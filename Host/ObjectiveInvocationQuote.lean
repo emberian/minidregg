@@ -28,11 +28,12 @@ open Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Theory.ObjectiveBendTypes Minidregg.Theory.ObjectiveBendTyping
 open Minidregg.Theory.ObjectiveBendDemandData
+open Minidregg.Theory.TypedAuthorization
+open Minidregg.Kernel.DurableDataIntent
 open Lean (Json)
 set_option autoImplicit false
 
 abbrev Request := ObjectiveBendQuoteRequest.Request
-abbrev Admission := Minidregg.Kernel.ObjectiveBendNativeAdmission
 
 /-- The claim this request would sign, for a given input commitment. -/
 def claimOf (request : Request) (expectedInput : Digest) : ObjectiveInvocationClaim.Claim :=
@@ -44,7 +45,7 @@ def claimOf (request : Request) (expectedInput : Digest) : ObjectiveInvocationCl
 index is a position in a command that does not exist yet; budget and Book
 preparation do not read it (`Prepared.relocate_budget_exact`). -/
 def environmentOf (config : Config) (opened : Opened config) (request : Request) :
-    Except String (Admission.Environment config.deployment opened.durable) := do
+    Except String (ObjectiveBendNativeAdmission.Environment config.deployment opened.durable) := do
   let some clock := ClockCellDomain.load config.deployment opened.durable.snapshot
     | throw "clock unavailable"
   let compute ← (RunComputeBudgetDomain.prepare config.deployment opened.durable.snapshot clock.clock
@@ -76,15 +77,15 @@ def resultIndex (request : Request) : Except String Nat :=
 /-- Command-free evaluation of the applied source and placement of its effects,
 in source plan order, by the registered output codec. -/
 def placed {F : Type} [Field F] [DecidableEq F] {deployment : CanonicalCellRegistry.Deployment}
-    {durable : Admission.Durable} {environment : Admission.Environment deployment durable}
+    {durable : DeclaredResourceController.Durable} {environment : ObjectiveBendNativeAdmission.Environment deployment durable}
     {profile : CanonicalRuntimeProfile.Profile F} {claim : ObjectiveInvocationClaim.Claim}
-    (request : Request) (core : Admission.Core environment profile claim) : Except String (List Placed) := do
-  let capacity := Admission.scalarProfile claim.capacity
-  let limits := Admission.limits claim.capacity
-  let budget := Admission.budget claim.capacity
+    (request : Request) (core : ObjectiveBendNativeAdmission.Core environment profile claim) : Except String (List Placed) := do
+  let capacity := ObjectiveBendNativeAdmission.scalarProfile claim.capacity
+  let limits := ObjectiveBendNativeAdmission.limits claim.capacity
+  let budget := ObjectiveBendNativeAdmission.budget claim.capacity
   let term := core.applied.term
   let profileAt (index : Nat) :=
-    Admission.profileAt core.policy core.source.loaded.artifact request.subject request.nonce index
+    ObjectiveBendNativeAdmission.profileAt core.policy core.source.loaded.artifact request.subject request.nonce index
   let resultEffect (type : Ty) (value : Data) : Except String Placed := do
     let some bytes := ObjectiveBendResultAdapter.encodeData budget.nodes value
       | throw "result value exceeds its output bound"
@@ -104,7 +105,7 @@ def placed {F : Type} [Field F] [DecidableEq F] {deployment : CanonicalCellRegis
     let some value := ObjectiveInvocationLayout.resultSource capacity limits budget term
       | throw "source did not finish"
     pure [← resultEffect core.typed.type value]
-  else if claim.outputCodec = Admission.combinedCodec then
+  else if claim.outputCodec = ObjectiveBendNativeAdmission.combinedCodec then
     let some (native,resultData) := ObjectiveInvocationLayout.combinedSource capacity limits budget term
       | throw "source did not produce a plan/result envelope"
     let .field "plan" _ (.field "result" resultType .emptyRow) := core.typed.type
@@ -164,9 +165,9 @@ def derive (config : Config) (opened : Opened config) (request : Request) :
       config.profile draft with
     | .error reason => return .error s!"source/input queries refused: {repr reason}"
     | .ok authenticated => pure authenticated
-  let input := Admission.inputOf authenticated
+  let input := ObjectiveBendNativeAdmission.inputOf authenticated
   let claim := claimOf request (ObjectiveInvocationClaim.inputCommitment (ObjectiveBendNativeInput.encode input))
-  let core ← match ← Admission.prepareCore config.signature ObjectiveBendAuthenticatedInputs.oracle
+  let core ← match ← ObjectiveBendNativeAdmission.prepareCore config.signature ObjectiveBendAuthenticatedInputs.oracle
       environment config.profile claim with
     | .error reason => return .error s!"source/input gate refused: {repr reason}"
     | .ok core => pure core
@@ -181,18 +182,26 @@ def derive (config : Config) (opened : Opened config) (request : Request) :
   let targets ← match layout request effects with
     | .error reason => return .error reason
     | .ok targets => pure targets
-  let command : Command := { subject := request.subject, nonce := request.nonce, targets := targets,
-    family := some (ObjectiveInvocationClaim.family claim) }
+  let command : Command :=
+    { subject := request.subject, nonce := request.nonce, targets := targets,
+      family := some (ObjectiveInvocationClaim.family claim) }
   let ambient : Ambient := ⟨config.federation,logicalHeight config opened.durable⟩
   match prepareFrom config.deployment config.profile ambient opened.durable (some opened.directory) command with
   | .error reason => return .error s!"final command preparation refused: {repr reason}"
   | .ok prepared =>
-    match ← Admission.select config.signature ObjectiveBendAuthenticatedInputs.oracle prepared with
+    match ← ObjectiveBendNativeAdmission.select config.signature ObjectiveBendAuthenticatedInputs.oracle prepared with
     | .error reason => return .error s!"final source/input gate refused: {repr reason}"
     | .ok selection =>
-      let guards := readGuards prepared ++ selection.core.guards.filter fun guard =>
+      -- The receiver's guard list less nothing it can compute without
+      -- signatures: ordinary read guards, audience guards, then the route's
+      -- consumed-read guards (`completeAdmissionGuards`). Ingress here is the
+      -- unsigned command, so `turnBytes` must cover the signed envelope too.
+      match ← checkAudiences prepared with
+      | .error reason => return .error s!"final audience check refused: {repr reason}"
+      | .ok audience =>
+      let guards := admissionGuards prepared audience ++ selection.core.guards.filter fun guard =>
         decide (guard.cellId ∉ (writes prepared).map DataWrite.cellId)
-      match Admission.admit selection (commandCodec.encode command) (writes prepared) guards with
+      match ObjectiveBendNativeAdmission.admit selection (commandCodec.encode command) (writes prepared) guards with
       | .error reason => return .error s!"final output gate refused: {repr reason}"
       | .ok admitted => return .ok ⟨claim,command,admitted.output.plan⟩
 
@@ -251,9 +260,10 @@ private def roleOf (json : Json) : Except String ObjectiveBendQuoteRequest.Role 
   let observeCapability ← match observe with
     | none => pure none
     | some _ => pure (some ⟨← natOf json "observeCapability"⟩)
-  pure { kind := ← kindOf json, resource := ← natOf json "resource", capability := ⟨← natOf json "capability"⟩,
-    schemaVersion := ← natOf json "schemaVersion", root := ← digestOf json "root",
-    observeCapability := observeCapability }
+  pure
+    { kind := ← kindOf json, resource := ← natOf json "resource", capability := ⟨← natOf json "capability"⟩,
+      schemaVersion := ← natOf json "schemaVersion", root := ← digestOf json "root",
+      observeCapability := observeCapability }
 
 private def fundingOf (json : Json) : Except String ObjectiveBendQuoteRequest.Funding := do
   pure ⟨← natOf json "payer",⟨← natOf json "capability"⟩,← natOf json "asset",← natOf json "credits",
@@ -291,7 +301,7 @@ def toJson (derived : Derived) : Json :=
   Json.mkObj [
     ("schema","dregg.objective-bend.quote.v1"),
     ("evidence","Core4 executeWith output"),
-    ("evaluator",ObjectiveBendNativeInput.hex (digestStream.encode Admission.evaluatorId)),
+    ("evaluator",ObjectiveBendNativeInput.hex (digestStream.encode ObjectiveBendNativeAdmission.evaluatorId)),
     ("claim",ObjectiveBendNativeInput.hex (ObjectiveInvocationClaim.encode derived.claim)),
     ("expectedInput",ObjectiveBendNativeInput.hex (digestStream.encode derived.claim.expectedInput)),
     ("command",ObjectiveBendNativeInput.hex (commandCodec.encode derived.command)),
@@ -307,12 +317,12 @@ private def hexDigest (digest : Digest) : Json :=
 request: the edition, the evaluator, and every registered codec identity. -/
 def constants : Json := Json.mkObj [
   ("schema","dregg.objective-bend.native-constants.v1"),
-  ("semanticsId",hexDigest Admission.semanticsId),
-  ("evaluatorId",hexDigest Admission.evaluatorId),
+  ("semanticsId",hexDigest ObjectiveBendNativeAdmission.semanticsId),
+  ("evaluatorId",hexDigest ObjectiveBendNativeAdmission.evaluatorId),
   ("inputCodec",hexDigest ObjectiveBendNativeInput.codecId),
   ("scalarCodec",hexDigest ObjectiveBendPlanAdapter.codecId),
   ("resultCodec",hexDigest ObjectiveBendResultAdapter.codecId),
-  ("combinedCodec",hexDigest Admission.combinedCodec),
+  ("combinedCodec",hexDigest ObjectiveBendNativeAdmission.combinedCodec),
   ("genericCodec",hexDigest ObjectiveBendGenericResult.codecId),
   ("resultStorageSchema",hexDigest ObjectiveBendResultAdapter.storageSchema)]
 
@@ -329,10 +339,10 @@ def authorPolicy (json : Json) : Except String String := do
     let some bytes := ObjectiveBendPlanAdapter.unhex hex.toList | throw "outputs must be lowercase hex"
     let some digest := ObjectiveNativeScalarBinding.rootCodec.decode bytes | throw "outputs must be digests"
     pure digest
-  let policy : Admission.Policy := ⟨Admission.semanticsId,← natOf json "sourceBytes",
+  let policy : ObjectiveBendNativeAdmission.Policy := ⟨ObjectiveBendNativeAdmission.semanticsId,← natOf json "sourceBytes",
     ← capacityOf (← field json "maximum"),outputs,← digestOf json "clearAudience",
     ⟨← text tooling "parserSha256",← text tooling "frontendSha256",← text tooling "elaboratorSha256"⟩⟩
-  pure (ObjectiveBendNativeInput.hex (Admission.encodePolicy policy))
+  pure (ObjectiveBendNativeInput.hex (ObjectiveBendNativeAdmission.encodePolicy policy))
 
 /-- Host operation `author objective-request`: JSON → canonical request bytes. -/
 def authorRequest (json : Json) : Except String (List UInt8) :=
