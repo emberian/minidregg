@@ -22,46 +22,22 @@ theorem source_perform_decomposition {assumptions : Assumptions} {context : Cont
     match term with
     | .perform plan => PerformDerivation assumptions context plan type uses
     | _ => True := by
-  refine PartialTyping.rec
+  apply PartialTyping.rec
     (motive_1 := fun context term type uses _ => match term with
       | .perform plan => PerformDerivation assumptions context plan type uses
       | _ => True)
     (motive_2 := fun _ _ _ _ _ => True)
     (motive_3 := fun _ _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intro context term actual expected uses prior agreement ih
+    (t := source)
+  case conversion =>
+    intro context term actual expected uses prior agreement ih
     cases term <;> try trivial
     obtain ⟨planType,response,planTyped,isPlan,isData,path⟩ := ih
     exact ⟨planType,response,planTyped,isPlan,isData,.step path agreement⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intro context plan planType response uses planTyped isPlan isData ih
+  case perform =>
+    intro context plan planType response uses planTyped isPlan isData ih
     exact ⟨planType,response,planTyped,isPlan,isData,.refl _⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
+  all_goals (intros; trivial)
 
 theorem source_done_decomposition {assumptions : Assumptions} {context : Context}
     {term : Term} {type : Ty} {uses : Uses}
@@ -69,46 +45,22 @@ theorem source_done_decomposition {assumptions : Assumptions} {context : Context
     match term with
     | .done value => DoneDerivation assumptions context value type uses
     | _ => True := by
-  refine PartialTyping.rec
+  apply PartialTyping.rec
     (motive_1 := fun context term type uses _ => match term with
       | .done value => DoneDerivation assumptions context value type uses
       | _ => True)
     (motive_2 := fun _ _ _ _ _ => True)
     (motive_3 := fun _ _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intro context term actual expected uses prior agreement ih
+    (t := source)
+  case conversion =>
+    intro context term actual expected uses prior agreement ih
     cases term <;> try trivial
     obtain ⟨planType,response,result,valueTyped,pure,path⟩ := ih
     exact ⟨planType,response,result,valueTyped,pure,.step path agreement⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intro context value planType response result uses valueTyped pure ih
+  case done =>
+    intro context value planType response result uses valueTyped pure ih
     exact ⟨planType,response,result,valueTyped,pure,.refl _⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
+  all_goals (intros; trivial)
 
 /-- An activity continuation contains no update frame anywhere: forcing a
 shared cell never sits under an activity, so a perform is never refused. -/

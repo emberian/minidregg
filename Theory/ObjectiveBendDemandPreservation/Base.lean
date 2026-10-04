@@ -1047,7 +1047,7 @@ theorem source_insert_binding {assumptions : Assumptions} {context : Context}
     (typed : PartialTyping assumptions context term type uses) :
     ∀ depth binding, depth ≤ context.length → validContext assumptions.shareableVariables [binding] = true →
       PartialTyping assumptions (context.insertIdx depth binding) (term.rename (shiftIndex depth)) type (uses.insertIdx depth 0) := by
-  refine PartialTyping.rec
+  apply PartialTyping.rec
     (motive_1 := fun context term type uses _ => ∀ depth binding,
       depth ≤ context.length → validContext assumptions.shareableVariables [binding] = true →
       PartialTyping assumptions (context.insertIdx depth binding) (term.rename (shiftIndex depth)) type (uses.insertIdx depth 0))
@@ -1059,21 +1059,26 @@ theorem source_insert_binding {assumptions : Assumptions} {context : Context}
       depth ≤ context.length → validContext assumptions.shareableVariables [binding] = true →
       ArmsTyping assumptions (context.insertIdx depth binding)
         (arms.map fun arm => (arm.1,arm.2.rename (shiftIndex (depth+1)))) row result (uses.insertIdx depth 0))
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
-  · intro context index declared found depth binding bound bindingValid
+    (t := typed)
+  case bound =>
+    intro context index declared found depth binding bound bindingValid
     simpa only [Term.rename,← variable_uses_insert context binding index depth bound] using
       (PartialTyping.bound (binding_insert_shift found) : PartialTyping assumptions (context.insertIdx depth binding)
         (.bound (shiftIndex depth index)) declared.type (variableUses (context.insertIdx depth binding) (shiftIndex depth index)))
-  · intro context value depth binding bound bindingValid
+  case natural =>
+    intro context value depth binding bound bindingValid
     simpa only [Term.rename,← zero_uses_insert context binding depth bound] using
       (PartialTyping.natural (context.insertIdx depth binding) value : PartialTyping assumptions _ (.nat value) .natural _)
-  · intro context value depth binding bound bindingValid
+  case boolean =>
+    intro context value depth binding bound bindingValid
     simpa only [Term.rename,← zero_uses_insert context binding depth bound] using
       (PartialTyping.boolean (context.insertIdx depth binding) value : PartialTyping assumptions _ (.boolean value) .boolean _)
-  · intro context value depth binding bound bindingValid
+  case label =>
+    intro context value depth binding bound bindingValid
     simpa only [Term.rename,← zero_uses_insert context binding depth bound] using
       (PartialTyping.label (context.insertIdx depth binding) value : PartialTyping assumptions _ (.label value) (literalType value) _)
-  · intro context body annotation uses bodyTyped safe valid captures ih depth binding bound bindingValid
+  case lambda =>
+    intro context body annotation uses bodyTyped safe valid captures ih depth binding bound bindingValid
     have bodyBound : depth+1 ≤ (⟨annotation.domain,annotation.parameter⟩ :: context).length := by simpa using bound
     have nonempty : 0 < uses.length := by rw [source_uses_length bodyTyped]; simp
     have bodyNext := ih (depth+1) binding bodyBound bindingValid
@@ -1082,53 +1087,67 @@ theorem source_insert_binding {assumptions : Assumptions} {context : Context}
     have capturesNext := reusable_allowed_insert assumptions annotation.reuse context uses.tail depth binding captures bound
     simpa only [Term.rename,lift_shift_index,List.insertIdx_succ_cons,uses_tail_insert nonempty] using
       (PartialTyping.lambda bodyNext safeNext validNext (by simpa only [List.insertIdx_succ_cons,uses_tail_insert nonempty] using capturesNext))
-  · intro context term actual expected uses prior agreement ih depth binding bound bindingValid
+  case conversion =>
+    intro context term actual expected uses prior agreement ih depth binding bound bindingValid
     exact .conversion (ih depth binding bound bindingValid) agreement
-  · intro context fn arg functionType argumentType domain codomain fu au reuse quantity fnTyped argTyped callableEq same allowed ihFn ihArg depth binding bound bindingValid
+  case application =>
+    intro context fn arg functionType argumentType domain codomain fu au reuse quantity fnTyped argTyped callableEq same allowed ihFn ihArg depth binding bound bindingValid
     have counts := add_uses_insert fu au depth ((source_uses_length fnTyped).trans (source_uses_length argTyped).symm) (insert_usage_bound fnTyped bound)
     simpa only [Term.rename,counts] using
       (PartialTyping.application (ihFn depth binding bound bindingValid) (ihArg depth binding bound bindingValid) callableEq same
         (argument_allowed_insert assumptions quantity context argumentType au depth binding allowed bound))
-  · intro context fields row uses fieldsTyped ih depth binding bound bindingValid
+  case record =>
+    intro context fields row uses fieldsTyped ih depth binding bound bindingValid
     simpa only [Term.rename] using (PartialTyping.record (ih depth binding bound bindingValid))
-  · intro context target targetType member uses name fuel targetTyped lookup ih depth binding bound bindingValid
+  case get =>
+    intro context target targetType member uses name fuel targetTyped lookup ih depth binding bound bindingValid
     simpa only [Term.rename] using (PartialTyping.get (ih depth binding bound bindingValid) lookup)
-  · intro context target fields targetType row tu fu targetTyped fieldsTyped isRow ihTarget ihFields depth binding bound bindingValid
+  case extend =>
+    intro context target fields targetType row tu fu targetTyped fieldsTyped isRow ihTarget ihFields depth binding bound bindingValid
     have fieldLength := source_uses_length (PartialTyping.record fieldsTyped)
     have counts := add_uses_insert tu fu depth ((source_uses_length targetTyped).trans fieldLength.symm) (insert_usage_bound targetTyped bound)
     simpa only [Term.rename,counts] using
       (PartialTyping.extend (ihTarget depth binding bound bindingValid) (ihFields depth binding bound bindingValid) isRow)
-  · intro context metadata extension metadataType extensionType mu eu metadataTyped extensionTyped mPure ePure ihMetadata ihExtension depth binding bound bindingValid
+  case specification =>
+    intro context metadata extension metadataType extensionType mu eu metadataTyped extensionTyped mPure ePure ihMetadata ihExtension depth binding bound bindingValid
     have counts := add_uses_insert mu eu depth ((source_uses_length metadataTyped).trans (source_uses_length extensionTyped).symm) (insert_usage_bound metadataTyped bound)
     simpa only [Term.rename,counts] using
       (PartialTyping.specification (ihMetadata depth binding bound bindingValid) (ihExtension depth binding bound bindingValid) mPure ePure)
-  · intro context spec target specType targetType su tu specTyped targetTyped sPure tPure ihSpec ihTarget depth binding bound bindingValid
+  case prototype =>
+    intro context spec target specType targetType su tu specTyped targetTyped sPure tPure ihSpec ihTarget depth binding bound bindingValid
     have counts := add_uses_insert su tu depth ((source_uses_length specTyped).trans (source_uses_length targetTyped).symm) (insert_usage_bound specTyped bound)
     simpa only [Term.rename,counts] using
       (PartialTyping.prototype (ihSpec depth binding bound bindingValid) (ihTarget depth binding bound bindingValid) sPure tPure)
-  · intro context target specType targetType uses prior ih depth binding bound bindingValid
+  case reflect =>
+    intro context target specType targetType uses prior ih depth binding bound bindingValid
     simpa only [Term.rename] using (PartialTyping.reflect (ih depth binding bound bindingValid))
-  · intro context target metadataType extensionType uses prior ih depth binding bound bindingValid
+  case metadata =>
+    intro context target metadataType extensionType uses prior ih depth binding bound bindingValid
     simpa only [Term.rename] using (PartialTyping.metadata (ih depth binding bound bindingValid))
-  · intro context target specType targetType uses prior ih depth binding bound bindingValid
+  case project =>
+    intro context target specType targetType uses prior ih depth binding bound bindingValid
     simpa only [Term.rename] using (PartialTyping.project (ih depth binding bound bindingValid))
-  · intro context lower upper lowerType upperType self inherited middle provided lu uu lowerTyped upperTyped lowerCallable upperCallable captures selfShare inheritedShare middleShare ihLower ihUpper depth binding bound bindingValid
+  case mix =>
+    intro context lower upper lowerType upperType self inherited middle provided lu uu lowerTyped upperTyped lowerCallable upperCallable captures selfShare inheritedShare middleShare ihLower ihUpper depth binding bound bindingValid
     have counts := add_uses_insert lu uu depth ((source_uses_length lowerTyped).trans (source_uses_length upperTyped).symm) (insert_usage_bound lowerTyped bound)
     have capturesNext := reusable_captures_insert assumptions.shareableVariables context (addUses lu uu) depth binding captures bound
     simpa only [Term.rename,counts] using
       (PartialTyping.mix (ihLower depth binding bound bindingValid) (ihUpper depth binding bound bindingValid)
         lowerCallable upperCallable (by simpa only [counts] using capturesNext) selfShare inheritedShare middleShare)
-  · intro context spec inheritedTerm specType inherited target su iu specTyped callableEq inheritedTyped targetShare inheritedAllowed captures ihSpec ihInherited depth binding bound bindingValid
+  case fix =>
+    intro context spec inheritedTerm specType inherited target su iu specTyped callableEq inheritedTyped targetShare inheritedAllowed captures ihSpec ihInherited depth binding bound bindingValid
     have counts := add_uses_insert su iu depth ((source_uses_length specTyped).trans (source_uses_length inheritedTyped).symm) (insert_usage_bound specTyped bound)
     simpa only [Term.rename,counts] using
       (PartialTyping.fix (ihSpec depth binding bound bindingValid) callableEq (ihInherited depth binding bound bindingValid) targetShare
         (argument_allowed_insert assumptions .unrestricted context inherited iu depth binding inheritedAllowed bound)
         (reusable_captures_insert assumptions.shareableVariables context su depth binding captures bound))
-  · intro context primitive left right input output lu ru primitiveEq leftTyped rightTyped ihLeft ihRight depth binding bound bindingValid
+  case binary =>
+    intro context primitive left right input output lu ru primitiveEq leftTyped rightTyped ihLeft ihRight depth binding bound bindingValid
     have counts := add_uses_insert lu ru depth ((source_uses_length leftTyped).trans (source_uses_length rightTyped).symm) (insert_usage_bound leftTyped bound)
     simpa only [Term.rename,counts] using
       (PartialTyping.binary primitiveEq (ihLeft depth binding bound bindingValid) (ihRight depth binding bound bindingValid))
-  · intro context value zero successor result vu zu su valueTyped zeroTyped successorTyped successorSafe ihValue ihZero ihSuccessor depth binding bound bindingValid
+  case ifZero =>
+    intro context value zero successor result vu zu su valueTyped zeroTyped successorTyped successorSafe ihValue ihZero ihSuccessor depth binding bound bindingValid
     have successorBound : depth+1 ≤ (⟨.natural,.unrestricted⟩ :: context).length := by simpa using bound
     have nonempty : 0 < su.length := by rw [source_uses_length successorTyped]; simp
     have tailLength : su.tail.length = context.length := by simp [List.length_tail,source_uses_length successorTyped]
@@ -1140,13 +1159,16 @@ theorem source_insert_binding {assumptions : Assumptions} {context : Context}
       (PartialTyping.ifZero (ihValue depth binding bound bindingValid) (ihZero depth binding bound bindingValid)
         (ihSuccessor (depth+1) binding successorBound bindingValid)
         (safe_uses_insert _ su (depth+1) binding successorSafe successorBound))
-  · intro context tag payload payloadType row uses fuel payloadTyped lookup pure ih depth binding bound bindingValid
+  case inject =>
+    intro context tag payload payloadType row uses fuel payloadTyped lookup pure ih depth binding bound bindingValid
     simpa only [Term.rename] using (PartialTyping.inject (ih depth binding bound bindingValid) lookup pure)
-  · intro context scrutinee arms row result su au scrutineeTyped armsTyped ihScrutinee ihArms depth binding bound bindingValid
+  case case =>
+    intro context scrutinee arms row result su au scrutineeTyped armsTyped ihScrutinee ihArms depth binding bound bindingValid
     have counts := add_uses_insert su au depth ((source_uses_length scrutineeTyped).trans (arms_uses_length armsTyped).symm) (insert_usage_bound scrutineeTyped bound)
     simpa only [Term.rename,lift_shift_index,counts] using
       (PartialTyping.case (ihScrutinee depth binding bound bindingValid) (ihArms depth binding bound bindingValid))
-  · intro context condition whenTrue whenFalse result cu tu fu conditionTyped trueTyped falseTyped ihCondition ihTrue ihFalse depth binding bound bindingValid
+  case ifBool =>
+    intro context condition whenTrue whenFalse result cu tu fu conditionTyped trueTyped falseTyped ihCondition ihTrue ihFalse depth binding bound bindingValid
     have trueLength := source_uses_length trueTyped
     have falseLength := source_uses_length falseTyped
     have firstCounts := add_uses_insert tu fu depth (trueLength.trans falseLength.symm) (insert_usage_bound trueTyped bound)
@@ -1155,26 +1177,33 @@ theorem source_insert_binding {assumptions : Assumptions} {context : Context}
     simpa only [Term.rename,firstCounts,allCounts] using
       (PartialTyping.ifBool (ihCondition depth binding bound bindingValid) (ihTrue depth binding bound bindingValid)
         (ihFalse depth binding bound bindingValid))
-  · intro context plan planType response uses planTyped isPlan isData ih depth binding bound bindingValid
+  case perform =>
+    intro context plan planType response uses planTyped isPlan isData ih depth binding bound bindingValid
     simpa only [Term.rename] using (PartialTyping.perform (ih depth binding bound bindingValid) isPlan isData)
-  · intro context value planType response result uses valueTyped pure ih depth binding bound bindingValid
+  case done =>
+    intro context value planType response result uses valueTyped pure ih depth binding bound bindingValid
     simpa only [Term.rename] using
       (PartialTyping.done (planType := planType) (response := response) (ih depth binding bound bindingValid) pure)
-  · intro context scrutinee arms planType response row result su au scrutineeTyped armsTyped pure ihScrutinee ihArms depth binding bound bindingValid
+  case effectCase =>
+    intro context scrutinee arms planType response row result su au scrutineeTyped armsTyped pure ihScrutinee ihArms depth binding bound bindingValid
     have counts := add_uses_insert su au depth ((source_uses_length scrutineeTyped).trans (arms_uses_length armsTyped).symm) (insert_usage_bound scrutineeTyped bound)
     simpa only [Term.rename,lift_shift_index,counts] using
       (PartialTyping.effectCase (ihScrutinee depth binding bound bindingValid) (ihArms depth binding bound bindingValid) pure)
-  · intro context depth binding bound bindingValid
+  case nil =>
+    intro context depth binding bound bindingValid
     simpa only [List.map_nil,← zero_uses_insert context binding depth bound] using (FieldsTyping.nil (context.insertIdx depth binding) : FieldsTyping assumptions _ [] .emptyRow _)
-  · intro context name body rest type row bu ru bodyTyped restTyped pure ihBody ihRest depth binding bound bindingValid
+  case cons =>
+    intro context name body rest type row bu ru bodyTyped restTyped pure ihBody ihRest depth binding bound bindingValid
     have restLength := source_uses_length (PartialTyping.record restTyped)
     have counts := add_uses_insert bu ru depth ((source_uses_length bodyTyped).trans restLength.symm) (insert_usage_bound bodyTyped bound)
     simpa only [List.map_cons,counts] using
       (FieldsTyping.cons (ihBody depth binding bound bindingValid) (ihRest depth binding bound bindingValid) pure)
-  · intro context result depth binding bound bindingValid
+  case nil =>
+    intro context result depth binding bound bindingValid
     simpa only [List.map_nil,← zero_uses_insert context binding depth bound] using
       (ArmsTyping.nil (context.insertIdx depth binding) result : ArmsTyping assumptions _ [] .emptyRow result _)
-  · intro context name body rest payload row result bu ru bodyTyped safe shareable restTyped ihBody ihRest depth binding bound bindingValid
+  case cons =>
+    intro context name body rest payload row result bu ru bodyTyped safe shareable restTyped ihBody ihRest depth binding bound bindingValid
     have bodyBound : depth+1 ≤ (⟨payload,.unrestricted⟩ :: context).length := by simpa using bound
     have nonempty : 0 < bu.length := by rw [source_uses_length bodyTyped]; simp
     have tailLength : bu.tail.length = context.length := by simp [List.length_tail,source_uses_length bodyTyped]
@@ -1410,46 +1439,22 @@ theorem source_bound_assignment {assumptions : Assumptions} {context : Context}
     | .bound index => ∃ binding, context[index]? = some binding ∧
         ConversionPath assumptions binding.type type
     | _ => True := by
-  refine PartialTyping.rec
+  apply PartialTyping.rec
     (motive_1 := fun context term type _ _ => match term with
       | .bound index => ∃ binding, context[index]? = some binding ∧
           ConversionPath assumptions binding.type type
       | _ => True)
     (motive_2 := fun _ _ _ _ _ => True)
     (motive_3 := fun _ _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
-  · intro context index binding found; exact ⟨binding,found,.refl binding.type⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intro context term actual expected uses prior agreement ih
+    (t := source)
+  case bound =>
+    intro context index binding found; exact ⟨binding,found,.refl binding.type⟩
+  case conversion =>
+    intro context term actual expected uses prior agreement ih
     cases term <;> try trivial
     obtain ⟨binding,found,path⟩ := ih
     exact ⟨binding,found,.step path agreement⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
+  all_goals (intros; trivial)
 
 theorem safe_add_uses_right (context : Context) (first second : Uses)
     (firstLength : first.length = context.length) (secondLength : second.length = context.length)
@@ -1488,7 +1493,7 @@ theorem source_focus_typed {assumptions : Assumptions} {context : Context}
       match sourceFocus term environment with
       | some (target,frame) => Nonempty (FocusedSource assumptions types target environment frame type)
       | none => True := by
-  refine PartialTyping.rec
+  apply PartialTyping.rec
     (motive_1 := fun context term type uses _ => ∀ types environment,
       EnvironmentTyping types context environment → safeUses context uses = true →
       validContext assumptions.shareableVariables context = true →
@@ -1497,13 +1502,9 @@ theorem source_focus_typed {assumptions : Assumptions} {context : Context}
       | none => True)
     (motive_2 := fun _ _ _ _ _ => True)
     (motive_3 := fun _ _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
-  · intros; simp [sourceFocus]
-  · intros; simp [sourceFocus]
-  · intros; simp [sourceFocus]
-  · intros; simp [sourceFocus]
-  · intros; simp [sourceFocus]
-  · intro context term actual expected uses prior agreement ih types environment environmentTyped safe valid
+    (t := source)
+  case conversion =>
+    intro context term actual expected uses prior agreement ih types environment environmentTyped safe valid
     have focused := ih types environment environmentTyped safe valid
     cases found : sourceFocus term environment with
     | none => trivial
@@ -1512,28 +1513,28 @@ theorem source_focus_typed {assumptions : Assumptions} {context : Context}
       rw [found] at focused
       obtain ⟨data⟩ := focused
       exact ⟨⟨data.current,data.output,data.origin,data.continuation,.step data.result agreement⟩⟩
-  · intros; simp [sourceFocus]
-  · intros; simp [sourceFocus]
-  · intro context target targetType member uses name fuel targetTyped lookup ih types environment environmentTyped safe valid
+  case get =>
+    intro context target targetType member uses name fuel targetTyped lookup ih types environment environmentTyped safe valid
     exact ⟨⟨targetType,member,⟨context,uses,environmentTyped,targetTyped,safe,valid⟩,.field lookup,.refl member⟩⟩
-  · intro context target fields targetType row targetUses fieldUses targetTyped fieldsTyped rowValid ihTarget ihFields types environment environmentTyped safe valid
+  case extend =>
+    intro context target fields targetType row targetUses fieldUses targetTyped fieldsTyped rowValid ihTarget ihFields types environment environmentTyped safe valid
     have targetSafe := safe_add_uses_left context targetUses fieldUses (source_uses_length targetTyped)
       (source_uses_length (PartialTyping.record fieldsTyped)) safe
     have fieldsSafe := safe_add_uses_right context targetUses fieldUses (source_uses_length targetTyped)
       (source_uses_length (PartialTyping.record fieldsTyped)) safe
     exact ⟨⟨targetType,overlay row targetType,⟨context,targetUses,environmentTyped,targetTyped,targetSafe,valid⟩,
       .extend environmentTyped fieldsTyped fieldsSafe valid rowValid,.refl _⟩⟩
-  · intros; simp [sourceFocus]
-  · intros; simp [sourceFocus]
-  · intro context target specType targetType uses targetTyped ih types environment environmentTyped safe valid
+  case reflect =>
+    intro context target specType targetType uses targetTyped ih types environment environmentTyped safe valid
     exact ⟨⟨.prototype specType targetType,specType,⟨context,uses,environmentTyped,targetTyped,safe,valid⟩,.reflect _ _,.refl _⟩⟩
-  · intro context target metadataType extensionType uses targetTyped ih types environment environmentTyped safe valid
+  case metadata =>
+    intro context target metadataType extensionType uses targetTyped ih types environment environmentTyped safe valid
     exact ⟨⟨.specification metadataType extensionType,metadataType,⟨context,uses,environmentTyped,targetTyped,safe,valid⟩,.metadata _ _,.refl _⟩⟩
-  · intro context target specType targetType uses targetTyped ih types environment environmentTyped safe valid
+  case project =>
+    intro context target specType targetType uses targetTyped ih types environment environmentTyped safe valid
     exact ⟨⟨.prototype specType targetType,targetType,⟨context,uses,environmentTyped,targetTyped,safe,valid⟩,.project _ _,.refl _⟩⟩
-  · intros; simp [sourceFocus]
-  · intros; simp [sourceFocus]
-  · intro context primitive left right input output lu ru primitiveEq leftTyped rightTyped ihLeft ihRight types environment environmentTyped safe valid
+  case binary =>
+    intro context primitive left right input output lu ru primitiveEq leftTyped rightTyped ihLeft ihRight types environment environmentTyped safe valid
     have leftSafe := safe_add_uses_left context lu ru (source_uses_length leftTyped) (source_uses_length rightTyped) safe
     have rightSafe := safe_add_uses_right context lu ru (source_uses_length leftTyped) (source_uses_length rightTyped) safe
     have inputEq : (primitiveTypes primitive).1 = input := congrArg Prod.fst primitiveEq
@@ -1545,7 +1546,8 @@ theorem source_focus_typed {assumptions : Assumptions} {context : Context}
     have frame : FrameTyping assumptions types (.binaryLeft primitive right environment) input output := by
       simpa only [inputEq,outputEq] using FrameTyping.binaryLeft rightOrigin'
     exact ⟨⟨input,output,⟨context,lu,environmentTyped,leftTyped,leftSafe,valid⟩,frame,.refl _⟩⟩
-  · intro context value zero successor result vu zu su valueTyped zeroTyped successorTyped successorSafe ihValue ihZero ihSuccessor types environment environmentTyped safe valid
+  case ifZero =>
+    intro context value zero successor result vu zu su valueTyped zeroTyped successorTyped successorSafe ihValue ihZero ihSuccessor types environment environmentTyped safe valid
     have vuLength := source_uses_length valueTyped
     have zuLength := source_uses_length zeroTyped
     have suLength : su.tail.length = context.length := by simp [List.length_tail,source_uses_length successorTyped]
@@ -1558,12 +1560,13 @@ theorem source_focus_typed {assumptions : Assumptions} {context : Context}
       ⟨context,zu,environmentTyped,zeroTyped,zeroSafe,valid⟩
     exact ⟨⟨.natural,result,⟨context,vu,environmentTyped,valueTyped,valueSafe,valid⟩,
       .condition zeroOrigin environmentTyped successorTyped successorSafe valid,.refl _⟩⟩
-  · intros; simp [sourceFocus]
-  · intro context scrutinee arms row result su au scrutineeTyped armsTyped ihScrutinee ihArms types environment environmentTyped safe valid
+  case case =>
+    intro context scrutinee arms row result su au scrutineeTyped armsTyped ihScrutinee ihArms types environment environmentTyped safe valid
     have scrutineeSafe := safe_add_uses_left context su au (source_uses_length scrutineeTyped) (arms_uses_length armsTyped) safe
     exact ⟨⟨.variant row,result,⟨context,su,environmentTyped,scrutineeTyped,scrutineeSafe,valid⟩,
       .case environmentTyped armsTyped valid,.refl _⟩⟩
-  · intro context condition whenTrue whenFalse result cu tu fu conditionTyped trueTyped falseTyped ihCondition ihTrue ihFalse types environment environmentTyped safe valid
+  case ifBool =>
+    intro context condition whenTrue whenFalse result cu tu fu conditionTyped trueTyped falseTyped ihCondition ihTrue ihFalse types environment environmentTyped safe valid
     have cuLength := source_uses_length conditionTyped
     have tuLength := source_uses_length trueTyped
     have fuLength := source_uses_length falseTyped
@@ -1575,17 +1578,21 @@ theorem source_focus_typed {assumptions : Assumptions} {context : Context}
     have falseSafe := safe_add_uses_right context tu fu tuLength fuLength branchSafe
     exact ⟨⟨.boolean,result,⟨context,cu,environmentTyped,conditionTyped,conditionSafe,valid⟩,
       .ifBool ⟨context,tu,environmentTyped,trueTyped,trueSafe,valid⟩ ⟨context,fu,environmentTyped,falseTyped,falseSafe,valid⟩,.refl _⟩⟩
-  · intros; simp [sourceFocus]
-  · intros; simp [sourceFocus]
-  · intro context scrutinee arms planType response row result su au scrutineeTyped armsTyped pure ihScrutinee ihArms types environment environmentTyped safe valid
+  case effectCase =>
+    intro context scrutinee arms planType response row result su au scrutineeTyped armsTyped pure ihScrutinee ihArms types environment environmentTyped safe valid
     have scrutineeSafe := safe_add_uses_left context su au (source_uses_length scrutineeTyped) (arms_uses_length armsTyped) safe
     exact ⟨⟨.computation planType response (.variant row),.computation planType response result,
       ⟨context,su,environmentTyped,scrutineeTyped,scrutineeSafe,valid⟩,
       .effectCase environmentTyped armsTyped valid pure,.refl _⟩⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
+  case nil =>
+    intros; trivial
+  case cons =>
+    intros; trivial
+  case nil =>
+    intros; trivial
+  case cons =>
+    intros; trivial
+  all_goals (intros; simp [sourceFocus])
 
 /-- Focusing projection/overlay, binary and conditional source forms preserves the typed stack
 at the exact raw-machine step; no source annotation or row oracle is assumed. -/

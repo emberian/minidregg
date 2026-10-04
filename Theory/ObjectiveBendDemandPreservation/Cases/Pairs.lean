@@ -125,49 +125,27 @@ theorem source_pair_decomposition {assumptions : Assumptions} {context : Context
     | .specification left right => PairDerivation assumptions context true left right type uses
     | .prototype left right => PairDerivation assumptions context false left right type uses
     | _ => True := by
-  refine PartialTyping.rec
+  apply PartialTyping.rec
     (motive_1 := fun context term type uses _ => match term with
       | .specification left right => PairDerivation assumptions context true left right type uses
       | .prototype left right => PairDerivation assumptions context false left right type uses
       | _ => True)
     (motive_2 := fun _ _ _ _ _ => True)
     (motive_3 := fun _ _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intro context term actual expected uses prior agreement ih
+    (t := source)
+  case conversion =>
+    intro context term actual expected uses prior agreement ih
     cases term <;> try trivial
     all_goals
       obtain ⟨lt,rt,lu,ru,leftTyped,rightTyped,counts,path⟩ := ih
       exact ⟨lt,rt,lu,ru,leftTyped,rightTyped,counts,.step path agreement⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intro context metadata extension metadataType extensionType mu eu metadataTyped extensionTyped _ _ ihMetadata ihExtension
+  case specification =>
+    intro context metadata extension metadataType extensionType mu eu metadataTyped extensionTyped _ _ ihMetadata ihExtension
     exact ⟨metadataType,extensionType,mu,eu,metadataTyped,extensionTyped,rfl,.refl _⟩
-  · intro context spec target specType targetType su tu specTyped targetTyped _ _ ihSpec ihTarget
+  case prototype =>
+    intro context spec target specType targetType su tu specTyped targetTyped _ _ ihSpec ihTarget
     exact ⟨specType,targetType,su,tu,specTyped,targetTyped,rfl,.refl _⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
+  all_goals (intros; trivial)
 
 /-- The pair decomposition with its component types' suspendability (each
 component becomes a shared cell). -/
@@ -186,49 +164,27 @@ theorem source_pair_decomposition_pure {assumptions : Assumptions} {context : Co
     | .specification left right => PairPureDerivation assumptions context true left right type uses
     | .prototype left right => PairPureDerivation assumptions context false left right type uses
     | _ => True := by
-  refine PartialTyping.rec
+  apply PartialTyping.rec
     (motive_1 := fun context term type uses _ => match term with
       | .specification left right => PairPureDerivation assumptions context true left right type uses
       | .prototype left right => PairPureDerivation assumptions context false left right type uses
       | _ => True)
     (motive_2 := fun _ _ _ _ _ => True)
     (motive_3 := fun _ _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intro context term actual expected uses prior agreement ih
+    (t := source)
+  case conversion =>
+    intro context term actual expected uses prior agreement ih
     cases term <;> try trivial
     all_goals
       obtain ⟨lt,rt,lu,ru,leftTyped,rightTyped,lp,rp,counts,path⟩ := ih
       exact ⟨lt,rt,lu,ru,leftTyped,rightTyped,lp,rp,counts,.step path agreement⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intro context metadata extension metadataType extensionType mu eu metadataTyped extensionTyped mp ep ihMetadata ihExtension
+  case specification =>
+    intro context metadata extension metadataType extensionType mu eu metadataTyped extensionTyped mp ep ihMetadata ihExtension
     exact ⟨metadataType,extensionType,mu,eu,metadataTyped,extensionTyped,mp,ep,rfl,.refl _⟩
-  · intro context spec target specType targetType su tu specTyped targetTyped sp tp ihSpec ihTarget
+  case prototype =>
+    intro context spec target specType targetType su tu specTyped targetTyped sp tp ihSpec ihTarget
     exact ⟨specType,targetType,su,tu,specTyped,targetTyped,sp,tp,rfl,.refl _⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
+  all_goals (intros; trivial)
 
 /-- Specification and prototype allocation keep both authored source origins,
 their independently typed pointers, and all prior heap identities. -/

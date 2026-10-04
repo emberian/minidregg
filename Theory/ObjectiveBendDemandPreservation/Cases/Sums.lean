@@ -17,46 +17,22 @@ theorem source_inject_decomposition {assumptions : Assumptions} {context : Conte
     match term with
     | .inject tag payload => InjectDerivation assumptions context tag payload type uses
     | _ => True := by
-  refine PartialTyping.rec
+  apply PartialTyping.rec
     (motive_1 := fun context term type uses _ => match term with
       | .inject tag payload => InjectDerivation assumptions context tag payload type uses
       | _ => True)
     (motive_2 := fun _ _ _ _ _ => True)
     (motive_3 := fun _ _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intro context term actual expected uses prior agreement ih
+    (t := source)
+  case conversion =>
+    intro context term actual expected uses prior agreement ih
     cases term <;> try trivial
     obtain ⟨payloadType,row,fuel,payloadTyped,lookup,path⟩ := ih
     exact ⟨payloadType,row,fuel,payloadTyped,lookup,.step path agreement⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intro context tag payload payloadType row uses fuel payloadTyped lookup _ ih
+  case inject =>
+    intro context tag payload payloadType row uses fuel payloadTyped lookup _ ih
     exact ⟨payloadType,row,fuel,payloadTyped,lookup,.refl _⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
+  all_goals (intros; trivial)
 
 /-- The injection decomposition with the payload's suspendability. -/
 def InjectPureDerivation (assumptions : Assumptions) (context : Context)
@@ -71,46 +47,22 @@ theorem source_inject_decomposition_pure {assumptions : Assumptions} {context : 
     match term with
     | .inject tag payload => InjectPureDerivation assumptions context tag payload type uses
     | _ => True := by
-  refine PartialTyping.rec
+  apply PartialTyping.rec
     (motive_1 := fun context term type uses _ => match term with
       | .inject tag payload => InjectPureDerivation assumptions context tag payload type uses
       | _ => True)
     (motive_2 := fun _ _ _ _ _ => True)
     (motive_3 := fun _ _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intro context term actual expected uses prior agreement ih
+    (t := source)
+  case conversion =>
+    intro context term actual expected uses prior agreement ih
     cases term <;> try trivial
     obtain ⟨payloadType,row,fuel,payloadTyped,lookup,pure,path⟩ := ih
     exact ⟨payloadType,row,fuel,payloadTyped,lookup,pure,.step path agreement⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intro context tag payload payloadType row uses fuel payloadTyped lookup pure ih
+  case inject =>
+    intro context tag payload payloadType row uses fuel payloadTyped lookup pure ih
     exact ⟨payloadType,row,fuel,payloadTyped,lookup,pure,.refl _⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
+  all_goals (intros; trivial)
 
 /-- Injection allocates its payload thunk at the payload's source type; the
 returned variant is typed at the declared row by that exact address. -/

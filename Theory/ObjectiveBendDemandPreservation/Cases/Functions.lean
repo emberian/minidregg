@@ -21,52 +21,42 @@ theorem immediate_value_typed {assumptions : Assumptions} {context : Context}
       EnvironmentTyping types context environment →
       ∀ value, immediateValue term environment = some value →
         ValueTyping assumptions types value type := by
-  refine PartialTyping.rec
+  apply PartialTyping.rec
     (motive_1 := fun context term type _ _ => ∀ types environment,
       EnvironmentTyping types context environment →
       ∀ value, immediateValue term environment = some value →
         ValueTyping assumptions types value type)
     (motive_2 := fun _ _ _ _ _ => True)
     (motive_3 := fun _ _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
-  · intros; simp [immediateValue,scalarValue] at *
-  · intro context n types env envTyped value found
+    (t := source)
+  case natural =>
+    intro context n types env envTyped value found
     simp only [immediateValue,scalarValue,Option.some.injEq] at found
     subst value; exact .natural n
-  · intro context boolean types env envTyped value found
+  case boolean =>
+    intro context boolean types env envTyped value found
     simp only [immediateValue,scalarValue,Option.some.injEq] at found
     subst value; exact .boolean boolean
-  · intro context label types env envTyped value found
+  case label =>
+    intro context label types env envTyped value found
     simp only [immediateValue,scalarValue,Option.some.injEq] at found
     subst value; exact .label label
-  · intro context body annotation uses bodyTyped safe valid captures ih types env envTyped value found
+  case lambda =>
+    intro context body annotation uses bodyTyped safe valid captures ih types env envTyped value found
     simp only [immediateValue,Option.some.injEq] at found
     subst value; exact .closure envTyped bodyTyped safe valid captures
-  · intro context term actual expected uses prior agreement ih types env envTyped value found
+  case conversion =>
+    intro context term actual expected uses prior agreement ih types env envTyped value found
     exact .conversion (ih types env envTyped value found) agreement
-  · intros; simp [immediateValue,scalarValue] at *
-  · intros; simp [immediateValue,scalarValue] at *
-  · intros; simp [immediateValue,scalarValue] at *
-  · intros; simp [immediateValue,scalarValue] at *
-  · intros; simp [immediateValue,scalarValue] at *
-  · intros; simp [immediateValue,scalarValue] at *
-  · intros; simp [immediateValue,scalarValue] at *
-  · intros; simp [immediateValue,scalarValue] at *
-  · intros; simp [immediateValue,scalarValue] at *
-  · intros; simp [immediateValue,scalarValue] at *
-  · intros; simp [immediateValue,scalarValue] at *
-  · intros; simp [immediateValue,scalarValue] at *
-  · intros; simp [immediateValue,scalarValue] at *
-  · intros; simp [immediateValue,scalarValue] at *
-  · intros; simp [immediateValue,scalarValue] at *
-  · intros; simp [immediateValue,scalarValue] at *
-  · intros; simp [immediateValue,scalarValue] at *
-  · intros; simp [immediateValue,scalarValue] at *
-  · intros; simp [immediateValue,scalarValue] at *
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
+  case nil =>
+    intros; trivial
+  case cons =>
+    intros; trivial
+  case nil =>
+    intros; trivial
+  case cons =>
+    intros; trivial
+  all_goals (intros; simp [immediateValue,scalarValue] at *)
 
 /-- Demanding ANY well-typed address preserves its assigned type in all three
 cell phases. A cyclic active demand may become blackhole, never missingCell.
@@ -230,48 +220,24 @@ theorem source_mix_expansion {assumptions : Assumptions} {context : Context}
     | .mix lower upper => validContext assumptions.shareableVariables context = true →
         Nonempty (ReusableTerm assumptions context (mixBody lower upper) type)
     | _ => True := by
-  refine PartialTyping.rec
+  apply PartialTyping.rec
     (motive_1 := fun context term type _ _ => match term with
       | .mix lower upper => validContext assumptions.shareableVariables context = true →
           Nonempty (ReusableTerm assumptions context (mixBody lower upper) type)
       | _ => True)
     (motive_2 := fun _ _ _ _ _ => True)
     (motive_3 := fun _ _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intro context term actual expected uses prior agreement ih
+    (t := source)
+  case conversion =>
+    intro context term actual expected uses prior agreement ih
     cases term <;> try trivial
     intro valid
     obtain ⟨expanded⟩ := ih valid
     exact ⟨⟨expanded.uses,.conversion expanded.derivation agreement,expanded.captures⟩⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intro context lower upper lowerType upperType self inherited middle provided lu uu lowerTyped upperTyped lowerCallable upperCallable captures selfShare inheritedShare middleShare ihLower ihUpper valid
+  case mix =>
+    intro context lower upper lowerType upperType self inherited middle provided lu uu lowerTyped upperTyped lowerCallable upperCallable captures selfShare inheritedShare middleShare ihLower ihUpper valid
     exact ⟨reusable_mix_body lowerTyped upperTyped lowerCallable upperCallable captures selfShare inheritedShare middleShare valid⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
+  all_goals (intros; trivial)
 
 /-- Evaluating every checked mix, including source result conversions, preserves
 its actual lexical capture qualification and the executor's generated body. -/
@@ -303,7 +269,7 @@ theorem source_fix_expansion {assumptions : Assumptions} {context : Context}
           (.app (.app (spec.rename Nat.succ) (.bound 0)) (seed.rename Nat.succ)) target) ∧
         ConversionPath assumptions target type
     | _ => True := by
-  refine PartialTyping.rec
+  apply PartialTyping.rec
     (motive_1 := fun context term type _ _ => match term with
       | .fix spec seed => ∃ target,
           target.shareableUnder assumptions.shareableVariables = true ∧
@@ -313,40 +279,16 @@ theorem source_fix_expansion {assumptions : Assumptions} {context : Context}
       | _ => True)
     (motive_2 := fun _ _ _ _ _ => True)
     (motive_3 := fun _ _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intro context term actual expected uses prior agreement ih
+    (t := source)
+  case conversion =>
+    intro context term actual expected uses prior agreement ih
     cases term <;> try trivial
     obtain ⟨target,share,expanded,path⟩ := ih
     exact ⟨target,share,expanded,.step path agreement⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intro context spec seed specType inherited target su iu specTyped callableEq seedTyped share allowed captures ihSpec ihSeed
+  case fix =>
+    intro context spec seed specType inherited target su iu specTyped callableEq seedTyped share allowed captures ihSpec ihSeed
     exact ⟨target,share,⟨reusable_fix_body specTyped callableEq seedTyped share allowed captures⟩,.refl target⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
+  all_goals (intros; trivial)
 
 /-- Generic Fix preserves typed address assignments at its actual cyclic
 allocation. The suspended origin contains the new address, preserving the
@@ -412,7 +354,7 @@ theorem source_application_decomposition {assumptions : Assumptions} {context : 
         argumentAllowed assumptions quantity context domain argumentUses = true ∧
         uses = addUses functionUses argumentUses ∧ ConversionPath assumptions codomain type
     | _ => True := by
-  refine PartialTyping.rec
+  apply PartialTyping.rec
     (motive_1 := fun context term type uses _ => match term with
       | .app function argument => ∃ functionType domain codomain functionUses argumentUses reuse quantity,
           PartialTyping assumptions context function functionType functionUses ∧
@@ -423,41 +365,17 @@ theorem source_application_decomposition {assumptions : Assumptions} {context : 
       | _ => True)
     (motive_2 := fun _ _ _ _ _ => True)
     (motive_3 := fun _ _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intro context term actual expected uses prior agreement ih
+    (t := source)
+  case conversion =>
+    intro context term actual expected uses prior agreement ih
     cases term <;> try trivial
     obtain ⟨ft,domain,codomain,fu,au,reuse,quantity,fn,arg,callable,copyAllowed,counts,path⟩ := ih
     exact ⟨ft,domain,codomain,fu,au,reuse,quantity,fn,arg,callable,copyAllowed,counts,.step path agreement⟩
-  · intro context function argument functionType argumentType domain codomain fu au reuse quantity fn arg callable same copyAllowed ihFn ihArg
+  case application =>
+    intro context function argument functionType argumentType domain codomain fu au reuse quantity fn arg callable same copyAllowed ihFn ihArg
     subst argumentType
     exact ⟨functionType,domain,codomain,fu,au,reuse,quantity,fn,arg,callable,copyAllowed,rfl,.refl codomain⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
+  all_goals (intros; trivial)
 
 /-- Focusing the function of ANY well-typed application keeps both lexical
 origins, safely splits the usage vector, and retains copy/shareability evidence

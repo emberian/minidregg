@@ -230,46 +230,22 @@ theorem source_record_decomposition {assumptions : Assumptions} {context : Conte
     | .record fields => ∃ row, FieldsTyping assumptions context fields row uses ∧
         ConversionPath assumptions row type
     | _ => True := by
-  refine PartialTyping.rec
+  apply PartialTyping.rec
     (motive_1 := fun context term type uses _ => match term with
       | .record fields => ∃ row, FieldsTyping assumptions context fields row uses ∧ ConversionPath assumptions row type
       | _ => True)
     (motive_2 := fun _ _ _ _ _ => True)
     (motive_3 := fun _ _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intro context term actual expected uses prior agreement ih
+    (t := source)
+  case conversion =>
+    intro context term actual expected uses prior agreement ih
     cases term <;> try trivial
     obtain ⟨row,fields,path⟩ := ih
     exact ⟨row,fields,.step path agreement⟩
-  · intros; trivial
-  · intro context fields row uses fieldsTyped ihFields
+  case record =>
+    intro context fields row uses fieldsTyped ihFields
     exact ⟨row,fieldsTyped,.refl row⟩
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
-  · intros; trivial
+  all_goals (intros; trivial)
 
 /-- Actual record allocation preserves all typed addresses and lazy field
 origins, including declaration-order first-field shadowing. Row conversion is
