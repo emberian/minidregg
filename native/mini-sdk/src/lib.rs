@@ -34,6 +34,7 @@
 pub mod confirm;
 pub mod contracts;
 pub mod custody;
+pub mod decimal;
 pub mod explain;
 pub mod hex;
 pub mod profile;
@@ -41,6 +42,12 @@ pub mod sign;
 
 #[cfg(feature = "native")]
 pub mod consent;
+#[cfg(feature = "native")]
+pub mod durable;
+#[cfg(feature = "native")]
+pub mod lock;
+#[cfg(feature = "native")]
+pub mod secret;
 #[cfg(feature = "native")]
 pub mod flow;
 #[cfg(feature = "native")]

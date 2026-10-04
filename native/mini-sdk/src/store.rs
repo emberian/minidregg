@@ -1,15 +1,16 @@
 //! Filesystem custody: owner-private directories, fsync-then-rename JSON records under an
 //! exclusive lease, and the retained attempt-directory layout `resource-client` already writes
 //! (`call.bin`, `outcome.json`, `retry-NNNN.{bin,json,transport.json}`).
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
-use std::os::fd::AsRawFd;
+use std::fs::{self, OpenOptions};
+use std::io::Read;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
 use crate::custody::{classify, Outcome};
+use crate::durable::{self, Perm};
+use crate::lock::{Create, Lease, LockError, Wait};
 use crate::{Error, Result};
 
 const MAX_RECORD: u64 = 16 * 1024 * 1024;
@@ -31,21 +32,10 @@ pub fn private_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn sync_dir(path: &Path) -> Result<()> {
-    File::open(path.parent().ok_or("record has no parent")?)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| e.to_string().into())
-}
-
-/// Write `value` to `path` durably: a 0600 sibling, fsync, rename, fsync the directory.
+/// Write `value` to `path` durably: a unique 0600 sibling, fsync, rename, fsync the directory.
 pub fn atomic_json(path: &Path, value: &Value) -> Result<()> {
-    let tmp = path.with_extension("pending");
-    let mut f = OpenOptions::new().write(true).create(true).truncate(true).mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW).open(&tmp).map_err(|e| e.to_string())?;
-    f.write_all(&serde_json::to_vec(value).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    f.sync_all().map_err(|e| e.to_string())?;
-    fs::rename(&tmp, path).map_err(|e| e.to_string())?;
-    sync_dir(path)
+    let bytes = serde_json::to_vec(value).map_err(|e| e.to_string())?;
+    durable::replace(path, &bytes, Perm::Private).map_err(|e| e.to_string().into())
 }
 
 /// Read a bounded JSON record; absence is `None`, corruption is an error (never absence).
@@ -69,7 +59,7 @@ pub fn read_json(path: &Path) -> Result<Option<Value>> {
 pub struct Record {
     pub path: PathBuf,
     pub value: Option<Value>,
-    _lease: File,
+    _lease: Lease,
 }
 
 impl Record {
@@ -79,18 +69,13 @@ impl Record {
             return Err("invalid custody key".into());
         }
         private_dir(root)?;
-        let f = OpenOptions::new().read(true).write(true).create(true).truncate(false).mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW).open(root.join(format!("{key}.lock"))).map_err(|e| e.to_string())?;
-        // SAFETY: a valid open descriptor; flock has no memory preconditions.
-        if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-            let e = std::io::Error::last_os_error();
-            if e.kind() == std::io::ErrorKind::WouldBlock {
-                return Ok(None);
-            }
-            return Err(e.to_string().into());
-        }
+        let lease = match Lease::acquire(&root.join(format!("{key}.lock")), Create::Yes, Wait::No) {
+            Ok(lease) => lease,
+            Err(LockError::Busy) => return Ok(None),
+            Err(e) => return Err(e.to_string().into()),
+        };
         let path = root.join(format!("{key}.json"));
-        Ok(Some(Record { value: read_json(&path)?, path, _lease: f }))
+        Ok(Some(Record { value: read_json(&path)?, path, _lease: lease }))
     }
 
     pub fn save(&mut self, value: Value) -> Result<()> {
@@ -119,18 +104,13 @@ fn retry_index(name: &str) -> Option<(u64, bool)> {
 }
 
 impl AttemptDir {
-    /// Retain the exact call: create-new, fsync, then fsync every ancestor directory. A
-    /// transmission must never precede a durable call and its pathname.
+    /// Retain the exact call: complete-or-absent (staged, fsynced, linked into place), then fsync
+    /// every ancestor directory. A transmission must never precede a durable call and its
+    /// pathname, and a crash can never leave a truncated `call.bin` to be resent.
     pub fn seal_call(&self, call: &[u8]) -> Result<PathBuf> {
         let path = self.0.join("call.bin");
-        let mut f = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path)
-            .map_err(|e| format!("cannot retain exact call {}: {e}", path.display()))?;
-        f.write_all(call).and_then(|_| f.sync_all()).map_err(|e| e.to_string())?;
-        let mut ancestor = Some(self.0.clone());
-        while let Some(p) = ancestor {
-            File::open(&p).and_then(|f| f.sync_all()).map_err(|e| e.to_string())?;
-            ancestor = p.parent().map(Path::to_path_buf);
-        }
+        durable::create_new(&path, call, Perm::Private).map_err(|e| format!("cannot retain exact call {}: {e}", path.display()))?;
+        durable::sync_ancestors(&self.0).map_err(|e| e.to_string())?;
         Ok(path)
     }
 

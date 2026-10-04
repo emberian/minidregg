@@ -26,7 +26,6 @@
 //! ```
 use serde_json::{json, Map, Value};
 
-use crate::hex::is_decimal;
 use crate::{Error, Result};
 
 pub const INTENT_DOMAIN: &[u8] = b"MINI/SDK/INTENT/v1";
@@ -37,7 +36,7 @@ pub const INVOCATION_DOMAIN: &[u8] = b"MINI/SDK/INVOCATION-ID/v1";
 pub struct Dec(String);
 impl Dec {
     pub fn new(text: &str) -> Result<Self> {
-        if !is_decimal(text) {
+        if !crate::decimal::is_canonical(text) {
             return Err(Error(format!("{text:?} is not a canonical decimal")));
         }
         Ok(Dec(text.to_owned()))
