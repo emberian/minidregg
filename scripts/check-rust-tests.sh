@@ -271,6 +271,12 @@ exact rc-hex-rate-limit      resource-client --bin mini -- \
 # Operator `resolve` frees the slot of a dead lease holder (0c148911)
 exact scheduler-resolve      inference-scheduler --test core -- \
   dead_lease_holder_frees_its_slot_only_by_operator_resolve
+# Signing consent: a remote plan with one changed byte is refused before any key signs (W1.9 b45237d1)
+exact consent-remote-plan    resource-client --bin mini -- \
+  client_consent::tests::remote_signing_plan_with_one_changed_byte_is_refused_before_signing \
+  client_consent::tests::consent_headers_preserve_duplicates_order_and_reject_unframed_values \
+  client_consent::tests::consent_pair_preserves_exact_order_and_bounds \
+  client_consent::tests::consent_round_trip_refusal_never_returns_header_bytes
 # --- end W1.9 rows
 
 # Private rooms (W1.9b 4564a8fa, 8c67fc66, d38116cd): the refusals the room lane
