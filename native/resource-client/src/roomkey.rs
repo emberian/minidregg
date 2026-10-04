@@ -1989,7 +1989,8 @@ pub(crate) fn signed_recipient_descriptor(workspace: &Value, room: &str, keys: &
 }
 
 /// Shared shell/chat transport parsing. This function never authenticates a
-/// recipient: all authority comes from the later protected current-source check.
+/// recipient: its callers authenticate the signed record it yields against the
+/// room and the pinned signing key (`pin_member_declaration`, `invitation_record`).
 pub(crate) fn recipient_argument(text: &str) -> Result<String> {
     let text = text.trim();
     if text.len() > 4096 { return Err("recipient declaration exceeds its transport bound".into()); }

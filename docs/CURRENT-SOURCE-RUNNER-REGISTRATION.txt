@@ -1,8 +1,0 @@
-Insert ONLY after pub(crate) mod carry in receipt_continuity.rs, preserving current recipient registration and all root-owned process/socket/submit/host-resolution work:
-#[path = "current_source.rs"]
-mod current_source;
-pub(crate) use current_source::{with_current_source, CurrentSourceOperation, CurrentSourceReadback};
-
-with_current_source(root,workspace,closedOperation,inputWithoutPoint,validate)->Result<T>
-Only confirmed CurrentRecipient verb triple enabled. Input pointHeight/pointRoot prohibited; helper injects locked actual custodypoint. Source fullquery/deployment/point bound BEFORE validation, validation runs UNDER SAME custodylock, repeatpin/config/settings/workspace/anchor check aftervalidation. Fresh empty outputs; bounded input4096/query4096/rawreadback8192/JSON8192; no remote fallback/Boolean grant.
-RoomHead/Applied producer variants deliberately not guessed; receiver must provide exact source-owned CLI+readback schema. CurrentRecipient API unchanged; exact token remains scope/key authentication not used-room-key releasepermission. Rustfmt +actual5focusedchecks/release PASS; earlier recipient1206 pass is separate. Matchedsourcecurrent3verbELF/Store receiving remains captain/runtime dependency.

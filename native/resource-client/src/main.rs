@@ -3335,8 +3335,6 @@ fn run(mut args: Args) -> Result<()> {
         }
         #[cfg(unix)]
         "workspace" => workspace::run(args),
-        #[cfg(unix)]
-        "current-source-helper" => receipt_continuity::pin_current_source_helper(args),
         "member" => member::run(args),
         #[cfg(unix)]
         "web" => web::run(args),
