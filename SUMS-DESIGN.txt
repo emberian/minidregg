@@ -1,0 +1,109 @@
+SUMS-DESIGN — Objective Bend Core4 sums, case and Boolean branching (lane W1.3, 2026-10-04)
+Base: minidregg c8fdd000. Tags: READ = read in code at that commit; DECIDED = this lane's design.
+
+1. CONSTRUCTORS (Theory/ObjectiveBendOpenRecursion.lean, DECIDED)
+  Term.inject (label : String) (payload : Term)          -- weak-head value; payload stays lazy
+  Term.case (scrutinee : Term) (arms : List (String × Term))  -- each arm body binds the payload at index 0
+  Term.ifBool (condition whenTrue whenFalse : Term)       -- the Boolean eliminator
+  Primitive.labelEqual                                     -- String × String → Bool, beside .equal (Nat)
+ Why a dedicated ifBool, not a two-arm case over Bool: edition 2 separates Booleans from labels
+ (READ: conjunction_labels_refused, reserved_strings_are_not_booleans). Making `case` accept a Boolean
+ scrutinee would re-conflate them; making `equal` return a variant would change existing statements
+ (equality_boolean_exact). ifBool is ifZero without a binder: one frame, no allocation.
+ Why labelEqual is a primitive: two opaque labels compared for a Boolean is the only dynamic label
+ observation needed now; `case` dispatches on a static label set. No dynamic `get` (move 5) here.
+
+2. REFERENCE STEPS (weak head; case and ifBool force ONLY their scrutinee/condition)
+  caseTarget  : s → s'  ⇒  case s arms → case s' arms
+  caseInject  : arms.find? (·.1 == l) = some (l, body)  ⇒  case (inject l p) arms → instantiate body p
+  ifCondition : c → c'  ⇒  ifBool c t f → ifBool c' t f
+  ifTrue / ifFalse : ifBool (boolean true) t f → t ;  ifBool (boolean false) t f → f
+  primitive   : labelEqual (label a) (label b) → boolean (a == b)
+ First-matching arm wins, exactly as record field lookup (Step.field) takes the first field.
+ Value gains `inject`. sourceStep_deterministic still holds: inject is a value, so caseTarget and
+ caseInject never overlap; caseInject's arm is pinned by find?.
+
+3. MACHINE (Theory/ObjectiveBendDemandMachine.lean). Limits, step, runBounded, run unchanged.
+  RuntimeValue.variant (label : String) (payload : Address)
+  Frame.case (arms) (environment) ; Frame.ifBool (whenTrue whenFalse) (environment)
+  Refusal.missingArm (typed programs never reach it; ControlTyping has no refusal constructor)
+  evaluate (inject l p) env : push suspended ⟨p,env⟩ at a = heap.size; return variant l a (no forcing)
+  evaluate (case s arms) env: evaluate s, push Frame.case arms env
+  evaluate (ifBool c t f) env: evaluate c, push Frame.ifBool t f env
+  returned (variant l a) / case arms env: find? first arm with label l → push the binder cell
+    suspended ⟨bound 0, [a]⟩ at b = heap.size and evaluate body (b :: env); no arm → missingArm;
+    any other value → wrongValue.
+  returned (boolean true|false) / ifBool t f env: evaluate t | f in env; other → wrongValue.
+ The binder cell is an indirection to the shared payload address (sharing kept: forcing it forces a
+ once). It exists because the payload address is typed at the TYPE OF THE INJECTION SITE and the arm's
+ binder at the type of the CASE'S ROW; the two agree only up to sameType (canonical row equality
+ rewrites member types). EnvironmentTyping requires exact address types, so the arm gets a fresh
+ address typed by a ClosureTyping that converts along the ConversionPath. Same discipline as every
+ other binder in this machine (argument and predecessor are fresh cells); cost one cell per match.
+
+4. INVARIANTS (DemandInvariant): Scoped.inject/case (arms at n+1)/ifBool; RuntimeValueValid (variant _ a)
+ = a < bound; FrameValid case = env valid ∧ arms Scoped (len+1); ifBool = env valid ∧ both Scoped len.
+
+5. TYPES (ObjectiveBendTypes / ObjectiveBendTyping)
+  Ty.variant (row : Ty): row is the ordinary field row (.field label payloadType tail). Closed sum:
+  tail .emptyRow. Open-tail sum: tail .variable k (future cases), allowed at injection sites.
+  shareable/shareableUnder/canonical/instantiate recurse into the row; sameType unchanged (canonical
+  equality makes label order irrelevant; one bound head unfolds, so a recursive sum is a bounded
+  variable, e.g. List = variable k with bound variant{nil: {}, cons: {head: Nat, tail: variable k}}).
+  inject: payload : T, row.lookup bounds fuel l = some T ⊢ inject l payload : variant row (uses = payload's).
+  case  : scrutinee : variant row,  ArmsTyping arms row R  ⊢ case scrutinee arms : R.
+  ArmsTyping (third mutual inductive beside FieldsTyping): nil → emptyRow; cons: body typed under
+  ⟨T, unrestricted⟩ :: context at R, safeUses, T shareable, rest typed at row ⇒ (l,body)::rest
+  types at field l T row, uses = body uses tail + rest uses. EXHAUSTIVE by construction: the arms
+  row is closed and must be sameType to the scrutinee's row, so labels coincide; an extra arm has no
+  lookup, a missing arm makes the rows differ. Case on an open-tail sum is refused (needs a default
+  arm: DEFERRED). Uses count arms ADDITIVELY (as ifZero adds zero and successor): conservative for
+  at-most-once, since exactly one arm runs.
+  ifBool: condition : boolean, both branches : R ⊢ R, uses added. labelEqual : (label, boolean).
+  Checker: AnnotatedTerm gains `injections : List Nat → Option Ty` (path → the declared variant type
+  of that inject); infer returns derivations for all three constructors; packet field "injections"
+  [{path,type}] (absent = none). Packet schema stays typed-core.v2 + optional field.
+
+6. TYPED STATE (DemandTyping): ValueTyping.variant (row.lookup l = member, types[a] = actual,
+ ConversionPath actual member — the record rule's shape); FrameTyping.case (closure-free: env typing +
+ ArmsTyping + safe/valid) from variant row to R; FrameTyping.ifBool from boolean to R.
+
+7. BACKEND CONSTRAINT (scout A §6, REC GRADED-EXECUTION L431–433)
+ Core semantics is lazy: only the selected arm runs. Every case/ifBool must also have a both-arms
+ MUX lowering for the oblivious backend: evaluate each arm on a padded payload of that arm's declared
+ type, select by a constant-time tag mux. Admissible only where every arm terminates within the
+ public step/allocation bound at every inhabitant of its payload type (the backend's public resource
+ vector, not core typing); recursive sums need a public unrolling bound. No effect can occur in an arm:
+ this core has no effect constructor, and when `perform` arrives (move 2) effects must be RETURNED as
+ Plan data (a sum of actions) and executed by the kernel after evaluation — never performed inside a
+ forced shared thunk or an arm on a secret scrutinee. Closed (exhaustive) rows give the finite tag set
+ and payload widths the mux needs; open-tail sums are outside the oblivious fragment.
+
+8. WHAT IT UNBLOCKS (Faré, scout A): C17 directly (sums, lists, case on labels, Boolean branching);
+ C7 (runtime lists for linearization; labelEqual for identity-by-name comparisons); C8 (sub-method
+ lists for user-defined method combination); C16 (Plan as a SUM of typed actions, decoded by case;
+ DemandData gains Data.variant so the Plan path can extract it); C10 partly (computed selector
+ comparison; dynamic get still move 5).
+
+9. SURFACE SYNTAX FOR W1.5 (objective-parser.ts / objective-elaborate.ts)
+  sum Shape:                         | declaration, mirrors `record`; a field per label
+    circle: Nat                      | recursive mention (List in List) → bounded variable + shareable
+    square: {side: Nat}              |   premise in literalAnnotations
+  Shape.circle(3)   Shape.nil()      | injection; () payload = empty record; emits inject + injections[path]
+  match s:                           | body-level; any constructor pattern ⇒ lower to `case`
+    case circle(r): r                | binder required (`_` allowed); arms in source order
+    case square(q): q.side
+  match b:  case true: x  case false: y   ⇒ ifBool ; expression form `if c then x else y` ⇒ ifBool
+  a == b with String operands ⇒ binary labelEqual (Nat operands keep equal); unknown types refused.
+
+10. PROOF STRUCTURE FINDING (READ, needs a root decision)
+ Adding Term/Frame/RuntimeValue/Scoped constructors makes every exhaustive induction in
+ DemandAdequacy (the substitution lemmas, frameMeaning, stackRealizes_*, sourceStep_deterministic,
+ graph_stepRaw) and DemandPreservation (typed_stepRaw_preserved, rec-motive counts) non-exhaustive.
+ Those defs/inductions cannot be extended from a separate file, and graph_stepRaw/typed_stepRaw_preserved
+ must call the new per-constructor lemmas, which need Adequacy's own definitions (cycle). So the merge
+ cannot be purely additive: plan = new lemmas in ObjectiveBendSums{Adequacy,Preservation}.lean written
+ against current names, checked on persvati against PATCHED COPIES of the two big files kept in
+ $L/ports/ (not committed under Theory/); the inline port goes into W1.4's landed files later.
+ Between step 2 and that port, Adequacy/Preservation do not compile against the extended core
+ (they are ResearchWip-only; Host/ObjectiveBendPreview, Typing, Machine, Data stay green).
