@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Join · Mini</title>
-<meta name="description" content="How to get onto Mini's public node, what a newcomer can and cannot do there today, and the caveats.">
+<meta name="description" content="How to get an account on Mini's public node, what works there, and what does not.">
 <link rel="stylesheet" href="site.css">
 </head>
 <body>
@@ -27,67 +27,41 @@
 <main id="main">
 <div class="wrap">
 <h1>Join</h1>
-<p class="lede">Mini is early. The way in is the hosted shell on the public node, and the
-guide for it is
-<a href="https://github.com/emberian/minidregg/blob/main/deploy/shell/FRIENDS.md">FRIENDS.md</a>.
-Read it first: it says, section by section, what the node has and what only main has.</p>
+<p class="lede">Accounts on the public node are given by hand. The guide is
+<a href="https://github.com/emberian/minidregg/blob/main/deploy/shell/FRIENDS.md">FRIENDS.md</a>;
+read it first.</p>
+<ol>
+<li>Make an SSH key for Mini.</li>
+<li>Send ember its public half and the session name you want.</li>
+<li>Once enrolled, SSH in to the <code>mini&gt;</code> prompt.</li>
+</ol>
 
-<h2>Getting an account</h2>
-<p>Accounts are given by hand. You make an SSH key for this, send its public half and the
-session name you want, and are enrolled; then you reach a <code>mini&gt;</code> prompt over
-SSH. The steps, and how to reach ember, are in FRIENDS.md. Paying to enrol is designed but
-not deployed.</p>
-
-<h2>What you can do on the public node today</h2>
-<ul>
-<li>Make a key and a workspace, create resources, propose and submit changes, and read
-them back.</li>
-<li>Delegate a narrower grant to another member, publish it, export and import references,
-and revoke a grant.</li>
-<li>Set a resource's law as a JSON predicate, including a permanent lock.</li>
-<li>Retry an attempt and get the same receipt; list your history.</li>
-<li>Documents: <code>new</code>, <code>show</code>, <code>append</code>, <code>edit</code>,
-<code>link</code> and <code>backlinks</code>; and boards.</li>
-</ul>
-<p>This set passed the shell journey, J0 to J8.</p>
-
-<h2>What you cannot do there yet</h2>
-<ul>
-<li>Rooms, chat, private rooms, jobs and sealed markets.</li>
-<li>Key rotation (a committed next key), and proxy mode, which keeps your key on your own
-machine.</li>
-<li>The librarian (Hermes), the Discord entrance, and paying to enrol.</li>
-<li>The newer document verbs and <code>can</code>, <code>why</code>, <code>inspect</code>
-and law checking.</li>
-</ul>
-
-<h2>Before you rely on anything</h2>
+<h2>On the public node</h2>
+<p><strong>Works</strong> (shell journey J0–J8): keys, resources, delegation and revocation,
+JSON laws including locks, retries, history, documents, boards.</p>
+<p><strong>Not yet:</strong> rooms, chat, private rooms, key rotation, proxy mode, the
+librarian, paying to enrol.</p>
 <div class="note">
-<p><strong>It is a devnet.</strong> When the data model or the kernel wire changes, the store is
-re-genesised: your SSH key and signing key stay, and everything you made is gone. Nothing
-has an uptime promise.</p>
-<p><strong>Your key is on the box.</strong> In the hosted shell your signing key is made on the
-operator's machine. The operator, and every process that runs as the box's service account,
-including other members' sessions, can read it. Keep nothing precious behind a hosted
-key.</p>
+<p>The devnet is re-genesised when its data model or kernel wire changes: your SSH
+and signing keys stay, and everything you made is erased. Your hosted
+signing key is on the operator's machine, readable by the operator and by other members'
+sessions. Keep nothing precious behind it.</p>
 </div>
 
 <h2>Contributing</h2>
-<p>Start with the repository's
-<a href="https://github.com/emberian/minidregg/blob/main/README.md">README</a>,
+<p>Read the <a href="https://github.com/emberian/minidregg/blob/main/README.md">README</a>,
 <a href="https://github.com/emberian/minidregg/blob/main/AGENTS.md">AGENTS.md</a> and the
 <a href="https://github.com/emberian/minidregg/blob/main/docs/DEVELOPING.md">developer
-guide</a>. Nothing in Mini has users or a compatibility obligation, so a format change is a
-rebuild, and an old shape should refuse to load rather than be reinterpreted. Say what a
-change breaks.</p>
+guide</a>. Nothing in Mini has users, so a format change is a rebuild: an old shape must
+refuse to load, and the commit says what it breaks.</p>
 
 </div>
 </main>
 <footer class="site">
 <div class="wrap wide">
-<p>Mini. Every statement on this site is taken from a file in the
-<a href="https://github.com/emberian/minidregg">repository</a> at main; where the site and
-the repository disagree, the repository is right.</p>
+<p>Every claim here maps to a file at main
+(<a href="https://github.com/emberian/minidregg/blob/main/website/SOURCES.md">SOURCES.md</a>).
+The repository overrides this site.</p>
 </div>
 </footer>
 </body>

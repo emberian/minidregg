@@ -5,11 +5,11 @@ no JavaScript, no external fonts or scripts.
 
 | Page | Content |
 | --- | --- |
-| `index.html` | what Mini is, who it is for, its state in one paragraph |
-| `language.html` | Objective Bend: Core4, two tutorial programs, what is and is not proved |
-| `architecture.html` | admission, store and laws, receipts, SDK, private rooms, agreement, what is not done |
+| `index.html` | what Mini is, its state, its four rules |
+| `language.html` | Objective Bend: Core4, one example, what is and is not proved |
+| `architecture.html` | admission, laws, receipts, consent, private rooms, agreement |
 | `status.html` | **generated**: the README's Honest state table (`gen-status.py`) |
-| `join.html` | a pointer to `deploy/shell/FRIENDS.md` and what a newcomer can do today |
+| `join.html` | how to get an account, what the public node has, contributing |
 
 ## Rules
 

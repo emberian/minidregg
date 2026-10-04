@@ -143,8 +143,7 @@ def render(readme: str, index: str) -> str:
                     'generated from the Honest state table of the repository README.">', header)
     intro = (
         "<h1>Status</h1>\n"
-        "<p class=\"lede\">What each part of Mini has actually done, graded by the strongest "
-        "evidence there is for it.</p>\n"
+        "<p class=\"lede\">Each component of Mini, graded by the strongest evidence for it.</p>\n"
         "<p class=\"small muted\">This page is generated from the Honest state table of the "
         f"repository <a href=\"{BLOB}README.md#honest-state\">README</a> by "
         "<code>website/gen-status.py</code>, and a gate fails when it is stale. "

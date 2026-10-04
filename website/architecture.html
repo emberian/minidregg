@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Architecture · Mini</title>
-<meta name="description" content="How Mini is built: admission by re-execution, the store and laws, receipts, the SDK consent boundary, private rooms, the agreement mesh, and what is not done.">
+<meta name="description" content="How Mini admits a change: re-execution, the store and laws, receipts, consent, private rooms, agreement.">
 <link rel="stylesheet" href="site.css">
 </head>
 <body>
@@ -27,157 +27,56 @@
 <main id="main">
 <div class="wrap">
 <h1>Architecture</h1>
-<p class="lede">Lean owns semantics and admission. Rust owns the physical boundary. Every
-change is a proposal, and the Lean kernel admits or refuses it.</p>
+<p class="lede">Every change is a signed request. The Lean kernel admits it, leaving a
+receipt, or refuses it with a reason.</p>
 
-<pre><code>authored source + partial specifications
-                   ↓
-        checked program + pinned profile
-                   ↓
-authorized inputs → computation → typed effects and results
-                   ↓
-   current grants · laws · read roots · funding
-                   ↓
-         admitted durable transition
-                   ↓
- views · retained outcomes · delivery · authorized private release</code></pre>
-<p class="small muted">This is the shared contract, not a claim that every arrow is wired
-for every language and backend.</p>
+<h2>Admission</h2>
+<p>The kernel checks a request against current capabilities, laws, exact read roots and
+funding, and checks a computation by running it again, at admission and on every replay.
+No admission uses a proof. The proof-system research, Selvage, is outside the deployed
+build except twelve modules behind the Host's digest backend.</p>
 
-<h2>Admission by re-execution</h2>
-<p>The Lean kernel admits or refuses each proposed change against current capabilities,
-laws, exact read roots and funding. It checks a computation by running it again: at
-admission, and again on every replay when a Store is reopened. No admission uses a proof.
-The deployed Host's Lean umbrella leaves out the proof-system research, because nothing on
-the admission path needs it; the Host still imports twelve of its modules through a digest
-backend.</p>
-<p>That research layer is called Selvage: hash-based, small-field machinery for proximity
-testing, sumcheck, transcript compilation, accumulation and verifiable history. It is
-research, and it has no role in admission today.</p>
-<p>The Rust side supplies clients, signing and custody, storage, transport and
-hosted-service adapters, and decides nothing semantic.</p>
-
-<h2>The store and laws</h2>
-<p>One Store is one directory with a SQLite log, plus one key file and an anchor for its
-head kept outside the directory. Every log entry and every checkpoint carries a KMAC tag
-under the Store's key. A valid tag means this Host executed and accepted this history. It
-does not mean that every signed request was admitted again.</p>
-<p>What lives in the store are resources: governed state with an exact current
-representation and history. Access is by capability: an owner delegates a grant with
-specific verbs to another member, and can revoke it, after which the holder's next request
-is refused <code>revoked</code>. Each resource also has a law, a predicate the Host checks on
-every change. Laws are written in JSON or, on main, a one-line grammar, and on main the Host
-can say before installation whether a law can ever be satisfied. A law can lock a resource for good:</p>
-<pre><code>mini&gt; law lock notes {"type":"any","predicates":[]} --allow-unsatisfiable   # "any of nothing": denies everything
+<h2>Grants and laws</h2>
+<p>An owner delegates a grant with named verbs and can revoke it. Each resource has a law, a
+predicate checked on every change. A law that denies everything is permanent:</p>
+<pre><code>mini&gt; law lock notes {"type":"any","predicates":[]} --allow-unsatisfiable
 mini&gt; submit lock
-mini&gt; read notes                                       # refused: law-denied: sealed   (exit 3)
-mini&gt; law unlock notes {"type":"all","predicates":[]}  # refused: law-denied: …</code></pre>
-<p>Neither the owner nor the operator can get past that law. A capability and a law are
-separate: neither is replaced by an object reference.</p>
+mini&gt; read notes
+# refused: law-denied: sealed
+mini&gt; law unlock notes {"type":"all","predicates":[]}
+# refused: law-denied</code></pre>
 
-<h2>Turns and receipts</h2>
-<p>Every action is a signed request. An admitted one leaves a receipt with a confirmation
-(<code>installed</code>, <code>replayed</code> or <code>recoveredAfterUncertainResponse</code>),
-a transaction id, an event id, an accepted count and the resulting world root. A refused one
-names its reason from a closed set: <code>no-grant</code>, <code>unknown-key</code>,
-<code>law-denied</code>, <code>revoked</code>, <code>stale-root</code>,
-<code>stale-grant</code>, <code>bad-signature</code>, <code>malformed</code>,
-<code>operation-rejected</code>, <code>conflict</code>, <code>outside-validity</code>,
-<code>law-input-range</code>, <code>tail-bound</code> and <code>undisclosed</code>.</p>
-<p>A lost reply is answered by looking up the same call bytes, never by sending a new
-request. Retrying after a restart returns the same receipt, with
-<code>replayed</code> and the same transaction id.</p>
+<h2>Receipts and retries</h2>
+<p>A receipt names the transaction, the resulting world root and a confirmation such as
+<code>installed</code> or <code>replayed</code>. A refusal names one of fourteen reasons, such as <code>no-grant</code>,
+<code>law-denied</code> or <code>stale-root</code>. A lost reply is answered by looking up
+the same call bytes, never by a new request; a retry returns the same receipt.</p>
 
-<h2>The SDK and the consent boundary</h2>
-<p>The client SDK (a Rust crate, and a TypeScript package that matches the Rust core byte
-for byte) is how an app, an agent, a bot or a
-browser extension asks the world to act for a member without the member's key ever signing
-bytes the member did not see:</p>
-<pre><code>Profile ─► Intent (one typed cut) ─► explain() ─► Confirmation (nonce-bound)
-        ─► sign (only consent-returned headers, only under the Confirmation) ─► sealed call
-        ─► submit ─► Receipt | Refused | Uncertain ─► lookup (the SAME call bytes)</code></pre>
-<ul>
-<li>It runs on the member's device, and key material never leaves it.</li>
-<li>It trusts a local Host image and consent executable that the member selects, never ones
-the operator chooses.</li>
-<li>It does not trust the operator. Before a key signs, the Lean consent process re-derives
-the plan from the retained intent and returns the exact header bytes this key may sign. The
-SDK signs those bytes and nothing else.</li>
-<li>A confirmation is for one invocation, attempt, intent, plan, header list and reading;
-change any of them and nothing signs.</li>
-<li>A browser has no consent process. Until a bridge to a member-held replica exists, a
-browser surface must not sign Mini plans.</li>
-</ul>
+<h2>Consent</h2>
+<p>The SDK (Rust, and TypeScript byte-identical to it) runs on the member's device and does
+not trust the operator. Before a key signs, a Lean consent process the member chose
+re-derives the plan and returns the exact header bytes that key may sign; the SDK signs
+nothing else. A browser has no consent process, so until a bridge to a member-held
+replica exists, a browser must not sign.</p>
 
 <h2>Private rooms</h2>
-<div class="note"><p>Devnet quality; privacy not audited. Private rooms are on main only, not
-on the public node, and no run on a real Host is recorded.</p></div>
-<p>A room is a resource that other things are born in. In a private room, what a member says
-is sealed on their own machine under the room key before it leaves. The node holds that key
-only wrapped to each member. Each wrap is to an X25519 + ML-KEM-768 pair, so what a recorded
-wrap protects is post-quantum; the signatures that vouch for the founder are not. Kicking a member revokes their grant and makes a fresh room key for
-everyone else: they keep what they could already read and get nothing new.</p>
-<p>What it does not hide, or does not stop:</p>
-<ul>
-<li>The node sees who is in the room, who wrote when, and how big each line is, in 64-byte
-steps.</li>
-<li>The founder key is pinned trust-on-first-use. If it reached a member through the node and
-nobody compared fingerprints, the node could have substituted its own key.</li>
-<li>A misbehaving node can hide a key change from a member until that member has seen it
-once, so a member who has not synced since a kick can be kept on the old key.</li>
-<li>In the hosted shell the member's key and the room key are files on the operator's box,
-so a private room needs <code>mini</code> on the member's own machine.</li>
-</ul>
+<p>Main only; devnet quality; privacy not audited. A member's words are sealed on their own
+machine under the room key, which the node holds only wrapped to each member (X25519 +
+ML-KEM-768). The node still sees who is in the room, who wrote when, and line sizes in
+64-byte steps. The founder key is trusted on first use.</p>
 
-<h2>The agreement mesh</h2>
-<p>The agreement mesh is a Generic Simplex BFT engine written in Lean and compiled native,
-so that a world can be replicated across replicas that agree on its history. Its model is a
-fixed committee of n = 3f + 1 with at most f Byzantine members, authenticated reliable
-delivery and partial synchrony.</p>
-<ul>
-<li><strong>Built:</strong> the engine, and a safety theorem over the Lean engine model. A
-four-node native harness passes with real TCP, ML-DSA signatures, selective Byzantine COMMIT
-delivery, durable certificate recovery after restart, and lost compare-and-swap replies.</li>
-<li><strong>Not built or not shown:</strong> liveness is not established. The executed run had
-four replicas on one host, which is one failure domain. Changing membership is separate
-work, and the workdesk fixture has not run.</li>
-</ul>
-
-<h2>Other parts, briefly</h2>
-<ul>
-<li><strong>Hosted applications (SPK).</strong> Sandstorm-style packages run as grains under
-Mini authority. Install, start, supervised restart and export are integrated on development
-worlds; no application has served a browser session yet.</li>
-<li><strong>Hermes.</strong> Agents summoned into a room with selected context and delegated
-tools. Run only with a scripted provider on a private Store; off on the public node.</li>
-<li><strong>Traffic privacy.</strong> A post-quantum onion cohort with cover traffic, executed
-on one host with an honest registrar; the endpoint sees the plaintext call, and there is no
-anonymity proof.</li>
-<li><strong>MPC and FHE.</strong> Research: an MPC width-8 adder over private inputs, and FHE
-on a public two-input expression with one owner.</li>
-</ul>
-
-<h2>What is not done</h2>
-<ul>
-<li>No Objective Bend program has produced a native accepted receipt on main.</li>
-<li>No kernel delivers a response to a yielded activity or persists its checkpoint.</li>
-<li>The Objective Bend proofs are not checked by the default build.</li>
-<li>Chat is compiled, with no recorded run joining it to a native Host.</li>
-<li>Studio has no member-reachable route.</li>
-<li>Payments ran only on fixtures; nothing is deployed and no mainnet transaction has been
-made.</li>
-<li>None of the private execution paths runs a member's program privately.</li>
-<li>Agreement liveness, and more than one failure domain.</li>
-</ul>
-<p>Per-component evidence is on the <a href="status.html">status page</a>.</p>
+<h2>Agreement</h2>
+<p>A Generic Simplex BFT engine, written in Lean and compiled native, for n = 3f + 1
+replicas with at most f Byzantine. Safety is proved over the Lean engine model. Liveness is
+not established; the executed run was four replicas on one host.</p>
 
 </div>
 </main>
 <footer class="site">
 <div class="wrap wide">
-<p>Mini. Every statement on this site is taken from a file in the
-<a href="https://github.com/emberian/minidregg">repository</a> at main; where the site and
-the repository disagree, the repository is right.</p>
+<p>Every claim here maps to a file at main
+(<a href="https://github.com/emberian/minidregg/blob/main/website/SOURCES.md">SOURCES.md</a>).
+The repository overrides this site.</p>
 </div>
 </footer>
 </body>

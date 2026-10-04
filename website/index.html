@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mini</title>
-<meta name="description" content="Mini is a programmable shared world for people and agents: Lean admits every change by re-executing it, Rust is the client and custody boundary. A devnet; privacy not audited.">
+<meta name="description" content="Mini is a programmable shared world for people and agents: a Lean kernel admits or refuses every signed change. A devnet; privacy not audited.">
 <link rel="stylesheet" href="site.css">
 </head>
 <body>
@@ -26,77 +26,43 @@
 </header>
 <main id="main">
 <div class="wrap">
-
 <h1>Mini</h1>
-<p class="lede">Mini is a programmable shared world for people and agents. Documents,
-applications, communities and continuing computations share one set of rules for
-authority, resources, privacy and history.</p>
-
-<p>Underneath, Mini is a small store of owned resources. Every action is a signed
-request that the Host, a program written in Lean, admits or refuses. An admitted
-request leaves a receipt. A refused one comes back with a reason.</p>
+<p class="lede">Mini is a programmable shared world for people and agents. Every change
+is a signed request that a Lean kernel admits or refuses.</p>
+<p>Documents, applications, communities and continuing computations share one set of
+rules for authority, resources, privacy and history. A member can delegate bounded work to
+an agent without giving any application unrestricted access to the rest of the world.</p>
 
 <div class="note">
-<p><strong>State, in one paragraph.</strong> Mini is a devnet. When the data model or the
-kernel wire changes, the store is re-genesised and everything made on it is gone. Nothing
-has an uptime promise. The public node runs a candidate from 2026-10-01 with the shell,
-documents and boards. It has no rooms, chat, key rotation or proxy mode, and no outside
-member is enrolled. No admission uses a proof: admission is checked by re-execution.
-Private rooms are devnet quality and their privacy is not audited. None of the private
-execution research runs a member's program privately today.
-<a href="status.html">Full status</a>.</p>
+<p><strong>State.</strong> Mini is a devnet: a change to the data model or the kernel wire
+re-genesises the store, and everything on it is lost. No admission uses a proof. Private
+rooms are on main only and their privacy is not audited. No native Host has admitted an
+Objective Bend program. The public node runs the shell, documents and boards; no outside
+member is enrolled. <a href="status.html">Status by component</a>.</p>
 </div>
 
-<h2>How it is built</h2>
+<h2>Rules</h2>
 <ul>
-<li><strong>Lean owns semantics and admission.</strong> Every change is a proposal that the
-Lean kernel admits or refuses against current capabilities, laws, exact read roots and
-funding. The kernel checks a computation by running it again, at admission and again on
-every replay.</li>
-<li><strong>Rust owns the physical boundary.</strong> The Rust side supplies clients, signing
-and custody, storage, transport and hosted-service adapters. It decides nothing
-semantic.</li>
-<li><strong>Resources carry laws.</strong> A law is a predicate the Host checks on every
-change to a resource. A law that forbids everything locks the resource: neither its owner
-nor the operator can get past it.</li>
-<li><strong>Computation proposes; authority admits.</strong> A correct calculation cannot grant
-itself permission, a reference is not ownership, and a lost reply keeps the original
-operation and its exact retry rather than licensing a second one.</li>
-<li><strong>Objective Bend is the language.</strong> It is a lazy language of first-class,
-partial, composable specifications, after Faré's account of objects. Its core has
-machine-checked soundness, preservation and completeness theorems, which the default build
-does not yet re-check. No Objective Bend program has yet been admitted by a native
-Host.</li>
+<li><strong>Lean owns semantics; Rust owns the physical boundary.</strong> The kernel admits a change against current
+capabilities, laws, exact read roots and funding. Rust supplies clients, custody, storage
+and transport, and decides nothing semantic.</li>
+<li><strong>Admission is re-execution.</strong> The kernel runs a computation again at
+admission and on every replay.</li>
+<li><strong>Computation proposes; authority admits.</strong> A correct calculation cannot
+grant itself permission, and a reference is not ownership.</li>
+<li><strong>A law binds its owner.</strong> A law is a predicate checked on every change to
+its resource. A law that denies everything stops the owner and the operator alike.</li>
 </ul>
-
-<h2>Who it is for</h2>
-<p>The design aim is a world where members inspect how their tools work, compose new
-behaviour, delegate bounded work to agents, and change their shared world without handing
-any application unrestricted access to the rest of it.</p>
-<p>Today that means two groups. Friends can use a hosted shell on the public node, with the
-limits on the <a href="join.html">join page</a>. Contributors can read and build the
-repository: useful work improves a tool or world, closes a source-to-runtime connection,
-deletes a duplicated mechanism, strengthens a proof, or exposes a claim the evidence does
-not support.</p>
-
-<h2>Read next</h2>
-<ul class="cards">
-<li><a href="language.html">Language</a><p>Objective Bend: Core4, two programs that run, and exactly what is proved.</p></li>
-<li><a href="architecture.html">Architecture</a><p>Admission by re-execution, laws, receipts, the SDK, private rooms, agreement.</p></li>
-<li><a href="status.html">Status</a><p>The component table from the README, by evidence class.</p></li>
-<li><a href="join.html">Join</a><p>What a newcomer can and cannot do on the public node today.</p></li>
-</ul>
-
-<p class="small muted">The project is called Mini. Its repository and its host binary keep
-the older name, minidregg.</p>
+<p class="small muted">The repository and the host binary keep the older name,
+minidregg.</p>
 
 </div>
 </main>
 <footer class="site">
 <div class="wrap wide">
-<p>Mini. Every statement on this site is taken from a file in the
-<a href="https://github.com/emberian/minidregg">repository</a> at main; where the site and
-the repository disagree, the repository is right.</p>
+<p>Every claim here maps to a file at main
+(<a href="https://github.com/emberian/minidregg/blob/main/website/SOURCES.md">SOURCES.md</a>).
+The repository overrides this site.</p>
 </div>
 </footer>
 </body>
