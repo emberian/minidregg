@@ -46,10 +46,6 @@ import Compiler.BoundedNockEntry
 import Compiler.BoundedNockNetwork
 import Compiler.CurrentRecipientRecord
 import Compiler.EmitSystemFast
-import Compiler.GenericSimplexController
-import Compiler.GenericSimplexNative
-import Compiler.GenericSimplexParticipant
-import Compiler.GenericSimplexPending
 import Compiler.GenericSimplexTransferability
 import Compiler.JointBackendPartyCodec
 import Compiler.NativeDurableEventRegistry
@@ -108,11 +104,9 @@ import Kernel.GenericSimplexReconfig
 import Kernel.JointBackendPartyAdmission
 import Kernel.JointBackendPartyReceiver
 import Kernel.JointBackendPartyRecovery
-import Kernel.JointOrderedSourceReceiver
 import Kernel.JointProtectedGateProofs
 import Kernel.JointReservationFunding
 import Kernel.JointSimplexBinding
-import Kernel.JointSourcePrefixValidation
 import Kernel.NativeCurrentMemberKey
 import Kernel.NativeCurrentMemberKeyIO
 import Kernel.NativeCurrentSigningKey
@@ -152,6 +146,4 @@ import Theory.OptimisticAdjudication
 import Theory.ResearchRegime
 import Theory.Transferability
 import Verify.GenericSimplexAxioms
-import Verify.GenericSimplexOperatorBridge
-import Verify.GenericSimplexSourceHarness
 import Verify.ResourceReserveBirthFixture

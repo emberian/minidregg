@@ -18,6 +18,7 @@
 # updated 2026-10-04: shipfix item 4: DeclaredResourceController imports Kernel.RefusalLane (per-signer refusal lane, Host-process state)  [counts: Minidregg 0 1, Theory 68 148, Kernel 337 482, Pred 7 11, Effects 0 3, Compiler 128 294, Selvage 12 153, Assurance 0 146, Host 66 103, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 10, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-04: main 31a9072e..796d7d7a: the objective quotation path and native admission (quote request, invocation layout/settings, package author, authenticated inputs, source-agreement legacy view) are reached from Host.Main  [counts: Minidregg 0 1, Theory 68 149, Kernel 338 486, Pred 7 11, Effects 0 3, Compiler 132 295, Selvage 12 153, Assurance 0 146, Host 72 107, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 10, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-04: registry kind objectiveActivity: its cell layout module enters the Host closure  [counts: Minidregg 0 1, Theory 68 151, Kernel 339 491, Pred 7 11, Effects 0 3, Compiler 132 297, Selvage 12 153, Assurance 0 151, Host 72 107, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 10, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-04: schema-v2 (merge-keeper rebase onto activity-native): Kernel.SessionIndex enters (the loaded image session indexes CellIds/TxIndex, consumed by Kernel.NativeHostContext)  [counts: Minidregg 0 1, Theory 68 151, Kernel 340 495, Pred 7 11, Effects 0 3, Compiler 132 298, Selvage 12 153, Assurance 0 151, Host 72 107, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 11, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -546,6 +547,7 @@ Kernel.Run
 Kernel.RunComputeBudget
 Kernel.RunComputeBudgetDomain
 Kernel.RunComputeView
+Kernel.SessionIndex
 Kernel.SparseAuthenticatedState
 Kernel.StreamWrite
 Kernel.SubjectKeyCommitmentAdoption
