@@ -17,6 +17,9 @@ class CredentialLauncherTests(unittest.TestCase):
             shutil.copyfile(source/name,self.lib/name);(self.lib/name).chmod(0o755)
         self.mini=self.frame/"mini"
         self.mini.write_text("#!/usr/bin/env python3\nimport json,sys\nprint(json.dumps(sys.argv[1:]))\n");self.mini.chmod(0o755)
+        # The broker relay sits beside the pinned mini and records its argv the same way.
+        self.keys=self.frame/"mini-keys"
+        self.keys.write_text("#!/usr/bin/env python3\nimport json,sys\nprint(json.dumps(['mini-keys']+sys.argv[1:]))\n");self.keys.chmod(0o755)
         self.args=[str(self.mini),"/host","/config","/public/socket","/member/workspace","/member/home"]
     def run_launcher(self,command=None,args=None):
         env=os.environ.copy();env.pop("SSH_ORIGINAL_COMMAND",None)
@@ -27,7 +30,7 @@ class CredentialLauncherTests(unittest.TestCase):
     def test_signed_credential_protocol_uses_exact_installed_frame(self):
         result=self.run_launcher("mini-provider-credentials-v1")
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertEqual(json.loads(result.stdout),["key-service","--config",str(self.frame/"etc/mini/provider-service.json")])
+        self.assertEqual(json.loads(result.stdout),["mini-keys","relay","--client-config",str(self.frame/"etc/mini/keys-client.json")])
     def test_normal_shell_and_script_preserve_participant_binding(self):
         for command in (None,"whoami","mini-provider-credentials-v1 /foreign/config"):
             result=self.run_launcher(command)

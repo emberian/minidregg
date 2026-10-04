@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # SSH forced command, proxy mode: one authorized key = one participant whose
 # `mini` runs on their own machine (`mini --remote user@host ...`). The key's
-# session is a byte pipe to the deployment's public socket and nothing else:
+# session is a byte pipe to the deployment's public socket, or one signed
+# credential exchange relayed to the box's key broker, and nothing else:
 # `mini socket-proxy` relays socket frames (envelopes naming the pinned config
 # and a public-socket operation) and closes the pipe on anything that is not
 # one. No shell, no command, no file on this box belongs to the participant;
 # their signing key, workspace and attempts stay on their machine.
 #
 #   mini --remote friend@host shell --workspace W --home H   (the friend's side)
+#   mini --remote friend@host key --action set ...          signed exchange, relayed to mini-keys
 #   ssh friend@host 'anything'                               refused, exit 64
 set -euo pipefail
 if [[ $# -ne 2 ]]; then
@@ -18,10 +20,16 @@ for path in "$@"; do
   [[ $path == /* ]] || { echo 'mini-socket-proxy paths must be absolute' >&2; exit 64; }
 done
 mini=$1 socket=$2
+[[ -x $mini ]] || { echo 'mini client is not executable' >&2; exit 66; }
+umask 077
+# One fixed, signed service protocol, relayed byte for byte to the broker the
+# root-owned /etc/mini/keys-client.json names (mini-keys sits beside the pinned
+# mini). The connecting member chooses no path, broker or command.
+if [[ ${SSH_ORIGINAL_COMMAND-} == mini-provider-credentials-v1 ]]; then
+  exec "${mini%/*}/mini-keys" relay
+fi
 if [[ -n ${SSH_ORIGINAL_COMMAND-} ]]; then
   echo 'this key is a byte proxy for a local mini client (mini --remote); it runs no commands' >&2
   exit 64
 fi
-[[ -x $mini ]] || { echo 'mini client is not executable' >&2; exit 66; }
-umask 077
 exec "$mini" socket-proxy --socket "$socket"

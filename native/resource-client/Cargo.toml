@@ -33,5 +33,11 @@ aws-lc-rs = { version = "=1.18.1", default-features = false, features = ["non-fi
 # and version aws-lc-rs already links; aws-lc-rs exposes no seeded keygen.
 aws-lc-sys = { version = "=0.45.0", default-features = false }
 
+# The key broker's client side (wire, peer check, client); no crypto, no custody.
+minidregg-mini-keys = { path = "../mini-keys", default-features = false }
 # The same bounded HTTP transport serves RPC observation and paid cold entry.
 minidregg-pay-watcher = { path = "../pay-watcher" }
+
+[dev-dependencies]
+# The broker itself, so the member exchange is tested against the real server.
+minidregg-mini-keys = { path = "../mini-keys" }

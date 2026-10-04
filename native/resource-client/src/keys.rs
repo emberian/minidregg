@@ -7,11 +7,18 @@
 //!   mini key --action revoke --dir WORKSPACE --provider NAME [--runner SUBJECT]
 //!   mini key --action ls     --dir WORKSPACE
 //!   mini key --action set|revoke|ls --pool true --provider NAME [--secret FILE|-]
+//!   (any of them: [--broker CLIENT_CONFIG], default /etc/mini/keys-client.json)
 //!
-//! The namespace is the workspace's subject AND the public key of its signing
-//! key, so a workspace that only claims someone else's subject lands in its
-//! own directory (`credentials.rs`). `--pool true` is the operator's pool key;
-//! the hosted shell never offers it. Values are never printed.
+//! Custody is the key broker's (native/mini-keys, account mini-keys): this
+//! client never opens the seal key or a sealed record. A member action is the
+//! broker's signed exchange (key_service.rs), on the broker socket for a hosted
+//! session or through ssh for a remote workspace; the broker asks the Store
+//! whether the signing key is current before it seals, grants or lists. The
+//! namespace is the workspace's subject AND the public key of its signing key,
+//! so a workspace that only claims someone else's subject lands in its own
+//! directory (`credentials.rs`). `--pool true` is the operator's pool key (the
+//! broker grants it to root only); the hosted shell never offers it. Values are
+//! never printed.
 //!
 //! Shell verbs (`key set PROVIDER -|@FILE`, `key grant PROVIDER RUNNER
 //! --per-call N --per-day N --until HEIGHT`, `key revoke PROVIDER [RUNNER]`,
@@ -32,7 +39,8 @@ mod credentials;
 #[path = "key_service.rs"]
 mod service;
 
-use credentials::{CredentialSource, CredentialStore, Grant, Namespace, Owner, ProviderTable};
+use credentials::Owner;
+use mini_keys::client::{Broker, CLIENT_CONFIG};
 
 /// Set by the shell: true only for the one-verb form (`--line`), where stdin
 /// is not the shell's own input and `key set PROVIDER -` may read it.
@@ -83,44 +91,6 @@ fn read_secret(source: &str) -> Result<credentials::Secret> {
     secret
 }
 
-fn row_of(
-    table: &Path,
-    provider: &str,
-    wanted: CredentialSource,
-    model: Option<&str>,
-) -> Result<()> {
-    let table = ProviderTable::load(table, 0)?;
-    let row = table
-        .rows
-        .iter()
-        .find(|row| row.name == provider)
-        .ok_or_else(|| format!("provider table has no row named {provider}"))?;
-    if row.credential != wanted {
-        return Err(match wanted {
-            CredentialSource::Pool => format!("{provider} is not a pool row"),
-            _ => format!("{provider} does not take a friend's own key"),
-        });
-    }
-    if model.is_some_and(|model| !row.models.iter().any(|m| m == model)) {
-        return Err(
-            "model is not allowed on the selected provider route; see key providers".into(),
-        );
-    }
-    Ok(())
-}
-
-fn catalogue(table: &ProviderTable) -> Value {
-    let providers: Vec<Value> = table.rows.iter().map(|row| json!({
-        "provider":row.name, "models":row.models,
-        "credential":match row.credential { CredentialSource::User => "user", CredentialSource::Pool => "pool", CredentialSource::Homelab => "homelab" },
-        "memberKey":row.credential == CredentialSource::User,
-    })).collect();
-    json!({"type":"mini-provider-catalogue-v1", "providers":providers,"tableSha256":table.sha256,
-        "custody":"Hosted keys are sealed on this service; its operator can use them. A local key command does not upload custody to a remote service.",
-        "selection":"A credential grant authorizes a provider/model; the controller must also be provisioned for that route.",
-        "budget":"Credential caps limit output tokens and calls; Mini purse authority and credit remain separate."})
-}
-
 fn owner_view(host: &Path, socket: &Path, config: &Path, owner: &Owner) -> Result<Value> {
     let payload =
         serde_json::to_vec(&json!({"subject":owner.subject,"publicKey":owner.public_key})).unwrap();
@@ -153,19 +123,27 @@ fn owner_status(mut args: Args) -> Result<()> {
     )?)
 }
 
+/// The box's broker, or the one `--broker` names (a client config this account
+/// or root owns, writable by no other account).
+fn broker(path: &Option<PathBuf>) -> Result<Broker> {
+    let path = path.clone().unwrap_or_else(|| PathBuf::from(CLIENT_CONFIG));
+    Broker::load(&path, unsafe { libc::geteuid() }).map_err(String::from)
+}
+
 pub(crate) fn run(mut args: Args) -> Result<()> {
     let action = text(args.required("action")?, "action")?;
     if action == "owner-status" {
         return owner_status(args);
     }
-    let root_override = args.optional("credentials").map(PathBuf::from);
-    let key_override = args.optional("credentials-key").map(PathBuf::from);
-    let table_override = args.optional("providers").map(PathBuf::from);
-    let custom_custody =
-        root_override.is_some() || key_override.is_some() || table_override.is_some();
-    let root = root_override.unwrap_or_else(|| PathBuf::from(credentials::DEFAULT_ROOT));
-    let key = key_override.unwrap_or_else(|| PathBuf::from(credentials::DEFAULT_KEY));
-    let table = table_override.unwrap_or_else(|| PathBuf::from(credentials::DEFAULT_TABLE));
+    // The old in-process custody shape refuses by name: no client reads the seal key.
+    for gone in ["credentials", "credentials-key", "providers"] {
+        if args.optional(gone).is_some() {
+            return Err(format!(
+                "mini key --{gone} is gone: no client opens credential custody; the key broker (mini-keys) holds the seal key, the provider table it seals under and every key. --broker CLIENT_CONFIG names a broker other than {CLIENT_CONFIG}"
+            ));
+        }
+    }
+    let broker_path = args.optional("broker").map(PathBuf::from);
     let pool = match args
         .optional("pool")
         .map(|v| text(v, "pool"))
@@ -239,26 +217,12 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 .and_then(Value::as_str)
                 .and_then(|s| s.strip_prefix("ssh:"))
             {
-                if custom_custody {
-                    return Err("remote credential custody is pinned by the service; local custody overrides are unavailable".into());
+                if broker_path.is_some() {
+                    return Err("a remote workspace's broker is the service's own; --broker names a local one".into());
                 }
                 return service::client(workspace, &ws, &owner, destination, &mut request);
             }
-            let table = ProviderTable::load(&table, 0)?;
-            sign_choice(workspace, &owner, &table.sha256, &mut request)?;
-            let view = owner_view(
-                &super::workspace::workspace_host(&ws)?,
-                &super::workspace::member_path(&ws, "socket")?,
-                &super::workspace::member_path(&ws, "config")?,
-                &owner,
-            )?;
-            member_action(
-                &CredentialStore::open(&root, &key)?,
-                &owner,
-                &table,
-                &request,
-                required(&view, "keyEpoch")?,
-            )
+            service::local(&broker(&broker_path)?, workspace, &ws, &owner, &mut request)
         })();
         scrub_request(&mut request);
         return super::print_json(&result?);
@@ -274,68 +238,26 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     {
         return Err("pool commands take no member choice or grant limits".into());
     }
-    let namespace = Namespace::Pool;
-    let who = json!("pool");
-    let store = CredentialStore::open(&root, &key)?;
-    let need = |value: Option<String>, label: &str| {
-        value.ok_or_else(|| format!("key {action} needs --{label}"))
-    };
-    let reject = |present: bool, label: &str| -> Result<()> {
-        if present {
-            return Err(format!("key {action} does not take --{label}"));
+    if !matches!(action.as_str(), "set" | "revoke" | "ls") {
+        return Err("pool key --action must be set, revoke or ls".into());
+    }
+    let mut request = json!({"op":"pool","action":action});
+    if let Some(provider) = provider {
+        credentials::provider_name(&provider)?;
+        request["provider"] = json!(provider);
+    }
+    if let Some(runner) = runner {
+        request["runner"] = json!(runner);
+    }
+    if let Some(source) = secret {
+        if action != "set" {
+            return Err(format!("key {action} does not take --secret"));
         }
-        Ok(())
-    };
-    let report = match action.as_str() {
-        "set" => {
-            reject(
-                model.is_some()
-                    || runner.is_some()
-                    || per_call.is_some()
-                    || per_day.is_some()
-                    || until.is_some(),
-                "runner/caps",
-            )?;
-            let provider = need(provider, "provider")?;
-            credentials::provider_name(&provider)?;
-            row_of(&table, &provider, CredentialSource::Pool, None)?;
-            let secret = read_secret(&need(secret, "secret")?)?;
-            store.set(namespace, &provider, &secret)?;
-            json!({"type":"mini-key-set-v1","owner":who,"provider":provider,
-                "stored":"sealed","existingGrants":"preserved","next":"none: the purse gates pool spend"})
-        }
-        "revoke" => {
-            reject(
-                model.is_some()
-                    || secret.is_some()
-                    || per_call.is_some()
-                    || per_day.is_some()
-                    || until.is_some(),
-                "secret/caps",
-            )?;
-            let provider = need(provider, "provider")?;
-            let removed = store.revoke(namespace, &provider, runner.as_deref())?;
-            json!({"type":"mini-key-revoke-v1","owner":who,"provider":provider,
-                "runner":runner,"removed":removed,"effect":"Future reservations refuse; an already authorized request may finish."})
-        }
-        "ls" => {
-            reject(
-                provider.is_some()
-                    || secret.is_some()
-                    || runner.is_some()
-                    || per_call.is_some()
-                    || per_day.is_some()
-                    || until.is_some()
-                    || model.is_some(),
-                "provider/secret/runner/caps/model",
-            )?;
-            let mut listed = store.list(namespace)?;
-            listed["owner"] = who;
-            listed
-        }
-        _ => return Err("pool key --action must be set, revoke or ls".into()),
-    };
-    super::print_json(&report)
+        request["secret"] = json!(read_secret(&source)?.expose());
+    }
+    let result = broker(&broker_path)?.call(&request, std::time::Duration::from_secs(30));
+    scrub_request(&mut request);
+    super::print_json(&result.map_err(String::from)?["result"])
 }
 
 fn scrub_request(request: &mut Value) {
@@ -388,134 +310,6 @@ fn action_fields(value: &Value, fields: &[&str]) -> Result<()> {
     }
     Ok(())
 }
-/// One operation implementation for hosted shell and authenticated remote service.
-fn member_action(
-    store: &CredentialStore,
-    owner: &Owner,
-    table: &ProviderTable,
-    request: &Value,
-    owner_epoch: &str,
-) -> Result<Value> {
-    let who = json!({"subject":owner.subject,"publicKey":owner.public_key});
-    let provider = || required(request, "provider");
-    let user_row = |name: &str| -> Result<()> {
-        if table
-            .rows
-            .iter()
-            .any(|r| r.name == name && r.credential == CredentialSource::User)
-        {
-            Ok(())
-        } else {
-            Err("selected provider does not accept a member key".into())
-        }
-    };
-    match required(request, "action")? {
-        "providers" => {
-            action_fields(request, &["action"])?;
-            Ok(catalogue(table))
-        }
-        "ls" => {
-            action_fields(request, &["action"])?;
-            let mut v = store.list(Namespace::Owner(owner))?;
-            v["owner"] = who;
-            Ok(v)
-        }
-        "set" => {
-            action_fields(request, &["action", "provider", "secret"])?;
-            let provider = provider()?;
-            user_row(provider)?;
-            let secret = credentials::Secret::new(required(request, "secret")?.to_owned())?;
-            store.set(Namespace::Owner(owner), provider, &secret)?;
-            Ok(
-                json!({"type":"mini-key-set-v1","owner":who,"provider":provider,"stored":"sealed","existingGrants":"preserved"}),
-            )
-        }
-        "grant" => {
-            action_fields(
-                request,
-                &[
-                    "action", "provider", "runner", "perCall", "perDay", "notAfter", "model",
-                ],
-            )?;
-            let provider = provider()?;
-            user_row(provider)?;
-            let mut raw = request.clone();
-            raw.as_object_mut().unwrap().remove("action");
-            raw.as_object_mut().unwrap().remove("provider");
-            raw["ownerEpoch"] = json!(owner_epoch);
-            let grant = Grant::from_json(&raw)?;
-            if let Some(model) = &grant.model {
-                table.select(model, Some(provider))?;
-            }
-            store.grant(owner, provider, grant.clone())?;
-            Ok(
-                json!({"type":"mini-key-grant-v1","owner":who,"provider":provider,"grant":grant.to_json(),"budget":"Mini purse authority and credit are separate"}),
-            )
-        }
-        "revoke" => {
-            action_fields(request, &["action", "provider", "runner"])?;
-            let provider = provider()?;
-            let runner = request
-                .get("runner")
-                .map(|_| required(request, "runner"))
-                .transpose()?;
-            let removed = store.revoke(Namespace::Owner(owner), provider, runner)?;
-            Ok(
-                json!({"type":"mini-key-revoke-v1","owner":who,"provider":provider,"runner":runner,"removed":removed,"effect":"Future reservations refuse; an already authorized request may finish."}),
-            )
-        }
-        "choose" => {
-            action_fields(request, &["action", "choice"])?;
-            let choice = credentials::choice::Choice::from_json(
-                request.get("choice").ok_or("choice absent")?,
-            )?;
-            if &choice.owner != owner {
-                return Err("choice belongs to another member".into());
-            }
-            store.choose(&choice, table)?;
-            Ok(
-                json!({"type":"mini-provider-choice-stored-v1","choice":choice.to_json(),"choiceSha256":choice.digest(),"activation":"Fresh controller provisioning must consume this choice; existing controllers remain pinned."}),
-            )
-        }
-        _ => Err("unknown member key action".into()),
-    }
-}
-
-pub(crate) fn service_config(mut args: Args) -> Result<()> {
-    let fields = [
-        "host",
-        "host-config",
-        "host-socket",
-        "providers",
-        "credentials",
-        "credentials-key",
-        "namespace-helper",
-    ];
-    let mut paths = Vec::new();
-    for field in fields {
-        paths.push(PathBuf::from(args.required(field)?));
-    }
-    args.finish()?;
-    println!("{}", service::service_configuration(&paths)?);
-    Ok(())
-}
-
-pub(crate) fn namespace(mut args: Args) -> Result<()> {
-    let config = PathBuf::from(args.required("config")?);
-    let subject = text(args.required("subject")?, "subject")?;
-    let public_key = text(args.required("public-key")?, "public key")?;
-    args.finish()?;
-    let owner = Owner::new(&subject, &public_key)?;
-    println!("{}", service::namespace_description(&config, &owner)?);
-    Ok(())
-}
-
-pub(crate) fn serve(mut args: Args) -> Result<()> {
-    let config = PathBuf::from(args.required("config")?);
-    args.finish()?;
-    service::serve(&config)
-}
-
 fn flag(name: &str, value: impl Into<OsString>) -> (String, OsString) {
     (name.to_owned(), value.into())
 }
@@ -646,15 +440,7 @@ mod tests {
     }
 
     #[test]
-    fn catalogue_is_shared_provider_data_without_endpoint_or_custody_details() {
-        let table = ProviderTable::parse(br#"{"type":"mini-provider-table-v2","providers":[
-          {"name":"openrouter","endpoint":"https://example.test/v1/chat/completions","kind":"openai-compatible","models":["qwen/model"],"credential":"user"},
-          {"name":"chutes","endpoint":"https://chutes.example.test/v1/chat/completions","kind":"openai-compatible","models":["another/model"],"credential":"user"},
-          {"name":"pug","endpoint":"http://127.0.0.1:10001/v1/chat/completions","kind":"openai-compatible","models":["local/model"],"credential":"homelab"}]}"#).unwrap();
-        let report = catalogue(&table);
-        assert_eq!(report["providers"][0]["models"][0], "qwen/model");
-        assert_eq!(report["providers"][2]["memberKey"], false);
-        assert!(!report.to_string().contains("127.0.0.1"));
+    fn provider_catalogue_and_scoped_grants_map_to_one_key_call() {
         let flags = flags_of(
             shell_plan(
                 Path::new("/ws"),

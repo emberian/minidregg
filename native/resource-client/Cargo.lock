@@ -482,6 +482,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "minidregg-mini-keys"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek",
+ "libc",
+ "ring",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "minidregg-mini-sdk"
 version = "0.1.0"
 dependencies = [
@@ -514,6 +525,7 @@ dependencies = [
  "ed25519-dalek",
  "libc",
  "minidregg-compatible-upgrade-custody",
+ "minidregg-mini-keys",
  "minidregg-mini-sdk",
  "minidregg-pay-watcher",
  "ring",

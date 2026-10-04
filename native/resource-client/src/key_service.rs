@@ -1,14 +1,24 @@
-//! One authenticated credential action per SSH service exchange. No secret
-//! reaches argv, errors, audit files, native Store data, or returned metadata.
+//! The member side of the key broker's signed exchange (`member-action`).
+//! The broker (native/mini-keys) is the only process that holds the seal key;
+//! this client proves which member is asking, never sees a stored key, and
+//! talks to the broker one of two ways:
+//!
+//! * hosted (a session on the box): the broker's Unix socket directly, after
+//!   checking the answering uid is the broker's (`mini_keys::client`);
+//! * remote (`mini --remote`): ssh to the box's forced command
+//!   `mini-provider-credentials-v1`, which is `mini-keys relay`, a byte splice
+//!   to the same socket.
+//!
+//! No secret reaches argv, errors, audit files, native Store data, or returned metadata.
 use super::*;
 use crate::{transport, workspace};
-use ed25519_dalek::{Signature, Signer, VerifyingKey};
+use ed25519_dalek::Signer;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
-use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::fd::AsRawFd;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
-const LIMIT: usize = 32768;
+const LIMIT: usize = mini_keys::wire::MEMBER_FRAME;
 const COMMAND: &str = "mini-provider-credentials-v1";
 fn hash(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
@@ -38,81 +48,6 @@ fn ready(fd: i32, events: i16, end: Instant) -> Result<()> {
             return Err("credential service exchange unavailable or timed out".into());
         }
         return Ok(());
-    }
-}
-// Unix backlog admission can block too; keep connection inside the SSH deadline.
-fn connect(socket: &Path, end: Instant) -> Result<std::os::unix::net::UnixStream> {
-    use std::os::unix::ffi::OsStrExt;
-    let bytes = socket.as_os_str().as_bytes();
-    let mut address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
-    if bytes.is_empty() || bytes.len() >= address.sun_path.len() || bytes.contains(&0) {
-        return Err("native credential authority socket refused".into());
-    }
-    address.sun_family = libc::AF_UNIX as _;
-    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd", target_os = "dragonfly"))]
-    { address.sun_len = std::mem::size_of_val(&address) as _; }
-    for (dst, src) in address.sun_path.iter_mut().zip(bytes) {
-        *dst = *src as _;
-    }
-    loop {
-        if Instant::now() >= end {
-            return Err("native credential authority admission timed out".into());
-        }
-        let fd = unsafe {
-            libc::socket(
-                libc::AF_UNIX,
-                libc::SOCK_STREAM,
-                0,
-            )
-        };
-        if fd < 0 {
-            return Err("native credential authority unavailable".into());
-        }
-        let stream = unsafe { std::os::unix::net::UnixStream::from_raw_fd(fd) };
-        if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
-            return Err("native credential authority unavailable".into());
-        }
-        stream.set_nonblocking(true).map_err(|_| "native credential authority unavailable")?;
-        let rc = unsafe {
-            libc::connect(
-                fd,
-                &address as *const _ as *const libc::sockaddr,
-                std::mem::size_of_val(&address) as _,
-            )
-        };
-        if rc == 0 {
-            return Ok(stream);
-        }
-        let error = std::io::Error::last_os_error();
-        if error.raw_os_error() == Some(libc::EINPROGRESS) {
-            ready(fd, libc::POLLOUT, end)?;
-            let mut result: libc::c_int = 0;
-            let mut length = std::mem::size_of_val(&result) as libc::socklen_t;
-            if unsafe {
-                libc::getsockopt(
-                    fd,
-                    libc::SOL_SOCKET,
-                    libc::SO_ERROR,
-                    &mut result as *mut _ as *mut libc::c_void,
-                    &mut length,
-                )
-            } == 0
-                && result == 0
-            {
-                return Ok(stream);
-            }
-            return Err("native credential authority unavailable".into());
-        }
-        if !matches!(
-            error.kind(),
-            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
-        ) {
-            return Err("native credential authority unavailable".into());
-        }
-        drop(stream);
-        std::thread::sleep(
-            Duration::from_millis(5).min(end.saturating_duration_since(Instant::now())),
-        );
     }
 }
 
@@ -211,41 +146,6 @@ fn signing_bytes(request: &Value) -> Result<Vec<u8>> {
     );
     Ok(out)
 }
-fn authenticate(challenge: &Value, request: &Value) -> Result<(Owner, Value, String)> {
-    action_fields(request, &["challenge", "owner", "action", "signature"])?;
-    if request.get("challenge") != Some(challenge) {
-        return Err("credential challenge differs or was replayed".into());
-    }
-    let owner = request.get("owner").ok_or("credential owner absent")?;
-    action_fields(owner, &["subject", "publicKey"])?;
-    let owner = Owner::new(required(owner, "subject")?, required(owner, "publicKey")?)?;
-    let signature = unhex(required(request, "signature")?, 64)?;
-    let key = VerifyingKey::from_bytes(
-        &unhex(&owner.public_key, 32)?
-            .try_into()
-            .map_err(|_| "key width")?,
-    )
-    .map_err(|_| "invalid member signing key")?;
-    let mut unsigned = request.clone();
-    unsigned.as_object_mut().unwrap().remove("signature");
-    let mut bytes = signing_bytes(&unsigned)?;
-    let verified = key
-        .verify_strict(
-            &bytes,
-            &Signature::from_slice(&signature).map_err(|_| "signature width")?,
-        )
-        .map_err(|_| "credential action signature refused");
-    let digest = hash(&bytes);
-    bytes.fill(0);
-    super::scrub_request(&mut unsigned["action"]);
-    verified?;
-    let action = request
-        .get("action")
-        .filter(|v| v.is_object())
-        .ok_or("credential action absent")?
-        .clone();
-    Ok((owner, action, digest))
-}
 pub(super) fn verify_current(view: &Value, owner: &Owner) -> Result<()> {
     if view["type"] != "subject-key-status-v1"
         || view["subject"] != owner.subject
@@ -257,293 +157,97 @@ pub(super) fn verify_current(view: &Value, owner: &Owner) -> Result<()> {
     }
     Ok(())
 }
-// The configured path itself and every ancestor are operator custody. Reject
-// symlink spellings rather than silently changing the authority named by sshd.
-fn operator_config(path: &Path) -> Result<Vec<u8>> {
-    if !path.is_absolute() || std::fs::canonicalize(path).ok().as_deref() != Some(path) {
-        return Err("credential service config must have a canonical absolute path".into());
+/// The broker's first frame is its challenge, or a named refusal: the broker
+/// refused this account (`{"refused":CODE}`), or the exchange
+/// (`mini-member-provider-refused-v1`).
+fn refusal_of(frame: &Value) -> Option<String> {
+    if let Some(code) = frame.get("refused").and_then(Value::as_str) {
+        return Some(format!(
+            "mini-keys refused {code}: {}",
+            frame["detail"].as_str().unwrap_or("")
+        ));
     }
-    for (index, entry) in path.ancestors().enumerate() {
-        let meta = std::fs::symlink_metadata(entry)
-            .map_err(|_| "credential service config unavailable")?;
-        if meta.uid() != 0
-            || meta.permissions().mode() & 0o022 != 0
-            || (index == 0 && (!meta.is_file() || meta.len() > LIMIT as u64))
-            || (index != 0 && !meta.is_dir())
-        {
-            return Err("credential service config and ancestors require root custody".into());
-        }
-    }
-    std::fs::read(path).map_err(|_| "credential service config unavailable".into())
-}
-/// Emit the same public service policy consumed by the authenticated endpoint.
-/// No seal or provider secret is read while generating operator configuration.
-pub(super) fn service_configuration(paths: &[PathBuf]) -> Result<Value> {
-    if paths.len() != 7 || paths.iter().any(|p| !p.is_absolute()) {
-        return Err("credential service paths must be pinned absolute paths".into());
-    }
-    crate::host_image_sha256(&paths[0])?;
-    transport::read_config(&paths[1])?;
-    ProviderTable::load(&paths[3], 0)?;
-    credentials::namespace_path(&paths[4], Namespace::Pool)?;
-    if paths[5].starts_with(&paths[4]) {
-        return Err("credential seal must remain outside credential root".into());
-    }
-    let helper_hash = hash(&operator_config(&paths[6])?);
-    let value = json!({"type":"mini-member-provider-service-v1", "host":paths[0],
-        "hostConfig":paths[1],"socket":paths[2],"providers":paths[3],
-        "credentials":paths[4],"credentialsKey":paths[5],
-        "namespaceHelper":paths[6],"namespaceHelperSha256":helper_hash});
-    namespace_helper(&value)?;
-    Ok(value)
-}
-
-/// Public metadata only. The root allocator calls this using its fixed service
-/// config; this does not read a master key or assert native member authority.
-pub(super) fn namespace_description(service_path: &Path, owner: &Owner) -> Result<Value> {
-    let bytes = operator_config(service_path)?;
-    let cfg = json(&bytes)?;
-    if cfg["type"] != "mini-member-provider-service-v1" {
-        return Err("credential service config version refused".into());
-    }
-    let root = PathBuf::from(required(&cfg, "credentials")?);
-    let namespace = credentials::namespace_path(&root, Namespace::Owner(owner))?;
-    Ok(
-        json!({"type":"mini-credential-namespace-v1", "owner":{"subject":owner.subject,"publicKey":owner.public_key},
-        "serviceConfigSha256":hash(&bytes),"credentialsRoot":root,
-        "subjectDirectory":namespace.parent(),"namespace":namespace,
-        "serviceLockDirectory":root.join("_service")}),
-    )
-}
-fn namespace_helper(cfg: &Value) -> Result<Option<(PathBuf, String)>> {
-    match (cfg.get("namespaceHelper"), cfg.get("namespaceHelperSha256")) {
-        (None, None) => Ok(None),
-        (Some(path), Some(expected)) => {
-            let path = PathBuf::from(
-                path.as_str()
-                    .ok_or("namespace helper path must be a string")?,
-            );
-            let expected = expected
+    if frame["type"] == "mini-member-provider-refused-v1" {
+        return Some(
+            frame["error"]
                 .as_str()
-                .ok_or("namespace helper hash must be a string")?
-                .to_owned();
-            unhex(&expected, 32)?;
-            if hash(&operator_config(&path)?) != expected
-                || std::fs::metadata(&path)
-                    .map_err(|_| "namespace helper unavailable")?
-                    .permissions()
-                    .mode()
-                    & 0o111
-                    == 0
-            {
-                return Err("namespace helper root custody or image pin refused".into());
-            }
-            Ok(Some((path, expected)))
-        }
-        _ => Err("namespace helper path and hash must be pinned together".into()),
-    }
-}
-fn provision_namespace(helper: &Path, owner: &Owner, end: Instant) -> Result<()> {
-    let mut child = Command::new("/usr/bin/sudo")
-        .args(["-n", "--"])
-        .arg(helper)
-        .arg(&owner.subject)
-        .arg(&owner.public_key)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|_| "credential namespace provisioning unavailable")?;
-    loop {
-        match child
-            .try_wait()
-            .map_err(|_| "credential namespace provisioning unavailable")?
-        {
-            Some(status) => {
-                return if status.success() {
-                    Ok(())
-                } else {
-                    Err("credential namespace provisioning refused".into())
-                }
-            }
-            None if Instant::now() >= end => {
-                let _ = child.kill();
-                let _ = child.try_wait();
-                return Err("credential namespace provisioning timed out".into());
-            }
-            None => std::thread::sleep(Duration::from_millis(10)),
-        }
-    }
-}
-struct Binding {
-    service_path: PathBuf,
-    service: Vec<u8>,
-    host: PathBuf,
-    host_sha: String,
-    config_path: PathBuf,
-    config: Vec<u8>,
-    table_path: PathBuf,
-    table_sha: String,
-    key_path: PathBuf,
-    key_sha: String,
-    namespace_helper: Option<(PathBuf, String)>,
-}
-impl Binding {
-    fn current(&self) -> Result<()> {
-        if let Some((path, expected)) = &self.namespace_helper {
-            if hash(&operator_config(path)?) != *expected {
-                return Err("credential namespace helper binding changed during exchange".into());
-            }
-        }
-        if operator_config(&self.service_path)? != self.service
-            || crate::host_image_sha256(&self.host)? != self.host_sha
-            || transport::read_config(&self.config_path)? != self.config
-            || ProviderTable::load(&self.table_path, 0)?.sha256 != self.table_sha
-            || hash(
-                &std::fs::read(&self.key_path).map_err(|_| "credential service key unavailable")?,
-            ) != self.key_sha
-        {
-            return Err("credential service binding changed during exchange".into());
-        }
-        Ok(())
-    }
-    fn current_owner(&self, socket: &Path, owner: &Owner, end: Instant) -> Result<Value> {
-        // Send the captured bytes, never reread a possibly upgraded config into
-        // an envelope authorized by an earlier challenge.
-        let mut frame = vec![2];
-        frame.extend_from_slice(&(self.config.len() as u32).to_le_bytes());
-        frame.extend_from_slice(&self.config);
-        frame.extend_from_slice(&unhex(&self.host_sha, 32)?);
-        frame.push(144);
-        frame.extend_from_slice(
-            &serde_json::to_vec(&json!({"subject":owner.subject,"publicKey":owner.public_key}))
-                .unwrap(),
+                .unwrap_or("credential service refused")
+                .to_owned(),
         );
-        // The credential endpoint has one deadline; do not inherit the generic
-        // transport's ten-minute execution wait while holding member custody.
-        let mut stream = connect(socket, end)?;
-        write(&mut stream, &frame, end)?;
-        let reply = read(&mut stream, end)?;
-        match reply.split_first() {
-            Some((144, body)) => json(body),
-            _ => Err("native key-status query refused credential action".into()),
-        }
     }
+    None
 }
-pub(super) fn serve(service_path: &Path) -> Result<()> {
-    let service = operator_config(service_path)?;
-    let cfg = json(&service)?;
+/// One signed exchange over any pair of descriptors.
+fn exchange<R: Read + AsRawFd, W: Write + AsRawFd>(
+    input: &mut R,
+    output: &mut W,
+    workspace: &Path,
+    ws: &Value,
+    owner: &Owner,
+    action: &mut Value,
+    end: Instant,
+) -> Result<Value> {
+    let challenge = json(&read(input, end)?)?;
+    if let Some(refused) = refusal_of(&challenge) {
+        return Err(refused);
+    }
     action_fields(
-        &cfg,
-        &[
-            "type",
-            "host",
-            "hostConfig",
-            "socket",
-            "providers",
-            "credentials",
-            "credentialsKey",
-            "namespaceHelper",
-            "namespaceHelperSha256",
-        ],
+        &challenge,
+        &["type", "nonce", "hostSha256", "configSha256", "tableSha256"],
     )?;
-    if cfg["type"] != "mini-member-provider-service-v1" {
-        return Err("credential service config version refused".into());
+    if challenge["type"] != "mini-member-provider-challenge-v1"
+        || challenge["hostSha256"] != crate::host_image_sha256(&workspace::workspace_host(ws)?)?
+        || challenge["configSha256"]
+            != hash(&transport::read_config(&workspace::member_path(
+                ws, "config",
+            )?)?)
+    {
+        return Err("credential service differs from the pinned Mini deployment".into());
     }
-    let path = |field: &str| -> Result<PathBuf> {
-        let p = PathBuf::from(required(&cfg, field)?);
-        if !p.is_absolute() {
-            return Err("credential service paths must be pinned absolute paths".into());
-        }
-        Ok(p)
-    };
-    let host = path("host")?;
-    let config_path = path("hostConfig")?;
-    let socket = path("socket")?;
-    let table_path = path("providers")?;
-    let table = ProviderTable::load(&table_path, 0)?;
-    let credentials_path = path("credentials")?;
-    let key_path = path("credentialsKey")?;
-    let store = CredentialStore::open(&credentials_path, &key_path)?;
-    let binding = Binding {
-        service_path: service_path.to_owned(),
-        service,
-        host_sha: crate::host_image_sha256(&host)?,
-        host,
-        config: transport::read_config(&config_path)?,
-        config_path,
-        table_sha: table.sha256.clone(),
-        table_path,
-        key_sha: hash(&std::fs::read(&key_path).map_err(|_| "credential service key unavailable")?),
-        key_path,
-        namespace_helper: namespace_helper(&cfg)?,
-    };
-    let mut nonce = [0u8; 32];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut nonce))
-        .map_err(|_| "challenge entropy unavailable")?;
-    let challenge = json!({"type":"mini-member-provider-challenge-v1","nonce":hex(&nonce),
-        "hostSha256":binding.host_sha,"configSha256":hash(&binding.config),"tableSha256":table.sha256});
-    let end = Instant::now() + Duration::from_secs(30);
-    // Raw descriptors avoid stdio read-ahead hiding bytes from poll, and
-    // stdout line buffering delaying the challenge until a newline.
-    let duplicate = |fd| -> Result<std::fs::File> {
-        let copied = unsafe { libc::dup(fd) };
-        if copied < 0 {
-            return Err("credential service descriptor unavailable".into());
-        }
-        Ok(unsafe { std::fs::File::from_raw_fd(copied) })
-    };
-    let mut input = duplicate(0)?;
-    let mut output = duplicate(1)?;
-    write(&mut output, &serde_json::to_vec(&challenge).unwrap(), end)?;
-    let mut bytes = read(&mut input, end)?;
-    let decoded = json(&bytes);
+    unhex(required(&challenge, "nonce")?, 32)?;
+    unhex(required(&challenge, "tableSha256")?, 32)?;
+    super::sign_choice(
+        workspace,
+        owner,
+        required(&challenge, "tableSha256")?,
+        action,
+    )?;
+    let key = crate::participant_enrollment::key(&workspace::member_path(ws, "key")?)?;
+    let mut request = json!({"challenge":challenge,"owner":{"subject":owner.subject,"publicKey":owner.public_key},"action":action});
+    let mut signed = signing_bytes(&request)?;
+    let signature = key.sign(&signed);
+    signed.fill(0);
+    request["signature"] = json!(hex(&signature.to_bytes()));
+    let mut bytes =
+        serde_json::to_vec(&request).map_err(|_| "credential request encode failed")?;
+    let sent = write(output, &bytes, end);
     bytes.fill(0);
-    let mut request = decoded?;
-    let answer: Result<Value> = (|| {
-        let (owner, mut action, digest) = authenticate(&challenge, &request)?;
-        let response: Result<Value> = (|| {
-            // Serialize each authenticated member independently, including the final binding check.
-            // This is a native authority snapshot, not an atomic kernel custody
-            // transaction; provider use must independently recheck current owner.
-            let _custody = store.member_service_lock_until(&owner, end)?;
-            binding.current()?;
-            let view = binding.current_owner(&socket, &owner, end)?;
-            verify_current(&view, &owner)?;
-            binding.current()?;
-            if let Some((helper, _)) = &binding.namespace_helper {
-                provision_namespace(helper, &owner, end)?;
-                binding.current()?;
-            }
-            // Provisioning creates metadata only; recheck native signing-key
-            // authority immediately before any credential mutation.
-            let view = binding.current_owner(&socket, &owner, end)?;
-            verify_current(&view, &owner)?;
-            binding.current()?;
-            let result = super::member_action(
-                &store,
-                &owner,
-                &table,
-                &action,
-                required(&view, "keyEpoch")?,
-            )?;
-            binding.current()?;
-            Ok(
-                json!({"type":"mini-member-provider-result-v1","result":result,
-                "authentication":{"requestSha256":digest,"keyEpoch":view["keyEpoch"],"subject":owner.subject,"publicKey":owner.public_key}}),
-            )
-        })();
-        super::scrub_request(&mut action);
-        response
-    })();
     super::scrub_request(&mut request["action"]);
-    let result = match answer {
-        Ok(result) => result,
-        Err(error) => json!({"type":"mini-member-provider-refused-v1","error":error}),
-    };
-    write(&mut output, &serde_json::to_vec(&result).unwrap(), end)
+    sent?;
+    let result = json(&read(input, end)?)?;
+    if result["type"] == "mini-member-provider-result-v1" {
+        Ok(result)
+    } else {
+        Err(refusal_of(&result).unwrap_or_else(|| "credential service refused".into()))
+    }
 }
+/// A hosted session: the box's broker socket.
+pub(super) fn local(
+    broker: &mini_keys::client::Broker,
+    workspace: &Path,
+    ws: &Value,
+    owner: &Owner,
+    action: &mut Value,
+) -> Result<Value> {
+    let end = Instant::now() + Duration::from_secs(30);
+    let mut stream = broker.connect(end).map_err(String::from)?;
+    mini_keys::wire::send(&mut stream, &json!({"op":"member-action"}), end)?;
+    let mut input = stream
+        .try_clone()
+        .map_err(|_| "key broker socket unavailable")?;
+    exchange(&mut input, &mut stream, workspace, ws, owner, action, end)
+}
+/// A remote workspace: ssh to the box's forced command, which relays to its broker.
 pub(super) fn client(
     workspace: &Path,
     ws: &Value,
@@ -566,49 +270,7 @@ pub(super) fn client(
         let end = Instant::now() + Duration::from_secs(30);
         let mut input = child.stdout.take().ok_or("credential ssh stdout absent")?;
         let mut output = child.stdin.take().ok_or("credential ssh stdin absent")?;
-        let challenge = json(&read(&mut input, end)?)?;
-        action_fields(
-            &challenge,
-            &["type", "nonce", "hostSha256", "configSha256", "tableSha256"],
-        )?;
-        if challenge["type"] != "mini-member-provider-challenge-v1"
-            || challenge["hostSha256"] != crate::host_image_sha256(&workspace::workspace_host(ws)?)?
-            || challenge["configSha256"]
-                != hash(&transport::read_config(&workspace::member_path(
-                    ws, "config",
-                )?)?)
-        {
-            return Err("credential service differs from the pinned Mini deployment".into());
-        }
-        unhex(required(&challenge, "nonce")?, 32)?;
-        unhex(required(&challenge, "tableSha256")?, 32)?;
-        super::sign_choice(
-            workspace,
-            owner,
-            required(&challenge, "tableSha256")?,
-            action,
-        )?;
-        let key = crate::participant_enrollment::key(&workspace::member_path(ws, "key")?)?;
-        let mut request = json!({"challenge":challenge,"owner":{"subject":owner.subject,"publicKey":owner.public_key},"action":action});
-        let mut signed = signing_bytes(&request)?;
-        let signature = key.sign(&signed);
-        signed.fill(0);
-        request["signature"] = json!(hex(&signature.to_bytes()));
-        let mut bytes =
-            serde_json::to_vec(&request).map_err(|_| "credential request encode failed")?;
-        let sent = write(&mut output, &bytes, end);
-        bytes.fill(0);
-        super::scrub_request(&mut request["action"]);
-        sent?;
-        let result = json(&read(&mut input, end)?)?;
-        if result["type"] == "mini-member-provider-result-v1" {
-            Ok(result)
-        } else {
-            Err(result["error"]
-                .as_str()
-                .unwrap_or("credential service refused")
-                .to_owned())
-        }
+        exchange(&mut input, &mut output, workspace, ws, owner, action, end)
     })();
     let _ = child.kill();
     let _ = child.wait();
@@ -617,35 +279,7 @@ pub(super) fn client(
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn signed(action: Value) -> (Value, Value, Owner) {
-        let key = ed25519_dalek::SigningKey::from_bytes(&[41; 32]);
-        let owner = Owner::new("20", &hex(key.verifying_key().as_bytes())).unwrap();
-        let challenge = json!({"type":"mini-member-provider-challenge-v1","nonce":"a".repeat(64),"hostSha256":"b".repeat(64),"configSha256":"c".repeat(64),"tableSha256":"d".repeat(64)});
-        let mut request = json!({"challenge":challenge,"owner":{"subject":owner.subject,"publicKey":owner.public_key},"action":action});
-        request["signature"] = json!(hex(&key.sign(&signing_bytes(&request).unwrap()).to_bytes()));
-        (challenge, request, owner)
-    }
-    #[test]
-    fn action_signature_binds_secret_grant_route_owner_and_single_session_challenge() {
-        let (challenge, request, _) =
-            signed(json!({"action":"set","provider":"chutes","secret":"synthetic-wire-only"}));
-        assert!(authenticate(&challenge, &request).is_ok());
-        for (path, value) in [
-            ("secret", "other"),
-            ("provider", "openrouter"),
-            ("action", "revoke"),
-        ] {
-            let mut changed = request.clone();
-            changed["action"][path] = json!(value);
-            assert!(authenticate(&challenge, &changed).is_err());
-        }
-        let mut next = challenge.clone();
-        next["nonce"] = json!("f".repeat(64));
-        assert!(authenticate(&next, &request).is_err());
-        let mut other = request.clone();
-        other["owner"]["subject"] = json!("21");
-        assert!(authenticate(&challenge, &other).is_err());
-    }
+    use std::os::fd::FromRawFd;
     #[test]
     fn bounded_frames_round_trip_and_refuse_length_before_body() {
         use std::os::unix::net::UnixStream;
@@ -658,6 +292,19 @@ mod tests {
         assert!(read(&mut b, Instant::now())
             .unwrap_err()
             .contains("timed out"));
+    }
+
+    #[test]
+    fn a_broker_refusal_in_place_of_the_challenge_is_named() {
+        assert_eq!(
+            refusal_of(&json!({"refused":"peer-not-allowed","detail":"uid 7 holds no role"})).unwrap(),
+            "mini-keys refused peer-not-allowed: uid 7 holds no role"
+        );
+        assert_eq!(
+            refusal_of(&json!({"type":"mini-member-provider-refused-v1","error":"owner-not-current"})).unwrap(),
+            "owner-not-current"
+        );
+        assert!(refusal_of(&json!({"type":"mini-member-provider-challenge-v1"})).is_none());
     }
 
     #[test]
@@ -679,43 +326,75 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(1));
     }
 
+    /// The real `mini key` member exchange against the real broker, over its
+    /// socket, as one uid (the broker config says singleAccount): the signing
+    /// bytes, the challenge pins and the result agree across the two crates.
     #[test]
-    fn native_authority_backlog_obeys_exchange_deadline() {
-        use std::os::unix::net::{UnixListener, UnixStream};
-        let path = std::env::temp_dir().join(format!("mini-key-backlog-{}", std::process::id()));
-        let listener = UnixListener::bind(&path).unwrap();
-        assert_eq!(unsafe { libc::listen(listener.as_raw_fd(), 1) }, 0);
-        let a = UnixStream::connect(&path).unwrap();
-        let b = UnixStream::connect(&path).unwrap();
-        let start = Instant::now();
-        assert!(connect(&path, start + Duration::from_millis(40)).is_err());
-        assert!(start.elapsed() < Duration::from_secs(1));
-        drop(a);
-        drop(b);
-        drop(listener);
-        std::fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    fn namespace_allocator_requires_complete_root_image_pin() {
-        assert!(namespace_helper(&json!({})).unwrap().is_none());
-        assert!(
-            namespace_helper(&json!({"namespaceHelper":"/usr/local/lib/mini/helper"})).is_err()
-        );
-        assert!(namespace_helper(&json!({"namespaceHelperSha256":"00".repeat(32)})).is_err());
-        assert!(namespace_helper(
-            &json!({"namespaceHelper":"../helper","namespaceHelperSha256":"00".repeat(32)})
-        )
-        .is_err());
-        assert!(namespace_helper(
-            &json!({"namespaceHelper":"/not-present/helper","namespaceHelperSha256":"bad"})
-        )
-        .is_err());
+    fn hosted_key_set_reaches_the_broker_and_the_secret_stays_there() {
+        use mini_keys::{peer, server, wire as w};
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::net::UnixListener;
+        let dir = std::env::temp_dir().join(format!("rc-broker-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mk = |p: &Path| {
+            std::fs::create_dir_all(p).unwrap();
+            std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o700)).unwrap();
+        };
+        mk(&dir);
+        let dir = dir.canonicalize().unwrap();
+        for sub in ["etc", "keys", "run", "state", "credentials", "ws"] {
+            mk(&dir.join(sub));
+        }
+        let put = |p: &Path, b: &[u8], mode: u32| {
+            std::fs::write(p, b).unwrap();
+            std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
+        };
+        put(&dir.join("keys/credentials.key"), &[9u8; 32], 0o600);
+        put(&dir.join("etc/host"), b"host image", 0o755);
+        put(&dir.join("etc/config.json"), br#"{"pinned":true}"#, 0o644);
+        put(&dir.join("ws/member.key"), &[41u8; 32], 0o600);
+        put(&dir.join("etc/providers.json"), br#"{"type":"mini-provider-table-v2","providers":[{"name":"openrouter","endpoint":"https://example.test/v1/chat/completions","kind":"openai-compatible","models":["m1"],"credential":"user"}]}"#, 0o644);
+        let seed = ed25519_dalek::SigningKey::from_bytes(&[41u8; 32]);
+        let owner = Owner::new("20", &hex(seed.verifying_key().as_bytes())).unwrap();
+        let store = UnixListener::bind(dir.join("run/public.sock")).unwrap();
+        std::thread::spawn(move || {
+            for s in store.incoming() {
+                let mut s = s.unwrap();
+                let end = Instant::now() + Duration::from_secs(5);
+                let _ = w::read_frame(&mut s, 1 << 20, end).unwrap();
+                let mut reply = vec![144u8];
+                reply.extend_from_slice(br#"{"type":"subject-key-status-v1","subject":"20","keyEpoch":"4","isCurrent":true,"currentRevoked":false}"#);
+                w::write_frame(&mut s, &reply, end).unwrap();
+            }
+        });
+        let config = json!({"type":"mini-keys-broker-v1","socket":dir.join("run/broker.sock"),"audit":dir.join("state/audit.jsonl"),
+            "spool":dir.join("state/spool"),"singleAccount":true,"peers":[{"role":"member","gids":[peer::egid()]}],
+            "credentials":{"host":dir.join("etc/host"),"hostConfig":dir.join("etc/config.json"),"publicSocket":dir.join("run/public.sock"),
+                "providers":dir.join("etc/providers.json"),"root":dir.join("credentials"),"key":dir.join("keys/credentials.key")}});
+        put(&dir.join("etc/broker.json"), config.to_string().as_bytes(), 0o644);
+        let (b, listener) = server::Broker::start(server::Config::load(&dir.join("etc/broker.json"), peer::euid()).unwrap()).unwrap();
+        std::thread::spawn(move || b.serve(listener));
+        let broker = mini_keys::client::Broker::new(dir.join("run/broker.sock"), peer::euid());
+        let ws = json!({"host":dir.join("etc/host"),"config":dir.join("etc/config.json"),"key":dir.join("ws/member.key")});
+        let secret = "sk-hosted-member-0123456789";
+        let mut action = json!({"action":"set","provider":"openrouter","secret":secret});
+        let result = local(&broker, &dir.join("ws"), &ws, &owner, &mut action).unwrap();
+        assert_eq!(result["result"]["stored"], "sealed");
+        assert_eq!(result["authentication"]["keyEpoch"], "4");
+        let mut ls = json!({"action":"ls"});
+        let listed = local(&broker, &dir.join("ws"), &ws, &owner, &mut ls).unwrap();
+        assert_eq!(listed["result"]["credentials"][0]["provider"], "openrouter");
+        assert!(!listed.to_string().contains(secret));
+        // A broker answering as another uid is refused before any byte of the request.
+        let impostor = mini_keys::client::Broker::new(dir.join("run/broker.sock"), peer::euid().wrapping_add(1));
+        let mut again = json!({"action":"set","provider":"openrouter","secret":secret});
+        assert!(local(&impostor, &dir.join("ws"), &ws, &owner, &mut again).unwrap_err().contains("broker-identity"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn native_identity_must_be_current_unrevoked_and_exact() {
-        let (_, _, owner) = signed(json!({"action":"ls"}));
+        let owner = Owner::new("20", &"ab".repeat(32)).unwrap();
         let good = json!({"type":"subject-key-status-v1","subject":"20","keyEpoch":"1","isCurrent":true,"currentRevoked":false});
         assert!(verify_current(&good, &owner).is_ok());
         for field in ["isCurrent", "currentRevoked", "subject", "keyEpoch"] {
