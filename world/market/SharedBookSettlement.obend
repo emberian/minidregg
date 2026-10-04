@@ -1,0 +1,132 @@
+edition ObjectiveBend 1
+# Shared-coordinate single-seller consumer. Repeated roles are projections of ONE exact
+# sampled account table; they do not manufacture additional funding. Worst-case reservation
+# budgets aggregate by funding coordinate, and each order's private unspent value names its
+# own reserved budget, not the repeated whole balance.
+#
+# Port of examples/objective-bend-collective/SharedBookSettlement.bend.
+# Representation changes: root/subject/reservation/audience/keyEpoch are String labels;
+# lists are Nil/Cons sums (the sampled table is an AccountList); Lookup is a sum.
+# Omitted (Objective laws are retained, never checked; kept as a named property):
+#   prepared_exact: choose(...) is refused, or prepared with exactly the given book, root,
+#   samples, operations, returns and allocation.  The Demonstration executes it on a sample.
+import ./MarketMath.obend as Math
+import ./SingleSellerAllocation.obend as Seller
+import ./CanonicalBookSettlement.obend as Book
+
+sum Lookup:
+  missing: {}
+  found: {balance: Nat}
+
+sum AccountList:
+  nil: {}
+  cons: {head: Book.Account, tail: AccountList}
+
+record PrivateResult:
+  recipient: String
+  audience: String
+  keyEpoch: String
+  reservation: String
+  reservedBudget: Nat
+  units: Nat
+  price: Nat
+  payment: Nat
+  unspentBudget: Nat
+
+sum PrivateResultList:
+  nil: {}
+  cons: {head: PrivateResult, tail: PrivateResultList}
+
+record Prepared:
+  book: Nat
+  expectedRoot: String
+  samples: AccountList
+  operations: Book.TransferList
+  returns: PrivateResultList
+  allocation: Seller.Allocation
+
+sum Result:
+  refused: {}
+  prepared: Prepared
+
+def lookupChoice(balance: Nat, later: Lookup, same: Bool) -> Lookup:
+  if same then Lookup.found({balance: balance}) else later
+
+def lookup(wanted: Book.Coordinate, accounts: AccountList) -> Lookup:
+  match accounts:
+    case nil(_): Lookup.missing()
+    case cons(c): lookupChoice(c.head.balance, lookup(wanted, c.tail), Book.coordinateEq(wanted, Book.coordinate(c.head)))
+
+def appendAccounts(bids: Book.BidList) -> AccountList:
+  match bids:
+    case nil(_): AccountList.nil()
+    case cons(c): AccountList.cons({head: c.head.funds, tail: AccountList.cons({head: c.head.goods, tail: appendAccounts(c.tail)})})
+
+def sameBalance(balance: Nat, found: Lookup) -> Bool:
+  match found:
+    case missing(_): true
+    case found(f): balance == f.balance
+
+# Repeated role inputs must be exactly the same post-funding sampled balance.
+def consistent(accounts: AccountList) -> Bool:
+  match accounts:
+    case nil(_): true
+    case cons(c): sameBalance(c.head.balance, lookup(Book.coordinate(c.head), c.tail)) && consistent(c.tail)
+
+def uniqueChoice(account: Book.Account, rest: AccountList, found: Lookup) -> AccountList:
+  match found:
+    case missing(_): AccountList.cons({head: account, tail: rest})
+    case found(_): rest
+
+# Dedupe keeps the last occurrence, in order. Native sampleFunding checks this unique
+# table; the current root and every role projection must bind to it.
+def unique(accounts: AccountList) -> AccountList:
+  match accounts:
+    case nil(_): AccountList.nil()
+    case cons(c): uniqueChoice(c.head, unique(c.tail), lookup(Book.coordinate(c.head), c.tail))
+
+def reservationUsed(reservation: String, bids: Book.BidList) -> Bool:
+  match bids:
+    case nil(_): false
+    case cons(c): if reservation == c.head.order.reservation then true else reservationUsed(reservation, c.tail)
+
+def reservationsUnique(bids: Book.BidList) -> Bool:
+  match bids:
+    case nil(_): true
+    case cons(c): Math.not(reservationUsed(c.head.order.reservation, c.tail)) && reservationsUnique(c.tail)
+
+def reserved(coordinate: Book.Coordinate, bids: Book.BidList) -> Nat:
+  match bids:
+    case nil(_): 0n
+    case cons(c): Math.chooseNat(c.head.order.price * c.head.order.quantity, 0n, Book.coordinateEq(coordinate, Book.coordinate(c.head.funds))) + reserved(coordinate, c.tail)
+
+def backed(accounts: AccountList, bids: Book.BidList) -> Bool:
+  match accounts:
+    case nil(_): true
+    case cons(c): Math.le(reserved(Book.coordinate(c.head), bids), c.head.balance) && backed(c.tail, bids)
+
+def returns(bids: Book.BidList, fills: Seller.FillList, price: Nat, position: Nat) -> PrivateResultList:
+  match bids:
+    case nil(_): PrivateResultList.nil()
+    case cons(c): returnsFor(c.head, c.tail, fills, price, position, Book.unitsAt(position, fills))
+
+def returnsFor(bid: Book.Bid, rest: Book.BidList, fills: Seller.FillList, price: Nat, position: Nat, units: Nat) -> PrivateResultList:
+  returnsBudget(bid, rest, fills, price, position, units, price * units, bid.order.price * bid.order.quantity)
+
+def returnsBudget(bid: Book.Bid, rest: Book.BidList, fills: Seller.FillList, price: Nat, position: Nat, units: Nat, payment: Nat, budget: Nat) -> PrivateResultList:
+  PrivateResultList.cons({head: {recipient: bid.order.subject, audience: bid.audience, keyEpoch: bid.keyEpoch, reservation: bid.order.reservation, reservedBudget: budget, units: units, price: price, payment: payment, unspentBudget: Math.sub(budget, payment)}, tail: returns(rest, fills, price, position + 1n)})
+
+def choose(book: Nat, root: String, samples: AccountList, batch: Book.Batch, returns: PrivateResultList, allocation: Seller.Allocation, allowed: Bool) -> Result:
+  if allowed then Result.prepared({book: book, expectedRoot: root, samples: samples, operations: batch.operations, returns: returns, allocation: allocation}) else Result.refused()
+
+def prepare(book: Nat, root: String, stock: Book.Account, proceeds: Book.Account, bids: Book.BidList, allocation: Seller.Allocation) -> Result:
+  prepareRoles(book, root, stock, proceeds, bids, allocation, AccountList.cons({head: stock, tail: AccountList.cons({head: proceeds, tail: appendAccounts(bids)})}))
+
+def prepareRoles(book: Nat, root: String, stock: Book.Account, proceeds: Book.Account, bids: Book.BidList, allocation: Seller.Allocation, roles: AccountList) -> Result:
+  prepareSamples(book, root, stock, proceeds, bids, allocation, roles, unique(roles))
+
+def prepareSamples(book: Nat, root: String, stock: Book.Account, proceeds: Book.Account, bids: Book.BidList, allocation: Seller.Allocation, roles: AccountList, samples: AccountList) -> Result:
+  choose(book, root, samples, Book.batch(bids, allocation.fills, stock, proceeds, allocation.price, 0n), returns(bids, allocation.fills, allocation.price, 0n), allocation, consistent(roles) && reservationsUnique(bids) && backed(samples, bids) && Book.validBids(bids, allocation.fills, proceeds.asset, stock.asset, allocation.price, 0n))
+
+def settle(input: Book.Input) -> Result:
+  prepare(input.book, input.root, input.stock, input.proceeds, input.bids, Seller.allocate(input.stock.balance, Book.orders(input.bids)))

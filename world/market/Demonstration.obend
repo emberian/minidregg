@@ -5,6 +5,8 @@ import ./MarketMath.obend as Math
 import ./SingleSellerAllocation.obend as Seller
 import ./UniformProRata.obend as Uniform
 import ./CanonicalBookSettlement.obend as Book
+import ./CanonicalUniformSettlement.obend as UBook
+import ./SharedBookSettlement.obend as Shared
 
 # ---- MarketMath: arithmetic spot checks ----
 def divideQuotient(n: Nat, divisor: Nat) -> Nat:
@@ -367,3 +369,188 @@ def bookUnspentA(fundsA: Nat) -> Nat:
 # The prepared result carries exactly the input book id and expected root.
 def bookExactRoot() -> Bool:
   preparedOf(bookScenario()).book == 9n && preparedOf(bookScenario()).expectedRoot == "root0"
+
+# ---- CanonicalUniformSettlement ----
+# The rationed book (UniformProRata above) settled over a book: bids B1 (limit 6 qty 4,
+# funds 40) and B2 (limit 5 qty 4, funds 40), asks A1 (limit 3 qty 3, goods 10) and A2
+# (limit 5 qty 4, goods 10), in accounts 11..14 (money asset 8, goods asset 7), with
+# pools 100 (money) and 101 (goods). It clears at price 5, volume 7: units 4, 3, 3, 4.
+# Collect: 11->100 money 20, 12->100 money 15, 13->101 goods 3, 14->101 goods 4.
+# Distribute: 101->11 goods 4, 101->12 goods 3, 100->13 money 15, 100->14 money 20.
+def participant(order: Uniform.Order, funds: Book.Account, goods: Book.Account, audience: String) -> UBook.Participant:
+  {order: order, funds: funds, goods: goods, audience: audience, keyEpoch: "epoch1"}
+
+def ubookInput(fundsB1: Nat, levels: Nat) -> UBook.Input:
+  {book: 9n, root: "root0", currencyPool: account(100n, 8n, 50n), goodsPool: account(101n, 7n, 50n), levels: levels, participants: UBook.ParticipantList.cons({head: participant(uniformOrder("B1", true, 6n, 4n), account(11n, 8n, fundsB1), account(11n, 7n, 0n), "audB1"), tail: UBook.ParticipantList.cons({head: participant(uniformOrder("B2", true, 5n, 4n), account(12n, 8n, 40n), account(12n, 7n, 0n), "audB2"), tail: UBook.ParticipantList.cons({head: participant(uniformOrder("A1", false, 3n, 3n), account(13n, 8n, 0n), account(13n, 7n, 10n), "audA1"), tail: UBook.ParticipantList.cons({head: participant(uniformOrder("A2", false, 5n, 4n), account(14n, 8n, 0n), account(14n, 7n, 10n), "audA2"), tail: UBook.ParticipantList.nil()})})})})}
+
+def ubookSettled(fundsB1: Nat, levels: Nat) -> UBook.Result:
+  UBook.settle(ubookInput(fundsB1, levels))
+
+def ubookPrepared(fundsB1: Nat, levels: Nat) -> Bool:
+  match ubookSettled(fundsB1, levels):
+    case refused(_): false
+    case prepared(_): true
+
+# A refusal reads as the all-zero payload.
+def ubookOf(result: UBook.Result) -> UBook.Prepared:
+  match result:
+    case refused(_): {book: 0n, expectedRoot: "", operations: Book.TransferList.nil(), returns: UBook.PrivateResultList.nil(), clearing: {price: 0n, volume: 0n, fills: Uniform.FillList.nil()}}
+    case prepared(p): p
+
+def ubookScenario() -> UBook.Prepared:
+  ubookOf(ubookSettled(40n, 9n))
+
+def ubookReturnField(r: UBook.PrivateResult, field: Nat) -> Nat:
+  match field:
+    case 0n: r.units
+    case 1n+f1:
+      match f1:
+        case 0n: r.price
+        case 1n+f2:
+          match f2:
+            case 0n: r.payment
+            case 1n+f3: r.unspentReserved
+
+def ubookReturnAt(rs: UBook.PrivateResultList, index: Nat, field: Nat) -> Nat:
+  match rs:
+    case nil(_): 0n
+    case cons(c):
+      match index:
+        case 0n: ubookReturnField(c.head, field)
+        case 1n+i: ubookReturnAt(c.tail, i, field)
+
+def ubookReturnIsBid(rs: UBook.PrivateResultList, index: Nat) -> Bool:
+  match rs:
+    case nil(_): false
+    case cons(c):
+      match index:
+        case 0n: Uniform.sameSide(c.head.side, Uniform.Side.bid())
+        case 1n+i: ubookReturnIsBid(c.tail, i)
+
+# Transfer `index` of the scenario: field 0 source, 1 destination, 2 asset, 3 amount.
+def ubookTransfer(index: Nat, field: Nat) -> Nat:
+  transferAt(ubookScenario().operations, index, field)
+
+# Private result `index`: field 0 units, 1 price, 2 payment, 3 unspent reserved.
+def ubookReturn(index: Nat, field: Nat) -> Nat:
+  ubookReturnAt(ubookScenario().returns, index, field)
+
+def ubookReturnBid(index: Nat) -> Bool:
+  ubookReturnIsBid(ubookScenario().returns, index)
+
+# 0 price, 1 volume, 2 transfer count, 3 private-result count.
+def ubookTop(which: Nat) -> Nat:
+  match which:
+    case 0n: ubookScenario().clearing.price
+    case 1n+w1:
+      match w1:
+        case 0n: ubookScenario().clearing.volume
+        case 1n+w2:
+          match w2:
+            case 0n: transferCount(ubookScenario().operations)
+            case 1n+w3: ubookResultCount(ubookScenario().returns)
+
+def ubookResultCount(rs: UBook.PrivateResultList) -> Nat:
+  match rs:
+    case nil(_): 0n
+    case cons(c): 1n + ubookResultCount(c.tail)
+
+def flowInto(ts: Book.TransferList, account: Nat, asset: Nat) -> Nat:
+  match ts:
+    case nil(_): 0n
+    case cons(c): Math.chooseNat(c.head.amount, 0n, c.head.destination == account && c.head.asset == asset) + flowInto(c.tail, account, asset)
+
+def flowOutOf(ts: Book.TransferList, account: Nat, asset: Nat) -> Nat:
+  match ts:
+    case nil(_): 0n
+    case cons(c): Math.chooseNat(c.head.amount, 0n, c.head.source == account && c.head.asset == asset) + flowOutOf(c.tail, account, asset)
+
+# Both clearing pools finish at their pre-balances: what flows in flows out.
+def ubookPoolsBalanced() -> Bool:
+  flowInto(ubookScenario().operations, 100n, 8n) == flowOutOf(ubookScenario().operations, 100n, 8n) && flowInto(ubookScenario().operations, 101n, 7n) == flowOutOf(ubookScenario().operations, 101n, 7n)
+
+# ---- SharedBookSettlement ----
+# Two orders of one subject debit the SAME account 2 (money asset 8, goods asset 7): budgets
+# 20 + 15 against one sampled balance. Funds 35/35 prepares (samples deduped to 4 rows,
+# transfers 4/12/3/9, reserved budgets 20 and 15 with unspent 8 and 6); copied funds
+# 20/20 and inconsistent aliases 35/36 refuse.
+def sharedInput(firstFunds: Nat, secondFunds: Nat) -> Book.Input:
+  {book: 9n, root: "root0", stock: account(1n, 7n, 7n), proceeds: account(1n, 8n, 10n), bids: Book.BidList.cons({head: bookBid(order("S", "21", 5n, 4n), account(2n, 8n, firstFunds), account(2n, 7n, 0n), "audS"), tail: Book.BidList.cons({head: bookBid(order("S", "22", 3n, 5n), account(2n, 8n, secondFunds), account(2n, 7n, 0n), "audS"), tail: Book.BidList.nil()})})}
+
+def sharedSettled(firstFunds: Nat, secondFunds: Nat) -> Shared.Result:
+  Shared.settle(sharedInput(firstFunds, secondFunds))
+
+def sharedPrepared(firstFunds: Nat, secondFunds: Nat) -> Bool:
+  match sharedSettled(firstFunds, secondFunds):
+    case refused(_): false
+    case prepared(_): true
+
+def sharedOf(result: Shared.Result) -> Shared.Prepared:
+  match result:
+    case refused(_): {book: 0n, expectedRoot: "", samples: Shared.AccountList.nil(), operations: Book.TransferList.nil(), returns: Shared.PrivateResultList.nil(), allocation: {price: 0n, fills: Seller.FillList.nil(), remaining: 0n}}
+    case prepared(p): p
+
+def sharedScenario() -> Shared.Prepared:
+  sharedOf(sharedSettled(35n, 35n))
+
+def sharedSampleField(a: Book.Account, field: Nat) -> Nat:
+  match field:
+    case 0n: a.account
+    case 1n+f1:
+      match f1:
+        case 0n: a.asset
+        case 1n+f2: a.balance
+
+def sharedSampleAt(xs: Shared.AccountList, index: Nat, field: Nat) -> Nat:
+  match xs:
+    case nil(_): 0n
+    case cons(c):
+      match index:
+        case 0n: sharedSampleField(c.head, field)
+        case 1n+i: sharedSampleAt(c.tail, i, field)
+
+def sharedSampleCount(xs: Shared.AccountList) -> Nat:
+  match xs:
+    case nil(_): 0n
+    case cons(c): 1n + sharedSampleCount(c.tail)
+
+def sharedReturnField(r: Shared.PrivateResult, field: Nat) -> Nat:
+  match field:
+    case 0n: r.reservedBudget
+    case 1n+f1:
+      match f1:
+        case 0n: r.units
+        case 1n+f2:
+          match f2:
+            case 0n: r.price
+            case 1n+f3:
+              match f3:
+                case 0n: r.payment
+                case 1n+f4: r.unspentBudget
+
+def sharedReturnAt(rs: Shared.PrivateResultList, index: Nat, field: Nat) -> Nat:
+  match rs:
+    case nil(_): 0n
+    case cons(c):
+      match index:
+        case 0n: sharedReturnField(c.head, field)
+        case 1n+i: sharedReturnAt(c.tail, i, field)
+
+# Sample row `index`: field 0 account, 1 asset, 2 balance.
+def sharedSample(index: Nat, field: Nat) -> Nat:
+  sharedSampleAt(sharedScenario().samples, index, field)
+
+def sharedSamples() -> Nat:
+  sharedSampleCount(sharedScenario().samples)
+
+# Transfer `index`: field 0 source, 1 destination, 2 asset, 3 amount.
+def sharedTransfer(index: Nat, field: Nat) -> Nat:
+  transferAt(sharedScenario().operations, index, field)
+
+# Private result `index`: field 0 reserved budget, 1 units, 2 price, 3 payment, 4 unspent budget.
+def sharedReturn(index: Nat, field: Nat) -> Nat:
+  sharedReturnAt(sharedScenario().returns, index, field)
+
+# The prepared result carries exactly the input book id and expected root (prepared_exact).
+def sharedExactRoot() -> Bool:
+  sharedScenario().book == 9n && sharedScenario().expectedRoot == "root0"

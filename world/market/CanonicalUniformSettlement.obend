@@ -1,0 +1,140 @@
+edition ObjectiveBend 1
+# The two-sided DrEX consumer over the SAME canonical book contract (Transfer ABI). It
+# collects every admitted debit into two clearing pools (bid currency, ask goods) and then
+# distributes goods to bids and currency to asks. Pool coordinates are distinct from every
+# participant coordinate; the same account may hold both assets. The pools finish at their
+# pre-balances when each side's checked units equal the computed clearing volume.
+#
+# Port of examples/objective-bend-collective/CanonicalUniformSettlement.bend.
+# Representation changes: root/subject/reservation/audience/keyEpoch are String labels;
+# lists are Nil/Cons sums; the transfer, coordinate and account types are Book's.
+# Omitted (Objective laws are retained, never checked; kept as a named property):
+#   volume_equality: the accepted Bool.and(bidTotal == volume, askTotal == volume) guard
+#   implies both equalities.  In Objective Bend the guard is `&&` over Nat `==`, which
+#   is the checked primitive itself, so the Gen-1 soundness lemma has no counterpart.
+import ./MarketMath.obend as Math
+import ./UniformProRata.obend as Uniform
+import ./CanonicalBookSettlement.obend as Book
+
+record Participant:
+  order: Uniform.Order
+  funds: Book.Account
+  goods: Book.Account
+  audience: String
+  keyEpoch: String
+
+record Input:
+  book: Nat
+  root: String
+  currencyPool: Book.Account
+  goodsPool: Book.Account
+  levels: Nat
+  participants: ParticipantList
+
+record PrivateResult:
+  recipient: String
+  audience: String
+  keyEpoch: String
+  reservation: String
+  side: Uniform.Side
+  price: Nat
+  units: Nat
+  payment: Nat
+  unspentReserved: Nat
+
+record Prepared:
+  book: Nat
+  expectedRoot: String
+  operations: Book.TransferList
+  returns: PrivateResultList
+  clearing: Uniform.Clearing
+
+sum Result:
+  refused: {}
+  prepared: Prepared
+
+sum ParticipantList:
+  nil: {}
+  cons: {head: Participant, tail: ParticipantList}
+
+sum PrivateResultList:
+  nil: {}
+  cons: {head: PrivateResult, tail: PrivateResultList}
+
+def orders(participants: ParticipantList) -> Uniform.OrderList:
+  match participants:
+    case nil(_): Uniform.OrderList.nil()
+    case cons(c): Uniform.OrderList.cons({head: c.head.order, tail: orders(c.tail)})
+
+def coordinates(participants: ParticipantList) -> Book.CoordinateList:
+  match participants:
+    case nil(_): Book.CoordinateList.nil()
+    case cons(c): Book.CoordinateList.cons({head: Book.coordinate(c.head.funds), tail: Book.CoordinateList.cons({head: Book.coordinate(c.head.goods), tail: coordinates(c.tail)})})
+
+def unitsAt(position: Nat, fills: Uniform.FillList) -> Nat:
+  match fills:
+    case nil(_): 0n
+    case cons(c): Math.chooseNat(c.head.units, unitsAt(position, c.tail), position == c.head.position)
+
+# Per-side backing: a bid's worst case limit*quantity and its payment fit its funds;
+# an ask's quantity and units fit its goods; a nonzero fill respects the limit.
+def sideValid(side: Uniform.Side, limit: Nat, quantity: Nat, price: Nat, units: Nat, funds: Nat, goods: Nat) -> Bool:
+  match side:
+    case bid(_): Math.le(limit * quantity, funds) && Math.le(price * units, funds) && Math.chooseBool(true, Math.le(price, limit), units == 0n)
+    case ask(_): Math.le(quantity, goods) && Math.le(units, goods) && Math.chooseBool(true, Math.le(limit, price), units == 0n)
+
+def validParticipant(p: Participant, units: Nat, paymentAsset: Nat, goodsAsset: Nat, price: Nat) -> Bool:
+  paymentAsset == p.funds.asset && goodsAsset == p.goods.asset && Math.le(units, p.order.quantity) && sideValid(p.order.side, p.order.limit, p.order.quantity, price, units, p.funds.balance, p.goods.balance)
+
+def validParticipants(participants: ParticipantList, fills: Uniform.FillList, paymentAsset: Nat, goodsAsset: Nat, price: Nat, position: Nat) -> Bool:
+  match participants:
+    case nil(_): true
+    case cons(c): validParticipant(c.head, unitsAt(position, fills), paymentAsset, goodsAsset, price) && validParticipants(c.tail, fills, paymentAsset, goodsAsset, price, position + 1n)
+
+def sideTotal(side: Uniform.Side, fills: Uniform.FillList) -> Nat:
+  match fills:
+    case nil(_): 0n
+    case cons(c): Math.chooseNat(c.head.units, 0n, Uniform.sameSide(side, c.head.order.side)) + sideTotal(side, c.tail)
+
+# collect: participant -> pool; otherwise pool -> participant.
+def transferFor(side: Uniform.Side, collect: Bool, currencyPool: Nat, goodsPool: Nat, funds: Nat, goods: Nat, paymentAsset: Nat, goodsAsset: Nat, price: Nat, units: Nat) -> Book.Transfer:
+  match side:
+    case bid(_): if collect then {source: funds, destination: currencyPool, asset: paymentAsset, amount: price * units} else {source: goodsPool, destination: goods, asset: goodsAsset, amount: units}
+    case ask(_): if collect then {source: goods, destination: goodsPool, asset: goodsAsset, amount: units} else {source: currencyPool, destination: funds, asset: paymentAsset, amount: price * units}
+
+def transfers(participants: ParticipantList, fills: Uniform.FillList, currencyPool: Nat, goodsPool: Nat, paymentAsset: Nat, goodsAsset: Nat, price: Nat, position: Nat, collect: Bool) -> Book.TransferList:
+  match participants:
+    case nil(_): Book.TransferList.nil()
+    case cons(c): Book.TransferList.cons({head: transferFor(c.head.order.side, collect, currencyPool, goodsPool, c.head.funds.account, c.head.goods.account, paymentAsset, goodsAsset, price, unitsAt(position, fills)), tail: transfers(c.tail, fills, currencyPool, goodsPool, paymentAsset, goodsAsset, price, position + 1n, collect)})
+
+def append(left: Book.TransferList, right: Book.TransferList) -> Book.TransferList:
+  match left:
+    case nil(_): right
+    case cons(c): Book.TransferList.cons({head: c.head, tail: append(c.tail, right)})
+
+def remaining(side: Uniform.Side, funds: Nat, goods: Nat, price: Nat, units: Nat) -> Nat:
+  match side:
+    case bid(_): Math.sub(funds, price * units)
+    case ask(_): Math.sub(goods, units)
+
+def returns(participants: ParticipantList, fills: Uniform.FillList, price: Nat, position: Nat) -> PrivateResultList:
+  match participants:
+    case nil(_): PrivateResultList.nil()
+    case cons(c): returnsFor(c.head, c.tail, fills, price, position, unitsAt(position, fills))
+
+def returnsFor(p: Participant, rest: ParticipantList, fills: Uniform.FillList, price: Nat, position: Nat, units: Nat) -> PrivateResultList:
+  PrivateResultList.cons({head: {recipient: p.order.subject, audience: p.audience, keyEpoch: p.keyEpoch, reservation: p.order.reservation, side: p.order.side, price: price, units: units, payment: price * units, unspentReserved: remaining(p.order.side, p.funds.balance, p.goods.balance, price, units)}, tail: returns(rest, fills, price, position + 1n)})
+
+def choose(book: Nat, root: String, operations: Book.TransferList, returns: PrivateResultList, clearing: Uniform.Clearing, allowed: Bool) -> Result:
+  if allowed then Result.prepared({book: book, expectedRoot: root, operations: operations, returns: returns, clearing: clearing}) else Result.refused()
+
+def prepare(book: Nat, root: String, currencyPool: Book.Account, goodsPool: Book.Account, participants: ParticipantList, clearing: Uniform.Clearing) -> Result:
+  choose(book, root, append(transfers(participants, clearing.fills, currencyPool.account, goodsPool.account, currencyPool.asset, goodsPool.asset, clearing.price, 0n, true), transfers(participants, clearing.fills, currencyPool.account, goodsPool.account, currencyPool.asset, goodsPool.asset, clearing.price, 0n, false)), returns(participants, clearing.fills, clearing.price, 0n), clearing, Book.distinct(Book.CoordinateList.cons({head: Book.coordinate(currencyPool), tail: Book.CoordinateList.cons({head: Book.coordinate(goodsPool), tail: coordinates(participants)})})) && sideTotal(Uniform.Side.bid(), clearing.fills) == clearing.volume && sideTotal(Uniform.Side.ask(), clearing.fills) == clearing.volume && validParticipants(participants, clearing.fills, currencyPool.asset, goodsPool.asset, clearing.price, 0n))
+
+def accept(book: Nat, root: String, currencyPool: Book.Account, goodsPool: Book.Account, participants: ParticipantList, candidate: Uniform.Result) -> Result:
+  match candidate:
+    case invalidGrid(_): Result.refused()
+    case cleared(c): prepare(book, root, currencyPool, goodsPool, participants, c)
+
+def settle(input: Input) -> Result:
+  accept(input.book, input.root, input.currencyPool, input.goodsPool, input.participants, Uniform.allocate(input.levels, orders(input.participants)))
