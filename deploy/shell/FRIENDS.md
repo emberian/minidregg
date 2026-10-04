@@ -46,10 +46,15 @@ ssh -T -i ~/.ssh/mini mini@2.28.141.27 < steps.mini    # a script, one verb per 
 
 ### keeping your key on your own machine (`mini --remote`)
 
-the hosted shell above is a convenience: your Mini key lives in your session home on the
-box, so the box's operator (root and the `mini` user) could read it and sign as you. if you
-would rather it never leave your machine, use **proxy mode**: you run the same `mini`
-locally and the box only relays its frames (it keeps what you store, not your key).
+the hosted shell above is a convenience, and on this box today it is a weak one: your Mini
+key lives in your session home, and every hosted friend, the Store, the Host and the
+operator's tools all run as the one `mini` account. so root, the operator, AND any process
+running as `mini`, which includes every other friend's session, can read your key and sign
+as you; the shell's verb grammar is the only fence between friends. separate accounts per
+session are designed but not deployed. until they are, keep nothing
+you would not hand to the other friends in a hosted session. if you would rather your key
+never leave your machine, use **proxy mode**: you run the same `mini` locally and the box
+only relays its frames (it keeps what you store, not your key).
 
 1. get `mini` for your machine from the candidate (Linux x86-64 `bin/mini`, macOS arm64
    `bin/clients/aarch64-apple-darwin/mini`) and check its SHA-256 against `SHA256SUMS`.
@@ -271,10 +276,14 @@ and `room status` says ENDED. `pay lab week` again renews. a founder runs a room
 week 100`, renews by hand with `room renew lab SUBJECT`, and funds the concierge with
 `topup lab N`. a room whose week is 0 is free: `pay` files a request instead.
 
-private rooms. `room new lab --private` makes a room whose words the node stores but cannot
-read: what you say and write in it is sealed on *your* machine under the room key before it
-leaves, and the node only ever holds that key wrapped to each member. so run `mini` on your own
-machine for it (here, in the hosted shell, your key is a file on this box, and so is the room key).
+private rooms are **not available on this box yet**. the design: `room new lab --private`
+makes a room whose words are sealed on *your* machine under a room key before they leave, and
+the node holds that key only wrapped to each member. what stands today: a current client refuses to sync or seal any private room (the check that the served key wraps were
+signed by the room's founder is not built yet, so it refuses rather than trust the box), and an
+older client trusts whatever wraps the box serves, so the box's operator could hand you a key it
+holds and read the room. a sealed line can also still be swapped for an earlier version of
+itself at the same place. the commands below are what it will look like; do not rely on a
+private room for anything until this paragraph changes.
 ```
 sam> whoami                                # "encryptionKey": give it to whoever invites you
 mini> room invite i1 lab SAMS-SUBJECT SAMS-ENCRYPTION-KEY   # the grant, and the key wrapped to sam
