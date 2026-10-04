@@ -28,6 +28,15 @@ structure Schedule where
   retry : Nat := 0
   retryEnd : Nat := 0
   certificates : List (Nat × Block) := []
+  /-- Last application-candidate relay per recipient: (recipient, height, ms). -/
+  candidateSent : List (Nat × Nat × Nat) := []
+  /-- Earliest monotonic ms for the next certificate repair slice. -/
+  certificateDue : Nat := 0
+
+/-- Resend interval for the same unvalidated candidate to the same peer, and the
+pace of certificate repair. A changed candidate height is relayed at once. -/
+def candidateResendMs : Nat := 5000
+def certificateEveryMs : Nat := 1000
 
 structure Participant (config : SourceConfig) where
   runtime : Runtime
@@ -285,6 +294,9 @@ def applyNext {config : SourceConfig} (p : Participant config)
 
 def certificateSlice {config : SourceConfig} (p : Participant config) :
     IO (Participant config × List (Nat × Bytes) × String) := do
+  let now ← IO.monoMsNow
+  if now < p.schedule.certificateDue then return (p,[],"certificate repair paced")
+  let p := {p with schedule := {p.schedule with certificateDue := now + certificateEveryMs}}
   let some prior ← p.runtime.current | return (p,[],"invalid engine journal")
   let queue := if p.schedule.certificates.isEmpty then certificateCandidates prior
     else p.schedule.certificates
@@ -300,18 +312,30 @@ def certificateSlice {config : SourceConfig} (p : Participant config) :
 /-- Disseminate a complete checked source candidate before its owner's next
 leader turn. Each peer independently rechecks it; a MAC never transfers source
 authority. Already installed local prefixes need no offer relay: their original
-COMMIT certificates continue through the separate positive repair budget. -/
-def candidateSlice {config : SourceConfig} (p : Participant config) : IO (List (Nat × Bytes)) := do
-  let some prior ← p.runtime.current | return []
+COMMIT certificates continue through the separate positive repair budget. The
+same candidate goes to the same peer at most once per `candidateResendMs`; a
+longer candidate is relayed at once. The relay is availability, not delivery:
+a peer that lost it is served again after the interval. -/
+def candidateSlice {config : SourceConfig} (p : Participant config) :
+    IO (Participant config × List (Nat × Bytes)) := do
+  let some prior ← p.runtime.current | return (p,[])
   let state := prior.state
   let height := p.source.verified.opened.durable.image.accepted.length
   let some block := state.checked.find? (fun block => height < (applicationHistory block).length)
-    | return []
+    | return (p,[])
+  let length := (applicationHistory block).length
+  let now ← IO.monoMsNow
   let mut packets := []
+  let mut sent := p.schedule.candidateSent
   for recipient in List.range p.runtime.context.config.parties do
     if recipient != state.self then
-      packets := packets ++ [(recipient,candidateFrame (← sealCandidate p.runtime recipient block))]
-  return packets
+      let due := match sent.find? (fun (r,_,_) => r == recipient) with
+        | none => true
+        | some (_,h,last) => h != length || now ≥ last + candidateResendMs
+      if due then
+        packets := packets ++ [(recipient,candidateFrame (← sealCandidate p.runtime recipient block))]
+        sent := (sent.filter (fun (r,_,_) => r != recipient)) ++ [(recipient,length,now)]
+  return ({p with schedule := {p.schedule with candidateSent := sent}},packets)
 
 /-- A finite host service call. The host supplies due arrivals before this call.
 It consumes reserved validation, continuation, fresh, retry and certificate
@@ -337,7 +361,7 @@ def service {config : SourceConfig} (p : Participant config)
     if state.needsPoll || (now ≥ state.deadline && !(viewAt state state.current).disableRequested) then
       let _ ← GenericSimplexNative.tick p.runtime
   let (p,packets) ← outgoing p freshBudget retryBudget
-  let candidates ← candidateSlice p
+  let (p,candidates) ← candidateSlice p
   let (p,certificates,status) ← certificateSlice p
   return (p,packets ++ candidates ++ certificates,checks,status)
 
