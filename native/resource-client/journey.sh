@@ -318,6 +318,15 @@ refused() {
 reason() {
   grep -Eo "host refused [a-z-]+: refused: [a-z-]+" "$SD/$1.err" | tail -1 | sed -E 's/host refused ([a-z-]+): refused: /\1 /'
 }
+# consent_refused NAME: the client's own signing-consent component refused BEFORE
+# anything was signed or sent, and said exactly that a subject with no current
+# signing key in the verified source cannot sign (Host/ClientConsentCore.lean,
+# `consent`). Exactly that sentence: any other local failure (a crash, a timeout, a
+# parse error) is not a refusal.
+consent_refused() {
+  [ "$(cat "$SD/$1.rc" 2>/dev/null)" != 0 ] && [ "$(tail -1 "$SD/$1.err")" = \
+    "mini: local consent refused before signing: local intent subject has no current signing key" ]
+}
 # decode NAME: the Host's encoded refusal as text, one line.
 decode() {
   grep -o 'encoded refusal: [0-9a-f]*' "$SD/$1.err" | tail -1 | cut -d' ' -f3 | xxd -r -p 2>/dev/null \
@@ -539,11 +548,10 @@ scalar() {  # scalar NAME ACTION FIELD VALUE [EXPECTED]
 # A crafted intent: the newcomer's well-formed invoke intent re-addressed to
 # another subject with fresh nonces. This is an adversary's path, not a
 # friend's; the client still signs it with the workspace's own key.
-craft() {  # craft SOURCE_INTENT SUBJECT [AUTHORITY_ROOT] > out
-  jq --arg s "$2" --arg n1 "$(nonce)" --arg n2 "$(nonce)" --arg root "${3:-}" '
+craft() {  # craft SOURCE_INTENT SUBJECT > out
+  jq --arg s "$2" --arg n1 "$(nonce)" --arg n2 "$(nonce)" '
     .subject = $s | .nonce = $n1
-    | .purpose.draft.command.subject = $s | .purpose.draft.command.nonce = $n2
-    | if $root != "" then .purpose.draft.command.expectedAuthorityRoot = $root else . end' "$1"
+    | .purpose.draft.command.subject = $s | .purpose.draft.command.nonce = $n2' "$1"
 }
 
 # ---------------------------------------------------------------- J0-J8
@@ -681,19 +689,29 @@ step_J5() {
   call uread "$MINI" workspace --action read --dir "$UW" --name stolen
   call usubmit "$MINI" workspace --action submit --dir "$UW" --intent "$REQ/j5-stranger-crafted.json"
   local c
+  # The never-enrolled key is stopped one layer earlier than the Host: the client's
+  # consent component holds the verified source, finds no signing key for the intent's
+  # subject, and refuses before signing, so nothing reaches the Host. Each attempt is
+  # recorded under the layer that refused it; either layer's refusal counts, a
+  # refusal-less outcome or any other local failure does not.
+  local by_host=0 by_consent=0
   for c in read-child read-owner propose-write submit-crafted uread usubmit; do
     if refused "$c"; then
+      by_host=$((by_host + 1))
       printf '%s\trefused\t%s\t%s\n' "$c" "$(reason "$c")" "$(decode "$c")" >>"$ARTIFACT"
+    elif consent_refused "$c"; then
+      by_consent=$((by_consent + 1))
+      printf '%s\trefused-by-local-consent\tno signing key for the subject\tnothing was signed or sent\n' "$c" >>"$ARTIFACT"
     else
       printf '%s\tNOT-REFUSED\trc=%s\n' "$c" "$(cat "$SD/$c.rc")" >>"$ARTIFACT"; n=$((n + 1))
     fi
   done
-  [ "$n" = 0 ] || fail "$n of 6 stranger attempts were not refused by the Host (see $ARTIFACT)" || return
+  [ "$n" = 0 ] || fail "$n of 6 stranger attempts were refused by neither the Host nor the local consent component (see $ARTIFACT)" || return
   # Control: the grant holder still reads, and nothing the strangers did changed the image.
   call control "$MINI" workspace --action read --dir "$NEWCOMER_WS" --name shared || fail "control read failed" || return
   [ "$(field_value "$SD/control.out" 2)" = 1 ] || fail "control read lost field 2" || return
   [ "$(root_of_read control)" = "$before" ] || fail "world root or height moved during refused attempts" || return
-  DETAIL="6/6 refused by the Host (enrolled no-grant read x2, propose, crafted submit; unenrolled read, submit); image unchanged; third = record $LAST_COUNT"
+  DETAIL="6/6 refused: $by_host by the Host (enrolled no-grant read x2, propose, crafted submit), $by_consent by local consent before signing (unenrolled read, submit); image unchanged; third = record $LAST_COUNT"
 }
 
 step_J6() {
@@ -839,7 +857,7 @@ step_J7() {
 }
 
 step_J8() {
-  local A=$SPONSOR_WS/attempts/lockout NA=$NEWCOMER_WS/attempts/after-law-v2 root n=0 c
+  local A=$SPONSOR_WS/attempts/lockout NA=$NEWCOMER_WS/attempts/after-law-v2 n=0 c
   ARTIFACT=$SD/refusals.tsv; : >"$ARTIFACT"
   call propose "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$REQ/deny-all.json" --proposal-id lockout --allow-unsatisfiable true \
     || fail "deny-all propose failed" || return
@@ -847,10 +865,9 @@ step_J8() {
     || fail "deny-all install refused: $(tail -1 "$SD/submit.err")" || return
   accept "$A/outcome.json" || fail "deny-all not installed: $DETAIL" || return
   call nread "$MINI" workspace --action read --dir "$NEWCOMER_WS" --name shared
-  root=$(jq -r '.authorityRoot // empty' "$(read_attempt nread)/challenge.json" 2>/dev/null)
   scalar shared write 2 8 7 >"$REQ/j8-write.json"
   call npropose "$MINI" workspace --action propose --dir "$NEWCOMER_WS" --request "$REQ/j8-write.json" --proposal-id after-lock
-  craft "$NEWCOMER_WS/proposals/after-law-v2/intent.json" "$NEWCOMER_SUBJECT" "$root" >"$REQ/j8-newcomer-crafted.json"
+  craft "$NEWCOMER_WS/proposals/after-law-v2/intent.json" "$NEWCOMER_SUBJECT" >"$REQ/j8-newcomer-crafted.json"
   call ncrafted "$MINI" workspace --action submit --dir "$NEWCOMER_WS" --intent "$REQ/j8-newcomer-crafted.json"
   call sread "$MINI" workspace --action read --dir "$SPONSOR_WS" --name shared
   call srepair "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$REQ/repair.json" --proposal-id repair
@@ -867,7 +884,7 @@ step_J8() {
   call resubmit "$MINI" retry --attempt "$NA" --mode submit || fail "historical resubmit failed under lock" || return
   replayed "$SD/resubmit.out" && [ "$(count_of "$SD/resubmit.out")" = "$(count_of "$NA/outcome.json")" ] \
     || fail "historical resubmit was not the original receipt" || return
-  DETAIL="deny-all installed (submit $(cwall submit)s); 5/5 refused: newcomer read/propose/crafted(current root), sponsor read, sponsor repair propose; prior call replays"
+  DETAIL="deny-all installed (submit $(cwall submit)s); 5/5 refused: newcomer read/propose/crafted, sponsor read, sponsor repair propose; prior call replays"
 }
 
 # ---------------------------------------------------------------- K4 typed state
