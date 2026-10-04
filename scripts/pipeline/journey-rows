@@ -25,7 +25,7 @@ row_journey() {
   local rc=$?
   [ -s "$RUN/j/journey-result.json" ] || { tail -1 "$OUT/journey.err" >&2; return 1; }
   cp "$RUN/j/journey-result.json" "$OUT/"
-  jq -r --arg want " $steps " '.steps[] | select($want | contains(" " + .id + " ")) |
+  jq -r --arg want " $steps " '.steps[] | . as $s | select($want | contains(" " + $s.id + " ")) |
     [.id, .status, (.wallSeconds|tostring), (.detail // "" | gsub("[\t\n]"; " "))] | @tsv' \
     "$RUN/j/journey-result.json" >"$OUT/subrows.tsv"
   # keep each red step's own logs (the world itself goes with RUN)
@@ -56,7 +56,9 @@ row_rooms() {
     MINI_VERIFIER_BIN=$BIN/minidregg-credential-signature-verifier \
     bash "$d" "$RUN/r" >"$OUT/rooms.out" 2>"$OUT/rooms.err"
   local rc=$?
-  tail -1 "$OUT/rooms.out" >&2
+  # the verdict: the steps that did not pass, then the expected-row count
+  { grep -E '^rooms-e2e: [A-Z0-9]+ +(FAIL|SKIPPED|UNBUILT)' "$OUT/rooms.out" | sed 's/^rooms-e2e: //' | paste -sd';'
+    grep -E '^rooms-e2e: [0-9]+ rows' "$OUT/rooms.out" | sed 's/^rooms-e2e: //'; } | paste -sd' ' >&2
   return $rc
 }
 

@@ -4,7 +4,7 @@
 #   scripts/pipeline/publish-artifacts TIP LABEL [WARM_TREE]
 #
 # PIPELINE regime item 3 (artifacts once per tip), on the gate box. TIP is a 40-hex commit,
-# LABEL one of main|green|next. WARM_TREE is a built clone at TIP (the merge keeper's gated tree,
+# LABEL one or more of main|green|next joined by + (main+green). WARM_TREE is a built clone at TIP (the merge keeper's gated tree,
 # the warm base, the `next` base); default: found by pipeline_find_tree. Without one at TIP, the
 # newest warm base is copied and moved to TIP, and the Lean delta compiles here, once.
 #
@@ -27,7 +27,8 @@ PIPELINE_PROG=publish-artifacts
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 . "$here/lib.sh"
 tip=$(pipeline_full_sha "${1:?TIP}"); label=${2:?LABEL}; tree=${3:-}
-case "$label" in main|green|next) ;; *) pipeline_die "LABEL must be main|green|next" ;; esac
+labels=${label//+/ }        # the keeper writes compound labels: main+green
+for l in $labels; do case "$l" in main|green|next) ;; *) pipeline_die "LABEL must be main|green|next joined by +" ;; esac; done
 out=$ARTIFACT_ROOT/$tip
 # The BUILDER (lane-build.sh + lib.sh) is the pipeline's own, not the tip's: the fixed build root
 # and sccache are properties of how this box builds, and an older tip's copy predates them. The
@@ -41,7 +42,7 @@ mkdir -p "$ARTIFACT_ROOT/.work"
 exec 8>"$ARTIFACT_ROOT/.work/$tip.lock"
 flock -n 8 || { pipeline_log "$tip is being published by another run"; exit 0; }
 if [ -f "$out/READY" ]; then
-  pipeline_label "$label" "$tip"; pipeline_log "$tip already READY; labelled $label"; exit 0
+  for l in $labels; do pipeline_label "$l" "$tip"; done; pipeline_log "$tip already READY; labelled $label"; exit 0
 fi
 t0=$(date +%s)
 from=$(pipeline_find_tree "$tip" "$tree")
@@ -115,7 +116,7 @@ printf 'tip=%s label=%s lean=%s rust=%s built_on=%s from=%s%s command="clone-war
   $((t_end - t0)) "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$out/PROVENANCE"
 (cd "$out" && sha256sum --quiet -c SHA256SUMS) || pipeline_die "fresh set fails its own SHA256SUMS"
 date -u +%Y-%m-%dT%H:%M:%SZ >"$out/READY"
-pipeline_label "$label" "$tip"
+for l in $labels; do pipeline_label "$l" "$tip"; done
 pipeline_log "READY $out ($((t_end - t0)) s)"
 "$here/mirror-artifacts" "$tip" "$label" "$W/src" || pipeline_log "mirror of $tip incomplete (see above); the set is READY here"
 cd "$ARTIFACT_ROOT" && rm -rf "$W"

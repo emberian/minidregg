@@ -15,7 +15,8 @@
 # oleans) when present, else source.tar from the set, extracted. Every row gets a fresh SHORT
 # scratch directory that is deleted after it (worlds, Stores, sockets, test keys). Owners: the row's
 # own hint, else the commit (commits.tsv of the set: commits since the previous green) that
-# touched the row's driver files, else unknown.
+# touched the row's driver files, else "?" (nothing in this batch touched the driver: the red is
+# older than the batch, or comes from a dependency the pattern does not name).
 set -uo pipefail
 PIPELINE_PROG=journey-runner
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -39,7 +40,7 @@ owner_for() {  # SET ROW SRC -> a lane or commit naming who last changed the row
     *) pat="$row" ;;
   esac
   [ -f "$set/commits.tsv" ] || { echo unknown; return; }
-  awk -F'\t' -v p="$pat" '$3 ~ p {print substr($1,1,12)" "$2; exit}' "$set/commits.tsv" | grep . || echo "unknown (no commit since the previous green touched $pat)"
+  awk -F'\t' -v p="$pat" '$3 ~ p {print substr($1,1,12)" "substr($2,1,60); exit}' "$set/commits.tsv" | grep . || echo "?"
 }
 
 run_tip() {
@@ -84,9 +85,9 @@ run_tip() {
   done
   [ "$leanenv" = 1 ] || rm -rf "$src"
   local wall=$(( $(date +%s) - t0 ))
-  { printf 'tip %s  labels: %s  set: %s\njourney wall %s s on %s (%s CPUs), finished %s\n\n' "$tip" "${labels% }" "$(cat "$set/PROVENANCE" 2>/dev/null | cut -c1-120)" \
-      "$wall" "$(hostname)" "$(nproc)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    printf 'ROW\tSTATUS\tWALL_S\tOWNER\tDETAIL\n'; cat "$J/results.tsv"; } | column -t -s $'\t' >"$J/table.txt"
+  { printf 'tip %s  labels: %s\njourney wall %s s on %s (%s CPUs), finished %s; set built %s\n\n' "$tip" "${labels% }" \
+      "$wall" "$(hostname)" "$(nproc)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(sed -n 's/.*finished=\([^ ]*\).*/\1/p' "$set/PROVENANCE" 2>/dev/null)"
+    { printf 'ROW\tSTATUS\tWALL_S\tOWNER\tDETAIL\n'; cat "$J/results.tsv"; } | column -t -s $'\t'; } >"$J/table.txt"
   awk -F'\t' -v tip="${tip:0:12}" -v l="${labels% }" '$2=="FAIL"||$2=="UNBUILT"||$2=="SKIPPED"||$2=="NOT-RUN" {
       printf "- [RED] %s %s | tip %s (%s) | owner: %s | %s\n", $1, $2, tip, l, $4, $5 }' "$J/results.tsv" >"$J/red.txt"
   echo "$wall" >"$J/WALL_S"; date -u +%Y-%m-%dT%H:%M:%SZ >"$J/DONE"

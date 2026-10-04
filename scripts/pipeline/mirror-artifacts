@@ -26,7 +26,7 @@ for m in $PIPELINE_MIRRORS; do
   t=$(date +%s)
   if "${R[@]}" --delete --exclude=/READY "$ARTIFACT_ROOT/$tip/" "$m:$tip/" \
      && "${R[@]}" "$ARTIFACT_ROOT/$tip/READY" "$m:$tip/READY" \
-     && { [ -z "$label" ] || "${R[@]}" -l "$ARTIFACT_ROOT/$label" "$m:"; }; then
+     && for l in ${label//+/ }; do "${R[@]}" -l "$ARTIFACT_ROOT/$l" "$m:" || exit 1; done; then
     pipeline_log "mirrored $tip${label:+ ($label)} to $m in $(( $(date +%s) - t )) s"
   else pipeline_log "mirror to $m FAILED"; rc=1; fi
 done
@@ -37,14 +37,14 @@ if [ -n "$lean" ]; then
     t=$(date +%s)
     "${R[@]}" --dirs "$empty/" "$m:.leanenv/" || true    # rrsync cannot mkdir -p: create the parent
     prev=$("${R[@]}" --list-only "$m:.leanenv/" 2>/dev/null | awk '$5 ~ /^[0-9a-f]{40}$/ {print $3" "$4" "$5}' | sort | tail -1 | awk '{print $3}' || true)
-    link=(); [ -n "$prev" ] && [ "$prev" != "$tip" ] && link=(--link-dest="../$prev/")
+    link=(); [ -n "$prev" ] && [ "$prev" != "$tip" ] && link=(--link-dest="/.leanenv/$prev/")   # rrsync: absolute = anchored at its root; ".." refused
     if "${R[@]}" --delete "${link[@]}" \
         --exclude=/target-gates --exclude=/build-logs --exclude=/rust-target --exclude='/native/*/target' \
         --exclude=/.lake/build/ir --exclude=/.lake/build/bin --exclude='/.lake/packages/*/.lake/build/ir' \
         --exclude='/.lake/packages/*/.lake/build/bin' --exclude='*.o' --exclude='*.c' \
         "$lean/" "$m:.leanenv/$tip/" \
        && date -u +%Y-%m-%dT%H:%M:%SZ >"$empty.done" && "${R[@]}" "$empty.done" "$m:.leanenv/$tip/.pipeline-leanenv-complete"; then
-      pipeline_log "lean env $tip to $m in $(( $(date +%s) - t )) s${prev:+ (linked against ${prev:0:12})}"
+      pipeline_log "lean env $tip to $m in $(( $(date +%s) - t )) s${link:+ (hard-linked against ${prev:0:12})}"
     else pipeline_log "lean env to $m FAILED"; rc=1; fi
   done
 fi
