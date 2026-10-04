@@ -44,9 +44,13 @@ slot per enrolled client, then publishes independently sorted EXACT hash sets fo
 all stages, with separate registrar/operator MACs under independently provisioned
 keys. Those published sets do not pair a source/input hash with a successor hash.
 The registrar must not disclose the private pairing vectors; `*.route` files are
-secret test/client evidence, not public routing material. This CLI uses protected
-file handoff for that operator boundary; live authenticated enrollment/transport
-is a required deployment adapter, not implied by CSV paths.
+secret test/client evidence, not public routing material. The offline `mix` CLI
+still uses protected file handoff. The live `mix-live` path admits contributions
+only through roster enrollment (`COHORT-TCP.md`, "Roster enrollment"): the
+registrar's link for slot i accepts only a challenge-bound enrollment signed by
+the roster's native key for slot i, and the registrar worker consumes a slot
+directory only when its enrollment marker names that exact slot and key. An
+operator's directory list can no longer relabel or substitute a member.
 
 Each relay and receiver checks its own manifest MAC/pinned epoch/profile, the
 complete admitted input hash set, and the complete peeled output set before any
@@ -171,8 +175,9 @@ native effects. Two identical immutable transport operations may receive separat
 reply capabilities while the native journal preserves one dispatch; identity/body
 conflict is fenced. Keys must be distinct within both KEM and registrar pin lists.
 Registrar and operators durably bind manifest digest and local public clock/profile
-for each epoch; changed registration/clock on recovery refuses. This does not make
-an unimplemented live enrollment channel authentic by itself.
+for each epoch; changed registration/clock on recovery refuses. Live enrollment is
+the roster MCE2 handshake; the registrar-to-operator MAC pins remain provisioned
+files (one per operator), not enrolled.
 
 Adversarial review confirms the exact-set check precedes native effects and closes
 valid replacement under the declared honest-registrar/static model. It also

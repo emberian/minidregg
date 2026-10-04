@@ -2,17 +2,51 @@
 
 `cohort_tcp.rs` connects the guarded PQ packet/registrar/relay/mailbox path to
 fixed enrolled TCP links. It carries exact source frames; enrollment slots are
-not Mini sender authority. Independently provisioned PSKs authenticate each
-slot/generation/stage/profile/epoch and encrypt private route commitments on the
-client-to-registrar links. The honest noncolluding registrar remains an explicit
-additional trust premise; receiver still sees ordinary native signatures/graph.
+not Mini sender authority. Every link key comes from a roster enrollment (below)
+and authenticates each slot/generation/stage/profile/epoch record and encrypts
+private route commitments on the client-to-registrar links. The honest
+noncolluding registrar remains an explicit additional trust premise; receiver
+still sees ordinary native signatures/graph.
+
+## Roster enrollment (MCE2)
+
+The public cohort roster (`minidregg-cohort-roster-v1` JSON: `generation`,
+`width`, `members[width]`, `operators[5]`, each `{native, linkKem}` hex) is the
+only admission authority. Phase 0 slot i is sent by member i; phase k>0 by
+operator k-1 (registrar, relay0, relay1, relay2, mailbox); phase k<5 is received
+by operator k and phase 5 slot i by member i. Its exact-byte SHA-256 enters
+every transcript and pin, so both ends must hold the same roster.
+
+The receiver sends `MCE2 | nonce32 | ephemeral ML-KEM-768 key` (1,220 bytes).
+The sender answers with an encapsulation to the receiver's roster link key, an
+encapsulation to the ephemeral key, and an Ed25519 signature by its own roster
+native key over (domain, profile identity, roster digest, start epoch, the whole
+challenge, both ciphertexts) (2,240 bytes). The link key is HMAC-derived from
+both shared secrets and the signed transcript; the receiver's 32-byte
+acknowledgement proves it holds the roster link secret. Garbage, a non-roster
+or wrong-slot key, a response replayed from an earlier challenge and a stalled
+peer are dropped and the listener re-accepts until the public start deadline;
+none consumes the link. Handshake reads/writes are bounded at 3 s (a LAN round
+trip must fit). Native signatures are classical Ed25519.
+
+The receiver retains the signed transcript (`enrollment-*.signed`, admission
+evidence) and writes `enrolled-link` into its record directory before adopting
+any record. Network-fed workers (`registrar`, `relay`, `mailbox`, `scan`) take
+`--roster` and consume an input directory only if its marker names the exact
+upstream link (phase, slot) and the roster's sender key: an operator directory
+list cannot relabel slots. Senders take `--native-key SEED` (a `mini keygen`
+seed); receivers take `--link-secret/--link-public` (a `mini mix --action key`
+pair, checked by a real encapsulation and against the roster). Outer wires are
+sealed under the connection's key and never persisted; a resumed link re-enrolls
+and reseals its durable inner inventory. Profile pins carry codec `MCE2`: state
+from the pre-shared-key codec refuses to resume.
 This is neither a full private evaluator nor a formal active/lifetime anonymity
 proof. See `PQ-MAILBOX.md` for the restricted shuffle/exact-set construction.
 
-`mini mix-live` has `key`, `send`, `receive`, `cover`, `registrar`, `relay`,
+`mini mix-live` has `send`, `receive`, `cover`, `registrar`, `relay`,
 `mailbox`, and `scan` actions. Common public arguments are `--generation HEX16`,
 `--slot`, `--phase`, `--width`, `--payload-bytes`, `--origin-ms`, `--tick-ms`,
-`--first-epoch`, `--epochs`, `--state`, `--records`, and `--key`.
+`--first-epoch`, `--epochs`, `--state` and `--records`; links add `--roster`.
 Phases0..5 mean client contribution, registrar batch0, relay0/1/2 output, and
 whole broadcast. The bounded public lifetime is1..4096 epochs. Explicit
 `--resume-epoch` starts a future slot inside the original pinned lifetime;
@@ -78,9 +112,10 @@ required. Source-visible Pending is leakage only where explicitly declared.
 
 ## Incremental emission repair
 
-Sender now loads durable encrypted fallback inventory before the public lifetime;
+Sender seals its fallback inventory in memory before the public lifetime (since
+MCE2 the outer wires are never persisted; the inner cover is the durable inventory);
 client fallbacks are valid registered cover contributions, later stages use padded
-physical unavailable records. A separate worker persists exact ready wires. The
+physical unavailable records. A separate worker prepares exact ready wires. The
 clocked network loop only reads in-memory buffers and writes the socket; no fsync,
 native execution, packet sealing or private producer runs on that loop. Lifetime
 inventory is publicly bounded64MiB (ready buffers may temporarily add a matching

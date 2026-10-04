@@ -45,9 +45,10 @@ corruption, a malicious intended recipient's own observations.
 - Each packet has four onion layers (three relays + receiver), each ML-KEM-768
   + XChaCha20-Poly1305, +1,160 bytes per layer. Pure ML-KEM, **no classical
   hybrid**.
-- Link admission: see "Enrollment" below.
-- **Not post-quantum end to end.** Native Mini authority (call signatures)
-  is classical **Ed25519**. Calling the stack
+- Link admission: each fixed link opens only for the roster's member or
+  operator, by a signed challenge-bound enrollment (see "Enrollment" below).
+- **Not post-quantum end to end.** Native Mini authority (call signatures,
+  enrollment signatures) is classical **Ed25519**. Calling the stack
   post-quantum secure would be false.
 
 ## Cost (exact codec arithmetic, not provider bills)
@@ -110,12 +111,18 @@ With the registrar's help it can do anything: the registrar is the trust anchor.
 
 ## Enrollment
 
-**Today:** each fixed link is authenticated by a 32-byte pre-shared key that
-whoever runs the cohort writes to both ends, and the registrar learns which
-link is which member's slot from an operator-supplied list of directories.
-Nothing binds a slot to a member's own key. This is the "CSV path" adapter;
-authenticated enrollment under each member's native key is the required
-replacement and is the next change to this profile.
+The cohort is a public roster: for each member slot and each operator role, a
+native Ed25519 key and an ML-KEM-768 link key. A link opens only when the sender
+signs, with the roster's key for that exact slot, a transcript bound to a fresh
+receiver challenge, the profile and the roster's digest, and both ML-KEM
+encapsulations (to the receiver's roster key and to a per-connection ephemeral
+key) succeed. Unauthenticated, wrong-key and replayed attempts are dropped and
+the receiver keeps waiting for the real member. The registrar retains each
+member's signed enrollment as admission evidence. No operator-chosen shared
+secret is involved.
+
+Still the registrar's (and the roster author's) to get right: who is on the
+roster. The roster is public by design (P1 makes membership public).
 
 ## Evidence
 
