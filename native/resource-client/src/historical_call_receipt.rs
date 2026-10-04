@@ -5,29 +5,10 @@
 
 use super::*;
 use sha2::{Digest, Sha256};
-use std::io::Read;
 
 const MAX_CALL: usize = transport::HOST_MAX_FRAME - 1;
 const MAX_CONFIG: usize = 65_536;
 const MAX_OUTCOME: usize = 65_536;
-
-fn bounded(path: &Path, maximum: usize) -> Result<Vec<u8>> {
-    let metadata =
-        fs::symlink_metadata(path).map_err(|error| format!("{}: {error}", path.display()))?;
-    if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.len() > maximum as u64 {
-        return Err(format!("{} must be a bounded regular file", path.display()));
-    }
-    let mut bytes = Vec::new();
-    File::open(path)
-        .map_err(|error| format!("{}: {error}", path.display()))?
-        .take((maximum + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|error| format!("{}: {error}", path.display()))?;
-    if bytes.len() != metadata.len() as usize || bytes.len() > maximum {
-        return Err(format!("{} changed during bounded read", path.display()));
-    }
-    Ok(bytes)
-}
 
 
 fn exact_receipt(value: &Value, expected: [&str; 4]) -> Result<()> {
@@ -71,7 +52,7 @@ fn inspect_direct(host: &Path, config: &Path, input: &Path, output: &Path) -> Re
             "pinned Host refused exact call outcome inspection: {status}"
         ));
     }
-    serde_json::from_slice(&bounded(output, MAX_OUTCOME)?)
+    serde_json::from_slice(&crate::fsio::read_bounded(output, MAX_OUTCOME)?)
         .map_err(|error| format!("historical call Host outcome JSON: {error}"))
 }
 
@@ -110,10 +91,10 @@ pub(super) fn lookup_verified(
     {
         return Err("historical call receipt destination or expected fields are invalid".into());
     }
-    let call = bounded(call_path, MAX_CALL)?;
-    let config_bytes = bounded(config, MAX_CONFIG)?;
+    let call = crate::fsio::read_bounded(call_path, MAX_CALL)?;
+    let config_bytes = crate::fsio::read_bounded(config, MAX_CONFIG)?;
     let host_sha = host_image_sha256(host)?;
-    drain::private_dir(directory)?;
+    crate::fsio::ensure_private_dir_durable(directory)?;
     create_private(&directory.join("call.bin"), &call)?;
     let marker = json!({"type":"minidregg-recipient-historical-call-lookup-v1",
         "host":utf8_path(host)?,"hostSha256":host_sha,
@@ -131,8 +112,8 @@ pub(super) fn lookup_verified(
     create_private(&directory.join("reply.frame"), &frame)?;
     sync_directory_ancestors(directory)?;
     if host_image_sha256(host)? != host_sha
-        || bounded(config, MAX_CONFIG)? != config_bytes
-        || bounded(&directory.join("call.bin"), MAX_CALL)? != call
+        || crate::fsio::read_bounded(config, MAX_CONFIG)? != config_bytes
+        || crate::fsio::read_bounded(&directory.join("call.bin"), MAX_CALL)? != call
     {
         return Err("historical call Host, config or exact call changed after op3".into());
     }
@@ -147,12 +128,12 @@ pub(super) fn lookup_verified(
     sync_directory_ancestors(directory)?;
     let json_path = directory.join("outcome.json");
     let outcome = inspect_direct(host, config, &binary, &json_path)?;
-    let retained: Value = serde_json::from_slice(&bounded(&json_path, MAX_OUTCOME)?)
+    let retained: Value = serde_json::from_slice(&crate::fsio::read_bounded(&json_path, MAX_OUTCOME)?)
         .map_err(|error| format!("historical call retained JSON: {error}"))?;
     if retained != outcome
         || host_image_sha256(host)? != host_sha
-        || bounded(config, MAX_CONFIG)? != config_bytes
-        || bounded(&directory.join("call.bin"), MAX_CALL)? != call
+        || crate::fsio::read_bounded(config, MAX_CONFIG)? != config_bytes
+        || crate::fsio::read_bounded(&directory.join("call.bin"), MAX_CALL)? != call
     {
         return Err("historical call Host, config, input or inspection changed".into());
     }

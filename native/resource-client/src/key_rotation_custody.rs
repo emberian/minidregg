@@ -81,7 +81,7 @@ mod tests {
         let p = std::env::temp_dir().join(format!(
             "mini-rotation-custody-{}-{}",
             std::process::id(),
-            crate::hex(&super::super::random_seed().unwrap())
+            crate::hex(&crate::fsio::random::<32>().unwrap())
         ));
         directory(&p).unwrap();
         p

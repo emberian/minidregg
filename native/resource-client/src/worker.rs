@@ -9,7 +9,6 @@ use rustls::{
 };
 use sha2::{Digest, Sha256};
 use std::net::{SocketAddr, TcpStream};
-use std::os::unix::fs::MetadataExt;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -130,7 +129,7 @@ pub(super) enum FnPostOutcome {
 pub(super) fn post_config(path: &Path) -> Result<FnPostConfig> {
     let meta = fs::symlink_metadata(path)
         .map_err(|error| format!("cannot inspect fn post config: {error}"))?;
-    if !meta.is_file() || meta.uid() != unsafe { geteuid() } || meta.mode() & 0o077 != 0 {
+    if !mini_sdk::private::file_ok(&meta) {
         return Err("fn post config must be an owner-private regular file".into());
     }
     let bytes = fs::read(path).map_err(|error| format!("cannot read fn post config: {error}"))?;
@@ -188,7 +187,7 @@ fn property<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
 fn wake_config(path: &Path, host_config: &Path, route: ConsumerRoute) -> Result<WakeConfig> {
     let meta =
         fs::symlink_metadata(path).map_err(|e| format!("cannot inspect wake config: {e}"))?;
-    if !meta.is_file() || meta.uid() != unsafe { geteuid() } || meta.mode() & 0o077 != 0 {
+    if !mini_sdk::private::file_ok(&meta) {
         return Err("wake config must be an owner-private regular file".into());
     }
     let bytes = fs::read(path).map_err(|e| format!("cannot read wake config: {e}"))?;
@@ -288,14 +287,11 @@ fn wake_config(path: &Path, host_config: &Path, route: ConsumerRoute) -> Result<
     })
 }
 
-unsafe extern "C" {
-    fn geteuid() -> u32;
-}
 
 fn read_password(path: &Path) -> Result<Vec<u8>> {
     let meta =
         fs::symlink_metadata(path).map_err(|e| format!("cannot inspect NNTP password: {e}"))?;
-    if !meta.is_file() || meta.uid() != unsafe { geteuid() } || meta.mode() & 0o077 != 0 {
+    if !mini_sdk::private::file_ok(&meta) {
         return Err("NNTP password must be an owner-private regular file".into());
     }
     let mut bytes = fs::read(path).map_err(|e| format!("cannot read NNTP password: {e}"))?;
@@ -731,8 +727,8 @@ fn run_route(
 ) -> Result<()> {
     QUIET_WORKER.store(true, std::sync::atomic::Ordering::Relaxed);
     let cfg = wake_config(worker_config, config, route)?;
-    drain::private_dir(state_dir)?;
-    drain::private_dir(socket.parent().ok_or("socket lacks parent")?)?;
+    crate::fsio::ensure_private_dir_durable(state_dir)?;
+    crate::fsio::ensure_private_dir_durable(socket.parent().ok_or("socket lacks parent")?)?;
     let _global = transport::service_lock(
         &socket
             .parent()
@@ -802,7 +798,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        drain::private_dir(&root).unwrap();
+        crate::fsio::ensure_private_dir_durable(&root).unwrap();
         let cert = root.join("cert.pem");
         let password = root.join("password");
         let scope = root.join("scope.json");

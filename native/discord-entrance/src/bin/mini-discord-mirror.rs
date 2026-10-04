@@ -246,7 +246,7 @@ impl Mirror {
 
     /// Bounded signed source pages; advance only entries actually examined/published.
     fn up(&self,state:&mut State)->Result<usize,String>{
-        let requests=self.session.home.join("requests");custody::private_dir(&requests)?;
+        let requests=self.session.home.join("requests");mini_sdk::private::ensure_dir(&requests)?;
         let file=format!("mirror-{}-discovery.json",self.room);
         custody::atomic_json(&requests.join(&file),&json!({"type":"mini-resident-discovery-v1","cursors":state.cursors,"retained":[]}))?;
         let line=format!("tail --in {} --json -n {} --discover {}",self.room,BATCH,requests.join(&file).display());
@@ -293,7 +293,7 @@ impl Mirror {
     /// Scan backwards from a fixed head to the old watermark, retaining bounded
     /// pages. Drain oldest first. This does not assume `after` selects oldest N.
     fn down(&self,state:&mut State)->Result<usize,String>{
-        custody::private_dir(&self.custody_root())?;
+        mini_sdk::private::ensure_dir(&self.custody_root())?;
         if state.scan.is_null(){state.scan=json!({"phase":"scan","pages":0,"before":null,"boundary":state.message,"offset":0});save_state(&self.state,state)?;}
         if state.scan["phase"]=="scan" {
             let page=self.broker.call(&json!({"op":"discord-read","before":state.scan["before"],"limit":50}),Duration::from_secs(40)).map_err(|r|format!("channel read: {r}"))?;
@@ -327,7 +327,7 @@ impl Mirror {
         let mut said=0;
         for (i,(id,author,name,text)) in todo.iter().enumerate().skip(offset).take(BATCH){
             if !author.is_empty() && !text.trim().is_empty(){
-                let dir=self.session.home.join("requests");custody::private_dir(&dir)?;
+                let dir=self.session.home.join("requests");mini_sdk::private::ensure_dir(&dir)?;
                 let file=format!("discord-{id}.txt");
                 // Keep the exact first observed source bytes, not a later message edit.
                 let path=dir.join(&file);
@@ -387,7 +387,7 @@ fn main() {
 
     let interval = env_u64("MINI_MIRROR_INTERVAL_S", 30).unwrap_or_else(|e| fail(e)).max(5);
     let state_dir = home.join("mirror");
-    if let Err(e) = custody::private_dir(&state_dir) {
+    if let Err(e) = mini_sdk::private::ensure_dir(&state_dir) {
         fail(format!("{}: {e}", state_dir.display()));
     }
     let mirror = Mirror {
@@ -554,8 +554,8 @@ mod tests {
     /// secrets for the fake Discord at `api`.
     fn test_broker(home:&Path, api:&str)->(Broker,String) {
         use std::os::unix::fs::PermissionsExt;
-        let keys=home.join("keys");custody::private_dir(&keys).unwrap();
-        for sub in ["run","state"] {custody::private_dir(&keys.join(sub)).unwrap();}
+        let keys=home.join("keys");mini_sdk::private::ensure_dir(&keys).unwrap();
+        for sub in ["run","state"] {mini_sdk::private::ensure_dir(&keys.join(sub)).unwrap();}
         let channel=format!("{api}/channel");
         let secrets=keys.join("discord-mirror.json");
         std::fs::write(&secrets,json!({"type":"mini-discord-mirror-secrets-v1","webhookUrl":format!("{api}/webhook"),"channelUrl":channel,"botToken":"fake.token"}).to_string()).unwrap();
@@ -577,7 +577,7 @@ mod tests {
         let _=std::fs::remove_dir_all(&home);std::fs::create_dir_all(&home).unwrap();
         std::fs::set_permissions(&home,std::fs::Permissions::from_mode(0o700)).unwrap();
         let home=home.canonicalize().unwrap();
-        for sub in ["workspace","requests","mirror"] {custody::private_dir(&home.join(sub)).unwrap();}
+        for sub in ["workspace","requests","mirror"] {mini_sdk::private::ensure_dir(&home.join(sub)).unwrap();}
         std::fs::write(home.join("workspace/workspace.json"),r#"{"subject":"9"}"#).unwrap();
         let wrapper=home.join("wrapper");
         std::fs::write(&wrapper,"#!/bin/sh\ncase \"$SSH_ORIGINAL_COMMAND\" in\n tail*) cat \"$6/feed.json\" ;;\n *) printf '%s\\n' \"$SSH_ORIGINAL_COMMAND\" >> \"$6/says.log\" ;;\nesac\n").unwrap();

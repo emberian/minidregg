@@ -476,12 +476,6 @@ pub(crate) fn fill_bodies(lean: &Lean, pid: u8, secret: &[u8; 32], domain: u16, 
     Ok(out)
 }
 
-pub(crate) fn urandom(out: &mut [u8]) -> Result<()> {
-    File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(out))
-        .map_err(|e| format!("cannot read /dev/urandom: {e}"))
-}
-
 /// A 32-byte secret held in a private file, created on first use.
 pub(crate) fn secret_file(path: &Path) -> Result<[u8; 32]> {
     use mini_sdk::secret::{read_seed, Custody, SecretErrorKind};
@@ -490,7 +484,7 @@ pub(crate) fn secret_file(path: &Path) -> Result<[u8; 32]> {
             Ok(seed) => return Ok(*seed),
             Err(e) if matches!(&e.kind, SecretErrorKind::Unreadable(io) if io.kind() == io::ErrorKind::NotFound) => {
                 let mut s = zeroize::Zeroizing::new([0u8; 32]);
-                urandom(&mut *s)?;
+                crate::fsio::random_fill(&mut *s)?;
                 // Absent or complete at its final name; a concurrent creator wins and is re-read.
                 match mini_sdk::durable::create_new(path, &*s, mini_sdk::durable::Perm::Private) {
                     Ok(()) => return Ok(*s),
@@ -616,7 +610,7 @@ fn handshake(conn: &mut Conn, dom: &Domain) -> Result<(u32, u64)> {
     let subject = u64::from_be_bytes(hello[8..16].try_into().unwrap());
     let key: [u8; 32] = hello[16..48].try_into().unwrap();
     let mut nonce = [0u8; 32];
-    urandom(&mut nonce)?;
+    crate::fsio::random_fill(&mut nonce)?;
     conn.write_all(&nonce).map_err(|e| format!("challenge: {e}"))?;
     let mut sig = [0u8; 64];
     conn.read_exact(&mut sig).map_err(|e| format!("auth: {e}"))?;
@@ -1227,7 +1221,7 @@ pub(crate) fn run_emit(mut args: Args) -> Result<()> {
         if !done {
             let header = lean.header(domain, head.epoch, head.tick, slot);
             let mut body = vec![0u8; c - 8];
-            urandom(&mut body)?;
+            crate::fsio::random_fill(&mut body)?;
             let cell = lean.cell_encode(pid, &header, &body);
             if cell.len() != c {
                 return Err(format!("cell_encode refused ({} bytes)", cell.len()));

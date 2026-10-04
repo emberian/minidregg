@@ -29,7 +29,6 @@ use super::{hex, Args, Result};
 use serde_json::{json, Value};
 use std::ffi::OsString;
 use std::io::Read;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -127,7 +126,7 @@ fn owner_status(mut args: Args) -> Result<()> {
 /// or root owns, writable by no other account).
 fn broker(path: &Option<PathBuf>) -> Result<Broker> {
     let path = path.clone().unwrap_or_else(|| PathBuf::from(CLIENT_CONFIG));
-    Broker::load(&path, unsafe { libc::geteuid() }).map_err(String::from)
+    Broker::load(&path, mini_sdk::private::euid()).map_err(String::from)
 }
 
 pub(crate) fn run(mut args: Args) -> Result<()> {

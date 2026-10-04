@@ -44,7 +44,7 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::os::unix::fs::{OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use x25519_dalek::{PublicKey, StaticSecret};
@@ -79,10 +79,6 @@ fn room_dir(args: &mut Args) -> Result<(String, PathBuf)> {
     Ok((room.clone(), home.join(room)))
 }
 
-fn private_dir(p: &Path) -> Result<()> {
-    fs::DirBuilder::new().recursive(true).mode(0o700).create(p).map_err(|e| format!("{}: {e}", p.display()))
-}
-
 pub(crate) fn run(mut args: Args) -> Result<()> {
     let action = args.required("action").map_err(|_| USAGE.to_owned())?.to_string_lossy().into_owned();
     match action.as_str() {
@@ -98,7 +94,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 // ------------------------------------------------------------------ keys and roster
 
 fn xkey(dir: &Path) -> Result<StaticSecret> {
-    private_dir(dir)?;
+    crate::fsio::ensure_private_dir_all(dir)?;
     Ok(StaticSecret::from(relay::secret_file(&dir.join("xkey"))?))
 }
 
@@ -171,7 +167,7 @@ fn aad(header: &[u8], duty: &[u8], view_tag: u8, epk: &[u8]) -> Vec<u8> {
 
 fn random_secret() -> Result<StaticSecret> {
     let mut b = [0u8; 32];
-    relay::urandom(&mut b)?;
+    crate::fsio::random_fill(&mut b)?;
     Ok(StaticSecret::from(b))
 }
 
@@ -201,7 +197,7 @@ pub(crate) fn seal(lean: &Lean, pid: u8, c: usize, header: &[u8], shape: Shape, 
     }
     // the duty part (VRF proof, verdict root, accumulator) is CH-DUTY's; until then, random bytes
     let mut duty = vec![0u8; shape.duty];
-    relay::urandom(&mut duty)?;
+    crate::fsio::random_fill(&mut duty)?;
     let esk = random_secret()?;
     let epk = PublicKey::from(&esk);
     let rpk = match to {
@@ -368,10 +364,10 @@ fn join(mut args: Args) -> Result<()> {
         other => return Err(format!("--class {other}: this client speaks P1 and P1phone")),
     };
 
-    private_dir(&dir)?;
-    private_dir(&dir.join("outbox"))?;
-    private_dir(&dir.join("outbox/taken"))?;
-    private_dir(&dir.join("outbox/refused"))?;
+    crate::fsio::ensure_private_dir_all(&dir)?;
+    crate::fsio::ensure_private_dir_all(&dir.join("outbox"))?;
+    crate::fsio::ensure_private_dir_all(&dir.join("outbox/taken"))?;
+    crate::fsio::ensure_private_dir_all(&dir.join("outbox/refused"))?;
     let me_sk = xkey(&dir)?;
     let me_pk = *PublicKey::from(&me_sk).as_bytes();
     let sk = SigningKey::from_bytes(&relay::secret_file(&key_file)?);
@@ -583,9 +579,9 @@ fn join(mut args: Args) -> Result<()> {
                 }
                 None => {
                     let mut fill = vec![0u8; shape.cap];
-                    relay::urandom(&mut fill)?;
+                    crate::fsio::random_fill(&mut fill)?;
                     let mut f = [0u8; 4];
-                    relay::urandom(&mut f)?;
+                    crate::fsio::random_fill(&mut f)?;
                     cn.pad_cells += 1;
                     kind = "pad";
                     (seal(&lean, pid, c, &header, shape, None, f, &fill)?, None)
@@ -765,7 +761,7 @@ fn say(mut args: Args) -> Result<()> {
     }
     let now = unix_ms();
     let mut r = [0u8; 4];
-    relay::urandom(&mut r)?;
+    crate::fsio::random_fill(&mut r)?;
     let id = format!("{now:013}-{}-{}", std::process::id(), crate::hex(&r));
     let ob = dir.join("outbox");
     crate::create_private(&ob.join(format!("{id}.json")), format!("{}\n", json!({"to": to, "text": text, "queued_unix_ms": now})).as_bytes())

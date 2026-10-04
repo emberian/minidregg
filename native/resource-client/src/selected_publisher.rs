@@ -3,20 +3,6 @@
 //! This client retains those bytes and moves them across the protected fn POST.
 use super::*;
 use sha2::{Digest, Sha256};
-use std::os::unix::fs::DirBuilderExt;
-
-fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    File::open(path)
-        .map_err(|e| format!("cannot open {}: {e}", path.display()))?
-        .take((limit + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    if bytes.is_empty() || bytes.len() > limit {
-        return Err(format!("{} must contain 1..={limit} bytes", path.display()));
-    }
-    Ok(bytes)
-}
 
 
 /// The only source-envelope signer. Host selects the current source page and
@@ -37,15 +23,12 @@ pub(super) fn sign_source(
     {
         return Err("source delegate capability must be canonical decimal".into());
     }
-    let packet = bounded(packet_path, 1_048_576)?;
+    let packet = crate::fsio::read_bounded(packet_path, 1_048_576)?;
     let signing = crate::read_secret(key)?;
     let host = absolute(host)?;
     let config = absolute(config)?;
     let directory = absolute(directory)?;
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&directory)
-        .map_err(|e| format!("cannot create new selected source signing directory: {e}"))?;
+    crate::fsio::create_private_dir(&directory)?;
     sync_directory_ancestors(&directory)?;
     let packet_file = directory.join("packet.bin");
     create_private(&packet_file, &packet)?;
@@ -64,7 +47,7 @@ pub(super) fn sign_source(
             root.as_os_str(),
         ],
     )?;
-    let header_bytes = bounded(&header, 65_536)?;
+    let header_bytes = crate::fsio::read_bounded(&header, 65_536)?;
     let signature = directory.join("signature.bin");
     create_private(&signature, &signing.sign(&header_bytes).to_bytes())?;
     sync_directory_ancestors(&directory)?;
@@ -80,8 +63,8 @@ pub(super) fn sign_source(
             ingress.as_os_str(),
         ],
     )?;
-    let ingress_bytes = bounded(&ingress, transport::HOST_MAX_FRAME - 1)?;
-    let config_bytes = bounded(&config, 65_536)?;
+    let ingress_bytes = crate::fsio::read_bounded(&ingress, transport::HOST_MAX_FRAME - 1)?;
+    let config_bytes = crate::fsio::read_bounded(&config, 65_536)?;
     durable_json(
         &directory.join("pin.json"),
         &json!({"type":"minidregg-selected-source-sign-v1",
@@ -98,7 +81,7 @@ fn digest(bytes: &[u8]) -> String {
 }
 
 fn read_json(path: &Path) -> Result<Value> {
-    serde_json::from_slice(&bounded(path, 65_536)?).map_err(|e| format!("{}: {e}", path.display()))
+    serde_json::from_slice(&crate::fsio::read_bounded(path, 65_536)?).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 fn durable_json(path: &Path, value: &Value) -> Result<()> {
@@ -186,7 +169,7 @@ fn source_receipt(host: &Path, config: &Path, state: &Path) -> Result<Value> {
     let ingress = state.join("ingress.bin");
     let submitted = state.join("source-submit.bin");
     let marker = state.join("source-submit-attempt.json");
-    let ingress_hash = digest(&bounded(&ingress, transport::HOST_MAX_FRAME - 1)?);
+    let ingress_hash = digest(&crate::fsio::read_bounded(&ingress, transport::HOST_MAX_FRAME - 1)?);
     if marker.exists() {
         let marker_value = read_json(&marker)?;
         if marker_value.get("type").and_then(Value::as_str)
@@ -291,7 +274,7 @@ fn verify_source_lookup(
     submitted_receipt: &Value,
 ) -> Result<()> {
     let ingress = state.join("ingress.bin");
-    let expected_hash = digest(&bounded(&ingress, transport::HOST_MAX_FRAME - 1)?);
+    let expected_hash = digest(&crate::fsio::read_bounded(&ingress, transport::HOST_MAX_FRAME - 1)?);
     for index in 0..1000 {
         let marker = state.join(format!("source-proof-lookup-{index:03}.attempt.json"));
         let binary = state.join(format!("source-proof-lookup-{index:03}.bin"));
@@ -413,15 +396,15 @@ pub(super) fn publish(
     if SOCKET.get().is_some() {
         return Err("selected publisher requires pinned direct source Host commands".into());
     }
-    drain::private_dir(state)?;
+    crate::fsio::ensure_private_dir_durable(state)?;
     let _owner = transport::service_lock(&state.join("selected-publisher.lock"))?;
     let host = absolute(host)?;
     let config = absolute(config)?;
     let post = worker::post_config(post_config_path)?;
-    let config_bytes = bounded(&config, 65_536)?;
-    let post_bytes = bounded(post_config_path, 16_384)?;
-    let ingress = bounded(ingress_path, transport::HOST_MAX_FRAME - 1)?;
-    let article = bounded(article_path, 1_500_000)?;
+    let config_bytes = crate::fsio::read_bounded(&config, 65_536)?;
+    let post_bytes = crate::fsio::read_bounded(post_config_path, 16_384)?;
+    let ingress = crate::fsio::read_bounded(ingress_path, transport::HOST_MAX_FRAME - 1)?;
+    let article = crate::fsio::read_bounded(article_path, 1_500_000)?;
     let pin = json!({"type":"minidregg-selected-publisher-pin-v1",
         "host":utf8_path(&host)?,"hostSha256":host_image_sha256(&host)?,
         "configPath":utf8_path(&config)?,"configSha256":digest(&config_bytes),

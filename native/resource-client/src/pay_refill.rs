@@ -7,7 +7,6 @@
 use crate::agent_reserve::bounded;
 use crate::*;
 use serde_json::{json, Value};
-use std::os::unix::fs::DirBuilderExt;
 
 const LIMIT: usize = transport::HOST_MAX_FRAME - 1;
 
@@ -67,14 +66,6 @@ fn canonical(value: OsString, name: &str) -> Result<String> {
     Ok(value)
 }
 
-fn nonce() -> Result<String> {
-    let mut bytes = [0u8; 16];
-    File::open("/dev/urandom")
-        .and_then(|mut file| file.read_exact(&mut bytes))
-        .map_err(|error| format!("cannot obtain refill nonce: {error}"))?;
-    Ok(u128::from_be_bytes(bytes).to_string())
-}
-
 struct Context {
     host: PathBuf,
     config: PathBuf,
@@ -104,10 +95,7 @@ fn submit(mut args: Args) -> Result<()> {
     };
     args.finish()?;
     let socket = SOCKET.get().ok_or("pay refill requires --socket")?.clone();
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&dir)
-        .map_err(|error| format!("pay refill --dir must be new ({}): {error}", dir.display()))?;
+    crate::fsio::create_private_dir(&dir)?;
     let ctx = Context { host, config, socket, dir };
     let signing = crate::fsio::read_secret_in_private_dir(&key_path)?;
 
@@ -118,7 +106,7 @@ fn submit(mut args: Args) -> Result<()> {
         .and_then(Value::as_str)
         .ok_or("pay view lacks authorityRoot")?;
     let command = json!({"subject":subject,"capability":capability,"account":account,
-        "task":task,"amount":amount,"gain":gain,"nonce":nonce()?,
+        "task":task,"amount":amount,"gain":gain,"nonce":crate::fsio::random_nonce()?,
         "expectedAuthorityRoot":authority_root});
     let command_bytes = invoke(&ctx, "command", 7, &kinded("pay-refill", command.to_string().as_bytes())?)?;
     retain(&ctx.dir, "command.bin", &command_bytes)?;
@@ -147,7 +135,7 @@ fn lookup(mut args: Args) -> Result<()> {
     args.finish()?;
     let socket = SOCKET.get().ok_or("pay refill requires --socket")?.clone();
     let ingress = bounded(&dir.join("ingress.bin"), LIMIT)?;
-    let stem = format!("lookup-{}", nonce()?);
+    let stem = format!("lookup-{}", crate::fsio::random_nonce()?);
     let ctx = Context { host, config, socket, dir };
     let result = invoke(&ctx, &stem, 116, &ingress)?;
     outcome(&ctx, &stem, &result)

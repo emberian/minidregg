@@ -1,7 +1,7 @@
 //! Durable physical request custody. These states are never Mini admission
 //! verdicts. Only the original native exchange can supply a native reply.
 use super::{
-    directory, outcome, persist, read_private, Admission, Journal, MAX_ENVELOPE, UNCERTAIN,
+    outcome, persist, read_private, Admission, Journal, MAX_ENVELOPE, UNCERTAIN,
 };
 use crate::{transport, Result};
 use sha2::{Digest, Sha256};
@@ -61,7 +61,7 @@ impl AsyncDispatch {
         {
             return Err("invalid public asynchronous custody capacity".into());
         }
-        directory(root)?;
+        crate::fsio::ensure_private_dir_all(root)?;
         let lease = Arc::new(transport::service_lock(&root.join("async-service.lock"))?);
         // A restart cannot silently redirect an existing obligation to a different
         // native service, deployment config, or reply capacity.
@@ -318,9 +318,9 @@ mod tests {
     fn scratch() -> PathBuf {
         let p = std::env::temp_dir().join(format!(
             "mini-async-{}",
-            crate::hex(&super::super::random::<16>().unwrap())
+            crate::hex(&crate::fsio::random::<16>().unwrap())
         ));
-        directory(&p).unwrap();
+        crate::fsio::ensure_private_dir_all(&p).unwrap();
         p
     }
     fn body() -> Vec<u8> {

@@ -4,8 +4,6 @@
 //! Mini reservation and durable gateway attempt.
 
 use serde_json::Value;
-use std::fs::File;
-use std::io::Read;
 use std::path::Path;
 
 use super::{
@@ -16,19 +14,6 @@ use super::{
 const MAX_METADATA: usize = 4096;
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: usize = 8_388_608;
-
-fn bounded_file(path: &Path, maximum: usize, label: &str) -> Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    File::open(path)
-        .map_err(|error| format!("cannot open {label} {}: {error}", path.display()))?
-        .take((maximum + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|error| format!("cannot read {label} {}: {error}", path.display()))?;
-    if bytes.is_empty() || bytes.len() > maximum {
-        return Err(format!("{label} is empty or exceeds its byte bound"));
-    }
-    Ok(bytes)
-}
 
 fn canonical_decimal(value: &Value, name: &str) -> Result<()> {
     let text = value
@@ -159,10 +144,10 @@ pub(crate) fn meter(
     }
     // Read each input once. The bytes submitted to Lean are precisely those
     // copied into the private attempt, even if an input pathname later changes.
-    let metadata_bytes = bounded_file(metadata, MAX_METADATA, "provider metadata")?;
+    let metadata_bytes = crate::fsio::read_bounded(metadata, MAX_METADATA)?;
     let expected_provider = selected_provider(&metadata_bytes)?;
-    let request_bytes = bounded_file(request, MAX_REQUEST, "provider request")?;
-    let response_bytes = bounded_file(response, MAX_RESPONSE, "provider response")?;
+    let request_bytes = crate::fsio::read_bounded(request, MAX_REQUEST)?;
+    let response_bytes = crate::fsio::read_bounded(response, MAX_RESPONSE)?;
     let total = 1usize
         .checked_add(8)
         .and_then(|value| value.checked_add(metadata_bytes.len()))

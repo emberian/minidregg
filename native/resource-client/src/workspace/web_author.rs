@@ -57,10 +57,7 @@ pub(crate) fn open(root: &Path, workspace: &Value, name: &str) -> Result<Edit> {
         make_private_dir(&parent)?;
     }
     private_dir(&parent)?;
-    let mut token = [0u8; 16];
-    File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut token))
-        .map_err(|e| e.to_string())?;
+    let token = crate::fsio::random::<16>()?;
     let id = hex(&token);
     let dir = directory(root, &id)?;
     make_private_dir(&dir)?;

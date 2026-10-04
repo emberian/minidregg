@@ -975,12 +975,7 @@ fn selected_release_sign(
             .map_err(|e| format!("clock before Unix epoch: {e}"))?
             .as_nanos()
     ));
-    let mut builder = fs::DirBuilder::new();
-    use std::os::unix::fs::DirBuilderExt;
-    builder.mode(0o700);
-    builder
-        .create(&temporary)
-        .map_err(|e| format!("cannot create private source check directory: {e}"))?;
+    fsio::create_private_dir(&temporary)?;
     let result = (|| {
         let canonical_path = temporary.join("canonical.bin");
         process(
@@ -1068,10 +1063,7 @@ fn generate_key(
             }
         }
     }
-    let mut seed = [0u8; 32];
-    File::open("/dev/urandom")
-        .and_then(|mut source| source.read_exact(&mut seed))
-        .map_err(|error| format!("cannot obtain operating-system randomness: {error}"))?;
+    let mut seed = fsio::random::<32>()?;
     let signing = SigningKey::from_bytes(&seed);
     let escrowed = match &escrow {
         None => None,
@@ -1113,10 +1105,7 @@ fn generate_key(
     match &next_paths {
         None => eprintln!("no next key (--no-prerotation): this identity can never rotate; a stolen key is replaced only by enrolling a new subject"),
         Some((next_secret, next_public)) => {
-            let mut next_seed = [0u8; 32];
-            File::open("/dev/urandom")
-                .and_then(|mut source| source.read_exact(&mut next_seed))
-                .map_err(|error| format!("cannot obtain operating-system randomness: {error}"))?;
+            let mut next_seed = fsio::random::<32>()?;
             let next_signing = SigningKey::from_bytes(&next_seed);
             create_private(next_secret, &next_seed)?;
             next_seed.fill(0);
@@ -1194,20 +1183,7 @@ fn socket_process(
     let read = |index: usize| -> Result<Vec<u8>> {
         let path = arguments.get(index).ok_or("missing host input path")?;
         let path = Path::new(path);
-        let mut file = File::open(path)
-            .map_err(|e| format!("cannot read host input {}: {e}", path.display()))?;
-        let mut bytes = Vec::new();
-        Read::by_ref(&mut file)
-            .take((transport::HOST_MAX_FRAME + 1) as u64)
-            .read_to_end(&mut bytes)
-            .map_err(|e| format!("cannot read host input {}: {e}", path.display()))?;
-        if bytes.len() > transport::HOST_MAX_FRAME {
-            return Err(format!(
-                "host input {} exceeds session frame bound",
-                path.display()
-            ));
-        }
-        Ok(bytes)
+        fsio::read_bounded_or_empty(path, transport::HOST_MAX_FRAME)
     };
     let pair = |first: Vec<u8>, second: Vec<u8>| -> Result<Vec<u8>> {
         let length: u32 = first.len().try_into().map_err(|_| "host input too large")?;
@@ -1350,10 +1326,7 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
 /// authenticates only that Store's checkpoints and log tags. It is never
 /// printed, copied into another artifact, or committed.
 fn checkpoint_key(path: &Path) -> Result<()> {
-    let mut key = [0u8; 32];
-    File::open("/dev/urandom")
-        .and_then(|mut source| source.read_exact(&mut key))
-        .map_err(|error| format!("cannot obtain operating-system randomness: {error}"))?;
+    let mut key = fsio::random::<32>()?;
     let result = create_private(path, &key);
     key.fill(0);
     result
@@ -1516,15 +1489,7 @@ fn inspect_public(
             .map_err(|error| format!("clock before Unix epoch: {error}"))?
             .as_nanos()
     ));
-    let mut builder = fs::DirBuilder::new();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        builder.mode(0o700);
-    }
-    builder
-        .create(&temporary)
-        .map_err(|error| format!("cannot create private inspection directory: {error}"))?;
+    fsio::create_private_dir(&temporary)?;
     let result = (|| {
         let temporary_output = temporary.join("result.json");
         process(
@@ -1693,14 +1658,7 @@ fn write_manifest(directory: &Path, host: &Path, config: &Path, operation: &str)
 /// Select a private SSH transport credential without changing shared ssh config.
 fn pin_ssh_identity(path: &Path) -> Result<()> {
     let path = absolute(path)?;
-    let metadata = fs::symlink_metadata(&path).map_err(|e| format!("SSH identity: {e}"))?;
-    if !metadata.is_file() { return Err("SSH identity must be a regular file".into()); }
-    #[cfg(unix)] {
-        use std::os::unix::fs::PermissionsExt;
-        if metadata.permissions().mode() & 0o077 != 0 {
-            return Err("SSH identity must not be accessible to group or others".into());
-        }
-    }
+    mini_sdk::private::check_file(&path).map_err(|e| format!("SSH identity: {e}"))?;
     match SSH_IDENTITY.get() {
         Some(existing) if existing != &path => Err("SSH identity differs from the retained transport credential".into()),
         Some(_) => Ok(()),
@@ -2624,16 +2582,7 @@ fn private_consumer_attempt(
     directory: &Path,
     operation: &str,
 ) -> Result<PathBuf> {
-    use std::os::unix::fs::DirBuilderExt;
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(directory)
-        .map_err(|e| {
-            format!(
-                "cannot create private consumer attempt {}: {e}",
-                directory.display()
-            )
-        })?;
+    crate::fsio::create_private_dir(directory)?;
     let retained_config = directory.join("config.json");
     copy_new(config, &retained_config)?;
     write_manifest(directory, host, &retained_config, operation)?;
@@ -2875,15 +2824,7 @@ fn origin_outbox_prepare(
     let socket = SOCKET
         .get()
         .ok_or("origin-outbox-prepare requires --socket")?;
-    let mut bytes = Vec::new();
-    File::open(carrier)
-        .map_err(|e| format!("cannot open R carrier {}: {e}", carrier.display()))?
-        .take((MAX_CARRIER + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|e| format!("cannot read R carrier {}: {e}", carrier.display()))?;
-    if bytes.is_empty() || bytes.len() > MAX_CARRIER {
-        return Err("R carrier must be 1..1516384 bytes".into());
-    }
+    let bytes = fsio::read_bounded(carrier, MAX_CARRIER)?;
     let retained_config =
         private_consumer_attempt(host, config, directory, "origin-outbox-prepare")?;
     create_private(&directory.join("carrier.bin"), &bytes)?;
@@ -3050,23 +2991,9 @@ fn continuity(
     directory: &Path,
 ) -> Result<()> {
     let socket = SOCKET.get().ok_or("continuity requires --socket")?;
-    let mut call_bytes = Vec::new();
-    File::open(call)
-        .map_err(|e| format!("cannot open original reserve call: {e}"))?
-        .take((transport::HOST_MAX_FRAME + 1) as u64)
-        .read_to_end(&mut call_bytes)
-        .map_err(|e| format!("cannot read original reserve call: {e}"))?;
-    let mut outcome_bytes = Vec::new();
-    File::open(outcome)
-        .map_err(|e| format!("cannot open original reserve outcome: {e}"))?
-        .take(1025)
-        .read_to_end(&mut outcome_bytes)
-        .map_err(|e| format!("cannot read original reserve outcome: {e}"))?;
-    if call_bytes.is_empty()
-        || outcome_bytes.is_empty()
-        || outcome_bytes.len() > 1024
-        || call_bytes.len() + outcome_bytes.len() + 5 > transport::HOST_MAX_FRAME
-    {
+    let call_bytes = fsio::read_bounded(call, transport::HOST_MAX_FRAME)?;
+    let outcome_bytes = fsio::read_bounded(outcome, 1024)?;
+    if call_bytes.len() + outcome_bytes.len() + 5 > transport::HOST_MAX_FRAME {
         return Err(
             "original reserve call/outcome exceeds provider continuity frame bounds".into(),
         );

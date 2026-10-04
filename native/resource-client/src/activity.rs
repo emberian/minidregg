@@ -92,14 +92,6 @@ fn pair(first: &[u8], second: &[u8]) -> Vec<u8> {
     bytes
 }
 
-fn nonce() -> Result<String> {
-    let mut bytes = [0u8; 16];
-    File::open("/dev/urandom")
-        .and_then(|mut file| file.read_exact(&mut bytes))
-        .map_err(|error| format!("activity: cannot obtain a nonce: {error}"))?;
-    Ok(u128::from_be_bytes(bytes).to_string())
-}
-
 fn view(ws: &Ws, request: &Value) -> Result<Value> {
     serde_json::from_slice(&invoke(ws, 214, request.to_string().as_bytes())?)
         .map_err(|error| format!("activity: invalid view: {error}"))
@@ -113,7 +105,7 @@ fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool) -> Result<Value
     fs::create_dir(out).map_err(|error| format!("activity: cannot create {}: {error}", out.display()))?;
     let current = view(ws, &json!({}))?;
     let authority = current.get("authorityRoot").and_then(Value::as_str).ok_or("activity: view lacks authorityRoot")?;
-    let command = json!({"subject": ws.subject, "nonce": nonce()?, "expectedAuthorityRoot": authority, "turn": turn});
+    let command = json!({"subject": ws.subject, "nonce": crate::fsio::random_nonce()?, "expectedAuthorityRoot": authority, "turn": turn});
     write_new(&out.join("command.json"), command.to_string().as_bytes())?;
     let command_bytes = author(ws, "objective-activity", &command)?;
     write_new(&out.join("command.bin"), &command_bytes)?;

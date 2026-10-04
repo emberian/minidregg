@@ -3,7 +3,7 @@
 //! This module only joins its existing commands and retains exact recovery state.
 use super::*;
 use sha2::{Digest, Sha256};
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt};
 
 const FORMAT: &str = "minidregg-selected-exchange-v1";
 const MAX_FILE: usize = 1_500_000;
@@ -25,23 +25,8 @@ fn digest_file(path: &Path) -> Result<String> {
     }
 }
 
-fn bounded(path: &Path, max: usize) -> Result<Vec<u8>> {
-    let file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let mut bytes = Vec::new();
-    file.take((max + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
-    if bytes.is_empty() || bytes.len() > max {
-        return Err(format!(
-            "{} is empty or exceeds {max} bytes",
-            path.display()
-        ));
-    }
-    Ok(bytes)
-}
-
 fn read_json(path: &Path) -> Result<Value> {
-    serde_json::from_slice(&bounded(path, MAX_FILE)?)
+    serde_json::from_slice(&crate::fsio::read_bounded(path, MAX_FILE)?)
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
@@ -125,7 +110,7 @@ fn file_pins(config: &Value) -> Result<Value> {
 
 fn pin(config_path: &Path, config: &Value, state: &Path, first: bool) -> Result<()> {
     let current = json!({"format":FORMAT,
-        "contractSha256":digest(&bounded(config_path, 65_536)?),
+        "contractSha256":digest(&crate::fsio::read_bounded(config_path, 65_536)?),
         "clientSha256":digest_file(&env::current_exe().map_err(|e| e.to_string())?)?,
         "files":file_pins(config)?});
     let path = state.join("pin.json");
@@ -136,14 +121,6 @@ fn pin(config_path: &Path, config: &Value, state: &Path, first: bool) -> Result<
     } else {
         Err("selected exchange contract or pinned input changed".into())
     }
-}
-
-fn private_state(state: &Path) -> Result<()> {
-    let meta = fs::symlink_metadata(state).map_err(|e| e.to_string())?;
-    if !meta.file_type().is_dir() || meta.permissions().mode() & 0o077 != 0 {
-        return Err("selected exchange state must be a private, nonsymlink directory".into());
-    }
-    Ok(())
 }
 
 fn checked_receipt(value: &Value) -> Result<()> {
@@ -206,7 +183,7 @@ fn recipient_receipt(state: &Path) -> Result<Value> {
 
 fn selected_poll(state: &Path) -> Result<PathBuf> {
     let name =
-        String::from_utf8(bounded(&state.join("poll-selected"), 32)?).map_err(|e| e.to_string())?;
+        String::from_utf8(crate::fsio::read_bounded(&state.join("poll-selected"), 32)?).map_err(|e| e.to_string())?;
     let name = name.trim();
     if name.len() != 9
         || !name.starts_with("poll-")
@@ -215,14 +192,14 @@ fn selected_poll(state: &Path) -> Result<PathBuf> {
         return Err("retained selected poll name is invalid".into());
     }
     let poll = state.join(name);
-    private_state(&poll)?;
+    crate::fsio::check_private_dir(&poll)?;
     let report = read_json(&poll.join("fn-poll.json"))?;
     if report.get("type").and_then(Value::as_str) != Some("selected-release-fn-poll-v1")
         || report.get("status").and_then(Value::as_str) != Some("candidate-unacknowledged")
-        || bounded(&poll.join("source.eml"), MAX_FILE)?
-            != bounded(&state.join("article.eml"), MAX_FILE)?
-        || bounded(&poll.join("received-packet.bin"), MAX_FILE)?
-            != bounded(&state.join("packet.bin"), MAX_FILE)?
+        || crate::fsio::read_bounded(&poll.join("source.eml"), MAX_FILE)?
+            != crate::fsio::read_bounded(&state.join("article.eml"), MAX_FILE)?
+        || crate::fsio::read_bounded(&poll.join("received-packet.bin"), MAX_FILE)?
+            != crate::fsio::read_bounded(&state.join("packet.bin"), MAX_FILE)?
     {
         return Err("fn poll did not project the exact selected owner packet".into());
     }
@@ -233,9 +210,9 @@ fn prepared(state: &Path) -> Result<()> {
     let value = read_json(&state.join("prepared.json"))?;
     if value.get("type").and_then(Value::as_str) != Some("minidregg-selected-exchange-prepared-v1")
         || value.get("ownerPacketSha256").and_then(Value::as_str)
-            != Some(digest(&bounded(&state.join("packet.bin"), MAX_FILE)?).as_str())
+            != Some(digest(&crate::fsio::read_bounded(&state.join("packet.bin"), MAX_FILE)?).as_str())
         || value.get("articleSha256").and_then(Value::as_str)
-            != Some(digest(&bounded(&state.join("article.eml"), MAX_FILE)?).as_str())
+            != Some(digest(&crate::fsio::read_bounded(&state.join("article.eml"), MAX_FILE)?).as_str())
     {
         return Err("retained selected owner packet or article changed".into());
     }
@@ -255,7 +232,7 @@ fn next_name(state: &Path, prefix: &str, suffix: &str) -> Result<PathBuf> {
 fn prepare(config: &Value, state: &Path) -> Result<()> {
     let query = named_path(config, "sourceSignedQuery")?;
     let payload = named_path(config, "selectedPayload")?;
-    if digest(&bounded(&payload, 1_000_000)?) != field(config, "selectedPayloadSha256")? {
+    if digest(&crate::fsio::read_bounded(&payload, 1_000_000)?) != field(config, "selectedPayloadSha256")? {
         return Err("selected payload digest differs from contract".into());
     }
     host_call(
@@ -271,7 +248,7 @@ fn prepare(config: &Value, state: &Path) -> Result<()> {
         &state.join("source-view.bin"),
         &state.join("source-view.json"),
     )?;
-    let payload_hex = hex(&bounded(&payload, 1_000_000)?);
+    let payload_hex = hex(&crate::fsio::read_bounded(&payload, 1_000_000)?);
     let atom = decimal(config, "sourceAtom")?;
     let entries = view
         .pointer("/cell/entries")
@@ -296,7 +273,7 @@ fn prepare(config: &Value, state: &Path) -> Result<()> {
     let mut request = serde_json::Map::new();
     request.insert(
         "signedQueryHex".into(),
-        Value::String(hex(&bounded(&query, 65_536)?)),
+        Value::String(hex(&crate::fsio::read_bounded(&query, 65_536)?)),
     );
     for key in [
         "atom",
@@ -344,8 +321,8 @@ fn prepare(config: &Value, state: &Path) -> Result<()> {
             state.join("source-view-after.bin").as_os_str(),
         ],
     )?;
-    if bounded(&state.join("source-view.bin"), MAX_FILE)?
-        != bounded(&state.join("source-view-after.bin"), MAX_FILE)?
+    if crate::fsio::read_bounded(&state.join("source-view.bin"), MAX_FILE)?
+        != crate::fsio::read_bounded(&state.join("source-view-after.bin"), MAX_FILE)?
     {
         return Err("selected Mini source changed during authoring".into());
     }
@@ -370,7 +347,7 @@ fn prepare(config: &Value, state: &Path) -> Result<()> {
             state.join("article.eml").as_os_str(),
         ],
     )?;
-    if bounded(&state.join("article.eml"), 1_048_576).is_err() {
+    if crate::fsio::read_bounded(&state.join("article.eml"), 1_048_576).is_err() {
         return Err("selected article exceeds explicitly supported fn 1 MiB profile".into());
     }
     selected_publisher::sign_source(
@@ -393,9 +370,9 @@ fn prepare(config: &Value, state: &Path) -> Result<()> {
     put_json(
         &state.join("prepared.json"),
         &json!({"type":"minidregg-selected-exchange-prepared-v1",
-        "sourceAtom":atom,"selectedPayloadSha256":digest(&bounded(&payload, 1_000_000)?),
-        "ownerPacketSha256":digest(&bounded(&state.join("packet.bin"), MAX_FILE)?),
-        "articleSha256":digest(&bounded(&state.join("article.eml"), MAX_FILE)?)}),
+        "sourceAtom":atom,"selectedPayloadSha256":digest(&crate::fsio::read_bounded(&payload, 1_000_000)?),
+        "ownerPacketSha256":digest(&crate::fsio::read_bounded(&state.join("packet.bin"), MAX_FILE)?),
+        "articleSha256":digest(&crate::fsio::read_bounded(&state.join("article.eml"), MAX_FILE)?)}),
     )?;
     Ok(())
 }
@@ -432,10 +409,7 @@ fn receive(config: &Value, state: &Path) -> Result<()> {
     let recipient = state.join("recipient-attempt");
     if !recipient.exists() && !state.join("poll-selected").exists() {
         let poll = next_name(state, "poll", "")?;
-        fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&poll)
-            .map_err(|e| e.to_string())?;
+        crate::fsio::create_private_dir(&poll)?;
         host_call(
             config,
             true,
@@ -454,8 +428,8 @@ fn receive(config: &Value, state: &Path) -> Result<()> {
                 poll.join("fn-poll.json").as_os_str(),
             ],
         )?;
-        if bounded(&poll.join("source.eml"), MAX_FILE)?
-            != bounded(&state.join("article.eml"), MAX_FILE)?
+        if crate::fsio::read_bounded(&poll.join("source.eml"), MAX_FILE)?
+            != crate::fsio::read_bounded(&state.join("article.eml"), MAX_FILE)?
         {
             return Err("fn projected carrier differs from exact selected article".into());
         }
@@ -484,7 +458,7 @@ fn receive(config: &Value, state: &Path) -> Result<()> {
 fn transport_article(state: &Path) -> Result<PathBuf> {
     let transport = state.join("transport");
     let name =
-        String::from_utf8(bounded(&transport.join("selected"), 32)?).map_err(|e| e.to_string())?;
+        String::from_utf8(crate::fsio::read_bounded(&transport.join("selected"), 32)?).map_err(|e| e.to_string())?;
     if name.len() != 16
         || !name.starts_with("legacy-poll-")
         || !name[12..].bytes().all(|b| b.is_ascii_digit())
@@ -492,7 +466,7 @@ fn transport_article(state: &Path) -> Result<PathBuf> {
         return Err("retained legacy poll name is invalid".into());
     }
     let poll = transport.join(name);
-    private_state(&poll)?;
+    crate::fsio::check_private_dir(&poll)?;
     let report = read_json(&poll.join("result.json"))?;
     if report.get("type").and_then(Value::as_str) != Some("selected-release-fn-legacy-poll-v1")
         || report.get("mode").and_then(Value::as_str) != Some("fn-r-transport-only")
@@ -500,12 +474,12 @@ fn transport_article(state: &Path) -> Result<PathBuf> {
     {
         return Err("retained fn-r poll has no selected transport candidate".into());
     }
-    let stored = bounded(&poll.join("stored.eml"), 1_516_384)?;
-    let authored = bounded(&state.join("article.eml"), 1_048_576)?;
+    let stored = crate::fsio::read_bounded(&poll.join("stored.eml"), 1_516_384)?;
+    let authored = crate::fsio::read_bounded(&state.join("article.eml"), 1_048_576)?;
     if !stored.ends_with(&authored) {
         return Err("fn-r stored article does not carry exact selected owner article".into());
     }
-    if bounded(&poll.join("packet.bin"), MAX_FILE)? != bounded(&state.join("packet.bin"), MAX_FILE)?
+    if crate::fsio::read_bounded(&poll.join("packet.bin"), MAX_FILE)? != crate::fsio::read_bounded(&state.join("packet.bin"), MAX_FILE)?
     {
         return Err("fn-r projected owner packet differs from prepared packet".into());
     }
@@ -532,19 +506,13 @@ fn receive_transport(config: &Value, state: &Path) -> Result<()> {
     }
     let transport = state.join("transport");
     if !transport.exists() {
-        fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&transport)
-            .map_err(|e| e.to_string())?;
+        crate::fsio::create_private_dir(&transport)?;
         sync_directory_ancestors(state)?;
     }
-    private_state(&transport)?;
+    crate::fsio::check_private_dir(&transport)?;
     if !transport.join("selected").exists() {
         let poll = next_name(&transport, "legacy-poll", "")?;
-        fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&poll)
-            .map_err(|e| e.to_string())?;
+        crate::fsio::create_private_dir(&poll)?;
         host_call(
             config,
             true,
@@ -564,13 +532,13 @@ fn receive_transport(config: &Value, state: &Path) -> Result<()> {
                 poll.join("result.json").as_os_str(),
             ],
         )?;
-        if bounded(&poll.join("packet.bin"), MAX_FILE)?
-            != bounded(&state.join("packet.bin"), MAX_FILE)?
+        if crate::fsio::read_bounded(&poll.join("packet.bin"), MAX_FILE)?
+            != crate::fsio::read_bounded(&state.join("packet.bin"), MAX_FILE)?
         {
             return Err("fn-r projected packet differs from selected owner packet".into());
         }
-        let stored = bounded(&poll.join("stored.eml"), 1_516_384)?;
-        let authored = bounded(&state.join("article.eml"), 1_048_576)?;
+        let stored = crate::fsio::read_bounded(&poll.join("stored.eml"), 1_516_384)?;
+        let authored = crate::fsio::read_bounded(&state.join("article.eml"), 1_048_576)?;
         if !stored.ends_with(&authored) {
             return Err("fn-r stored article differs from selected owner article".into());
         }
@@ -582,17 +550,17 @@ fn receive_transport(config: &Value, state: &Path) -> Result<()> {
         sync_directory_ancestors(&transport)?;
     }
     if !transport.join("retrieval.json").exists() {
-        let name = String::from_utf8(bounded(&transport.join("selected"), 32)?)
+        let name = String::from_utf8(crate::fsio::read_bounded(&transport.join("selected"), 32)?)
             .map_err(|e| e.to_string())?;
         if name.len() != 16 || !name.starts_with("legacy-poll-") {
             return Err("retained legacy poll name is invalid".into());
         }
         let poll = transport.join(&name);
-        let stored = bounded(&poll.join("stored.eml"), 1_516_384)?;
-        let authored = bounded(&state.join("article.eml"), 1_048_576)?;
+        let stored = crate::fsio::read_bounded(&poll.join("stored.eml"), 1_516_384)?;
+        let authored = crate::fsio::read_bounded(&state.join("article.eml"), 1_048_576)?;
         if !stored.ends_with(&authored)
-            || bounded(&poll.join("packet.bin"), MAX_FILE)?
-                != bounded(&state.join("packet.bin"), MAX_FILE)?
+            || crate::fsio::read_bounded(&poll.join("packet.bin"), MAX_FILE)?
+                != crate::fsio::read_bounded(&state.join("packet.bin"), MAX_FILE)?
         {
             return Err("fn-r retained article or packet differs from selected release".into());
         }
@@ -635,8 +603,8 @@ fn cover_plan(config: &Value, state: &Path) -> Result<()> {
         decimal(&receipt, "transactionId")?,
         &state.join("frontier"),
     )?;
-    if bounded(&state.join("frontier/source.eml"), MAX_FILE)?
-        != bounded(&poll.join("source.eml"), MAX_FILE)?
+    if crate::fsio::read_bounded(&state.join("frontier/source.eml"), MAX_FILE)?
+        != crate::fsio::read_bounded(&poll.join("source.eml"), MAX_FILE)?
     {
         return Err("frontier plan source differs from selected poll".into());
     }
@@ -742,7 +710,7 @@ fn verify(config: &Value, state: &Path, transport_only: bool) -> Result<()> {
         &output,
     )?;
     let view = read_json(&output.join("view.json"))?;
-    let packet = hex(&bounded(&state.join("packet.bin"), MAX_FILE)?);
+    let packet = hex(&crate::fsio::read_bounded(&state.join("packet.bin"), MAX_FILE)?);
     let atom = decimal(&receipt, "transactionId")?;
     let entries = view
         .pointer("/cell/entries")
@@ -845,16 +813,13 @@ pub(super) fn run(
         if state.exists() {
             return Err("selected exchange state already exists".into());
         }
-        fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&state)
-            .map_err(|e| e.to_string())?;
+        crate::fsio::create_private_dir(&state)?;
         sync_directory_ancestors(&state)?;
         let _owner = transport::service_lock(&state.join("selected-exchange.lock"))?;
         pin(&contract, &config, &state, true)?;
         prepare(&config, &state)
     } else {
-        private_state(&state)?;
+        crate::fsio::check_private_dir(&state)?;
         let _owner = transport::service_lock(&state.join("selected-exchange.lock"))?;
         if state.join("pin.json").exists() {
             pin(&contract, &config, &state, false)?;

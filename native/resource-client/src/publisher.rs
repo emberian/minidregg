@@ -290,7 +290,7 @@ pub(super) fn publish(
     state_dir: &Path,
     post_config_path: &Path,
 ) -> Result<()> {
-    drain::private_dir(state_dir)?;
+    crate::fsio::ensure_private_dir_durable(state_dir)?;
     let _owner = transport::service_lock(&state_dir.join("publisher.lock"))?;
     let post = worker::post_config(post_config_path)?;
     let carrier =
@@ -443,8 +443,8 @@ mod tests {
     fn high_numbered_retained_outbox_confirmation_recovers_without_host_or_resubmit() {
         let dir = std::env::temp_dir().join(format!("mini-publisher-retained-high-{}-{}",
             std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
-        drain::private_dir(&dir).unwrap();
-        let attempt = dir.join("outbox-submit"); drain::private_dir(&attempt).unwrap();
+        crate::fsio::ensure_private_dir_durable(&dir).unwrap();
+        let attempt = dir.join("outbox-submit"); crate::fsio::ensure_private_dir_durable(&attempt).unwrap();
         durable_json(&attempt.join("retry-10000.json"),
             &json!({"type":"confirmed","confirmation":"recoveredAfterUncertainResponse","transactionId":"123"})).unwrap();
         durable_json(&attempt.join("retry-10001.transport.json"),
@@ -543,7 +543,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        drain::private_dir(&dir).unwrap();
+        crate::fsio::ensure_private_dir_durable(&dir).unwrap();
         let claim = dir.join("attempt.json");
         assert!(durable_json(&claim, &json!({"number":1})).is_ok());
         assert!(durable_json(&claim, &json!({"number":1})).is_err());

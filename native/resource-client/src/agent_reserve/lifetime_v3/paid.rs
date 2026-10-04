@@ -94,7 +94,7 @@ fn initial_bindings(reserve: &Value, grant: &Value, reserve_receipt: &Value) -> 
 }
 
 fn paid_pin(directory: &Path) -> Result<PaidPin> {
-    drain::private_dir(directory)?;
+    crate::fsio::ensure_private_dir_durable(directory)?;
     let value: Value = serde_json::from_slice(&private_bytes(&directory.join("pin.json"), 4096)?)
         .map_err(|error| format!("invalid lifetime paid pin: {error}"))?;
     if field(&value, "format")? != FORMAT {
@@ -168,10 +168,7 @@ pub(crate) fn lifetime_paid_plan(reserve: &Path, grant: &Path, directory: &Path)
         .map_err(|error| format!("invalid lifetime reserve count: {error}"))?
         .checked_sub(1)
         .ok_or("lifetime reserve accepted count is zero")?;
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&directory)
-        .map_err(|error| format!("cannot create lifetime paid directory: {error}"))?;
+    crate::fsio::create_private_dir(&directory)?;
     sync_directory_ancestors(&directory)?;
     retain_json(
         &directory.join("selector.json"),

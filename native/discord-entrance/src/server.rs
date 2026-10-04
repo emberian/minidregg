@@ -275,7 +275,7 @@ impl App {
     fn log(&self, s: &Session, at: u64, user: &str, id: &str, line: &str, ending: &Ending, exit: Option<i32>) {
         let rec = log_record(at, user, id, line, ending, exit);
         let written = match &self.cfg.state {
-            Some(state) => mini_sdk::store::private_dir(&state.join("log"))
+            Some(state) => mini_sdk::private::ensure_dir(&state.join("log"))
                 .map_err(|e| std::io::Error::other(e.to_string()))
                 .and_then(|_| append_log(&state.join("log"), &format!("{}.{LOG_FILE}", s.name), &rec)),
             None => append_log(&s.home, LOG_FILE, &rec),

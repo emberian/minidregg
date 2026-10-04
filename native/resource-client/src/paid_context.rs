@@ -80,20 +80,6 @@ fn selected_path(selected: &Option<PathBuf>, retained: &Path, name: &str) -> Res
     }
     Ok(chosen.to_path_buf())
 }
-fn read(path: &Path, limit: usize) -> Result<Vec<u8>> {
-    let meta = fs::symlink_metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    if !meta.is_file() || meta.len() > limit as u64 {
-        return Err("paid snapshot must be a bounded regular file".into());
-    }
-    let mut bytes = Vec::new();
-    File::open(path)
-        .and_then(|f| f.take(limit as u64 + 1).read_to_end(&mut bytes))
-        .map_err(|e| e.to_string())?;
-    if bytes.len() > limit {
-        return Err("paid snapshot exceeds bound".into());
-    }
-    Ok(bytes)
-}
 fn hash(bytes: &[u8]) -> String {
     hex(&sha2::Sha256::digest(bytes))
 }
@@ -257,7 +243,7 @@ fn workspace_snapshot(root: &Path, options: &Options, lookup: bool) -> Result<Co
         &absolute_member(&value, "config")?,
         "config",
     )?;
-    let config = read(&config_path, 1024 * 1024)?;
+    let config = crate::fsio::read_bounded_or_empty(&config_path, 1024 * 1024)?;
     let config_json: Value = serde_json::from_slice(&config).map_err(|e| e.to_string())?;
     let seed = natural(&config_json, "expectedSeed")?;
     let held_host = workspace::workspace_host(&value)?;
@@ -337,7 +323,7 @@ fn join_snapshot(
     }
     let join_bytes = match &retained {
         Some(origin) => origin.payment.clone(),
-        None => read(&record_path, 1024 * 1024)?,
+        None => crate::fsio::read_bounded_or_empty(&record_path, 1024 * 1024)?,
     };
     let join: Value = serde_json::from_slice(&join_bytes).map_err(|e| e.to_string())?;
     if string(&join, "type")? != "minidregg-join-solana-v2" {
@@ -393,7 +379,7 @@ fn join_snapshot(
         .ok_or("pending join context requires --config ABS")?
         .clone();
     let sha = host_image_sha256(&host)?;
-    let config = read(&config_path, 1024 * 1024)?;
+    let config = crate::fsio::read_bounded_or_empty(&config_path, 1024 * 1024)?;
     if string(&join, "hostSha256")? != sha || string(&join, "configSha256")? != hash(&config) {
         return Err("join Host/config pin changed".into());
     }
@@ -427,7 +413,7 @@ fn join_snapshot(
     }
     let locator_bytes = match &retained {
         Some(origin) => origin.locator.clone(),
-        None => read(
+        None => crate::fsio::read_bounded_or_empty(
             &root.join(format!(
                 "payment-{}.locator.json",
                 hash(string(&join, "memo")?.as_bytes())
@@ -536,13 +522,13 @@ pub(crate) fn retained_lookup(
             None,
             Some(Origin {
                 path: absolute_member(binding, "originRecordPath")?,
-                payment: read(&record.join("origin-payment.json"), 1024 * 1024)?,
-                locator: read(&record.join("origin-locator.json"), 4096)?,
+                payment: crate::fsio::read_bounded_or_empty(&record.join("origin-payment.json"), 1024 * 1024)?,
+                locator: crate::fsio::read_bounded_or_empty(&record.join("origin-locator.json"), 4096)?,
             }),
         )?,
     };
     if &context.binding()? != binding
-        || context.config != read(&record.join("config.json"), 1024 * 1024)?
+        || context.config != crate::fsio::read_bounded_or_empty(&record.join("config.json"), 1024 * 1024)?
     {
         return Err(
             "retained claim transport/identity/config/profile/genesis binding changed".into(),

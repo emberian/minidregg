@@ -2,7 +2,8 @@
 //! admitted by the public cohort roster through a signed, challenge-bound
 //! hybrid enrollment (MCE4): X25519 + ML-KEM-768 key exchange and an Ed25519 + ML-DSA-65
 //! signature; this layer does not manufacture Mini outcomes.
-use crate::scheduled_transport::{directory, persist, random, read_private};
+use crate::fsio::random;
+use crate::scheduled_transport::{persist, read_private};
 use crate::{transport, Args, Result};
 use crate::hybrid_kem::{self, HybridPublic, HybridSecret};
 use mini_sdk::signer::{self, HybridSigner, Scheme, Signer};
@@ -1316,7 +1317,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         .into_string()
         .map_err(|_| "invalid live action")?;
     let state = PathBuf::from(args.required("state")?);
-    directory(&state)?;
+    crate::fsio::ensure_private_dir_all(&state)?;
     let _lock = transport::service_lock(&state.join("service.lock"))?;
     let generation = crate::decode_hex(&args.required("generation")?.to_string_lossy())?
         .try_into()
@@ -1347,7 +1348,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         return Err("resume must remain inside retained public lifetime".into());
     }
     let files = PathBuf::from(args.required("records")?);
-    directory(&files)?;
+    crate::fsio::ensure_private_dir_all(&files)?;
     if ["cover", "registrar", "relay", "mailbox", "scan"].contains(&action.as_str()) {
         worker_pin(&state, &p)?;
         return worker(&action, args, &state, &files, &p, start);
@@ -1413,7 +1414,7 @@ mod tests {
             "mini-cache-alias-{}",
             crate::hex(&random::<16>().unwrap())
         ));
-        directory(&root).unwrap();
+        crate::fsio::ensure_private_dir_all(&root).unwrap();
         let cache = root.join("source.output");
         let ready = root.join("ready.payload");
         persist(&cache, b"exact durable output").unwrap();
@@ -1476,7 +1477,7 @@ mod tests {
             "mini-cohort-{}",
             crate::hex(&random::<16>().unwrap())
         ));
-        directory(&p).unwrap();
+        crate::fsio::ensure_private_dir_all(&p).unwrap();
         p
     }
     struct Cohort {

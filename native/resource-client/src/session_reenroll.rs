@@ -835,12 +835,9 @@ fn run_inner(
         if phase != "capture" {
             return Err("resume requires captured pre-quiesce intent".into());
         }
-        fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&directory)
-            .map_err(|e| e.to_string())?;
+        crate::fsio::create_private_dir(&directory)?;
     }
-    drain::private_dir(&directory)?;
+    crate::fsio::ensure_private_dir_durable(&directory)?;
     let _lock = lock(&directory)?;
     if !directory.join("pin.json").exists() {
         if phase != "capture" || directory.join("contract.json").exists() {

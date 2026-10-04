@@ -112,14 +112,6 @@ fn pair(first: &[u8], second: &[u8]) -> Vec<u8> {
 }
 
 
-fn nonce() -> Result<String> {
-    let mut bytes = [0u8; 16];
-    File::open("/dev/urandom")
-        .and_then(|mut file| file.read_exact(&mut bytes))
-        .map_err(|error| format!("job: cannot obtain a nonce: {error}"))?;
-    Ok(u128::from_be_bytes(bytes).to_string())
-}
-
 fn int(value: &Value, what: &str) -> Result<i128> {
     value
         .as_str()
@@ -344,7 +336,7 @@ fn money(
     let authority = view.get("authorityRoot").and_then(Value::as_str).ok_or("job: pay view lacks authorityRoot")?;
     let command = json!({"subject":ws.subject,"capability":capability,"jobCapability":job_capability,
         "job":job,"action":action.to_string(),
-        "account":account,"amount":amount,"nonce":nonce()?,"expectedAuthorityRoot":authority});
+        "account":account,"amount":amount,"nonce":crate::fsio::random_nonce()?,"expectedAuthorityRoot":authority});
     crate::shell::session_fs::replace(&ws.root, &dir.join("command.json"), command.to_string().as_bytes())?;
     let command_bytes = author(ws, "job-money", &command)?;
     let plan = match invoke(ws, 160, &command_bytes) {
@@ -392,7 +384,7 @@ fn retain_new_ingress(ws: &Ws, dir: &Path, ingress: &[u8]) -> Result<()> {
 /// Persist before the external call, including the crash-before-reply window.
 /// Each call gets a distinct record; later replies cannot fill an older gap.
 fn begin_money_submission(ws: &Ws, dir: &Path, ingress: &[u8]) -> Result<String> {
-    let id = nonce()?;
+    let id = crate::fsio::random_nonce()?;
     let started = json!({"type":"job-money-submit-started-v1",
         "ingressSha256":submission_digest(ingress)});
     crate::shell::session_fs::replace(&ws.root, &dir.join(format!("submit-{id}.started.json")),
@@ -407,7 +399,7 @@ fn submit_ingress(ws: &Ws, dir: &Path, ingress: &[u8]) -> Result<Value> {
 }
 
 fn retain_money_outcome(ws: &Ws, dir: &Path, outcome: Value, submission: Option<&str>) -> Result<Value> {
-    let id = match submission { Some(id) => id.to_owned(), None => nonce()? };
+    let id = match submission { Some(id) => id.to_owned(), None => crate::fsio::random_nonce()? };
     let stem = format!("outcome-{id}.json");
     crate::shell::session_fs::replace(&ws.root, &dir.join(stem), outcome.to_string().as_bytes())?;
     if outcome.get("type").and_then(Value::as_str) == Some("confirmed") {
@@ -445,7 +437,7 @@ fn settlement_needs_recovery(ws: &Ws, dir: &Path) -> Result<bool> {
         if name.starts_with("submit-") && name.ends_with(".started.json") {
             let id = name.strip_prefix("submit-").and_then(|rest| rest.strip_suffix(".started.json"))
                 .ok_or("job: invalid retained submission name")?;
-            // nonce() emits a canonical decimal u128, not a hex identifier.
+            // crate::fsio::random_nonce() emits a canonical decimal u128, not a hex identifier.
             // Roundtrip the spelling so aliases cannot pair different sends.
             if id.parse::<u128>().ok().is_none_or(|value| value.to_string() != id) {
                 return Err("job: invalid retained submission name".into());
@@ -568,7 +560,7 @@ fn timed<T>(label: &str, f: impl FnOnce() -> Result<T>) -> Result<(T, f64)> {
 fn post(ws: &Ws, mut args: Args) -> Result<Value> {
     let name = match opt(&mut args, "name")? {
         Some(name) => name,
-        None => format!("job-{}", &nonce()?[..8]),
+        None => format!("job-{}", &crate::fsio::random_nonce()?[..8]),
     };
     let room = arg(&mut args, "room")?;
     let program = decimal(&arg(&mut args, "program")?, "--program")?;
@@ -686,7 +678,7 @@ fn claim(ws: &Ws, mut args: Args) -> Result<Value> {
     let account = workspace::reference(&ws.root, &account_ref)?;
     let account_id = field(&account, "target")?.to_owned();
     let account_cap = operation_capability(&account)?;
-    let dir = jobs_dir(ws)?.join(format!("{name}.claim-{}", nonce()?));
+    let dir = jobs_dir(ws)?.join(format!("{name}.claim-{}", crate::fsio::random_nonce()?));
     let (_, latency) = timed("claim", || money(ws, &dir, &job, CLAIM, &account_id, &bond, &account_cap, &cap))?;
     // The job as the provider now holds it (a signed read under its grant).
     let f = fields(ws, &name)?;
@@ -741,7 +733,7 @@ fn fund(ws: &Ws, mut args: Args) -> Result<Value> {
         None => fields(ws, &name)?.get(&5).cloned().ok_or("job: the job has no price")?,
     };
     let account = workspace::reference(&ws.root, &account_ref)?;
-    let dir = jobs_dir(ws)?.join(format!("{name}.fund-{}", nonce()?));
+    let dir = jobs_dir(ws)?.join(format!("{name}.fund-{}", crate::fsio::random_nonce()?));
     let (_, latency) = timed("fund", || {
         money(ws, &dir, &job, FUND, field(&account, "target")?, &price, &operation_capability(&account)?, "0")
     })?;
@@ -760,7 +752,7 @@ fn truth(ws: &Ws, mut args: Args) -> Result<Value> {
     let ((claim, dry), ran) = timed("truth (run)", || dry_run(ws, &job, &f))?;
     let value = truth_of(&dry)?;
     let (_, latency) = timed("truth", || {
-        write(ws, &format!("{name}-truth-{}", nonce()?), &name, vec![create(TRUTH, &value)], Some(claim.clone()))
+        write(ws, &format!("{name}-truth-{}", crate::fsio::random_nonce()?), &name, vec![create(TRUTH, &value)], Some(claim.clone()))
     })?;
     Ok(json!({"type":"job-truth","job":job,"truth":value,"kernelSteps":claim.get("steps"),
         "latency":{"run":ran,"truth":latency}}))
@@ -793,7 +785,7 @@ fn answer(ws: &Ws, mut args: Args) -> Result<Value> {
         create(STEPS, &computed.1),
         create(FINAL_AT, final_at),
     ];
-    let (_, latency) = timed("answer", || write(ws, &format!("{name}-answer-{}", nonce()?), &name, actions, None))?;
+    let (_, latency) = timed("answer", || write(ws, &format!("{name}-answer-{}", crate::fsio::random_nonce()?), &name, actions, None))?;
     Ok(json!({"type":"job-answered","job":job,"name":name,"output":computed.0,"steps":computed.1,
         "finalAt":final_at.to_string(),"latency":{"run":ran,"answer":latency}}))
 }
@@ -806,7 +798,7 @@ fn check(ws: &Ws, mut args: Args) -> Result<Value> {
     let f = fields(ws, &name)?;
     let state = get(&f, STATE)?;
     let clock = now(ws)?;
-    let id = |what: &str| -> Result<String> { Ok(format!("{name}-{what}-{}", nonce()?)) };
+    let id = |what: &str| -> Result<String> { Ok(format!("{name}-{what}-{}", crate::fsio::random_nonce()?)) };
     match state {
         // The stall: claimed, no truth, answerBy past.
         1 if f.get(&TRUTH).is_none() && clock > get(&f, 7)? => {
@@ -904,7 +896,7 @@ fn settle(ws: &Ws, mut args: Args) -> Result<Value> {
             );
         }
     }
-    let dir = jobs.join(format!("{name}.settle-{}", nonce()?));
+    let dir = jobs.join(format!("{name}.settle-{}", crate::fsio::random_nonce()?));
     let reference = workspace::reference(&ws.root, &name)?;
     let cap = operation_capability(&reference)?;
     // Reads around the turn are for the report; the turn itself needs only the capability.
@@ -1026,7 +1018,7 @@ mod path_tests {
 
     #[test]
     fn settlement_lost_send_gap_survives_later_exact_native_refusal() {
-        let root = std::env::temp_dir().join(format!("mini-job-send-gap-{}-{}", std::process::id(), nonce().unwrap()));
+        let root = std::env::temp_dir().join(format!("mini-job-send-gap-{}-{}", std::process::id(), crate::fsio::random_nonce().unwrap()));
         workspace::make_private_dir(&root).unwrap();
         let dir = root.join("attempt");
         workspace::make_private_dir(&dir).unwrap();
@@ -1050,7 +1042,7 @@ mod path_tests {
 
     #[test]
     fn settlement_legacy_unknown_is_not_upgraded_by_later_refused_resend() {
-        let root = std::env::temp_dir().join(format!("mini-job-legacy-gap-{}-{}", std::process::id(), nonce().unwrap()));
+        let root = std::env::temp_dir().join(format!("mini-job-legacy-gap-{}-{}", std::process::id(), crate::fsio::random_nonce().unwrap()));
         workspace::make_private_dir(&root).unwrap();
         let dir = root.join("attempt");
         workspace::make_private_dir(&dir).unwrap();

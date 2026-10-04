@@ -68,6 +68,62 @@ pub(crate) fn sync_directory_ancestors(directory: &Path) -> Result<()> {
     durable::sync_ancestors(directory).map_err(|e| format!("cannot sync directory {}: {e}", directory.display()))
 }
 
+/// `N` bytes of operating-system randomness (`mini_sdk::random`, the one reader of `/dev/urandom`).
+pub(crate) fn random<const N: usize>() -> Result<[u8; N]> {
+    mini_sdk::random::bytes::<N>().map_err(|e| format!("cannot obtain operating-system randomness: {e}"))
+}
+
+/// Fill `out` completely from operating-system randomness.
+pub(crate) fn random_fill(out: &mut [u8]) -> Result<()> {
+    mini_sdk::random::fill(out).map_err(|e| format!("cannot obtain operating-system randomness: {e}"))
+}
+
+/// A fresh 128-bit nonce, as a canonical decimal.
+pub(crate) fn random_nonce() -> Result<String> {
+    mini_sdk::random::decimal_nonce().map_err(|e| format!("cannot obtain operating-system randomness: {e}"))
+}
+
+/// A regular file (never through a symlink) of `1..=limit` bytes.
+pub(crate) fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
+    mini_sdk::fsread::read_regular(path, 1, limit).map_err(String::from)
+}
+
+/// [`read_bounded`], an empty file also acceptable.
+pub(crate) fn read_bounded_or_empty(path: &Path, limit: usize) -> Result<Vec<u8>> {
+    mini_sdk::fsread::read_regular(path, 0, limit).map_err(String::from)
+}
+
+/// Refuse unless `path` is an owner-private directory (never through a symlink).
+pub(crate) fn check_private_dir(path: &Path) -> Result<()> {
+    mini_sdk::private::check_dir(path).map_err(String::from)
+}
+
+/// Refuse unless `socket` is an owner-private socket under an owner-private directory.
+pub(crate) fn check_private_socket(socket: &Path) -> Result<()> {
+    mini_sdk::private::check_socket(socket).map_err(String::from)
+}
+
+/// Create (0700) or accept an owner-private directory.
+pub(crate) fn ensure_private_dir(path: &Path) -> Result<()> {
+    mini_sdk::private::ensure_dir(path).map_err(String::from)
+}
+
+/// [`ensure_private_dir`], then the directory and every ancestor synced: the creation is durable.
+pub(crate) fn ensure_private_dir_durable(path: &Path) -> Result<()> {
+    ensure_private_dir(path)?;
+    sync_directory_ancestors(path)
+}
+
+/// [`ensure_private_dir`], missing ancestors created (0700) too.
+pub(crate) fn ensure_private_dir_all(path: &Path) -> Result<()> {
+    mini_sdk::private::ensure_dir_all(path).map_err(String::from)
+}
+
+/// Create an owner-private directory that must not already exist.
+pub(crate) fn create_private_dir(path: &Path) -> Result<()> {
+    mini_sdk::private::create_dir(path).map_err(String::from)
+}
+
 /// The crate's one secret-file loader. Custody is checked on the opened descriptor and the file
 /// must be owner-private and is never reached through a symlink; the `_in_private_dir` forms
 /// also require an owner-private containing directory.

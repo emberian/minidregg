@@ -607,17 +607,9 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
     }
 }
 
+/// A host config pin: a regular file of at most `MAX_CONFIG` bytes.
 pub(crate) fn read_config(path: &Path) -> Result<Vec<u8>, String> {
-    let file = fs::File::open(path)
-        .map_err(|e| format!("cannot read host config {}: {e}", path.display()))?;
-    let mut bytes = Vec::new();
-    file.take((MAX_CONFIG + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|e| format!("cannot read host config {}: {e}", path.display()))?;
-    if bytes.len() > MAX_CONFIG {
-        return Err("host config exceeds socket pin bound".to_owned());
-    }
-    Ok(bytes)
+    crate::fsio::read_bounded_or_empty(path, MAX_CONFIG)
 }
 
 pub(crate) fn read_frame<R: Read>(reader: &mut R) -> io::Result<Option<Vec<u8>>> {
@@ -711,10 +703,7 @@ pub(crate) fn service_lock_waiting(path: &Path, wait: Wait) -> Result<ServiceLoc
 pub(crate) fn pin_config(path: &Path, bytes: &[u8]) -> Result<(), String> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => {
-            if !metadata.file_type().is_file()
-                || metadata.uid() != effective_uid()
-                || metadata.mode() & 0o077 != 0
-            {
+            if !mini_sdk::private::file_ok(&metadata) {
                 return Err("retained host config is not an owner-private regular file".to_owned());
             }
             if read_config(path)? != bytes {
@@ -755,7 +744,7 @@ pub(crate) fn clear_stale_socket(path: &Path) -> Result<(), String> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(format!("cannot inspect socket {}: {error}", path.display())),
     };
-    if !metadata.file_type().is_socket() || metadata.uid() != effective_uid() {
+    if !metadata.file_type().is_socket() || !mini_sdk::private::owned(&metadata) {
         return Err("socket path is not an owned Unix socket".to_owned());
     }
     match UnixStream::connect(path) {
@@ -1204,7 +1193,7 @@ pub struct OperatorPeers(Vec<u32>);
 
 impl OperatorPeers {
     pub fn with(extra: &[u32]) -> Self {
-        Self::for_owner(effective_uid(), extra)
+        Self::for_owner(mini_sdk::private::euid(), extra)
     }
 
     fn for_owner(owner: u32, extra: &[u32]) -> Self {
@@ -1238,14 +1227,7 @@ fn serve_with_mode(
     let parent = socket
         .parent()
         .ok_or("socket requires a parent directory")?;
-    let metadata = fs::metadata(parent)
-        .map_err(|e| format!("cannot inspect socket directory {}: {e}", parent.display()))?;
-    if !metadata.is_dir() || metadata.uid() != effective_uid() || metadata.mode() & 0o077 != 0 {
-        return Err(format!(
-            "socket directory {} must be owned by this user with mode 0700",
-            parent.display()
-        ));
-    }
+    crate::fsio::check_private_dir(parent)?;
     let _service_lock = service_lock(&socket.with_extension("lock"))?;
     let pinned_config = socket.with_extension("config");
     pin_service_mode(
@@ -2003,13 +1985,6 @@ pub(crate) fn peer_uid(_stream: &UnixStream) -> Result<u32, String> {
     Err("operator peer credentials are unavailable on this platform".into())
 }
 
-pub(crate) fn effective_uid() -> u32 {
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
-    unsafe { geteuid() }
-}
-
 #[cfg(test)]
 mod tests {
     #[test]
@@ -2067,12 +2042,12 @@ mod tests {
         let relay = OperatorPeers::for_owner(1000, &[1002, 1000, 1002]);
         assert_eq!(relay, OperatorPeers(vec![1000, 1002]));
         assert!(relay.admits(1002) && !relay.admits(1001));
-        assert!(OperatorPeers::with(&[]).admits(effective_uid()));
+        assert!(OperatorPeers::with(&[]).admits(mini_sdk::private::euid()));
     }
 
     #[test]
     fn transport_operator_socket_refuses_a_peer_outside_the_allowlist() {
-        let me = effective_uid();
+        let me = mini_sdk::private::euid();
         let foreign = OperatorPeers(vec![me.wrapping_add(1)]);
         let reply = refusal_for_peer(&foreign);
         assert_eq!(reply, [&[254u8][..], b"operator peer UID mismatch"].concat());
@@ -2090,7 +2065,7 @@ mod tests {
     fn transport_operator_socket_two_uid_foreign_process_is_refused() {
         use std::os::unix::fs::PermissionsExt;
         let foreign: u32 = std::env::var("MINI_TEST_FOREIGN_UID").expect("MINI_TEST_FOREIGN_UID").parse().unwrap();
-        assert_ne!(foreign, effective_uid());
+        assert_ne!(foreign, mini_sdk::private::euid());
         let directory = std::env::temp_dir().join(format!("mini-two-uid-{}", std::process::id()));
         fs::create_dir(&directory).unwrap();
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();

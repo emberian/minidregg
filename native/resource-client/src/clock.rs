@@ -115,14 +115,6 @@ fn pair(first: &[u8], second: &[u8]) -> Vec<u8> {
     bytes
 }
 
-fn nonce() -> Result<String> {
-    let mut bytes = [0u8; 16];
-    File::open("/dev/urandom")
-        .and_then(|mut file| file.read_exact(&mut bytes))
-        .map_err(|error| format!("cannot obtain clock nonce: {error}"))?;
-    Ok(u128::from_be_bytes(bytes).to_string())
-}
-
 fn decimal_arg(args: &mut Args, name: &str) -> Result<Option<String>> {
     match args.optional(name) {
         None => Ok(None),
@@ -264,7 +256,7 @@ fn tick(
         ws,
         "clock-tick",
         &json!({
-            "sponsor": ws.subject, "capability": capability, "nonce": nonce()?,
+            "sponsor": ws.subject, "capability": capability, "nonce": crate::fsio::random_nonce()?,
             "expectedAuthorityRoot": field(&current, "authorityRoot")?,
             "expectedClockRoot": field(&current, "clockRoot")?,
             "now": now, "slot": slot,
@@ -281,7 +273,7 @@ fn tick(
     let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&header_bytes).to_bytes();
     let ingress = invoke(ws, 127, &pair(&plan, &signature))?;
     // Retained before submission: a lost reply is resolved by the next run.
-    let attempt = attempts(ws)?.join(format!("t-{}", nonce()?));
+    let attempt = attempts(ws)?.join(format!("t-{}", crate::fsio::random_nonce()?));
     make_private_dir(&attempt)?;
     let asserted = json!({"now": now, "slot": slot});
     create_private(&attempt.join("tick.json"), asserted.to_string().as_bytes())?;

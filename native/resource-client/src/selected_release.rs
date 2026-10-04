@@ -7,28 +7,13 @@ use super::{
 use crate::transport::{self, HOST_MAX_FRAME};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::fs::{self, File};
-use std::io::Read;
-use std::os::unix::fs::DirBuilderExt;
+use std::fs::{self};
 use std::path::{Path, PathBuf};
 
 const FORMAT: &str = "minidregg-selected-release-attempt-v1";
 
 fn digest(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
-}
-
-fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    File::open(path)
-        .map_err(|error| format!("cannot open {}: {error}", path.display()))?
-        .take((limit + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-    if bytes.is_empty() || bytes.len() > limit {
-        return Err(format!("{} must contain 1..={limit} bytes", path.display()));
-    }
-    Ok(bytes)
 }
 
 fn new_path(directory: &Path) -> Result<(PathBuf, PathBuf, PathBuf)> {
@@ -53,7 +38,7 @@ struct Attempt {
 }
 
 fn retained(directory: &Path) -> Result<Attempt> {
-    let manifest_bytes = bounded(&directory.join("attempt.json"), 65_536)?;
+    let manifest_bytes = crate::fsio::read_bounded(&directory.join("attempt.json"), 65_536)?;
     let manifest: Value = serde_json::from_slice(&manifest_bytes)
         .map_err(|error| format!("invalid selected-release manifest: {error}"))?;
     if manifest.get("format").and_then(Value::as_str) != Some(FORMAT) {
@@ -77,8 +62,8 @@ fn retained(directory: &Path) -> Result<Attempt> {
     {
         return Err("selected-release attempt identity or Host image changed".into());
     }
-    let ingress = bounded(&directory.join("ingress.bin"), HOST_MAX_FRAME - 1)?;
-    let config_bytes = bounded(&config, 65_536)?;
+    let ingress = crate::fsio::read_bounded(&directory.join("ingress.bin"), HOST_MAX_FRAME - 1)?;
+    let config_bytes = crate::fsio::read_bounded(&config, 65_536)?;
     if digest(&ingress) != field("ingressSha256")?
         || digest(&config_bytes) != field("configSha256")?
     {
@@ -111,7 +96,7 @@ where
     let Some(index) = latest else {
         return Ok(false);
     };
-    let marker: Value = serde_json::from_slice(&bounded(
+    let marker: Value = serde_json::from_slice(&crate::fsio::read_bounded(
         &directory.join(format!("request-{index:04}.json")),
         4096,
     )?)
@@ -125,14 +110,14 @@ where
     {
         return Err("retained lookup marker differs from exact ingress or selected socket".into());
     }
-    let frame = bounded(
+    let frame = crate::fsio::read_bounded(
         &directory.join(format!("request-{index:04}.frame")),
         HOST_MAX_FRAME,
     )?;
     if frame.first() != Some(&21) {
         return Ok(false);
     }
-    let binary = bounded(
+    let binary = crate::fsio::read_bounded(
         &directory.join(format!("request-{index:04}.bin")),
         HOST_MAX_FRAME - 1,
     )?;
@@ -229,21 +214,13 @@ pub(super) fn submit(
     ingress: &Path,
     directory: &Path,
 ) -> Result<()> {
-    let input = bounded(ingress, HOST_MAX_FRAME - 1)?;
-    let config_bytes = bounded(config, 65_536)?;
+    let input = crate::fsio::read_bounded(ingress, HOST_MAX_FRAME - 1)?;
+    let config_bytes = crate::fsio::read_bounded(config, 65_536)?;
     let host = absolute(host)?;
     let socket = absolute(socket)?;
     let directory = absolute(directory)?;
     let host_sha = host_image_sha256(&host)?;
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&directory)
-        .map_err(|error| {
-            format!(
-                "cannot create private attempt {}: {error}",
-                directory.display()
-            )
-        })?;
+    crate::fsio::create_private_dir(&directory)?;
     let retained_config = directory.join("config.json");
     create_private(&retained_config, &config_bytes)?;
     create_private(&directory.join("ingress.bin"), &input)?;
@@ -362,9 +339,9 @@ mod tests {
         fs::write(directory.join("request-0002.json"), b"{\"operation\":20}").unwrap();
         assert!(!latest_lookup_absent_with(&directory, &attempt, inspect_absent).unwrap());
         fs::write(directory.join("ingress.bin"), b"").unwrap();
-        assert!(bounded(&directory.join("ingress.bin"), 3).is_err());
+        assert!(crate::fsio::read_bounded(&directory.join("ingress.bin"), 3).is_err());
         fs::write(directory.join("ingress.bin"), b"abcd").unwrap();
-        assert!(bounded(&directory.join("ingress.bin"), 3).is_err());
+        assert!(crate::fsio::read_bounded(&directory.join("ingress.bin"), 3).is_err());
         fs::remove_dir_all(directory).unwrap();
     }
 

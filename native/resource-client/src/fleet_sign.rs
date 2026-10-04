@@ -204,25 +204,6 @@ impl Profile {
     }
 }
 
-fn private_dir(path: &Path) -> Result<()> {
-    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-    if !path.exists() {
-        fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(path)
-            .map_err(|error| format!("cannot create {}: {error}", path.display()))?;
-    }
-    let mode = fs::metadata(path)
-        .map_err(|error| error.to_string())?
-        .permissions()
-        .mode();
-    if mode & 0o077 != 0 {
-        return Err(format!("{} must be private (mode 700)", path.display()));
-    }
-    Ok(())
-}
-
 fn profile(flags: &Flags) -> Result<Profile> {
     let name = profile_name(flags)?;
     let dir = flags.home.join("profiles").join(&name);
@@ -297,7 +278,7 @@ fn join(flags: &Flags) -> Result<Value> {
         .sponsor
         .clone()
         .ok_or("join needs the sponsor's workspace: --sponsor-workspace or MINI_FLEET_SPONSOR")?;
-    private_dir(&profile.dir)?;
+    crate::fsio::ensure_private_dir_all(&profile.dir)?;
     if !profile.key().exists() {
         // K-PREROTATE: the agent key commits to a next key made beside it
         // (hosted: the notice says to move it off the box); fleet join's

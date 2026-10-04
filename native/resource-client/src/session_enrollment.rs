@@ -6,7 +6,6 @@ use super::agent_reserve::{
     retain_json, source, source_inspect,
 };
 use super::*;
-use std::os::unix::fs::DirBuilderExt;
 
 const LIMIT: usize = transport::HOST_MAX_FRAME - 1;
 const JSON_LIMIT: usize = 8 * transport::HOST_MAX_FRAME;
@@ -65,7 +64,7 @@ struct Pin {
 }
 
 fn pin(directory: &Path) -> Result<Pin> {
-    drain::private_dir(directory)?;
+    crate::fsio::ensure_private_dir_durable(directory)?;
     let value = inspected(directory, "pin.json")?;
     if field(&value, "format")? != FORMAT {
         return Err("unsupported enrollment custody pin".into());
@@ -127,10 +126,7 @@ pub(super) fn plan(
     let source_bytes = private_bytes(request_json, LIMIT)?;
     let config_bytes = bounded(&config, 65_536)?;
     let host_sha = host_image_sha256(&host)?;
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&directory)
-        .map_err(|error| format!("cannot create enrollment directory: {error}"))?;
+    crate::fsio::create_private_dir(&directory)?;
     sync_directory_ancestors(&directory)?;
     create_private(&directory.join("source.json"), &source_bytes)?;
     create_private(&directory.join("config.json"), &config_bytes)?;

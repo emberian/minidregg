@@ -4,26 +4,13 @@
 //! recovers an uncertain submit through receipt-only op41.
 use super::*;
 use sha2::{Digest, Sha256};
-use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 
 const FORMAT: &str = "minidregg-fn-namespace-custody-v1";
 const APPROVAL: &str = "minidregg-fn-namespace-approval-v1";
 
 fn digest(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
-}
-
-fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    File::open(path)
-        .map_err(|e| format!("cannot open {}: {e}", path.display()))?
-        .take((limit + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    if bytes.is_empty() || bytes.len() > limit {
-        return Err(format!("{} must contain 1..={limit} bytes", path.display()));
-    }
-    Ok(bytes)
 }
 
 fn member<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
@@ -35,26 +22,6 @@ fn member<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
 
 
 
-
-fn operator_socket_owned(socket: &Path) -> Result<()> {
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
-    let uid = unsafe { geteuid() };
-    let parent = socket.parent().ok_or("operator socket has no parent")?;
-    let directory = fs::symlink_metadata(parent).map_err(|e| e.to_string())?;
-    let node = fs::symlink_metadata(socket).map_err(|e| e.to_string())?;
-    if !directory.is_dir()
-        || directory.uid() != uid
-        || directory.permissions().mode() & 0o077 != 0
-        || !node.file_type().is_socket()
-        || node.uid() != uid
-        || node.permissions().mode() & 0o077 != 0
-    {
-        return Err("fn namespace requires an owner-private operator socket".into());
-    }
-    Ok(())
-}
 
 
 fn source_inspect(
@@ -74,7 +41,7 @@ fn source_inspect(
     if !result.status.success() {
         return Err(format!("pinned Host {kind} inspection refused"));
     }
-    serde_json::from_slice(&bounded(output, 65_536)?)
+    serde_json::from_slice(&crate::fsio::read_bounded(output, 65_536)?)
         .map_err(|e| format!("invalid source inspection: {e}"))
 }
 
@@ -98,8 +65,8 @@ struct Retained {
 }
 
 fn retained(directory: &Path) -> Result<Retained> {
-    drain::private_dir(directory)?;
-    let pin: Value = serde_json::from_slice(&bounded(&directory.join("pin.json"), 65_536)?)
+    crate::fsio::ensure_private_dir_durable(directory)?;
+    let pin: Value = serde_json::from_slice(&crate::fsio::read_bounded(&directory.join("pin.json"), 65_536)?)
         .map_err(|e| e.to_string())?;
     if member(&pin, "format")? != FORMAT {
         return Err("unsupported fn namespace custody pin".into());
@@ -113,15 +80,15 @@ fn retained(directory: &Path) -> Result<Retained> {
         || !socket.is_absolute()
         || config != absolute(&directory.join("config.json"))?
         || host_image_sha256(&host)? != host_sha
-        || digest(&bounded(&config, 65_536)?) != member(&pin, "configSha256")?
+        || digest(&crate::fsio::read_bounded(&config, 65_536)?) != member(&pin, "configSha256")?
     {
         return Err("fn namespace retained Host or config changed".into());
     }
-    let plan = bounded(&directory.join("plan.bin"), 8192)?;
+    let plan = crate::fsio::read_bounded(&directory.join("plan.bin"), 8192)?;
     if digest(&plan) != member(&pin, "planSha256")? {
         return Err("fn namespace retained plan changed".into());
     }
-    let inspection: Value = serde_json::from_slice(&bounded(&directory.join("plan.json"), 65_536)?)
+    let inspection: Value = serde_json::from_slice(&crate::fsio::read_bounded(&directory.join("plan.json"), 65_536)?)
         .map_err(|e| e.to_string())?;
     if member(&inspection, "type")? != "fn-consumer-namespace-plan-v1"
         || member(&inspection, "canonicalPlanHex")? != hex(&plan)
@@ -162,12 +129,9 @@ pub(super) fn plan(host: &Path, config: &Path, socket: &Path, directory: &Path) 
     let config = absolute(config)?;
     let socket = absolute(socket)?;
     let directory = absolute(directory)?;
-    operator_socket_owned(&socket)?;
-    let config_bytes = bounded(&config, 65_536)?;
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&directory)
-        .map_err(|e| format!("cannot create new fn namespace state: {e}"))?;
+    crate::fsio::check_private_socket(&socket)?;
+    let config_bytes = crate::fsio::read_bounded(&config, 65_536)?;
+    crate::fsio::create_private_dir(&directory)?;
     sync_directory_ancestors(&directory)?;
     let config_copy = directory.join("config.json");
     create_private(&config_copy, &config_bytes)?;
@@ -300,7 +264,7 @@ fn receipt(value: &Value) -> Result<Value> {
 
 fn validate_submit_marker(directory: &Path, state: &Retained, ingress: &[u8]) -> Result<()> {
     let marker: Value =
-        serde_json::from_slice(&bounded(&directory.join("submit-attempt.json"), 4096)?)
+        serde_json::from_slice(&crate::fsio::read_bounded(&directory.join("submit-attempt.json"), 4096)?)
             .map_err(|e| e.to_string())?;
     if marker.get("operation").and_then(Value::as_u64) != Some(40)
         || member(&marker, "ingressSha256")? != digest(ingress)
@@ -318,9 +282,9 @@ fn validate_assembly(
     signature: &[u8],
 ) -> Result<()> {
     let assembly: Value =
-        serde_json::from_slice(&bounded(&directory.join("assembly-attempt.json"), 4096)?)
+        serde_json::from_slice(&crate::fsio::read_bounded(&directory.join("assembly-attempt.json"), 4096)?)
             .map_err(|e| e.to_string())?;
-    let frame = bounded(&directory.join("assembly.frame"), 8193)?;
+    let frame = crate::fsio::read_bounded(&directory.join("assembly.frame"), 8193)?;
     if assembly.get("operation").and_then(Value::as_u64) != Some(43)
         || member(&assembly, "planSha256")? != digest(&state.plan)
         || member(&assembly, "signatureSha256")? != digest(signature)
@@ -333,10 +297,10 @@ fn validate_assembly(
 }
 
 fn validate_ingress_pin(directory: &Path, state: &Retained) -> Result<Vec<u8>> {
-    let ingress = bounded(&directory.join("ingress.bin"), 8192)?;
-    let signature = bounded(&directory.join("signature.bin"), 64)?;
+    let ingress = crate::fsio::read_bounded(&directory.join("ingress.bin"), 8192)?;
+    let signature = crate::fsio::read_bounded(&directory.join("signature.bin"), 64)?;
     validate_assembly(directory, state, &ingress, &signature)?;
-    let pin: Value = serde_json::from_slice(&bounded(&directory.join("ingress-pin.json"), 4096)?)
+    let pin: Value = serde_json::from_slice(&crate::fsio::read_bounded(&directory.join("ingress-pin.json"), 4096)?)
         .map_err(|e| e.to_string())?;
     if member(&pin, "ingressSha256")? != digest(&ingress)
         || member(&pin, "planSha256")? != digest(&state.plan)
@@ -389,7 +353,7 @@ pub(super) fn register(directory: &Path, key: &Path, approval_path: &Path) -> Re
     let directory = absolute(directory)?;
     let _owner = transport::service_lock(&directory.join("fn-namespace.lock"))?;
     let state = retained(&directory)?;
-    operator_socket_owned(&state.socket)?;
+    crate::fsio::check_private_socket(&state.socket)?;
     verify_inspection(&directory, &state)?;
     let approval_bytes = crate::agent_reserve::private_bytes(approval_path, 65_536)?;
     let approval: Value = serde_json::from_slice(&approval_bytes).map_err(|e| e.to_string())?;
@@ -399,7 +363,7 @@ pub(super) fn register(directory: &Path, key: &Path, approval_path: &Path) -> Re
     let approval_pin = directory.join("approval-pin.json");
     if approval_pin.exists() {
         let pin: Value =
-            serde_json::from_slice(&bounded(&approval_pin, 4096)?).map_err(|e| e.to_string())?;
+            serde_json::from_slice(&crate::fsio::read_bounded(&approval_pin, 4096)?).map_err(|e| e.to_string())?;
         if member(&pin, "approvalSha256")? != approval_hash
             || member(&pin, "signerPublicKey")? != hex(&signing.verifying_key().to_bytes())
         {
@@ -414,7 +378,7 @@ pub(super) fn register(directory: &Path, key: &Path, approval_path: &Path) -> Re
     }
     let signature_path = directory.join("signature.bin");
     let signature = if signature_path.exists() {
-        bounded(&signature_path, 64)?
+        crate::fsio::read_bounded(&signature_path, 64)?
     } else {
         let raw = signing.sign(&header).to_bytes();
         create_private(&signature_path, &raw)?;
@@ -426,16 +390,16 @@ pub(super) fn register(directory: &Path, key: &Path, approval_path: &Path) -> Re
     }
     let ingress_path = directory.join("ingress.bin");
     let ingress = if ingress_path.exists() {
-        bounded(&ingress_path, 8192)?
+        crate::fsio::read_bounded(&ingress_path, 8192)?
     } else {
         let marker = directory.join("assembly-attempt.json");
         let frame_path = directory.join("assembly.frame");
         let frame = if frame_path.exists() {
-            bounded(&frame_path, 8193)?
+            crate::fsio::read_bounded(&frame_path, 8193)?
         } else {
             if marker.exists() {
                 let old: Value =
-                    serde_json::from_slice(&bounded(&marker, 4096)?).map_err(|e| e.to_string())?;
+                    serde_json::from_slice(&crate::fsio::read_bounded(&marker, 4096)?).map_err(|e| e.to_string())?;
                 if old.get("operation").and_then(Value::as_u64) != Some(43)
                     || member(&old, "planSha256")? != digest(&state.plan)
                     || member(&old, "signatureSha256")? != digest(&signature)
@@ -467,7 +431,7 @@ pub(super) fn register(directory: &Path, key: &Path, approval_path: &Path) -> Re
     let ingress_pin = directory.join("ingress-pin.json");
     if ingress_pin.exists() {
         let pin: Value =
-            serde_json::from_slice(&bounded(&ingress_pin, 4096)?).map_err(|e| e.to_string())?;
+            serde_json::from_slice(&crate::fsio::read_bounded(&ingress_pin, 4096)?).map_err(|e| e.to_string())?;
         if member(&pin, "ingressSha256")? != digest(&ingress) {
             return Err("fn namespace retained ingress changed".into());
         }
@@ -506,8 +470,8 @@ pub(super) fn register(directory: &Path, key: &Path, approval_path: &Path) -> Re
         }
     }
     if directory.join("submit.outcome.bin").exists() {
-        let frame = bounded(&directory.join("submit.frame"), transport::HOST_MAX_FRAME)?;
-        let body = bounded(
+        let frame = crate::fsio::read_bounded(&directory.join("submit.frame"), transport::HOST_MAX_FRAME)?;
+        let body = crate::fsio::read_bounded(
             &directory.join("submit.outcome.bin"),
             transport::HOST_MAX_FRAME - 1,
         )?;
@@ -523,7 +487,7 @@ pub(super) fn register(directory: &Path, key: &Path, approval_path: &Path) -> Re
             if let Ok(original) = receipt(&value) {
                 let confirmed = directory.join("confirmed.json");
                 if confirmed.exists() {
-                    let prior: Value = serde_json::from_slice(&bounded(&confirmed, 4096)?)
+                    let prior: Value = serde_json::from_slice(&crate::fsio::read_bounded(&confirmed, 4096)?)
                         .map_err(|e| e.to_string())?;
                     if prior != original {
                         return Err("fn namespace original receipt changed".into());
@@ -539,7 +503,7 @@ pub(super) fn register(directory: &Path, key: &Path, approval_path: &Path) -> Re
         Some(original) => {
             if directory.join("confirmed.json").exists() {
                 let prior: Value =
-                    serde_json::from_slice(&bounded(&directory.join("confirmed.json"), 4096)?)
+                    serde_json::from_slice(&crate::fsio::read_bounded(&directory.join("confirmed.json"), 4096)?)
                         .map_err(|e| e.to_string())?;
                 if prior != original {
                     return Err("fn namespace original receipt changed".into());
@@ -559,14 +523,14 @@ pub(super) fn lookup_original(directory: &Path) -> Result<()> {
     let directory = absolute(directory)?;
     let _owner = transport::service_lock(&directory.join("fn-namespace.lock"))?;
     let state = retained(&directory)?;
-    operator_socket_owned(&state.socket)?;
+    crate::fsio::check_private_socket(&state.socket)?;
     verify_inspection(&directory, &state)?;
     let ingress = validate_ingress_pin(&directory, &state)?;
     match lookup(&directory, &state, &ingress)? {
         Some(original) => {
             let confirmed = directory.join("confirmed.json");
             if confirmed.exists() {
-                let prior: Value = serde_json::from_slice(&bounded(&confirmed, 4096)?)
+                let prior: Value = serde_json::from_slice(&crate::fsio::read_bounded(&confirmed, 4096)?)
                     .map_err(|e| e.to_string())?;
                 if prior != original {
                     return Err("fn namespace original receipt changed".into());

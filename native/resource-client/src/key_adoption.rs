@@ -301,7 +301,7 @@ fn resolve(
             }
         }
     }
-    let stem = format!("lookup-{}", participant_enrollment::nonce()?);
+    let stem = format!("lookup-{}", crate::fsio::random_nonce()?);
     outcome(source, attempt, &stem, 190, ingress)
 }
 fn uncommitted_manifest(manifest: &Value) -> bool {
@@ -511,7 +511,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         if current_public == next_public {
             return Err("next key must differ from current key".into());
         }
-        let request = json!({"subject":ws["subject"],"nonce":participant_enrollment::nonce()?,
+        let request = json!({"subject":ws["subject"],"nonce":crate::fsio::random_nonce()?,
             "currentPublicKey":current_public,"nextPublicKey":next_public});
         let pin = json!({"type":FORMAT,"context":context,"profile":profile,"request":request,"initialStatus":view});
         save_json_staged(&pin_path, &pin)?;
@@ -600,7 +600,7 @@ def serve():
             let root = env::temp_dir().join(format!(
                 "mini-adopt-test-{}-{}",
                 std::process::id(),
-                participant_enrollment::nonce().unwrap()
+                crate::fsio::random_nonce().unwrap()
             ));
             workspace::make_private_dir(&root).unwrap();
             let daily = root.join("daily.key");

@@ -130,13 +130,11 @@ pub mod store {
 
     /// Create a profile from 64 bytes of `/dev/urandom`; refuses an existing name.
     pub fn create(name: &str, created_at: i64) -> Result<Profile> {
-        use std::io::{Read, Write};
+        use std::io::Write;
         use std::os::unix::fs::OpenOptionsExt;
         validate_name(name)?;
         let mut seed = [0u8; 64];
-        std::fs::File::open("/dev/urandom")
-            .and_then(|mut f| f.read_exact(&mut seed))
-            .map_err(|e| format!("cannot obtain seed: {e}"))?;
+        crate::random::fill(&mut seed).map_err(|e| format!("cannot obtain seed: {e}"))?;
         let profile = Profile::from_seed(name, seed)?;
         zeroize::Zeroize::zeroize(&mut seed);
         let dir = dir()?;

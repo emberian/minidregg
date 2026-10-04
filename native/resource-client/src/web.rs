@@ -31,7 +31,7 @@ use crate::{absolute, hex, path, Args, Result};
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -117,11 +117,7 @@ pub(crate) fn loopback_address(text: &str) -> Result<SocketAddr> {
 }
 
 fn launch_token() -> Result<String> {
-    let mut bytes = [0u8; 16];
-    fs::File::open("/dev/urandom")
-        .and_then(|mut file| file.read_exact(&mut bytes))
-        .map_err(|error| format!("cannot obtain launch secret: {error}"))?;
-    Ok(hex(&bytes))
+    Ok(hex(&crate::fsio::random::<16>()?))
 }
 
 struct Site {

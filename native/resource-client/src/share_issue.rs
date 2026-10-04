@@ -4,7 +4,7 @@
 //! resubmits an uncertain native operation.
 use super::*;
 use sha2::{Digest, Sha256};
-use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt};
 
 const REQUEST_LIMIT: usize = 256 * 1024;
 const FORMAT: &str = "minidregg-application-share-issue-custody-v1";
@@ -58,20 +58,8 @@ pub(super) fn digest(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
 }
 
-pub(super) fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    File::open(path)
-        .map_err(|e| format!("cannot open {}: {e}", path.display()))?
-        .take((limit + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    if bytes.is_empty() || bytes.len() > limit {
-        return Err(format!("{} must contain 1..={limit} bytes", path.display()));
-    }
-    Ok(bytes)
-}
-
 pub(super) use crate::agent_reserve::private_bytes;
+pub(super) use crate::fsio::{check_private_socket as operator_socket_owned, read_bounded as bounded};
 
 pub(super) fn member<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
     value
@@ -147,30 +135,6 @@ fn check_intended_selectors(approval: &Value, plan: &Value) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn operator_socket_owned(socket: &Path) -> Result<()> {
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
-    let uid = unsafe { geteuid() };
-    let parent = socket.parent().ok_or("operator socket has no parent")?;
-    let directory = fs::symlink_metadata(parent)
-        .map_err(|e| format!("cannot inspect operator directory: {e}"))?;
-    let node =
-        fs::symlink_metadata(socket).map_err(|e| format!("cannot inspect operator socket: {e}"))?;
-    if !directory.is_dir()
-        || directory.uid() != uid
-        || directory.permissions().mode() & 0o077 != 0
-        || !node.file_type().is_socket()
-        || node.uid() != uid
-        || node.permissions().mode() & 0o077 != 0
-    {
-        return Err(
-            "operator socket must be owner-private under an owner-private directory".into(),
-        );
-    }
-    Ok(())
-}
-
 pub(super) fn expect_reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
         [255, ..] => Err(format!(
@@ -193,7 +157,7 @@ struct Retained {
 }
 
 fn retained(directory: &Path, socket_override: Option<&Path>) -> Result<Retained> {
-    drain::private_dir(directory)?;
+    crate::fsio::ensure_private_dir_durable(directory)?;
     let pin_bytes = bounded(&directory.join("pin.json"), 65_536)?;
     let pin: Value = serde_json::from_slice(&pin_bytes).map_err(|e| e.to_string())?;
     if member(&pin, "format")? != FORMAT {
@@ -510,10 +474,7 @@ pub(super) fn prepare(
     };
     let approval: Value = serde_json::from_slice(&approval_bytes)
         .map_err(|e| format!("invalid share issue approval: {e}"))?;
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&directory)
-        .map_err(|e| format!("cannot create share issue custody directory: {e}"))?;
+    crate::fsio::create_private_dir(&directory)?;
     sync_directory_ancestors(&directory)?;
     create_private(&directory.join("request.json"), &source)?;
     create_private(&directory.join("approval.json"), &approval_bytes)?;

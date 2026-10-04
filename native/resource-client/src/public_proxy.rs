@@ -242,7 +242,7 @@ fn public_directory(path: &Path, group: Option<u32>) -> Result<(), String> {
     let parent = path.parent().ok_or("socket requires a parent directory")?;
     let metadata =
         fs::symlink_metadata(parent).map_err(|e| format!("cannot inspect {}: {e}", parent.display()))?;
-    if !group_directory_custody(&metadata, transport::effective_uid(), group) {
+    if !group_directory_custody(&metadata, mini_sdk::private::euid(), group) {
         return Err(format!(
             "socket directory {} must be owned by this user, group {group}, mode 0710 or 0750",
             parent.display()
@@ -264,18 +264,7 @@ fn private_directory(path: &Path) -> Result<(), String> {
         return Err("public proxy socket paths must be absolute".into());
     }
     let parent = path.parent().ok_or("socket requires a parent directory")?;
-    let metadata =
-        fs::metadata(parent).map_err(|e| format!("cannot inspect {}: {e}", parent.display()))?;
-    if !metadata.is_dir()
-        || metadata.uid() != transport::effective_uid()
-        || metadata.mode() & 0o077 != 0
-    {
-        return Err(format!(
-            "socket directory {} must be owned by this user with mode 0700",
-            parent.display()
-        ));
-    }
-    Ok(())
+    crate::fsio::check_private_dir(parent)
 }
 fn check_upstream(path: &Path, config: &[u8]) -> Result<(), String> {
     private_directory(path)?;
@@ -286,10 +275,7 @@ fn check_upstream(path: &Path, config: &[u8]) -> Result<(), String> {
     ] {
         let metadata =
             fs::symlink_metadata(&pin).map_err(|e| format!("cannot inspect upstream pin: {e}"))?;
-        if !metadata.is_file()
-            || metadata.uid() != transport::effective_uid()
-            || metadata.mode() & 0o077 != 0
-        {
+        if !mini_sdk::private::file_ok(&metadata) {
             return Err("upstream pin is not an owner-private regular file".into());
         }
         if transport::read_config(&pin)? != expected {
@@ -298,10 +284,7 @@ fn check_upstream(path: &Path, config: &[u8]) -> Result<(), String> {
     }
     let metadata =
         fs::symlink_metadata(path).map_err(|e| format!("cannot inspect upstream socket: {e}"))?;
-    if !metadata.file_type().is_socket()
-        || metadata.uid() != transport::effective_uid()
-        || metadata.mode() & 0o077 != 0
-    {
+    if !mini_sdk::private::socket_ok(&metadata) {
         return Err("upstream is not an owner-private Unix socket".into());
     }
     Ok(())
@@ -372,7 +355,7 @@ fn connection(
             )
         }
     };
-    if transport::peer_uid(&private).ok() != Some(transport::effective_uid()) {
+    if transport::peer_uid(&private).ok() != Some(mini_sdk::private::euid()) {
         return refusal(&mut public, stop, bounds, "upstream peer UID mismatch");
     }
     // Once the first write starts, failure is uncertain. Never manufacture a
@@ -516,7 +499,7 @@ pub(crate) fn serve(socket: &Path, upstream: &Path, config: &Path, group: Option
     let stop = Arc::new(AtomicBool::new(false));
     let probe = connect(upstream, &stop, Instant::now() + BOUNDS.connect)
         .map_err(|e| format!("upstream unavailable: {e}"))?;
-    if transport::peer_uid(&probe)? != transport::effective_uid() {
+    if transport::peer_uid(&probe)? != mini_sdk::private::euid() {
         return Err("upstream peer UID mismatch".into());
     }
     drop(probe);
@@ -566,7 +549,7 @@ mod tests {
     fn transport_public_socket_group_directory_admits_only_group_search() {
         let root = std::env::temp_dir().join(format!("mini-public-group-{}", std::process::id()));
         fs::create_dir(&root).unwrap();
-        let me = transport::effective_uid();
+        let me = mini_sdk::private::euid();
         let gid = fs::metadata(&root).unwrap().gid();
         let socket = root.join("mini.sock");
         for (mode, admitted) in [(0o710, true), (0o750, true), (0o700, true), (0o770, false), (0o711, false), (0o755, false), (0o730, false), (0o2750, false), (0o610, false)] {

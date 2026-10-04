@@ -5,7 +5,6 @@
 
 use super::*;
 use sha2::{Digest, Sha256};
-use std::io::Read;
 
 const MAX_INGRESS: usize = transport::HOST_MAX_FRAME - 1;
 const MAX_OUTCOME: usize = 65_536;
@@ -31,24 +30,6 @@ impl IssueProfile {
             Self::GrainBackedEvent22 => "minidregg-grain-share-issue-recipient-lookup-v1",
         }
     }
-}
-
-fn bounded(path: &Path, maximum: usize) -> Result<Vec<u8>> {
-    let metadata =
-        fs::symlink_metadata(path).map_err(|error| format!("{}: {error}", path.display()))?;
-    if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.len() > maximum as u64 {
-        return Err(format!("{} must be a bounded regular file", path.display()));
-    }
-    let mut bytes = Vec::new();
-    File::open(path)
-        .map_err(|error| format!("{}: {error}", path.display()))?
-        .take((maximum + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|error| format!("{}: {error}", path.display()))?;
-    if bytes.len() != metadata.len() as usize || bytes.len() > maximum {
-        return Err(format!("{} changed during bounded read", path.display()));
-    }
-    Ok(bytes)
 }
 
 fn decimal(value: &str, label: &str) -> Result<()> {
@@ -115,7 +96,7 @@ fn inspect_direct(host: &Path, config: &Path, input: &Path, output: &Path) -> Re
             "pinned Host refused share issue outcome inspection: {status}"
         ));
     }
-    serde_json::from_slice(&bounded(output, MAX_OUTCOME)?)
+    serde_json::from_slice(&crate::fsio::read_bounded(output, MAX_OUTCOME)?)
         .map_err(|error| format!("share issue Host outcome JSON: {error}"))
 }
 
@@ -183,10 +164,10 @@ fn lookup_profile(
     if expected[2] == "0" || directory.exists() {
         return Err("share issue receipt destination exists or accepted count is zero".into());
     }
-    let ingress = bounded(ingress_path, MAX_INGRESS)?;
-    let config_bytes = bounded(config, MAX_CONFIG)?;
+    let ingress = crate::fsio::read_bounded(ingress_path, MAX_INGRESS)?;
+    let config_bytes = crate::fsio::read_bounded(config, MAX_CONFIG)?;
     let host_sha = host_image_sha256(host)?;
-    drain::private_dir(directory)?;
+    crate::fsio::ensure_private_dir_durable(directory)?;
     create_private(&directory.join("ingress.bin"), &ingress)?;
     let marker = json!({"type":profile.marker(),
         "host":utf8_path(host)?,"hostSha256":host_sha,
@@ -213,8 +194,8 @@ fn lookup_profile(
     create_private(&directory.join("reply.frame"), &frame)?;
     sync_directory_ancestors(directory)?;
     if host_image_sha256(host)? != host_sha
-        || bounded(config, MAX_CONFIG)? != config_bytes
-        || bounded(&directory.join("ingress.bin"), MAX_INGRESS)? != ingress
+        || crate::fsio::read_bounded(config, MAX_CONFIG)? != config_bytes
+        || crate::fsio::read_bounded(&directory.join("ingress.bin"), MAX_INGRESS)? != ingress
     {
         return Err(format!(
             "share issue Host, config, or exact ingress changed after op{}",
@@ -241,14 +222,14 @@ fn lookup_profile(
     sync_directory_ancestors(directory)?;
     let json_path = directory.join("outcome.json");
     let outcome = inspect_direct(host, config, &binary, &json_path)?;
-    let retained: Value = serde_json::from_slice(&bounded(&json_path, MAX_OUTCOME)?)
+    let retained: Value = serde_json::from_slice(&crate::fsio::read_bounded(&json_path, MAX_OUTCOME)?)
         .map_err(|error| format!("share issue Host outcome JSON: {error}"))?;
     if retained != outcome {
         return Err("share issue Host outcome changed after inspection".into());
     }
     if host_image_sha256(host)? != host_sha
-        || bounded(config, MAX_CONFIG)? != config_bytes
-        || bounded(&directory.join("ingress.bin"), MAX_INGRESS)? != ingress
+        || crate::fsio::read_bounded(config, MAX_CONFIG)? != config_bytes
+        || crate::fsio::read_bounded(&directory.join("ingress.bin"), MAX_INGRESS)? != ingress
     {
         return Err("share issue Host, config, or exact ingress changed after inspection".into());
     }

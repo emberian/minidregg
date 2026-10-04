@@ -6,7 +6,6 @@ use super::agent_reserve::{
     private_socket, retain_generated, retain_json, source, source_inspect,
 };
 use super::*;
-use std::os::unix::fs::DirBuilderExt;
 
 const FORMAT: &str = "minidregg-agent-payer-signatures-v1";
 const APPROVAL: &str = "minidregg-agent-payer-approval-v1";
@@ -83,10 +82,7 @@ pub(super) fn sign(inputs: Inputs<'_>) -> Result<()> {
     // Check the selected image/config before creating evidence or signing.
     let selected_host_sha = host_image_sha256(&host)?;
     let selected_config = bounded(&config, 65_536)?;
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&directory)
-        .map_err(|error| format!("cannot create agent payer directory: {error}"))?;
+    crate::fsio::create_private_dir(&directory)?;
     sync_directory_ancestors(&directory)?;
     let original = payer_anchor(&reserve_attempt, &directory)?;
     if host != original.host

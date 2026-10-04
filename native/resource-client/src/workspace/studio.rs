@@ -134,11 +134,7 @@ impl Manifest {
     }
 }
 fn token() -> Result<String> {
-    let mut bytes = [0u8; 16];
-    File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut bytes))
-        .map_err(|e| e.to_string())?;
-    Ok(hex(&bytes))
+    Ok(hex(&crate::fsio::random::<16>()?))
 }
 fn directory(root: &Path, id: &str) -> Result<PathBuf> {
     if !mini_sdk::hex::is_canonical_len(id, 16) {

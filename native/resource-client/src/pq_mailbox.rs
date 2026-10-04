@@ -1,7 +1,8 @@
 //! Restricted PQ batch cascade + full-broadcast replies. NOT Outfox protocol
 //! equivalence or a completed active/longitudinal anonymity theorem.
 use crate::crypto_transit::{self, SealedRef};
-use crate::scheduled_transport::{self as native, directory, persist, random, read_private};
+use crate::fsio::random;
+use crate::scheduled_transport::{self as native, persist, read_private};
 use crate::{transport, Args, Result};
 use crate::hybrid_kem::{self, HybridSecret};
 use chacha20poly1305::{
@@ -309,7 +310,7 @@ fn process_mailbox(
         return Ok(v);
     }
     let journal = root.join("native");
-    directory(&journal)?;
+    crate::fsio::ensure_private_dir_all(&journal)?;
     let mut replies = Vec::new();
     for (id, cap, body) in cores {
         let result = if body.is_empty() {
@@ -762,7 +763,7 @@ pub(crate) fn live_save_cap(
         payload,
     };
     p.check()?;
-    directory(root)?;
+    crate::fsio::ensure_private_dir_all(root)?;
     let _lock = live_cap_lock(root)?;
     let mut record = epoch.to_le_bytes().to_vec();
     record.push(p.class() as u8);
@@ -809,7 +810,7 @@ pub(crate) fn live_scan(
         payload,
     };
     p.check()?;
-    directory(root)?;
+    crate::fsio::ensure_private_dir_all(root)?;
     let _lock = live_cap_lock(root)?;
     consume_broadcast(root, &p, broadcast)
 }
@@ -841,7 +842,7 @@ pub(crate) fn live_register(
         payload,
     };
     p.check()?;
-    directory(root)?;
+    crate::fsio::ensure_private_dir_all(root)?;
     if contributions.len() != width || contributions.iter().any(|v| v.len() != p.size(0) + 160) {
         return Err("fixed enrolled contribution cohort incomplete".into());
     }
@@ -876,7 +877,7 @@ pub(crate) fn live_relay(
         payload,
     };
     p.check()?;
-    directory(root)?;
+    crate::fsio::ensure_private_dir_all(root)?;
     if hop >= 3 {
         return Err("live relay cannot impersonate receiver".into());
     }
@@ -998,7 +999,7 @@ pub(crate) fn live_mailbox(
         payload,
     };
     p.check()?;
-    directory(root)?;
+    crate::fsio::ensure_private_dir_all(root)?;
     let n = 18 + 160 * width + 128;
     if segment.len() != n + 19 + width * p.size(3) {
         return Err("live receiver exact shape".into());
@@ -1080,7 +1081,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         .into_string()
         .map_err(|_| "invalid mix action")?;
     let state = PathBuf::from(args.required("state")?);
-    directory(&state)?;
+    crate::fsio::ensure_private_dir_all(&state)?;
     let _lock = transport::service_lock(&state.join("service.lock"))?;
     if action == "registrar-key" {
         let secret = PathBuf::from(args.required("secret")?);
@@ -1307,7 +1308,7 @@ mod tests {
     fn scratch() -> PathBuf {
         let p =
             std::env::temp_dir().join(format!("mini-pq-{}", crate::hex(&random::<16>().unwrap())));
-        directory(&p).unwrap();
+        crate::fsio::ensure_private_dir_all(&p).unwrap();
         p
     }
     fn keys() -> (Vec<HybridSecret>, Vec<Vec<u8>>) {
@@ -1323,7 +1324,7 @@ mod tests {
             "mini-cap-wait-{}",
             crate::hex(&random::<16>().unwrap())
         ));
-        directory(&root).unwrap();
+        crate::fsio::ensure_private_dir_all(&root).unwrap();
         let lock = transport::service_lock(&root.join("service.lock")).unwrap();
         let worker_root = root.clone();
         let worker =
@@ -1510,7 +1511,7 @@ mod tests {
         assert!(!receiver.join("epoch-0-stage-3.input").exists());
         assert!(!receiver.join("epoch-0-stage-3.claimed").exists());
         let interrupted = root.join("interrupted");
-        directory(&interrupted).unwrap();
+        crate::fsio::ensure_private_dir_all(&interrupted).unwrap();
         persist(
             &interrupted.join("live-mailbox-epoch-0.admitted"),
             &admitted,
@@ -1521,15 +1522,15 @@ mod tests {
             .contains("uncertainty"));
         assert!(!interrupted.join("epoch-0-stage-3.output").exists());
         let orphan = root.join("orphan");
-        directory(&orphan).unwrap();
+        crate::fsio::ensure_private_dir_all(&orphan).unwrap();
         persist(&orphan.join("epoch-0-stage-3.output"), &out).unwrap();
         assert!(call(&orphan, 1000).unwrap_err().contains("orphan"));
         let legacy = root.join("legacy");
-        directory(&legacy).unwrap();
+        crate::fsio::ensure_private_dir_all(&legacy).unwrap();
         persist(&legacy.join("epoch-0-profile"), b"legacy").unwrap();
         assert!(call(&legacy, 1000).unwrap_err().contains("legacy"));
         let corrupt = root.join("corrupt");
-        directory(&corrupt).unwrap();
+        crate::fsio::ensure_private_dir_all(&corrupt).unwrap();
         persist(&corrupt.join("live-mailbox-epoch-0.admitted"), &admitted).unwrap();
         persist(&corrupt.join("epoch-0-stage-3.output"), b"bad").unwrap();
         assert!(call(&corrupt, 1000).is_err());
@@ -1582,24 +1583,24 @@ mod tests {
         let n = 18 + 160 * p.width + 128;
         let frame = live_relay_admission(&p, 0, &segment[..n], &segment[n..], 1000, 1000).unwrap();
         let crash = root.join("crash");
-        directory(&crash).unwrap();
+        crate::fsio::ensure_private_dir_all(&crash).unwrap();
         persist(&crash.join("live-epoch-3-stage-0.admitted"), &frame).unwrap();
         assert!(relay(&crash, 1000, &auth[0])
             .unwrap_err()
             .contains("uncertain"));
         assert!(!crash.join("live-epoch-3-stage-0.output").exists());
         let changed = root.join("changed");
-        directory(&changed).unwrap();
+        crate::fsio::ensure_private_dir_all(&changed).unwrap();
         let mut wrong = frame.clone();
         *wrong.last_mut().unwrap() ^= 1;
         persist(&changed.join("live-epoch-3-stage-0.admitted"), &wrong).unwrap();
         assert!(relay(&changed, 1000, &auth[0]).is_err());
         let orphan = root.join("orphan");
-        directory(&orphan).unwrap();
+        crate::fsio::ensure_private_dir_all(&orphan).unwrap();
         persist(&orphan.join("live-epoch-3-stage-0.output"), &out).unwrap();
         assert!(relay(&orphan, 1000, &auth[0]).is_err());
         let legacy = root.join("legacy");
-        directory(&legacy).unwrap();
+        crate::fsio::ensure_private_dir_all(&legacy).unwrap();
         persist(&legacy.join("epoch-3-stage-0.claimed"), b"claimed").unwrap();
         assert!(relay(&legacy, 1000, &auth[0]).is_err());
         assert!(!legacy.join("live-epoch-3-stage-0.admitted").exists());
@@ -1655,7 +1656,7 @@ mod tests {
         };
         for exhausted in [false, true] {
             let state = root.join(if exhausted { "full" } else { "oversize" });
-            directory(&state).unwrap();
+            crate::fsio::ensure_private_dir_all(&state).unwrap();
             if exhausted {
                 for i in 0..64 {
                     let mut v = p.epoch.to_le_bytes().to_vec();
@@ -1749,7 +1750,7 @@ mod tests {
         let root = scratch();
         for hop in 0..3 {
             let state = root.join(format!("r{hop}"));
-            directory(&state).unwrap();
+            crate::fsio::ensure_private_dir_all(&state).unwrap();
             let input = if hop == 0 {
                 b.clone()
             } else {
@@ -1797,7 +1798,7 @@ mod tests {
             vec![b"first".to_vec()]
         );
         let crash = root.join("crash");
-        directory(&crash).unwrap();
+        crate::fsio::ensure_private_dir_all(&crash).unwrap();
         persist(&crash.join(format!("{stem}.cap")), &record).unwrap();
         persist(&crash.join(format!("{stem}.spent")), b"burned").unwrap();
         assert!(consume_broadcast(&crash, &p, &input).is_err());
@@ -1991,7 +1992,7 @@ mod tests {
         let mut b = batch(&p, 0, &packets).unwrap();
         for hop in 0..3 {
             let state = root.join(format!("relay{hop}"));
-            directory(&state).unwrap();
+            crate::fsio::ensure_private_dir_all(&state).unwrap();
             let next = process_relay(&state, &p, hop, &secret[hop], &b).unwrap();
             assert_eq!(
                 process_relay(&state, &p, hop, &secret[hop], &b).unwrap(),
@@ -2000,7 +2001,7 @@ mod tests {
             b = next;
         }
         let state = root.join("mailbox");
-        directory(&state).unwrap();
+        crate::fsio::ensure_private_dir_all(&state).unwrap();
         let out = process_mailbox(&state, &p, &secret[3], &b, &target, b"{}").unwrap();
         assert_eq!(
             process_mailbox(&state, &p, &secret[3], &b, &target, b"{}").unwrap(),
@@ -2042,7 +2043,7 @@ mod tests {
         .is_err());
         let root = scratch();
         let state = root.join("relay");
-        directory(&state).unwrap();
+        crate::fsio::ensure_private_dir_all(&state).unwrap();
         let b = batch(&p, 0, &[original, dummy]).unwrap();
         process_relay(&state, &p, 0, &secret[0], &b).unwrap();
         let mut changed = b.clone();

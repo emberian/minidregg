@@ -300,10 +300,7 @@ fn complete_with(
             if manifest.get("receiptContinuity").is_some() {
                 return Err(fail("enabled candidate custody disappeared"));
             }
-            fs::DirBuilder::new()
-                .mode(0o700)
-                .create(&custody)
-                .map_err(fail)?;
+            crate::fsio::create_private_dir(&custody)?;
             directory(root)?.sync_all().map_err(fail)?;
         }
         Err(e) => return Err(fail(e)),

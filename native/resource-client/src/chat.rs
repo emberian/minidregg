@@ -61,7 +61,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 
 /// The verbs this module adds to the shell (rows for `help`).
@@ -567,18 +566,10 @@ pub(crate) fn chat_dir(session: &Session) -> PathBuf {
     session.home.join("chat")
 }
 
-pub(crate) fn private_dirs(path: &Path) -> Result<(), String> {
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(path)
-        .map_err(|e| format!("cannot create {}: {e}", path.display()))
-}
-
 /// Replace a small private JSON file (write a sibling, rename over).
 pub(crate) fn put_json(path: &Path, value: &Value) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        private_dirs(parent)?;
+        crate::fsio::ensure_private_dir_all(parent)?;
     }
     let mut bytes=serde_json::to_vec_pretty(value).map_err(|e|e.to_string())?;
     bytes.push(b'\n');
@@ -630,7 +621,7 @@ pub(crate) fn current_room(session: &Session) -> Result<Room, String> {
 }
 
 fn set_current(session: &Session, room: &str) -> Result<(), String> {
-    private_dirs(&chat_dir(session))?;
+    crate::fsio::ensure_private_dir_all(&chat_dir(session))?;
     crate::fsio::replace_private(&chat_dir(session).join("current"), format!("{room}\n").as_bytes())
 }
 
@@ -714,7 +705,7 @@ pub(crate) fn propose_submit(session: &Session, prefix: &str, request: &Value) -
 /// `workspace propose --private ROOM` seals every append's text under the
 /// room's current key, bound to the stream and the sequence it read).
 fn propose_submit_in(session: &Session, prefix: &str, request: &Value, sealed: Option<&str>) -> Result<Value, Done> {
-    private_dirs(&session.home.join("requests")).map_err(error)?;
+    crate::fsio::ensure_private_dir_all(&session.home.join("requests")).map_err(error)?;
     let ws = session.workspace.clone();
     let mut resigned = 0u32;
     let mut tries = 0u32;
@@ -779,7 +770,7 @@ pub(crate) fn signed_read(
     extra: &[(&str, String)],
 ) -> Result<Value, Done> {
     let folder = chat_dir(session).join("reads").join(room);
-    private_dirs(&folder).map_err(error)?;
+    crate::fsio::ensure_private_dir_all(&folder).map_err(error)?;
     let nonce = random_nonce().map_err(error)?;
     let field = |k: &str| member(reference, k).map(str::to_owned).map_err(error);
     let (kind, target, capability) = (field("kind")?, field("target")?, field("observeCapability")?);
@@ -1629,7 +1620,7 @@ fn append_operation(session: &Session, path: &Path, stream: &str, request: &Valu
     }
     let id = format!("operation-{}", workspace::member(&record, "nonce").map_err(error)?);
     let request_path = session.home.join("requests").join(format!("{id}.json"));
-    private_dirs(&session.home.join("requests")).map_err(error)?;
+    crate::fsio::ensure_private_dir_all(&session.home.join("requests")).map_err(error)?;
     create_private(&request_path, &serde_json::to_vec(request).map_err(error)?).map_err(error)?;
     let mut flags = vec![("action", os("propose")), ("dir", os(&session.workspace)),
         ("request", os(&request_path)), ("proposal-id", os(&id))];
@@ -1935,7 +1926,7 @@ fn tail(session: &Session, room: &Room, count: usize, since: Option<u64>, follow
 
 pub(crate) fn write_request(session: &Session, name: &str, value: &Value) -> Result<PathBuf, Done> {
     let dir = session.home.join("requests");
-    private_dirs(&dir).map_err(error)?;
+    crate::fsio::ensure_private_dir_all(&dir).map_err(error)?;
     let path = dir.join(format!("{name}.json"));
     let mut bytes = serde_json::to_vec(value).expect("JSON");
     bytes.push(b'\n');
@@ -1999,7 +1990,7 @@ fn room_grant(session: &Session, room: &str, recipient: &str, verbs: &[String]) 
 
 pub(crate) fn import_from(session: &Session, name: &str, reference_json: &Value) -> Result<(), Done> {
     let path = session.home.join("inbox").join(format!("{name}.json"));
-    private_dirs(&session.home.join("inbox")).map_err(error)?;
+    crate::fsio::ensure_private_dir_all(&session.home.join("inbox")).map_err(error)?;
     let _ = fs::remove_file(&path);
     create_private(&path, &serde_json::to_vec(reference_json).expect("JSON")).map_err(error)?;
     client("workspace", &[("action", os("import")), ("dir", os(&session.workspace)), ("name", os(name)), ("from-ref", os(&path))])?;

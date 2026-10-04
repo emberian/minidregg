@@ -1,9 +1,7 @@
 //! Filesystem custody: owner-private directories, fsync-then-rename JSON records under an
 //! exclusive lease, and the retained attempt-directory layout `resource-client` already writes
 //! (`call.bin`, `outcome.json`, `retry-NNNN.{bin,json,transport.json}`).
-use std::fs::{self, OpenOptions};
-use std::io::Read;
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
@@ -14,23 +12,6 @@ use crate::lock::{Create, Lease, LockError, Wait};
 use crate::{Error, Result};
 
 const MAX_RECORD: u64 = 16 * 1024 * 1024;
-
-/// Create (or accept) an owner-only directory owned by this effective uid; refuse anything
-/// else, including a symlink.
-pub fn private_dir(path: &Path) -> Result<()> {
-    match fs::DirBuilder::new().mode(0o700).create(path) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-        Err(e) => return Err(Error(format!("{}: {e}", path.display()))),
-    }
-    let m = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
-    // SAFETY: geteuid has no preconditions and cannot fail.
-    let euid = unsafe { libc::geteuid() };
-    if !m.is_dir() || m.mode() & 0o077 != 0 || m.uid() != euid {
-        return Err(Error(format!("{} must be an owner-private directory", path.display())));
-    }
-    Ok(())
-}
 
 /// Write `value` to `path` durably: a unique 0600 sibling, fsync, rename, fsync the directory.
 pub fn atomic_json(path: &Path, value: &Value) -> Result<()> {
@@ -55,17 +36,11 @@ pub fn write_once(path: &Path, value: &Value) -> Result<()> {
 
 /// Read a bounded JSON record; absence is `None`, corruption is an error (never absence).
 pub fn read_json(path: &Path) -> Result<Option<Value>> {
-    let f = match OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(path) {
-        Ok(f) => f,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e.to_string().into()),
+    let bytes = match crate::fsread::read_regular(path, 0, MAX_RECORD as usize) {
+        Ok(bytes) => bytes,
+        Err(e) if e.is_not_found() => return Ok(None),
+        Err(e) => return Err(Error(format!("invalid or oversized custody record: {e}"))),
     };
-    let meta = f.metadata().map_err(|e| e.to_string())?;
-    if !meta.is_file() || meta.len() > MAX_RECORD {
-        return Err("invalid or oversized custody record".into());
-    }
-    let mut bytes = Vec::new();
-    f.take(MAX_RECORD + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
     serde_json::from_slice(&bytes).map(Some).map_err(|e| Error(format!("corrupt custody record: {e}")))
 }
 
@@ -83,7 +58,7 @@ impl Record {
         if key.is_empty() || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
             return Err("invalid custody key".into());
         }
-        private_dir(root)?;
+        crate::private::ensure_dir(root)?;
         let lease = match Lease::acquire(&root.join(format!("{key}.lock")), Create::Yes, Wait::No) {
             Ok(lease) => lease,
             Err(LockError::Busy) => return Ok(None),
@@ -220,7 +195,7 @@ mod tests {
     #[test]
     fn attempt_history_is_numeric_and_transport_metadata_is_not_an_outcome() {
         let root = scratch("attempt");
-        private_dir(&root).unwrap();
+        crate::private::ensure_dir(&root).unwrap();
         let dir = AttemptDir(root.clone());
         dir.seal_call(b"call").unwrap();
         assert!(dir.seal_call(b"other").is_err(), "a sealed call is never replaced");
@@ -277,7 +252,7 @@ mod tests {
     #[test]
     fn a_phase_record_may_exist_only_once_with_these_contents() {
         let root = scratch("once");
-        private_dir(&root).unwrap();
+        crate::private::ensure_dir(&root).unwrap();
         let path = root.join("phase.json");
         write_once(&path, &json!({"attempt":"a"})).unwrap();
         write_once(&path, &json!({"attempt":"a"})).unwrap(); // an interrupted writer's retry
@@ -292,7 +267,7 @@ mod tests {
         let root = scratch("perm");
         fs::create_dir(&root).unwrap();
         fs::set_permissions(&root, fs::Permissions::from_mode(0o750)).unwrap();
-        assert!(private_dir(&root).is_err());
+        assert!(crate::private::ensure_dir(&root).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 }

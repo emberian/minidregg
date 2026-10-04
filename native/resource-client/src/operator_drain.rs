@@ -144,7 +144,7 @@ impl Control {
             while !cloned.stop_control.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
-                        if transport::peer_uid(&stream).ok() != Some(transport::effective_uid()) { continue; }
+                        if transport::peer_uid(&stream).ok() != Some(mini_sdk::private::euid()) { continue; }
                         if stream.set_nonblocking(true).is_err() { continue; }
                         let request = transport::read_frame_bounded(&mut transport::DeadlinePipe { reader: &mut stream, deadline: Instant::now() + Duration::from_millis(200) }, MAX_CONTROL_FRAME);
                         let Ok(Some(bytes)) = request else { continue; };
@@ -212,27 +212,15 @@ impl Drop for SocketGuard {
 
 fn request(socket: &Path, value: &Value) -> Result<Value, String> {
     let path = socket.with_extension("control");
-    let parent = path.parent().ok_or("control socket has no parent")?;
-    let metadata = fs::metadata(parent).map_err(|e| e.to_string())?;
-    if !path.is_absolute()
-        || !metadata.is_dir()
-        || metadata.uid() != transport::effective_uid()
-        || metadata.mode() & 0o077 != 0
-    {
+    if !path.is_absolute() {
         return Err("operator control requires an absolute owner-private socket directory".into());
     }
-    let metadata = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
-    if !metadata.file_type().is_socket()
-        || metadata.uid() != transport::effective_uid()
-        || metadata.mode() & 0o077 != 0
-    {
-        return Err("operator control socket is not owner-private".into());
-    }
+    crate::fsio::check_private_socket(&path)?;
     let stopping = AtomicBool::new(false);
     let deadline = Instant::now() + Duration::from_secs(2);
     let mut stream = crate::public_proxy::connect(&path, &stopping, deadline)
         .map_err(|e| format!("operator control connect: {e}"))?;
-    if transport::peer_uid(&stream)? != transport::effective_uid() {
+    if transport::peer_uid(&stream)? != mini_sdk::private::euid() {
         return Err("operator control peer UID mismatch".into());
     }
     transport::write_frame(

@@ -4,10 +4,8 @@ use crate::{hex, workspace, Args, Result};
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::os::unix::fs::OpenOptionsExt;
 use std::{
     fs,
-    io::Read,
     path::{Path, PathBuf},
 };
 const DOMAIN: &[u8] = b"mini-hermes-handoff-v1\0";
@@ -44,28 +42,8 @@ fn name(s: &str) -> Result<()> {
     }
     Ok(())
 }
-fn read(p: &Path) -> Result<Vec<u8>> {
-    let mut f = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(p)
-        .map_err(|e| e.to_string())?;
-    let m = f.metadata().map_err(|e| e.to_string())?;
-    if !m.is_file() || m.len() > LIMIT as u64 {
-        return Err("handoff requires bounded regular file".into());
-    }
-    let mut b = Vec::new();
-    f.by_ref()
-        .take((LIMIT + 1) as u64)
-        .read_to_end(&mut b)
-        .map_err(|e| e.to_string())?;
-    if b.len() > LIMIT {
-        return Err("handoff too large".into());
-    }
-    Ok(b)
-}
 pub(crate) fn json_file(p: &Path) -> Result<Value> {
-    serde_json::from_slice(&read(p)?).map_err(|e| e.to_string())
+    serde_json::from_slice(&crate::fsio::read_bounded_or_empty(p, LIMIT)?).map_err(|e| e.to_string())
 }
 fn world(ws: &Value) -> Result<Value> {
     let c = json_file(&workspace::member_path(ws, "config")?)?;
@@ -230,11 +208,11 @@ pub(crate) fn seal(
     let mut files = serde_json::Map::new();
     for n in names {
         name(&n)?;
-        files.insert(n.clone(), json!(hex(&read(&out.join(&n))?)));
+        files.insert(n.clone(), json!(hex(&crate::fsio::read_bounded_or_empty(&out.join(&n), LIMIT)?)));
     }
     let receipt =
         workspace::accepted_outcome(origin)?.ok_or("summon source operation is not accepted")?;
-    let payload = json!({"type":"mini-hermes-summon-bundle-v1","world":world(ws)?,"recipient":manifest["hermes"],"task":task,"founder":workspace::member(ws,"subject")?,"room":room,"roomCell":manifest["roomCell"],"assignment":manifest["assignment"],"origin":{"callHex":hex(&read(&origin.join("call.bin"))?),"planHex":hex(&read(&origin.join("plan.bin"))?),"signaturesHex":hex(&read(&origin.join("transaction-signatures.bin"))?),"command":json_file(&origin.join("intent.json"))?["purpose"]["draft"]["command"],"receipt":receipt},"files":files});
+    let payload = json!({"type":"mini-hermes-summon-bundle-v1","world":world(ws)?,"recipient":manifest["hermes"],"task":task,"founder":workspace::member(ws,"subject")?,"room":room,"roomCell":manifest["roomCell"],"assignment":manifest["assignment"],"origin":{"callHex":hex(&crate::fsio::read_bounded_or_empty(&origin.join("call.bin"), LIMIT)?),"planHex":hex(&crate::fsio::read_bounded_or_empty(&origin.join("plan.bin"), LIMIT)?),"signaturesHex":hex(&crate::fsio::read_bounded_or_empty(&origin.join("transaction-signatures.bin"), LIMIT)?),"command":json_file(&origin.join("intent.json"))?["purpose"]["draft"]["command"],"receipt":receipt},"files":files});
     let bytes = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
     let key = crate::fsio::read_secret_in_private_dir(&workspace::member_path(ws, "key")?)?;
     let bundle = json!({"type":"mini-hermes-handoff-v1","payloadHex":hex(&bytes),"publicKey":hex(key.verifying_key().as_bytes()),"signature":hex(&key.sign(&message(&bytes)).to_bytes())});
@@ -391,7 +369,7 @@ fn verify(
         &config,
         &[Path::new("assemble"), &plan, &signatures, &assembled],
     )?;
-    if read(&assembled)? != read(&call)? {
+    if crate::fsio::read_bounded_or_empty(&assembled, LIMIT)? != crate::fsio::read_bounded_or_empty(&call, LIMIT)? {
         return Err("origin plan/signatures do not reconstruct accepted call".into());
     }
     let presentation = crate::inspect(&host, &config, "plan", &plan, &attempt.join("plan.json"))?;
@@ -426,7 +404,7 @@ fn verify(
         &command_bin,
     )?;
     if presentation["finalizedDraft"]["type"] != "invoke"
-        || presentation["finalizedDraft"]["command"] != hex(&read(&command_bin)?)
+        || presentation["finalizedDraft"]["command"] != hex(&crate::fsio::read_bounded_or_empty(&command_bin, LIMIT)?)
         || presentation["domain"] != p["world"]["domain"]
     {
         return Err("accepted summon source command differs from bound origin".into());
@@ -481,8 +459,8 @@ fn verify(
                 &v,
                 &capability,
                 &c,
-                &read(&signed.with_file_name("challenge.bin"))?,
-                &read(&signed)?,
+                &crate::fsio::read_bounded_or_empty(&signed.with_file_name("challenge.bin"), LIMIT)?,
+                &crate::fsio::read_bounded_or_empty(&signed, LIMIT)?,
             )?);
         }
     }
@@ -581,7 +559,7 @@ fn check_delivery(root: &Path, inbox: &Path, task: &str) -> Result<Value> {
     // Revalidate source assignment and grants every time the resident acts.
     let verified = verify(root, &ready["bundle"], task, room, false)?;
     for (n, b) in p["files"].as_object().unwrap() {
-        if read(&inbox.join(n))? != unhex(b.as_str().unwrap())? {
+        if crate::fsio::read_bounded_or_empty(&inbox.join(n), LIMIT)? != unhex(b.as_str().unwrap())? {
             return Err(format!("resident delivered file differs: {n}"));
         }
     }
@@ -593,7 +571,7 @@ pub(crate) fn seal_dismiss(ws: &Value, out: &Path, origin: &Path) -> Result<()> 
     let prior = json_file(&out.join("handoff.json"))?;
     let (mut payload, _) = decode(&prior)?;
     payload["type"] = json!("mini-hermes-dismiss-bundle-v1");
-    payload["origin"] = json!({"callHex":hex(&read(&origin.join("call.bin"))?),"planHex":hex(&read(&origin.join("plan.bin"))?),"signaturesHex":hex(&read(&origin.join("transaction-signatures.bin"))?),"command":json_file(&origin.join("intent.json"))?["purpose"]["draft"]["command"],"receipt":workspace::accepted_outcome(origin)?.ok_or("dismissal is not accepted")?});
+    payload["origin"] = json!({"callHex":hex(&crate::fsio::read_bounded_or_empty(&origin.join("call.bin"), LIMIT)?),"planHex":hex(&crate::fsio::read_bounded_or_empty(&origin.join("plan.bin"), LIMIT)?),"signaturesHex":hex(&crate::fsio::read_bounded_or_empty(&origin.join("transaction-signatures.bin"), LIMIT)?),"command":json_file(&origin.join("intent.json"))?["purpose"]["draft"]["command"],"receipt":workspace::accepted_outcome(origin)?.ok_or("dismissal is not accepted")?});
     validate_origin_command(&payload, &payload["origin"]["command"])?;
     let bytes = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
     let key = crate::fsio::read_secret_in_private_dir(&workspace::member_path(ws, "key")?)?;
@@ -849,7 +827,7 @@ fn registration_file(registration: &Path) -> Result<Value> {
     let meta = fs::symlink_metadata(registration).map_err(|e| e.to_string())?;
     if !meta.is_file()
         || meta.mode() & 0o022 != 0
-        || (meta.uid() != 0 && meta.uid() != unsafe { libc::geteuid() })
+        || (meta.uid() != 0 && meta.uid() != mini_sdk::private::euid())
     {
         return Err(
             "dispatcher registration must be operator-owned and not group/world writable".into(),
@@ -899,7 +877,7 @@ fn registered(registration: &Path, bundle: &Value) -> Result<(PathBuf, PathBuf, 
     Ok((root, destination, r))
 }
 fn staged_file(path: &Path, bytes: &[u8]) -> Result<()> {
-    if read(path).is_ok_and(|prior| prior == bytes) {
+    if crate::fsio::read_bounded_or_empty(path, LIMIT).is_ok_and(|prior| prior == bytes) {
         return Ok(());
     }
     workspace::replace_private_file(path, bytes)
@@ -913,7 +891,7 @@ fn publish(inbox: &Path, bundle: &Value) -> Result<Value> {
             return Err("registered assignment inbox already contains another handoff".into());
         }
         for (n, b) in p["files"].as_object().unwrap() {
-            if read(&inbox.join(n))? != unhex(b.as_str().unwrap())? {
+            if crate::fsio::read_bounded_or_empty(&inbox.join(n), LIMIT)? != unhex(b.as_str().unwrap())? {
                 return Err("retained delivery differs".into());
             }
         }

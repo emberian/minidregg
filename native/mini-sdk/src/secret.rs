@@ -68,8 +68,7 @@ pub fn read_private_or_empty(path: &Path, limit: usize, custody: Custody) -> Res
 
 fn read_bounded(path: &Path, min: usize, limit: usize, custody: Custody) -> Result<Zeroizing<Vec<u8>>, SecretError> {
     let fail = |kind| SecretError { path: path.to_owned(), kind };
-    // SAFETY: geteuid has no preconditions and cannot fail.
-    let euid = unsafe { libc::geteuid() };
+    let euid = crate::private::euid();
     if custody == Custody::FileAndDirectory {
         let parent = match path.parent() {
             Some(p) if p.as_os_str().is_empty() => Path::new("."),
@@ -77,7 +76,7 @@ fn read_bounded(path: &Path, min: usize, limit: usize, custody: Custody) -> Resu
             None => return Err(fail(SecretErrorKind::Custody("has no parent directory"))),
         };
         let directory = fs::symlink_metadata(parent).map_err(|e| fail(SecretErrorKind::Unreadable(e)))?;
-        if !directory.is_dir() || directory.uid() != euid || directory.mode() & 0o077 != 0 {
+        if !crate::private::dir_ok(&directory) {
             return Err(fail(SecretErrorKind::Custody("is not in an owner-private directory")));
         }
     }

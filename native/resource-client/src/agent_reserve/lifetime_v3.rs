@@ -32,7 +32,7 @@ struct Pin {
 }
 
 fn pin(directory: &Path) -> Result<Pin> {
-    drain::private_dir(directory)?;
+    crate::fsio::ensure_private_dir_durable(directory)?;
     let value: Value = serde_json::from_slice(&private_bytes(&directory.join("pin.json"), 4096)?)
         .map_err(|error| format!("invalid lifetime reserve pin: {error}"))?;
     if field(&value, "format")? != FORMAT {
@@ -109,10 +109,7 @@ pub(crate) fn lifetime_plan(
     let source_bytes = private_bytes(request_json, REQUEST_LIMIT)?;
     let config_bytes = bounded(&config, 65_536)?;
     let host_sha = host_image_sha256(&host)?;
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&directory)
-        .map_err(|error| format!("cannot create lifetime reserve directory: {error}"))?;
+    crate::fsio::create_private_dir(&directory)?;
     sync_directory_ancestors(&directory)?;
     create_private(&directory.join("source.json"), &source_bytes)?;
     create_private(&directory.join("config.json"), &config_bytes)?;

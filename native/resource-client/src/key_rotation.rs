@@ -310,14 +310,6 @@ fn workspace(root: &Path) -> Result<Workspace> {
     })
 }
 
-fn random_seed() -> Result<[u8; 32]> {
-    let mut seed = [0u8; 32];
-    File::open("/dev/urandom")
-        .and_then(|mut source| source.read_exact(&mut seed))
-        .map_err(|error| format!("cannot obtain operating-system randomness: {error}"))?;
-    Ok(seed)
-}
-
 /// The workspace subject's current key epoch, as the Host reports it.
 pub(crate) fn current_key_epoch(root: &Path) -> Result<String> {
     let ws = workspace(root)?;
@@ -496,7 +488,7 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
         )?;
         let after = attempt.join("after-next.key");
         if !after.exists() {
-            let mut seed = random_seed()?;
+            let mut seed = crate::fsio::random::<32>()?;
             custody::immutable(&after, &seed)?;
             seed.fill(0);
         }
@@ -603,7 +595,7 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
                 .ok_or("retained rotation request lacks nonce")?
                 .to_owned()
         } else {
-            let nonce = participant_enrollment::nonce()?;
+            let nonce = crate::fsio::random_nonce()?;
             custody::publish(&request_path, &json!({"nonce":nonce}), None)?;
             nonce
         };

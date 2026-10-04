@@ -51,7 +51,7 @@
 //! shape this store allows.
 
 use crate::chat::{
-    client, entries_of, error, get_json, import_from, import_stream, os, private_dirs,
+    client, entries_of, error, get_json, import_from, import_stream, os,
     propose_submit, put_json, reference, signed_read, usage, workspace_record, Done, Payload,
 };
 use crate::shell::{Session, Verb, EXIT_OK, EXIT_REFUSED};
@@ -621,7 +621,7 @@ fn current(session: &Session) -> Result<Value, Done> {
 }
 
 fn set_current(session: &Session, name: &str) -> Result<(), Done> {
-    private_dirs(&story_dir(session)).map_err(error)?;
+    crate::fsio::ensure_private_dir_all(&story_dir(session)).map_err(error)?;
     let path = story_dir(session).join("current");
     let _ = fs::remove_file(&path);
     crate::create_private(&path, format!("{name}\n").as_bytes()).map_err(error)

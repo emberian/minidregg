@@ -23,7 +23,7 @@ use sha2::{Digest, Sha256};
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::{OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::Mutex;
@@ -154,33 +154,6 @@ pub(crate) fn ref_name_of_file(stem: &str) -> String {
     stem.replace('.', "/")
 }
 
-pub(crate) fn private_dir(path: &Path) -> Result<()> {
-    let named = fs::symlink_metadata(path)
-        .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
-    if !named.file_type().is_dir()
-        || named.uid() != unsafe { geteuid() }
-        || named.mode() & 0o077 != 0
-    {
-        return Err(format!(
-            "{} must be an owner-private directory",
-            path.display()
-        ));
-    }
-    Ok(())
-}
-
-pub(crate) fn make_private_dir(path: &Path) -> Result<()> {
-    let mut builder = fs::DirBuilder::new();
-    builder.mode(0o700);
-    builder
-        .create(path)
-        .map_err(|error| format!("cannot create {}: {error}", path.display()))?;
-    private_dir(path)
-}
-
 fn atomic_json(path: &Path, value: &Value, expected: Option<&Value>) -> Result<()> {
     let parent=path.parent().ok_or("retained JSON lacks parent")?;
     private_dir(parent)?;
@@ -216,21 +189,7 @@ pub(crate) fn bounded_json(path: &Path) -> Result<Value> {
 }
 
 fn bounded_json_limit(path: &Path, limit: u64) -> Result<Value> {
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
-    if !metadata.file_type().is_file() || metadata.len() > limit {
-        return Err(format!(
-            "{} must be a bounded regular JSON file",
-            path.display()
-        ));
-    }
-    let mut bytes = Vec::new();
-    File::open(path)
-        .and_then(|file| file.take(limit + 1).read_to_end(&mut bytes))
-        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-    if bytes.len() as u64 > limit {
-        return Err(format!("{} exceeds workspace JSON bound", path.display()));
-    }
+    let bytes = crate::fsio::read_bounded(path, limit as usize)?;
     serde_json::from_slice(&bytes).map_err(|error| format!("invalid {}: {error}", path.display()))
 }
 
@@ -347,13 +306,7 @@ fn unsigned_invocation_command(subject: &str, nonce: &str, targets: Vec<Value>,
     command
 }
 
-pub(crate) fn random_nonce() -> Result<String> {
-    let mut bytes = [0u8; 16];
-    File::open("/dev/urandom")
-        .and_then(|mut file| file.read_exact(&mut bytes))
-        .map_err(|error| format!("cannot obtain workspace nonce: {error}"))?;
-    Ok(u128::from_be_bytes(bytes).to_string())
-}
+pub(crate) use crate::fsio::{check_private_dir as private_dir, create_private_dir as make_private_dir, random_nonce};
 
 pub(crate) fn new_attempt(root: &Path) -> Result<(PathBuf, String)> {
     for _ in 0..8 {
@@ -3719,7 +3672,7 @@ fn bind_append_attempt(root: &Path, proposal: &Path, request: &Value, source: &P
     // Read the durable binding BEFORE allocating a default attempt.
     let attempt = if path.exists() {
         let metadata = fs::symlink_metadata(&path).map_err(|error|error.to_string())?;
-        if metadata.uid() != unsafe {libc::geteuid()} || metadata.mode() & 0o077 != 0 || metadata.nlink() != 1 {
+        if !mini_sdk::private::file_ok(&metadata) {
             return Err("append custody binding must be owner-private with one link".into());
         }
         let saved = bounded_json(&path)?;

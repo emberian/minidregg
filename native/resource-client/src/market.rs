@@ -29,9 +29,7 @@ use crate::Result;
 use serde_json::{json, Value};
 use sha3::digest::{core_api::CoreWrapper, ExtendableOutput, Update, XofReader};
 use sha3::CShake256Core;
-use std::fs::{self, File};
-use std::io::Read;
-use std::os::unix::fs::DirBuilderExt;
+use std::fs::{self};
 use std::path::{Path, PathBuf};
 
 /// The sealed-market law in the shell grammar, with placeholders.
@@ -163,14 +161,6 @@ pub(crate) fn commitment(cell: u64, k: u64, price: i128, qty: i128, blinder: &[u
         blinder,
     );
     decimal(&digest(&pre))
-}
-
-fn random32() -> Result<[u8; 32]> {
-    let mut bytes = [0u8; 32];
-    File::open("/dev/urandom")
-        .and_then(|mut file| file.read_exact(&mut bytes))
-        .map_err(|error| format!("cannot obtain operating-system randomness: {error}"))?;
-    Ok(bytes)
 }
 
 // ------------------------------------------------------------ reading a market
@@ -316,11 +306,7 @@ fn propose_writes(root: &Path, ws: &Value, name: &str, id: &str, actions: Vec<Va
 
 fn openings_dir(root: &Path, name: &str) -> Result<PathBuf> {
     let dir = root.join("market").join(name);
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&dir)
-        .map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
+    crate::fsio::ensure_private_dir_all(&dir)?;
     Ok(dir)
 }
 
@@ -388,7 +374,7 @@ pub(crate) fn bid(root: &Path, ws: &Value, name: &str, price: &str, qty: &str, i
     let k = (0..SLOTS)
         .find(|k| market.get(slot_fields(*k).who) == Some("0"))
         .ok_or_else(|| format!("market {name} has no free bid slot ({SLOTS} taken)"))?;
-    let blinder = random32()?;
+    let blinder = crate::fsio::random::<32>()?;
     let commit = commitment(cell, k, price, qty, &blinder);
     let opening = json!({"type":"minidregg-sealed-bid-opening-v1","market":name,"cell":cell.to_string(),
         "slot":k,"price":price.to_string(),"qty":qty.to_string(),"blinder":decimal(&blinder),

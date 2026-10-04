@@ -11,8 +11,7 @@ use crate::{absolute, hex, path, process, session_invoke, Args, Result, SOCKET};
 use ed25519_dalek::Signer;
 use serde_json::{json, Value};
 use std::ffi::{OsStr, OsString};
-use std::fs::{self, File};
-use std::io::Read;
+use std::fs::{self};
 use std::path::{Path, PathBuf};
 
 fn text(value: OsString, label: &str) -> Result<String> {
@@ -48,14 +47,6 @@ fn reference_capability(reference: &Option<Value>, label: &str) -> Result<String
         .and_then(Value::as_str)
         .map(str::to_owned)
         .ok_or_else(|| format!("{label} reference names no capability"))
-}
-
-fn nonce() -> Result<String> {
-    let mut bytes = [0u8; 16];
-    File::open("/dev/urandom")
-        .and_then(|mut file| file.read_exact(&mut bytes))
-        .map_err(|error| format!("cannot obtain nonce: {error}"))?;
-    Ok(u128::from_be_bytes(bytes).to_string())
 }
 
 fn pair(first: &[u8], second: &[u8]) -> Result<Vec<u8>> {
@@ -112,7 +103,7 @@ fn command(root: &Path, mut args: Args, op: &str) -> Result<()> {
     }
     let attempt = match args.optional("attempt") {
         Some(value) => absolute(&path(value))?,
-        None => root.join("attempts").join(format!("well-{op}-{}", nonce()?)),
+        None => root.join("attempts").join(format!("well-{op}-{}", crate::fsio::random_nonce()?)),
     };
     args.finish()?;
     if attempt.exists() {
@@ -126,7 +117,7 @@ fn command(root: &Path, mut args: Args, op: &str) -> Result<()> {
         .ok_or("well commands require a pinned persistent Host socket")?
         .clone();
     let source = json!({"subject":member(&workspace, "subject")?,"capability":capability,
-        "well":well,"op":op,"account":account,"amount":amount,"nonce":nonce()?});
+        "well":well,"op":op,"account":account,"amount":amount,"nonce":crate::fsio::random_nonce()?});
     let source_path = attempt.join("command.json");
     retain(
         &source_path,

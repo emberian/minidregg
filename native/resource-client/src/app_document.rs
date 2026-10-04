@@ -148,9 +148,7 @@ fn store_key(root: &Path) -> Result<Zeroizing<[u8; 32]>> {
             return Err("connector custody key is missing; restore the complete workspace, no replacement key was created".into());
         }
         let mut seed = Zeroizing::new([0u8; 32]);
-        File::open("/dev/urandom")
-            .and_then(|mut f| f.read_exact(&mut *seed))
-            .map_err(|e| e.to_string())?;
+        crate::fsio::random_fill(&mut *seed)?;
         replace_private_file(&path, &*seed)?;
     }
     let secret = Zeroizing::new(crate::read_secret(&path)?.to_bytes());
@@ -172,10 +170,7 @@ fn aad(workspace: &Value, id: &str) -> Result<Vec<u8>> {
 fn seal(root: &Path, workspace: &Value, id: &str, v: &Value) -> Result<()> {
     let key = store_key(root)?;
     let bytes = Zeroizing::new(serde_json::to_vec(v).map_err(|e| e.to_string())?);
-    let mut nonce = [0u8; 12];
-    File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut nonce))
-        .map_err(|e| e.to_string())?;
+    let nonce = crate::fsio::random::<12>()?;
     let cipher = ChaCha20Poly1305::new_from_slice(&*key)
         .map_err(|_| "invalid custody key")?
         .encrypt(
@@ -531,10 +526,7 @@ pub(crate) fn capture(root: &Path, workspace: &Value, binding: &Value, id: &str)
     if let Some(retained) = occupied_capture(root, workspace, binding, id)? {
         return Ok(retained);
     }
-    let mut nonce = [0u8; 16];
-    File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut nonce))
-        .map_err(|e| e.to_string())?;
+    let nonce = crate::fsio::random::<16>()?;
     let capture = hex(&nonce);
     // The fetch is an external effect: retain that it STARTED (naming the send) before any byte
     // leaves. From here, anything short of the retained export leaves it UNKNOWN, never repeated.

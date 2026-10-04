@@ -5,7 +5,7 @@
 //! checked only by the Host.
 use crate::agent_reserve::{bounded, digest, field, private_bytes};
 use crate::participant_enrollment::{
-    confirmed, decimal, inspect, json_private, key, nonce, pair, pinned, retain_exact, save_json,
+    confirmed, decimal, inspect, json_private, key, pair, pinned, retain_exact, save_json,
     save_json_staged, signed_factory_observation, staged_invoke, transform, FactoryObservation,
 };
 use crate::participant_namespace::{self, IdKind, Role};
@@ -105,7 +105,7 @@ fn record(grant: &ObserveGrant<'_>) -> Result<(Value, participant_namespace::Res
         retained
     } else {
         let mut fresh = expected;
-        fresh["nonce"] = json!(nonce()?);
+        fresh["nonce"] = json!(crate::fsio::random_nonce()?);
         save_json_staged(&request_path, &fresh)?;
         fresh
     };
@@ -334,10 +334,7 @@ fn generations(directory: &Path) -> Result<Vec<PathBuf>> {
 
 fn new_generation(directory: &Path, count: usize) -> Result<PathBuf> {
     let next = directory.join(format!("g{:04}", count + 1));
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&next)
-        .map_err(|error| format!("cannot create provisioning generation: {error}"))?;
+    crate::fsio::create_private_dir(&next)?;
     sync_directory_ancestors(directory)?;
     Ok(next)
 }
@@ -365,7 +362,7 @@ pub(crate) fn observe_grant(grant: &ObserveGrant<'_>) -> Result<Value> {
     match fs::DirBuilder::new().mode(0o700).create(grant.directory) {
         Ok(()) => (),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            drain::private_dir(grant.directory)?;
+            crate::fsio::ensure_private_dir_durable(grant.directory)?;
         }
         Err(error) => return Err(format!("cannot create provisioning attempt: {error}")),
     }
@@ -397,7 +394,7 @@ pub(crate) fn observe_grant(grant: &ObserveGrant<'_>) -> Result<Value> {
         "provision plan",
         || {
             let current = latest()?;
-            drain::private_dir(&current)?;
+            crate::fsio::ensure_private_dir_durable(&current)?;
             if !current.join("seal.json").exists() {
                 plan(grant, &request, &capability, &current)?;
             }
@@ -514,7 +511,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!(
             "mini-provision-frame-{}-{}",
             std::process::id(),
-            nonce().unwrap()
+            crate::fsio::random_nonce().unwrap()
         ));
         fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
         let grant = ObserveGrant {

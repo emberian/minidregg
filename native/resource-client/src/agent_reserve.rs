@@ -3,7 +3,7 @@
 //! caller can select a payer, key or capability through this module.
 use super::*;
 use sha2::{Digest, Sha256};
-use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 
 const FORMAT: &str = "minidregg-agent-reserve-custody-v1";
 const APPROVAL: &str = "minidregg-agent-reserve-approval-v1";
@@ -22,64 +22,17 @@ pub(super) fn digest(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
 }
 
-pub(super) fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
-    let named = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
-    if !named.file_type().is_file() || named.len() == 0 || named.len() > limit as u64 {
-        return Err(format!("{} is not a bounded regular file", path.display()));
-    }
-    let mut file = File::open(path).map_err(|error| error.to_string())?;
-    let opened = file.metadata().map_err(|error| error.to_string())?;
-    if (named.dev(), named.ino()) != (opened.dev(), opened.ino()) {
-        return Err(format!("{} changed before read", path.display()));
-    }
-    let mut bytes = Vec::new();
-    Read::by_ref(&mut file)
-        .take((limit + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|error| error.to_string())?;
-    if bytes.len() != named.len() as usize || bytes.len() > limit {
-        return Err(format!("{} changed during read", path.display()));
-    }
-    Ok(bytes)
-}
-
-pub(super) use crate::fsio::read_private_in_private_dir as private_bytes;
-
-pub(super) fn private_socket(path: &Path) -> Result<()> {
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
-    let uid = unsafe { geteuid() };
-    let parent = path.parent().ok_or("operator socket has no parent")?;
-    let directory = fs::symlink_metadata(parent).map_err(|error| error.to_string())?;
-    let named = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
-    if !directory.is_dir()
-        || directory.uid() != uid
-        || directory.permissions().mode() & 0o077 != 0
-        || !named.file_type().is_socket()
-        || named.uid() != uid
-        || named.permissions().mode() & 0o077 != 0
-    {
-        return Err("agent reserve operator socket must be owner-private".into());
-    }
-    Ok(())
-}
+pub(super) use crate::fsio::{check_private_socket as private_socket, read_bounded as bounded, read_private_in_private_dir as private_bytes};
 
 pub(super) fn retain_generated(path: &Path) -> Result<()> {
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
-    let uid = unsafe { geteuid() };
     let parent = path.parent().ok_or("generated evidence has no parent")?;
     let directory = fs::symlink_metadata(parent).map_err(|error| error.to_string())?;
     let named = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
     let file = File::open(path).map_err(|error| error.to_string())?;
     let opened = file.metadata().map_err(|error| error.to_string())?;
-    if !directory.is_dir()
-        || directory.uid() != uid
-        || directory.permissions().mode() & 0o077 != 0
+    if !mini_sdk::private::dir_ok(&directory)
         || !named.file_type().is_file()
-        || named.uid() != uid
+        || !mini_sdk::private::owned(&named)
         || (named.dev(), named.ino()) != (opened.dev(), opened.ino())
     {
         return Err("source-generated reserve evidence is not an owner file".into());
@@ -199,7 +152,7 @@ struct Pin {
 }
 
 fn pinned(directory: &Path) -> Result<Pin> {
-    drain::private_dir(directory)?;
+    crate::fsio::ensure_private_dir_durable(directory)?;
     let pin: Value = serde_json::from_slice(&private_bytes(&directory.join("pin.json"), 4096)?)
         .map_err(|error| format!("invalid agent reserve pin: {error}"))?;
     if field(&pin, "format")? != FORMAT {
@@ -278,10 +231,7 @@ pub(super) fn plan(
     let source_bytes = bounded(request_json, REQUEST_LIMIT)?;
     let config_bytes = bounded(&config, 65_536)?;
     let host_sha = host_image_sha256(&host)?;
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&directory)
-        .map_err(|error| format!("cannot create agent reserve directory: {error}"))?;
+    crate::fsio::create_private_dir(&directory)?;
     sync_directory_ancestors(&directory)?;
     create_private(&directory.join("source.json"), &source_bytes)?;
     create_private(&directory.join("config.json"), &config_bytes)?;

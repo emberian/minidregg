@@ -5,40 +5,12 @@
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::fs::{self, File};
-use std::io::{self, Read};
-use std::os::unix::fs::MetadataExt;
+use std::fs::{self};
+use std::io::{self};
 use std::path::{Path, PathBuf};
 
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
-}
-
-fn bounded_file(path: &Path, maximum: usize) -> Result<Vec<u8>, String> {
-    let named = fs::symlink_metadata(path)
-        .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
-    if !named.file_type().is_file() || named.len() > maximum as u64 {
-        return Err(format!("{} is not a bounded regular file", path.display()));
-    }
-    let opened =
-        File::open(path).map_err(|error| format!("cannot open {}: {error}", path.display()))?;
-    let metadata = opened
-        .metadata()
-        .map_err(|error| format!("cannot inspect opened {}: {error}", path.display()))?;
-    if !metadata.file_type().is_file()
-        || (named.dev(), named.ino()) != (metadata.dev(), metadata.ino())
-    {
-        return Err(format!("{} changed while opening", path.display()));
-    }
-    let mut bytes = Vec::new();
-    opened
-        .take((maximum + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-    if bytes.len() > maximum {
-        return Err(format!("{} exceeds byte bound", path.display()));
-    }
-    Ok(bytes)
 }
 
 fn require_absent(path: &Path) -> Result<(), String> {
@@ -75,15 +47,15 @@ pub(crate) fn retain(
     }
     require_absent(&attempt.join("call.bin"))?;
     require_absent(destination)?;
-    let request_file = bounded_file(
+    let request_file = crate::fsio::read_bounded_or_empty(
         &attempt.join("signed-observation.bin"),
         super::transport::HOST_MAX_FRAME,
     )?;
     if request_file != request {
         return Err("prepare request differs from retained signed observation".into());
     }
-    let config_bytes = bounded_file(config, 65_536)?;
-    let manifest_bytes = bounded_file(&attempt.join("attempt.json"), 65_536)?;
+    let config_bytes = crate::fsio::read_bounded_or_empty(config, 65_536)?;
+    let manifest_bytes = crate::fsio::read_bounded_or_empty(&attempt.join("attempt.json"), 65_536)?;
     let manifest: Value = serde_json::from_slice(&manifest_bytes)
         .map_err(|error| format!("attempt manifest decode: {error}"))?;
     if manifest["format"] != "minidregg-resource-client-attempt-v1"

@@ -1,7 +1,7 @@
 //! Admission-bound provider continuity. The Host owns history validation and
 //! canonical envelope rewriting; Mini binds their exact outputs before signing.
 use crate::*;
-use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+use std::os::unix::fs::{MetadataExt};
 
 const DESCRIPTOR_MAX: usize = 16_384;
 pub(crate) const V2: &[u8] = b"DREGG/PROVIDER-CONTINUITY/v2\0";
@@ -73,26 +73,6 @@ fn natural<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
     }
     Ok(s)
 }
-fn bounded_regular(path: &Path, limit: usize) -> Result<Vec<u8>> {
-    let named = fs::symlink_metadata(path).map_err(|e| format!("inspect continuity input: {e}"))?;
-    if !named.file_type().is_file() || named.len() > limit as u64 {
-        return Err("continuity input must be a bounded regular file".into());
-    }
-    let mut file = File::open(path).map_err(|e| format!("open continuity input: {e}"))?;
-    let opened = file.metadata().map_err(|e| e.to_string())?;
-    if (named.dev(), named.ino()) != (opened.dev(), opened.ino()) || !opened.is_file() {
-        return Err("continuity input changed while opening".into());
-    }
-    let mut bytes = Vec::new();
-    Read::by_ref(&mut file)
-        .take((limit + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
-    if bytes.is_empty() || bytes.len() > limit {
-        return Err("continuity input length exceeds bound".into());
-    }
-    Ok(bytes)
-}
 fn retained_input(value: &Value, limit: usize, destination: &Path) -> Result<Vec<u8>> {
     object_keys(value, &["path", "sha256"])?;
     let path = Path::new(
@@ -111,7 +91,7 @@ fn retained_input(value: &Value, limit: usize, destination: &Path) -> Result<Vec
     {
         return Err("continuity SHA256 must be lowercase hex".into());
     }
-    let bytes = bounded_regular(path, limit)?;
+    let bytes = crate::fsio::read_bounded(path, limit)?;
     if hex(&sha2::Sha256::digest(&bytes)) != expected {
         return Err("continuity input SHA256 mismatch".into());
     }
@@ -306,7 +286,7 @@ fn require_before_signing(directory: &Path) -> Result<()> {
     Ok(())
 }
 fn rejection_binding(directory: &Path, name: &str, limit: usize) -> Result<Value> {
-    let bytes = bounded_regular(&directory.join(name), limit)?;
+    let bytes = crate::fsio::read_bounded(&directory.join(name), limit)?;
     Ok(json!({"path":name,"sha256":hex(&sha2::Sha256::digest(&bytes))}))
 }
 /// Called only after guard returns Err. That caller immediately returns; it
@@ -344,7 +324,7 @@ pub(crate) fn retain_rejection(directory: &Path, intent: &Path) -> Result<()> {
         ),
     ];
     let manifest: Value =
-        serde_json::from_slice(&bounded_regular(&directory.join("attempt.json"), 65_536)?)
+        serde_json::from_slice(&crate::fsio::read_bounded(&directory.join("attempt.json"), 65_536)?)
             .map_err(|e| format!("invalid continuity attempt manifest: {e}"))?;
     if manifest["format"] != "minidregg-resource-client-attempt-v1"
         || manifest["operation"] != "submit"
@@ -414,11 +394,8 @@ pub(crate) fn guard(
         .get()
         .ok_or("provider continuity requires --socket")?;
     let evidence = directory.join("provider-continuity");
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&evidence)
-        .map_err(|e| e.to_string())?;
-    let bytes = bounded_regular(descriptor_path, DESCRIPTOR_MAX)?;
+    crate::fsio::create_private_dir(&evidence)?;
+    let bytes = crate::fsio::read_bounded(descriptor_path, DESCRIPTOR_MAX)?;
     create_private(&evidence.join("descriptor.json"), &bytes)?;
     let descriptor = strict_descriptor(&bytes)?;
     let payload = descriptor_payload(&descriptor, &evidence)?;
@@ -532,7 +509,7 @@ fn copy_resolution_input(
 ) -> Result<Vec<u8>> {
     let from = attempt.join(name);
     let to = kept.join(name);
-    let bytes = bounded_regular(&from, limit)?;
+    let bytes = crate::fsio::read_bounded(&from, limit)?;
     create_private(&to, &bytes)?;
     inputs[name] = json!({"path":absolute(&from)?,"retainedPath":absolute(&to)?,"sha256":hex(&sha2::Sha256::digest(&bytes))});
     Ok(bytes)
@@ -565,7 +542,7 @@ fn inspect_private(
 }
 fn evidence_file(path: &Path) -> Result<Value> {
     protect_native_evidence(path)?;
-    let bytes = bounded_regular(path, 4 * transport::HOST_MAX_FRAME)?;
+    let bytes = crate::fsio::read_bounded(path, 4 * transport::HOST_MAX_FRAME)?;
     Ok(json!({"path":absolute(path)?,"sha256":hex(&sha2::Sha256::digest(&bytes))}))
 }
 fn recheck_resolution_inputs(inputs: &Value) -> Result<()> {
@@ -575,7 +552,7 @@ fn recheck_resolution_inputs(inputs: &Value) -> Result<()> {
         .values()
     {
         let path = Path::new(binding["path"].as_str().ok_or("resolution path absent")?);
-        let actual = hex(&sha2::Sha256::digest(bounded_regular(
+        let actual = hex(&sha2::Sha256::digest(crate::fsio::read_bounded(
             path,
             4 * transport::HOST_MAX_FRAME,
         )?));
@@ -609,7 +586,7 @@ fn verify_settlement_command(pinned: &Value, authored: &[u8]) -> Result<()> {
 }
 fn verify_resolution_environment(host: &Path, config: &Path, report: &Value) -> Result<()> {
     let actual_host = host_image_sha256(host)?;
-    let actual_config = hex(&sha2::Sha256::digest(bounded_regular(config, 65536)?));
+    let actual_config = hex(&sha2::Sha256::digest(crate::fsio::read_bounded(config, 65536)?));
     if report["hostSha256"].as_str() != Some(actual_host.as_str())
         || report["configSha256"].as_str() != Some(actual_config.as_str())
     {
@@ -638,29 +615,11 @@ pub(crate) fn resolve_attempt(
         .ok_or("provider continuity resolution requires --socket")?;
     let selected_host_sha = host_image_sha256(host)?;
     let attempt = absolute(attempt)?;
-    let metadata = fs::symlink_metadata(&attempt).map_err(|e| e.to_string())?;
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
-    if !metadata.file_type().is_dir()
-        || metadata.uid() != unsafe { geteuid() }
-        || metadata.mode() & 0o077 != 0
-    {
-        return Err("guarded attempt must be an owned private directory".into());
-    }
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(directory)
-        .map_err(|e| e.to_string())?;
+    crate::fsio::check_private_dir(&attempt)?;
+    crate::fsio::create_private_dir(directory)?;
     let kept = directory.join("retained");
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&kept)
-        .map_err(|e| e.to_string())?;
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(kept.join("provider-continuity"))
-        .map_err(|e| e.to_string())?;
+    crate::fsio::create_private_dir(&kept)?;
+    crate::fsio::create_private_dir(&kept.join("provider-continuity"))?;
     let mut inputs = json!({});
     let manifest_bytes =
         copy_resolution_input(&attempt, &kept, "attempt.json", 65_536, &mut inputs)?;
@@ -685,7 +644,7 @@ pub(crate) fn resolve_attempt(
         || manifest["host"].as_str().map(Path::new) != Some(absolute(host)?.as_path())
         || manifest["config"].as_str().map(Path::new) != Some(attempt.join("config.json").as_path())
         || manifest["socket"].as_str() != Some(transport::pinned_address(socket)?.as_str())
-        || config_bytes != bounded_regular(config, 65_536)?
+        || config_bytes != crate::fsio::read_bounded(config, 65_536)?
     {
         return Err("guarded attempt differs from selected Host/config/socket".into());
     }
@@ -733,7 +692,7 @@ pub(crate) fn resolve_attempt(
         copy_resolution_input(&attempt, &kept, name, limit, &mut inputs)?;
     }
     let read_json = |name: &str| -> Result<Value> {
-        strict_descriptor(&bounded_regular(
+        strict_descriptor(&crate::fsio::read_bounded(
             &kept.join(name),
             4 * transport::HOST_MAX_FRAME,
         )?)
@@ -795,7 +754,7 @@ pub(crate) fn resolve_attempt(
     )?;
     verify_settlement_command(
         &pinned,
-        &bounded_regular(&grain_command, transport::HOST_MAX_FRAME)?,
+        &crate::fsio::read_bounded(&grain_command, transport::HOST_MAX_FRAME)?,
     )?;
     let reassembled = directory.join("reassembled-call.bin");
     let assembled = Command::new(host)
@@ -807,13 +766,13 @@ pub(crate) fn resolve_attempt(
         .output()
         .map_err(|e| e.to_string())?;
     if !assembled.status.success()
-        || bounded_regular(&reassembled, transport::HOST_MAX_FRAME)? != call
+        || crate::fsio::read_bounded(&reassembled, transport::HOST_MAX_FRAME)? != call
     {
         return Err(
             "retained signed plan and signatures do not reassemble the exact original call".into(),
         );
     }
-    let old_frame = bounded_regular(&kept.join("provider-continuity/reply.frame"), 65_536)?;
+    let old_frame = crate::fsio::read_bounded(&kept.join("provider-continuity/reply.frame"), 65_536)?;
     if old_frame.first() != Some(&17) {
         return Err("original continuity frame is not API17 evidence".into());
     }
@@ -823,14 +782,11 @@ pub(crate) fn resolve_attempt(
     }
     verify_reply(&old_prefix, &descriptor, &original)?;
     let fresh_dir = directory.join("fresh-continuity");
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&fresh_dir)
-        .map_err(|e| e.to_string())?;
+    crate::fsio::create_private_dir(&fresh_dir)?;
     let payload = descriptor_payload(&descriptor, &fresh_dir)?;
     // The original proof must have used these same exact reserve/fence inputs.
     if payload
-        != bounded_regular(
+        != crate::fsio::read_bounded(
             &kept.join("provider-continuity/request.bin"),
             transport::HOST_MAX_FRAME,
         )?
@@ -848,8 +804,8 @@ pub(crate) fn resolve_attempt(
         if name.starts_with("fence") && descriptor["fence"].is_null() {
             continue;
         }
-        if bounded_regular(&fresh_dir.join(name), transport::HOST_MAX_FRAME)?
-            != bounded_regular(
+        if crate::fsio::read_bounded(&fresh_dir.join(name), transport::HOST_MAX_FRAME)?
+            != crate::fsio::read_bounded(
                 &kept.join("provider-continuity").join(name),
                 transport::HOST_MAX_FRAME,
             )?
@@ -1155,10 +1111,10 @@ mod tests {
         assert_eq!(fs::metadata(&kept).unwrap().mode() & 0o777, 0o600);
         fs::write(&input, b"changed").unwrap();
         assert!(retained_input(&value, 64, &dir.join("changed.bin")).is_err());
-        assert!(bounded_regular(&input, 2).is_err());
+        assert!(crate::fsio::read_bounded(&input, 2).is_err());
         let link = dir.join("link");
         std::os::unix::fs::symlink(&input, &link).unwrap();
-        assert!(bounded_regular(&link, 64).is_err());
+        assert!(crate::fsio::read_bounded(&link, 64).is_err());
         let mut malformed = value.clone();
         malformed["extra"] = json!(true);
         assert!(retained_input(&malformed, 64, &dir.join("extra.bin")).is_err());

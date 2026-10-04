@@ -5,9 +5,8 @@ use crate::{create_private, hex, sync_directory_ancestors, transport, Result};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, File};
-use std::io::Read;
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+use std::fs::{self};
+use std::os::unix::fs::{PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -53,34 +52,11 @@ pub(crate) struct AttemptBinding {
     pub record_path: PathBuf,
 }
 
-fn random_bytes<const N: usize>() -> Result<[u8; N]> {
-    let mut bytes = [0; N];
-    File::open("/dev/urandom")
-        .and_then(|mut source| source.read_exact(&mut bytes))
-        .map_err(|error| format!("cannot obtain namespace randomness: {error}"))?;
-    Ok(bytes)
-}
-
 fn private_root(root: &Path) -> Result<()> {
     if !root.is_absolute() {
         return Err("namespace root must be absolute".into());
     }
-    match fs::DirBuilder::new().mode(0o700).create(root) {
-        Ok(()) => sync_directory_ancestors(root)?,
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => (),
-        Err(error) => return Err(format!("cannot create namespace root: {error}")),
-    }
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
-    let info = fs::symlink_metadata(root).map_err(|error| error.to_string())?;
-    if !info.file_type().is_dir()
-        || info.uid() != unsafe { geteuid() }
-        || info.permissions().mode() & 0o077 != 0
-    {
-        return Err("namespace root must be an owner-private directory".into());
-    }
-    Ok(())
+    crate::fsio::ensure_private_dir_durable(root)
 }
 
 fn lock(root: &Path) -> Result<transport::ServiceLock> {
@@ -108,14 +84,7 @@ fn checked_text(name: &str, value: &str) -> Result<()> {
 
 fn record(path: &Path) -> Result<Value> {
     let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
-    if !metadata.file_type().is_file()
-        || metadata.uid() != unsafe { geteuid() }
-        || metadata.permissions().mode() & 0o077 != 0
-        || metadata.len() > MAX_RECORD
-    {
+    if !mini_sdk::private::file_ok(&metadata) || metadata.len() > MAX_RECORD {
         return Err(format!(
             "invalid private namespace record {}",
             path.display()
@@ -208,7 +177,7 @@ fn used_ids(root: &Path, deployment: &str) -> Result<BTreeSet<String>> {
 /// A fresh random candidate ID not in `used` (inserted into it).
 fn fresh_id(used: &mut BTreeSet<String>) -> Result<String> {
     for _ in 0..16 {
-        let mut number = u64::from_be_bytes(random_bytes()?);
+        let mut number = u64::from_be_bytes(crate::fsio::random()?);
         number |= 1u64 << 63;
         let id = number.to_string();
         if used.insert(id.clone()) {

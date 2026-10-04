@@ -20,7 +20,8 @@
 //! The room-key protocol that hands these keys out (wraps in the room's `keys`
 //! cell, rotation on a kick, the cache sync) is `roomkey.rs`.
 
-use crate::hybrid_kem::{self, cshake, cshake_xof, random, CIPHERTEXT_LEN};
+use crate::fsio::random;
+use crate::hybrid_kem::{self, cshake, cshake_xof, CIPHERTEXT_LEN};
 use crate::{hex, Result};
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};

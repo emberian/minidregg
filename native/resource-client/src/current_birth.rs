@@ -7,36 +7,29 @@ use crate::{
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::fs::{self, File};
-use std::io::Read;
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+use std::fs::{self};
+use std::os::unix::fs::{DirBuilderExt};
 use std::path::Path;
 
 /// Births carrying a Nock program (NOCK K-NOCK-CELL) carry its hex in the source.
 const MAX_SOURCE: usize = 4 * 1024 * 1024;
 const MAX_INTENT: usize = 4 * 1024 * 1024;
 
+/// A file this user owns, at most `limit` bytes, read without following a symlink.
 fn retained_file(path: &Path, limit: usize) -> Result<Vec<u8>> {
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
     let metadata = fs::symlink_metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    if !metadata.file_type().is_file()
-        || metadata.uid() != unsafe { geteuid() }
-        || metadata.len() == 0
-        || metadata.len() > limit as u64
-    {
-        return Err(format!(
-            "{} is not an owner-retained bounded regular file",
-            path.display()
-        ));
+    if !mini_sdk::private::owned(&metadata) {
+        return Err(format!("{} is not owned by this user", path.display()));
     }
-    let mut bytes = Vec::new();
-    File::open(path)
-        .and_then(|file| file.take((limit + 1) as u64).read_to_end(&mut bytes))
-        .map_err(|e| format!("{}: {e}", path.display()))?;
-    if bytes.len() != metadata.len() as usize {
-        return Err("retained file changed during read".into());
+    crate::fsio::read_bounded(path, limit)
+}
+
+fn bounded_source(path: &Path) -> Result<Vec<u8>> {
+    let bytes = crate::fsio::read_bounded(path, MAX_SOURCE)?;
+    let value: Value =
+        serde_json::from_slice(&bytes).map_err(|e| format!("current birth source JSON: {e}"))?;
+    if !value.is_object() {
+        return Err("current birth source must be a JSON object".into());
     }
     Ok(bytes)
 }
@@ -66,28 +59,6 @@ impl Route {
     }
 }
 
-fn bounded_source(path: &Path) -> Result<Vec<u8>> {
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|e| format!("current birth source {}: {e}", path.display()))?;
-    if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.len() > MAX_SOURCE as u64
-    {
-        return Err("current birth source must be a nonempty regular file at most 4 MiB".into());
-    }
-    let mut bytes = Vec::new();
-    File::open(path)
-        .and_then(|file| file.take((MAX_SOURCE + 1) as u64).read_to_end(&mut bytes))
-        .map_err(|e| format!("current birth source {}: {e}", path.display()))?;
-    if bytes.is_empty() || bytes.len() > MAX_SOURCE {
-        return Err("current birth source exceeds bound".into());
-    }
-    let value: Value =
-        serde_json::from_slice(&bytes).map_err(|e| format!("current birth source JSON: {e}"))?;
-    if !value.is_object() {
-        return Err("current birth source must be a JSON object".into());
-    }
-    Ok(bytes)
-}
-
 fn intent_from_frame(route: Route, frame: &[u8]) -> Result<&[u8]> {
     match frame {
         [255, ..] => Err(format!(
@@ -115,23 +86,7 @@ pub(crate) fn author(
     route: Route,
 ) -> Result<()> {
     let source_bytes = bounded_source(source)?;
-    if fs::symlink_metadata(directory).is_err() {
-        let mut builder = fs::DirBuilder::new();
-        builder.mode(0o700);
-        builder
-            .create(directory)
-            .map_err(|e| format!("current birth attempt directory: {e}"))?;
-    }
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
-    let named = fs::symlink_metadata(directory).map_err(|e| e.to_string())?;
-    if !named.file_type().is_dir()
-        || named.uid() != unsafe { geteuid() }
-        || named.permissions().mode() & 0o077 != 0
-    {
-        return Err("current birth attempt must be an owner-private real directory".into());
-    }
+    crate::fsio::ensure_private_dir(directory)?;
     let retained_source = directory.join("source.json");
     let retained_config = directory.join("config.json");
     if !retained_source.exists() {

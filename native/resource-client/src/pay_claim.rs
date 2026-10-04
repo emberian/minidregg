@@ -145,7 +145,7 @@ impl Session {
         if self.host.as_os_str().is_empty() || host_image_sha256(&self.host)? != self.sha {
             return Err("claim requires its original pinned local Host inspector".into());
         }
-        if digest(&read_bounded(&self.config, 1024 * 1024)?) != self.config_sha {
+        if digest(&crate::fsio::read_bounded_or_empty(&self.config, 1024 * 1024)?) != self.config_sha {
             return Err("claim inspector config differs from original profile pin".into());
         }
         Ok(())
@@ -288,7 +288,7 @@ impl Backend for Session {
             input.as_os_str(),
             output.as_os_str(),
         ])?;
-        let bytes = read_bounded(output, 16 * 1024)?;
+        let bytes = crate::fsio::read_bounded_or_empty(output, 16 * 1024)?;
         let value: Value = serde_json::from_slice(&bytes)
             .map_err(|e| format!("local source inspection JSON: {e}"))?;
         if let (Some(context), Some(command)) = (&self.context, value.get("command")) {
@@ -309,21 +309,6 @@ impl Backend for Session {
         )?;
         Ok(value)
     }
-}
-
-fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
-    let meta = fs::symlink_metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    if !meta.is_file() || meta.len() > limit as u64 {
-        return Err(format!("{} is not a bounded regular file", path.display()));
-    }
-    let mut bytes = Vec::new();
-    File::open(path)
-        .and_then(|f| f.take(limit as u64 + 1).read_to_end(&mut bytes))
-        .map_err(|e| format!("{}: {e}", path.display()))?;
-    if bytes.len() > limit {
-        return Err(format!("{} exceeds byte bound", path.display()));
-    }
-    Ok(bytes)
 }
 
 
@@ -550,17 +535,17 @@ fn recover<B: Backend>(
             "claim operation action differs; retained operation allows only exact lookup".into(),
         );
     }
-    let command = read_bounded(&dir.join("command.bin"), 2048)?;
+    let command = crate::fsio::read_bounded_or_empty(&dir.join("command.bin"), 2048)?;
     if supplied.is_some_and(|bytes| bytes != command) {
         return Err("claim operation command or authority differs; refusing rebase".into());
     }
-    let retained_config = read_bounded(&dir.join("config.json"), 1024 * 1024)?;
+    let retained_config = crate::fsio::read_bounded_or_empty(&dir.join("config.json"), 1024 * 1024)?;
     if config != retained_config {
         return Err("claim operation config differs from original profile pin".into());
     }
-    let plan = read_bounded(&dir.join("plan.bin"), 3072)?;
-    let signature = read_bounded(&dir.join("signature.bin"), 64)?;
-    let ingress = read_bounded(&dir.join("ingress.bin"), 4096)?;
+    let plan = crate::fsio::read_bounded_or_empty(&dir.join("plan.bin"), 3072)?;
+    let signature = crate::fsio::read_bounded_or_empty(&dir.join("signature.bin"), 64)?;
+    let ingress = crate::fsio::read_bounded_or_empty(&dir.join("ingress.bin"), 4096)?;
     for (field, bytes) in [
         ("commandSha256", command.as_slice()),
         ("planSha256", plan.as_slice()),
@@ -958,7 +943,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     let config = context.config().to_vec();
     let command = command_path
         .as_ref()
-        .map(|p| read_bounded(p, 2048))
+        .map(|p| crate::fsio::read_bounded_or_empty(p, 2048))
         .transpose()?;
     let binding = context.binding()?;
     let endpoint = match context.bootstrap() {

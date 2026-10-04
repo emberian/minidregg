@@ -46,7 +46,13 @@ pub mod consent;
 #[cfg(feature = "native")]
 pub mod durable;
 #[cfg(feature = "native")]
+pub mod fsread;
+#[cfg(feature = "native")]
 pub mod lock;
+#[cfg(feature = "native")]
+pub mod private;
+#[cfg(feature = "native")]
+pub mod random;
 #[cfg(feature = "native")]
 pub mod secret;
 #[cfg(feature = "native")]

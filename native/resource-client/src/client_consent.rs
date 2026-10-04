@@ -53,13 +53,6 @@ pub(crate) fn pure_host(host: &Path) -> Result<PathBuf> {
     Ok(selected)
 }
 
-fn bounded(path: &Path) -> Result<Vec<u8>> {
-    let mut bytes=Vec::new();
-    File::open(path).map_err(|e|format!("consent input {}: {e}",path.display()))?
-        .take((CAP+1) as u64).read_to_end(&mut bytes).map_err(|e|e.to_string())?;
-    if bytes.len()>CAP { return Err("local consent input exceeds frame bound".into()); }
-    Ok(bytes)
-}
 fn pair(left: &[u8], right: &[u8]) -> Result<Vec<u8>> {
     let length:u32=left.len().try_into().map_err(|_|"consent pair exceeds bound")?;
     let mut bytes=length.to_le_bytes().to_vec();bytes.extend_from_slice(left);bytes.extend_from_slice(right);
@@ -87,7 +80,7 @@ fn invoke(host: &Path, config: &Path, operation:u8, payload:&[u8]) -> Result<Vec
     let settings=PINS.get().map(|pins|pins.config.clone()).or_else(||std::env::var_os("MINI_CONSENT_CONFIG").map(PathBuf::from))
         .unwrap_or_else(||config.to_path_buf());
     if !executable.is_absolute()||!settings.is_absolute() {return Err("local consent executable/settings must be absolute".into());}
-    let settings_bytes=bounded(&settings)?;
+    let settings_bytes=crate::fsio::read_bounded_or_empty(&settings, CAP)?;
     let mut slot=SESSION.lock().map_err(|_|"local consent session lock poisoned")?;
     if let Some(session)=slot.as_ref() {
         if session.executable!=executable||session.settings_bytes!=settings_bytes {
@@ -222,17 +215,17 @@ fn headers(bytes:&[u8])->Result<Vec<Vec<u8>>> {
     rows.iter().map(|row|decode_hex(row.as_str().ok_or("local consent header is not hex")?)).collect()
 }
 pub(crate) fn intent(host:&Path,config:&Path,intent:&Path,signing:&SigningKey)->Result<Vec<u8>> {
-    let bytes=bounded(intent)?;
+    let bytes=crate::fsio::read_bounded_or_empty(intent, CAP)?;
     let checked=invoke(host,config,220,&pair(&bytes,&pair(signing.verifying_key().as_bytes(),&[])?)?)?;
     if checked!=bytes {return Err("local consent returned a different retained intent".into());}
     Ok(bytes)
 }
 pub(crate) fn observation(host:&Path,config:&Path,intent:&Path,signature:&Path,challenge:&Path,signing:&SigningKey)->Result<Vec<Vec<u8>>> {
-    let payload=pair(&bounded(intent)?,&pair(signing.verifying_key().as_bytes(),&pair(&bounded(signature)?,&bounded(challenge)?)?)?)?;
+    let payload=pair(&crate::fsio::read_bounded_or_empty(intent, CAP)?,&pair(signing.verifying_key().as_bytes(),&pair(&crate::fsio::read_bounded_or_empty(signature, CAP)?,&crate::fsio::read_bounded_or_empty(challenge, CAP)?)?)?)?;
     headers(&invoke(host,config,221,&payload)?)
 }
 pub(crate) fn plan(host:&Path,config:&Path,intent:&Path,plan:&Path,signing:&SigningKey)->Result<Vec<Vec<u8>>> {
-    headers(&invoke(host,config,222,&pair(&bounded(intent)?,&pair(signing.verifying_key().as_bytes(),&bounded(plan)?)?)?)?)
+    headers(&invoke(host,config,222,&pair(&crate::fsio::read_bounded_or_empty(intent, CAP)?,&pair(signing.verifying_key().as_bytes(),&crate::fsio::read_bounded_or_empty(plan, CAP)?)?)?)?)
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -262,7 +255,7 @@ pub(crate) fn configured_record()->Result<Option<Value>> {
 pub(crate) fn codec_process(host:&Path,config:&Path,args:&[&OsStr])->Result<Option<Output>> {
     if PINS.get().is_none() && std::env::var_os("MINI_CONSENT_HOST").is_none(){return Ok(None);}
     let verb=args.first().and_then(|s|s.to_str()).ok_or("missing local codec command")?;
-    let read=|index:usize|->Result<Vec<u8>>{bounded(Path::new(args.get(index).ok_or("missing local codec input")?))};
+    let read=|index:usize|->Result<Vec<u8>>{crate::fsio::read_bounded_or_empty(Path::new(args.get(index).ok_or("missing local codec input")?), CAP)};
     let kind=|label:&OsStr,bytes:Vec<u8>|->Result<Vec<u8>>{
         let label=label.to_str().ok_or("local codec kind is not UTF-8")?.as_bytes();
         let width:u16=label.len().try_into().map_err(|_|"local codec kind exceeds bound")?;
@@ -510,7 +503,7 @@ fn local_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u
         .or_else(||std::env::var_os("MINI_CONSENT_CONFIG").map(PathBuf::from))
         .unwrap_or_else(||config.to_path_buf());
     if !settings.is_absolute(){return Err("local native settings must be absolute".into());}
-    let settings_bytes=bounded(&settings)?;
+    let settings_bytes=crate::fsio::read_bounded_or_empty(&settings, CAP)?;
     let mut child=Command::new(&executable).arg(&settings).arg("stdio")
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit())
         .spawn().map_err(|e|format!("cannot start local native codec: {e}"))?;
@@ -518,7 +511,7 @@ fn local_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u
     let output=child.stdout.take().ok_or("local codec stdout missing")?;
     let mut session=Session{child,input,output,executable,settings_bytes:settings_bytes.clone(),anchor:None};
     let body=round_trip(&mut session,operation,payload)?;
-    if bounded(&settings)?!=settings_bytes{return Err("local native settings changed during codec operation".into());}
+    if crate::fsio::read_bounded_or_empty(&settings, CAP)?!=settings_bytes{return Err("local native settings changed during codec operation".into());}
     Ok([vec![operation],body].concat())
 }
 

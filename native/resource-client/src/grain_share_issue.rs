@@ -3,7 +3,6 @@
 //! client retains one exact plan/ingress and never retries an uncertain issue.
 use super::share_issue as custody;
 use super::*;
-use std::os::unix::fs::DirBuilderExt;
 
 const REQUEST_LIMIT: usize = 256 * 1024;
 const INSPECT_LIMIT: usize = 1_048_576;
@@ -18,7 +17,7 @@ struct Retained {
 }
 
 fn retained(directory: &Path, socket_override: Option<&Path>) -> Result<Retained> {
-    drain::private_dir(directory)?;
+    crate::fsio::ensure_private_dir_durable(directory)?;
     let pin_bytes = custody::bounded(&directory.join("pin.json"), 65_536)?;
     let pin: Value = serde_json::from_slice(&pin_bytes)
         .map_err(|e| format!("invalid grain share custody pin: {e}"))?;
@@ -324,10 +323,7 @@ pub(super) fn plan(
         }
         Ok(())
     };
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&directory)
-        .map_err(|e| format!("cannot create grain share preview directory: {e}"))?;
+    crate::fsio::create_private_dir(&directory)?;
     sync_directory_ancestors(&directory)?;
     create_private(&directory.join("request.json"), &source)?;
     create_private(&directory.join("config.json"), &config_bytes)?;
@@ -417,10 +413,7 @@ pub(super) fn prepare(
     };
     let approval: Value = serde_json::from_slice(&approval_bytes)
         .map_err(|e| format!("invalid grain share approval: {e}"))?;
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&directory)
-        .map_err(|e| format!("cannot create grain share custody directory: {e}"))?;
+    crate::fsio::create_private_dir(&directory)?;
     sync_directory_ancestors(&directory)?;
     create_private(&directory.join("request.json"), &source)?;
     create_private(&directory.join("approval.json"), &approval_bytes)?;

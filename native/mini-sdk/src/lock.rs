@@ -9,7 +9,7 @@
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::time::Duration;
 
@@ -71,8 +71,7 @@ impl Lease {
             .open(path)
             .map_err(LockError::Io)?;
         let meta = file.metadata().map_err(LockError::Io)?;
-        // SAFETY: geteuid has no preconditions and cannot fail.
-        if !meta.is_file() || meta.uid() != unsafe { libc::geteuid() } || meta.mode() & 0o077 != 0 || meta.nlink() != 1 {
+        if !crate::private::file_ok(&meta) {
             return Err(LockError::Unsafe);
         }
         let mut remaining = match wait {

@@ -5,16 +5,6 @@
 use super::*;
 use std::collections::BTreeMap;
 const CAP: usize = 2_000_000;
-fn bounded(path: &Path) -> Result<Vec<u8>> {
-    use std::io::Read;
-    let mut bytes = Vec::new();
-    fs::File::open(path).map_err(|e| e.to_string())?.take((CAP + 1) as u64)
-        .read_to_end(&mut bytes).map_err(|e| e.to_string())?;
-    if bytes.is_empty() || bytes.len() > CAP {
-        return Err("Objective intent/plan must be nonempty and within capacity".into());
-    }
-    Ok(bytes)
-}
 pub(crate) fn run(arguments: &[String]) -> Result<()> {
     let (kind, args) = arguments.split_first().ok_or("expected native or return plan kind")?;
     if kind != "native" && kind != "return" {
@@ -47,22 +37,12 @@ pub(crate) fn run(arguments: &[String]) -> Result<()> {
     if directory.exists() {
         return Err("Objective signer directory already exists".into());
     }
-    let metadata = fs::symlink_metadata(key).map_err(|e| e.to_string())?;
-    if !metadata.file_type().is_file() {
-        return Err("Objective custody key is not a regular file".into());
-    }
-    #[cfg(unix)] {
-        use std::os::unix::fs::PermissionsExt;
-        if metadata.permissions().mode() & 0o077 != 0 {
-            return Err("Objective custody key must exclude group/other access".into());
-        }
-    }
-    let intended = bounded(intent)?;
-    let candidate = bounded(plan)?;
+    mini_sdk::private::check_file(key)?;
+    let intended = crate::fsio::read_bounded(intent, CAP)?;
+    let candidate = crate::fsio::read_bounded(plan, CAP)?;
     let signing = read_secret(key)?;
     #[cfg(unix)] {
-        use std::os::unix::fs::DirBuilderExt;
-        fs::DirBuilder::new().mode(0o700).create(directory).map_err(|e| e.to_string())?;
+        crate::fsio::create_private_dir(directory)?;
     }
     #[cfg(not(unix))]
     fs::create_dir(directory).map_err(|e| e.to_string())?;
@@ -78,7 +58,7 @@ pub(crate) fn run(arguments: &[String]) -> Result<()> {
     if headers.is_empty() || headers.len() > 32 || (kind == "return" && headers.len() != 1) {
         return Err("Objective native consent returned invalid signing slot count".into());
     }
-    if bounded(&retained_intent)? != intended || bounded(&retained_plan)? != candidate {
+    if crate::fsio::read_bounded(&retained_intent, CAP)? != intended || crate::fsio::read_bounded(&retained_plan, CAP)? != candidate {
         return Err("retained Objective intent/plan changed".into());
     }
     let signatures = sign_headers(&signing, &headers)?;

@@ -10,10 +10,10 @@ use chacha20poly1305::{
 use ring::hmac;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
-use std::fs::{self, File};
+use std::fs::{self};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+use std::os::unix::fs::{PermissionsExt};
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::sync::{
@@ -98,29 +98,8 @@ fn scheduled_at(start: Instant, tick: Duration, index: usize) -> Result<Instant>
         .ok_or_else(|| "traffic clock lifetime exhausted".into())
 }
 
-pub(crate) fn random<const N: usize>() -> Result<[u8; N]> {
-    let mut v = [0; N];
-    File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut v))
-        .map_err(|e| e.to_string())?;
-    Ok(v)
-}
 fn id_text(id: &[u8; 16]) -> String {
     crate::hex(id)
-}
-pub(crate) fn directory(path: &Path) -> Result<()> {
-    if !path.exists() {
-        fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(path)
-            .map_err(|e| e.to_string())?;
-    }
-    let m = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
-    if !m.is_dir() || m.uid() != transport::effective_uid() || m.mode() & 0o077 != 0 {
-        return Err("traffic state must be an owner-private directory".into());
-    }
-    Ok(())
 }
 pub(crate) use crate::fsio::read_private;
 pub(crate) fn persist(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -344,7 +323,7 @@ pub(crate) enum Admission {
 }
 impl Journal {
     pub(crate) fn open(root: &Path, total: usize) -> Result<Self> {
-        directory(root)?;
+        crate::fsio::ensure_private_dir_all(root)?;
         let max = retained_quotas(total);
         let mut count = [0; 3];
         for e in fs::read_dir(root).map_err(|e| e.to_string())? {
@@ -548,12 +527,12 @@ fn handshake(
     let mut server = [0; 32];
     let mut client = [0; 32];
     if server_side {
-        server = random()?;
+        server = crate::fsio::random()?;
         stream.write_all(&server).map_err(|e| e.to_string())?;
         stream.read_exact(&mut client).map_err(|e| e.to_string())?;
     } else {
         stream.read_exact(&mut server).map_err(|e| e.to_string())?;
-        client = random()?;
+        client = crate::fsio::random()?;
         stream.write_all(&client).map_err(|e| e.to_string())?;
     }
     Ok((
@@ -660,7 +639,7 @@ fn local_accept(
         std::thread::spawn(move || {
             let mut handed_off = false;
             let mut work = || -> Result<()> {
-                if transport::peer_uid(&socket)? != transport::effective_uid() {
+                if transport::peer_uid(&socket)? != mini_sdk::private::euid() {
                     return Err("traffic facade requires same-UID caller".into());
                 }
                 socket
@@ -669,7 +648,7 @@ fn local_accept(
                 let body = transport::read_frame_bounded(&mut socket, max_body)
                     .map_err(|e| e.to_string())?
                     .ok_or("traffic facade closed")?;
-                let id = random()?;
+                let id = crate::fsio::random()?;
                 if retained
                     .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
                         (n < retained_max).then_some(n + 1)
@@ -827,12 +806,12 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         .into_string()
         .map_err(|_| "invalid traffic action")?;
     let state = PathBuf::from(args.required("state")?);
-    directory(&state)?;
+    crate::fsio::ensure_private_dir_all(&state)?;
     let _guard = transport::service_lock(&state.join("service.lock"))?;
     let secret_path = PathBuf::from(args.required("key")?);
     if action == "key" {
         args.finish()?;
-        return persist(&secret_path, &random::<32>()?);
+        return persist(&secret_path, &crate::fsio::random::<32>()?);
     }
     let secret = key(&secret_path)?;
     let profile = Profile {
@@ -978,9 +957,9 @@ mod tests {
         let p = std::env::temp_dir().join(format!(
             "mini-traffic-{}-{}",
             std::process::id(),
-            id_text(&random().unwrap())
+            id_text(&crate::fsio::random().unwrap())
         ));
-        directory(&p).unwrap();
+        crate::fsio::ensure_private_dir_all(&p).unwrap();
         p
     }
     #[test]
@@ -1164,8 +1143,8 @@ mod tests {
         let root = scratch();
         let server_root = root.join("server");
         let client_root = root.join("client");
-        directory(&server_root).unwrap();
-        directory(&client_root).unwrap();
+        crate::fsio::ensure_private_dir_all(&server_root).unwrap();
+        crate::fsio::ensure_private_dir_all(&client_root).unwrap();
         let target = root.join("host.sock");
         let listener = UnixListener::bind(&target).unwrap();
         let expected: Vec<Vec<u8>> = (0..3)

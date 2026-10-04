@@ -70,14 +70,6 @@ fn identity_name(value: &str) -> Result<()> {
 
 pub(crate) use crate::fsio::read_secret_in_private_dir as key;
 
-pub(crate) fn nonce() -> Result<String> {
-    let mut bytes = [0u8; 16];
-    File::open("/dev/urandom")
-        .and_then(|mut file| file.read_exact(&mut bytes))
-        .map_err(|error| format!("cannot obtain enrollment nonce: {error}"))?;
-    Ok(u128::from_be_bytes(bytes).to_string())
-}
-
 pub(crate) fn pair(first: &[u8], second: &[u8]) -> Result<Vec<u8>> {
     let length: u32 = first
         .len()
@@ -393,7 +385,7 @@ fn public_key_file(path: &Path) -> Result<VerifyingKey> {
 }
 
 fn load_pin(directory: &Path) -> Result<Pin> {
-    drain::private_dir(directory)?;
+    crate::fsio::ensure_private_dir_durable(directory)?;
     let pin = json_private(&directory.join("pin.json"))?;
     pinned(&pin, "format", FORMAT)?;
     let host = member_path(&pin, "host")?;
@@ -536,7 +528,7 @@ pub(crate) fn signed_factory_observation(
     match fs::DirBuilder::new().mode(0o700).create(&observation) {
         Ok(()) => (),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            drain::private_dir(&observation)?;
+            crate::fsio::ensure_private_dir_durable(&observation)?;
         }
         Err(error) => return Err(format!("cannot create enrollment observation: {error}")),
     }
@@ -795,7 +787,7 @@ fn plan(mut args: Args) -> Result<()> {
     match fs::DirBuilder::new().mode(0o700).create(&directory) {
         Ok(()) => (),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            drain::private_dir(&directory)?;
+            crate::fsio::ensure_private_dir_durable(&directory)?;
         }
         Err(error) => return Err(format!("cannot create enrollment attempt: {error}")),
     }
@@ -814,7 +806,7 @@ fn plan(mut args: Args) -> Result<()> {
     let request_nonce = if directory.join("request.json").exists() {
         field(&json_private(&directory.join("request.json"))?, "nonce")?.to_owned()
     } else {
-        nonce()?
+        crate::fsio::random_nonce()?
     };
     let mut expected_request = json!({"type":"minidregg-participant-enrollment-request-v1",
         "name":name,"sponsor":sponsor,"control":control,"factory":factory_target,
@@ -1115,7 +1107,7 @@ fn welcome(directory: &Path, birth_context: Option<&Path>) -> Result<()> {
 fn join_dir(path: &Path) -> Result<()> {
     match fs::DirBuilder::new().mode(0o700).create(path) {
         Ok(()) => sync_directory_ancestors(path),
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => drain::private_dir(path),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => crate::fsio::ensure_private_dir_durable(path),
         Err(error) => Err(format!("cannot create {}: {error}", path.display())),
     }
 }
@@ -1294,7 +1286,7 @@ fn local_join_inspect(verifier: &Path, pin: &Value, config: &Path, kind: &str,
     if host_image_sha256(verifier)? != field(pin, "verifierSha256")? {
         return Err("join local verifier image changed".into());
     }
-    let output = directory.join(format!("inspect-{}.json", nonce()?));
+    let output = directory.join(format!("inspect-{}.json", crate::fsio::random_nonce()?));
     create_private(&output, b"")?;
     let result = Command::new(verifier).arg(config).arg("inspect").arg(kind)
         .arg(input).arg(&output).output().map_err(|error| format!("cannot inspect join evidence: {error}"))?;
@@ -1368,7 +1360,7 @@ fn retain_join_workspace_marker(state: &Path, root: &Path, evidence: &Value, man
 fn join_welcome(key_path: &Path, welcome_path: &Path, root: &Path, verifier: &Path) -> Result<()> {
     let socket = join_remote()?;
     let state = root.join("join");
-    drain::private_dir(&state)?;
+    crate::fsio::ensure_private_dir_durable(&state)?;
     let _lock = transport::service_lock(&state.join("welcome.lock"))?;
     let offer_bytes = bounded(&state.join("offer.json"), 8 * transport::HOST_MAX_FRAME)?;
     let offer: Value = serde_json::from_slice(&offer_bytes).map_err(|error| error.to_string())?;
@@ -1465,7 +1457,7 @@ fn join_welcome(key_path: &Path, welcome_path: &Path, root: &Path, verifier: &Pa
         // refusal leaves retained ingress available for another read-only lookup.
         let frame = session_invoke(Path::new(""),&socket,&config,89,&ingress)
             .map_err(|e| format!("join receipt lookup unresolved; retry this exact welcome (no submission): {e}"))?;
-        let stem = format!("welcome-lookup-{}",nonce()?);
+        let stem = format!("welcome-lookup-{}",crate::fsio::random_nonce()?);
         retained_frame(&state,&stem,&frame,89)?;
         let outcome = local_join_inspect(verifier,&verifier_pin,&config,"outcome",&state.join(format!("{stem}.bin")),&state)?;
         let receipt = match_join_receipt(&outcome,admitted)?;
@@ -1792,7 +1784,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!(
             "mini-enrollment-{label}-{}-{}",
             std::process::id(),
-            nonce().unwrap()
+            crate::fsio::random_nonce().unwrap()
         ));
         fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
         root
@@ -2007,7 +1999,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!(
             "mini-enrollment-result-{}-{}",
             std::process::id(),
-            nonce().unwrap()
+            crate::fsio::random_nonce().unwrap()
         ));
         fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
         let pin = Pin {

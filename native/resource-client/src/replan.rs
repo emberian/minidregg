@@ -215,13 +215,13 @@ pub(crate) fn stale_root(_error: &str, decision: Option<&HostDecision>) -> bool 
 pub(crate) fn retire(directory: &Path, number: u32, keep: &[&str]) -> Result<PathBuf> {
     let parent = directory.join(REPLANNED);
     if !parent.exists() {
-        private_dir(&parent)?;
+        crate::fsio::create_private_dir(&parent)?;
     }
     let target = parent.join(format!("{number:02}"));
     if target.exists() {
         return Err(format!("{} already holds a retired plan", target.display()));
     }
-    private_dir(&target)?;
+    crate::fsio::create_private_dir(&target)?;
     let mut names = Vec::new();
     for entry in fs::read_dir(directory).map_err(|error| error.to_string())? {
         let name = entry.map_err(|error| error.to_string())?.file_name();
@@ -241,15 +241,6 @@ pub(crate) fn retire(directory: &Path, number: u32, keep: &[&str]) -> Result<Pat
             .map_err(|error| error.to_string())?;
     }
     Ok(target)
-}
-
-fn private_dir(path: &Path) -> Result<()> {
-    let mut builder = fs::DirBuilder::new();
-    #[cfg(unix)]
-    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
-    builder
-        .create(path)
-        .map_err(|error| format!("cannot create {}: {error}", path.display()))
 }
 
 /// Whether an attempt directory retains an installed or replayed receipt
@@ -352,7 +343,7 @@ mod tests {
     #[test]
     fn nested_recovery_never_overwrites_evidence_or_retires_an_acceptance() {
         let base = std::env::temp_dir().join(format!("nested-replan-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&base); private_dir(&base).unwrap();
+        let _ = fs::remove_dir_all(&base); crate::fsio::create_private_dir(&base).unwrap();
         fs::write(base.join("call.bin"), b"original").unwrap();
         retire_attempt(&base, 1).unwrap();
         fs::write(base.join("call.bin"), b"fresh observation").unwrap();
@@ -519,7 +510,7 @@ mod tests {
     #[test]
     fn exact_readback_after_uncertain_cas_is_never_retired() {
         let base = std::env::temp_dir().join(format!("recovered-replan-{}", std::process::id()));
-        private_dir(&base).unwrap();
+        crate::fsio::create_private_dir(&base).unwrap();
         fs::write(base.join("outcome.json"),
             br#"{"type":"confirmed","confirmation":"recoveredAfterUncertainResponse"}"#).unwrap();
         fs::write(base.join("call.bin"), b"exact accepted call").unwrap();
@@ -541,9 +532,9 @@ mod tests {
     fn replan_retire_keeps_evidence_and_never_retires_an_accepted_attempt() {
         let base = std::env::temp_dir().join(format!("replan-retire-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
-        private_dir(&base).unwrap();
+        crate::fsio::create_private_dir(&base).unwrap();
         let attempt = base.join("a");
-        private_dir(&attempt).unwrap();
+        crate::fsio::create_private_dir(&attempt).unwrap();
         fs::write(attempt.join("challenge.bin"), b"one").unwrap();
         fs::write(attempt.join("plan.bin.refusal"), b"stale").unwrap();
         retire_attempt(&attempt, 1).unwrap();

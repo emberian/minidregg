@@ -100,8 +100,7 @@ pub(crate) fn private_folder(root: &Path, name: &str) -> Result<(), String> {
     }
     let folder = unsafe { File::from_raw_fd(fd) };
     let metadata = folder.metadata().map_err(|e| e.to_string())?;
-    use std::os::unix::fs::MetadataExt;
-    if metadata.uid() != unsafe { libc::geteuid() } || metadata.mode() & 0o077 != 0 {
+    if !mini_sdk::private::dir_ok(&metadata) {
         return Err(format!("session folder {name} must be an owner-private directory"));
     }
     Ok(())
@@ -199,8 +198,7 @@ pub(crate) fn replace(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), Stri
     } else if std::io::Error::last_os_error().kind() != std::io::ErrorKind::NotFound {
         return Err(std::io::Error::last_os_error().to_string());
     }
-    let mut nonce = [0u8; 16];
-    File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut nonce)).map_err(|e| e.to_string())?;
+    let nonce = crate::fsio::random::<16>()?;
     let nonce = nonce.iter().map(|b| format!("{b:02x}")).collect::<String>();
     let temporary = CString::new(format!(".mini-replace-{}-{nonce}", std::process::id())).unwrap();
     let fd = unsafe { libc::openat(directory.as_raw_fd(), temporary.as_ptr(),

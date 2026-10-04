@@ -92,14 +92,6 @@ fn pair(first: &[u8], second: &[u8]) -> Vec<u8> {
     bytes
 }
 
-fn nonce() -> Result<String> {
-    let mut bytes = [0u8; 16];
-    File::open("/dev/urandom")
-        .and_then(|mut file| file.read_exact(&mut bytes))
-        .map_err(|error| format!("cannot obtain certify nonce: {error}"))?;
-    Ok(u128::from_be_bytes(bytes).to_string())
-}
-
 fn decimal_arg(args: &mut Args, name: &str) -> Result<Option<String>> {
     match args.optional(name) {
         None => Ok(None),
@@ -133,7 +125,7 @@ fn certify(ws: &Workspace, control: &str, min_tail: Option<String>) -> Result<Va
         ws,
         "certify",
         &json!({
-            "sponsor": ws.subject, "control": control, "nonce": nonce()?,
+            "sponsor": ws.subject, "control": control, "nonce": crate::fsio::random_nonce()?,
             "expectedFactoryRoot": field(&current, "factoryRoot")?,
             "expectedAuthorityRoot": field(&current, "authorityRoot")?,
             "expectedSystemRoot": field(&current, "systemRoot")?,

@@ -4,7 +4,7 @@
 //! client signs only its exact header and never invents a cursor or ingress.
 use super::*;
 use sha2::{Digest, Sha256};
-use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt};
 
 const FORMAT: &str = "minidregg-fn-frontier-custody-v1";
 const APPROVAL: &str = "minidregg-fn-frontier-approval-v1";
@@ -15,32 +15,6 @@ fn digest(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
 }
 
-fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    File::open(path)
-        .map_err(|e| format!("cannot open {}: {e}", path.display()))?
-        .take((limit + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    if bytes.is_empty() || bytes.len() > limit {
-        return Err(format!("{} must contain 1..={limit} bytes", path.display()));
-    }
-    Ok(bytes)
-}
-
-fn bounded_allow_empty(path: &Path, limit: usize) -> Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    File::open(path)
-        .map_err(|e| format!("cannot open {}: {e}", path.display()))?
-        .take((limit + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    if bytes.len() > limit {
-        return Err(format!("{} exceeds {limit} bytes", path.display()));
-    }
-    Ok(bytes)
-}
-
 fn member<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
     value
         .get(name)
@@ -48,26 +22,6 @@ fn member<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
         .ok_or_else(|| format!("fn frontier custody lacks {name}"))
 }
 
-
-fn operator_socket_owned(socket: &Path) -> Result<()> {
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
-    let uid = unsafe { geteuid() };
-    let parent = socket.parent().ok_or("operator socket has no parent")?;
-    let directory = fs::symlink_metadata(parent).map_err(|e| e.to_string())?;
-    let node = fs::symlink_metadata(socket).map_err(|e| e.to_string())?;
-    if !directory.is_dir()
-        || directory.uid() != uid
-        || directory.permissions().mode() & 0o077 != 0
-        || !node.file_type().is_socket()
-        || node.uid() != uid
-        || node.permissions().mode() & 0o077 != 0
-    {
-        return Err("fn frontier requires an owner-private operator socket".into());
-    }
-    Ok(())
-}
 
 
 fn source_inspect(
@@ -88,7 +42,7 @@ fn source_inspect(
         return Err(format!("pinned Host {kind} inspection refused"));
     }
     agent_reserve::retain_generated(output)?;
-    serde_json::from_slice(&bounded(output, MAX_INSPECTION)?)
+    serde_json::from_slice(&crate::fsio::read_bounded(output, MAX_INSPECTION)?)
         .map_err(|e| format!("invalid source inspection: {e}"))
 }
 
@@ -120,8 +74,8 @@ struct Retained {
 }
 
 fn retained(directory: &Path) -> Result<Retained> {
-    drain::private_dir(directory)?;
-    let pin: Value = serde_json::from_slice(&bounded(&directory.join("pin.json"), 65_536)?)
+    crate::fsio::ensure_private_dir_durable(directory)?;
+    let pin: Value = serde_json::from_slice(&crate::fsio::read_bounded(&directory.join("pin.json"), 65_536)?)
         .map_err(|e| e.to_string())?;
     if member(&pin, "format")? != FORMAT {
         return Err("unsupported fn frontier custody pin".into());
@@ -135,19 +89,19 @@ fn retained(directory: &Path) -> Result<Retained> {
         || !socket.is_absolute()
         || config != absolute(&directory.join("config.json"))?
         || host_image_sha256(&host)? != host_sha
-        || digest(&bounded(&config, 65_536)?) != member(&pin, "configSha256")?
+        || digest(&crate::fsio::read_bounded(&config, 65_536)?) != member(&pin, "configSha256")?
     {
         return Err("fn frontier retained Host or config changed".into());
     }
-    let plan = bounded(&directory.join("plan.bin"), MAX_PLAN)?;
+    let plan = crate::fsio::read_bounded(&directory.join("plan.bin"), MAX_PLAN)?;
     if digest(&plan) != member(&pin, "planSha256")? {
         return Err("fn frontier retained plan changed".into());
     }
-    if digest(&bounded(&directory.join("request.bin"), 128)?) != member(&pin, "requestSha256")? {
+    if digest(&crate::fsio::read_bounded(&directory.join("request.bin"), 128)?) != member(&pin, "requestSha256")? {
         return Err("fn frontier retained request changed".into());
     }
     let inspection: Value =
-        serde_json::from_slice(&bounded(&directory.join("plan.json"), MAX_INSPECTION)?)
+        serde_json::from_slice(&crate::fsio::read_bounded(&directory.join("plan.json"), MAX_INSPECTION)?)
             .map_err(|e| e.to_string())?;
     if member(&inspection, "type")? != "fn-consumer-frontier-plan-v2"
         || member(&inspection, "canonicalPlanHex")? != hex(&plan)
@@ -160,7 +114,7 @@ fn retained(directory: &Path) -> Result<Retained> {
         ("source.eml", 1_500_000),
     ] {
         let path = directory.join(name);
-        let bytes = bounded_allow_empty(&path, limit)?;
+        let bytes = crate::fsio::read_bounded_or_empty(&path, limit)?;
         if (name == "cursor.fncu" && bytes.is_empty())
             || (member(&inspection, "kind")? == "empty"
                 && name != "cursor.fncu"
@@ -227,7 +181,7 @@ fn record_confirmed(directory: &Path, original: &Value) -> Result<()> {
     let target = directory.join("confirmed.json");
     if target.exists() {
         let prior: Value =
-            serde_json::from_slice(&bounded(&target, 4096)?).map_err(|e| e.to_string())?;
+            serde_json::from_slice(&crate::fsio::read_bounded(&target, 4096)?).map_err(|e| e.to_string())?;
         if prior != *original {
             return Err("fn frontier original receipt changed".into());
         }
@@ -269,12 +223,9 @@ pub(super) fn plan(
     let config = absolute(config)?;
     let socket = absolute(socket)?;
     let directory = absolute(directory)?;
-    operator_socket_owned(&socket)?;
-    let config_bytes = bounded(&config, 65_536)?;
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&directory)
-        .map_err(|e| format!("cannot create new fn frontier state: {e}"))?;
+    crate::fsio::check_private_socket(&socket)?;
+    let config_bytes = crate::fsio::read_bounded(&config, 65_536)?;
+    crate::fsio::create_private_dir(&directory)?;
     sync_directory_ancestors(&directory)?;
     let config_copy = directory.join("config.json");
     create_private(&config_copy, &config_bytes)?;
@@ -293,7 +244,7 @@ pub(super) fn plan(
         &[&request],
     )?;
     agent_reserve::retain_generated(&request)?;
-    let request_bytes = bounded(&request, 128)?;
+    let request_bytes = crate::fsio::read_bounded(&request, 128)?;
     let frame = transport::invoke_pinned(&socket, &config_copy, &host_sha, 64, &request_bytes)
         .map_err(|e| format!("fn frontier plan response uncertain; no Mini write: {e}"))?;
     create_private(&directory.join("plan.frame"), &frame)?;
@@ -330,9 +281,9 @@ pub(super) fn plan(
     for name in ["cursor.fncu", "report.fn-e", "source.eml"] {
         agent_reserve::retain_generated(&directory.join(name))?;
     }
-    let cursor = bounded(&directory.join("cursor.fncu"), 346)?;
-    let report = bounded_allow_empty(&directory.join("report.fn-e"), 3_150_546)?;
-    let source = bounded_allow_empty(&directory.join("source.eml"), 1_500_000)?;
+    let cursor = crate::fsio::read_bounded(&directory.join("cursor.fncu"), 346)?;
+    let report = crate::fsio::read_bounded_or_empty(&directory.join("report.fn-e"), 3_150_546)?;
+    let source = crate::fsio::read_bounded_or_empty(&directory.join("source.eml"), 1_500_000)?;
     if report.len() > 3_150_546
         || source.len() > 1_500_000
         || (kind == "selected" && (report.is_empty() || source.is_empty()))
@@ -341,7 +292,7 @@ pub(super) fn plan(
         return Err("fn frontier retained poll artifacts exceed source bounds".into());
     }
     if host_image_sha256(&host)? != host_sha
-        || digest(&bounded(&config_copy, 65_536)?) != digest(&config_bytes)
+        || digest(&crate::fsio::read_bounded(&config_copy, 65_536)?) != digest(&config_bytes)
     {
         return Err("fn frontier Host or config changed while preparing plan".into());
     }
@@ -466,7 +417,7 @@ fn submit_mode(
     let marker = directory.join("submit-attempt.json");
     if marker.exists() {
         let old: Value =
-            serde_json::from_slice(&bounded(&marker, 4096)?).map_err(|e| e.to_string())?;
+            serde_json::from_slice(&crate::fsio::read_bounded(&marker, 4096)?).map_err(|e| e.to_string())?;
         if old.get("operation").and_then(Value::as_u64) != Some(operation as u64)
             || member(&old, "ingressSha256")? != digest(ingress)
             || member(&old, "operatorSocket")? != utf8_path(socket)?
@@ -530,7 +481,7 @@ pub(super) fn advance(directory: &Path, key: &Path, approval_path: &Path) -> Res
     let directory = absolute(directory)?;
     let _owner = transport::service_lock(&directory.join("fn-frontier.lock"))?;
     let state = retained(&directory)?;
-    operator_socket_owned(&state.socket)?;
+    crate::fsio::check_private_socket(&state.socket)?;
     verify_inspection(&directory, &state)?;
     pin_still(&directory, &state)?;
     let approval_bytes = crate::agent_reserve::private_bytes(approval_path, 65_536)?;
@@ -541,7 +492,7 @@ pub(super) fn advance(directory: &Path, key: &Path, approval_path: &Path) -> Res
     let approval_hash = digest(&approval_bytes);
     if approval_pin.exists() {
         let pinned: Value =
-            serde_json::from_slice(&bounded(&approval_pin, 4096)?).map_err(|e| e.to_string())?;
+            serde_json::from_slice(&crate::fsio::read_bounded(&approval_pin, 4096)?).map_err(|e| e.to_string())?;
         if member(&pinned, "approvalSha256")? != approval_hash
             || member(&pinned, "signerPublicKey")? != hex(&signing.verifying_key().to_bytes())
         {
@@ -556,7 +507,7 @@ pub(super) fn advance(directory: &Path, key: &Path, approval_path: &Path) -> Res
     }
     let signature_path = directory.join("signature.bin");
     let signature = if signature_path.exists() {
-        bounded(&signature_path, 64)?
+        crate::fsio::read_bounded(&signature_path, 64)?
     } else {
         let raw = signing.sign(&header).to_bytes();
         create_private(&signature_path, &raw)?;
@@ -568,16 +519,16 @@ pub(super) fn advance(directory: &Path, key: &Path, approval_path: &Path) -> Res
     }
     let ingress_path = directory.join("ingress.bin");
     let ingress = if ingress_path.exists() {
-        bounded(&ingress_path, 16_384)?
+        crate::fsio::read_bounded(&ingress_path, 16_384)?
     } else {
         let marker = directory.join("assembly-attempt.json");
         let frame_path = directory.join("assembly.frame");
         let frame = if frame_path.exists() {
-            bounded(&frame_path, 16_385)?
+            crate::fsio::read_bounded(&frame_path, 16_385)?
         } else {
             if marker.exists() {
                 let old: Value =
-                    serde_json::from_slice(&bounded(&marker, 4096)?).map_err(|e| e.to_string())?;
+                    serde_json::from_slice(&crate::fsio::read_bounded(&marker, 4096)?).map_err(|e| e.to_string())?;
                 if old.get("operation").and_then(Value::as_u64) != Some(65)
                     || member(&old, "planSha256")? != digest(&state.plan)
                     || member(&old, "signatureSha256")? != digest(&signature)
@@ -612,7 +563,7 @@ pub(super) fn advance(directory: &Path, key: &Path, approval_path: &Path) -> Res
         create_private(&ingress_path, bytes)?;
         bytes.to_vec()
     };
-    let assembly_frame = bounded(&directory.join("assembly.frame"), 16_385)?;
+    let assembly_frame = crate::fsio::read_bounded(&directory.join("assembly.frame"), 16_385)?;
     if assembly_frame.first() != Some(&65) || assembly_frame[1..] != ingress {
         return Err("fn frontier ingress differs from retained assembly".into());
     }
@@ -644,8 +595,8 @@ pub(super) fn advance(directory: &Path, key: &Path, approval_path: &Path) -> Res
     }
     if directory.join("submit.outcome.bin").exists() {
         pin_still(&directory, &state)?;
-        let frame = bounded(&directory.join("submit.frame"), 16_385)?;
-        let body = bounded(&directory.join("submit.outcome.bin"), 16_384)?;
+        let frame = crate::fsio::read_bounded(&directory.join("submit.frame"), 16_385)?;
+        let body = crate::fsio::read_bounded(&directory.join("submit.outcome.bin"), 16_384)?;
         if frame.first() != Some(&submit_op) || frame[1..] != body {
             return Err("fn frontier submit outcome differs from exact Host frame".into());
         }
@@ -675,11 +626,11 @@ pub(super) fn lookup_original(directory: &Path) -> Result<()> {
     let directory = absolute(directory)?;
     let _owner = transport::service_lock(&directory.join("fn-frontier.lock"))?;
     let state = retained(&directory)?;
-    operator_socket_owned(&state.socket)?;
+    crate::fsio::check_private_socket(&state.socket)?;
     pin_still(&directory, &state)?;
-    let ingress = bounded(&directory.join("ingress.bin"), 16_384)?;
+    let ingress = crate::fsio::read_bounded(&directory.join("ingress.bin"), 16_384)?;
     let marker: Value =
-        serde_json::from_slice(&bounded(&directory.join("submit-attempt.json"), 4096)?)
+        serde_json::from_slice(&crate::fsio::read_bounded(&directory.join("submit-attempt.json"), 4096)?)
             .map_err(|e| e.to_string())?;
     let (submit_op, _) = operations(&state.inspection)?;
     if marker.get("operation").and_then(Value::as_u64) != Some(submit_op as u64)

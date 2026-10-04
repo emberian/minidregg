@@ -8,28 +8,6 @@ fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-fn read(path: &Path, limit: usize) -> Result<Vec<u8>, String> {
-    use std::io::Read;
-    use std::os::unix::fs::MetadataExt;
-    let named = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
-    if !named.file_type().is_file() || named.len() > limit as u64 {
-        return Err("query refusal artifact is not a bounded regular file".into());
-    }
-    let file = fs::File::open(path).map_err(|e| e.to_string())?;
-    let opened = file.metadata().map_err(|e| e.to_string())?;
-    if !opened.is_file() || (opened.dev(), opened.ino()) != (named.dev(), named.ino()) {
-        return Err("query refusal artifact changed while opening".into());
-    }
-    let mut bytes = Vec::new();
-    file.take(limit as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
-    if bytes.len() > limit {
-        return Err("query refusal artifact exceeds bound".into());
-    }
-    Ok(bytes)
-}
-
 /// Called only at socket op 5's actual op-255 response. Keep the whole frame
 /// and hashes; the controller asks the pinned Host to decode it independently.
 pub(crate) fn retain(
@@ -64,15 +42,15 @@ pub(crate) fn retain(
             _ => return Err("query refusal has a result or submit artifact".into()),
         }
     }
-    let signed = read(
+    let signed = crate::fsio::read_bounded_or_empty(
         &attempt.join("signed-observation.bin"),
         super::transport::HOST_MAX_FRAME,
     )?;
     if signed.is_empty() || signed != request {
         return Err("query refusal differs from retained signed observation".into());
     }
-    let config_bytes = read(config, 65_536)?;
-    let manifest_bytes = read(&attempt.join("attempt.json"), 65_536)?;
+    let config_bytes = crate::fsio::read_bounded_or_empty(config, 65_536)?;
+    let manifest_bytes = crate::fsio::read_bounded_or_empty(&attempt.join("attempt.json"), 65_536)?;
     let manifest: Value = serde_json::from_slice(&manifest_bytes).map_err(|e| e.to_string())?;
     if manifest["format"] != "minidregg-resource-client-attempt-v1"
         || manifest["operation"] != "query"

@@ -28,9 +28,6 @@ const NOFOLLOW: i32 = 0x20000;
 const DIRECTORY_FLAG: i32 = 0x100000;
 #[cfg(not(target_os = "macos"))]
 const DIRECTORY_FLAG: i32 = 0x10000;
-unsafe extern "C" {
-    fn geteuid() -> u32;
-}
 
 fn fail(error: impl std::fmt::Display) -> String {
     format!("receipt continuity: {error}")
@@ -111,14 +108,11 @@ fn identity(profile: &Value) -> Result<Value> {
 }
 fn private_metadata(file: &File, directory: bool) -> Result<()> {
     let meta = file.metadata().map_err(fail)?;
-    if meta.uid() != unsafe { geteuid() }
-        || meta.mode() & 0o077 != 0
-        || if directory {
-            !meta.is_dir()
-        } else {
-            !meta.is_file() || meta.nlink() != 1
-        }
-    {
+    if !(if directory {
+        mini_sdk::private::dir_ok(&meta)
+    } else {
+        mini_sdk::private::file_ok(&meta)
+    }) {
         return Err(fail(
             "custody path must be owner-private, regular, and unlinked elsewhere",
         ));
@@ -149,7 +143,7 @@ fn read_json_mode(path: &Path, custody: bool) -> Result<Value> {
         // Existing retained query files are public-mode inside a private workspace.
         // This imports only the claimed point; the prefix proof authenticates it.
         let meta = file.metadata().map_err(fail)?;
-        if !meta.is_file() || meta.uid() != unsafe { geteuid() } {
+        if !meta.is_file() || !mini_sdk::private::owned(&meta) {
             return Err(fail("retained point is not an owned regular file"));
         }
     }
@@ -922,10 +916,7 @@ pub(crate) fn initialize(
     if !complete || verified != target {
         return Err(fail("bootstrap did not verify exact signed read point"));
     }
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&custody)
-        .map_err(fail)?;
+    crate::fsio::create_private_dir(&custody)?;
     directory(root)?.sync_all().map_err(fail)?;
     let _lock = lock(&custody)?;
     persist(&custody, &settings, &verified)?;

@@ -1,7 +1,6 @@
 //! One bounded B consumer wake. All policy decisions and calls come from Host/Main.
 use super::*;
 use sha2::{Digest, Sha256};
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
@@ -18,30 +17,6 @@ fn file_digest(path: &Path) -> Result<String> {
         }
         digest.update(&buffer[..count]);
     }
-}
-
-fn bounded_catalog_digest(path: &Path, limit: u64) -> Result<String> {
-    let meta = fs::symlink_metadata(path)
-        .map_err(|e| format!("cannot inspect A catalog input {}: {e}", path.display()))?;
-    if !meta.is_file() || meta.len() == 0 || meta.len() > limit {
-        return Err(format!(
-            "A catalog input {} is not a bounded regular file",
-            path.display()
-        ));
-    }
-    let mut bytes = Vec::new();
-    File::open(path)
-        .map_err(|e| format!("cannot open A catalog input {}: {e}", path.display()))?
-        .take(limit + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|e| format!("cannot read A catalog input {}: {e}", path.display()))?;
-    if bytes.is_empty() || bytes.len() as u64 > limit {
-        return Err(format!(
-            "A catalog input {} changed or exceeds its bound",
-            path.display()
-        ));
-    }
-    Ok(hex(&Sha256::digest(&bytes)))
 }
 
 pub(super) struct HostUpgrade {
@@ -118,30 +93,6 @@ fn direct_host(host: &Path, config: &Path, args: &[&Path]) -> Result<()> {
 fn canonical_sha(value: &str) -> bool {
     value.len() == 64
         && mini_sdk::hex::is_lower(value)
-}
-
-pub(super) fn private_dir(path: &Path) -> Result<()> {
-    match fs::DirBuilder::new().mode(0o700).create(path) {
-        Ok(()) => sync_directory_ancestors(path)?,
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-        Err(error) => return Err(format!("cannot create {}: {error}", path.display())),
-    }
-    let meta = fs::symlink_metadata(path)
-        .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
-    if !meta.is_dir()
-        || meta.uid() != unsafe { geteuid() }
-        || meta.permissions().mode() & 0o077 != 0
-    {
-        return Err(format!(
-            "{} must be an owner-private directory",
-            path.display()
-        ));
-    }
-    Ok(())
-}
-
-unsafe extern "C" {
-    fn geteuid() -> u32;
 }
 
 fn read_json(path: &Path) -> Result<Value> {
@@ -336,7 +287,7 @@ fn a_reply_pin_identity(host: &Path, config: &Path, socket: &Path, key: &Path) -
         } else {
             8_192
         };
-        manifests.insert(name.to_owned(), json!(bounded_catalog_digest(path, bound)?));
+        manifests.insert(name.to_owned(), json!(hex(&Sha256::digest(&crate::fsio::read_bounded(path, bound as usize)?))));
     }
     let control_path = catalog
         .get("controlPath")
@@ -501,9 +452,9 @@ pub(super) fn upgrade_host(request: UpgradeRequest<'_>) -> Result<()> {
             return Err(format!("{label} SHA-256 must be canonical lowercase hex"));
         }
     }
-    private_dir(state_dir)?;
+    crate::fsio::ensure_private_dir_durable(state_dir)?;
     let socket_dir = socket.parent().ok_or("socket lacks parent")?;
-    private_dir(socket_dir)?;
+    crate::fsio::ensure_private_dir_durable(socket_dir)?;
     let _service = transport::service_lock(&socket.with_extension("lock"))?;
     let _global = transport::service_lock(&socket_dir.join("consumer-worker.lock"))?;
     let _worker = transport::service_lock(&state_dir.join("worker.lock"))?;
@@ -536,7 +487,7 @@ pub(super) fn upgrade_host(request: UpgradeRequest<'_>) -> Result<()> {
     let old_pin: Value = serde_json::from_slice(&old_pin_bytes).map_err(|e| e.to_string())?;
     let old_pin_type = field(&old_pin, "type")?.to_owned();
     let pending = state_dir.join("pending");
-    private_dir(&pending)?;
+    crate::fsio::ensure_private_dir_durable(&pending)?;
     let state = read_json(&pending.join("state.json"))?;
     if field(&state, "phase")? != "Sending" {
         return Err("host upgrade requires the exact pending Sending phase".into());
@@ -569,7 +520,7 @@ pub(super) fn upgrade_host(request: UpgradeRequest<'_>) -> Result<()> {
         }
     }
     let upgrade_dir = upgrade_dir.ok_or("exhausted host upgrade evidence names")?;
-    private_dir(&upgrade_dir)?;
+    crate::fsio::ensure_private_dir_durable(&upgrade_dir)?;
     create_private(&upgrade_dir.join("old-pin.json"), &old_pin_bytes)?;
     if file_digest(&upgrade_dir.join("old-pin.json"))? != old_pin_sha {
         return Err("retained old worker pin differs from pre-upgrade digest".into());
@@ -853,7 +804,7 @@ fn classify_poll(value: &Value) -> Result<(String, bool)> {
 
 fn finish(state_dir: &Path, pending: &Path, state: &Value) -> Result<()> {
     let completed = state_dir.join("completed");
-    private_dir(&completed)?;
+    crate::fsio::ensure_private_dir_durable(&completed)?;
     let target = completed.join(field(state, "txn")?);
     if target.exists() {
         return Err("completed transaction archive already exists".into());
@@ -1127,9 +1078,9 @@ fn resume_held_ack_route(
     state_dir: &Path,
     route: ConsumerRoute,
 ) -> Result<()> {
-    private_dir(state_dir)?;
+    crate::fsio::ensure_private_dir_durable(state_dir)?;
     let socket_dir = socket.parent().ok_or("socket lacks parent")?;
-    private_dir(socket_dir)?;
+    crate::fsio::ensure_private_dir_durable(socket_dir)?;
     let _global = transport::service_lock(&socket_dir.join("consumer-worker.lock"))?;
     let _worker = transport::service_lock(&state_dir.join("worker.lock"))?;
     pin_route(state_dir, host, config, socket, key, route)?;
@@ -1146,7 +1097,7 @@ fn resume_held_ack_route(
     }
     pin_worker_host_image(state_dir)?;
     let pending = state_dir.join("pending");
-    private_dir(&pending)?;
+    crate::fsio::ensure_private_dir_durable(&pending)?;
     let mut state = read_json(&pending.join("state.json"))?;
     require_pending_route(&state, route)?;
     if field(&state, "phase")? != "Held" {
@@ -1181,7 +1132,7 @@ fn resume_held_ack_route(
         return Err("held ACK lacks a complete source refusal frame".into());
     }
     let reconcile = attempt(&pending, &mut state, "reconcile")?;
-    private_dir(&reconcile)?;
+    crate::fsio::ensure_private_dir_durable(&reconcile)?;
     create_private(&reconcile.join("prior-refusal.bin"), &prior_frame[1..])?;
     let decoded = inspect(
         host,
@@ -1311,9 +1262,9 @@ fn run_route(
     max_pages: u32,
     route: ConsumerRoute,
 ) -> Result<()> {
-    private_dir(state_dir)?;
+    crate::fsio::ensure_private_dir_durable(state_dir)?;
     let socket_dir = socket.parent().ok_or("socket lacks parent")?;
-    private_dir(socket_dir)?;
+    crate::fsio::ensure_private_dir_durable(socket_dir)?;
     let _global = transport::service_lock(&socket_dir.join("consumer-worker.lock"))?;
     let _lock = transport::service_lock(&state_dir.join("worker.lock"))?;
     let stop = run_locked_route(host, config, socket, key, state_dir, max_pages, route)?;
@@ -1339,14 +1290,14 @@ pub(super) fn run_locked_route(
             return Ok(Stop::PageCap);
         }
         if !pending.exists() {
-            private_dir(&pending)?;
+            crate::fsio::ensure_private_dir_durable(&pending)?;
             let mut initial = json!({"phase":"Polling", "serial":0});
             if route.reply {
                 initial["route"] = json!("a-reply");
             }
             save_state(&pending, &initial)?;
         }
-        private_dir(&pending)?;
+        crate::fsio::ensure_private_dir_durable(&pending)?;
         let state_file = pending.join("state.json");
         if !state_file.exists() {
             let only_state_temps = fs::read_dir(&pending)
@@ -1531,11 +1482,11 @@ mod tests {
                 std::process::id(),
                 workspace::random_nonce().unwrap()
             ));
-            private_dir(&root).unwrap();
+            crate::fsio::ensure_private_dir_durable(&root).unwrap();
             let state_dir = root.join("state");
             let socket_dir = root.join("service");
-            private_dir(&state_dir).unwrap();
-            private_dir(&socket_dir).unwrap();
+            crate::fsio::ensure_private_dir_durable(&state_dir).unwrap();
+            crate::fsio::ensure_private_dir_durable(&socket_dir).unwrap();
             let old_host = root.join("old-host");
             let new_host = root.join("new-host");
             let config = root.join("config.json");
@@ -1569,8 +1520,8 @@ fi
             }
             let pending = state_dir.join("pending");
             let prepare = pending.join("prepare-00000002");
-            private_dir(&pending).unwrap();
-            private_dir(&prepare).unwrap();
+            crate::fsio::ensure_private_dir_durable(&pending).unwrap();
+            crate::fsio::ensure_private_dir_durable(&prepare).unwrap();
             create_private(&prepare.join("call.bin"), b"exact retained call").unwrap();
             create_private(&prepare.join("config.json"), b"{}\n").unwrap();
             write_json_new(&prepare.join("attempt.json"), &json!({"format":"minidregg-resource-client-attempt-v1", "operation":"submit",
@@ -1628,11 +1579,11 @@ fi
                 .unwrap()
                 .as_nanos()
         ));
-        private_dir(&root).unwrap();
+        crate::fsio::ensure_private_dir_durable(&root).unwrap();
         let state_dir = root.join("state");
         let socket_dir = root.join("service");
-        private_dir(&state_dir).unwrap();
-        private_dir(&socket_dir).unwrap();
+        crate::fsio::ensure_private_dir_durable(&state_dir).unwrap();
+        crate::fsio::ensure_private_dir_durable(&socket_dir).unwrap();
         let old_host = root.join("old-host");
         let new_host = root.join("new-host");
         let config = root.join("config.json");
@@ -1644,8 +1595,8 @@ fi
         create_private(&key, &[7; 32]).unwrap();
         let pending = state_dir.join("pending");
         let prepare = pending.join("prepare-00000002");
-        private_dir(&pending).unwrap();
-        private_dir(&prepare).unwrap();
+        crate::fsio::ensure_private_dir_durable(&pending).unwrap();
+        crate::fsio::ensure_private_dir_durable(&prepare).unwrap();
         create_private(&prepare.join("call.bin"), b"exact retained call").unwrap();
         let attempt_config = prepare.join("config.json");
         create_private(&attempt_config, b"{}\n").unwrap();
@@ -1765,11 +1716,11 @@ fi
                 .unwrap()
                 .as_nanos()
         ));
-        private_dir(&root).unwrap();
+        crate::fsio::ensure_private_dir_durable(&root).unwrap();
         let pending = root.join("pending");
         let prepare = pending.join("prepare-00000002");
-        private_dir(&pending).unwrap();
-        private_dir(&prepare).unwrap();
+        crate::fsio::ensure_private_dir_durable(&pending).unwrap();
+        crate::fsio::ensure_private_dir_durable(&prepare).unwrap();
         create_private(&prepare.join("call.bin"), b"call").unwrap();
         create_private(&prepare.join("attempt.json"), b"manifest").unwrap();
         let absent = json!({"type":"absent"});
@@ -1814,11 +1765,11 @@ fi
                 .unwrap()
                 .as_nanos()
         ));
-        private_dir(&root).unwrap();
+        crate::fsio::ensure_private_dir_durable(&root).unwrap();
         let pending = root.join("pending");
         let ack = pending.join("ack-00000003");
-        private_dir(&pending).unwrap();
-        private_dir(&ack).unwrap();
+        crate::fsio::ensure_private_dir_durable(&pending).unwrap();
+        crate::fsio::ensure_private_dir_durable(&ack).unwrap();
         let reply = json!({"type":B_CONSUMER.ack_type,
             "miniTransactionId":"123", "fnAck":"durable-accepted"});
         let mut frame = vec![B_CONSUMER.ack_opcode];
@@ -1854,7 +1805,7 @@ fi
                 .unwrap()
                 .as_nanos()
         ));
-        private_dir(&root).unwrap();
+        crate::fsio::ensure_private_dir_durable(&root).unwrap();
         let socket = root.join("host.sock");
         let _running = transport::service_lock(&socket.with_extension("lock")).unwrap();
         let old_host = root.join("missing-old");
@@ -1890,7 +1841,7 @@ fi
                 .unwrap()
                 .as_nanos()
         ));
-        private_dir(&root).unwrap();
+        crate::fsio::ensure_private_dir_durable(&root).unwrap();
         let host = root.join("old-host");
         let config = root.join("config.json");
         let key = root.join("key");
@@ -1903,7 +1854,7 @@ fi
             &pin_identity(&host, &config, &socket, &key).unwrap(),
         )
         .unwrap();
-        private_dir(&root.join("host-upgrade-001")).unwrap();
+        crate::fsio::ensure_private_dir_durable(&root.join("host-upgrade-001")).unwrap();
         create_private(&root.join("pin-upgrade-001.tmp"), b"incomplete").unwrap();
         pin(&root, &host, &config, &socket, &key).unwrap();
         assert_eq!(
@@ -1949,7 +1900,7 @@ fi
                 .unwrap()
                 .as_nanos()
         ));
-        private_dir(&root).unwrap();
+        crate::fsio::ensure_private_dir_durable(&root).unwrap();
         let host = root.join("host");
         let key = root.join("key");
         let socket = root.join("host.sock");
@@ -2054,13 +2005,13 @@ fi
                 .unwrap()
                 .as_nanos()
         ));
-        private_dir(&root).unwrap();
+        crate::fsio::ensure_private_dir_durable(&root).unwrap();
         let pending = root.join("pending");
-        private_dir(&pending).unwrap();
+        crate::fsio::ensure_private_dir_durable(&pending).unwrap();
         let mut state = json!({"phase":"Preparing", "serial":0});
         save_state(&pending, &state).unwrap();
         let old = attempt(&pending, &mut state, "prepare").unwrap();
-        private_dir(&old).unwrap();
+        crate::fsio::ensure_private_dir_durable(&old).unwrap();
         let recovered = read_json(&pending.join("state.json")).unwrap();
         let mut recovered = recovered;
         let next = attempt(&pending, &mut recovered, "prepare").unwrap();
@@ -2083,13 +2034,13 @@ fi
                 .unwrap()
                 .as_nanos()
         ));
-        private_dir(&root).unwrap();
+        crate::fsio::ensure_private_dir_durable(&root).unwrap();
         let pending = root.join("pending");
-        private_dir(&pending).unwrap();
+        crate::fsio::ensure_private_dir_durable(&pending).unwrap();
         let mut state = json!({"phase":"Acking", "serial":0, "txn":"123"});
         assert_eq!(retained_ack(&pending, &state).unwrap(), None);
         let ack = attempt(&pending, &mut state, "ack").unwrap();
-        private_dir(&ack).unwrap();
+        crate::fsio::ensure_private_dir_durable(&ack).unwrap();
         assert_eq!(retained_ack(&pending, &state).unwrap(), None);
 
         let exact = json!({"type":B_CONSUMER.ack_type,
@@ -2149,12 +2100,12 @@ fi
                 .unwrap()
                 .as_nanos()
         ));
-        private_dir(&root).unwrap();
+        crate::fsio::ensure_private_dir_durable(&root).unwrap();
         let pending = root.join("pending");
-        private_dir(&pending).unwrap();
+        crate::fsio::ensure_private_dir_durable(&pending).unwrap();
         let mut state = json!({"phase":"Acking", "route":"a-reply", "serial":0, "txn":"123"});
         let ack = attempt(&pending, &mut state, "ack").unwrap();
-        private_dir(&ack).unwrap();
+        crate::fsio::ensure_private_dir_durable(&ack).unwrap();
         let exact = json!({"type":A_REPLY_CONSUMER.ack_type,
             "miniTransactionId":"123", "kind":"own-r-skip",
             "outboxTransactionId":"0", "fnStoreSequence":"0",

@@ -29,7 +29,6 @@ use serde_json::{json, Value};
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, BufRead, IsTerminal, Read, Write};
-use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -2479,19 +2478,11 @@ pub(crate) fn render(ending: &Ending) -> (i32, String) {
 
 // ---------------------------------------------------------------- execution
 
-fn private_dir(path: &Path) -> Result<()> {
-    match fs::DirBuilder::new().mode(0o700).create(path) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(()),
-        Err(e) => Err(format!("cannot create {}: {e}", path.display())),
-    }
-}
-
 /// Create a request file once. An identical file already present is the same
 /// request (a retried line); different content under the same name is refused.
 fn write_once(path: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
-        private_dir(parent)?;
+        crate::fsio::ensure_private_dir(parent)?;
     }
     crate::fsio::retain_exact(path, bytes, || {
         format!("{} already holds a different request; choose a new ID", path.display())
@@ -2499,17 +2490,11 @@ fn write_once(path: &Path, bytes: &[u8]) -> Result<()> {
     .map(|_| ())
 }
 
-fn nonce() -> String {
-    let mut bytes = [0u8; 8];
-    let _ = fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut bytes));
-    super::hex(&bytes)
-}
-
 /// Retain a refused frame under HOME/refusals and ask the Host to decode it
 /// with its own outcome codec (`inspect outcome`).
 fn decode_refusal(session: &Session, command: &str, encoded: &[u8]) -> (Option<PathBuf>, std::result::Result<Value, String>) {
     let dir = session.home.join("refusals");
-    if let Err(e) = private_dir(&dir) {
+    if let Err(e) = crate::fsio::ensure_private_dir(&dir) {
         return (None, Err(e));
     }
     let stem = format!(
@@ -2519,7 +2504,10 @@ fn decode_refusal(session: &Session, command: &str, encoded: &[u8]) -> (Option<P
             .map(|d| d.as_secs())
             .unwrap_or(0),
         command.replace(|c: char| !c.is_ascii_alphanumeric(), "-"),
-        nonce()
+        match crate::fsio::random::<8>() {
+            Ok(bytes) => super::hex(&bytes),
+            Err(e) => return (None, Err(e)),
+        }
     );
     let bin = dir.join(format!("{stem}.bin"));
     let json = dir.join(format!("{stem}.json"));
@@ -3131,7 +3119,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     if super::SOCKET.get().is_none() {
         return Err("shell requires --socket (the deployment's public socket) or --remote".into());
     }
-    private_dir(&home)?;
+    crate::fsio::ensure_private_dir(&home)?;
     let session = Session { workspace, home, host, config };
     let code = if let Some(one) = one {
         let text = one.into_string().map_err(|_| "--line must be UTF-8")?;
@@ -3774,7 +3762,7 @@ mod tests {
 
     #[test]
     fn completion_offers_verbs_refs_and_proposals() {
-        let root = std::env::temp_dir().join(format!("mini-shell-complete-{}-{}", std::process::id(), nonce()));
+        let root = std::env::temp_dir().join(format!("mini-shell-complete-{}-{}", std::process::id(), crate::fsio::random_nonce().unwrap()));
         let ws = root.join("w");
         fs::create_dir_all(ws.join("refs")).unwrap();
         fs::create_dir_all(ws.join("proposals").join("grant-newcomer")).unwrap();
@@ -3807,7 +3795,7 @@ mod tests {
 
     #[test]
     fn identical_request_lines_are_idempotent_and_different_ones_refused() {
-        let root = std::env::temp_dir().join(format!("mini-shell-write-{}-{}", std::process::id(), nonce()));
+        let root = std::env::temp_dir().join(format!("mini-shell-write-{}-{}", std::process::id(), crate::fsio::random_nonce().unwrap()));
         let path = root.join("requests").join("x.json");
         fs::create_dir_all(&root).unwrap();
         write_once(&path, b"{}\n").unwrap();
@@ -3816,7 +3804,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     fn temp_session(label: &str) -> (PathBuf, Session) {
-        let root = std::env::temp_dir().join(format!("mini-shell-{label}-{}-{}", std::process::id(), nonce()));
+        let root = std::env::temp_dir().join(format!("mini-shell-{label}-{}-{}", std::process::id(), crate::fsio::random_nonce().unwrap()));
         fs::create_dir_all(root.join("h")).unwrap();
         fs::create_dir_all(root.join("w")).unwrap();
         let s = Session { workspace: root.join("w"), home: root.join("h"), host: "/bin/host".into(), config: "/c.json".into() };
