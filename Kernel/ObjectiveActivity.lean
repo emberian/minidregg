@@ -130,6 +130,11 @@ structure Record where
   checkpoint : Bytes
   checkpointDigest : Digest
   escrow : Escrow
+  /-- The largest envelope an exhausted attempt at the current await already
+  ran under (0: none). A run that exhausts an envelope exhausts every smaller
+  one, so an attempt at or below it is refused before it runs, and an
+  exhaustion must strictly raise it: no attempt is ever run or paid twice. -/
+  tried : Nat
   phase : Phase
   deriving DecidableEq, Repr
 
@@ -178,16 +183,17 @@ def recordStream : StreamCodec Record :=
       (StreamCodec.product digestStream (StreamCodec.product bytesStream
       (StreamCodec.product StreamCodec.nat (StreamCodec.product bytesStream
       (StreamCodec.product digestStream
-      (StreamCodec.product escrowStream phaseStream))))))))
+      (StreamCodec.product escrowStream (StreamCodec.product StreamCodec.nat phaseStream)))))))))
     (fun r => (r.object, r.activity, r.pin, r.input, r.generation, r.checkpoint, r.checkpointDigest,
-      r.escrow, r.phase))
+      r.escrow, r.tried, r.phase))
     (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2.1, w.2.2.2.2.2.2.1,
-      w.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2⟩)
+      w.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.2⟩)
     (by intro r; cases r; rfl)
 
-/-- v3: no recorded reads (resume with view reads the state in the resuming
-turn); v2: the escrow names the payer's Book account. -/
-def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v3".toUTF8.toList
+/-- v4: the record carries `tried` (the envelope its exhausted attempts at the
+current await reached); v3: no recorded reads (resume with view reads the state
+in the resuming turn); v2: the escrow names the payer's Book account. -/
+def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v4".toUTF8.toList
 def recordCodec := framed recordFrame recordStream
 def encodeRecord (record : Record) : Bytes := recordCodec.encode record
 def decodeRecord (bytes : Bytes) : Option Record := recordCodec.decode bytes
@@ -282,6 +288,8 @@ structure Config where
   typeFuel : Nat
   maxArtifactBytes : Nat
   tariff : Tariff
+  /-- Heights past an await's deadline after which anyone may abandon it. -/
+  abandonGrace : Nat
 
 def Config.domain (config : Config) : Digest := config.deployment.domain
 def Config.bookCell (config : Config) : CellId := ⟨config.deployment.resourceBookId⟩
@@ -350,6 +358,14 @@ inductive Refusal where
   | stateCodec
   /-- A delivery found no declared state to show the activity. -/
   | stateMissing
+  /-- An attempt at an envelope no larger than one that already exhausted:
+  refused before it runs (it would exhaust again). -/
+  | alreadyExhausted (tried envelope : Nat)
+  /-- The await is not yet abandonable: abandonment needs a height past its
+  deadline plus the deployment's grace. -/
+  | notYetAbandonable (deadline grace height : Nat)
+  /-- An exhaustion was submitted for a run that does not exhaust: deliver it. -/
+  | notExhausted
   deriving Repr
 
 /-! ## Typing data against declared types
@@ -633,9 +649,30 @@ def guardAt {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (cell
 @[simp] theorem guardAt_expectedRoot {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (cell : CellId) :
     (guardAt snapshot cell).expectedRoot = snapshot.model.roots cell := rfl
 
+/-- The image of a reclaimed activity cell: the cell stays at its coordinate
+(so the coordinate is never reused and the registry law still holds) with an
+EMPTY kernel body, which every reader refuses by name before decoding
+(`recordOfBody_vacant`, `slotOfBody_vacant`: `recordMissing`, `slotMissing`). It is a fixed-size tombstone; the checkpoint, the input,
+the result and every other byte the cell held are gone. -/
+def vacant (role : Role) (key : Bytes) : Bytes := image role key []
+
+/-- What a record cell holds: the record while it awaits; nothing once it has
+ended (`done`/`faulted`). The end of an activity is its disposal: the turn
+that ends it reclaims its record (and `settlePurse` returns its purse); the
+result is the turn's own (re-derivable by replaying the retained ingress). -/
+def recordBody (record : Record) : Bytes :=
+  match record.phase with
+  | .awaiting _ => encodeRecord record
+  | .done _ | .faulted _ => []
+
 def recordPost {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (cell : CellId) (record : Record) : Post :=
-  postAt snapshot cell (image .record (recordKey record.object record.activity) (encodeRecord record))
+  postAt snapshot cell (image .record (recordKey record.object record.activity) (recordBody record))
+
+/-- Reclaim a slot cell. -/
+def slotVacate {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (name : Digest) : Post :=
+  postAt snapshot (AnswerSlot.cell config.domain name) (vacant .slot (AnswerSlot.key name))
 
 def slotPost {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (slot : AnswerSlot.Slot) : Post :=
@@ -645,12 +682,19 @@ def slotPost {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsh
 def stateImage (object : CellId) (state : ObjectState) : Bytes :=
   image .state (stateKey object) (encodeObjectState state)
 
+/-- The record a record cell's kernel body holds. A reclaimed (empty) body
+holds none, refused by name before any decoding (`recordOfBody_vacant`). -/
+def recordOfBody (body : Bytes) : Option Record := if body.isEmpty then none else decodeRecord body
+
 def readRecord {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (cell : CellId) : Option Record :=
-  (bodyOf .record (snapshot.canonicalBytes cell)).bind decodeRecord
+  (bodyOf .record (snapshot.canonicalBytes cell)).bind recordOfBody
+
+/-- The slot a slot cell's kernel body holds; a reclaimed body holds none. -/
+def slotOfBody (body : Bytes) : Option AnswerSlot.Slot := if body.isEmpty then none else AnswerSlot.decode body
 
 def readSlot {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (name : Digest) :
     Option AnswerSlot.Slot :=
-  (bodyOf .slot (snapshot.canonicalBytes (AnswerSlot.cell config.domain name))).bind AnswerSlot.decode
+  (bodyOf .slot (snapshot.canonicalBytes (AnswerSlot.cell config.domain name))).bind slotOfBody
 
 /-- The object's declared state as its state cell holds it: `none` when the
 object has no state yet, refused when the cell holds anything else. -/
@@ -838,6 +882,7 @@ def nextRecord (base : Record) (generation : Nat) : Segment → Option YieldComm
       generation := generation
       checkpoint := encoded
       checkpointDigest := ObjectiveActivityWire.checkpointDigest encoded
+      tried := 0
       phase := .awaiting yielded.await }
   | .finished result, _ =>
     { base with
@@ -969,7 +1014,7 @@ structure Birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
     ⟨request.object, activityId request.object (birthTransaction request), request.pin, dataBytes request.input,
       0, [], checkpointDigest [],
       escrowOf config.tariff request.subject request.account request.resumeTicks request.timeoutTicks,
-      .faulted "unborn"⟩ 0 segment yielded
+      0, .faulted "unborn"⟩ 0 segment yielded
   book : BookCell
   bookExact : loadBook config snapshot = .ok book
   posted : Postings book
@@ -1023,7 +1068,7 @@ def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
           let batch ← birthBatch config (logicalBook book.logical) held request escrow segment
           let posted ← postings book batch
           let base : Record := ⟨request.object, activity, request.pin, dataBytes request.input, 0, [],
-            checkpointDigest [], escrow, .faulted "unborn"⟩
+            checkpointDigest [], escrow, 0, .faulted "unborn"⟩
           let record := nextRecord base 0 segment yielded
           let posts := recordPost config snapshot cell record ::
             ((yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
@@ -1145,11 +1190,11 @@ def settle {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
       match slot.phase with
       | .decided decision _ => do
         let outcome ← outcomeOfDecision decision
-        pure ⟨if decision = .expired then .timedOut else .resumed, outcome, [],
-          [guardAt snapshot (AnswerSlot.cell config.domain slotName)], []⟩
+        pure ⟨if decision = .expired then .timedOut else .resumed, outcome,
+          [slotVacate config snapshot slotName], [], []⟩
       | .opened =>
         match AnswerSlot.expire slot height with
-        | .ok expired => .ok ⟨.timedOut, .timedOut, [slotPost config snapshot expired], [],
+        | .ok _ => .ok ⟨.timedOut, .timedOut, [slotVacate config snapshot slotName], [],
             [AnswerSlot.decisionClaim slotName]⟩
         | .error _ => .error (.notYetDecided await.deadline height)
   | .height due =>
@@ -1258,6 +1303,7 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   | some resumed =>
   let envelope := record.escrow.ticks settlement.path + request.extraTicks
   if config.maxTicks < envelope then .error (.envelope envelope config.maxTicks) else
+  if 0 < record.tried ∧ envelope ≤ record.tried then .error (.alreadyExhausted record.tried envelope) else
   match segmentExact : runSegment config envelope resumed with
   | .error reason => .error reason
   | .ok segment =>
@@ -1302,6 +1348,274 @@ theorem Delivery.conserves {rootBytes : Bytes → Digest} {config : Config} {sna
     (logicalBook delivery.posted.post.logical).totalAsset asset =
       (logicalBook delivery.book.logical).totalAsset asset :=
   delivery.posted.conserves asset
+
+/-! ### exhaust
+
+An attempt to end an await whose run runs out of its declared envelope. It is
+a committed, paid turn, never a free refusal: KeyKOS decremented the meter as
+a domain ran, every gas system charges an exhausted envelope, and an attempt
+that cost nothing could be repeated at the Host's expense. It is admitted ONLY
+when the delivery's own run (the stored checkpoint resumed with the settled,
+typed outcome under the declared envelope) exhausts; otherwise the submitter
+must deliver. It charges DECLARED amounts only: the purse pays the declared
+envelope of the ending path the first time this await exhausts (`tried = 0`),
+the submitter pays the public price of the envelope it added. It ends nothing:
+the await, the checkpoint, the generation and the slot are unchanged, and
+`tried` rises to the envelope it ran under, so the next attempt at this await
+must run under a strictly larger envelope (`deliver` and `exhaust` both refuse
+one at or below `tried` before running): no attempt is ever run or paid twice. -/
+
+structure ExhaustRequest where
+  subject : SubjectId
+  record : CellId
+  extraTicks : Nat
+  account : AccountId
+  nonce : Nat
+
+/-- Distinct attempts are distinct transactions (the submitter and its nonce);
+an exact retry replays. -/
+def exhaustTransaction (await : Digest) (request : ExhaustRequest) : TransactionId :=
+  tagged "DREGG/OBJECTIVE/ACTIVITY/TX/EXHAUST/v1"
+    (digestStream.encode await ++ subjectStream.encode request.subject ++ StreamCodec.nat.encode request.nonce)
+
+/-- The declared charge of an exhausted attempt. -/
+def exhaustCharge (config : Config) (record : Record) (path : Path) (request : ExhaustRequest) : Nat :=
+  (if record.tried = 0 then record.escrow.used path else 0) +
+    (if request.extraTicks = 0 then 0 else config.tariff.price request.extraTicks)
+
+/-- Its postings: the purse's part, then the submitter's, both to the collector. -/
+def exhaustCharges (config : Config) (record : Record) (cell : CellId) (path : Path)
+    (request : ExhaustRequest) : Batch :=
+  ⟨[], (if record.tried = 0 then [.fee (heldAccount cell) config.collector config.asset (record.escrow.used path)]
+        else []) ++
+    (if request.extraTicks = 0 then []
+     else [.fee request.account config.collector config.asset (config.tariff.price request.extraTicks)])⟩
+
+/-- Guard every cell a settlement would write, at the root the attempt read:
+an exhaustion is decided against exactly the slot state its run saw. -/
+def settlementGuards (settlement : Settlement) : List ReadGuard :=
+  settlement.guards ++ settlement.posts.map (fun post => ⟨post.cell, post.pre⟩)
+
+structure Exhaustion {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (request : ExhaustRequest) where
+  private mk ::
+  record : Record
+  recordExact : readRecord snapshot request.record = some record
+  located : request.record = recordCell config.domain record.object record.activity
+  await : Await
+  awaiting : record.phase = .awaiting await
+  idExact : await.id = awaitId request.record record.generation record.checkpointDigest
+  digestExact : checkpointDigest record.checkpoint = record.checkpointDigest
+  input : Data
+  inputExact : decodeDataBytes record.input = some input
+  program : Program config record.pin input
+  programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input = .ok program
+  settlement : Settlement
+  settled : settle config snapshot height request.record await = .ok settlement
+  /-- The object's declared state and its version, read in THIS turn (as a
+  delivery reads it: the run is the delivery's run). -/
+  view : ObjectState
+  viewExact : readState config snapshot record.object = .ok (some view)
+  response : TypedData program.assumptions (responseData settlement.decided view) program.responseType
+  state : State
+  stateExact : decodeCheckpoint record.checkpoint = some state
+  resumed : State
+  resumeExact : resume (responseData settlement.decided view).term state = some resumed
+  envelope : Nat
+  envelopeExact : envelope = record.escrow.ticks settlement.path + request.extraTicks
+  raises : record.tried < envelope
+  ran : runSegment config envelope resumed = .error .exhausted
+  next : Record
+  nextExact : next = { record with tried := envelope }
+  book : BookCell
+  bookExact : loadBook config snapshot = .ok book
+  posted : Postings book
+  postedBatch : posted.batch = exhaustCharges config record request.record settlement.path request
+  posts : List Post
+  postsExact : posts = [recordPost config snapshot request.record next, posted.write config snapshot]
+  guards : List ReadGuard
+  guardsExact : guards = guardAt snapshot (packageCell config.domain record.pin) ::
+    guardAt snapshot (stateCell config.domain record.object) :: settlementGuards settlement
+
+def exhaust {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (request : ExhaustRequest) : Except Refusal (Exhaustion config snapshot height request) :=
+  match recordExact : readRecord snapshot request.record with
+  | none => .error .recordMissing
+  | some record =>
+  if located : request.record = recordCell config.domain record.object record.activity then
+  match awaiting : record.phase with
+  | .done _ | .faulted _ => .error .notAwaiting
+  | .awaiting await =>
+  if idExact : await.id = awaitId request.record record.generation record.checkpointDigest then
+  if digestExact : checkpointDigest record.checkpoint = record.checkpointDigest then
+  match inputExact : decodeDataBytes record.input with
+  | none => .error .inputType
+  | some input =>
+  match programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input with
+  | .error reason => .error reason
+  | .ok program =>
+  match settled : settle config snapshot height request.record await with
+  | .error reason => .error reason
+  | .ok settlement =>
+  match viewExact : readState config snapshot record.object with
+  | .error reason => .error reason
+  | .ok none => .error .stateMissing
+  | .ok (some view) =>
+  match typeResponse program settlement.decided view with
+  | .error reason => .error reason
+  | .ok response =>
+  match stateExact : decodeCheckpoint record.checkpoint with
+  | none => .error .checkpointCodec
+  | some state =>
+  match resumeExact : resume (responseData settlement.decided view).term state with
+  | none => .error .checkpointCodec
+  | some resumed =>
+  let envelope := record.escrow.ticks settlement.path + request.extraTicks
+  if config.maxTicks < envelope then .error (.envelope envelope config.maxTicks) else
+  if raises : record.tried < envelope then
+  -- The charge must be payable BEFORE the run: an unpayable attempt never runs.
+  match bookExact : loadBook config snapshot with
+  | .error reason => .error reason
+  | .ok book =>
+  match postings book (exhaustCharges config record request.record settlement.path request) with
+  | .error reason => .error reason
+  | .ok posted =>
+  if postedBatch : posted.batch = exhaustCharges config record request.record settlement.path request then
+  match ran : runSegment config envelope resumed with
+  | .ok _ => .error .notExhausted
+  | .error .exhausted =>
+    let next := { record with tried := envelope }
+    let posts := [recordPost config snapshot request.record next, posted.write config snapshot]
+    let guards := guardAt snapshot (packageCell config.domain record.pin) ::
+      guardAt snapshot (stateCell config.domain record.object) :: settlementGuards settlement
+    .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, program,
+      programExact, settlement, settled, view, viewExact, response, state, stateExact, resumed, resumeExact,
+      envelope, rfl, raises, ran, next, rfl, book, bookExact, posted, postedBatch, posts, rfl, guards, rfl⟩
+  | .error reason => .error reason
+  else .error .bookRefused
+  else .error (.alreadyExhausted record.tried envelope)
+  else .error .checkpointDigest
+  else .error .awaitMismatch
+  else .error .recordMisplaced
+
+/-- An exhaustion spends no claim: the await stays open. -/
+def Exhaustion.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : ExhaustRequest} (ex : Exhaustion config snapshot height request) (sealing : Seal) :
+    DataIntent rootBytes :=
+  intentOf rootBytes (exhaustTransaction ex.await.id request) ex.posts ex.guards [] sealing
+
+/-- **An exhaustion conserves every asset.** -/
+theorem Exhaustion.conserves {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : ExhaustRequest} (ex : Exhaustion config snapshot height request) (asset : AssetId) :
+    (logicalBook ex.posted.post.logical).totalAsset asset = (logicalBook ex.book.logical).totalAsset asset :=
+  ex.posted.conserves asset
+
+/-! ### abandon
+
+An await nobody ended — its decider never decided, its timeout was never
+delivered, or every attempt exhausted and nobody funded the next — may be
+abandoned by anyone once the height passes its deadline plus the deployment's
+grace. Abandonment is the disposal of an activity that cannot end itself
+(KeyKOS's "junk queue" needed outside repair; Agoric invented suspended vats
+after the fact): it spends the await (so it races deliveries and exhaustions
+under consume-once), reclaims the record and the await's slot (an open slot's
+decision claim is spent with it, so no late decision lands), pays the timeout
+fee (or what the purse still holds of it) to the collector as its own fee, and
+returns the rest of the purse to the payer. Every amount is a function of the
+record and the Book. -/
+
+structure AbandonRequest where
+  subject : SubjectId
+  record : CellId
+
+def abandonTransaction (await : Digest) : TransactionId :=
+  tagged "DREGG/OBJECTIVE/ACTIVITY/TX/ABANDON/v1" (digestStream.encode await)
+
+/-- The slot an abandoned await leaves: reclaimed; an open slot's decision
+claim is spent with it. -/
+def abandonSlot {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (await : Await) :
+    Except Refusal (List Post × List StableNullifier) :=
+  match await.source with
+  | .height _ => .ok ([], [])
+  | .reply name _ =>
+    match readSlot config snapshot name with
+    | none => .error .slotMissing
+    | some slot => match slot.phase with
+      | .opened => .ok ([slotVacate config snapshot name], [AnswerSlot.decisionClaim name])
+      | .decided _ _ => .ok ([slotVacate config snapshot name], [])
+
+/-- The abandonment's own fee: the timeout fee, or what the purse holds of it. -/
+def abandonFee (config : Config) (book : Book) (cell : CellId) (escrow : Escrow) : Nat :=
+  min (purse book config.asset (heldAccount cell)) escrow.timeoutFee
+
+/-- Its postings: the fee to the collector, the rest of the purse to the payer. -/
+def abandonCharges (config : Config) (book : Book) (cell : CellId) (escrow : Escrow) : Batch :=
+  let balance := purse book config.asset (heldAccount cell)
+  let fee := abandonFee config book cell escrow
+  ⟨[], (if fee = 0 then [] else [.fee (heldAccount cell) config.collector config.asset fee]) ++
+       (if balance - fee = 0 then [] else [.transfer (heldAccount cell) escrow.account config.asset (balance - fee)])⟩
+
+structure Abandonment {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (request : AbandonRequest) where
+  private mk ::
+  record : Record
+  recordExact : readRecord snapshot request.record = some record
+  located : request.record = recordCell config.domain record.object record.activity
+  await : Await
+  awaiting : record.phase = .awaiting await
+  idExact : await.id = awaitId request.record record.generation record.checkpointDigest
+  due : await.deadline + config.abandonGrace < height
+  slotPosts : List Post
+  slotClaims : List StableNullifier
+  slotExact : abandonSlot config snapshot await = .ok (slotPosts, slotClaims)
+  book : BookCell
+  bookExact : loadBook config snapshot = .ok book
+  posted : Postings book
+  postedBatch : posted.batch = abandonCharges config (logicalBook book.logical) request.record record.escrow
+  posts : List Post
+  postsExact : posts = postAt snapshot request.record (vacant .record (recordKey record.object record.activity)) ::
+    (slotPosts ++ [posted.write config snapshot])
+  claims : List StableNullifier
+  claimsExact : claims = awaitClaim await.id :: slotClaims
+
+def abandon {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (request : AbandonRequest) : Except Refusal (Abandonment config snapshot height request) :=
+  match recordExact : readRecord snapshot request.record with
+  | none => .error .recordMissing
+  | some record =>
+  if located : request.record = recordCell config.domain record.object record.activity then
+  match awaiting : record.phase with
+  | .done _ | .faulted _ => .error .notAwaiting
+  | .awaiting await =>
+  if idExact : await.id = awaitId request.record record.generation record.checkpointDigest then
+  if due : await.deadline + config.abandonGrace < height then
+  match slotExact : abandonSlot config snapshot await with
+  | .error reason => .error reason
+  | .ok (slotPosts, slotClaims) =>
+  match bookExact : loadBook config snapshot with
+  | .error reason => .error reason
+  | .ok book =>
+  match postings book (abandonCharges config (logicalBook book.logical) request.record record.escrow) with
+  | .error reason => .error reason
+  | .ok posted =>
+  if postedBatch : posted.batch = abandonCharges config (logicalBook book.logical) request.record record.escrow then
+    .ok ⟨record, recordExact, located, await, awaiting, idExact, due, slotPosts, slotClaims, slotExact, book,
+      bookExact, posted, postedBatch, _, rfl, _, rfl⟩
+  else .error .bookRefused
+  else .error (.notYetAbandonable await.deadline config.abandonGrace height)
+  else .error .awaitMismatch
+  else .error .recordMisplaced
+
+def Abandonment.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : AbandonRequest} (ab : Abandonment config snapshot height request) (sealing : Seal) :
+    DataIntent rootBytes :=
+  intentOf rootBytes (abandonTransaction ab.await.id) ab.posts [] ab.claims sealing
+
+/-- **An abandonment conserves every asset.** -/
+theorem Abandonment.conserves {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : AbandonRequest} (ab : Abandonment config snapshot height request) (asset : AssetId) :
+    (logicalBook ab.posted.post.logical).totalAsset asset = (logicalBook ab.book.logical).totalAsset asset :=
+  ab.posted.conserves asset
 
 /-! ### topUp -/
 
@@ -1517,12 +1831,14 @@ theorem settle_posts_current {rootBytes : Bytes → Digest} {config : Config} {s
           cases outcome : outcomeOfDecision decision <;>
             simp [outcome, bind, Except.bind, pure, Except.pure] at settled
           subst settled
-          intro post member; simp at member
+          intro post member
+          simp only [List.mem_singleton] at member
+          subst member; simp only [slotVacate, postAt]
         · split at settled
           · cases settled
             intro post member
             simp only [List.mem_singleton] at member
-            subst member; simp only [slotPost, postAt]
+            subst member; simp only [slotVacate, postAt]
           · cases settled
   · split at settled
     · cases settled; intro post member; simp at member
@@ -2026,6 +2342,259 @@ theorem end_returns_purse (config : Config) (book : Book) (held : AccountId) (es
   subst settled
   rfl
 
+
+/-! ## Metering and disposal (ACTIVITY-METERING-DISPOSAL) -/
+
+/-- **Exhaustion is never free, and is paid only by declared amounts.** An
+admitted exhaustion posts exactly the declared charge (the purse's declared
+envelope of the ending path the first time this await exhausts, plus the
+public price of the submitter's added envelope), leaves the activity exactly at
+its yield (checkpoint, digest, generation, phase), and strictly raises `tried`
+to the envelope it ran under. -/
+theorem exhaustion_charges_declared {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : ExhaustRequest} (ex : Exhaustion config snapshot height request) :
+    ex.posted.batch = exhaustCharges config ex.record request.record ex.settlement.path request ∧
+    ex.next.checkpoint = ex.record.checkpoint ∧
+    ex.next.checkpointDigest = ex.record.checkpointDigest ∧
+    ex.next.generation = ex.record.generation ∧
+    ex.next.phase = ex.record.phase ∧
+    ex.next.tried = ex.record.escrow.ticks ex.settlement.path + request.extraTicks ∧
+    ex.record.tried < ex.next.tried := by
+  have n := ex.nextExact
+  refine ⟨ex.postedBatch, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;> rw [n]
+  · rw [← ex.envelopeExact]
+  · exact ex.raises
+
+/-- The declared charge, as postings: the purse pays its declared envelope only
+on the first exhaustion of an await; the submitter pays the price of what it
+declared, never of what ran. -/
+theorem exhaust_charges_are_declared (config : Config) (record : Record) (cell : CellId) (path : Path)
+    (request : ExhaustRequest) :
+    (exhaustCharges config record cell path request).operations =
+      (if record.tried = 0 then [Operation.fee (heldAccount cell) config.collector config.asset
+          (record.escrow.used path)] else []) ++
+      (if request.extraTicks = 0 then []
+       else [Operation.fee request.account config.collector config.asset (config.tariff.price request.extraTicks)]) :=
+  rfl
+
+/-- **An exhaustion spends no claim of its own**: the await stays open. -/
+theorem exhaustion_spends_nothing {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : ExhaustRequest} (ex : Exhaustion config snapshot height request) (sealing : Seal) :
+    (ex.intent sealing).nullifiers = sealing.nullifiers := by
+  simp [Exhaustion.intent]
+
+/-- **Exhaustion is a fact about the run, not a claim of the submitter.** For
+one record, snapshot, height and added envelope, an exhaustion and a delivery
+never both exist: the run that resumes the stored checkpoint with the settled
+outcome either exhausts or ends its segment. -/
+theorem exhaustion_excludes_delivery {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {exReq : ExhaustRequest} {delReq : DeliverRequest}
+    (ex : Exhaustion config snapshot height exReq) (delivery : Delivery config snapshot height delReq)
+    (sameRecord : exReq.record = delReq.record) (sameExtra : exReq.extraTicks = delReq.extraTicks) : False := by
+  have records : ex.record = delivery.record := by
+    have := ex.recordExact; rw [sameRecord, delivery.recordExact] at this; exact (Option.some.inj this).symm
+  have awaits : ex.await = delivery.await := by
+    have a := ex.awaiting; have b := delivery.awaiting; rw [records, b] at a
+    exact (Phase.awaiting.inj a).symm
+  have settlements : ex.settlement = delivery.settlement := by
+    have a := ex.settled; have b := delivery.settled
+    rw [sameRecord, awaits, b] at a; exact (Except.ok.inj a).symm
+  have views : ex.view = delivery.view := by
+    have a := ex.viewExact; rw [records, delivery.viewExact] at a
+    exact (Option.some.inj (Except.ok.inj a)).symm
+  have states : ex.state = delivery.state := by
+    have a := ex.stateExact; rw [records, delivery.stateExact] at a; exact (Option.some.inj a).symm
+  have resumedEq : ex.resumed = delivery.resumed := by
+    have a := ex.resumeExact; rw [settlements, views, states, delivery.resumeExact] at a
+    exact (Option.some.inj a).symm
+  have envelopes : ex.envelope = delivery.envelope := by
+    rw [ex.envelopeExact, delivery.envelopeExact, records, settlements, sameExtra]
+  have ran := ex.ran
+  rw [envelopes, resumedEq, delivery.segmentExact] at ran
+  cases ran
+
+/-- **No attempt is paid twice.** Two exhaustions of one record from one
+snapshot and height, with equal added envelopes, post the same charge, and
+after either installs the other is refused before it runs (its envelope does not
+exceed the raised `tried`). -/
+theorem exhaustion_charge_measurement_free {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {first second : ExhaustRequest}
+    (one : Exhaustion config snapshot height first) (two : Exhaustion config snapshot height second)
+    (sameRecord : first.record = second.record) (sameExtra : first.extraTicks = second.extraTicks) :
+    one.envelope = two.envelope ∧ one.next.tried = two.next.tried ∧
+      exhaustCharge config one.record one.settlement.path first =
+        exhaustCharge config two.record two.settlement.path second := by
+  have records : one.record = two.record := by
+    have := one.recordExact; rw [sameRecord, two.recordExact] at this; exact (Option.some.inj this).symm
+  have awaits : one.await = two.await := by
+    have a := one.awaiting; have b := two.awaiting; rw [records, b] at a
+    exact (Phase.awaiting.inj a).symm
+  have settlements : one.settlement = two.settlement := by
+    have a := one.settled; have b := two.settled
+    rw [sameRecord, awaits, b] at a; exact (Except.ok.inj a).symm
+  have envelopes : one.envelope = two.envelope := by
+    rw [one.envelopeExact, two.envelopeExact, records, settlements, sameExtra]
+  refine ⟨envelopes, ?_, ?_⟩
+  · rw [one.nextExact, two.nextExact]; exact envelopes
+  · simp [exhaustCharge, records, settlements, sameExtra]
+
+/-- **A reclaimed cell reads as nothing, by name.** The empty kernel body of a
+reclaimed record cell decodes to no record (a delivery, exhaustion or
+abandonment of it is refused `recordMissing`), and that of a reclaimed slot to
+no slot (a late decision is refused `slotMissing`). -/
+theorem recordOfBody_vacant : recordOfBody [] = none := rfl
+
+theorem slotOfBody_vacant : slotOfBody [] = none := rfl
+
+/-- A record that has ended holds nothing: its body is empty. -/
+theorem recordBody_ended (record : Record) (ended : ∀ await, record.phase ≠ .awaiting await) :
+    recordBody record = [] := by
+  unfold recordBody
+  cases phase : record.phase with
+  | awaiting await => exact absurd phase (ended await)
+  | done _ => rfl
+  | faulted _ => rfl
+
+/-- The record a segment that does not yield leaves has ended. -/
+theorem nextRecord_ended (base : Record) (generation : Nat) (segment : Segment) (yielded : Option YieldCommit)
+    (ends : segment.yields = false) : ∀ await, (nextRecord base generation segment yielded).phase ≠ .awaiting await := by
+  intro await
+  cases segment with
+  | yielded _ _ => simp [Segment.yields] at ends
+  | finished _ => simp [nextRecord]
+  | faulted _ => simp [nextRecord]
+
+theorem nextRecord_names (base : Record) (generation : Nat) (segment : Segment) (yielded : Option YieldCommit) :
+    (nextRecord base generation segment yielded).object = base.object ∧
+      (nextRecord base generation segment yielded).activity = base.activity := by
+  cases segment <;> cases yielded <;> simp [nextRecord]
+
+/-- **Disposal frees the record.** A delivery whose segment ends (finished or
+faulted) writes its record cell to the empty tombstone: the checkpoint, the
+input and the result leave the store in the turn that ends the activity (and
+`settlePurse` returns the purse, `end_returns_purse`). -/
+theorem delivery_end_vacates {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request)
+    (ends : delivery.segment.yields = false) :
+    delivery.posts.head? = some (postAt snapshot request.record
+      (vacant .record (recordKey delivery.record.object delivery.record.activity))) := by
+  rw [delivery.recordFirst]
+  have ended := nextRecord_ended delivery.record (delivery.record.generation + 1) delivery.segment
+    delivery.yielded ends
+  have names := nextRecord_names delivery.record (delivery.record.generation + 1) delivery.segment delivery.yielded
+  rw [← delivery.nextExact] at ended names
+  simp [recordPost, vacant, recordBody_ended _ ended, names.1, names.2]
+
+/-- The same for a birth whose first segment already ends: no record is kept. -/
+theorem birth_end_vacates {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request)
+    (ends : born.segment.yields = false) :
+    born.posts.head? = some (postAt snapshot born.cell
+      (vacant .record (recordKey request.object (activityId request.object (birthTransaction request))))) := by
+  rw [born.recordFirst]
+  have ended : ∀ await, born.record.phase ≠ .awaiting await := by
+    rw [born.recordExact]; exact nextRecord_ended _ _ _ _ ends
+  have names : born.record.object = request.object ∧
+      born.record.activity = activityId request.object (birthTransaction request) := by
+    rw [born.recordExact]; exact nextRecord_names _ _ _ _
+  simp [recordPost, vacant, recordBody_ended _ ended, names.1, names.2]
+
+/-- **Settled slots are reclaimed.** Whenever a reply await settles (decided,
+or expired at its deadline), the settlement reclaims its slot cell. -/
+theorem settle_reclaims_slot {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {cell : CellId} {await : Await} {settlement : Settlement} {name : Digest} {decider : SubjectId}
+    (source : await.source = .reply name decider)
+    (settled : settle config snapshot height cell await = .ok settlement) :
+    settlement.posts = [slotVacate config snapshot name] := by
+  unfold settle at settled
+  rw [source] at settled
+  simp only at settled
+  cases hslot : readSlot config snapshot name with
+  | none => rw [hslot] at settled; cases settled
+  | some slot =>
+    rw [hslot] at settled
+    simp only at settled
+    split at settled
+    · cases settled
+    · cases hphase : slot.phase with
+      | decided decision decidedAt =>
+        rw [hphase] at settled
+        cases outcome : outcomeOfDecision decision with
+        | error e => simp [outcome, bind, Except.bind] at settled
+        | ok value =>
+          simp [outcome, bind, Except.bind, pure, Except.pure] at settled
+          subst settled
+          rfl
+      | opened =>
+        rw [hphase] at settled
+        cases hexp : AnswerSlot.expire slot height with
+        | error e => simp [hexp] at settled
+        | ok expired =>
+          simp [hexp] at settled
+          subst settled
+          rfl
+
+/-- A delivery of a reply await reclaims the slot it settled. -/
+theorem delivery_reclaims_slot {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request)
+    {name : Digest} {decider : SubjectId} (source : delivery.await.source = .reply name decider) :
+    slotVacate config snapshot name ∈ delivery.posts := by
+  rw [delivery.postsExact, settle_reclaims_slot source delivery.settled]
+  simp
+
+/-- **Abandonment returns the purse and ends the await.** An admitted
+abandonment is past deadline plus grace; it spends the await's claim; it
+reclaims the record; its own fee is at most the timeout fee; and the fee plus
+what it returns to the payer is the whole purse. -/
+theorem abandon_returns_escrow {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : AbandonRequest} (ab : Abandonment config snapshot height request) :
+    ab.await.deadline + config.abandonGrace < height ∧
+    awaitClaim ab.await.id ∈ ab.claims ∧
+    ab.posts.head? = some (postAt snapshot request.record (vacant .record (recordKey ab.record.object ab.record.activity))) ∧
+    ab.posted.batch = abandonCharges config (logicalBook ab.book.logical) request.record ab.record.escrow ∧
+    abandonFee config (logicalBook ab.book.logical) request.record ab.record.escrow ≤ ab.record.escrow.timeoutFee ∧
+    abandonFee config (logicalBook ab.book.logical) request.record ab.record.escrow +
+        (purse (logicalBook ab.book.logical) config.asset (heldAccount request.record) -
+          abandonFee config (logicalBook ab.book.logical) request.record ab.record.escrow) =
+      purse (logicalBook ab.book.logical) config.asset (heldAccount request.record) := by
+  refine ⟨ab.due, by rw [ab.claimsExact]; simp, by rw [ab.postsExact]; rfl, ab.postedBatch, ?_, ?_⟩
+  · unfold abandonFee; omega
+  · unfold abandonFee; omega
+
+/-- An abandonment closes an open slot: its decision claim is spent with it,
+so no late decision ever lands. -/
+theorem abandon_closes_open_slot {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : AbandonRequest} (ab : Abandonment config snapshot height request)
+    {name : Digest} {decider : SubjectId} {slot : AnswerSlot.Slot}
+    (source : ab.await.source = .reply name decider) (read : readSlot config snapshot name = some slot)
+    (opened : slot.phase = .opened) :
+    slotVacate config snapshot name ∈ ab.posts ∧ AnswerSlot.decisionClaim name ∈ ab.claims := by
+  have exact := ab.slotExact
+  unfold abandonSlot at exact
+  rw [source] at exact
+  simp only [read, opened, Except.ok.injEq, Prod.mk.injEq] at exact
+  obtain ⟨hp, hc⟩ := exact
+  rw [ab.postsExact, ab.claimsExact, ← hp, ← hc]
+  simp
+
+theorem Abandonment.spends {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : AbandonRequest} (ab : Abandonment config snapshot height request) (sealing : Seal) :
+    awaitClaim ab.await.id ∈ (ab.intent sealing).nullifiers := by
+  simp [Abandonment.intent, ab.claimsExact]
+
+/-- **Abandonment and delivery exclude each other.** Once an abandonment
+installs, no turn that ends the same await (a delivery, another abandonment)
+is ever accepted; and the same claim makes an installed delivery exclude a
+later abandonment. -/
+theorem abandon_delivery_exclusive {rootBytes : Bytes → Digest} {config : Config} {snapshot next : Snapshot rootBytes}
+    {height : Nat} {request : AbandonRequest} (ab : Abandonment config snapshot height request) (sealing : Seal)
+    (installed : DurableDataIntent.execute .complete snapshot (ab.intent sealing) = .accepted next)
+    (later : DataIntent rootBytes) (again : awaitClaim ab.await.id ∈ later.nullifiers)
+    (schedule : DurableCommitProtocol.Schedule) (after : Snapshot rootBytes) :
+    DurableDataIntent.execute schedule next later ≠ .accepted after :=
+  spent_claim_never_accepted (ab.spends sealing) installed later again schedule after
+
+
 #assert_axioms record_roundTrip
 #assert_axioms TypedData.typed
 #assert_axioms Postings.conserves
@@ -2061,4 +2630,24 @@ theorem end_returns_purse (config : Config) (book : Book) (held : AccountId) (es
 #assert_axioms submitter_charge_declared
 #assert_axioms yield_reserves_pair
 #assert_axioms end_returns_purse
+#assert_axioms Exhaustion.conserves
+#assert_axioms Abandonment.conserves
+#assert_axioms exhaustion_charges_declared
+#assert_axioms exhaust_charges_are_declared
+#assert_axioms exhaustion_spends_nothing
+#assert_axioms exhaustion_excludes_delivery
+#assert_axioms exhaustion_charge_measurement_free
+#assert_axioms recordOfBody_vacant
+#assert_axioms slotOfBody_vacant
+#assert_axioms recordBody_ended
+#assert_axioms nextRecord_ended
+#assert_axioms nextRecord_names
+#assert_axioms delivery_end_vacates
+#assert_axioms birth_end_vacates
+#assert_axioms settle_reclaims_slot
+#assert_axioms delivery_reclaims_slot
+#assert_axioms abandon_returns_escrow
+#assert_axioms abandon_closes_open_slot
+#assert_axioms Abandonment.spends
+#assert_axioms abandon_delivery_exclusive
 end Minidregg.Kernel.ObjectiveActivity
