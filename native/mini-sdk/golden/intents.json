@@ -1,0 +1,226 @@
+[
+ {
+  "name": "invoke-fixture",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"},{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10002\",\"kind\":{\"type\":\"text\"},\"payload\":\"62\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"14577708938600385229\",\"kind\":\"object\"},\"root\":\"40973790007425822174187669515479723066699262397556655188951117822470285145823\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "invoke-family",
+  "text": "{\"actor\":\"7\",\"cut\":\"invoke\",\"family\":{\"context\":\"00ff10\",\"route\":\"objectiveMethod\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "observe",
+  "text": "{\"actor\":\"7\",\"capability\":\"3\",\"cut\":\"observe\",\"projection\":\"view-resource\",\"resource\":{\"object\":{\"domain\":\"8501\",\"id\":\"42\",\"kind\":\"object\"},\"root\":\"0\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\"}"
+ },
+ {
+  "name": "reserve",
+  "text": "{\"actor\":\"7\",\"candidate\":{\"format\":\"bend-core\",\"length\":10,\"sha256\":\"0101010101010101010101010101010101010101010101010101010101010101\"},\"cut\":\"reserve\",\"footprint\":[{\"domain\":\"8501\",\"id\":\"1\",\"kind\":\"object\"},{\"domain\":\"8501\",\"id\":\"2\",\"kind\":\"object\"}],\"law\":{\"format\":\"policy\",\"length\":0,\"sha256\":\"0202020202020202020202020202020202020202020202020202020202020202\"},\"obligation\":{\"format\":\"ticket\",\"length\":9007199254740992,\"sha256\":\"0303030303030303030303030303030303030303030303030303030303030303\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\"}"
+ },
+ {
+  "name": "install",
+  "text": "{\"actor\":\"7\",\"candidate\":{\"format\":\"bend-core\",\"length\":10,\"sha256\":\"0101010101010101010101010101010101010101010101010101010101010101\"},\"cut\":\"install\",\"effects\":{\"format\":\"plan\",\"length\":1,\"sha256\":\"0404040404040404040404040404040404040404040404040404040404040404\"},\"obligation\":{\"format\":\"ticket\",\"length\":2,\"sha256\":\"0303030303030303030303030303030303030303030303030303030303030303\"},\"preimage\":{\"object\":{\"domain\":\"8501\",\"id\":\"9\",\"kind\":\"object\"},\"root\":\"123\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\"}"
+ },
+ {
+  "name": "release",
+  "text": "{\"actor\":\"7\",\"audience\":[\"1\",\"20\",\"300\"],\"cut\":\"release\",\"law\":{\"format\":\"policy\",\"length\":0,\"sha256\":\"0202020202020202020202020202020202020202020202020202020202020202\"},\"result\":{\"format\":\"text/ünïcode\",\"length\":5,\"sha256\":\"0505050505050505050505050505050505050505050505050505050505050505\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\"}"
+ },
+ {
+  "name": "retire",
+  "text": "{\"actor\":\"7\",\"cut\":\"retire\",\"evidence\":{\"format\":\"nullifier\",\"length\":64,\"sha256\":\"0606060606060606060606060606060606060606060606060606060606060606\"},\"obligation\":{\"format\":\"ticket\",\"length\":2,\"sha256\":\"0303030303030303030303030303030303030303030303030303030303030303\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\"}"
+ },
+ {
+  "name": "invoke-payload-escapes-and-key-order",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"type\":\"content\",\"note\":\"\\u0000\\u0007\\b\\t\\n\\f\\r\\u001b \\\"\\\\/ünï😀\",\"ｚ\":1,\"😀\":2,\"z\":3,\"é\":4,\"\":5,\"neg\":[0,-1,9007199254740992,-9007199254740992,true,false,null]},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"},{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10002\",\"kind\":{\"type\":\"text\"},\"payload\":\"62\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"14577708938600385229\",\"kind\":\"object\"},\"root\":\"40973790007425822174187669515479723066699262397556655188951117822470285145823\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "invoke-zero-actor-256bit-root-unicode-kind",
+  "text": "{\"actor\":\"0\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"déjà-vu/😀\"},\"root\":\"115792089237316195423570985008687907853269984665640564039457584007913129639935\"},\"schemaVersion\":\"9\"},{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10002\",\"kind\":{\"type\":\"text\"},\"payload\":\"62\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"14577708938600385229\",\"kind\":\"object\"},\"root\":\"40973790007425822174187669515479723066699262397556655188951117822470285145823\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "invoke-base255-digit-boundaries",
+  "text": "{\"actor\":\"254\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"255\",\"observeCapability\":\"256\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"65025\"},{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10002\",\"kind\":{\"type\":\"text\"},\"payload\":\"62\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"14577708938600385229\",\"kind\":\"object\"},\"root\":\"40973790007425822174187669515479723066699262397556655188951117822470285145823\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "invoke-family-room-publish-empty-context",
+  "text": "{\"actor\":\"7\",\"cut\":\"invoke\",\"family\":{\"route\":\"roomPublish\",\"context\":\"\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "invoke-family-ordinary",
+  "text": "{\"actor\":\"7\",\"cut\":\"invoke\",\"family\":{\"route\":\"ordinary\",\"context\":\"ab\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "invoke-family-activityDispatch",
+  "text": "{\"actor\":\"7\",\"cut\":\"invoke\",\"family\":{\"route\":\"activityDispatch\",\"context\":\"ab\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "invoke-family-roomRelease",
+  "text": "{\"actor\":\"7\",\"cut\":\"invoke\",\"family\":{\"route\":\"roomRelease\",\"context\":\"ab\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "reserve-empty-footprint",
+  "text": "{\"actor\":\"7\",\"candidate\":{\"format\":\"bend-core\",\"length\":10,\"sha256\":\"0101010101010101010101010101010101010101010101010101010101010101\"},\"cut\":\"reserve\",\"footprint\":[],\"law\":{\"format\":\"policy\",\"length\":0,\"sha256\":\"0202020202020202020202020202020202020202020202020202020202020202\"},\"obligation\":{\"format\":\"ticket\",\"length\":9007199254740992,\"sha256\":\"0303030303030303030303030303030303030303030303030303030303030303\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\"}"
+ },
+ {
+  "name": "release-empty-audience",
+  "text": "{\"actor\":\"7\",\"audience\":[],\"cut\":\"release\",\"law\":{\"format\":\"policy\",\"length\":0,\"sha256\":\"0202020202020202020202020202020202020202020202020202020202020202\"},\"result\":{\"format\":\"text/ünïcode\",\"length\":5,\"sha256\":\"0505050505050505050505050505050505050505050505050505050505050505\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\"}"
+ },
+ {
+  "name": "retire-max-length",
+  "text": "{\"actor\":\"7\",\"cut\":\"retire\",\"evidence\":{\"format\":\"nullifier\",\"length\":64,\"sha256\":\"0606060606060606060606060606060606060606060606060606060606060606\"},\"obligation\":{\"format\":\"ticket\",\"length\":9007199254740992,\"sha256\":\"0303030303030303030303030303030303030303030303030303030303030303\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\"}"
+ },
+ {
+  "name": "refuse-leading-zero-actor",
+  "text": "{\"actor\":\"07\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"},{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10002\",\"kind\":{\"type\":\"text\"},\"payload\":\"62\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"14577708938600385229\",\"kind\":\"object\"},\"root\":\"40973790007425822174187669515479723066699262397556655188951117822470285145823\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-signed-actor",
+  "text": "{\"actor\":\"-1\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"},{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10002\",\"kind\":{\"type\":\"text\"},\"payload\":\"62\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"14577708938600385229\",\"kind\":\"object\"},\"root\":\"40973790007425822174187669515479723066699262397556655188951117822470285145823\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-numeric-actor",
+  "text": "{\"actor\":7,\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"},{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10002\",\"kind\":{\"type\":\"text\"},\"payload\":\"62\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"14577708938600385229\",\"kind\":\"object\"},\"root\":\"40973790007425822174187669515479723066699262397556655188951117822470285145823\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-uppercase-salt",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"AA0102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"},{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10002\",\"kind\":{\"type\":\"text\"},\"payload\":\"62\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"14577708938600385229\",\"kind\":\"object\"},\"root\":\"40973790007425822174187669515479723066699262397556655188951117822470285145823\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-short-salt",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"00\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"},{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10002\",\"kind\":{\"type\":\"text\"},\"payload\":\"62\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"14577708938600385229\",\"kind\":\"object\"},\"root\":\"40973790007425822174187669515479723066699262397556655188951117822470285145823\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-odd-hex-salt",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"},{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10002\",\"kind\":{\"type\":\"text\"},\"payload\":\"62\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"14577708938600385229\",\"kind\":\"object\"},\"root\":\"40973790007425822174187669515479723066699262397556655188951117822470285145823\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-empty-targets",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[]}"
+ },
+ {
+  "name": "refuse-unknown-route",
+  "text": "{\"actor\":\"7\",\"cut\":\"invoke\",\"family\":{\"route\":\"bogus\",\"context\":\"\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-family-extra-field",
+  "text": "{\"actor\":\"7\",\"cut\":\"invoke\",\"family\":{\"context\":\"00ff10\",\"route\":\"objectiveMethod\",\"extra\":1},\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-family-bad-context",
+  "text": "{\"actor\":\"7\",\"cut\":\"invoke\",\"family\":{\"context\":\"0G\",\"route\":\"objectiveMethod\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-float-in-payload",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"x\":1.5},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"},{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10002\",\"kind\":{\"type\":\"text\"},\"payload\":\"62\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"14577708938600385229\",\"kind\":\"object\"},\"root\":\"40973790007425822174187669515479723066699262397556655188951117822470285145823\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-oversized-integer-in-payload",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"x\":9007199254740994},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"},{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10002\",\"kind\":{\"type\":\"text\"},\"payload\":\"62\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"14577708938600385229\",\"kind\":\"object\"},\"root\":\"40973790007425822174187669515479723066699262397556655188951117822470285145823\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-missing-field",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"},{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10002\",\"kind\":{\"type\":\"text\"},\"payload\":\"62\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"14577708938600385229\",\"kind\":\"object\"},\"root\":\"40973790007425822174187669515479723066699262397556655188951117822470285145823\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-extra-field",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"},{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10002\",\"kind\":{\"type\":\"text\"},\"payload\":\"62\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"14577708938600385229\",\"kind\":\"object\"},\"root\":\"40973790007425822174187669515479723066699262397556655188951117822470285145823\"},\"schemaVersion\":\"9\"}],\"zz\":\"1\"}"
+ },
+ {
+  "name": "refuse-unknown-cut",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"burn\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"},{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10002\",\"kind\":{\"type\":\"text\"},\"payload\":\"62\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"14577708938600385229\",\"kind\":\"object\"},\"root\":\"40973790007425822174187669515479723066699262397556655188951117822470285145823\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-target-extra-field",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\",\"extra\":\"1\"},{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10002\",\"kind\":{\"type\":\"text\"},\"payload\":\"62\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"14577708938600385229\",\"kind\":\"object\"},\"root\":\"40973790007425822174187669515479723066699262397556655188951117822470285145823\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-noncanonical-root",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10001\",\"kind\":{\"type\":\"text\"},\"payload\":\"61\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"01\"},\"schemaVersion\":\"9\"},{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"actions\":[{\"atom\":\"10002\",\"kind\":{\"type\":\"text\"},\"payload\":\"62\",\"type\":\"createAtom\"}],\"type\":\"content\"},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"14577708938600385229\",\"kind\":\"object\"},\"root\":\"40973790007425822174187669515479723066699262397556655188951117822470285145823\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-short-sha256",
+  "text": "{\"actor\":\"7\",\"candidate\":{\"format\":\"bend-core\",\"length\":10,\"sha256\":\"01010101010101010101010101010101010101010101010101010101010101\"},\"cut\":\"reserve\",\"footprint\":[{\"domain\":\"8501\",\"id\":\"1\",\"kind\":\"object\"},{\"domain\":\"8501\",\"id\":\"2\",\"kind\":\"object\"}],\"law\":{\"format\":\"policy\",\"length\":0,\"sha256\":\"0202020202020202020202020202020202020202020202020202020202020202\"},\"obligation\":{\"format\":\"ticket\",\"length\":9007199254740992,\"sha256\":\"0303030303030303030303030303030303030303030303030303030303030303\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\"}"
+ },
+ {
+  "name": "refuse-oversized-length",
+  "text": "{\"actor\":\"7\",\"candidate\":{\"format\":\"bend-core\",\"length\":9007199254740993,\"sha256\":\"0101010101010101010101010101010101010101010101010101010101010101\"},\"cut\":\"reserve\",\"footprint\":[{\"domain\":\"8501\",\"id\":\"1\",\"kind\":\"object\"},{\"domain\":\"8501\",\"id\":\"2\",\"kind\":\"object\"}],\"law\":{\"format\":\"policy\",\"length\":0,\"sha256\":\"0202020202020202020202020202020202020202020202020202020202020202\"},\"obligation\":{\"format\":\"ticket\",\"length\":9007199254740992,\"sha256\":\"0303030303030303030303030303030303030303030303030303030303030303\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\"}"
+ },
+ {
+  "name": "refuse-negative-length",
+  "text": "{\"actor\":\"7\",\"candidate\":{\"format\":\"bend-core\",\"length\":-1,\"sha256\":\"0101010101010101010101010101010101010101010101010101010101010101\"},\"cut\":\"reserve\",\"footprint\":[{\"domain\":\"8501\",\"id\":\"1\",\"kind\":\"object\"},{\"domain\":\"8501\",\"id\":\"2\",\"kind\":\"object\"}],\"law\":{\"format\":\"policy\",\"length\":0,\"sha256\":\"0202020202020202020202020202020202020202020202020202020202020202\"},\"obligation\":{\"format\":\"ticket\",\"length\":9007199254740992,\"sha256\":\"0303030303030303030303030303030303030303030303030303030303030303\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\"}"
+ },
+ {
+  "name": "refuse-float-length",
+  "text": "{\"actor\":\"7\",\"candidate\":{\"format\":\"bend-core\",\"length\":1.5,\"sha256\":\"0101010101010101010101010101010101010101010101010101010101010101\"},\"cut\":\"reserve\",\"footprint\":[{\"domain\":\"8501\",\"id\":\"1\",\"kind\":\"object\"},{\"domain\":\"8501\",\"id\":\"2\",\"kind\":\"object\"}],\"law\":{\"format\":\"policy\",\"length\":0,\"sha256\":\"0202020202020202020202020202020202020202020202020202020202020202\"},\"obligation\":{\"format\":\"ticket\",\"length\":9007199254740992,\"sha256\":\"0303030303030303030303030303030303030303030303030303030303030303\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\"}"
+ },
+ {
+  "name": "refuse-noncanonical-audience",
+  "text": "{\"actor\":\"7\",\"audience\":[\"1\",\"02\"],\"cut\":\"release\",\"law\":{\"format\":\"policy\",\"length\":0,\"sha256\":\"0202020202020202020202020202020202020202020202020202020202020202\"},\"result\":{\"format\":\"text/ünïcode\",\"length\":5,\"sha256\":\"0505050505050505050505050505050505050505050505050505050505050505\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\"}"
+ },
+ {
+  "name": "refuse-audience-not-a-list",
+  "text": "{\"actor\":\"7\",\"audience\":\"1\",\"cut\":\"release\",\"law\":{\"format\":\"policy\",\"length\":0,\"sha256\":\"0202020202020202020202020202020202020202020202020202020202020202\"},\"result\":{\"format\":\"text/ünïcode\",\"length\":5,\"sha256\":\"0505050505050505050505050505050505050505050505050505050505050505\"},\"salt\":\"000102030405060708090a0b0c0d0e0f\"}"
+ },
+ {
+  "name": "example-invoke",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"type\":\"content\",\"actions\":[{\"type\":\"createAtom\",\"atom\":\"1\",\"kind\":{\"type\":\"text\"},\"payload\":\"68656c6c6f\"}]},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "payload-number-100",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"n\":100},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "payload-number-100-point-0",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"n\":100.0},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "payload-number-1e2",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"n\":1e2},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "payload-number-1E2",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"n\":1E2},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "payload-number-negative-zero",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"n\":-0},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "payload-number-zero-point-zero",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"n\":0.0},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "payload-number-negative-fifty-exponent",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"n\":-5.0e1},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "payload-number-2-pow-53",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"n\":9007199254740992},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "payload-number-2-pow-53-as-fraction-form",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"n\":900719925474099200e-2},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-payload-number-1-point-5",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"n\":1.5},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-payload-number-tiny-fraction",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"n\":1.0000000000000000001},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-payload-number-1e-2",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"n\":1e-2},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-payload-number-2-pow-53-plus-1",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"n\":9007199254740993},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-payload-number-huge-exponent",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"n\":1e400},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ },
+ {
+  "name": "refuse-payload-number-hostile-negative-exponent",
+  "text": "{\"actor\":\"12504530369102912422\",\"cut\":\"invoke\",\"family\":null,\"salt\":\"000102030405060708090a0b0c0d0e0f\",\"targets\":[{\"capability\":\"9591460230184716503\",\"observeCapability\":\"9591460230184716503\",\"payload\":{\"n\":1e-99999999999},\"revision\":{\"object\":{\"domain\":\"8501\",\"id\":\"11713997809205700508\",\"kind\":\"object\"},\"root\":\"94531388991341573437548127621893842788707596369540381335288917555563780111749\"},\"schemaVersion\":\"9\"}]}"
+ }
+]
