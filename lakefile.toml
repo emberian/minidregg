@@ -162,3 +162,8 @@ root = "Verify.GenericSimplexLogReopen"
 [[lean_exe]]
 name = "minidregg-four-source-fixture"
 root = "Verify.NativeJointSourceFixture"
+
+# Per-operation cost of the agreement engine over a long busy run (compiled; run the binary).
+[[lean_exe]]
+name = "generic-simplex-load"
+root = "Verify.GenericSimplexLoad"
