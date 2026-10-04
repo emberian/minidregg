@@ -43,6 +43,10 @@ def protocolFrame (bytes : Bytes) : Bytes := frameStream.encode (0,bytes)
 def certificateFrame (bytes : Bytes) : Bytes := frameStream.encode (1,bytes)
 def candidateFrame (bytes : Bytes) : Bytes := frameStream.encode (2,bytes)
 
+/-- The highest view this replica has locally committed (0 if none). -/
+def lastDecidedView (state : State) : Nat :=
+  state.views.foldl (fun acc view => if view.committed.isSome then max acc view.number else acc) 0
+
 /-- Opening checks the exact configured source genesis against the consensus
 anchor through the real historical validator. A journal alone cannot select the
 source seed or committee. -/
@@ -55,13 +59,17 @@ def openParticipant (config : SourceConfig) (runtime : Runtime)
     let some prior ← runtime.current
       | return .error "invalid durable agreement journal"
     let state := prior.state
-    -- Current-view traffic must not queue behind every historical send after
-    -- each host restart. This is a scheduling hint, never an acknowledgement:
-    -- the independent retry round still covers the entire retained old outbox.
-    let firstCurrent := (state.outbox.findIdx? (fun message =>
-      decide (state.current ≤ message.view))).getD state.outbox.length
+    -- After a restart, resend as fresh every message of every view this
+    -- replica has not locally decided: a COMMIT or READY for an older
+    -- undecided view (the stalled view 17/18 sends) is exactly what peers may
+    -- still need. Decided views are covered by certificate repair, and the
+    -- independent retry round still covers the entire retained outbox. This is
+    -- a scheduling hint, never an acknowledgement.
+    let decided := lastDecidedView state
+    let firstUndecided := (state.outbox.findIdx? (fun message =>
+      decide (decided < message.view))).getD state.outbox.length
     let schedule : Schedule :=
-      { fresh := firstCurrent * expected.config.parties
+      { fresh := firstUndecided * expected.config.parties
         retryEnd := state.outbox.length * expected.config.parties }
     return .ok ⟨runtime,source,
       Minidregg.Compiler.GenericSimplexPending.discover state {},schedule⟩
