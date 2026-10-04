@@ -8,7 +8,12 @@ content cell born `--in R`, the room's `keys` cell, partitioned by atom id:
 
 * a WRAP of epoch `e` for member `m`, addressed to the member's encryption key
   of generation `g`, is the atom `wrapAtomId e g m = (e + 1)·2^96 + g·2^64 + m`
-  (high half `≥ 2^32`); its payload is that public key and the wrap;
+  (high half `≥ 2^32`); its payload is that public key, the wrap, and the
+  founder-signed epoch certificate and delivery;
+* the RELEASE record of that wrap, written by the founder one turn EARLIER, is
+  the atom `((2^30 + 1 + e) << 96) | g << 64 | m`: a founder-signed commitment to
+  the wrap's exact bytes (the client writes the wrap only after reading this
+  record back unchanged);
 * member `m`'s ENCRYPTION-KEY RECORD is the atom `m` itself (high half `0`); its
   payload is the member's current key epoch and X25519 public key.  The member
   creates it and later edits it, after each signing-key rotation
@@ -28,7 +33,8 @@ the write creates or edits, `ContentResource.project`):
 * only the founder writes wraps (`keysLaw_refuses_nonfounder_wrap`), only by
   creating atoms: no wrap edit (`keysLaw_refuses_wrap_edit`), no tombstone
   (`keysLaw_refuses_tombstone`), nothing but atoms (`keysLaw_refuses_non_atom`);
-  so the set of wraps only grows and the room's epoch never goes backwards;
+  release records fall in the same founder-only region; so the set of wraps
+  and releases only grows;
 * each subject writes only ITS OWN encryption-key record: one action, creating
   or editing the atom whose id is the writer's subject number
   (`keysLaw_admits_own_record`, `keysLaw_refuses_foreign_record`); the founder
@@ -36,11 +42,15 @@ the write creates or edits, `ContentResource.project`):
 * reads, delegation, law installs and revocations are left to capabilities
   (`keysLaw_admits_reads`): who may read the wraps is who may observe under R.
 
-What the law does NOT decide, and who does.  That a re-wrap is addressed to
-the member's CURRENT record, and that the record's key really is the
-member's: the law sees ids, never payloads.  The founder's client reads the
-member's record (written, by the law, by that member only, and so signed by
-that member's current key) and wraps to it; the member's client opens the wrap
+What the law does NOT decide, and who does.  Which epoch is current, that a
+wrap is the founder's, that a re-wrap is addressed to the member's CURRENT
+record, and that the record's key really is the member's: the law sees ids,
+never payloads.  The clients decide, from out-of-band PINS: every certificate,
+wrap and release must verify under the founder key each client pinned, the
+certificates form one chain whose head each client retains and never lets go
+backwards, and the founder wraps only to a record that verifies under the
+signing key it pinned from the member's own declaration
+(`docs/PRIVATE-ROOMS-DESIGN.txt`). The member's client opens the wrap
 whose public key matches a secret in its keyring.  The client protocol's
 outcome is stated as a model below (`rotation_preserves_room_access`, with
 its poles): a theorem of the model, not of the Rust.
