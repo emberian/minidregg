@@ -27,6 +27,7 @@
     "Host.PrivateCircuitPlanFixture",
     "Host.SourceAgreementReader",
     "Host.WorldPrototypeDefinitionAuthor",
+    "Kernel.Contracts.IntentVectors",
     "Verify.BendCommittedIR2Emit",
     "Verify.GenericSimplexHarness",
     "Verify.GenericSimplexNativeHarness",
@@ -3977,7 +3978,7 @@
     {
       "module": "Kernel",
       "path": "Kernel.lean",
-      "sha256": "e52b7c3e26cce588f182b98556b9068b282cfe3aef833a8ca950c5c0790e2195",
+      "sha256": "d6191a23bfc79bd1da973e85efc4d8710c72a3ca45bc3084aedc34a90dd432d3",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -5154,6 +5155,20 @@
       "module": "Kernel.Contracts.Identities",
       "path": "Kernel/Contracts/Identities.lean",
       "sha256": "66536e615f27384e0e06bb66b29f850272ba32c924046e7ae811968a72a82dc0",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Kernel.Contracts.IntentVectors",
+      "path": "Kernel/Contracts/IntentVectors.lean",
+      "sha256": "4615339931296e0476b6320cfd89d459a798b5e3512ffd9f3aa46e520e43be6f",
+      "surface": "authored-research",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Kernel.Contracts.Intents",
+      "path": "Kernel/Contracts/Intents.lean",
+      "sha256": "d1eeb6cf307a09290ae8a8eea6482803206d7ad2a64384362846e289848393e2",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
