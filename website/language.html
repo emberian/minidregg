@@ -16,6 +16,7 @@
 <ul>
 <li><a href="index.html">Overview</a></li>
 <li><a href="language.html" aria-current="page">Language</a></li>
+<li><a href="laws.html">Laws</a></li>
 <li><a href="architecture.html">Architecture</a></li>
 <li><a href="status.html">Status</a></li>
 <li><a href="join.html">Join</a></li>
@@ -41,7 +42,9 @@ self super)</code>; <code>fix(spec, inherited)</code> computes the fixpoint.</li
 <li><strong>Laziness:</strong> call-by-name reference semantics, call-by-need machine.
 <code>{good = 7, bad = self.bad}.good</code> is <code>7</code>.</li>
 <li><strong>Activities:</strong> <code>perform</code> yields a typed Plan; the program
-resumes on a typed Response.</li>
+resumes on a typed Response. The kernel side (a persisted checkpoint, answer slots, resume
+with the object's state in view, paid exhaustion, abandonment) is compiled and proved;
+<a href="laws.html">no Host operation reaches it yet</a>.</li>
 <li><strong>Types:</strong> the checker returns a typing derivation. Affine and linear
 quantities are checked as at most once.</li>
 </ul>
@@ -75,16 +78,20 @@ and fails on any changed output.</p>
 <tr><td data-label="Property">No refusal</td><td data-label="Statement">A closed term the checker accepts never reaches a refusal. It may still diverge or exhaust its limits.</td></tr>
 <tr><td data-label="Property">Completeness</td><td data-label="Statement">A closed term that evaluates to an observable value finishes on the machine in finitely many steps, given large enough limits. No bound on those limits is proved.</td></tr>
 <tr><td data-label="Property">Fast machine</td><td data-label="Statement">Every compiled call runs a fast machine proved equal to the specified one.</td></tr>
+<tr><td data-label="Property">Front end</td><td data-label="Statement">When the checker accepts the front end's output, that term is typed, the machine never refuses it, and a finished run is a deep evaluation of it. The checker's reading of the front end's packet is proved to be the elaborator's own term.</td></tr>
 </tbody>
 </table>
 
 <h2>Not proved, not wired</h2>
 <ul>
-<li>The default build re-checks none of these proofs.</li>
-<li>No theorem relates <code>.obend</code> source to Core4; the TypeScript front end is
-trusted.</li>
-<li>No native Host has admitted an Objective Bend program, and no kernel delivers a
-response to an activity.</li>
+<li>The default build does not re-check these proofs; a separate gate does (<code>ObjectiveProofs</code>,
+with a snapshot of every statement and axiom set).</li>
+<li>There is no surface semantics: no theorem says the core means what the source says. The
+front end is one Lean program, trusted; the receiver re-runs it at admission and admits only
+a core equal to its own output.</li>
+<li>A native Host admits Objective Bend programs on scratch worlds, not on the public node.
+The kernel's activities, object records and seats have no native route yet; see
+<a href="laws.html">Laws</a>.</li>
 </ul>
 <p><a href="https://github.com/emberian/minidregg/blob/main/docs/OBJECTIVE-BEND.md">Language guide</a>: every theorem, its hypotheses, and what Core4 lacks.</p>
 

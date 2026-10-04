@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Laws and objects · Mini</title>
+<meta name="description" content="What judges a write: laws, object records, the Objective pin, activities and seats, and which of them a Host runs today.">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site">
+<div class="wrap wide">
+<a class="brand" href="index.html">Mini</a>
+<nav class="primary" aria-label="Site">
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="language.html">Language</a></li>
+<li><a href="laws.html" aria-current="page">Laws</a></li>
+<li><a href="architecture.html">Architecture</a></li>
+<li><a href="status.html">Status</a></li>
+<li><a href="join.html">Join</a></li>
+<li><a href="https://github.com/emberian/minidregg">Source</a></li>
+</ul>
+</nav>
+</div>
+</header>
+<main id="main">
+<div class="wrap">
+<h1>Laws and objects</h1>
+<p class="lede">A law is a predicate the kernel checks on every change to a resource, whoever
+proposed it. Objects, activities and seats build on that rule. All of what follows is compiled
+and proved in Lean; none of it is reachable from a Host operation yet unless a row says so.</p>
+
+<h2>Three things called law</h2>
+<ul>
+<li><strong>A cell law</strong> is a decidable predicate over a write's old and new state and
+its request. It is the judge of admission.</li>
+<li><strong>A <code>law</code> in <code>.obend</code></strong> is a property of a specification's
+methods, kept as a closure in its metadata. Nothing discharges it and it never reaches
+admission.</li>
+<li><strong><code>requires</code></strong> names a member a specification needs from its final
+self. It is not a precondition, and it is recorded, not checked.</li>
+</ul>
+<p>Rules for admission written in <code>.obend</code> (<code>invariant</code>, <code>guard</code>,
+<code>permit</code>, <code>forbid</code>) are a design, not built: a program cannot yet state the
+law of its own object.</p>
+
+<h2>Which code wrote</h2>
+<p>Every law state begins with the slot <code>objective/artifact</code>. For a command with an
+Objective claim it holds the claimed method's identity; for any other command it holds
+<code>-1</code>. A clause <code>objectivePin</code> accepts only steps whose slot names a pinned
+artifact, so an ordinary command is refused whatever its writes. No turn installs that clause at
+object birth yet.</p>
+
+<h2>Objects</h2>
+<p>A cell is an object to the kernel only if it has a record: its package pin, its law, an
+upgrade policy and a payer. A birth on a cell without a record is refused, and so is a birth
+of any package but the pinned one. Every write to an object's declared state, from a birth, a
+resume or a direct write, is judged by the object's law over the old and new state. A resumed
+activity's write is judged as its birth subject, never as whoever delivered the response. A
+refusal names the failing clause and commits nothing.</p>
+
+<h2>Activities</h2>
+<p>An activity is a persisted checkpoint plus one await. Its reply slot has one decider and one
+deadline, decided once. A resume delivers the settled outcome together with the object's state
+and version read in the same turn, so no write is computed from a stale read. An await that
+exhausts its declared envelope is a paid turn; an ended activity leaves an empty tombstone; anyone
+may abandon an await after its deadline plus a grace, which returns the purse minus the timeout
+fee. One public tariff prices every declared envelope, for native admission and for activities.</p>
+
+<h2>Seats</h2>
+<p>A seat holds one side of a contract in its own Book account. Its law is offer safety: every
+want is met, or every give is refunded. The law is judged on every reallocation, and the
+offerer's exit is a kernel action no contract clause is consulted for.</p>
+
+<h2>Where each stands</h2>
+<table class="stack">
+<thead><tr><th>Part</th><th>Evidence</th><th>Landed</th><th>Journey row</th></tr></thead>
+<tbody>
+<tr><td data-label="Part">Native Objective admission (signed invocation, receipt, refusals)</td><td data-label="Evidence">integrated on scratch worlds</td><td data-label="Landed"><code>6df4602f</code>, <code>73223088</code>, <code>a2454432</code></td><td data-label="Journey row"><code>objective</code> PASS, 17 rows at main <code>4795b657</code></td></tr>
+<tr><td data-label="Part">Law slot and the pin clause</td><td data-label="Evidence">compiled, proved</td><td data-label="Landed"><code>2a7c372b</code></td><td data-label="Journey row">none</td></tr>
+<tr><td data-label="Part">Object record, law on every state write</td><td data-label="Evidence">compiled, proved; no Host operation</td><td data-label="Landed"><code>eac4b18c</code>, <code>de9c84f7</code></td><td data-label="Journey row">none (a row is queued)</td></tr>
+<tr><td data-label="Part">Activities: records, slots, resume with view, paid exhaustion, abandonment</td><td data-label="Evidence">compiled, proved; no Host operation</td><td data-label="Landed"><code>8194e09d</code>, <code>67362781</code>, <code>d1ce7b0c</code></td><td data-label="Journey row"><code>activity</code> ABSENT: no driver</td></tr>
+<tr><td data-label="Part">One public tariff</td><td data-label="Evidence">compiled, proved; in the Host</td><td data-label="Landed"><code>bf28dd19</code></td><td data-label="Journey row"><code>objective</code> (prices the claim)</td></tr>
+<tr><td data-label="Part">Seats and invitations</td><td data-label="Evidence">compiled, proved; no Host operation</td><td data-label="Landed"><code>6347dcb4</code></td><td data-label="Journey row"><code>seats</code> ABSENT: no driver</td></tr>
+</tbody>
+</table>
+<p>In flight, by lane: the signed route for activities, seats on the native route, a storage
+charge for packages and checkpoints, record upgrades, the turn gate, and the receiver that pins
+an object's law to its package.</p>
+<p><a href="https://github.com/emberian/minidregg/blob/main/docs/OBJECTIVE-BEND.md#objects-activities-and-seats">Objects, activities and seats</a>
+in the language guide, <a href="https://github.com/emberian/minidregg/blob/main/docs/OBJECTIVE-BEND-EVENTS.md#the-kernel-activity">the kernel activity</a>
+and <a href="https://github.com/emberian/minidregg/blob/main/docs/SEATS.md">seats</a>: each theorem and its line.</p>
+
+</div>
+</main>
+<footer class="site">
+<div class="wrap wide">
+<p>Every claim here maps to a file at main
+(<a href="https://github.com/emberian/minidregg/blob/main/website/SOURCES.md">SOURCES.md</a>).
+The repository overrides this site.</p>
+</div>
+</footer>
+</body>
+</html>

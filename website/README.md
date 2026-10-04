@@ -7,8 +7,9 @@ no JavaScript, no external fonts or scripts.
 | --- | --- |
 | `index.html` | what Mini is, its state, its four rules |
 | `language.html` | Objective Bend: Core4, one example, what is and is not proved |
+| `laws.html` | laws, object records, the Objective pin, activities, seats, and which a Host runs |
 | `architecture.html` | admission, laws, receipts, consent, private rooms, agreement |
-| `status.html` | **generated**: the README's Honest state table (`gen-status.py`) |
+| `status.html` | **generated**: the README's Honest state table (`gen-status.py`); every row names the landing commit or journey row it rests on |
 | `join.html` | how to get an account, what the public node has, contributing |
 
 ## Rules
