@@ -49,6 +49,8 @@ set_option autoImplicit false
   | condition zero successorBody environment => exact .condition _ _ step
   | binaryLeft primitive right environment => exact .binaryLeft _ _ step
   | binaryRight primitive left => exact .binaryRight _ _ (valueMeaning_value _ _) step
+  | case arms environment => exact .caseTarget _ step
+  | ifBool whenTrue whenFalse environment => exact .ifCondition _ _ step
 
  theorem sourceStep_stack (meaning : AddressMeaning) (frames : List Frame) {before after : Term} (step : Step before after) :
     Step (stackMeaning meaning frames before) (stackMeaning meaning frames after) := by
@@ -258,6 +260,8 @@ noncomputable def framePotential : Frame → Nat
   | .binaryLeft _ right _ => 3 * sizeOf right + 2
   | .condition zero body _ => 3 * (sizeOf zero + sizeOf body)
   | .extend fields _ => 3 * sizeOf fields
+  | .case arms _ => 3 * sizeOf arms
+  | .ifBool whenTrue whenFalse _ => 3 * (sizeOf whenTrue + sizeOf whenFalse)
   | .update _ | .field _ | .reflect | .metadata | .project | .binaryRight _ _ => 0
 
 noncomputable def heapPotential (heap : Array Cell) : Nat := (heap.toList.map cellPotential).sum
@@ -499,6 +503,40 @@ def WholeAdvance (meaning next : AddressMeaning) (state successor : State) : Pro
   · cases kind <;>
       simp [stutterRank,stepRaw,evaluate,PairObject.term,heapPotential_push,cellPotential,controlPotential] <;> omega
 
+ theorem inject_advance {meaning : AddressMeaning} {state : State} {source payload : Term}
+    {tag : String} {environment : Environment} (represented : GraphRepresentsBy meaning state source)
+    (evaluate : state.control = .evaluate (.inject tag payload) environment) :
+    ∃ next : AddressMeaning, GraphRepresentsBy next (stepRaw state) source ∧ WholeAdvance meaning next state (stepRaw state) := by
+  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
+  have valid : ClosureValid state.heap.size ⟨.inject tag payload,environment⟩ := by
+    simpa only [evaluate,ControlValid] using lexical.2.1
+  have scope : Scoped environment.length payload := by simpa using valid.1
+  obtain ⟨one,oneNames,oneHeap,oneSame,oneFresh⟩ :=
+    allocateClosure_realizes lexical.1 names heap scope valid.2
+  have sourceEq : valueMeaning one (.variant tag state.heap.size) =
+      closeTerm meaning environment (.inject tag payload) := by
+    simp [valueMeaning,oneFresh,closeTerm_inject]
+  simp [controlMeaning,evaluate] at control
+  subst focus
+  have consumers := stackRealizes_congr lexical.2.2 oneSame stack
+  have stackEq := stackMeaning_names_congr lexical.2.2 oneSame (focus := closeTerm meaning environment (.inject tag payload))
+  refine ⟨one,⟨stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
+    stepRaw_finalStackInvariant final,?_,?_,valueMeaning one (.variant tag state.heap.size),?_,?_⟩,
+    stackMeaning meaning state.stack (closeTerm meaning environment (.inject tag payload)),
+    stackMeaning meaning state.stack (closeTerm meaning environment (.inject tag payload)),?_,?_,Or.inr ⟨.refl _,?_⟩⟩
+  · simpa [stepRaw,evaluate] using oneNames
+  · simpa [stepRaw,evaluate] using oneHeap
+  · simp [stepRaw,evaluate,controlMeaning]
+  · rw [sourceEq]
+    simpa [stepRaw,evaluate] using consumers
+  · simp [budgetWhole,budgetFocus,evaluate,controlMeaning]
+  · have nextValue : budgetFocus one (stepRaw state) = some (valueMeaning one (.variant tag state.heap.size)) := by
+      simp [budgetFocus,stepRaw,evaluate,controlMeaning]
+    have nextStack : (stepRaw state).stack = state.stack := by simp [stepRaw,evaluate]
+    simp only [budgetWhole,nextValue,nextStack,Option.map_some,sourceEq,stackEq]
+  · simp [stutterRank,stepRaw,evaluate,heapPotential_push,cellPotential,controlPotential]
+    omega
+
  theorem record_advance {meaning : AddressMeaning} {state : State} {source : Term}
     {fields : List (String × Term)} {environment : Environment} (represented : GraphRepresentsBy meaning state source)
     (evaluate : state.control = .evaluate (.record fields) environment) :
@@ -677,6 +715,10 @@ def WholeAdvance (meaning next : AddressMeaning) (state successor : State) : Pro
       | extend inherited fields => exact context_advance (context := .extend fields) represented successful control
       | ifZero value zero body => exact context_advance (context := .condition zero body) represented successful control
       | binary primitive left right => exact context_advance (context := .binary primitive right) represented successful control
+      | inject tag payload => exact inject_advance represented control
+      | case scrutinee arms => exact context_advance (context := .case arms) represented successful control
+      | ifBool condition whenTrue whenFalse =>
+          exact context_advance (context := .ifBool whenTrue whenFalse) represented successful control
   | returned value =>
       have noEnter : ∀ address, state.control ≠ .enter address := by intro address; simp [control]
       cases frames : state.stack with
@@ -691,28 +733,28 @@ def WholeAdvance (meaning next : AddressMeaning) (state successor : State) : Pro
                   exact ⟨next,current,dispatch_advance represented same current noEnter dispatch⟩
               | specification descriptor extension =>
                   exact specification_call_advance represented successful control frames
-              | natural _ | boolean _ | label _ | record _ | prototype _ _ =>
+              | natural _ | boolean _ | label _ | record _ | prototype _ _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | reflect =>
               cases value with
               | prototype spec target =>
                   obtain ⟨next,same,current,dispatch⟩ := graph_object_access_execution (access := .reflect) represented control frames
                   exact ⟨next,current,dispatch_advance represented same current noEnter dispatch⟩
-              | closure _ _ | specification _ _ | natural _ | boolean _ | label _ | record _ =>
+              | closure _ _ | specification _ _ | natural _ | boolean _ | label _ | record _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | metadata =>
               cases value with
               | specification descriptor extension =>
                   obtain ⟨next,same,current,dispatch⟩ := graph_object_access_execution (access := .metadata) represented control frames
                   exact ⟨next,current,dispatch_advance represented same current noEnter dispatch⟩
-              | closure _ _ | prototype _ _ | natural _ | boolean _ | label _ | record _ =>
+              | closure _ _ | prototype _ _ | natural _ | boolean _ | label _ | record _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | project =>
               cases value with
               | prototype spec target =>
                   obtain ⟨next,same,current,dispatch⟩ := graph_object_access_execution (access := .project) represented control frames
                   exact ⟨next,current,dispatch_advance represented same current noEnter dispatch⟩
-              | closure _ _ | specification _ _ | natural _ | boolean _ | label _ | record _ =>
+              | closure _ _ | specification _ _ | natural _ | boolean _ | label _ | record _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | field name =>
               cases value with
@@ -723,14 +765,14 @@ def WholeAdvance (meaning next : AddressMeaning) (state successor : State) : Pro
                       obtain ⟨key,address⟩ := field
                       obtain ⟨next,same,current,dispatch⟩ := graph_field_return_execution represented control frames found
                       exact ⟨next,current,dispatch_advance represented same current noEnter dispatch⟩
-              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ =>
+              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | extend fields environment =>
               cases value with
               | record inherited =>
                   obtain ⟨next,same,current,dispatch⟩ := graph_extend_record_execution represented control frames
                   exact ⟨next,current,dispatch_advance represented same current noEnter dispatch⟩
-              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ =>
+              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | condition zero body environment =>
               cases value with
@@ -742,7 +784,7 @@ def WholeAdvance (meaning next : AddressMeaning) (state successor : State) : Pro
                   | succ number =>
                       obtain ⟨next,same,current,dispatch⟩ := graph_condition_successor_execution represented control frames
                       exact ⟨next,current,dispatch_advance represented same current noEnter dispatch⟩
-              | closure _ _ | specification _ _ | prototype _ _ | record _ | boolean _ | label _ =>
+              | closure _ _ | specification _ _ | prototype _ _ | record _ | boolean _ | label _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | binaryLeft primitive right environment => exact binaryLeft_advance represented successful control frames
           | binaryRight primitive left =>
@@ -755,6 +797,24 @@ def WholeAdvance (meaning next : AddressMeaning) (state successor : State) : Pro
                       obtain ⟨meaning',same,current,sourceDispatch⟩ :=
                         graph_primitive_return_execution represented control frames dispatch scalar
                       exact ⟨meaning',current,dispatch_advance represented same current noEnter sourceDispatch⟩
+          | case arms environment =>
+              cases value with
+              | variant tag payload =>
+                  cases found : arms.find? (fun arm => arm.1 == tag) with
+                  | none => simp [stepRaw,control,frames,found,ResultControl] at successful
+                  | some arm =>
+                      obtain ⟨key,body⟩ := arm
+                      obtain ⟨next,same,current,dispatch⟩ := graph_case_return_execution represented control frames found
+                      exact ⟨next,current,dispatch_advance represented same current noEnter dispatch⟩
+              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ | record _ =>
+                  simp [stepRaw,control,frames,ResultControl] at successful
+          | ifBool whenTrue whenFalse environment =>
+              cases value with
+              | boolean value =>
+                  obtain ⟨next,same,current,dispatch⟩ := graph_ifBool_return_execution represented control frames
+                  exact ⟨next,current,dispatch_advance represented same current noEnter dispatch⟩
+              | closure _ _ | specification _ _ | prototype _ _ | natural _ | label _ | record _ | variant _ _ =>
+                  simp [stepRaw,control,frames,ResultControl] at successful
 
 /-! ## Finite completion -/
 
@@ -856,7 +916,7 @@ def groundObservation : RuntimeValue → Option Observation
   | .natural number => some (.natural number)
   | .boolean value => some (.boolean value)
   | .label name => some (.label name)
-  | .closure _ _ | .record _ | .specification _ _ | .prototype _ _ => none
+  | .closure _ _ | .record _ | .specification _ _ | .prototype _ _ | .variant _ _ => none
 
 /-- Adapter: a tick suspension is an advance, unless it advanced into a fault
 or blackhole (refusal); capacity suspension retains the exact state; only a
@@ -1380,4 +1440,12 @@ info: 'Minidregg.Theory.ObjectiveBendDemandCompleteness.open_term_not_started' d
 -/
 #guard_msgs in
 #print axioms open_term_not_started
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandCompleteness.inject_advance' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms inject_advance
+
 end Minidregg.Theory.ObjectiveBendDemandCompleteness

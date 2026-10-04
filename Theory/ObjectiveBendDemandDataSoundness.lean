@@ -119,6 +119,9 @@ inductive DeepEvaluates : Term → Data → Prop where
   | label {term : Term} {name : String} : Evaluates term (.label name) → DeepEvaluates term (.label name)
   | record {term : Term} {fields : List (String × Term)} {data : List (String × Data)} :
       Evaluates term (.record fields) → DeepFields fields data → DeepEvaluates term (.record data)
+  /-- A variant evaluates to an injection whose payload TERM deep-evaluates. -/
+  | variant {term payload : Term} {tag : String} {data : Data} :
+      Evaluates term (.inject tag payload) → DeepEvaluates payload data → DeepEvaluates term (.variant tag data)
 inductive DeepFields : List (String × Term) → List (String × Data) → Prop where
   | nil : DeepFields [] []
   | cons {name : String} {term : Term} {value : Data} {fields : List (String × Term)} {data : List (String × Data)} :
@@ -132,6 +135,7 @@ end
   | boolean evaluates => exact .boolean ⟨sourceSteps_trans steps evaluates.1,evaluates.2⟩
   | label evaluates => exact .label ⟨sourceSteps_trans steps evaluates.1,evaluates.2⟩
   | record evaluates fields => exact .record ⟨sourceSteps_trans steps evaluates.1,evaluates.2⟩ fields
+  | variant evaluates payload => exact .variant ⟨sourceSteps_trans steps evaluates.1,evaluates.2⟩ payload
 
  theorem deepFields_append {fields : List (String × Term)} {data : List (String × Data)}
     {name : String} {term : Term} {value : Data}
@@ -278,6 +282,31 @@ the value's source meaning, and leaves a settled heap extending the names. -/
       | closure _ _ | specification _ _ | prototype _ _ =>
           simp only [materializeWith] at h
           split at h <;> cases h
+      | variant tag payload =>
+          simp only [materializeWith] at h
+          split at h
+          · cases h
+          · split at h
+            · cases h
+            · rename_i bytesOk
+              have allocated : payload < state.heap.size := valid
+              cases forced : (forceWith policy limits budget.ticks
+                  {heap := state.heap,control := .enter payload,stack := []}).1 with
+              | suspended _ _ | divergent _ _ | refused _ _ => simp [forced] at h
+              | finished forcedValue retained =>
+                  simp only [forced] at h
+                  obtain ⟨_,_,h⟩ := except_bind_ok h
+                  obtain ⟨_,_,h⟩ := except_bind_ok h
+                  obtain ⟨child,childEq,h⟩ := except_bind_ok h
+                  cases h
+                  obtain ⟨next,same,nextSettled,grows,forcedValid,steps⟩ :=
+                    force_field_sound settled allocated forced
+                  obtain ⟨childDeep,last,lastSame,lastSettled,lastGrows⟩ :=
+                    ih _ forcedValue retained next child nextSettled forcedValid childEq
+                  refine ⟨.variant ⟨.refl _,.inject _ _⟩ (deepEvaluates_steps steps childDeep),last,?_,lastSettled,
+                    Nat.le_trans grows lastGrows⟩
+                  intro address old
+                  exact (same address old).trans (lastSame address (Nat.lt_of_lt_of_le old grows))
       | record fields =>
           simp only [materializeWith] at h
           split at h

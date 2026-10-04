@@ -30,6 +30,7 @@ theorem ValueTyping.weaken {assumptions : Assumptions} {before after : AddressTy
   | specification metadata ext => exact .specification (extension _ _ metadata) (extension _ _ ext)
   | prototype spec target => exact .prototype (extension _ _ spec) (extension _ _ target)
   | conversion prior agreement ih => exact .conversion ih agreement
+  | variant lookup assigned path => exact .variant lookup (extension _ _ assigned) path
 
 theorem CellTyping.weaken {assumptions : Assumptions} {before after : AddressTypes}
     {cell : Cell} {type : Ty} (extension : TypeExtension before after)
@@ -55,6 +56,9 @@ theorem FrameTyping.weaken {assumptions : Assumptions} {before after : AddressTy
       exact .condition (ClosureTyping.weaken extension zero) (environment.weaken extension) successor safe valid
   | binaryLeft right => exact .binaryLeft (ClosureTyping.weaken extension right)
   | binaryRight left => exact .binaryRight (ValueTyping.weaken extension left)
+  | case environment arms valid => exact .case (environment.weaken extension) arms valid
+  | ifBool whenTrue whenFalse =>
+      exact .ifBool (ClosureTyping.weaken extension whenTrue) (ClosureTyping.weaken extension whenFalse)
 
 theorem StackTyping.weaken {assumptions : Assumptions} {before after : AddressTypes}
     {stack : List Frame} {input output : Ty} (extension : TypeExtension before after)
@@ -176,7 +180,8 @@ theorem immediate_value_typed {assumptions : Assumptions} {context : Context}
       ∀ value, immediateValue term environment = some value →
         ValueTyping assumptions types value type)
     (motive_2 := fun _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
+    (motive_3 := fun _ _ _ _ _ _ => True)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
   · intros; simp [immediateValue,scalarValue] at *
   · intro context n types env envTyped value found
     simp only [immediateValue,scalarValue,Option.some.injEq] at found
@@ -205,6 +210,11 @@ theorem immediate_value_typed {assumptions : Assumptions} {context : Context}
   · intros; simp [immediateValue,scalarValue] at *
   · intros; simp [immediateValue,scalarValue] at *
   · intros; simp [immediateValue,scalarValue] at *
+  · intros; simp [immediateValue,scalarValue] at *
+  · intros; simp [immediateValue,scalarValue] at *
+  · intros; simp [immediateValue,scalarValue] at *
+  · intros; trivial
+  · intros; trivial
   · intros; trivial
   · intros; trivial
 
@@ -536,19 +546,20 @@ theorem same_type_preserves_head {assumptions : Assumptions} {first second resul
       exact .alias found (canonical_agreement_normalizes equal.symm normal)
 
 inductive HeadKind where
-  | natural | boolean | label | function | row | specification | prototype | custody | variable
+  | natural | boolean | label | function | row | specification | prototype | custody | variable | variant
   deriving DecidableEq
 
 def typeHead : Ty → HeadKind
   | .natural => .natural | .boolean => .boolean | .label => .label
   | .arrow _ _ _ _ => .function | .emptyRow | .field _ _ _ => .row
   | .specification _ _ => .specification | .prototype _ _ => .prototype
-  | .custody _ => .custody | .variable _ => .variable
+  | .custody _ => .custody | .variable _ => .variable | .variant _ => .variant
 
 def valueHead : RuntimeValue → HeadKind
   | .natural _ => .natural | .boolean _ => .boolean | .label _ => .label
   | .closure _ _ => .function | .record _ => .row
   | .specification _ _ => .specification | .prototype _ _ => .prototype
+  | .variant _ _ => .variant
 
 theorem insert_canonical_row_head (row : Ty) (name : String) (member : Ty) :
     typeHead (row.insertCanonical name member) = .row := by
@@ -595,6 +606,7 @@ theorem value_head_correct {assumptions : Assumptions} {types : AddressTypes}
       exact row_head_normalizes _ fuel _ isRow
   | specification metadata ext => exact ⟨_,.direct _ rfl,rfl⟩
   | prototype spec target => exact ⟨_,.direct _ rfl,rfl⟩
+  | variant lookup assigned path => exact ⟨_,.direct _ rfl,rfl⟩
   | conversion prior agreement ih =>
       obtain ⟨head,normal,kind⟩ := ih
       exact ⟨head,same_type_preserves_head agreement normal,kind⟩
@@ -619,6 +631,17 @@ theorem boolean_value_form {assumptions : Assumptions} {types : AddressTypes}
   have scalarKind : valueHead value = .boolean := by simpa [typeHead] using kind.symm
   cases value with
   | boolean boolean => exact ⟨boolean,rfl⟩
+  | _ => cases scalarKind
+
+theorem label_value_form {assumptions : Assumptions} {types : AddressTypes}
+    {value : RuntimeValue} (typed : ValueTyping assumptions types value .label) :
+    ∃ name, value = .label name := by
+  obtain ⟨head,normal,kind⟩ := value_head_correct typed
+  have same := head_normalizes_unique normal (.direct .label rfl)
+  subst head
+  have scalarKind : valueHead value = .label := by simpa [typeHead] using kind.symm
+  cases value with
+  | label name => exact ⟨name,rfl⟩
   | _ => cases scalarKind
 
 theorem canonical_same_type (assumptions : Assumptions) (first second : Ty)
@@ -654,6 +677,7 @@ theorem value_specification_fields {assumptions : Assumptions} {types : AddressT
       cases same
       exact ⟨_,_,metadataAssigned,extensionAssigned,.direct _ rfl⟩
   | prototype spec target => intros; contradiction
+  | variant lookup assigned path => intros; contradiction
   | conversion prior agreement ih =>
       intro metadata extension same
       obtain ⟨metadataType,extensionType,metadataAssigned,extensionAssigned,normal⟩ := ih metadata extension same
@@ -728,6 +752,7 @@ theorem value_prototype_fields {assumptions : Assumptions} {types : AddressTypes
   | prototype specAssigned targetAssigned =>
       intro spec target same; cases same
       exact ⟨_,_,specAssigned,targetAssigned,.direct _ rfl⟩
+  | variant lookup assigned path => intros; contradiction
   | conversion prior agreement ih =>
       intro spec target same
       obtain ⟨specType,targetType,specAssigned,targetAssigned,normal⟩ := ih spec target same
@@ -813,6 +838,7 @@ theorem value_closure_fields {assumptions : Assumptions} {types : AddressTypes}
   | closure env bodyTyped safe valid captures =>
       intro body environment same; cases same
       exact ⟨⟨_,_,_,env,bodyTyped,safe,valid,captures⟩,.direct _ rfl⟩
+  | variant lookup assigned path => intros; contradiction
   | conversion prior agreement ih =>
       intro body environment same
       obtain ⟨captured,normal⟩ := ih body environment same
@@ -1101,6 +1127,19 @@ theorem insert_usage_bound {assumptions : Assumptions} {context : Context}
     {term : Term} {type : Ty} {uses : Uses} (typed : PartialTyping assumptions context term type uses)
     {depth : Nat} (bound : depth ≤ context.length) : depth ≤ uses.length := by rw [source_uses_length typed]; exact bound
 
+/-- Arms account for every lexical slot of the enclosing context. -/
+theorem arms_uses_length {assumptions : Assumptions} {context : Context}
+    {arms : List (String × Term)} {row result : Ty} {uses : Uses}
+    (typed : ArmsTyping assumptions context arms row result uses) : uses.length = context.length := by
+  induction arms generalizing row uses with
+  | nil => cases typed; simp [zeroUses]
+  | cons arm rest ih =>
+      cases typed with
+      | cons bodyTyped safe shareable restTyped =>
+          have bodyLength := source_uses_length bodyTyped
+          have restLength := ih restTyped
+          simp_all [addUses,List.length_zipWith,List.length_tail]
+
 /-- General capture-sensitive lexical weakening over EVERY source constructor,
 including nested fields and conditional/lambda binders. The inserted slot is
 unused; its declared context validity is checked rather than assumed pure. -/
@@ -1117,7 +1156,11 @@ theorem source_insert_binding {assumptions : Assumptions} {context : Context}
       depth ≤ context.length → validContext assumptions.shareableVariables [binding] = true →
       FieldsTyping assumptions (context.insertIdx depth binding)
         (fields.map fun field => (field.1,field.2.rename (shiftIndex depth))) row (uses.insertIdx depth 0))
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
+    (motive_3 := fun context arms row result uses _ => ∀ depth binding,
+      depth ≤ context.length → validContext assumptions.shareableVariables [binding] = true →
+      ArmsTyping assumptions (context.insertIdx depth binding)
+        (arms.map fun arm => (arm.1,arm.2.rename (shiftIndex (depth+1)))) row result (uses.insertIdx depth 0))
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
   · intro context index declared found depth binding bound bindingValid
     simpa only [Term.rename,← variable_uses_insert context binding index depth bound] using
       (PartialTyping.bound (binding_insert_shift found) : PartialTyping assumptions (context.insertIdx depth binding)
@@ -1198,6 +1241,21 @@ theorem source_insert_binding {assumptions : Assumptions} {context : Context}
       (PartialTyping.ifZero (ihValue depth binding bound bindingValid) (ihZero depth binding bound bindingValid)
         (ihSuccessor (depth+1) binding successorBound bindingValid)
         (safe_uses_insert _ su (depth+1) binding successorSafe successorBound))
+  · intro context tag payload payloadType row uses fuel payloadTyped lookup ih depth binding bound bindingValid
+    simpa only [Term.rename] using (PartialTyping.inject (ih depth binding bound bindingValid) lookup)
+  · intro context scrutinee arms row result su au scrutineeTyped armsTyped ihScrutinee ihArms depth binding bound bindingValid
+    have counts := add_uses_insert su au depth ((source_uses_length scrutineeTyped).trans (arms_uses_length armsTyped).symm) (insert_usage_bound scrutineeTyped bound)
+    simpa only [Term.rename,lift_shift_index,counts] using
+      (PartialTyping.case (ihScrutinee depth binding bound bindingValid) (ihArms depth binding bound bindingValid))
+  · intro context condition whenTrue whenFalse result cu tu fu conditionTyped trueTyped falseTyped ihCondition ihTrue ihFalse depth binding bound bindingValid
+    have trueLength := source_uses_length trueTyped
+    have falseLength := source_uses_length falseTyped
+    have firstCounts := add_uses_insert tu fu depth (trueLength.trans falseLength.symm) (insert_usage_bound trueTyped bound)
+    have sumLength : (addUses tu fu).length = context.length := by simp [addUses,List.length_zipWith,trueLength,falseLength]
+    have allCounts := add_uses_insert cu (addUses tu fu) depth ((source_uses_length conditionTyped).trans sumLength.symm) (insert_usage_bound conditionTyped bound)
+    simpa only [Term.rename,firstCounts,allCounts] using
+      (PartialTyping.ifBool (ihCondition depth binding bound bindingValid) (ihTrue depth binding bound bindingValid)
+        (ihFalse depth binding bound bindingValid))
   · intro context depth binding bound bindingValid
     simpa only [List.map_nil,← zero_uses_insert context binding depth bound] using (FieldsTyping.nil (context.insertIdx depth binding) : FieldsTyping assumptions _ [] .emptyRow _)
   · intro context name body rest type row bu ru bodyTyped restTyped ihBody ihRest depth binding bound bindingValid
@@ -1205,6 +1263,21 @@ theorem source_insert_binding {assumptions : Assumptions} {context : Context}
     have counts := add_uses_insert bu ru depth ((source_uses_length bodyTyped).trans restLength.symm) (insert_usage_bound bodyTyped bound)
     simpa only [List.map_cons,counts] using
       (FieldsTyping.cons (ihBody depth binding bound bindingValid) (ihRest depth binding bound bindingValid))
+  · intro context result depth binding bound bindingValid
+    simpa only [List.map_nil,← zero_uses_insert context binding depth bound] using
+      (ArmsTyping.nil (context.insertIdx depth binding) result : ArmsTyping assumptions _ [] .emptyRow result _)
+  · intro context name body rest payload row result bu ru bodyTyped safe shareable restTyped ihBody ihRest depth binding bound bindingValid
+    have bodyBound : depth+1 ≤ (⟨payload,.unrestricted⟩ :: context).length := by simpa using bound
+    have nonempty : 0 < bu.length := by rw [source_uses_length bodyTyped]; simp
+    have tailLength : bu.tail.length = context.length := by simp [List.length_tail,source_uses_length bodyTyped]
+    have counts := add_uses_insert bu.tail ru depth (tailLength.trans (arms_uses_length restTyped).symm)
+      (by rw [tailLength]; exact bound)
+    have bodyNext := ihBody (depth+1) binding bodyBound bindingValid
+    have safeNext := safe_uses_insert _ bu (depth+1) binding safe bodyBound
+    simp only [List.insertIdx_succ_cons] at bodyNext safeNext
+    have combined := ArmsTyping.cons (name := name) bodyNext safeNext shareable (ihRest depth binding bound bindingValid)
+    rw [uses_tail_insert nonempty,counts] at combined
+    simpa only [List.map_cons] using combined
 
 theorem shift_zero : shiftIndex 0 = Nat.succ := by funext index; simp [shiftIndex,Nat.succ_eq_add_one]
 
@@ -1500,7 +1573,8 @@ theorem source_bound_assignment {assumptions : Assumptions} {context : Context}
           ConversionPath assumptions binding.type type
       | _ => True)
     (motive_2 := fun _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
+    (motive_3 := fun _ _ _ _ _ _ => True)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
   · intro context index binding found; exact ⟨binding,found,.refl binding.type⟩
   · intros; trivial
   · intros; trivial
@@ -1525,6 +1599,12 @@ theorem source_bound_assignment {assumptions : Assumptions} {context : Context}
   · intros; trivial
   · intros; trivial
   · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+
 
 theorem source_mix_expansion {assumptions : Assumptions} {context : Context}
     {term : Term} {type : Ty} {uses : Uses}
@@ -1539,7 +1619,8 @@ theorem source_mix_expansion {assumptions : Assumptions} {context : Context}
           Nonempty (ReusableTerm assumptions context (mixBody lower upper) type)
       | _ => True)
     (motive_2 := fun _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
+    (motive_3 := fun _ _ _ _ _ _ => True)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
   · intros; trivial
   · intros; trivial
   · intros; trivial
@@ -1566,6 +1647,12 @@ theorem source_mix_expansion {assumptions : Assumptions} {context : Context}
   · intros; trivial
   · intros; trivial
   · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+
 
 /-- Evaluating every checked mix, including source result conversions, preserves
 its actual lexical capture qualification and the executor's generated body. -/
@@ -1606,7 +1693,8 @@ theorem source_fix_expansion {assumptions : Assumptions} {context : Context}
           ConversionPath assumptions target type
       | _ => True)
     (motive_2 := fun _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
+    (motive_3 := fun _ _ _ _ _ _ => True)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
   · intros; trivial
   · intros; trivial
   · intros; trivial
@@ -1632,6 +1720,12 @@ theorem source_fix_expansion {assumptions : Assumptions} {context : Context}
   · intros; trivial
   · intros; trivial
   · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+
 
 /-- Generic Fix preserves typed address assignments at its actual cyclic
 allocation. The suspended origin contains the new address, preserving the
@@ -1690,6 +1784,7 @@ theorem value_record_member {assumptions : Assumptions} {types : AddressTypes}
   | closure environment body safe valid captures => intro fuel name member lookup; cases fuel <;> simp [Ty.lookup] at lookup
   | specification metadata ext => intro fuel name member lookup; cases fuel <;> simp [Ty.lookup] at lookup
   | prototype spec target => intro fuel name member lookup; cases fuel <;> simp [Ty.lookup] at lookup
+  | variant rowLookup assigned path => intro fuel name member lookup; cases fuel <;> simp [Ty.lookup] at lookup
 
 theorem stack_field_member {assumptions : Assumptions} {types : AddressTypes}
     {stack : List Frame} {input result : Ty} {value : RuntimeValue}
@@ -1776,7 +1871,8 @@ theorem source_application_decomposition {assumptions : Assumptions} {context : 
           uses = addUses functionUses argumentUses ∧ ConversionPath assumptions codomain type
       | _ => True)
     (motive_2 := fun _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
+    (motive_3 := fun _ _ _ _ _ _ => True)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
   · intros; trivial
   · intros; trivial
   · intros; trivial
@@ -1803,6 +1899,12 @@ theorem source_application_decomposition {assumptions : Assumptions} {context : 
   · intros; trivial
   · intros; trivial
   · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+
 
 /-- Focusing the function of ANY well-typed application keeps both lexical
 origins, safely splits the usage vector, and retains copy/shareability evidence
@@ -1840,6 +1942,8 @@ def sourceFocus (term : Term) (environment : Environment) : Option (Term × Fram
   | .extend target fields => some (target,.extend fields environment)
   | .binary primitive left right => some (left,.binaryLeft primitive right environment)
   | .ifZero value zero successor => some (value,.condition zero successor environment)
+  | .case scrutinee arms => some (scrutinee,.case arms environment)
+  | .ifBool condition whenTrue whenFalse => some (condition,.ifBool whenTrue whenFalse environment)
   | _ => none
 
 structure FocusedSource (assumptions : Assumptions) (types : AddressTypes)
@@ -1868,7 +1972,8 @@ theorem source_focus_typed {assumptions : Assumptions} {context : Context}
       | some (target,frame) => Nonempty (FocusedSource assumptions types target environment frame type)
       | none => True)
     (motive_2 := fun _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
+    (motive_3 := fun _ _ _ _ _ _ => True)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
   · intros; simp [sourceFocus]
   · intros; simp [sourceFocus]
   · intros; simp [sourceFocus]
@@ -1929,6 +2034,25 @@ theorem source_focus_typed {assumptions : Assumptions} {context : Context}
       ⟨context,zu,environmentTyped,zeroTyped,zeroSafe,valid⟩
     exact ⟨⟨.natural,result,⟨context,vu,environmentTyped,valueTyped,valueSafe,valid⟩,
       .condition zeroOrigin environmentTyped successorTyped successorSafe valid,.refl _⟩⟩
+  · intros; simp [sourceFocus]
+  · intro context scrutinee arms row result su au scrutineeTyped armsTyped ihScrutinee ihArms types environment environmentTyped safe valid
+    have scrutineeSafe := safe_add_uses_left context su au (source_uses_length scrutineeTyped) (arms_uses_length armsTyped) safe
+    exact ⟨⟨.variant row,result,⟨context,su,environmentTyped,scrutineeTyped,scrutineeSafe,valid⟩,
+      .case environmentTyped armsTyped valid,.refl _⟩⟩
+  · intro context condition whenTrue whenFalse result cu tu fu conditionTyped trueTyped falseTyped ihCondition ihTrue ihFalse types environment environmentTyped safe valid
+    have cuLength := source_uses_length conditionTyped
+    have tuLength := source_uses_length trueTyped
+    have fuLength := source_uses_length falseTyped
+    have branchLength : (addUses tu fu).length = context.length := by
+      simp [addUses,List.length_zipWith,tuLength,fuLength]
+    have conditionSafe := safe_add_uses_left context cu (addUses tu fu) cuLength branchLength safe
+    have branchSafe := safe_add_uses_right context cu (addUses tu fu) cuLength branchLength safe
+    have trueSafe := safe_add_uses_left context tu fu tuLength fuLength branchSafe
+    have falseSafe := safe_add_uses_right context tu fu tuLength fuLength branchSafe
+    exact ⟨⟨.boolean,result,⟨context,cu,environmentTyped,conditionTyped,conditionSafe,valid⟩,
+      .ifBool ⟨context,tu,environmentTyped,trueTyped,trueSafe,valid⟩ ⟨context,fu,environmentTyped,falseTyped,falseSafe,valid⟩,.refl _⟩⟩
+  · intros; trivial
+  · intros; trivial
   · intros; trivial
   · intros; trivial
 
@@ -2118,7 +2242,8 @@ theorem source_record_decomposition {assumptions : Assumptions} {context : Conte
       | .record fields => ∃ row, FieldsTyping assumptions context fields row uses ∧ ConversionPath assumptions row type
       | _ => True)
     (motive_2 := fun _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
+    (motive_3 := fun _ _ _ _ _ _ => True)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
   · intros; trivial
   · intros; trivial
   · intros; trivial
@@ -2144,6 +2269,12 @@ theorem source_record_decomposition {assumptions : Assumptions} {context : Conte
   · intros; trivial
   · intros; trivial
   · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+
 
 /-- Actual record allocation preserves all typed addresses and lazy field
 origins, including declaration-order first-field shadowing. Row conversion is
@@ -2267,7 +2398,8 @@ theorem source_pair_decomposition {assumptions : Assumptions} {context : Context
       | .prototype left right => PairDerivation assumptions context false left right type uses
       | _ => True)
     (motive_2 := fun _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
+    (motive_3 := fun _ _ _ _ _ _ => True)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
   · intros; trivial
   · intros; trivial
   · intros; trivial
@@ -2295,6 +2427,12 @@ theorem source_pair_decomposition {assumptions : Assumptions} {context : Context
   · intros; trivial
   · intros; trivial
   · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+
 
 /-- Specification and prototype allocation keep both authored source origins,
 their independently typed pointers, and all prior heap identities. -/
@@ -2451,6 +2589,10 @@ theorem primitive_result_typed {assumptions : Assumptions} {types : AddressTypes
       obtain ⟨first,rfl⟩ := boolean_value_form leftTyped
       obtain ⟨second,rfl⟩ := boolean_value_form rightTyped
       exact ⟨.boolean (first&&second),.boolean (first&&second),rfl,rfl,.boolean _⟩
+  | labelEqual =>
+      obtain ⟨first,rfl⟩ := label_value_form leftTyped
+      obtain ⟨second,rfl⟩ := label_value_form rightTyped
+      exact ⟨.boolean (first==second),.boolean (first==second),rfl,rfl,.boolean _⟩
 
 theorem stack_binary_right_values {assumptions : Assumptions} {types : AddressTypes}
     {stack : List Frame} {input result : Ty} {right : RuntimeValue}
@@ -2614,6 +2756,309 @@ theorem typed_completion_preserved {assumptions : Assumptions} {types : AddressT
   · simpa [stepRaw,returned,empty] using (ControlTyping.complete valueTyped)
   · simpa [stepRaw,returned,empty] using typed.stack
 
+/-! ## Sums: injection, case and Boolean branching -/
+
+theorem source_convert_path {assumptions : Assumptions} {context : Context} {term : Term}
+    {first last : Ty} {uses : Uses} (typed : PartialTyping assumptions context term first uses)
+    (path : ConversionPath assumptions first last) : PartialTyping assumptions context term last uses := by
+  induction path with
+  | refl => exact typed
+  | step prior agreement ih => exact .conversion ih agreement
+
+def InjectDerivation (assumptions : Assumptions) (context : Context)
+    (tag : String) (payload : Term) (type : Ty) (uses : Uses) : Prop :=
+  ∃ payloadType row fuel, PartialTyping assumptions context payload payloadType uses ∧
+    row.lookup assumptions.bounds fuel tag = some payloadType ∧
+    ConversionPath assumptions (.variant row) type
+
+theorem source_inject_decomposition {assumptions : Assumptions} {context : Context}
+    {term : Term} {type : Ty} {uses : Uses}
+    (source : PartialTyping assumptions context term type uses) :
+    match term with
+    | .inject tag payload => InjectDerivation assumptions context tag payload type uses
+    | _ => True := by
+  refine PartialTyping.rec
+    (motive_1 := fun context term type uses _ => match term with
+      | .inject tag payload => InjectDerivation assumptions context tag payload type uses
+      | _ => True)
+    (motive_2 := fun _ _ _ _ _ => True)
+    (motive_3 := fun _ _ _ _ _ _ => True)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ source
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intro context term actual expected uses prior agreement ih
+    cases term <;> try trivial
+    obtain ⟨payloadType,row,fuel,payloadTyped,lookup,path⟩ := ih
+    exact ⟨payloadType,row,fuel,payloadTyped,lookup,.step path agreement⟩
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intro context tag payload payloadType row uses fuel payloadTyped lookup ih
+    exact ⟨payloadType,row,fuel,payloadTyped,lookup,.refl _⟩
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
+
+/-- Injection allocates its payload thunk at the payload's source type; the
+returned variant is typed at the declared row by that exact address. -/
+theorem typed_inject_preserved {assumptions : Assumptions} {types : AddressTypes}
+    {state : State} {result : Ty} {tag : String} {payload : Term} {environment : Environment}
+    (typed : StateTyping assumptions types state result)
+    (evaluate : state.control = .evaluate (.inject tag payload) environment) :
+    ∃ after, TypeExtension types after ∧
+      Nonempty (StateTyping assumptions after (stepRaw state) result) := by
+  have control := typed.control
+  rw [evaluate] at control
+  cases control with
+  | evaluate origin =>
+    have decomposition : InjectDerivation assumptions origin.context tag payload typed.current origin.uses :=
+      source_inject_decomposition origin.source
+    obtain ⟨payloadType,row,fuel,payloadTyped,lookup,path⟩ := decomposition
+    let after := types ++ [payloadType]
+    have extension : TypeExtension types after := type_extension_append types [payloadType]
+    let payloadOrigin : ClosureTyping assumptions after ⟨payload,environment⟩ payloadType :=
+      ⟨origin.context,origin.uses,origin.environment.weaken extension,payloadTyped,origin.safe,origin.contextValid⟩
+    have assigned : after[state.heap.size]? = some payloadType := by
+      rw [← typed.heap.length]
+      simp [after]
+    have value : ValueTyping assumptions after (.variant tag state.heap.size) (.variant row) :=
+      .variant lookup assigned (.refl _)
+    refine ⟨after,extension,⟨step_alloc_certificate typed after (.variant row) ?_ ?_ ?_⟩⟩
+    · simpa [stepRaw,evaluate,after] using heap_typed_push typed.heap (CellTyping.suspended payloadOrigin)
+    · simpa [stepRaw,evaluate] using ControlTyping.returned value
+    · simpa [stepRaw,evaluate] using StackTyping.weaken extension (stack_convert_path path typed.stack)
+
+theorem value_variant_fields {assumptions : Assumptions} {types : AddressTypes}
+    {value : RuntimeValue} {type : Ty} (typed : ValueTyping assumptions types value type) :
+    ∀ tag address, value = .variant tag address →
+      ∃ (row member actual : Ty) (fuel : Nat), row.lookup assumptions.bounds fuel tag = some member ∧
+        types[address]? = some actual ∧ ConversionPath assumptions actual member ∧
+        HeadNormalizes assumptions.bounds type (.variant row.canonical) := by
+  induction typed with
+  | natural value => intros; contradiction
+  | boolean value => intros; contradiction
+  | label value => intros; contradiction
+  | closure environment body safe valid captures => intros; contradiction
+  | record isRow members => intros; contradiction
+  | specification metadata ext => intros; contradiction
+  | prototype spec target => intros; contradiction
+  | variant lookup assigned path =>
+      intro tag address same
+      cases same
+      exact ⟨_,_,_,_,lookup,assigned,path,.direct _ rfl⟩
+  | conversion prior agreement ih =>
+      intro tag address same
+      obtain ⟨row,member,actual,fuel,lookup,assigned,path,normal⟩ := ih tag address same
+      exact ⟨row,member,actual,fuel,lookup,assigned,path,same_type_preserves_head agreement normal⟩
+
+theorem variant_value_form {assumptions : Assumptions} {types : AddressTypes}
+    {value : RuntimeValue} {row : Ty} (typed : ValueTyping assumptions types value (.variant row)) :
+    ∃ tag address, value = .variant tag address := by
+  obtain ⟨head,normal,kind⟩ := value_head_correct typed
+  have same := head_normalizes_unique normal (.direct (.variant row) rfl)
+  rw [same,Ty.canonical] at kind
+  have shape : valueHead value = .variant := by simpa [typeHead] using kind.symm
+  cases value with
+  | variant tag address => exact ⟨tag,address,rfl⟩
+  | _ => cases shape
+
+/-- Arms typed in source order denote a closed row whose first visible member
+for a label is exactly the binder type of the first matching arm. -/
+theorem arms_row_closed {assumptions : Assumptions} {context : Context} {arms : List (String × Term)}
+    {row result : Ty} {uses : Uses} (typed : ArmsTyping assumptions context arms row result uses) :
+    row.tail = .emptyRow := by
+  induction arms generalizing row uses with
+  | nil => cases typed; rfl
+  | cons arm rest ih =>
+      cases typed with
+      | cons bodyTyped safe shareable restTyped => simpa [Ty.tail] using ih restTyped
+
+theorem arms_typing_find {assumptions : Assumptions} {context : Context} {arms : List (String × Term)}
+    {row result : Ty} {uses : Uses} (typed : ArmsTyping assumptions context arms row result uses)
+    {tag key : String} {body : Term} (found : arms.find? (fun arm => arm.1 == tag) = some (key,body)) :
+    key = tag ∧ ∃ payload bodyUses, finiteLookup row tag = some payload ∧
+      PartialTyping assumptions (⟨payload,.unrestricted⟩ :: context) body result bodyUses ∧
+      safeUses (⟨payload,.unrestricted⟩ :: context) bodyUses = true ∧
+      payload.shareableUnder assumptions.shareableVariables = true := by
+  induction arms generalizing row uses with
+  | nil => simp at found
+  | cons arm rest ih =>
+      obtain ⟨name,armBody⟩ := arm
+      cases typed with
+      | cons bodyTyped safe shareable restTyped =>
+        by_cases hit : name = tag
+        · subst hit
+          simp at found
+          obtain ⟨rfl,rfl⟩ := found
+          exact ⟨rfl,_,_,by simp [finiteLookup],bodyTyped,safe,shareable⟩
+        · have next : rest.find? (fun arm => arm.1 == tag) = some (key,body) := by simpa [hit] using found
+          obtain ⟨keyEq,payload,bodyUses,lookup,typedBody,safeBody,share⟩ := ih restTyped next
+          exact ⟨keyEq,payload,bodyUses,by simpa [finiteLookup,hit] using lookup,typedBody,safeBody,share⟩
+
+theorem arms_typing_absent {assumptions : Assumptions} {context : Context} {arms : List (String × Term)}
+    {row result : Ty} {uses : Uses} (typed : ArmsTyping assumptions context arms row result uses)
+    {tag : String} (absent : arms.find? (fun arm => arm.1 == tag) = none) : finiteLookup row tag = none := by
+  induction arms generalizing row uses with
+  | nil => cases typed; rfl
+  | cons arm rest ih =>
+      obtain ⟨name,armBody⟩ := arm
+      cases typed with
+      | cons bodyTyped safe shareable restTyped =>
+        have hit : name ≠ tag := by intro same; subst same; simp at absent
+        have next : rest.find? (fun arm => arm.1 == tag) = none := by simpa [hit] using absent
+        simpa [finiteLookup,hit] using ih restTyped next
+
+theorem closed_lookup_finite {bounds : Bounds} {row member : Ty} {fuel : Nat} {name : String}
+    (closed : row.tail = .emptyRow) (lookup : row.lookup bounds fuel name = some member) :
+    finiteLookup row name = some member := by
+  rcases lookup_prefix_or_alias bounds fuel row name member lookup with visible | ⟨_,index,_,_,tail,_,_⟩
+  · exact visible
+  · rw [closed] at tail; cases tail
+
+theorem stack_case_value {assumptions : Assumptions} {types : AddressTypes}
+    {stack : List Frame} {input result : Ty} {value : RuntimeValue}
+    (continuation : StackTyping assumptions types stack input result)
+    (valueTyped : ValueTyping assumptions types value input) :
+    ∀ arms environment rest, stack = .case arms environment :: rest →
+      ∃ row branchType context uses, EnvironmentTyping types context environment ∧
+        ArmsTyping assumptions context arms row branchType uses ∧
+        validContext assumptions.shareableVariables context = true ∧
+        ValueTyping assumptions types value (.variant row) ∧
+        StackTyping assumptions types rest branchType result := by
+  induction continuation with
+  | nil type => intro arms environment rest impossible; simp at impossible
+  | cons frame restTyped =>
+      intro arms environment rest same
+      cases same
+      cases frame with
+      | case environmentTyped armsTyped valid => exact ⟨_,_,_,_,environmentTyped,armsTyped,valid,valueTyped,restTyped⟩
+  | conversion agreement restTyped ih => exact ih (.conversion valueTyped agreement)
+
+/-- A typed returned variant always has its arm (no missingArm), and the arm
+binder is a fresh indirection cell typed at the arm's declared payload type,
+reached from the payload's own address type along a finite conversion path. -/
+theorem typed_case_preserved {assumptions : Assumptions} {types : AddressTypes}
+    {state : State} {result : Ty} {value : RuntimeValue} {arms : List (String × Term)}
+    {environment : Environment} {rest : List Frame}
+    (typed : StateTyping assumptions types state result)
+    (returned : state.control = .returned value)
+    (stack : state.stack = .case arms environment :: rest) :
+    ∃ after, TypeExtension types after ∧
+      Nonempty (StateTyping assumptions after (stepRaw state) result) := by
+  have valueTyped : ValueTyping assumptions types value typed.current := by
+    have control := typed.control
+    rw [returned] at control
+    cases control with | returned valueTyped => exact valueTyped
+  obtain ⟨row,branchType,context,uses,environmentTyped,armsTyped,valid,variantTyped,restTyped⟩ :=
+    stack_case_value typed.stack valueTyped arms environment rest stack
+  obtain ⟨tag,address,rfl⟩ := variant_value_form variantTyped
+  obtain ⟨valueRow,member,actual,fuel,lookup,assigned,path,normal⟩ := value_variant_fields variantTyped tag address rfl
+  have rowsEq : valueRow.canonical = row.canonical := by
+    have same := head_normalizes_unique normal (.direct (.variant row) rfl)
+    simpa [Ty.canonical] using same
+  obtain ⟨depth,armMember,armLookup,memberEq⟩ :=
+    canonical_lookup_transport assumptions.bounds row valueRow rowsEq.symm fuel tag member lookup
+  have armVisible := closed_lookup_finite (arms_row_closed armsTyped) armLookup
+  cases found : arms.find? (fun arm => arm.1 == tag) with
+  | none =>
+      have absent := arms_typing_absent armsTyped found
+      rw [absent] at armVisible
+      cases armVisible
+  | some arm =>
+    obtain ⟨key,body⟩ := arm
+    obtain ⟨_,payload,bodyUses,payloadLookup,bodyTyped,bodySafe,shareable⟩ := arms_typing_find armsTyped found
+    have payloadEq : armMember = payload := Option.some.inj (armVisible.symm.trans payloadLookup)
+    subst payloadEq
+    have toPayload : ConversionPath assumptions actual armMember :=
+      .step path (canonical_same_type assumptions member armMember memberEq.symm)
+    let after := types ++ [armMember]
+    have extension : TypeExtension types after := type_extension_append types [armMember]
+    have addressAssigned : after[address]? = some actual := extension _ _ assigned
+    have freshAssigned : after[state.heap.size]? = some armMember := by
+      rw [← typed.heap.length]
+      simp [after]
+    let bindingContext : Context := [⟨actual,.affine⟩]
+    have bindingSource : PartialTyping assumptions bindingContext (.bound 0) armMember (variableUses bindingContext 0) :=
+      source_convert_path (PartialTyping.bound (context := bindingContext) (binding := ⟨actual,.affine⟩) rfl) toPayload
+    have bindingSafe : safeUses bindingContext (variableUses bindingContext 0) = true := by
+      simp [bindingContext,safeUses,variableUses,safeQuantity]
+    have bindingValid : validContext assumptions.shareableVariables bindingContext = true := by
+      simp [bindingContext,validContext]
+    let binder : ClosureTyping assumptions after ⟨.bound 0,[address]⟩ armMember :=
+      ⟨bindingContext,variableUses bindingContext 0,(EnvironmentTyping.empty after).cons addressAssigned,
+        bindingSource,bindingSafe,bindingValid⟩
+    have bodyValid : validContext assumptions.shareableVariables (⟨armMember,.unrestricted⟩ :: context) = true := by
+      simp only [validContext,List.all_cons] at valid ⊢
+      simp [shareable,valid]
+    let next : ClosureTyping assumptions after ⟨body,state.heap.size :: environment⟩ branchType :=
+      ⟨⟨armMember,.unrestricted⟩ :: context,bodyUses,(environmentTyped.weaken extension).cons freshAssigned,
+        bodyTyped,bodySafe,bodyValid⟩
+    refine ⟨after,extension,⟨step_alloc_certificate typed after branchType ?_ ?_ ?_⟩⟩
+    · simpa [stepRaw,returned,stack,found,after] using heap_typed_push typed.heap (CellTyping.suspended binder)
+    · simpa [stepRaw,returned,stack,found] using ControlTyping.evaluate next
+    · simpa [stepRaw,returned,stack,found] using StackTyping.weaken extension restTyped
+
+theorem stack_ifBool_value {assumptions : Assumptions} {types : AddressTypes}
+    {stack : List Frame} {input result : Ty} {value : RuntimeValue}
+    (continuation : StackTyping assumptions types stack input result)
+    (valueTyped : ValueTyping assumptions types value input) :
+    ∀ whenTrue whenFalse environment rest, stack = .ifBool whenTrue whenFalse environment :: rest →
+      ∃ branchType, ∃ _trueOrigin : ClosureTyping assumptions types ⟨whenTrue,environment⟩ branchType,
+        ∃ _falseOrigin : ClosureTyping assumptions types ⟨whenFalse,environment⟩ branchType,
+        ValueTyping assumptions types value .boolean ∧ StackTyping assumptions types rest branchType result := by
+  induction continuation with
+  | nil type => intro whenTrue whenFalse environment rest impossible; simp at impossible
+  | cons frame restTyped =>
+      intro whenTrue whenFalse environment rest same
+      cases same
+      cases frame with
+      | ifBool trueOrigin falseOrigin => exact ⟨_,trueOrigin,falseOrigin,valueTyped,restTyped⟩
+  | conversion agreement restTyped ih => exact ih (.conversion valueTyped agreement)
+
+/-- A typed returned Boolean selects exactly one branch, typed at the frame's
+result; no wrongValue refusal is reachable. -/
+theorem typed_ifBool_preserved {assumptions : Assumptions} {types : AddressTypes}
+    {state : State} {result : Ty} {value : RuntimeValue} {whenTrue whenFalse : Term}
+    {environment : Environment} {rest : List Frame}
+    (typed : StateTyping assumptions types state result)
+    (returned : state.control = .returned value)
+    (stack : state.stack = .ifBool whenTrue whenFalse environment :: rest) :
+    Nonempty (StateTyping assumptions types (stepRaw state) result) := by
+  have valueTyped : ValueTyping assumptions types value typed.current := by
+    have control := typed.control
+    rw [returned] at control
+    cases control with | returned valueTyped => exact valueTyped
+  obtain ⟨branchType,trueOrigin,falseOrigin,booleanTyped,restTyped⟩ :=
+    stack_ifBool_value typed.stack valueTyped whenTrue whenFalse environment rest stack
+  obtain ⟨condition,rfl⟩ := boolean_value_form booleanTyped
+  cases condition with
+  | true =>
+      refine ⟨step_certificate typed branchType ?_ ?_ ?_⟩
+      · simpa [stepRaw,returned,stack] using typed.heap
+      · simpa [stepRaw,returned,stack] using ControlTyping.evaluate trueOrigin
+      · simpa [stepRaw,returned,stack] using restTyped
+  | false =>
+      refine ⟨step_certificate typed branchType ?_ ?_ ?_⟩
+      · simpa [stepRaw,returned,stack] using typed.heap
+      · simpa [stepRaw,returned,stack] using ControlTyping.evaluate falseOrigin
+      · simpa [stepRaw,returned,stack] using restTyped
+
 /-- Every raw-machine constructor preserves typing over a monotonically
 extended address assignment. Captured quantities travel with lexical origins,
 closures, continuation arguments and generated mix/Fix bodies. -/
@@ -2642,6 +3087,10 @@ theorem typed_stepRaw_preserved {assumptions : Assumptions} {types : AddressType
       | project target => exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
       | binary primitive left right => exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
       | ifZero value zero successor => exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
+      | inject tag payload => exact typed_inject_preserved typed control
+      | case scrutinee arms => exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
+      | ifBool condition whenTrue whenFalse =>
+          exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
   | returned value =>
       cases stack : state.stack with
       | nil => exact ⟨types,type_extension_refl types,typed_completion_preserved typed control stack⟩
@@ -2657,6 +3106,9 @@ theorem typed_stepRaw_preserved {assumptions : Assumptions} {types : AddressType
           | condition zero successor environment => exact typed_condition_preserved typed control stack
           | binaryLeft primitive right environment => exact ⟨types,type_extension_refl types,typed_binary_left_preserved typed control stack⟩
           | binaryRight primitive left => exact ⟨types,type_extension_refl types,typed_binary_right_preserved typed control stack⟩
+          | case arms environment => exact typed_case_preserved typed control stack
+          | ifBool whenTrue whenFalse environment =>
+              exact ⟨types,type_extension_refl types,typed_ifBool_preserved typed control stack⟩
   | blackhole address => exact ⟨types,type_extension_refl types,by simpa [stepRaw,control] using (Nonempty.intro typed)⟩
   | complete value => exact ⟨types,type_extension_refl types,by simpa [stepRaw,control] using (Nonempty.intro typed)⟩
   | refused reason => exact False.elim (typed_control_not_refused typed.control reason control)
@@ -2889,5 +3341,41 @@ info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.check_runBounded_no_refu
 -/
 #guard_msgs in
 #print axioms check_runBounded_no_refusal
+
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_inject_preserved' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms typed_inject_preserved
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_case_preserved' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms typed_case_preserved
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.typed_ifBool_preserved' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms typed_ifBool_preserved
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.arms_typing_find' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms arms_typing_find
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandPreservation.value_variant_fields' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms value_variant_fields
 
 end Minidregg.Theory.ObjectiveBendDemandPreservation

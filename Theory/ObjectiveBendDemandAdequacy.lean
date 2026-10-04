@@ -31,6 +31,8 @@ constructor. This includes fixed-point unfolding and field shadowing. -/
     | exact False.elim (source_value_noStep (Value.record _) (by assumption))
     | exact False.elim (source_value_noStep (Value.specification _ _) (by assumption))
     | exact False.elim (source_value_noStep (Value.prototype _ _) (by assumption))
+    | exact False.elim (source_value_noStep (Value.inject _ _) (by assumption))
+    | exact False.elim (source_value_noStep (Value.boolean _) (by assumption))
     | grind [source_value_noStep]
 
  theorem source_value_steps_identity {term next : Term} (value : Value term) (steps : Steps term next) : term = next := by
@@ -115,6 +117,18 @@ inductive SourceDerivation : Term → Term → Nat → Prop where
       SourceDerivation condition (.nat (number+1)) conditionCost →
       SourceDerivation (instantiate body (.nat number)) result resultCost →
       SourceDerivation (.ifZero condition zero body) result (conditionCost+resultCost+1)
+  | case {scrutinee payload body result : Term} {arms : List (String × Term)} {tag : String}
+      {scrutineeCost resultCost : Nat} :
+      SourceDerivation scrutinee (.inject tag payload) scrutineeCost →
+      arms.find? (fun arm => arm.1 == tag) = some (tag,body) →
+      SourceDerivation (instantiate body payload) result resultCost →
+      SourceDerivation (.case scrutinee arms) result (scrutineeCost+resultCost+1)
+  | ifTrue {condition whenTrue whenFalse result : Term} {conditionCost resultCost : Nat} :
+      SourceDerivation condition (.boolean true) conditionCost → SourceDerivation whenTrue result resultCost →
+      SourceDerivation (.ifBool condition whenTrue whenFalse) result (conditionCost+resultCost+1)
+  | ifFalse {condition whenTrue whenFalse result : Term} {conditionCost resultCost : Nat} :
+      SourceDerivation condition (.boolean false) conditionCost → SourceDerivation whenFalse result resultCost →
+      SourceDerivation (.ifBool condition whenTrue whenFalse) result (conditionCost+resultCost+1)
 
  theorem sourceSteps_lift (context : Term → Term)
     (compatible : ∀ {first second}, Step first second → Step (context first) (context second))
@@ -167,6 +181,15 @@ small-step semantics. The value/thunk rules do not force latent fields. -/
   | successor first second iht ihr =>
       exact ⟨sourceSteps_trans (sourceSteps_lift (fun c => .ifZero c _ _) (fun step => Step.condition _ _ step) iht.1)
         (.next (Step.successor _ _ _) ihr.1),ihr.2⟩
+  | case first found second iht ihr =>
+      exact ⟨sourceSteps_trans (sourceSteps_lift (fun t => .case t _) (fun step => Step.caseTarget _ step) iht.1)
+        (.next (Step.caseInject _ _ _ _ found) ihr.1),ihr.2⟩
+  | ifTrue first second iht ihr =>
+      exact ⟨sourceSteps_trans (sourceSteps_lift (fun c => .ifBool c _ _) (fun step => Step.ifCondition _ _ step) iht.1)
+        (.next (Step.ifTrue _ _) ihr.1),ihr.2⟩
+  | ifFalse first second iht ihr =>
+      exact ⟨sourceSteps_trans (sourceSteps_lift (fun c => .ifBool c _ _) (fun step => Step.ifCondition _ _ step) iht.1)
+        (.next (Step.ifFalse _ _) ihr.1),ihr.2⟩
 
  theorem sourceDerivation_cost_positive {source result : Term} {cost : Nat}
     (derivation : SourceDerivation source result cost) : 0 < cost := by
@@ -204,6 +227,25 @@ strictly increases demand cost. Context reductions retain the latent terms. -/
       exact ⟨_,.binary (.value lv) (.value rv) found,by omega⟩
   | zero zero body => exact ⟨_,.zero (.value (.natural 0)) derivation,by omega⟩
   | successor number zero body => exact ⟨_,.successor (.value (.natural _)) derivation,by omega⟩
+  | caseInject tag payload arms body found =>
+      exact ⟨_,.case (.value (.inject tag payload)) found derivation,by omega⟩
+  | ifTrue whenTrue whenFalse => exact ⟨_,.ifTrue (.value (.boolean true)) derivation,by omega⟩
+  | ifFalse whenTrue whenFalse => exact ⟨_,.ifFalse (.value (.boolean false)) derivation,by omega⟩
+  | caseTarget arms step ih =>
+      cases derivation with
+      | value value => cases value
+      | case first found second =>
+          obtain ⟨larger,first',greater⟩ := ih first
+          exact ⟨_,.case first' found second,by omega⟩
+  | ifCondition whenTrue whenFalse step ih =>
+      cases derivation with
+      | value value => cases value
+      | ifTrue first second =>
+          obtain ⟨larger,first',greater⟩ := ih first
+          exact ⟨_,.ifTrue first' second,by omega⟩
+      | ifFalse first second =>
+          obtain ⟨larger,first',greater⟩ := ih first
+          exact ⟨_,.ifFalse first' second,by omega⟩
   | application argument step ih =>
       cases derivation with
       | value value => cases value
@@ -368,6 +410,19 @@ demand budget. This is the semantic component of the lazy graph progress rank. -
       apply List.map_congr_left
       intro original member
       exact Prod.ext rfl (ih original member f hf)
+  | inject _ ih => simp only [Term.rename,ih f hf]
+  | ifBool _ _ _ ih₁ ih₂ ih₃ => simp only [Term.rename,ih₁ f hf,ih₂ f hf,ih₃ f hf]
+  | case _ _ ih₁ ih₂ =>
+      simp only [Term.rename,ih₁ f hf]
+      congr 1
+      apply Eq.trans _ (List.map_id' _)
+      apply List.map_congr_left
+      intro original member
+      refine Prod.ext rfl (ih₂ original member (liftRename f) ?_)
+      intro i hi
+      cases i with
+      | zero => rfl
+      | succ i => simp [liftRename,hf i (Nat.lt_of_succ_lt_succ hi)]
   | condition _ _ _ ih₁ ih₂ ih₃ =>
       simp only [Term.rename,ih₁ f hf,ih₂ f hf]
       congr 1
@@ -416,6 +471,19 @@ demand budget. This is the semantic component of the lazy graph progress rank. -
       apply List.map_congr_left
       intro original member
       exact Prod.ext rfl (ih original member f hf)
+  | inject _ ih => simp only [Term.substitute,ih f hf]
+  | ifBool _ _ _ ih₁ ih₂ ih₃ => simp only [Term.substitute,ih₁ f hf,ih₂ f hf,ih₃ f hf]
+  | case _ _ ih₁ ih₂ =>
+      simp only [Term.substitute,ih₁ f hf]
+      congr 1
+      apply Eq.trans _ (List.map_id' _)
+      apply List.map_congr_left
+      intro original member
+      refine Prod.ext rfl (ih₂ original member (liftSubstitution f) ?_)
+      intro i hi
+      cases i with
+      | zero => rfl
+      | succ i => simp [liftSubstitution,hf i (Nat.lt_of_succ_lt_succ hi),Term.rename]
   | condition _ _ _ ih₁ ih₂ ih₃ =>
       simp only [Term.substitute,ih₁ f hf,ih₂ f hf]
       congr 1
@@ -461,6 +529,18 @@ demand budget. This is the semantic component of the lazy graph progress rank. -
       apply List.map_congr_left
       intro original member
       exact Prod.ext rfl (ih original member first second same)
+  | inject _ ih => simp only [Term.substitute,ih first second same]
+  | ifBool _ _ _ ih₁ ih₂ ih₃ => simp only [Term.substitute,ih₁ first second same,ih₂ first second same,ih₃ first second same]
+  | case _ _ ih₁ ih₂ =>
+      simp only [Term.substitute,ih₁ first second same]
+      congr 1
+      apply List.map_congr_left
+      intro original member
+      refine Prod.ext rfl (ih₂ original member (liftSubstitution first) (liftSubstitution second) ?_)
+      intro i hi
+      cases i with
+      | zero => rfl
+      | succ i => simp only [liftSubstitution,same i (Nat.lt_of_succ_lt_succ hi)]
   | condition _ _ _ ih₁ ih₂ ih₃ =>
       simp only [Term.substitute,ih₁ first second same,ih₂ first second same]
       congr 1
@@ -509,6 +589,16 @@ demand budget. This is the semantic component of the lazy graph progress rank. -
       apply List.map_congr_left
       intro original member
       exact Prod.ext rfl (ih original member first second)
+  | inject _ ih => simp only [Term.rename,ih first second]
+  | ifBool _ _ _ ih₁ ih₂ ih₃ => simp only [Term.rename,ih₁ first second,ih₂ first second,ih₃ first second]
+  | case _ _ ih₁ ih₂ =>
+      simp only [Term.rename,List.map_map,ih₁ first second]
+      congr 1
+      apply List.map_congr_left
+      intro original member
+      refine Prod.ext rfl ?_
+      simp only [Function.comp_apply]
+      rw [ih₂ original member,liftRename_comp]
   | condition _ _ _ ih₁ ih₂ ih₃ =>
       simp only [Term.rename,Term.rename,ih₁ first second,ih₂ first second,ih₃,liftRename_comp]
 
@@ -542,6 +632,16 @@ demand budget. This is the semantic component of the lazy graph progress rank. -
       apply List.map_congr_left
       intro original member
       exact Prod.ext rfl (ih original member first second)
+  | inject _ ih => simp only [Term.rename,Term.substitute,ih first second]
+  | ifBool _ _ _ ih₁ ih₂ ih₃ => simp only [Term.rename,Term.substitute,ih₁ first second,ih₂ first second,ih₃ first second]
+  | case _ _ ih₁ ih₂ =>
+      simp only [Term.rename,Term.substitute,List.map_map,ih₁ first second]
+      congr 1
+      apply List.map_congr_left
+      intro original member
+      refine Prod.ext rfl ?_
+      simp only [Function.comp_apply]
+      rw [ih₂ original member,liftRename_substitution_comp]
   | condition _ _ _ ih₁ ih₂ ih₃ =>
       simp only [Term.rename,Term.substitute,ih₁ first second,ih₂ first second,ih₃,liftRename_substitution_comp]
 
@@ -602,6 +702,17 @@ demand budget. This is the semantic component of the lazy graph progress rank. -
       apply List.map_congr_left
       intro original member
       exact Prod.ext rfl (ih original member substitution images rename)
+  | inject _ ih => simp only [Term.substitute,Term.rename,ih substitution images rename]
+  | ifBool _ _ _ ih₁ ih₂ ih₃ => simp only [Term.substitute,Term.rename,ih₁ substitution images rename,ih₂ substitution images rename,ih₃ substitution images rename]
+  | case _ hs ih₁ ih₂ =>
+      simp only [Term.substitute,Term.rename,List.map_map,ih₁ substitution images rename]
+      congr 1
+      apply List.map_congr_left
+      intro original member
+      refine Prod.ext rfl ?_
+      simp only [Function.comp_apply]
+      rw [ih₂ original member _ (lifted_substitution_scoped images)]
+      exact scoped_substitution_congr (hs original member) _ _ (lifted_substitution_rename images rename)
   | condition _ _ h ih₁ ih₂ ih₃ =>
       simp only [Term.substitute,Term.rename,ih₁ substitution images rename,ih₂ substitution images rename]
       congr 1
@@ -657,6 +768,17 @@ demand budget. This is the semantic component of the lazy graph progress rank. -
       apply List.map_congr_left
       intro original member
       exact Prod.ext rfl (ih original member first images second nextImages)
+  | inject _ ih => simp only [Term.substitute,ih first images second nextImages]
+  | ifBool _ _ _ ih₁ ih₂ ih₃ => simp only [Term.substitute,ih₁ first images second nextImages,ih₂ first images second nextImages,ih₃ first images second nextImages]
+  | case _ hs ih₁ ih₂ =>
+      simp only [Term.substitute,List.map_map,ih₁ first images second nextImages]
+      congr 1
+      apply List.map_congr_left
+      intro original member
+      refine Prod.ext rfl ?_
+      simp only [Function.comp_apply]
+      rw [ih₂ original member _ (lifted_substitution_scoped images) _ (lifted_substitution_scoped nextImages)]
+      exact scoped_substitution_congr (hs original member) _ _ (lifted_substitution_comp images nextImages)
   | condition _ _ h ih₁ ih₂ ih₃ =>
       simp only [Term.substitute,ih₁ first images second nextImages,ih₂ first images second nextImages]
       congr 1
@@ -689,6 +811,7 @@ def valueMeaning (meaning : AddressMeaning) : RuntimeValue → Term
   | .record fields => .record (fields.map fun field => (field.1,meaning field.2))
   | .specification metadata extension => .specification (meaning metadata) (meaning extension)
   | .prototype specification target => .prototype (meaning specification) (meaning target)
+  | .variant tag payload => .inject tag (meaning payload)
 
 /- The evaluating phase retains its source meaning. A cache additionally has
 an actual independent reference evaluation, rather than an arbitrary cached
@@ -791,6 +914,7 @@ substitution, even when the environment points into a cyclic heap. -/
       exact names _ (valid original ho)
   | specification metadata extension => exact .specification (names _ valid.1) (names _ valid.2)
   | prototype specification target => exact .prototype (names _ valid.1) (names _ valid.2)
+  | variant tag payload => exact .inject (names _ valid)
 
 def CellRealizes (meaning : AddressMeaning) (address : Address) (cell : Cell) : Prop :=
   Steps (meaning address) (closeOrigin meaning (cellOrigin cell)) ∧
@@ -816,6 +940,7 @@ def HeapRealizes (meaning : AddressMeaning) (heap : Array Cell) : Prop :=
       exact Prod.ext rfl (same _ (valid field member))
   | specification metadata extension => simp only [valueMeaning,same _ valid.1,same _ valid.2]
   | prototype specification target => simp only [valueMeaning,same _ valid.1,same _ valid.2]
+  | variant tag payload => simp only [valueMeaning,same _ valid]
 
  theorem cellRealizes_congr {bound address : Nat} {first second : AddressMeaning} {cell : Cell}
     (allocated : address < bound) (valid : CellValid bound cell)
@@ -863,6 +988,10 @@ def frameMeaning (meaning : AddressMeaning) (frame : Frame) (hole : Term) : Term
       (successorBody.substitute (liftSubstitution (environmentSubstitution meaning environment)))
   | .binaryLeft primitive right environment => .binary primitive hole (closeTerm meaning environment right)
   | .binaryRight primitive left => .binary primitive (valueMeaning meaning left) hole
+  | .case arms environment => .case hole
+      (arms.map fun arm => (arm.1,arm.2.substitute (liftSubstitution (environmentSubstitution meaning environment))))
+  | .ifBool whenTrue whenFalse environment => .ifBool hole
+      (closeTerm meaning environment whenTrue) (closeTerm meaning environment whenFalse)
 
  theorem frameMeaning_congr {bound : Nat} {first second : AddressMeaning} {frame : Frame} {hole : Term}
     (valid : FrameValid bound frame)
@@ -890,6 +1019,23 @@ def frameMeaning (meaning : AddressMeaning) (frame : Frame) (hole : Term) : Term
           have lt : i < environment.length := by omega
           have found : environment[i]? = some environment[i] := getElem?_pos environment i lt
           simp only [liftSubstitution,environmentSubstitution,found,same _ (valid.1 _ (List.mem_of_getElem? found))]
+  | case arms environment =>
+      simp only [frameMeaning]
+      congr 1
+      apply List.map_congr_left
+      intro arm member
+      refine Prod.ext rfl ?_
+      apply scoped_substitution_congr (valid.2 arm member)
+      intro i hi
+      cases i with
+      | zero => rfl
+      | succ i =>
+          have lt : i < environment.length := by omega
+          have found : environment[i]? = some environment[i] := getElem?_pos environment i lt
+          simp only [liftSubstitution,environmentSubstitution,found,same _ (valid.1 _ (List.mem_of_getElem? found))]
+  | ifBool whenTrue whenFalse environment =>
+      simp only [frameMeaning,closeTerm_meaning_congr valid.1 valid.2.1 same,
+        closeTerm_meaning_congr valid.1 valid.2.2 same]
 
 def stackMeaning (meaning : AddressMeaning) (stack : List Frame) (hole : Term) : Term :=
   stack.foldl (fun prior frame => frameMeaning meaning frame prior) hole
@@ -912,6 +1058,7 @@ def controlMeaning (meaning : AddressMeaning) : Control → Option Term
   | record fields => exact .record _
   | specification _ _ => exact .specification _ _
   | prototype _ _ => exact .prototype _ _
+  | variant _ _ => exact .inject _ _
 
 /-- A dynamic demand focus reads the actual cell phase. The fixed source
 address meaning remains in HeapRealizes and local update provenance; this
@@ -967,6 +1114,8 @@ def enteredFocus (meaning : AddressMeaning) (heap : Array Cell) : Control → Op
       | condition zero successorBody environment => exact .condition _ _ step
       | binaryLeft primitive right environment => exact .binaryLeft _ _ step
       | binaryRight primitive left => exact .binaryRight _ _ (valueMeaning_value _ _) step
+      | case arms environment => exact .caseTarget _ step
+      | ifBool whenTrue whenFalse environment => exact .ifCondition _ _ step
 
 /-- Every active update carries its own demand-segment source evaluation.
 Erasing update frames would lose the LOCAL proof required when writing a cache:
@@ -990,7 +1139,7 @@ def StackRealizes (meaning : AddressMeaning) (root focus : Term) : List Frame �
       | update address =>
           exact ⟨by simpa only [StackRealizes,same _ hv] using realizes.1,
             by simpa only [same _ hv] using ih ht realizes.2⟩
-      | argument _ _ | field _ | reflect | metadata | project | extend _ _ | condition _ _ _ | binaryLeft _ _ _ | binaryRight _ _ =>
+      | argument _ _ | field _ | reflect | metadata | project | extend _ _ | condition _ _ _ | binaryLeft _ _ _ | binaryRight _ _ | case _ _ | ifBool _ _ _ =>
           simpa only [StackRealizes,frameMeaning_congr hv same] using ih ht realizes
 
  theorem stackRealizes_steps {meaning : AddressMeaning} {root before after : Term}
@@ -1001,7 +1150,7 @@ def StackRealizes (meaning : AddressMeaning) (root focus : Term) : List Frame �
   | cons frame rest ih =>
       cases frame with
       | update address => exact ⟨sourceSteps_trans realizes.1 steps,realizes.2⟩
-      | argument _ _ | field _ | reflect | metadata | project | extend _ _ | condition _ _ _ | binaryLeft _ _ _ | binaryRight _ _ =>
+      | argument _ _ | field _ | reflect | metadata | project | extend _ _ | condition _ _ _ | binaryLeft _ _ _ | binaryRight _ _ | case _ _ | ifBool _ _ _ =>
           exact ih realizes (sourceSteps_frame _ _ steps)
 
  theorem sourceSteps_stack (meaning : AddressMeaning) (stack : List Frame) {before after : Term}
@@ -1020,7 +1169,7 @@ provenance: each erased boundary contributes its actual demand derivation. -/
       cases frame with
       | update address =>
           exact sourceSteps_trans (ih realizes.2) (sourceSteps_stack meaning rest realizes.1)
-      | argument _ _ | field _ | reflect | metadata | project | extend _ _ | condition _ _ _ | binaryLeft _ _ _ | binaryRight _ _ =>
+      | argument _ _ | field _ | reflect | metadata | project | extend _ _ | condition _ _ _ | binaryLeft _ _ _ | binaryRight _ _ | case _ _ | ifBool _ _ _ =>
           exact ih realizes
 
  theorem heapRealizes_set {meaning : AddressMeaning} {heap : Array Cell}
@@ -1170,6 +1319,15 @@ context therefore supplies a finite derivation for the demanded focus. -/
       cases derivation with
       | value value => cases value
       | binary first second found => exact ⟨_,_,second,by omega⟩
+  | case arms environment =>
+      cases derivation with
+      | value value => cases value
+      | case first found second => exact ⟨_,_,first,by omega⟩
+  | ifBool whenTrue whenFalse environment =>
+      cases derivation with
+      | value value => cases value
+      | ifTrue first second => exact ⟨_,_,first,by omega⟩
+      | ifFalse first second => exact ⟨_,_,first,by omega⟩
 
  theorem stack_derivation_demand {meaning : AddressMeaning} {stack : List Frame} {focus result : Term} {cost : Nat}
     (derivation : SourceDerivation (stackMeaning meaning stack focus) result cost) :
@@ -1206,6 +1364,8 @@ inductive DemandContext where
   | extend (fields : List (String × Term))
   | condition (zero successorBody : Term)
   | binary (primitive : Primitive) (right : Term)
+  | case (arms : List (String × Term))
+  | ifBool (whenTrue whenFalse : Term)
 
 def DemandContext.term : DemandContext → Term → Term
   | .argument arg, hole => .app hole arg
@@ -1216,6 +1376,8 @@ def DemandContext.term : DemandContext → Term → Term
   | .extend fields, hole => .extend hole fields
   | .condition zero successorBody, hole => .ifZero hole zero successorBody
   | .binary primitive right, hole => .binary primitive hole right
+  | .case arms, hole => .case hole arms
+  | .ifBool whenTrue whenFalse, hole => .ifBool hole whenTrue whenFalse
 
 def DemandContext.frame : DemandContext → Environment → Frame
   | .argument arg, environment => .argument arg environment
@@ -1226,6 +1388,8 @@ def DemandContext.frame : DemandContext → Environment → Frame
   | .extend fields, environment => .extend fields environment
   | .condition zero successorBody, environment => .condition zero successorBody environment
   | .binary primitive right, environment => .binaryLeft primitive right environment
+  | .case arms, environment => .case arms environment
+  | .ifBool whenTrue whenFalse, environment => .ifBool whenTrue whenFalse environment
 
  theorem demandContext_closes (context : DemandContext) (meaning : AddressMeaning)
     (environment : Environment) (hole : Term)
@@ -1244,7 +1408,16 @@ def DemandContext.frame : DemandContext → Environment → Frame
           simp only [DemandContext.term,DemandContext.frame,closeTerm,frameMeaning,lifted,
             scoped_substitute_identity scopedBody Term.bound (by intros; rfl)]
       | extend fields => simp [DemandContext.term,DemandContext.frame,closeTerm,frameMeaning]
-      | argument _ | field _ | reflect | metadata | project | binary _ _ => rfl
+      | case arms =>
+          have scopedArms : ∀ arm ∈ arms, Scoped 1 arm.2 := (scoped_case_iff ..).mp scope |>.2
+          simp only [DemandContext.term,DemandContext.frame,closeTerm,frameMeaning,lifted]
+          congr 1
+          apply Eq.symm
+          apply Eq.trans _ (List.map_id' _)
+          apply List.map_congr_left
+          intro arm member
+          exact Prod.ext rfl (scoped_substitute_identity (scopedArms arm member) Term.bound (by intros; rfl))
+      | argument _ | field _ | reflect | metadata | project | binary _ _ | ifBool _ _ => rfl
 
  theorem demandContext_dispatch {state : State} {context : DemandContext} {hole : Term} {environment : Environment}
     (evaluate : state.control = .evaluate (context.term hole) environment) :
@@ -1637,6 +1810,7 @@ Fix and sharing, while excluding arbitrary fabricated cyclic suspended aliases. 
     | apply heapOriginsBorn_suspend (heapOriginsBorn_suspend born (by assumption));
       exact environmentValid_mono (by assumption) (by simp)
     | apply heapOriginsBorn_push born; left; intro address member; simp [cellOrigin] at member
+    | apply heapOriginsBorn_suspend born; intro address member; simp at member; subst member; assumption
 
  theorem initial_originsBorn (source : Term) : HeapOriginsBorn (initial source).heap := by
   intro address cell found
@@ -2306,6 +2480,173 @@ def SourceDispatch (meaning next : AddressMeaning) (state : State) : Prop :=
   · simp [stepRaw,returned,empty,controlMeaning]
   · simpa [stepRaw,returned,empty] using stack
 
+ theorem closeTerm_inject (meaning : AddressMeaning) (environment : Environment) (tag : String) (payload : Term) :
+    closeTerm meaning environment (.inject tag payload) = .inject tag (closeTerm meaning environment payload) := by
+  cases environment <;> simp [closeTerm,Term.substitute]
+
+/-- Injection allocates exactly one lazy payload thunk; the returned variant
+denotes the injected closed payload computation without forcing it. -/
+ theorem graph_evaluate_inject_names {meaning : AddressMeaning} {state : State} {source payload : Term}
+    {tag : String} {environment : Environment} (represented : GraphRepresentsBy meaning state source)
+    (evaluate : state.control = .evaluate (.inject tag payload) environment) :
+    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
+  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
+  have valid : ClosureValid state.heap.size ⟨.inject tag payload,environment⟩ := by
+    simpa only [evaluate,ControlValid] using lexical.2.1
+  have scope : Scoped environment.length payload := by simpa using valid.1
+  obtain ⟨one,oneNames,oneHeap,oneSame,oneFresh⟩ :=
+    allocateClosure_realizes lexical.1 names heap scope valid.2
+  have sourceEq : valueMeaning one (.variant tag state.heap.size) =
+      closeTerm meaning environment (.inject tag payload) := by
+    simp [valueMeaning,oneFresh,closeTerm_inject]
+  simp [controlMeaning,evaluate] at control
+  subst focus
+  have consumers := stackRealizes_congr lexical.2.2 oneSame stack
+  refine ⟨one,oneSame,stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
+    stepRaw_finalStackInvariant final,?_,?_,valueMeaning one (.variant tag state.heap.size),?_,?_⟩
+  · simpa [stepRaw,evaluate] using oneNames
+  · simpa [stepRaw,evaluate] using oneHeap
+  · simp [stepRaw,evaluate,controlMeaning]
+  · rw [sourceEq]
+    simpa [stepRaw,evaluate] using consumers
+
+ theorem find_map_arms (arms : List (String × Term)) (f : Term → Term) (tag : String) :
+    (arms.map fun arm => (arm.1,f arm.2)).find? (fun arm => arm.1 == tag) =
+      (arms.find? (fun arm => arm.1 == tag)).map (fun arm => (arm.1,f arm.2)) := by
+  rw [List.find?_map]
+  rfl
+
+ theorem find_arm_label {arms : List (String × Term)} {tag key : String} {body : Term}
+    (found : arms.find? (fun arm => arm.1 == tag) = some (key,body)) : key = tag := by
+  have holds := List.find?_some found
+  simpa using holds
+
+/-- A returned variant selects its first matching arm. The binder is a fresh
+indirection cell to the shared payload address, and the transition is exactly
+independent source case-of-injection reduction. -/
+ theorem graph_case_return_execution {meaning : AddressMeaning} {state : State} {source body : Term}
+    {arms : List (String × Term)} {environment : Environment} {tag key : String} {payload : Address}
+    {rest : List Frame} (represented : GraphRepresentsBy meaning state source)
+    (returned : state.control = .returned (.variant tag payload))
+    (head : state.stack = .case arms environment::rest)
+    (found : arms.find? (fun arm => arm.1 == tag) = some (key,body)) :
+    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧
+      (GraphRepresentsBy next (stepRaw state) source ∧ SourceDispatch meaning next state) := by
+  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
+  have keyEq := find_arm_label found
+  subst keyEq
+  have frameValid : FrameValid state.heap.size (.case arms environment) :=
+    lexical.2.2 _ (head ▸ List.mem_cons_self ..)
+  have restValid : ∀ frame ∈ rest, FrameValid state.heap.size frame := by
+    intro frame member
+    apply lexical.2.2 frame
+    rw [head]
+    exact List.mem_cons_of_mem _ member
+  have payloadValid : payload < state.heap.size := by
+    simpa only [returned,ControlValid,RuntimeValueValid] using lexical.2.1
+  have bodyScope : Scoped (environment.length+1) body :=
+    frameValid.2 _ (List.mem_of_find?_eq_some found)
+  have bindingCaptures : EnvironmentValid state.heap.size [payload] := by
+    intro address member
+    simp at member
+    subst member
+    exact payloadValid
+  obtain ⟨one,oneNames,oneHeap,oneSame,oneFresh⟩ :=
+    allocateClosure_realizes (term := .bound 0) lexical.1 names heap (.bound (by simp)) bindingCaptures
+  have freshEq : one state.heap.size = meaning payload := by
+    rw [oneFresh]
+    simp [closeTerm,Term.substitute,environmentSubstitution]
+  let sigma := environmentSubstitution meaning environment
+  let closedArms := arms.map fun arm => (arm.1,arm.2.substitute (liftSubstitution sigma))
+  have closedFound : closedArms.find? (fun arm => arm.1 == key) =
+      some (key,body.substitute (liftSubstitution sigma)) := by
+    simp only [closedArms]
+    rw [find_map_arms,found]
+    rfl
+  have reduce : Step (.case (.inject key (meaning payload)) closedArms)
+      (closeTerm one (state.heap.size::environment) body) := by
+    rw [←closeTerm_beta names frameValid.1 bodyScope (names payload payloadValid) oneSame freshEq]
+    exact Step.caseInject _ _ _ _ closedFound
+  simp [controlMeaning,returned,valueMeaning] at control
+  subst focus
+  have before : StackRealizes meaning source (.case (.inject key (meaning payload)) closedArms) rest := by
+    simpa only [head,StackRealizes,frameMeaning] using stack
+  have consumers := stackRealizes_congr restValid oneSame before
+  have advanced := stackRealizes_steps consumers (Steps.next reduce (Steps.refl _))
+  refine ⟨one,oneSame,?_,?_⟩
+  · refine ⟨stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
+      stepRaw_finalStackInvariant final,?_,?_,closeTerm one (state.heap.size::environment) body,?_,?_⟩
+    · simpa [stepRaw,returned,head,found] using oneNames
+    · simpa [stepRaw,returned,head,found] using oneHeap
+    · simp [stepRaw,returned,head,found,controlMeaning]
+    · simpa [stepRaw,returned,head,found] using advanced
+  · refine ⟨[.case arms environment],.inject key (meaning payload),closeTerm one (state.heap.size::environment) body,?_,?_,?_,?_⟩
+    · simp [controlMeaning,returned,valueMeaning]
+    · simp [stepRaw,returned,head,found,controlMeaning]
+    · simp [stepRaw,returned,head,found]
+    · simpa [stackMeaning,frameMeaning] using reduce
+
+ theorem graph_case_return_names {meaning : AddressMeaning} {state : State} {source body : Term}
+    {arms : List (String × Term)} {environment : Environment} {tag key : String} {payload : Address}
+    {rest : List Frame} (represented : GraphRepresentsBy meaning state source)
+    (returned : state.control = .returned (.variant tag payload))
+    (head : state.stack = .case arms environment::rest)
+    (found : arms.find? (fun arm => arm.1 == tag) = some (key,body)) :
+    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
+  obtain ⟨next,same,current,_⟩ := graph_case_return_execution represented returned head found
+  exact ⟨next,same,current⟩
+
+/-- A returned Boolean selects exactly one branch; the other stays latent. -/
+ theorem graph_ifBool_return_execution {meaning : AddressMeaning} {state : State} {source whenTrue whenFalse : Term}
+    {environment : Environment} {rest : List Frame} {value : Bool} (represented : GraphRepresentsBy meaning state source)
+    (returned : state.control = .returned (.boolean value))
+    (head : state.stack = .ifBool whenTrue whenFalse environment::rest) :
+    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧
+      (GraphRepresentsBy next (stepRaw state) source ∧ SourceDispatch meaning next state) := by
+  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
+  simp [controlMeaning,returned,valueMeaning] at control
+  subst focus
+  have before : StackRealizes meaning source
+      (.ifBool (.boolean value) (closeTerm meaning environment whenTrue) (closeTerm meaning environment whenFalse)) rest := by
+    simpa only [head,StackRealizes,frameMeaning] using stack
+  cases value with
+  | true =>
+    have advanced := stackRealizes_steps before (Steps.next (Step.ifTrue _ _) (Steps.refl _))
+    refine ⟨meaning,(fun _ _ => rfl),?_,?_⟩
+    · refine ⟨stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
+        stepRaw_finalStackInvariant final,?_,?_,closeTerm meaning environment whenTrue,?_,?_⟩
+      · simpa [stepRaw,returned,head] using names
+      · simpa [stepRaw,returned,head] using heap
+      · simp [stepRaw,returned,head,controlMeaning]
+      · simpa [stepRaw,returned,head] using advanced
+    · refine ⟨[.ifBool whenTrue whenFalse environment],.boolean true,closeTerm meaning environment whenTrue,?_,?_,?_,?_⟩
+      · simp [controlMeaning,returned,valueMeaning]
+      · simp [stepRaw,returned,head,controlMeaning]
+      · simp [stepRaw,returned,head]
+      · exact Step.ifTrue _ _
+  | false =>
+    have advanced := stackRealizes_steps before (Steps.next (Step.ifFalse _ _) (Steps.refl _))
+    refine ⟨meaning,(fun _ _ => rfl),?_,?_⟩
+    · refine ⟨stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
+        stepRaw_finalStackInvariant final,?_,?_,closeTerm meaning environment whenFalse,?_,?_⟩
+      · simpa [stepRaw,returned,head] using names
+      · simpa [stepRaw,returned,head] using heap
+      · simp [stepRaw,returned,head,controlMeaning]
+      · simpa [stepRaw,returned,head] using advanced
+    · refine ⟨[.ifBool whenTrue whenFalse environment],.boolean false,closeTerm meaning environment whenFalse,?_,?_,?_,?_⟩
+      · simp [controlMeaning,returned,valueMeaning]
+      · simp [stepRaw,returned,head,controlMeaning]
+      · simp [stepRaw,returned,head]
+      · exact Step.ifFalse _ _
+
+ theorem graph_ifBool_return_names {meaning : AddressMeaning} {state : State} {source whenTrue whenFalse : Term}
+    {environment : Environment} {rest : List Frame} {value : Bool} (represented : GraphRepresentsBy meaning state source)
+    (returned : state.control = .returned (.boolean value))
+    (head : state.stack = .ifBool whenTrue whenFalse environment::rest) :
+    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
+  obtain ⟨next,same,current,_⟩ := graph_ifBool_return_execution represented returned head
+  exact ⟨next,same,current⟩
+
 /-- EVERY running/finished raw transition retains a specified source name assignment on all already allocated addresses. New names are constructed from actual allocations. -/
  theorem graph_stepRaw_names {meaning : AddressMeaning} {state : State} {source : Term}
     (represented : GraphRepresentsBy meaning state source) (successful : ResultControl (stepRaw state).control) :
@@ -2345,6 +2686,10 @@ def SourceDispatch (meaning next : AddressMeaning) (state : State) : Prop :=
       | extend inherited fields => exact graph_evaluate_context_names (context := .extend fields) represented control
       | ifZero value zero body => exact graph_evaluate_context_names (context := .condition zero body) represented control
       | binary primitive left right => exact graph_evaluate_context_names (context := .binary primitive right) represented control
+      | inject tag payload => exact graph_evaluate_inject_names represented control
+      | case scrutinee arms => exact graph_evaluate_context_names (context := .case arms) represented control
+      | ifBool condition whenTrue whenFalse =>
+          exact graph_evaluate_context_names (context := .ifBool whenTrue whenFalse) represented control
   | returned value =>
       cases frames : state.stack with
       | nil => exact graph_complete_return_names represented control frames
@@ -2355,22 +2700,22 @@ def SourceDispatch (meaning next : AddressMeaning) (state : State) : Prop :=
               cases value with
               | closure body captured => exact graph_closure_call_names represented control frames
               | specification descriptor extension => exact graph_specification_call_names represented control frames
-              | natural _ | boolean _ | label _ | record _ | prototype _ _ =>
+              | natural _ | boolean _ | label _ | record _ | prototype _ _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | reflect =>
               cases value with
               | prototype spec target => exact graph_object_access_names (access := .reflect) represented control frames
-              | closure _ _ | specification _ _ | natural _ | boolean _ | label _ | record _ =>
+              | closure _ _ | specification _ _ | natural _ | boolean _ | label _ | record _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | metadata =>
               cases value with
               | specification descriptor extension => exact graph_object_access_names (access := .metadata) represented control frames
-              | closure _ _ | prototype _ _ | natural _ | boolean _ | label _ | record _ =>
+              | closure _ _ | prototype _ _ | natural _ | boolean _ | label _ | record _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | project =>
               cases value with
               | prototype spec target => exact graph_object_access_names (access := .project) represented control frames
-              | closure _ _ | specification _ _ | natural _ | boolean _ | label _ | record _ =>
+              | closure _ _ | specification _ _ | natural _ | boolean _ | label _ | record _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | field name =>
               cases value with
@@ -2380,12 +2725,12 @@ def SourceDispatch (meaning next : AddressMeaning) (state : State) : Prop :=
                   | some field =>
                       obtain ⟨key,address⟩ := field
                       exact graph_field_return_names represented control frames found
-              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ =>
+              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | extend fields environment =>
               cases value with
               | record inherited => exact graph_extend_record_names represented control frames
-              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ =>
+              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | condition zero body environment =>
               cases value with
@@ -2393,7 +2738,7 @@ def SourceDispatch (meaning next : AddressMeaning) (state : State) : Prop :=
                   cases number with
                   | zero => exact graph_condition_zero_names represented control frames
                   | succ number => exact graph_condition_successor_names represented control frames
-              | closure _ _ | specification _ _ | prototype _ _ | record _ | boolean _ | label _ =>
+              | closure _ _ | specification _ _ | prototype _ _ | record _ | boolean _ | label _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | binaryLeft primitive right environment => exact graph_binary_left_return_names represented control frames
           | binaryRight primitive left =>
@@ -2403,6 +2748,21 @@ def SourceDispatch (meaning next : AddressMeaning) (state : State) : Prop :=
                   cases scalar : scalarValue result with
                   | none => simp [stepRaw,control,frames,dispatch,scalar,ResultControl] at successful
                   | some next => exact graph_primitive_return_names represented control frames dispatch scalar
+          | case arms environment =>
+              cases value with
+              | variant tag payload =>
+                  cases found : arms.find? (fun arm => arm.1 == tag) with
+                  | none => simp [stepRaw,control,frames,found,ResultControl] at successful
+                  | some arm =>
+                      obtain ⟨key,body⟩ := arm
+                      exact graph_case_return_names represented control frames found
+              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ | record _ =>
+                  simp [stepRaw,control,frames,ResultControl] at successful
+          | ifBool whenTrue whenFalse environment =>
+              cases value with
+              | boolean value => exact graph_ifBool_return_names represented control frames
+              | closure _ _ | specification _ _ | prototype _ _ | natural _ | label _ | record _ | variant _ _ =>
+                  simp [stepRaw,control,frames,ResultControl] at successful
 
 
 /-- Every demand-starting context advances through the real dispatcher,
@@ -2649,6 +3009,13 @@ set_option maxHeartbeats 800000 in
 successor is running or finished. No syntactic fragment, evaluator oracle or
 implementation-selected coverage premise is used. Operational invariants for
 fault/blackhole successors are proved independently in DemandInvariant. -/
+ theorem graph_via_names {state : State} {source : Term}
+    (represented : GraphRepresents state source) (successful : ResultControl (stepRaw state).control) :
+    GraphRepresents (stepRaw state) source := by
+  obtain ⟨lexical,busy,final,meaning,names,heap,focus,control,stack⟩ := represented
+  obtain ⟨next,_,advanced⟩ := graph_stepRaw_names ⟨lexical,busy,final,names,heap,focus,control,stack⟩ successful
+  exact graphBy_graph advanced
+
  theorem graph_stepRaw {state : State} {source : Term}
     (represented : GraphRepresents state source) (successful : ResultControl (stepRaw state).control) :
     GraphRepresents (stepRaw state) source := by
@@ -2687,6 +3054,7 @@ fault/blackhole successors are proved independently in DemandInvariant. -/
       | extend inherited fields => exact graph_evaluate_context (context := .extend fields) represented control
       | ifZero value zero body => exact graph_evaluate_context (context := .condition zero body) represented control
       | binary primitive left right => exact graph_evaluate_context (context := .binary primitive right) represented control
+      | inject _ _ | case _ _ | ifBool _ _ _ => exact graph_via_names represented successful
   | returned value =>
       cases frames : state.stack with
       | nil => exact graph_complete_return represented control frames
@@ -2697,22 +3065,22 @@ fault/blackhole successors are proved independently in DemandInvariant. -/
               cases value with
               | closure body captured => exact graph_closure_call represented control frames
               | specification descriptor extension => exact graph_specification_call represented control frames
-              | natural _ | boolean _ | label _ | record _ | prototype _ _ =>
+              | natural _ | boolean _ | label _ | record _ | prototype _ _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | reflect =>
               cases value with
               | prototype spec target => exact graph_object_access (access := .reflect) represented control frames
-              | closure _ _ | specification _ _ | natural _ | boolean _ | label _ | record _ =>
+              | closure _ _ | specification _ _ | natural _ | boolean _ | label _ | record _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | metadata =>
               cases value with
               | specification descriptor extension => exact graph_object_access (access := .metadata) represented control frames
-              | closure _ _ | prototype _ _ | natural _ | boolean _ | label _ | record _ =>
+              | closure _ _ | prototype _ _ | natural _ | boolean _ | label _ | record _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | project =>
               cases value with
               | prototype spec target => exact graph_object_access (access := .project) represented control frames
-              | closure _ _ | specification _ _ | natural _ | boolean _ | label _ | record _ =>
+              | closure _ _ | specification _ _ | natural _ | boolean _ | label _ | record _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | field name =>
               cases value with
@@ -2722,12 +3090,12 @@ fault/blackhole successors are proved independently in DemandInvariant. -/
                   | some field =>
                       obtain ⟨key,address⟩ := field
                       exact graph_field_return represented control frames found
-              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ =>
+              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | extend fields environment =>
               cases value with
               | record inherited => exact graph_extend_record represented control frames
-              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ =>
+              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | condition zero body environment =>
               cases value with
@@ -2735,7 +3103,7 @@ fault/blackhole successors are proved independently in DemandInvariant. -/
                   cases number with
                   | zero => exact graph_condition_zero represented control frames
                   | succ number => exact graph_condition_successor represented control frames
-              | closure _ _ | specification _ _ | prototype _ _ | record _ | boolean _ | label _ =>
+              | closure _ _ | specification _ _ | prototype _ _ | record _ | boolean _ | label _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | binaryLeft primitive right environment => exact graph_binary_left_return represented control frames
           | binaryRight primitive left =>
@@ -2745,6 +3113,7 @@ fault/blackhole successors are proved independently in DemandInvariant. -/
                   cases scalar : scalarValue result with
                   | none => simp [stepRaw,control,frames,dispatch,scalar,ResultControl] at successful
                   | some next => exact graph_primitive_return represented control frames dispatch scalar
+          | case _ _ | ifBool _ _ _ => exact graph_via_names represented successful
 
 /-- A concrete cyclic heap instance: its one address denotes the source Fix;
 the saved origin captures that same address and denotes its independent source
@@ -4069,7 +4438,7 @@ administrative boundaries from the demanded context. -/
           have rest := ih realizes.2
           exact sourceSteps_trans rest (sourceSteps_stack meaning before head)
       | argument _ _ | field _ | reflect | metadata | project | extend _ _
-      | condition _ _ _ | binaryLeft _ _ _ | binaryRight _ _ =>
+      | condition _ _ _ | binaryLeft _ _ _ | binaryRight _ _ | case _ _ | ifBool _ _ _ =>
           exact ih realizes
 
 /-- Every active update bounds the current demanded source budget, derived
@@ -4393,6 +4762,15 @@ info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.stepRaw_demandSafety_bound' 
       cases derivation with
       | value value => cases value
       | binary first second found => exact ⟨_,_,second,by omega⟩
+  | case arms environment =>
+      cases derivation with
+      | value value => cases value
+      | case first found second => exact ⟨_,_,first,by omega⟩
+  | ifBool whenTrue whenFalse environment =>
+      cases derivation with
+      | value value => cases value
+      | ifTrue first second => exact ⟨_,_,first,by omega⟩
+      | ifFalse first second => exact ⟨_,_,first,by omega⟩
 
  theorem stackUpdates_member_split {stack : List Frame} {address : Address}
     (member : address ∈ stackUpdates stack) :
@@ -4790,6 +5168,26 @@ info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.demandSafety_meaning_congr' 
 /-- Every running/finished actual raw transition preserves the named graph
 and active finite-demand safety, including cyclic Fix allocation and sharing.
 Fault exclusion is a separate source-termination consequence. -/
+ theorem graph_case_return_safety {meaning : AddressMeaning} {state : State} {source body : Term}
+    {arms : List (String × Term)} {environment : Environment} {tag key : String} {payload : Address}
+    {rest : List Frame} (represented : GraphRepresentsBy meaning state source)
+    (returned : state.control = .returned (.variant tag payload))
+    (head : state.stack = .case arms environment::rest)
+    (found : arms.find? (fun arm => arm.1 == tag) = some (key,body)) :
+    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧
+      GraphRepresentsBy next (stepRaw state) source ∧ DemandSafety next (stepRaw state) := by
+  obtain ⟨next,same,current,dispatch⟩ := graph_case_return_execution represented returned head found
+  exact ⟨next,same,current,graph_execution_demandSafety represented same current (by intro address; simp [returned]) dispatch⟩
+
+ theorem graph_ifBool_return_safety {meaning : AddressMeaning} {state : State} {source whenTrue whenFalse : Term}
+    {environment : Environment} {rest : List Frame} {value : Bool} (represented : GraphRepresentsBy meaning state source)
+    (returned : state.control = .returned (.boolean value))
+    (head : state.stack = .ifBool whenTrue whenFalse environment::rest) :
+    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧
+      GraphRepresentsBy next (stepRaw state) source ∧ DemandSafety next (stepRaw state) := by
+  obtain ⟨next,same,current,dispatch⟩ := graph_ifBool_return_execution represented returned head
+  exact ⟨next,same,current,graph_execution_demandSafety represented same current (by intro address; simp [returned]) dispatch⟩
+
  theorem graph_stepRaw_safety_names {meaning : AddressMeaning} {state : State} {source : Term}
     (represented : GraphRepresentsBy meaning state source) (safe : DemandSafety meaning state)
     (born : HeapOriginsBorn state.heap) (successful : ResultControl (stepRaw state).control) :
@@ -4830,6 +5228,10 @@ Fault exclusion is a separate source-termination consequence. -/
       | extend inherited fields => exact graph_evaluate_context_safety (context := .extend fields) represented control
       | ifZero value zero body => exact graph_evaluate_context_safety (context := .condition zero body) represented control
       | binary primitive left right => exact graph_evaluate_context_safety (context := .binary primitive right) represented control
+      | inject tag payload => exact graph_next_returned_safety represented successful (by simp [stepRaw,control])
+      | case scrutinee arms => exact graph_evaluate_context_safety (context := .case arms) represented control
+      | ifBool condition whenTrue whenFalse =>
+          exact graph_evaluate_context_safety (context := .ifBool whenTrue whenFalse) represented control
   | returned value =>
       cases frames : state.stack with
       | nil => exact graph_next_complete_safety represented successful (by simp [stepRaw,control,frames])
@@ -4845,22 +5247,22 @@ Fault exclusion is a separate source-termination consequence. -/
                   exact graph_next_ordinary_safety represented successful
                     (frame := .argument argument environment) (rest := rest)
                     (by simp [stepRaw,control,frames]) (by intro address; simp)
-              | natural _ | boolean _ | label _ | record _ | prototype _ _ =>
+              | natural _ | boolean _ | label _ | record _ | prototype _ _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | reflect =>
               cases value with
               | prototype spec target => exact graph_object_access_safety (access := .reflect) represented control frames
-              | closure _ _ | specification _ _ | natural _ | boolean _ | label _ | record _ =>
+              | closure _ _ | specification _ _ | natural _ | boolean _ | label _ | record _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | metadata =>
               cases value with
               | specification descriptor extension => exact graph_object_access_safety (access := .metadata) represented control frames
-              | closure _ _ | prototype _ _ | natural _ | boolean _ | label _ | record _ =>
+              | closure _ _ | prototype _ _ | natural _ | boolean _ | label _ | record _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | project =>
               cases value with
               | prototype spec target => exact graph_object_access_safety (access := .project) represented control frames
-              | closure _ _ | specification _ _ | natural _ | boolean _ | label _ | record _ =>
+              | closure _ _ | specification _ _ | natural _ | boolean _ | label _ | record _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | field name =>
               cases value with
@@ -4870,12 +5272,12 @@ Fault exclusion is a separate source-termination consequence. -/
                   | some field =>
                       obtain ⟨key,address⟩ := field
                       exact graph_field_return_safety represented control frames found
-              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ =>
+              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | extend fields environment =>
               cases value with
               | record inherited => exact graph_next_returned_safety represented successful (by simp [stepRaw,control,frames])
-              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ =>
+              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | condition zero body environment =>
               cases value with
@@ -4883,7 +5285,7 @@ Fault exclusion is a separate source-termination consequence. -/
                   cases number with
                   | zero => exact graph_condition_zero_safety represented control frames
                   | succ number => exact graph_condition_successor_safety represented control frames
-              | closure _ _ | specification _ _ | prototype _ _ | record _ | boolean _ | label _ =>
+              | closure _ _ | specification _ _ | prototype _ _ | record _ | boolean _ | label _ | variant _ _ =>
                   simp [stepRaw,control,frames,ResultControl] at successful
           | binaryLeft primitive right environment =>
               exact graph_next_ordinary_safety represented successful
@@ -4896,6 +5298,21 @@ Fault exclusion is a separate source-termination consequence. -/
                   cases scalar : scalarValue result with
                   | none => simp [stepRaw,control,frames,dispatch,scalar,ResultControl] at successful
                   | some next => exact graph_next_returned_safety represented successful (by simp [stepRaw,control,frames,dispatch,scalar])
+          | case arms environment =>
+              cases value with
+              | variant tag payload =>
+                  cases found : arms.find? (fun arm => arm.1 == tag) with
+                  | none => simp [stepRaw,control,frames,found,ResultControl] at successful
+                  | some arm =>
+                      obtain ⟨key,body⟩ := arm
+                      exact graph_case_return_safety represented control frames found
+              | closure _ _ | specification _ _ | prototype _ _ | natural _ | boolean _ | label _ | record _ =>
+                  simp [stepRaw,control,frames,ResultControl] at successful
+          | ifBool whenTrue whenFalse environment =>
+              cases value with
+              | boolean value => exact graph_ifBool_return_safety represented control frames
+              | closure _ _ | specification _ _ | prototype _ _ | natural _ | label _ | record _ | variant _ _ =>
+                  simp [stepRaw,control,frames,ResultControl] at successful
 
 
 /--
@@ -5130,6 +5547,28 @@ uses source semantics, without a separate typed-source restriction. -/
           rw [leftEq,rightEq] at found
           cases primitive <;> cases left <;> cases returnedValue <;> simp [valueMeaning,closeTerm_lam_form,primitiveResult] at found
           all_goals simp [stepRaw,returned,head,valueTerm,primitiveResult,scalarValue,ResultControl]
+  | case arms environment =>
+      cases derivation with
+      | value value => cases value
+      | @case scrutinee payload body result closedArms tag scrutineeCost resultCost first selected second =>
+          have same := (sourceDerivation_value_inv (valueMeaning_value meaning returnedValue) first).1
+          cases returnedValue <;> simp [valueMeaning,closeTerm_lam_form] at same
+          case variant label address =>
+            obtain ⟨rfl,-⟩ := same
+            cases found : arms.find? (fun arm => arm.1 == tag) with
+            | none => rw [find_map_arms,found] at selected; simp at selected
+            | some arm => obtain ⟨key,armBody⟩ := arm; simp [stepRaw,returned,head,found,ResultControl]
+  | ifBool whenTrue whenFalse environment =>
+      cases derivation with
+      | value value => cases value
+      | ifTrue first second =>
+          have same := (sourceDerivation_value_inv (valueMeaning_value meaning returnedValue) first).1
+          cases returnedValue <;> simp [valueMeaning,closeTerm_lam_form] at same
+          case boolean value => subst value; simp [stepRaw,returned,head,ResultControl]
+      | ifFalse first second =>
+          have same := (sourceDerivation_value_inv (valueMeaning_value meaning returnedValue) first).1
+          cases returnedValue <;> simp [valueMeaning,closeTerm_lam_form] at same
+          case boolean value => subst value; simp [stepRaw,returned,head,ResultControl]
 
 /--
 info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.frame_derivation_return_progress' depends on axioms: [propext, Quot.sound]
@@ -6247,5 +6686,48 @@ info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.lazyFixedSource_finish_or_su
 -/
 #guard_msgs in
 #print axioms lazyFixedSource_finish_or_suspend
+
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_inject_names' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms graph_evaluate_inject_names
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_case_return_execution' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms graph_case_return_execution
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_ifBool_return_execution' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms graph_ifBool_return_execution
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_case_return_safety' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms graph_case_return_safety
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_ifBool_return_safety' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms graph_ifBool_return_safety
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_via_names' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms graph_via_names
 
 end Minidregg.Theory.ObjectiveBendDemandAdequacy
