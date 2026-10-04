@@ -2123,6 +2123,75 @@ def activityViewLoaded (config : Config) (opened : Opened config) (cells : List 
     ObjectiveActivity.bookOf (snapshot.canonicalBytes ⟨config.deployment.resourceBookId⟩),
     cells.map fun cell => (cell, snapshot.model.roots ⟨cell⟩, snapshot.canonicalBytes ⟨cell⟩)⟩
 
+/-! ## Seats and invitations (SEATS-NATIVE): session operations 215–219
+
+Publish a contract package, create an instance, hand over an invitation,
+offer, invoke an instance's method, exit (`DREGG/SEAT/COMMAND/v1`) share one
+plan/assembly/submission/lookup quartet; the signed ingress is
+`DREGG/SEAT/SIGNED/v1`; 219 is the public seat view. A refusal names its reason
+to the signer: every seat cell is public (op 219), so the reason discloses
+nothing the view does not. -/
+
+def seatAmbient (config : Config) (opened : Opened config) : ObjectiveKernelConfig.Ambient :=
+  ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector⟩
+
+def seatPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
+    Except String SeatReceiver.SigningPlan := do
+  let command ← need "noncanonical seat command" (SeatReceiver.commandCodec.decode commandBytes)
+  let header ← SeatReceiver.signingHeader config.deployment config.profile
+    (seatAmbient config opened) opened.durable command
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    CredentialSignedEnvelopeController.headerCodec.encode header⟩
+
+def seatAssemble (plan : SeatReceiver.SigningPlan) (signature : List UInt8) :
+    Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "seat signature must be 64 bytes"
+  let header ← need "noncanonical seat header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  check (SeatReceiver.commandCodec.decode plan.commandBytes).isSome "noncanonical seat plan command"
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  pure (SeatReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+
+def seatSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) : IO Outcome := do
+  match ← SeatReceiver.receiveLoaded config.deployment config.profile
+      (seatAmbient config opened) config.signature config.transport opened.durable bytes with
+  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused .operationRejected "seat" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- Receipt-only historical lookup of a seat turn. Absence never submits. -/
+def seatLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) : Outcome :=
+  match SeatReceiver.decodeIngress bytes with
+  | none => refused .malformed "seat" "noncanonical signed ingress"
+  | some ingress =>
+      match SeatReceiver.replay config.deployment.domain config.profile.semantics opened.durable ingress with
+      | none => .absent
+      | some (.error _) => refused .conflict "replay" "transaction identity conflict"
+      | some (.ok receipt) =>
+          match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
+          | some original => .confirmed .replayed original
+          | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+
+/-- The public seat view's raw material: the logical height, the authority root
+a command pins, the Book, and the canonical bytes of each named cell. -/
+structure SeatView where
+  height : Nat
+  authorityRoot : Digest
+  book : Option ObjectiveActivity.BookCell
+  cells : List (Nat × Digest × List UInt8)
+
+def seatViewLoaded (config : Config) (opened : Opened config) (cells : List Nat) : Except String SeatView := do
+  let authority ← need "authority unavailable"
+    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment opened.durable.snapshot)
+  let snapshot := opened.durable.snapshot
+  pure ⟨logicalHeight config opened.durable, authority.snapshot.cell.root,
+    ObjectiveActivity.bookOf (snapshot.canonicalBytes ⟨config.deployment.resourceBookId⟩),
+    cells.map fun cell => (cell, snapshot.model.roots ⟨cell⟩, snapshot.canonicalBytes ⟨cell⟩)⟩
+
 /-- The operator's local read of one job (not a socket operation): its root,
 its eight money fields, and what the Book's held account for it (the account
 with the job's id) holds in the credit asset. -/

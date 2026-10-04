@@ -66,6 +66,8 @@ behind a signed account observation, 102=exact receipt by transaction id,
 162=job money submit (blind, as 115), 163=job money receipt-only lookup.
 210=activity signing plan, 211=activity detached assembly, 212=activity submit,
 213=activity receipt-only lookup, 214=public activity view (JSON request and reply).
+215=seat signing plan, 216=seat detached assembly, 217=seat submit,
+218=seat receipt-only lookup, 219=public seat view (JSON request and reply).
 170=certify signing plan, 171=certify detached assembly, 172=certify submit,
 173=public system view (certified head, tail bound, current head and chain).
 
@@ -90,6 +92,7 @@ frame boundary ends normally; truncated/oversized/unknown frames terminate.
 -/
 import Kernel.NativeHost
 import Host.ObjectiveActivityJson
+import Host.SeatJson
 import Compiler.GenericSimplexSourceAnchor
 import Compiler.FnWireFncu
 import Kernel.NativeHostObjectAudience
@@ -5693,6 +5696,11 @@ def run (arguments : List String) : IO UInt32 := do
           IO.FS.writeFile (directory / "publication.json") result.json.compress
           IO.println result.json.compress
           pure 0
+      | "seat-contract-artifact", [specPath, outputPath] =>
+          let (bytes, json) ← Minidregg.Host.SeatJson.artifact specPath
+          writeBytes outputPath bytes
+          IO.println json.compress
+          pure 0
       | "carry-plan", [requestPath, outputPath] =>
           let operator ← carryOperator settings
           let request ← readCarryJson requestPath
@@ -6626,6 +6634,37 @@ def run (arguments : List String) : IO UInt32 := do
                             let json := Minidregg.Host.ObjectiveActivityJson.viewJson domain
                               pinnedConfig.tariff.asset request view
                             return ((214 : UInt8), json.compress.toUTF8.toList)
+                        | 215 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let plan ← IO.ofExcept (NativeHost.seatPlanLoaded pinnedConfig opened payload)
+                            let bytes := SeatReceiver.signingPlanCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "seat plan exceeds host frame bound")
+                            return ((215 : UInt8), bytes)
+                        | 216 =>
+                            let (planBytes, signature) ← splitPair payload
+                            let some plan := SeatReceiver.signingPlanCodec.decode planBytes
+                              | throw (IO.userError "noncanonical seat plan")
+                            let ingress ← IO.ofExcept (NativeHost.seatAssemble plan signature)
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "seat ingress exceeds host frame bound")
+                            return ((216 : UInt8), ingress)
+                        | 217 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome ← NativeHost.seatSubmitLoaded pinnedConfig opened payload
+                            return ((217 : UInt8), outcomeCodec.encode outcome)
+                        | 218 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome := NativeHost.seatLookupLoaded pinnedConfig opened payload
+                            return ((218 : UInt8), outcomeCodec.encode outcome)
+                        | 219 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let request ← IO.ofExcept (Minidregg.Host.SeatJson.parseViewRequest payload)
+                            let domain := pinnedConfig.deployment.domain
+                            let view ← IO.ofExcept (NativeHost.seatViewLoaded pinnedConfig opened
+                              (Minidregg.Host.SeatJson.viewCells domain request))
+                            let json := Minidregg.Host.SeatJson.viewJson domain request view
+                            return ((219 : UInt8), json.compress.toUTF8.toList)
                         | 60 =>
                             let outcome ← fnSelectedPollSubmitSession
                               pinnedConfig state payload

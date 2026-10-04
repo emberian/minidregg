@@ -58,6 +58,7 @@ import Kernel.PayClaimReceiver
 import Kernel.PurseRefillReceiver
 import Kernel.JobMoneyReceiver
 import Kernel.ObjectiveActivityReceiver
+import Kernel.SeatReceiver
 import Kernel.CertifyReceiver
 import Kernel.CapabilityRenounce
 import Kernel.JointReserveIngress
@@ -837,6 +838,11 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
         ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector⟩
         opened.durable ingress) :
       NativeAdmission config opened (ObjectiveActivityReceiver.intent accepted)
+  | seat {ingress : SeatReceiver.DecodedIngress}
+      (accepted : SeatReceiver.Accepted config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector⟩
+        opened.durable ingress) :
+      NativeAdmission config opened (SeatReceiver.intent accepted)
   | certify {ingress : CertifyReceiver.DecodedIngress}
       (accepted : CertifyReceiver.AcceptedCertify config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
@@ -1872,6 +1878,14 @@ private def derive (config : Config) (opened : Opened config)
         return .ok ⟨ObjectiveActivityReceiver.intent accepted,
           .activity accepted, none, none, none, none, none, none, none, none, none, none, none, none,
           some ⟨ingress, ⟨accepted, rfl⟩⟩⟩
+  if let some ingress := SeatReceiver.decodeIngress bytes then
+    match ← SeatReceiver.admitDecodedNative config.deployment config.profile
+        ⟨config.federation, height, config.tariff.asset, config.tariff.collector⟩ opened.durable
+        config.signature ingress with
+    | .error reason => return .error s!"seat turn refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨SeatReceiver.intent accepted,
+          .seat accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := CertifyReceiver.decodeIngress bytes then
     match ← CertifyReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with

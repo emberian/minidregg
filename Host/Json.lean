@@ -53,6 +53,7 @@ import Kernel.NockDoor
 import Kernel.DocumentHistory
 import Host.ResidentContextInspection
 import Host.ObjectiveActivityJson
+import Host.SeatJson
 import Lean.Data.Json
 
 namespace Minidregg.Host.Json
@@ -3542,6 +3543,7 @@ def author (kind : String) (json : Lean.Json)
   | "pay-refill" => payRefill json
   | "job-money" => jobMoney json
   | "objective-activity" => ObjectiveActivityJson.author predicate json
+  | "seat" => SeatJson.author predicate json
   | "certify" => certify json
   | "application-spk-launch-descriptor" =>
       (ApplicationSpkLaunchDescriptorAuthoring.author json).map Prod.fst
@@ -5440,6 +5442,9 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   | "objective-activity" => ObjectiveActivityJson.inspectCommand bytes
   | "objective-activity-plan" => ObjectiveActivityJson.inspectPlan bytes
   | "objective-activity-ingress" => ObjectiveActivityJson.inspectIngress bytes
+  | "seat" => SeatJson.inspectCommand bytes
+  | "seat-plan" => SeatJson.inspectPlan bytes
+  | "seat-ingress" => SeatJson.inspectIngress bytes
   | "certify-plan" => do
       let plan ← decoded "certify-plan" CertifyReceiver.signingPlanCodec bytes
       pure <| .mkObj

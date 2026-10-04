@@ -18,3 +18,4 @@ import Host.ReceiptContinuityCheck
 import Host.ApplicationManagedPolicyAuthoringCheck
 
 import Host.ObjectiveActivityJson  -- the kernel activity's JSON surface: command authoring, plan/ingress inspection, the public view (op 214), the activity artifact
+import Host.SeatJson  -- seats and invitations: command authoring, plan/ingress inspection, the public view (op 219), the contract artifact
