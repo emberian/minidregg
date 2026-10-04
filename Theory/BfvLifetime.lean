@@ -4,10 +4,12 @@
 The ported `Theory.Bfv*` modules (breadstuffs `metatheory/Bfv/`) prove the noise algebra for
 BFV over the fhe.rs degree-4096 parameter set. Mini runs that same set: degree 4096,
 `t = 1,032,193`, and the three RNS moduli `68719403009 · 68719230977 · 137438822401`
-(`Compiler/BfvCompressedEquation.lean` `RnsModulus.value`; `native/fhe-bend/src/lib.rs` `T`, `Q`).
-This module joins the ported algebra to what Mini's native FHE profiles actually check.
+(`Compiler/BfvCompressedEquation.lean` `RnsModulus.value`).
+This module joins the ported algebra to the native FHE profile Mini last ran. That profile
+(`native/fhe-bend`) consumed only artifacts of the upstream-Bend path and was deleted with it on
+2026-10-04 (Git history keeps it); the next native FHE consumer must re-bind these constants.
 
-## What Mini's native code decides (read from `native/fhe-bend/src/{lib,natural}.rs`)
+## What Mini's native code decided (read from the deleted `native/fhe-bend/src/{lib,natural}.rs`)
 
 * Plaintexts are lifted as `⌊q·m/t⌋`, not as `Δ·m` (README: "actual floor(q*m/t) lifting adds
   at most one defect per … addition"). Bread's keystone `decrypt_exact` is for the `Δ·m` lift and
@@ -61,12 +63,12 @@ def miniQ0 : ℕ := 68719403009
 def miniQ1 : ℕ := 68719230977
 /-- Mini's third RNS modulus (`RnsModulus.q2`). -/
 def miniQ2 : ℕ := 137438822401
-/-- Mini's plaintext modulus (`native/fhe-bend` `T`). -/
+/-- Mini's plaintext modulus (`T` of the deleted native profile). -/
 def miniT : ℕ := 1032193
 
 /-- Mini's modulus chain IS the ported parameter set: the product of Mini's three pinned RNS
 moduli is `fheRs4096.q`, Mini's `t` is `fheRs4096.t`, and each modulus is the hex literal of
-`native/fhe-bend/src/lib.rs` `Q`. -/
+`Q` in the deleted native profile. -/
 theorem mini_modulus_chain :
     miniQ0 * miniQ1 * miniQ2 = fheRs4096.q ∧ miniT = fheRs4096.t ∧
       miniQ0 = 0xffffee001 ∧ miniQ1 = 0xffffc4001 ∧ miniQ2 = 0x1ffffe0001 := by
@@ -340,7 +342,7 @@ theorem lifetimeMarginHolds_anti {P : Params} {N B₀ : ℕ} {Bks Bks' d d' : �
     (le_trans (lifetimeNoise_mono_Bks P N B₀ hk d) (lifetimeNoise_mono_depth P N Bks' B₀ hd)) h
 
 /-- **The third unrefreshed use is refused, at every relinearization allowance and every depth
-`≥ 3`** — the fhe-bend README's "third unrefreshed invocation refuses", as a theorem about the
+`≥ 3`** — the deleted native profile's "third unrefreshed invocation refuses", as a theorem about the
 noise budget rather than a test of a counter. -/
 theorem lifetime_three_refused (Bks d : ℕ) (hd : 3 ≤ d) :
     lifetimeMarginHolds fheRs4096 4096 Bks freshNoise d = false := by

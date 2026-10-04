@@ -6,7 +6,7 @@
 # checked on every tracked .lean file (direct imports; Theory and Selvage are
 # closed under their rows, so their transitive closure is checked too):
 #
-#   Theory    Mathlib Lean Std Init Theory                     the metatheory never knows the candidate
+#   Theory    Mathlib Lean Theory                              the metatheory never knows the candidate
 #   Selvage   Mathlib Theory Selvage             the proof system knows only the metatheory
 #   Pred      Mathlib Theory Pred Compiler
 #   Kernel    Mathlib Lean Std Init Theory Pred Compiler Kernel
@@ -38,6 +38,10 @@
 # edge counts printed on every run (Theory -> Lean:N Std:N, Kernel -> Init:N
 # Std:N) are where a new such import shows; narrowing these rows again is a
 # table edit here, recorded in docs/LEAN-QUALIFICATION.md (import tiers).
+#
+# NARROWED (bendtt-delete, 2026-10-04): the Theory row loses Std and Init. Their
+# only Theory importers were the deleted upstream-Bend kernel and its machine;
+# Theory -> Lean remains (the Objective Bend Core4 definitions import Lean).
 # A new edge between libraries is a red until this table is changed on purpose.
 # Exits 1 listing every offending import line, with the edge it would add.
 set -u
@@ -45,7 +49,7 @@ cd "$(dirname "$0")/.." || exit 1
 python3 - <<'PY'
 import re, subprocess, sys
 ALLOWED = {
-    "Theory":    {"Mathlib", "Lean", "Std", "Init", "Theory"},
+    "Theory":    {"Mathlib", "Lean", "Theory"},
     "Selvage":   {"Mathlib", "Theory", "Selvage"},
     "Pred":      {"Mathlib", "Theory", "Pred", "Compiler"},
     "Kernel":    {"Mathlib", "Lean", "Std", "Init", "Theory", "Pred", "Compiler", "Kernel"},

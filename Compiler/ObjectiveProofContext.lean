@@ -1,8 +1,7 @@
 import Compiler.Tower256ConcreteBackend
 import Theory.AssertAxioms
 
-/- Objective-only commitment context, independent of historical BendTT and
-its invocation/source profiles. Generic framing and circuit machinery consume
+/- Objective-only commitment context. Generic framing and circuit machinery consume
 this codec; actual current admission must derive every field independently.
 No default public projection of a complete result is introduced here. -/
 namespace Minidregg.Compiler.ObjectiveProofContext

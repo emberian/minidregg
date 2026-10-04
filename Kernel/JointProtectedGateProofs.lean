@@ -20,7 +20,7 @@ theorem joint_exception_retains_activity {rootBytes : List UInt8 → TypedAuthor
     (snapshot : DataSnapshot rootBytes) (intent : DataIntent rootBytes)
     (pinned : config.activityControl = some pin)
     (admitted : config.otherFacetGate .joint snapshot intent = .ok ()) :
-    BendActivityControl.ordinaryGate pin snapshot intent = .ok () := by
+    ProtectedContentGate.ordinaryGate pin snapshot intent = .ok () := by
   cases layout : config.controlLayoutValid with
   | false =>
       change config.sourceGate (some .joint) snapshot intent = .ok () at admitted

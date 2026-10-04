@@ -12,16 +12,6 @@ import subprocess
 from pathlib import Path
 
 GROUPS = {
-    "BendQualification": [
-        "Compiler.BendCoreAdmission",
-        "Assurance.BendSourceAudit",
-        "Assurance.BendObliviousControllerChecks",
-        "Assurance.BendObliviousExecutionChecks",
-        "Assurance.BendObliviousSourceJoin",
-        "Assurance.BendArithmeticQualification",
-        "Compiler.BendNaturalRefinement",
-        "Compiler.BendNaturalArtifact",
-    ],
     "SimplexQualification": [
         "Kernel.GeneralSimplexReachability",
         "Kernel.GenericSimplexCausal",

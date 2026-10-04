@@ -2,7 +2,7 @@ import Lean
 namespace Minidregg.Theory.ObjectiveBendTypes
 set_option autoImplicit false
 
-/-- Quantities are obligations of this edition, not inherited BendTT defaults. -/
+/-- Quantities are obligations of this edition. -/
 inductive Quantity where
   | erased | affine | linear | unrestricted
   deriving Repr, DecidableEq

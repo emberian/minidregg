@@ -2,7 +2,7 @@
 represented, including lazy fix/mix, reflective specifications/prototypes and
 per-field records. This is a source compiler and translation validator, not a
 second evaluator. Runtime generated closures still need the demand-machine
-representation/simulation bridge. No BendTT modules are imported. -/
+representation/simulation bridge. -/
 import Theory.ObjectiveTermEquality
 
 namespace Minidregg.Compiler.ObjectiveDemandCode

@@ -3,8 +3,7 @@ Core scalar edition 2 distinguishes Booleans from arbitrary String labels.
 Weak-head call-by-name gives an independent partial meaning to lazy mix/fix.
 A sharing implementation must prove representation adequacy; this reference
 relation does not claim a heap machine, type safety, termination, proof
-consistency, or authority. BendTT's existing total calculus is a distinct
-supported embedding, not an admission theorem for these new constructors. -/
+consistency, or authority. -/
 import Lean
 namespace Minidregg.Theory.ObjectiveBendOpenRecursion
 set_option autoImplicit false

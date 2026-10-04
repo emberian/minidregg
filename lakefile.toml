@@ -118,17 +118,9 @@ root = "Host.CshakeBench"
 name = "minidregg-carry-verifier"
 root = "Host.CarryVerifierMain"
 
-# Explicit synthetic controller diagnostic; not part of the native Host.
-[[lean_exe]]
-name = "bend-controller-probe"
-root = "Verify.BendObliviousProbe"
-
 # Explicit qualification roots. Compilation does not imply native deployment.
 [[lean_lib]]
 name = "Verify"
-
-[[lean_lib]]
-name = "BendQualification"
 
 [[lean_lib]]
 name = "SimplexQualification"

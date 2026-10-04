@@ -3,8 +3,8 @@ import Theory.AssertAxioms
 
 /- Exact canonical-byte embedding shared by proof input and private commitment
 relations. This module does not choose which bytes may be disclosed. In
-particular, BendInvocation.Result contains private release bytes and cannot be
-published wholesale by default. -/
+particular, a bound invocation result carries private release bytes and cannot
+be published wholesale by default. -/
 namespace Minidregg.Compiler.BendProofBytes
 set_option autoImplicit false
 

@@ -324,7 +324,7 @@ theorem v9_command_refused (payload : List UInt8) :
   simp [rawCommandCodec, commandFrame, familyCommandFrame,
     List.append_assoc, take_tagged_frame]
 
-/-- A transaction11 command (a signed BendTT execution claim) refuses to decode:
+/-- A transaction11 command (a signed claim of the deleted upstream-Bend evaluator) refuses to decode:
 the retired evaluator's claims are not reinterpreted as anything. -/
 theorem v11_command_refused (payload : List UInt8) :
     rawCommandCodec.decode ("DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ 11 :: payload) = none := by

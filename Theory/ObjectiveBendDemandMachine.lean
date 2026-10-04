@@ -8,7 +8,7 @@ stack. A perform reached while a shared cell is being forced is refused, never
 run once-for-all or once-per-demand. Native authority and affine continuations
 are not constructors and cannot be minted/copied by this machine.
 Weak-head reference adequacy, graph/capture ownership and new type metatheory
-remain obligations; old BendTT metatheory is not asserted for this edition. -/
+remain obligations. -/
 import Theory.ObjectiveBendOpenRecursion
 namespace Minidregg.Theory.ObjectiveBendDemandMachine
 open Minidregg.Theory.ObjectiveBendOpenRecursion

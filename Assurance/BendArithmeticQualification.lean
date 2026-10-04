@@ -15,7 +15,7 @@ General claims checked here:
 The generic unroll checks below exercise finite networks. They do not construct
 that missing controller refinement, establish source completeness, prove native
 PCS/Fiat-Shamir security or transcript hiding, or authorize a world effect.
-No old BendTT evaluator or its termination theorem occurs in this target.
+No upstream-Bend evaluator or termination theorem occurs in this target.
 -/
 namespace Minidregg.Assurance.BendArithmeticQualification
 #assert_axioms Minidregg.Compiler.ObjectiveProofContext.preimage_injective
