@@ -220,6 +220,33 @@ def pump (c : Config) : Nat → State → State
       let s := { s with needsPoll := false }
       let next := pass c s
       if next == s then next else pump c fuel next
+
+deriving instance ReflBEq for Kind, Message, View, AuditEvent, State
+
+/-- Executable `pump`. A pass that changes nothing returns the very object it was
+given, and the whole-state `==` that detects that fixpoint walks every retained
+view, message, block byte and audit event, on every input (on the four-source
+evidence copy this dominated both a replica's per-input cost and its reopen
+replay). `withPtrEq` answers that case by pointer equality first; it is
+logically `next == s` (`withPtrEq a b k h = k ()`), so `pump` stays the
+definition every proof reads. -/
+def pumpFast (c : Config) : Nat → State → State
+  | 0, s => { s with needsPoll := true }
+  | fuel + 1, s =>
+      let s := { s with needsPoll := false }
+      let next := pass c s
+      if withPtrEq next s (fun _ => next == s) (fun same => by simp only [same, beq_self_eq_true])
+      then next else pumpFast c fuel next
+
+@[csimp] theorem pump_eq_pumpFast : @pump = @pumpFast := by
+  funext c fuel s
+  induction fuel generalizing s with
+  | zero => rfl
+  | succ fuel ih =>
+    show pump c (fuel + 1) s = pumpFast c (fuel + 1) s
+    rw [pump, pumpFast]
+    simp only [withPtrEq, ih]
+    rfl
 inductive Input where
   | delivery (message : Message)
   | tick (now : Nat)
