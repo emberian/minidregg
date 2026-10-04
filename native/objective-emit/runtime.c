@@ -10,28 +10,39 @@
  * is the Lean accounting, capacity suspension restores the exact
  * pre-transition state, and the State is written in the canonical codec
  * `objective-state.v1` (see the Lean module). Refinement to `stepRaw` is NOT
- * proved; native/objective-emit/differential.sh is the evidence.
+ * proved; native/objective-emit/differential.py is the evidence.
  *
- * usage: prog HEAP STACK TICKS OUT_STATE [RESUME_STATE]
+ * Activities: `perform` outside every update frame yields the whole program
+ * (Control.yielded, terminal for stepRaw); under an update frame it is refused
+ * `sharedEffect`. At a yield the driver below resumes (Lean `resume`: control
+ * := evaluate response [], heap and stack unchanged) with the next of the
+ * program's closed responses, which the emitter interned as ROM roots
+ * (ob_responses), and continues under the SAME tick budget; with no response
+ * left the run ends `yielded`.
+ *
+ * usage: prog HEAP STACK TICKS OUT_STATE [RESUME_STATE [FIRST_RESPONSE]]
+ *   RESUME_STATE "-" starts from the entry; FIRST_RESPONSE (default 0) is the
+ *   index into ob_responses of the next response to deliver.
  */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-extern const uint32_t ob_node_count, ob_label_count, ob_entry, ob_bound_zero;
+extern const uint32_t ob_node_count, ob_label_count, ob_entry, ob_bound_zero, ob_response_count;
+extern const uint32_t ob_responses[];
 extern const uint8_t ob_tag[], ob_label_bytes[];
 extern const uint32_t ob_a[], ob_b[], ob_c[], ob_d[], ob_pair_off[], ob_pair_len[], ob_pairs[],
     ob_nat_off[], ob_nat_len[], ob_limbs[], ob_label_off[], ob_label_len[];
 
 enum { T_BOUND, T_LAM, T_APP, T_MIX, T_FIX, T_SPEC, T_PROTO, T_REFLECT, T_METADATA, T_PROJECT,
        T_NAT, T_BOOL, T_LABEL, T_BINARY, T_EXTEND, T_RECORD, T_GET, T_IFZERO, T_INJECT, T_CASE,
-       T_IFBOOL };
+       T_IFBOOL, T_PERFORM, T_DONE };
 enum { P_ADD, P_MUL, P_EQUAL, P_CONJ, P_LABELEQ };
 enum { R_UNBOUND, R_MISSINGCELL, R_MISSINGFIELD, R_WRONGVALUE, R_INVALIDUPDATE, R_CAPACITY,
-       R_MISSINGARM };
+       R_MISSINGARM, R_SHAREDEFFECT };
 static const char *refusal_name[] = {"unbound", "missingCell", "missingField", "wrongValue",
-                                     "invalidUpdate", "capacity", "missingArm"};
+                                     "invalidUpdate", "capacity", "missingArm", "sharedEffect"};
 
 static void die(const char *message) { fprintf(stderr, "{\"error\":\"%s\"}\n", message); exit(2); }
 
@@ -117,7 +128,8 @@ typedef struct {
    condition: t1=zero t2=successor env | binaryLeft: prim t1=right env
    binaryRight: prim left | case: pairs env | ifBool: t1=true t2=false env */
 
-enum { K_EVALUATE, K_ENTER, K_BLACKHOLE, K_RETURNED, K_COMPLETE, K_REFUSED };
+enum { K_EVALUATE, K_ENTER, K_BLACKHOLE, K_RETURNED, K_COMPLETE, K_REFUSED, K_YIELDED };
+/* yielded: addr = the plan cell's address */
 typedef struct { uint8_t tag; uint8_t reason; uint32_t code; const Env *env; uint64_t addr; Value value; } Control;
 
 static Cell *heap; static uint64_t heap_len, heap_cap;
@@ -174,7 +186,7 @@ static Fields *allocate_fields(const Pair *pairs, uint64_t n, const Env *env, ui
 /* ---- stepRaw ---- */
 static void step_raw(void) {
   switch (ctl.tag) {
-  case K_COMPLETE: case K_REFUSED: case K_BLACKHOLE: return;
+  case K_COMPLETE: case K_REFUSED: case K_BLACKHOLE: case K_YIELDED: return;
   case K_ENTER: {
     uint64_t a = ctl.addr;
     if (a >= heap_len) { refuse(R_MISSINGCELL); return; }                 /* none */
@@ -243,6 +255,20 @@ static void step_raw(void) {
     case T_IFBOOL: {
       Frame f = f_simple(F_IFBOOL); f.t1 = ob_b[n]; f.t2 = ob_c[n]; f.env = env;
       evaluate(ob_a[n], env); stack_push(f); return;
+    }
+    case T_DONE: evaluate(ob_a[n], env); return;                              /* administrative */
+    case T_PERFORM: {
+#ifndef OB_MUTATE_SHARED
+      /* OB_MUTATE_SHARED: deliberate mutation for the harness control (no sharedEffect refusal). */
+      for (uint64_t k = 0; k < stack_len; k++)                               /* forcingShared */
+        if (stk[k].tag == F_UPDATE) { refuse(R_SHAREDEFFECT); return; }
+#endif
+      uint64_t a = heap_len;
+#ifndef OB_MUTATE_PERFORM
+      heap_push(suspended_cell(ob_a[n], env));                               /* the plan, lazily */
+#endif
+      /* OB_MUTATE_PERFORM: deliberate mutation for the harness control (the plan is not allocated). */
+      ctl.tag = K_YIELDED; ctl.addr = a; return;
     }
     }
     die("unknown ROM tag");
@@ -407,7 +433,7 @@ static void put_state(void) {
   put(ctl.tag);
   switch (ctl.tag) {
   case K_EVALUATE: put_term_code(ctl.code); put_env(ctl.env); break;
-  case K_ENTER: case K_BLACKHOLE: put64(ctl.addr); break;
+  case K_ENTER: case K_BLACKHOLE: case K_YIELDED: put64(ctl.addr); break;
   case K_RETURNED: case K_COMPLETE: put_value(&ctl.value); break;
   case K_REFUSED: put(ctl.reason); break;
   }
@@ -418,7 +444,8 @@ static void put_state(void) {
 /* A term written as a ROM index is reused; the codec writes `.nat` literals
    that ARE ROM nodes as ROM indices (the Lean encoder looks the term up first). */
 static void canonical_rom_terms_check(void) {
-  for (uint32_t i = 0; i < ob_node_count; i++) if (ob_tag[i] > T_IFBOOL) die("ROM tag out of range");
+  for (uint32_t i = 0; i < ob_node_count; i++) if (ob_tag[i] > T_DONE) die("ROM tag out of range");
+  for (uint32_t i = 0; i < ob_response_count; i++) if (ob_responses[i] >= ob_node_count) die("response outside the ROM");
 }
 
 /* ---- decoder (resume from a State written by either side) ---- */
@@ -487,9 +514,9 @@ static void load_state(const char *path) {
   ctl.tag = get8();
   switch (ctl.tag) {
   case K_EVALUATE: ctl.code = get_code(); ctl.env = get_env(); break;
-  case K_ENTER: case K_BLACKHOLE: ctl.addr = getn(8); break;
+  case K_ENTER: case K_BLACKHOLE: case K_YIELDED: ctl.addr = getn(8); break;
   case K_RETURNED: case K_COMPLETE: ctl.value = get_value(); break;
-  case K_REFUSED: ctl.reason = get8(); if (ctl.reason > R_MISSINGARM) die("bad refusal"); break;
+  case K_REFUSED: ctl.reason = get8(); if (ctl.reason > R_SHAREDEFFECT) die("bad refusal"); break;
   default: die("bad control");
   }
   uint64_t frames = getn(8); Frame *tmp = malloc((frames ? frames : 1) * sizeof(Frame));
@@ -523,15 +550,20 @@ static uint64_t fingerprint(uint64_t h) {
 }
 
 int main(int argc, char **argv) {
-  if (argc != 5 && argc != 6) { fprintf(stderr, "usage: %s HEAP STACK TICKS OUT_STATE [RESUME_STATE]\n", argv[0]); return 2; }
+  if (argc < 5 || argc > 7) { fprintf(stderr, "usage: %s HEAP STACK TICKS OUT_STATE [RESUME_STATE [FIRST_RESPONSE]]\n", argv[0]); return 2; }
   uint64_t heap_limit = strtoull(argv[1], NULL, 10), stack_limit = strtoull(argv[2], NULL, 10), ticks = strtoull(argv[3], NULL, 10);
+  uint64_t next_response = argc == 7 ? strtoull(argv[6], NULL, 10) : 0, resumes = 0;
   canonical_rom_terms_check();
-  if (argc == 6) load_state(argv[5]); else { ctl.tag = K_EVALUATE; ctl.code = ob_entry; ctl.env = NULL; }
+  if (argc >= 6 && strcmp(argv[5], "-") != 0) load_state(argv[5]); else { ctl.tag = K_EVALUATE; ctl.code = ob_entry; ctl.env = NULL; }
   uint64_t used = 0, hash = 0xcbf29ce484222325ULL; const char *outcome; char detail[64] = "";
   for (;;) {
     if (ctl.tag == K_COMPLETE) { outcome = "finished"; break; }
     if (ctl.tag == K_BLACKHOLE) { outcome = "divergent"; snprintf(detail, sizeof detail, "%llu", (unsigned long long)ctl.addr); break; }
     if (ctl.tag == K_REFUSED) { outcome = "refused"; snprintf(detail, sizeof detail, "%s", refusal_name[ctl.reason]); break; }
+    if (ctl.tag == K_YIELDED) {                         /* Lean `resume`: heap and stack unchanged */
+      if (next_response >= ob_response_count) { outcome = "yielded"; snprintf(detail, sizeof detail, "%llu", (unsigned long long)ctl.addr); break; }
+      evaluate(ob_responses[next_response++], NULL); resumes++; continue;
+    }
     if (used == ticks) { outcome = "suspended-ticks"; break; }
     undo_save(); step_raw();
     if (heap_len <= heap_limit && stack_len <= stack_limit) { used++; hash = fingerprint(hash); }
@@ -539,8 +571,8 @@ int main(int argc, char **argv) {
   }
   put_state();
   FILE *fp = fopen(argv[4], "wb"); if (!fp || fwrite(out_buf, 1, out_len, fp) != out_len) die("cannot write state"); fclose(fp);
-  printf("{\"outcome\":\"%s\",\"detail\":\"%s\",\"ticks\":%llu,\"trace\":\"%016llx\",\"heap\":%llu,\"stack\":%llu,\"bytes\":%zu}\n",
+  printf("{\"outcome\":\"%s\",\"detail\":\"%s\",\"ticks\":%llu,\"trace\":\"%016llx\",\"heap\":%llu,\"stack\":%llu,\"bytes\":%zu,\"resumes\":%llu}\n",
          outcome, detail, (unsigned long long)used, (unsigned long long)hash, (unsigned long long)heap_len,
-         (unsigned long long)stack_len, out_len);
+         (unsigned long long)stack_len, out_len, (unsigned long long)resumes);
   return 0;
 }

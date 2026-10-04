@@ -20,9 +20,14 @@ The one runtime term outside the ROM is the cached predecessor literal that
 an `ifZero` successor step allocates (`.nat n` for a runtime `n`); the codec
 encodes a term by ROM index when it is in the ROM and as a literal otherwise.
 
+A `perform` yields the whole program (`Control.yielded`, terminal for
+`stepRaw`); `resume` restarts it at a closed response under the empty
+environment. Responses are interned as extra ROM roots (`Compiled.responses`),
+so a resumed run never leaves the ROM either.
+
 Refinement status: NONE PROVED. The obligation is "the emitted C's trace is
 `stepRaw`'s trace"; the evidence today is a differential harness
-(native/objective-emit/differential.sh) comparing canonical State bytes,
+(native/objective-emit/differential.py) comparing canonical State bytes,
 outcome, tick count and a per-tick fingerprint against `runBounded`. -/
 import Std.Data.HashMap
 import Theory.ObjectiveBendDemandMachine
@@ -96,6 +101,8 @@ inductive Node where
   | inject (name payload : Nat)
   | case (scrutinee : Nat) (arms : List (Nat × Nat))
   | ifBool (condition whenTrue whenFalse : Nat)
+  | perform (plan : Nat)
+  | done (value : Nat)
   deriving Repr, Inhabited
 
 structure Rom where
@@ -167,6 +174,8 @@ mutual
         | .ifBool condition whenTrue whenFalse =>
           pure (.ifBool (← intern capacity fuel condition) (← intern capacity fuel whenTrue)
             (← intern capacity fuel whenFalse))
+        | .perform plan => pure (.perform (← intern capacity fuel plan))
+        | .done value => pure (.done (← intern capacity fuel value))
       place capacity term node
 
   def internFields (capacity : Nat) : Nat → List (String × Term) → Build (List (Nat × Nat))
@@ -203,17 +212,26 @@ structure Compiled where
   rom : Rom
   entry : Nat
   boundZero : Nat
+  /-- ROM indices of the closed response terms a `resume` may evaluate, in order. -/
+  responses : Array Nat := #[]
 
-/-- Build the ROM of one closed program. Index 0 is always `bound 0`. -/
-def buildAll (capacity fuel : Nat) (entry : Term) : Build (Nat × Nat) := do
+/-- Build the ROM of one closed program and the closed responses it may be
+resumed with (`resume` evaluates a response under the empty environment, so a
+response is code like any other). Index 0 is always `bound 0`. -/
+def buildAll (capacity fuel : Nat) (entry : Term) (responses : List Term) :
+    Build (Nat × Nat × Array Nat) := do
   let boundZero ← intern capacity fuel (.bound 0)
   let entryIndex ← intern capacity fuel entry
+  let mut responseIndices : Array Nat := #[]
+  for response in responses do
+    responseIndices := responseIndices.push (← intern capacity fuel response)
   deriveAll capacity fuel (capacity + 1) 0
-  pure (boundZero, entryIndex)
+  pure (boundZero, entryIndex, responseIndices)
 
-def compile (capacity fuel : Nat) (entry : Term) : Except String Compiled := do
-  let ((boundZero, entryIndex), rom) ← (buildAll capacity fuel entry).run {}
-  pure ⟨rom, entryIndex, boundZero⟩
+def compile (capacity fuel : Nat) (entry : Term) (responses : List Term := []) :
+    Except String Compiled := do
+  let ((boundZero, entryIndex, responseIndices), rom) ← (buildAll capacity fuel entry responses).run {}
+  pure ⟨rom, entryIndex, boundZero, responseIndices⟩
 
 /-! ## Audit: the ROM decodes to its keys, the derived pointers to the probes -/
 
@@ -244,6 +262,8 @@ mutual
       | .inject name p => pure (.inject (← label name) (← rom.decode fuel p))
       | .case s arms => pure (.case (← rom.decode fuel s) (← rom.decodeFields fuel arms))
       | .ifBool c t f => pure (.ifBool (← rom.decode fuel c) (← rom.decode fuel t) (← rom.decode fuel f))
+      | .perform p => pure (.perform (← rom.decode fuel p))
+      | .done v => pure (.done (← rom.decode fuel v))
 
   def Rom.decodeFields (rom : Rom) : Nat → List (Nat × Nat) → Option (List (String × Term))
     | _, [] => some []
@@ -308,12 +328,12 @@ def primitiveCode : Primitive → Nat
 
 def refusalCode : Refusal → Nat
   | .unbound => 0 | .missingCell => 1 | .missingField => 2 | .wrongValue => 3
-  | .invalidUpdate => 4 | .capacity => 5 | .missingArm => 6
+  | .invalidUpdate => 4 | .capacity => 5 | .missingArm => 6 | .sharedEffect => 7
 
 def refusalName : Refusal → String
   | .unbound => "unbound" | .missingCell => "missingCell" | .missingField => "missingField"
   | .wrongValue => "wrongValue" | .invalidUpdate => "invalidUpdate"
-  | .capacity => "capacity" | .missingArm => "missingArm"
+  | .capacity => "capacity" | .missingArm => "missingArm" | .sharedEffect => "sharedEffect"
 
 def putAddressFields (out : ByteArray) (fields : List (String × Address)) : ByteArray :=
   fields.foldl (fun acc field => putU64 (putString acc field.1) field.2) (putU64 out fields.length)
@@ -363,6 +383,7 @@ def putControl (rom : Rom) (out : ByteArray) : Control → Except String ByteArr
   | .returned v => putValue rom (putU8 out 3) v
   | .complete v => putValue rom (putU8 out 4) v
   | .refused r => pure (putU8 (putU8 out 5) (refusalCode r))
+  | .yielded plan => pure (putU64 (putU8 out 6) plan)
 
 def stateMagic : ByteArray := "OBS1".toUTF8
 
@@ -378,7 +399,7 @@ def encodeState (rom : Rom) (state : State) : Except String ByteArray := do
 
 def controlTag : Control → Nat
   | .evaluate .. => 0 | .enter _ => 1 | .blackhole _ => 2
-  | .returned _ => 3 | .complete _ => 4 | .refused _ => 5
+  | .returned _ => 3 | .complete _ => 4 | .refused _ => 5 | .yielded _ => 6
 
 def fnvPrime : UInt64 := 0x100000001b3
 def fnvOffset : UInt64 := 0xcbf29ce484222325
@@ -405,6 +426,7 @@ def nodeTag : Node → Nat
   | .project .. => 9 | .nat .. => 10 | .boolean .. => 11 | .label .. => 12
   | .binary .. => 13 | .extend .. => 14 | .record .. => 15 | .get .. => 16
   | .ifZero .. => 17 | .inject .. => 18 | .case .. => 19 | .ifBool .. => 20
+  | .perform .. => 21 | .done .. => 22
 
 /-- (a, b, c, d, pairs) for one node; see runtime.c's table contract. -/
 def nodeSlots : Node → Nat × Nat × Nat × Nat × List (Nat × Nat)
@@ -427,6 +449,8 @@ def nodeSlots : Node → Nat × Nat × Nat × Nat × List (Nat × Nat)
   | .inject n p => (n, p, 0, 0, [])
   | .case s arms => (s, 0, 0, 0, arms)
   | .ifBool c t f => (c, t, f, 0, [])
+  | .perform p => (p, 0, 0, 0, [])
+  | .done v => (v, 0, 0, 0, [])
 
 def limbs : Nat → Nat → List Nat
   | 0, _ => []
@@ -467,6 +491,8 @@ def emitC (compiled : Compiled) : Except String String := do
     s!"const uint32_t ob_label_count = {rom.labels.size};\n",
     s!"const uint32_t ob_entry = {compiled.entry};\n",
     s!"const uint32_t ob_bound_zero = {compiled.boundZero};\n",
+    s!"const uint32_t ob_response_count = {compiled.responses.size};\n",
+    cArray "uint32_t" "ob_responses" compiled.responses,
     cArray "uint8_t" "ob_tag" tags, cArray "uint32_t" "ob_a" as, cArray "uint32_t" "ob_b" bs,
     cArray "uint32_t" "ob_c" cs, cArray "uint32_t" "ob_d" ds,
     cArray "uint32_t" "ob_pair_off" pairOffsets, cArray "uint32_t" "ob_pair_len" pairLengths,

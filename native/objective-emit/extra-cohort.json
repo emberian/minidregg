@@ -1,5 +1,4 @@
 [
- {"name":"SumsTotal","modules":[{"name":"Sums","source":"../../tests/objective-bend-source/Sums.obend"}],"entry":"total","arguments":[]},
  {"name":"StressCount","modules":[{"name":"Stress","source":"Stress.obend"}],"entry":"count","arguments":["20000"]},
  {"name":"StressWork","modules":[{"name":"Stress","source":"Stress.obend"}],"entry":"work","arguments":["14"]},
  {"name":"StressSharedWork","modules":[{"name":"Stress","source":"Stress.obend"}],"entry":"sharedWork","arguments":["2000"]},

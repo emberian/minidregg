@@ -1,0 +1,7 @@
+{
+  "schema": "dregg.objective-bend.core.v2",
+  "edition": "objective-bend-1",
+  "note": "Hand-built negative fixture, not a front-end product: the front end refuses an Activity in an argument position, so no source reaches this. (\\x. x) (perform 1): the argument thunk is forced under its update frame and its perform must be refused sharedEffect (Theory/ObjectiveBendDemandMachine perform_under_update_refused).",
+  "term": {"tag": "app", "fn": {"tag": "lam", "body": {"tag": "bound", "index": 0}},
+           "arg": {"tag": "perform", "plan": {"tag": "nat", "value": "1"}}}
+}

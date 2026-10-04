@@ -28,7 +28,7 @@ log = open(a.log, "w")
 def say(line):
     print(line, flush=True); log.write(line + "\n"); log.flush()
 lean = ["lake", "env", "lean", "--run", os.path.join(repo, "Compiler/ObjectiveBendEmitCRun.lean")]
-fields = ["outcome", "detail", "ticks", "trace", "heap", "stack", "bytes"]
+fields = ["outcome", "detail", "ticks", "trace", "heap", "stack", "bytes", "resumes"]
 index = json.load(open(os.path.join(a.packets, "index.json")))
 only = set(filter(None, a.only.split(",")))
 passes = fails = 0
@@ -44,11 +44,11 @@ for item in index:
         t = subprocess.run(lean + ["typing", item["typed"]], cwd=repo, capture_output=True, text=True)
         typing = (json.loads(t.stdout.strip().splitlines()[-1])["typing"] if t.returncode == 0 and t.stdout.strip() else "typing-driver-error")
     started = time.time()
-    s = subprocess.run(lean + ["suite", item["core"], work, a.heap, a.stack, a.ticks], cwd=repo, capture_output=True, text=True)
+    s = subprocess.run(lean + ["suite", item["core"], work, a.heap, a.stack, a.ticks] + ([item["responses"]] if item.get("responses") else []), cwd=repo, capture_output=True, text=True)
     if s.returncode != 0:
         fails += 1; say(f"FAIL {name} lean-suite: {s.stderr.strip()[:400]!r}"); continue
     summary = json.loads(s.stdout.strip().splitlines()[-1])
-    say(f"# {name} typing={typing} rom-nodes={summary['nodes']} labels={summary['labels']} full-ticks={summary['fullTicks']} lean-suite-s={time.time()-started:.1f}")
+    say(f"# {name} typing={typing} rom-nodes={summary['nodes']} labels={summary['labels']} full-ticks={summary['fullTicks']} responses={summary.get('responses',0)} yields={summary.get('yields',0)} lean-suite-s={time.time()-started:.1f}")
     prog = os.path.join(work, "prog")
     cc = subprocess.run(["cc", "-O2", "-std=c11", "-Wall", "-Werror"] + a.cflags.split() +
                         ["-o", prog, os.path.join(here, "runtime.c"), os.path.join(work, "program.c")],
@@ -57,7 +57,10 @@ for item in index:
         fails += 1; say(f"FAIL {name} cc: {cc.stderr.strip()[:400]!r}"); continue
     for case in json.load(open(os.path.join(work, "cases.json"))):
         cstate = os.path.join(work, case["case"] + ".c.state")
-        cmd = [prog, str(case["heap"]), str(case["stack"]), str(case["ticks"]), cstate] + ([case["resume"]] if case["resume"] else [])
+        # FIRST_RESPONSE is passed whenever it is not the default 0; it needs a resume path.
+        cmd = [prog, str(case["heap"]), str(case["stack"]), str(case["ticks"]), cstate]
+        if case["resume"] or case["first"]:
+            cmd += [case["resume"] or "-", str(case["first"])]
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
             fails += 1; say(f"FAIL {name} {case['case']} c-run: {r.stderr.strip()[:300]!r}"); continue
@@ -66,7 +69,7 @@ for item in index:
         lb = open(case["state"], "rb").read(); cb = open(cstate, "rb").read()
         if lb != cb: differ.append("state-bytes")
         digest = hashlib.sha256(lb).hexdigest()[:16]
-        line = f"{name} {case['case']} limits=({case['heap']},{case['stack']},{case['ticks']}){' resume' if case['resume'] else ''} outcome={e['outcome']}{(':'+e['detail']) if e['detail'] else ''} ticks={e['ticks']} heap={e['heap']} stack={e['stack']} state-sha256={digest}"
+        line = f"{name} {case['case']} limits=({case['heap']},{case['stack']},{case['ticks']}){' resume' if case['resume'] else ''} first={case['first']} outcome={e['outcome']}{(':'+e['detail']) if e['detail'] else ''} ticks={e['ticks']} resumes={e['resumes']} heap={e['heap']} stack={e['stack']} state-sha256={digest}"
         if differ:
             fails += 1; say(f"FAIL {line} differ={differ} c={json.dumps(c)}")
         else:

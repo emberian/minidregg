@@ -8,6 +8,7 @@ import Theory.ObjectiveBendTyping
 import Theory.ObjectiveBendDemandMachine
 import Theory.ObjectiveBendDemandData
 import Theory.ObjectiveBendCheckpoint
+import Compiler.ObjectiveBendDataWire
 
 namespace Minidregg.Host.ObjectiveBendPreview
 open Lean (Json toJson)
@@ -15,6 +16,7 @@ open Minidregg.Theory.ObjectiveBendTyping
 open Minidregg.Theory.ObjectiveBendDemandMachine
 open Minidregg.Theory.ObjectiveBendTypes (Ty)
 open Minidregg.Theory.ObjectiveBendDemandData (Data)
+open Minidregg.Compiler.ObjectiveBendDataWire
 set_option autoImplicit false
 
 def natural (json : Json) (key : String) : Except String Nat := do
@@ -31,36 +33,6 @@ def valueJson : RuntimeValue → Json
   | .specification _ _ => Json.mkObj [("tag",toJson "specification"),("status",toJson "unforced extension")]
   | .prototype _ _ => Json.mkObj [("tag",toJson "prototype"),("status",toJson "unforced target")]
   | .variant label _ => Json.mkObj [("tag",toJson "variant"),("label",toJson label),("status",toJson "unforced payload")]
-
-/-- Typed data on the wire: typed-values-v1 plus `variant`. -/
-partial def dataJson : Data → Json
-  | .natural n => Json.mkObj [("tag",toJson "natural"),("value",toJson (toString n))]
-  | .boolean b => Json.mkObj [("tag",toJson "boolean"),("value",toJson b)]
-  | .label s => Json.mkObj [("tag",toJson "label"),("value",toJson s)]
-  | .record fields => Json.mkObj [("tag",toJson "record"),("fields",Json.arr (fields.map fun field =>
-      Json.mkObj [("name",toJson field.1),("value",dataJson field.2)]).toArray)]
-  | .variant label payload => Json.mkObj [("tag",toJson "variant"),("label",toJson label),("payload",dataJson payload)]
-
-def decodeNatural (json : Json) : Except String Data := do
-  let text ← json.getObjValAs? String "value"
-  let some n := text.toNat? | throw "response natural must be canonical decimal"
-  if toString n != text then throw "response natural must be canonical decimal"
-  pure (.natural n)
-
-def decodeData : Nat → Json → Except String Data
-  | 0, _ => throw "response nesting capacity"
-  | fuel + 1, json => do
-    let tag ← json.getObjValAs? String "tag"
-    if tag == "natural" then decodeNatural json
-    else if tag == "boolean" then return .boolean (← json.getObjValAs? Bool "value")
-    else if tag == "label" then return .label (← json.getObjValAs? String "value")
-    else if tag == "record" then
-      let fields ← (← json.getObjVal? "fields").getArr?
-      return .record (← fields.toList.mapM fun field => do
-        return (← field.getObjValAs? String "name", ← decodeData fuel (← field.getObjVal? "value")))
-    else if tag == "variant" then
-      return .variant (← json.getObjValAs? String "label") (← decodeData fuel (← json.getObjVal? "payload"))
-    else throw "unknown response data tag"
 
 /-- Run one turn: to a finish, a yield, or a refusal/suspension/divergence. -/
 def runTurn (limits : Limits) (ticks : Nat) (state : State) : Outcome := runBounded limits ticks state

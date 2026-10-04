@@ -1,0 +1,10 @@
+# differential 2026-10-04T02:02:08-0400 cflags='' limits heap=4000000 stack=4000000 ticks=20000000
+# StressCount typing=accepted:{"tag":"natural"} rom-nodes=62 labels=14 full-ticks=360037 responses=0 yields=0 lean-suite-s=422.3
+PASS StressCount full limits=(4000000,4000000,20000000) first=0 outcome=finished ticks=360037 resumes=0 heap=40014 stack=0 state-sha256=78bdd6f416b95afb
+PASS StressCount ticks-third limits=(4000000,4000000,120012) first=0 outcome=suspended-ticks ticks=120012 resumes=0 heap=16011 stack=8000 state-sha256=56441b8babda1640
+PASS StressCount ticks-two-thirds limits=(4000000,4000000,240024) first=0 outcome=suspended-ticks ticks=240024 resumes=0 heap=32013 stack=16002 state-sha256=afeff306accee5d4
+PASS StressCount heap-half limits=(20007,4000000,20000000) first=0 outcome=suspended-capacity ticks=149982 resumes=0 heap=20007 stack=9998 state-sha256=34dc77ea5a7b62f4
+PASS StressCount resume-capacity limits=(4000000,4000000,19850018) resume first=0 outcome=finished ticks=210055 resumes=0 heap=40014 stack=0 state-sha256=78bdd6f416b95afb
+PASS StressCount stack-three limits=(4000000,3,20000000) first=0 outcome=suspended-capacity ticks=4 resumes=0 heap=1 stack=3 state-sha256=5ac7b3a2b7014a2c
+PASS StressCount resume-half limits=(4000000,4000000,19819982) resume first=0 outcome=finished ticks=180019 resumes=0 heap=40014 stack=0 state-sha256=78bdd6f416b95afb
+# TOTAL pass=7 fail=0

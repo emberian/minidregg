@@ -1,0 +1,8 @@
+# differential 2026-10-04T01:58:59-0400 cflags='' limits heap=4000000 stack=4000000 ticks=20000000
+# SharedEffect typing=no-typed-packet rom-nodes=5 labels=0 full-ticks=6 responses=0 yields=0 lean-suite-s=1.8
+PASS SharedEffect full limits=(4000000,4000000,20000000) first=0 outcome=refused:sharedEffect ticks=6 resumes=0 heap=1 stack=1 state-sha256=e88998df778ac7de
+PASS SharedEffect ticks-third limits=(4000000,4000000,2) first=0 outcome=suspended-ticks ticks=2 resumes=0 heap=0 stack=1 state-sha256=d13db028cb5a3db7
+PASS SharedEffect ticks-two-thirds limits=(4000000,4000000,4) first=0 outcome=suspended-ticks ticks=4 resumes=0 heap=1 stack=0 state-sha256=f841380ab8d0a5b5
+PASS SharedEffect stack-three limits=(4000000,3,20000000) first=0 outcome=refused:sharedEffect ticks=6 resumes=0 heap=1 stack=1 state-sha256=e88998df778ac7de
+PASS SharedEffect resume-half limits=(4000000,4000000,19999997) resume first=0 outcome=refused:sharedEffect ticks=3 resumes=0 heap=1 stack=1 state-sha256=e88998df778ac7de
+# TOTAL pass=5 fail=0

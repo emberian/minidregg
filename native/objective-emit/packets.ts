@@ -21,6 +21,8 @@ for(const cohortPath of cohorts){
    modules:item.modules.map((m:any)=>({name:m.name,sourcePath:resolve(cohortDir,m.source),imports:m.imports??[]})),
    entryModule:String(item.modules.length-1),entryDefinition:item.entry};
   writeFileSync(join(dir,"package-input.json"),JSON.stringify(packageInput,null,2)+"\n");
+  // An activity's responses, on the preview's wire, in delivery order.
+  writeFileSync(join(dir,"responses.json"),JSON.stringify(item.responses??[],null,2)+"\n");
   let status="ok",message="";
   try{
    captureObjective(join(dir,"package-input.json"),join(dir,"capture"));
@@ -29,7 +31,8 @@ for(const cohortPath of cohorts){
    execFileSync(process.execPath,[elaborator,join(dir,"capture","objective.json"),join(dir,"source"),JSON.stringify(wire),JSON.stringify(item.projections??[]),JSON.stringify(limits)],{encoding:"utf8",stdio:["ignore","pipe","pipe"]});
   }catch(error:any){status="refused";message=String(error.stderr??error.message??error).trim().slice(0,400);}
   index.push({name:item.name,cohort:cohortPath,status,message,core:existsSync(join(dir,"source.core.json"))?join(dir,"source.core.json"):null,
-   typed:existsSync(join(dir,"source.typed.json"))?join(dir,"source.typed.json"):null});
+   typed:existsSync(join(dir,"source.typed.json"))?join(dir,"source.typed.json"):null,
+   responses:join(dir,"responses.json")});
  }
 }
 writeFileSync(join(outRoot,"index.json"),JSON.stringify(index,null,2)+"\n");
