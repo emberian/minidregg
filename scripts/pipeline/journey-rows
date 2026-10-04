@@ -68,10 +68,13 @@ row_activity() {
   d=$(ls "$SRC"/native/resource-client/*activity*accept* "$SRC"/native/resource-client/*activity*e2e* 2>/dev/null | head -1)
   [ -n "$d" ] || return 99
   case "$d" in
-    *.py) (cd "$SRC" && python3 "$d" all --bin "$BIN" --root "$RUN/a") ;;
+    # objective-activity-native-acceptance.py takes --bin and --root only (no `all` verb, unlike
+    # objective-native-acceptance.py); its results.json is the row's evidence
+    *.py) (cd "$SRC" && python3 "$d" --bin "$BIN" --root "$RUN/a") ;;
     *)    (cd "$SRC" && MINI_HOST_BIN=$BIN/minidregg-host MINI_BIN=$BIN/mini bash "$d" "$MANIFEST" "$RUN/a") ;;
   esac >"$OUT/activity.out" 2>"$OUT/activity.err"
   local rc=$?
+  cp "$RUN/a/results.json" "$OUT/" 2>/dev/null
   echo "$(basename "$d"): $(tail -1 "$OUT/activity.out")" >&2
   return $rc
 }
