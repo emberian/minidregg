@@ -633,7 +633,8 @@ usage:
   mini join --wait --host HOST --config PINNED-CONFIG.json [--socket SOCKET | --bootstrap-url HTTPS-BASE] --dir JOIN-DIR [--signature TX --key CURRENT-SECRET --next-public NEXT.pub] [--timeout SECONDS] [--interval SECONDS] [--birth-context CONTEXT.json]
   mini join --renew --host HOST --config PINNED-CONFIG.json (--socket SOCKET | --bootstrap-url HTTPS-BASE | --quote QUOTE.json) --enrol ENROL.json --dir JOIN-DIR
   mini pay refill --mode lookup --host HOST --config PINNED-CONFIG.json --socket SOCKET --dir ATTEMPT
-  mini enc-public --secret KEY
+  mini enc-public --secret KEY     the hybrid (X25519 + ML-KEM-768) public key, for --escrow-to-sponsor
+  mini enc-key-id --secret KEY     its 32-byte id (what whoami prints)
   mini escrow-recover --escrow PUBLIC.escrow --sponsor-secret KEY --subject SUBJECT --secret NEW-KEY
   mini workspace --action init|import|list|describe|read|tail|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
   mini workspace --action room-key --op found|sync|invite|rotate|kick|list|open|forget --dir WORKSPACE --name ROOM [op options]
@@ -1180,11 +1181,12 @@ fn generate_key(
                     .map_err(|error| format!("cannot read sponsor key {file}: {error}"))?,
                 None => sponsor.to_owned(),
             };
-            let key: [u8; 32] = workspace::private::decode_hex(text.trim())?
-                .try_into()
-                .map_err(|_| "the sponsor encryption key is exactly 32 bytes".to_owned())?;
+            // The sponsor's full hybrid public key (`mini enc-public`): X25519 + ML-KEM-768.
+            let key = workspace::private::MemberPublic::from_bytes(
+                &workspace::private::decode_hex(text.trim())?,
+            )?;
             let subject = subject.to_str().ok_or("--escrow-subject must be UTF-8")?;
-            Some(workspace::private::escrow_seed(subject, &seed, &x25519_dalek::PublicKey::from(key))?)
+            Some(workspace::private::escrow_seed(subject, &seed, &key)?)
         }
     };
     create_private(secret, &seed)?;
@@ -3763,8 +3765,8 @@ fn run(mut args: Args) -> Result<()> {
                 .write_all(&output.stdout)
                 .map_err(|e| format!("cannot print host output: {e}"))
         }
-        // The X25519 public key a private room's inviter wraps the room key to,
-        // derived from the same seed the signing key file holds.
+        // The hybrid (X25519 + ML-KEM-768) public key a sponsor's escrow is
+        // sealed to, derived from the same seed the signing key file holds.
         "enc-public" => {
             if socket_argument.is_some() {
                 return Err("enc-public does not use a host socket".to_owned());
@@ -3772,6 +3774,17 @@ fn run(mut args: Args) -> Result<()> {
             let secret = path(args.required("secret")?);
             args.finish()?;
             println!("{}", workspace::roomkey::enc_public_hex(&secret)?);
+            Ok(())
+        }
+        // The 32-byte id of that key: what `whoami` shows and a room inviter
+        // uses to select an already-published signed record.
+        "enc-key-id" => {
+            if socket_argument.is_some() {
+                return Err("enc-key-id does not use a host socket".to_owned());
+            }
+            let secret = path(args.required("secret")?);
+            args.finish()?;
+            println!("{}", workspace::roomkey::enc_key_id_hex(&secret)?);
             Ok(())
         }
         // D3 (b): the sponsor opens a friend's escrowed seed (written by
@@ -3791,7 +3804,7 @@ fn run(mut args: Args) -> Result<()> {
                 &fs::read(&escrow).map_err(|e| format!("cannot read {}: {e}", escrow.display()))?,
             )?;
             let sponsor_secret =
-                workspace::private::derive_enc_key(&*workspace::roomkey::seed_of(&sponsor)?);
+                workspace::private::derive_enc_key(&*workspace::roomkey::seed_of(&sponsor)?)?;
             let seed = workspace::private::recover_escrowed_seed(&subject, &sponsor_secret, &wrapped)?;
             if secret.exists() {
                 return Err(format!("refusing to replace {}", secret.display()));

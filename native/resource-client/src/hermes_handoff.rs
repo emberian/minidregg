@@ -683,7 +683,7 @@ fn check_registration_custody(r: &Value) -> Result<()> {
     let root = PathBuf::from(text(&r, "workspace")?);
     let ws = workspace::load(&root)?;
     if workspace::member(&ws, "subject")? != text(&r, "subject")?
-        || workspace::roomkey::enc_public_hex(&workspace::member_path(&ws, "key")?)?
+        || workspace::roomkey::enc_key_id_hex(&workspace::member_path(&ws, "key")?)?
             != r["encryptionKey"]
     {
         return Err("resident registration differs from custody subject/encryption key".into());
@@ -730,7 +730,7 @@ fn emit_registration(root: &Path, task: &str, cell: &str, inbox: &Path) -> Resul
     let ws = workspace::load(root)?;
     let r = json!({"type":"mini-hermes-dispatch-registration-v1","task":task,
         "subject":workspace::member(&ws,"subject")?,"roomCell":cell,
-        "encryptionKey":workspace::roomkey::enc_public_hex(&workspace::member_path(&ws,"key")?)?,
+        "encryptionKey":workspace::roomkey::enc_key_id_hex(&workspace::member_path(&ws,"key")?)?,
         "workspace":root,"inbox":inbox});
     check_registration_custody(&r)?;
     Ok(r)

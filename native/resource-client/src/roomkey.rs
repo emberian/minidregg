@@ -4,18 +4,24 @@
 //! seal under a ROOM KEY `k_R^e` before it reaches the socket. The founder's
 //! client draws `k_R^0` at `room new NAME --private`; every later epoch `e + 1`
 //! is drawn fresh at a kick (never derived from `e`). The node never holds a
-//! room key. It holds WRAPS: `k_R^e` encrypted to one member's X25519 key
-//! (`private::wrap_room_key`: ephemeral X25519, a cSHAKE256 key-encryption key
-//! bound to room, epoch, member and both public keys, XChaCha20-Poly1305).
+//! room key. It holds WRAPS: `k_R^e` encrypted to one member's HYBRID key
+//! (`private::wrap_room_key`, wrap v3: an ephemeral X25519 exchange AND an
+//! ML-KEM-768 encapsulation, both shared secrets and the full transcript (both
+//! ciphertexts, both public keys, room, epoch, member) into one cSHAKE256
+//! key-encryption key, then XChaCha20-Poly1305) -- secure if EITHER primitive
+//! survives, so a recorded wrap is not harvest-now-decrypt-later exposed to a
+//! quantum adversary. DEVNET QUALITY; PRIVACY NOT AUDITED.
 //!
 //! THE `keys` CELL. The wraps live in one content cell born `--in R` by the
 //! founder (reference `NAME-keys`), partitioned by atom id
 //! (`Kernel/PrivateRoomKeys.lean`):
 //!   WRAP of epoch e for member m, addressed to m's key of generation g:
 //!     atom id   = (e + 1) * 2^96 + g * 2^64 + m
-//!     kind      = inlineObject(schema of "DREGG/PRIVATE-AUTH-WRAP/v2")
-//!     payload   = X25519 public key (32) ‖ wrap (104) ‖ keys grant (8)
+//!     kind      = inlineObject(schema of "DREGG/PRIVATE-AUTH-WRAP/v3")
+//!     payload   = key id (32) ‖ wrap (1192) ‖ keys grant (8)
 //!                 ‖ founder-signed epoch certificate (192) ‖ founder-signed delivery (108).
+//!     (the key id names the recipient's hybrid key; the wrap is
+//!      ephemeral X25519 (32) ‖ ML-KEM-768 ciphertext (1088) ‖ nonce (24) ‖ box (48).)
 //!   RELEASE of that wrap, written in an EARLIER turn (`ReleaseStatement`):
 //!     atom id   = ((2^30 + 1 + e) << 96) | g << 64 | m
 //!     kind      = inlineObject(schema of "DREGG/PRIVATE-ROOM-RELEASE/v1")
@@ -23,13 +29,13 @@
 //!                 certificate, its recipient's record digest and its grant (232).
 //!   m's ENCRYPTION-KEY RECORD (FIX-IDENTITY):
 //!     atom id   = m
-//!     kind      = inlineObject(schema of "DREGG/PRIVATE-ENC-KEY/v2")
-//!     payload   = epoch (4) ‖ X25519 key (32) ‖ room (8) ‖ keys cell (8)
-//!                 ‖ member signing key (32) ‖ member signature (64).
-//! The signature binds the suite, room, keys cell, member, epoch and both keys.
+//!     kind      = inlineObject(schema of "DREGG/PRIVATE-ENC-KEY/v3")
+//!     payload   = epoch (4) ‖ X25519 key (32) ‖ ML-KEM-768 encapsulation key (1184)
+//!                 ‖ room (8) ‖ keys cell (8) ‖ member signing key (32) ‖ member signature (64).
+//! The signature binds the suite, room, keys cell, member, epoch and BOTH encryption keys.
+//! Pre-hybrid records (v1, v2) and wraps (v2) REFUSE by name; nothing reads them as a key.
 //! Recipient selection additionally requires the record to verify under the
 //! founder's PIN for that member; the record's own public key is never an anchor.
-//! Legacy unsigned v1 records can be edited but cannot authorize a new wrap.
 //! The generation g is the key epoch of the record a wrap was addressed to (0:
 //! a key given at invite time, before any record). A second wrap to the SAME key
 //! is the same id, refused by the content controller; a RE-WRAP to a member's
@@ -98,8 +104,9 @@
 //! the subject's key itself is rotated (PRIVACY row 13).
 
 use super::private::{
-    self, derive_enc_key, enc_public, open, seal, unwrap_room_key, wrap_room_key, Keyring, Place,
-    PrivateEnvelope, RoomKey, Wrapped, KEYCACHE_PASSPHRASE_ENV, WRAPPED_LEN,
+    self, derive_enc_key, enc_public, open, seal, unwrap_room_key, wrap_room_key, Keyring,
+    MemberPublic, MemberSecret, Place, PrivateEnvelope, RoomKey, Wrapped, KEYCACHE_PASSPHRASE_ENV,
+    MEMBER_PUBLIC_LEN, WRAPPED_LEN,
 };
 use super::{
     bounded_json, make_private_dir, member, member_path, propose, reference, signed_view,
@@ -115,7 +122,6 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::Zeroizing;
 
 /// The keys cell's law, as the template ships it; `@FOUNDER` is the founder.
@@ -144,11 +150,13 @@ pub(crate) fn keys_name(room: &str) -> Result<String> {
 }
 
 pub(crate) fn wrap_schema() -> String {
-    private::schema_decimal_of(b"DREGG/PRIVATE-AUTH-WRAP/v2")
+    private::schema_decimal_of(AUTH_WRAP_FRAME)
 }
 
 const EPOCH_FRAME: &[u8] = b"DREGG/PRIVATE-ROOM-EPOCH/v1";
-const AUTH_WRAP_FRAME: &[u8] = b"DREGG/PRIVATE-AUTH-WRAP/v2";
+const AUTH_WRAP_FRAME: &[u8] = b"DREGG/PRIVATE-AUTH-WRAP/v3";
+/// The pre-hybrid wrap frame. Nothing writes it; a keys cell that holds one refuses to load.
+const AUTH_WRAP_FRAME_V2: &[u8] = b"DREGG/PRIVATE-AUTH-WRAP/v2";
 
 fn lineage_digest(parts: &[&[u8]]) -> [u8; 32] {
     let mut hash = CoreWrapper::from_core(CShake256Core::new(b"DREGG.PRIVATE-ROOM.LINEAGE/v1"));
@@ -336,7 +344,7 @@ fn retain_epoch_head(root: &Path, room: &str, keys: &str, prior: Option<&Value>,
 /// `pin-founder`). It is trust on first use through whatever channel carried the
 /// key, which is the operator unless the member checks the printed fingerprint
 /// against one the founder gave it directly. MEMBER pins are written by the
-/// founder from each member's signed 148-byte declaration.
+/// founder from each member's signed v3 declaration.
 const FOUNDER_PIN_TYPE: &str = "minidregg-room-founder-pin-v1";
 const MEMBER_PINS_TYPE: &str = "minidregg-room-member-pins-v1";
 
@@ -433,16 +441,15 @@ fn pin_member(root: &Path, room: &str, keys: &str, subject: u64, public: &[u8; 3
 }
 
 /// `room-key --op pin-member`: pin the signing key of a member's signed
-/// 148-byte declaration (the founder, from the member, out of band).
+/// v3 declaration (the founder, from the member, out of band).
 pub(crate) fn pin_member_declaration(root: &Path, room_name: &str, subject: &str,
     declaration: &str, replace: bool) -> Result<Value> {
     let (_, room, keys) = private_room(root, room_name)?;
     let number = subject_number(subject)?;
     let bytes = crate::decode_hex(&recipient_argument(declaration)?)?;
-    if bytes.len() != SIGNED_RECORD_LEN { return Err("pin-member needs the member's signed 148-byte declaration".into()); }
+    if bytes.len() != SIGNED_RECORD_LEN { return Err(format!("pin-member needs the member's signed v3 declaration ({SIGNED_RECORD_LEN} bytes)")); }
     let record = EncRecord::from_atom(subject, &bytes, &Value::Null)?;
-    let attestation = record.attestation.as_ref().ok_or("declaration is unsigned")?;
-    let signing = attestation.signing_public;
+    let signing = record.attestation.signing_public;
     record.authenticate(&room, &keys, &signing)?;
     pin_member(root, &room, &keys, number, &signing, replace)?;
     Ok(json!({"room":room_name,"member":subject,"signingKey":hex(&signing)}))
@@ -631,9 +638,15 @@ fn verify_lineage(room: &str, keys: &str, founder: &[u8; 32], view: &Value,
 }
 
 /// A member's encryption-key record in the keys cell.
-pub(crate) const RECORD_FRAME: &[u8] = b"DREGG/PRIVATE-ENC-KEY/v1";
-const SIGNED_RECORD_FRAME: &[u8] = b"DREGG/PRIVATE-ENC-KEY/v2";
-const SIGNED_RECORD_LEN: usize = 148;
+///
+/// v3 (hybrid): `key epoch (4) || X25519 key (32) || ML-KEM-768 encapsulation key (1184)
+/// || room (8) || keys cell (8) || member signing key (32) || member signature (64)`,
+/// 1332 bytes, the signature over BOTH encryption keys. v1 (unsigned, 36 bytes) and v2
+/// (signed, X25519 only, 148 bytes) records refuse by name; nothing reads them as a key.
+pub(crate) const RECORD_FRAME_V1: &[u8] = b"DREGG/PRIVATE-ENC-KEY/v1";
+const RECORD_FRAME_V2: &[u8] = b"DREGG/PRIVATE-ENC-KEY/v2";
+const SIGNED_RECORD_FRAME: &[u8] = b"DREGG/PRIVATE-ENC-KEY/v3";
+const SIGNED_RECORD_LEN: usize = 4 + MEMBER_PUBLIC_LEN + 8 + 8 + 32 + 64;
 
 pub(crate) fn record_schema() -> String {
     private::schema_decimal_of(SIGNED_RECORD_FRAME)
@@ -647,7 +660,8 @@ pub(crate) struct WrapAtom {
     pub(crate) epoch: u32,
     pub(crate) gen: u32,
     pub(crate) member: u64,
-    pub(crate) enc_pub: [u8; 32],
+    /// The id (`MemberPublic::id`) of the hybrid key this wrap is addressed to.
+    pub(crate) enc_id: [u8; 32],
     pub(crate) wrapped: Wrapped,
     /// The member's keys-cell grant (0: none).
     pub(crate) grant: u64,
@@ -686,9 +700,9 @@ pub(crate) fn parse_wrap_atom_id(id: &str) -> Result<(u32, u32, u64)> {
 pub(crate) struct EncRecord {
     pub(crate) member: u64,
     pub(crate) key_epoch: u32,
-    pub(crate) enc_pub: [u8; 32],
+    pub(crate) enc: MemberPublic,
     pub(crate) atom: Value,
-    attestation: Option<KeyAttestation>,
+    attestation: KeyAttestation,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -710,59 +724,63 @@ pub(crate) struct AuthenticatedRecord {
 }
 
 fn record_statement(room: u64, keys: u64, member: u64, epoch: u32,
-    signing_public: &[u8; 32], encryption_public: &[u8; 32]) -> Vec<u8> {
+    signing_public: &[u8; 32], encryption_public: &MemberPublic) -> Vec<u8> {
     [SIGNED_RECORD_FRAME, &[1u8], &room.to_be_bytes(), &keys.to_be_bytes(),
-        &member.to_be_bytes(), &epoch.to_be_bytes(), signing_public, encryption_public].concat()
+        &member.to_be_bytes(), &epoch.to_be_bytes(), signing_public, &encryption_public.to_bytes()].concat()
 }
 
 impl EncRecord {
     fn signed_payload(room: &str, keys: &str, member: u64, key_epoch: u32,
-        enc_pub: &[u8; 32], signer: &SigningKey) -> Result<Vec<u8>> {
+        enc: &MemberPublic, signer: &SigningKey) -> Result<Vec<u8>> {
         let room = subject_number(room)?;
         let keys = subject_number(keys)?;
         let public = signer.verifying_key().to_bytes();
-        let signature = signer.sign(&record_statement(room, keys, member, key_epoch, &public, enc_pub));
-        Ok([&key_epoch.to_be_bytes()[..], enc_pub, &room.to_be_bytes(),
+        let signature = signer.sign(&record_statement(room, keys, member, key_epoch, &public, enc));
+        Ok([&key_epoch.to_be_bytes()[..], &enc.to_bytes(), &room.to_be_bytes(),
             &keys.to_be_bytes(), &public, &signature.to_bytes()].concat())
     }
 
     fn canonical_signed_payload(&self) -> Result<Vec<u8>> {
-        let attestation = self.attestation.as_ref().ok_or("unsigned recipient record has no signed payload")?;
-        Ok([&self.key_epoch.to_be_bytes()[..], &self.enc_pub, &attestation.room.to_be_bytes(),
+        let attestation = &self.attestation;
+        Ok([&self.key_epoch.to_be_bytes()[..], &self.enc.to_bytes(), &attestation.room.to_be_bytes(),
             &attestation.keys.to_be_bytes(), &attestation.signing_public, &attestation.signature].concat())
     }
 
     pub(crate) fn from_atom(id: &str, payload: &[u8], atom: &Value) -> Result<Self> {
         let member = subject_number(id).map_err(|_| format!("record atom id {id} is not a subject number"))?;
-        if payload.len() != 36 && payload.len() != SIGNED_RECORD_LEN {
-            return Err(format!("record {id} has an invalid encryption-key record length"));
+        if payload.len() == 36 || payload.len() == 148 {
+            return Err(format!(
+                "record {id} is a pre-hybrid {} record ({} bytes, X25519 only): it is refused, not read as a key; the member publishes a {} record ({SIGNED_RECORD_LEN} bytes)",
+                if payload.len() == 36 { "DREGG/PRIVATE-ENC-KEY/v1" } else { "DREGG/PRIVATE-ENC-KEY/v2" },
+                payload.len(), "DREGG/PRIVATE-ENC-KEY/v3"));
         }
+        if payload.len() != SIGNED_RECORD_LEN {
+            return Err(format!("record {id} has an invalid encryption-key record length ({} bytes; a v3 record is {SIGNED_RECORD_LEN})", payload.len()));
+        }
+        let at = 4 + MEMBER_PUBLIC_LEN;
         Ok(Self {
             member,
             key_epoch: u32::from_be_bytes(payload[..4].try_into().expect("4 bytes")),
-            enc_pub: payload[4..36].try_into().expect("32 bytes"),
+            enc: MemberPublic::from_bytes(&payload[4..at])?,
             atom: atom.clone(),
-            attestation: if payload.len() == SIGNED_RECORD_LEN {
-                Some(KeyAttestation {
-                    room: u64::from_be_bytes(payload[36..44].try_into().expect("8 bytes")),
-                    keys: u64::from_be_bytes(payload[44..52].try_into().expect("8 bytes")),
-                    signing_public: payload[52..84].try_into().expect("32 bytes"),
-                    signature: payload[84..148].try_into().expect("64 bytes"),
-                })
-            } else { None },
+            attestation: KeyAttestation {
+                room: u64::from_be_bytes(payload[at..at + 8].try_into().expect("8 bytes")),
+                keys: u64::from_be_bytes(payload[at + 8..at + 16].try_into().expect("8 bytes")),
+                signing_public: payload[at + 16..at + 48].try_into().expect("32 bytes"),
+                signature: payload[at + 48..at + 112].try_into().expect("64 bytes"),
+            },
         })
     }
 
     fn authenticate(&self, room: &str, keys: &str, current_public: &[u8; 32]) -> Result<SignatureCheckedRecord> {
-        let attestation = self.attestation.as_ref()
-            .ok_or("unsigned legacy recipient record: member must publish a signed room key record")?;
+        let attestation = &self.attestation;
         if attestation.room != subject_number(room)? || attestation.keys != subject_number(keys)?
             || attestation.signing_public != *current_public {
             return Err("recipient record differs from its room, keys cell or pinned member signing key".into());
         }
         VerifyingKey::from_bytes(current_public).map_err(|_| "invalid authenticated signing key")?
             .verify_strict(&record_statement(attestation.room, attestation.keys, self.member,
-                self.key_epoch, current_public, &self.enc_pub), &Signature::from_bytes(&attestation.signature))
+                self.key_epoch, current_public, &self.enc), &Signature::from_bytes(&attestation.signature))
             .map_err(|_| "recipient encryption key signature does not verify under the pinned member key")?;
         Ok(SignatureCheckedRecord(self.clone()))
     }
@@ -777,7 +795,7 @@ fn subject_number(subject: &str) -> Result<u64> {
 }
 
 impl WrapAtom {
-    pub(crate) fn new(room: &str, member: &str, enc_pub: &PublicKey, gen: u32, grant: u64, key: &RoomKey) -> Result<Self> {
+    pub(crate) fn new(room: &str, member: &str, enc: &MemberPublic, gen: u32, grant: u64, key: &RoomKey) -> Result<Self> {
         if key.epoch() > MAX_EPOCH {
             return Err("room-key epoch exhausted".into());
         }
@@ -785,15 +803,15 @@ impl WrapAtom {
             epoch: key.epoch(),
             gen,
             member: subject_number(member)?,
-            enc_pub: *enc_pub.as_bytes(),
-            wrapped: wrap_room_key(room, member, enc_pub, key)?,
+            enc_id: enc.id(),
+            wrapped: wrap_room_key(room, member, enc, key)?,
             grant,
             attestation: None,
         })
     }
 
     fn unsigned_payload(&self) -> Vec<u8> {
-        [&self.enc_pub[..], &self.wrapped.to_bytes(), &self.grant.to_be_bytes()].concat()
+        [&self.enc_id[..], &self.wrapped.to_bytes(), &self.grant.to_be_bytes()].concat()
     }
 
     pub(crate) fn payload(&self) -> Vec<u8> {
@@ -817,7 +835,7 @@ impl WrapAtom {
         }
         let payload = self.payload();
         if payload.len() != WRAP_PAYLOAD_LEN + 300 {
-            return Err("delivery commitment requires the complete signed wrap444".into());
+            return Err("delivery commitment requires the complete signed wrap".into());
         }
         Ok(lineage_digest(&[&payload]))
     }
@@ -864,7 +882,7 @@ impl WrapAtom {
             epoch,
             gen,
             member,
-            enc_pub: payload[..32].try_into().expect("32 bytes"),
+            enc_id: payload[..32].try_into().expect("32 bytes"),
             wrapped: Wrapped::from_bytes(&payload[32..32 + WRAPPED_LEN])?,
             grant: u64::from_be_bytes(payload[32 + WRAPPED_LEN..WRAP_PAYLOAD_LEN].try_into().expect("8 bytes")),
             attestation: if payload.len() == WRAP_PAYLOAD_LEN + 300 {
@@ -886,7 +904,10 @@ impl WrapAtom {
             "kind":{"type":"inlineObject","schema":wrap_schema()},"payload":hex(&self.payload())})
     }
 
-    pub(crate) fn open(&self, room: &str, secret: &StaticSecret) -> Result<RoomKey> {
+    pub(crate) fn open(&self, room: &str, secret: &MemberSecret) -> Result<RoomKey> {
+        if secret.public().id() != self.enc_id {
+            return Err("wrap is addressed to another encryption key".into());
+        }
         let key = unwrap_room_key(room, self.epoch, &self.member.to_string(), secret, &self.wrapped)?;
         if let Some(attestation) = &self.attestation {
             let certificate = &attestation.certificate;
@@ -926,6 +947,11 @@ pub(crate) fn wraps_in_view(view: &Value) -> Result<Vec<WrapAtom>> {
         }
     }
     let mut found = Vec::new();
+    let mut pre_hybrid = Vec::new();
+    walk(view, &private::schema_decimal_of(AUTH_WRAP_FRAME_V2), &mut pre_hybrid);
+    if !pre_hybrid.is_empty() {
+        return Err("this keys cell holds a pre-hybrid DREGG/PRIVATE-AUTH-WRAP/v2 wrap (X25519 only): the room predates the v3 hybrid X25519 + ML-KEM-768 format and is refused, not read; found the room again".into());
+    }
     walk(view, &wrap_schema(), &mut found);
     let mut wraps = found.into_iter().collect::<Result<Vec<_>>>()?;
     wraps.sort_by_key(|w| (w.epoch, w.member, w.gen));
@@ -955,8 +981,9 @@ pub(crate) fn records_in_view(view: &Value) -> BTreeMap<u64, EncRecord> {
     }
     let mut found = Vec::new();
     walk(view, &record_schema(), &mut found);
-    // Legacy records remain editable, but they are never recipient authority.
-    walk(view, &private::schema_decimal_of(RECORD_FRAME), &mut found);
+    // Pre-hybrid records are parsed only to be refused by name; they are never recipient authority.
+    walk(view, &private::schema_decimal_of(RECORD_FRAME_V2), &mut found);
+    walk(view, &private::schema_decimal_of(RECORD_FRAME_V1), &mut found);
     let mut out = BTreeMap::new();
     for atom in found {
         let parsed = (|| {
@@ -999,13 +1026,13 @@ pub(crate) fn grant_of(wraps: &[WrapAtom], member: u64) -> u64 {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Recipient {
     gen: u32,
-    enc_pub: [u8; 32],
+    enc: MemberPublic,
     record: [u8; 32],
 }
 
 impl Recipient {
     fn of(authenticated: &AuthenticatedRecord) -> Result<Self> {
-        Ok(Self { gen: authenticated.record.key_epoch, enc_pub: authenticated.record.enc_pub,
+        Ok(Self { gen: authenticated.record.key_epoch, enc: authenticated.record.enc.clone(),
             record: record_digest(&authenticated.record)? })
     }
 }
@@ -1034,7 +1061,7 @@ pub(crate) fn rotation(
         }
         let recipient = recipients.get(&member)
             .ok_or_else(|| format!("member {member} lacks an authenticated recipient record"))?;
-        let wrap = WrapAtom::new(room, &member.to_string(), &PublicKey::from(recipient.enc_pub),
+        let wrap = WrapAtom::new(room, &member.to_string(), &recipient.enc,
             recipient.gen, grant_of(wraps, member), &key)?;
         out.push((wrap, recipient.record));
     }
@@ -1176,15 +1203,16 @@ fn save_ring(root: &Path, passphrase: &[u8], ring: &Keyring) -> Result<()> {
     private::save_cache(&cache_path(root), passphrase, ring)
 }
 
-/// This workspace's X25519 secret, derived from the seed its signing key file holds.
-fn own_secret(workspace: &Value) -> Result<StaticSecret> {
+/// This workspace's hybrid (X25519 + ML-KEM-768) secret, derived from the seed
+/// its signing key file holds.
+fn own_secret(workspace: &Value) -> Result<MemberSecret> {
     let path = member_path(workspace, "key")?;
-    Ok(derive_enc_key(&*seed_of(&path)?))
+    derive_enc_key(&*seed_of(&path)?)
 }
 
-/// Every X25519 secret this workspace opens with: the current one, then every
+/// Every hybrid secret this workspace opens with: the current one, then every
 /// past one its keyring kept across signing-key rotations.
-fn own_secrets(workspace: &Value) -> Result<Vec<StaticSecret>> {
+fn own_secrets(workspace: &Value) -> Result<Vec<MemberSecret>> {
     private::enc_secrets(&member_path(workspace, "key")?)
 }
 
@@ -1199,9 +1227,18 @@ pub(crate) fn seed_of(path: &Path) -> Result<Zeroizing<[u8; 32]>> {
     Ok(Zeroizing::new(seed))
 }
 
-/// `mini enc-public --secret KEY`: the X25519 public key an inviter wraps to.
+/// `mini enc-public --secret KEY`: the full hybrid public key (X25519 ||
+/// ML-KEM-768 encapsulation key, 1216 bytes) a sponsor's escrow is sealed to.
 pub(crate) fn enc_public_hex(secret: &Path) -> Result<String> {
-    Ok(hex(enc_public(&*seed_of(secret)?).as_bytes()))
+    Ok(hex(&enc_public(&*seed_of(secret)?)?.to_bytes()))
+}
+
+/// `mini enc-key-id --secret KEY`: the 32-byte id of that key, which a room's
+/// inviter uses to SELECT an already-published, signed record of it and which a
+/// registration or `whoami` shows. A key id authorizes nothing by itself: a
+/// first invite needs the member's signed declaration.
+pub(crate) fn enc_key_id_hex(secret: &Path) -> Result<String> {
+    Ok(hex(&enc_public(&*seed_of(secret)?)?.id()))
 }
 
 // ---------------------------------------------------------------- references
@@ -1312,7 +1349,7 @@ pub(crate) fn sync(root: &Path, workspace: &Value, room_name: &str) -> Result<Sy
         if ring.is_forgotten(&room, wrap.epoch) {
             continue;
         }
-        let Some(secret) = secrets.iter().find(|s| PublicKey::from(*s).as_bytes() == &wrap.enc_pub) else {
+        let Some(secret) = secrets.iter().find(|s| s.public().id() == wrap.enc_id) else {
             unopened.insert(wrap.epoch);
             continue;
         };
@@ -1746,7 +1783,7 @@ fn check_readback(draft: &RetainedReleaseDraft, deliveries: &[Delivery], founder
         }
         if release.member == me { continue; }
         if let Some(record) = records.get(&release.member) {
-            if record.attestation.is_none() || record_digest(record)? != release.record {
+            if record_digest(record)? != release.record {
                 return Err(format!("member {} published a different recipient record after this release was drafted: the bound key is stale", release.member));
             }
         }
@@ -1932,7 +1969,7 @@ pub(crate) fn found(root: &Path, workspace: &Value, room_name: &str) -> Result<(
         }
     } else {
         let founder = founder_signer(root, workspace, &room, &keys)?;
-        let enc = PublicKey::from(&own_secret(workspace)?);
+        let enc = own_secret(workspace)?.public().clone();
         let proposal = match live_release(root, &room, "found")? {
             Some(proposal) => proposal,
             None => {
@@ -1980,10 +2017,10 @@ pub(crate) fn signed_recipient_descriptor(workspace: &Value, room: &str, keys: &
     if epoch.to_string() != key_epoch { return Err("recipient key epoch must be canonical decimal".into()); }
     let subject = member(workspace, "subject")?;
     let signer = crate::read_secret(&member_path(workspace, "key")?)?;
-    let encryption = enc_public(&*seed_of(&member_path(workspace, "key")?)?);
+    let encryption = enc_public(&*seed_of(&member_path(workspace, "key")?)?)?;
     let payload = EncRecord::signed_payload(room, keys, subject_number(subject)?, epoch,
-        encryption.as_bytes(), &signer)?;
-    Ok(json!({"type":"minidregg-signed-room-recipient-v2","member":subject,
+        &encryption, &signer)?;
+    Ok(json!({"type":"minidregg-signed-room-recipient-v3","member":subject,
         "room":room,"keysCell":keys,"keyEpoch":key_epoch,"recordHex":hex(&payload),
         "authority":"the founder pins this signing key: hand it to the founder directly, not through the node"}))
 }
@@ -1993,16 +2030,16 @@ pub(crate) fn signed_recipient_descriptor(workspace: &Value, room: &str, keys: &
 /// room and the pinned signing key (`pin_member_declaration`, `invitation_record`).
 pub(crate) fn recipient_argument(text: &str) -> Result<String> {
     let text = text.trim();
-    if text.len() > 4096 { return Err("recipient declaration exceeds its transport bound".into()); }
+    if text.len() > 8192 { return Err("recipient declaration exceeds its transport bound".into()); }
     let declaration = if text.starts_with('{') {
         let value: Value = serde_json::from_str(text).map_err(|error| error.to_string())?;
-        if member(&value, "type")? != "minidregg-signed-room-recipient-v2" {
-            return Err("unknown signed room recipient declaration".into());
+        if member(&value, "type")? != "minidregg-signed-room-recipient-v3" {
+            return Err("unknown signed room recipient declaration (only minidregg-signed-room-recipient-v3, the hybrid X25519 + ML-KEM-768 declaration, is read)".into());
         }
         let record_hex = member(&value, "recordHex")?;
         let bytes = crate::decode_hex(record_hex)?;
         let record = EncRecord::from_atom(member(&value, "member")?, &bytes, &Value::Null)?;
-        let attestation = record.attestation.as_ref().ok_or("recipient JSON requires signed148 record")?;
+        let attestation = &record.attestation;
         if attestation.room.to_string() != member(&value, "room")?
             || attestation.keys.to_string() != member(&value, "keysCell")?
             || record.key_epoch.to_string() != member(&value, "keyEpoch")? {
@@ -2012,7 +2049,7 @@ pub(crate) fn recipient_argument(text: &str) -> Result<String> {
     } else { text.to_owned() };
     let bytes = crate::decode_hex(&declaration)?;
     if bytes.len() != 32 && bytes.len() != SIGNED_RECORD_LEN {
-        return Err("recipient declaration must be signed148bytes or an existing-record32byte selector".into());
+        return Err(format!("a recipient declaration is a signed v3 record ({SIGNED_RECORD_LEN} bytes) or the 32-byte key id of an existing signed record, not {} bytes", bytes.len()));
     }
     Ok(hex(&bytes))
 }
@@ -2030,11 +2067,11 @@ fn invitation_record(invitee: u64, declaration_hex: &str, stored: Option<&EncRec
             Ok(record)
         }
         32 => {
-            let stored = stored.ok_or("first invite requires the member's full signed148 recipient declaration; a bare encryption key cannot authorize disclosure")?;
-            if bytes != stored.enc_pub { return Err("named encryption key differs from recipient record".into()); }
+            let stored = stored.ok_or_else(|| format!("first invite requires the member's full signed v3 recipient declaration ({SIGNED_RECORD_LEN} bytes); a bare key id cannot authorize disclosure"))?;
+            if bytes != stored.enc.id() { return Err("named encryption key id differs from the recipient record".into()); }
             Ok(stored.clone())
         }
-        _ => Err("invite encryption declaration must be a signed148-byte record, or32bytes matching an existing signed record".into()),
+        _ => Err(format!("invite encryption declaration must be a signed v3 record ({SIGNED_RECORD_LEN} bytes), or the 32-byte key id of an existing signed record")),
     }
 }
 
@@ -2053,7 +2090,7 @@ pub(crate) fn invite_preflight(root: &Path, workspace: &Value, room_name: &str,
     founder_pin(root, &room, &keys)?;
     let number = subject_number(invitee)?;
     let record = invitation_record(number, declaration_hex, synced.records.get(&number))?;
-    let signing = record.attestation.as_ref().ok_or("recipient record must be signed")?.signing_public;
+    let signing = record.attestation.signing_public;
     record.authenticate(&room, &keys, &signing)?;
     let (_, pins) = member_pins(root, &room, &keys)?;
     if pins.get(&number).is_some_and(|pinned| *pinned != signing) {
@@ -2091,7 +2128,7 @@ pub(crate) fn invite(
     }
     let invitee_number = subject_number(invitee)?;
     let record = invitation_record(invitee_number, enc_pub_hex, synced.records.get(&invitee_number))?;
-    let signing = record.attestation.as_ref().ok_or("recipient record must be signed")?.signing_public;
+    let signing = record.attestation.signing_public;
     record.authenticate(&room, &keys, &signing)?;
     pin_member(root, &room, &keys, invitee_number, &signing, false)?;
     let (_, pins) = member_pins(root, &room, &keys)?;
@@ -2116,7 +2153,7 @@ pub(crate) fn invite(
     for e in epochs {
         let held: Vec<&WrapAtom> = synced.wraps.iter()
             .filter(|w| w.member == invitee_number && w.epoch == e).collect();
-        if held.iter().any(|w| w.enc_pub == recipient.enc_pub) {
+        if held.iter().any(|w| w.enc_id == recipient.enc.id()) {
             eprintln!("room {room_name}: {invitee} already holds a wrap at epoch {e} to this key");
             continue;
         }
@@ -2130,7 +2167,7 @@ pub(crate) fn invite(
         let key = synced.ring.get(&room, e).expect("listed epoch");
         let certificate = synced.lineage.certificates.get(&e)
             .ok_or_else(|| format!("held epoch {e} is not on the authenticated chain; it is never released"))?;
-        let wrap = WrapAtom::new(&room, invitee, &PublicKey::from(recipient.enc_pub), recipient.gen, grant, &key)?
+        let wrap = WrapAtom::new(&room, invitee, &recipient.enc, recipient.gen, grant, &key)?
             .sign(certificate, founder.subject, founder.key_epoch, &founder.signer)?;
         deliveries.push(Delivery::new(wrap, recipient.record, &founder)?);
     }
@@ -2155,13 +2192,13 @@ fn kept_recipients(root: &Path, workspace: &Value, synced: &Synced, head: u32,
     current: &BTreeSet<u64>, dropped: Option<u64>) -> Result<BTreeMap<u64, Recipient>> {
     let me = subject_number(member(workspace, "subject")?)?;
     let (_, pins) = member_pins(root, &synced.room, &synced.keys)?;
-    let own = *PublicKey::from(&own_secret(workspace)?).as_bytes();
+    let own = own_secret(workspace)?.public().clone();
     members_at(&synced.wraps, head).into_keys()
         .filter(|member| Some(*member) != dropped && current.contains(member))
         .map(|member| {
             if member == me {
-                let gen = synced.records.get(&me).filter(|r| r.enc_pub == own).map_or(0, |r| r.key_epoch);
-                return Ok((me, Recipient { gen, enc_pub: own, record: [0; 32] }));
+                let gen = synced.records.get(&me).filter(|r| r.enc == own).map_or(0, |r| r.key_epoch);
+                return Ok((me, Recipient { gen, enc: own.clone(), record: [0; 32] }));
             }
             let record = synced.records.get(&member)
                 .ok_or_else(|| format!("member {member} must publish a signed recipient-key record"))?;
@@ -2230,13 +2267,13 @@ pub(crate) fn register(root: &Path, workspace: &Value, room_name: &str, key_epoc
     let (room_ref, room, keys) = private_room(root, room_name)?;
     let (view, _, _) = signed_view(root, workspace, &keys_view_ref(&room_ref, &keys)?, "resource")?;
     let me = subject_number(member(workspace, "subject")?)?;
-    let public = PublicKey::from(&own_secret(workspace)?);
+    let public = own_secret(workspace)?.public().clone();
     let wraps = wraps_in_view(&view)?;
     let signer = crate::read_secret(&member_path(workspace, "key")?)?;
-    let payload = EncRecord::signed_payload(&room, &keys, me, key_epoch, public.as_bytes(), &signer)?;
+    let payload = EncRecord::signed_payload(&room, &keys, me, key_epoch, &public, &signer)?;
     let kind = json!({"type":"inlineObject","schema":record_schema()});
     let action = match records_in_view(&view).remove(&me) {
-        Some(record) if record.enc_pub == *public.as_bytes() && record.key_epoch == key_epoch
+        Some(record) if record.enc == public && record.key_epoch == key_epoch
             && record.authenticate(&room, &keys, &signer.verifying_key().to_bytes()).is_ok() => {
             return Ok(json!({"room":room_name,"record":"already current","keyEpoch":key_epoch.to_string()}));
         }
@@ -2256,7 +2293,7 @@ pub(crate) fn register(root: &Path, workspace: &Value, room_name: &str, key_epoc
     turn(root, workspace, proposal_id, &json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
         "targets":[{"name":keys_ref,"payload":{"type":"content","actions":[action]}}]}))?;
     Ok(json!({"room":room_name,"record":"published","keyEpoch":key_epoch.to_string(),
-        "encryptionKey":hex(public.as_bytes())}))
+        "encryptionKey":hex(&public.id())}))
 }
 
 /// After an admitted `rotate-key`: publish the new encryption key to every
@@ -2329,7 +2366,7 @@ pub(crate) fn rewrap(root: &Path, workspace: &Value, room_name: &str, subject: &
     let mut deliveries = Vec::new();
     for epoch in synced.ring.epochs(&room) {
         let held: Vec<&WrapAtom> = synced.wraps.iter().filter(|w| w.member == number && w.epoch == epoch).collect();
-        if held.is_empty() || held.iter().any(|w| w.enc_pub == recipient.enc_pub || w.gen == recipient.gen) {
+        if held.is_empty() || held.iter().any(|w| w.enc_id == recipient.enc.id() || w.gen == recipient.gen) {
             continue;
         }
         if synced.lineage.releases.contains_key(&release_atom_id(epoch, recipient.gen, number)) {
@@ -2338,7 +2375,7 @@ pub(crate) fn rewrap(root: &Path, workspace: &Value, room_name: &str, subject: &
         let key = synced.ring.get(&room, epoch).expect("listed epoch");
         let certificate = synced.lineage.certificates.get(&epoch)
             .ok_or_else(|| format!("held epoch {epoch} is not on the authenticated chain"))?;
-        let wrap = WrapAtom::new(&room, subject, &PublicKey::from(recipient.enc_pub), recipient.gen,
+        let wrap = WrapAtom::new(&room, subject, &recipient.enc, recipient.gen,
             grant_of(&synced.wraps, number), &key)?
             .sign(certificate, founder.subject, founder.key_epoch, &founder.signer)?;
         deliveries.push(Delivery::new(wrap, recipient.record, &founder)?);
@@ -2355,7 +2392,7 @@ pub(crate) fn rewrap(root: &Path, workspace: &Value, room_name: &str, subject: &
     })?;
     println!("{}", serde_json::to_string_pretty(&json!({"type":"minidregg-room-rewrap-v1",
         "room":room_name,"member":subject,"epochs":released.wraps.iter().map(|w| w.epoch).collect::<Vec<_>>(),
-        "generation":recipient.gen,"encryptionKey":hex(&recipient.enc_pub)})).map_err(|e| e.to_string())?);
+        "generation":recipient.gen,"encryptionKey":hex(&recipient.enc.id())})).map_err(|e| e.to_string())?);
     Ok(())
 }
 
@@ -2493,13 +2530,17 @@ mod tests {
 
     fn pinned() -> [u8; 32] { founder_key().verifying_key().to_bytes() }
 
+    fn dk(n: u8) -> MemberSecret { derive_enc_key(&[n; 32]).unwrap() }
+
+    fn ep(n: u8) -> MemberPublic { enc_public(&[n; 32]).unwrap() }
+
     fn wrap_for(seed: u8, member: &str, key: &RoomKey) -> WrapAtom {
-        WrapAtom::new(ROOM, member, &enc_public(&[seed; 32]), 0, 0, key).unwrap()
+        WrapAtom::new(ROOM, member, &ep(seed), 0, 0, key).unwrap()
     }
 
     fn signed_record(seed: u8, member: u64, epoch: u32) -> EncRecord {
         let payload = EncRecord::signed_payload(ROOM, KEYS, member, epoch,
-            enc_public(&[seed; 32]).as_bytes(), &SigningKey::from_bytes(&[seed; 32])).unwrap();
+            &ep(seed), &SigningKey::from_bytes(&[seed; 32])).unwrap();
         EncRecord::from_atom(&member.to_string(), &payload, &json!({})).unwrap()
     }
 
@@ -2640,31 +2681,46 @@ mod tests {
     fn recipient_signature_rejects_operator_substitution_and_unpinned_members() {
         let signer = SigningKey::from_bytes(&[9; 32]);
         let trusted_public = signer.verifying_key().to_bytes();
-        let payload = EncRecord::signed_payload(ROOM, KEYS, 11, 2,
-            enc_public(&[9; 32]).as_bytes(), &signer).unwrap();
+        let payload = EncRecord::signed_payload(ROOM, KEYS, 11, 2, &ep(9), &signer).unwrap();
         let parse = |bytes: &[u8]| EncRecord::from_atom("11", bytes, &json!({})).unwrap();
         let pins = pins_for(&[(11, 9)]);
         let legitimate = Recipient::of(&authenticate_recipient(&pins, ROOM, KEYS, &parse(&payload)).unwrap()).unwrap();
-        assert_eq!((legitimate.gen, legitimate.enc_pub), (2, *enc_public(&[9; 32]).as_bytes()));
+        assert_eq!((legitimate.gen, legitimate.enc.clone()), (2, ep(9)));
         let old_key = RoomKey::generate(0).unwrap();
         let wraps = [wrap_for(1, "11", &old_key)];
         let (new_key, released, _) = rotation(ROOM, &wraps, 0, 1, &[(11, legitimate)].into_iter().collect(),
             &[11].into_iter().collect(), None).unwrap();
-        assert_eq!(released[0].0.open(ROOM, &derive_enc_key(&[9; 32])).unwrap().bytes(), new_key.bytes());
-        assert!(released[0].0.open(ROOM, &derive_enc_key(&[8; 32])).is_err());
+        assert_eq!(released[0].0.open(ROOM, &dk(9)).unwrap().bytes(), new_key.bytes());
+        assert!(released[0].0.open(ROOM, &dk(8)).is_err());
         let mut substituted = payload.clone();
-        substituted[4..36].copy_from_slice(enc_public(&[8; 32]).as_bytes());
-        assert!(parse(&substituted).authenticate(ROOM, KEYS, &trusted_public).is_err());
+        substituted[4..36].copy_from_slice(ep(8).x25519());
+        assert!(parse(&substituted).authenticate(ROOM, KEYS, &trusted_public).is_err(),
+            "the signature binds the X25519 half");
+        // ... and the ML-KEM half: splicing in another member's encapsulation key
+        // yields a well-formed key the signature does not cover.
+        let mut spliced = payload.clone();
+        spliced[36..4 + MEMBER_PUBLIC_LEN].copy_from_slice(&ep(8).to_bytes()[32..]);
+        assert!(parse(&spliced).authenticate(ROOM, KEYS, &trusted_public).is_err(),
+            "the signature binds the ML-KEM-768 half");
         let operator = SigningKey::from_bytes(&[8; 32]);
-        let forged = EncRecord::signed_payload(ROOM, KEYS, 11, 2, enc_public(&[8; 32]).as_bytes(), &operator).unwrap();
+        let forged = EncRecord::signed_payload(ROOM, KEYS, 11, 2, &ep(8), &operator).unwrap();
         assert!(authenticate_recipient(&pins, ROOM, KEYS, &parse(&forged)).is_err(),
             "a record self-signed by an operator-chosen key is not the pinned member");
         assert!(parse(&payload).authenticate("70", KEYS, &trusted_public).is_err());
         assert!(parse(&payload).authenticate(ROOM, "73", &trusted_public).is_err());
         let relabelled = EncRecord::from_atom("12", &payload, &json!({})).unwrap();
         assert!(relabelled.authenticate(ROOM, KEYS, &trusted_public).is_err());
-        let legacy = [&2u32.to_be_bytes()[..], enc_public(&[9; 32]).as_bytes()].concat();
-        assert!(parse(&legacy).authenticate(ROOM, KEYS, &trusted_public).is_err());
+        // Pre-hybrid records refuse by name: v1 (unsigned, 36 bytes) and v2
+        // (signed, X25519 only, 148 bytes) are never read as a key.
+        let v1 = [&2u32.to_be_bytes()[..], ep(9).x25519()].concat();
+        let error = EncRecord::from_atom("11", &v1, &json!({})).unwrap_err();
+        assert!(error.contains("DREGG/PRIVATE-ENC-KEY/v1") && error.contains("refused"), "{error}");
+        let mut v2 = v1.clone();
+        v2.extend([0u8; 112]);
+        assert_eq!(v2.len(), 148);
+        let error = EncRecord::from_atom("11", &v2, &json!({})).unwrap_err();
+        assert!(error.contains("DREGG/PRIVATE-ENC-KEY/v2") && error.contains("refused"), "{error}");
+        assert!(EncRecord::from_atom("11", &payload[..payload.len() - 1], &json!({})).is_err());
         assert!(authenticate_recipient(&BTreeMap::new(), ROOM, KEYS, &parse(&payload)).unwrap_err()
             .contains("no pinned signing key"), "an unpinned member is never authenticated from what the node serves");
     }
@@ -2677,10 +2733,10 @@ mod tests {
         let parsed = wraps_in_view(&view).unwrap();
         assert_eq!(parsed, wraps);
         assert_eq!(parsed[0].action()["atom"], wrap_atom_id(0, 0, 11));
-        let key = parsed[1].open(ROOM, &derive_enc_key(&[2; 32])).unwrap();
+        let key = parsed[1].open(ROOM, &dk(2)).unwrap();
         assert_eq!((key.epoch(), key.bytes()), (0, e0.bytes()));
-        assert!(parsed[1].open(ROOM, &derive_enc_key(&[1; 32])).is_err(), "a member cannot open another's wrap");
-        assert!(parsed[1].open("70", &derive_enc_key(&[2; 32])).is_err(), "a wrap is bound to its room");
+        assert!(parsed[1].open(ROOM, &dk(1)).is_err(), "a member cannot open another's wrap");
+        assert!(parsed[1].open("70", &dk(2)).is_err(), "a wrap is bound to its room");
     }
 
     #[test]
@@ -2723,12 +2779,38 @@ mod tests {
         let (e1, wraps1, _) = rotation(ROOM, &wraps0, 0, 1, &records, &current, None).unwrap();
         let mine = &wraps1.iter().find(|(w, _)| w.member == 11).unwrap().0;
         assert_eq!((mine.gen, mine.grant), (2, 900), "to the record, carrying the keys grant");
-        assert!(mine.open(ROOM, &derive_enc_key(&[1; 32])).is_err(), "the OLD secret cannot open the new epoch");
-        assert_eq!(mine.open(ROOM, &derive_enc_key(&[9; 32])).unwrap().bytes(), e1.bytes());
-        assert_eq!(old.open(ROOM, &derive_enc_key(&[1; 32])).unwrap().bytes(), e0.bytes());
+        assert!(mine.open(ROOM, &dk(1)).is_err(), "the OLD secret cannot open the new epoch");
+        assert_eq!(mine.open(ROOM, &dk(9)).unwrap().bytes(), e1.bytes());
+        assert_eq!(old.open(ROOM, &dk(1)).unwrap().bytes(), e0.bytes());
         assert!(rotation(ROOM, &wraps0, 0, 1, &BTreeMap::new(), &current, None).is_err(),
             "an operator-served old wrap cannot substitute for an authenticated recipient");
         assert!(rotation(ROOM, &wraps0, 1, 1, &records, &current, None).is_err());
+    }
+
+    #[test]
+    fn a_pre_hybrid_v2_wrap_in_a_keys_cell_refuses_the_whole_cell_by_name() {
+        // A v2 (X25519-only) wrap atom: the room predates the hybrid format. It is
+        // refused by name, not skipped, so a stale room cannot read as an empty one.
+        let old_schema = private::schema_decimal_of(AUTH_WRAP_FRAME_V2);
+        assert_ne!(old_schema, wrap_schema(), "v2 and v3 are different schemas");
+        let view = json!({"cell":{"entries":[{"type":"atom","id":wrap_atom_id(0, 0, 11),
+            "kind":{"type":"inlineObject","schema":old_schema},"payload":"00"}]}});
+        let error = wraps_in_view(&view).unwrap_err();
+        assert!(error.contains("DREGG/PRIVATE-AUTH-WRAP/v2") && error.contains("refused"), "{error}");
+        assert!(verify_lineage(ROOM, KEYS, &pinned(), &view, None).is_err());
+        // A v3 cell is not mistaken for it.
+        let e0 = RoomKey::generate(0).unwrap();
+        let (_, d) = epoch(&e0, [0; 32], &[(13, 3)], &founder_key());
+        assert!(wraps_in_view(&cell(&[&d[0]])).is_ok());
+    }
+
+    #[test]
+    fn a_wrap_to_another_key_id_never_opens_even_for_the_right_room_and_member() {
+        let e0 = RoomKey::generate(0).unwrap();
+        let mut wrap = wrap_for(1, "11", &e0);
+        assert!(wrap.open(ROOM, &dk(1)).is_ok());
+        wrap.enc_id = ep(2).id();
+        assert!(wrap.open(ROOM, &dk(1)).err().unwrap().contains("another encryption key"));
     }
 
     #[test]
@@ -2793,16 +2875,16 @@ mod tests {
         let after = seal_for_room(&e1, ROOM, "81", "1", b"after the kick").unwrap();
         let all: Vec<WrapAtom> = wraps0.iter().chain(&wraps1).cloned().collect();
         let mut b_ring = Keyring::default();
-        b_ring.insert(ROOM, &wraps0[1].open(ROOM, &derive_enc_key(&[2; 32])).unwrap());
+        b_ring.insert(ROOM, &wraps0[1].open(ROOM, &dk(2)).unwrap());
         assert_eq!(open_in_room(Some(&b_ring), ROOM, "80", "1", &before)["text"], "before the kick");
         assert_eq!(open_in_room(Some(&b_ring), ROOM, "81", "1", &after),
             json!("[sealed under epoch 1 — you do not hold that key]"));
         for wrap in &wraps1 {
-            assert!(wrap.open(ROOM, &derive_enc_key(&[2; 32])).is_err());
+            assert!(wrap.open(ROOM, &dk(2)).is_err());
         }
         let mut c_ring = Keyring::default();
         for wrap in all.iter().filter(|w| w.member == 13) {
-            c_ring.insert(ROOM, &wrap.open(ROOM, &derive_enc_key(&[3; 32])).unwrap());
+            c_ring.insert(ROOM, &wrap.open(ROOM, &dk(3)).unwrap());
         }
         assert_eq!(open_in_room(Some(&c_ring), ROOM, "81", "1", &after)["text"], "after the kick");
         assert_eq!(open_in_room(Some(&c_ring), ROOM, "80", "1", &before)["text"], "before the kick");
@@ -2830,7 +2912,7 @@ mod tests {
         assert_eq!(open(&ring, &place, &sealed).err().unwrap(), "no key for epoch 1");
         let w = wrap_for(1, "11", &e0);
         let relabelled = WrapAtom::from_atom(&wrap_atom_id(1, 0, 11), &w.payload()).unwrap();
-        assert!(relabelled.open(ROOM, &derive_enc_key(&[1; 32])).is_err());
+        assert!(relabelled.open(ROOM, &dk(1)).is_err());
     }
 
     #[test]
@@ -2876,10 +2958,11 @@ mod tests {
     #[test]
     fn first_invite_signed_descriptor_pins_its_key_but_needs_no_prior_wrap_or_record() {
         let signer = SigningKey::from_bytes(&[9; 32]);
-        let encryption = enc_public(&[9; 32]);
-        let payload = EncRecord::signed_payload(ROOM, KEYS, 9, 0, encryption.as_bytes(), &signer).unwrap();
-        assert!(invitation_record(9, &hex(encryption.as_bytes()), None).is_err());
-        let declaration = json!({"type":"minidregg-signed-room-recipient-v2","member":"9",
+        let encryption = ep(9);
+        let payload = EncRecord::signed_payload(ROOM, KEYS, 9, 0, &encryption, &signer).unwrap();
+        assert_eq!(payload.len(), SIGNED_RECORD_LEN);
+        assert!(invitation_record(9, &hex(&encryption.id()), None).is_err());
+        let declaration = json!({"type":"minidregg-signed-room-recipient-v3","member":"9",
             "room":ROOM,"keysCell":KEYS,"keyEpoch":"0","recordHex":hex(&payload)});
         assert_eq!(recipient_argument(&declaration.to_string()).unwrap(), hex(&payload));
         let mut wrong_metadata = declaration.clone(); wrong_metadata["room"] = json!("73");
@@ -2888,9 +2971,15 @@ mod tests {
         assert!(declared.authenticate(ROOM, KEYS, &signer.verifying_key().to_bytes()).is_ok());
         assert!(declared.authenticate(ROOM, KEYS, &SigningKey::from_bytes(&[8; 32]).verifying_key().to_bytes()).is_err());
         assert!(declared.authenticate(ROOM, "73", &signer.verifying_key().to_bytes()).is_err());
-        assert!(invitation_record(9, &hex(encryption.as_bytes()), Some(&declared)).is_ok());
+        assert!(invitation_record(9, &hex(&encryption.id()), Some(&declared)).is_ok(), "the selector is the 32-byte key id");
+        assert!(invitation_record(9, &hex(&ep(8).id()), Some(&declared)).is_err(), "another key's id selects nothing");
         let mut substituted = payload.clone(); substituted[4] ^= 1;
         assert!(invitation_record(9, &hex(&substituted), Some(&declared)).is_err());
+        // The pre-hybrid declaration type and an X25519-only key refuse by name.
+        let old = json!({"type":"minidregg-signed-room-recipient-v2","member":"9",
+            "room":ROOM,"keysCell":KEYS,"keyEpoch":"0","recordHex":hex(&payload)});
+        assert!(recipient_argument(&old.to_string()).unwrap_err().contains("recipient-v3"));
+        assert!(recipient_argument(&hex(encryption.x25519())).is_ok(), "32 bytes parse as a selector; it selects only an existing record");
     }
 
     #[test]
@@ -2900,15 +2989,16 @@ mod tests {
         let signed = &deliveries[0].wrap;
         let release = &deliveries[0].release;
         let payload = signed.payload();
-        assert_eq!(payload.len(), 444);
+        assert_eq!(payload.len(), 32 + WRAPPED_LEN + 8 + 300);
+        assert_eq!(payload.len(), 1532);
         assert_eq!(signed.payload_commitment().unwrap(), lineage_digest(&[&payload]));
         assert_eq!(release.commitment, signed.payload_commitment().unwrap());
         release.check(ROOM, KEYS, &pinned()).unwrap();
         release.names(signed).unwrap();
         assert!(wrap_for(9, "9", &key).payload_commitment().is_err(), "an unsigned wrap has no commitment");
-        // The commitment covers grant, certificate, signer and signature, not
-        // merely the 104-byte encrypted component.
-        for offset in [0, 32, 136, 144, 336, 344, 348, 380, 443] {
+        // The commitment covers the key id, BOTH ciphertext components, the box,
+        // grant, certificate, signer and signature -- not merely the encrypted component.
+        for offset in [0, 32, 32 + 32 + 500, 32 + WRAPPED_LEN - 1, 32 + WRAPPED_LEN, 1232, 1424, 1432, 1436, 1531] {
             let mut substituted = payload.clone(); substituted[offset] ^= 1;
             let altered = WrapAtom::from_atom(&wrap_atom_id(1, 0, 9), &substituted).unwrap();
             assert!(release.names(&altered).is_err(), "offset {offset}");
@@ -2969,7 +3059,7 @@ mod tests {
     }
 
     fn invite_spec(e0: &RoomKey, c0: &EpochCertificate, record: &EncRecord) -> ReleaseSpec {
-        let wrap = WrapAtom::new(ROOM, "13", &PublicKey::from(record.enc_pub), 0, 0, e0).unwrap()
+        let wrap = WrapAtom::new(ROOM, "13", &record.enc, 0, 0, e0).unwrap()
             .sign(c0, FOUNDER, 0, &founder_key()).unwrap();
         ReleaseSpec { room: ROOM.into(), keys: KEYS.into(), keys_ref: "lab-keys".into(), purpose: "invite",
             head_before: Some(EpochHead { epoch: 0, identity: c0.identity() }), key: None,
@@ -2988,10 +3078,31 @@ mod tests {
         let lineage = verify_lineage(ROOM, KEYS, &pinned(), &host.keys_view().unwrap(), None).unwrap();
         assert!(lineage.wraps.iter().any(|w| w.member == 13));
         assert_eq!(lineage.wraps.iter().find(|w| w.member == 13).unwrap()
-            .open(ROOM, &derive_enc_key(&[3; 32])).unwrap().bytes(), e0.bytes());
+            .open(ROOM, &dk(3)).unwrap().bytes(), e0.bytes());
         // Resuming a disclosed release re-sends nothing.
         run_release(&root, &mut host, &pinned(), FOUNDER, ROOM, "inv-1", b"pass", || unreachable!()).unwrap();
         assert_eq!(host.submitted.len(), 2);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_full_64_delivery_release_still_fits_the_retained_draft_bound() {
+        // A hybrid delivery is ~3.7 KB of JSON (1532-byte wrap + 232-byte release, hex), so a
+        // 64-delivery draft is ~240 KB: the retained manifest is read back through the
+        // 256 KiB record bound. Stage the worst case and load it again.
+        let root = scratch("full-release");
+        let key = RoomKey::generate(1).unwrap();
+        let members: Vec<(u64, u8)> = (0..64u64).map(|m| (100 + m, (100 + m) as u8)).collect();
+        let (c1, deliveries) = epoch(&key, [1; 32], &members, &founder_key());
+        let spec = ReleaseSpec { room: ROOM.into(), keys: KEYS.into(), keys_ref: "lab-keys".into(),
+            purpose: "rotate", head_before: None, key: Some(key), deliveries };
+        let operation = RetainedReleaseDraft::operation(ROOM, "full");
+        RetainedReleaseDraft::stage(&root, &operation, "full", &spec, b"pass").unwrap();
+        let draft = RetainedReleaseDraft::load(&root, &operation).unwrap().unwrap();
+        assert_eq!(draft.deliveries().unwrap().len(), 64);
+        let bytes = fs::metadata(draft.directory.join("draft.json")).unwrap().len();
+        assert!(bytes < 256 * 1024, "the draft manifest is {bytes} bytes");
+        assert_eq!(c1.epoch, 1);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -3029,18 +3140,18 @@ mod tests {
         let root = scratch("dead-draft");
         let (mut host, _, c0, records) = genesis_host(&[FOUNDER, 13]);
         let head0 = EpochHead { epoch: 0, identity: c0.identity() };
-        let rotation_spec = |key: RoomKey, to: &[(u64, [u8; 32], [u8; 32])]| {
+        let rotation_spec = |key: RoomKey, to: &[(u64, MemberPublic, [u8; 32])]| {
             let certificate = EpochCertificate::sign(ROOM, KEYS, &key, c0.identity(), FOUNDER, 0, &founder_key()).unwrap();
             let deliveries = to.iter().map(|(member, enc, record)| {
-                let wrap = WrapAtom::new(ROOM, &member.to_string(), &PublicKey::from(*enc), 0, 0, &key).unwrap()
+                let wrap = WrapAtom::new(ROOM, &member.to_string(), enc, 0, 0, &key).unwrap()
                     .sign(&certificate, FOUNDER, 0, &founder_key()).unwrap();
                 Delivery::new(wrap, *record, &founder()).unwrap()
             }).collect();
             ReleaseSpec { room: ROOM.into(), keys: KEYS.into(), keys_ref: "lab-keys".into(), purpose: "rotate",
                 head_before: Some(head0.clone()), key: Some(key), deliveries }
         };
-        let me = (FOUNDER, *enc_public(&[1; 32]).as_bytes(), [0; 32]);
-        let thirteen = (13, records[&13].enc_pub, record_digest(&records[&13]).unwrap());
+        let me = (FOUNDER, ep(1), [0; 32]);
+        let thirteen = (13, records[&13].enc.clone(), record_digest(&records[&13]).unwrap());
         // Draft Z: its first turn fails (UNKNOWN to the client). It stays a draft,
         // and its key never enters the sealing cache.
         struct Refusing;
@@ -3051,7 +3162,7 @@ mod tests {
         }
         let z_key = RoomKey::generate(1).unwrap();
         assert!(run_release(&root, &mut Refusing, &pinned(), FOUNDER, ROOM, "rot-z", b"pass",
-            || Ok(rotation_spec(z_key, &[me]))).is_err());
+            || Ok(rotation_spec(z_key, &[me.clone()]))).is_err());
         let z = RetainedReleaseDraft::load(&root, &RetainedReleaseDraft::operation(ROOM, "rot-z")).unwrap().unwrap();
         assert_eq!(z.state().unwrap(), ReleaseState::Drafted);
         assert!(load_ring(&root, b"pass").unwrap().get(ROOM, 1).is_none(), "a draft key never enters the sealing cache");
@@ -3064,7 +3175,7 @@ mod tests {
         }));
         let a_key = RoomKey::generate(1).unwrap();
         assert!(run_release(&root, &mut host, &pinned(), FOUNDER, ROOM, "rot-a", b"pass",
-            || Ok(rotation_spec(a_key, &[me, thirteen]))).err().unwrap().contains("dead"));
+            || Ok(rotation_spec(a_key, &[me.clone(), thirteen]))).err().unwrap().contains("dead"));
         assert!(matches!(z.state().unwrap(), ReleaseState::Dead(_)), "one live draft per room");
         assert!(run_release(&root, &mut host, &pinned(), FOUNDER, ROOM, "rot-z", b"pass", || unreachable!())
             .err().unwrap().contains("dead"), "a dead draft is never resumed");
@@ -3079,7 +3190,7 @@ mod tests {
         let b_key = RoomKey::generate(2).unwrap();
         let b_bytes = b_key.bytes();
         let b = run_release(&root, &mut host, &pinned(), FOUNDER, ROOM, "rot-b", b"pass",
-            || Ok(rotation_spec(b_key, &[me]))).unwrap();
+            || Ok(rotation_spec(b_key, &[me.clone()]))).unwrap();
         assert_eq!(b.key.unwrap().bytes(), b_bytes);
         let head = verify_lineage(ROOM, KEYS, &pinned(), &host.keys_view().unwrap(), None).unwrap().head.unwrap();
         assert_eq!(head.epoch, 2);

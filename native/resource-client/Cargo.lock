@@ -455,6 +455,7 @@ version = "0.1.0"
 dependencies = [
  "argon2",
  "aws-lc-rs",
+ "aws-lc-sys",
  "bs58",
  "chacha20poly1305",
  "ed25519-dalek",

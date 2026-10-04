@@ -777,7 +777,7 @@ fn enc_argument(session: &Session, word: &str) -> std::result::Result<String, St
         Some(file) => {
             session_file(file, "encryption key file")?;
             let path = session.home.join("requests").join(file);
-            String::from_utf8(session_fs::read(&session.home, &path, 4096)?).map_err(|error| error.to_string())?
+            String::from_utf8(session_fs::read(&session.home, &path, 8192)?).map_err(|error| error.to_string())?
         }
         None => word.to_owned(),
     };
@@ -2622,7 +2622,7 @@ fn whoami(session: &Session) {
         "subject":pin.as_ref().and_then(|p| p.get("subject")).cloned(),
         "socket":pin.as_ref().and_then(|p| p.get("socket")).cloned(),
         "encryptionKey":pin.as_ref().and_then(|p| p.get("key")).and_then(Value::as_str)
-            .and_then(|key| crate::workspace::roomkey::enc_public_hex(Path::new(key)).ok()),
+            .and_then(|key| crate::workspace::roomkey::enc_key_id_hex(Path::new(key)).ok()),
         "authority":"discovery-only"});
     println!("{}", serde_json::to_string_pretty(&value).expect("JSON renders"));
 }

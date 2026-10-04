@@ -14,13 +14,15 @@
 //!
 //! Every derivation is cSHAKE256 with its own customization string, every input
 //! length-prefixed. One secret per friend: the 32-byte seed `keygen` writes signs
-//! (Ed25519, as before) and, through `derive_enc_key`, decrypts (X25519).
+//! (Ed25519, as before) and, through `derive_enc_key`, decrypts (hybrid:
+//! X25519 + ML-KEM-768, v3 -- a v1 X25519-only wrap or keyring refuses).
 //!
 //! The room-key protocol that hands these keys out (wraps in the room's `keys`
 //! cell, rotation on a kick, the cache sync) is `roomkey.rs`.
 
 use crate::{hex, Result};
 use argon2::{Algorithm, Argon2, Params, Version};
+use aws_lc_rs::kem::{Ciphertext, DecapsulationKey, EncapsulationKey, ML_KEM_768};
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use serde_json::{json, Map, Value};
@@ -35,13 +37,17 @@ use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::{Zeroize, Zeroizing};
 
 pub(crate) const ENVELOPE_FRAME: &[u8] = b"DREGG/PRIVATE-CELL/v2";
-pub(crate) const WRAP_FRAME: &[u8] = b"DREGG/PRIVATE-WRAP/v1";
-const ESCROW_FRAME: &[u8] = b"DREGG/SEED-ESCROW/v1";
+pub(crate) const WRAP_FRAME: &[u8] = b"DREGG/PRIVATE-WRAP/v3";
+const ESCROW_FRAME: &[u8] = b"DREGG/SEED-ESCROW/v2";
 const CACHE_FRAME: &[u8] = b"DREGG/PRIVATE-KEYCACHE/v2";
 const COMMIT_LABEL: &[u8] = b"DREGG.PRIVATE-CELL.COMMIT/v1";
 const SCHEMA_LABEL: &[u8] = b"DREGG.PRIVATE-CELL.SCHEMA/v1";
 const ENC_LABEL: &[u8] = b"DREGG.CLIENT.ENC/v1";
-const KEK_LABEL: &[u8] = b"DREGG.PRIVATE-WRAP.KEK/v1";
+/// The combiner's customization string: it names the suite, so a KEK derived for
+/// X25519 + ML-KEM-768 is never confusable with any other derivation.
+const KEK_LABEL: &[u8] = b"DREGG.PRIVATE-WRAP.KEK/x25519+ml-kem-768/v3";
+const KEM_SEED_LABEL: &[u8] = b"DREGG.CLIENT.KEM-SEED/v1";
+const KEY_ID_LABEL: &[u8] = b"DREGG.CLIENT.ENC-KEY-ID/v1";
 
 const BUCKET: usize = 64;
 const BLINDER: usize = 32;
@@ -53,7 +59,7 @@ const MAX_PLAINTEXT: usize = 1 << 20;
 const HEADER: usize = ENVELOPE_FRAME.len() + 4 + 32 + NONCE;
 /// Everything in an envelope but the padded value: header, blinder, length, tag.
 const OVERHEAD: usize = HEADER + BLINDER + LENGTH + TAG;
-pub(crate) const WRAPPED_LEN: usize = 32 + NONCE + KEY + TAG;
+pub(crate) const WRAPPED_LEN: usize = 32 + KEM_CT_LEN + NONCE + KEY + TAG;
 const SALT: usize = 16;
 /// Argon2id, RFC 9106 §4 second recommendation minus lanes: 64 MiB, 3 passes, 1 lane.
 const ARGON_MEMORY_KIB: u32 = 64 * 1024;
@@ -100,12 +106,16 @@ Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` w
 to your sponsor, which lets your sponsor sign as you.";
 
 fn cshake(label: &[u8], parts: &[&[u8]]) -> [u8; 32] {
+    cshake_xof::<32>(label, parts)
+}
+
+fn cshake_xof<const N: usize>(label: &[u8], parts: &[&[u8]]) -> [u8; N] {
     let mut hasher = CoreWrapper::from_core(CShake256Core::new(label));
     for part in parts {
         hasher.update(&(part.len() as u64).to_be_bytes());
         hasher.update(part);
     }
-    let mut output = [0u8; 32];
+    let mut output = [0u8; N];
     XofReader::read(&mut hasher.finalize_xof(), &mut output);
     output
 }
@@ -458,29 +468,209 @@ impl PrivateEnvelope {
 
 // ---------------------------------------------------------------- member keys
 
-/// The friend's X25519 secret: `cSHAKE256("DREGG.CLIENT.ENC/v1", seed)`, the same
-/// 32-byte seed whose Ed25519 key signs. Clamping happens inside X25519.
-pub(crate) fn derive_enc_key(seed: &[u8; 32]) -> StaticSecret {
-    let mut bytes = cshake(ENC_LABEL, &[seed]);
-    let secret = StaticSecret::from(bytes);
-    bytes.zeroize();
-    secret
+/// ML-KEM-768 (FIPS 203) sizes, bytes.
+pub(crate) const KEM_EK_LEN: usize = 1184;
+pub(crate) const KEM_CT_LEN: usize = 1088;
+const KEM_DK_LEN: usize = 2400;
+/// FIPS 203 key-generation seed `d || z`.
+const KEM_SEED_LEN: usize = 64;
+/// A member's hybrid public key: X25519 (32) then the ML-KEM-768 encapsulation key.
+pub(crate) const MEMBER_PUBLIC_LEN: usize = 32 + KEM_EK_LEN;
+
+/// A friend's PUBLIC encryption key: an X25519 key and an ML-KEM-768
+/// encapsulation key. A room key wrapped to it opens only for a holder of BOTH
+/// secrets, and stays sealed if EITHER primitive survives (see `hybrid_kek`).
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct MemberPublic {
+    x25519: [u8; 32],
+    kem: [u8; KEM_EK_LEN],
 }
 
-pub(crate) fn enc_public(seed: &[u8; 32]) -> PublicKey {
-    PublicKey::from(&derive_enc_key(seed))
+impl std::fmt::Debug for MemberPublic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MemberPublic(id {})", hex(&self.id()))
+    }
+}
+
+impl MemberPublic {
+    pub(crate) fn x25519(&self) -> &[u8; 32] {
+        &self.x25519
+    }
+
+    /// `x25519 (32) || ML-KEM-768 encapsulation key (1184)`.
+    pub(crate) fn to_bytes(&self) -> Vec<u8> {
+        [&self.x25519[..], &self.kem[..]].concat()
+    }
+
+    /// Strict: exactly `MEMBER_PUBLIC_LEN` bytes, and an encapsulation key
+    /// the ML-KEM implementation accepts.
+    pub(crate) fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() != MEMBER_PUBLIC_LEN {
+            return Err(format!(
+                "a hybrid encryption key is {MEMBER_PUBLIC_LEN} bytes (X25519 32 + ML-KEM-768 {KEM_EK_LEN}), not {}",
+                bytes.len()
+            ));
+        }
+        let kem: [u8; KEM_EK_LEN] = fixed(&bytes[32..], "ML-KEM-768 encapsulation key")?;
+        EncapsulationKey::new(&ML_KEM_768, &kem)
+            .map_err(|_| "the ML-KEM-768 encapsulation key is malformed")?;
+        Ok(Self { x25519: fixed(&bytes[..32], "X25519 key")?, kem })
+    }
+
+    /// The 32-byte name of this key pair: a digest over both halves. What a
+    /// wrap atom, a release and an inviter's key SELECTOR carry in place of the
+    /// 1216-byte key.
+    pub(crate) fn id(&self) -> [u8; 32] {
+        cshake(KEY_ID_LABEL, &[&self.x25519, &self.kem])
+    }
+}
+
+/// A friend's SECRET encryption keys. Both halves come from the one 32-byte
+/// seed that signs: X25519 as `cSHAKE256(ENC_LABEL, seed)`, and the ML-KEM-768
+/// key from the FIPS 203 seed `cSHAKE256-XOF(KEM_SEED_LABEL, seed)` (64 bytes
+/// `d || z`) -- so a seed alone still recovers every key, as before.
+pub(crate) struct MemberSecret {
+    x25519: StaticSecret,
+    kem_seed: Zeroizing<[u8; KEM_SEED_LEN]>,
+    kem: DecapsulationKey,
+    public: MemberPublic,
+}
+
+impl MemberSecret {
+    pub(crate) fn from_seed(seed: &[u8; 32]) -> Result<Self> {
+        let mut x25519 = cshake(ENC_LABEL, &[seed]);
+        let kem_seed = Zeroizing::new(cshake_xof::<KEM_SEED_LEN>(KEM_SEED_LABEL, &[seed]));
+        let secret = Self::from_parts(x25519, *kem_seed);
+        x25519.zeroize();
+        secret
+    }
+
+    /// From the two secret halves a keyring entry keeps.
+    pub(crate) fn from_parts(x25519: [u8; 32], kem_seed: [u8; KEM_SEED_LEN]) -> Result<Self> {
+        let x25519 = StaticSecret::from(x25519);
+        let (kem, ek) = ml_kem_768_from_seed(&kem_seed)?;
+        let public = MemberPublic { x25519: *PublicKey::from(&x25519).as_bytes(), kem: ek };
+        Ok(Self { x25519, kem_seed: Zeroizing::new(kem_seed), kem, public })
+    }
+
+    pub(crate) fn public(&self) -> &MemberPublic {
+        &self.public
+    }
+
+    /// The two secret halves, for the keyring entry only.
+    fn parts(&self) -> (Zeroizing<[u8; 32]>, Zeroizing<[u8; KEM_SEED_LEN]>) {
+        (Zeroizing::new(self.x25519.to_bytes()), self.kem_seed.clone())
+    }
+
+    /// The same X25519 half with a different ML-KEM half: only a test builds a
+    /// split identity, to show a wrap needs both halves.
+    #[cfg(test)]
+    pub(crate) fn with_kem_of(&self, other: &MemberSecret) -> Result<Self> {
+        Self::from_parts(self.x25519.to_bytes(), *other.kem_seed)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_x25519_of(&self, other: &MemberSecret) -> Result<Self> {
+        Self::from_parts(other.x25519.to_bytes(), *self.kem_seed)
+    }
+}
+
+/// Deterministic ML-KEM-768 key generation from a FIPS 203 seed (`d || z`).
+///
+/// `aws-lc-rs` generates a random key and loads a serialized one but exposes no
+/// seeded generation. AWS-LC itself has it: `EVP_PKEY_keygen_deterministic`, the
+/// call its own FIPS 203 known-answer tests use. `aws-lc-sys`'s portable
+/// ("universal") bindings omit it, so it is declared here against the library
+/// the workspace already links, at the exact pinned version the symbol carries
+/// in its name (`aws_lc_0_45_0_*`): a version bump fails to LINK, loudly, and
+/// is a deliberate edit of this line. The raw 2400-byte secret key it returns is
+/// the standard FIPS 203 `dk`, which `DecapsulationKey::new` loads. The known-
+/// answer test below checks the derived encapsulation key against an independent
+/// pure-Python FIPS 203 implementation, so a wrong seed layout cannot pass.
+fn ml_kem_768_from_seed(seed: &[u8; KEM_SEED_LEN]) -> Result<(DecapsulationKey, [u8; KEM_EK_LEN])> {
+    extern "C" {
+        #[link_name = "aws_lc_0_45_0_EVP_PKEY_keygen_deterministic"]
+        fn EVP_PKEY_keygen_deterministic(
+            ctx: *mut aws_lc_sys::EVP_PKEY_CTX,
+            out_pkey: *mut *mut aws_lc_sys::EVP_PKEY,
+            seed: *const u8,
+            seed_len: *mut usize,
+        ) -> std::os::raw::c_int;
+    }
+    use aws_lc_sys as sys;
+    struct Context(*mut sys::EVP_PKEY_CTX);
+    impl Drop for Context {
+        fn drop(&mut self) {
+            // SAFETY: the pointer came from EVP_PKEY_CTX_new_id and is freed once.
+            unsafe { sys::EVP_PKEY_CTX_free(self.0) }
+        }
+    }
+    struct Pkey(*mut sys::EVP_PKEY);
+    impl Drop for Pkey {
+        fn drop(&mut self) {
+            // SAFETY: the pointer came from EVP_PKEY_keygen_deterministic and is freed once.
+            unsafe { sys::EVP_PKEY_free(self.0) }
+        }
+    }
+    const FAIL: &str = "ML-KEM-768 key generation from the member seed failed";
+    // SAFETY: every pointer passed is either null where the API takes null or a
+    // live buffer of the stated length; contexts and keys are freed by the guards.
+    unsafe {
+        let ctx = Context(sys::EVP_PKEY_CTX_new_id(sys::EVP_PKEY_KEM, std::ptr::null_mut()));
+        if ctx.0.is_null()
+            || sys::EVP_PKEY_CTX_kem_set_params(ctx.0, sys::NID_MLKEM768) != 1
+            || sys::EVP_PKEY_keygen_init(ctx.0) != 1
+        {
+            return Err(FAIL.into());
+        }
+        let mut raw: *mut sys::EVP_PKEY = std::ptr::null_mut();
+        let mut seed_len = KEM_SEED_LEN;
+        if EVP_PKEY_keygen_deterministic(ctx.0, &mut raw, seed.as_ptr(), &mut seed_len) != 1
+            || raw.is_null()
+        {
+            return Err(FAIL.into());
+        }
+        let pkey = Pkey(raw);
+        let mut dk = Zeroizing::new(vec![0u8; KEM_DK_LEN]);
+        let mut dk_len = dk.len();
+        let mut ek = [0u8; KEM_EK_LEN];
+        let mut ek_len = ek.len();
+        if sys::EVP_PKEY_get_raw_private_key(pkey.0, dk.as_mut_ptr(), &mut dk_len) != 1
+            || dk_len != KEM_DK_LEN
+            || sys::EVP_PKEY_get_raw_public_key(pkey.0, ek.as_mut_ptr(), &mut ek_len) != 1
+            || ek_len != KEM_EK_LEN
+        {
+            return Err(FAIL.into());
+        }
+        let key = DecapsulationKey::new(&ML_KEM_768, &dk).map_err(|_| FAIL.to_owned())?;
+        Ok((key, ek))
+    }
+}
+
+/// The friend's secret encryption keys for the seed its signing key file holds.
+pub(crate) fn derive_enc_key(seed: &[u8; 32]) -> Result<MemberSecret> {
+    MemberSecret::from_seed(seed)
+}
+
+pub(crate) fn enc_public(seed: &[u8; 32]) -> Result<MemberPublic> {
+    Ok(derive_enc_key(seed)?.public)
 }
 
 // ---------------------------------------------------------------- the encryption keyring
 
-/// FIX-IDENTITY B. The X25519 key is derived from the signing seed, so a
-/// signing-key rotation (which overwrites the seed) changes it. Before the seed
-/// is overwritten, `rotate-key` keeps the OLD encryption secret here, beside the
-/// key, so every room epoch wrapped to it stays openable: `KEY.enc-ring`, mode
+/// FIX-IDENTITY B. Every encryption secret is derived from the signing seed, so
+/// a signing-key rotation (which overwrites the seed) changes it. Before the seed
+/// is overwritten, `rotate-key` keeps the OLD encryption secrets here, beside the
+/// key, so every room epoch wrapped to them stays openable: `KEY.enc-ring`, mode
 /// 0600 -- exactly the protection the seed itself has (the seed is a raw 0600
-/// file). It holds X25519 secrets only, never a signing seed: a past signing key
-/// is revoked at the Host and nothing here could sign.
-const ENC_RING_TYPE: &str = "minidregg-encryption-keyring-v1";
+/// file). Each entry holds the X25519 secret and the 64-byte ML-KEM-768 seed,
+/// never a signing seed: a past signing key is revoked at the Host and nothing
+/// here could sign.
+///
+/// v2 (hybrid): v1 held X25519 secrets only. A v1 ring REFUSES to load: it
+/// cannot open a v3 wrap, and silently treating it as empty would hide that.
+const ENC_RING_TYPE: &str = "minidregg-encryption-keyring-v2";
+const ENC_RING_TYPE_V1: &str = "minidregg-encryption-keyring-v1";
 
 pub(crate) fn enc_ring_path(key: &Path) -> std::path::PathBuf {
     let mut name = key.as_os_str().to_owned();
@@ -499,7 +689,9 @@ fn read_seed(key: &Path) -> Result<Zeroizing<[u8; 32]>> {
     Ok(Zeroizing::new(seed))
 }
 
-fn load_enc_ring(key: &Path) -> Result<Vec<(String, Zeroizing<[u8; 32]>)>> {
+type RingEntry = (String, Zeroizing<[u8; 32]>, Zeroizing<[u8; KEM_SEED_LEN]>);
+
+fn load_enc_ring(key: &Path) -> Result<Vec<RingEntry>> {
     let path = enc_ring_path(key);
     let bytes = match fs::read(&path) {
         Ok(bytes) => Zeroizing::new(bytes),
@@ -508,40 +700,47 @@ fn load_enc_ring(key: &Path) -> Result<Vec<(String, Zeroizing<[u8; 32]>)>> {
     };
     let value: Value = serde_json::from_slice(&bytes)
         .map_err(|error| format!("{} is not an encryption keyring: {error}", path.display()))?;
-    if value.get("type").and_then(Value::as_str) != Some(ENC_RING_TYPE) {
-        return Err(format!("{} is not a {ENC_RING_TYPE}", path.display()));
+    match value.get("type").and_then(Value::as_str) {
+        Some(ENC_RING_TYPE) => {}
+        Some(ENC_RING_TYPE_V1) => {
+            return Err(format!(
+                "{} is a {ENC_RING_TYPE_V1} (X25519 only, written before hybrid ML-KEM-768 wraps): it cannot open a v3 wrap and is refused, not read as empty; move it aside once its rooms are re-founded",
+                path.display()
+            ))
+        }
+        _ => return Err(format!("{} is not a {ENC_RING_TYPE}", path.display())),
     }
     let mut out = Vec::new();
     for entry in value.get("keys").and_then(Value::as_array).ok_or("keyring lacks keys")? {
         let epoch = entry.get("keyEpoch").and_then(Value::as_str).ok_or("keyring entry lacks keyEpoch")?;
-        let secret: [u8; 32] = decode_hex(entry.get("secret").and_then(Value::as_str).ok_or("keyring entry lacks secret")?)?
+        let x25519: [u8; 32] = decode_hex(entry.get("x25519").and_then(Value::as_str).ok_or("keyring entry lacks x25519")?)?
             .try_into()
-            .map_err(|_| "a keyring secret is 32 bytes")?;
-        out.push((epoch.to_owned(), Zeroizing::new(secret)));
+            .map_err(|_| "a keyring X25519 secret is 32 bytes")?;
+        let kem: [u8; KEM_SEED_LEN] = decode_hex(entry.get("kemSeed").and_then(Value::as_str).ok_or("keyring entry lacks kemSeed")?)?
+            .try_into()
+            .map_err(|_| "a keyring ML-KEM seed is 64 bytes")?;
+        out.push((epoch.to_owned(), Zeroizing::new(x25519), Zeroizing::new(kem)));
     }
     Ok(out)
 }
 
-/// Keep the encryption secret of the seed now at `key`, labelled with the key
-/// epoch it belonged to. Idempotent: a secret already kept is not added again.
+/// Keep the encryption secrets of the seed now at `key`, labelled with the key
+/// epoch they belonged to. Idempotent: a pair already kept is not added again.
 pub(crate) fn keyring_remember(key: &Path, key_epoch: &str) -> Result<()> {
     let seed = read_seed(key)?;
-    let mut secret = cshake(ENC_LABEL, &[&seed[..]]);
+    let current = MemberSecret::from_seed(&seed)?;
+    let (x25519, kem) = current.parts();
     let mut ring = load_enc_ring(key)?;
-    if ring.iter().any(|(_, kept)| **kept == secret) {
-        secret.zeroize();
+    if ring.iter().any(|(_, kept_x, kept_k)| **kept_x == *x25519 && **kept_k == *kem) {
         return Ok(());
     }
-    ring.push((key_epoch.to_owned(), Zeroizing::new(secret)));
-    secret.zeroize();
-    let keys: Vec<Value> = ring
-        .iter()
-        .map(|(epoch, secret)| {
-            json!({"keyEpoch":epoch,
-                "public":hex(PublicKey::from(&StaticSecret::from(**secret)).as_bytes()),
-                "secret":hex(&secret[..])})
-        })
-        .collect();
+    ring.push((key_epoch.to_owned(), x25519, kem));
+    let mut keys = Vec::new();
+    for (epoch, x25519, kem) in &ring {
+        let public = MemberSecret::from_parts(**x25519, **kem)?.public.id();
+        keys.push(json!({"keyEpoch":epoch,"keyId":hex(&public),
+            "x25519":hex(&x25519[..]),"kemSeed":hex(&kem[..])}));
+    }
     let bytes = Zeroizing::new(
         serde_json::to_vec_pretty(&json!({"type":ENC_RING_TYPE,"keys":keys})).map_err(|e| e.to_string())?,
     );
@@ -562,112 +761,134 @@ pub(crate) fn keyring_remember(key: &Path, key_epoch: &str) -> Result<()> {
     fs::rename(&staged, &path).map_err(|error| format!("cannot install {}: {error}", path.display()))
 }
 
-/// Every X25519 secret this key file can open with: the current seed's first,
-/// then every kept past secret, newest last.
-pub(crate) fn enc_secrets(key: &Path) -> Result<Vec<StaticSecret>> {
+/// Every encryption identity this key file can open with: the current seed's
+/// first, then every kept past one, newest last.
+pub(crate) fn enc_secrets(key: &Path) -> Result<Vec<MemberSecret>> {
     let seed = read_seed(key)?;
-    let mut out = vec![derive_enc_key(&seed)];
-    for (_, secret) in load_enc_ring(key)? {
-        out.push(StaticSecret::from(*secret));
+    let mut out = vec![derive_enc_key(&seed)?];
+    for (_, x25519, kem) in load_enc_ring(key)? {
+        out.push(MemberSecret::from_parts(*x25519, *kem)?);
     }
     Ok(out)
 }
 
-/// ECIES: ephemeral X25519 → cSHAKE KEK → XChaCha20-Poly1305 of a 32-byte secret.
+// ---------------------------------------------------------------- hybrid wraps
+
+/// A hybrid wrap (frame v3): one ephemeral X25519 key, one ML-KEM-768
+/// ciphertext, and a XChaCha20-Poly1305 box of a 32-byte secret under a key
+/// derived from BOTH shared secrets (`hybrid_kek`).
+///
+/// `ephemeral (32) || ML-KEM-768 ciphertext (1088) || nonce (24) || box (48)`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Wrapped {
     ephemeral: [u8; 32],
+    kem_ct: [u8; KEM_CT_LEN],
     nonce: [u8; NONCE],
     ct: Vec<u8>,
 }
 
 impl Wrapped {
     pub(crate) fn to_bytes(&self) -> Vec<u8> {
-        [&self.ephemeral[..], &self.nonce, &self.ct].concat()
+        [&self.ephemeral[..], &self.kem_ct[..], &self.nonce, &self.ct].concat()
     }
 
     pub(crate) fn from_bytes(bytes: &[u8]) -> Result<Self> {
         if bytes.len() != WRAPPED_LEN {
-            return Err(format!("a wrap is exactly {WRAPPED_LEN} bytes"));
+            return Err(format!("a v3 hybrid wrap is exactly {WRAPPED_LEN} bytes, not {}", bytes.len()));
         }
         Ok(Self {
             ephemeral: fixed(&bytes[..32], "ephemeral key")?,
-            nonce: fixed(&bytes[32..32 + NONCE], "nonce")?,
-            ct: bytes[32 + NONCE..].to_vec(),
+            kem_ct: fixed(&bytes[32..32 + KEM_CT_LEN], "ML-KEM-768 ciphertext")?,
+            nonce: fixed(&bytes[32 + KEM_CT_LEN..32 + KEM_CT_LEN + NONCE], "nonce")?,
+            ct: bytes[32 + KEM_CT_LEN + NONCE..].to_vec(),
         })
     }
 }
 
-fn kek_and_aad(
+/// The transcript every part of the wrap is bound to, length-prefixed: the
+/// frame, the caller's context (room id, epoch, member), BOTH ciphertexts (the
+/// ephemeral X25519 key and the ML-KEM ciphertext) and BOTH recipient public
+/// keys. It is the AEAD's associated data and an input to the key derivation.
+fn wrap_transcript(
     frame: &[u8],
     context: &[&[u8]],
-    shared: &[u8; 32],
-    ephemeral: &PublicKey,
-    recipient: &PublicKey,
-) -> (Zeroizing<[u8; KEY]>, Vec<u8>) {
+    ephemeral: &[u8; 32],
+    kem_ct: &[u8],
+    recipient: &MemberPublic,
+) -> Vec<u8> {
     let mut aad = Vec::new();
     for part in [frame]
         .into_iter()
         .chain(context.iter().copied())
-        .chain([&ephemeral.as_bytes()[..], &recipient.as_bytes()[..]])
+        .chain([&ephemeral[..], kem_ct, &recipient.x25519[..], &recipient.kem[..]])
     {
         aad.extend_from_slice(&(part.len() as u64).to_be_bytes());
         aad.extend_from_slice(part);
     }
-    (Zeroizing::new(cshake(KEK_LABEL, &[shared, &aad])), aad)
+    aad
+}
+
+/// The combiner. The key-encryption key is cSHAKE256 under its own
+/// domain-separating customization string (`KEK_LABEL`, which names the suite
+/// `X25519 + ML-KEM-768`) of the two shared secrets and the full transcript,
+/// each input length-prefixed. Both secrets are inputs to one hash together
+/// with every public value they were derived from, so the KEK is unknown to an
+/// adversary that breaks only one primitive, and a ciphertext, key or context
+/// substituted in either half changes it.
+fn hybrid_kek(shared_x25519: &[u8], shared_kem: &[u8], transcript: &[u8]) -> Zeroizing<[u8; KEY]> {
+    Zeroizing::new(cshake(KEK_LABEL, &[shared_x25519, shared_kem, transcript]))
 }
 
 fn seal_to(
     frame: &[u8],
     context: &[&[u8]],
-    recipient: &PublicKey,
+    recipient: &MemberPublic,
     secret: &[u8; KEY],
 ) -> Result<Wrapped> {
     let ephemeral_secret = StaticSecret::from(random::<32>()?);
-    let ephemeral = PublicKey::from(&ephemeral_secret);
-    let shared = ephemeral_secret.diffie_hellman(recipient);
-    if !shared.was_contributory() {
+    let ephemeral = *PublicKey::from(&ephemeral_secret).as_bytes();
+    let shared_x = ephemeral_secret.diffie_hellman(&PublicKey::from(recipient.x25519));
+    if !shared_x.was_contributory() {
         return Err("recipient X25519 key is a low-order point".into());
     }
-    let (kek, aad) = kek_and_aad(frame, context, shared.as_bytes(), &ephemeral, recipient);
+    let encapsulation = EncapsulationKey::new(&ML_KEM_768, &recipient.kem)
+        .map_err(|_| "recipient ML-KEM-768 encapsulation key is malformed")?;
+    let (kem_ct, shared_k) = encapsulation
+        .encapsulate()
+        .map_err(|_| "ML-KEM-768 encapsulation failed")?;
+    let kem_ct: [u8; KEM_CT_LEN] = fixed(kem_ct.as_ref(), "ML-KEM-768 ciphertext")?;
+    let transcript = wrap_transcript(frame, context, &ephemeral, &kem_ct, recipient);
+    let kek = hybrid_kek(shared_x.as_bytes(), shared_k.as_ref(), &transcript);
     let nonce = random::<NONCE>()?;
     let ct = aead(&kek)
-        .encrypt(
-            XNonce::from_slice(&nonce),
-            Payload {
-                msg: secret,
-                aad: &aad,
-            },
-        )
+        .encrypt(XNonce::from_slice(&nonce), Payload { msg: secret, aad: &transcript })
         .map_err(|_| "wrap encryption failed")?;
-    Ok(Wrapped {
-        ephemeral: *ephemeral.as_bytes(),
-        nonce,
-        ct,
-    })
+    Ok(Wrapped { ephemeral, kem_ct, nonce, ct })
 }
 
 fn open_from(
     frame: &[u8],
     context: &[&[u8]],
-    secret: &StaticSecret,
+    secret: &MemberSecret,
     wrapped: &Wrapped,
 ) -> Result<Zeroizing<[u8; KEY]>> {
-    let ephemeral = PublicKey::from(wrapped.ephemeral);
-    let recipient = PublicKey::from(secret);
-    let shared = secret.diffie_hellman(&ephemeral);
-    if !shared.was_contributory() {
+    let shared_x = secret.x25519.diffie_hellman(&PublicKey::from(wrapped.ephemeral));
+    if !shared_x.was_contributory() {
         return Err("wrap ephemeral key is a low-order point".into());
     }
-    let (kek, aad) = kek_and_aad(frame, context, shared.as_bytes(), &ephemeral, &recipient);
+    // ML-KEM decapsulation never fails on a well-sized ciphertext: a forged one
+    // yields an unrelated shared secret (implicit rejection), and the box fails.
+    let shared_k = secret
+        .kem
+        .decapsulate(Ciphertext::from(&wrapped.kem_ct[..]))
+        .map_err(|_| "ML-KEM-768 decapsulation failed")?;
+    let transcript = wrap_transcript(frame, context, &wrapped.ephemeral, &wrapped.kem_ct, &secret.public);
+    let kek = hybrid_kek(shared_x.as_bytes(), shared_k.as_ref(), &transcript);
     let plain = Zeroizing::new(
         aead(&kek)
             .decrypt(
                 XNonce::from_slice(&wrapped.nonce),
-                Payload {
-                    msg: &wrapped.ct,
-                    aad: &aad,
-                },
+                Payload { msg: &wrapped.ct, aad: &transcript },
             )
             .map_err(|_| "wrap does not open under this member key")?,
     );
@@ -677,7 +898,7 @@ fn open_from(
 pub(crate) fn wrap_room_key(
     room: &str,
     member: &str,
-    member_pub: &PublicKey,
+    member_pub: &MemberPublic,
     key: &RoomKey,
 ) -> Result<Wrapped> {
     seal_to(
@@ -692,7 +913,7 @@ pub(crate) fn unwrap_room_key(
     room: &str,
     epoch: u32,
     member: &str,
-    member_secret: &StaticSecret,
+    member_secret: &MemberSecret,
     wrapped: &Wrapped,
 ) -> Result<RoomKey> {
     let key = open_from(
@@ -704,14 +925,14 @@ pub(crate) fn unwrap_room_key(
     Ok(RoomKey::from_parts(epoch, *key))
 }
 
-/// D3 (b), opt-in only: the seed encrypted to the sponsor's X25519 key.
-pub(crate) fn escrow_seed(subject: &str, seed: &[u8; 32], sponsor: &PublicKey) -> Result<Wrapped> {
+/// D3 (b), opt-in only: the seed encrypted to the sponsor's hybrid key.
+pub(crate) fn escrow_seed(subject: &str, seed: &[u8; 32], sponsor: &MemberPublic) -> Result<Wrapped> {
     seal_to(ESCROW_FRAME, &[subject.as_bytes()], sponsor, seed)
 }
 
 pub(crate) fn recover_escrowed_seed(
     subject: &str,
-    sponsor: &StaticSecret,
+    sponsor: &MemberSecret,
     wrapped: &Wrapped,
 ) -> Result<Zeroizing<[u8; 32]>> {
     open_from(ESCROW_FRAME, &[subject.as_bytes()], sponsor, wrapped)
@@ -1137,28 +1358,189 @@ mod tests {
             .contains("not a DREGG"));
     }
 
+    use sha2::{Digest, Sha256};
+
+    const KAT_TRANSCRIPT_SHA256: &str = "68d2bb8e36b6216b877efa867cd838371cba31a476a80035a4b7f75235d9312c";
+    const KAT_KEK: &str = "64f554872ea555dc44317554720ab62466775814286345e527619ed52c44e708";
+
+    fn dk(n: u8) -> MemberSecret {
+        derive_enc_key(&[n; 32]).unwrap()
+    }
+
+    fn ep(n: u8) -> MemberPublic {
+        enc_public(&[n; 32]).unwrap()
+    }
+
     #[test]
     fn wrap_opens_for_its_member_and_not_another() {
-        let s = enc_public(&[1; 32]);
+        let s = ep(1);
         let key = RoomKey::generate(3).unwrap();
         let wrap = Wrapped::from_bytes(&wrap_room_key("71", "11", &s, &key).unwrap().to_bytes())
             .unwrap();
-        let opened = unwrap_room_key("71", 3, "11", &derive_enc_key(&[1; 32]), &wrap).unwrap();
+        let opened = unwrap_room_key("71", 3, "11", &dk(1), &wrap).unwrap();
         assert_eq!((opened.epoch, *opened.key), (3, *key.key));
-        let wrong = unwrap_room_key("71", 3, "11", &derive_enc_key(&[2; 32]), &wrap);
+        let wrong = unwrap_room_key("71", 3, "11", &dk(2), &wrap);
         assert!(wrong.err().unwrap().contains("does not open"));
-        let relabelled = unwrap_room_key("71", 3, "12", &derive_enc_key(&[1; 32]), &wrap);
+        let relabelled = unwrap_room_key("71", 3, "12", &dk(1), &wrap);
         assert!(relabelled.is_err(), "a wrap is bound to its member id");
-        let other_epoch = unwrap_room_key("71", 4, "11", &derive_enc_key(&[1; 32]), &wrap);
+        let other_epoch = unwrap_room_key("71", 4, "11", &dk(1), &wrap);
         assert!(other_epoch.is_err(), "a wrap is bound to its epoch");
-        let other_room = unwrap_room_key("70", 3, "11", &derive_enc_key(&[1; 32]), &wrap);
+        let other_room = unwrap_room_key("70", 3, "11", &dk(1), &wrap);
         assert!(other_room.is_err(), "a wrap is bound to its room");
+    }
+
+    #[test]
+    fn a_hybrid_wrap_has_the_v3_shape_and_a_fresh_ciphertext_every_time() {
+        let key = RoomKey::generate(0).unwrap();
+        let a = wrap_room_key("71", "11", &ep(1), &key).unwrap().to_bytes();
+        let b = wrap_room_key("71", "11", &ep(1), &key).unwrap().to_bytes();
+        assert_eq!(a.len(), WRAPPED_LEN);
+        assert_eq!(WRAPPED_LEN, 32 + 1088 + 24 + 48, "ephemeral || ML-KEM-768 ciphertext || nonce || box");
+        assert_ne!(a, b, "ephemeral key, KEM encapsulation and nonce are all fresh");
+        assert_ne!(a[..32], b[..32]);
+        assert_ne!(a[32..32 + KEM_CT_LEN], b[32..32 + KEM_CT_LEN]);
+        let public = ep(1).to_bytes();
+        assert_eq!(public.len(), MEMBER_PUBLIC_LEN);
+        assert_eq!(MEMBER_PUBLIC_LEN, 32 + 1184);
+        assert_eq!(MemberPublic::from_bytes(&public).unwrap(), ep(1));
+        assert!(MemberPublic::from_bytes(&public[..32]).unwrap_err().contains("hybrid encryption key"),
+            "an X25519-only key is not an encryption key any more");
+    }
+
+    #[test]
+    fn tampering_either_ciphertext_component_refuses_the_wrap() {
+        let key = RoomKey::generate(3).unwrap();
+        let bytes = wrap_room_key("71", "11", &ep(1), &key).unwrap().to_bytes();
+        let opens = |bytes: &[u8]| {
+            unwrap_room_key("71", 3, "11", &dk(1), &Wrapped::from_bytes(bytes).unwrap())
+        };
+        assert!(opens(&bytes).is_ok());
+        // X25519 half: the ephemeral public key.
+        let mut ephemeral = bytes.clone();
+        ephemeral[0] ^= 1;
+        assert!(opens(&ephemeral).err().unwrap().contains("does not open"));
+        // ML-KEM half: the encapsulation ciphertext (first, middle and last byte).
+        for at in [32, 32 + KEM_CT_LEN / 2, 32 + KEM_CT_LEN - 1] {
+            let mut kem = bytes.clone();
+            kem[at] ^= 1;
+            assert!(opens(&kem).err().unwrap().contains("does not open"), "KEM ciphertext byte {at}");
+        }
+        // The box, its nonce and its tag.
+        for at in [32 + KEM_CT_LEN, 32 + KEM_CT_LEN + NONCE, WRAPPED_LEN - 1] {
+            let mut boxed = bytes.clone();
+            boxed[at] ^= 1;
+            assert!(opens(&boxed).is_err(), "box byte {at}");
+        }
+        assert!(Wrapped::from_bytes(&bytes[..WRAPPED_LEN - 1]).is_err());
+        let mut long = bytes.clone();
+        long.push(0);
+        assert!(Wrapped::from_bytes(&long).is_err());
+    }
+
+    #[test]
+    fn a_wrap_needs_both_halves_of_the_recipient_identity() {
+        // The hybrid is only as good as the requirement that BOTH secrets are
+        // used: an identity with the right X25519 half and another's ML-KEM half
+        // (or the reverse) cannot open the wrap.
+        let key = RoomKey::generate(0).unwrap();
+        let wrap = wrap_room_key("71", "11", &ep(1), &key).unwrap();
+        assert!(unwrap_room_key("71", 0, "11", &dk(1), &wrap).is_ok());
+        let right_x_wrong_kem = dk(1).with_kem_of(&dk(2)).unwrap();
+        let wrong_x_right_kem = dk(1).with_x25519_of(&dk(2)).unwrap();
+        assert!(unwrap_room_key("71", 0, "11", &right_x_wrong_kem, &wrap).is_err());
+        assert!(unwrap_room_key("71", 0, "11", &wrong_x_right_kem, &wrap).is_err());
+    }
+
+    #[test]
+    fn a_recipient_with_another_kem_key_is_not_the_recipient() {
+        // A public key whose X25519 half is member 1's and whose ML-KEM half is
+        // member 2's names a third identity: member 1 cannot open a wrap to it
+        // (the transcript binds both public keys), and its id differs from both.
+        let spliced = MemberPublic::from_bytes(&[&ep(1).to_bytes()[..32], &ep(2).to_bytes()[32..]].concat()).unwrap();
+        assert_ne!(spliced.id(), ep(1).id());
+        assert_ne!(spliced.id(), ep(2).id());
+        let key = RoomKey::generate(0).unwrap();
+        let wrap = wrap_room_key("71", "11", &spliced, &key).unwrap();
+        assert!(unwrap_room_key("71", 0, "11", &dk(1), &wrap).is_err());
+        assert!(unwrap_room_key("71", 0, "11", &dk(2), &wrap).is_err());
+        assert!(unwrap_room_key("71", 0, "11", &dk(1).with_kem_of(&dk(2)).unwrap(), &wrap).is_ok());
+    }
+
+    /// Known-answer vector for the combiner. The expected KEK was computed by an
+    /// independent implementation (Python, pycryptodome `cSHAKE256`, not the
+    /// `sha3` crate this code runs on) from the same inputs:
+    ///   KEK = cSHAKE256(S = KEK_LABEL, X = for each of [ss_x25519, ss_mlkem, transcript]:
+    ///                                       u64be(len) || bytes, L = 256 bits)
+    /// with ss_x25519 = 32 x 0x11, ss_mlkem = 32 x 0x22 and the transcript below
+    /// (frame, room "71", epoch 3, member "11", ephemeral 32 x 0x33, KEM
+    /// ciphertext 1088 x 0x44, X25519 key 32 x 0x55, ML-KEM key 1184 x 0x66,
+    /// each u64be-length-prefixed).
+    #[test]
+    fn the_combiner_matches_an_independent_known_answer() {
+        let recipient = MemberPublic { x25519: [0x55; 32], kem: [0x66; KEM_EK_LEN] };
+        let transcript = wrap_transcript(
+            WRAP_FRAME,
+            &[b"71", &3u32.to_be_bytes(), b"11"],
+            &[0x33; 32],
+            &[0x44; KEM_CT_LEN],
+            &recipient,
+        );
+        assert_eq!(hex(&Sha256::digest(&transcript)), KAT_TRANSCRIPT_SHA256);
+        let kek = hybrid_kek(&[0x11; 32], &[0x22; 32], &transcript);
+        assert_eq!(hex(&kek[..]), KAT_KEK);
+        // Each input is load-bearing: flipping either shared secret or any
+        // transcript byte gives a different key.
+        assert_ne!(hybrid_kek(&[0x12; 32], &[0x22; 32], &transcript)[..], kek[..]);
+        assert_ne!(hybrid_kek(&[0x11; 32], &[0x23; 32], &transcript)[..], kek[..]);
+        let mut other = transcript.clone();
+        *other.last_mut().unwrap() ^= 1;
+        assert_ne!(hybrid_kek(&[0x11; 32], &[0x22; 32], &other)[..], kek[..]);
+        // Swapping the two shared secrets is not the same key (they are not interchangeable).
+        assert_ne!(hybrid_kek(&[0x22; 32], &[0x11; 32], &transcript)[..], kek[..]);
+    }
+
+    /// Independent known answers (pure-Python FIPS 203 `kyber-py` `_keygen_internal(d, z)`
+    /// and pycryptodome `cSHAKE256`, neither of which is the code under test): the
+    /// seeded ML-KEM-768 key AWS-LC derives from a FIPS 203 seed, and the whole chain
+    /// member seed -> cSHAKE256 -> (X25519 secret, ML-KEM seed) -> encapsulation key.
+    #[test]
+    fn the_seeded_ml_kem_key_matches_an_independent_fips_203_implementation() {
+        let seed: [u8; KEM_SEED_LEN] = std::array::from_fn(|i| i as u8);
+        let (_, ek) = ml_kem_768_from_seed(&seed).unwrap();
+        assert_eq!(hex(&Sha256::digest(ek)), "0b7934c83125c788995e2ba6bd761e33046b3e40571be53e023309a29f398cc9");
+        let member = [7u8; 32];
+        assert_eq!(hex(&cshake_xof::<KEM_SEED_LEN>(KEM_SEED_LABEL, &[&member])),
+            "6dced71e0350ea6f8bc7260011db1c96f00818159ffdde14bef9829680fd16156c7d305aad5baa12d55253580e0c96d153650bd0ce23e0a8067a7699d7e3bc07");
+        assert_eq!(hex(&cshake(ENC_LABEL, &[&member])),
+            "d136b4e4fe6c9422db54a421e27dc43565fc353d91f5eeed00d11c7b1be78386");
+        assert_eq!(hex(&Sha256::digest(&dk(7).public().to_bytes()[32..])),
+            "f25326bac91dc9d641e27ade7dbc1a9a856a353e302fa600a2b9bda21abe77f4");
+    }
+
+    #[test]
+    fn ml_kem_keys_come_from_the_seed_and_round_trip_across_a_reload() {
+        let a = dk(7);
+        let b = dk(7);
+        assert_eq!(a.public(), b.public(), "same seed, same hybrid public key");
+        assert_ne!(dk(7).public(), dk(8).public());
+        assert_ne!(dk(7).public().kem[..], dk(8).public().kem[..]);
+        // The ML-KEM half is not the X25519 half under another name, and not the
+        // signing key's: independent derivations of one seed.
+        assert_ne!(dk(7).public().x25519[..], dk(7).public().kem[..32]);
+        // A key rebuilt from its keyring parts is the same identity.
+        let (x25519, kem) = a.parts();
+        let reloaded = MemberSecret::from_parts(*x25519, *kem).unwrap();
+        assert_eq!(reloaded.public(), a.public());
+        // Encapsulation to the seeded key decapsulates (checked through a wrap).
+        let key = RoomKey::generate(0).unwrap();
+        let wrap = wrap_room_key("71", "11", a.public(), &key).unwrap();
+        assert!(unwrap_room_key("71", 0, "11", &reloaded, &wrap).is_ok());
     }
 
     #[test]
     fn low_order_member_key_refused() {
         let key = RoomKey::generate(0).unwrap();
-        let zero = PublicKey::from([0u8; 32]);
+        let zero = MemberPublic::from_bytes(&[&[0u8; 32][..], &ep(1).to_bytes()[32..]].concat()).unwrap();
         assert!(wrap_room_key("71", "11", &zero, &key)
             .err()
             .unwrap()
@@ -1175,9 +1557,15 @@ mod tests {
         keyring_remember(&key, "1").unwrap();
         // rotate-key overwrites the seed; the old secret stays openable.
         fs::write(&key, [2u8; 32]).unwrap();
-        let secrets: Vec<[u8; 32]> = enc_secrets(&key).unwrap().iter()
-            .map(|s| *PublicKey::from(s).as_bytes()).collect();
-        assert_eq!(secrets, vec![*enc_public(&[2; 32]).as_bytes(), *enc_public(&[1; 32]).as_bytes()]);
+        let secrets: Vec<MemberPublic> = enc_secrets(&key).unwrap().iter()
+            .map(|s| s.public().clone()).collect();
+        assert_eq!(secrets, vec![ep(2), ep(1)]);
+        // The kept pair opens a wrap addressed to the OLD hybrid key.
+        let room_key = RoomKey::generate(0).unwrap();
+        let wrap = wrap_room_key("71", "11", &ep(1), &room_key).unwrap();
+        let kept = enc_secrets(&key).unwrap();
+        assert!(unwrap_room_key("71", 0, "11", &kept[0], &wrap).is_err());
+        assert!(unwrap_room_key("71", 0, "11", &kept[1], &wrap).is_ok());
         use std::os::unix::fs::MetadataExt;
         assert_eq!(fs::metadata(enc_ring_path(&key)).unwrap().mode() & 0o777, 0o600);
         let text = fs::read_to_string(enc_ring_path(&key)).unwrap();
@@ -1186,24 +1574,36 @@ mod tests {
     }
 
     #[test]
+    fn a_v1_encryption_keyring_refuses_by_name_and_is_not_read_as_empty() {
+        let dir = scratch("enc-ring-v1");
+        let key = dir.join("mini.key");
+        fs::write(&key, [1u8; 32]).unwrap();
+        fs::write(enc_ring_path(&key), br#"{"type":"minidregg-encryption-keyring-v1","keys":[]}"#).unwrap();
+        let error = enc_secrets(&key).err().unwrap();
+        assert!(error.contains("minidregg-encryption-keyring-v1") && error.contains("refused"), "{error}");
+        assert!(keyring_remember(&key, "1").is_err(), "remembering must not overwrite a ring it cannot read");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn enc_key_is_deterministic_from_the_seed_and_not_the_signing_key() {
         let seed = [9u8; 32];
-        assert_eq!(enc_public(&seed), enc_public(&seed));
+        assert_eq!(enc_public(&seed).unwrap(), enc_public(&seed).unwrap());
         assert_eq!(
-            derive_enc_key(&seed).to_bytes(),
-            derive_enc_key(&seed).to_bytes()
+            derive_enc_key(&seed).unwrap().x25519.to_bytes(),
+            derive_enc_key(&seed).unwrap().x25519.to_bytes()
         );
-        assert_ne!(enc_public(&seed), enc_public(&[8u8; 32]));
+        assert_ne!(enc_public(&seed).unwrap(), ep(8));
         let signing = SigningKey::from_bytes(&seed);
-        let enc = derive_enc_key(&seed).to_bytes();
+        let enc = derive_enc_key(&seed).unwrap().x25519.to_bytes();
         assert_ne!(enc, seed);
         assert_ne!(enc, signing.to_scalar_bytes());
         assert_ne!(
-            *enc_public(&seed).as_bytes(),
+            *enc_public(&seed).unwrap().x25519(),
             signing.verifying_key().to_bytes()
         );
         assert_ne!(
-            *enc_public(&seed).as_bytes(),
+            *enc_public(&seed).unwrap().x25519(),
             signing.verifying_key().to_montgomery().to_bytes()
         );
     }
@@ -1237,13 +1637,10 @@ mod tests {
         assert!(KEYGEN_NOTICE.contains("no recovery"));
         assert!(KEYGEN_NOTICE.contains("Escrow is off"));
         let seed = [5u8; 32];
-        let wrapped = escrow_seed("11", &seed, &enc_public(&[6; 32])).unwrap();
-        assert_eq!(
-            *recover_escrowed_seed("11", &derive_enc_key(&[6; 32]), &wrapped).unwrap(),
-            seed
-        );
-        assert!(recover_escrowed_seed("11", &derive_enc_key(&[7; 32]), &wrapped).is_err());
-        assert!(recover_escrowed_seed("12", &derive_enc_key(&[6; 32]), &wrapped).is_err());
+        let wrapped = escrow_seed("11", &seed, &ep(6)).unwrap();
+        assert_eq!(*recover_escrowed_seed("11", &dk(6), &wrapped).unwrap(), seed);
+        assert!(recover_escrowed_seed("11", &dk(7), &wrapped).is_err());
+        assert!(recover_escrowed_seed("12", &dk(6), &wrapped).is_err());
     }
 
     #[test]
