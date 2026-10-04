@@ -16,3 +16,5 @@ import Host.KeyRotationInspectionChecks
 import Host.ReceiptContinuityCheck
 
 import Host.ApplicationManagedPolicyAuthoringCheck
+
+import Host.ObjectiveActivityWorld  -- the kernel activity's durable scratch world (exe objective-activity-world)

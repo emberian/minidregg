@@ -1,0 +1,44 @@
+edition ObjectiveBend 1
+# A tally resident: the first activity the kernel delivers to
+# (Kernel/ObjectiveActivity). Each yield publishes the running total as the
+# object's declared state and awaits one answer slot that exactly one named
+# subject decides within `patience` heights. It is resumed with the kernel's
+# await outcome sum; a stale total (someone else wrote the object) arrives as
+# `conflict`, and the deadline as `timedOut`, which ends the tally.
+record Start:
+  total: Nat
+  decider: Nat
+record Ask:
+  decider: Nat
+record At:
+  at: Nat
+sum Source:
+  reply: Ask
+  height: At
+record Await:
+  state: Nat
+  on: Source
+  patience: Nat
+sum Plan:
+  await: Await
+record Reply:
+  amount: Nat
+record Stale:
+  stale: Nat
+sum Outcome:
+  reply: Reply
+  refused: {}
+  unknown: {}
+  timedOut: {}
+  broken: {}
+  upgraded: {}
+  conflict: Stale
+def tally(start: Start) -> Activity<Plan, Outcome, Nat>:
+  match perform(Plan.await({state: start.total, on: Source.reply({decider: start.decider}), patience: 4n})):
+    case reply(r): tally({total: start.total + r.amount, decider: start.decider})
+    case conflict(_): tally(start)
+    case unknown(_): tally(start)
+    case refused(_): start.total
+    case timedOut(_): start.total
+    case broken(_): start.total
+    case upgraded(_): start.total

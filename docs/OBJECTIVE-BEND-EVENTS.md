@@ -9,8 +9,10 @@ Bread's JavaScript host. Design record: [EVENTS-DESIGN.txt](../EVENTS-DESIGN.txt
 
 Evidence classes as in [OBJECTIVE-BEND.md](OBJECTIVE-BEND.md): *authored*,
 *compiled*, *executed*, *integrated*, *deployed*. Everything below is compiled and,
-where it says so, executed in the clear preview. **No kernel delivers responses or
-persists an activity yet** (not integrated).
+where it says so, executed in the clear preview. The kernel half, which persists an
+activity and delivers its responses, is [below](#the-kernel-activity): compiled and
+executed on a durable scratch world, **not yet on the native signed-command route**
+(not integrated).
 
 ## In the source
 
@@ -143,6 +145,75 @@ yield, prints the Plan, checks and applies the next response, and reports for ev
 turn the checkpoint size, that it round-trips (executed) and that the yield was
 quiescent.
 
+## The kernel activity
+
+[Kernel/ObjectiveActivity](../Kernel/ObjectiveActivity.lean),
+[Kernel/AnswerSlot](../Kernel/AnswerSlot.lean),
+[Kernel/ObjectiveActivityWire](../Kernel/ObjectiveActivityWire.lean) and, in
+`ObjectiveProofs`, [Kernel/ObjectiveResumeContract](../Kernel/ObjectiveResumeContract.lean).
+Design: `redregg/designs/MINI-PROGRAM-MODEL-20261004.md` §B, §D (answer slots), T1.
+
+- **The record.** An activity is a cell under its object (`recordCell object activity`)
+  holding the exact yielded machine state as checkpoint bytes (the token stream of
+  `encodeState`), their digest, the pinned package identity, the instantiating input,
+  the generation, the reads its continuation depends on, the escrowed fee pair, and its
+  phase (`awaiting await | done result | faulted reason`). An await has an id
+  `H(record cell, generation, checkpoint digest)`, a source (an answer slot with one
+  decider, or a due height; a `message` await is refused by name until inboxes exist),
+  and a mandatory deadline height (yield height + `patience`, 0 < patience ≤ the
+  kernel's maximum).
+- **Plans the kernel performs.** A yielded Plan is `await {state, on, patience}`: the
+  declared state is written to the object, `on` names the source. The response type
+  is the outcome sum `reply R | refused | unknown | timedOut | broken | upgraded |
+  conflict {stale}`; a birth is refused unless the program's response type types every
+  kernel outcome.
+- **Typing data.** The kernel never asks whether data "conforms": it types the datum's
+  closed Core4 term with the actual checker (`check`), annotating each injection with
+  the constructor the declared type gives it, and requires the checked type to agree
+  (`TypedData`). Inputs, replies and every delivered outcome go through it, so a
+  delivered response carries exactly the premise of `typed_resume_preserved`.
+- **Turns** (each is one `DataIntent`, all writes or none): `publish` (the package),
+  `birth` (instantiate, run to the first yield, commit record + state + slot + escrow),
+  `resolve` (the slot's decider, at or before the deadline, typed reply; spends the
+  slot claim), `deliver` (anyone; settles the await from its slot, due height or
+  deadline, revalidates the recorded reads, decodes the record cell's checkpoint, resumes
+  with the typed outcome, runs to the next yield or end, commits the new record, the
+  Plan's write, the next slot, the escrow and the refund together; spends the await
+  claim), `writeState` (the owner writes the object, which stales recorded reads).
+  Every delivery of one await shares one transaction id: the exact retry replays, any
+  other is a transaction conflict.
+- **Fees.** Each await escrows a pair priced from declared envelopes
+  (`price resumeTicks`, `price timeoutTicks`); the turn that ends it uses one and returns
+  the other. A submitter may add envelope and pays its declared price. Fee accounts are
+  kernel cells standing in for the resource Book.
+
+Theorems (compiled, `#assert_axioms`, no `sorry`): `resume_consumes_once` (after a
+delivery installs, no intent spending its await is ever accepted, under any schedule,
+and its exact retry replays), `second_delivery_refused`, `slot_decided_once`,
+`slot_single_decider`, `stale_reads_conflict` and `current_reads_exact`,
+`resume_binds_checkpoint`, `resume_deterministic`, `refund_measurement_free`,
+`submitter_charge_declared`; in `ObjectiveProofs`, `birth_checkpoint_typed` and
+`delivery_checkpoint_typed` (every checkpoint the kernel stores decodes to exactly its
+yielded state, typed at the program's own checked type, from `checked_initial_state`,
+`typed_stepRaw_preserved`, `typed_resume_preserved` and `state_roundTrip`).
+
+Executed: `native/resource-client/objective-activity-demo.py` drives
+[world/activity/Tally.obend](../world/activity/Tally.obend) through the
+`objective-activity-world` executable (one process per turn over a durable image,
+recovered by replay through `DurableDataIntent.execute`): a reply resumes it; the retry
+replays; a racing second delivery conflicts; a forged claim of the spent await is
+refused `alreadyConsumed` (the same forged claim on a fresh id commits); a write by the
+owner turns the next reply into `conflict {stale: 1}`; a record whose checkpoint bytes
+were altered is refused `checkpointDigest`; past the deadline the decider is refused and
+any delivery expires the slot and resumes the tally with `timedOut`, which ends it and
+returns the resume fee.
+
+Not yet: the native signed-command route (`DeclaredResourceController`, the Host's
+quotation and the client) for these turns; record, slot and account cells as protected
+coordinates of the native receivers; collection at the yield (checkpoints grow with the
+heap); upgrade dispositions (DRAIN/ABORT and the `upgraded` outcome's producer); sends,
+inboxes and `message` awaits; escrow on the resource Book.
+
 ## Compared with deos-js
 
 Bread's `deos-js` crate is a SpiderMonkey host (with a boa twin
@@ -176,8 +247,8 @@ change it, and a refusal comes back as `refused`.
 What Objective Bend cannot do yet: a view library (a View sum is expressible, but Plans
 and responses must be non-recursive data, so lists of children wait); live authoring and governed evolution;
 more than one action per yield (no multi-cell turn in one step); crawling the world
-from inside a program; snapshot and rewind; kernel delivery of responses and persisted
-activity checkpoints; a guardedness check; string operations beyond equality; the
+from inside a program; snapshot and rewind; kernel delivery on the native signed-command
+route (the kernel itself is above); a guardedness check; string operations beyond equality; the
 `before`/`after` method qualifiers (now buildable on perform); dynamic `get`.
 
 ## Checks
