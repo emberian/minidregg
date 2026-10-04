@@ -8,7 +8,6 @@ Minidregg.Selvage.FoldDistancePreserving  [12 consumers; poles: cond] proof-syst
 Minidregg.Selvage.BaseFoldPoseidon2Rom.romConstructionTarget  [7 consumers; poles: none] ROM/sponge-indifferentiability ledger seam (Selvage research); task 01a0f802-02f0
 Minidregg.Kernel.ReplicatedSettlementFinality.PrefixDiscipline  [6 consumers; poles: sat/cond] deployment refinement/discipline premise (satisfied by closed instances; refuting instance missing); task 01a0f802-02f0
 Minidregg.Kernel.DurableDataIntent.ImplementationRefinement  [6 consumers; poles: sat/cond] deployment refinement/discipline premise (satisfied by closed instances; refuting instance missing); task 01a0f802-02f0
-Minidregg.Selvage.PolishchukSpielman  [6 consumers; poles: none] research hypothesis (BCIKS L4.4); Z-PS refutes or discharges; task 01a0f802-0329
 Minidregg.Theory.CredentialAuthorityState.LineageValid  [5 consumers; poles: sat/cond] predicate over data/parameters admitted to the tier by its doc or parameter shape; a negative example is owed; task 01a0f802-02f0
 Minidregg.Theory.CellState.PairBindingPremise  [5 consumers; poles: cond] commitment binding/collision premise or event; task 01a0f802-02f0
 Minidregg.Selvage.FoldCommitScheme.MsisHardEx  [5 consumers; poles: sat/cond] proof-system soundness/proximity premise (Selvage research); task 01a0f802-02f0
