@@ -228,6 +228,16 @@ fn signed(w:&World,v:&Value)->minidregg_discord_entrance::http::Request {
 fn durable_restart_exact_binding_unknown_and_roster_revocation(){
     let w=world("restart");let cmd=command("70",FRIEND,"mini",Some("read shared"));
     let first=deferred_then_patch(&w,"70",post(&w,&cmd,false));
+    // The fake answers the PATCH before the worker records delivery and drops its
+    // custody lease; a restart that races it sees the record held. Wait for the
+    // lease itself (the worker is gone), then require what it left: delivery confirmed.
+    let custody=w.sessions.join(".discord-custody");let t0=std::time::Instant::now();
+    loop{
+        if mini_sdk::store::Record::lock(&custody,"4242-70").unwrap().is_some(){break}
+        assert!(t0.elapsed()<Duration::from_secs(20),"worker never released its custody lease");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(serde_json::from_slice::<Value>(&std::fs::read(custody.join("4242-70.json")).unwrap()).unwrap()["delivery"],"confirmed");
     let restarted=App::new(w.cfg.clone()).unwrap();
     let (resp,job)=restarted.handle(&signed(&w,&cmd),now_s());assert!(job.is_none());assert_eq!(content(&String::from_utf8(resp.body).unwrap()),first);
     let (resp,job)=restarted.handle(&signed(&w,&command("70",FRIEND,"mini",Some("submit foreign"))),now_s());assert_eq!(resp.status,409);assert!(job.is_none());
