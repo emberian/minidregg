@@ -19,8 +19,9 @@ the receiver that admitted it (`ObjectiveActivityReceiver`: the signed marker,
 the authority guards, the replay event), so its writes commit all together or
 not at all (`DurableDataIntent.execute_no_partial_data_commit`):
 
-* `publish`: an activity artifact AND the source package it names into the
-  artifact's content-addressed package cell, only after the kernel re-ran the Lean
+* `publish`: an activity artifact AND the source package it names (and the
+  payer funding the cell's retention, a registered Book account read under a
+  guard of the Book cell) into the artifact's content-addressed package cell, only after the kernel re-ran the Lean
   front end on the package and the artifact's typed core is that replay's
   rendering (`ObjectiveBendPublication.Replayed`). Every later turn reloads the
   pair and replays again (`loadProgram`): the term an activity runs is the front
@@ -249,16 +250,18 @@ def stateCell (domain : Digest) (object : CellId) : CellId :=
 
 def packageKey (pin : Digest) : Bytes := digestStream.encode pin
 
-/-- What a package cell holds: the activity artifact's bytes and the bytes of the
-source package the artifact names. -/
+/-- What a package cell holds: the activity artifact's bytes, the bytes of the source
+package the artifact names, and the payer: the Book account that funds the cell's
+retention (never authority over it). -/
 structure Stored where
   artifact : Bytes
   package : Bytes
+  payer : AccountId
   deriving DecidableEq, Repr
 
 def storedStream : StreamCodec Stored :=
-  StreamCodec.xmap (StreamCodec.product bytesStream bytesStream)
-    (fun p => (p.artifact, p.package)) (fun w => ⟨w.1, w.2⟩) (by intro p; cases p; rfl)
+  StreamCodec.xmap (StreamCodec.product bytesStream (StreamCodec.product bytesStream StreamCodec.nat))
+    (fun p => (p.artifact, p.package, p.payer)) (fun w => ⟨w.1, w.2.1, w.2.2⟩) (by intro p; cases p; rfl)
 
 def storedFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-PACKAGE/v1".toUTF8.toList
 def storedCodec := framed storedFrame storedStream
@@ -1109,6 +1112,14 @@ structure Publication {rootBytes : Bytes → Digest} (config : Config) (snapshot
   pin : Digest
   /-- The front end's replay of the stored package, which produced the artifact's core. -/
   replay : Replay config pin
+  /-- The payer is a registered account of the loaded Book, and neither the credit asset's
+  issuer well nor the collector. -/
+  book : BookCell
+  bookExact : loadBook config snapshot = .ok book
+  payerRegistered : stored.payer ∈ (logicalBook book.logical).accounts
+  /-- The Book cell the payer was read from, guarded at the root it was read at. -/
+  guards : List ReadGuard
+  guardsExact : guards = [guardAt snapshot config.bookCell]
   posts : List Post
   postsExact : posts = [postAt snapshot (packageCell config.domain pin) (image .package (packageKey pin) (encodeStored stored))]
 
@@ -1118,16 +1129,22 @@ def publish {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   if artifact.outputCodec ≠ codecId then throw (.packageType "not an activity artifact")
   let pin := ObjectiveBendSourceArtifact.identity artifact
   if (payloadOf (snapshot.canonicalBytes (packageCell config.domain pin))).isSome then throw .packageExists
-  let definition ← replayPackage config stored pin
-  match callable definition.replayed.accepted.typed.type with
-  | .arrow _ _ _ (.computation _ _ _) => pure ()
-  | _ => throw (.packageType "an activity package selects a definition `Input -> Activity<P,R,A>`")
-  pure ⟨pin, definition, _, rfl⟩
+  if stored.payer = config.asset ∨ stored.payer = config.collector then throw .payerInvalid
+  match bookExact : loadBook config snapshot with
+  | .error reason => throw reason
+  | .ok book =>
+    if payerRegistered : stored.payer ∈ (logicalBook book.logical).accounts then
+      let definition ← replayPackage config stored pin
+      match callable definition.replayed.accepted.typed.type with
+      | .arrow _ _ _ (.computation _ _ _) => pure ()
+      | _ => throw (.packageType "an activity package selects a definition `Input -> Activity<P,R,A>`")
+      pure ⟨pin, definition, book, bookExact, payerRegistered, _, rfl, _, rfl⟩
+    else throw .payerInvalid
 
 def Publication.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {stored : Stored} (publication : Publication config snapshot stored) (sealing : Seal) :
     DataIntent rootBytes :=
-  intentOf rootBytes (publishTransaction publication.pin) publication.posts [] [] sealing
+  intentOf rootBytes (publishTransaction publication.pin) publication.posts publication.guards [] sealing
 
 /-! ### birth -/
 

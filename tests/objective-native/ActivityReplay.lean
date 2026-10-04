@@ -50,7 +50,7 @@ def main (args : List String) : IO UInt32 := do
       Compiler.ObjectiveBendSourceArtifact.Artifact :=
     ⟨Compiler.ObjectiveSourcePackage.identity p, declaration, core, Kernel.ObjectiveBendNativeInput.codecId, codecId⟩
   let pairOf (p : Compiler.ObjectiveSourcePackage.Package) (a : Compiler.ObjectiveBendSourceArtifact.Artifact) : Stored :=
-    ⟨Compiler.ObjectiveBendSourceArtifact.encode a, Compiler.ObjectiveSourcePackage.encode p⟩
+    ⟨Compiler.ObjectiveBendSourceArtifact.encode a, Compiler.ObjectiveSourcePackage.encode p, 9⟩
   let refuses (label kind : String) (stored : Stored) (a : Compiler.ObjectiveBendSourceArtifact.Artifact) :
       IO (Option String) := do
     match replayPackage config stored (Compiler.ObjectiveBendSourceArtifact.identity a) with
@@ -78,7 +78,7 @@ def main (args : List String) : IO UInt32 := do
   if let some why ← refuses "foreign front end" "packageSource" (pairOf foreignPackage foreignPinned) foreignPinned then
     return ← fail why
   -- 4. no package
-  if let some why ← refuses "no package" "packageSource" ⟨Compiler.ObjectiveBendSourceArtifact.encode honest, []⟩ honest then
+  if let some why ← refuses "no package" "packageSource" ⟨Compiler.ObjectiveBendSourceArtifact.encode honest, [], 9⟩ honest then
     return ← fail why
   -- 5. another source under the honest artifact
   let moved := { package with modules := [⟨"Activity", bytes.toList ++ "# one more comment line\n".toUTF8.toList, []⟩] }
