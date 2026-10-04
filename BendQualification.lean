@@ -8,4 +8,3 @@ import Assurance.BendObliviousSourceJoin
 import Assurance.BendArithmeticQualification
 import Compiler.BendNaturalRefinement
 import Compiler.BendNaturalArtifact
-import Kernel.ObjectiveBendCallContext

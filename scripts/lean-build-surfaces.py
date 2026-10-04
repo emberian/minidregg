@@ -21,7 +21,6 @@ GROUPS = {
         "Assurance.BendArithmeticQualification",
         "Compiler.BendNaturalRefinement",
         "Compiler.BendNaturalArtifact",
-        "Kernel.ObjectiveBendCallContext",
     ],
     "SimplexQualification": [
         "Kernel.GeneralSimplexReachability",

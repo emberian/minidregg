@@ -55,7 +55,7 @@ that can find the versioned one) for the Store helper.
 | what | pinned by | fetched from |
 | --- | --- | --- |
 | Lean toolchain | `lean-toolchain` | elan's release server (first use) |
-| Lean packages (mathlib and its dependencies, `uwueave`) | `lake-manifest.json` revisions | their git URLs in `lake-manifest.json` |
+| Lean packages (mathlib and its dependencies) | `lake-manifest.json` revisions | their git URLs in `lake-manifest.json` |
 | mathlib `.olean` + generated C for that revision | the mathlib revision | the mathlib artifact cache (`lake exe cache get`), stored in `OUT/work/mathlib-cache` |
 | Rust toolchain | `rust-toolchain.toml` | rustup's dist server (`--no-self-update`) |
 | Rust crates | each crate's `Cargo.lock` (`--locked`) | crates.io, cached in `$CARGO_HOME` |
