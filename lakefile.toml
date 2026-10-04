@@ -133,3 +133,14 @@ name = "ObjectiveProofs"
 # Source-first research is an explicit opt-in build.
 [[lean_lib]]
 name = "ResearchWip"
+
+# Reopen of 100 000-entry agreement journals in constant stack (compiled; run the binary).
+[[lean_exe]]
+name = "generic-simplex-log-reopen"
+root = "Verify.GenericSimplexLogReopen"
+
+# The four-source agreement fixture: init, serve-replica (one standing replica
+# process), await-call, run, lookup-all-call, convert-journal.
+[[lean_exe]]
+name = "minidregg-four-source-fixture"
+root = "Verify.NativeJointSourceFixture"

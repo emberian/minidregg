@@ -271,6 +271,25 @@ def decodeBytesPrefix (count : Nat) (bytes : List UInt8) :
     Option (List UInt8 × List UInt8) :=
   if count ≤ bytes.length then some (bytes.splitAt count) else none
 
+/-- Executable `decodeBytesPrefix`: split first, then check the prefix came out
+whole. The definition measures `bytes.length`, the WHOLE remaining stream, once
+per length-prefixed field, so decoding a stream of `k` frames walked the stream
+`k` times (an append-only agreement journal of 100 000 frames never finished
+reopening). This costs `count` steps, independent of what follows. -/
+def decodeBytesPrefixTR (count : Nat) (bytes : List UInt8) :
+    Option (List UInt8 × List UInt8) :=
+  let split := bytes.splitAt count
+  if split.1.length = count then some split else none
+
+@[csimp] theorem decodeBytesPrefix_eq_decodeBytesPrefixTR :
+    @decodeBytesPrefix = @decodeBytesPrefixTR := by
+  funext count bytes
+  simp only [decodeBytesPrefix, decodeBytesPrefixTR, List.splitAt_eq, List.length_take]
+  by_cases fits : count ≤ bytes.length
+  · simp [fits]
+  · have short : min count bytes.length ≠ count := by omega
+    simp [fits, short]
+
 theorem decodeMany_byte (count : Nat) (bytes : List UInt8) :
     StreamCodec.decodeMany StreamCodec.byte count bytes =
       decodeBytesPrefix count bytes := by

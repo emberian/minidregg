@@ -106,6 +106,59 @@ def decodeDeltas : Nat → Bytes → Option (List Delta)
       let ds ← decodeDeltas fuel rest
       some (d :: ds)
 
+/-! A standing replica appends one frame per acknowledged input, so the frame
+count of a journal is unbounded. The definitions above are the specification
+the proofs use; the compiled code runs the loops below (`@[csimp]`), whose
+stack use does not grow with the number of frames. -/
+
+/-- Executable `encodeDeltas`: core's tail-recursive `flatMap`. -/
+def encodeDeltasTR (ds : List Delta) : Bytes := ds.flatMap deltaFrame
+
+@[csimp] theorem encodeDeltas_eq_encodeDeltasTR : @encodeDeltas = @encodeDeltasTR := by
+  funext ds
+  induction ds with
+  | nil => rfl
+  | cons d ds ih => simp [encodeDeltas, encodeDeltasTR, ih]
+
+/-- Executable `decodeDeltas`: one loop step per frame, decoded frames
+accumulated newest-first. -/
+def decodeDeltasLoop : Nat → Bytes → List Delta → Option (List Delta)
+  | 0, bytes, acc => if bytes.isEmpty then some acc.reverse else none
+  | fuel + 1, bytes, acc =>
+    if bytes.isEmpty then some acc.reverse else
+    match bytesStream.decodePrefix bytes with
+    | none => none
+    | some (payload,rest) =>
+      match deltaStream.toLawful.decode payload with
+      | none => none
+      | some d => decodeDeltasLoop fuel rest (d :: acc)
+
+def decodeDeltasTR (fuel : Nat) (bytes : Bytes) : Option (List Delta) :=
+  decodeDeltasLoop fuel bytes []
+
+theorem decodeDeltasLoop_eq (fuel : Nat) (bytes : Bytes) (acc : List Delta) :
+    decodeDeltasLoop fuel bytes acc = (decodeDeltas fuel bytes).map (acc.reverse ++ ·) := by
+  induction fuel generalizing bytes acc with
+  | zero =>
+    by_cases empty : bytes.isEmpty <;> simp [decodeDeltasLoop, decodeDeltas, empty]
+  | succ fuel ih =>
+    by_cases empty : bytes.isEmpty
+    · simp [decodeDeltasLoop, decodeDeltas, empty]
+    · cases framed : bytesStream.decodePrefix bytes with
+      | none => simp [decodeDeltasLoop, decodeDeltas, empty, framed]
+      | some split =>
+        obtain ⟨payload,rest⟩ := split
+        cases decoded : deltaStream.toLawful.decode payload with
+        | none => simp [decodeDeltasLoop, decodeDeltas, empty, framed, decoded]
+        | some d =>
+          simp only [decodeDeltasLoop, decodeDeltas, empty, framed, decoded, ih,
+            Bool.false_eq_true, ↓reduceIte]
+          cases rested : decodeDeltas fuel rest <;> simp [decoded, rested]
+
+@[csimp] theorem decodeDeltas_eq_decodeDeltasTR : @decodeDeltas = @decodeDeltasTR := by
+  funext fuel bytes
+  simp [decodeDeltasTR, decodeDeltasLoop_eq]
+
 def decodeLog (bytes : Bytes) : Option Log := do
   if bytes.take logMagic.length != logMagic then none
   let (payload,rest) ← bytesStream.decodePrefix (bytes.drop logMagic.length)
@@ -129,6 +182,23 @@ def restoreLog (expected : Context) (bytes : Bytes) : Option (Log × State) := d
   if l.encode != bytes then none
   let s ← replayLog expected l
   some (l,s)
+
+/-- A restored log re-encodes to exactly the physical image it was read from:
+`restoreLog` itself compares them, by the tail-recursive `List.beq`. -/
+theorem restoreLog_encode_eq {expected : Context} {bytes : Bytes} {l : Log} {s : State}
+    (h : restoreLog expected bytes = some (l,s)) : l.encode = bytes := by
+  unfold restoreLog at h
+  cases decoded : decodeLog bytes with
+  | none => simp [decoded] at h
+  | some l' =>
+    by_cases same : l'.encode = bytes
+    · cases replayed : replayLog expected l' with
+      | none => simp [decoded, same, replayed] at h
+      | some s' =>
+        simp [decoded, same, replayed] at h
+        rw [← h.1]
+        exact same
+    · simp [decoded, same] at h
 
 theorem bytesStream_encode_ne_nil (payload : Bytes) : bytesStream.encode payload ≠ [] := by
   simp [bytesStream, StreamCodec.nat, StreamCodec.encodeNat]
@@ -252,13 +322,14 @@ structure Restored (context : Context) where
 
 def Restored.self {context : Context} (r : Restored context) : Nat := r.log.base.self
 
+/-- Reopen a physical image. `restoreLog` already compared the re-encoding with
+the image (`restoreLog_encode_eq`); no second encode or comparison runs here. -/
 def openRestored (context : Context) (bytes : Bytes) : Option (Restored context) :=
   match h : restoreLog context bytes with
   | none => none
   | some (l,s) =>
-    if same : l.encode = bytes then
-      some ⟨l,s,bytes.length,l.merged.commitWitnesses,same ▸ h,by rw [same],rfl⟩
-    else none
+    have same : l.encode = bytes := restoreLog_encode_eq h
+    some ⟨l,s,bytes.length,l.merged.commitWitnesses,same ▸ h,by rw [same],rfl⟩
 
 /-- Execute only the appended inputs; the result carries the whole-replay
 equation for the extended physical image. Returns the exact frame to append. -/
@@ -281,30 +352,53 @@ theorem appendRestored_exact {context : Context} (next : Restored context) :
 
 #assert_axioms decodeLog_encode
 #assert_axioms restoreLog_push
+#assert_axioms restoreLog_encode_eq
+#assert_axioms encodeDeltas_eq_encodeDeltasTR
+#assert_axioms decodeDeltas_eq_decodeDeltasTR
 #assert_axioms appendRestored_exact
+
+/-- A base-255 length prefix (`StreamCodec.nat`'s digits then byte 255): its
+value, the number of bytes it occupies, and the remainder. One loop step per
+digit. -/
+def natPrefixCounted (bytes : Bytes) : Option (Nat × Nat × Bytes) :=
+  go bytes 0 1 0
+where
+  go : Bytes → Nat → Nat → Nat → Option (Nat × Nat × Bytes)
+  | [], _, _, _ => none
+  | byte :: rest, value, scale, digits =>
+    if byte = 255 then some (value, digits + 1, rest)
+    else go rest (value + byte.toNat * scale) (scale * 255) (digits + 1)
+
+/-- Classify the delta frames after the base frame. `valid` is the byte length
+of the complete frames so far; it grows by each frame's size, never by
+re-measuring the remainder. -/
+def scanFrames : Nat → Bytes → Nat → Option Nat
+  | 0, rest, valid => if rest.isEmpty then some valid else none
+  | fuel + 1, rest, valid =>
+    if rest.isEmpty then some valid else
+    match natPrefixCounted rest with
+    | none =>
+      -- Torn: the length digits never terminate. A 255 inside them is corruption.
+      if rest.contains 255 then none else some valid
+    | some (count,digits,afterCount) =>
+      let (payload,next) := afterCount.splitAt count
+      -- Torn: fewer payload bytes than declared.
+      if payload.length < count then some valid
+      else if (deltaStream.toLawful.decode payload).isNone then none
+      else scanFrames fuel next (valid + digits + count)
 
 /-- A reader's classification of a physical image: the longest prefix of
 complete frames, and whether the remainder is an unacknowledged torn frame.
-A complete but undecodable frame is corruption and is never truncated. -/
-def scanLog (bytes : Bytes) : Option Nat := Id.run do
-  if bytes.take logMagic.length != logMagic then return none
-  let afterMagic := bytes.drop logMagic.length
-  let some (_,afterBase) := bytesStream.decodePrefix afterMagic | return none
-  let mut rest := afterBase
-  let mut valid := bytes.length - rest.length
-  for _ in List.range (rest.length + 1) do
-    if rest.isEmpty then return some valid
-    match bytesStream.decodePrefix rest with
-    | some (payload,next) =>
-      if (deltaStream.toLawful.decode payload).isNone then return none
-      rest := next
-      valid := bytes.length - rest.length
-    | none =>
-      -- Torn: the length digits never terminate, or fewer bytes than declared.
-      match StreamCodec.nat.decodePrefix rest with
-      | none => return (if rest.contains 255 then none else some valid)
-      | some (count,payload) => return (if payload.length < count then some valid else none)
-  return none
+A complete but undecodable frame is corruption and is never truncated. Linear
+in the image: each frame is visited once. -/
+def scanLog (bytes : Bytes) : Option Nat :=
+  if bytes.take logMagic.length != logMagic then none else
+  match bytesStream.decodePrefix (bytes.drop logMagic.length) with
+  | none => none
+  | some (_,afterBase) =>
+    let total := bytes.length
+    let rest := afterBase.length
+    scanFrames (rest + 1) afterBase (total - rest)
 
 structure Crypto where
   /-- Concrete ML-DSA-65 implementation, context MiniJointAgreementV1. -/
