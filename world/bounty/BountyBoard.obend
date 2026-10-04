@@ -1,0 +1,339 @@
+edition ObjectiveBend 1
+# A bounty board: a poster escrows a reward for a piece of work; the first
+# claimer takes it; the claimant submits; the poster approves (the reward goes to
+# the claimant) or rejects (the claim is released and the bounty reopens). An
+# unclaimed or unsubmitted bounty refunds the poster at its deadline. A
+# submission the poster leaves undecided for `review` heights is PAID: silence
+# accepts, so a poster cannot keep the work and the reward by not answering.
+#
+# Port of Bread's starbridge-apps/bounty-board (open -> claimed -> submitted ->
+# paid, first claimer wins, reward write-once), with the one thing Bread could
+# not express: there, "the reward is a PROMISE, not an escrow" (the bounty cell's
+# own program forbade it from holding value, lib.rs "A PAYOUT MOVES VALUE"), so
+# a poster could post, take the work and never pay. Here the reward is escrowed
+# when the bounty is posted and leaves escrow exactly once, whole, to exactly one
+# party (`disbursed`, `escrowConserved`): the claimant on approval or silence,
+# the poster on cancel or expiry.
+#
+# Layers, as in ResidentServiceCommons: (1) pure transitions over a sum-typed
+# State; (2) the same lifecycle as an Activity that yields one Plan per step and
+# is resumed with a typed Response. The Plans are proposals: the escrow and the
+# disbursement are lowered by the kernel's seat (offer safety: the poster gives
+# the reward and wants either the approved work or the reward back; exit at the
+# deadline) and the activity's answer slots, never by this program. Preview
+# evidence only: no native receipt exists for this package yet.
+import ./NatOrder.obend as Order
+
+record Posted:
+  poster: Nat
+  title: String
+  reward: Nat
+  deadline: Nat
+  review: Nat
+
+record Taken:
+  posted: Posted
+  claimant: Nat
+
+record Delivered:
+  taken: Taken
+  work: String
+  submittedAt: Nat
+
+sum State:
+  open: Posted
+  claimed: Taken
+  submitted: Delivered
+  paid: Delivered
+  refunded: Posted
+
+record Payout:
+  to: Nat
+  amount: Nat
+
+record Claim:
+  claimant: Nat
+  now: Nat
+
+record Submit:
+  claimant: Nat
+  work: String
+  now: Nat
+
+record Act:
+  actor: Nat
+  now: Nat
+
+record Tick:
+  now: Nat
+
+sum Event:
+  claim: Claim
+  submit: Submit
+  approve: Act
+  reject: Act
+  cancel: Act
+  expire: Tick
+
+record Move:
+  next: State
+  payout: Payout
+
+sum Transition:
+  refused: State
+  moved: State
+  disbursed: Move
+
+# ---- (1) the pure lifecycle -------------------------------------------------
+
+def postedOf(s: State) -> Posted:
+  match s:
+    case open(p): p
+    case claimed(t): t.posted
+    case submitted(d): d.taken.posted
+    case paid(d): d.taken.posted
+    case refunded(p): p
+
+def phaseOf(s: State) -> String:
+  match s:
+    case open(_): "open"
+    case claimed(_): "claimed"
+    case submitted(_): "submitted"
+    case paid(_): "paid"
+    case refunded(_): "refunded"
+
+def isTerminal(s: State) -> Bool:
+  match s:
+    case open(_): false
+    case claimed(_): false
+    case submitted(_): false
+    case paid(_): true
+    case refunded(_): true
+
+# Before the deadline (strictly): claims, submissions and cancels.
+def live(p: Posted, now: Nat) -> Bool:
+  Order.less(now, p.deadline)
+
+# A submission is decided by the poster within `review` heights of arriving.
+def reviewEnds(d: Delivered) -> Nat:
+  d.submittedAt + d.taken.posted.review
+
+def post(poster: Nat, title: String, reward: Nat, deadline: Nat, review: Nat) -> State:
+  State.open({poster: poster, title: title, reward: reward, deadline: deadline, review: review})
+
+def claimOn(s: State, c: Claim) -> Transition:
+  match s:
+    case open(p):
+      if live(p, c.now) && Order.not(c.claimant == p.poster) then Transition.moved(State.claimed({posted: p, claimant: c.claimant})) else Transition.refused(s)
+    case claimed(_): Transition.refused(s)
+    case submitted(_): Transition.refused(s)
+    case paid(_): Transition.refused(s)
+    case refunded(_): Transition.refused(s)
+
+def submitOn(s: State, m: Submit) -> Transition:
+  match s:
+    case claimed(t):
+      if live(t.posted, m.now) && m.claimant == t.claimant then Transition.moved(State.submitted({taken: t, work: m.work, submittedAt: m.now})) else Transition.refused(s)
+    case open(_): Transition.refused(s)
+    case submitted(_): Transition.refused(s)
+    case paid(_): Transition.refused(s)
+    case refunded(_): Transition.refused(s)
+
+def payClaimant(d: Delivered) -> Transition:
+  Transition.disbursed({next: State.paid(d), payout: {to: d.taken.claimant, amount: d.taken.posted.reward}})
+
+def refundPoster(p: Posted) -> Transition:
+  Transition.disbursed({next: State.refunded(p), payout: {to: p.poster, amount: p.reward}})
+
+def approveOn(s: State, a: Act) -> Transition:
+  match s:
+    case submitted(d):
+      if a.actor == d.taken.posted.poster && Order.lessOrEqual(a.now, reviewEnds(d)) then payClaimant(d) else Transition.refused(s)
+    case open(_): Transition.refused(s)
+    case claimed(_): Transition.refused(s)
+    case paid(_): Transition.refused(s)
+    case refunded(_): Transition.refused(s)
+
+# A rejection releases the claim and reopens the bounty while it is live; the
+# rejected claimant keeps nothing and may claim again like anyone else.
+def rejectOn(s: State, a: Act) -> Transition:
+  match s:
+    case submitted(d):
+      if a.actor == d.taken.posted.poster && Order.lessOrEqual(a.now, reviewEnds(d)) && live(d.taken.posted, a.now) then Transition.moved(State.open(d.taken.posted)) else Transition.refused(s)
+    case open(_): Transition.refused(s)
+    case claimed(_): Transition.refused(s)
+    case paid(_): Transition.refused(s)
+    case refunded(_): Transition.refused(s)
+
+# Only an unclaimed bounty can be withdrawn: once someone has committed to the
+# work, the poster can no longer pull the reward out from under them.
+def cancelOn(s: State, a: Act) -> Transition:
+  match s:
+    case open(p):
+      if a.actor == p.poster then refundPoster(p) else Transition.refused(s)
+    case claimed(_): Transition.refused(s)
+    case submitted(_): Transition.refused(s)
+    case paid(_): Transition.refused(s)
+    case refunded(_): Transition.refused(s)
+
+# Anyone may end an overdue bounty: unclaimed or unsubmitted at the deadline
+# refunds the poster; a submission past its review window pays the claimant.
+def expireOn(s: State, k: Tick) -> Transition:
+  match s:
+    case open(p):
+      if live(p, k.now) then Transition.refused(s) else refundPoster(p)
+    case claimed(t):
+      if live(t.posted, k.now) then Transition.refused(s) else refundPoster(t.posted)
+    case submitted(d):
+      if Order.less(reviewEnds(d), k.now) then payClaimant(d) else Transition.refused(s)
+    case paid(_): Transition.refused(s)
+    case refunded(_): Transition.refused(s)
+
+def react(s: State, e: Event) -> Transition:
+  match e:
+    case claim(c): claimOn(s, c)
+    case submit(m): submitOn(s, m)
+    case approve(a): approveOn(s, a)
+    case reject(a): rejectOn(s, a)
+    case cancel(a): cancelOn(s, a)
+    case expire(k): expireOn(s, k)
+
+def stateOf(t: Transition) -> State:
+  match t:
+    case refused(s): s
+    case moved(s): s
+    case disbursed(m): m.next
+
+def wasRefused(t: Transition) -> Bool:
+  match t:
+    case refused(_): true
+    case moved(_): false
+    case disbursed(_): false
+
+# The escrow law, read from a state: what escrow still holds, and what it has
+# paid out. Every reachable state holds the whole reward or has paid it whole,
+# once, to exactly one party.
+def escrowHeld(s: State) -> Nat:
+  if isTerminal(s) then 0n else postedOf(s).reward
+
+def escrowConserved(t: Transition, before: State) -> Bool:
+  match t:
+    case refused(s): escrowHeld(s) == escrowHeld(before)
+    case moved(s): escrowHeld(s) == escrowHeld(before) && Order.not(isTerminal(s))
+    case disbursed(m): escrowHeld(m.next) == 0n && m.payout.amount == escrowHeld(before) && isTerminal(m.next)
+
+# ---- (2) the lifecycle as an Activity ----------------------------------------
+
+record Waiting:
+  phase: String
+  deadline: Nat
+
+sum Plan:
+  await: Waiting
+  disburse: Payout
+
+sum Response:
+  event: Event
+  settled: {}
+  refused: {}
+
+def waitingOf(s: State) -> Waiting:
+  match s:
+    case submitted(d): {phase: phaseOf(s), deadline: reviewEnds(d)}
+    case open(p): {phase: phaseOf(s), deadline: p.deadline}
+    case claimed(t): {phase: phaseOf(s), deadline: t.posted.deadline}
+    case paid(_): {phase: phaseOf(s), deadline: 0n}
+    case refunded(_): {phase: phaseOf(s), deadline: 0n}
+
+# The result is the terminal phase ("paid" or "refunded"). Every unfolding of
+# `serve` past a yield costs one admitted turn.
+def serve(s: State) -> Activity<Plan, Response, String>:
+  match perform(Plan.await(waitingOf(s))):
+    case event(e): step(s, react(s, e))
+    case settled(_): serve(s)
+    case refused(_): serve(s)
+
+def step(s: State, t: Transition) -> Activity<Plan, Response, String>:
+  match t:
+    case refused(unchanged): serve(unchanged)
+    case moved(next): serve(next)
+    case disbursed(m): disburse(s, m)
+
+# The disbursement is the last Plan: the kernel moves the escrow (whole) or
+# refuses, and a refused disbursement leaves the bounty where it was.
+def disburse(s: State, m: Move) -> Activity<Plan, Response, String>:
+  match perform(Plan.disburse(m.payout)):
+    case settled(_): phaseOf(m.next)
+    case refused(_): serve(s)
+    case event(_): serve(s)
+
+def bounty(p: Posted) -> Activity<Plan, Response, String>:
+  serve(State.open(p))
+
+# ---- the named scenario ------------------------------------------------------
+# Poster 1 escrows 50 for "translate the README", deadline height 100, review
+# window 20 heights. Claimant 7 is the first claimer; claimant 9 is too late.
+
+def demo() -> Posted:
+  {poster: 1n, title: "translate the README", reward: 50n, deadline: 100n, review: 20n}
+
+
+def demoOpen() -> State:
+  State.open(demo())
+
+def demoClaimed() -> State:
+  stateOf(react(demoOpen(), Event.claim({claimant: 7n, now: 10n})))
+
+def demoSubmitted() -> State:
+  stateOf(react(demoClaimed(), Event.submit({claimant: 7n, work: "doc-hash-1", now: 40n})))
+
+def firstClaimerWins() -> Bool:
+  let late = react(demoClaimed(), Event.claim({claimant: 9n, now: 11n}))
+  wasRefused(late) && phaseOf(stateOf(late)) == "claimed"
+
+def posterCannotClaim() -> Bool:
+  wasRefused(react(demoOpen(), Event.claim({claimant: 1n, now: 10n})))
+
+def strangerCannotSubmit() -> Bool:
+  wasRefused(react(demoClaimed(), Event.submit({claimant: 9n, work: "doc-hash-9", now: 40n})))
+
+def cancelOnlyWhileUnclaimed() -> Bool:
+  Order.not(wasRefused(react(demoOpen(), Event.cancel({actor: 1n, now: 5n})))) && wasRefused(react(demoClaimed(), Event.cancel({actor: 1n, now: 11n}))) && wasRefused(react(demoOpen(), Event.cancel({actor: 9n, now: 5n})))
+
+def onlyPosterApproves() -> Bool:
+  wasRefused(react(demoSubmitted(), Event.approve({actor: 7n, now: 41n}))) && Order.not(wasRefused(react(demoSubmitted(), Event.approve({actor: 1n, now: 41n}))))
+
+def earlyExpiryRefused() -> Bool:
+  wasRefused(react(demoOpen(), Event.expire({now: 99n}))) && Order.not(wasRefused(react(demoOpen(), Event.expire({now: 100n}))))
+
+# A submission pending past its review window pays the claimant; within it, no.
+def silencePays() -> Bool:
+  wasRefused(react(demoSubmitted(), Event.expire({now: 60n}))) && phaseOf(stateOf(react(demoSubmitted(), Event.expire({now: 61n})))) == "paid"
+
+def approvedPayout() -> Nat:
+  match react(demoSubmitted(), Event.approve({actor: 1n, now: 41n})):
+    case disbursed(m): m.payout.amount
+    case refused(_): 0n
+    case moved(_): 0n
+
+def approvedPayee() -> Nat:
+  match react(demoSubmitted(), Event.approve({actor: 1n, now: 41n})):
+    case disbursed(m): m.payout.to
+    case refused(_): 0n
+    case moved(_): 0n
+
+def expiredClaimRefundsPoster() -> Nat:
+  match react(demoClaimed(), Event.expire({now: 100n})):
+    case disbursed(m): m.payout.to
+    case refused(_): 0n
+    case moved(_): 0n
+
+def rejectReopens() -> Bool:
+  phaseOf(stateOf(react(demoSubmitted(), Event.reject({actor: 1n, now: 45n})))) == "open"
+
+# The escrow law over every event the scenario can meet, from every state.
+def conservedFrom(s: State) -> Bool:
+  escrowConserved(react(s, Event.claim({claimant: 9n, now: 11n})), s) && escrowConserved(react(s, Event.submit({claimant: 7n, work: "w", now: 40n})), s) && escrowConserved(react(s, Event.approve({actor: 1n, now: 41n})), s) && escrowConserved(react(s, Event.reject({actor: 1n, now: 45n})), s) && escrowConserved(react(s, Event.cancel({actor: 1n, now: 5n})), s) && escrowConserved(react(s, Event.expire({now: 200n})), s)
+
+def escrowLawHolds() -> Bool:
+  conservedFrom(demoOpen()) && conservedFrom(demoClaimed()) && conservedFrom(demoSubmitted()) && conservedFrom(State.paid({taken: {posted: demo(), claimant: 7n}, work: "w", submittedAt: 40n})) && conservedFrom(State.refunded(demo()))

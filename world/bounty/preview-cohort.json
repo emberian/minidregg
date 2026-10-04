@@ -1,0 +1,1643 @@
+[
+ {
+  "name": "BountyFirstClaimerWins",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "BountyBoard",
+    "source": "BountyBoard.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "firstClaimerWins",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BountyPosterCannotClaim",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "BountyBoard",
+    "source": "BountyBoard.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "posterCannotClaim",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BountyStrangerCannotSubmit",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "BountyBoard",
+    "source": "BountyBoard.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "strangerCannotSubmit",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BountyCancelOnlyWhileUnclaimed",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "BountyBoard",
+    "source": "BountyBoard.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "cancelOnlyWhileUnclaimed",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BountyOnlyPosterApproves",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "BountyBoard",
+    "source": "BountyBoard.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "onlyPosterApproves",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BountyEarlyExpiryRefused",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "BountyBoard",
+    "source": "BountyBoard.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "earlyExpiryRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BountySilencePays",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "BountyBoard",
+    "source": "BountyBoard.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "silencePays",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BountyRejectReopens",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "BountyBoard",
+    "source": "BountyBoard.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "rejectReopens",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BountyEscrowLawHolds",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "BountyBoard",
+    "source": "BountyBoard.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "escrowLawHolds",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BountyApprovedPayout",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "BountyBoard",
+    "source": "BountyBoard.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "approvedPayout",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "50"
+ },
+ {
+  "name": "BountyApprovedPayee",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "BountyBoard",
+    "source": "BountyBoard.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "approvedPayee",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "7"
+ },
+ {
+  "name": "BountyExpiredClaimRefundsPoster",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "BountyBoard",
+    "source": "BountyBoard.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "expiredClaimRefundsPoster",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "1"
+ },
+ {
+  "name": "BountyActivityApprovedPays",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "BountyBoard",
+    "source": "BountyBoard.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "bounty",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "poster",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "title",
+      "value": {
+       "tag": "label",
+       "value": "translate the README"
+      }
+     },
+     {
+      "name": "reward",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "deadline",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "review",
+      "value": {
+       "tag": "natural",
+       "value": "20"
+      }
+     }
+    ]
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "claim",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "claimant",
+        "value": {
+         "tag": "natural",
+         "value": "7"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "10"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "submit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "claimant",
+        "value": {
+         "tag": "natural",
+         "value": "7"
+        }
+       },
+       {
+        "name": "work",
+        "value": {
+         "tag": "label",
+         "value": "doc-hash-1"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "40"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "approve",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "actor",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "41"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "label",
+  "expected": "paid",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "disburse",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "to",
+      "value": {
+       "tag": "natural",
+       "value": "7"
+      }
+     },
+     {
+      "name": "amount",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 4
+ },
+ {
+  "name": "BountyActivityUnclaimedRefunds",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "BountyBoard",
+    "source": "BountyBoard.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "bounty",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "poster",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "title",
+      "value": {
+       "tag": "label",
+       "value": "translate the README"
+      }
+     },
+     {
+      "name": "reward",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "deadline",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "review",
+      "value": {
+       "tag": "natural",
+       "value": "20"
+      }
+     }
+    ]
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "expire",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "100"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "label",
+  "expected": "refunded",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "disburse",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "to",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "amount",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 2
+ },
+ {
+  "name": "BountyActivityLateClaimerIgnored",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "BountyBoard",
+    "source": "BountyBoard.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "bounty",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "poster",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "title",
+      "value": {
+       "tag": "label",
+       "value": "translate the README"
+      }
+     },
+     {
+      "name": "reward",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "deadline",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "review",
+      "value": {
+       "tag": "natural",
+       "value": "20"
+      }
+     }
+    ]
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "claim",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "claimant",
+        "value": {
+         "tag": "natural",
+         "value": "7"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "10"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "claim",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "claimant",
+        "value": {
+         "tag": "natural",
+         "value": "9"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "11"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "submit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "claimant",
+        "value": {
+         "tag": "natural",
+         "value": "9"
+        }
+       },
+       {
+        "name": "work",
+        "value": {
+         "tag": "label",
+         "value": "doc-hash-9"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "30"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "submit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "claimant",
+        "value": {
+         "tag": "natural",
+         "value": "7"
+        }
+       },
+       {
+        "name": "work",
+        "value": {
+         "tag": "label",
+         "value": "doc-hash-1"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "40"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "approve",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "actor",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "41"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "label",
+  "expected": "paid",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "disburse",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "to",
+      "value": {
+       "tag": "natural",
+       "value": "7"
+      }
+     },
+     {
+      "name": "amount",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 6
+ },
+ {
+  "name": "BountyActivityRejectThenAnother",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "BountyBoard",
+    "source": "BountyBoard.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "bounty",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "poster",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "title",
+      "value": {
+       "tag": "label",
+       "value": "translate the README"
+      }
+     },
+     {
+      "name": "reward",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "deadline",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "review",
+      "value": {
+       "tag": "natural",
+       "value": "20"
+      }
+     }
+    ]
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "claim",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "claimant",
+        "value": {
+         "tag": "natural",
+         "value": "7"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "10"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "submit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "claimant",
+        "value": {
+         "tag": "natural",
+         "value": "7"
+        }
+       },
+       {
+        "name": "work",
+        "value": {
+         "tag": "label",
+         "value": "doc-hash-1"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "40"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reject",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "actor",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "45"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "claim",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "claimant",
+        "value": {
+         "tag": "natural",
+         "value": "9"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "46"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "submit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "claimant",
+        "value": {
+         "tag": "natural",
+         "value": "9"
+        }
+       },
+       {
+        "name": "work",
+        "value": {
+         "tag": "label",
+         "value": "doc-hash-9"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "50"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "approve",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "actor",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "55"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "label",
+  "expected": "paid",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "disburse",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "to",
+      "value": {
+       "tag": "natural",
+       "value": "9"
+      }
+     },
+     {
+      "name": "amount",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 7
+ },
+ {
+  "name": "BountyActivitySilencePays",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "BountyBoard",
+    "source": "BountyBoard.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "bounty",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "poster",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "title",
+      "value": {
+       "tag": "label",
+       "value": "translate the README"
+      }
+     },
+     {
+      "name": "reward",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "deadline",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "review",
+      "value": {
+       "tag": "natural",
+       "value": "20"
+      }
+     }
+    ]
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "claim",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "claimant",
+        "value": {
+         "tag": "natural",
+         "value": "7"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "10"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "submit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "claimant",
+        "value": {
+         "tag": "natural",
+         "value": "7"
+        }
+       },
+       {
+        "name": "work",
+        "value": {
+         "tag": "label",
+         "value": "doc-hash-1"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "40"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "expire",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "60"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "expire",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "61"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "label",
+  "expected": "paid",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "disburse",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "to",
+      "value": {
+       "tag": "natural",
+       "value": "7"
+      }
+     },
+     {
+      "name": "amount",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 5
+ },
+ {
+  "name": "BountyActivityRefusedDisbursementWaits",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "BountyBoard",
+    "source": "BountyBoard.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "bounty",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "poster",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "title",
+      "value": {
+       "tag": "label",
+       "value": "translate the README"
+      }
+     },
+     {
+      "name": "reward",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "deadline",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "review",
+      "value": {
+       "tag": "natural",
+       "value": "20"
+      }
+     }
+    ]
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "expire",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "100"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "refused",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "expire",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "101"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "label",
+  "expected": "refunded",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "disburse",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "to",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "amount",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 4
+ },
+ {
+  "name": "BountyActivityAwaitsReview",
+  "modules": [
+   {
+    "name": "NatOrder",
+    "source": "../workshop/NatOrder.obend",
+    "imports": []
+   },
+   {
+    "name": "BountyBoard",
+    "source": "BountyBoard.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "bounty",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "poster",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "title",
+      "value": {
+       "tag": "label",
+       "value": "translate the README"
+      }
+     },
+     {
+      "name": "reward",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "deadline",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "review",
+      "value": {
+       "tag": "natural",
+       "value": "20"
+      }
+     }
+    ]
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "claim",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "claimant",
+        "value": {
+         "tag": "natural",
+         "value": "7"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "10"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "submit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "claimant",
+        "value": {
+         "tag": "natural",
+         "value": "7"
+        }
+       },
+       {
+        "name": "work",
+        "value": {
+         "tag": "label",
+         "value": "doc-hash-1"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "40"
+        }
+       }
+      ]
+     }
+    }
+   }
+  ],
+  "expectedStatus": "yielded",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "await",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "phase",
+      "value": {
+       "tag": "label",
+       "value": "submitted"
+      }
+     },
+     {
+      "name": "deadline",
+      "value": {
+       "tag": "natural",
+       "value": "60"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 3
+ }
+]
