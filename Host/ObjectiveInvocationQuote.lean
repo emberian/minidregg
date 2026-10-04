@@ -20,6 +20,7 @@ import Kernel.NativeHost
 import Kernel.ObjectiveBendAuthenticatedInputs
 import Compiler.ObjectiveBendQuoteRequest
 import Compiler.ObjectiveInvocationLayout
+import Compiler.ObjectiveBendDataWire
 import Lean.Data.Json
 namespace Minidregg.Host.ObjectiveInvocationQuote
 open Minidregg.Compiler Minidregg.Kernel Minidregg.Theory
@@ -328,7 +329,17 @@ def toJson (derived : Derived) (intentNonce : Nat) : Json :=
     ("command",ObjectiveBendNativeInput.hex (commandCodec.encode derived.command)),
     ("plan",ObjectiveBendNativeInput.hex (planBytes derived.plan)),
     ("intent",ObjectiveBendNativeInput.hex
-      (NativeObservationCodec.intentCodec.encode (prepareIntent derived intentNonce)))]
+      (NativeObservationCodec.intentCodec.encode (prepareIntent derived intentNonce))),
+    -- The structured result as this signer's own evaluation produced it: the
+    -- return atom the command stores (id and exact bytes) and its decoded value.
+    ("returns",Json.arr (derived.plan.returns.map fun slot => Json.mkObj [
+      ("atom",toString (BendWorldPlan.returnId slot).value),
+      ("payload",ObjectiveBendNativeInput.hex (BendWorldPlan.encodeReturn slot)),
+      ("value",match ObjectiveBendResultAdapter.decodeData
+          (ObjectiveBendNativeAdmission.scalarProfile derived.claim.capacity)
+          (ObjectiveBendNativeAdmission.budget derived.claim.capacity) slot.bytes with
+        | some value => ObjectiveBendDataWire.dataJson value
+        | none => Json.null)]).toArray)]
 
 /-- Host operation: decode a retained request, derive on a freshly walked
 image, write the quote. -/

@@ -5,7 +5,7 @@ A fresh private one-sponsor Store (newparticipant-acceptance.sh) whose genesis
 pins an Objective invocation policy (tariff, output codecs, the parser/frontend/
 elaborator pins of THIS checkout's tools). Never a live or common world.
 
-  world    --bin DIR --root NEW_DIR [--tariff-base N --tariff-tick N]
+  world    --bin DIR --root NEW_DIR [--tariff-base N --tariff-tick N] [--disable EVALUATOR-NAMES]
            policy authoring, genesis, `mini serve`, two content documents
            (`source` holds the published method, `notes` is its input and
            its effect/result target).
@@ -17,7 +17,7 @@ elaborator pins of THIS checkout's tools). Never a live or common world.
            fresh nonce; signed resource-scope queries of `source` and `notes`
            (that nonce); the retained request; `mini objective-invoke` (local
            quote, prepare intent, plan, endpoint-227 consent, assemble, submit).
-  refuse   --root W --label L --mutation M [--argument X|@variant]
+  refuse   --root W --label L --mutation M [--argument X|@variant] [--move-source LABEL]
            a DISHONEST signer: the honest quote's command mutated by
            tests/objective-native/Mutate.lean, signed through the ordinary
            plan consent, submitted; the Host must refuse and the judged height
@@ -43,7 +43,7 @@ HERE=pathlib.Path(__file__).resolve().parent
 REPO=HERE.parent.parent
 ap=argparse.ArgumentParser()
 ap.add_argument('verb',choices=['all','world','publish','publish-variant','invoke','refuse','retry-submit','readback','lookup','reopen','stop'])
-for f in ['bin','root','method','entry','label','byte','tariff-base','tariff-tick','request-edit','mutation','argument','expect','prepare-only']:
+for f in ['bin','root','method','entry','label','byte','tariff-base','tariff-tick','request-edit','mutation','argument','expect','prepare-only','move-source','disable']:
     ap.add_argument('--'+f)
 a=ap.parse_args()
 root=pathlib.Path(a.root).resolve()
@@ -111,6 +111,7 @@ if a.verb=='all':
     step('invoke',*W,'--label','r11-source-moved','--prepare-only','true','--expect','prepared')
     step('publish-variant',*W,'--label','moved')
     step('retry-submit',*W,'--label','r11-source-moved')
+    step('refuse',*W,'--label','r12-stale-source-query','--mutation','none','--move-source','moved-again')
     step('refuse',*W,'--label','r07-credits-not-quote','--mutation','fee-debit')
     step('refuse',*W,'--label','r08-tariff','--mutation','tariff')
     step('refuse',*W,'--label','r09-altered-argument','--mutation','argument')
@@ -120,6 +121,14 @@ if a.verb=='all':
     step('lookup',*W,'--label','first')
     step('lookup',*W,'--label','second')
     step('readback',*W,'--label','after-reopen')
+    # A second world whose operator disabled Core4 by name: no Objective
+    # invocation is admitted there (the quote refuses before any signature).
+    D=['--root',str(root)+'-disabled']
+    step('world','--bin',a.bin,*D,'--disable','objective-core4')
+    step('publish',*D)
+    step('invoke',*D,'--label','r13-core4-disabled','--expect','refused')
+    for p in (pathlib.Path(str(root)+'-disabled')/'results').glob('*.json'):
+        if not p.name.endswith('.dry.json'):(root/'results'/p.name).write_bytes(p.read_bytes())
     rows=[json.loads(p.read_text()) for p in sorted((root/'results').glob('*.json')) if not p.name.endswith('.dry.json')]
     def ok(row):
         if row['expect']=='confirmed':return row['rc']==0 and not row['unchanged']
@@ -150,8 +159,9 @@ elif a.verb=='world':
     sh('policy',host,'/dev/null','author','objective-policy',root/'policy.json',root/'policy.hex')
     policy_hex=(root/'policy.hex').read_text().strip()
     w=root/'w';sock=w/'public'/'mini.sock'
-    sh('genesis','sh',HERE/'newparticipant-acceptance.sh',host,mini,store,verifier,w,sock,
-       env={'OBJECTIVE_INVOCATION_POLICY':policy_hex})
+    genesis_env={'OBJECTIVE_INVOCATION_POLICY':policy_hex}
+    if a.disable:genesis_env['NEWPARTICIPANT_DISABLED_EVALUATORS']=a.disable
+    sh('genesis','sh',HERE/'newparticipant-acceptance.sh',host,mini,store,verifier,w,sock,env=genesis_env)
     s={'type':'minidregg-objective-native-acceptance-v1','root':str(root),'bin':str(bin_),'host':str(host),
        'mini':str(mini),'config':str(w/'deployment'/'pinned-config.json'),'socket':str(sock),
        'sponsor':str(w/'sponsor'),'key':str(w/'sponsor.key'),'subject':'7',
@@ -298,6 +308,13 @@ elif a.verb=='refuse':
     d=build_request(s,label)
     sh(f'{label}-author',host,s['config'],'author','objective-request',d/'request.json',d/'request.bin')
     sh(f'{label}-quote',host,s['config'],'objective-quote',d/'request.bin',str(secrets.randbelow(2**62)+1),d/'quote.json')
+    if a.move_source:
+        # The source document moves AFTER the honest quote: the signed queries
+        # now name a root the Host no longer holds.
+        r=subprocess.run([sys.executable,__file__,'publish-variant','--root',str(root),'--label',a.move_source],
+            stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        if r.returncode:raise SystemExit('move-source publication failed: '+r.stderr.decode(errors='replace')[-800:])
+        s=state()
     argument=[a.argument] if a.argument else []
     def resolve(x):
         if not x.startswith('@'):return x
@@ -331,7 +348,9 @@ elif a.verb=='publish-variant':
     s=state();host=s['host'];mini=s['mini']
     pub=root/'publication';v=root/f'variant-{a.label}';v.mkdir(mode=0o700)
     pin=json.loads((pub/'package-input.json').read_text())
-    pin['elaboratorSha256']=hashlib.sha256((REPO/'native/bend-source/objective-parser.ts').read_bytes()).hexdigest()
+    # A well-formed pin naming no elaborator the policy admits (one per label,
+    # so two variants are two packages).
+    pin['elaboratorSha256']=hashlib.sha256(f'not-the-pinned-elaborator:{a.label}'.encode()).hexdigest()
     (v/'package-input.json').write_text(json.dumps(pin))
     sh(f'variant-{a.label}-publication',host,s['config'],'objective-publication',v/'package-input.json',
        pub/'def.typed.json','generic',v/'out')
@@ -347,9 +366,31 @@ elif a.verb=='publish-variant':
     save(s);print(json.dumps({'variant':a.label,'artifactId':out['artifactId'],'elaboratorSha256':pin['elaboratorSha256']}))
 
 elif a.verb=='readback':
+    # A signed read of `notes`; for every confirmed invocation, the return atom
+    # its quote derived (id, exact bytes) must be stored there, and the created
+    # atom with the requested byte.
     s=state()
     sh(f'{a.label}-readback',s['mini'],'workspace','--action','read','--dir',s['sponsor'],'--name','notes')
-    print((T/f'{a.label}-readback.out').read_text()[:4000])
+    view=json.loads((T/f'{a.label}-readback.out').read_text())
+    atoms={e['id']:e for e in view['cell']['entries'] if e.get('type')=='atom'}
+    checks=[]
+    for d in sorted((root/'invocations').iterdir()):
+        att=d/'attempt.txt'
+        if not att.exists():continue
+        attempt=pathlib.Path(att.read_text().strip())
+        outcome=attempt/'outcome.json'
+        if not outcome.exists() or json.loads(outcome.read_text()).get('type')!='confirmed':continue
+        quote=json.loads((attempt/'quote.json').read_text())
+        for ret in quote['returns']:
+            stored=atoms.get(ret['atom'])
+            checks.append({'invocation':d.name,'returnAtom':ret['atom'],'stored':stored is not None,
+                'bytesExact':stored is not None and stored['payload']==ret['payload'],'value':ret['value']})
+    out={'height':view['judgedAt']['height'],'notesRoot':view['cell']['root'],'atoms':len(atoms),'returns':checks}
+    (root/'results').mkdir(exist_ok=True)
+    (root/'results'/f'readback-{a.label}.json').write_text(json.dumps(out,indent=1)+'\n')
+    print(json.dumps(out))
+    if not checks or not all(c['stored'] and c['bytesExact'] for c in checks):
+        raise SystemExit('a return atom of a confirmed invocation is not stored exactly')
 
 elif a.verb=='lookup':
     s=state();attempt=(root/'invocations'/a.label/'attempt.txt').read_text().strip()

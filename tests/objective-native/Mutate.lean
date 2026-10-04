@@ -17,6 +17,8 @@ Mutations:
   tariff                the claim's proofWork is one below the tariff price
   argument              one byte of the argument packet changes; expectedInput stays
   output                the effect's created-atom payload byte changes
+  none                  nothing changes: the honest command, signed later
+                        (after the state it was derived from has moved)
 -/
 import Kernel.ObjectiveBendNativeAdmission
 import Host.ObjectiveInvocationQuote
@@ -51,6 +53,7 @@ def mutate (name : String) (argument : Option String) (command : Command) : IO C
       pure { command with targets := command.targets.map fun target =>
         { target with capability := ⟨capability.toNat!⟩ } }
   | "command-nonce", none => pure { command with nonce := command.nonce + 1 }
+  | "none", none => pure command
   | "fee-debit", none =>
       pure (withClaim command { claim with capacity := { claim.capacity with feeDebit := claim.capacity.feeDebit + 1 } })
   | "tariff", none =>
@@ -74,7 +77,7 @@ def main (args : List String) : IO UInt32 := do
   let commandHex ← IO.ofExcept (quote.getObjValAs? String "command")
   let some command := commandCodec.decode (← unhex commandHex) | throw (IO.userError "command")
   let mutated ← mutate mutation rest.head? command
-  if mutated == command then throw (IO.userError "the mutation changed nothing")
+  if mutation != "none" && mutated == command then throw (IO.userError "the mutation changed nothing")
   let intent : NativeObservationCodec.Intent := ⟨mutated.subject,nonceText.toNat!,
     .prepare (.invoke (commandCodec.encode mutated)),
     mutated.targets.filterMap fun target =>
