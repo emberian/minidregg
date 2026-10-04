@@ -63,7 +63,15 @@ init() {
   p=$state/genesis-params.json
   params=$p
 
-  "$MINI" keygen --secret "$state/keys/sponsor.key" --public "$state/keys/sponsor.pub" \
+  # The sponsor's key record commits to exactly what the params say about its next
+  # key (K-PREROTATE). nextKeyDigest null: the genesis commits to NO next key, so the
+  # key is generated without one; `run.sh sponsor` then initializes without one.
+  # (A generated next key against a null commitment made `sponsor` refuse: "subject
+  # 7's record commits to no next key, but you hold one".) A non-null digest names a
+  # next key the operator generated beforehand; run.sh cannot make one to match it.
+  prerotation=$(jq -r 'if .sponsor.nextKeyDigest == null then "--no-prerotation" else "" end' "$p")
+  [ -n "$prerotation" ] || candidate_die "params commit the sponsor to a next key (.sponsor.nextKeyDigest); run.sh init generates the sponsor key and cannot match it — set it to null, or bootstrap by hand with that key pair"
+  "$MINI" keygen --secret "$state/keys/sponsor.key" --public "$state/keys/sponsor.pub" $prerotation \
     >"$state/keys/sponsor.pub.hex"
   sponsor_public=$(od -An -tx1 -v "$state/keys/sponsor.pub" | tr -d ' \n')
   # The clock subject's key (its workspace: `mini clock --action init`, e.g. the
@@ -166,8 +174,9 @@ sponsor() {
     return 0
   fi
   p=$STATE/genesis-params.json
+  prerotation=$(jq -r 'if .sponsor.nextKeyDigest == null then "--no-prerotation" else "" end' "$p")
   "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
-    --key "$STATE/keys/sponsor.key" --subject "$(jq -r '.sponsor.subject | tostring' "$p")" \
+    --key "$STATE/keys/sponsor.key" --subject "$(jq -r '.sponsor.subject | tostring' "$p")" $prerotation \
     --birth-context "$STATE/sponsor-birth-context.json" \
     --namespace-root "$STATE/namespace" --dir "$STATE/sponsor" >"$STATE/logs/sponsor-init.stdout"
   "$MINI" workspace --action import --dir "$STATE/sponsor" --name factory --kind object \
