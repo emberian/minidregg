@@ -14,6 +14,13 @@
 //! --file F`: the BRIDGE says it, and the payload names the Discord author. It never signs as
 //! a friend; a reader sees `bridge via discord NAME#ID: text`.
 //!
+//! A PRIVATE room is never mirrored. Opened text from a sealed room reaches this process
+//! only inside a `tail --json` feed whose header and entries say `"private": true` (the
+//! native client stamps both); `PublicFeed` is the only way into `outbound`, and it refuses
+//! a feed that says private, says nothing, or mixes the two. There is no setting that
+//! lifts this: re-publishing opened text outside the sealed room is exactly what the room
+//! key exists to prevent. DEVNET QUALITY; PRIVACY NOT AUDITED.
+//!
 //! Loop prevention, both directions:
 //! * a room entry that carries `via` (anything a bridge said), or that the bridge's own
 //!   subject signed, is never posted to the channel;
@@ -65,18 +72,79 @@ fn load_state(p:&Path)->Result<State,String>{
 }
 fn save_state(p:&Path,s:&State)->Result<(),String>{Ok(custody::atomic_json(p,&json!({"version":2,"height":s.height,"message":s.message,"cursors":s.cursors,"scan":s.scan}))?)}
 
-/// The room's feed from `tail --json`: (bridge-relevant state line, entries).
-pub fn feed_of(stdout: &str) -> (Value, Vec<Value>) {
-    let mut docs = serde_json::Deserializer::from_str(stdout).into_iter::<Value>().flatten();
-    let state = docs.next().unwrap_or(Value::Null);
-    (state, docs.collect())
+/// The refusal a private room gets. `main` stops the bridge on it (it is configuration, not
+/// a transient failure, so it is never retried and never skipped past).
+pub const PRIVATE_ROOM_REFUSAL: &str = "room is private";
+
+/// A room entry that came out of a room the native client stated is PUBLIC. The inner value
+/// is private to this constructor: `outbound` cannot be handed an entry of unknown privacy.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PublicEntry(Value);
+
+impl PublicEntry {
+    pub fn get(&self, key: &str) -> Option<&Value> {
+        self.0.get(key)
+    }
+}
+
+/// The feed of a PUBLIC room. The only constructor refuses (a) a header that says
+/// `"private": true`, (b) a header or entry with no boolean `private` (an older client that
+/// cannot say is not a client that says "public"), (c) an entry that disagrees with its
+/// header, and (d) an entry that carries the `sealed` mark of an opened private line.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PublicFeed {
+    pub header: Value,
+    pub entries: Vec<PublicEntry>,
+}
+
+impl PublicFeed {
+    pub fn from_docs(docs: &[Value]) -> Result<Self, String> {
+        let header = docs.first().ok_or("empty source page")?;
+        match header.get("private").and_then(Value::as_bool) {
+            Some(false) => {}
+            Some(true) => {
+                return Err(format!(
+                    "{PRIVATE_ROOM_REFUSAL}: its opened text is never published to a Discord channel (not configurable); a bridge mirrors public rooms only"
+                ))
+            }
+            None => {
+                return Err(format!(
+                    "{PRIVATE_ROOM_REFUSAL} or unknowable: the native client does not state whether this room is private, and an unstated room is not treated as public"
+                ))
+            }
+        }
+        let mut entries = Vec::new();
+        for entry in &docs[1..] {
+            match entry.get("private").and_then(Value::as_bool) {
+                Some(false) => {}
+                Some(true) => return Err(format!("{PRIVATE_ROOM_REFUSAL}: an entry of a public-looking feed is marked private")),
+                None => return Err(format!("{PRIVATE_ROOM_REFUSAL} or unknowable: an entry does not state whether it is private")),
+            }
+            if entry.get("sealed").is_some_and(|sealed| !sealed.is_null() && sealed != &Value::Bool(false)) {
+                return Err(format!("{PRIVATE_ROOM_REFUSAL}: an entry carries the sealed mark of an opened private line"));
+            }
+            entries.push(PublicEntry(entry.clone()));
+        }
+        Ok(Self { header: header.clone(), entries })
+    }
+}
+
+/// The room's feed from `tail --json`: (header line, entries), refusing a private room.
+pub fn feed_of(stdout: &str) -> Result<PublicFeed, String> {
+    let docs: Vec<Value> = serde_json::Deserializer::from_str(stdout)
+        .into_iter::<Value>()
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("incomplete source page: {e}"))?;
+    PublicFeed::from_docs(&docs)
 }
 
 /// The channel lines for room entries above `height`: `say` and raw text only, never an
-/// entry a bridge said (`via`) or one the bridge itself signed (`me`).
-pub fn outbound(entries: &[Value], height: Option<u64>, me: &str) -> Vec<(u64, String)> {
+/// entry a bridge said (`via`) or one the bridge itself signed (`me`). Entries are
+/// `PublicEntry`: there is no way to pass one that was not stated public.
+pub fn outbound(entries: &[PublicEntry], height: Option<u64>, me: &str) -> Vec<(u64, String)> {
     let mut out: Vec<(u64, String)> = entries
         .iter()
+        .map(|entry| &entry.0)
         .filter_map(|e| {
             let h = e.get("height")?.as_u64()?;
             if height.is_some_and(|seen| h <= seen) {
@@ -179,15 +247,18 @@ impl Mirror {
         if result.ending.word!="ok" {return Err(result.ending.line)}
         // Parsing must be complete; silently flattening a truncated JSON stream loses events.
         let docs:Vec<Value>=serde_json::Deserializer::from_str(&result.stdout).into_iter::<Value>().collect::<Result<_,_>>().map_err(|e|format!("incomplete source page: {e}"))?;
-        let header=docs.first().ok_or("empty source page")?;
+        // BEFORE anything else reads an entry: a private room ends the page here.
+        let public=PublicFeed::from_docs(&docs)?;
+        let header=&public.header;
         if header["type"]!="mini-chat-room-v1" || !header["discoveryCursors"].is_object() || header["selectedEntries"].as_u64()!=Some((docs.len()-1) as u64) {return Err("native client lacks signed discovery pages".into())}
         if header["unreadable"].as_array().is_none_or(|v|!v.is_empty()) {return Err("source streams unreadable; cursor retained".into())}
         let mut posted=0;
-        for e in docs.iter().skip(1).take(BATCH){
+        for pe in public.entries.iter().take(BATCH){
+            let e=&pe.0;
             let cell=e["cell"].as_str().filter(|s|is_snowflake(s)).ok_or("invalid source cell")?;
             let seq=e["sequence"].as_u64().filter(|n|*n>0).ok_or("invalid source sequence")?;
             if state.cursors.get(cell).and_then(Value::as_u64).is_some_and(|seen|seq<=seen){continue}
-            let posts=outbound(std::slice::from_ref(e),state.height,&self.me());
+            let posts=outbound(std::slice::from_ref(pe),state.height,&self.me());
             if let Some((_,text))=posts.first(){
                 let key=format!("up-{cell}-{seq}");
                 let mut record=Record::lock(&self.custody_root(),&key)?.ok_or("publication record busy")?;
@@ -340,6 +411,9 @@ fn main() {
     loop {
         let mut state = load_state(&mirror.state).unwrap_or_else(|e|fail(e));
         let up = mirror.up(&mut state);
+        // A private room is a configuration error, not a transient one: stop, do not
+        // retry, and do not run the channel-to-room direction into a sealed room either.
+        if let Err(why) = &up { if why.starts_with(PRIVATE_ROOM_REFUSAL) { fail(format!("{}: {why}", mirror.room)) } }
         let down = mirror.down(&mut state);
         match (&up, &down) {
             (Ok(u), Ok(d)) => eprintln!("mini-discord-mirror: {}: posted {u}, said {d}", mirror.room),
@@ -363,17 +437,91 @@ mod tests {
 
     #[test]
     fn room_to_channel_skips_bridged_and_own_entries() {
-        let out = r#"{"type":"mini-chat-room-v1","room":"commons"}
-{"n":1,"height":10,"author":"1","name":"alice","kind":"say","text":"hi @everyone","via":null}
-{"n":2,"height":11,"author":"9","name":"bridge","kind":"say","text":"from discord","via":{"network":"discord","id":"4","name":"zed"}}
-{"n":3,"height":12,"author":"9","name":"bridge","kind":"say","text":"the bridge itself","via":null}
-{"n":4,"height":13,"author":"2","name":"bob","kind":"react","text":"+1","via":null}
-{"n":5,"height":14,"author":"2","name":"b*ob","kind":"say","text":"yo","via":null}"#;
-        let (state, entries) = feed_of(out);
+        let out = r#"{"type":"mini-chat-room-v1","room":"commons","private":false}
+{"n":1,"height":10,"author":"1","name":"alice","kind":"say","text":"hi @everyone","via":null,"private":false}
+{"n":2,"height":11,"author":"9","name":"bridge","kind":"say","text":"from discord","via":{"network":"discord","id":"4","name":"zed"},"private":false}
+{"n":3,"height":12,"author":"9","name":"bridge","kind":"say","text":"the bridge itself","via":null,"private":false}
+{"n":4,"height":13,"author":"2","name":"bob","kind":"react","text":"+1","via":null,"private":false}
+{"n":5,"height":14,"author":"2","name":"b*ob","kind":"say","text":"yo","via":null,"private":false}"#;
+        let PublicFeed { header: state, entries } = feed_of(out).unwrap();
         assert_eq!(state["room"], "commons");
         let posts = outbound(&entries, None, "9");
         assert_eq!(posts, vec![(10, "**alice**: hi @\u{200b}everyone".to_owned()), (14, "**bob**: yo".to_owned())]);
         assert_eq!(outbound(&entries, Some(10), "9"), vec![(14, "**bob**: yo".to_owned())]);
+    }
+
+    // ---- a private room's opened text can never reach the channel ----
+
+    fn feed(header: Value, entries: Vec<Value>) -> String {
+        std::iter::once(header).chain(entries).map(|v| v.to_string()).collect::<Vec<_>>().join("\n")
+    }
+    fn say(private: Value) -> Value {
+        json!({"n":1,"height":10,"author":"1","name":"alice","kind":"say","text":"the lab is at seven","via":null,"private":private})
+    }
+
+    #[test]
+    fn a_private_room_feed_is_refused_by_name_and_yields_no_entry_to_publish() {
+        let sealed = feed(json!({"type":"mini-chat-room-v1","room":"hush","private":true}), vec![say(json!(true))]);
+        let refusal = feed_of(&sealed).unwrap_err();
+        assert!(refusal.starts_with(PRIVATE_ROOM_REFUSAL) && refusal.contains("never published"), "{refusal}");
+        // A forged header cannot launder a private entry, nor an entry its header.
+        let laundered = feed(json!({"type":"mini-chat-room-v1","room":"hush","private":false}), vec![say(json!(true))]);
+        assert!(feed_of(&laundered).unwrap_err().contains("marked private"));
+        let mixed = feed(json!({"type":"mini-chat-room-v1","room":"hush","private":true}), vec![say(json!(false))]);
+        assert!(feed_of(&mixed).is_err());
+        // The opened-line mark of a sealed read refuses even under a "public" stamp.
+        let mut marked = say(json!(false));
+        marked["sealed"] = json!(true);
+        let opened = feed(json!({"type":"mini-chat-room-v1","room":"hush","private":false}), vec![marked]);
+        assert!(feed_of(&opened).unwrap_err().contains("sealed mark"));
+    }
+
+    #[test]
+    fn a_feed_that_does_not_state_privacy_is_not_treated_as_public() {
+        // The client before the stamp, a string "false", null, a number: none is a boolean false.
+        for header in [json!({"type":"mini-chat-room-v1"}), json!({"private":"false"}), json!({"private":null}), json!({"private":0})] {
+            let refusal = feed_of(&feed(header.clone(), vec![])).unwrap_err();
+            assert!(refusal.contains("does not state"), "{header}: {refusal}");
+        }
+        let unstated_entry = feed(json!({"type":"mini-chat-room-v1","private":false}), vec![say(Value::Null)]);
+        assert!(feed_of(&unstated_entry).unwrap_err().contains("does not state"));
+        let missing_entry = feed(json!({"type":"mini-chat-room-v1","private":false}),
+            vec![json!({"n":1,"height":10,"author":"1","kind":"say","text":"x","via":null})]);
+        assert!(feed_of(&missing_entry).is_err());
+        assert!(feed_of("").unwrap_err().contains("empty"));
+        assert!(feed_of("{\"private\":false}\n{").unwrap_err().contains("incomplete"));
+    }
+
+    #[test]
+    fn the_mirror_makes_no_request_and_moves_no_cursor_for_a_private_room() {
+        use minidregg_discord_entrance::http::{read_request, write_response};
+        use std::sync::{atomic::{AtomicUsize, Ordering}, Arc};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = format!("http://{}", listener.local_addr().unwrap());
+        let count = Arc::new(AtomicUsize::new(0));
+        let remote = count.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                let _ = read_request(&mut stream);
+                remote.fetch_add(1, Ordering::SeqCst);
+                let _ = write_response(&mut stream, 204, "No Content", "application/json", b"");
+            }
+        });
+        let m = test_mirror("private", addr);
+        let mut s = json!({"type":"mini-chat-room-v1","private":true,"selectedEntries":1,"discoveryCursors":{"42":1},"unreadable":[]}).to_string() + "\n";
+        s += &(json!({"height":1,"cell":"42","sequence":1,"author":"7","name":"alice","kind":"say","via":null,"private":true,"text":"PRIVATE-OPENED-TEXT"}).to_string() + "\n");
+        std::fs::write(m.session.home.join("feed.json"), s).unwrap();
+        let mut state = State::default();
+        let refusal = m.up(&mut state).unwrap_err();
+        assert!(refusal.starts_with(PRIVATE_ROOM_REFUSAL), "{refusal}");
+        assert_eq!(count.load(Ordering::SeqCst), 0, "no webhook request for a private room");
+        assert!(state.cursors.is_empty() && !m.state.exists(), "no cursor or state is written for it");
+        assert!(!m.custody_root().join("up-42-1.json").exists());
+        // The same bridge on a public page still publishes (the control: the refusal is about privacy, not breakage).
+        page(&m, 1, 2);
+        assert_eq!(m.up(&mut state).unwrap(), 1);
+        assert_eq!(count.load(Ordering::SeqCst), 1);
     }
 
     #[test]
@@ -411,8 +559,8 @@ mod tests {
         Mirror{deployment:Deployment{wrapper,mini:"/fixed/mini".into(),host:"/fixed/host".into(),config:"/fixed/config".into(),socket:"/fixed/socket".into(),timeout:Duration::from_secs(2)},session:Session{name:"mirror".into(),workspace:home.join("workspace"),home:home.clone()},room:"commons".into(),webhook:format!("{api}/webhook"),channel:format!("{api}/channel"),token:"fake".into(),poster:Poster{curl:"/usr/bin/curl".into(),spool:home.join("spool"),max_time_s:2},state:home.join("mirror/commons.json")}
     }
     fn page(m:&Mirror,start:u64,end:u64){
-        let mut s=json!({"type":"mini-chat-room-v1","selectedEntries":end-start,"discoveryCursors":{"42":end-1},"unreadable":[]}).to_string()+"\n";
-        for n in start..end{s+=&(json!({"height":n,"cell":"42","sequence":n,"author":"7","name":"alice","kind":"say","via":null,"text":format!("entry-{n}")}).to_string()+"\n");}
+        let mut s=json!({"type":"mini-chat-room-v1","private":false,"selectedEntries":end-start,"discoveryCursors":{"42":end-1},"unreadable":[]}).to_string()+"\n";
+        for n in start..end{s+=&(json!({"height":n,"cell":"42","sequence":n,"author":"7","name":"alice","kind":"say","via":null,"private":false,"text":format!("entry-{n}")}).to_string()+"\n");}
         std::fs::write(m.session.home.join("feed.json"),s).unwrap();
     }
     #[test] fn outbound_pages_restart_and_unknown_never_repost(){

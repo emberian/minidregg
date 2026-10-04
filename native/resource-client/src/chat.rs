@@ -1806,6 +1806,27 @@ fn shown_entries(feed:&Feed,since:Option<u64>,entry:Option<&(String,u64)>)->Vec<
         .filter(|n|entry.is_none_or(|(cell,seq)|feed.feed[n-1].cell==*cell && feed.feed[n-1].sequence==*seq))
         .collect()
 }
+/// The lines `tail --json` prints: the room header, then one object per shown entry.
+/// Every consumer of this feed (the Discord mirror among them) is told, on the header
+/// AND on every entry, whether the text it is about to read came out of a private room:
+/// a bridge must not have to guess, and an absent field is not "public"
+/// (`mini-discord-mirror`'s `PublicFeed` refuses a feed that does not say).
+#[allow(clippy::too_many_arguments)]
+fn json_feed(room: &str, private: bool, feed: &Feed, roster: &Roster, names: &Names, shown: &[usize], start: usize,
+    cursors: &Value, missing: &Value, former: &[(String, String)]) -> Vec<Value> {
+    let mut lines = vec![json!({"type":"mini-chat-room-v1","room":room,"private":private,"founder":roster.founder,
+        "members":roster.members.iter().map(|(s, c)| json!({"subject":s,"stream":c,"name":names.of(s)})).collect::<Vec<_>>(),
+        "topic":feed.topic.as_ref().map(|t| t.0.clone()),"pin":feed.pin.map(|p| p.0),
+        "entries":feed.feed.len(),"selectedEntries":shown.len(),"discoveryCursors":cursors,"unreadable":missing,
+        "former":former.iter().map(|(s, c)| json!({"subject":s,"stream":c,"name":names.of(s)})).collect::<Vec<_>>()})];
+    for n in &shown[start..] {
+        let mut entry = entry_json(feed, *n, names);
+        entry["private"] = json!(private);
+        lines.push(entry);
+    }
+    lines
+}
+
 fn tail(session: &Session, room: &Room, count: usize, since: Option<u64>, follow: bool, as_json: bool, held: bool, entry: Option<&(String, u64)>, discovery: Option<&str>) -> Result<(), Done> {
     let names = names(session);
     let (feed, roster, missing, cursors) = if let Some(file)=discovery {
@@ -1825,14 +1846,9 @@ fn tail(session: &Session, room: &Room, count: usize, since: Option<u64>, follow
     let shown = shown_entries(&feed, since, entry);
     let start = if discovery.is_some() {0} else {shown.len().saturating_sub(count)};
     if as_json {
-        let state = json!({"type":"mini-chat-room-v1","room":room.name,"founder":roster.founder,
-            "members":roster.members.iter().map(|(s, c)| json!({"subject":s,"stream":c,"name":names.of(s)})).collect::<Vec<_>>(),
-            "topic":feed.topic.as_ref().map(|t| t.0.clone()),"pin":feed.pin.map(|p| p.0),
-            "entries":feed.feed.len(),"selectedEntries":shown.len(),"discoveryCursors":cursors,"unreadable":missing,
-            "former":former.iter().map(|(s, c)| json!({"subject":s,"stream":c,"name":names.of(s)})).collect::<Vec<_>>()});
-        let _ = writeln!(out, "{state}");
-        for n in &shown[start..] {
-            let _ = writeln!(out, "{}", entry_json(&feed, *n, &names));
+        let private = room_is_private(session, &room.name);
+        for line in json_feed(&room.name, private, &feed, &roster, &names, &shown, start, &cursors, &json!(missing), &former) {
+            let _ = writeln!(out, "{line}");
         }
     } else {
         let mut line = header(room, &feed, &roster, &names);
@@ -2502,6 +2518,20 @@ mod tests {
         assert!(render_entry(&feed, 3, &names).contains("ignored: only me, the founder, sets the topic"));
         assert!(render_entry(&feed, 4, &names).contains("ignored: only me, the founder, pins"));
         assert_eq!(render_entry(&feed, 2, &names), "#2 h2 bob: hi\n      +1 s…3");
+    }
+
+    #[test]
+    fn tail_json_states_privacy_on_the_header_and_every_entry() {
+        let feed = merge(vec![entry(1, "1", "a", 1, r#"{"type":"say","text":"the lab is at seven"}"#)], Some("1".into()));
+        let roster = Roster { founder: Some("1".into()), members: vec![("1".into(), "a".into())] };
+        let names = Names { me: "1".into(), pet: BTreeMap::new() };
+        for private in [true, false] {
+            let lines = json_feed("hush", private, &feed, &roster, &names, &[1], 0, &Value::Null, &json!([]), &[]);
+            assert_eq!(lines.len(), 2);
+            assert_eq!(lines[0]["type"], "mini-chat-room-v1");
+            assert_eq!(lines[0]["private"], json!(private), "the header says it, as a boolean");
+            assert_eq!(lines[1]["private"], json!(private), "and so does every entry");
+        }
     }
 
     #[test]

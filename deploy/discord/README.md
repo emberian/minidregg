@@ -122,6 +122,8 @@ A friend without an ssh key can still be given a session: create the home (`inst
 
 ### Durable room/channel custody
 
+**A private room is never mirrored, and nothing configures that away.** The native client stamps `"private": true|false` on the header and on every entry of `tail --json`; the mirror reads the feed only through `PublicFeed`, which refuses a feed that says private, says nothing (an older client cannot say, and an unstated room is not treated as public), or mixes the two; `outbound` accepts only the entries it yields. A private room stops the bridge (exit 78, no retry, no webhook request, no cursor written, and the channel-to-room direction does not run into a sealed room either). The room key a hosted bridge would hold as a member is a separate matter, guarded at the invite (`--i-know`, and the bridge's own signed custody declaration). Private rooms are devnet quality; privacy not audited.
+
 A mirror must explicitly set `MINI_MIRROR_PUBLISH_ROOM_TO_CHANNEL=yes`. This acknowledges an authorized disclosure mapping between the named Mini room and the configured Discord channel. Membership/read permission alone does not establish that every member consented to external publication. The interaction user's private answer and bridge publication are separate paths; `/mini-world` never posts its output into the channel.
 
 The mirror keeps an owner-private `HOME/mirror` directory. A bridge lease binds its subject, room, workspace and channel URL; changing that mapping requires separate custody. Do not share one bridge home/room state between destinations. The room/channel identities and endpoint configuration are operator supplied; this runner does not prove the webhook points at the configured read channel.

@@ -143,6 +143,9 @@ exact store-anchor-head      hyperdocument-link-sqlite-store --lib -- \
 exact discord-custody        discord-entrance --bin mini-discord-mirror --test endpoint -- \
   tests::outbound_pages_restart_and_unknown_never_repost \
   tests::channel_backfill_retains_all_115_across_restart_and_small_drains \
+  tests::a_private_room_feed_is_refused_by_name_and_yields_no_entry_to_publish \
+  tests::a_feed_that_does_not_state_privacy_is_not_treated_as_public \
+  tests::the_mirror_makes_no_request_and_moves_no_cursor_for_a_private_room \
   durable_restart_exact_binding_unknown_and_roster_revocation \
   accepted_before_deferral_is_recoverable_and_status_is_actor_bound
 # D9 / D2 as shared by the Mini SDK (5c88af84, 4b2f299d): the custody lease, numeric
@@ -252,6 +255,10 @@ exact rc-roomkey-invite-path resource-client --bin mini -- \
   shell::tests::private_room_verbs_spell_the_room_key_operations \
   shell::tests::a_hosted_subject_joins_a_private_room_only_with_i_know \
   chat::tests::chat_verbs_take_the_rest_of_the_line_as_text
+# The native client states privacy on the `tail --json` header and every entry (what the
+# Discord mirror's PublicFeed refuses to guess); the mirror's side is in discord-custody.
+exact rc-chat-json-privacy   resource-client --bin mini -- \
+  chat::tests::tail_json_states_privacy_on_the_header_and_every_entry
 # R2-1 #10 / C4: the cohort link admits only roster members (d7b2f19b replaced the
 # pre-shared-key adapter and its re-accept test from 76757030)
 exact rc-cohort-roster       resource-client --bin mini -- \
