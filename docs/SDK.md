@@ -130,6 +130,13 @@ refused, destination unreachable, session not established within Ns); everything
 uncertain, the session is closed, and the exact request is never resent (a lost reply is a `lookup`
 of the same call bytes). `MINI_SSH` names another OpenSSH-compatible program.
 
+The route is held end to end by `native/mini-sdk/tests/ssh-e2e.sh ART_DIR` (ART_DIR from
+`scripts/pipeline/fetch-artifacts`): it starts a scratch Store behind the candidate Host, an
+unprivileged sshd on 127.0.0.1 with throwaway host and client keys whose only key is forced to
+`mini socket-proxy`, and runs `tests/ssh_e2e.rs`: DESCRIBE over ssh equals the unix socket on one
+reused session, a planted wrong or unknown host key and an unauthorised key are refused by name with
+nothing sent, and the proxy refuses an unpinned config and an operator-only operation.
+
 ## What it does not do
 
 - **Execute.** The Host executes, and re-executes on every replay; that is Mini's evidence.
