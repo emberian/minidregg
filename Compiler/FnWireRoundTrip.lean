@@ -877,4 +877,201 @@ theorem decodeAll_injective {g : Grammar} {xs ys : List UInt8} {v : Value} (hwf 
 #assert_axioms decode_encode encode_decode decodeAll_encode encode_decodeAll
   decodeAll_injective unlines_lines' position_getElem getElem_position
 
+/-! ## The decoder's answers (fn `fn-wg-decode-answers`) -/
+
+/-- Every refusal the decoder gives is one of fn's three words; it never answers `limit`
+(that is `decodeWithin`'s, before decoding). For EVERY grammar, well formed or not. -/
+theorem decode_refusal_mem : ∀ (g : Grammar) (xs : List UInt8) (e : Refusal),
+    decode g xs = .error e → e ∈ fnRefusals := by
+  intro g
+  induction g with
+  | seqCons h t ihh iht =>
+    intro xs e hd
+    simp only [decode] at hd
+    split at hd
+    · split at hd
+      · cases hd
+      · cases hd; simp [fnRefusals]
+      · rename_i heq; cases hd; exact iht _ _ heq
+    · rename_i heq; cases hd; exact ihh _ _ heq
+  | tagArm w code name arm more iharm ihmore =>
+    intro xs e hd
+    simp only [decode] at hd
+    split at hd
+    · split at hd
+      · cases hd
+      · rename_i heq; cases hd; exact iharm _ _ heq
+    · exact ihmore _ _ hd
+  | maybe g ih =>
+    intro xs e hd
+    simp only [decode] at hd
+    split at hd
+    · cases hd
+    · split at hd
+      · cases hd
+      · rename_i heq; cases hd; exact ih _ _ heq
+  | where_ g cs ih =>
+    intro xs e hd
+    simp only [decode] at hd
+    split at hd
+    · split at hd
+      · cases hd
+      · cases hd; simp [fnRefusals]
+    · rename_i heq; cases hd; exact ih _ _ heq
+  | frame magic version kind max g ih =>
+    intro xs e hd
+    simp only [decode] at hd
+    split at hd
+    · split at hd
+      · split at hd
+        · split at hd
+          · cases hd
+          · cases hd; simp [fnRefusals]
+          · rename_i heq; cases hd; exact ih _ _ heq
+        · cases hd; simp [fnRefusals]
+      · cases hd; simp [fnRefusals]
+    · cases hd; simp [fnRefusals]
+  | base64Lines width lo hi =>
+    intro xs e hd
+    simp only [decode] at hd
+    split at hd
+    · split at hd
+      · split at hd
+        · cases hd
+        · cases hd; simp [fnRefusals]
+      · cases hd; simp [fnRefusals]
+    · cases hd; simp [fnRefusals]
+  | seqNil => intro xs e hd; simp [decode] at hd
+  | tagNil w => intro xs e hd; simp only [decode] at hd; cases hd; simp [fnRefusals]
+  | _ =>
+    intro xs e hd
+    simp only [decode] at hd
+    split at hd
+    · cases hd
+    · cases hd; simp [fnRefusals]
+
+/-- An accepted answer's rest is a suffix of the input: the decoder consumes from the front
+and nothing else. For EVERY grammar. -/
+theorem decode_rest_suffix : ∀ (g : Grammar) (xs : List UInt8) (v : Value) (r : List UInt8),
+    decode g xs = .ok (v, r) → r <:+ xs := by
+  intro g
+  induction g with
+  | const o =>
+    intro xs v r hd; simp only [decode] at hd
+    split at hd
+    · cases hd; exact List.drop_suffix _ _
+    · cases hd
+  | uint w lo hi =>
+    intro xs v r hd; simp only [decode] at hd
+    split at hd
+    · cases hd; exact List.drop_suffix _ _
+    · cases hd
+  | bytes w lo hi c =>
+    intro xs v r hd; simp only [decode] at hd
+    split at hd
+    · cases hd; exact (List.drop_suffix _ _).trans (List.drop_suffix _ _)
+    · cases hd
+  | rest lo hi c =>
+    intro xs v r hd; simp only [decode] at hd
+    split at hd
+    · cases hd; exact List.nil_suffix
+    · cases hd
+  | line lo hi c =>
+    intro xs v r hd; simp only [decode] at hd
+    split at hd
+    · cases hd
+      refine (List.drop_suffix _ _).trans ?_
+      exact ⟨xs.takeWhile (· != 13), List.takeWhile_append_dropWhile⟩
+    · cases hd
+  | base64Lines width lo hi =>
+    intro xs v r hd; simp only [decode] at hd
+    split at hd
+    · split at hd
+      · split at hd
+        · cases hd; exact List.nil_suffix
+        · cases hd
+      · cases hd
+    · cases hd
+  | enum w base names =>
+    intro xs v r hd; simp only [decode] at hd
+    split at hd
+    · cases hd; exact List.drop_suffix _ _
+    · cases hd
+  | seqNil => intro xs v r hd; simp only [decode] at hd; cases hd; exact List.suffix_refl _
+  | seqCons h t ihh iht =>
+    intro xs v r hd; simp only [decode] at hd
+    split at hd
+    · rename_i x r1 hx
+      split at hd
+      · rename_i vs r2 hvs
+        obtain ⟨-, rfl⟩ := Prod.mk.inj (Except.ok.inj hd)
+        exact (iht _ _ _ hvs).trans (ihh _ _ _ hx)
+      · cases hd
+      · cases hd
+    · cases hd
+  | tagNil w => intro xs v r hd; simp [decode] at hd
+  | tagArm w code name arm more iharm ihmore =>
+    intro xs v r hd; simp only [decode] at hd
+    split at hd
+    · split at hd
+      · rename_i x r1 hx
+        obtain ⟨-, rfl⟩ := Prod.mk.inj (Except.ok.inj hd)
+        exact (iharm _ _ _ hx).trans (List.drop_suffix _ _)
+      · cases hd
+    · exact ihmore _ _ _ hd
+  | maybe g ih =>
+    intro xs v r hd; simp only [decode] at hd
+    split at hd
+    · cases hd; exact List.nil_suffix
+    · split at hd
+      · rename_i x r1 hx
+        obtain ⟨-, rfl⟩ := Prod.mk.inj (Except.ok.inj hd)
+        exact ih _ _ _ hx
+      · cases hd
+  | where_ g cs ih =>
+    intro xs v r hd; simp only [decode] at hd
+    split at hd
+    · rename_i x r1 hx
+      split at hd
+      · obtain ⟨-, rfl⟩ := Prod.mk.inj (Except.ok.inj hd)
+        exact ih _ _ _ hx
+      · cases hd
+    · cases hd
+  | frame magic version kind max g ih =>
+    intro xs v r hd; simp only [decode] at hd
+    split at hd
+    · rename_i m0 m1 m2 m3 ver knd l0 l1 l2 l3 body
+      split at hd
+      · split at hd
+        · split at hd
+          · obtain ⟨-, rfl⟩ := Prod.mk.inj (Except.ok.inj hd)
+            refine (List.drop_suffix _ _).trans ((List.drop_suffix _ _).trans ?_)
+            exact ⟨[m0, m1, m2, m3, ver, knd, l0, l1, l2, l3], rfl⟩
+          · cases hd
+          · cases hd
+        · cases hd
+      · cases hd
+    · cases hd
+
+/-- **fn-wg-decode-answers, Mini's side.** For every grammar and every input the decoder
+answers exactly one of: accepted, with a value and a rest that is a suffix of the input
+(the octets consumed are the prefix before it); or refused, with one of fn's three words
+`trailer`, `where`, `malformed` (a refusal consumes nothing: it carries no position). -/
+theorem decode_answers (g : Grammar) (xs : List UInt8) :
+    (∃ v r, decode g xs = .ok (v, r) ∧ r <:+ xs) ∨
+      (∃ e, decode g xs = .error e ∧ e ∈ fnRefusals) := by
+  cases hd : decode g xs with
+  | ok p => exact Or.inl ⟨p.1, p.2, rfl, decode_rest_suffix g xs p.1 p.2 hd⟩
+  | error e => exact Or.inr ⟨e, rfl, decode_refusal_mem g xs e hd⟩
+
+/-- The `utf8` class is RFC 3629: an overlong encoding and a surrogate are refused, and a
+four-octet scalar and the last scalar U+10FFFF are accepted; one past it is refused. -/
+theorem utf8Valid_table :
+    utf8Valid [0xC0, 0x80] = false ∧ utf8Valid [0xE0, 0x80, 0x80] = false ∧
+      utf8Valid [0xED, 0xA0, 0x80] = false ∧ utf8Valid [0xF0, 0x9F, 0x98, 0x80] = true ∧
+      utf8Valid [0xF4, 0x8F, 0xBF, 0xBF] = true ∧ utf8Valid [0xF4, 0x90, 0x80, 0x80] = false := by
+  decide
+
+#assert_axioms decode_refusal_mem decode_rest_suffix decode_answers utf8Valid_table
+
 end Minidregg.Compiler.FnWire

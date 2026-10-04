@@ -194,7 +194,10 @@ structure Summary where
   deriving DecidableEq, Repr
 
 /-- The vector kinds of fn §3. -/
-def vectorKinds : List String := ["accept", "concat", "prefix", "mutation", "length"]
+def vectorKinds : List String := ["accept", "concat", "prefix", "mutation", "length", "refuse"]
+
+/-- fn's refusal words, in the order `words.refusals` lists them. -/
+def fnRefusalWords : List String := fnRefusals.map Refusal.fnWord
 
 /-- What one vector checked: its kind and, when refused, the word. -/
 structure Checked where
@@ -204,8 +207,9 @@ structure Checked where
 /-- One vector against the decoder's whole answer (fn §2 "Decoding", §3): every vector names
 its family, the language version and its kind; an accepting vector names the value, the
 octets consumed and the rest, and the value re-encodes to exactly the consumed octets; a
-refusing vector names the refusal word, and the decoder refuses with that word (a refusal
-consumes nothing). -/
+refusing vector names the refusal word (one of `words.refusals`), and the decoder refuses
+with that word (a refusal consumes nothing). A `refuse` vector is a named near miss: it
+carries a `case`, and it must be refused. -/
 def vectorCheck (fam : Family) (version : Nat) (v : Json) : Except String Checked := do
   let label := fam.name
   unless (← jStr label (← jField label "family" v)) == fam.name do
@@ -214,12 +218,23 @@ def vectorCheck (fam : Family) (version : Nat) (v : Json) : Except String Checke
     throw s!"{label}: vector of another language version"
   let kind ← jStr label (← jField label "kind" v)
   unless vectorKinds.contains kind do throw s!"{label}: unknown vector kind {kind}"
+  -- Only `refuse` vectors carry a `case` (a named near miss), and every one of them does.
+  let case_ ← match v.getObjVal? "case" with
+    | .ok c => do
+        unless kind == "refuse" do throw s!"{label}: a {kind} vector carries a case"
+        pure (some (← jStr label c))
+    | .error _ => do
+        if kind == "refuse" then throw s!"{label}: a refuse vector without a case"
+        pure none
+  let kind := match case_ with
+    | some c => s!"{kind}:{c}"
+    | none => kind
   let octets ← ofHex label (← jStr label (← jField label "octets" v))
   let at_ := s!"{label} {kind} {(hexOf octets).take 80}"
   match v.getObjVal? "refused" with
   | .ok word =>
       let word ← jStr label word
-      unless word == "trailer" || word == "malformed" do
+      unless fnRefusalWords.contains word do
         throw s!"{at_}: unknown refusal word {word}"
       match decode fam.grammar octets with
       | .ok (got, _) => throw s!"{at_}: accepted a refusal vector as {(valueToJson got).compress}"
@@ -228,6 +243,7 @@ def vectorCheck (fam : Family) (version : Nat) (v : Json) : Except String Checke
             throw s!"{at_}: refused {r.fnWord} where the file says {word}"
           return { kind, refused := some word }
   | .error _ =>
+      if kind.startsWith "refuse:" then throw s!"{at_}: a refuse vector the file accepts"
       let valueJ ← jField label "value" v
       let value ← valueOfJson fam.grammar valueJ
       let consumed ← jNat label (← jField label "consumed" v)
@@ -269,6 +285,11 @@ def loadDoc (text : String) : Except String (Json × List (Family × List Json))
     throw s!"fn-wire-grammar version {version} is not version {languageVersion}"
   unless (← jStr "trailer" (← jField "file" "trailer" doc)) == "blake3-256" do
     throw "frame trailer is not blake3-256"
+  -- The refusal words are exactly fn's three; a file naming another is refused.
+  let words ← (← jArr "refusals" (← jField "words" "refusals" (← jField "file" "words" doc))).mapM
+    (jStr "refusal word")
+  unless words == fnRefusalWords do
+    throw s!"refusal words {words} are not {fnRefusalWords}"
   let fams ← (← jArr "families" (← jField "file" "families" doc)).mapM fun f => do
     let name ← jStr "family name" (← jField "family" "name" f)
     let g ← loadGrammar (← jField name "grammar" f)
@@ -294,6 +315,8 @@ def checkDoc (text : String) : Except String Summary := do
     -- for a frame also the declared-length vectors and both refusal words.
     for k in ["accept", "prefix", "mutation"] do
       unless seen.any (·.kind == k) do throw s!"{fam.name}: no {k} vectors"
+    let cases := (seen.filterMap fun c => if c.kind.startsWith "refuse:" then some c.kind else none)
+    unless distinct cases do throw s!"{fam.name}: a refuse case is named twice"
     if fam.grammar.isFrame then
       unless seen.any (·.kind == "length") do throw s!"{fam.name}: no length vectors"
       for w in ["trailer", "malformed"] do

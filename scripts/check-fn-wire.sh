@@ -6,11 +6,11 @@
 #   1. Compiler/FnWirePinned.lean re-elaborates against the vendored bytes: the file's BLAKE3
 #      is the pinned digest, every vector gets exactly the decoder answer the file prints
 #      (value, consumed, rest; or the refusal word), fncu.cursor is the grammar Mini runs,
-#      and three planted faults are refused (#assert_compiled on each).
+#      and the planted-fault teeth are refused (#assert_compiled on each).
 #   2. The driver run on the vendored file prints OK (pinned).
 #   3. Controls, each asserting first that its mutation happened: one vector's `consumed`
-#      off by one, one accepted vector's `rest` changed, one trailer refusal renamed
-#      `malformed` -> RED naming the fault (unpinned); the same mutated file pinned -> RED by
+#      off by one, one accepted vector's `rest` changed, one `trailer` and one `where`
+#      refusal renamed `malformed` -> RED naming the fault (unpinned); the same mutated file pinned -> RED by
 #      digest; the unmutated copy unpinned -> OK.
 #   4. fnWrittenCursorHex (FnWirePinned's fn-written cursor) is the evidence file's octets.
 #   5. With FN_REPO set (an fn clone holding the pinned revision): the vendored file is
@@ -27,7 +27,7 @@ fail() { echo "check-fn-wire: FAIL $*"; red=$((red + 1)); }
 ok() { echo "check-fn-wire: ok   $*"; }
 
 if lake env lean Compiler/FnWirePinned.lean >"$tmp/pinned.log" 2>&1 && [ ! -s "$tmp/pinned.log" ]; then
-  ok "Compiler/FnWirePinned.lean elaborates silently (digest, vectors, fncu.cursor, three teeth)"
+  ok "Compiler/FnWirePinned.lean elaborates silently (digest, vectors, fncu.cursor, teeth)"
 else
   cat "$tmp/pinned.log"; fail "Compiler/FnWirePinned.lean"
 fi
@@ -62,6 +62,7 @@ control() { # NAME OLD NEW EXPECT
 control consumed '"consumed":32,' '"consumed":33,' 'consumed'
 control rest '"rest":""' '"rest":"00"' 'rest'
 control word '"refused":"trailer"' '"refused":"malformed"' 'refused trailer where the file says malformed'
+control where '"refused":"where"' '"refused":"malformed"' 'refused where where the file says malformed'
 cp "$file" "$tmp/copy.json"
 o=$(run "$tmp/copy.json" --unpinned); r=$?
 if [ "$r" = 0 ] && grep -q '^fn-wire: OK ' <<<"$o"; then ok "control copy (unmutated, unpinned) passes"; else fail "control copy (rc=$r): $o"; fi

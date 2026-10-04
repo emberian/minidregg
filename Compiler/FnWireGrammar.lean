@@ -3,7 +3,7 @@
 
 fn publishes its wire formats as GRAMMARS in one data language (`fn-wire-grammar`,
 version 1). The normative description is fn `planning/design/wire-grammar-2026-10-04.md`
-§2, read at fn 1e38bb67a; the families and vectors are fn `specs/wire-grammar.json`,
+§2, read at fn 930c67414; the families and vectors are fn `specs/wire-grammar.json`,
 vendored as `protocol/fn/wire-grammar.json`, loaded by `Compiler.FnWireJson` and pinned by
 `Compiler.FnWirePinned`. This module is Mini's ONE interpreter of that language:
 
@@ -20,11 +20,13 @@ and proves, once for every well-formed grammar:
 * `encode_decode` — `decode g xs = ok (v, r)` implies `encode g v = ok b` with
   `b ++ r = xs` (CANONICITY: every accepted octet string is the encoding of its value).
 
-Refusals are named and distinct: `malformed` (the octets are not of the grammar),
-`constraint` (a `where` check fails on a decoded value; fn's file words this
-"malformed", `Refusal.fnWord`), `trailer` (a frame whose trailer is not BLAKE3-256 of its
-protected prefix), `limit` (the input exceeds the caller's work bound, refused before any
-decoding work; `decodeWithin`).
+Refusals are named and distinct, and the decoder is sequential (the first refusal met is
+the answer): `trailer` (a frame whose trailer is not BLAKE3-256 of its protected prefix,
+checked before the payload is decoded), `whereFailed` (a `where` node's fields decode and
+one of its checks fails; fn's word `where`), `malformed` (every other refusal). These are
+fn's three words (`fnRefusals`), and `FnWireRoundTrip.decode_answers` proves the decoder
+gives no other. `limit` is Mini's own work bound, answered only by `decodeWithin` (the input
+exceeds the caller's bound; refused before any decoding work).
 
 The base64 is `Kernel.Base64` (the tree's one codec, with its own two round trips); the
 frame digest is `Compiler.Blake3.hash`, used here only through its length.
@@ -96,16 +98,19 @@ inductive Value where
 /-- The named refusals. -/
 inductive Refusal where
   | malformed
-  | constraint
+  | whereFailed
   | trailer
   | limit
   deriving DecidableEq, Repr
 
-/-- fn's refusal word for a refusal (fn v1 names only `trailer` and `malformed`; a failed
-`where` check is "malformed" there). `limit` is Mini's own work bound and has no fn word. -/
+/-- The refusals of fn's language, in fn's order (`words.refusals` of the exported file:
+`trailer`, `where`, `malformed`). -/
+def fnRefusals : List Refusal := [.trailer, .whereFailed, .malformed]
+
+/-- A refusal's word. fn's three are fn's words; `limit` is Mini's own work bound. -/
 def Refusal.fnWord : Refusal → String
   | .malformed => "malformed"
-  | .constraint => "malformed"
+  | .whereFailed => "where"
   | .trailer => "trailer"
   | .limit => "limit"
 
@@ -362,7 +367,7 @@ def encode : Grammar → Value → Except Refusal (List UInt8)
   | .maybe g, .list [v] => encode g v
   | .where_ g cs, v =>
       match encode g v with
-      | .ok b => if checksHold v cs then .ok b else .error .constraint
+      | .ok b => if checksHold v cs then .ok b else .error .whereFailed
       | .error e => .error e
   | .frame magic version kind max g, v =>
       match encode g v with
@@ -435,7 +440,7 @@ def decode : Grammar → List UInt8 → Except Refusal (Value × List UInt8)
           | .error e => .error e
   | .where_ g cs, xs =>
       match decode g xs with
-      | .ok (v, r) => if checksHold v cs then .ok (v, r) else .error .constraint
+      | .ok (v, r) => if checksHold v cs then .ok (v, r) else .error .whereFailed
       | .error e => .error e
   | .frame magic version kind max g, xs =>
       match xs with

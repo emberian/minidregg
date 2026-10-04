@@ -15,8 +15,9 @@ What this module establishes, at build time, against the vendored bytes:
 * `fncuCursor_is_pinned` — the `fncu.cursor` grammar Mini runs (`cursorGrammar`) is the
   file's family of that name;
 * `fn_written_cursor` — a cursor fn wrote (evidence) decodes to its scope and position;
-* teeth: a file with one vector's `consumed` changed, or one `rest` changed, or one refusal
-  word swapped, is refused.
+* teeth: a file with one vector's `consumed` changed, or one `rest` changed, or a `trailer`
+  or `where` refusal answered `malformed`, or refusal words other than fn's three, is
+  refused.
 
 Re-pinning to another fn revision is: vendor the file, set `pinnedRevision` and
 `pinnedDigest`, re-run this module and `scripts/check-fn-wire.sh`. The counts in
@@ -31,10 +32,10 @@ import Theory.AssertCompiled
 namespace Minidregg.Compiler.FnWire
 
 /-- fn's commit the vendored file is taken from. -/
-def pinnedRevision : String := "1e38bb67a806872fe1e29a825875c7d56df04083"
+def pinnedRevision : String := "930c67414ab9f866fd918465dcedeaeb9640437f"
 
 /-- BLAKE3-256 of the vendored file. -/
-def pinnedDigest : String := "68a681bff5e1b73a0a5dc9d424cc33a05f73fc39e733dd0cb71f8082f41c047c"
+def pinnedDigest : String := "d5f516610458cfa0b3d001a5cfba983482ef9520bbcc5445dc0afc849c745454"
 
 /-- The vendored file. -/
 def pinnedText : String := include_str "../protocol/fn/wire-grammar.json"
@@ -43,10 +44,11 @@ def pinnedText : String := include_str "../protocol/fn/wire-grammar.json"
 theorem pinned_digest : Blake3.toHex (Blake3.hash pinnedText.toUTF8.toList) = pinnedDigest := by
   native_decide
 
-theorem pinned_length : pinnedText.utf8ByteSize = 47340 := by native_decide
+theorem pinned_length : pinnedText.utf8ByteSize = 64056 := by native_decide
 
-/-- Every vector of the pinned file: 3 families, 31 accepted answers, 218 refusals. -/
-theorem pinned_vectors : checkPasses pinnedText ⟨3, 31, 218⟩ = true := by native_decide
+/-- Every vector of the pinned file: 6 families (three on a wire, three `conformance.*`),
+356 vectors, 60 accepted answers and 296 refusals. -/
+theorem pinned_vectors : checkPasses pinnedText ⟨6, 60, 296⟩ = true := by native_decide
 
 theorem fncuCursor_is_pinned : familyIs pinnedText "fncu.cursor" cursorGrammar = true := by
   native_decide
@@ -67,6 +69,20 @@ theorem pinned_refuses_word_fault :
       true := by
   native_decide
 
+/-- Tooth: a failed `where` check answered `malformed` is refused (`where` is its own word). -/
+theorem pinned_refuses_where_fault :
+    checkRefuses (pinnedText.replace "\"refused\":\"where\"" "\"refused\":\"malformed\"") =
+      true := by
+  native_decide
+
+/-- Tooth: a file whose refusal words are not exactly fn's three is refused. -/
+theorem pinned_refuses_words_fault :
+    checkRefuses (pinnedText.replace "\"refusals\":[\"trailer\",\"where\",\"malformed\"]"
+      "\"refusals\":[\"trailer\",\"malformed\"]") = true := by
+  native_decide
+
+#assert_compiled pinned_refuses_where_fault
+#assert_compiled pinned_refuses_words_fault
 #assert_compiled pinned_digest
 #assert_compiled pinned_length
 #assert_compiled pinned_vectors
