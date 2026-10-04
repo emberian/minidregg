@@ -504,9 +504,18 @@ impl Broker {
             return;
         }
         let result = match op.as_str() {
-            "hello" => Ok(json!({"ok":true,"broker":CONFIG_TYPE,"peer":{"uid":peer.uid,"gid":peer.gid},
-                "roles":roles.iter().map(|r| r.name()).collect::<Vec<_>>(),"singleAccount":self.config.single_account,
-                "configSha256":self.config.sha256,"credentials":self.config.credentials.is_some(),"discord":self.config.discord.is_some()})),
+            "hello" => {
+                // The mirror's channel URL is not a secret (the webhook URL and the
+                // token are); a discord peer binds its custody to it.
+                let channel = match (&self.config.discord, roles.contains(&Role::Discord)) {
+                    (Some(d), true) => discord::Secrets::load(&d.mirror).ok().map(|s| s.channel_url.clone()),
+                    _ => None,
+                };
+                Ok(json!({"ok":true,"broker":CONFIG_TYPE,"peer":{"uid":peer.uid,"gid":peer.gid},
+                    "roles":roles.iter().map(|r| r.name()).collect::<Vec<_>>(),"singleAccount":self.config.single_account,
+                    "configSha256":self.config.sha256,"credentials":self.config.credentials.is_some(),"discord":self.config.discord.is_some(),
+                    "discordChannel":channel}))
+            }
             "provider-authorize" => provider::authorize(self, &peer, &request, &mut note),
             "provider-forward" => provider::forward(self, &peer, &request, &mut stream, &mut note),
             "provider-verify-grant" => provider::verify_grant(self, &request, &mut note),

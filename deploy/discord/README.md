@@ -11,7 +11,7 @@
 It is a Discord **interactions endpoint**:
 
 - Discord POSTs each signed slash command to an HTTPS URL, and the endpoint answers.
-- There is no bot gateway, no websocket, no long-lived connection and no bot token on the box.
+- There is no bot gateway, no websocket, no long-lived connection and no bot token in the entrance. (The room mirror, `mini-discord-mirror`, uses a webhook and a bot token; the key broker `mini-keys` holds both and posts/reads for it.)
 - Caddy on the anchor terminates TLS and proxies to the workhorse's private address.
 
 ```
@@ -46,13 +46,15 @@ mini-discord ──curl PATCH /webhooks/APP/TOKEN/messages/@original──▶ Di
      - the shell's stdout in a code block, cut to 2000 characters with a note saying how much was shown;
      - on failure, the shell's own ending line verbatim (`error:` / `usage:` / `refused:` / `undecided:`).
 6. **Log.**
-   - `(user, line, ending, exit)` is appended to `SESSIONS/NAME/discord.log` (0600).
+   - `(user, line, ending, exit)` is appended to `SESSIONS/NAME/discord.log` (0600); under split tenancy, to `MINI_DISCORD_STATE/log/NAME.discord.log`, and custody below lives in `MINI_DISCORD_STATE/custody/`.
    - Full captured stdout/stderr (each bounded to 1 MiB), ending and delivery status are synced into `SESSIONS/.discord-custody/APP-INTERACTION.json`, mode 0600 in a 0700 directory. This is sensitive session data; protect it like session keys. The interaction token is not retained.
    - Cross-process advisory leases and synced atomic records prevent concurrent duplicate execution. Corrupt or inaccessible custody fails closed. Do not delete custody to retry an uncertain command.
    - The roster is checked at admission and again after waiting for a session worker. Removing/remapping a user prevents queued execution and future custody retrieval. Native capability revocation/current law still governs every actual native operation.
    - An unsuccessful PATCH does not rerun the command. Its result remains available by status or signed interaction retry. There is no autonomous token-based reply recovery after restart; tokens are not retained.
 
 Every interaction answer is **ephemeral** in Discord: it is scoped to the invoking user in the Discord UI. Its content is still disclosed to Discord and to the service operator; this is not end-to-end privacy. Cached command answers are prior evidence, not a fresh authorization check of their original resource. Every answer also sets `allowed_mentions: {parse: []}`, so output text can never ping anyone.
+
+Under split tenancy (dregg-infra `/etc/mini/tenancy` = `split`) each friend's session is its own account `mini-s-NAME` and the entrance is account `mini-discord`, which cannot run anything as a friend by itself. It hands the line on stdin to `sudo -n -- /usr/local/lib/mini/mini-session-run NAME` (the one sudo rule `mini-discord` holds). The runner, as root, checks that NAME is a value of the root-owned Discord roster and that `mini-s-NAME` exists in group `mini-hosted`, reads one bounded line, and runs the same forced command below as `mini-s-NAME` with a fixed environment and a fixed timeout. A compromise of the entrance can therefore act as a rostered friend only through the shell's grammar, never read a friend's session files, and never act as a friend who is not on the Discord roster.
 
 The line is passed as one argument (`SSH_ORIGINAL_COMMAND` becomes `--line "$SSH_ORIGINAL_COMMAND"`) with an otherwise empty environment. It never reaches a system shell. The Discord user chooses neither the workspace nor the home: both come from NAME by `render-authorized-keys.sh`'s rule. The sponsor gets `store/node/sponsor`; everyone else gets `sessions/NAME/workspace`.
 

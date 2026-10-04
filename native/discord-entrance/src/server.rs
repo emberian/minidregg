@@ -38,6 +38,11 @@ pub struct Config {
     pub deployment: Deployment,
     pub sessions: Sessions,
     pub poster: Poster,
+    /// The entrance's own state (`MINI_DISCORD_STATE`): interaction custody and
+    /// the per-session line log, when it runs as its own account and cannot
+    /// write the sessions tree (split tenancy; requires `MINI_SESSION_RUNNER`).
+    /// None: custody in `SESSIONS/.discord-custody`, the log in `HOME/discord.log`.
+    pub state: Option<PathBuf>,
 }
 
 impl Config {
@@ -73,6 +78,18 @@ impl Config {
                 spool: path_or("MINI_DISCORD_SPOOL", "/run/mini-discord")?,
                 max_time_s: 20,
             },
+            state: match std::env::var("MINI_DISCORD_STATE") {
+                Ok(v) if !v.is_empty() => Some(crate::env_path("MINI_DISCORD_STATE")?),
+                _ => None,
+            },
+        })
+        .and_then(|c: Config| {
+            // Half the split shape is neither shape: refuse it by name.
+            match (c.deployment.runner.is_some(), c.state.is_some()) {
+                (true, false) => Err("MINI_SESSION_RUNNER needs MINI_DISCORD_STATE: an entrance that runs lines as the sessions' own accounts cannot write the sessions tree".into()),
+                (false, true) => Err("MINI_DISCORD_STATE needs MINI_SESSION_RUNNER: an entrance with its own state runs lines through the root runner".into()),
+                _ => Ok(c),
+            }
         })
     }
 }
@@ -202,7 +219,10 @@ impl App {
                 return (say(Ending::entrance("error", &e)), None);
             }
         };
-        let custody = self.cfg.sessions.dir.join(".discord-custody");
+        let custody = match &self.cfg.state {
+            Some(state) => state.join("custody"),
+            None => self.cfg.sessions.dir.join(".discord-custody"),
+        };
         if cmd.name == interaction::COMMAND_STATUS {
             let Some(id) = cmd.target.as_deref().filter(|id| interaction::is_snowflake(id)) else {
                 return (say(Ending::entrance("usage", "/mini-status target:INTERACTION-ID")), None);
@@ -254,7 +274,13 @@ impl App {
     #[allow(clippy::too_many_arguments)]
     fn log(&self, s: &Session, at: u64, user: &str, id: &str, line: &str, ending: &Ending, exit: Option<i32>) {
         let rec = log_record(at, user, id, line, ending, exit);
-        if let Err(e) = append_log(&s.home, LOG_FILE, &rec) {
+        let written = match &self.cfg.state {
+            Some(state) => mini_sdk::store::private_dir(&state.join("log"))
+                .map_err(|e| std::io::Error::other(e.to_string()))
+                .and_then(|_| append_log(&state.join("log"), &format!("{}.{LOG_FILE}", s.name), &rec)),
+            None => append_log(&s.home, LOG_FILE, &rec),
+        };
+        if let Err(e) = written {
             eprintln!("mini-discord: session {}: cannot append {LOG_FILE}: {e}", s.name);
         }
         eprintln!("mini-discord: user {} session {} ending {}", user, s.name, ending.word);

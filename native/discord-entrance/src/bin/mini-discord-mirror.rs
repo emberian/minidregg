@@ -27,20 +27,27 @@
 //! * a channel message from a webhook (`webhook_id`: what this mirror posted) or from a bot
 //!   is never said into the room.
 //!
-//! Configuration is the environment (`EnvironmentFile`, 0600; the webhook URL and the bot
-//! token are secrets): `MINI_MIRROR_ROOM`, `MINI_MIRROR_WEBHOOK_URL`, `MINI_MIRROR_CHANNEL_URL`
-//! (`https://discord.com/api/v10/channels/ID/messages`), `MINI_MIRROR_BOT_TOKEN`,
+//! The webhook URL and the bot token are never this process's: the key broker
+//! (native/mini-keys) holds them and posts to the one configured webhook / reads the one
+//! configured channel on its behalf (`discord-post`, `discord-read`; this account must hold
+//! the broker's `discord` role). Under split tenancy the mirror runs as its own session's
+//! account, so it reads and writes only its own session home.
+//!
+//! Configuration is the environment, and holds no secret: `MINI_MIRROR_ROOM`,
+//! `MINI_MIRROR_BROKER` (the broker client config, default `/etc/mini/keys-client.json`),
 //! `MINI_MIRROR_PUBLISH_ROOM_TO_CHANNEL=yes` (authorized disclosure mapping),
 //! `MINI_MIRROR_HOME`, `MINI_MIRROR_WORKSPACE`, `MINI_MIRROR_INTERVAL_S` (default 30),
-//! `MINI_DISCORD_SPOOL`, and the deployment variables of `mini-discord` (`MINI_SHELL_WRAPPER`
+//! and the deployment variables of `mini-discord` (`MINI_SHELL_WRAPPER`
 //! `MINI_CLIENT` `MINI_HOST` `MINI_CONFIG` `MINI_SOCKET`). One argument is accepted: `--once`.
+//! `MINI_MIRROR_WEBHOOK_URL`, `MINI_MIRROR_CHANNEL_URL` and `MINI_MIRROR_BOT_TOKEN` refuse
+//! to start the mirror: a secret in a session's environment is the shape this replaced.
 
 use std::path::{Path, PathBuf};
 use mini_sdk::custody::{Delivery, DeliveryState};
 use mini_sdk::store::{self as custody, Record};
 use std::time::Duration;
 
-use minidregg_discord_entrance::curl::Poster;
+use mini_keys::client::Broker;
 use minidregg_discord_entrance::interaction::{followup, is_snowflake};
 use minidregg_discord_entrance::reply::DISCORD_LIMIT;
 use minidregg_discord_entrance::session::{append_log, Deployment, Session};
@@ -214,10 +221,10 @@ struct Mirror {
     deployment: Deployment,
     session: Session,
     room: String,
-    webhook: String,
+    /// The mirrored channel's API URL, as the broker reports it (not a secret);
+    /// part of the bridge's custody binding.
     channel: String,
-    token: String,
-    poster: Poster,
+    broker: Broker,
     state: PathBuf,
 }
 
@@ -269,8 +276,8 @@ impl Mirror {
                     DeliveryState::Unknown=>return Err(format!("publication {cell}:{seq} UNKNOWN; inspect Discord and resolve before continuing")),
                     DeliveryState::Fresh=>{
                         record.save(delivery.start(now_s())?)?;
-                        let url=if self.webhook.contains('?'){format!("{}&wait=true",self.webhook)}else{format!("{}?wait=true",self.webhook)};
-                        let code=self.poster.send("POST",&url,followup(text).to_string().as_bytes())?;
+                        let answer=self.broker.call(&json!({"op":"discord-post","body":followup(text)}),Duration::from_secs(40)).map_err(|r|format!("publication {cell}:{seq} UNKNOWN ({r}); no automatic repost"))?;
+                        let code=answer["status"].as_u64().unwrap_or(0) as u16;
                         if !(200..300).contains(&code){return Err(format!("publication {cell}:{seq} UNKNOWN (HTTP {code}); no automatic repost"))}
                         record.save(Delivery::open(delivery.binding,record.value.clone())?.complete(json!({"http":code}),now_s())?)?;
                         posted+=1;
@@ -289,8 +296,9 @@ impl Mirror {
         custody::private_dir(&self.custody_root())?;
         if state.scan.is_null(){state.scan=json!({"phase":"scan","pages":0,"before":null,"boundary":state.message,"offset":0});save_state(&self.state,state)?;}
         if state.scan["phase"]=="scan" {
-            let url=match state.scan["before"].as_str(){Some(id)=>format!("{}?before={id}&limit=50",self.channel),None=>format!("{}?limit=50",self.channel)};
-            let (code,body)=self.poster.get(&url,&[("Authorization",&format!("Bot {}",self.token))])?;
+            let page=self.broker.call(&json!({"op":"discord-read","before":state.scan["before"],"limit":50}),Duration::from_secs(40)).map_err(|r|format!("channel read: {r}"))?;
+            let code=page["status"].as_u64().unwrap_or(0) as u16;
+            let body=page["body"].as_str().unwrap_or("").as_bytes().to_vec();
             if !(200..300).contains(&code){return Err(format!("channel read HTTP {code}"))}
             let v:Value=serde_json::from_slice(&body).map_err(|e|e.to_string())?;
             let rows=v.as_array().ok_or("channel response is not an array")?;
@@ -360,26 +368,24 @@ fn main() {
     if !is_room_name(&room) {
         fail("MINI_MIRROR_ROOM must be a room name (letters, digits, hyphens)");
     }
-    let webhook = env_required("MINI_MIRROR_WEBHOOK_URL").unwrap_or_else(|e| fail(e));
-    let channel = env_required("MINI_MIRROR_CHANNEL_URL").unwrap_or_else(|e| fail(e));
-    for url in [&webhook, &channel] {
-        if !minidregg_discord_entrance::curl::is_plain_url(url) {
-            fail("MINI_MIRROR_WEBHOOK_URL and MINI_MIRROR_CHANNEL_URL must be plain URLs");
+    for gone in ["MINI_MIRROR_WEBHOOK_URL", "MINI_MIRROR_CHANNEL_URL", "MINI_MIRROR_BOT_TOKEN"] {
+        if std::env::var_os(gone).is_some() {
+            fail(format!("{gone} is set: the mirror no longer takes Discord secrets; the key broker holds the webhook, channel and bot token (mini-keys discord-mirror secrets). Remove it from the environment."));
         }
     }
-    let token = env_required("MINI_MIRROR_BOT_TOKEN").unwrap_or_else(|e| fail(e));
-    if !token.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-')) {
-        fail("MINI_MIRROR_BOT_TOKEN has characters a Discord token does not");
-    }
+    let broker_config = match std::env::var("MINI_MIRROR_BROKER") {
+        Ok(v) if !v.is_empty() => env_path("MINI_MIRROR_BROKER").unwrap_or_else(|e| fail(e)),
+        _ => PathBuf::from(mini_keys::client::CLIENT_CONFIG),
+    };
+    let broker = Broker::load(&broker_config, unsafe { libc::geteuid() }).unwrap_or_else(|e| fail(e));
+    let hello = mini_keys::client::hello(&broker).unwrap_or_else(|e| fail(e));
+    let channel = hello["discordChannel"].as_str().map(str::to_owned)
+        .unwrap_or_else(|| fail("this account holds no discord role at the key broker, or the broker holds no mirror secrets"));
     let home = env_path("MINI_MIRROR_HOME").unwrap_or_else(|e| fail(e));
     let workspace = env_path("MINI_MIRROR_WORKSPACE").unwrap_or_else(|e| fail(e));
     if home.to_string_lossy().chars().any(char::is_whitespace) {fail("MINI_MIRROR_HOME cannot contain whitespace: native chat path options use whitespace-separated words")}
 
     let interval = env_u64("MINI_MIRROR_INTERVAL_S", 30).unwrap_or_else(|e| fail(e)).max(5);
-    let spool = match std::env::var("MINI_DISCORD_SPOOL") {
-        Ok(v) if !v.is_empty() => env_path("MINI_DISCORD_SPOOL").unwrap_or_else(|e| fail(e)),
-        _ => PathBuf::from("/run/mini-discord"),
-    };
     let state_dir = home.join("mirror");
     if let Err(e) = custody::private_dir(&state_dir) {
         fail(format!("{}: {e}", state_dir.display()));
@@ -389,10 +395,8 @@ fn main() {
         session: Session { name: "mirror".into(), home, workspace },
         state: state_dir.join(format!("{room}.json")),
         room,
-        webhook,
         channel,
-        token,
-        poster: Poster { curl: PathBuf::from(minidregg_discord_entrance::curl::CURL), spool, max_time_s: 20 },
+        broker,
     };
     // One process owns this bridge configuration and all its page files.
     let mut lease=Record::lock(&state_dir,&format!("{}-bridge",mirror.room)).unwrap_or_else(|e|fail(e)).unwrap_or_else(||fail("bridge already running"));
@@ -546,17 +550,40 @@ mod tests {
         assert!(!is_room_name("../x"));
         assert!(!is_room_name(""));
     }
+    /// A real key broker (same account, singleAccount) holding the mirror's
+    /// secrets for the fake Discord at `api`.
+    fn test_broker(home:&Path, api:&str)->(Broker,String) {
+        use std::os::unix::fs::PermissionsExt;
+        let keys=home.join("keys");custody::private_dir(&keys).unwrap();
+        for sub in ["run","state"] {custody::private_dir(&keys.join(sub)).unwrap();}
+        let channel=format!("{api}/channel");
+        let secrets=keys.join("discord-mirror.json");
+        std::fs::write(&secrets,json!({"type":"mini-discord-mirror-secrets-v1","webhookUrl":format!("{api}/webhook"),"channelUrl":channel,"botToken":"fake.token"}).to_string()).unwrap();
+        std::fs::set_permissions(&secrets,std::fs::Permissions::from_mode(0o600)).unwrap();
+        let me=unsafe{libc::geteuid()};
+        let config=json!({"type":"mini-keys-broker-v1","socket":keys.join("run/b.sock"),"audit":keys.join("state/audit.jsonl"),
+            "spool":keys.join("state/spool"),"singleAccount":true,"peers":[{"role":"discord","uids":[me]}],"discord":{"mirror":secrets}});
+        std::fs::write(keys.join("broker.json"),config.to_string()).unwrap();
+        std::fs::set_permissions(keys.join("broker.json"),std::fs::Permissions::from_mode(0o644)).unwrap();
+        let (server,listener)=mini_keys::server::Broker::start(mini_keys::server::Config::load(&keys.join("broker.json"),me).unwrap()).unwrap();
+        std::thread::spawn(move||server.serve(listener));
+        let broker=Broker::new(keys.join("run/b.sock"),me);
+        assert_eq!(mini_keys::client::hello(&broker).unwrap()["discordChannel"],channel.as_str());
+        (broker,channel)
+    }
     fn test_mirror(tag:&str, api:String)->Mirror {
         use std::os::unix::fs::PermissionsExt;
         let home=std::env::temp_dir().join(format!("mirror-{tag}-{}",std::process::id()));
         let _=std::fs::remove_dir_all(&home);std::fs::create_dir_all(&home).unwrap();
         std::fs::set_permissions(&home,std::fs::Permissions::from_mode(0o700)).unwrap();
-        for sub in ["workspace","requests","mirror","spool"] {custody::private_dir(&home.join(sub)).unwrap();}
+        let home=home.canonicalize().unwrap();
+        for sub in ["workspace","requests","mirror"] {custody::private_dir(&home.join(sub)).unwrap();}
         std::fs::write(home.join("workspace/workspace.json"),r#"{"subject":"9"}"#).unwrap();
         let wrapper=home.join("wrapper");
         std::fs::write(&wrapper,"#!/bin/sh\ncase \"$SSH_ORIGINAL_COMMAND\" in\n tail*) cat \"$6/feed.json\" ;;\n *) printf '%s\\n' \"$SSH_ORIGINAL_COMMAND\" >> \"$6/says.log\" ;;\nesac\n").unwrap();
         std::fs::set_permissions(&wrapper,std::fs::Permissions::from_mode(0o700)).unwrap();
-        Mirror{deployment:Deployment{wrapper,mini:"/fixed/mini".into(),host:"/fixed/host".into(),config:"/fixed/config".into(),socket:"/fixed/socket".into(),timeout:Duration::from_secs(2)},session:Session{name:"mirror".into(),workspace:home.join("workspace"),home:home.clone()},room:"commons".into(),webhook:format!("{api}/webhook"),channel:format!("{api}/channel"),token:"fake".into(),poster:Poster{curl:"/usr/bin/curl".into(),spool:home.join("spool"),max_time_s:2},state:home.join("mirror/commons.json")}
+        let (broker,channel)=test_broker(&home,&api);
+        Mirror{deployment:Deployment{wrapper,mini:"/fixed/mini".into(),host:"/fixed/host".into(),config:"/fixed/config".into(),socket:"/fixed/socket".into(),timeout:Duration::from_secs(2),runner:None},session:Session{name:"mirror".into(),workspace:home.join("workspace"),home:home.clone()},room:"commons".into(),channel,broker,state:home.join("mirror/commons.json")}
     }
     fn page(m:&Mirror,start:u64,end:u64){
         let mut s=json!({"type":"mini-chat-room-v1","private":false,"selectedEntries":end-start,"discoveryCursors":{"42":end-1},"unreadable":[]}).to_string()+"\n";

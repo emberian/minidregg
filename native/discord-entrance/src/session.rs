@@ -1,5 +1,13 @@
 //! One line through the ssh entrance's own forced command.
 //!
+//! Under split tenancy (dregg-infra `/etc/mini/tenancy` = split) every friend's
+//! session is its own account (`mini-s-NAME`) and the entrance (account
+//! `mini-discord`) cannot run anything as it. It hands the line to the root
+//! runner (`MINI_SESSION_RUNNER`, run as `sudo -n -- RUNNER NAME`, the line on
+//! stdin), which checks NAME against the Discord roster and runs the same forced
+//! command as that account. Without a runner (single tenancy, and the tests) the
+//! entrance runs the forced command itself, as before.
+//!
 //! The entrance does not re-derive `mini shell`'s environment. It runs
 //! `deploy/shell/mini-shell-ssh MINI HOST CONFIG SOCKET WORKSPACE HOME` with the line in
 //! `SSH_ORIGINAL_COMMAND` (so the line is one argument to `mini shell --line`, never parsed
@@ -9,6 +17,7 @@
 
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
+use std::ffi::OsString;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -35,6 +44,10 @@ pub struct Deployment {
     pub config: PathBuf,
     pub socket: PathBuf,
     pub timeout: Duration,
+    /// The argv prefix that runs one line as a session's own account, NAME
+    /// appended and the line on stdin: `sudo -n -- MINI_SESSION_RUNNER`. None:
+    /// the entrance shares the sessions' account and runs the wrapper itself.
+    pub runner: Option<Vec<OsString>>,
 }
 
 impl Deployment {
@@ -48,22 +61,45 @@ impl Deployment {
             config: env_path("MINI_CONFIG")?,
             socket: env_path("MINI_SOCKET")?,
             timeout: Duration::from_secs(env_u64("MINI_LINE_TIMEOUT_S", 120)?),
+            runner: match std::env::var("MINI_SESSION_RUNNER") {
+                Ok(v) if !v.is_empty() => Some(vec![
+                    "/usr/bin/sudo".into(),
+                    "-n".into(),
+                    "--".into(),
+                    env_path("MINI_SESSION_RUNNER")?.into_os_string(),
+                ]),
+                _ => None,
+            },
         })
     }
 
     /// Run one line in one session. Never fails: a spawn failure or a timeout is an ending.
     pub fn run(&self, session: &Session, line: &str) -> Outcome {
-        let mut cmd = Command::new(&self.wrapper);
-        cmd.args([&self.mini, &self.host, &self.config, &self.socket, &session.workspace, &session.home])
-            .env_clear()
+        let mut cmd = match &self.runner {
+            None => {
+                let mut cmd = Command::new(&self.wrapper);
+                cmd.args([&self.mini, &self.host, &self.config, &self.socket, &session.workspace, &session.home])
+                    .stdin(Stdio::null());
+                cmd
+            }
+            // The runner chooses the paths and the account from NAME alone; the
+            // line is data on stdin, never an argument and never a shell word.
+            Some(prefix) => {
+                let mut cmd = Command::new(&prefix[0]);
+                cmd.args(&prefix[1..]).arg(&session.name).stdin(Stdio::piped());
+                cmd
+            }
+        };
+        cmd.env_clear()
             .env("PATH", "/usr/bin:/bin")
             .env("LANG", "C.UTF-8")
-            .env("SSH_ORIGINAL_COMMAND", line)
-            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             // Its own process group, so a timeout stops the Host children too.
             .process_group(0);
+        if self.runner.is_none() {
+            cmd.env("SSH_ORIGINAL_COMMAND", line);
+        }
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
@@ -73,6 +109,11 @@ impl Deployment {
                 ))
             }
         };
+        if let Some(mut stdin) = child.stdin.take() {
+            let mut bytes = line.as_bytes().to_vec();
+            bytes.push(b'\n');
+            let _ = stdin.write_all(&bytes);
+        }
         let out = capture(child.stdout.take());
         let err = capture(child.stderr.take());
         let started = Instant::now();
@@ -80,6 +121,12 @@ impl Deployment {
             match child.try_wait() {
                 Ok(Some(s)) => break Some(s),
                 Ok(None) if started.elapsed() >= self.timeout => {
+                    if self.runner.is_some() {
+                        // sudo relays TERM to the session's process; the runner
+                        // also bounds the line itself. KILL only stops sudo.
+                        unsafe { libc::killpg(child.id() as libc::pid_t, libc::SIGTERM) };
+                        std::thread::sleep(Duration::from_secs(3));
+                    }
                     unsafe { libc::killpg(child.id() as libc::pid_t, libc::SIGKILL) };
                     let _ = child.wait();
                     break None;

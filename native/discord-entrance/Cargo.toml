@@ -28,4 +28,9 @@ libc = "=0.2.189"
 # Durable custody (owner-private leased records, external-delivery custody) is the SDK's one implementation.
 minidregg-mini-sdk = { path = "../mini-sdk", features = ["native"] }
 serde_json = "=1.0.151"
+# The key broker client: the mirror posts and reads through it and holds no Discord secret.
+minidregg-mini-keys = { path = "../mini-keys", default-features = false }
 
+[dev-dependencies]
+# The broker itself, so the mirror's tests reach the fake Discord through a real one.
+minidregg-mini-keys = { path = "../mini-keys" }

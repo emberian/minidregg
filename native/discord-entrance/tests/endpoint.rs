@@ -39,6 +39,20 @@ struct World {
 }
 
 fn world(tag: &str) -> World {
+    world_with(tag, false)
+}
+
+/// The split shape: the entrance runs each line through a root runner as the
+/// session's own account (here a stand-in script, invoked exactly as
+/// `sudo -n -- RUNNER NAME` would invoke it: NAME as the one argument, the line
+/// on stdin) and keeps its custody and log in its own state directory.
+const RUNNER: &str = r#"#!/bin/sh
+[ "$#" = 1 ] || { echo "runner takes NAME only, got $#" >&2; exit 64; }
+IFS= read -r line
+printf 'runner name=%s line=[%s] ssh_env=%s\n' "$1" "$line" "${SSH_ORIGINAL_COMMAND-unset}"
+"#;
+
+fn world_with(tag: &str, split: bool) -> World {
     let root = std::env::temp_dir().join(format!("discord-entrance-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     for d in ["sessions/friend", "spool"] {
@@ -82,9 +96,21 @@ fn world(tag: &str) -> World {
             config: p("config"),
             socket: p("socket"),
             timeout: Duration::from_secs(20),
+            runner: split.then(|| {
+                let runner = root.join("runner");
+                std::fs::write(&runner, RUNNER).unwrap();
+                std::fs::set_permissions(&runner, std::fs::Permissions::from_mode(0o755)).unwrap();
+                vec![runner.into_os_string()]
+            }),
         },
         sessions: Sessions { dir: root.join("sessions"), sponsor: "ember".into(), sponsor_workspace: p("sponsor-ws") },
         poster: Poster { curl: "/usr/bin/curl".into(), spool: root.join("spool"), max_time_s: 10 },
+        state: split.then(|| {
+            let state = root.join("entrance-state");
+            std::fs::create_dir_all(&state).unwrap();
+            std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o700)).unwrap();
+            state
+        }),
     };
     let app = App::new(cfg.clone()).unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -186,6 +212,20 @@ fn a_rostered_line_runs_in_its_session_deferred_and_logged() {
     assert_eq!(recs[2]["exit"], 3);
     let mode = std::fs::metadata(home.join("discord.log")).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600);
+}
+
+#[test]
+fn split_tenancy_lines_go_through_the_runner_and_nothing_is_written_in_the_sessions_tree() {
+    let w = world_with("split", true);
+    let c = deferred_then_patch(&w, "1", post(&w, &command("1", FRIEND, "mini", Some("read 'a b' {\"x\":1}")), false));
+    assert_eq!(c, "```\nrunner name=friend line=[read 'a b' {\"x\":1}] ssh_env=unset\n```");
+    let state = w.cfg.state.clone().unwrap();
+    let log = std::fs::read_to_string(state.join("log/friend.discord.log")).unwrap();
+    assert_eq!(log.lines().count(), 1);
+    assert!(std::fs::read_dir(state.join("custody")).unwrap().count() >= 1);
+    // The entrance wrote nothing a session account owns.
+    assert!(!w.sessions.join("friend/discord.log").exists());
+    assert!(!w.sessions.join(".discord-custody").exists());
 }
 
 #[test]

@@ -16,6 +16,8 @@
 //! | `MINI_SHELL_WRAPPER` `MINI_CLIENT` `MINI_HOST` `MINI_CONFIG` `MINI_SOCKET` | the ssh entrance's forced command and its first four arguments |
 //! | `MINI_SESSIONS` `MINI_SPONSOR` `MINI_SPONSOR_WORKSPACE` | the session layout (`render-authorized-keys.sh`'s) |
 //! | `MINI_LINE_TIMEOUT_S` | a line is stopped after this long (default 120) |
+//! | `MINI_SESSION_RUNNER` | split tenancy: the root runner; each line runs as `sudo -n -- RUNNER NAME`, the line on stdin, as the session's own account |
+//! | `MINI_DISCORD_STATE` | split tenancy: this account's own directory for interaction custody and the per-session line log (required with the runner, refused without it) |
 
 use std::net::TcpListener;
 

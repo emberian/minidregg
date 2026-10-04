@@ -161,6 +161,10 @@ exact grain-key-broker       grain-runtime --bin grain-runtime -- \
   provider::tests::upstream_echo_of_custody_key_is_never_returned_to_worker \
   provider::tests::hard_revoke_kills_inflight_transport_without_waiting_for_controller \
   provider::homelab_tests::homelab_gateways_share_capacity_and_exact_replay_bypasses_queue
+# TENANCY-B: under split tenancy the Discord entrance runs each line through the
+# root runner as the session's own account and writes nothing in the sessions tree.
+exact discord-split-tenancy  discord-entrance --test endpoint -- \
+  split_tenancy_lines_go_through_the_runner_and_nothing_is_written_in_the_sessions_tree
 # D9-D11: Discord durable custody, mirror cursor after custody, paged backfill (bce707b7);
 # the custody lease itself moved into mini-sdk (4b2f299d): row sdk-custody
 exact discord-custody        discord-entrance --bin mini-discord-mirror --test endpoint -- \
