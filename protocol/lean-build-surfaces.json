@@ -1959,37 +1959,37 @@
     {
       "module": "Compiler.GenericSimplexController",
       "path": "Compiler/GenericSimplexController.lean",
-      "sha256": "156b0a22d107c0a4fc946f955e9af3365b3e9df44ebd118ea52dc75b60605e30",
+      "sha256": "29d4a5ce3768e4e6cf654314c5fba1f67ed242a3d682b2356b7c93f8cb93bd6e",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.GenericSimplexIO",
       "path": "Compiler/GenericSimplexIO.lean",
-      "sha256": "67e99b0016a63b7c2280d8598b8802e8ff9ebc0fc83656d8c561a9969149ff8b",
+      "sha256": "18642b4f2e6c3747813420b02cb4fd74cfdf860af3a00b75b2c91cf1358aa2ed",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.GenericSimplexNative",
       "path": "Compiler/GenericSimplexNative.lean",
-      "sha256": "05914c48b61a791004a220457404c88c65959813828655980487debc928c5006",
+      "sha256": "854246359069ca8f7c37d48acc385f457d73ee6b57c260152701fb02aba116fd",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.GenericSimplexParticipant",
       "path": "Compiler/GenericSimplexParticipant.lean",
-      "sha256": "eb94099437cc5e45fb5e214d47532e27c7122b4040fa2d5d0c0d8d9e89965ce0",
+      "sha256": "9b63e996d8b5732d690dcdae76833370057a6c6a5fd1fb650e7d9452d5397e74",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.GenericSimplexPending",
       "path": "Compiler/GenericSimplexPending.lean",
-      "sha256": "fab559ec936abbbc40abc9aa8af22b0ffb3eea7ac4fb3c908bdff8492100f275",
+      "sha256": "8f89107ca47c20c928b88d7f636dc5bd13e8921e16c17c5173368042d7824d45",
       "surface": "default",
-      "ownerReportedStatus": "COMPILED narrow r3; event+axiom gates PASS; integrated native selective test pending fixture correction"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.GenericSimplexServe",
@@ -5767,7 +5767,7 @@
     {
       "module": "Kernel.GenericSimplex",
       "path": "Kernel/GenericSimplex.lean",
-      "sha256": "1dc7bc8a74bd03b188886b65c0adfa4a4e16d45f06436a025230fa220500ece0",
+      "sha256": "39493d6fad5d818ebbaaaffb9052642a9e6b65376e447710278bddbeb4a01bee",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -5788,9 +5788,9 @@
     {
       "module": "Kernel.GenericSimplexCausal",
       "path": "Kernel/GenericSimplexCausal.lean",
-      "sha256": "2d535c7435a73cc87a9a1ef159c7ade8f0af0f20fe29b9e2a3784472bc78e119",
+      "sha256": "d4c005d53ff0b4e848fb0259b1f1856d9b67a3e786d19d69fa94be3ac7a0f276",
       "surface": "default",
-      "ownerReportedStatus": "Persvati r13 full primitive+composite+start/step/pump+kernelaxiom PASS; strict quorum cause/global safety native join separate"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.GenericSimplexCertificateSafety",
@@ -5816,9 +5816,9 @@
     {
       "module": "Kernel.GenericSimplexEmissionSupport",
       "path": "Kernel/GenericSimplexEmissionSupport.lean",
-      "sha256": "a1ea1a8a4fb535a27835cd92dc5704a1e6cabe6096c65c4002989f38cac9f16f",
+      "sha256": "1c24683c62433ca10b29bac791f491d63677c0fb8508a15b427ba8ad6f50514c",
       "surface": "default",
-      "ownerReportedStatus": "FULL start/step actualkernelPASS r17 terminal12:39:58; no sorry axioms"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.GenericSimplexEngineSafety",
@@ -5900,23 +5900,23 @@
     {
       "module": "Kernel.GenericSimplexOutputHistory",
       "path": "Kernel/GenericSimplexOutputHistory.lean",
-      "sha256": "1195ed4ebf9c441e931c343a5b3d0dffbf5d7d01086f2e8e1b92ce6c57155b4b",
+      "sha256": "7dad1e20fd12721c1acbc55bb7ac062e9e30c9587903ef83daab31c266f95305",
       "surface": "default",
-      "ownerReportedStatus": "FULL actual start/step kernelPASS r3 terminal12:58:26 standardaxioms"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.GenericSimplexPositive",
       "path": "Kernel/GenericSimplexPositive.lean",
-      "sha256": "838f5f2b5e9a10ccc8b1a89fb51527280a6d5513d926fb0e84f972d95d7c9cf9",
+      "sha256": "95acdc143012caf511117b17aa02f5bc88c5d5fb5ca268b9b3014e4fff5fab58",
       "surface": "default",
-      "ownerReportedStatus": "KERNEL PASS scoped actual-source proof checks; final consumers EngineSafety12:51:27 ObservationSafety13:00:21 ReceiverSafety13:06:19 UTC"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.GenericSimplexPreparedHistory",
       "path": "Kernel/GenericSimplexPreparedHistory.lean",
-      "sha256": "bf8b4f3bba1384d8aa67511e59746ad77ceca101f9ea392a16ebb69ddce11a1f",
+      "sha256": "e7267579a990b5769ab503b5dda3c187ba844c1847e802e647076c83895746dc",
       "surface": "default",
-      "ownerReportedStatus": "Persvati exactwarm leaf3 historyr4 full actual start/step/isSafe extraction PASS + kernel assertions; global trace mapping consumer separate"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.GenericSimplexQuorum",
@@ -5942,9 +5942,9 @@
     {
       "module": "Kernel.GenericSimplexReceiveStructure",
       "path": "Kernel/GenericSimplexReceiveStructure.lean",
-      "sha256": "36a866f9079e80aa3efcbbab30ef63fc32d51a272814d164be8b4215d0c3dfef",
+      "sha256": "2ae8d4510ebcd335659653a55ccc293d19f7a9a928c5c88ab04cef438044b285",
       "surface": "default",
-      "ownerReportedStatus": "KERNEL PASS scoped actual-source proof checks; final consumers EngineSafety12:51:27 ObservationSafety13:00:21 ReceiverSafety13:06:19 UTC"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.GenericSimplexReceiverSafety",
@@ -5963,16 +5963,16 @@
     {
       "module": "Kernel.GenericSimplexScopeStructure",
       "path": "Kernel/GenericSimplexScopeStructure.lean",
-      "sha256": "be3723817923e730cf652288f92ecb46b4445a50b6ed1ecdaf18457adb5b04fc",
+      "sha256": "634201545960ca2fb7fac54e555e8ace0714c7efb08695f97d14565e826252ff",
       "surface": "default",
-      "ownerReportedStatus": "KERNEL PASS scoped actual-source proof checks; final consumers EngineSafety12:51:27 ObservationSafety13:00:21 ReceiverSafety13:06:19 UTC"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.GenericSimplexStructure",
       "path": "Kernel/GenericSimplexStructure.lean",
-      "sha256": "f3baa9dbb02bcc434e4ec400cecc66077697ad84e5733a751866400eb1c01d10",
+      "sha256": "eb2ec39b456fa1d3632c43d42a03a6455ba8e7b59b3900cd10654d1259cf51da",
       "surface": "default",
-      "ownerReportedStatus": "KERNEL PASS scoped actual-source proof checks; final consumers EngineSafety12:51:27 ObservationSafety13:00:21 ReceiverSafety13:06:19 UTC"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.GenericSimplexVAInvariant",
@@ -5984,14 +5984,14 @@
     {
       "module": "Kernel.GenericSimplexVoteOrigin",
       "path": "Kernel/GenericSimplexVoteOrigin.lean",
-      "sha256": "238b1d45cda3506e096ee665bd246587b98692c99968f6d37febb81ccf1f6441",
+      "sha256": "984a587e979d1c40fed7ca69559659151a5e1aa302a8fbde3de397f0e574043b",
       "surface": "default",
-      "ownerReportedStatus": "KERNEL PASS scoped actual-source proof checks; final consumers EngineSafety12:51:27 ObservationSafety13:00:21 ReceiverSafety13:06:19 UTC"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.GenericSimplexWitnesses",
       "path": "Kernel/GenericSimplexWitnesses.lean",
-      "sha256": "3a8c8b6449cd38d659d1e270c05b2e68ab511d7183ae1140c085ba5f5ce7418b",
+      "sha256": "74583defba841ea85da6b5ed26faf49b3c4d66b89aca56a62da8dd4db196ea76",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6558,7 +6558,7 @@
     {
       "module": "Kernel.ObjectiveActivity",
       "path": "Kernel/ObjectiveActivity.lean",
-      "sha256": "e85c65548f726751f35c647028b2bab1851b1922b53821751fbfa5001ced397e",
+      "sha256": "daeb211724c573f0a48109f84457c115467b3201fa0d02635348ea4d70207c2d",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -9785,7 +9785,7 @@
     {
       "module": "Verify.GenericSimplexHarness",
       "path": "Verify/GenericSimplexHarness.lean",
-      "sha256": "3f2c06e1f63a498fa798ce0c04e3b5cd3b5e1f8d66de4f00c02f80364ab58f2f",
+      "sha256": "604c1ccefa5ce262d5ffc2ece87fd53f06532ce09858b3251058791f2309e1e1",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -9799,7 +9799,7 @@
     {
       "module": "Verify.GenericSimplexNativeHarness",
       "path": "Verify/GenericSimplexNativeHarness.lean",
-      "sha256": "10693e72fd2a2067668abfaa27367a169dc68d84abed39192d484fbdd87a9222",
+      "sha256": "40245bfa15684696b4a0e2a9fbf08c630f7bb33f65ba180bf35b525bd2ade620",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },
