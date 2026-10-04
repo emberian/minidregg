@@ -766,6 +766,33 @@ def Segment.yields : Segment → Bool
   | .yielded _ _ => true
   | _ => false
 
+/-- The refusals a RESUMED segment can meet that its own program causes and
+that no later delivery could avoid: resumption is deterministic
+(`resume_deterministic`), so each recurs on every delivery of the same await,
+the timeout delivery included. Exhaustion is one only at the turn cap; below it,
+a delivery (or an `exhaust` turn) with more envelope may still run the segment.
+A write that does not fit the declared state (`writeShape`) is the Plan's own
+malformation. A write the object's law refuses is NOT a program fault: the law
+is the object's, and abandonment past deadline plus grace returns the escrow.
+(SCHOLAR-CALLS 8d1d3c0e, ported onto resume-with-view and object records.) -/
+def programFault (config : Config) (envelope : Nat) : Refusal → Option String
+  | .plan reason => some s!"plan: {reason}"
+  | .planExtraction reason => some s!"plan extraction: {reason}"
+  | .resultExtraction reason => some s!"result extraction: {reason}"
+  | .patience patience maximum => some s!"patience {patience} outside 1..{maximum}"
+  | .messageAwaitNeedsInbox => some "a message await needs an inbox"
+  | .writeShape reason => some s!"write shape: {reason}"
+  | .exhausted => if config.maxTicks ≤ envelope then some s!"no yield within the turn cap {config.maxTicks}" else none
+  | _ => none
+
+/-- A program fault ends the segment as `faulted`; any other refusal refuses
+the turn. -/
+def faultOr (config : Config) (envelope : Nat) {α : Type} (refusal : Refusal) :
+    Except Refusal (Segment × Option α) :=
+  match programFault config envelope refusal with
+  | some reason => .ok (.faulted reason, none)
+  | none => .error refusal
+
 /-! ## Turns -/
 
 abbrev Snapshot (rootBytes : Bytes → Digest) := DataSnapshot rootBytes
@@ -1087,6 +1114,129 @@ def segmentCommit {rootBytes : Bytes → Digest} (config : Config) (snapshot : S
       (checkpointDigest (checkpointBytes state)) current viewed plan
     pure (some committed)
   | _ => pure none
+
+/-- A RESUMED segment and its yield commit, shown `view`. Program faults commit
+as `faulted` (the await ends, the unused escrow returns); birth keeps refusing
+them, since nothing is escrowed before a birth commits. -/
+def resumedSegment {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (transaction : TransactionId) (cell object : CellId) (generation envelope : Nat)
+    (view : ObjectState) (start : State) : Except Refusal (Segment × Option YieldCommit) :=
+  match runSegment config envelope start with
+  | .error refusal => faultOr config envelope refusal
+  | .ok segment =>
+    match segmentCommit config snapshot height transaction cell object generation (some view) true segment with
+    | .error refusal => faultOr config envelope refusal
+    | .ok yielded => .ok (segment, yielded)
+
+theorem faultOr_refused {config : Config} {envelope : Nat} {α : Type} {refusal other : Refusal}
+    (refused : (faultOr config envelope refusal : Except Refusal (Segment × Option α)) = .error other) :
+    other = refusal ∧ programFault config envelope refusal = none := by
+  unfold faultOr at refused
+  split at refused
+  · cases refused
+  · rename_i none_
+    cases refused
+    exact ⟨rfl, none_⟩
+
+theorem faultOr_ok {config : Config} {envelope : Nat} {α : Type} {refusal : Refusal}
+    {segment : Segment} {yielded : Option α}
+    (ok : (faultOr config envelope refusal : Except Refusal (Segment × Option α)) = .ok (segment, yielded)) :
+    ∃ reason, segment = .faulted reason ∧ yielded = none := by
+  unfold faultOr at ok
+  split at ok
+  · rename_i reason _
+    cases ok
+    exact ⟨reason, rfl, rfl⟩
+  · cases ok
+
+/-- **A resumed program never wedges its await.** Whatever a delivery is
+refused for, it is not a fault of the resumed program: those commit. -/
+theorem resumedSegment_never_refuses_program_fault {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {transaction : TransactionId} {cell object : CellId}
+    {generation envelope : Nat} {view : ObjectState} {start : State} {refusal : Refusal}
+    (refused : resumedSegment config snapshot height transaction cell object generation envelope view start =
+      .error refusal) :
+    programFault config envelope refusal = none := by
+  unfold resumedSegment at refused
+  split at refused
+  · obtain ⟨rfl, clean⟩ := faultOr_refused refused
+    exact clean
+  · split at refused
+    · obtain ⟨rfl, clean⟩ := faultOr_refused refused
+      exact clean
+    · cases refused
+
+/-- A resumed segment that committed a yield is the bounded run's own segment
+and its own yield commit. -/
+theorem resumedSegment_committed {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {transaction : TransactionId} {cell object : CellId}
+    {generation envelope : Nat} {view : ObjectState} {start : State} {segment : Segment}
+    {committed : YieldCommit}
+    (ran : resumedSegment config snapshot height transaction cell object generation envelope view start =
+      .ok (segment, some committed)) :
+    runSegment config envelope start = .ok segment ∧
+      segmentCommit config snapshot height transaction cell object generation (some view) true segment =
+        .ok (some committed) := by
+  unfold resumedSegment at ran
+  split at ran
+  · obtain ⟨_, _, none_⟩ := faultOr_ok ran
+    cases none_
+  · rename_i run runs
+    split at ran
+    · obtain ⟨_, _, none_⟩ := faultOr_ok ran
+      cases none_
+    · rename_i yielded commits
+      cases ran
+      exact ⟨runs, commits⟩
+
+/-- A resumed segment that yielded is the bounded run's own yield and its own
+yield commit. -/
+theorem resumedSegment_yielded {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {transaction : TransactionId} {cell object : CellId}
+    {generation envelope : Nat} {view : ObjectState} {start state : State} {plan : PlanAwait}
+    {committed : Option YieldCommit}
+    (ran : resumedSegment config snapshot height transaction cell object generation envelope view start =
+      .ok (.yielded state plan, committed)) :
+    runSegment config envelope start = .ok (.yielded state plan) ∧
+      segmentCommit config snapshot height transaction cell object generation (some view) true
+        (.yielded state plan) = .ok committed := by
+  unfold resumedSegment at ran
+  split at ran
+  · obtain ⟨_, faulted, _⟩ := faultOr_ok ran
+    cases faulted
+  · rename_i run runs
+    split at ran
+    · obtain ⟨_, faulted, _⟩ := faultOr_ok ran
+      cases faulted
+    · rename_i yielded commits
+      cases ran
+      exact ⟨runs, commits⟩
+
+/-- An exhaustion below the turn cap is refused, never committed as a fault. -/
+theorem resumedSegment_exhausted_below_cap {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {transaction : TransactionId} {cell object : CellId}
+    {generation envelope : Nat} {view : ObjectState} {start : State}
+    (ran : runSegment config envelope start = .error .exhausted) (below : envelope < config.maxTicks) :
+    resumedSegment config snapshot height transaction cell object generation envelope view start =
+      .error .exhausted := by
+  unfold resumedSegment
+  rw [ran]
+  simp [faultOr, programFault, Nat.not_le.mpr below]
+
+/-- The program faults, by name (regression teeth for the classification). -/
+theorem plan_fault_commits (config : Config) (envelope : Nat) (reason : String) :
+    (faultOr config envelope (.plan reason) : Except Refusal (Segment × Option YieldCommit)) =
+      .ok (.faulted s!"plan: {reason}", none) := rfl
+
+theorem funding_is_not_a_fault (config : Config) (envelope available pair : Nat) :
+    programFault config envelope (.awaitsFunding available pair) = none := rfl
+
+theorem law_denial_is_not_a_fault (config : Config) (envelope : Nat) (reason : WriteRefusal) :
+    programFault config envelope (.objectWrite reason) = none := rfl
+
+theorem exhaustion_below_cap_is_not_a_fault (config : Config) (envelope : Nat)
+    (below : envelope < config.maxTicks) : programFault config envelope .exhausted = none := by
+  simp [programFault, Nat.not_le.mpr below]
 
 /-- After a segment: a yield must leave the purse able to pay the await's fee
 pair (it stays reserved there); an end returns the purse to the payer. The
@@ -1462,10 +1612,10 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   envelope : Capacity
   envelopeExact : envelope = addCapacity (record.escrow.capacity settlement.path) request.extra
   segment : Segment
-  segmentExact : runSegment config envelope.sourceTicks resumed = .ok segment
   yielded : Option YieldCommit
-  yieldedExact : segmentCommit config snapshot height (deliveryTransaction await.id) request.record record.object
-    (record.generation + 1) (some view) true segment = .ok yielded
+  /-- The resumed run and its yield commit; a program fault ends it `faulted`. -/
+  endExact : resumedSegment config snapshot height (deliveryTransaction await.id) request.record record.object
+    (record.generation + 1) envelope.sourceTicks view resumed = .ok (segment, yielded)
   next : Record
   nextExact : next = nextRecord record (record.generation + 1) segment yielded
   book : BookCell
@@ -1533,14 +1683,10 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   let envelope := addCapacity (record.escrow.capacity settlement.path) request.extra
   if !config.covers envelope then .error (.uncovered envelope) else
   if 0 < record.tried ∧ envelope.sourceTicks ≤ record.tried then .error (.alreadyExhausted record.tried envelope.sourceTicks) else
-  match segmentExact : runSegment config envelope.sourceTicks resumed with
+  match endExact : resumedSegment config snapshot height (deliveryTransaction await.id) request.record
+      record.object (record.generation + 1) envelope.sourceTicks view resumed with
   | .error reason => .error reason
-  | .ok segment =>
-  let transaction := deliveryTransaction await.id
-  match yieldedExact : segmentCommit config snapshot height transaction request.record record.object
-      (record.generation + 1) (some view) true segment with
-  | .error reason => .error reason
-  | .ok yielded =>
+  | .ok (segment, yielded) =>
   match judged : judgeWritten object (factsOf record.escrow.payer height record.object 2)
       (yielded.bind YieldCommit.written) with
   | .error reason => .error reason
@@ -1564,7 +1710,7 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
     guardAt snapshot (stateCell config.domain record.object) :: settlement.guards
   .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, program, programExact,
     settlement, settled, view, viewExact, response, state, stateExact, resumed, resumeExact, envelope, rfl,
-    segment, segmentExact, yielded, yieldedExact, next, rfl, book, bookExact, batch, batchExact, posted,
+    segment, yielded, endExact, next, rfl, book, bookExact, batch, batchExact, posted,
     postedBatch, posts, rfl, rfl, guards, rfl, awaitClaim await.id :: settlement.claims, rfl,
     object, objectExact, judged⟩
   else .error .bookRefused
@@ -1660,6 +1806,8 @@ structure Exhaustion {rootBytes : Bytes → Digest} (config : Config) (snapshot 
   envelope : Capacity
   envelopeExact : envelope = addCapacity (record.escrow.capacity settlement.path) request.extra
   raises : record.tried < envelope.sourceTicks
+  /-- At the turn cap an exhaustion is a program fault: a delivery commits it `faulted`. -/
+  belowCap : envelope.sourceTicks < config.maxTicks
   ran : runSegment config envelope.sourceTicks resumed = .error .exhausted
   next : Record
   nextExact : next = { record with tried := envelope.sourceTicks }
@@ -1717,6 +1865,7 @@ def exhaust {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   | .error reason => .error reason
   | .ok posted =>
   if postedBatch : posted.batch = exhaustCharges config record request.record settlement.path request then
+  if belowCap : envelope.sourceTicks < config.maxTicks then
   match ran : runSegment config envelope.sourceTicks resumed with
   | .ok _ => .error .notExhausted
   | .error .exhausted =>
@@ -1726,8 +1875,9 @@ def exhaust {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
       guardAt snapshot (stateCell config.domain record.object) :: settlementGuards settlement
     .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, program,
       programExact, settlement, settled, view, viewExact, response, state, stateExact, resumed, resumeExact,
-      envelope, rfl, raises, ran, next, rfl, book, bookExact, posted, postedBatch, posts, rfl, guards, rfl⟩
+      envelope, rfl, raises, belowCap, ran, next, rfl, book, bookExact, posted, postedBatch, posts, rfl, guards, rfl⟩
   | .error reason => .error reason
+  else .error .notExhausted
   else .error .bookRefused
   else .error (.alreadyExhausted record.tried envelope.sourceTicks)
   else .error .checkpointDigest
@@ -2244,8 +2394,9 @@ theorem Delivery.posts_current {rootBytes : Bytes → Digest} {config : Config} 
     | none => simp [yielded] at inYield
     | some committed =>
       simp only [yielded, Option.map_some, Option.getD_some] at inYield
-      have commit := delivery.yieldedExact
-      rw [yielded] at commit
+      have ended := delivery.endExact
+      rw [yielded] at ended
+      have commit := (resumedSegment_committed ended).2
       obtain ⟨_, _, _, committedExact⟩ := segmentCommit_spec commit
       exact (commitYield_spec committedExact).2.2 post inYield
   · rcases isBook with isBook | none
@@ -2378,8 +2529,9 @@ theorem yield_write_from_current_read {rootBytes : Bytes → Digest} {config : C
       written.after.version = delivery.view.version + 1 ∧
       ∃ state plan edits, delivery.segment = .yielded state plan ∧ decodeWrite plan.write = .ok edits ∧
         applyWrite edits (some delivery.view.value) = .ok (some written.after.value) := by
-  have commit := delivery.yieldedExact
-  rw [yielded] at commit
+  have ended := delivery.endExact
+  rw [yielded] at ended
+  have commit := (resumedSegment_committed ended).2
   obtain ⟨state, plan, segmentIs, committedExact⟩ := segmentCommit_spec commit
   obtain ⟨wrote, inPosts, _⟩ := commitYield_spec committedExact
   rw [writes] at wrote
@@ -2536,9 +2688,11 @@ theorem resume_binds_checkpoint {rootBytes : Bytes → Digest} {config : Config}
       delivery.await.id = awaitId request.record record.generation (checkpointDigest record.checkpoint) ∧
       decodeCheckpoint record.checkpoint = some state ∧
       resume (responseData delivery.settlement.decided delivery.view).term state = some delivery.resumed ∧
-      runSegment config delivery.envelope.sourceTicks delivery.resumed = .ok delivery.segment := by
+      resumedSegment config snapshot height (deliveryTransaction delivery.await.id) request.record record.object
+        (record.generation + 1) delivery.envelope.sourceTicks delivery.view delivery.resumed =
+          .ok (delivery.segment, delivery.yielded) := by
   refine ⟨delivery.record, delivery.state, delivery.recordExact, delivery.awaiting, ?_, delivery.stateExact,
-    delivery.resumeExact, delivery.segmentExact⟩
+    delivery.resumeExact, delivery.endExact⟩
   rw [delivery.digestExact]; exact delivery.idExact
 
 /-- **Resume determinism.** Two deliveries of the same record at the same
@@ -2567,13 +2721,12 @@ theorem resume_deterministic {rootBytes : Bytes → Digest} {config : Config} {s
     exact (Option.some.inj a).symm
   have envelopes : one.envelope = two.envelope := by
     rw [one.envelopeExact, two.envelopeExact, records, settlements, sameEnvelope]
-  have segments : one.segment = two.segment := by
-    have a := one.segmentExact; rw [envelopes, resumedEq, two.segmentExact] at a
+  have ends : (one.segment, one.yielded) = (two.segment, two.yielded) := by
+    have a := one.endExact
+    rw [awaits, sameRecord, records, envelopes, views, resumedEq, two.endExact] at a
     exact (Except.ok.inj a).symm
-  have yieldeds : one.yielded = two.yielded := by
-    have a := one.yieldedExact
-    rw [awaits, sameRecord, records, segments, views, two.yieldedExact] at a
-    exact (Except.ok.inj a).symm
+  have segments : one.segment = two.segment := congrArg Prod.fst ends
+  have yieldeds : one.yielded = two.yielded := congrArg Prod.snd ends
   refine ⟨resumedEq, segments, ?_⟩
   rw [one.nextExact, two.nextExact, records, segments, yieldeds]
 
@@ -2702,9 +2855,9 @@ theorem exhaustion_excludes_delivery {rootBytes : Bytes → Digest} {config : Co
     exact (Option.some.inj a).symm
   have envelopes : ex.envelope = delivery.envelope := by
     rw [ex.envelopeExact, delivery.envelopeExact, records, settlements, sameExtra]
-  have ran := ex.ran
-  rw [envelopes, resumedEq, delivery.segmentExact] at ran
-  cases ran
+  have ended := delivery.endExact
+  rw [← envelopes, ← resumedEq, ← views, resumedSegment_exhausted_below_cap ex.ran ex.belowCap] at ended
+  cases ended
 
 /-- **No attempt is paid twice.** Two exhaustions of one record from one
 snapshot and height, with equal added envelopes, post the same charge, and
@@ -3017,6 +3170,16 @@ theorem create_refuses_existing {rootBytes : Bytes → Digest} {config : Config}
 #assert_axioms editFields_add_comm
 #assert_axioms add_writes_commute
 #assert_axioms resume_binds_checkpoint
+#assert_axioms faultOr_refused
+#assert_axioms faultOr_ok
+#assert_axioms resumedSegment_never_refuses_program_fault
+#assert_axioms resumedSegment_committed
+#assert_axioms resumedSegment_yielded
+#assert_axioms resumedSegment_exhausted_below_cap
+#assert_axioms plan_fault_commits
+#assert_axioms funding_is_not_a_fault
+#assert_axioms law_denial_is_not_a_fault
+#assert_axioms exhaustion_below_cap_is_not_a_fault
 #assert_axioms resume_deterministic
 #assert_axioms refund_measurement_free
 #assert_axioms submitter_charge_declared

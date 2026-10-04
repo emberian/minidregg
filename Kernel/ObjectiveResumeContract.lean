@@ -156,8 +156,9 @@ theorem delivery_checkpoint_typed {rootBytes : Bytes → Digest} {config : Confi
     {state : State} {plan : PlanAwait} (yieldedSegment : delivery.segment = .yielded state plan) :
     decodeCheckpoint delivery.next.checkpoint = some state ∧
       ∃ types, Nonempty (StateTyping delivery.program.assumptions types state delivery.program.checked.type) := by
-  have commit := delivery.yieldedExact
-  rw [yieldedSegment] at commit
+  have ended := delivery.endExact
+  rw [yieldedSegment] at ended
+  obtain ⟨ran, commit⟩ := resumedSegment_yielded ended
   obtain ⟨yielded, someYielded⟩ := segmentCommit_yielded commit
   refine ⟨?_, ?_⟩
   · rw [delivery.nextExact, yieldedSegment, someYielded, nextRecord_checkpoint]
@@ -168,8 +169,6 @@ theorem delivery_checkpoint_typed {rootBytes : Bytes → Digest} {config : Confi
     obtain ⟨address, waiting⟩ := resume_requires_yield _ _ (by rw [delivery.resumeExact]; rfl)
     have resumedTyped := typed_resume_preserved typed waiting delivery.response.typed delivery.resumeExact
     obtain ⟨resumedState⟩ := resumedTyped
-    have ran := delivery.segmentExact
-    rw [yieldedSegment] at ran
     obtain ⟨_, retained, extracted, executed, extractedExact, stored⟩ := runSegment_yielded ran
     rw [computation]
     obtain ⟨_, ⟨typedRetained⟩⟩ := typed_runBounded_yielded resumedState config.limits delivery.envelope.sourceTicks executed
