@@ -32,6 +32,32 @@ fn parent(root: &Path, path: &Path) -> Result<(File, CString), String> {
     Ok((directory, parts.last().unwrap().clone()))
 }
 
+/// Whether a path a verb will hand to the client by name is confined to the
+/// session: every directory from the root down is a real directory (opened
+/// O_NOFOLLOW, never a link), and the leaf is absent, a regular file or a
+/// directory, never a symlink, FIFO, socket or device. The client then opens
+/// the name; between this check and that open only the session's own account
+/// could swap the leaf, so with one account per session this check is the
+/// whole fence and with a shared account it is the argument fence.
+pub(crate) fn confined(root: &Path, path: &Path) -> Result<(), String> {
+    if path == root {
+        return Ok(());
+    }
+    let (directory, name) = parent(root, path)?;
+    let mut status = std::mem::MaybeUninit::<libc::stat>::uninit();
+    let found = unsafe { libc::fstatat(directory.as_raw_fd(), name.as_ptr(), status.as_mut_ptr(), libc::AT_SYMLINK_NOFOLLOW) };
+    if found != 0 {
+        let error = std::io::Error::last_os_error();
+        return if error.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(error.to_string()) };
+    }
+    let kind = unsafe { status.assume_init() }.st_mode & libc::S_IFMT;
+    if kind == libc::S_IFREG || kind == libc::S_IFDIR {
+        Ok(())
+    } else {
+        Err("session path must name a regular file or directory, not a link or special file".into())
+    }
+}
+
 pub(crate) fn read(root: &Path, path: &Path, limit: usize) -> Result<Vec<u8>, String> {
     let (directory, name) = parent(root, path)?;
     let fd = unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(),
@@ -81,6 +107,28 @@ mod tests {
         assert_eq!(std::fs::read(&external).unwrap(), b"foreign retained bytes");
         assert!(!std::fs::read_dir(&root).unwrap().filter_map(Result::ok).any(|e| e.file_name().to_string_lossy().starts_with(".mini-replace-")));
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn session_fs_confined_refuses_links_and_special_leaves_and_linked_parents() {
+        let root = std::env::temp_dir().join(format!("mini-session-confined-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("requests")).unwrap();
+        std::fs::create_dir_all(root.join("keys")).unwrap();
+        std::fs::write(root.join("requests/a.json"), b"{}").unwrap();
+        assert!(confined(&root, &root).is_ok());
+        assert!(confined(&root, &root.join("requests/a.json")).is_ok());
+        assert!(confined(&root, &root.join("requests/absent.json")).is_ok());
+        assert!(confined(&root, &root.join("keys")).is_ok());
+        assert!(confined(&root, Path::new("/etc/passwd")).is_err());
+        assert!(confined(&root, &root.join("requests/../keys/x")).is_err());
+        symlink("/etc/passwd", root.join("requests/link.json")).unwrap();
+        assert!(confined(&root, &root.join("requests/link.json")).is_err());
+        symlink("/etc", root.join("linked")).unwrap();
+        assert!(confined(&root, &root.join("linked/passwd")).is_err());
+        let fifo = component(root.join("requests/fifo").as_os_str()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        assert!(confined(&root, &root.join("requests/fifo")).is_err());
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

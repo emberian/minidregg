@@ -727,9 +727,7 @@ fn text_argument(session: &Session, word: &str) -> std::result::Result<String, S
     let text = if let Some(file) = word.strip_prefix('@') {
         session_file(file, "text file")?;
         let path = session.home.join("requests").join(file);
-        let mut bytes = Vec::new();
-        fs::File::open(&path)
-            .and_then(|f| f.take(4097).read_to_end(&mut bytes))
+        let bytes = session_fs::read(&session.home, &path, 4097)
             .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         String::from_utf8(bytes).map_err(|_| "text file is not UTF-8".to_owned())?
     } else {
@@ -2548,6 +2546,18 @@ fn execute(session: &Session, plan: Plan) -> Ending {
     let Plan::Client { command, flags, writes } = plan else {
         return Ending::Done;
     };
+    // Every path this line hands the client inside the session home is
+    // confined there: real directories down from the home, and no link or
+    // special file at the leaf. Paths outside the home are the deployment's
+    // (Host, config, the sponsor's workspace), never a friend's argument.
+    for path in writes.iter().map(|(path, _)| path.as_os_str()).chain(flags.iter().map(|(_, value)| value.as_os_str())) {
+        let path = Path::new(path);
+        if path.starts_with(&session.home) {
+            if let Err(e) = session_fs::confined(&session.home, path) {
+                return Ending::Client(format!("{}: {e}", path.display()));
+            }
+        }
+    }
     for (path, bytes) in &writes {
         if let Err(e) = write_once(path, bytes) {
             return Ending::Client(e);
