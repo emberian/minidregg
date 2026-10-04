@@ -2,10 +2,10 @@
 This decoder confers no authority. Current source/family/law/capacity admission
 remains the native receiver's responsibility. No returns in this explicit slice. -/
 import Theory.ObjectiveBendDemandData
-import Compiler.BendScalarPlanAdapter
+import Compiler.ObjectiveNativeScalarBinding
 namespace Minidregg.Compiler.ObjectiveBendPlanAdapter
 open Minidregg.Theory.ObjectiveBendDemandData
-open BendScalarPlanAdapter
+open ObjectiveNativeScalarBinding
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization

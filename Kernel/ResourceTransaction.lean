@@ -3,6 +3,8 @@ operations share one command, exact old directory and authority snapshot, one
 nullifier, one candidate tuple and one durable publication. No wire variant
 contains a proposed post, raw patch, policy decision, or authority snapshot. -/
 import Compiler.NativeProtocolFrames
+import Compiler.NativeInvocationStatement
+import Compiler.ObjectiveInvocationClaim
 import Kernel.DeclaredResourceScalar
 import Kernel.WorldKindProjection
 import Kernel.WorldKindMethods
@@ -17,7 +19,7 @@ import Kernel.NockDoor
 import Kernel.ClockCellDomain
 import Kernel.RunComputeBudgetDomain
 import Kernel.ResourceMoneyReceiver
-import Kernel.BendNativeRun
+import Compiler.BendExecutionClaim
 import Kernel.ResourceObservationAdmission
 
 namespace Minidregg.Kernel.DeclaredResourceController
@@ -116,6 +118,8 @@ structure Command where
   run : Option Run.RunClaim := none
   /-- Signed source execution; mutually exclusive with the historical Nock claim. -/
   bend : Option BendExecutionClaim.Claim := none
+  /-- Explicit new signed invocation family. None preserves historical10/11. -/
+  family : Option NativeInvocationStatement.Family := none
   deriving DecidableEq, Repr
 
 def Command.TargetsValid (command : Command) : Prop :=
@@ -208,46 +212,86 @@ def legacyCommandStream : StreamCodec (SubjectId × Nat × List Target × Option
     (StreamCodec.product StreamCodec.nat
       (StreamCodec.product (StreamCodec.list targetStream) (StreamCodec.option runClaimStream)))
 
+abbrev CommandBody := (SubjectId × Nat × List Target × Option Run.RunClaim) ×
+  Option BendExecutionClaim.Claim
+
+def commandBodyStream : StreamCodec CommandBody :=
+  StreamCodec.product legacyCommandStream (StreamCodec.option BendExecutionClaim.stream)
+
+def Command.body (command : Command) : CommandBody :=
+  ((command.subject,command.nonce,command.targets,command.run),command.bend)
+
+def Command.ofBody (body : CommandBody) (family : Option NativeInvocationStatement.Family := none) : Command :=
+  ⟨body.1.1,body.1.2.1,body.1.2.2.1,body.1.2.2.2,body.2,family⟩
+
 def commandStream : StreamCodec Command :=
   StreamCodec.xmap
-    (StreamCodec.product legacyCommandStream (StreamCodec.option BendExecutionClaim.stream))
-    (fun c => ((c.subject,c.nonce,c.targets,c.run),c.bend))
-    (fun c => ⟨c.1.1,c.1.2.1,c.1.2.2.1,c.1.2.2.2,c.2⟩)
-    (by intro c; cases c; rfl)
+    (StreamCodec.product commandBodyStream (StreamCodec.option NativeInvocationStatement.familyStream))
+    (fun command => (command.body,command.family))
+    (fun (body,family) => Command.ofBody body family)
+    (by intro command; cases command; rfl)
 
 def bendCommandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [11]
+def familyCommandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [12]
+
+/-- Complete original unsigned body, excluding only the new family. This uses
+exact historical10/11 framing, not a lossy projection or supplied byte string. -/
+def Command.bodyBytes (command : Command) : List UInt8 :=
+  match command.bend with
+  | none => commandFrame ++ legacyCommandStream.encode
+      (command.subject,command.nonce,command.targets,command.run)
+  | some _ => bendCommandFrame ++ commandBodyStream.encode command.body
+
+/-- Consume only the fixed prefix and one version byte, independently of
+arbitrary payload bytes. Keeping this lemma abstract avoids expanding codecs. -/
+private theorem take_tagged_frame (headerBytes : List UInt8) (tag : UInt8) (payload : List UInt8) :
+    (headerBytes ++ tag :: payload).take (headerBytes.length + 1) = headerBytes ++ [tag] := by
+  simpa only [List.length_append,List.length_singleton,List.append_assoc,List.singleton_append]
+    using (List.take_left (l₁ := headerBytes ++ [tag]) (l₂ := payload))
+
+private theorem drop_tagged_frame (headerBytes : List UInt8) (tag : UInt8) (payload : List UInt8) :
+    (headerBytes ++ tag :: payload).drop (headerBytes.length + 1) = payload := by
+  simpa only [List.length_append,List.length_singleton,List.append_assoc,List.singleton_append]
+    using (List.drop_left (l₁ := headerBytes ++ [tag]) (l₂ := payload))
+
+private theorem stream_roundtrip {α : Type} (codec : StreamCodec α) (value : α) :
+    codec.toLawful.decode (codec.encode value) = some value := codec.toLawful.decode_encode value
 
 def rawCommandCodec : LawfulCodec Command where
-  encode command := match command.bend with
-    | none => commandFrame ++ legacyCommandStream.encode
-        (command.subject,command.nonce,command.targets,command.run)
-    | some _ => bendCommandFrame ++ commandStream.encode command
+  encode command := match command.family with
+    | none => command.bodyBytes
+    | some _ => familyCommandFrame ++ commandStream.encode command
   decode bytes :=
     if bytes.take commandFrame.length = commandFrame then do
       let c ← legacyCommandStream.toLawful.decode (bytes.drop commandFrame.length)
-      pure ⟨c.1,c.2.1,c.2.2.1,c.2.2.2,none⟩
-    else if bytes.take bendCommandFrame.length = bendCommandFrame then
-      commandStream.toLawful.decode (bytes.drop bendCommandFrame.length)
+      pure ⟨c.1,c.2.1,c.2.2.1,c.2.2.2,none,none⟩
+    else if bytes.take bendCommandFrame.length = bendCommandFrame then do
+      let body ← commandBodyStream.toLawful.decode (bytes.drop bendCommandFrame.length)
+      pure (Command.ofBody body)
+    else if bytes.take familyCommandFrame.length = familyCommandFrame then
+      commandStream.toLawful.decode (bytes.drop familyCommandFrame.length)
     else none
   decode_encode := by
     intro command
     cases command with
-    | mk subject nonce targets run bend =>
-      cases bend <;> simp [rawCommandCodec, commandStream, legacyCommandStream,
-        StreamCodec.decodePrefix_encode, StreamCodec.toLawful]
+    | mk subject nonce targets run bend family =>
+      cases family with
+      | none => cases bend <;>
+          simp [Command.bodyBytes, Command.body, Command.ofBody,
+            commandFrame, bendCommandFrame, familyCommandFrame, List.append_assoc,
+            take_tagged_frame, drop_tagged_frame, stream_roundtrip]
+      | some family =>
+          simp [Command.bodyBytes, Command.body, Command.ofBody,
+            commandFrame, bendCommandFrame, familyCommandFrame, List.append_assoc,
+            take_tagged_frame, drop_tagged_frame, stream_roundtrip]
 
 def commandCodec : LawfulCodec Command := ResourceBirthCodec.strictCodec rawCommandCodec
 
 /-- A version-4 command frame refuses to decode. -/
 theorem v4_command_refused (payload : List UInt8) :
     rawCommandCodec.decode ("DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ 4 :: payload) = none := by
-  let oldFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [4]
-  have lengthExact : commandFrame.length = oldFrame.length := by
-    simp [commandFrame, oldFrame]
-  have different : oldFrame ≠ commandFrame := by decide +kernel
-  have refused : rawCommandCodec.decode (oldFrame ++ payload) = none := by
-    simp [rawCommandCodec, lengthExact, different]
-  simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
+  simp [rawCommandCodec, commandFrame, bendCommandFrame, familyCommandFrame,
+    List.append_assoc, take_tagged_frame]
 
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.v4_command_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v4_command_refused
@@ -256,13 +300,8 @@ theorem v4_command_refused (payload : List UInt8) :
 different shapes) refuses to decode. -/
 theorem v5_command_refused (payload : List UInt8) :
     rawCommandCodec.decode ("DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ 5 :: payload) = none := by
-  let oldFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [5]
-  have lengthExact : commandFrame.length = oldFrame.length := by
-    simp [commandFrame, oldFrame]
-  have different : oldFrame ≠ commandFrame := by decide +kernel
-  have refused : rawCommandCodec.decode (oldFrame ++ payload) = none := by
-    simp [rawCommandCodec, lengthExact, different]
-  simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
+  simp [rawCommandCodec, commandFrame, bendCommandFrame, familyCommandFrame,
+    List.append_assoc, take_tagged_frame]
 
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.v5_command_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v5_command_refused
@@ -270,13 +309,8 @@ theorem v5_command_refused (payload : List UInt8) :
 /-- Previous commands cannot be reinterpreted under the extended payload tags. -/
 theorem v6_command_refused (payload : List UInt8) :
     rawCommandCodec.decode ("DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ 6 :: payload) = none := by
-  let oldFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [6]
-  have lengthExact : commandFrame.length = oldFrame.length := by
-    simp [commandFrame, oldFrame]
-  have different : oldFrame ≠ commandFrame := by decide +kernel
-  have refused : rawCommandCodec.decode (oldFrame ++ payload) = none := by
-    simp [rawCommandCodec, lengthExact, different]
-  simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
+  simp [rawCommandCodec, commandFrame, bendCommandFrame, familyCommandFrame,
+    List.append_assoc, take_tagged_frame]
 
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.v6_command_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v6_command_refused
@@ -284,32 +318,20 @@ theorem v6_command_refused (payload : List UInt8) :
 /-- Neither retired v7 candidate can be read under the union target contract. -/
 theorem v7_command_refused (payload : List UInt8) :
     rawCommandCodec.decode ("DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ 7 :: payload) = none := by
-  let oldFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [7]
-  have lengthExact : commandFrame.length = oldFrame.length := by simp [commandFrame, oldFrame]
-  have different : oldFrame ≠ commandFrame := by decide +kernel
-  have refused : rawCommandCodec.decode (oldFrame ++ payload) = none := by
-    simp [rawCommandCodec, lengthExact, different]
-  simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
+  simp [rawCommandCodec, commandFrame, bendCommandFrame, familyCommandFrame,
+    List.append_assoc, take_tagged_frame]
 
 /-- Core transaction8 is never reinterpreted under paid execution semantics. -/
 theorem v8_command_refused (payload : List UInt8) :
     rawCommandCodec.decode ("DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ 8 :: payload) = none := by
-  let oldFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [8]
-  have lengthExact : commandFrame.length = oldFrame.length := by simp [commandFrame, oldFrame]
-  have different : oldFrame ≠ commandFrame := by decide +kernel
-  have refused : rawCommandCodec.decode (oldFrame ++ payload) = none := by
-    simp [rawCommandCodec, lengthExact, different]
-  simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
+  simp [rawCommandCodec, commandFrame, bendCommandFrame, familyCommandFrame,
+    List.append_assoc, take_tagged_frame]
 
 /-- Prototype receiver v10 cannot reinterpret a numeric-only v9 command. -/
 theorem v9_command_refused (payload : List UInt8) :
     rawCommandCodec.decode ("DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ 9 :: payload) = none := by
-  let oldFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [9]
-  have lengthExact : commandFrame.length = oldFrame.length := by simp [commandFrame, oldFrame]
-  have different : oldFrame ≠ commandFrame := by decide +kernel
-  have refused : rawCommandCodec.decode (oldFrame ++ payload) = none := by
-    simp [rawCommandCodec, lengthExact, different]
-  simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
+  simp [rawCommandCodec, commandFrame, bendCommandFrame, familyCommandFrame,
+    List.append_assoc, take_tagged_frame]
 
 @[simp] theorem command_decode_encode (command : Command) :
     commandCodec.decode (commandCodec.encode command) = some command := commandCodec.decode_encode command
@@ -326,12 +348,29 @@ def framedCommandBytes (domain semantics : Digest) (encodedCommand : List UInt8)
   (StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
     (domain, semantics, encodedCommand)
 
-def commandBytes (domain semantics : Digest) (command : Command) : List UInt8 :=
-  framedCommandBytes domain semantics (commandCodec.encode command)
+/-- The receiver derives the entire statement from its actual scoped command.
+For legacy commands this is a view only; their historical signing bytes remain. -/
+def statement (domain semantics : Digest) (command : Command) : NativeInvocationStatement.Statement :=
+  { domain := domain, semantics := semantics, route := (command.family.map NativeInvocationStatement.Family.route).getD .ordinary, contextBytes := (command.family.map NativeInvocationStatement.Family.contextBytes).getD [], bodyBytes := command.bodyBytes}
 
-theorem framedCommandBytes_exact (domain semantics : Digest) (command : Command) :
+def commandBytes (domain semantics : Digest) (command : Command) : List UInt8 :=
+  match command.family with
+  | none => framedCommandBytes domain semantics (commandCodec.encode command)
+  | some _ => NativeInvocationStatement.encode (statement domain semantics command)
+
+theorem framedCommandBytes_exact (domain semantics : Digest) (command : Command)
+    (legacy : command.family = none) :
     framedCommandBytes domain semantics (commandCodec.encode command) =
-      commandBytes domain semantics command := rfl
+      commandBytes domain semantics command := by simp [commandBytes,legacy]
+
+theorem family_commandBytes_exact (domain semantics : Digest) (command : Command)
+    (family : NativeInvocationStatement.Family) (selected : command.family = some family) :
+    commandBytes domain semantics command =
+      NativeInvocationStatement.encode (statement domain semantics command) := by
+  simp [commandBytes,selected]
+
+theorem statement_body_exact (domain semantics : Digest) (command : Command) :
+    (statement domain semantics command).bodyBytes = command.bodyBytes := rfl
 
 def argsDigest (domain semantics : Digest) (command : Command) : Digest :=
   (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.ARGS/v3".toUTF8.toList
@@ -341,13 +380,20 @@ def effectsDigest (domain semantics : Digest) (command : Command) : Digest :=
   (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.EFFECT/v3".toUTF8.toList
     (commandBytes domain semantics command)).digest
 
-/-- Subject+nonce is the operation identity. Different payloads under that
-identity conflict; they do not obtain a new marker by changing a target. -/
+/-- Historical operations retain their exact subject/nonce identity. Explicit
+family operations instead bind the complete statement and route; stripping or
+changing the family cannot retain its signed authorization or operation identity.
+Collision resistance is a cryptographic assumption, not codec injectivity. -/
 def operationMarker (domain semantics : Digest) (command : Command) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.IDENTITY/v3".toUTF8.toList
-    ((StreamCodec.product digestStream (StreamCodec.product digestStream
-      (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream StreamCodec.nat))).encode
-      (domain, semantics, command.subject, command.nonce))).digest.value
+  match command.family with
+  | none =>
+    (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.IDENTITY/v3".toUTF8.toList
+      ((StreamCodec.product digestStream (StreamCodec.product digestStream
+        (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream StreamCodec.nat))).encode
+        (domain, semantics, command.subject, command.nonce))).digest.value
+  | some _ =>
+    (Sp800185Cshake256.hash "DREGG.NATIVE.INVOCATION-STATEMENT.IDENTITY/v1".toUTF8.toList
+      (NativeInvocationStatement.encode (statement domain semantics command))).digest.value
 
 abbrev ordinaryVerb := DeclaredResourceScalar.ordinaryVerb
 
@@ -404,7 +450,7 @@ funding credits are the funding leg cost; other legs retain canonical command le
 def requestFor (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
     (command : Command) (target : Target) (preRoot : Digest) : Request target.kind :=
   let encodedCommand := commandCodec.encode command
-  let framedBytes := framedCommandBytes snapshot.domain semantics encodedCommand
+  let framedBytes := commandBytes snapshot.domain semantics command
   { domain := snapshot.domain
     semantics := semantics
     federation := ambient.federation
@@ -1131,12 +1177,35 @@ def checkCommandRun (disabled : List Digest) (domain : Digest) (directory : Dire
   | none => .ok none
   | some claim => ((checkClaim disabled domain directory ambient command pre claim validatedFundingIndex).map some).mapError .run
 
+/-- Only the explicit Objective route carries an Objective claim. A malformed
+claim, an oversized argument vector, or a second evaluator claim refuses instead
+of falling through to the no-compute branch. Other route policy is enforced by
+current native admission; this function does not authorize any route. -/
+def Command.objectiveClaim (command : Command) :
+    Except Reject (Option ObjectiveInvocationClaim.Claim) :=
+  match command.family with
+  | some family =>
+    match family.route with
+    | .objectiveMethod =>
+      match command.run, command.bend with
+      | none, none =>
+        match ObjectiveInvocationClaim.decode family.contextBytes with
+        | none => .error .malformedCommand
+        | some claim =>
+          if claim.arguments.length ≤ claim.capacity.inputBytes then .ok (some claim)
+          else .error .malformedCommand
+      | _, _ => .error .malformedCommand
+    | _ => .ok none
+  | none => .ok none
+
 /-- Extract at most one explicit account funding leg from the actual signed
-command. No run means no funding; caller-selected exclusion indices do not enter
+command. Legacy calls without execution have no funding; Objective calls bind
+the signed public work envelope. Caller-selected exclusion indices do not enter
 this API. The domain quote and Book preparation run before the evaluator. -/
 def prepareCompute (deployment : Deployment) (physical : RunComputeBudgetDomain.Physical)
     (clock : ClockCell.Clock) (command : Command) :
     Except Reject (Option (RunComputeBudgetDomain.Prepared deployment physical command.subject)) := do
+  let objective ← command.objectiveClaim
   let funding ← (List.finRange command.targets.length).foldlM
     (fun (selected : Option RunComputeBudgetDomain.FundingInput) i => do
       let target := command.targets[i]
@@ -1155,18 +1224,21 @@ def prepareCompute (deployment : Deployment) (physical : RunComputeBudgetDomain.
             pure (some ⟨i.val, target.target, target.capability, funding.asset, funding.credits,
               funding.expectedPayerBalance, funding.expectedBookRoot⟩)
       | _ => pure selected) none
-  match command.run, command.bend with
-  | none, none => if funding.isSome then throw .computeFunding else pure none
-  | some claim, none =>
-      let prepared ← (RunComputeBudgetDomain.prepare deployment physical clock command.subject
-        claim.steps funding).mapError Reject.computeBudget
-      pure (some prepared)
-  | none, some claim =>
+  match objective with
+  | some claim =>
       let prepared ← (RunComputeBudgetDomain.prepare deployment physical clock command.subject
         claim.capacity.proofWork funding).mapError Reject.computeBudget
       if prepared.credits != claim.capacity.feeDebit then throw .computeFunding
       pure (some prepared)
-  | some _, some _ => throw .bendExecution
+  | none =>
+    match command.run, command.bend with
+    | none, none => if funding.isSome then throw .computeFunding else pure none
+    | some claim, none =>
+        let prepared ← (RunComputeBudgetDomain.prepare deployment physical clock command.subject
+          claim.steps funding).mapError Reject.computeBudget
+        pure (some prepared)
+    | none, some _ => throw .bendExecution
+    | some _, some _ => throw .bendExecution
 
 /-- The account identity is taken only from the containing signed target. -/
 def moneyEntries (command : Command) : List ResourceMoneyWire.Entry :=
@@ -1196,79 +1268,30 @@ def computeExecutionMatches {deployment : Deployment} {physical : RunComputeBudg
     {subject : SubjectId} (command : Command)
     (compute : Option (RunComputeBudgetDomain.Prepared deployment physical subject))
     (run : Option CheckedRun) : Bool :=
-  match command.bend with
-  | none => computeRunMatches compute run
-  | some claim => run.isNone && compute.any (fun funded =>
+  match command.objectiveClaim with
+  | .error _ => false
+  | .ok (some claim) => run.isNone && compute.any (fun funded =>
       decide (funded.steps = claim.capacity.proofWork ∧ funded.credits = claim.capacity.feeDebit))
+  | .ok none =>
+    match command.bend with
+    | none => computeRunMatches compute run
+    | some _ => false
 
-/-- Native source input is constructed from the SAME current directory and
-read scopes as the signed transaction. It never accepts a sampled store from
-the client. Source/funding dependencies remain native read guards, even when
-excluded from the application-visible observation vector. -/
-def bendObservations {deployment : Deployment} {durable : Durable} (context : ResourceObservationAdmission.Context deployment durable)
-    (command : Command) (sourceIndex : Nat)
-    (compute : Option (RunComputeBudgetDomain.Prepared deployment durable.snapshot command.subject)) :
-    Option (List BendNativeInput.Observation) := do
-  let indices := (List.finRange command.targets.length).filter fun i =>
-    i.val != sourceIndex &&
-      match command.targets[i].payload with | .computeFunding _ => false | _ => true
-  indices.mapM fun i => do
-    let target := command.targets[i]
-    let .present packed := context.directory.directory.slots target.target | none
-    let fields := ResourceObservationAdmission.readerFields context target.kind
-      (target.observeCapability.getD ⟨0⟩)
-    let narrowed := ResourceObservationAdmission.narrowPacked fields packed
-    let balances ← match compute with
-      | some funded => if target.kind = .account then
-          some (CanonicalAccountView.accountCut
-            (CanonicalResourceKernel.logicalBook funded.budget.book.post.logical) target.target)
-        else some []
-      | none => ResourceObservationAdmission.balances context target.kind target.target
-    pure ⟨target.target, target.expectedTargetRoot, packed.kind.tag.toNat,
-      (CanonicalCellRegistry.materializer narrowed.kind).codec.encode narrowed.payload.logical,
-      CanonicalAccountView.balanceStream.encode
-        (ResourceObservationAdmission.narrowBalances fields balances)⟩
+/-- Objective preparation cannot settle an absent funding token or a different
+public work/credit envelope. This is accounting binding, not source execution. -/
+theorem compute_objective_matches_exact {deployment : Deployment}
+    {physical : RunComputeBudgetDomain.Physical} {subject : SubjectId}
+    (command : Command) (claim : ObjectiveInvocationClaim.Claim)
+    (compute : Option (RunComputeBudgetDomain.Prepared deployment physical subject))
+    (run : Option CheckedRun)
+    (selected : command.objectiveClaim = .ok (some claim))
+    (matched : computeExecutionMatches command compute run = true) :
+    run = none ∧ ∃ funded, compute = some funded ∧
+      funded.steps = claim.capacity.proofWork ∧ funded.credits = claim.capacity.feeDebit := by
+  cases run <;> cases compute <;>
+    simp_all [computeExecutionMatches]
 
-structure PreparedBend (command : Command) where
-  private mk ::
-  claim : BendExecutionClaim.Claim
-  claimExact : command.bend = some claim
-  artifact : BendWorldProgramCodec.Artifact
-  observations : List BendNativeInput.Observation
-  source : BendNativeRun.ContextChecked artifact claim ⟨command.subject,command.nonce⟩ observations
-  workFits : source.source.sourceCount ≤ claim.capacity.proofWork
-
-/-- The complete source result is retained internally for the pinned typed
-Plan/Surface/Card decoder at actual native admission. No source count appears
-in signed public receipts, and no source diagnostic is returned here. -/
-def checkCommandBend {F : Type} [Field F] [DecidableEq F] {durable : Durable}
-    (deployment : Deployment)
-    (profile : CanonicalRuntimeProfile.Profile F)
-    (context : ResourceObservationAdmission.Context deployment durable)
-    (command : Command) (pre : (i : Fin command.targets.length) → Store command.targets[i].layout)
-    (compute : Option (RunComputeBudgetDomain.Prepared deployment durable.snapshot command.subject)) :
-    Except Reject (Option (PreparedBend command)) := do
-  match selected : command.bend with
-  | none => pure none
-  | some claim =>
-    if command.run.isSome then throw .bendExecution
-    if BendNativeRun.evaluatorId ∈ profile.disabledEvaluators then throw .bendExecution
-    let some sourceIndex := if h : claim.sourceIndex < command.targets.length then
-        some (⟨claim.sourceIndex,h⟩ : Fin command.targets.length) else none
-      | throw .bendExecution
-    let target := command.targets[sourceIndex]
-    if target.payload != .read then throw .bendExecution
-    if ResourceObservationAdmission.readerFields context target.kind
-        (target.observeCapability.getD ⟨0⟩) != none then throw .bendExecution
-    let some store := target.contentStore? (materialize target.materializer (pre sourceIndex))
-      | throw .bendExecution
-    let some artifact := BendArtifactSource.lookup store ⟨claim.sourceAtom⟩ | throw .bendExecution
-    let some observations := bendObservations context command claim.sourceIndex compute
-      | throw .bendExecution
-    let source ← (BendNativeRun.checkContext artifact claim ⟨command.subject,command.nonce⟩ observations).mapError (fun _ => Reject.bendExecution)
-    if work : source.source.sourceCount ≤ claim.capacity.proofWork then
-      pure (some ⟨claim,selected,artifact,observations,source,work⟩)
-    else throw .bendExecution
+#assert_axioms compute_objective_matches_exact
 
 structure PreparedInvocation {F : Type} [Field F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
@@ -1294,9 +1317,8 @@ structure PreparedInvocation {F : Type} [Field F]
   run : Option CheckedRun
   runChecked : checkCommandRun profile.disabledEvaluators deployment.domain directory.directory
     ambient command (fun i => (targets i).pre.logical) (computeFundingIndex compute) = .ok run
-  bend : Option (PreparedBend command)
-  bendChecked : checkCommandBend deployment profile ⟨directory,authority⟩ command
-    (fun i => (targets i).pre.logical) compute = .ok bend
+  /-- Historical claim bytes decode, but the retired evaluator never runs. -/
+  historicalSourceDisabled : command.bend = none
   computeRunExact : computeExecutionMatches command compute run = true
 
 /-- The accounting plan's amount is tied to the actual accepted oracle count. -/
@@ -1308,9 +1330,15 @@ theorem PreparedInvocation.compute_steps_exact {F : Type} [Field F]
     (run : CheckedRun) (hasCompute : prepared.compute = some compute)
     (hasRun : prepared.run = some run) : compute.steps = run.verdict.steps := by
   have exact := prepared.computeRunExact
-  cases selected : command.bend with
-  | none => simpa [computeExecutionMatches, selected, hasCompute, hasRun, computeRunMatches] using exact
-  | some claim => simp [computeExecutionMatches, selected, hasCompute, hasRun, computeRunMatches] at exact
+  cases objective : command.objectiveClaim with
+  | error reason => simp [computeExecutionMatches, objective] at exact
+  | ok value =>
+    cases value with
+    | some claim => simp [computeExecutionMatches, objective, hasCompute, hasRun] at exact
+    | none =>
+      cases selected : command.bend with
+      | none => simpa [computeExecutionMatches, objective, selected, hasCompute, hasRun, computeRunMatches] using exact
+      | some claim => simp [computeExecutionMatches, objective, selected, hasCompute, hasRun, computeRunMatches] at exact
 
 /-- `prepare` over a directory the caller already holds for this image (the
 Host's `Opened.directory`), or `none` for an image whose directory does not load.
@@ -1319,37 +1347,35 @@ def prepareFrom {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient)
     (durable : Durable) (directory? : Option (LoadedDirectory durable)) (command : Command) :
     Except Reject (PreparedInvocation deployment profile ambient durable command) := do
-  if nonempty : command.targets ≠ [] then
-    if distinct : (command.targets.map Target.target).Nodup then
-      let directory ← requireSome .directoryUnavailable directory?
-      let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
-      let clock ← requireSome .clockUnavailable (ClockCellDomain.load deployment durable.snapshot)
-      let targets ← collect command.targets (prepareTarget deployment directory.directory
-        authority.snapshot profile.semantics ambient command)
-      if openings : openingsCheck command
-          (fun j => command.targets[j].contentStore? (targets j).pre) = true then
-        let marker ← prepareMarker authority.snapshot profile.semantics command
-        match computeChecked : prepareCompute deployment durable.snapshot clock.clock command with
-        | .error reason => .error reason
-        | .ok compute =>
-          match checked : checkCommandRun profile.disabledEvaluators deployment.domain directory.directory ambient command
-              (fun i => (targets i).pre.logical) (computeFundingIndex compute) with
+  if historicalSourceDisabled : command.bend = none then
+    if nonempty : command.targets ≠ [] then
+      if distinct : (command.targets.map Target.target).Nodup then
+        let directory ← requireSome .directoryUnavailable directory?
+        let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
+        let clock ← requireSome .clockUnavailable (ClockCellDomain.load deployment durable.snapshot)
+        let targets ← collect command.targets (prepareTarget deployment directory.directory
+          authority.snapshot profile.semantics ambient command)
+        if openings : openingsCheck command
+            (fun j => command.targets[j].contentStore? (targets j).pre) = true then
+          let marker ← prepareMarker authority.snapshot profile.semantics command
+          match computeChecked : prepareCompute deployment durable.snapshot clock.clock command with
           | .error reason => .error reason
-          | .ok run =>
-            match bendChecked : checkCommandBend deployment profile ⟨directory,authority⟩ command
-                (fun i => (targets i).pre.logical) compute with
+          | .ok compute =>
+            match checked : checkCommandRun profile.disabledEvaluators deployment.domain directory.directory ambient command
+                (fun i => (targets i).pre.logical) (computeFundingIndex compute) with
             | .error reason => .error reason
-            | .ok bend =>
+            | .ok run =>
               if computeRunExact : computeExecutionMatches command compute run = true then
                 match moneyChecked : prepareMoney deployment durable.snapshot command compute with
                 | .error reason => .error reason
                 | .ok money =>
                   .ok ⟨nonempty, distinct, directory, authority, clock, targets, openings, marker,
-                    compute, computeChecked, money, moneyChecked, run, checked, bend, bendChecked, computeRunExact⟩
+                    compute, computeChecked, money, moneyChecked, run, checked, historicalSourceDisabled, computeRunExact⟩
               else .error .computeFunding
-      else .error (.content .staleOpening)
-    else .error .duplicateTargets
-  else .error .emptyTargets
+        else .error (.content .staleOpening)
+      else .error .duplicateTargets
+    else .error .emptyTargets
+  else .error .bendExecution
 
 def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient)

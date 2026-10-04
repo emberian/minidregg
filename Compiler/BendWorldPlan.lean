@@ -2,7 +2,7 @@
 content, append, definitions and world actions do not get separate language
 interpreters. Authority remains the actual receiver's current checks. -/
 import Kernel.ResourceTransaction
-import Compiler.BendWorldProgramCodec
+import Compiler.ObjectiveSourcePackage
 
 namespace Minidregg.Compiler.BendWorldPlan
 open Minidregg.Compiler.Tower256ConcreteBackend
@@ -17,9 +17,10 @@ structure Effect where
   payload : Payload
   deriving DecidableEq, Repr
 
-/-- An independent return slot. Its plaintext schema and encrypted encoding are
-distinct. A backend must establish their correspondence; opaque ciphertext
-storage by itself does not prove a Boolean or any other plaintext predicate. -/
+/-- An independent return slot binds a value schema and an encoding profile.
+A CLEAR profile stores canonical data and requires current disclosure authority;
+an encrypted profile additionally requires its cryptographic correspondence.
+Opaque byte storage alone does not prove a plaintext predicate. -/
 structure ReturnSlot where
   name : String
   valueSchema : Digest
@@ -63,30 +64,18 @@ def decodeReturn (bytes : List UInt8) : Option ReturnSlot :=
 def returnId (r : ReturnSlot) : Digest :=
   (Sp800185Cshake256.hash "DREGG.BEND.RETURN/v1".toUTF8.toList (encodeReturn r)).digest
 
-/-- Monetary consent fields authorize the batch, while the source program
-produces the complete semantic Book operation sequence. Their full signed legs
-remain in native admission, read/authority guards and the accepted trace. -/
-def moneyEffect (target : Nat) (consent : ResourceMoneyWire.Consent) : Option Effect :=
-  consent.batch.map fun batch => ⟨target, .moneyConsent ⟨some batch, [], none⟩⟩
-
-theorem exact_money_batch (target : Nat) (consent : ResourceMoneyWire.Consent)
-    (batch : ResourceMoneyWire.ApplicationBatch) (present : consent.batch = some batch) :
-    moneyEffect target consent = some ⟨target, .moneyConsent ⟨some batch, [], none⟩⟩ := by
-  simp [moneyEffect, present]
-
 /-- Compute the exact ordered application effects from a native command.
 Observation and validated accounting legs are not arbitrary application writes. -/
 def effectsOf (command : Command) : List Effect :=
   (List.finRange command.targets.length).filterMap fun index =>
     match command.targets[index].payload with
     | .read | .kindRead | .computeFunding _ => none
-    | .moneyConsent consent => moneyEffect index.val consent
     | payload => some ⟨index.val, payload⟩
 
 def matchesCommand (plan : Plan) (command : Command) : Bool :=
   decide (plan.effects = effectsOf command) &&
   decide ((plan.returns.map ReturnSlot.name).Nodup) &&
-  plan.returns.all (fun r => BendWorldSource.nameValid r.name)
+  plan.returns.all (fun r => ObjectiveSourcePackage.validName r.name)
 
 theorem ordered_payloads_exact {plan : Plan} {command : Command}
     (h : matchesCommand plan command = true) : plan.effects = effectsOf command := by

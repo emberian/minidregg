@@ -91,6 +91,26 @@ structure Prepared (deployment : Deployment) (physical : Physical) (subject : Su
   budget : RunComputeBudget.Prepared subject pay.cell pay.cell.root book.cell
   fundingIndex : Option Nat
 
+/-- Proposal assembly may discover the funding target position only after the
+source runs. Relocation changes only that bookkeeping position: the exact
+loaded Pay/Book and accepted fee-first budget token are retained. Absence of
+funding remains absence; this never creates a payer consent or acceptance. -/
+def Prepared.relocateFundingIndex {deployment : Deployment} {physical : Physical}
+    {subject : SubjectId} (prepared : Prepared deployment physical subject) (index : Nat) :
+    Prepared deployment physical subject :=
+  ⟨prepared.pay, prepared.book, prepared.budget, prepared.fundingIndex.map (fun _ => index)⟩
+
+theorem Prepared.relocate_budget_exact {deployment : Deployment} {physical : Physical}
+    {subject : SubjectId} (prepared : Prepared deployment physical subject) (index : Nat) :
+    (prepared.relocateFundingIndex index).budget = prepared.budget := rfl
+
+theorem Prepared.relocate_book_exact {deployment : Deployment} {physical : Physical}
+    {subject : SubjectId} (prepared : Prepared deployment physical subject) (index : Nat) :
+    (prepared.relocateFundingIndex index).book = prepared.book := rfl
+
+#assert_axioms Prepared.relocate_budget_exact
+#assert_axioms Prepared.relocate_book_exact
+
 def prepare (deployment : Deployment) (physical : Physical)
     (clock : ClockCell.Clock) (subject : SubjectId) (steps : Nat)
     (funding : Option FundingInput) :

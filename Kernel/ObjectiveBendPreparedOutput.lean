@@ -12,7 +12,7 @@ open Minidregg.Theory.ObjectiveBendTyping
 open Minidregg.Theory.ObjectiveBendDemandMachine
 open Minidregg.Theory.ObjectiveBendDemandData
 open Minidregg.Compiler
-open Minidregg.Compiler.BendScalarPlanAdapter
+open Minidregg.Compiler.ObjectiveNativeScalarBinding
 open Minidregg.Kernel.DeclaredResourceController
 set_option autoImplicit false
 

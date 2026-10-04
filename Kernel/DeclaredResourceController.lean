@@ -5,7 +5,8 @@ PreparedTuple; all signatures and current policies precede its single CAS.  The
 shared replay marker is the intent's durable nullifier. -/
 import Kernel.ResourceTransaction
 import Kernel.ResourceInvocationSignatureFirst
-import Kernel.BendPreparedOutput
+import Kernel.ObjectiveBendNativeAdmission
+import Compiler.NativeInvocationProfile
 import Compiler.PhysicalLawResolution
 import Compiler.ComposedLawDiagnostics
 import Compiler.WorldKindLawDependencies
@@ -185,12 +186,6 @@ def runSlots : Option CheckedRun → List (String × Int)
        ("run/steps", Int.ofNat checked.verdict.steps),
        ("run/fuel", Int.ofNat checked.fuel)]
 
-def bendSlots : Option (PreparedBend command) → List (String × Int)
-  | none => []
-  | some checked =>
-    [(Minidregg.Pred.ranSlot (BendWorldProgramCodec.bendProgramId checked.artifact).value,1),
-     (Minidregg.Pred.evaluatorSlot BendNativeRun.evaluatorId.value,1)]
-
 /-- Physical selector input is derived from the authenticated directory. -/
 def storageKind (prepared : PreparedInvocation deployment profile ambient durable command)
     (incidence : Incidence command) : Nat :=
@@ -223,7 +218,7 @@ def projectCommonSlots (prepared : PreparedInvocation deployment profile ambient
   CanonicalRuntimeProfile.requestSlots
       (requestFor prepared.authority.snapshot profile.semantics ambient command selected preRoot) ++
     bytesSlots "command/bytes" 0 (commandCodec.encode source.val) ++
-    (runSlots prepared.run ++ bendSlots prepared.bend) ++ computeSlots prepared
+    (runSlots prepared.run) ++ computeSlots prepared
 
 /-- Fixed before/application-before/after balances and per-position values
 come from the SAME actual admitted global Book batch, never account metadata. -/
@@ -361,16 +356,6 @@ theorem runSlots_unjoint (run : Option CheckedRun) : Unjoint (runSlots run) := b
       · dsimp only; decide
       · dsimp only; decide
 
-theorem bendSlots_unjoint (run : Option (PreparedBend command)) : Unjoint (bendSlots run) := by
-  intro p hp
-  cases run with
-  | none => simp [bendSlots] at hp
-  | some checked =>
-    simp only [bendSlots, List.mem_cons, List.not_mem_nil, or_false] at hp
-    rcases hp with rfl | rfl
-    · simp [Minidregg.Pred.ranSlot, String.toList_append]
-    · simp [Minidregg.Pred.evaluatorSlot, String.toList_append]
-
 theorem participantSlots_unjoint (prepared : PreparedInvocation deployment profile ambient durable command)
     (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
     (i : TargetIndex command) : Unjoint (participantSlots prepared logical i) :=
@@ -407,7 +392,7 @@ theorem projectCommonSlots_unjoint (prepared : PreparedInvocation deployment pro
           (unjoint_append _ _ (by intro p hp; simp only [List.mem_singleton] at hp; subst p; dsimp only; decide)
             (clockSlots_unjoint _)) (requestSlots_unjoint _))
         (bytesSlots_unjoint "command/bytes" 'c' (by decide) (by decide) _ _))
-      (unjoint_append _ _ (runSlots_unjoint _) (bendSlots_unjoint _)))
+      (runSlots_unjoint _))
     (computeSlots_unjoint prepared)
 
 /-- Every joint key is read from the joint block: nothing local or common can shadow it. -/
@@ -1485,10 +1470,81 @@ theorem decodeSignedBytes_canonical {bytes : List UInt8} {ingress : SignedIngres
 
 
 /-- Complete guards before final execution/capacity admission. -/
-def admissionGuards (prepared : PreparedInvocation deployment profile ambient durable command)
+def admissionGuards [DecidableEq F] (prepared : PreparedInvocation deployment profile ambient durable command)
     (audience : AudienceChecks prepared) : List ReadGuard :=
   readGuards prepared ++ (audienceGuards audience.targets).filter fun guard =>
     guard.cellId ∉ (writes prepared).map DataWrite.cellId
+
+/- Current signature, observation and law checks only. This token cannot create
+an effect intent and carries no accepted source execution. -/
+/-- A closed, current route admission. Registration alone cannot create an
+AcceptedInvocation for a nonordinary family. -/
+inductive InvocationRouteAdmission [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand)
+  | legacy (selected : command.family = none)
+  | ordinary (family : NativeInvocationStatement.Family)
+      (selected : command.family = some family) (route : family.route = .ordinary)
+      (registered : NativeInvocationProfile.binding profile.receiverParameters .ordinary = some family.contextBytes)
+  | objective (family : NativeInvocationStatement.Family)
+      (selected : command.family = some family) (route : family.route = .objectiveMethod)
+      (registered : (NativeInvocationProfile.binding profile.receiverParameters .objectiveMethod).isSome = true)
+
+def InvocationRouteAdmission.guards [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    (route : InvocationRouteAdmission prepared signed) : List ReadGuard :=
+  match route with
+  | .legacy _ => []
+  | .ordinary _ _ _ _ => []
+  | .objective _ _ _ _ => []
+
+theorem InvocationRouteAdmission.guards_readonly [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    (route : InvocationRouteAdmission prepared signed) :
+    ∀ guard ∈ route.guards, guard.cellId ∉ (writes prepared).map DataWrite.cellId := by
+  cases route with
+  | legacy selected => simp [InvocationRouteAdmission.guards]
+  | ordinary family selected kind registered => simp [InvocationRouteAdmission.guards]
+  | objective family selected kind registered => simp [InvocationRouteAdmission.guards]
+
+theorem InvocationRouteAdmission.guards_roots [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    (route : InvocationRouteAdmission prepared signed) :
+    ∀ guard ∈ route.guards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
+  cases route with
+  | legacy selected => simp [InvocationRouteAdmission.guards]
+  | ordinary family selected kind registered => simp [InvocationRouteAdmission.guards]
+  | objective family selected kind registered => simp [InvocationRouteAdmission.guards]
+
+def completeAdmissionGuards [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (signed : SignedCommand) (audience : AudienceChecks prepared)
+    (route : InvocationRouteAdmission prepared signed) : List ReadGuard :=
+  admissionGuards prepared audience ++ route.guards
+
+def admitOrdinaryRoute [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand) :
+    Option (InvocationRouteAdmission prepared signed) := do
+  match selected : command.family with
+  | none => some (.legacy selected)
+  | some family =>
+    if route : family.route = .ordinary then
+      if registered : NativeInvocationProfile.binding profile.receiverParameters .ordinary = some family.contextBytes then
+        some (.ordinary family selected route registered)
+      else none
+    else none
+
+structure AuthorityInvocation [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand) where
+  private mk ::
+  ingressExact : commandCodec.encode command = signed.commandBytes
+  envelopeCount : signed.targetEnvelopes.length = command.targets.length
+  observeCount : signed.observeEnvelopes.length =
+    (if command.requiresObservation then command.targets.length else 0)
+  observations : command.requiresObservation = true → (i : TargetIndex command) →
+    ReadLeg prepared i (signed.observeEnvelopes[i.val]?.getD [])
+  audience : AudienceChecks prepared
+  tuple : PreparedTuple (plan prepared)
+  checked : (incidence : Incidence command) → CheckedLeg prepared tuple incidence (signed.envelope command incidence)
 
 structure AcceptedInvocation [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand) where
@@ -1500,12 +1556,12 @@ structure AcceptedInvocation [DecidableEq F]
   observations : command.requiresObservation = true → (i : TargetIndex command) →
     ReadLeg prepared i (signed.observeEnvelopes[i.val]?.getD [])
   audience : AudienceChecks prepared
-  execution : Option (BendPreparedOutput.Admitted prepared
+  route : InvocationRouteAdmission prepared signed
+  execution : Option (ObjectiveBendNativeAdmission.Admitted prepared signed.observeEnvelopes
     (signedBytes prepared.authority.snapshot.domain profile.semantics signed)
-    (writes prepared) (admissionGuards prepared audience))
-  executionChecked : BendPreparedOutput.admit prepared
-    (signedBytes prepared.authority.snapshot.domain profile.semantics signed)
-    (writes prepared) (admissionGuards prepared audience) = .ok execution
+    (writes prepared) (completeAdmissionGuards prepared signed audience route))
+  executionRequired : command.family.any (fun family => family.route == .objectiveMethod) = true → execution.isSome = true
+  historicalSourceDisabled : command.bend = none
   tuple : PreparedTuple (plan prepared)
   checked : (incidence : Incidence command) → CheckedLeg prepared tuple incidence (signed.envelope command incidence)
 
@@ -1532,9 +1588,9 @@ def verifyReads [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     | .ok checked => return .ok (fun _ => checked)
   else return .ok (fun contradiction => False.elim (needed contradiction))
 
-def admit [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
+def admitAuthority [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand) :
-    IO (Except Reject (AcceptedInvocation prepared signed)) := do
+    IO (Except Reject (AuthorityInvocation prepared signed)) := do
   if ingress : commandCodec.encode command = signed.commandBytes then
     if count : signed.targetEnvelopes.length = command.targets.length then
       if readCount : signed.observeEnvelopes.length =
@@ -1555,16 +1611,80 @@ def admit [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
                     match ← checkAudiences prepared with
                     | .error reason => return .error reason
                     | .ok audience =>
-                      match executionChecked : BendPreparedOutput.admit prepared
-                          (signedBytes prepared.authority.snapshot.domain profile.semantics signed)
-                          (writes prepared) (admissionGuards prepared audience) with
-                      | .error reason => return .error reason
-                      | .ok execution => return .ok ⟨ingress, count, readCount, observations, audience,
-                          execution, executionChecked, tuple,
+                      return .ok ⟨ingress, count, readCount, observations, audience, tuple,
                           fun incidence => match incidence with | some i => targets i | none => authority⟩
       else return .error .wrongEnvelopeCount
     else return .error .wrongEnvelopeCount
   else return .error .malformedCommand
+
+private def finishAdmission [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand)
+    (authority : AuthorityInvocation prepared signed) (route : InvocationRouteAdmission prepared signed)
+    (execution : Option (ObjectiveBendNativeAdmission.Admitted prepared signed.observeEnvelopes
+      (signedBytes prepared.authority.snapshot.domain profile.semantics signed)
+      (writes prepared) (completeAdmissionGuards prepared signed authority.audience route))) :
+    Except Reject (AcceptedInvocation prepared signed) := do
+  if historicalSourceDisabled : command.bend = none then
+    if executionRequired : command.family.any (fun family => family.route == .objectiveMethod) = true → execution.isSome = true then
+      .ok ⟨authority.ingressExact,authority.envelopeCount,authority.observeCount,authority.observations,
+        authority.audience,route,execution,executionRequired,historicalSourceDisabled,authority.tuple,authority.checked⟩
+    else .error .bendExecution
+  else .error .bendExecution
+
+/-- Historical ordinary admission refuses every nonordinary statement family.
+Unwrapped profiles also refuse framed ordinary families. -/
+def admitOrdinary [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
+    (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand) :
+    IO (Except Reject (AcceptedInvocation prepared signed)) := do
+  match admitOrdinaryRoute prepared signed with
+  | none => return .error .malformedCommand
+  | some route =>
+    match ← admitAuthority native prepared signed with
+    | .error reason => return .error reason
+    | .ok authority => return finishAdmission prepared signed authority route none
+
+/-- Historical TT Activity execution is disabled. The new Objective continuation
+route will consume its own source/current-input/residual transition evidence. -/
+def admitActivity [DecidableEq F] (_native : CredentialSignatureIO.NativeConfig)
+    (_prepared : PreparedInvocation deployment profile ambient durable command) (_signed : SignedCommand) :
+    IO (Except Reject (AcceptedInvocation _prepared _signed)) := pure (.error .bendExecution)
+
+/-- New Objective completion admission: ALL native authority/read/law/audience
+checks precede construction or execution of the source's authenticated input.
+The completed output token retains exact full native writes/guards/capacity. -/
+def admitObjective [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
+    (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand) :
+    IO (Except Reject (AcceptedInvocation prepared signed)) := do
+  match selected : command.family with
+  | none => return .error .malformedCommand
+  | some family =>
+    if kind : family.route = .objectiveMethod then
+      if registered : (NativeInvocationProfile.binding profile.receiverParameters .objectiveMethod).isSome = true then
+        let route : InvocationRouteAdmission prepared signed := .objective family selected kind registered
+        if needed : command.requiresObservation = true then
+          match ← admitAuthority native prepared signed with
+          | .error reason => return .error reason
+          | .ok authority =>
+            let reads : ObjectiveBendNativeAdmission.Reads prepared signed.observeEnvelopes := fun i =>
+              let read := authority.observations needed i
+              ObjectiveBendNativeAdmission.bindRead read.selected read.preparedExact read.checked
+            match ObjectiveBendNativeAdmission.admit prepared signed.observeEnvelopes reads
+                (signedBytes prepared.authority.snapshot.domain profile.semantics signed)
+                (writes prepared) (completeAdmissionGuards prepared signed authority.audience route) with
+            | .error reason => return .error reason
+            | .ok completed => return finishAdmission prepared signed authority route (some completed)
+        else return .error .observationRejected
+      else return .error .malformedCommand
+    else return .error .malformedCommand
+
+/-- Shared running receiver dispatches the registered Objective family through
+its actual source gate. Every other special route remains explicitly typed. -/
+def admit [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
+    (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand) :
+    IO (Except Reject (AcceptedInvocation prepared signed)) :=
+  if command.family.any (fun family => family.route == .objectiveMethod) then
+    admitObjective native prepared signed
+  else admitOrdinary native prepared signed
 
 def AcceptedInvocation.apex [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
@@ -1662,26 +1782,29 @@ theorem AcceptedInvocation.policy_view_exact [DecidableEq F]
 def AcceptedInvocation.readGuards [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) : List ReadGuard :=
-  DeclaredResourceController.readGuards prepared ++ (audienceGuards accepted.audience.targets).filter fun guard =>
-    guard.cellId ∉ (writes prepared).map DataWrite.cellId
+  completeAdmissionGuards prepared signed accepted.audience accepted.route
 
 theorem AcceptedInvocation.readGuards_readonly [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
     ∀ guard ∈ accepted.readGuards, guard.cellId ∉ (writes prepared).map DataWrite.cellId := by
   intro guard member
-  rcases List.mem_append.mp member with ordinary | audience
-  · exact DeclaredResourceController.readGuards_readonly prepared shape guard ordinary
-  · simpa using (List.mem_filter.mp audience).2
+  rcases List.mem_append.mp member with base | route
+  · rcases List.mem_append.mp base with ordinary | audience
+    · exact DeclaredResourceController.readGuards_readonly prepared shape guard ordinary
+    · simpa using (List.mem_filter.mp audience).2
+  · exact accepted.route.guards_readonly guard route
 
 theorem AcceptedInvocation.readGuards_roots [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
     ∀ guard ∈ accepted.readGuards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
   intro guard member
-  rcases List.mem_append.mp member with ordinary | audience
-  · exact shape.2.2.2.2.1 guard ordinary
-  · exact accepted.audience.roots guard (List.mem_filter.mp audience).1
+  rcases List.mem_append.mp member with base | route
+  · rcases List.mem_append.mp base with ordinary | audience
+    · exact shape.2.2.2.2.1 guard ordinary
+    · exact accepted.audience.roots guard (List.mem_filter.mp audience).1
+  · exact accepted.route.guards_roots guard route
 
 theorem AcceptedInvocation.audience_dependency_cas [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
@@ -1693,8 +1816,8 @@ theorem AcceptedInvocation.audience_dependency_cas [DecidableEq F]
   · obtain ⟨write, member, same⟩ := List.mem_map.mp written
     exact Or.inr ⟨write, member, same.symm,
       accepted.audience.writeDischarge guard used write member same.symm⟩
-  · exact Or.inl (List.mem_append.mpr (Or.inr
-      (List.mem_filter.mpr ⟨used, by simpa using written⟩)))
+  · exact Or.inl (List.mem_append.mpr (Or.inl (List.mem_append.mpr (Or.inr
+      (List.mem_filter.mpr ⟨used, by simpa using written⟩)))))
 
 abbrev invocationNullifier := CredentialAuthorityReplay.nullifier
 
@@ -1722,9 +1845,9 @@ def legacySourceChargeFrom (prepared : PreparedInvocation deployment profile amb
 private branch usage was checked against this envelope before Accepted existed. -/
 def sourceChargeFrom (prepared : PreparedInvocation deployment profile ambient durable command)
     (signed : SignedCommand) (ws : List DataWrite) (guards : List ReadGuard) : ResourceCost.Charge :=
-  match prepared.bend with
-  | none => legacySourceChargeFrom prepared signed ws guards
-  | some checked => BendPrivateCapacity.charge checked.claim.capacity
+  match command.objectiveClaim with
+  | .ok (some claim) => ObjectiveBendNativeAdmission.charge claim.capacity
+  | _ => legacySourceChargeFrom prepared signed ws guards
 
 def sourceCharge (prepared : PreparedInvocation deployment profile ambient durable command)
     (signed : SignedCommand) : ResourceCost.Charge :=
@@ -1760,7 +1883,7 @@ Authority and observe-only targets are guards, neither stored nor charged. -/
 theorem AcceptedInvocation.storage_charge_is_written_bytes [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared)
-    (historical : prepared.bend = none) :
+    (ordinary : command.objectiveClaim = .ok none) :
     (accepted.dataIntent shape).exactCharge .storageBytes =
         ((accepted.dataIntent shape).writes.map fun write => write.canonicalPostBytes.length).sum ∧
       (accepted.dataIntent shape).writes =
@@ -1768,7 +1891,7 @@ theorem AcceptedInvocation.storage_charge_is_written_bytes [DecidableEq F]
           if command.targets[i].isRead then none else some (targetWrite prepared i)) ++ entryWrites prepared ++ computeWrites prepared :=
   by
     constructor
-    · simp [AcceptedInvocation.dataIntent, sourceChargeFrom, historical, legacySourceChargeFrom]
+    · simp [AcceptedInvocation.dataIntent, sourceChargeFrom, ordinary, legacySourceChargeFrom]
     · rfl
 
 theorem AcceptedInvocation.dataIntent_exact_charge [DecidableEq F]
