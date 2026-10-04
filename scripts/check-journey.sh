@@ -32,11 +32,14 @@ export PATH=$HOME/.elan/bin:$HOME/.cargo/bin:$PATH
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$root/target-gates}
 rust=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
 die() { echo "journey-gate: FAIL: $*"; exit 1; }
+# A build that fails prints the end of its own log, so the cause is in the gate
+# output and not only in a file the runner discards.
+build_die() { local log=$1; shift; echo "journey-gate: tail of $log:"; tail -n 40 "$log" | sed 's/^/  | /'; die "$@"; }
 
-lake build minidregg-host >"$root/build-logs/gate5-host.log" 2>&1 || die "lake build minidregg-host (build-logs/gate5-host.log)"
+lake build minidregg-host >"$root/build-logs/gate5-host.log" 2>&1 || build_die "$root/build-logs/gate5-host.log" "lake build minidregg-host (build-logs/gate5-host.log)"
 for c in resource-client hyperdocument-link-sqlite-store credential-signature-verifier grain-runtime spk-host pay-watcher; do
   (cd "native/$c" && cargo "+$rust" build --release --locked -j "${LOCAL_GATES_CARGO_JOBS:-6}") \
-    >"$root/build-logs/gate5-cargo-$c.log" 2>&1 || die "cargo build --release native/$c (build-logs/gate5-cargo-$c.log)"
+    >"$root/build-logs/gate5-cargo-$c.log" 2>&1 || build_die "$root/build-logs/gate5-cargo-$c.log" "cargo build --release native/$c (build-logs/gate5-cargo-$c.log)"
 done
 bin=$CARGO_TARGET_DIR/release
 base=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}

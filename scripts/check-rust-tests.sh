@@ -27,6 +27,9 @@ jobs=${LOCAL_GATES_CARGO_JOBS:-6}
 logs=$root/build-logs/rust-tests; mkdir -p "$logs"
 red=0
 passed_of() { grep -Eo 'test result: [a-zA-Z]+\. [0-9]+ passed' "$1" | awk '{s+=$4} END{print s+0}'; }
+# The cause of a failed build (a build script's stderr) sits below its "error:" line, which
+# the one-line verdict cannot carry; print the end of the log so it is in the gate output.
+tail_cargo_error() { grep -q '^error' "$1" && { echo "rust-tests: tail of $1:"; tail -n 25 "$1" | sed 's/^/  | /'; }; return 0; }
 t() {
   local name=$1 floor=$2 crate=$3; shift 3
   local log=$logs/$name.log rc n
@@ -36,6 +39,7 @@ t() {
   n=$(passed_of "$log")
   if [ "$rc" != 0 ]; then
     echo "rust-tests: RED: $name: cargo exit $rc, $n passed; $(grep -E '^test .* FAILED$|^error' "$log" | head -3 | tr '\n' ';') ($log)"
+    tail_cargo_error "$log"
     red=$((red + 1))
   elif [ "$n" -lt "$floor" ]; then
     echo "rust-tests: RED: $name: $n tests ran, floor $floor (a filter stopped matching?) ($log)"
@@ -80,6 +84,7 @@ exact() {
   done
   if [ "$rc" != 0 ]; then
     echo "rust-tests: RED: $name: cargo exit $rc, $n passed; $(grep -E '^test .* FAILED$|^error' "$log" | head -3 | tr '\n' ';') ($log)"
+    tail_cargo_error "$log"
     red=$((red + 1))
   elif [ "${#missing[@]}" != 0 ]; then
     echo "rust-tests: RED: $name: ${#missing[@]} named test(s) did not pass (renamed, moved or ignored?): ${missing[*]} ($log)"
