@@ -152,7 +152,12 @@ gate_c() {
 gate_transparency() {
   local bun; bun=$(bun_bin)
   # `lean --run scripts/ObjectiveCheckpointTransparency.lean` needs every import built
-  "$lake" build Kernel.ObjectiveActivityWire Compiler.ObjectiveBendDataWire Theory.ObjectiveBendDemandCollect
+  "$lake" build Kernel.ObjectiveActivityWire Compiler.ObjectiveBendDataWire Theory.ObjectiveBendDemandCollect \
+    Host.ObjectiveBendFrontEnd
+  # packets.ts elaborates through the Lean front end, as in gate `c`; without these the
+  # standalone `transparency` gate refused every packet ('capture failed') and only `all`
+  # (which runs `c` first in the same shell) passed
+  LEAN=$("$lake" env which lean); LEAN_PATH=$("$lake" env printenv LEAN_PATH); export LEAN LEAN_PATH
   # the preview cohort's activities (sources made absolute: packets.ts resolves them
   # against the cohort file's directory)
   python3 - tests/objective-bend-source/preview-cohort.json "$tmp/activities.json" <<'EOF'
