@@ -7,6 +7,7 @@ open ObjectiveBendDemandMachine
 inductive Data where
   | natural (value : Nat) | boolean (value : Bool) | label (value : String)
   | record (fields : List (String × Data))
+  | variant (label : String) (payload : Data)
   deriving Repr
 def lengthBytes (n : Nat) : List UInt8 := (toString n).toUTF8.toList ++ [0]
 def encoded : Nat → Data → Option (List UInt8)
@@ -18,6 +19,8 @@ def encoded : Nat → Data → Option (List UInt8)
       let children ← fields.mapM fun field => do
         pure (lengthBytes field.1.utf8ByteSize ++ field.1.toUTF8.toList ++ (← encoded depth field.2))
       pure ([3] ++ lengthBytes fields.length ++ children.flatten)
+  | depth+1,.variant label payload => do
+      pure ([4] ++ lengthBytes label.utf8ByteSize ++ label.toUTF8.toList ++ (← encoded depth payload))
 inductive Failure where
   | budget | duplicateField | executableValue | suspended | divergent | refused
   deriving Repr
@@ -79,6 +82,19 @@ def materializeWith (policy : State → Bool) (limits : Limits) : Nat → Budget
         | .divergent _ retained => throw (.divergent,retained)
         | .refused _ retained => throw (.refused,retained)) ([],state,remaining)
       pure ⟨.record pair.1.reverse,pair.2.1,pair.2.2⟩
+    | .variant label payload =>
+      let bytes := label.utf8ByteSize+(toString label.utf8ByteSize).utf8ByteSize+2
+      if bytes > remaining.bytes || remaining.nodes = 0 then throw (.budget,state)
+      let entered : State := {state with control:=.enter payload,stack:=[]}
+      let (outcome,ticks) := forceWith policy limits remaining.ticks entered
+      let nextBudget := {remaining with ticks:=ticks,bytes:=remaining.bytes-bytes}
+      match outcome with
+      | .finished forced retained =>
+        let child ← materializeWith policy limits depth nextBudget forced retained
+        pure ⟨.variant label child.value,child.state,child.remaining⟩
+      | .suspended _ retained => throw (.suspended,retained)
+      | .divergent _ retained => throw (.divergent,retained)
+      | .refused _ retained => throw (.refused,retained)
     | .closure _ _ | .specification _ _ | .prototype _ _ => throw (.executableValue,state)
 
 def completeWith (policy : State → Bool) (limits : Limits) (budget : Budget) (state : State) : Except (Failure × State) Result :=

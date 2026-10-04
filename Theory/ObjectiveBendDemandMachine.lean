@@ -20,6 +20,8 @@ inductive RuntimeValue where
   | record (fields : List (String × Address))
   | specification (metadata extension : Address)
   | prototype (specification target : Address)
+  /-- An injected label with the address of its (lazy) payload cell. -/
+  | variant (label : String) (payload : Address)
   deriving Repr
 structure Closure where
   term : Term
@@ -39,9 +41,11 @@ inductive Frame where
   | condition (zero successorBody : Term) (environment : Environment)
   | binaryLeft (primitive : Primitive) (right : Term) (environment : Environment)
   | binaryRight (primitive : Primitive) (left : RuntimeValue)
+  | case (arms : List (String × Term)) (environment : Environment)
+  | ifBool (whenTrue whenFalse : Term) (environment : Environment)
   deriving Repr
 inductive Refusal where
-  | unbound | missingCell | missingField | wrongValue | invalidUpdate | capacity
+  | unbound | missingCell | missingField | wrongValue | invalidUpdate | capacity | missingArm
   deriving Repr
 inductive Control where
   | evaluate (term : Term) (environment : Environment)
@@ -113,6 +117,11 @@ def stepRaw (state : State) : State :=
     | .extend inherited fields => {state with control:=.evaluate inherited environment, stack:=.extend fields environment::state.stack}
     | .ifZero value zero successorBody => {state with control:=.evaluate value environment, stack:=.condition zero successorBody environment::state.stack}
     | .binary primitive left right => {state with control:=.evaluate left environment, stack:=.binaryLeft primitive right environment::state.stack}
+    | .inject tag payload =>
+      let address := state.heap.size
+      {state with heap:=state.heap.push (.suspended ⟨payload,environment⟩),control:=.returned (.variant tag address)}
+    | .case scrutinee arms => {state with control:=.evaluate scrutinee environment, stack:=.case arms environment::state.stack}
+    | .ifBool condition whenTrue whenFalse => {state with control:=.evaluate condition environment, stack:=.ifBool whenTrue whenFalse environment::state.stack}
   | .returned value => match state.stack with
     | [] => {state with control:=.complete value}
     | frame::rest => match frame with
@@ -157,6 +166,16 @@ def stepRaw (state : State) : State :=
           | some next => {state with control:=.returned next,stack:=rest}
           | none => {state with control:=.refused .wrongValue,stack:=rest}
         | none => {state with control:=.refused .wrongValue,stack:=rest}
+      | .case arms environment => match value with
+        | .variant tag payload => match arms.find? (fun arm => arm.1 == tag) with
+          | some (_,body) =>
+            {state with heap:=state.heap.push (.suspended ⟨.bound 0,[payload]⟩), control:=.evaluate body (state.heap.size::environment),stack:=rest}
+          | none => {state with control:=.refused .missingArm,stack:=rest}
+        | _ => {state with control:=.refused .wrongValue,stack:=rest}
+      | .ifBool whenTrue whenFalse environment => match value with
+        | .boolean true => {state with control:=.evaluate whenTrue environment,stack:=rest}
+        | .boolean false => {state with control:=.evaluate whenFalse environment,stack:=rest}
+        | _ => {state with control:=.refused .wrongValue,stack:=rest}
 
 /-- A blackhole is a non-result divergence observation, not a catchable language
 exception. Tick exhaustion and allocation capacity suspend with the EXACT

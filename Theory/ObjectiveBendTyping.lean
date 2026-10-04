@@ -30,7 +30,10 @@ def sameType (assumptions : Assumptions) (actual expected : Ty) : Bool :=
       | _ => false)
 
 /-- Source positions address the annotation of each actual lambda. Missing
-annotations are refused, not guessed or silently replaced by Data types. -/
+annotations are refused, not guessed or silently replaced by Data types. An
+injection's position carries the type of its constructor function: domain is
+the declared payload type, codomain the declared variant; a sum type is never
+guessed from one label. -/
 abbrev Annotations := List Nat → Option LambdaAnnotation
 structure AnnotatedTerm where
   term : Term
@@ -60,6 +63,7 @@ def primitiveTypes : Primitive → Ty × Ty
   | .add | .multiply => (.natural, .natural)
   | .equal => (.natural, .boolean)
   | .conjunction => (.boolean, .boolean)
+  | .labelEqual => (.label, .boolean)
 
 def literalType (_value : String) : Ty := .label
 
@@ -152,11 +156,35 @@ inductive PartialTyping (assumptions : Assumptions) : Context → Term → Ty �
       PartialTyping assumptions (⟨.natural,.unrestricted⟩ :: context) successor result su →
       safeUses (⟨.natural,.unrestricted⟩ :: context) su = true →
       PartialTyping assumptions context (.ifZero value zero successor) result (addUses vu (addUses zu su.tail))
+  | inject {context : Context} {tag : String} {payload : Term} {payloadType row : Ty} {uses : Uses} {fuel : Nat} :
+      PartialTyping assumptions context payload payloadType uses →
+      row.lookup assumptions.bounds fuel tag = some payloadType →
+      PartialTyping assumptions context (.inject tag payload) (.variant row) uses
+  | case {context : Context} {scrutinee : Term} {arms : List (String × Term)} {row result : Ty} {su au : Uses} :
+      PartialTyping assumptions context scrutinee (.variant row) su →
+      ArmsTyping assumptions context arms row result au →
+      PartialTyping assumptions context (.case scrutinee arms) result (addUses su au)
+  | ifBool {context : Context} {condition whenTrue whenFalse : Term} {result : Ty} {cu tu fu : Uses} :
+      PartialTyping assumptions context condition .boolean cu →
+      PartialTyping assumptions context whenTrue result tu →
+      PartialTyping assumptions context whenFalse result fu →
+      PartialTyping assumptions context (.ifBool condition whenTrue whenFalse) result (addUses cu (addUses tu fu))
 inductive FieldsTyping (assumptions : Assumptions) : Context → List (String × Term) → Ty → Uses → Prop where
   | nil (context : Context) : FieldsTyping assumptions context [] .emptyRow (zeroUses context)
   | cons {context : Context} {name : String} {body : Term} {rest : List (String × Term)} {type row : Ty} {bu ru : Uses} :
       PartialTyping assumptions context body type bu → FieldsTyping assumptions context rest row ru →
       FieldsTyping assumptions context ((name,body) :: rest) (.field name type row) (addUses bu ru)
+/-- Arms in source order build a CLOSED row: with the scrutinee at that variant
+row, every label has exactly the arm the machine's first-match lookup selects.
+Each body binds the payload unrestricted (so its type must be shareable). -/
+inductive ArmsTyping (assumptions : Assumptions) : Context → List (String × Term) → Ty → Ty → Uses → Prop where
+  | nil (context : Context) (result : Ty) : ArmsTyping assumptions context [] .emptyRow result (zeroUses context)
+  | cons {context : Context} {name : String} {body : Term} {rest : List (String × Term)} {payload row result : Ty} {bu ru : Uses} :
+      PartialTyping assumptions (⟨payload,.unrestricted⟩ :: context) body result bu →
+      safeUses (⟨payload,.unrestricted⟩ :: context) bu = true →
+      payload.shareableUnder assumptions.shareableVariables = true →
+      ArmsTyping assumptions context rest row result ru →
+      ArmsTyping assumptions context ((name,body) :: rest) (.field name payload row) result (addUses bu.tail ru)
 end
 
 structure Inferred (assumptions : Assumptions) (context : Context) (term : Term) where
@@ -167,6 +195,20 @@ structure InferredFields (assumptions : Assumptions) (context : Context) (fields
   type : Ty
   uses : Uses
   derivation : FieldsTyping assumptions context fields type uses
+structure InferredArms (assumptions : Assumptions) (context : Context) (arms : List (String × Term)) where
+  row : Ty
+  result : Ty
+  uses : Uses
+  derivation : ArmsTyping assumptions context arms row result uses
+
+/-- The scrutinee's row guides arm binder types; one declared variable head
+unfolds, as in sameType. The final sameType premise is what is trusted. -/
+def variantRow (assumptions : Assumptions) : Ty → Option Ty
+  | .variant row => some row
+  | .variable index => match assumptions.bounds.lookup index with
+    | some (.variant row) => some row
+    | _ => none
+  | _ => none
 
 mutual
 /-- Fuel bounds only the checker, never the runtime or meaning of Fix. Failure
@@ -309,6 +351,36 @@ def infer (assumptions : Assumptions) (annotations : Annotations) (context : Con
           else none
         else none
       else none
+  | fuel + 1, .inject tag payload => do
+      let annotation ← annotations position
+      let value ← infer assumptions annotations context (position ++ [0]) fuel payload
+      if hk : annotation.parameter = .unrestricted ∧ annotation.reuse = .reusable then
+        match annotation.codomain with
+        | .variant row =>
+            if hm : row.lookup assumptions.bounds (fuel + 1) tag = some annotation.domain then
+              if hs : sameType assumptions value.type annotation.domain = true then
+                some ⟨.variant row, value.uses, .inject (.conversion value.derivation hs) hm⟩
+              else none
+            else none
+        | _ => none
+      else none
+  | fuel + 1, .case scrutinee arms => do
+      let value ← infer assumptions annotations context (position ++ [0]) fuel scrutinee
+      let row ← variantRow assumptions value.type
+      let typed ← inferArms assumptions annotations context (position ++ [1]) 0 row none fuel arms
+      if hc : sameType assumptions value.type (.variant typed.row) = true then
+        some ⟨typed.result, addUses value.uses typed.uses, .case (.conversion value.derivation hc) typed.derivation⟩
+      else none
+  | fuel + 1, .ifBool condition whenTrue whenFalse => do
+      let c ← infer assumptions annotations context (position ++ [0]) fuel condition
+      let t ← infer assumptions annotations context (position ++ [1]) fuel whenTrue
+      let f ← infer assumptions annotations context (position ++ [2]) fuel whenFalse
+      if hc : c.type = .boolean then
+        if hb : f.type = t.type then
+          some ⟨t.type, addUses c.uses (addUses t.uses f.uses),
+            .ifBool (hc ▸ c.derivation) t.derivation (hb ▸ f.derivation)⟩
+        else none
+      else none
 
 def inferFields (assumptions : Assumptions) (annotations : Annotations) (context : Context)
     (position : List Nat) (index : Nat) : Nat → (fields : List (String × Term)) → Option (InferredFields assumptions context fields)
@@ -318,6 +390,29 @@ def inferFields (assumptions : Assumptions) (annotations : Annotations) (context
       let first ← infer assumptions annotations context (position ++ [index]) fuel body
       let later ← inferFields assumptions annotations context position (index + 1) fuel rest
       some ⟨.field name first.type later.type, addUses first.uses later.uses, .cons first.derivation later.derivation⟩
+
+/-- Every arm body is checked under its label's payload type in the scrutinee
+row; all arms must agree exactly on the result type. Empty arm lists have no
+result type to infer and are refused here (the relation itself permits them). -/
+def inferArms (assumptions : Assumptions) (annotations : Annotations) (context : Context)
+    (position : List Nat) (index : Nat) (scrutineeRow : Ty) (expected : Option Ty) :
+    Nat → (arms : List (String × Term)) → Option (InferredArms assumptions context arms)
+  | 0, _ => none
+  | _ + 1, [] => match expected with
+    | some result => some ⟨.emptyRow, result, zeroUses context, .nil context result⟩
+    | none => none
+  | fuel + 1, (name,body) :: rest => do
+      let payload ← scrutineeRow.lookup assumptions.bounds (fuel + 1) name
+      if hs : payload.shareableUnder assumptions.shareableVariables = true then
+        let first ← infer assumptions annotations (⟨payload,.unrestricted⟩ :: context) (position ++ [index]) fuel body
+        if hu : safeUses (⟨payload,.unrestricted⟩ :: context) first.uses = true then
+          let later ← inferArms assumptions annotations context position (index + 1) scrutineeRow (some first.type) fuel rest
+          if hl : later.result = first.type then
+            some ⟨.field name payload later.row, first.type, addUses first.uses.tail later.uses,
+              .cons first.derivation hu hs (hl ▸ later.derivation)⟩
+          else none
+        else none
+      else none
 end
 
 structure Checked (source : AnnotatedTerm) (context : Context) where
@@ -577,6 +672,50 @@ theorem absent_future_requirement_refused :
     (checkExtension futureRowSource [] 16 unmetFamily (.variable 0)).isNone = true := by decide
 
 
+/-- A closed two-label sum; arms checked against it in any source order. -/
+def shapeRow : Ty := .field "circle" .natural (.field "square" .natural .emptyRow)
+def shapeInjection : LambdaAnnotation := ⟨.natural,.variant shapeRow,.unrestricted,.reusable⟩
+def shapeCase (arms : List (String × Term)) (tag : String) : AnnotatedTerm :=
+  ⟨.case (.inject tag (.nat 4)) arms, fun position => if position = [0] then some shapeInjection else none, {}⟩
+def shapeArms : List (String × Term) := [("circle",.bound 0),("square",.binary .add (.bound 0) (.nat 1))]
+
+theorem exhaustive_case_accepted :
+    (check (shapeCase shapeArms "square") [] 16).map (fun checked => checked.type) = some .natural := by decide
+theorem reordered_arms_accepted :
+    (check (shapeCase shapeArms.reverse "circle") [] 16).isSome = true := by decide
+theorem missing_arm_refused :
+    (check (shapeCase [("circle",.bound 0)] "circle") [] 16).isNone = true := by decide
+theorem extra_arm_refused :
+    (check (shapeCase (shapeArms ++ [("triangle",.bound 0)]) "circle") [] 16).isNone = true := by decide
+theorem undeclared_injection_refused :
+    (check (shapeCase shapeArms "triangle") [] 16).isNone = true := by decide
+theorem unannotated_injection_refused :
+    (check ⟨.inject "circle" (.nat 4), fun _ => none, {}⟩ [] 16).isNone = true := by decide
+theorem arm_results_must_agree :
+    (check (shapeCase [("circle",.bound 0),("square",.label "four")] "circle") [] 16).isNone = true := by decide
+
+/-- Natural equality drives a Boolean branch; a label is not a condition. -/
+theorem equality_branch_accepted :
+    (check ⟨.ifBool (.binary .equal (.nat 2) (.nat 2)) (.label "same") (.label "different"),
+      fun _ => none, {}⟩ [] 16).map (fun checked => checked.type) = some .label := by decide
+theorem label_condition_refused :
+    (check ⟨.ifBool (.label "true") (.nat 1) (.nat 0), fun _ => none, {}⟩ [] 16).isNone = true := by decide
+theorem label_equality_accepted :
+    (check ⟨.binary .labelEqual (.label "a") (.label "b"), fun _ => none, {}⟩ [] 8).map
+      (fun checked => checked.type) = some .boolean := by decide
+theorem boolean_label_equality_refused :
+    (check ⟨.binary .labelEqual (.boolean true) (.boolean true), fun _ => none, {}⟩ [] 8).isNone = true := by decide
+
+/-- An affine binding used in two arms counts twice: arms are additive. -/
+theorem affine_in_two_arms_refused :
+    (check ⟨.case (.inject "circle" (.nat 4)) [("circle",.bound 1),("square",.bound 1)],
+      fun position => if position = [0] then some shapeInjection else none, {}⟩
+      [⟨.natural,.affine⟩] 16).isNone = true := by decide
+theorem affine_in_one_arm_accepted :
+    (check ⟨.case (.inject "circle" (.nat 4)) [("circle",.bound 1),("square",.nat 0)],
+      fun position => if position = [0] then some shapeInjection else none, {}⟩
+      [⟨.natural,.affine⟩] 16).isSome = true := by decide
+
 open Lean (Json toJson)
 
 def requireSome {α : Type} (message : String) : Option α → Except String α
@@ -623,12 +762,14 @@ def decodeType : Nat → Json → Except String Ty
     | "prototype" => return (.prototype
         (← decodeType fuel (← value.getObjVal? "spec"))
         (← decodeType fuel (← value.getObjVal? "target")))
+    | "variant" => return .variant (← decodeType fuel (← value.getObjVal? "row"))
     | _ => .error "unknown Objective type constructor"
 
 def decodePrimitive (value : Json) : Except String Primitive := do
   match ← value.getStr? with
   | "add" => pure .add | "multiply" => pure .multiply
   | "equal" => pure .equal | "conjunction" => pure .conjunction
+  | "labelEqual" => pure .labelEqual
   | _ => .error "unknown Objective primitive"
 
 /-- Decodes exactly the existing world lowerer's runtime core wire; no second
@@ -660,6 +801,13 @@ def decodeTerm : Nat → Json → Except String Term
     | "extend" => return .extend (← sub "inherited") (← fields ())
     | "get" => return .get (← sub "target") (← value.getObjValAs? String "name")
     | "ifZero" => return .ifZero (← sub "value") (← sub "zero") (← sub "successor")
+    | "inject" => return .inject (← value.getObjValAs? String "label") (← sub "payload")
+    | "case" => do
+        let array ← (← value.getObjVal? "arms").getArr?
+        let arms ← array.toList.mapM fun arm => do
+          return (← arm.getObjValAs? String "label", ← decodeTerm fuel (← arm.getObjVal? "body"))
+        return .case (← sub "scrutinee") arms
+    | "ifBool" => return .ifBool (← sub "condition") (← sub "whenTrue") (← sub "whenFalse")
     | _ => .error "unknown Objective runtime constructor"
 
 def decodeLambda (value : Json) : Except String LambdaAnnotation := do
@@ -720,6 +868,7 @@ def typeJson : Ty → Json
       ("metadata",typeJson metadata),("extension",typeJson extension)]
   | .prototype spec target => Json.mkObj [("tag",toJson "prototype"),
       ("spec",typeJson spec),("target",typeJson target)]
+  | .variant row => Json.mkObj [("tag",toJson "variant"),("row",typeJson row)]
 
 def packetReceipt (value : Json) : Except String Json := do
   let packet ← decodePacket value
@@ -748,5 +897,91 @@ def checkPacketFile (path : String) : IO UInt32 := do
         ("status",toJson "refused"),("stage",toJson "objective-source-type-check"),("message",toJson message)]).compress
       return 2
 
+
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.exhaustive_case_accepted' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms exhaustive_case_accepted
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.reordered_arms_accepted' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms reordered_arms_accepted
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.missing_arm_refused' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms missing_arm_refused
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.extra_arm_refused' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms extra_arm_refused
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.undeclared_injection_refused' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms undeclared_injection_refused
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.unannotated_injection_refused' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms unannotated_injection_refused
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.arm_results_must_agree' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms arm_results_must_agree
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.equality_branch_accepted' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms equality_branch_accepted
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.label_condition_refused' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms label_condition_refused
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.label_equality_accepted' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms label_equality_accepted
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.boolean_label_equality_refused' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms boolean_label_equality_refused
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.affine_in_two_arms_refused' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms affine_in_two_arms_refused
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.affine_in_one_arm_accepted' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms affine_in_one_arm_accepted
 
 end Minidregg.Theory.ObjectiveBendTyping

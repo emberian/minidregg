@@ -22,6 +22,9 @@ inductive Ty where
   | specification (metadata extension : Ty)
   | prototype (specification target : Ty)
   | custody (identity : Nat)
+  /-- A sum over the labels of an ordinary field row. A `.emptyRow` tail is a
+  closed (exhaustively eliminable) sum; a variable tail is an open sum. -/
+  | variant (row : Ty)
   deriving Repr, DecidableEq
 
 /-- A reusable closure is shareable only after its captures have been checked.
@@ -33,6 +36,7 @@ def Ty.shareable : Ty → Bool
   | .field _ member tail => member.shareable && tail.shareable
   | .specification metadata extension => metadata.shareable && extension.shareable
   | .prototype spec target => spec.shareable && target.shareable
+  | .variant row => row.shareable
 
 /-- Rigid variables may be quantified over shareable future types explicitly.
 Every instantiation must discharge this finite premise; an unknown row is never
@@ -42,6 +46,7 @@ def Ty.shareableUnder (variables : List Nat) : Ty → Bool
   | .field _ member tail => member.shareableUnder variables && tail.shareableUnder variables
   | .specification metadata extension => metadata.shareableUnder variables && extension.shareableUnder variables
   | .prototype spec target => spec.shareableUnder variables && target.shareableUnder variables
+  | .variant row => row.shareableUnder variables
   | other => other.shareable
 
 @[simp] theorem Ty.shareableUnder_empty (type : Ty) : type.shareableUnder [] = type.shareable := by
@@ -81,6 +86,7 @@ def Ty.canonical : Ty → Ty
   | .field name member tail => tail.canonical.insertCanonical name member.canonical
   | .specification metadata extension => .specification metadata.canonical extension.canonical
   | .prototype spec target => .prototype spec.canonical target.canonical
+  | .variant row => .variant row.canonical
   | other => other
 
 /-- Explicit finite bounds disclose the members available on a rigid self/super
@@ -193,6 +199,7 @@ def Ty.instantiate (arguments : Nat → Ty) : Ty → Ty
   | .specification metadata extension =>
       .specification (metadata.instantiate arguments) (extension.instantiate arguments)
   | .prototype spec target => .prototype (spec.instantiate arguments) (target.instantiate arguments)
+  | .variant row => .variant (row.instantiate arguments)
   | other => other
 
 /-- Families are independently authored expressions over future type variables.

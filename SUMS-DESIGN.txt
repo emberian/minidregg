@@ -60,9 +60,12 @@ Base: minidregg c8fdd000. Tags: READ = read in code at that commit; DECIDED = th
   arm: DEFERRED). Uses count arms ADDITIVELY (as ifZero adds zero and successor): conservative for
   at-most-once, since exactly one arm runs.
   ifBool: condition : boolean, both branches : R ⊢ R, uses added. labelEqual : (label, boolean).
-  Checker: AnnotatedTerm gains `injections : List Nat → Option Ty` (path → the declared variant type
-  of that inject); infer returns derivations for all three constructors; packet field "injections"
-  [{path,type}] (absent = none). Packet schema stays typed-core.v2 + optional field.
+  Checker (REVISED in step 2): an inject's declared type travels in the EXISTING lambda-annotation
+  map at the inject's path, read as the type of the constructor function payload → sum: domain =
+  declared payload type, codomain = variant row, parameter "unrestricted", reuse "reusable" (anything
+  else refused). Adding an AnnotatedTerm field would have changed existing theorem statements that
+  build AnnotatedTerm anonymously. infer returns derivations for all three constructors; packet schema
+  unchanged (typed-core.v2).
 
 6. TYPED STATE (DemandTyping): ValueTyping.variant (row.lookup l = member, types[a] = actual,
  ConversionPath actual member — the record rule's shape); FrameTyping.case (closure-free: env typing +
@@ -107,3 +110,12 @@ Base: minidregg c8fdd000. Tags: READ = read in code at that commit; DECIDED = th
  $L/ports/ (not committed under Theory/); the inline port goes into W1.4's landed files later.
  Between step 2 and that port, Adequacy/Preservation do not compile against the extended core
  (they are ResearchWip-only; Host/ObjectiveBendPreview, Typing, Machine, Data stay green).
+
+11. CORE JSON AND ANNOTATION PATHS (step 2, compiled; for W1.5)
+  {"tag":"inject","label":L,"payload":T}  {"tag":"case","scrutinee":T,"arms":[{"label":L,"body":T}]}
+  {"tag":"ifBool","condition":T,"whenTrue":T,"whenFalse":T}  primitive "labelEqual"
+  type {"tag":"variant","row":<field row>}
+  Child paths: inject payload [0]; case scrutinee [0], arm i body [1,i]; ifBool [0],[1],[2].
+  Inject annotation entry: {path:<inject path>, domain:<payload type>, codomain:{"tag":"variant",...},
+  parameter:"unrestricted", reuse:"reusable"}. Arm bodies see the payload as bound 0 (env shifts by 1).
+  Generated preview Lean (objective-elaborate.ts template resultJson) needs a `.variant` line.

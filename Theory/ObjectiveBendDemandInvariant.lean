@@ -30,6 +30,10 @@ inductive Scoped : Nat → Term → Prop where
       (∀ f ∈ fs, Scoped n f.2) → Scoped n (.record fs)
   | get {n : Nat} {t : Term} {name : String} : Scoped n t → Scoped n (.get t name)
   | condition {n : Nat} {t z s : Term} : Scoped n t → Scoped n z → Scoped (n+1) s → Scoped n (.ifZero t z s)
+  | inject {n : Nat} {tag : String} {p : Term} : Scoped n p → Scoped n (.inject tag p)
+  | case {n : Nat} {t : Term} {arms : List (String × Term)} :
+      Scoped n t → (∀ arm ∈ arms, Scoped (n+1) arm.2) → Scoped n (.case t arms)
+  | ifBool {n : Nat} {c t f : Term} : Scoped n c → Scoped n t → Scoped n f → Scoped n (.ifBool c t f)
 
 @[simp] theorem scoped_bound_iff (n : Nat) (i : Nat) :
     Scoped n (.bound i) ↔ i < n := by
@@ -121,6 +125,24 @@ inductive Scoped : Nat → Term → Prop where
   · intro h; cases h; exact ⟨by assumption,by assumption,by assumption⟩
   · intro h; exact .condition h.1 h.2.1 h.2.2
 
+@[simp] theorem scoped_inject_iff (n : Nat) (tag : String) (p : Term) :
+    Scoped n (.inject tag p) ↔ Scoped n p := by
+  constructor
+  · intro h; cases h; assumption
+  · intro h; exact .inject h
+
+@[simp] theorem scoped_case_iff (n : Nat) (t : Term) (arms : List (String × Term)) :
+    Scoped n (.case t arms) ↔ Scoped n t ∧ ∀ arm ∈ arms, Scoped (n+1) arm.2 := by
+  constructor
+  · intro h; cases h; exact ⟨by assumption,by assumption⟩
+  · intro h; exact .case h.1 h.2
+
+@[simp] theorem scoped_ifBool_iff (n : Nat) (c t f : Term) :
+    Scoped n (.ifBool c t f) ↔ Scoped n c ∧ Scoped n t ∧ Scoped n f := by
+  constructor
+  · intro h; cases h; exact ⟨by assumption,by assumption,by assumption⟩
+  · intro h; exact .ifBool h.1 h.2.1 h.2.2
+
  theorem scoped_rename {n : Nat} {t : Term} (h : Scoped n t)
     (f : Nat → Nat) (m : Nat) (hf : ∀ i, i < n → f i < m) :
     Scoped m (t.rename f) := by
@@ -199,6 +221,22 @@ inductive Scoped : Nat → Term → Prop where
       cases i with
       | zero => simp [liftRename]
       | succ i => simp only [liftRename]; exact Nat.succ_lt_succ (hf i (Nat.lt_of_succ_lt_succ hi))
+  | inject _ ih =>
+      simp only [Term.rename]
+      exact .inject (ih f m hf)
+  | case _ _ ih₁ ih₂ =>
+      simp only [Term.rename]
+      apply Scoped.case (ih₁ f m hf)
+      intro arm member
+      obtain ⟨original, ho, rfl⟩ := List.mem_map.mp member
+      apply ih₂ original ho (liftRename f) (m+1)
+      intro i hi
+      cases i with
+      | zero => simp [liftRename]
+      | succ i => simp only [liftRename]; exact Nat.succ_lt_succ (hf i (Nat.lt_of_succ_lt_succ hi))
+  | ifBool _ _ _ ih₁ ih₂ ih₃ =>
+      simp only [Term.rename]
+      exact .ifBool (ih₁ f m hf) (ih₂ f m hf) (ih₃ f m hf)
 
  theorem scoped_weaken {n : Nat} {t : Term} (h : Scoped n t) :
     Scoped (n+1) (t.rename Nat.succ) :=
@@ -282,6 +320,22 @@ inductive Scoped : Nat → Term → Prop where
       cases i with
       | zero => exact .bound (Nat.zero_lt_succ _)
       | succ i => exact scoped_weaken (hs i (Nat.lt_of_succ_lt_succ hi))
+  | inject _ ih =>
+      simp only [Term.substitute]
+      exact .inject (ih substitution m hs)
+  | case _ _ ih₁ ih₂ =>
+      simp only [Term.substitute]
+      apply Scoped.case (ih₁ substitution m hs)
+      intro arm member
+      obtain ⟨original, ho, rfl⟩ := List.mem_map.mp member
+      apply ih₂ original ho (liftSubstitution substitution) (m+1)
+      intro i hi
+      cases i with
+      | zero => exact .bound (Nat.zero_lt_succ _)
+      | succ i => exact scoped_weaken (hs i (Nat.lt_of_succ_lt_succ hi))
+  | ifBool _ _ _ ih₁ ih₂ ih₃ =>
+      simp only [Term.substitute]
+      exact .ifBool (ih₁ substitution m hs) (ih₂ substitution m hs) (ih₃ substitution m hs)
 
  theorem scoped_mixBody {n : Nat} {lower upper : Term}
     (hl : Scoped n lower) (hu : Scoped n upper) : Scoped n (mixBody lower upper) := by
@@ -304,6 +358,7 @@ def RuntimeValueValid (bound : Nat) : RuntimeValue → Prop
   | .record fields => ∀ field ∈ fields, field.2 < bound
   | .specification metadata extension => metadata < bound ∧ extension < bound
   | .prototype specification target => specification < bound ∧ target < bound
+  | .variant _ payload => payload < bound
 
  theorem environmentValid_mono {a b : Nat} {environment : Environment}
     (h : EnvironmentValid a environment) (hab : a ≤ b) : EnvironmentValid b environment :=
@@ -332,6 +387,10 @@ def FrameValid (bound : Nat) : Frame → Prop
   | .condition zero successorBody environment => EnvironmentValid bound environment ∧
       Scoped environment.length zero ∧ Scoped (environment.length+1) successorBody
   | .binaryRight _ value => RuntimeValueValid bound value
+  | .case arms environment => EnvironmentValid bound environment ∧
+      ∀ arm ∈ arms, Scoped (environment.length+1) arm.2
+  | .ifBool whenTrue whenFalse environment => EnvironmentValid bound environment ∧
+      Scoped environment.length whenTrue ∧ Scoped environment.length whenFalse
 
 def ControlValid (bound : Nat) : Control → Prop
   | .evaluate term environment => ClosureValid bound ⟨term,environment⟩
@@ -357,6 +416,7 @@ def LexicalInvariant (state : State) : Prop :=
   | natural _ | boolean _ | label _ => trivial
   | record fields => exact fun field member => Nat.lt_of_lt_of_le (h field member) hab
   | specification _ _ | prototype _ _ => exact ⟨Nat.lt_of_lt_of_le h.1 hab,Nat.lt_of_lt_of_le h.2 hab⟩
+  | variant _ _ => exact Nat.lt_of_lt_of_le h hab
 
  theorem closureValid_mono {a b : Nat} {closure : Closure}
     (h : ClosureValid a closure) (hab : a ≤ b) : ClosureValid b closure :=
@@ -377,6 +437,8 @@ def LexicalInvariant (state : State) : Prop :=
   | extend _ _ => exact ⟨environmentValid_mono h.1 hab,h.2⟩
   | condition _ _ _ => exact ⟨environmentValid_mono h.1 hab,h.2⟩
   | binaryRight _ _ => exact runtimeValueValid_mono h hab
+  | case _ _ => exact ⟨environmentValid_mono h.1 hab,h.2⟩
+  | ifBool _ _ _ => exact ⟨environmentValid_mono h.1 hab,h.2⟩
 
  theorem controlValid_mono {a b : Nat} {control : Control}
     (h : ControlValid a control) (hab : a ≤ b) : ControlValid b control := by
@@ -564,12 +626,13 @@ set_option maxHeartbeats 1200000 in
   all_goals try (have headValid := stackHead _ _ (by assumption))
   all_goals simp_all only [LexicalInvariant, ControlValid, ClosureValid,
     CellValid.eq_1, CellValid.eq_2, CellValid.eq_3,
-    RuntimeValueValid.eq_1, RuntimeValueValid.eq_2, RuntimeValueValid.eq_3, RuntimeValueValid.eq_4, RuntimeValueValid.eq_5, RuntimeValueValid.eq_6,
-    FrameValid.eq_1, FrameValid.eq_2, FrameValid.eq_3, FrameValid.eq_4, FrameValid.eq_5, FrameValid.eq_6, FrameValid.eq_7, FrameValid.eq_8, FrameValid.eq_9, FrameValid.eq_10,
+    RuntimeValueValid.eq_1, RuntimeValueValid.eq_2, RuntimeValueValid.eq_3, RuntimeValueValid.eq_4, RuntimeValueValid.eq_5, RuntimeValueValid.eq_6, RuntimeValueValid.eq_7,
+    FrameValid.eq_1, FrameValid.eq_2, FrameValid.eq_3, FrameValid.eq_4, FrameValid.eq_5, FrameValid.eq_6, FrameValid.eq_7, FrameValid.eq_8, FrameValid.eq_9, FrameValid.eq_10, FrameValid.eq_11, FrameValid.eq_12,
     scoped_bound_iff, scoped_lam_iff, scoped_app_iff,
     scoped_mix_iff, scoped_fix_iff, scoped_specification_iff, scoped_prototype_iff,
     scoped_reflect_iff, scoped_metadata_iff, scoped_project_iff, scoped_binary_iff,
     scoped_extend_iff, scoped_record_iff, scoped_get_iff, scoped_condition_iff,
+    scoped_inject_iff, scoped_case_iff, scoped_ifBool_iff,
     List.mem_cons, List.not_mem_nil, false_or, or_false, Array.size_push]
   all_goals try (have lookupValid := environmentValid_lookup hc.2 (by assumption))
   all_goals try (have allocationValid := allocateFields_valid hh hc.2 hc.1)

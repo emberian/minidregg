@@ -23,6 +23,7 @@ def valueJson : RuntimeValue → Json
   | .record fields => Json.mkObj [("tag",toJson "record"),("fields",toJson (fields.map Prod.fst))]
   | .specification _ _ => Json.mkObj [("tag",toJson "specification"),("status",toJson "unforced extension")]
   | .prototype _ _ => Json.mkObj [("tag",toJson "prototype"),("status",toJson "unforced target")]
+  | .variant label _ => Json.mkObj [("tag",toJson "variant"),("label",toJson label),("status",toJson "unforced payload")]
 
 /-- Receives an actual annotated packet; typing and bounded demand use exactly
 packet.source.term. A Boolean assertion supplied by the caller cannot replace

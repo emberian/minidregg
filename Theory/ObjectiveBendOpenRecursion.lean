@@ -10,7 +10,7 @@ namespace Minidregg.Theory.ObjectiveBendOpenRecursion
 set_option autoImplicit false
 
 inductive Primitive where
-  | add | multiply | equal | conjunction
+  | add | multiply | equal | conjunction | labelEqual
   deriving Repr, DecidableEq
 
 inductive Term where
@@ -32,6 +32,12 @@ inductive Term where
   | record (fields : List (String × Term))
   | get (target : Term) (name : String)
   | ifZero (value zero successorBody : Term)
+  /-- A sum injection: a weak-head value whose payload stays an unforced computation. -/
+  | inject (label : String) (payload : Term)
+  /-- Sum elimination; every arm body binds the payload at de Bruijn index 0. -/
+  | case (scrutinee : Term) (arms : List (String × Term))
+  /-- The Boolean eliminator. Booleans are not labels, so this is not a case. -/
+  | ifBool (condition whenTrue whenFalse : Term)
   deriving Repr
 
 def liftRename (rename : Nat → Nat) : Nat → Nat
@@ -59,6 +65,11 @@ def Term.rename (rename : Nat → Nat) : Term → Term
   | .ifZero value zero successorBody =>
       .ifZero (value.rename rename) (zero.rename rename)
         (successorBody.rename (liftRename rename))
+  | .inject tag payload => .inject tag (payload.rename rename)
+  | .case scrutinee arms => .case (scrutinee.rename rename)
+      (arms.map fun field => (field.1,field.2.rename (liftRename rename)))
+  | .ifBool condition whenTrue whenFalse =>
+      .ifBool (condition.rename rename) (whenTrue.rename rename) (whenFalse.rename rename)
 
 termination_by source => sizeOf source
 decreasing_by
@@ -98,6 +109,12 @@ def Term.substitute (substitution : Nat → Term) : Term → Term
   | .ifZero value zero successorBody =>
       .ifZero (value.substitute substitution) (zero.substitute substitution)
         (successorBody.substitute (liftSubstitution substitution))
+  | .inject tag payload => .inject tag (payload.substitute substitution)
+  | .case scrutinee arms => .case (scrutinee.substitute substitution)
+      (arms.map fun field => (field.1,field.2.substitute (liftSubstitution substitution)))
+  | .ifBool condition whenTrue whenFalse =>
+      .ifBool (condition.substitute substitution) (whenTrue.substitute substitution)
+        (whenFalse.substitute substitution)
 
 termination_by source => sizeOf source
 decreasing_by
@@ -128,6 +145,7 @@ inductive Value : Term → Prop where
   | record (fields : List (String × Term)) : Value (.record fields)
   | specification (metadata extension : Term) : Value (.specification metadata extension)
   | prototype (spec target : Term) : Value (.prototype spec target)
+  | inject (label : String) (payload : Term) : Value (.inject label payload)
 
 /-- A record-target fragment only. Other target kinds use ordinary extensions.
 New fields shadow inherited fields; the inherited computation remains super. -/
@@ -139,6 +157,7 @@ def primitiveResult : Primitive → Term → Term → Option Term
   | .multiply, .nat a, .nat b => some (.nat (a * b))
   | .equal, .nat a, .nat b => some (.boolean (a == b))
   | .conjunction, .boolean a, .boolean b => some (.boolean (a && b))
+  | .labelEqual, .label a, .label b => some (.boolean (a == b))
   | _, _, _ => none
 
 /-- All String labels, including true/false, are excluded from Boolean operations. -/
@@ -151,6 +170,13 @@ theorem conjunction_boolean_exact (left right : Bool) :
 
 theorem equality_boolean_exact (left right : Nat) :
     primitiveResult .equal (.nat left) (.nat right) = some (.boolean (left == right)) := rfl
+
+theorem label_equality_boolean_exact (left right : String) :
+    primitiveResult .labelEqual (.label left) (.label right) = some (.boolean (left == right)) := rfl
+
+/-- Labels compare only with labels: a Boolean is never a reserved label. -/
+theorem label_equality_booleans_refused (left right : Bool) :
+    primitiveResult .labelEqual (.boolean left) (.boolean right) = none := rfl
 
 inductive Step : Term → Term → Prop where
   | beta (body argument : Term) : Step (.app (.lam body) argument) (instantiate body argument)
@@ -188,6 +214,17 @@ inductive Step : Term → Term → Prop where
   | zero (zero successorBody : Term) : Step (.ifZero (.nat 0) zero successorBody) zero
   | successor (n : Nat) (zero successorBody : Term) :
       Step (.ifZero (.nat (n + 1)) zero successorBody) (instantiate successorBody (.nat n))
+  | caseTarget {scrutinee next : Term} (arms : List (String × Term)) :
+      Step scrutinee next → Step (.case scrutinee arms) (.case next arms)
+  /-- The first arm carrying the injected label is selected, exactly as field
+  lookup selects the first field; the payload is substituted unevaluated. -/
+  | caseInject (label : String) (payload : Term) (arms : List (String × Term)) (body : Term) :
+      arms.find? (fun arm => arm.1 == label) = some (label,body) →
+      Step (.case (.inject label payload) arms) (instantiate body payload)
+  | ifCondition {condition next : Term} (whenTrue whenFalse : Term) :
+      Step condition next → Step (.ifBool condition whenTrue whenFalse) (.ifBool next whenTrue whenFalse)
+  | ifTrue (whenTrue whenFalse : Term) : Step (.ifBool (.boolean true) whenTrue whenFalse) whenTrue
+  | ifFalse (whenTrue whenFalse : Term) : Step (.ifBool (.boolean false) whenTrue whenFalse) whenFalse
 
 inductive Steps : Term → Term → Prop where
   | refl (term : Term) : Steps term term
@@ -279,5 +316,42 @@ theorem lazy_fixed_function :
         (Step.beta (.lam (.bound 0)) (.nat 7))
     exact .next first (.next second (.refl _))
   · exact .function _
+
+/-- The injected label selects its arm and the unevaluated payload is
+substituted; a divergent payload in an unselected position is never demanded. -/
+theorem case_selects_injected_arm (unused : Term) :
+    Evaluates (.case (.inject "some" (.nat 7)) [("none",unused),("some",.bound 0)]) (.nat 7) := by
+  refine ⟨.next (.caseInject "some" (.nat 7) _ (.bound 0) rfl) ?_,.natural 7⟩
+  simpa [instantiate, Term.substitute] using Steps.refl (Term.nat 7)
+
+/-- Natural equality drives control flow through the Boolean eliminator. -/
+theorem equality_drives_branch (left right : Nat) :
+    Evaluates (.ifBool (.binary .equal (.nat left) (.nat right)) (.label "same") (.label "different"))
+      (.label (if left == right then "same" else "different")) := by
+  refine ⟨.next (.ifCondition _ _ (.primitive .equal _ _ _ (.natural _) (.natural _) rfl)) ?_,.label _⟩
+  cases h : left == right
+  · exact .next (.ifFalse _ _) (by simp; exact .refl _)
+  · exact .next (.ifTrue _ _) (by simp; exact .refl _)
+
+/--
+info: 'Minidregg.Theory.ObjectiveBendOpenRecursion.label_equality_boolean_exact' depends on axioms: [propext]
+-/
+#guard_msgs in
+#print axioms label_equality_boolean_exact
+/--
+info: 'Minidregg.Theory.ObjectiveBendOpenRecursion.label_equality_booleans_refused' depends on axioms: [propext]
+-/
+#guard_msgs in
+#print axioms label_equality_booleans_refused
+/--
+info: 'Minidregg.Theory.ObjectiveBendOpenRecursion.case_selects_injected_arm' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms case_selects_injected_arm
+/--
+info: 'Minidregg.Theory.ObjectiveBendOpenRecursion.equality_drives_branch' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms equality_drives_branch
 
 end Minidregg.Theory.ObjectiveBendOpenRecursion

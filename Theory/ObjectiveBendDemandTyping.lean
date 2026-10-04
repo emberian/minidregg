@@ -102,6 +102,12 @@ inductive ValueTyping (assumptions : Assumptions) (types : AddressTypes) : Runti
   | conversion {value : RuntimeValue} {actual expected : Ty} :
       ValueTyping assumptions types value actual → sameType assumptions actual expected = true →
       ValueTyping assumptions types value expected
+  /-- The payload address keeps the type of its injection site; the declared
+  member agrees with it along a finite conversion path, as for record fields. -/
+  | variant {tag : String} {address : Address} {row member actual : Ty} {fuel : Nat} :
+      row.lookup assumptions.bounds fuel tag = some member → types[address]? = some actual →
+      ConversionPath assumptions actual member →
+      ValueTyping assumptions types (.variant tag address) (.variant row)
 
 /-- Both origin and cached result inhabit the same assigned type. Cycles use
 address assignments; the relation never unfolds a cyclic heap into a tree. -/
@@ -162,6 +168,16 @@ inductive FrameTyping (assumptions : Assumptions) (types : AddressTypes) : Frame
       ValueTyping assumptions types left (primitiveTypes primitive).1 →
       FrameTyping assumptions types (.binaryRight primitive left)
         (primitiveTypes primitive).1 (primitiveTypes primitive).2
+  | case {arms : List (String × Term)} {environment : Environment} {row result : Ty}
+      {context : Context} {uses : Uses} :
+      EnvironmentTyping types context environment →
+      ArmsTyping assumptions context arms row result uses →
+      validContext assumptions.shareableVariables context = true →
+      FrameTyping assumptions types (.case arms environment) (.variant row) result
+  | ifBool {whenTrue whenFalse : Term} {environment : Environment} {result : Ty} :
+      ClosureTyping assumptions types ⟨whenTrue,environment⟩ result →
+      ClosureTyping assumptions types ⟨whenFalse,environment⟩ result →
+      FrameTyping assumptions types (.ifBool whenTrue whenFalse environment) .boolean result
 
 inductive StackTyping (assumptions : Assumptions) (types : AddressTypes) : List Frame → Ty → Ty → Prop where
   | nil (type : Ty) : StackTyping assumptions types [] type type
@@ -209,7 +225,8 @@ theorem source_uses_length {assumptions : Assumptions} {context : Context}
   refine PartialTyping.rec
     (motive_1 := fun context _ _ uses _ => uses.length = context.length)
     (motive_2 := fun context _ _ uses _ => uses.length = context.length)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
+    (motive_3 := fun context _ _ _ uses _ => uses.length = context.length)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
   · intros; simp [variableUses]
   · intros; simp [zeroUses]
   · intros; simp [zeroUses]
@@ -229,6 +246,11 @@ theorem source_uses_length {assumptions : Assumptions} {context : Context}
   · intros; simp_all [addUses,List.length_zipWith]
   · intros; simp_all [addUses,List.length_zipWith]
   · intros; simp_all [addUses,List.length_zipWith]
+  · intros; assumption
+  · intros; simp_all [addUses,List.length_zipWith]
+  · intros; simp_all [addUses,List.length_zipWith]
+  · intros; simp [zeroUses]
+  · intros; simp_all [addUses,List.length_zipWith]
   · intros; simp [zeroUses]
   · intros; simp_all [addUses,List.length_zipWith]
 
@@ -241,7 +263,11 @@ theorem source_fields_row {assumptions : Assumptions} {context : Context}
   refine FieldsTyping.rec
     (motive_1 := fun _ _ _ _ _ => True)
     (motive_2 := fun _ _ row _ _ => ∃ fuel, row.isRow assumptions.bounds fuel = true)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
+    (motive_3 := fun _ _ _ _ _ _ => True)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
   · intros; trivial
   · intros; trivial
   · intros; trivial
@@ -265,6 +291,8 @@ theorem source_fields_row {assumptions : Assumptions} {context : Context}
   · intro context name body rest type row bu ru hb hr ihBody ihRest
     obtain ⟨fuel,isRow⟩ := ihRest
     exact ⟨fuel+1,isRow⟩
+  · intros; trivial
+  · intros; trivial
 
 /-- Every actual source derivation is lexically scoped. This connects checker
 success to the independently proved graph reference/busy invariants. -/
@@ -275,7 +303,8 @@ theorem source_scoped {assumptions : Assumptions} {context : Context}
   refine PartialTyping.rec
     (motive_1 := fun context term _ _ _ => ObjectiveBendDemandInvariant.Scoped context.length term)
     (motive_2 := fun context fields _ _ _ => ∀ field ∈ fields, ObjectiveBendDemandInvariant.Scoped context.length field.2)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
+    (motive_3 := fun context arms _ _ _ _ => ∀ arm ∈ arms, ObjectiveBendDemandInvariant.Scoped (context.length+1) arm.2)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
 
   · intro context index binding found
     exact .bound (List.getElem?_eq_some_iff.mp found).1
@@ -299,12 +328,21 @@ theorem source_scoped {assumptions : Assumptions} {context : Context}
   · intros; exact .binary (by assumption) (by assumption)
   · intros; rename_i ihValue ihZero ihSuccessor
     exact .condition ihValue ihZero (by simpa using ihSuccessor)
+  · intros; exact .inject (by assumption)
+  · intros; exact .case (by assumption) (by assumption)
+  · intros; exact .ifBool (by assumption) (by assumption) (by assumption)
   · intro context field member; simp at member
   · intro context name body rest type row bu ru hb hr ihb ihr field member
     simp only [List.mem_cons] at member
     rcases member with rfl | member
     · exact ihb
     · exact ihr field member
+  · intro context result arm member; simp at member
+  · intro context name body rest payload row result bu ru hb _ _ _ ihb ihr arm member
+    simp only [List.mem_cons] at member
+    rcases member with rfl | member
+    · simpa using ihb
+    · exact ihr arm member
 
 theorem source_fields_scoped {assumptions : Assumptions} {context : Context}
     {fields : List (String × Term)} {type : Ty} {uses : Uses}
@@ -313,7 +351,8 @@ theorem source_fields_scoped {assumptions : Assumptions} {context : Context}
   refine FieldsTyping.rec
     (motive_1 := fun context term _ _ _ => ObjectiveBendDemandInvariant.Scoped context.length term)
     (motive_2 := fun context fields _ _ _ => ∀ field ∈ fields, ObjectiveBendDemandInvariant.Scoped context.length field.2)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
+    (motive_3 := fun context arms _ _ _ _ => ∀ arm ∈ arms, ObjectiveBendDemandInvariant.Scoped (context.length+1) arm.2)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
 
   · intro context index binding found
     exact .bound (List.getElem?_eq_some_iff.mp found).1
@@ -337,12 +376,21 @@ theorem source_fields_scoped {assumptions : Assumptions} {context : Context}
   · intros; exact .binary (by assumption) (by assumption)
   · intros; rename_i ihValue ihZero ihSuccessor
     exact .condition ihValue ihZero (by simpa using ihSuccessor)
+  · intros; exact .inject (by assumption)
+  · intros; exact .case (by assumption) (by assumption)
+  · intros; exact .ifBool (by assumption) (by assumption) (by assumption)
   · intro context field member; simp at member
   · intro context name body rest type row bu ru hb hr ihb ihr field member
     simp only [List.mem_cons] at member
     rcases member with rfl | member
     · exact ihb
     · exact ihr field member
+  · intro context result arm member; simp at member
+  · intro context name body rest payload row result bu ru hb _ _ _ ihb ihr arm member
+    simp only [List.mem_cons] at member
+    rcases member with rfl | member
+    · simpa using ihb
+    · exact ihr arm member
 
 /-- A successful closed checker result initializes the genuine typed graph;
 no extra scope oracle or termination premise is required. -/
