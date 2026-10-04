@@ -89,11 +89,43 @@ console.log('QUANTITY SURFACE PASS: affine/linear/dead/copy reach annotations; l
  if(!dom||dom.tag!=='field'||dom.name!=='l'||dom.member.tag!=='field'||dom.member.name!=='a'||dom.tail.name!=='r'||dom.tail.member.name!=='a')throw Error('table expansion lost structure');
  console.log('TYPE TABLE PASS: depth-'+depth+' nested records: proposal '+JSON.stringify(big).length+' bytes, '+big.types.length+' table entries, expansion would be '+expanded+' type nodes');
 }
-// (d) operators without a core constructor are refused with the constructor they wait for.
-for(const [op,wait] of [['<','Primitive.less'],['>=','Primitive.less'],['-','Primitive.subtract'],['/','Primitive.divide']]){
- expectThrow(()=>run('1n '+op+' 2n','Nat'),new RegExp('operator '+op.replace(/[-/]/g,'\\$&')+' is not yet a core constructor.*'+wait.replace('.','\\.')),'operator '+op);
+// (d) operators without a core primitive lower to the package prelude: a call of one global of the knot.
+const preludeKeys=(out:any)=>findTag(out.term,'fix').spec.extension.body.body.fields.map((f:any)=>f.name).filter((n:string)=>n.startsWith('$prelude.'));
+for(const [op,type,definitions] of [['<','Bool',['lt']],['>','Bool',['lt']],['<=','Bool',['le']],['>=','Bool',['le']],['-','Nat',['sub']],['/','Nat',['sub','lt','quotient','divide']]] as [string,string,string[]][]){
+ const out=run('7n '+op+' 2n',type);
+ const keys=preludeKeys(out).map((n:string)=>n.slice('$prelude.'.length)).sort().join();
+ if(keys!==[...definitions].sort().join())throw Error('operator '+op+' pulled prelude definitions '+keys+' wanted '+definitions);
+ const typedOp=literalAnnotations(out);
+ if(typedOp.schema!=='dregg.objective-bend.typed-core.v3'||!typedOp.bounds[0].type)throw Error('operator '+op+' lost its typing proposal: '+typedOp.message);
+ const row:string[]=[];for(let r=typedOp.bounds[0].type;r.tag==='field';r=r.tail)row.push(r.name);
+ if(!definitions.every(d=>row.includes('$prelude.'+d))||row.includes('Probe.value')===false)throw Error('prelude definitions missing from the global row for '+op);
 }
-console.log('OPERATOR REFUSAL PASS: < >= - / name Primitive.less/subtract/divide');
+// `>` and `>=` swap the operands of `<` and `<=`; neither operand is duplicated.
+const lt32=findAll(run('3n < 2n','Bool').term,(x:any)=>x.tag==='app'&&x.fn.tag==='app'&&x.fn.fn.name==='$prelude.lt')[0];
+const gt32=findAll(run('3n > 2n','Bool').term,(x:any)=>x.tag==='app'&&x.fn.tag==='app'&&x.fn.fn.name==='$prelude.lt')[0];
+if(lt32.fn.arg.value!=='3'||lt32.arg.value!=='2'||gt32.fn.arg.value!=='2'||gt32.arg.value!=='3')throw Error('> did not lower to < with swapped operands');
+if(preludeKeys(run('1n + 2n','Nat')).length||preludeKeys(run('1n == 2n','Bool')).length)throw Error('a package without these operators gained prelude definitions');
+if(JSON.parse(findTag(run('4n - 1n','Nat').term,'fix').spec.metadata.fields[0].value.value).join()!=='Probe,$prelude')throw Error('package label does not name the prelude module');
+if(JSON.parse(findTag(run('4n + 1n','Nat').term,'fix').spec.metadata.fields[0].value.value).join()!=='Probe')throw Error('package label of an operator-free package changed');
+if(run('4n - 1n','Nat').sourceModules.length!==1||run('4n - 1n','Nat').declarationASTs.length!==1)throw Error('prelude leaked into the captured source modules');
+console.log('OPERATOR LOWERING PASS: - / < <= > >= call $prelude.sub/divide/lt/le; only needed definitions added; > >= swap; operator-free packages unchanged');
+// `let`: (lambda x. body) value, ONE value subterm however often x is used; the value is outside the binder.
+const letOut=elaborate([moduleFor('edition ObjectiveBend 1\ndef f(x: Nat) -> Nat:\n  let y = x + 1n\n  let x: Nat = y * y\n  x + x\n')],0,'f',[],'definition');
+const fBody=findTag(letOut.term,'fix').spec.extension.body.body.fields.find((f:any)=>f.name==='Probe.f').value.body;
+if(fBody.tag!=='app'||fBody.fn.tag!=='lam'||fBody.arg.tag!=='binary'||fBody.arg.primitive!=='add'||fBody.arg.left.tag!=='bound'||fBody.arg.left.index!==0)
+ throw Error('let did not lower to an application of a lambda whose argument is the value, elaborated outside the binder');
+const inner=fBody.fn.body;
+if(inner.tag!=='app'||inner.arg.primitive!=='multiply'||inner.arg.left.index!==0||inner.arg.right.index!==0||inner.fn.body.primitive!=='add'||inner.fn.body.left.index!==0)
+ throw Error('nested let / shadowing lowered wrongly: '+JSON.stringify(inner).slice(0,300));
+if(findAll(letOut.term,(x:any)=>x.tag==='binary'&&x.primitive==='multiply').length!==1)throw Error('let duplicated its value');
+const letTyped=literalAnnotations(letOut);
+if(letTyped.schema!=='dregg.objective-bend.typed-core.v3'||letTyped.annotations.filter((a:any)=>a.domain.tag==='natural'&&a.codomain.tag==='natural').length<3)throw Error('let lambdas lost their annotations: '+letTyped.message);
+const unresolved=literalAnnotations(elaborate([moduleFor('edition ObjectiveBend 1\ndef g(p: Nat) -> Nat:\n  let y = metadata(p)\n  1n\n')],0,'g',[],'definition'));
+if(unresolved.status!=='unsupported'||!/parameter y has no resolvable type/.test(unresolved.message))throw Error('an unresolvable let type was guessed: '+JSON.stringify(unresolved).slice(0,200));
+const inline=elaborate([moduleFor('edition ObjectiveBend 1\ndef h(x: Nat) -> Nat:\n  let a: Nat = x in a + a\n')],0,'h',[],'definition');
+if(findAll(inline.term,(x:any)=>x.tag==='app'&&x.fn.tag==='lam').length!==1)throw Error('expression let did not lower to a redex');
+expectThrow(()=>moduleFor('edition ObjectiveBend 1\ndef f() -> Nat:\n  let y = 1n\n    y\n'),/same indent/,'misplaced let body');
+console.log('LET PASS: let lowers to one redex, value shared and outside the binder, shadowing, unresolved type refused by the proposal, statement and expression forms');
 // Sums (SUMS-DESIGN §9): inject/case/ifBool/labelEqual, != and || via ifBool.
 const shapes=`edition ObjectiveBend 1\nsum Shape:\n  circle: Nat\n  square: {side: Nat}\n  none: {}\nsum List:\n  nil: {}\n  cons: {head: Nat, tail: List}\ndef area(s: Shape) -> Nat:\n  match s:\n    case circle(r): r * 3n\n    case square(q): q.side * q.side\n    case none(_): 0n\ndef pick(b: Bool) -> Nat:\n  if b then 1n else 2n\ndef same(a: String, b: String) -> Bool:\n  a == b\ndef differ(a: Nat, b: Nat) -> Bool:\n  a != b\ndef either(a: Bool, b: Bool) -> Bool:\n  a || b\ndef one() -> List:\n  List.cons({head: 1n, tail: List.nil()})\ndef main() -> Nat:\n  area(Shape.square({side: 4n}))\n`;
 const sumsOut=elaborate([moduleFor(shapes)],0,'main',[]);

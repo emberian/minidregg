@@ -1,0 +1,85 @@
+edition ObjectiveBend 1
+# `let`: call-by-need sharing. `let x = v` then the rest of the body at the same
+# indent (statement form), or `let x = v in e` (expression form). The value is one
+# lazy cell: evaluated at most once however often x is used, and not at all when
+# x is unused. Its scope is the body only, so `let x = x + 1n` reads the outer x.
+
+def square(x: Nat) -> Nat:
+  let y = x + 1n
+  y * y
+
+def chain(x: Nat) -> Nat:
+  let a = x * 2n
+  let b: Nat = a + 1n
+  let c = a + b
+  c
+
+def shadow(x: Nat) -> Nat:
+  let x = x + 10n
+  let x = x * 2n
+  x
+
+def inExpression(x: Nat) -> Nat:
+  let y = x + 1n in y * y + y
+
+def nested(x: Nat) -> Nat:
+  let a = (let b = x + 1n in b * b) in a + a
+
+def inMatchArm(n: Nat) -> Nat:
+  match n:
+    case 0n: 0n
+    case 1n+p:
+      let q = p * p
+      q + n
+
+def overRecord(a: Nat) -> Nat:
+  let r = {x: a, y: a + 1n}
+  r.x * r.y
+
+def overBool(a: Nat, b: Nat) -> Nat:
+  let bigger = a > b
+  if bigger then a - b else b - a
+
+def overFunction(a: Nat) -> Nat:
+  let twice = fn(n: Nat) -> Nat: n + n
+  twice(twice(a))
+
+# Work sharing. `burn(n)` costs about n machine steps. Shared once it is paid once;
+# written out three times it is paid three times (the preview's tick budget is
+# 100000: the shared form finishes, the repeated form is suspended).
+def burn(n: Nat) -> Nat:
+  match n:
+    case 0n: 0n
+    case 1n+p: burn(p)
+
+def sharedBurn(n: Nat) -> Nat:
+  let w = burn(n)
+  w + w + w
+
+def repeatedBurn(n: Nat) -> Nat:
+  burn(n) + burn(n) + burn(n)
+
+# Laziness: an unused let value is never forced.
+def forever(n: Nat) -> Nat:
+  forever(n + 1n)
+
+def unused() -> Nat:
+  let ignored = forever(0n)
+  7n
+
+record Write:
+  slot: Nat
+  before: Nat
+  after: Nat
+sum Plan:
+  write: Write
+sum Response:
+  written: {}
+  refused: {}
+
+# A let in the tail of an activity body and in an arm of its match.
+def commit(before: Nat, by: Nat) -> Activity<Plan, Response, Nat>:
+  let after = before + by
+  match perform(Plan.write({slot: 0n, before: before, after: after})):
+    case written(_): let doubled = after * 2n in doubled
+    case refused(_): before

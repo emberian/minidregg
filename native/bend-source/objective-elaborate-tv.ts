@@ -28,8 +28,11 @@ for(const file of readdirSync(testDir).filter(f=>f.endsWith(".obend")).sort()){
  for(const d of last.ast.declarations)if(d.kind!=="record"&&d.kind!=="sum")
   jobs.push({name:file+"#"+(d.name??d.signature.name),modules:mods,entryModule:mods.length-1,entryDefinition:d.name??d.signature.name,arguments:[],mode:"definition"});
 }
+// A cohort item names its own modules (sources may live outside this directory, e.g. world/market) and import indices.
+const cohortModules=(item:any)=>item.modules.map((m:any)=>({name:m.name,ast:parseObjective(readFileSync(join(testDir,m.source),"utf8")),
+ imports:(m.imports??[]).map((i:any)=>({alias:i.alias,moduleName:item.modules[Number(i.module)].name,module:String(i.module)}))}));
 for(const item of JSON.parse(readFileSync(join(testDir,"preview-cohort.json"),"utf8"))){
- const file=item.modules[item.modules.length-1].source;const mods=moduleSet(file);
+ const mods=cohortModules(item);
  const args=item.argumentEncoding==="typed-values-v1"?{schema:"dregg.objective-bend.argument-values.v1",values:item.arguments}:item.arguments;
  jobs.push({name:"cohort:"+item.name,modules:mods,entryModule:mods.length-1,entryDefinition:item.entry,arguments:args,mode:"application"});
 }
@@ -37,11 +40,23 @@ for(const item of JSON.parse(readFileSync(join(testDir,"preview-cohort.json"),"u
 // the in-repo programs do not reach.
 const R="record R:\n  v(n: Nat) -> Nat\n";
 const A="sum P:\n  go: {}\nsum R:\n  ok: {}\n";
+const A2="sum L:\n  nil: {}\n  cons: {head: Nat, tail: L}\n";
 const sp=(name:string,head:string,body="    super.v(n) + 1n")=>head.replace("NAME",name)+"\n  def v(n: Nat) -> Nat:\n"+body+"\n";
 const probes:[string,string][]=[
  ["refuse-unbound","def f() -> Nat:\n  missing\n"],
- ["refuse-less","def f() -> Bool:\n  1n < 2n\n"],
- ["refuse-subtract","def f() -> Nat:\n  2n - 1n\n"],
+ ["accept-order-operators","def f(a: Nat, b: Nat) -> Bool:\n  a < b || a <= b || a > b || a >= b\n"],
+ ["accept-subtract-divide","def f(a: Nat, b: Nat) -> Nat:\n  a - b + a / b\n"],
+ ["accept-order-in-spec-law",R+"spec O for R:\n  def v(n: Nat) -> Nat:\n    n - 1n\n  law positive(n: Nat): self.v(n) < n\n"],
+ ["accept-let-statement","def f(x: Nat) -> Nat:\n  let y = x + 1n\n  let z: Nat = y * y\n  match z:\n    case 0n: 0n\n    case 1n+p:\n      let w = p - 1n\n      w / 2n\n"],
+ ["accept-let-expression","def f(x: Nat) -> Nat:\n  let a = (let b = x + 1n in b * b) in a + a\n"],
+ ["accept-let-shadow","def f(x: Nat) -> Nat:\n  let x = x + 10n\n  let x = x * 2n\n  x\n"],
+ ["accept-let-function","def f(a: Nat) -> Nat:\n  let twice = fn(n: Nat) -> Nat: n + n\n  twice(twice(a))\n"],
+ ["accept-let-unresolved-type","def g(p: Nat) -> Nat:\n  let y = metadata(p)\n  1n\n"],
+ ["accept-let-sum-recursive",A2+"def f(xs: L) -> Nat:\n  let n = 3n\n  match xs:\n    case nil(_): n\n    case cons(c): let m = c.head in m + f(c.tail)\n"],
+ ["accept-let-activity-tail",A+"def f(n: Nat) -> Activity<P, R, Nat>:\n  let m = n + 1n\n  match perform(P.go({})):\n    case ok(_): let k = m * 2n in k\n"],
+ ["accept-let-activity-pure-tail",A+"def f(n: Nat) -> Activity<P, R, Nat>:\n  match perform(P.go({})):\n    case ok(_):\n      let k = n + 1n\n      k\n"],
+ ["refuse-let-activity-value",A+"def f(n: Nat) -> Activity<P, R, Nat>:\n  let x = perform(P.go({}))\n  1n\n"],
+ ["accept-let-unknown-annotation-type","def f(x: Nat) -> Nat:\n  let y: Nope = x\n  y\n"],
  ["refuse-untyped-eq","def f(a, b) -> Bool:\n  a == b\n"],
  ["refuse-nat-wildcard","def f(n: Nat) -> Nat:\n  match n:\n    case _: 1n\n"],
  ["refuse-nonexhaustive","sum S:\n  a: Nat\n  b: Nat\ndef f(s: S) -> Nat:\n  match s:\n    case a(x): x\n"],

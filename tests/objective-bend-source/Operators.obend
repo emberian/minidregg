@@ -1,0 +1,101 @@
+edition ObjectiveBend 1
+# The surface operators with no Core4 primitive: - < <= > >= / . They lower to
+# recursion over the successor structure (the package prelude), so every result
+# here is exact on the naturals. `-` is truncated at 0n; `/` is floor division
+# and a zero divisor gives 0n.
+
+def subExact() -> Nat:
+  9n - 4n
+
+def subTruncated() -> Nat:
+  3n - 5n
+
+def subZero() -> Nat:
+  7n - 0n
+
+def subFromZero() -> Nat:
+  0n - 4n
+
+def subChain() -> Nat:
+  20n - 5n - 3n
+
+def lessTrue() -> Bool:
+  3n < 4n
+
+def lessEqual() -> Bool:
+  4n < 4n
+
+def lessFalse() -> Bool:
+  5n < 4n
+
+def lessOrEqualAtEdge() -> Bool:
+  4n <= 4n
+
+def lessOrEqualFalse() -> Bool:
+  5n <= 4n
+
+def lessOrEqualZero() -> Bool:
+  0n <= 0n
+
+def greaterTrue() -> Bool:
+  5n > 4n
+
+def greaterEqual() -> Bool:
+  4n > 4n
+
+def greaterOrEqualAtEdge() -> Bool:
+  4n >= 4n
+
+def greaterOrEqualFalse() -> Bool:
+  3n >= 4n
+
+def divExact() -> Nat:
+  12n / 4n
+
+def divFloors() -> Nat:
+  17n / 5n
+
+def divSmallerNumerator() -> Nat:
+  3n / 5n
+
+def divByOne() -> Nat:
+  9n / 1n
+
+def divZeroNumerator() -> Nat:
+  0n / 7n
+
+def divByZero() -> Nat:
+  17n / 0n
+
+def divChain() -> Nat:
+  100n / 5n / 4n
+
+# Precedence: * and / bind tighter than + and -, which bind tighter than comparisons.
+def precedenceArithmetic() -> Nat:
+  10n - 2n * 3n
+
+def precedenceMixed() -> Bool:
+  2n * 3n < 10n - 3n && 7n / 2n >= 3n
+
+def subOfArguments(a: Nat, b: Nat) -> Nat:
+  a - b
+
+def clampedDifference(a: Nat, b: Nat) -> Nat:
+  if a < b then b - a else a - b
+
+# A comparison is an ordinary Bool: it feeds if, match, ==, != and &&.
+def comparisonAsBool(a: Nat, b: Nat) -> Bool:
+  (a < b) == (b > a)
+
+def comparisonMatched(a: Nat, b: Nat) -> Nat:
+  match a <= b:
+    case true: 1n
+    case false: 0n
+
+# Operands are lazy: the unused side is never forced, so a diverging operand is harmless
+# where the other side already decides the result (`<` of 0n and a successor needs only
+# the successor's head).
+def forever(n: Nat) -> Nat:
+  forever(n + 1n)
+def lazyUnused() -> Nat:
+  if 1n < 2n then 5n else forever(0n)

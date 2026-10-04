@@ -1,5 +1,0 @@
-edition ObjectiveBend 1
-# Chapter 9: there is no order on Nats yet.
-
-def less(a: Nat, b: Nat) -> Bool:
-  a < b

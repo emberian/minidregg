@@ -174,8 +174,7 @@ yields one write and returns the new count if it was written, the old one if ref
 change it, and a refusal comes back as `refused`.
 
 What Objective Bend cannot do yet: a view library (a View sum is expressible, but Plans
-and responses must be non-recursive data, so lists of children wait); `-` and `<`
-(saturating decrement is written by recursion); live authoring and governed evolution;
+and responses must be non-recursive data, so lists of children wait); live authoring and governed evolution;
 more than one action per yield (no multi-cell turn in one step); crawling the world
 from inside a program; snapshot and rewind; kernel delivery of responses and persisted
 activity checkpoints; a guardedness check; string operations beyond equality; the

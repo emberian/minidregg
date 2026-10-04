@@ -18,6 +18,16 @@ const selected=quoted.declarations.find((d:any)=>d.kind==="function") as any;
 if(JSON.stringify(row.fields.map((f:any)=>f.name))!==JSON.stringify(["0","1"])||selected.body.expression.name!=="1")throw Error("quoted field identity differs");
 console.log("QUOTED FIELDS PASS: canonical ordinal keys, escaped string names, actual member selection");
 
+// let: statement form (rest of the body at the same indent) and expression form.
+const lets=parseObjective("edition ObjectiveBend 1\ndef f(x: Nat) -> Nat:\n  let y = x + 1n\n  let z: Nat = y * y\n  match z:\n    case 0n: 0n\n    case 1n+p:\n      let w = p - 1n\n      w / 2n\ndef g(x: Nat) -> Nat:\n  let a = 1n in a + x\n") as any;
+const letF=lets.declarations[0].body,letG=lets.declarations[1].body;
+if(letF.kind!=="let"||letF.name!=="y"||letF.type!=="_"||letF.value.op!=="+"||letF.body.kind!=="let"||letF.body.type!=="Nat"||letF.body.body.kind!=="match")throw Error("statement let chain lost");
+if(letF.body.body.branches[1].body.kind!=="let"||letF.body.body.branches[1].body.body.expression.op!=="/")throw Error("let inside a match arm lost");
+if(letG.kind!=="expression"||letG.expression.kind!=="let"||letG.expression.body.op!=="+")throw Error("expression let lost");
+for(const [bad,why] of [["def f() -> Nat:\n  let y = 1n\n    y\n","a let body indented deeper"],["def f() -> Nat:\n  let y = 1n\n","a let with no body"],["def f() -> Nat:\n  let = 1n\n  1n\n","a let with no name"]] as [string,string][]){
+ let refused=false;try{parseObjective("edition ObjectiveBend 1\n"+bad)}catch{refused=true}if(!refused)throw Error("malformed let accepted: "+why);}
+console.log("LET PARSE PASS: statement chain, let in a match arm, expression form, malformed lets refused");
+
 import {readdirSync} from "node:fs";
 const every=readdirSync(import.meta.dirname).filter(f=>f.endsWith(".obend")).sort();
 for(const f of every)parseObjective(readFileSync(join(import.meta.dirname,f),"utf8"));

@@ -1,0 +1,23 @@
+edition ObjectiveBend 1
+# Chapter 2: subtraction, order, division and let.
+# a - b stops at zero. a / b is whole-number division and a / 0n is 0n.
+# a < b, a <= b, a > b and a >= b give a Bool.
+
+def difference(a: Nat, b: Nat) -> Nat:
+  a - b
+
+def ordered(a: Nat, b: Nat) -> Bool:
+  a <= b
+
+def share(total: Nat, parts: Nat) -> Nat:
+  total / parts
+
+# let names a value. It is computed the first time something reads it, once.
+def surcharge(price: Nat, units: Nat) -> Nat:
+  let base = price * units
+  base + base / 10n
+
+def spread(a: Nat, b: Nat) -> Nat:
+  let high = if a < b then b else a
+  let low = if a < b then a else b
+  high - low

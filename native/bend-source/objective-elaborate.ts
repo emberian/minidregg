@@ -72,15 +72,82 @@ export const quantityOf=(p:any):string=>{
 };
 const restricted=(q:string)=>q==="affine"||q==="linear";
 
-// Operators the parser accepts whose core constructor does not exist yet.
-// Each refusal names the constructor it waits for.
-const awaiting:Record<string,string>={
- "<":"`<` needs a Nat order primitive (Primitive.less) in Core4; none exists",
- ">":"`>` needs a Nat order primitive (Primitive.less) in Core4; none exists",
- "<=":"`<=` needs a Nat order primitive (Primitive.less) in Core4; none exists",
- ">=":"`>=` needs a Nat order primitive (Primitive.less) in Core4; none exists",
- "-":"`-` needs a truncated-subtraction primitive (Primitive.subtract) in Core4; none exists",
- "/":"`/` needs a division primitive (Primitive.divide, with a stated zero-divisor meaning) in Core4; none exists",
+// Operators with no Core4 primitive. Each lowers to a call of one definition of the
+// package prelude (below), a global of the package knot like any other, so the
+// recursion is the machine's ordinary lazy `fix` and nothing new is trusted. `>` and
+// `>=` swap the operands of `<` and `<=` (operands are pure and lazy: order is not
+// observable and neither is duplicated). Cost: every one of these is O(value), not
+// O(1): the recursion peels the successor structure one tick at a time.
+const preludeOperators:Record<string,{definition:string,input:Ty,output:Ty,swap:boolean}>={
+ "-":{definition:"sub",input:T.natural,output:T.natural,swap:false},
+ "/":{definition:"divide",input:T.natural,output:T.natural,swap:false},
+ "<":{definition:"lt",input:T.natural,output:T.boolean,swap:false},
+ ">":{definition:"lt",input:T.natural,output:T.boolean,swap:true},
+ "<=":{definition:"le",input:T.natural,output:T.boolean,swap:false},
+ ">=":{definition:"le",input:T.natural,output:T.boolean,swap:true},
+};
+// The prelude module `$prelude` (not a legal source module name: `$`). Truncated
+// subtraction: `sub(a, b)` is 0 when b exceeds a. Division is FLOOR division and TOTAL:
+// `a / 0n` is `0n` (Core4 has no catchable exception, so a zero divisor must mean
+// something; this is the Lean `Nat.div` convention). A program whose zero divisor is a
+// real case must test the divisor first. Only the definitions an operator needs are
+// added to a package (see `withPrelude`); a package that uses none is unchanged.
+export const preludeSource=`edition ObjectiveBend 1
+def sub(a: Nat, b: Nat) -> Nat:
+  match b:
+    case 0n: a
+    case 1n+q:
+      match a:
+        case 0n: 0n
+        case 1n+p: sub(p, q)
+
+def le(a: Nat, b: Nat) -> Bool:
+  match a:
+    case 0n: true
+    case 1n+p:
+      match b:
+        case 0n: false
+        case 1n+q: le(p, q)
+
+def lt(a: Nat, b: Nat) -> Bool:
+  match b:
+    case 0n: false
+    case 1n+q:
+      match a:
+        case 0n: true
+        case 1n+p: lt(p, q)
+
+def quotient(a: Nat, b: Nat) -> Nat:
+  if lt(a, b) then 0n else 1n + quotient(sub(a, b), b)
+
+def divide(a: Nat, b: Nat) -> Nat:
+  match b:
+    case 0n: 0n
+    case 1n+q: quotient(a, b)
+`;
+const preludeNeeds:Record<string,string[]>={sub:[],le:[],lt:[],quotient:["lt","sub"],divide:["quotient"]};
+const preludeModuleName="$prelude";
+const operatorsUsed=(modules:any[]):Set<string>=>{
+ const found=new Set<string>();
+ const walk=(node:any)=>{
+  if(Array.isArray(node)){node.forEach(walk);return;}
+  if(!node||typeof node!=="object")return;
+  if(node.kind==="binary"&&preludeOperators[node.op])found.add(preludeOperators[node.op].definition);
+  for(const v of Object.values(node))walk(v);
+ };
+ for(const m of modules)walk(m.ast.declarations);
+ return found;
+};
+// The user's modules plus, when an operator needs it, the prelude module holding exactly the
+// definitions that operator (transitively) uses, in source order.
+const withPrelude=(modules:any[]):any[]=>{
+ const needed=new Set<string>();
+ const add=(name:string)=>{if(needed.has(name))return;needed.add(name);preludeNeeds[name].forEach(add);};
+ operatorsUsed(modules).forEach(add);
+ if(!needed.size)return modules;
+ const ast=parseObjective(preludeSource);
+ return [...modules,{name:preludeModuleName,sha256:"prelude",astSha256:"prelude",imports:[],
+  ast:{...ast,declarations:ast.declarations.filter((d:any)=>needed.has(d.signature.name))}}];
 };
 const primitives:Record<string,{primitive:string,input:Ty,output:Ty}>={
  "+":{primitive:"add",input:T.natural,output:T.natural},"*":{primitive:"multiply",input:T.natural,output:T.natural},
@@ -90,7 +157,8 @@ const primitives:Record<string,{primitive:string,input:Ty,output:Ty}>={
 type Binding={name:string,ty:Ty|null,quantity:string};
 const declName=(d:any)=>d.name??d.signature.name;
 
-export function elaborate(modules:any[],entryModule:number,entryDefinition:string,args:any,mode:"application"|"definition"="application"){
+export function elaborate(userModules:any[],entryModule:number,entryDefinition:string,args:any,mode:"application"|"definition"="application"){
+ const modules=withPrelude(userModules);
  const declarations=new Map<string,{d:any,m:any}>();
  for(const m of modules)for(const d of m.ast.declarations)if(d.kind!=="record"&&d.kind!=="sum"){
   const key=m.name+"."+declName(d);if(declarations.has(key))failure(d,"duplicate declaration "+key);declarations.set(key,{d,m});
@@ -221,6 +289,8 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
  // The Plan/Response of the definition being lowered (null outside an activity).
  let currentEffect:{plan:Ty,response:Ty}|null=null;
  const isPerform=(e:any,env:Binding[],m:any)=>e.kind==="call"&&e.callee.kind==="var"&&e.callee.name==="perform"&&!env.some(b=>b.name==="perform")&&!lookupGlobal("perform",m);
+ // The binding a `let` introduces: its annotated type, else the type of its value (null when neither resolves).
+ const letBinding=(node:any,env:Binding[],m:any):Binding=>({name:node.name,ty:node.type==="_"?synth(node.value,env,m):sourceType(node.type,m.name),quantity:"unrestricted"});
  const synth=(e:any,env:Binding[],m:any):Ty|null=>{
   switch(e.kind){
    case "nat":return T.natural;case "bool":return T.boolean;case "string":return T.label;case "unit":return T.emptyRow;
@@ -234,9 +304,10 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
    case "binary":{
     if(e.op==="!="||e.op==="==")return T.boolean;
     if(e.op==="||")return sameTy(synth(e.left,env,m),T.boolean)&&sameTy(synth(e.right,env,m),T.boolean)?T.boolean:null;
-    const p=primitives[e.op];if(!p)return null;
+    const p=primitives[e.op]??preludeOperators[e.op];if(!p)return null;
     return sameTy(synth(e.left,env,m),p.input)&&sameTy(synth(e.right,env,m),p.input)?p.output:null;}
    case "if":{const a=synth(e.whenTrue,env,m),b=synth(e.whenFalse,env,m);return a&&b&&sameTy(a,b)?a:null;}
+   case "let":return synth(e.body,[letBinding(e,env,m),...env],m);
    case "compose":{let t=synth(e.specifications[0],env,m);for(const next of e.specifications.slice(1))t=composeTy(t,synth(next,env,m));return t;}
    case "fix":{const s=callable(synth(e.specification,env,m));return s?.tag==="arrow"?s.domain:null;}
    case "lambda":case "extension-value":return signatureTy(e.parameters,e.targetType??e.resultType,m.name);
@@ -251,6 +322,7 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
  };
  const synthBody=(b:any,env:Binding[],m:any):Ty|null=>{
   if(b.kind==="expression")return synth(b.expression,env,m);
+  if(b.kind==="let")return synthBody(b.body,[letBinding(b,env,m),...env],m);
   if(b.branches.some((x:any)=>x.pattern.kind==="constructor"||x.pattern.kind==="bool")){
    const scrutineeTy=synth(b.scrutinee,env,m);const row=variantRow(scrutineeTy);
    let types=b.branches.map((x:any)=>synthBody(x.body,x.pattern.kind==="constructor"?[{name:x.pattern.binder,ty:lookupRow(row,x.pattern.label),quantity:"unrestricted"},...env]:env,m));
@@ -295,9 +367,23 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
   // packages without activities elaborate exactly as before; inside one, synthesis names the rule.
   if(isPerform(e,env,m)||(currentEffect&&isComputation(synth(e,env,m))))failure(e,"refused ("+rule+"): an Activity cannot be used here; "+why+", so its effect would be cached and shared. Match on it first.");
  };
+ // `let x = v` then body: (λx. body) v. The machine allocates ONE lazy cell for the argument
+ // of an application and caches it on first demand, so `v` is evaluated at most once however
+ // often x is used and not at all when x is unused (call-by-need): a let is sharing, never a
+ // copy of v. Scope is the body only: `v` is elaborated outside the binder. In an activity
+ // tail the lambda's codomain is the activity type (a pure body is lifted with `done`).
+ const lowerLet=(node:any,env:Binding[],m:any,tailPosition:boolean,lowerBody:(inner:Binding[])=>Core,bodyType:(inner:Binding[])=>Ty|null):Core=>{
+  noActivity(node.value,env,m,"effect-in-let","a let-bound value is a shared lazy thunk");
+  const binding=letBinding(node,env,m);
+  let codomain=bodyType([binding,...env]);
+  if(tailPosition&&currentEffect&&codomain&&!isComputation(codomain))codomain={tag:"computation",plan:currentEffect.plan,response:currentEffect.response,result:codomain};
+  const fn=abstract([{name:node.name,ty:binding.ty,type:node.type,quantity:"default"}],env,lowerBody,node,codomain,m.name);
+  return app(fn,expression(node.value,env,m));
+ };
  // A tail position of an activity body: pure results are lifted with `done`.
  const tail=(e:any,env:Binding[],m:any):Core=>{
   if(!currentEffect)return expression(e,env,m);
+  if(e.kind==="let")return lowerLet(e,env,m,true,inner=>tail(e.body,inner,m),inner=>synth(e.body,inner,m));
   if(e.kind==="if")return term("ifBool",{condition:expression(e.condition,env,m),whenTrue:tail(e.whenTrue,env,m),whenFalse:tail(e.whenFalse,env,m)});
   if(isPerform(e,env,m)||isComputation(synth(e,env,m)))return expression(e,env,m);
   const t=term("done",{value:expression(e,env,m)});effects.set(t,currentEffect);return t;
@@ -344,11 +430,20 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
      return e.op==="=="?eq:not(eq);
     }
     if(e.op==="||")return term("ifBool",{condition:expression(e.left,env,m),whenTrue:term("boolean",{value:true}),whenFalse:expression(e.right,env,m)});
+    const q=preludeOperators[e.op];
+    if(q){
+     const l=expression(e.left,env,m),r=expression(e.right,env,m);
+     return app(app(get(bound(globalsIndex(env)),preludeModuleName+"."+q.definition),q.swap?r:l),q.swap?l:r);
+    }
     const p=primitives[e.op];
-    if(!p)return failure(e,"operator "+e.op+" is not yet a core constructor: "+(awaiting[e.op]??"unknown operator"));
+    if(!p)return failure(e,"unknown operator "+e.op);
     return term("binary",{primitive:p.primitive,left:expression(e.left,env,m),right:expression(e.right,env,m)});
    }
    case "if":return term("ifBool",{condition:expression(e.condition,env,m),whenTrue:expression(e.whenTrue,env,m),whenFalse:expression(e.whenFalse,env,m)});
+   case "let":{
+    // Not a tail position: the body is a pure expression even inside an activity body.
+    return lowerLet(e,env,m,false,inner=>expression(e.body,inner,m),inner=>synth(e.body,inner,m));
+   }
    case "compose":{
     // compose(a,b) = (λl. λr. specification({operator, inherited: l, wrapping: r}, mix l r)) a b.
     // The inherited composite is bound ONCE and shared by metadata and mix:
@@ -400,6 +495,7 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
  };
  const body=(b:any,env:Binding[],m:any):Core=>{
   if(b.kind==="expression")return tail(b.expression,env,m);
+  if(b.kind==="let")return lowerLet(b,env,m,true,inner=>body(b.body,inner,m),inner=>synthBody(b.body,inner,m));
   if(b.kind!=="match")failure(b,"unsupported body "+b.kind);
   if(b.branches.some((x:any)=>x.pattern.kind==="bool")){
    const t=b.branches.find((x:any)=>x.pattern.kind==="bool"&&x.pattern.value),f=b.branches.find((x:any)=>x.pattern.kind==="bool"&&!x.pattern.value);
@@ -592,8 +688,8 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
   for(const arg of args.values)selected=app(selected,typedArgument(arg));
  }else failure(null,"arguments must select a supported complete value envelope");
  const output:any={schema:"dregg.objective-bend.core.v2",edition:"objective-bend-1",term:selected,
-   sourceEntry:entry.name+"."+entryDefinition,argumentCodec,selectionMode:mode,sourceModules:modules.map(m=>({name:m.name,sourceSha256:m.sha256,astSha256:m.astSha256,imports:m.imports})),
-   declarationASTs:modules.map(m=>m.ast),status:"elaborated executable term; new typing and demand adequacy unqualified"};
+   sourceEntry:entry.name+"."+entryDefinition,argumentCodec,selectionMode:mode,sourceModules:userModules.map(m=>({name:m.name,sourceSha256:m.sha256,astSha256:m.astSha256,imports:m.imports})),
+   declarationASTs:userModules.map(m=>m.ast),status:"elaborated executable term; new typing and demand adequacy unqualified"};
  // Non-enumerable: the typing proposal travels with the in-process output only.
  Object.defineProperty(output,"typing",{value:{globalRow,typeErrors,sumBounds},enumerable:false});
  return output;

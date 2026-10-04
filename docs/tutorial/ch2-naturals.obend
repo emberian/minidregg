@@ -12,7 +12,7 @@ def isZero(n: Nat) -> Bool:
     case 0n: true
     case 1n+p: false
 
-# Subtract b from a, stopping at zero. There is no - operator.
+# Subtract b from a, stopping at zero. This is the recursion that a - b means.
 def minus(a: Nat, b: Nat) -> Nat:
   match b:
     case 0n: a

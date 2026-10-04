@@ -51,6 +51,8 @@ for(const item of cohort){
  if(item.expectedTurns!==undefined)require(turns.length===item.expectedTurns,"turn count differs: "+item.name+" "+turns.length);
  if(item.expectedLastPlan!==undefined)require(turns.length>0&&canonical(norm(turns[turns.length-1].plan))===canonical(norm(item.expectedLastPlan)),"yielded plan differs: "+item.name+" "+JSON.stringify(turns.at(-1)?.plan));
  if(item.expectedStatus==="yielded"){require(out.status==="yielded"&&out.preview.result===null,"activity did not stop at a yield: "+item.name+" "+out.status);continue;}
+ // Budget exhaustion is a verdict, not an error: the preview stopped at its tick budget and shows no result.
+ if(item.expectedStatus==="suspended"){require(out.status==="suspended"&&out.preview.result===null&&out.preview.resultData===null,"program did not suspend at its budget: "+item.name+" "+out.status);continue;}
  if(!require(out.status==="finished","preview did not finish: "+item.name+" "+out.status+" "+JSON.stringify(out.diagnostic??out.preview?.diagnostic)))continue;
  // An activity's checked type is Activity<Plan, Response, Result>; its finished value has type Result.
  const resultType=out.preview.type.tag==="computation"?out.preview.type.result:out.preview.type;

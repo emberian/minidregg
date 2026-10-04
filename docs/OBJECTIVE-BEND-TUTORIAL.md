@@ -243,8 +243,9 @@ below. You must write both. There is no wildcard (chapter 9).
 
 A Bool is `true` or `false`. You can `match` on a Bool with `case true:` and
 `case false:`, or write `if c then a else b`. `==` and `!=` compare two Nats.
-`&&` and `||` join two Bools. `+` and `*` work on Nats. There is no `-`
-(chapter 9), so `minus` below is written by recursion.
+`&&` and `||` join two Bools. `+` and `*` work on Nats, and so do `-`, `/`, `<`,
+`<=`, `>` and `>=`, which are shown after `minus` below. `minus` is written out by
+recursion first, because that recursion is what `-` means.
 
 ```text
 edition ObjectiveBend 1
@@ -261,7 +262,7 @@ def isZero(n: Nat) -> Bool:
     case 0n: true
     case 1n+p: false
 
-# Subtract b from a, stopping at zero. There is no - operator.
+# Subtract b from a, stopping at zero. This is the recursion that a - b means.
 def minus(a: Nat, b: Nat) -> Nat:
   match b:
     case 0n: a
@@ -364,6 +365,97 @@ result: 9
 
 The type line tells you which are Nats and which are Bools. The checker has
 checked every call against those types before anything runs.
+
+### Subtraction, order, division and `let`
+
+Core4 has no primitive for these, so the front end turns each into a call of a
+small recursive definition it adds to the package (`$prelude.sub`, `lt`, `le`,
+`divide`). That has two consequences. They are exact on any Nat. And each costs
+about one machine step per unit of the numbers involved, so `a - b` on two
+million-sized Nats is not cheap.
+
+`a - b` stops at zero. `a / b` is whole-number division, rounding down, and
+`a / 0n` is `0n`: the language has no catchable exception, so a zero divisor has
+to mean something, and a program whose zero divisor is a real case tests it
+first. `a < b`, `a <= b`, `a > b` and `a >= b` give a Bool.
+
+`let name = value` followed by the rest of the body at the same indent, or
+`let name = value in expression`, names a value. It is a suspended computation
+like an argument: computed the first time something reads it, once, and not at
+all if nothing does. `let` never copies the work.
+
+```text
+edition ObjectiveBend 1
+# Chapter 2: subtraction, order, division and let.
+# a - b stops at zero. a / b is whole-number division and a / 0n is 0n.
+# a < b, a <= b, a > b and a >= b give a Bool.
+
+def difference(a: Nat, b: Nat) -> Nat:
+  a - b
+
+def ordered(a: Nat, b: Nat) -> Bool:
+  a <= b
+
+def share(total: Nat, parts: Nat) -> Nat:
+  total / parts
+
+# let names a value. It is computed the first time something reads it, once.
+def surcharge(price: Nat, units: Nat) -> Nat:
+  let base = price * units
+  base + base / 10n
+
+def spread(a: Nat, b: Nat) -> Nat:
+  let high = if a < b then b else a
+  let low = if a < b then a else b
+  high - low
+```
+
+```sh
+$ bun docs/tutorial/run.ts docs/tutorial/ch2-operators.obend difference '["7","3"]'
+status: finished
+type: Nat
+result: 4
+
+$ bun docs/tutorial/run.ts docs/tutorial/ch2-operators.obend difference '["3","7"]'
+status: finished
+type: Nat
+result: 0
+
+$ bun docs/tutorial/run.ts docs/tutorial/ch2-operators.obend ordered '["3","4"]'
+status: finished
+type: Bool
+result: true
+
+$ bun docs/tutorial/run.ts docs/tutorial/ch2-operators.obend ordered '["5","4"]'
+status: finished
+type: Bool
+result: false
+
+$ bun docs/tutorial/run.ts docs/tutorial/ch2-operators.obend share '["17","5"]'
+status: finished
+type: Nat
+result: 3
+
+$ bun docs/tutorial/run.ts docs/tutorial/ch2-operators.obend share '["17","0"]'
+status: finished
+type: Nat
+result: 0
+
+$ bun docs/tutorial/run.ts docs/tutorial/ch2-operators.obend surcharge '["7","10"]'
+status: finished
+type: Nat
+result: 77
+
+$ bun docs/tutorial/run.ts docs/tutorial/ch2-operators.obend spread '["3","10"]'
+status: finished
+type: Nat
+result: 7
+
+$ bun docs/tutorial/run.ts docs/tutorial/ch2-operators.obend spread '["10","3"]'
+status: finished
+type: Nat
+result: 7
+```
 
 ## 3. Sums
 
@@ -1076,15 +1168,7 @@ refusals: `effect-in-payload`, `effect-in-plan`, `perform-outside-activity` and
 
 ## 9. What the language does not do yet
 
-Two things you will meet quickly. Both were run:
-
-```text
-edition ObjectiveBend 1
-# Chapter 9: there is no order on Nats yet.
-
-def less(a: Nat, b: Nat) -> Bool:
-  a < b
-```
+One thing you will meet quickly. It was run:
 
 ```text
 edition ObjectiveBend 1
@@ -1097,12 +1181,6 @@ def f(n: Nat) -> Nat:
 ```
 
 ```sh
-$ bun docs/tutorial/run.ts docs/tutorial/ch9-less.obend less '["1","2"]'
-status: refused
-stage: objective-core-elaboration
-message: operator < is not yet a core constructor: `<` needs a Nat order primitive (Primitive.less) in Core4; none exists
-(exit status 2)
-
 $ bun docs/tutorial/run.ts docs/tutorial/ch9-wildcard.obend f '["3"]'
 status: refused
 stage: objective-core-elaboration
@@ -1140,7 +1218,7 @@ the machine.
 
 [OBJECTIVE-BEND-EVENTS.md](OBJECTIVE-BEND-EVENTS.md) adds what activities cannot
 do yet: a view library (Plans and responses must be non-recursive data, so lists
-of children wait); `-` and `<`; live authoring and governed evolution; more than
+of children wait); live authoring and governed evolution; more than
 one action per yield; crawling the world from inside a program; snapshot and
 rewind; string operations beyond equality; and the `before` and `after`
 method qualifiers.

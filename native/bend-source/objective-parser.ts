@@ -6,7 +6,8 @@ export type Expr={span:Span}&(
  {kind:"string",value:string}|{kind:"unit"}|{kind:"record",fields:{name:string,value:Expr}[]}|{kind:"extend",inherited:Expr,fields:{name:string,value:Expr}[]}|{kind:"member",target:Expr,name:string}|
  {kind:"call",callee:Expr,args:Expr[]}|{kind:"compose",specifications:Expr[]}|
  {kind:"fix",specification:Expr,inherited:Expr}|{kind:"extension-value",parameters:Parameter[],targetType:string,body:Expr}|{kind:"lambda",parameters:Parameter[],resultType:string,body:Expr}|
- {kind:"binary",op:string,left:Expr,right:Expr}|{kind:"if",condition:Expr,whenTrue:Expr,whenFalse:Expr});
+ {kind:"binary",op:string,left:Expr,right:Expr}|{kind:"if",condition:Expr,whenTrue:Expr,whenFalse:Expr}|
+ {kind:"let",name:string,type:string,value:Expr,body:Expr});
 // Quantities: `+x` copy (unrestricted), `-x` dead (erased), `affine x`, `linear x`;
 // an unmarked parameter is the default (unrestricted, shareable) quantity.
 export type Quantity="default"|"copy"|"dead"|"affine"|"linear";
@@ -17,7 +18,8 @@ export type Parameter={name:string,type:string,quantity:Quantity};
 export type Qualifier="primary"|"around"|"before"|"after"|"+"|"*"|"and";
 export type Signature={name:string,parameters:Parameter[],resultType:string,span:Span};
 export type Body={kind:"expression",expression:Expr,span:Span}|
- {kind:"match",scrutinee:Expr,branches:{pattern:{kind:"zero"|"succ"|"wildcard"|"bool"|"constructor",binder?:string,value?:boolean,label?:string},body:Body,span:Span}[],span:Span};
+ {kind:"match",scrutinee:Expr,branches:{pattern:{kind:"zero"|"succ"|"wildcard"|"bool"|"constructor",binder?:string,value?:boolean,label?:string},body:Body,span:Span}[],span:Span}|
+ {kind:"let",name:string,type:string,value:Expr,body:Body,span:Span};
 export type Declaration=
  {kind:"spec",name:string,suffix:boolean,parents:string[],targetType:string,requirements:Signature[],methods:(Signature&{qualifier:Qualifier,body:Body})[],laws:{name:string,parameters:Parameter[],body:Expr,span:Span}[],span:Span}|
  {kind:"extension",name:string,parameters:Parameter[],targetType:string,body:Body,span:Span}|
@@ -66,6 +68,15 @@ export function expression(text:string,sourceSpan:Span):Expr{
  const take=(wanted?:string)=>{const t=tokens[cursor++];if(!t||wanted&&t.text!==wanted)throw new Error("expected "+(wanted??"expression"));return t;};
  const parse=(minimum=0):Expr=>{
   const first=take();let result:Expr;
+  if(first.text==="let"){
+   // `let x = value in body` / `let x: T = value in body`: call-by-need sharing of `value` (one lazy cell), scope = body.
+   const name=take();if(!/^[A-Za-z_]\w*$/.test(name.text)||name.text==="in")throw new Error("expected a name after let");
+   let type="_";
+   if(tokens[cursor]?.text===":"){const colon=take(":");let end=colon;while(tokens[cursor]?.text!=="="){if(cursor>=tokens.length)throw new Error("expected = in let");end=take();}
+    type=text.slice(colon.end,tokens[cursor].start).trim();if(!type)throw new Error("missing let type");}
+   take("=");const value=parse();take("in");const letBody=parse();
+   return {kind:"let",name:name.text,type,value,body:letBody,span:{...location(first.start,first.end),end:letBody.span.end}};
+  }
   if(first.text==="if"){
    const condition=parse();take("then");const whenTrue=parse();take("else");const whenFalse=parse();
    result={kind:"if",condition,whenTrue,whenFalse,span:{...location(first.start,first.end),end:whenFalse.span.end}};
@@ -134,6 +145,16 @@ export function parseObjective(source:string){
     branches.push({pattern,body:branchBody,span:span(branch)});
    }
    if(!branches.length)fail(line,"empty match");return {kind:"match",scrutinee,branches,span:span(line)};
+  }
+  // `let x = value` / `let x: T = value`, then the rest of the body at the same indent. A whole-line
+  // `let x = a in b` is an expression and falls through.
+  const letLine=/^let\s+([A-Za-z_]\w*)\s*(?::\s*(.+?))?\s*=\s*(.+)$/.exec(line.text);
+  if(letLine&&letLine[1]!=="in"){
+   let value:Expr|null=null;try{value=expression(letLine[3],{...span(line),start:line.start+byteLength(line.text.slice(0,line.text.lastIndexOf(letLine[3])))});}catch{}
+   if(value){
+    if(cursor>=lines.length||lines[cursor].indent!==line.indent)fail(line,"a let must be followed by its body at the same indent");
+    return {kind:"let",name:letLine[1],type:letLine[2]??"_",value,body:body(line.indent-1),span:span(line)};
+   }
   }
   const text=line.text.startsWith("return ")?line.text.slice(7):line.text;
   return {kind:"expression",expression:expr(text,line),span:span(line)};

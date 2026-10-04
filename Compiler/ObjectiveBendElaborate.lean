@@ -50,6 +50,8 @@ inductive Expr where
   | closure (params : List Param) (resultType : String) (body : Expr)
   | binary (op : String) (left right : Expr)
   | ite (condition whenTrue whenFalse : Expr)
+  /-- `let name: type = value in body` (type `_` when unannotated). -/
+  | letE (name type : String) (value body : Expr)
   deriving Inhabited, Repr
 
 inductive Pattern where
@@ -59,6 +61,8 @@ inductive Pattern where
 inductive Body where
   | expr (e : Expr)
   | cases (scrutinee : Expr) (branches : List (Pattern × Body))
+  /-- `let name: type = value` then the rest of the body. -/
+  | letB (name type : String) (value : Expr) (body : Body)
   deriving Inhabited, Repr
 
 structure Method where
@@ -142,6 +146,7 @@ def decodeExpr : Nat → Json → Except String Expr
     | "lambda" => return .closure (← (← arr j "parameters").mapM decodeParam) (← str j "resultType") (← sub "body")
     | "binary" => return .binary (← str j "op") (← sub "left") (← sub "right")
     | "if" => return .ite (← sub "condition") (← sub "whenTrue") (← sub "whenFalse")
+    | "let" => return .letE (← str j "name") (← str j "type") (← sub "value") (← sub "body")
     | other => .error ("unknown AST expression " ++ other)
 
 def decodeBody : Nat → Json → Except String Body
@@ -162,6 +167,10 @@ def decodeBody : Nat → Json → Except String Body
           | other => .error ("unknown pattern " ++ other)
         return (pattern, ← decodeBody fuel (← b.getObjVal? "body"))
       return .cases (← decodeExpr fuel (← j.getObjVal? "scrutinee")) branches
+    | "let" =>
+      let value ← decodeExpr fuel (← j.getObjVal? "value")
+      let rest ← decodeBody fuel (← j.getObjVal? "body")
+      return .letB (← str j "name") (← str j "type") value rest
     | other => .error ("unknown AST body " ++ other)
 end
 
@@ -400,7 +409,10 @@ structure Binding where
   deriving Inhabited
 
 structure Ctx where
+  /-- The user's modules, then the package prelude (`$prelude`, see `preludeModule`):
+  the prelude is always resolvable here but only emitted when an operator used it. -/
   modules : List Module
+  userCount : Nat
   decls : List (String × Decl × Module)
   records : List (String × Decl)
   sums : List (String × Decl)
@@ -416,6 +428,8 @@ structure St where
   hidden : Array (String × ATerm × Option PTy) := #[]
   /-- The Plan/Response of the activity being lowered (none outside one). -/
   effect : Option (PTy × PTy) := none
+  /-- Prelude definitions an operator lowered to so far. -/
+  preludeUsed : List String := []
 
 abbrev M := StateT St (Except String)
 
@@ -482,6 +496,22 @@ def primitiveSignature : String → Option (String × PTy × PTy)
   | "==" => some ("equal", .natural, .boolean)
   | "&&" => some ("conjunction", .boolean, .boolean)
   | _ => none
+/-- The module the operators without a Core4 primitive lower into (not a legal source module name). -/
+def preludeModuleName : String := "$prelude"
+
+/-- Operators with no Core4 primitive: (prelude definition, input, output, swap operands). -/
+def preludeOperator : String → Option (String × PTy × PTy × Bool)
+  | "-" => some ("sub", .natural, .natural, false)
+  | "/" => some ("divide", .natural, .natural, false)
+  | "<" => some ("lt", .natural, .boolean, false)
+  | ">" => some ("lt", .natural, .boolean, true)
+  | "<=" => some ("le", .natural, .boolean, false)
+  | ">=" => some ("le", .natural, .boolean, true)
+  | _ => none
+def operatorTypes (op : String) : Option (PTy × PTy) :=
+  match primitiveSignature op with
+  | some (_, input, output) => some (input, output)
+  | none => (preludeOperator op).map fun (_, input, output, _) => (input, output)
 def composeTy (left right : Option PTy) : Option PTy :=
   match left, right, callable left, callable right with
   | some l, some r, some (.arrow _ _ ld (.arrow _ _ li _)), some (.arrow _ _ _ (.arrow _ _ _ rp)) =>
@@ -701,9 +731,12 @@ def synth (c : Ctx) : Nat → Expr → List Binding → Module → M (Option PTy
       if op == "||" then
         return if sameTy (← synth c fuel left env m) (some .boolean) && sameTy (← synth c fuel right env m) (some .boolean)
           then some .boolean else none
-      let some (_, input, output) := primitiveSignature op | return none
+      let some (input, output) := operatorTypes op | return none
       return if sameTy (← synth c fuel left env m) (some input) && sameTy (← synth c fuel right env m) (some input)
         then some output else none
+    | .letE name type value body =>
+      let ty ← if type == "_" then synth c fuel value env m else sourceType c fuel type m.name []
+      synth c fuel body (⟨name, ty, "unrestricted"⟩ :: env) m
     | .ite _ whenTrue whenFalse =>
       let a ← synth c fuel whenTrue env m
       let b ← synth c fuel whenFalse env m
@@ -737,6 +770,9 @@ def synth (c : Ctx) : Nat → Expr → List Binding → Module → M (Option PTy
 def synthBody (c : Ctx) : Nat → Body → List Binding → Module → M (Option PTy)
   | 0, _, _, _ => fail "type synthesis fuel"
   | fuel + 1, .expr e, env, m => synth c fuel e env m
+  | fuel + 1, .letB name type value rest, env, m => do
+    let ty ← if type == "_" then synth c fuel value env m else sourceType c fuel type m.name []
+    synthBody c fuel rest (⟨name, ty, "unrestricted"⟩ :: env) m
   | fuel + 1, .cases scrutinee branches, env, m => do
     if branches.any (fun b => match b.1 with | .ctor .. | .bool _ => true | _ => false) then
       let scrutineeTy ← synth c fuel scrutinee env m
@@ -778,12 +814,17 @@ def globalRef (env : List Binding) (key : String) : M ATerm := do
 
 /-- Curried lambdas with their checker proposals. Reuse is `once` when any
 visible lexical binding (outer or earlier parameter) is affine or linear. -/
-def abstract (c : Ctx) (fuel : Nat) (params : List Param) (env : List Binding)
+def abstractWith (c : Ctx) (fuel : Nat) (params : List Param) (domains : Option (List (Option PTy))) (env : List Binding)
     (lower : List Binding → M ATerm) (nodeName : String) (result : ResultSpec) (moduleName : String) : M ATerm := do
   if duplicate (params.map (·.name)) then fail "duplicate lexical parameter"
   let mut bindings : List Binding := []
-  for p in params do
-    bindings := bindings ++ [⟨p.name, ← sourceType c fuel p.type moduleName [], ← quantityOf p⟩]
+  for (p, i) in params.zipIdx do
+    -- A given domain (a `let`'s synthesized type) stands in for the source annotation when it resolved.
+    let given := (domains.bind (·[i]?)).bind id
+    let domain ← match given with
+      | some d => pure (some d)
+      | none => sourceType c fuel p.type moduleName []
+    bindings := bindings ++ [⟨p.name, domain, ← quantityOf p⟩]
   let initial : Option PTy ← (match result with
     | .source text => sourceType c fuel text moduleName []
     | .given given => pure given)
@@ -809,11 +850,9 @@ def abstract (c : Ctx) (fuel : Nat) (params : List Param) (env : List Binding)
       | _, _ => none
   return value
 
-def awaiting : String → String
-  | "<" | ">" | "<=" | ">=" => "`" ++ "order" ++ "` needs a Nat order primitive (Primitive.less) in Core4; none exists"
-  | "-" => "`-` needs a truncated-subtraction primitive (Primitive.subtract) in Core4; none exists"
-  | "/" => "`/` needs a division primitive (Primitive.divide, with a stated zero-divisor meaning) in Core4; none exists"
-  | _ => "unknown operator"
+def abstract (c : Ctx) (fuel : Nat) (params : List Param) (env : List Binding)
+    (lower : List Binding → M ATerm) (nodeName : String) (result : ResultSpec) (moduleName : String) : M ATerm :=
+  abstractWith c fuel params none env lower nodeName result moduleName
 
 def rowNames : PTy → List String
   | .field n _ t => n :: rowNames t
@@ -830,6 +869,25 @@ def noActivity (c : Ctx) (fuel : Nat) (e : Expr) (env : List Binding) (m : Modul
   if flagged then
     fail ("refused (" ++ rule ++ "): an Activity cannot be used here; " ++ why ++
       ", so its effect would be cached and shared. Match on it first.")
+
+/-- `let x = v` then body: (λx. body) v. The machine allocates ONE lazy cell for the
+argument of an application and caches it on first demand, so `v` is evaluated at most
+once however often x is used and not at all when x is unused (call-by-need): a let is
+sharing, never a copy of v. Scope is the body only: `v` is elaborated outside the
+binder. In an activity tail the lambda's codomain is the activity type (a pure body is
+lifted with `done`). Mirror of `lowerLet` in objective-elaborate.ts, same order of
+effects (the order assigns recursive-sum variable numbers). -/
+def lowerLet (c : Ctx) (fuel : Nat) (name type : String) (value : Expr) (env : List Binding) (m : Module)
+    (tailPosition : Bool) (elaborateValue : M ATerm) (lowerBody : List Binding → M ATerm)
+    (bodyType : List Binding → M (Option PTy)) : M ATerm := do
+  noActivity c fuel value env m "effect-in-let" "a let-bound value is a shared lazy thunk"
+  let ty ← if type == "_" then synth c fuel value env m else sourceType c fuel type m.name []
+  let mut codomain ← bodyType (⟨name, ty, "unrestricted"⟩ :: env)
+  if tailPosition then
+    if let (some (p, r), some cod) := ((← get).effect, codomain) then
+      if !isComputation (some cod) then codomain := some (.computation p r cod)
+  let fn ← abstractWith c fuel [⟨name, type, "default"⟩] (some [ty]) env lowerBody "let" (.given codomain) m.name
+  return .app fn (← elaborateValue)
 
 mutual
 def expression (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
@@ -886,17 +944,27 @@ def expression (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
         let lt ← expression c fuel left env m
         let rt ← expression c fuel right env m
         return .ifBool lt (.boolean true) rt
+      if let some (definition, _, _, swap) := preludeOperator op then
+        let lt ← expression c fuel left env m
+        let rt ← expression c fuel right env m
+        modify fun s => { s with preludeUsed := s.preludeUsed ++ [definition] }
+        let fn ← globalRef env (preludeModuleName ++ "." ++ definition)
+        return .app (.app fn (if swap then rt else lt)) (if swap then lt else rt)
       match primitiveSignature op with
       | some (primitive, _, _) =>
         let lt ← expression c fuel left env m
         let rt ← expression c fuel right env m
         return .binary primitive lt rt
-      | none => fail ("operator " ++ op ++ " is not yet a core constructor: " ++ awaiting op)
+      | none => fail ("unknown operator " ++ op)
     | .ite condition whenTrue whenFalse =>
       let ct ← expression c fuel condition env m
       let tt ← expression c fuel whenTrue env m
       let ft ← expression c fuel whenFalse env m
       return .ifBool ct tt ft
+    | .letE name type value bodyE =>
+      -- Not a tail position: the body is a pure expression even inside an activity body.
+      lowerLet c fuel name type value env m false (expression c fuel value env m)
+        (fun inner => expression c fuel bodyE inner m) (fun inner => synth c fuel bodyE inner m)
     | .compose specs =>
       match specs with
       | [] => fail "empty composition requires an explicit identity extension"
@@ -970,6 +1038,9 @@ def tail (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
   | 0, _, _, _ => fail "elaboration fuel"
   | fuel + 1, e, env, m => do
     let some (p, r) := (← get).effect | expression c fuel e env m
+    if let .letE name type value bodyE := e then
+      return ← lowerLet c fuel name type value env m true (expression c fuel value env m)
+        (fun inner => tail c fuel bodyE inner m) (fun inner => synth c fuel bodyE inner m)
     if let .ite condition whenTrue whenFalse := e then
       let ct ← expression c fuel condition env m
       let tt ← tail c fuel whenTrue env m
@@ -989,6 +1060,9 @@ def fieldsOf (c : Ctx) : Nat → List (String × Expr) → List Binding → Modu
 def body (c : Ctx) : Nat → Body → List Binding → Module → M ATerm
   | 0, _, _, _ => fail "elaboration fuel"
   | fuel + 1, .expr e, env, m => tail c fuel e env m
+  | fuel + 1, .letB name type value rest, env, m =>
+    lowerLet c fuel name type value env m true (expression c fuel value env m)
+      (fun inner => body c fuel rest inner m) (fun inner => synthBody c fuel rest inner m)
   | fuel + 1, .cases scrutinee branches, env, m => do
     if branches.any (fun b => match b.1 with | .bool _ => true | _ => false) then
       let t := branches.find? (fun b => b.1 == .bool true)
@@ -1165,6 +1239,55 @@ def specification (c : Ctx) (fuel : Nat) (s : Spec) (m : Module) : M ATerm := do
       (fun inner => expression c fuel law.body inner m) law.name (.source "Bool") m.name)]
   return .specification (.record [("name", .label key), ("interface", .label (interfaceLabel s list)), ("laws", .record laws)]) extension
 
+/-! ## The package prelude
+
+Mirror of `preludeSource` in objective-elaborate.ts, written out as the AST the TS
+parser produces for that source (translation validation compares what each lowers to,
+so a divergence between the two is caught). Truncated subtraction `sub`; `le`, `lt`
+(order, by recursion on the successor structure); floor `divide` that is TOTAL: a zero
+divisor gives 0n (Core4 has no catchable exception). Cost: each is O(value) machine
+steps. Only the definitions an operator needs are emitted. -/
+
+def natParam (name : String) : Param := ⟨name, "Nat", "default"⟩
+def call (f : String) (args : List Expr) : Expr := .call (.var f) args
+
+def preludeModule : Module := ⟨preludeModuleName, [], [
+  .function "sub" [natParam "a", natParam "b"] "Nat"
+    (.cases (.var "b") [
+      (.zero, .expr (.var "a")),
+      (.succ "q", .cases (.var "a") [
+        (.zero, .expr (.nat "0")),
+        (.succ "p", .expr (call "sub" [.var "p", .var "q"]))])]),
+  .function "le" [natParam "a", natParam "b"] "Bool"
+    (.cases (.var "a") [
+      (.zero, .expr (.bool true)),
+      (.succ "p", .cases (.var "b") [
+        (.zero, .expr (.bool false)),
+        (.succ "q", .expr (call "le" [.var "p", .var "q"]))])]),
+  .function "lt" [natParam "a", natParam "b"] "Bool"
+    (.cases (.var "b") [
+      (.zero, .expr (.bool false)),
+      (.succ "q", .cases (.var "a") [
+        (.zero, .expr (.bool true)),
+        (.succ "p", .expr (call "lt" [.var "p", .var "q"]))])]),
+  .function "quotient" [natParam "a", natParam "b"] "Nat"
+    (.expr (.ite (call "lt" [.var "a", .var "b"]) (.nat "0")
+      (.binary "+" (.nat "1") (call "quotient" [call "sub" [.var "a", .var "b"], .var "b"])))),
+  .function "divide" [natParam "a", natParam "b"] "Nat"
+    (.cases (.var "b") [
+      (.zero, .expr (.nat "0")),
+      (.succ "q", .expr (call "quotient" [.var "a", .var "b"]))])]⟩
+
+/-- What a prelude definition calls (transitively closed by `preludeClosure`). -/
+def preludeNeeds : String → List String
+  | "quotient" => ["lt", "sub"]
+  | "divide" => ["quotient"]
+  | _ => []
+
+def preludeClosure (used : List String) : List String :=
+  let step := fun (names : List String) => (names ++ names.flatMap preludeNeeds).eraseDups
+  (step (step (step (step used)))).eraseDups
+
 /-! ## The package knot, entry selection, arguments -/
 
 def resultOf : Option PTy → Nat → Option PTy
@@ -1214,31 +1337,41 @@ structure Output where
   sumBounds : List (Nat × PTy)
   typeErrors : Array String
 
+/-- One declaration of the package knot: its field and the hidden layer fields it created. -/
+def emitDecl (c : Ctx) (fuel : Nat) (m : Module) (d : Decl) (fields : List (String × ATerm)) : M (List (String × ATerm)) := do
+  match d with
+  | .record .. | .sum .. => return fields
+  | _ => pure ()
+  let key := m.name ++ "." ++ d.name
+  if let .function _ [] resultType _ := d then
+    if (trimStr resultType).startsWith "Activity<" then
+      fail ("refused (nullary-activity): " ++ key ++ " has no parameters, so it is a shared lazy value; an Activity needs a parameter, e.g. (start: {})")
+  let value ← match d with
+    | .function _ params resultType b => do
+      let result ← if resultType == "_" then do pure (ResultSpec.given (resultOf (← globalType c fuel key) params.length))
+        else pure (ResultSpec.source resultType)
+      abstract c fuel params outerEnv (fun next => body c fuel b next m) d.name result m.name
+    | .extension _ params targetType b => abstract c fuel params outerEnv (fun next => body c fuel b next m) d.name (.source targetType) m.name
+    | .spec s => specification c fuel s m
+    | _ => fail "unsupported declaration"
+  let mut fields := fields ++ [(key, value)]
+  for (name, value, type) in (← get).hidden do
+    fields := fields ++ [(name, value)]
+    modify fun st => { st with globalTypes := st.globalTypes ++ [(name, type)] }
+  modify fun st => { st with hidden := #[] }
+  return fields
+
 def elaborateM (c : Ctx) (entryModule : Nat) (entryDefinition : String) (args : Json) (mode : String) : M Output := do
   let fuel := 100000
+  let userModules := c.modules.take c.userCount
   let mut fields : List (String × ATerm) := []
-  for m in c.modules do
+  for m in userModules do
     for d in m.decls do
-      match d with
-      | .record .. | .sum .. => continue
-      | _ => pure ()
-      let key := m.name ++ "." ++ d.name
-      if let .function _ [] resultType _ := d then
-        if (trimStr resultType).startsWith "Activity<" then
-          fail ("refused (nullary-activity): " ++ key ++ " has no parameters, so it is a shared lazy value; an Activity needs a parameter, e.g. (start: {})")
-      let value ← match d with
-        | .function _ params resultType b => do
-          let result ← if resultType == "_" then do pure (ResultSpec.given (resultOf (← globalType c fuel key) params.length))
-            else pure (ResultSpec.source resultType)
-          abstract c fuel params outerEnv (fun next => body c fuel b next m) d.name result m.name
-        | .extension _ params targetType b => abstract c fuel params outerEnv (fun next => body c fuel b next m) d.name (.source targetType) m.name
-        | .spec s => specification c fuel s m
-        | _ => fail "unsupported declaration"
-      fields := fields ++ [(key, value)]
-      for (name, value, type) in (← get).hidden do
-        fields := fields ++ [(name, value)]
-        modify fun st => { st with globalTypes := st.globalTypes ++ [(name, type)] }
-      modify fun st => { st with hidden := #[] }
+      fields ← emitDecl c fuel m d fields
+  -- The prelude definitions an operator lowered to (closed under what they call), after the user's.
+  let needed := preludeClosure (← get).preludeUsed
+  for d in preludeModule.decls do
+    if needed.contains d.name then fields ← emitDecl c fuel preludeModule d fields
   let mut rowFields : List (String × PTy) := []
   let mut unresolved : List String := []
   for (name, _) in fields do
@@ -1249,9 +1382,9 @@ def elaborateM (c : Ctx) (entryModule : Nat) (entryDefinition : String) (args : 
   let reason := if unresolved.isEmpty then none else some ("declaration types unresolved: " ++ String.intercalate ", " unresolved)
   let rootExtension := ATerm.lam ⟨some (.variable 0), some (arrowTy .emptyRow (.variable 0)), "unrestricted", "reusable", reason⟩
     (.lam ⟨some .emptyRow, some (.variable 0), "unrestricted", "reusable", reason⟩ (.extend (.bound 0) fields))
-  let packageLabel := (toJson (c.modules.map (·.name))).compress
+  let packageLabel := (toJson ((userModules ++ (if needed.isEmpty then [] else [preludeModule])).map (·.name))).compress
   let root := ATerm.fix (.specification (.record [("package", .label packageLabel)]) rootExtension) (.record [])
-  let some entry := c.modules[entryModule]? | fail "missing selected entry"
+  let some entry := userModules[entryModule]? | fail "missing selected entry"
   let entryKey := entry.name ++ "." ++ entryDefinition
   if (declOf c entryKey).isNone then fail "missing selected entry"
   let mut selected := ATerm.get root entryKey
@@ -1277,7 +1410,9 @@ def elaborateM (c : Ctx) (entryModule : Nat) (entryDefinition : String) (args : 
   return ⟨selected, globalRow, st.sumBounds, st.typeErrors⟩
 
 /-- Build the context; duplicate declarations / types refuse as in the TS. -/
-def context (modules : List Module) : Except String Ctx := do
+def context (userModules : List Module) : Except String Ctx := do
+  let modules := userModules ++ [preludeModule]
+  let userCount := userModules.length
   let mut decls : List (String × Decl × Module) := []
   let mut records : List (String × Decl) := []
   let mut sums : List (String × Decl) := []
@@ -1299,7 +1434,7 @@ def context (modules : List Module) : Except String Ctx := do
         | .record .. => records := records ++ [(key, d)]
         | _ => sums := sums ++ [(key, d)]
       | _ => pure ()
-  return ⟨modules, decls, records, sums⟩
+  return ⟨modules, userCount, decls, records, sums⟩
 
 def elaborate (modules : List Module) (entryModule : Nat) (entryDefinition : String) (args : Json) (mode : String) :
     Except String Output := do

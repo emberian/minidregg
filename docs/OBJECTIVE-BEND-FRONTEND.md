@@ -50,7 +50,8 @@ fingerprints, not Mini package identities.
 | `match n:` `case 0n:` / `case 1n+p:` | `ifZero` (exactly those two branches) |
 | `match b:` `case true:` / `case false:` | `ifBool` |
 | `sum S:` `l: T`; `S.l(e)`; `match s:` `case l(x):` | variant type; `inject l e`; `case` (exhaustive, no wildcard) |
-| `<`, `>`, `<=`, `>=`, `-`, `/` | refused: no `Primitive.less / subtract / divide` exists |
+| `-`, `/`, `<`, `<=`, `>`, `>=` | a call of one prelude definition (`$prelude.sub / divide / lt / le`; `>` and `>=` swap the operands of `<` and `<=`): see below |
+| `let x = v` + rest of the body, `let x: T = v in e` | `(λx. body) v`, one lazy cell for `v`: see below |
 
 The `==` dispatch needs both operand types; an unannotated operand is refused.
 `inject`, `case`, `ifBool` and `Primitive.labelEqual` are Core4 constructors
@@ -98,6 +99,40 @@ ancestor and combined in another.
 The spec interface label (canonical JSON) records target type, suffix mark,
 parents, precedence list, requirements and method signatures; reflection reads
 it with `metadata(S).interface`.
+
+## Operators without a core primitive, and `let`
+
+Core4 has no `subtract`, `less` or `divide` primitive, so the elaborator adds a
+module `$prelude` (not a legal source module name) to the package knot, holding
+exactly the definitions the program's operators need, after the user's modules:
+
+| Operator | Prelude definition | Meaning |
+| --- | --- | --- |
+| `a - b` | `sub` | truncated: `0n` when `b` exceeds `a` |
+| `a < b`, `a > b` | `lt` (`>` swaps the operands) | Bool |
+| `a <= b`, `a >= b` | `le` (`>=` swaps the operands) | Bool |
+| `a / b` | `divide`, via `quotient`, `lt`, `sub` | floor division, and `a / 0n = 0n` |
+
+Each is a recursion over `ifZero`, so it is exact on every Nat and costs about
+one machine step per unit of the smaller operand (`/`: of the dividend). A zero
+divisor must mean something because the machine has no catchable exception; `0n`
+is the `Nat.div` convention, and a program whose zero divisor is a real case must
+test it first. A package using none of these operators is unchanged. The TS source
+of the prelude is `preludeSource` in `objective-elaborate.ts`; the Lean elaborator
+carries it as the AST that source parses to, and translation validation catches a
+divergence. Replacing this by machine primitives (O(1)) is a core change and is
+not done: the lowering is the one place to swap.
+
+`let x = v` (statement form: the rest of the body follows at the same indent) and
+`let x: T = v in e` (expression form) lower to `app (lam body) v`. An application
+allocates one lazy cell for its argument and the machine caches it on first demand
+(`DemandMachine`, frame `argument`), so `v` is evaluated at most once however often
+`x` is used and not at all when unused: call-by-need, never a copy. The value is
+elaborated outside the binder (`let x = x + 1n` reads the outer `x`), `x` is
+unrestricted, and an omitted type is synthesized from `v` (an unresolvable one makes
+the typing proposal unsupported with a reason, never a guess). A `let` in an
+activity's tail has the activity type as its lambda codomain; `let x = perform(..)`
+is refused like any activity in a shared position.
 
 ## Typing proposal
 
@@ -159,6 +194,10 @@ bun tests/objective-bend-source/check-preview.ts \
 `check-preview.ts` captures each cohort item with the real frontend,
 elaborates it and runs the compiled checker and `runBounded`; it also checks a
 wrong capture pin and a typing-budget refusal, and tick and heap suspensions.
+A cohort item pins a scalar result (`expected`), or a whole structured result
+(`expectedData`, typed data compared with record fields ordered by name), or the
+reason a result has no deep view (`expectedDataStatus`), or exhaustion of the
+preview's tick budget (`expectedStatus: "suspended"`).
 
 ## Trust boundary
 
