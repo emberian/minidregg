@@ -1,4 +1,5 @@
 import Kernel.GenericSimplex
+import Compiler.GenericSimplexPending
 namespace Minidregg.Verify.GenericSimplexHarness
 open Minidregg.Kernel.GenericSimplex
 set_option autoImplicit false
@@ -51,6 +52,21 @@ def restarted (n : Network) : Bool :=
     (n.logs[i]!.foldl (step cfg) (start cfg i 0 [payload] [block,[[43]]])) == n.nodes[i]!
 def ensure (condition : Bool) (message : String) : IO Unit :=
   if condition then pure () else throw (IO.userError message)
+
+/-- Incremental validation discovery misses nothing: replaying a node's inputs
+and discovering only the blocks each input carries (as the participant does)
+requests every prefix the full rescan of the final state requests. -/
+def incrementalCovers (n : Network) : Bool :=
+  (List.range cfg.parties).all fun i =>
+    let initial := start cfg i 0 [payload] [block,[[43]]]
+    let (final,queue) := n.logs[i]!.foldl (fun (s,q) input =>
+        let next := step cfg s input
+        let carried := match input with
+          | .delivery m | .deliveryAt _ m => m.value.toList
+          | _ => []
+        (next,Minidregg.Compiler.GenericSimplexPending.discoverFrom next carried q))
+      (initial,Minidregg.Compiler.GenericSimplexPending.discover initial {})
+    (Minidregg.Compiler.GenericSimplexPending.discover final {}).pending.all queue.pending.contains
 def honestSafe (n : Network) : Bool :=
   let honest := n.nodes.toList.take 3
   honest.all (fun s => !s.failed) &&
@@ -247,6 +263,14 @@ def main : IO Unit := do
     "delayed source offer starved behind inert protocol blocks"
   ensure (safe delayedComplete && restarted delayedComplete)
     "delayed offer safety/replay"
+  -- Unvalidated histories from a Byzantine sender make discovery non-trivial.
+  let unvalidated := (List.range 3).foldl (fun n i =>
+      act (act n i (.delivery ⟨3,1,.vote,some [[77],[78]]⟩)) i (.delivery ⟨3,2,.commit,some [[79]]⟩))
+    delayedComplete
+  ensure ((List.range 3).all fun i =>
+      (Minidregg.Compiler.GenericSimplexPending.discover unvalidated.nodes[i]! {}).pending.length ≥ 3)
+    "probe: the full scan requests no unvalidated prefix"
+  ensure (incrementalCovers unvalidated) "incremental discovery missed a prefix the full scan requests"
   ensure (!(validBlock delayedComplete.nodes[0]! [[99],[44]]))
     "different nonempty source history inherited validation"
   -- Proposer 0 is silent through view1. Every remaining member receives its
