@@ -466,6 +466,63 @@ class ComposedTests(unittest.TestCase):
             self.assertTrue(result["phases"]["connector"].startswith("stopped:"))
             self.assertEqual(result["pending"]["name"], "connector:journey")
 
+    def documents_binding(self):
+        path = self.root / "documents-binding.json"
+        path.write_text(json.dumps({"protocol": "mini-protected-same-store-v1"}))
+        return path
+
+    def test_spec_documents_binding_declares_both_adapters_under_state(self):
+        world_value = json.loads(self.world.read_text())
+        world_value["restart"] = {"argv": [str(self.root / "restart.sh")]}
+        self.world.write_text(json.dumps(world_value))
+        binding = self.documents_binding()
+        value = c.generate(str(self.world), str(self.state), 3, "jd3", documents=str(binding))
+        docs = value["documents"]
+        self.assertEqual(docs["rooms"], ["shared"])
+        for kind in ("protected", "ordinary"):
+            self.assertEqual(docs[kind], {"binding": str(binding.resolve()),
+                                          "output": str(self.state.resolve() / f"documents-{kind}")})
+        self.assertIn("protected adapter ready", c.readiness(value, c.plan(value))["documents"])
+        self.assertNotIn("blocked", c.readiness(value, c.plan(value))["documents"])
+        self.assertNotIn("protected", c.generate(str(self.world), str(self.state), 3, "jd3")["documents"])
+        other = self.root / "not-a-binding.json"
+        other.write_text(json.dumps({"protocol": "mini-world-identity-v1"}))
+        with self.assertRaisesRegex(ValueError, "mini-protected-same-store-v1"):
+            c.generate(str(self.world), str(self.state), 3, "jd3", documents=str(other))
+
+    def test_documents_bindings_are_refused_unless_exact(self):
+        good = {"binding": "/b.json", "output": "/out-p"}
+        for documents, message in [
+                ({"protected": {"binding": "/b.json"}}, "exactly binding and output"),
+                ({"protected": dict(good, extra=1)}, "exactly binding and output"),
+                ({"ordinary": {"binding": "b.json", "output": "/o"}}, "absolute"),
+                ({"protected": good, "ordinary": good}, "its own output"),
+                ({"forced": good}, "names only rooms, protected and ordinary")]:
+            with self.assertRaisesRegex(ValueError, message):
+                c.plan(self.spec(phases=["documents"], documents=documents))
+
+    def test_documents_bindings_run_protected_then_ordinary_once_and_pass(self):
+        binding = str(self.documents_binding())
+        documents = {kind: {"binding": binding, "output": str(self.root / kind)} for kind in ("protected", "ordinary")}
+        value = self.spec(phases=["documents"], documents=documents)
+        with mock.patch.object(c.subprocess, "run", return_value=self.adapter_response({})) as run:
+            result = c.Scenario(value, "spec.json").run()
+            self.assertEqual(result["phases"]["documents"], "pass")
+            argvs = [call.args[0] for call in run.call_args_list]
+            self.assertEqual([Path(a[1]).name for a in argvs],
+                             ["protected-document-same-store.py", "docuverse-same-store.py"])
+            for argv, kind in zip(argvs, ("protected", "ordinary")):
+                self.assertEqual(argv[2:], ["--binding", binding, "--output", str(self.root / kind)])
+            c.Scenario(value, "spec.json").run()
+            self.assertEqual(run.call_count, 2)
+
+    def test_documents_without_bindings_report_blocked_rows_not_pass(self):
+        value = self.spec(phases=["rooms", "documents"], documents={"rooms": ["overlap"]})
+        shell = Shell(self.value["members"])
+        result = self.scenario(value, shell).run()
+        self.assertEqual(result["phases"]["documents"],
+                         "pass; blocked rows: documents:protected, documents:ordinary")
+
     def test_changed_spec_needs_a_fresh_state_directory(self):
         shell = Shell(self.value["members"])
         self.scenario(self.spec(), shell).run()

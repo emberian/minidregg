@@ -7,9 +7,13 @@
   composed-scenario.py settle SPEC STEP absent|confirmed EVIDENCE REASON
   composed-scenario.py spec WORLD.json STATE N OP [--residents-binding B]
                             [--app-world-inputs PLATFORM SELECTION]
+                            [--documents-binding D]
                                             print a spec over the first N inventory members:
                                             one shared room of all N, churn on the last,
-                                            documents in the room, every phase declared
+                                            documents in the room, every phase declared;
+                                            D (mini-protected-same-store-v1) drives both
+                                            supplied-world document adapters, protected
+                                            and ordinary, writing under STATE
   composed-scenario.py gate SPEC RESULT.json  run (or resume), then the DEPLOY verdict:
                                             PASS only when every one of the seven phases
                                             is declared and reports exactly "pass"
@@ -33,6 +37,12 @@ Store through the inventory's own "restart": {"argv": [...]} and then requires
 that every member resolves every room's notes to the SAME cell as before, reads
 every documents-phase marker exactly once, and sees an owner write admitted
 after the restart.
+
+Documents bindings: {"documents": {"rooms": [...], "protected": {"binding": B, "output": O},
+"ordinary": {"binding": B, "output": O2}}}. B is a mini-protected-same-store-v1 file naming
+the Store, the published manifest and existing member workspaces (owner, member, reader,
+reviewer); its adapter validates it and drives those members' own CLIs. O is the adapter's
+private output directory, one per kind; the two kinds may share one binding file.
 
 Connector binding: {"input": "/provision-input.json", "journeyInput": "/journey-input.json"}.
 An app can instead bind {"worldInputs":{"platformInputs":"/platform-inputs.json",
@@ -199,8 +209,19 @@ def plan(spec):
     if "lockout" in churn:
         require(churn["lockout"]["room"] in rooms, "lockout names unknown room")
     docs = spec.get("documents", {})
+    require(set(docs) <= {"rooms", "protected", "ordinary"}, "documents names only rooms, protected and ordinary")
     for key in docs.get("rooms", []):
         require(key in rooms, f"documents names unknown room {key}")
+    outputs = []
+    for kind in ("protected", "ordinary"):
+        if kind in docs:
+            value = docs[kind]
+            require(isinstance(value, dict) and set(value) == {"binding", "output"},
+                    f"documents.{kind} names exactly binding and output")
+            require(all(isinstance(value[k], str) and Path(value[k]).is_absolute() for k in ("binding", "output")),
+                    f"documents.{kind} binding and output must be absolute paths")
+            outputs.append(value["output"])
+    require(len(set(outputs)) == len(outputs), "each document adapter needs its own output directory")
     for key, binding in spec.get("apps", {}).items():
         require(KEY.fullmatch(key) is not None, "invalid app binding key")
         if "worldInputs" in binding:
@@ -906,7 +927,7 @@ def status(spec):
             "lanesPending": {k: v["pending"] for k, v in state.items() if k.startswith("lane:") and v.get("pending")}}
 
 
-def generate(world_path, state, count, op, residents=None, app_inputs=None):
+def generate(world_path, state, count, op, residents=None, app_inputs=None, documents=None):
     """A spec over the first COUNT inventory members, every phase declared."""
     world = read(world_path)
     members, _ = inventory(world)
@@ -923,6 +944,12 @@ def generate(world_path, state, count, op, residents=None, app_inputs=None):
             "restart": {"world": "restart"} if residents is None else {"binding": residents}}
     if residents is not None:
         spec["residents"] = {"binding": residents}
+    if documents is not None:
+        require(read(documents).get("protocol") == "mini-protected-same-store-v1",
+                "documents binding is not a mini-protected-same-store-v1 file")
+        binding, root = str(Path(documents).resolve()), Path(state).resolve()
+        for kind in ("protected", "ordinary"):
+            spec["documents"][kind] = {"binding": binding, "output": str(root / f"documents-{kind}")}
     if app_inputs is not None:
         spec["apps"] = {"sheet": {"worldInputs": {"platformInputs": app_inputs[0], "selection": app_inputs[1]}}}
         spec["connector"] = {"app": "sheet"}
@@ -954,6 +981,7 @@ def main(argv=None):
     parser.add_argument("words", nargs="+")
     parser.add_argument("--residents-binding")
     parser.add_argument("--app-world-inputs", nargs=2)
+    parser.add_argument("--documents-binding")
     parsed = parser.parse_args(argv)
     words = parsed.words
     os.umask(0o077)
@@ -963,7 +991,7 @@ def main(argv=None):
         if len(words) != 5 or not re.fullmatch(r"[0-9]+", words[3]):
             parser.error("spec WORLD.json STATE N OP")
         print(json.dumps(generate(words[1], words[2], int(words[3]), words[4], parsed.residents_binding,
-                                  parsed.app_world_inputs), indent=2))
+                                  parsed.app_world_inputs, parsed.documents_binding), indent=2))
         return 0
     spec = read(words[1])
     if words[0] == "gate":
