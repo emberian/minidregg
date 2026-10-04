@@ -321,3 +321,44 @@ Full local certified history is bounded16MiB separately from unchanged network
 203/mix bounds262078/262070. No implicit fragmentation or history truncation.
 Actual native205 configured entrypoint/source gate remains peer WIP, so no
 end-to-end native authority claim; two new scoped negative checks pending.
+
+Closed worker source r30 compiled; two narrow refusers/local-bound checks
+actualPASS16:17:27UTC, compile20.53s/tests0.136s,115 skipped. No positive205
+channel run follows: actual source native helper/config/certificate producer
+remains peer-owned. New r31 binds authenticated receiver WAL additionally to
+exact frozen private bootstrap/context/worker profile; changed original cannot
+reinterpret prior accepted packet history. Old receiver domain bytes preserved.
+
+Actual generic all-width Lean emitPairs integer/origin proof and width8 Plan
+producer now qualified. Public379-byte fixture SHA
+c6aa69b560f438bdc623b695470e75ea9d27cda7a85d9a6488e7363aaace3350
+has16inputs/41gates/16AND/output9bits, retained finalcarry. New consumer combines
+counted16bit prefix with actual fullgraph32tuples, actual ACSS input16bits and
+King32tuple stock -> onlyfixedrecipient result255+1=256 and recovered result.
+Synthetic fixture generation/rows replaced by exact actual custody binding;
+generic sourceExpr/newObjective/native release/GOD/PQ claims remain separate.
+New generic word computation and changed-bootstrap refusal checks pending.
+
+2026-10-03 r31 actual consumer: generic Lean width8 graph, 16 qualified input bits and 32 checked tuples, combined burn-before-getter Plan, LayerMPC 255+1=256 including carry, recipient1-only delivery and exact restart recovery. Three scoped tests PASS at16:38:24Z; actual worker binary release built. This is reference GF128/classical-ROM computation under static cumulative f<n/3 and independent authenticated confidential party channels, not GOD/PQ/native source authority or successor qualification.
+r33 horse batch consumer: seven selected circuit_batch tests PASS; AND assignments scan once, complete pool batch opcode2 anchored before material, zero-row plan avoids invalid empty allocation. Native worker config now preflights all original/lock/pending role paths with canonicalized parent and inode alias refusal. Initial native path test correctly rejected a symlink test fixture; fixed fixture to actual canonical image, two relevant tests +new release pending.
+r34 lawful event60 source author: Host.PrivatePartyReserveAuthor actual Lean+C PASS check-r32-04.log; all #assert_axioms standard three. Actual current ordinary native admission plus PhysicalShape binds the full local candidate projection and descriptor. Promise headers bind exact selected signed command/current source image; final source control edit retains reservation, separate maintenance and recursive repair envelopes and rechecks law guards/exact physical post. Assembly emits only ReserveSource claims. Actual event60 ordered admission/funding/CAS and native205 source-prefix verification remain receiving obligations, no Reserved/Qualified/YES minted by author. New source-v3 fixture consumes this API; genuine private output bootstrap must use its emitted full generation and source command, not old synthetic test command[3].
+
+r34 recipient custody path preflight/refuser tests actual2PASS; current worker release SHA923cf9ea94417397581a2ad697f22371194b4a3358ee7be4dbed4350be10ed4c. Original key/output/receiver/lock/pending roles reject canonical name, symlink and inode aliases before opening recipient capsule.
+r35 actual-current-generation bootstrap constructor test PASS .494s (126 skipped). Real ACSS input/King32tuple/LayerMPC width8 public255+1 constructs all four pending PrivateOutput stores, retained original recursive packet and exact generation, reopen recipient1 still no delivered result. Export requires actual source-emitted canonical Generation plus fresh private destination; no source-bound export yet. Deterministic reference preprocessing/public-input fixture is explicit, not production entropy, Qualified, release admission or GOD/PQ.
+r36 source-first current IO projection addition: projectLoaded performs actual prepare/native admission/sourceGate/preflight and derives exact transaction/intent/lineage/command. Custody holder metadata is structural, not recovery evidence. authorLoaded now checks current sourceGate/preflight and descriptor invocation identity. Focused Lean leaf pending. New stable membership v4 is peer source-owned, backend Party/capsule format unchanged; per-job context must come only from actual funded PENDING-backed checked producer. No empty v3 reinterpretation or latest-key recovery.
+
+r36 latest projectLoaded/sourceGate/transaction binding actual Lean+C PASS; standard-three assertions, own olean-r36, check-r36.log. Author source bed90cad9361f9f42ebccf06d609bd3372f6bacf5b868ef097d6f07cd364892c.
+r37 full-source descriptor retention bootstrap test actual1PASS .495s/126skip, compile21.01s, exact manifest7da672cd7d76492f526824e2681f02b58a2cb575dbd762b5a2dd200fdb987182. Actual private export requires source-emitted Generation AND descriptor AND fresh protected destination; entire descriptor retained into original pending output context/WAL/reopen/artifact. Mechanical generation-prefix comparison does not decode or authorize the source descriptor. No source-bound export generated before genuine source projection. Both seats released.
+
+2026-10-03 r42 actual Objective receiving repair:
+The current Objective identity source artifact has153 logical Boolean inputs,
+34696 gates and13563 ANDs; input qualification adds153 counted ANDs.
+The r41 run constructed all429 actual King stocks, then refused odd ACSS
+count25 after117.304s. The constructor now preflights every real ACSS profile
+before stock generation and shares154 physical inputs (one fixed zero pad)
+in distinct even groups128+26. Exactly153 InputRefs and input checks remain.
+Public partition bytes bind logical/physical/group counts and source artifact.
+A fresh preprocessing instance7200 preserves failed-run consumed material.
+The two shared sealed-image/config execution checks actually PASS in r41.
+The repaired full Objective computation is pending execution; no native source
+release, Qualified successor, GOD or PQ claim follows from this fixture.

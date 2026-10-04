@@ -494,6 +494,19 @@ impl<M: IngressMachine> Receiver<M> {
         capacity: usize,
         inner: M,
     ) -> Result<Self> {
+        Self::open_bound(path, context, n, capacity, inner, &[])
+    }
+    /// Preserve old receiver bytes when binding is empty. A closed native
+    /// worker additionally binds its original private bootstrap/public profile;
+    /// the same old replay prefix cannot be reinterpreted over changed state.
+    pub fn open_bound(
+        path: &Path,
+        context: Context,
+        n: usize,
+        capacity: usize,
+        inner: M,
+        original_binding: &[u8],
+    ) -> Result<Self> {
         if n == 0 || n > 16 || context.recipient as usize >= n || capacity == 0 || capacity > 65536
         {
             return Err(bad("receiver funded bounds"));
@@ -508,6 +521,13 @@ impl<M: IngressMachine> Receiver<M> {
         bytes(&context.recipient_role, &mut identity);
         identity.extend((n as u64).to_le_bytes());
         identity.extend((capacity as u64).to_le_bytes());
+        if !original_binding.is_empty() {
+            bytes(
+                b"DREGG.PRIVATE.RECEIVER.ORIGINAL.BINDING\x01",
+                &mut identity,
+            );
+            bytes(original_binding, &mut identity);
+        }
         let machine = AuthenticatedMachine {
             inner,
             context,
@@ -812,6 +832,52 @@ mod tests {
         ));
         fs::create_dir(&p).unwrap();
         p.join("wal")
+    }
+    #[test]
+    fn receiver_bound_original_bootstrap_refuses_reinterpretation_on_restart() {
+        let f = fixture(Protocol::Acs);
+        let path = path();
+        let packet = packet(&f, 5, 7u64.to_le_bytes().to_vec()).encode().unwrap();
+        {
+            let mut receiver = Receiver::open_bound(
+                &path,
+                f.party.context.clone(),
+                4,
+                3,
+                Counter { value: 0 },
+                b"original-bootstrap+worker-profile",
+            )
+            .unwrap();
+            receiver.receive(&f, &packet).unwrap();
+            assert_eq!(receiver.state().value, 7);
+        }
+        assert!(Receiver::open_bound(
+            &path,
+            f.party.context.clone(),
+            4,
+            3,
+            Counter { value: 100 },
+            b"changed-bootstrap+worker-profile"
+        )
+        .is_err());
+        assert!(
+            Receiver::open(&path, f.party.context.clone(), 4, 3, Counter { value: 0 }).is_err()
+        );
+        let mut receiver = Receiver::open_bound(
+            &path,
+            f.party.context.clone(),
+            4,
+            3,
+            Counter { value: 0 },
+            b"original-bootstrap+worker-profile",
+        )
+        .unwrap();
+        assert_eq!(receiver.state().value, 7);
+        assert_eq!(
+            receiver.receive(&f, &packet).unwrap().disposition,
+            Disposition::Replayed
+        );
+        assert_eq!(receiver.state().value, 7);
     }
     #[test]
     fn replay_and_protocol_transition_are_one_durable_record() {

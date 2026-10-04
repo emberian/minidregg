@@ -228,10 +228,26 @@ mod tests {
         Vec<crate::triple_king::tests::AnchorFixture>,
         Vec<PathBuf>,
     ) {
+        stores_from_completed_descriptor(
+            completed,
+            anchors,
+            instance,
+            b"fixed reference addition/result recipient1; no native release grant",
+        )
+    }
+    fn stores_from_completed_descriptor(
+        completed: Vec<crate::field_network_layers::LayerEngine>,
+        anchors: Vec<crate::triple_king::tests::AnchorFixture>,
+        instance: u64,
+        descriptor: &[u8],
+    ) -> (
+        Vec<Option<Store>>,
+        Vec<crate::triple_king::tests::AnchorFixture>,
+        Vec<PathBuf>,
+    ) {
         let paths = (0..4)
             .map(|i| path(&format!("{instance}-{i}")))
             .collect::<Vec<_>>();
-        let descriptor = b"fixed reference addition/result recipient1; no native release grant";
         let stores = completed
             .iter()
             .enumerate()
@@ -284,6 +300,403 @@ mod tests {
                     .map(|p| (to, p)),
             );
         }
+    }
+    /// Restricted public-input integration fixture. An optional protected export
+    /// consumes exact source-authored Generation bytes; it never enrolls a party,
+    /// supplies source permission, or creates Qualified successor evidence.
+    #[test]
+    fn source_generation_bootstrap_retains_real_output_wal_and_recursive_packet() {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let supplied = std::env::var_os("MINI_PRIVATE_SOURCE_GENERATION");
+        let destination = std::env::var_os("MINI_PRIVATE_BOOTSTRAP_DEST");
+        let source_descriptor = std::env::var_os("MINI_PRIVATE_SOURCE_DESCRIPTOR");
+        assert_eq!(supplied.is_some(), destination.is_some());
+        assert_eq!(supplied.is_some(), source_descriptor.is_some());
+        let g = if let Some(path) = supplied {
+            let raw = fs::read(path).unwrap();
+            let mut reader = crate::codec::Reader::new(&raw).unwrap();
+            let g = crate::codec::Generation::get(&mut reader).unwrap();
+            reader.finish().unwrap();
+            let mut canonical = vec![];
+            g.put(&mut canonical);
+            assert_eq!(canonical, raw);
+            g
+        } else {
+            crate::codec::Generation {
+                invocation: crate::codec::Nat::from_be(&[9; 64]),
+                command: vec![6; 300],
+                attempt: crate::codec::Nat::new(2),
+                generation: crate::codec::Nat::new(1),
+                configuration: crate::codec::Nat::from_be(&[7; 64]),
+            }
+        };
+        // Canonical descriptor authority belongs to the source producer. Here
+        // retain its entire original bytes and verify the exact generation prefix;
+        // this mechanical comparison creates no source admission or recovery proof.
+        let mut generation_bytes = vec![];
+        g.put(&mut generation_bytes);
+        let descriptor = if let Some(path) = source_descriptor {
+            let raw = fs::read(path).unwrap();
+            assert!(raw.len() > generation_bytes.len() && raw.len() <= 65536);
+            assert!(raw.starts_with(&generation_bytes));
+            raw
+        } else {
+            let mut raw = generation_bytes.clone();
+            crate::codec::bytes(b"explicit unqualified reference descriptor", &mut raw);
+            raw
+        };
+        let source = include_bytes!("../fixtures/addition-network-8-plan.bin");
+        let network = crate::field_network::with_boolean_inputs(
+            &crate::circuit_batch::Plan::decode(source).unwrap().network,
+        )
+        .unwrap();
+        let (completed, anchors) = arithmetic_reference::tests::completed_word_network_generation(
+            255,
+            1,
+            96,
+            network,
+            source,
+            Some(&g),
+        );
+        let (mut stores, anchors, paths) =
+            stores_from_completed_descriptor(completed, anchors, 96, &descriptor);
+        let mut sent = vec![];
+        for (i, s) in stores.iter_mut().enumerate() {
+            let state = s.as_ref().unwrap().state();
+            assert_eq!(state.generation(), &g);
+            assert_eq!(state.descriptor_bytes(), descriptor);
+            assert!(state.result().is_none());
+            sent.push(s.as_mut().unwrap().start().unwrap());
+            assert!(!sent[i].is_empty());
+            assert_eq!(
+                s.as_ref().unwrap().replay_outboxes().unwrap().len(),
+                sent[i].len()
+            );
+        }
+        let packet = sent[0].iter().find(|p| p.to == 1).unwrap();
+        let wire = private_output::encode_message(&packet.message);
+        assert_eq!(
+            private_output::encode_message(&private_output::decode_message(&wire).unwrap()),
+            wire
+        );
+        let context = stores[1].as_ref().unwrap().state().context();
+        drop(stores[1].take());
+        stores[1] = Some(Store::reopen(&paths[1], &g, context, 1, 1, anchors[1].socket()).unwrap());
+        assert!(stores[1].as_ref().unwrap().state().result().is_none());
+        assert_eq!(
+            stores[1].as_ref().unwrap().state().descriptor_bytes(),
+            descriptor
+        );
+        if let Some(destination) = destination {
+            let root = PathBuf::from(destination);
+            assert!(root.is_absolute() && !root.exists());
+            fs::create_dir(&root).unwrap();
+            fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+            fn write(path: &std::path::Path, bytes: &[u8]) {
+                let mut f = fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(path)
+                    .unwrap();
+                f.write_all(bytes).unwrap();
+                f.sync_all().unwrap();
+                std::fs::File::open(path.parent().unwrap())
+                    .unwrap()
+                    .sync_all()
+                    .unwrap();
+                assert_eq!(fs::read(path).unwrap(), bytes);
+            }
+            let mut canonical = vec![];
+            g.put(&mut canonical);
+            write(&root.join("generation.bin"), &canonical);
+            write(&root.join("source-descriptor.bin"), &descriptor);
+            write(&root.join("message-sender0-recipient1.bin"), &wire);
+            for i in 0..4 {
+                let d = root.join(format!("party-{i}"));
+                fs::create_dir(&d).unwrap();
+                fs::set_permissions(&d, fs::Permissions::from_mode(0o700)).unwrap();
+                let wal = fs::read(&paths[i]).unwrap();
+                write(&d.join("output.wal"), &wal);
+                write(
+                    &d.join("output.initial"),
+                    &fs::read(paths[i].with_extension("initial")).unwrap(),
+                );
+                write(
+                    &d.join("output-context.bin"),
+                    &stores[i].as_ref().unwrap().state().context(),
+                );
+                write(&d.join("output-bootstrap-sha256.bin"), &custody::hash(&wal));
+                write(&d.join("source-descriptor.bin"), &descriptor);
+                let a = d.join("anchor");
+                fs::create_dir(&a).unwrap();
+                fs::set_permissions(&a, fs::Permissions::from_mode(0o700)).unwrap();
+                let original = anchors[i]
+                    .socket()
+                    .parent()
+                    .unwrap()
+                    .join("authority/authority.log");
+                write(&a.join("authority.log"), &fs::read(original).unwrap());
+                // Reopening the exported physical log proves its full spent prefix;
+                // it does not invent a new monotonic deployment authority.
+                let exported = custody::Anchor::open(&a).unwrap();
+                let live = crate::codec::Journal::decode(
+                    &custody::rpc(anchors[i].socket(), &[0]).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(exported.journal, live);
+            }
+            write(&root.join("PROFILE.txt"),b"PUBLIC255+1 reference integration fixture; actual ACSS/Sh2t/King/LayerMPC/output WAL; deterministic reference preprocessing, no general private-production entropy claim. All original outboxes/spent retained. No source authority, recipient enrollment, current release, Qualified successor, GOD/PQ claim.
+");
+        }
+    }
+    /// Complete current Objective identity source diagnostic. The public
+    /// compiler emits full final state+handled, so this synthetic fixture checks
+    /// the entire vector at its sole diagnostic recipient. Production audiences
+    /// require a separate authorized result projection and fresh release law.
+    #[test]
+    fn actual_compiler_origin_objective_identity_acss_mpc_private_diagnostic_recovery() {
+        use crate::codec::{bytes, Correlation, Generation, Nat};
+        let source = include_bytes!("../fixtures/objective-identity-source.bin");
+        let network_bytes = include_bytes!("../fixtures/objective-identity-network.bin");
+        let input = include_bytes!("../fixtures/objective-identity-input.bin");
+        let expected = include_bytes!("../fixtures/objective-identity-expected.bin");
+        assert_eq!(input.len(), 153);
+        assert_eq!(expected.len(), 154);
+        assert!(input.iter().chain(expected.iter()).all(|b| *b <= 1));
+        let g = Generation {
+            invocation: Nat::new(7101),
+            command: source.to_vec(),
+            attempt: Nat::new(0),
+            generation: Nat::new(1),
+            configuration: Nat::from_be(&crate::custody::hash(source)),
+        };
+        // Surround exact actual Lean-produced network bytes with an explicitly
+        // synthetic Rust Plan; no alleged source-produced allocation authority.
+        let mut encoded = vec![];
+        bytes(b"DREGG.PRIVATE.CIRCUIT.ALLOCATION\x01", &mut encoded);
+        g.put(&mut encoded);
+        encoded.extend_from_slice(network_bytes);
+        Nat::new(1).put(&mut encoded);
+        bytes(source, &mut encoded);
+        Nat::new(13563).put(&mut encoded);
+        for i in 0..13563 {
+            Correlation {
+                pool: Nat::new(0),
+                row: Nat::new(i),
+            }
+            .put(&mut encoded);
+        }
+        let public = crate::circuit_batch::Plan::decode(&encoded).unwrap();
+        assert_eq!(public.encode(), encoded);
+        assert_eq!(public.network.gates.len(), 34696);
+        assert_eq!(public.network.outputs.len(), 154);
+        let network = crate::field_network::with_boolean_inputs(&public.network).unwrap();
+        assert_eq!(
+            network
+                .gates
+                .iter()
+                .filter(|v| matches!(v, crate::circuit_batch::Op::And(..)))
+                .count(),
+            13716
+        );
+        let bits = input.iter().map(|b| *b == 1).collect::<Vec<_>>();
+        eprintln!(
+            "public Objective identity:153 ACSS inputs,429 checked stocks,13716 anchored tuples"
+        );
+        let (completed, anchors) = arithmetic_reference::tests::completed_boolean_network_many(
+            &bits, 7200, network, source, &g,
+        );
+        eprintln!("public Objective identity: actual LayerMPC completed, beginning private diagnostic delivery");
+        let (mut stores,anchors,paths)=stores_from_completed_descriptor(completed,anchors,7200,
+            b"public Objective identity synthetic whole-state diagnostic; no native release or successor qualification");
+        let mut q = VecDeque::new();
+        for (holder, store) in stores.iter_mut().enumerate() {
+            q.extend(
+                store
+                    .as_mut()
+                    .unwrap()
+                    .start()
+                    .unwrap()
+                    .into_iter()
+                    .map(|p| (holder as u16, p)),
+            );
+        }
+        drive(&mut stores, &mut q, false, false);
+        for (holder, store) in stores.iter_mut().enumerate() {
+            q.extend(
+                store
+                    .as_mut()
+                    .unwrap()
+                    .request_delivery()
+                    .unwrap()
+                    .into_iter()
+                    .map(|p| (holder as u16, p)),
+            );
+        }
+        drive(&mut stores, &mut q, false, false);
+        let wanted = expected.iter().map(|b| *b == 1).collect::<Vec<_>>();
+        let result = stores[1].as_ref().unwrap().state().result().unwrap();
+        assert_eq!(result.bits(), wanted);
+        assert!(result.bits()[0] && !result.bits()[1]);
+        assert_eq!(&result.bits()[2..5], &[true, false, true]);
+        assert_eq!(&result.bits()[14..17], &[true, false, false]);
+        assert_eq!(
+            &result.bits()[17..20],
+            &[true, true, false],
+            "actual current Objective Nat3"
+        );
+        for holder in [0, 2, 3] {
+            assert!(stores[holder].as_ref().unwrap().state().result().is_none());
+        }
+        let context = stores[1].as_ref().unwrap().state().context();
+        drop(stores[1].take());
+        stores[1] = Some(Store::reopen(&paths[1], &g, context, 1, 1, anchors[1].socket()).unwrap());
+        assert_eq!(
+            stores[1].as_ref().unwrap().state().result().unwrap().bits(),
+            wanted
+        );
+    }
+    #[test]
+    fn actual_170_boolean_inputs_distinct_acss_chunks_checked_stocks_private_result() {
+        let bits = (0..170).map(|i| i % 7 == 0).collect::<Vec<_>>();
+        let mut raw = crate::circuit_batch::Network {
+            input_count: 170,
+            gates: vec![crate::circuit_batch::Op::Constant(false)],
+            outputs: vec![],
+        };
+        let mut accumulator = 170;
+        for input in 0..170 {
+            let next = raw.input_count + raw.gates.len() as u64;
+            raw.gates
+                .push(crate::circuit_batch::Op::Xor(accumulator, input));
+            accumulator = next;
+        }
+        raw.outputs.push(accumulator);
+        let network = crate::field_network::with_boolean_inputs(&raw).unwrap();
+        let g = crate::codec::Generation {
+            invocation: crate::codec::Nat::new(7001),
+            command: b"fixed public170 parity reference".to_vec(),
+            attempt: crate::codec::Nat::new(0),
+            generation: crate::codec::Nat::new(1),
+            configuration: crate::codec::Nat::new(7001),
+        };
+        let (completed, anchors) = arithmetic_reference::tests::completed_boolean_network_many(
+            &bits,
+            700,
+            network,
+            b"public fixed170 input capacity/parity; no Objective or native authority",
+            &g,
+        );
+        let (mut stores, anchors, paths) = stores_from_completed(completed, anchors, 700);
+        let mut q = VecDeque::new();
+        for (holder, store) in stores.iter_mut().enumerate() {
+            q.extend(
+                store
+                    .as_mut()
+                    .unwrap()
+                    .start()
+                    .unwrap()
+                    .into_iter()
+                    .map(|p| (holder as u16, p)),
+            );
+        }
+        drive(&mut stores, &mut q, false, false);
+        for (holder, store) in stores.iter_mut().enumerate() {
+            q.extend(
+                store
+                    .as_mut()
+                    .unwrap()
+                    .request_delivery()
+                    .unwrap()
+                    .into_iter()
+                    .map(|p| (holder as u16, p)),
+            );
+        }
+        drive(&mut stores, &mut q, false, false);
+        let expected = bits.iter().fold(false, |a, b| a ^ b);
+        assert!(expected);
+        assert_eq!(
+            stores[1].as_ref().unwrap().state().result().unwrap().bits(),
+            &[expected]
+        );
+        for holder in [0, 2, 3] {
+            assert!(stores[holder].as_ref().unwrap().state().result().is_none());
+        }
+        let context = stores[1].as_ref().unwrap().state().context();
+        drop(stores[1].take());
+        stores[1] = Some(Store::reopen(&paths[1], &g, context, 1, 1, anchors[1].socket()).unwrap());
+        assert_eq!(
+            stores[1].as_ref().unwrap().state().result().unwrap().bits(),
+            &[expected]
+        );
+    }
+    #[test]
+    fn actual_generic_lean_width8_private_addition_full_carry_and_recovery() {
+        let bytes = include_bytes!("../fixtures/addition-network-8-plan.bin");
+        let fixture = crate::circuit_batch::Plan::decode(bytes).unwrap();
+        assert_eq!(fixture.encode(), bytes);
+        assert_eq!(fixture.network.input_count, 16);
+        assert_eq!(fixture.network.gates.len(), 41);
+        assert_eq!(
+            fixture.network.outputs,
+            vec![18, 23, 28, 33, 38, 43, 48, 53, 56]
+        );
+        assert_eq!(fixture.public_ticks, 1);
+        assert_eq!(fixture.rows.len(), 16);
+        let network = crate::field_network::with_boolean_inputs(&fixture.network).unwrap();
+        assert_eq!(network.gates.len(), 74);
+        let (completed, anchors) =
+            arithmetic_reference::tests::completed_word_network(255, 1, 85, network, bytes);
+        let (mut stores, anchors, paths) = stores_from_completed(completed, anchors, 85);
+        let mut q = VecDeque::new();
+        for (i, s) in stores.iter_mut().enumerate() {
+            q.extend(
+                s.as_mut()
+                    .unwrap()
+                    .start()
+                    .unwrap()
+                    .into_iter()
+                    .map(|p| (i as u16, p)),
+            );
+        }
+        drive(&mut stores, &mut q, false, false);
+        assert!(stores
+            .iter()
+            .all(|s| s.as_ref().unwrap().state().result().is_none()));
+        // Reference release environment, not a fabricated Native grant.
+        for (i, s) in stores.iter_mut().enumerate() {
+            q.extend(
+                s.as_mut()
+                    .unwrap()
+                    .request_delivery()
+                    .unwrap()
+                    .into_iter()
+                    .map(|p| (i as u16, p)),
+            );
+        }
+        drive(&mut stores, &mut q, false, false);
+        let state = stores[1].as_ref().unwrap().state();
+        let g = state.generation().clone();
+        let context = state.context();
+        let expected = vec![false, false, false, false, false, false, false, false, true];
+        assert_eq!(state.result().unwrap().bits(), &expected);
+        assert!(stores
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != 1)
+            .all(|(_, s)| s.as_ref().unwrap().state().result().is_none()));
+        drop(stores[1].take());
+        let reopened = Store::reopen(&paths[1], &g, context, 1, 1, anchors[1].socket()).unwrap();
+        assert_eq!(reopened.state().result().unwrap().bits(), &expected);
+        assert_eq!(
+            expected
+                .iter()
+                .enumerate()
+                .fold(0u16, |v, (i, b)| v | ((*b as u16) << i)),
+            256
+        );
     }
     #[test]
     fn actual_lean_compiler_addition_graph_private_result_and_recipient_recovery() {

@@ -96,6 +96,90 @@ fn path(r: &mut Reader<'_>) -> Result<PathBuf> {
     Ok(p)
 }
 impl Config {
+    /// Canonical protected local operator configuration. No secret key bytes
+    /// enter this frame; it is never part of the public source packet.
+    pub fn encode(&self) -> Result<Vec<u8>> {
+        let mut b = CONFIG.to_vec();
+        bytes(&self.local_party.encode(), &mut b);
+        Nat::new(self.n as u64).put(&mut b);
+        Nat::new(self.capacity_per_party as u64).put(&mut b);
+        bytes(&self.key_identity, &mut b);
+        Nat::new(self.key_capacity as u64).put(&mut b);
+        for path in [&self.key_wal, &self.output_initial_base] {
+            bytes(
+                path.to_str()
+                    .ok_or_else(|| bad("operator path encoding"))?
+                    .as_bytes(),
+                &mut b,
+            );
+        }
+        bytes(&self.output_context, &mut b);
+        Nat::new(self.output_recipient as u64).put(&mut b);
+        bytes(&self.output_bootstrap_sha256, &mut b);
+        for path in [&self.receiver_wal, &self.anchor, &self.native_program] {
+            bytes(
+                path.to_str()
+                    .ok_or_else(|| bad("operator path encoding"))?
+                    .as_bytes(),
+                &mut b,
+            );
+        }
+        bytes(&self.native_image_sha256, &mut b);
+        Nat::new(self.native_argv.len() as u64).put(&mut b);
+        for arg in &self.native_argv {
+            bytes(arg.as_bytes(), &mut b);
+        }
+        bytes(&self.worker_profile, &mut b);
+        if b.len() > MAX {
+            return Err(bad("worker config capacity"));
+        }
+        Ok(b)
+    }
+    /// Check the actual files used by each custody role, including extension-
+    /// derived original/lock/pending paths. Resolve parents before comparison;
+    /// existing hard-link aliases and symlinks also refuse before secret work.
+    pub fn validate_paths(&self) -> Result<()> {
+        use std::os::unix::fs::MetadataExt;
+        let roles = vec![
+            self.key_wal.clone(),
+            self.key_wal.with_extension("lock"),
+            self.output_initial_base.clone(),
+            self.output_initial_base.with_extension("lock"),
+            self.output_initial_base.with_extension("initial"),
+            self.output_initial_base.with_extension("initial.lock"),
+            self.receiver_wal.clone(),
+            self.receiver_wal.with_extension("lock"),
+            self.receiver_wal.with_extension("initial"),
+            self.receiver_wal.with_extension("initial.lock"),
+            self.anchor.clone(),
+            self.native_program.clone(),
+        ];
+        let mut names = std::collections::BTreeSet::new();
+        let mut inodes = std::collections::BTreeSet::new();
+        for role in roles {
+            if !role.is_absolute() {
+                return Err(bad("worker custody path must be absolute"));
+            }
+            let parent = role.parent().ok_or_else(|| bad("worker custody parent"))?;
+            let name = role
+                .file_name()
+                .ok_or_else(|| bad("worker custody filename"))?;
+            let resolved = std::fs::canonicalize(parent)?.join(name);
+            if !names.insert(resolved) {
+                return Err(bad("worker custody role path collision"));
+            }
+            match std::fs::symlink_metadata(&role) {
+                Ok(m) => {
+                    if m.file_type().is_symlink() || !inodes.insert((m.dev(), m.ino())) {
+                        return Err(bad("worker custody role inode alias"));
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    }
     pub fn load(file: &Path) -> Result<Self> {
         let meta = std::fs::symlink_metadata(file)?;
         use std::os::unix::fs::PermissionsExt;
@@ -157,7 +241,7 @@ impl Config {
         {
             return Err(bad("worker fixed receiving profile"));
         }
-        Ok(Self {
+        let config = Self {
             local_party,
             n,
             capacity_per_party,
@@ -174,7 +258,9 @@ impl Config {
             native_image_sha256,
             native_argv,
             worker_profile,
-        })
+        };
+        config.validate_paths()?;
+        Ok(config)
     }
 }
 // Constructed only by the fixed image invocation in this module. Caller claims
@@ -257,10 +343,68 @@ fn invoke_native(
         InnerCredentialOutcome::decode(&reply)
     }
 }
+/// Explicit successor worker profile. This holds the actual sealed verifier and
+/// original settings for the whole synchronous invocation. Construction is only
+/// from protected operator Config and original protected settings bytes; source
+/// enrollment/worker image activation is a separate required deployment step.
+/// The legacy worker CLI and its frozen source image remain unchanged.
+pub struct SealedNative {
+    invocation: crate::pinned_execution::SealedInvocation,
+    config_bytes: Vec<u8>,
+    arguments: Vec<String>,
+}
+impl SealedNative {
+    pub fn new(config: &Config, original_native_settings: &[u8]) -> Result<Self> {
+        // Config v1 argv begins with the original native settings path. The
+        // sealed helper replaces ONLY that argument by the held settings FD.
+        let first = config.native_argv.first().ok_or_else(|| bad("sealed native settings argument absent"))?;
+        if !Path::new(first).is_absolute() {
+            return Err(bad("sealed native original settings path"));
+        }
+        config.validate_paths()?;
+        let invocation = crate::pinned_execution::SealedInvocation::new(
+            &config.native_program, &config.native_image_sha256,
+            original_native_settings,
+        )?;
+        Ok(Self { invocation, config_bytes: config.encode()?,
+            arguments: config.native_argv[1..].to_vec() })
+    }
+    fn invoke(&self, config: &Config, request: &InnerCredentialRequest) -> Result<InnerCredentialOutcome> {
+        if self.config_bytes != config.encode()? {
+            return Err(bad("sealed native protected profile changed"));
+        }
+        let raw = request.encode()?;
+        let reply = self.invocation.output_with_input(
+            &self.arguments, &raw, 45,
+            crate::source_endpoint::MAX_LOCAL_INNER,
+            crate::source_endpoint::MAX_LOCAL_INNER,
+        )?;
+        InnerCredentialOutcome::decode(&reply)
+    }
+}
+// Closed local selector; no requester callback or successful-byte oracle.
+enum NativeInvocation<'a> { Legacy, Sealed(&'a SealedNative) }
+impl NativeInvocation<'_> {
+    fn invoke(&self, config: &Config, request: &InnerCredentialRequest) -> Result<InnerCredentialOutcome> {
+        match self {
+            Self::Legacy => invoke_native(config, request),
+            Self::Sealed(held) => held.invoke(config, request),
+        }
+    }
+}
+/// Explicit sealed successor consumer. It shares the exact original-prefix
+/// authority comparison and durable receiver with the legacy path. A new source
+/// worker image/profile must activate this path; the existing CLI uses Legacy.
+pub fn receive_sealed(config: &Config, dispatch: &DispatchClaim, held: &SealedNative) -> Result<Vec<u8>> {
+    receive_with_invocation(config, dispatch, NativeInvocation::Sealed(held))
+}
 /// Actual native-image verification followed by actual private receiver WAL.
 /// Response is pending local egress, not source Qualified/terminal YES or an
 /// encrypted audience release. All recursive plaintext stays in private WAL.
 pub fn receive(config: &Config, dispatch: &DispatchClaim) -> Result<Vec<u8>> {
+    receive_with_invocation(config, dispatch, NativeInvocation::Legacy)
+}
+fn receive_with_invocation(config: &Config, dispatch: &DispatchClaim, invocation: NativeInvocation<'_>) -> Result<Vec<u8>> {
     if dispatch.worker_profile != config.worker_profile
         || dispatch.enrollment_bytes.is_empty()
         || dispatch.source_record_bytes.is_empty()
@@ -268,6 +412,7 @@ pub fn receive(config: &Config, dispatch: &DispatchClaim) -> Result<Vec<u8>> {
     {
         return Err(bad("worker original source bindings absent"));
     }
+    config.validate_paths()?;
     let request = RequestClaim::decode(&dispatch.request_bytes)?;
     let capsule = SealedIngress::decode(&request.raw_carrier)?;
     if capsule.party.context != config.local_party.context
@@ -275,7 +420,7 @@ pub fn receive(config: &Config, dispatch: &DispatchClaim) -> Result<Vec<u8>> {
     {
         return Err(bad("worker fixed source context"));
     }
-    let mut keys =
+    let keys =
         RecipientKeyCustody::open(&config.key_wal, &config.key_identity, config.key_capacity)?;
     let opened = keys.open_capsule(
         &capsule,
@@ -289,7 +434,7 @@ pub fn receive(config: &Config, dispatch: &DispatchClaim) -> Result<Vec<u8>> {
         dispatch.source_index.clone(),
         dispatch.certificate_bytes.clone(),
     )?;
-    let native = invoke_native(config, &native_request)?;
+    let native = invocation.invoke(config, &native_request)?;
     if !native.matches_opened(&native_request, &opened)? {
         return Err(bad("native original credential refused"));
     }
@@ -323,17 +468,29 @@ pub fn receive(config: &Config, dispatch: &DispatchClaim) -> Result<Vec<u8>> {
         config.output_recipient,
         &config.anchor,
     )?;
-    let bootstrap_bytes = std::fs::read(&config.output_initial_base)?;
+    let bootstrap_file = File::open(&config.output_initial_base)?;
+    if bootstrap_file.metadata()?.len() > MAX as u64 {
+        return Err(bad("frozen bootstrap local capacity"));
+    }
+    let mut bootstrap_bytes = vec![];
+    bootstrap_file
+        .take(MAX as u64 + 1)
+        .read_to_end(&mut bootstrap_bytes)?;
     if Sha256::digest(&bootstrap_bytes).as_slice() != config.output_bootstrap_sha256 {
         return Err(bad("frozen private bootstrap prefix changed"));
     }
     let state = bootstrap.state().clone();
-    let mut receiver = Receiver::open(
+    let mut original_binding = b"DREGG.PRIVATE.WORKER.ORIGINAL.BINDING\x01".to_vec();
+    original_binding.extend(config.output_bootstrap_sha256);
+    original_binding.extend(config.output_context);
+    bytes(&config.worker_profile, &mut original_binding);
+    let mut receiver = Receiver::open_bound(
         &config.receiver_wal,
         config.local_party.context.clone(),
         config.n,
         config.capacity_per_party,
         OutputMachine { state },
+        &original_binding,
     )?;
     let outcome = receiver.receive(&authority, &opened.inner().encode()?)?;
     // Hiding endpoint receipt for retained pending egress. Do not publish an
@@ -405,11 +562,72 @@ mod tests {
             output_bootstrap_sha256: [2; 32],
             receiver_wal: "/never-selected-receiver-path".into(),
             anchor: "/never-selected-anchor-path".into(),
-            native_program: program.into(),
+            native_program: std::fs::canonicalize(program).unwrap_or_else(|_| program.into()),
             native_image_sha256: digest,
             native_argv: vec![],
             worker_profile: vec![9],
         }
+    }
+    #[test]
+    fn derived_worker_custody_roles_and_hardlinks_refuse_before_secret_work() {
+        let root = std::env::temp_dir().join(format!(
+            "worker-role-poles-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let mut cfg = config("/usr/bin/false", [0; 32]);
+        cfg.key_wal = root.join("key.wal");
+        cfg.output_initial_base = root.join("state.output");
+        cfg.receiver_wal = root.join("state.receiver");
+        cfg.anchor = root.join("anchor.socket");
+        assert!(
+            cfg.validate_paths().is_err(),
+            "same stem original/lock collision"
+        );
+        cfg.output_initial_base = root.join("output.wal");
+        cfg.receiver_wal = root.join("receiver.wal");
+        cfg.validate_paths().unwrap();
+        std::fs::write(&cfg.key_wal, b"retained").unwrap();
+        std::fs::hard_link(&cfg.key_wal, &cfg.receiver_wal).unwrap();
+        assert!(
+            cfg.validate_paths().is_err(),
+            "different names cannot alias the same inode"
+        );
+        assert!(!cfg.output_initial_base.with_extension("initial").exists());
+        assert!(!cfg.receiver_wal.with_extension("initial").exists());
+    }
+    #[test]
+    fn protected_operator_config_roundtrip_refuses_public_file_and_trailing_bytes() {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let path = std::env::temp_dir().join(format!(
+            "mini-worker-config-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let cfg = config("/usr/bin/false", [0; 32]);
+        let bytes = cfg.encode().unwrap();
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .unwrap();
+        file.write_all(&bytes).unwrap();
+        file.sync_all().unwrap();
+        assert_eq!(Config::load(&path).unwrap().encode().unwrap(), bytes);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(Config::load(&path).is_err());
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        file.write_all(&[0]).unwrap();
+        file.sync_all().unwrap();
+        assert!(Config::load(&path).is_err());
     }
     #[test]
     fn actual_fixed_native_program_wrong_image_and_process_refusal_cannot_authenticate() {

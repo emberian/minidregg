@@ -1,0 +1,6 @@
+[profile.default]
+default-filter = "not test(actual_compiler_origin_objective_identity_acss_mpc_private_diagnostic_recovery)"
+
+[profile.heavy]
+default-filter = "test(actual_compiler_origin_objective_identity_acss_mpc_private_diagnostic_recovery)"
+slow-timeout = { period = "60s", terminate-after = 14 }

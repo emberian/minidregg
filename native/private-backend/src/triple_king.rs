@@ -1578,6 +1578,13 @@ pub(crate) mod tests {
         checked_inventory(count, 0)
     }
     pub(crate) fn checked_inventory(count: usize, instance: u64) -> Vec<CheckedTriples> {
+        checked_inventory_generation(count, instance, &generation(300 + 1000 * instance))
+    }
+    pub(crate) fn checked_inventory_generation(
+        count: usize,
+        instance: u64,
+        consumer: &Generation,
+    ) -> Vec<CheckedTriples> {
         let material = prepared_count_instance(count, None, instance);
         let mut anchors = vec![];
         let mut nodes = vec![];
@@ -1585,7 +1592,7 @@ pub(crate) mod tests {
             let r = root(&format!("consumer-{i}"));
             let a = AnchorFixture::new(&r);
             let basis = PreparedBasis::reserve_new(
-                &generation(300 + 1000 * instance),
+                consumer,
                 0,
                 count,
                 0,
@@ -1594,7 +1601,7 @@ pub(crate) mod tests {
                 &r.join("burn"),
             )
             .unwrap();
-            nodes.push(TripleKing::new(&generation(300 + 1000 * instance), basis).unwrap());
+            nodes.push(TripleKing::new(consumer, basis).unwrap());
             anchors.push(a);
         }
         let mut q = start(&mut nodes);

@@ -228,6 +228,11 @@ impl PrivateOutput {
     pub fn generation(&self) -> &Generation {
         &self.generation
     }
+    /// Exact public binding retained from the original source/output request.
+    /// Returning bytes is not source admission or successor qualification.
+    pub fn descriptor_bytes(&self) -> &[u8] {
+        &self.descriptor
+    }
     pub fn context(&self) -> [u8; 32] {
         self.context
     }
