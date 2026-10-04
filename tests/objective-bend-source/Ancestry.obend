@@ -1,0 +1,58 @@
+edition ObjectiveBend 1
+# Declared ancestry: C4 linearization, a diamond counted once, standard
+# method combination (around outside every primary) and a `+` combination.
+record Doc:
+  save(n: Nat) -> Nat
+  weight() -> Nat
+
+spec Object for Doc:
+  def save(n: Nat) -> Nat:
+    n
+  combine + weight() -> Nat:
+    1n
+
+spec Timestamped extends Object for Doc:
+  def save(n: Nat) -> Nat:
+    super.save(n) * 10n + 1n
+  combine + weight() -> Nat:
+    10n
+
+spec Audited extends Object for Doc:
+  def save(n: Nat) -> Nat:
+    super.save(n) * 10n + 2n
+  combine + weight() -> Nat:
+    100n
+
+spec Document extends Timestamped, Audited for Doc:
+  def save(n: Nat) -> Nat:
+    super.save(n) * 10n + 3n
+  combine + weight() -> Nat:
+    1000n
+
+spec Logged extends Document for Doc:
+  around save(n: Nat) -> Nat:
+    super.save(n) + 100000n
+
+spec Inner extends Logged for Doc:
+  def save(n: Nat) -> Nat:
+    super.save(n) * 10n + 4n
+
+def blank() -> Doc:
+  {save: fn(n: Nat) -> Nat: 0n, weight: 0n}
+
+# Document -> Timestamped -> Audited -> Object: 0, 2, 21, 213.
+def saved() -> Nat:
+  fix(Document, blank()).save(0n)
+
+# Object's weight is counted once through the diamond: 1000 + 10 + 100 + 1.
+def weighed() -> Nat:
+  fix(Document, blank()).weight
+
+# The around method wraps every primary, including Inner's, which is more
+# specific than Logged: 2134 + 100000 (a plain mixin chain would give 1002134).
+def logged() -> Nat:
+  fix(Inner, blank()).save(0n)
+
+# Reflection reads the static precedence list from the spec's interface label.
+def interface() -> String:
+  metadata(Inner).interface

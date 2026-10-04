@@ -5,6 +5,7 @@
 import {readFile,writeFile} from "node:fs/promises";
 import {createHash} from "node:crypto";
 import {parseObjective} from "./objective-parser.ts";
+import {c4Linearize,C4Inconsistency} from "./objective-c4.ts";
 type Core={tag:string,[key:string]:any};
 type Ty={tag:string,[key:string]:any};
 const term=(tag:string,fields:any={}):Core=>({tag,...fields});
@@ -381,6 +382,112 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
    successor:body(succ.body,[{name:succ.pattern.binder,ty:T.natural,quantity:"unrestricted"},...env],m)});
  };
  const outer:Binding[]=[{name:"$seed",ty:T.emptyRow,quantity:"unrestricted"},{name:"$globals",ty:T.variable(0),quantity:"unrestricted"}];
+ function resultOf(t:Ty|null,arity:number):Ty|null{for(let i=0;i<arity;i++){if(t?.tag!=="arrow")return null;t=t.codomain;}return t;}
+ // ---- specifications, declared ancestry and method combination ----
+ // Identity is static and generative: the qualified declaration key. A spec's
+ // precedence list is the C4 linearization of its declared parents; its
+ // effective extension is the mix chain of its ancestors' own layers, least
+ // specific lowest: init layers for simple combinations, then primary layers,
+ // then around layers (standard method combination, ltuo §9.2.5).
+ const specKey=(name:string,m:any,node:any):string=>{
+  const q=/^([A-Za-z_]\w*)\.([A-Za-z_]\w*)$/.exec(name);
+  let key=m.name+"."+name;
+  if(q){const imported=importOf(m,q[1]);if(!imported)failure(node,"unknown import alias in spec parent "+name);key=imported.moduleName+"."+q[2];}
+  if(declarations.get(key)?.d.kind!=="spec")failure(node,"spec parent "+name+" is not a spec declaration");
+  return key;
+ };
+ const precedenceMemo=new Map<string,string[]>();const linearizing=new Set<string>();
+ const precedence=(key:string):string[]=>{
+  if(precedenceMemo.has(key))return precedenceMemo.get(key)!;
+  const {d,m}=declarations.get(key)!;
+  if(linearizing.has(key))failure(d,"spec ancestry cycle through "+key);
+  linearizing.add(key);
+  let list:string[]=[];
+  try{list=c4Linearize([key],[d.parents.map((p:string)=>specKey(p,m,d))],precedence,(k:string)=>declarations.get(k)!.d.suffix===true).list;}
+  catch(e){if(e instanceof C4Inconsistency)failure(d,"C4 linearization of "+key+" refused: "+e.message);throw e;}
+  linearizing.delete(key);precedenceMemo.set(key,list);return list;
+ };
+ const combinations:Record<string,{primitive:string,zero:Core}>={
+  "+":{primitive:"add",zero:nat(0)},"*":{primitive:"multiply",zero:nat(1)},"and":{primitive:"conjunction",zero:term("boolean",{value:true})},
+ };
+ const qualifierGroup=(q:string)=>q==="around"?"around":"primary";
+ const checkSpecMethods=(d:any)=>{
+  for(const method of d.methods)if(method.qualifier==="before"||method.qualifier==="after")
+   failure(method,method.qualifier+" methods run for their effects and discard their result; Objective Bend core has no effect constructor yet (perform/yield, scout A move 2), so a pure "+method.qualifier+" method would be silently discarded");
+  for(const group of ["primary","around"]){const names=d.methods.filter((x:any)=>qualifierGroup(x.qualifier??"primary")===group).map((x:any)=>x.name);
+   if(duplicate(names))failure(d,"duplicate "+group+" method");}
+ };
+ const hasLayer=(d:any,group:string)=>d.methods.some((x:any)=>qualifierGroup(x.qualifier??"primary")===group);
+ const plain=(d:any)=>!d.parents.length&&!hasLayer(d,"around")&&d.methods.every((x:any)=>(x.qualifier??"primary")==="primary");
+ const selfSuperOf=(target:Ty|null):Binding[]=>[{name:"super",ty:target,quantity:"unrestricted"},{name:"self",ty:target,quantity:"unrestricted"},...outer];
+ const layer=(d:any,m:any,group:string):Core=>{
+  const selfSuper=selfSuperOf(sourceType(d.targetType,m.name));
+  const methods=d.methods.filter((x:any)=>qualifierGroup(x.qualifier??"primary")===group).map((method:any)=>{
+   const q=method.qualifier??"primary",combination=combinations[q];
+   return {name:method.name,value:abstract(method.parameters,selfSuper,inner=>{
+    const own=body(method.body,inner,m);if(!combination)return own;
+    // A simple-combination method: own result op the next method's result.
+    let next=get(bound(method.parameters.length),method.name);
+    for(let i=0;i<method.parameters.length;i++)next=app(next,bound(method.parameters.length-1-i));
+    return term("binary",{primitive:combination.primitive,left:own,right:next});
+   },method,method.resultType,m.name)};
+  });
+  return abstract([{name:"self",type:d.targetType},{name:"super",type:d.targetType}],outer,
+   ()=>term("extend",{inherited:bound(0),fields:methods}),d,d.targetType,m.name);
+ };
+ const layerRef=(key:string,group:string):Core=>{
+  const {d}=declarations.get(key)!;
+  return get(bound(globalsIndex(outer)),plain(d)&&group==="primary"?key:key+"#"+group);
+ };
+ const hidden:{name:string,value:Core,type:Ty|null}[]=[];
+ function specification(d:any,m:any):Core{
+  checkSpecMethods(d);
+  const key=m.name+"."+d.name,target=sourceType(d.targetType,m.name);
+  const list=precedence(key);
+  let extension:Core;
+  if(plain(d))extension=layer(d,m,"primary");
+  else{
+   for(const ancestor of list){const a=declarations.get(ancestor)!;
+    if(target&&!sameTy(sourceType(a.d.targetType,a.m.name),target))failure(d,"ancestor "+ancestor+" targets "+a.d.targetType+"; declared ancestry composes one target type ("+d.targetType+")");}
+   for(const group of ["primary","around"])if(hasLayer(d,group))
+    hidden.push({name:key+"#"+group,value:layer(d,m,group),type:target?extensionTy(target):null});
+   // Simple combinations: every primary-group method of one name across the
+   // precedence list must share one qualifier; the combination's identity is
+   // the bottom layer.
+   const qualifiers=new Map<string,{q:string,method:any}>();
+   for(const ancestor of list)for(const method of declarations.get(ancestor)!.d.methods){
+    const q=method.qualifier??"primary";if(qualifierGroup(q)!=="primary")continue;
+    const prior=qualifiers.get(method.name);
+    if(prior&&prior.q!==q)failure(d,"method "+method.name+" is "+prior.q+" in one ancestor and "+q+" in another of "+key);
+    if(!prior)qualifiers.set(method.name,{q,method});
+   }
+   const layers:Core[]=[];
+   for(const [name,{q,method}] of qualifiers){const combination=combinations[q];if(!combination)continue;
+    const init=abstract(method.parameters,selfSuperOf(target),()=>combination.zero,method,method.resultType,m.name);
+    layers.push(abstract([{name:"self",type:d.targetType},{name:"super",type:d.targetType}],outer,
+     ()=>term("extend",{inherited:bound(0),fields:[{name,value:init}]}),d,d.targetType,m.name));
+   }
+   const reversed=[...list].reverse();
+   for(const group of ["primary","around"])for(const ancestor of reversed)
+    if(hasLayer(declarations.get(ancestor)!.d,group))layers.push(layerRef(ancestor,group));
+   if(!layers.length)failure(d,"spec "+key+" and its ancestors provide no methods");
+   if(layers.length===1)extension=abstract([{name:"self",type:d.targetType},{name:"super",type:d.targetType}],outer,
+     ()=>app(app(shift(layers[0],2),bound(1)),bound(0)),d,d.targetType,m.name);
+   else extension=layers.slice(1).reduce((lower,upper)=>term("mix",{lower,upper}),layers[0]);
+  }
+  // Reflection retains actual law bodies as callable values and complete
+  // authored interfaces as immutable labels. Retention is not proof discharge.
+  const laws=d.laws.map((law:any)=>({name:law.name,value:abstract([{name:"self",type:d.targetType},{name:"super",type:d.targetType},...law.parameters],outer,
+     inner=>expression(law.body,inner,m),law,"Bool",m.name)}));
+  return term("specification",{metadata:record([{name:"name",value:label(key)},
+     {name:"interface",value:label(JSON.stringify({targetType:d.targetType,suffix:d.suffix,parents:d.parents,precedence:list,requirements:d.requirements,
+         methods:d.methods.map(({body,...signature}:any)=>signature)}))},{name:"laws",value:record(laws)}]),extension});
+ }
+ // Free de Bruijn indices of a closed-over-outer reference shift under binders.
+ function shift(t:Core,by:number):Core{
+  if(t.tag==="get"&&t.target.tag==="bound")return get(bound(t.target.index+by),t.name);
+  return failure(null,"internal: only global references are shifted");
+ }
  const fields:{name:string,value:Core}[]=[];
  for(const m of modules)for(const d of m.ast.declarations){
   let value:Core;
@@ -392,35 +499,20 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
   else if(d.kind==="spec")value=specification(d,m);
   else failure(d,"unsupported declaration "+d.kind);
   fields.push({name:key,value:value!});
+  for(const h of hidden.splice(0)){fields.push({name:h.name,value:h.value});globalTypes.set(h.name,h.type);}
  }
- function resultOf(t:Ty|null,arity:number):Ty|null{for(let i=0;i<arity;i++){if(t?.tag!=="arrow")return null;t=t.codomain;}return t;}
- function specification(d:any,m:any):Core{
-  if(duplicate(d.methods.map((x:any)=>x.name)))failure(d,"duplicate provided method");
-  for(const method of d.methods)if(method.qualifier&&method.qualifier!=="primary")
-   failure(method,"method qualifier "+method.qualifier+" requires declared ancestry elaboration");
-  if(d.parents?.length)failure(d,"declared ancestry requires the C4 elaborator");
-  const target=sourceType(d.targetType,m.name);
-  const selfSuper:Binding[]=[{name:"super",ty:target,quantity:"unrestricted"},{name:"self",ty:target,quantity:"unrestricted"},...outer];
-  const methods=d.methods.map((method:any)=>({name:method.name,value:abstract(method.parameters,selfSuper,
-     inner=>body(method.body,inner,m),method,method.resultType,m.name)}));
-  const extension=abstract([{name:"self",type:d.targetType},{name:"super",type:d.targetType}],outer,
-     ()=>term("extend",{inherited:bound(0),fields:methods}),d,d.targetType,m.name);
-  // Reflection retains actual law bodies as callable values and complete
-  // authored interfaces as immutable labels. Retention is not proof discharge.
-  const laws=d.laws.map((law:any)=>({name:law.name,value:abstract([{name:"self",type:d.targetType},{name:"super",type:d.targetType},...law.parameters],outer,
-     inner=>expression(law.body,inner,m),law,"Bool",m.name)}));
-  return term("specification",{metadata:record([{name:"name",value:label(m.name+"."+d.name)},
-     {name:"interface",value:label(JSON.stringify({targetType:d.targetType,requirements:d.requirements,
-         methods:d.methods.map(({body,...signature}:any)=>signature)}))},{name:"laws",value:record(laws)}]),extension});
- }
- // The global knot: fix(λ$globals. λ$seed. {M.decl: …}, {}). $globals is the
+ // The global knot: fix(spec(meta, λ$globals. λ$seed. extend $seed {M.decl: …}), {}). $globals is the
  // rigid row variable 0, bounded by the row of every declaration's type.
  const globalRowFields=fields.map(f=>({name:f.name,type:globalType(f.name)}));
  const globalRow=globalRowFields.every(f=>f.type)?T.row(globalRowFields as {name:string,type:Ty}[]):null;
  const knotReason=globalRow?undefined:"declaration types unresolved: "+globalRowFields.filter(f=>!f.type).map(f=>f.name).join(", ");
- const knot=lam(lam(record(fields),{domain:T.emptyRow,codomain:T.variable(0),parameter:"unrestricted",reuse:"reusable",reason:knotReason}),
+ // The package root is itself a specification: its extension overlays the
+ // declarations on the inherited row (super), so a package is a first-class
+ // extensible value, not a closed record (scout A finding 4).
+ const rootExtension=lam(lam(term("extend",{inherited:bound(0),fields}),{domain:T.emptyRow,codomain:T.variable(0),parameter:"unrestricted",reuse:"reusable",reason:knotReason}),
   {domain:T.variable(0),codomain:T.arrow(T.emptyRow,T.variable(0)),parameter:"unrestricted",reuse:"reusable",reason:knotReason});
- const root=term("fix",{spec:knot,seed:record([])});
+ const rootSpecification=term("specification",{metadata:record([{name:"package",value:label(JSON.stringify(modules.map(m=>m.name)))}]),extension:rootExtension});
+ const root=term("fix",{spec:rootSpecification,seed:record([])});
  const entry=modules[entryModule];if(!entry||!declarations.has(entry.name+"."+entryDefinition))failure(null,"missing selected entry");
  let selected=get(root,entry.name+"."+entryDefinition);
  const argument=(a:any):Core=>{

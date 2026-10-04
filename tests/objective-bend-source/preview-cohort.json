@@ -21,5 +21,8 @@
  {"name":"ScalarNativeAdvance","modules":[{"name":"ScalarNativeAdvance","source":"ScalarNativeAdvance.obend"}],"entry":"advance","argumentEncoding":"typed-values-v1","arguments":[{"tag":"natural","value":"1"},{"tag":"natural","value":"0"},{"tag":"natural","value":"4"},{"tag":"label","value":"00ab"}],"expectedType":"field","expectedRecord":true},
  {"name":"QuantityOnce","modules":[{"name":"QuantityOnce","source":"QuantityOnce.obend"}],"entry":"once","arguments":["2","3"],"expected":"5"},
  {"name":"QuantityDuplicated","modules":[{"name":"QuantityDuplicated","source":"QuantityDuplicated.obend"}],"entry":"duplicated","arguments":["2"],"expectedStatus":"refused"},
- {"name":"ReflectScalarSpecification","modules":[{"name":"ReflectLazyPrototype","source":"ReflectLazyPrototype.obend"}],"entry":"inspect","arguments":[],"expectedStatus":"refused"}
+ {"name":"ReflectScalarSpecification","modules":[{"name":"ReflectLazyPrototype","source":"ReflectLazyPrototype.obend"}],"entry":"inspect","arguments":[],"expectedStatus":"refused"},
+ {"name":"AncestryDiamondSave","modules":[{"name":"Ancestry","source":"Ancestry.obend"}],"entry":"saved","arguments":[],"expected":"213"},
+ {"name":"AncestryDiamondWeightOnce","modules":[{"name":"Ancestry","source":"Ancestry.obend"}],"entry":"weighed","arguments":[],"expected":"1111"},
+ {"name":"AncestryAroundWrapsPrimaries","modules":[{"name":"Ancestry","source":"Ancestry.obend"}],"entry":"logged","arguments":[],"expected":"102134"}
 ]
