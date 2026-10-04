@@ -76,6 +76,12 @@ mod lifecycle_v3_native;
 #[cfg(target_os = "linux")]
 mod lifecycle_v3_report_native;
 #[cfg(target_os = "linux")]
+mod lifecycle_v4_retry_claim_native;
+#[cfg(target_os = "linux")]
+mod lifecycle_v4_retry_completion_native;
+#[cfg(target_os = "linux")]
+mod lifecycle_v4_retry_native;
+#[cfg(target_os = "linux")]
 mod lifecycle_v3_stop_native;
 #[cfg(target_os = "linux")]
 mod lifecycle_v3_stop_claim_native;

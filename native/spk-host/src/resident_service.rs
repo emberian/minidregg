@@ -33,6 +33,18 @@ use crate::lifecycle_v3_native::{
 use crate::lifecycle_v3_report_native::{
     prepare_once as prepare_v3_running_report, PhysicalMode, ReportInput,
 };
+use crate::lifecycle_v4_retry_claim_native::{
+    assemble_once as assemble_v4_claim, submit_fresh_once as submit_v4_claim,
+    FixedRetryClaimSigners,
+};
+use crate::lifecycle_v4_retry_completion_native::{
+    assemble_once as assemble_v4_completion, prepare_report_once as prepare_v4_running_report,
+    submit_fresh_once as submit_v4_completion, FixedRetryCompletionSigners,
+    RetryCompletionInput, RetryReportInput,
+};
+use crate::lifecycle_v4_retry_native::{
+    select_retry, submit_once as submit_v4_begin, FixedRetryBeginSigners, RetrySelection,
+};
 use crate::materialize::verify_installed_spk;
 use crate::resident_launch::PreparedResident;
 use crate::resident_launch::SourceBoundLaunch;
@@ -375,6 +387,85 @@ fn retire_start_markers(
         fs::remove_file(path)?;
     }
     File::open(&config.journal_dir)?.sync_all()
+}
+
+/// Per-generation artifacts of a governed repeat CREATE (event69/70/72).
+/// None shares a name with a v3 attempt, so v3 evidence is never overwritten.
+fn retry_v4_paths(journal_dir: &Path) -> [PathBuf; 9] {
+    use crate::lifecycle_v4_retry_claim_native as claim;
+    use crate::lifecycle_v4_retry_completion_native as completion;
+    use crate::lifecycle_v4_retry_native as begin;
+    [
+        journal_dir.join(begin::ACTIVE_MARKER),
+        journal_dir.join(claim::ACTIVE_MARKER),
+        journal_dir.join(completion::ACTIVE_MARKER),
+        journal_dir.join(begin::BEGIN_ATTEMPT_DIR),
+        journal_dir.join(claim::CLAIM_ATTEMPT_DIR),
+        journal_dir.join(completion::REPORT_ATTEMPT_DIR),
+        journal_dir.join(completion::COMPLETION_ATTEMPT_DIR),
+        journal_dir.join("start-admitted-retry-v4.json"),
+        journal_dir.join("start-completed-retry-v4.json"),
+    ]
+}
+
+/// The v4 analog of `retire_start_markers`: only after a confirmed event72,
+/// and only active markers byte-equal to their retained attempt markers.
+fn retire_retry_v4_markers(config: &ResidentConfig) -> io::Result<()> {
+    use crate::lifecycle_v4_retry_claim_native as claim;
+    use crate::lifecycle_v4_retry_completion_native as completion;
+    use crate::lifecycle_v4_retry_native as begin;
+    let journal = &config.journal_dir;
+    let mut present = Vec::new();
+    for (active, retained) in [
+        (
+            completion::ACTIVE_MARKER,
+            journal
+                .join(completion::COMPLETION_ATTEMPT_DIR)
+                .join("op70-requested.json"),
+        ),
+        (
+            claim::ACTIVE_MARKER,
+            journal.join(claim::CLAIM_ATTEMPT_DIR).join("op68-requested.json"),
+        ),
+        (
+            begin::ACTIVE_MARKER,
+            journal.join(begin::BEGIN_ATTEMPT_DIR).join("op66-requested.json"),
+        ),
+    ] {
+        let active_path = journal.join(active);
+        match fs::symlink_metadata(&active_path) {
+            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+                if private_file(&active_path, MAX_CONFIG)? != private_file(&retained, MAX_CONFIG)? {
+                    return Err(invalid(
+                        "retry START success marker differs from retained attempt",
+                    ));
+                }
+                present.push(active_path);
+            }
+            Ok(_) => return Err(invalid("retry START success marker identity refused")),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    for path in present {
+        fs::remove_file(path)?;
+    }
+    File::open(journal)?.sync_all()
+}
+
+/// Which lawful BEGIN this START consumes. Continue and a first create stay
+/// on v3 exactly; only the recovered stopped state of a failed first create
+/// selects the governed v4 repeat.
+fn start_retry(config: &ResidentConfig) -> io::Result<Option<RetrySelection>> {
+    match config.start_action {
+        StartAction::Create { .. } => select_retry(
+            &config.journal_dir,
+            &config.unit,
+            config.volume_resource,
+            true,
+        ),
+        StartAction::Continue { .. } => Ok(None),
+    }
 }
 
 fn load_retained_start(
@@ -988,6 +1079,15 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         config_sha256: config.mini_config_sha256.clone(),
     };
     if journal.read()?.is_some() {
+        match fs::symlink_metadata(config.journal_dir.join("start-admitted-retry-v4.json")) {
+            Ok(_) => {
+                return Err(invalid(
+                    "prior retry-v4 START has no reconciliation path; source STOP is required",
+                ))
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
         return reconcile_prior_start(&config, &operator, &journal);
     }
     Journal::preflight_current_unit(&config.unit)?;
@@ -1013,6 +1113,16 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             Ok(_) => return Err(invalid("resident lifecycle attempt already exists")),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
+        }
+    }
+    let retry = start_retry(&config)?;
+    if retry.is_some() {
+        for path in retry_v4_paths(&config.journal_dir) {
+            match fs::symlink_metadata(&path) {
+                Ok(_) => return Err(invalid("resident retry-v4 attempt already exists")),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
         }
     }
     let package = verify_installed_spk(&config.image_dir, config.app_uid)?;
@@ -1129,12 +1239,29 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     {
         return Err(invalid("signed package has no configured API interface"));
     }
-    let begin_signers: FixedLaunchBeginSigners =
-        serde_json::from_slice(&private_file(&config.begin_management_custody, MAX_CONFIG)?)?;
-    let claim_signers: FixedLaunchClaimSigners =
-        serde_json::from_slice(&private_file(&config.claim_management_custody, MAX_CONFIG)?)?;
+    let begin_custody = private_file(&config.begin_management_custody, MAX_CONFIG)?;
+    let claim_custody = private_file(&config.claim_management_custody, MAX_CONFIG)?;
+    let begin_signers: FixedLaunchBeginSigners = serde_json::from_slice(&begin_custody)?;
+    let claim_signers: FixedLaunchClaimSigners = serde_json::from_slice(&claim_custody)?;
     begin_signers.validate(&operator, config.app_uid)?;
     claim_signers.validate(&operator, config.app_uid)?;
+    // The same custody files, read once, serve the v4 repeat: one management
+    // identity signs every lifecycle plan for this app.
+    let retry_signers = match &retry {
+        Some(_) => {
+            let begin: FixedRetryBeginSigners = serde_json::from_slice(&begin_custody)?;
+            let claim: FixedRetryClaimSigners = serde_json::from_slice(&claim_custody)?;
+            let completion: FixedRetryCompletionSigners = serde_json::from_slice(&private_file(
+                &config.completion_management_custody,
+                MAX_CONFIG,
+            )?)?;
+            begin.validate(&operator, config.app_uid)?;
+            claim.validate(&operator, config.app_uid)?;
+            completion.validate(&operator, config.app_uid)?;
+            Some((begin, claim, completion))
+        }
+        None => None,
+    };
     // The volume registration is a root-published physical witness, not a
     // source permit. Preflight it before consuming the one-shot BEGIN, then
     // require its volume ID to equal Mini's exact source projection.
@@ -1151,15 +1278,37 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         return Err(invalid("START mount differs from root volume registration"));
     }
     volume.recheck_handoff()?;
-    let begin = submit_v3_begin(
-        &operator,
-        &begin_signers,
-        config.app_uid,
-        &launch,
-        config.start_action.native()?,
-        &config.begin_operation_ledger,
-        &config.begin_attempt_dir,
-    )?;
+    let begin = match (&retry, &retry_signers) {
+        (Some(selection), Some((fixed, _, _))) => {
+            let crate::lifecycle_v3_native::LaunchBeginAction::Create(index) =
+                config.start_action.native()?
+            else {
+                return Err(invalid("retry-v4 START requires a create action"));
+            };
+            submit_v4_begin(
+                &operator,
+                fixed,
+                config.app_uid,
+                &launch,
+                index,
+                selection,
+                &config.begin_operation_ledger,
+                &config
+                    .journal_dir
+                    .join(crate::lifecycle_v4_retry_native::BEGIN_ATTEMPT_DIR),
+            )?
+        }
+        (None, None) => submit_v3_begin(
+            &operator,
+            &begin_signers,
+            config.app_uid,
+            &launch,
+            config.start_action.native()?,
+            &config.begin_operation_ledger,
+            &config.begin_attempt_dir,
+        )?,
+        _ => return Err(invalid("retry-v4 START custody selection differs")),
+    };
     if begin.volume_id_hex != volume.volume_id {
         return Err(invalid("root volume differs from source BEGIN volume ID"));
     }
@@ -1197,16 +1346,35 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     };
     let prepared =
         PreparedResident::prepare(&spec, config.app_uid, config.app_gid, &config.bwrap_sha256)?;
-    let assembled = assemble_v3_claim(
-        &operator,
-        &claim_signers,
-        config.app_uid,
-        &begin,
-        &launch,
-        &config.claim_nonce_ledger,
-        &config.claim_author_attempt_dir,
-    )?;
-    let claim = submit_v3_claim(&operator, assembled, &begin, &launch, &claim_signers)?;
+    let claim = match (&retry, &retry_signers) {
+        (Some(selection), Some((_, fixed, _))) => {
+            let assembled = assemble_v4_claim(
+                &operator,
+                fixed,
+                config.app_uid,
+                &begin,
+                &launch,
+                selection,
+                &config.claim_nonce_ledger,
+                &config
+                    .journal_dir
+                    .join(crate::lifecycle_v4_retry_claim_native::CLAIM_ATTEMPT_DIR),
+            )?;
+            submit_v4_claim(&operator, assembled, &begin, &launch, fixed, selection)?
+        }
+        _ => {
+            let assembled = assemble_v3_claim(
+                &operator,
+                &claim_signers,
+                config.app_uid,
+                &begin,
+                &launch,
+                &config.claim_nonce_ledger,
+                &config.claim_author_attempt_dir,
+            )?;
+            submit_v3_claim(&operator, assembled, &begin, &launch, &claim_signers)?
+        }
+    };
     if claim.physical_begin.unit != config.unit
         || claim.physical_begin.app != config.volume_resource
         || claim.physical_begin.image_identity
@@ -1245,7 +1413,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             return Err(invalid("agent custody differs from claimed shared app"));
         }
     }
-    let admitted = json!({
+    let mut admitted = json!({
         "protocol":"mini-spk-resident-start-admitted-v3",
         "rawSha256":package.raw_sha256,
         "launchRoot":descriptor.root,
@@ -1278,15 +1446,25 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             "worldRoot":claim.world_root,
         },
     });
+    let admitted_name = match &retry {
+        Some(selection) => {
+            admitted["protocol"] = json!("mini-spk-resident-start-admitted-retry-v4");
+            admitted["retry"] = json!({
+                "recoveryIndex":selection.recovery_index,
+                "recoveryIngressSha256":selection.recovery_ingress_sha256,
+                "recoveryRecordSha256":selection.record_sha256,
+                "failedGeneration":selection.failed_generation.to_string(),
+                "beforeGeneration":selection.before_generation.to_string(),
+            });
+            "start-admitted-retry-v4.json"
+        }
+        None => "start-admitted-v3.json",
+    };
     // After this fsync a restarted supervisor can look up only the retained
     // completion ingress. It cannot convert these old bytes into another
     // physical launch or ask Mini for a second fresh claim.
     let admitted_bytes = serde_json::to_vec(&admitted)?;
-    write_new(
-        &config.journal_dir,
-        "start-admitted-v3.json",
-        &admitted_bytes,
-    )?;
+    write_new(&config.journal_dir, admitted_name, &admitted_bytes)?;
     journal.arm(claim.physical_begin.clone())?;
     journal.request_launch(&claim.physical_begin)?;
     let mut resident = prepared.start(&journal, &claim.physical_begin)?;
@@ -1298,50 +1476,102 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             "running app ViewInfo differs from signed bridge schema",
         ));
     }
-    let report = prepare_v3_running_report(
-        &operator,
-        ReportInput {
-            begin: &begin,
-            claim: &claim,
-            launch: &launch,
-            mode: PhysicalMode::Running {
-                journal: &journal,
-                volume: &volume,
-            },
-        },
-        &config.completion_custodian_seed,
-        &config.completion_semantics,
-        &config.completion_attempt_dir,
-    )?;
-    let completion_ingress = assemble_v3_completion(
-        &operator,
-        &signers,
-        config.app_uid,
-        CompletionInput {
-            begin: &begin,
-            claim: &claim,
-            launch: &launch,
-            signed_report: &report.signed_report,
-        },
-        &config.completion_sign_attempt_dir,
-    )?;
-    let _receipt = submit_v3_completion(
-        &operator,
-        &completion_ingress,
-        &begin,
-        &claim,
-        &report.signed_report,
-        Some(&journal),
-    )?;
-    let outcome_inspection = private_file(
-        &config.completion_sign_attempt_dir.join("op38-outcome.json"),
-        MAX_CONFIG,
-    )?;
+    let (_receipt, outcome_dir, completed_name) = match (&retry, &retry_signers) {
+        (Some(selection), Some((_, _, fixed))) => {
+            let report = prepare_v4_running_report(
+                &operator,
+                RetryReportInput {
+                    begin: &begin,
+                    claim: &claim,
+                    launch: &launch,
+                    journal: &journal,
+                    volume: &volume,
+                    selection,
+                },
+                &config.completion_custodian_seed,
+                &config.completion_semantics,
+                &config
+                    .journal_dir
+                    .join(crate::lifecycle_v4_retry_completion_native::REPORT_ATTEMPT_DIR),
+            )?;
+            let sign_dir = config
+                .journal_dir
+                .join(crate::lifecycle_v4_retry_completion_native::COMPLETION_ATTEMPT_DIR);
+            let completion_ingress = assemble_v4_completion(
+                &operator,
+                fixed,
+                config.app_uid,
+                RetryCompletionInput {
+                    begin: &begin,
+                    claim: &claim,
+                    launch: &launch,
+                    signed_report: &report.signed_report,
+                },
+                &sign_dir,
+            )?;
+            let receipt = submit_v4_completion(
+                &operator,
+                &completion_ingress,
+                &begin,
+                &claim,
+                &report.signed_report,
+                &journal,
+            )?;
+            (receipt, sign_dir, "start-completed-retry-v4.json")
+        }
+        _ => {
+            let report = prepare_v3_running_report(
+                &operator,
+                ReportInput {
+                    begin: &begin,
+                    claim: &claim,
+                    launch: &launch,
+                    mode: PhysicalMode::Running {
+                        journal: &journal,
+                        volume: &volume,
+                    },
+                },
+                &config.completion_custodian_seed,
+                &config.completion_semantics,
+                &config.completion_attempt_dir,
+            )?;
+            let completion_ingress = assemble_v3_completion(
+                &operator,
+                &signers,
+                config.app_uid,
+                CompletionInput {
+                    begin: &begin,
+                    claim: &claim,
+                    launch: &launch,
+                    signed_report: &report.signed_report,
+                },
+                &config.completion_sign_attempt_dir,
+            )?;
+            let _receipt = submit_v3_completion(
+                &operator,
+                &completion_ingress,
+                &begin,
+                &claim,
+                &report.signed_report,
+                Some(&journal),
+            )?;
+            (
+                _receipt,
+                config.completion_sign_attempt_dir.clone(),
+                "start-completed-v3.json",
+            )
+        }
+    };
+    let outcome_inspection = private_file(&outcome_dir.join("op38-outcome.json"), MAX_CONFIG)?;
     write_new(
         &config.journal_dir,
-        "start-completed-v3.json",
+        completed_name,
         &serde_json::to_vec(&json!({
-            "protocol":"mini-spk-resident-start-completed-v3",
+            "protocol":if retry.is_some() {
+                "mini-spk-resident-start-completed-retry-v4"
+            } else {
+                "mini-spk-resident-start-completed-v3"
+            },
             "admittedSha256":format!("{:x}", Sha256::digest(&admitted_bytes)),
             "evidenceName":"op38-outcome.json",
             "evidenceSha256":format!("{:x}", Sha256::digest(&outcome_inspection)),
@@ -1353,7 +1583,11 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             },
         }))?,
     )?;
-    retire_start_markers(&config, &_receipt)?;
+    if retry.is_some() {
+        retire_retry_v4_markers(&config)?;
+    } else {
+        retire_start_markers(&config, &_receipt)?;
+    }
     // A START completion is the first state that may expose transport. Native
     // admission remains decisive for every later HTTP request as well.
     let entrances = config
