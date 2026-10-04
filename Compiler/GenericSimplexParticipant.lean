@@ -89,6 +89,17 @@ def openParticipant (config : SourceConfig) (runtime : Runtime)
   | .rejected detail => return .error detail
   | .retry failure => return .error failure.detail
 
+/-- The blocks carried by the newest journal delta's inputs: exactly what the
+just-acknowledged packet added to this replica's observed set. -/
+def latestObserved {context : Context} (r : Restored context) : List Block :=
+  match r.log.recent with
+  | d :: _ => d.events.filterMap fun e =>
+      match decodeInput e with
+      | some (.delivery m) => m.value
+      | some (.deliveryAt _ m) => m.value
+      | _ => none
+  | [] => []
+
 /-- Every ingress is durably authenticated before it enters the engine. A
 certificate imports its original COMMIT signatures atomically, and discovery
 then schedules source validation; neither path grants Input.checked itself. -/
@@ -103,7 +114,7 @@ def receive {config : SourceConfig} (p : Participant config) (bytes : Bytes) :
       let pending := Minidregg.Compiler.GenericSimplexPending.retry p.pending
         (applicationHistory candidate)
       return ({p with pending :=
-        Minidregg.Compiler.GenericSimplexPending.discover state pending},result)
+        Minidregg.Compiler.GenericSimplexPending.discoverFrom state [candidate] pending},result)
     | _,_ => return (p,result)
   let before := (← p.runtime.current).map (·.length)
   let result ← match tag with
@@ -116,9 +127,10 @@ def receive {config : SourceConfig} (p : Participant config) (bytes : Bytes) :
     -- nothing (the journal length is unchanged) and leaves the engine state as
     -- it was, so there is nothing new to discover. Peers resend their retained
     -- outboxes continuously, so this is most packets.
-    if (← p.runtime.current).map (·.length) == before then return (p,result)
+    let some now ← p.runtime.current | return (p,result)
+    if some now.length == before then return (p,result)
     return ({p with pending :=
-      Minidregg.Compiler.GenericSimplexPending.discover state p.pending},result)
+      Minidregg.Compiler.GenericSimplexPending.discoverFrom state (latestObserved now) p.pending},result)
   | _ => return (p,result)
 
 /-- Preserve the existing outer native call family before generic historical
@@ -166,7 +178,7 @@ def propose {config : SourceConfig} (p : Participant config) (signedIngress : By
     match ← persist (storage p.runtime.native) p.runtime.context (.offer payload) with
     | .durable state =>
       return ({p with pending :=
-        Minidregg.Compiler.GenericSimplexPending.discover state p.pending},.ok payload)
+        Minidregg.Compiler.GenericSimplexPending.discoverFrom state [] p.pending},.ok payload)
     | .invalid => return (p,.error "invalid engine journal")
     | .conflict => return (p,.error "engine journal changed; retry admission")
     | .uncertain => return (p,.error "engine append uncertain; recover journal before retry")

@@ -16,10 +16,13 @@ def applicationPrefixes (block : Block) : List Block :=
   let history := applicationHistory block
   (List.range history.length).map (fun i => history.take (i + 1))
 
-def requestedPrefixes (s : State) : List Block :=
-  let proposed := observedBlocks s
+/-- Application prefixes requested by the given observed blocks and by this
+replica's own offers over its current best parent. -/
+def requestedFrom (s : State) (observed : List Block) : List Block :=
   let localOffers := s.offers.map (fun payload => bestParent s ++ [payload])
-  ((proposed ++ localOffers).flatMap applicationPrefixes).eraseDups
+  ((observed ++ localOffers).flatMap applicationPrefixes).eraseDups
+
+def requestedPrefixes (s : State) : List Block := requestedFrom s (observedBlocks s)
 
 /-- Native controller bookkeeping, not protocol agreement or a source grant.
 On restart rebuild from the durable engine state. Forgetting a negative cache
@@ -37,16 +40,31 @@ progress assumptions; this scheduler does not manufacture those resources. -/
 def appendFresh (old incoming : List Block) : List Block :=
   old ++ (incoming.filter fun b => !old.contains b).eraseDups
 
-def discover (s : State) (queue : Queue) : Queue :=
-  let wanted := fun b => !s.checked.any (fun checked => applicationHistory checked == b) && !queue.rejected.contains b
-  let old := queue.pending.filter wanted
-  let incoming := (requestedPrefixes s).filter wanted
+/-- Not yet checked and not already rejected. -/
+def wanted (s : State) (queue : Queue) (b : Block) : Bool :=
+  !s.checked.any (fun checked => applicationHistory checked == b) && !queue.rejected.contains b
+
+/-- Discovery over the given observed blocks plus this replica's own offers.
+The retained queue is refiltered, never reordered. -/
+def discoverFrom (s : State) (observed : List Block) (queue : Queue) : Queue :=
+  let old := queue.pending.filter (wanted s queue)
+  let incoming := (requestedFrom s observed).filter (wanted s queue)
   { queue with pending := appendFresh old incoming }
 
+/-- Full discovery: every block this replica has ever observed. Run once when a
+participant opens; afterwards each acknowledged input contributes only the
+blocks it carries (`discoverFrom`). Rescanning every observed block on every
+input and every service slice made each idle replica's per-input cost grow with
+its whole history (measured on the 00f711 evidence copy: about 1 s of every
+service slice). -/
+def discover (s : State) (queue : Queue) : Queue := discoverFrom s (observedBlocks s) queue
+
 /-- Removing work is not accepting it. Only the source receiver's opaque
-historical-sourcePrefix validation capability may cause native Input.checked. -/
+historical-sourcePrefix validation capability may cause native Input.checked.
+Every observed block was discovered when its input was journaled, so a slice
+refilters the retained queue and re-derives only this replica's own offers. -/
 def take (s : State) (queue : Queue) : Option (Block × Queue) :=
-  let queue := discover s queue
+  let queue := discoverFrom s [] queue
   match queue.pending with
   | [] => none
   | sourcePrefix :: rest => some (sourcePrefix,{queue with pending := rest})

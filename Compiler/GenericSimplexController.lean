@@ -40,7 +40,7 @@ def attempt (runtime : Runtime) (config : Minidregg.Kernel.NativeHost.Config) (o
   let some prior ← runtime.current | return (queue,.invalidJournal)
   let state := prior.state
   let some (block,rest) := Minidregg.Compiler.GenericSimplexPending.take state queue
-    | return (Minidregg.Compiler.GenericSimplexPending.discover state queue,.idle)
+    | return (Minidregg.Compiler.GenericSimplexPending.discoverFrom state [] queue,.idle)
   match ← Minidregg.Kernel.JointSourcePrefixValidation.validate config origin runtime.context block with
   | .accepted validated =>
     match ← persist (storage runtime.native) runtime.context (checkedInput validated) with
