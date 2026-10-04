@@ -1,14 +1,24 @@
 edition ObjectiveBend 1
-# A tally resident: the first activity the kernel delivers to
-# (Kernel/ObjectiveActivity). Each yield publishes the running total as the
-# object's declared state and awaits one answer slot that exactly one named
-# subject decides within `patience` heights. It is resumed with the kernel's
-# await outcome sum. A stale total (someone else wrote the object's state)
-# arrives as `conflict`, carrying the outcome the await DID resolve to, so a
-# reply is never lost to a stale read: the tally still adds it. The deadline
-# arrives as `timedOut`, which ends the tally.
-record Start:
+# A tally resident on the resume-with-view kernel (Kernel/ObjectiveActivity).
+# Each yield writes the object's declared state and awaits one answer slot that
+# exactly one named subject decides within `patience` heights. Each resume
+# delivers the await's outcome TOGETHER WITH a view of the object's declared
+# state and its version, read in the resuming turn. The tally writes DELTAS: a
+# reply of `amount` is `add amount`, which the kernel applies to that view, so a
+# concurrent write (the owner's, or another tally's on the same object) is kept,
+# never overwritten. Its only `set` is the initial total, which the kernel admits
+# only when the birth creates the state (`init: keep` joins an existing object).
+# The deadline arrives as `timedOut`, which ends the tally with the total it saw.
+record State:
   total: Nat
+sum EditNat:
+  keep: {}
+  set: Nat
+  add: Nat
+record Write:
+  total: EditNat
+record Start:
+  init: EditNat
   decider: Nat
 record Ask:
   decider: Nat
@@ -18,23 +28,13 @@ sum Source:
   reply: Ask
   height: At
 record Await:
-  state: Nat
+  write: Write
   on: Source
   patience: Nat
 sum Plan:
   await: Await
 record Reply:
   amount: Nat
-sum Decided:
-  reply: Reply
-  refused: {}
-  unknown: {}
-  timedOut: {}
-  broken: {}
-  upgraded: {}
-record Lost:
-  stale: Nat
-  decided: Decided
 sum Outcome:
   reply: Reply
   refused: {}
@@ -42,20 +42,23 @@ sum Outcome:
   timedOut: {}
   broken: {}
   upgraded: {}
-  conflict: Lost
-def tally(start: Start) -> Activity<Plan, Outcome, Nat>:
-  match perform(Plan.await({state: start.total, on: Source.reply({decider: start.decider}), patience: 4n})):
-    case reply(r): tally({total: start.total + r.amount, decider: start.decider})
-    case conflict(lost):
-      match lost.decided:
-        case reply(r): tally({total: start.total + r.amount, decider: start.decider})
-        case unknown(_): tally(start)
-        case refused(_): start.total
-        case timedOut(_): start.total
-        case broken(_): start.total
-        case upgraded(_): start.total
-    case unknown(_): tally(start)
-    case refused(_): start.total
-    case timedOut(_): start.total
-    case broken(_): start.total
-    case upgraded(_): start.total
+record View:
+  version: Nat
+  state: State
+record Step:
+  outcome: Outcome
+  view: View
+sum Resumed:
+  resumed: Step
+def ask(start: Start, write: Write) -> Activity<Plan, Resumed, Nat>:
+  match perform(Plan.await({write: write, on: Source.reply({decider: start.decider}), patience: 4n})):
+    case resumed(step):
+      match step.outcome:
+        case reply(r): ask(start, {total: EditNat.add(r.amount)})
+        case unknown(_): ask(start, {total: EditNat.keep()})
+        case refused(_): step.view.state.total
+        case timedOut(_): step.view.state.total
+        case broken(_): step.view.state.total
+        case upgraded(_): step.view.state.total
+def tally(start: Start) -> Activity<Plan, Resumed, Nat>:
+  ask(start, {total: start.init})

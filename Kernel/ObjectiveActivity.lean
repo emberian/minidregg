@@ -6,12 +6,13 @@ An activity of an object is a cell of the deployment's activity role
 (`recordCell domain object activity`), holding its `Record`: the exact machine
 checkpoint (the bytes of `ObjectiveBendCheckpoint.encodeState`, never a
 summary), the checkpoint's digest, the pinned package identity, the generation,
-the read versions the continuation depends on, the escrow terms, and its phase.
+the escrow terms, and its phase.
 While awaiting, the phase names one `Await`: its id `H(record cell, generation,
 checkpoint digest)`, its source (an answer slot with one decider, or a height),
 and a mandatory deadline height. The object is a native resource (`object`, a
 cell id the authority layer issues capabilities on); its declared state lives in
-its own protected state cell (`stateCell domain object`).
+its own protected state cell (`stateCell domain object`) as an `ObjectState`:
+the value and a write version, which every committed write advances by one.
 
 Six kernel turns; each is ONE `DataIntent` built by `intentOf` with the sealing of
 the receiver that admitted it (`ObjectiveActivityReceiver`: the signed marker,
@@ -22,22 +23,30 @@ not at all (`DurableDataIntent.execute_no_partial_data_commit`):
   content-addressed package cell.
 * `birth`: instantiate the pinned definition with typed input, run to the
   first yield, commit the record, the declared-state write, the answer slot it
-  awaits and the Book postings, all at once.
+  awaits and the Book postings, all at once. The first segment has seen no
+  state, so its write may `set` a field only when it creates the state cell
+  (`blindWrite`); a first yield on an object with no state must create it.
 * `resolve`: the slot's one decider decides it (typed against the awaiting
   activity's own response type) at or before the deadline; spends the slot claim.
 * `deliver`: anyone resumes the activity with the typed outcome of its await.
   The await id is spent as a nullifier bound to the checkpoint digest, AND the
   record cell is written against its current root: consume-once is a
-  compare-and-swap at admission's decide point. Recorded reads are revalidated
-  (stale: the activity receives `conflict` carrying the outcome it lost, never
-  the bare outcome). Past the deadline an open slot expires in the same turn and
-  the activity receives `timedOut`. The checkpoint is decoded from the record
-  cell (no state is ever accepted from a request), resumed with the typed
-  response, run to its next yield or end, and the new checkpoint, the Plan's
-  write, the next await and the Book postings commit together.
+  compare-and-swap at admission's decide point. RESUME WITH VIEW: the activity
+  is resumed with `resumed {outcome, view}`, the outcome its await settled to
+  (never replaced, never dropped) and a view of the object's declared state and
+  its version read IN THE SAME TURN; the Plan then names a write (per field:
+  keep, set or add) that the kernel applies to that view, against the root the
+  view was read from. So no write is ever computed from a stale read: a
+  delivery prepared on one snapshot is refused on any snapshot where the state
+  moved (`moved_state_refuses`), and a fresh delivery sees the move. Past the
+  deadline an open slot expires in the same turn and the activity receives
+  `timedOut`. The checkpoint is decoded from the record cell (no state is ever
+  accepted from a request), resumed with the typed response, run to its next
+  yield or end, and the new checkpoint, the Plan's write, the next await and
+  the Book postings commit together.
 * `topUp`: anyone funds an activity's purse on the Book.
 * `writeState`: a holder of the object writes its declared state directly
-  (what makes a recorded read stale).
+  (a new version; the next delivery's view shows it).
 
 Fees are Book postings in the deployment's credit asset. An activity's purse is
 a Book account of its own, `heldAccount cell` (the record cell's id), registered
@@ -55,6 +64,7 @@ import Kernel.AnswerSlot
 import Compiler.ObjectiveBendSourceArtifact
 import Compiler.CanonicalCellRegistry
 import Theory.ObjectiveBendDemandCollect
+import Kernel.ObjectState
 
 namespace Minidregg.Kernel.ObjectiveActivity
 open Minidregg.Theory Minidregg.Compiler
@@ -69,6 +79,7 @@ open Minidregg.Theory.ObjectiveBendDemandMachine (State Limits initial runBounde
 open Minidregg.Theory.ObjectiveBendDemandData (Data Budget)
 open Minidregg.Compiler.ResourceBirthCodec (LifecycleImage)
 open Minidregg.Theory.CanonicalResourceKernel (Book Batch Operation AccountId AssetId logicalBook AcceptedBatch)
+open Minidregg.Kernel.ObjectState (encodeObjectState decodeObjectState)
 set_option autoImplicit false
 
 abbrev Role := ObjectiveActivityCell.Role
@@ -118,7 +129,6 @@ structure Record where
   generation : Nat
   checkpoint : Bytes
   checkpointDigest : Digest
-  reads : List ReadGuard
   escrow : Escrow
   phase : Phase
   deriving DecidableEq, Repr
@@ -167,16 +177,17 @@ def recordStream : StreamCodec Record :=
     (StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product digestStream (StreamCodec.product bytesStream
       (StreamCodec.product StreamCodec.nat (StreamCodec.product bytesStream
-      (StreamCodec.product digestStream (StreamCodec.product (StreamCodec.list readGuardStream)
-      (StreamCodec.product escrowStream phaseStream)))))))))
+      (StreamCodec.product digestStream
+      (StreamCodec.product escrowStream phaseStream))))))))
     (fun r => (r.object, r.activity, r.pin, r.input, r.generation, r.checkpoint, r.checkpointDigest,
-      r.reads, r.escrow, r.phase))
+      r.escrow, r.phase))
     (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2.1, w.2.2.2.2.2.2.1,
-      w.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.2⟩)
+      w.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2⟩)
     (by intro r; cases r; rfl)
 
-/-- v2: the escrow names the payer's Book account (fees moved onto the Book). -/
-def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v2".toUTF8.toList
+/-- v3: no recorded reads (resume with view reads the state in the resuming
+turn); v2: the escrow names the payer's Book account. -/
+def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v3".toUTF8.toList
 def recordCodec := framed recordFrame recordStream
 def encodeRecord (record : Record) : Bytes := recordCodec.encode record
 def decodeRecord (bytes : Bytes) : Option Record := recordCodec.decode bytes
@@ -328,6 +339,17 @@ inductive Refusal where
   /-- The Book refused the postings (an account absent or overdrawn). -/
   | bookRefused
   | zeroAmount
+  /-- A write that `set`s a field of state the activity has not seen (a birth
+  on an object whose state exists): only `keep` and `add` are admitted. -/
+  | blindWrite
+  /-- The Plan's write does not fit the declared state (an unknown field, a
+  repeated field, `add` on a non-natural, a creation that does not set every
+  field, or a first yield that does not create absent state). -/
+  | writeShape (reason : String)
+  /-- The object's state cell holds bytes that are not an `ObjectState`. -/
+  | stateCodec
+  /-- A delivery found no declared state to show the activity. -/
+  | stateMissing
   deriving Repr
 
 /-! ## Typing data against declared types
@@ -385,9 +407,9 @@ theorem TypedData.typed {assumptions : Assumptions} {data : Data} {type : Ty}
 
 /-! ## Await outcomes -/
 
-/-- Every await resolves to exactly one of these (the root's sum, with
-`conflict` added: B2). A `conflict` carries the outcome the await DID resolve
-to (`decided`), so the activity sees the reply it lost to a stale read. -/
+/-- Every await resolves to exactly one of these. The outcome is delivered
+exactly as the await settled it, never replaced and never dropped; staleness is
+not an outcome (resume with view, ROOT ruling 10-05). -/
 inductive AwaitOutcome where
   | reply (value : Data)
   | refused
@@ -395,42 +417,47 @@ inductive AwaitOutcome where
   | timedOut
   | broken
   | upgraded
-  | conflict (stale : Nat) (decided : AwaitOutcome)
   deriving Repr
 
 def AwaitOutcome.label : AwaitOutcome → String
   | .reply _ => "reply" | .refused => "refused" | .unknown => "unknown" | .timedOut => "timedOut"
-  | .broken => "broken" | .upgraded => "upgraded" | .conflict _ _ => "conflict"
+  | .broken => "broken" | .upgraded => "upgraded"
 
-/-- The response datum the activity is resumed with. -/
+/-- The outcome datum, the `outcome` field of the response. -/
 def AwaitOutcome.data : AwaitOutcome → Data
   | .reply value => .variant "reply" value
-  | .conflict stale decided =>
-      .variant "conflict" (.record [("stale", .natural stale), ("decided", decided.data)])
   | .refused => .variant "refused" (.record [])
   | .unknown => .variant "unknown" (.record [])
   | .timedOut => .variant "timedOut" (.record [])
   | .broken => .variant "broken" (.record [])
   | .upgraded => .variant "upgraded" (.record [])
 
-/-- The kernel's own outcomes, which every activity's response type must type
-at birth, bare and inside a `conflict` (a reply is typed when it is decided). -/
-def kernelOutcomes : List AwaitOutcome :=
-  let bare : List AwaitOutcome := [.refused, .unknown, .timedOut, .broken, .upgraded]
-  bare ++ bare.map (.conflict 0)
+/-- The view datum: the object's declared state and its write version. -/
+def viewData (view : ObjectState) : Data :=
+  .record [("version", .natural view.version), ("state", view.value)]
 
-/-- The type a reply must have: the `reply` member of the response sum. -/
-def replyType (assumptions : Assumptions) (response : Ty) : Option Ty :=
-  match unalias assumptions.bounds response with
-  | .variant row => row.lookup assumptions.bounds 64 "reply"
-  | _ => none
+/-- **The response an activity is resumed with**: the settled outcome together
+with the view of the object's declared state read in the resuming turn. -/
+def responseData (outcome : AwaitOutcome) (view : ObjectState) : Data :=
+  .variant "resumed" (.record [("outcome", outcome.data), ("view", viewData view)])
 
-/-- The reply type a `conflict` carries in its `decided` field. -/
-def conflictReplyType (assumptions : Assumptions) (response : Ty) : Option Ty := do
+/-- The kernel's own outcomes, which every activity's outcome type must type at
+birth (a reply is typed when it is decided). -/
+def kernelOutcomes : List AwaitOutcome := [.refused, .unknown, .timedOut, .broken, .upgraded]
+
+/-- The response type's parts: `resumed {outcome : O, view : V}`. -/
+def responseParts (assumptions : Assumptions) (response : Ty) : Option (Ty × Ty) := do
   let .variant row := unalias assumptions.bounds response | none
-  let lost ← row.lookup assumptions.bounds 64 "conflict"
-  let decided ← (unalias assumptions.bounds lost).lookup assumptions.bounds 64 "decided"
-  replyType assumptions decided
+  let step ← row.lookup assumptions.bounds 64 "resumed"
+  let outcome ← (unalias assumptions.bounds step).lookup assumptions.bounds 64 "outcome"
+  let view ← (unalias assumptions.bounds step).lookup assumptions.bounds 64 "view"
+  pure (outcome, view)
+
+/-- The type a reply must have: the `reply` member of the outcome sum. -/
+def replyType (assumptions : Assumptions) (response : Ty) : Option Ty := do
+  let (outcome, _) ← responseParts assumptions response
+  let .variant row := unalias assumptions.bounds outcome | none
+  row.lookup assumptions.bounds 64 "reply"
 
 /-! ## The pinned program -/
 
@@ -495,26 +522,31 @@ def loadProgram (config : Config) (bytes : Bytes) (pin : Digest) (input : Data) 
   else throw .packageIdentity
 
 /-- Type an outcome at the program's response type. -/
-def typeOutcome {config : Config} {pin : Digest} {input : Data} (program : Program config pin input)
-    (outcome : AwaitOutcome) : Except Refusal (TypedData program.assumptions outcome.data program.responseType) :=
-  match typeData program.assumptions config.typeFuel outcome.data program.responseType with
+def typeResponse {config : Config} {pin : Digest} {input : Data} (program : Program config pin input)
+    (outcome : AwaitOutcome) (view : ObjectState) :
+    Except Refusal (TypedData program.assumptions (responseData outcome view) program.responseType) :=
+  match typeData program.assumptions config.typeFuel (responseData outcome view) program.responseType with
   | some typed => .ok typed
   | none => .error (.responseType outcome.label)
 
-/-- At birth: every kernel outcome is typed at the response type, bare and in a
-`conflict`, and a `conflict`'s decided reply has the reply type itself, so no
-outcome the kernel can deliver is ill-typed later (an ill-typed delivery would
-park the activity for ever). -/
+/-- At birth: the response type is `resumed {outcome, view}` and every kernel
+outcome is typed at its outcome type, so no outcome the kernel can deliver is
+ill-typed later (an ill-typed delivery would park the activity for ever). -/
 def outcomeProtocol {config : Config} {pin : Digest} {input : Data} (program : Program config pin input) :
     Except Refusal Unit := do
+  let some (outcomeType, _) := responseParts program.assumptions program.responseType
+    | throw (.outcomeProtocol "resumed {outcome, view}")
   for outcome in kernelOutcomes do
-    if (typeData program.assumptions config.typeFuel outcome.data program.responseType).isNone then
+    if (typeData program.assumptions config.typeFuel outcome.data outcomeType).isNone then
       throw (.outcomeProtocol outcome.label)
-  match conflictReplyType program.assumptions program.responseType with
-  | some lost =>
-    if sameType program.assumptions lost program.reply then pure ()
-    else throw (.outcomeProtocol "conflict.decided.reply")
-  | none => throw (.outcomeProtocol "conflict.decided.reply")
+
+/-- At a birth that yields: the response type types the view of the state the
+birth leaves, so the next delivery's view is typed. -/
+def viewProtocol {config : Config} {pin : Digest} {input : Data} (program : Program config pin input)
+    (view : ObjectState) : Except Refusal Unit :=
+  match typeData program.assumptions config.typeFuel (responseData .unknown view) program.responseType with
+  | some _ => .ok ()
+  | none => .error (.outcomeProtocol "view")
 
 /-! ## Plans the kernel performs -/
 
@@ -523,11 +555,12 @@ inductive PlanSource where
   | height (due : Nat)
   deriving DecidableEq, Repr
 
-/-- A yielded Plan: `await {state, on, patience}`. The declared state is
-written to the object's state cell; `on` names what the activity waits for; the
-deadline is the yield height plus `patience`. -/
+/-- A yielded Plan: `await {write, on, patience}`. `write` names, per field of
+the object's declared state, an edit (`keep`, `set v` or `add n`) that the kernel
+applies to the state the activity was resumed with (`stateWrite`); `on` names
+what the activity waits for; the deadline is the yield height plus `patience`. -/
 structure PlanAwait where
-  state : Data
+  write : Data
   source : PlanSource
   patience : Nat
 
@@ -536,7 +569,7 @@ def fieldOf (fields : List (String × Data)) (name : String) : Option Data :=
 
 def decodePlan : Data → Except Refusal PlanAwait
   | .variant "await" (.record fields) => do
-    let some state := fieldOf fields "state" | throw (.plan "await.state missing")
+    let some write := fieldOf fields "write" | throw (.plan "await.write missing")
     let some (.natural patience) := fieldOf fields "patience" | throw (.plan "await.patience missing")
     let some on := fieldOf fields "on" | throw (.plan "await.on missing")
     let source ← match on with
@@ -548,7 +581,7 @@ def decodePlan : Data → Except Refusal PlanAwait
         | _ => throw (.plan "await.on.height.at missing")
       | .variant "message" _ => throw .messageAwaitNeedsInbox
       | _ => throw (.plan "await.on must be reply, height or message")
-    pure ⟨state, source, patience⟩
+    pure ⟨write, source, patience⟩
   | _ => throw (.plan "the kernel performs only `await` Plans")
 
 /-- What one segment of an activity ends in. A yield keeps the yielded machine
@@ -594,6 +627,12 @@ def postAt {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (cell 
 def guardAt {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (cell : CellId) : ReadGuard :=
   ⟨cell, snapshot.model.roots cell⟩
 
+@[simp] theorem guardAt_cellId {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (cell : CellId) :
+    (guardAt snapshot cell).cellId = cell := rfl
+
+@[simp] theorem guardAt_expectedRoot {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (cell : CellId) :
+    (guardAt snapshot cell).expectedRoot = snapshot.model.roots cell := rfl
+
 def recordPost {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (cell : CellId) (record : Record) : Post :=
   postAt snapshot cell (image .record (recordKey record.object record.activity) (encodeRecord record))
@@ -602,8 +641,9 @@ def slotPost {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsh
     (slot : AnswerSlot.Slot) : Post :=
   postAt snapshot (AnswerSlot.cell config.domain slot.name) (image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot))
 
-/-- The image a declared-state write installs. -/
-def stateImage (object : CellId) (value : Data) : Bytes := image .state (stateKey object) (dataBytes value)
+/-- The image a declared-state write installs: the `ObjectState`. -/
+def stateImage (object : CellId) (state : ObjectState) : Bytes :=
+  image .state (stateKey object) (encodeObjectState state)
 
 def readRecord {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (cell : CellId) : Option Record :=
   (bodyOf .record (snapshot.canonicalBytes cell)).bind decodeRecord
@@ -611,6 +651,112 @@ def readRecord {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (c
 def readSlot {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (name : Digest) :
     Option AnswerSlot.Slot :=
   (bodyOf .slot (snapshot.canonicalBytes (AnswerSlot.cell config.domain name))).bind AnswerSlot.decode
+
+/-- The object's declared state as its state cell holds it: `none` when the
+object has no state yet, refused when the cell holds anything else. -/
+def readState {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (object : CellId) :
+    Except Refusal (Option ObjectState) :=
+  let bytes := snapshot.canonicalBytes (stateCell config.domain object)
+  match bodyOf .state bytes with
+  | some body => match decodeObjectState body with
+    | some state => .ok (some state)
+    | none => .error .stateCodec
+  | none => if (payloadOf bytes).isSome then .error .stateCodec else .ok none
+
+/-! ### Writes: fields and deltas, applied to the state the activity saw -/
+
+/-- One field's edit. -/
+inductive Edit where
+  | keep
+  | set (value : Data)
+  | add (amount : Nat)
+  deriving Repr
+
+def Edit.isKeep : Edit → Bool
+  | .keep => true
+  | _ => false
+
+def Edit.isSet : Edit → Bool
+  | .set _ => true
+  | _ => false
+
+def decodeEdit : Data → Except Refusal Edit
+  | .variant "keep" _ => .ok .keep
+  | .variant "set" value => .ok (.set value)
+  | .variant "add" (.natural amount) => .ok (.add amount)
+  | _ => .error (.writeShape "an edit is keep, set or add (of a natural)")
+
+/-- A Plan's `write`: a record of field edits, each field named once. -/
+def decodeWrite : Data → Except Refusal (List (String × Edit))
+  | .record fields =>
+    if (fields.map Prod.fst).Nodup then fields.mapM fun field => do pure (field.1, ← decodeEdit field.2)
+    else .error (.writeShape "a field is edited twice")
+  | _ => .error (.writeShape "a write is a record of field edits")
+
+/-- One field of the state after its edit (absent edit: kept). -/
+def editField (edits : List (String × Edit)) (name : String) (value : Data) : Except Refusal Data :=
+  match (edits.find? (fun edit => edit.1 == name)).map Prod.snd with
+  | none => .ok value
+  | some .keep => .ok value
+  | some (.set replacement) => .ok replacement
+  | some (.add amount) => match value with
+    | .natural current => .ok (.natural (current + amount))
+    | _ => .error (.writeShape s!"add on the non-natural field {name}")
+
+/-- The field-wise edit of present record state, in the state's field order. -/
+def editFields (edits : List (String × Edit)) : List (String × Data) → Except Refusal (List (String × Data))
+  | [] => .ok []
+  | field :: rest =>
+    match editField edits field.1 field.2 with
+    | .error reason => .error reason
+    | .ok value =>
+      match editFields edits rest with
+      | .error reason => .error reason
+      | .ok edited => .ok ((field.1, value) :: edited)
+
+/-- **The write applied to a state.** `none`: nothing to write (every edit
+`keep`). Creating absent state needs a `set` of every field it names; editing
+present state needs every edited field to exist; the result keeps the state's
+field order. Pure and a function of the write and the state alone. -/
+def applyWrite (edits : List (String × Edit)) (current : Option Data) : Except Refusal (Option Data) :=
+  if edits.all (fun edit => edit.2.isKeep) then .ok none else
+  match current with
+  | none =>
+    (edits.mapM fun (edit : String × Edit) => (match edit.2 with
+      | .set value => .ok (edit.1, value)
+      | _ => .error (.writeShape s!"creating the state must set {edit.1}") : Except Refusal (String × Data))).map
+      fun fields => some (.record fields)
+  | some (.record fields) =>
+    if edits.all (fun edit => fields.any (fun field => field.1 == edit.1)) then
+      (editFields edits fields).map fun edited => some (.record edited)
+    else .error (.writeShape "an edit names no field of the declared state")
+  | some _ => .error (.writeShape "the declared state is not a record")
+
+/-- What a state write commits: the state it was computed from, the state it
+installs (the next version), and the post. -/
+structure StateWritten where
+  before : Option ObjectState
+  after : ObjectState
+  post : Post
+
+/-- **The one point where a declared-state write is built** (the hook the
+object's law and facet check wrap: `before`, `after`). `current` is the state
+the writer SAW in this turn; `viewed` says whether the activity was shown it
+(a delivery) or not (a birth's first segment, which may only `keep`/`add` on
+present state). The post installs version `current + 1` against the root
+`current` was read from, so a write is never computed from a stale read. -/
+def stateWrite {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (object : CellId) (current : Option ObjectState) (viewed : Bool) (write : Data) :
+    Except Refusal (Option StateWritten) := do
+  let edits ← decodeWrite write
+  if !viewed && current.isSome && edits.any (fun edit => edit.2.isSet) then throw .blindWrite
+  match ← applyWrite edits (current.map ObjectState.value) with
+  | none =>
+    if current.isNone then throw (.writeShape "the first yield must create the declared state")
+    pure none
+  | some value =>
+    let after : ObjectState := ⟨(current.map ObjectState.version).getD 0 + 1, value⟩
+    pure (some ⟨current, after, postAt snapshot (stateCell config.domain object) (stateImage object after)⟩)
 
 /-! ### The Book -/
 
@@ -656,32 +802,33 @@ def purse (book : Book) (asset : AssetId) (held : AccountId) : Nat := (book.bala
 
 /-! ### Yields -/
 
-/-- What a yield commits besides the record: the declared-state write, the
-answer slot it opens, and the await. -/
+/-- What a yield commits besides the record: the declared-state write (if the
+Plan writes), the answer slot it opens, and the await. -/
 structure YieldCommit where
   await : Await
+  written : Option StateWritten
   posts : List Post
-  reads : List ReadGuard
 
 def commitYield {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (transaction : TransactionId) (cell : CellId) (object : CellId) (generation : Nat)
-    (checkpoint : Digest) (plan : PlanAwait) : Except Refusal YieldCommit := do
+    (checkpoint : Digest) (current : Option ObjectState) (viewed : Bool) (plan : PlanAwait) :
+    Except Refusal YieldCommit :=
   if plan.patience = 0 ∨ config.maxPatience < plan.patience then
-    throw (.patience plan.patience config.maxPatience)
-  let deadline := height + plan.patience
-  let id := awaitId cell generation checkpoint
-  let stateBytes := stateImage object plan.state
-  let statePost := postAt snapshot (stateCell config.domain object) stateBytes
-  let reads : List ReadGuard := [⟨stateCell config.domain object, rootBytes stateBytes⟩]
+    .error (.patience plan.patience config.maxPatience) else
+  match stateWrite config snapshot object current viewed plan.write with
+  | .error reason => .error reason
+  | .ok written =>
   match plan.source with
   | .reply decider =>
-    let slotName := AnswerSlot.name transaction cell generation
-    if (readSlot config snapshot slotName).isSome then throw .slotFresh
-    let slot : AnswerSlot.Slot := ⟨slotName, cell, decider, deadline, .opened⟩
-    pure ⟨⟨id, .reply slotName decider, deadline, height⟩, [statePost, slotPost config snapshot slot], reads⟩
+    if (readSlot config snapshot (AnswerSlot.name transaction cell generation)).isSome then .error .slotFresh else
+    .ok ⟨⟨awaitId cell generation checkpoint, .reply (AnswerSlot.name transaction cell generation) decider,
+        height + plan.patience, height⟩, written,
+      (written.map StateWritten.post).toList ++ [slotPost config snapshot
+        ⟨AnswerSlot.name transaction cell generation, cell, decider, height + plan.patience, .opened⟩]⟩
   | .height due =>
-    if deadline < due then throw (.plan "a height await is due after its deadline")
-    pure ⟨⟨id, .height due, deadline, height⟩, [statePost], reads⟩
+    if height + plan.patience < due then .error (.plan "a height await is due after its deadline") else
+    .ok ⟨⟨awaitId cell generation checkpoint, .height due, height + plan.patience, height⟩, written,
+      (written.map StateWritten.post).toList⟩
 
 /-- The record that ends a segment. -/
 def nextRecord (base : Record) (generation : Nat) : Segment → Option YieldCommit → Record
@@ -691,32 +838,29 @@ def nextRecord (base : Record) (generation : Nat) : Segment → Option YieldComm
       generation := generation
       checkpoint := encoded
       checkpointDigest := ObjectiveActivityWire.checkpointDigest encoded
-      reads := yielded.reads
       phase := .awaiting yielded.await }
   | .finished result, _ =>
     { base with
       generation := generation
       checkpoint := []
       checkpointDigest := ObjectiveActivityWire.checkpointDigest []
-      reads := []
       phase := .done (dataBytes result) }
   | .faulted reason, _ =>
     { base with
       generation := generation
       checkpoint := []
       checkpointDigest := ObjectiveActivityWire.checkpointDigest []
-      reads := []
       phase := .faulted reason }
   | .yielded _ _, none =>
     { base with generation := generation, phase := .faulted "internal: yield without commit" }
 
 /-- The yield commit of a segment, when it yielded. -/
 def segmentCommit {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
-    (height : Nat) (transaction : TransactionId) (cell object : CellId) (generation : Nat) :
-    Segment → Except Refusal (Option YieldCommit)
+    (height : Nat) (transaction : TransactionId) (cell object : CellId) (generation : Nat)
+    (current : Option ObjectState) (viewed : Bool) : Segment → Except Refusal (Option YieldCommit)
   | .yielded state plan => do
     let committed ← commitYield config snapshot height transaction cell object generation
-      (checkpointDigest (checkpointBytes state)) plan
+      (checkpointDigest (checkpointBytes state)) current viewed plan
     pure (some committed)
   | _ => pure none
 
@@ -811,15 +955,19 @@ structure Birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
     .ok program
   cell : CellId
   cellExact : cell = recordCell config.domain request.object (activityId request.object (birthTransaction request))
+  /-- The object's declared state as the birth found it (the first segment is
+  not shown it: its write may not `set` present state). -/
+  current : Option ObjectState
+  currentExact : readState config snapshot request.object = .ok current
   segment : Segment
   segmentExact : runSegment config request.ticks (initial program.applied.erase) = .ok segment
   yielded : Option YieldCommit
-  yieldedExact : segmentCommit config snapshot height (birthTransaction request) cell request.object 0 segment =
-    .ok yielded
+  yieldedExact : segmentCommit config snapshot height (birthTransaction request) cell request.object 0
+    current false segment = .ok yielded
   record : Record
   recordExact : record = nextRecord
     ⟨request.object, activityId request.object (birthTransaction request), request.pin, dataBytes request.input,
-      0, [], checkpointDigest [], [],
+      0, [], checkpointDigest [],
       escrowOf config.tariff request.subject request.account request.resumeTicks request.timeoutTicks,
       .faulted "unborn"⟩ 0 segment yielded
   book : BookCell
@@ -830,7 +978,8 @@ structure Birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
   postsExact : posts = recordPost config snapshot cell record ::
     ((yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
   guards : List ReadGuard
-  guardsExact : guards = [guardAt snapshot (packageCell config.domain request.pin)]
+  guardsExact : guards = [guardAt snapshot (packageCell config.domain request.pin),
+    guardAt snapshot (stateCell config.domain request.object)]
 
 def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : BirthRequest) : Except Refusal (Birth config snapshot height request) := do
@@ -852,24 +1001,36 @@ def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
     | .error reason => throw reason
     | .ok book =>
       if held ∈ (logicalBook book.logical).accounts then throw .purseTaken
+      match currentExact : readState config snapshot request.object with
+      | .error reason => throw reason
+      | .ok current =>
       match segmentExact : runSegment config request.ticks (initial program.applied.erase) with
       | .error reason => throw reason
       | .ok segment =>
-        match yieldedExact : segmentCommit config snapshot height transaction cell request.object 0 segment with
+        match yieldedExact : segmentCommit config snapshot height transaction cell request.object 0
+            current false segment with
         | .error reason => throw reason
         | .ok yielded =>
+          match yielded with
+          | some committed =>
+            match (committed.written.map StateWritten.after).orElse (fun _ => current) with
+            | some view => viewProtocol program view
+            | none => throw .stateMissing
+          | none => pure ()
           let escrow := escrowOf config.tariff request.subject request.account request.resumeTicks request.timeoutTicks
           if segment.yields ∧ request.deposit < escrow.pair then
             throw (.underfunded request.deposit escrow.pair)
           let batch ← birthBatch config (logicalBook book.logical) held request escrow segment
           let posted ← postings book batch
           let base : Record := ⟨request.object, activity, request.pin, dataBytes request.input, 0, [],
-            checkpointDigest [], [], escrow, .faulted "unborn"⟩
+            checkpointDigest [], escrow, .faulted "unborn"⟩
           let record := nextRecord base 0 segment yielded
           let posts := recordPost config snapshot cell record ::
             ((yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
-          pure ⟨program, programExact, cell, rfl, segment, segmentExact, yielded, yieldedExact, record, rfl,
-            book, bookExact, posted, posts, rfl, rfl, [guardAt snapshot (packageCell config.domain request.pin)], rfl⟩
+          pure ⟨program, programExact, cell, rfl, current, currentExact, segment, segmentExact, yielded, yieldedExact,
+            record, rfl, book, bookExact, posted, posts, rfl, rfl,
+            [guardAt snapshot (packageCell config.domain request.pin),
+              guardAt snapshot (stateCell config.domain request.object)], rfl⟩
 
 def Birth.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request) (sealing : Seal) :
@@ -996,14 +1157,6 @@ def settle {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
     else if due ≤ height then .ok ⟨.resumed, .reply (.record [("at", .natural height)]), [], [], []⟩
     else .error (.notYetDue due height)
 
-/-- The number of recorded reads whose cell moved since the yield. -/
-def staleCount {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (reads : List ReadGuard) : Nat :=
-  (reads.filter (fun guard => snapshot.model.roots guard.cellId != guard.expectedRoot)).length
-
-/-- A stale read wraps the decided outcome; it never replaces it. -/
-def revalidate (stale : Nat) (decided : AwaitOutcome) : AwaitOutcome :=
-  if stale = 0 then decided else .conflict stale decided
-
 /-- No state, no checkpoint and no outcome is ever taken from a request: the
 submitter names the record and may add envelope it pays for from `account`. -/
 structure DeliverRequest where
@@ -1036,20 +1189,21 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input = .ok program
   settlement : Settlement
   settled : settle config snapshot height request.record await = .ok settlement
-  outcome : AwaitOutcome
-  outcomeExact : outcome = revalidate (staleCount snapshot record.reads) settlement.decided
-  response : TypedData program.assumptions outcome.data program.responseType
+  /-- The object's declared state and its version, read in THIS turn. -/
+  view : ObjectState
+  viewExact : readState config snapshot record.object = .ok (some view)
+  response : TypedData program.assumptions (responseData settlement.decided view) program.responseType
   state : State
   stateExact : decodeCheckpoint record.checkpoint = some state
   resumed : State
-  resumeExact : resume outcome.data.term state = some resumed
+  resumeExact : resume (responseData settlement.decided view).term state = some resumed
   envelope : Nat
   envelopeExact : envelope = record.escrow.ticks settlement.path + request.extraTicks
   segment : Segment
   segmentExact : runSegment config envelope resumed = .ok segment
   yielded : Option YieldCommit
   yieldedExact : segmentCommit config snapshot height (deliveryTransaction await.id) request.record record.object
-    (record.generation + 1) segment = .ok yielded
+    (record.generation + 1) (some view) true segment = .ok yielded
   next : Record
   nextExact : next = nextRecord record (record.generation + 1) segment yielded
   book : BookCell
@@ -1065,7 +1219,7 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
     (settlement.posts ++ (yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
   guards : List ReadGuard
   guardsExact : guards = guardAt snapshot (packageCell config.domain record.pin) ::
-    (settlement.guards ++ record.reads.map (fun guard => guardAt snapshot guard.cellId))
+    guardAt snapshot (stateCell config.domain record.object) :: settlement.guards
   claims : List StableNullifier
   claimsExact : claims = awaitClaim await.id :: settlement.claims
 
@@ -1089,14 +1243,17 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   match settled : settle config snapshot height request.record await with
   | .error reason => .error reason
   | .ok settlement =>
-  let outcome := revalidate (staleCount snapshot record.reads) settlement.decided
-  match typeOutcome program outcome with
+  match viewExact : readState config snapshot record.object with
+  | .error reason => .error reason
+  | .ok none => .error .stateMissing
+  | .ok (some view) =>
+  match typeResponse program settlement.decided view with
   | .error reason => .error reason
   | .ok response =>
   match stateExact : decodeCheckpoint record.checkpoint with
   | none => .error .checkpointCodec
   | some state =>
-  match resumeExact : resume outcome.data.term state with
+  match resumeExact : resume (responseData settlement.decided view).term state with
   | none => .error .checkpointCodec
   | some resumed =>
   let envelope := record.escrow.ticks settlement.path + request.extraTicks
@@ -1106,7 +1263,7 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   | .ok segment =>
   let transaction := deliveryTransaction await.id
   match yieldedExact : segmentCommit config snapshot height transaction request.record record.object
-      (record.generation + 1) segment with
+      (record.generation + 1) (some view) true segment with
   | .error reason => .error reason
   | .ok yielded =>
   let next := nextRecord record (record.generation + 1) segment yielded
@@ -1124,9 +1281,9 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   let posts := recordPost config snapshot request.record next ::
     (settlement.posts ++ (yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
   let guards := guardAt snapshot (packageCell config.domain record.pin) ::
-    (settlement.guards ++ record.reads.map (fun guard => guardAt snapshot guard.cellId))
+    guardAt snapshot (stateCell config.domain record.object) :: settlement.guards
   .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, program, programExact,
-    settlement, settled, outcome, rfl, response, state, stateExact, resumed, resumeExact, envelope, rfl,
+    settlement, settled, view, viewExact, response, state, stateExact, resumed, resumeExact, envelope, rfl,
     segment, segmentExact, yielded, yieldedExact, next, rfl, book, bookExact, batch, batchExact, posted,
     postedBatch, posts, rfl, rfl, guards, rfl, awaitClaim await.id :: settlement.claims, rfl⟩
   else .error .bookRefused
@@ -1221,14 +1378,21 @@ structure StateWrite {rootBytes : Bytes → Digest} (config : Config) (snapshot 
   private mk ::
   record : Record
   recordExact : readRecord snapshot request.record = some record
+  /-- The state the write replaces: the new value is the next version. -/
+  current : Option ObjectState
+  currentExact : readState config snapshot record.object = .ok current
   posts : List Post
-  postsExact : posts = [postAt snapshot (stateCell config.domain record.object) (stateImage record.object request.value)]
+  postsExact : posts = [postAt snapshot (stateCell config.domain record.object)
+    (stateImage record.object ⟨(current.map ObjectState.version).getD 0 + 1, request.value⟩)]
 
 def writeState {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (request : StateWriteRequest) : Except Refusal (StateWrite config snapshot request) :=
   match recordExact : readRecord snapshot request.record with
   | none => .error .recordMissing
-  | some record => .ok ⟨record, recordExact, _, rfl⟩
+  | some record =>
+    match currentExact : readState config snapshot record.object with
+    | .error reason => .error reason
+    | .ok current => .ok ⟨record, recordExact, current, currentExact, _, rfl⟩
 
 def StateWrite.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {request : StateWriteRequest} (written : StateWrite config snapshot request) (sealing : Seal) :
@@ -1331,39 +1495,430 @@ theorem slot_single_decider {rootBytes : Bytes → Digest} {config : Config} {sn
   let decided := AnswerSlot.decide_single_decider resolution.decidedExact
   ⟨decided.1, decided.2.1, decided.2.2.1⟩
 
-/-- **Stale reads deliver `conflict`, carrying what was decided.** If any read
-the activity recorded at its yield has moved, the activity is resumed with
-`conflict`, never with the bare outcome; the count it receives is positive and
-the outcome the await resolved to travels inside it. -/
-theorem stale_reads_conflict {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request)
-    (moved : ∃ guard ∈ delivery.record.reads, snapshot.model.roots guard.cellId ≠ guard.expectedRoot) :
-    ∃ stale, 0 < stale ∧ delivery.outcome = .conflict stale delivery.settlement.decided := by
-  obtain ⟨guard, member, differs⟩ := moved
-  have positive : 0 < staleCount snapshot delivery.record.reads := by
-    unfold staleCount
-    apply List.length_pos_of_mem (a := guard)
-    simp [member, differs]
-  refine ⟨_, positive, ?_⟩
-  rw [delivery.outcomeExact]
-  simp [revalidate, Nat.pos_iff_ne_zero.mp positive]
+/-! ### Resume with view -/
 
-/-- Current reads deliver the settled outcome itself. -/
-theorem current_reads_exact {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+/-- Every post a kernel turn builds is written against the root the turn read
+(`postAt`): the posts are current at the turn's snapshot. -/
+def PostsCurrent {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (posts : List Post) : Prop :=
+  ∀ post ∈ posts, post.pre = snapshot.model.roots post.cell
+
+theorem settle_posts_current {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {cell : CellId} {await : Await} {settlement : Settlement}
+    (settled : settle config snapshot height cell await = .ok settlement) :
+    PostsCurrent snapshot settlement.posts := by
+  unfold settle at settled
+  split at settled
+  · split at settled
+    · cases settled
+    · split at settled
+      · cases settled
+      · split at settled
+        · rename_i decision _ _
+          cases outcome : outcomeOfDecision decision <;>
+            simp [outcome, bind, Except.bind, pure, Except.pure] at settled
+          subst settled
+          intro post member; simp at member
+        · split at settled
+          · cases settled
+            intro post member
+            simp only [List.mem_singleton] at member
+            subst member; simp only [slotPost, postAt]
+          · cases settled
+  · split at settled
+    · cases settled; intro post member; simp at member
+    · split at settled
+      · cases settled; intro post member; simp at member
+      · cases settled
+
+theorem stateWrite_spec {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {object : CellId} {current : Option ObjectState} {viewed : Bool} {write : Data} {written : StateWritten}
+    (ok : stateWrite config snapshot object current viewed write = .ok (some written)) :
+    ∃ edits value, decodeWrite write = .ok edits ∧
+      applyWrite edits (current.map ObjectState.value) = .ok (some value) ∧
+      written = ⟨current, ⟨(current.map ObjectState.version).getD 0 + 1, value⟩,
+        postAt snapshot (stateCell config.domain object)
+          (stateImage object ⟨(current.map ObjectState.version).getD 0 + 1, value⟩)⟩ := by
+  unfold stateWrite at ok
+  cases decoded : decodeWrite write with
+  | error reason => simp [decoded, bind, Except.bind] at ok
+  | ok edits =>
+    simp only [decoded, bind, Except.bind] at ok
+    split at ok
+    · cases ok
+    · cases applied : applyWrite edits (current.map ObjectState.value) with
+      | error reason => simp [applied, pure, Except.pure] at ok
+      | ok result =>
+        simp only [applied, pure, Except.pure] at ok
+        cases result with
+        | none =>
+          simp only at ok
+          split at ok
+          · cases ok
+          · cases ok
+        | some value =>
+          cases ok
+          exact ⟨edits, value, rfl, applied, rfl⟩
+
+theorem commitYield_spec {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat} {checkpoint : Digest}
+    {current : Option ObjectState} {viewed : Bool} {plan : PlanAwait} {committed : YieldCommit}
+    (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan =
+      .ok committed) :
+    stateWrite config snapshot object current viewed plan.write = .ok committed.written ∧
+      (∀ written, committed.written = some written → written.post ∈ committed.posts) ∧
+      PostsCurrent snapshot committed.posts := by
+  unfold commitYield at ok
+  split at ok
+  · cases ok
+  · split at ok
+    · cases ok
+    · rename_i written wrote
+      have stateCurrent : PostsCurrent snapshot (written.map StateWritten.post).toList := by
+        intro post member
+        cases written with
+        | none => simp at member
+        | some one =>
+          simp only [Option.map_some, Option.toList_some, List.mem_singleton] at member
+          subst member
+          obtain ⟨_, _, _, _, exact⟩ := stateWrite_spec wrote
+          simp only [exact, postAt]
+      split at ok
+      · split at ok
+        · cases ok
+        · simp only [Except.ok.injEq] at ok
+          subst ok
+          refine ⟨wrote, ?_, ?_⟩
+          · intro one some; subst some; simp
+          · intro post member
+            simp only [List.mem_append, List.mem_singleton] at member
+            rcases member with inState | isSlot
+            · exact stateCurrent post inState
+            · subst isSlot; simp only [slotPost, postAt]
+      · split at ok
+        · cases ok
+        · simp only [Except.ok.injEq] at ok
+          subst ok
+          refine ⟨wrote, ?_, stateCurrent⟩
+          intro one some; subst some; simp
+
+theorem segmentCommit_spec {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat}
+    {current : Option ObjectState} {viewed : Bool} {segment : Segment} {committed : YieldCommit}
+    (ok : segmentCommit config snapshot height transaction cell object generation current viewed segment =
+      .ok (some committed)) :
+    ∃ state plan, segment = .yielded state plan ∧
+      commitYield config snapshot height transaction cell object generation
+        (checkpointDigest (checkpointBytes state)) current viewed plan = .ok committed := by
+  cases segment with
+  | yielded state plan =>
+    simp only [segmentCommit, bind, Except.bind] at ok
+    split at ok
+    · cases ok
+    · rename_i one equation
+      simp only [pure, Except.pure] at ok
+      cases ok
+      exact ⟨state, plan, rfl, equation⟩
+  | finished result => simp [segmentCommit, pure, Except.pure] at ok
+  | faulted reason => simp [segmentCommit, pure, Except.pure] at ok
+
+/-- Every post a delivery commits is current at the delivering snapshot. -/
+theorem Delivery.posts_current {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) :
+    PostsCurrent snapshot delivery.posts := by
+  intro post member
+  rw [delivery.postsExact] at member
+  simp only [List.mem_cons, List.mem_append] at member
+  rcases member with isRecord | (inSettlement | inYield) | isBook
+  · subst isRecord; simp only [recordPost, postAt]
+  · exact settle_posts_current delivery.settled post inSettlement
+  · cases yielded : delivery.yielded with
+    | none => simp [yielded] at inYield
+    | some committed =>
+      simp only [yielded, Option.map_some, Option.getD_some] at inYield
+      have commit := delivery.yieldedExact
+      rw [yielded] at commit
+      obtain ⟨_, _, _, committedExact⟩ := segmentCommit_spec commit
+      exact (commitYield_spec committedExact).2.2 post inYield
+  · rcases isBook with isBook | none
+    · subst isBook; simp only [Postings.write, postAt]
+    · simp at none
+
+/-- An accepted intent found every post's pre-root current. -/
+theorem accepted_posts_current {rootBytes : Bytes → Digest} {snapshot after : Snapshot rootBytes}
+    {intent : DataIntent rootBytes} {schedule : DurableCommitProtocol.Schedule}
+    (accepted : DurableDataIntent.execute schedule snapshot intent = .accepted after) :
+    ∀ write ∈ intent.writes, snapshot.model.roots write.cellId = write.expectedPre := by
+  intro write member
+  unfold DurableDataIntent.execute at accepted
+  split at accepted
+  · split at accepted <;> cases accepted
+  · split at accepted
+    · cases accepted
+    · rename_i ok
+      unfold DataIntent.preflight at ok
+      split at ok
+      · cases ok
+      split at ok
+      · cases ok
+      split at ok
+      · cases ok
+      rename_i lower
+      unfold DurableCommitProtocol.Intent.preflight at lower
+      split at lower
+      · cases lower
+      split at lower
+      · cases lower
+      split at lower
+      · cases lower
+      split at lower
+      · cases lower
+      rename_i matched
+      have all : ∀ write ∈ intent.writes, snapshot.model.roots write.cellId = write.expectedPre := by
+        simpa [DataIntent.erase] using matched
+      exact all write member
+
+/-- An accepted intent found every read guard current. -/
+theorem accepted_guards_current {rootBytes : Bytes → Digest} {snapshot after : Snapshot rootBytes}
+    {intent : DataIntent rootBytes} {schedule : DurableCommitProtocol.Schedule}
+    (accepted : DurableDataIntent.execute schedule snapshot intent = .accepted after) :
+    ∀ guard ∈ intent.readGuards, snapshot.model.roots guard.cellId = guard.expectedRoot := by
+  intro guard member
+  unfold DurableDataIntent.execute at accepted
+  split at accepted
+  · split at accepted <;> cases accepted
+  · split at accepted
+    · cases accepted
+    · rename_i ok
+      by_contra stale
+      have refused := DurableDataIntent.stale_read_guard_rejected snapshot intent
+        ⟨guard, member, by simpa using stale⟩
+      rw [refused] at ok
+      cases ok
+
+/-- **The outcome is preserved.** An await answered by its slot reaches the
+activity exactly as the slot's decider decided it: the response the activity
+is resumed with carries `outcomeOfDecision decision`, whatever happened to the
+object's state since the yield (no kernel path replaces or drops it). -/
+theorem resume_outcome_preserved {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request)
-    (current : ∀ guard ∈ delivery.record.reads, snapshot.model.roots guard.cellId = guard.expectedRoot) :
-    delivery.outcome = delivery.settlement.decided := by
-  have zero : staleCount snapshot delivery.record.reads = 0 := by
-    unfold staleCount
-    simp only [List.length_eq_zero_iff, List.filter_eq_nil_iff, bne_iff_ne, ne_eq, Decidable.not_not]
+    {slotName : Digest} {decider : SubjectId} {slot : AnswerSlot.Slot} {decision : AnswerSlot.Decision}
+    {when : Nat}
+    (source : delivery.await.source = .reply slotName decider)
+    (read : readSlot config snapshot slotName = some slot)
+    (decided : slot.phase = .decided decision when) :
+    outcomeOfDecision decision = .ok delivery.settlement.decided ∧
+      resume (responseData delivery.settlement.decided delivery.view).term delivery.state =
+        some delivery.resumed := by
+  refine ⟨?_, delivery.resumeExact⟩
+  have settled := delivery.settled
+  unfold settle at settled
+  rw [source] at settled
+  simp only [read, decided] at settled
+  split at settled
+  · cases settled
+  · cases outcome : outcomeOfDecision decision with
+    | error reason => simp [outcome, bind, Except.bind] at settled
+    | ok value =>
+      simp [outcome, bind, Except.bind, pure, Except.pure] at settled
+      rw [← settled]
+
+/-- **The view is current.** The view a delivery resumes the activity with is
+the object's state cell as the delivering snapshot holds it, and the delivery
+is accepted only on a snapshot where that cell's root is still the one the view
+was read from: the activity never acts on a state that has moved. -/
+theorem resume_view_current {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request)
+    (sealing : Seal) {later after : Snapshot rootBytes} {schedule : DurableCommitProtocol.Schedule}
+    (accepted : DurableDataIntent.execute schedule later (delivery.intent sealing) = .accepted after) :
+    readState config snapshot delivery.record.object = .ok (some delivery.view) ∧
+      later.model.roots (stateCell config.domain delivery.record.object) =
+        snapshot.model.roots (stateCell config.domain delivery.record.object) := by
+  refine ⟨delivery.viewExact, ?_⟩
+  by_cases posted : stateCell config.domain delivery.record.object ∈
+      ((delivery.posts.map (Post.write rootBytes)).map DataWrite.cellId)
+  · simp only [List.mem_map] at posted
+    obtain ⟨write, ⟨post, member, rfl⟩, same⟩ := posted
+    have current := accepted_posts_current accepted (post.write rootBytes)
+      (by simp only [Delivery.intent, intentOf_writes, List.mem_map]; exact ⟨post, member, rfl⟩)
+    simp only [Post.write] at current same
+    rw [← same, current]
+    exact delivery.posts_current post member
+  · have inGuards : guardAt snapshot (stateCell config.domain delivery.record.object) ∈ delivery.guards := by
+      rw [delivery.guardsExact]
+      exact List.mem_cons_of_mem _ (List.mem_cons_self ..)
+    have guarded : guardAt snapshot (stateCell config.domain delivery.record.object) ∈
+        (delivery.intent sealing).readGuards := by
+      show _ ∈ readOnly rootBytes delivery.posts (delivery.guards ++ sealing.guards)
+      exact List.mem_filter.mpr ⟨List.mem_append.mpr (Or.inl inGuards), decide_eq_true posted⟩
+    have current := accepted_guards_current accepted _ guarded
+    rw [guardAt_cellId, guardAt_expectedRoot] at current
     exact current
-  rw [delivery.outcomeExact, zero]
-  rfl
+
+/-- **Every state write is computed from the view, in the same turn.** If the
+segment a delivery runs yields a Plan that writes, the delivery posts the
+object's state cell against the root the view was read from, installing the
+next version of exactly the Plan's write applied to the view's state. -/
+theorem yield_write_from_current_read {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : DeliverRequest}
+    (delivery : Delivery config snapshot height request) {committed : YieldCommit} {written : StateWritten}
+    (yielded : delivery.yielded = some committed) (writes : committed.written = some written) :
+    written.post ∈ delivery.posts ∧
+      written.post.cell = stateCell config.domain delivery.record.object ∧
+      written.post.pre = snapshot.model.roots (stateCell config.domain delivery.record.object) ∧
+      written.before = some delivery.view ∧
+      written.after.version = delivery.view.version + 1 ∧
+      ∃ state plan edits, delivery.segment = .yielded state plan ∧ decodeWrite plan.write = .ok edits ∧
+        applyWrite edits (some delivery.view.value) = .ok (some written.after.value) := by
+  have commit := delivery.yieldedExact
+  rw [yielded] at commit
+  obtain ⟨state, plan, segmentIs, committedExact⟩ := segmentCommit_spec commit
+  obtain ⟨wrote, inPosts, _⟩ := commitYield_spec committedExact
+  rw [writes] at wrote
+  obtain ⟨edits, value, decoded, applied, exact⟩ := stateWrite_spec wrote
+  have member : written.post ∈ delivery.posts := by
+    rw [delivery.postsExact, yielded]
+    simp only [List.mem_cons, List.mem_append, Option.map_some, Option.getD_some]
+    exact Or.inr (Or.inl (Or.inr (inPosts written writes)))
+  subst exact
+  refine ⟨member, rfl, rfl, rfl, rfl, state, plan, edits, segmentIs, decoded, ?_⟩
+  simpa using applied
+
+/-- **A write is refused once the state has moved.** A delivery prepared on one
+snapshot whose Plan writes the declared state is never accepted on a snapshot
+where the state cell's root is not the one the view was read from: the ruling's
+"a Plan state write is refused if the version moved". A fresh delivery reads
+the moved state (`resume_view_current`). -/
+theorem moved_state_refuses {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request)
+    (sealing : Seal) {later after : Snapshot rootBytes} (schedule : DurableCommitProtocol.Schedule)
+    (moved : later.model.roots (stateCell config.domain delivery.record.object) ≠
+      snapshot.model.roots (stateCell config.domain delivery.record.object)) :
+    DurableDataIntent.execute schedule later (delivery.intent sealing) ≠ .accepted after := by
+  intro accepted
+  exact moved (resume_view_current delivery sealing accepted).2
+
+/-! ### Deltas commute -/
+
+/-- An add-only write: every edit adds to a natural field. -/
+def AddOnly (edits : List (String × Edit)) : Prop := ∀ edit ∈ edits, ∃ amount, edit.2 = .add amount
+
+theorem editField_addOnly {edits : List (String × Edit)} (adds : AddOnly edits) (name : String) :
+    (edits.find? (fun edit => edit.1 == name)).map Prod.snd = none ∨
+      ∃ amount, (edits.find? (fun edit => edit.1 == name)).map Prod.snd = some (.add amount) := by
+  cases found : edits.find? (fun edit => edit.1 == name) with
+  | none => exact Or.inl rfl
+  | some edit =>
+    obtain ⟨amount, isAdd⟩ := adds edit (List.mem_of_find?_eq_some found)
+    exact Or.inr ⟨amount, by simp [isAdd]⟩
+
+/-- Two add-only edits of one field commute. -/
+theorem editField_add_comm {one two : List (String × Edit)} (addsOne : AddOnly one) (addsTwo : AddOnly two)
+    {name : String} {value v1 v12 v2 v21 : Data}
+    (h1 : editField one name value = .ok v1) (h12 : editField two name v1 = .ok v12)
+    (h2 : editField two name value = .ok v2) (h21 : editField one name v2 = .ok v21) : v12 = v21 := by
+  unfold editField at h1 h12 h2 h21
+  rcases editField_addOnly addsOne name with n1 | ⟨k1, a1⟩ <;>
+    rcases editField_addOnly addsTwo name with n2 | ⟨k2, a2⟩
+  · simp only [n1, n2, Except.ok.injEq] at h1 h12 h2 h21
+    subst h1 h12 h2 h21; rfl
+  · simp only [n1, a2, Except.ok.injEq] at h1 h12 h2 h21
+    subst h1 h21
+    cases value <;> simp_all
+  · simp only [a1, n2, Except.ok.injEq] at h1 h12 h2 h21
+    subst h12 h2
+    cases value <;> simp_all
+  · simp only [a1, a2] at h1 h12 h2 h21
+    cases value <;> simp only [reduceCtorEq] at h1 h2
+    rename_i base
+    simp only [Except.ok.injEq] at h1 h2
+    subst h1 h2
+    simp only [Except.ok.injEq] at h12 h21
+    subst h12 h21
+    congr 1; omega
+
+/-- Two add-only writes applied field-wise, in either order, give the same fields. -/
+theorem editFields_add_comm {one two : List (String × Edit)} (addsOne : AddOnly one) (addsTwo : AddOnly two) :
+    ∀ {fields a b c d : List (String × Data)},
+      editFields one fields = .ok a → editFields two a = .ok b →
+      editFields two fields = .ok c → editFields one c = .ok d → b = d
+  | [], a, b, c, d, h1, h12, h2, h21 => by
+    simp only [editFields, Except.ok.injEq] at h1 h2
+    subst h1 h2
+    simp only [editFields, Except.ok.injEq] at h12 h21
+    rw [← h12, ← h21]
+  | field :: rest, a, b, c, d, h1, h12, h2, h21 => by
+    simp only [editFields] at h1 h2
+    split at h1
+    · cases h1
+    rename_i v1 e1
+    split at h1
+    · cases h1
+    rename_i a' r1
+    split at h2
+    · cases h2
+    rename_i v2 e2
+    split at h2
+    · cases h2
+    rename_i c' r2
+    cases h1; cases h2
+    simp only [editFields] at h12 h21
+    split at h12
+    · cases h12
+    rename_i v12 e12
+    split at h12
+    · cases h12
+    rename_i b' r12
+    split at h21
+    · cases h21
+    rename_i v21 e21
+    split at h21
+    · cases h21
+    rename_i d' r21
+    cases h12; cases h21
+    rw [editField_add_comm addsOne addsTwo e1 e12 e2 e21,
+      editFields_add_comm addsOne addsTwo r1 r12 r2 r21]
+
+/-- **Deltas commute.** Two add-only writes applied by `applyWrite` to present
+record state, in either order, give the same state: two activities' replies to
+one object both land, whichever is delivered first. -/
+theorem add_writes_commute {one two : List (String × Edit)} (addsOne : AddOnly one) (addsTwo : AddOnly two)
+    {fields : List (String × Data)} {a b c d : Data}
+    (h1 : applyWrite one (some (.record fields)) = .ok (some a)) (h12 : applyWrite two (some a) = .ok (some b))
+    (h2 : applyWrite two (some (.record fields)) = .ok (some c)) (h21 : applyWrite one (some c) = .ok (some d)) :
+    b = d := by
+  have shape : ∀ {edits : List (String × Edit)} {fs : List (String × Data)} {r : Data},
+      applyWrite edits (some (.record fs)) = .ok (some r) →
+        ∃ out, editFields edits fs = .ok out ∧ r = .record out := by
+    intro edits fs r h
+    simp only [applyWrite] at h
+    split at h
+    · cases h
+    · split at h
+      · cases out : editFields edits fs with
+        | error reason => simp [out, Except.map] at h
+        | ok out' =>
+          simp only [out, Except.map, Except.ok.injEq, Option.some.injEq] at h
+          exact ⟨out', rfl, h.symm⟩
+      · cases h
+  obtain ⟨a', ea, rfl⟩ := shape h1
+  obtain ⟨b', eb, rfl⟩ := shape h12
+  obtain ⟨c', ec, rfl⟩ := shape h2
+  obtain ⟨d', ed, rfl⟩ := shape h21
+  rw [editFields_add_comm addsOne addsTwo ea eb ec ed]
+
+/-- **Births are never blind.** A birth's first segment has not seen the
+object's state, so where state exists its write may not `set` a field. -/
+theorem stateWrite_unviewed_never_sets {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {object : CellId} {present : ObjectState} {write : Data}
+    {edits : List (String × Edit)} (decoded : decodeWrite write = .ok edits)
+    (sets : edits.any (fun edit => edit.2.isSet) = true) :
+    stateWrite config snapshot object (some present) false write = .error .blindWrite := by
+  simp [stateWrite, decoded, sets, bind, Except.bind]
 
 /-- **The resume binds the stored checkpoint.** The machine state a delivery
 resumes is decoded from the record cell's own checkpoint bytes, whose digest
-the record and the await id name; the response is the typed outcome; nothing
-of the state comes from the request. -/
+the record and the await id name; the response is the typed outcome with the
+view; nothing of the state comes from the request. -/
 theorem resume_binds_checkpoint {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) :
     ∃ record state,
@@ -1371,7 +1926,7 @@ theorem resume_binds_checkpoint {rootBytes : Bytes → Digest} {config : Config}
       record.phase = .awaiting delivery.await ∧
       delivery.await.id = awaitId request.record record.generation (checkpointDigest record.checkpoint) ∧
       decodeCheckpoint record.checkpoint = some state ∧
-      resume delivery.outcome.data.term state = some delivery.resumed ∧
+      resume (responseData delivery.settlement.decided delivery.view).term state = some delivery.resumed ∧
       runSegment config delivery.envelope delivery.resumed = .ok delivery.segment := by
   refine ⟨delivery.record, delivery.state, delivery.recordExact, delivery.awaiting, ?_, delivery.stateExact,
     delivery.resumeExact, delivery.segmentExact⟩
@@ -1393,12 +1948,14 @@ theorem resume_deterministic {rootBytes : Bytes → Digest} {config : Config} {s
   have settlements : one.settlement = two.settlement := by
     have a := one.settled; have b := two.settled
     rw [sameRecord, awaits, b] at a; exact (Except.ok.inj a).symm
-  have outcomes : one.outcome = two.outcome := by
-    rw [one.outcomeExact, two.outcomeExact, records, settlements]
+  have views : one.view = two.view := by
+    have a := one.viewExact; rw [records, two.viewExact] at a
+    exact (Option.some.inj (Except.ok.inj a)).symm
   have states : one.state = two.state := by
     have a := one.stateExact; rw [records, two.stateExact] at a; exact (Option.some.inj a).symm
   have resumedEq : one.resumed = two.resumed := by
-    have a := one.resumeExact; rw [outcomes, states, two.resumeExact] at a; exact (Option.some.inj a).symm
+    have a := one.resumeExact; rw [settlements, views, states, two.resumeExact] at a
+    exact (Option.some.inj a).symm
   have envelopes : one.envelope = two.envelope := by
     rw [one.envelopeExact, two.envelopeExact, records, settlements, sameEnvelope]
   have segments : one.segment = two.segment := by
@@ -1406,7 +1963,7 @@ theorem resume_deterministic {rootBytes : Bytes → Digest} {config : Config} {s
     exact (Except.ok.inj a).symm
   have yieldeds : one.yielded = two.yielded := by
     have a := one.yieldedExact
-    rw [awaits, sameRecord, records, segments, two.yieldedExact] at a
+    rw [awaits, sameRecord, records, segments, views, two.yieldedExact] at a
     exact (Except.ok.inj a).symm
   refine ⟨resumedEq, segments, ?_⟩
   rw [one.nextExact, two.nextExact, records, segments, yieldeds]
@@ -1483,8 +2040,21 @@ theorem end_returns_purse (config : Config) (book : Book) (held : AccountId) (es
 #assert_axioms second_delivery_refused
 #assert_axioms slot_decided_once
 #assert_axioms slot_single_decider
-#assert_axioms stale_reads_conflict
-#assert_axioms current_reads_exact
+#assert_axioms settle_posts_current
+#assert_axioms stateWrite_spec
+#assert_axioms commitYield_spec
+#assert_axioms segmentCommit_spec
+#assert_axioms Delivery.posts_current
+#assert_axioms accepted_posts_current
+#assert_axioms accepted_guards_current
+#assert_axioms resume_outcome_preserved
+#assert_axioms resume_view_current
+#assert_axioms yield_write_from_current_read
+#assert_axioms moved_state_refuses
+#assert_axioms stateWrite_unviewed_never_sets
+#assert_axioms editField_add_comm
+#assert_axioms editFields_add_comm
+#assert_axioms add_writes_commute
 #assert_axioms resume_binds_checkpoint
 #assert_axioms resume_deterministic
 #assert_axioms refund_measurement_free

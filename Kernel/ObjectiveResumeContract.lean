@@ -86,14 +86,16 @@ theorem runSegment_yielded {config : Config} {ticks : Nat} {start state : State}
 /-- A yielded segment's commit always exists when it was admitted. -/
 theorem segmentCommit_yielded {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {transaction : TransactionId} {cell object : CellId}
-    {generation : Nat} {state : State} {plan : PlanAwait} {committed : Option YieldCommit}
-    (ok : segmentCommit config snapshot height transaction cell object generation (.yielded state plan) =
-      .ok committed) :
+    {generation : Nat} {current : Option ObjectState} {viewed : Bool} {state : State} {plan : PlanAwait}
+    {committed : Option YieldCommit}
+    (ok : segmentCommit config snapshot height transaction cell object generation current viewed
+      (.yielded state plan) = .ok committed) :
     ∃ yielded, committed = some yielded := by
   simp only [segmentCommit, bind, Except.bind] at ok
   split at ok
   · cases ok
-  · cases ok; exact ⟨_, rfl⟩
+  · simp only [pure, Except.pure, Except.ok.injEq] at ok
+    exact ⟨_, ok.symm⟩
 
 /-- The record that ends a yielded segment stores exactly its yielded state. -/
 theorem nextRecord_checkpoint (base : Record) (generation : Nat) (state : State)
@@ -157,7 +159,7 @@ theorem delivery_checkpoint_typed {rootBytes : Bytes → Digest} {config : Confi
 
 /-- Two segments end alike: the same Plan, the same result, the same fault. -/
 def Segment.Agrees : Segment → Segment → Prop
-  | .yielded _ plan, .yielded _ plan' => plan.state = plan'.state ∧ plan.source = plan'.source ∧
+  | .yielded _ plan, .yielded _ plan' => plan.write = plan'.write ∧ plan.source = plan'.source ∧
       plan.patience = plan'.patience
   | .finished result, .finished result' => result = result'
   | .faulted reason, .faulted reason' => reason = reason'

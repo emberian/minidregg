@@ -167,18 +167,29 @@ Design: `redregg/designs/MINI-PROGRAM-MODEL-20261004.md` §A, §B, §D (answer s
   ([Theory/ObjectiveBendDemandCollect](../Theory/ObjectiveBendDemandCollect.lean): only
   the cells the yielded Plan and the stack reach, compacted and renumbered), as
   checkpoint bytes (the token stream of `encodeState`), their digest, the pinned package identity, the instantiating input,
-  the generation, the reads its continuation depends on, the escrow terms, and its phase
+  the generation, the escrow terms, and its phase
   (`awaiting await | done result | faulted reason`). An await has an id
   `H(record cell, generation, checkpoint digest)`, a source (an answer slot with one
   decider, or a due height; a `message` await is refused by name until inboxes exist),
   and a mandatory deadline height (yield height + `patience`).
-- **Plans the kernel performs.** A yielded Plan is `await {state, on, patience}`: the
-  declared state is written to the object's state cell, `on` names the source. The
-  response type is the outcome sum `reply R | refused | unknown | timedOut | broken |
-  upgraded | conflict {stale, decided}`; a stale read wraps the outcome the await DID
-  resolve to (`decided`), so a reply is never lost to a stale read. A birth is refused
-  unless the program's response type types every kernel outcome, bare and inside a
-  `conflict`, and a conflict's decided reply has the reply type.
+- **Resume with view** (ROOT ruling 10-05). The object's declared state cell holds an
+  `ObjectState {version, value}` ([Kernel/ObjectState](../Kernel/ObjectState.lean));
+  every committed write installs the next version. An activity is resumed with
+  `resumed {outcome, view}`: the outcome its await settled to, exactly (never replaced,
+  never dropped), and `view = {version, state}`, the object's declared state read IN THE
+  RESUMING TURN. The outcome sum is `reply R | refused | unknown | timedOut | broken |
+  upgraded`; staleness is not an outcome.
+- **Plans the kernel performs.** A yielded Plan is `await {write, on, patience}`. `write`
+  is a record of field edits (`keep | set v | add n`), applied by the kernel to the state
+  the activity was resumed with (`stateWrite`, the single point where a declared-state
+  write is built), installing version + 1 against the root that state was read from. So
+  no write is computed from a stale read: a delivery prepared on one snapshot is refused
+  on any snapshot where the state moved, and a fresh delivery sees the move. A birth's
+  first segment has seen no state: its write may `set` a field only when it creates the
+  state cell (`blindWrite`), and a first yield on an object with no state must create it.
+  A birth is refused unless the program's response type is `resumed {outcome, view}`,
+  types every kernel outcome at its outcome type, and (when it yields) types the view of
+  the state it leaves.
 - **Typing data.** The kernel types the datum's closed Core4 term with the actual
   checker (`check`), annotating each injection with the constructor the declared type
   gives it, and requires the checked type to agree (`TypedData`). Inputs, replies and
@@ -188,11 +199,12 @@ Design: `redregg/designs/MINI-PROGRAM-MODEL-20261004.md` §A, §B, §D (answer s
   receiver's seal): `publish`, `birth` (instantiate, run to the first yield, commit
   record + state + slot + Book postings), `resolve` (the slot's decider, at or before
   the deadline, typed reply; spends the slot claim), `deliver` (anyone; settles the
-  await from its slot, due height or deadline, revalidates the recorded reads, decodes
-  the record cell's checkpoint, resumes with the typed outcome, runs to the next yield
+  await from its slot, due height or deadline, reads the view, decodes
+  the record cell's checkpoint, resumes with the typed outcome and view, runs to the next yield
   or end, commits the new record, the Plan's write, the next slot and the Book postings
   together; spends the await claim), `topUp` (anyone funds a purse), `writeState` (a
-  holder of the object writes its declared state, which stales recorded reads). Every
+  holder of the object writes its declared state: a new version, which the next
+  delivery's view shows). Every
   delivery of one await shares one transaction id: the exact retry replays, any other
   is a transaction conflict.
 - **Fees on the Book.** In the deployment's credit asset, paid to its collector. An
@@ -213,8 +225,12 @@ Design: `redregg/designs/MINI-PROGRAM-MODEL-20261004.md` §A, §B, §D (answer s
 Theorems (compiled, `#assert_axioms`, no `sorry`): `resume_consumes_once` (for every
 seal: after a delivery installs, no intent spending its await is ever accepted, and its
 exact retry replays), `second_delivery_refused`, `slot_decided_once`,
-`slot_single_decider`, `stale_reads_conflict` (the conflict carries the decided outcome)
-and `current_reads_exact`, `resume_binds_checkpoint`, `resume_deterministic`,
+`slot_single_decider`, `resume_outcome_preserved` (an await answered by its slot reaches
+the activity exactly as decided), `resume_view_current` (the view is the state cell at the
+delivering snapshot, and an accepted delivery found that cell's root unmoved),
+`yield_write_from_current_read` (every state post is the Plan's write applied to the
+view, version + 1, against the view's root), `moved_state_refuses`,
+`stateWrite_unviewed_never_sets`, `resume_binds_checkpoint`, `resume_deterministic`,
 `refund_measurement_free`, `submitter_charge_declared`, `yield_reserves_pair`,
 `end_returns_purse`, `Birth.conserves`, `Delivery.conserves`, `TopUp.conserves`; in `ObjectiveProofs`,
 `birth_checkpoint_typed` and `delivery_checkpoint_typed` (the collected checkpoint is
@@ -225,13 +241,12 @@ from `collect_resume_segment`, `related_collect` and the lockstep simulation of
 
 Executed (on the WIP route, `lane/activity-native-wip`): the native acceptance drives
 [world/activity/Tally.obend](../world/activity/Tally.obend) on a scratch native world,
-every turn a signed command, 59 rows (ownership, slot decider, typed replies, retry and
+every turn a signed command, 59 rows, before resume with view (ownership, slot decider, typed replies, retry and
 conflict, conflict carrying the reply, funding park, timeout, Book conservation, reopen,
 and the collected checkpoint's size across twelve resumes).
 
-Not yet: the native route (above); the object record (L3); a resume that delivers the
-current declared state with its version and refuses a Plan state write computed from a
-superseded version (a stale resume today still writes back its own copy: lost update);
+Not yet: the native route (above); the object record (L3); a theorem that `add`-only
+writes commute (executed by the two-tallies acceptance scenario on the native route);
 exhaustion charged at the declared envelope; disposal of ended and abandoned records;
 upgrade dispositions (DRAIN/ABORT and the `upgraded` outcome's producer);
 sends, inboxes and `message` awaits; the object's law judging its declared-state writes
