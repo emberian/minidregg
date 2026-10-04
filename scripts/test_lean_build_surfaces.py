@@ -19,6 +19,9 @@ class BuildSurfaces(unittest.TestCase):
                 p = root / (name.replace(".", "/") + ".lean")
                 p.parent.mkdir(parents=True, exist_ok=True)
                 p.write_text("namespace Fixture\nend Fixture\n")
+        # The tests author Compiler modules; no qualification group roots live
+        # under Compiler/ any more, so the fixture must create the directory.
+        (root / "Compiler").mkdir(exist_ok=True)
         (root / "docs/construction").mkdir(parents=True)
         (root / "docs/construction/source-intake-20261003.json").write_text('{"files": []}')
         (root / "protocol").mkdir()
