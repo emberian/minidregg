@@ -1,7 +1,33 @@
 name: Build and gates
 
 # The same gate as scripts/local-gates.sh (its header lists the gates). The
-# local run on a Linux build box is the bar, not this workflow.
+# local run on a Linux build box is the bar, not this workflow; this workflow
+# exists so that the same gate is also measured on every push.
+#
+# Two jobs. A cold build of the umbrella (about 9,500 Lake jobs; Mathlib comes
+# prebuilt from its cache) took 79 to 102 minutes on a hosted runner, and runs have
+# been cut by "The runner has received a shutdown signal" (exit 143) after 20 to
+# 68 minutes. So the Lean build is made incremental and resumable:
+#
+#   lean-build  restores the newest project build cache, builds in four stages,
+#               and saves a checkpoint after each, so a killed job costs at most
+#               one stage and the next run resumes from the last checkpoint.
+#   gates       restores the newest cache and runs scripts/local-gates.sh
+#               UNCHANGED, every gate included. It runs even when lean-build is
+#               red (a red build must not hide a second red gate), and its own
+#               lake-build gate is the authoritative build: the cache only decides
+#               how much of it is already done. A job that cannot run is a red
+#               job, never a skipped green one.
+#
+# Cache key: lean-toolchain + lake-manifest.json (the TOOL part, shared by every
+# commit that keeps the toolchain and the dependency pins) then a hash of every
+# tracked .lean source and lakefile.toml (the SOURCE part). The exact key hits
+# only for an identical tree; the restore prefix falls back to the newest cache of
+# the same toolchain, and Lake then rebuilds only the modules whose hashes
+# differ. Mathlib is NOT cached here: `lake exe cache get` already fetches it.
+#
+# Limits: both jobs timeout-minutes 350 (GitHub's hosted maximum is 360).
+
 on:
   push:
   workflow_dispatch:
@@ -9,8 +35,152 @@ on:
 permissions:
   contents: read
 
+env:
+  # What is cached: the project's own build, the git dependency uwueave's build,
+  # and the compiled C objects of Mathlib and its dependencies (about 2,900
+  # objects, ~9 minutes to rebuild; linking the executables needs them, and the
+  # Mathlib cache supplies only the oleans and C files).
+  LEAN_CACHE_PATHS: |
+    .lake/build
+    .lake/packages/uwueave/.lake/build
+    .lake/packages/*/.lake/build/ir/**/*.c.o*
+
 jobs:
+  lean-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    permissions:
+      contents: read
+      actions: write # only to delete this run's own superseded checkpoint caches
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/v3.1.1/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Swap and resource baseline
+        run: |
+          df -h / /mnt; free -m; nproc
+          avail_mb=$(df -Pm /mnt | awk 'NR==2{print $4}')
+          size_mb=$(( avail_mb - 2048 ))
+          [ "$size_mb" -gt 12288 ] && size_mb=12288
+          if [ "$size_mb" -ge 2048 ]; then
+            sudo swapoff -a
+            sudo rm -f /mnt/swapfile
+            sudo fallocate -l "${size_mb}M" /mnt/swapfile
+            sudo chmod 600 /mnt/swapfile
+            sudo mkswap /mnt/swapfile
+            sudo swapon /mnt/swapfile
+          else
+            echo "::warning::/mnt has ${avail_mb} MB free; keeping the image swap"
+          fi
+          swapon --show; free -m
+
+      - name: Cache keys
+        id: keys
+        run: |
+          tool=$(sha256sum lean-toolchain lake-manifest.json | sha256sum | cut -c1-16)
+          src=$(git ls-files -z -- '*.lean' lakefile.toml | xargs -0 sha256sum | sha256sum | cut -c1-16)
+          echo "tool=lean-build-v1-${RUNNER_OS}-${RUNNER_ARCH}-${tool}" >> "$GITHUB_OUTPUT"
+          echo "src=${src}" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch dependencies and the Mathlib build cache
+        run: |
+          lake exe cache get
+
+      - name: Restore the project build cache
+        id: restore
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ${{ env.LEAN_CACHE_PATHS }}
+          key: ${{ steps.keys.outputs.tool }}-${{ steps.keys.outputs.src }}
+          restore-keys: |
+            ${{ steps.keys.outputs.tool }}-
+
+      - name: Which cache was restored
+        run: |
+          echo "exact hit: ${{ steps.restore.outputs.cache-hit }}"
+          echo "matched key: ${{ steps.restore.outputs.cache-matched-key }}"
+          if [ -z "${{ steps.restore.outputs.cache-matched-key }}" ]; then
+            echo "::warning::no project build cache found: this is a cold build"
+          fi
+
+      - name: Build stage 1 (Theory Pred Kernel Effects)
+        id: s1
+        run: bash scripts/ci-run-sampled.sh lake build Theory Pred Kernel Effects
+      - name: Checkpoint 1
+        if: ${{ always() && steps.s1.outputs.worked == 'true' && steps.restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ${{ env.LEAN_CACHE_PATHS }}
+          key: ${{ steps.keys.outputs.tool }}-${{ steps.keys.outputs.src }}-cp1-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Build stage 2 (Compiler Selvage)
+        id: s2
+        run: bash scripts/ci-run-sampled.sh lake build Compiler Selvage
+      - name: Checkpoint 2
+        if: ${{ always() && steps.s2.outputs.worked == 'true' && steps.restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ${{ env.LEAN_CACHE_PATHS }}
+          key: ${{ steps.keys.outputs.tool }}-${{ steps.keys.outputs.src }}-cp2-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Build stage 3 (Assurance Host)
+        id: s3
+        run: bash scripts/ci-run-sampled.sh lake build Assurance Host
+      - name: Checkpoint 3
+        if: ${{ always() && steps.s3.outputs.worked == 'true' && steps.restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ${{ env.LEAN_CACHE_PATHS }}
+          key: ${{ steps.keys.outputs.tool }}-${{ steps.keys.outputs.src }}-cp3-${{ github.run_id }}-${{ github.run_attempt }}
+
+      # Stage 4 is exactly the target list of scripts/local-gates.sh g_lake-build.
+      - name: Build stage 4 (every declared library and executable)
+        id: s4
+        run: |
+          mapfile -t libs < <(sed -n '/^\[\[lean_lib\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | grep -v '^ResearchWip$')
+          mapfile -t exes < <(sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml)
+          echo "lake build ${libs[*]} ${exes[*]}"
+          bash scripts/ci-run-sampled.sh lake build "${libs[@]}" "${exes[@]}"
+
+      - name: Save the project build cache
+        id: save
+        if: ${{ steps.s4.outcome == 'success' && steps.restore.outputs.cache-hit != 'true' && (steps.s1.outputs.worked == 'true' || steps.s2.outputs.worked == 'true' || steps.s3.outputs.worked == 'true' || steps.s4.outputs.worked == 'true') }}
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ${{ env.LEAN_CACHE_PATHS }}
+          key: ${{ steps.keys.outputs.tool }}-${{ steps.keys.outputs.src }}
+
+      - name: Save a partial cache of a red build
+        # A build with a real Lean error still compiled most of the tree; keeping
+        # that makes the next run incremental instead of cold.
+        if: ${{ steps.s4.outcome == 'failure' && steps.restore.outputs.cache-hit != 'true' && (steps.s1.outputs.worked == 'true' || steps.s2.outputs.worked == 'true' || steps.s3.outputs.worked == 'true' || steps.s4.outputs.worked == 'true') }}
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ${{ env.LEAN_CACHE_PATHS }}
+          key: ${{ steps.keys.outputs.tool }}-${{ steps.keys.outputs.src }}-partial-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Drop this run's superseded checkpoints
+        if: ${{ steps.save.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          for n in 1 2 3; do
+            gh cache delete "${{ steps.keys.outputs.tool }}-${{ steps.keys.outputs.src }}-cp${n}-${{ github.run_id }}-${{ github.run_attempt }}" -R "$GITHUB_REPOSITORY" || true
+          done
+
   gates:
+    needs: lean-build
+    # Runs when lean-build is red or when it was cut by the runner; never when
+    # the whole run is cancelled. Its own lake-build gate finishes whatever the
+    # cache lacks, so every gate is measured and none is skipped.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     steps:
@@ -23,9 +193,82 @@ jobs:
             | sh -s -- -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
+      - name: Swap and resource baseline
+        run: |
+          df -h / /mnt; free -m; nproc
+          avail_mb=$(df -Pm /mnt | awk 'NR==2{print $4}')
+          size_mb=$(( avail_mb - 2048 ))
+          [ "$size_mb" -gt 12288 ] && size_mb=12288
+          if [ "$size_mb" -ge 2048 ]; then
+            sudo swapoff -a
+            sudo rm -f /mnt/swapfile
+            sudo fallocate -l "${size_mb}M" /mnt/swapfile
+            sudo chmod 600 /mnt/swapfile
+            sudo mkswap /mnt/swapfile
+            sudo swapon /mnt/swapfile
+          else
+            echo "::warning::/mnt has ${avail_mb} MB free; keeping the image swap"
+          fi
+          swapon --show; free -m
+
+      - name: Cache keys
+        id: keys
+        run: |
+          tool=$(sha256sum lean-toolchain lake-manifest.json | sha256sum | cut -c1-16)
+          src=$(git ls-files -z -- '*.lean' lakefile.toml | xargs -0 sha256sum | sha256sum | cut -c1-16)
+          echo "tool=lean-build-v1-${RUNNER_OS}-${RUNNER_ARCH}-${tool}" >> "$GITHUB_OUTPUT"
+          echo "src=${src}" >> "$GITHUB_OUTPUT"
+
       - name: Fetch dependencies and the Mathlib build cache
         run: |
           lake exe cache get
 
+      - name: Restore the project build cache
+        id: restore
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ${{ env.LEAN_CACHE_PATHS }}
+          key: ${{ steps.keys.outputs.tool }}-${{ steps.keys.outputs.src }}
+          restore-keys: |
+            ${{ steps.keys.outputs.tool }}-${{ steps.keys.outputs.src }}-
+            ${{ steps.keys.outputs.tool }}-
+
+      - name: Which cache was restored
+        run: |
+          echo "lean-build job result: ${{ needs.lean-build.result }}"
+          echo "exact hit: ${{ steps.restore.outputs.cache-hit }}"
+          echo "matched key: ${{ steps.restore.outputs.cache-matched-key }}"
+          if [ -z "${{ steps.restore.outputs.cache-matched-key }}" ]; then
+            echo "::warning::no project build cache found: the lake-build gate is a cold build"
+          fi
+
       - name: Gates
-        run: bash scripts/local-gates.sh
+        id: gates
+        run: bash scripts/ci-run-sampled.sh bash scripts/local-gates.sh
+
+      - name: Did the lake-build gate do real work
+        id: gatebuild
+        if: ${{ always() }}
+        run: |
+          secs=$(awk '$1=="lake-build"{print $3}' build-logs/local-gates/summary.txt 2>/dev/null || true)
+          echo "lake-build gate wall: ${secs:-unknown} s"
+          if [ "${secs:-0}" -gt 300 ]; then echo "worked=true" >> "$GITHUB_OUTPUT"; fi
+          exit 0
+
+      - name: Save the cache this job extended
+        # Only when the gates job itself did a long build the restored cache
+        # lacked (the lean-build job was cut or red); otherwise nothing is new.
+        if: ${{ always() && steps.restore.outputs.cache-hit != 'true' && steps.gatebuild.outputs.worked == 'true' }}
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ${{ env.LEAN_CACHE_PATHS }}
+          key: ${{ steps.keys.outputs.tool }}-${{ steps.keys.outputs.src }}-gates-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Gate logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gate-logs
+          path: build-logs/local-gates/
+          if-no-files-found: warn
+          retention-days: 14
