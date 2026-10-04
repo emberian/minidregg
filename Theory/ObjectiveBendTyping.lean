@@ -985,10 +985,108 @@ def typeJson : Ty → Json
   | .computation plan response result => Json.mkObj [("tag",toJson "computation"),
       ("plan",typeJson plan),("response",typeJson response),("result",typeJson result)]
 
+/-- Every quantity in a type made `unrestricted` (arrow parameters at any depth). -/
+def unrestrictedTy : Ty → Ty
+  | .arrow reuse _ domain codomain => .arrow reuse .unrestricted (unrestrictedTy domain) (unrestrictedTy codomain)
+  | .field name member tail => .field name (unrestrictedTy member) (unrestrictedTy tail)
+  | .specification metadata extension => .specification (unrestrictedTy metadata) (unrestrictedTy extension)
+  | .prototype spec target => .prototype (unrestrictedTy spec) (unrestrictedTy target)
+  | .variant row => .variant (unrestrictedTy row)
+  | .computation plan response result =>
+      .computation (unrestrictedTy plan) (unrestrictedTy response) (unrestrictedTy result)
+  | other => other
+
+/-- The kind of rule a refused packet broke. -/
+inductive RefusalKind where
+  | budget | ownership | typing
+  deriving Repr, DecidableEq
+
+/-- Type fuel that bounds only the checker's depth, generous enough that a
+program refused with it was not refused for depth. -/
+def ampleFuel (fuel : Nat) : Nat := max (fuel * 4) 65536
+
+/-- The same packet with every quantity relaxed to `unrestricted`: lambda
+parameters, every arrow in the declared types and bounds, and the context. -/
+def relaxQuantities (packet : DecodedPacket) : DecodedPacket :=
+  let relaxAnnotation := fun (annotation : LambdaAnnotation) =>
+    ({ domain := unrestrictedTy annotation.domain, codomain := unrestrictedTy annotation.codomain,
+       parameter := .unrestricted, reuse := annotation.reuse } : LambdaAnnotation)
+  { source :=
+      { term := packet.source.term,
+        annotations := fun position => (packet.source.annotations position).map relaxAnnotation,
+        assumptions := { packet.source.assumptions with
+          bounds := packet.source.assumptions.bounds.map fun entry => (entry.1, unrestrictedTy entry.2) } },
+    context := packet.context.map fun binding =>
+      ({ type := unrestrictedTy binding.type, quantity := .unrestricted } : Binding),
+    fuel := packet.fuel }
+
+/-- The checker answers accepted or refused; it does not name the rule. To say
+which KIND of rule refused, this re-runs the SAME checker on two variations of
+the same packet, in order: (1) ample fuel — if that accepts, the refusal was
+the checker budget; (2) every quantity relaxed to `unrestricted` — if that
+accepts, the refusal was ownership (an affine or linear binding used more than
+once, or captured by a closure that may run again). Otherwise it was a typing
+or activity rule. No second checker is written: the classification is what the
+real checker says about the variations. Meaningful only for a packet `check`
+refused. -/
+def refusalKind (packet : DecodedPacket) : RefusalKind :=
+  if (check packet.source packet.context (ampleFuel packet.fuel)).isSome then .budget
+  else
+    let relaxed := relaxQuantities packet
+    if (check relaxed.source relaxed.context relaxed.fuel).isSome then .ownership else .typing
+
+def refusalReason (packet : DecodedPacket) : String :=
+  match refusalKind packet with
+  | .budget => s!"checker budget refused: typeFuel {packet.fuel} is too small for this program (it checks with {ampleFuel packet.fuel}); raise limits.typeFuel"
+  | .ownership => "ownership refused: an affine or linear parameter is used more than once (both mean at most once), or one is captured by a closure that may run again (the program checks with every quantity unrestricted)"
+  | .typing => "typing refused: types disagree, a custody value is shared or captured, or an activity rule (an Activity is refused as an argument, record/extend field, specification or prototype component, or sum payload; a Plan must be a sum of first-order data; a response must be first-order data)"
+
+/-- The classification on this module's own refused fixtures, each also refused
+by `check` above: an affine binding used twice is ownership, an accepted
+program given too little fuel is the budget, a conjunction of labels is typing,
+and capturing custody in a reusable closure is typing (relaxing quantities
+cannot make custody shareable). -/
+theorem refusal_kind_duplicate_affine :
+    refusalKind ⟨duplicateAffine, [⟨.natural,.affine⟩], 8⟩ = .ownership := by decide +kernel
+theorem refusal_kind_starved_fuel :
+    (check (custodyCapture .once) [⟨.custody 17,.linear⟩] 1).isNone = true ∧
+      refusalKind ⟨custodyCapture .once, [⟨.custody 17,.linear⟩], 1⟩ = .budget := by decide +kernel
+theorem refusal_kind_label_conjunction :
+    refusalKind ⟨stringConjunction, [], 8⟩ = .typing := by decide +kernel
+theorem refusal_kind_custody_in_reusable_closure :
+    refusalKind ⟨custodyCapture .reusable, [⟨.custody 17,.linear⟩], 8⟩ = .typing := by decide +kernel
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.refusal_kind_duplicate_affine' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms refusal_kind_duplicate_affine
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.refusal_kind_starved_fuel' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms refusal_kind_starved_fuel
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.refusal_kind_label_conjunction' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms refusal_kind_label_conjunction
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.refusal_kind_custody_in_reusable_closure' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms refusal_kind_custody_in_reusable_closure
+
 def packetReceipt (value : Json) : Except String Json := do
   let packet ← decodePacket value
-  let result ← requireSome "annotated typing/ownership refused or checker budget insufficient"
-    (check packet.source packet.context packet.fuel)
+  let result ← requireSome (refusalReason packet) (check packet.source packet.context packet.fuel)
   return Json.mkObj [
     ("schema", toJson "dregg.objective-bend.typing-receipt.v1"),
     ("status", toJson "accepted"),

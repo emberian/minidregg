@@ -77,7 +77,7 @@ def preview (typed limits : Json) (responsesJson : Json := Json.arr #[]) : Excep
   let responses ← (← responsesJson.getArr?).toList.mapM (decodeData 64)
   if responses.length > 64 then throw "preview response capacity refused"
   let some checked := check packet.source packet.context packet.fuel
-    | throw "annotated typing/ownership refused or checker budget insufficient (activities: an Activity is refused as an argument, record/extend field, specification or prototype component, or sum payload; a Plan must be a sum of first-order data; a response must be first-order data)"
+    | throw (refusalReason packet)
   let response? : Option Ty := match checked.type with
     | .computation _ response _ => some response
     | _ => none

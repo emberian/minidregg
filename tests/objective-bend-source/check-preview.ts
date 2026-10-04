@@ -42,7 +42,10 @@ for(const item of cohort){
  let out:any;try{out=preview(requestPath,join(dir,"preview"),toolingPath);}catch(error){out=error;}
  const turns=out.preview?.turns??[];
  results.push({name:item.name,status:out.status,type:out.preview?.type?.tag??null,result:out.preview?.result??null,turns:turns.length,diagnostic:out.diagnostic?.message??null});
- if(item.expectedStatus==="refused"){require(out.status==="refused","source typing refusal differs: "+item.name+" "+out.status);continue;}
+ if(item.expectedStatus==="refused"){require(out.status==="refused","source typing refusal differs: "+item.name+" "+out.status);
+  // The preview names the kind of rule that refused (Host/ObjectiveBendPreview.refusalReason).
+  if(item.expectedRefusal!==undefined)require(String(out.diagnostic?.message??"").startsWith(item.expectedRefusal),"refusal reason differs: "+item.name+" "+out.diagnostic?.message);
+  continue;}
  // Activities: every yield is quiescent and its checkpoint round-trips (executed, not proved here).
  for(const turn of turns)require(turn.quiescent===true&&turn.checkpointRoundTrips===true,"yield not a quiescent round-tripping checkpoint: "+item.name);
  if(item.expectedTurns!==undefined)require(turns.length===item.expectedTurns,"turn count differs: "+item.name+" "+turns.length);
@@ -66,6 +69,7 @@ for(const [name,change,expect] of [
  const request=join(outputRoot,name+"-request.json");writeFileSync(request,JSON.stringify({...original,...change})+"\n",{flag:"wx"});
  let result:any;try{result=preview(request,join(outputRoot,name),toolingPath);}catch(error){result=error;}
  require(result.status===expect,"preview refusal/exhaustion differs: "+name+" "+result.status);
+ if(name==="TypingBudget")require(String(result.diagnostic?.message??"").startsWith("checker budget refused"),"a budget refusal is not named as one: "+result.diagnostic?.message);
  require(expect!=="suspended"||result.preview?.result===null,"exhaustion falsely returned a source result");
 }
 writeFileSync(join(outputRoot,"results.json"),JSON.stringify(results,null,2)+"\n");

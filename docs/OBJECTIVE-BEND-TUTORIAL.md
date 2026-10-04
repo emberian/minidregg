@@ -901,15 +901,18 @@ def twice(affine x: Nat) -> Nat:
 $ bun docs/tutorial/run.ts docs/tutorial/ch7-twice.obend twice '["4"]'
 status: refused
 stage: objective-typed-preview
-message: annotated typing/ownership refused or checker budget insufficient (activities: an Activity is refused as an argument, record/extend field, specification or prototype component, or sum payload; a Plan must be a sum of first-order data; a response must be first-order data)
+message: ownership refused: an affine or linear parameter is used more than once (both mean at most once), or one is captured by a closure that may run again (the program checks with every quantity unrestricted)
 (exit status 2)
 ```
 
-The checker refuses the whole program. This is its exact text. The preview has one message for every
-program the checker refuses (see the end of
-[Host/ObjectiveBendPreview.lean](../Host/ObjectiveBendPreview.lean)), so it does
-not say which rule failed, and the part about activities is not about this
-program. Nothing runs
+The checker refuses the whole program. The checker itself only answers
+accepted or refused; the preview names the kind of rule by asking the same
+checker about two variations of the program (see `refusalReason` in
+[Host/ObjectiveBendPreview.lean](../Host/ObjectiveBendPreview.lean)): with ample
+type fuel (a `checker budget refused` message), and with every quantity made
+unrestricted (this `ownership refused` message: relaxing `affine` is exactly
+what makes `twice` check). Anything else is reported as `typing refused`. It
+names the kind of rule, not the line. Nothing runs
 after a refusal. The command also exits with status 2, and the same message goes
 to standard error as JSON.
 
