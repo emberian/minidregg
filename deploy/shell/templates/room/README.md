@@ -16,7 +16,7 @@ file's.
 |---|---|---|
 | `workroom/template.shell` | `$ROOM` (open law), `$ROOM/index` (the map: only `$ME` writes, only grows), `$ROOM/wall` (stream), `$ROOM/notes` (draft), `$ROOM/tasks` (note), the map's line and links to wall/notes/tasks, notes → index | `room template show workroom` |
 | `social/template.shell` | `$ROOM`, `$ROOM/index`, `$ROOM/wall` (stream), `$ROOM/intro` (draft), the map's links | `room template show social` |
-| `social/member.shell` | `room welcome $ROOM $MEMBER --template social`: the invite (observe, place, append), and `$ROOM/stream-$MEMBER`, owned by `$MEMBER`, whose law refuses every other writer (PLACE §2.3 (a)) | `room template show social member` |
+| `social/member.shell` | `room welcome $ROOM $MEMBER --template social`: the invite (observe, place, append), and `$ROOM/stream-$MEMBER`, born owned by the founder (a birth into a room is owned by its creator; its law refuses every writer but `$MEMBER`, the founder included) (PLACE §2.3 (a)) | `room template show social member` |
 | `story/template.shell` | `$ROOM`, `$ROOM/index`, `$ROOM/chapters` (note), `$ROOM/scenes` (stream), `$ROOM/cast` (draft), the map's links, chapters → cast | `room template show story` |
 
 The map's links to a stream are `external mini:object/ID` links (the

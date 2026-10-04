@@ -47,7 +47,7 @@ secret in `KEY.enc-ring`, so past epochs stay open; the founder's next rotation 
     mini workspace --action room-key --op recipient-record --room-id R --keys-cell K --key-epoch N --founder-key F
                                         (a member) pin the founder key you were given directly, and print your
                                         signed declaration: give it to the founder directly
-    room invite i1 lab SUBJECT @DECL    the grant (submit i1, publish i1 as ever), pin SUBJECT's signing key,
+    room invite i1 lab SUBJECT @DECL    the grant (for a private room this verb submits and publishes it itself, so there is no separate `submit i1`; the invitee still needs your `export i1`), pin SUBJECT's signing key,
                                         then the release records, the readback, and the wrap
          [--past]                       also wrap every earlier epoch you hold (default: the current one only)
          [--i-know]                     invite a hosted subject anyway (see below)
