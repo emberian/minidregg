@@ -1,5 +1,8 @@
 //! Physical controller for one Mini agent-grain task. Semantic admission is
 //! exclusively a signed call to the native Lean host through `mini`.
+mod journal_io;
+mod controller_digest;
+mod public_status;
 mod application_api_tools;
 mod application_tools;
 mod concierge;
@@ -2300,47 +2303,11 @@ fn bounded_policy_bytes(path: &Path) -> Result<Vec<u8>> {
 }
 
 fn sha256_file(path: &Path) -> Result<String> {
-    let output = Command::new("/usr/bin/openssl")
-        .args(["dgst", "-sha256"])
-        .arg(path)
-        .output()
-        .map_err(|e| format!("file digest: {e}"))?;
-    if !output.status.success() {
-        return Err(format!("file digest refused for {}", path.display()));
-    }
-    let line = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
-    let digest = line.split_whitespace().last().ok_or("file digest absent")?;
-    if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err("file digest is not SHA-256 hex".into());
-    }
-    Ok(digest.to_ascii_lowercase())
+    controller_digest::file(path).map_err(|e| format!("file digest: {e}"))
 }
 
 fn sha256_bytes(bytes: &[u8]) -> Result<String> {
-    let mut child = Command::new("/usr/bin/openssl")
-        .args(["dgst", "-sha256"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("byte digest: {e}"))?;
-    child
-        .stdin
-        .take()
-        .ok_or("byte digest stdin absent")?
-        .write_all(bytes)
-        .map_err(|e| format!("byte digest input: {e}"))?;
-    let output = child
-        .wait_with_output()
-        .map_err(|e| format!("byte digest result: {e}"))?;
-    if !output.status.success() {
-        return Err("byte digest refused".into());
-    }
-    let line = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
-    let digest = line.split_whitespace().last().ok_or("byte digest absent")?;
-    if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err("byte digest is not SHA-256 hex".into());
-    }
-    Ok(digest.to_ascii_lowercase())
+    Ok(controller_digest::bytes(bytes))
 }
 
 fn retained_exact(
@@ -2584,15 +2551,7 @@ fn next_retry_json(attempt: &Path) -> Result<PathBuf> {
 
 fn atomic_json(path: &Path, value: &impl Serialize) -> Result<()> {
     let bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
-    let tmp = path.with_extension("tmp");
-    if tmp.exists() {
-        return Err(format!("unresolved temporary journal {}", tmp.display()));
-    }
-    write_new(&tmp, &bytes)?;
-    fs::rename(&tmp, path).map_err(|e| format!("journal rename: {e}"))?;
-    File::open(path.parent().unwrap())
-        .and_then(|f| f.sync_all())
-        .map_err(|e| format!("journal directory sync: {e}"))
+    journal_io::write(path, &bytes).map_err(|e| format!("journal publication: {e}"))
 }
 
 fn decimal(s: &str, label: &str) -> Result<()> {
@@ -2748,22 +2707,8 @@ fn hermes_state_fingerprint(home: &Path) -> Result<Option<String>> {
                 "Hermes {name} must be an owned private regular file under 512 MiB"
             ));
         }
-        let output = Command::new("/usr/bin/openssl")
-            .args(["dgst", "-sha256"])
-            .arg(&path)
-            .output()
-            .map_err(|e| format!("Hermes state digest: {e}"))?;
-        if !output.status.success() {
-            return Err(format!("Hermes state digest refused for {name}"));
-        }
-        let line = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
-        let digest = line
-            .split_whitespace()
-            .last()
-            .ok_or("Hermes state digest absent")?;
-        if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err("Hermes state digest malformed".into());
-        }
+        let digest = controller_digest::file(&path)
+            .map_err(|e| format!("Hermes state digest for {name}: {e}"))?;
         parts.push(format!("{name}:{}:{digest}", meta.len()));
     }
     Ok(Some(parts.join("|")))
@@ -17661,13 +17606,16 @@ fn serve(mut rt: Runtime) -> Result<()> {
         let result = match next {
             Input::Line(line) if line == "attach hard" => rt.attach(false),
             Input::Line(line) if line == "attach soft" => rt.attach(true),
-            Input::Line(line) if line == "status" => {
+            Input::Line(line) if line == "status" => (|| -> Result<()> {
                 rt.emit(format!(
                     "{}\n",
-                    serde_json::to_string_pretty(&rt.journal).unwrap()
+                    serde_json::to_string_pretty(&public_status::project(
+                        &serde_json::to_value(&rt.journal).map_err(|e| e.to_string())?,
+                        rt.config.tool_task.as_ref().map_or(0, |tool| tool.registered_shared_applications.len()),
+                    )).map_err(|e| e.to_string())?
                 ));
                 Ok(())
-            }
+            })(),
             Input::TerminalLine {
                 attachment_id,
                 line,
@@ -19008,7 +18956,7 @@ mod tests {
     }
 
     #[test]
-    fn birth_ordinal_interrupted_journal_save_keeps_consumed_marker() {
+    fn birth_ordinal_legacy_temp_does_not_fence_retained_marker_retirement() {
         let root = std::env::temp_dir().join(format!(
             "grain-birth-ordinal-save-{}-{}",
             std::process::id(),
@@ -19018,6 +18966,7 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir(&root).unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
         let path = root.join("journal.json");
         let mut journal = Journal::fresh(json!({}));
         journal.birth_next_ordinal.insert("office".into(), 1);
@@ -19028,18 +18977,14 @@ mod tests {
         });
         atomic_json(&path, &journal).unwrap();
         std::fs::write(path.with_extension("tmp"), b"unresolved").unwrap();
-        assert!(persist_retired_no_birth_operation(&path, &mut journal).is_err());
-        assert_eq!(journal.birth_next_ordinal["office"], 1);
-        assert!(journal.birth_operation.is_some());
-        let disk: Journal = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        assert_eq!(disk.birth_next_ordinal["office"], 1);
-        assert!(disk.birth_operation.is_some());
-        std::fs::remove_file(path.with_extension("tmp")).unwrap();
+        // The previous committed journal remains authoritative; legacy temp
+        // bytes are never promoted, deleted, or allowed to fence exact recovery.
         persist_retired_no_birth_operation(&path, &mut journal).unwrap();
         assert_eq!(journal.birth_next_ordinal["office"], 0);
         let disk: Journal = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(disk.birth_next_ordinal["office"], 0);
         assert!(disk.birth_operation.is_none());
+        assert_eq!(std::fs::read(path.with_extension("tmp")).unwrap(), b"unresolved");
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -19122,6 +19067,8 @@ mod tests {
                 .as_nanos()
         ));
         fs::create_dir(&root).unwrap();
+        // Journals publish only into private parents (journal_io).
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         let state = root.join("state");
         fs::create_dir(&state).unwrap();
         fs::write(state.join("status"), b"1").unwrap();
@@ -19897,6 +19844,8 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
                 .as_nanos()
         ));
         fs::create_dir(&root).unwrap();
+        // Journals publish only into private parents (journal_io).
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         let state = root.join("state");
         fs::create_dir(&state).unwrap();
         fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).unwrap();

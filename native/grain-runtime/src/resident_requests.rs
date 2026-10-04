@@ -442,7 +442,7 @@ pub(crate) fn reconcile(state:&Path,controller:&Path,completion:Option<&Value>)-
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fixture(tag:&str)->PathBuf {let p=std::env::temp_dir().join(format!("resident-queue-{tag}-{}",std::process::id()));fs::create_dir_all(&p).unwrap();p}
+    fn fixture(tag:&str)->PathBuf {let p=std::env::temp_dir().join(format!("resident-queue-{tag}-{}",std::process::id()));fs::create_dir_all(&p).unwrap();fs::set_permissions(&p,std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();p}
     fn entry(author:&str,n:u64)->Value {json!({"author":author,"cell":author,"sequence":n,"height":n,"n":n,"kind":"say","text":"question","to":"8"})}
     fn prepared(entries:Vec<Value>)->Value {json!({"requestBinding":{"world":{"domain":"1","expectedSeed":"2"},"roomCell":"99","assignment":"1","task":"7"},"sourceRoom":{"entries":entries.len(),"selectedEntries":entries.len(),"members":[{"subject":"20","stream":"20"},{"subject":"21","stream":"21"}]},"sourceRequests":entries,"acceptedHeight":"0","me":"8","recentMemberEntries":[]})}
     #[test]fn fair_fifo_restart_and_bounded_admission() {
@@ -492,7 +492,7 @@ mod tests {
         fs::remove_dir_all(state).unwrap();
     }
     #[test]fn completion_recovery_requires_exact_native_delivery_and_never_zero_models_claim() {
-        let state=fixture("receipt");let controller=state.join("controller");fs::create_dir(&controller).unwrap();
+        let state=fixture("receipt");let controller=state.join("controller");fs::create_dir(&controller).unwrap();fs::set_permissions(&controller,std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
         let p=prepared(vec![entry("20",1),entry("21",2)]);select(&p,&state,Limits::default()).unwrap();started(&state,"source-id","input").unwrap();
         let frame=json!({"residentOrigin":{"residentPromptId":"source-id","promptOperationId":1}});
         assert!(reconcile(&state,&controller,Some(&frame)).is_err());
@@ -559,7 +559,7 @@ mod tests {
     }
 
     #[test]fn selected_completion_satisfies_unchanged_maintenance_without_another_prompt() {
-        let state=fixture("maintenance");let controller=state.join("controller");fs::create_dir(&controller).unwrap();
+        let state=fixture("maintenance");let controller=state.join("controller");fs::create_dir(&controller).unwrap();fs::set_permissions(&controller,std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
         let p=prepared(vec![entry("20",1)]);select(&p,&state,Limits::default()).unwrap();
         started(&state,"selected-source","request-input").unwrap();maintenance_started(&state,"selected-source","maintenance-revision").unwrap();
         let frame=json!({"outcome":"completed","residentOrigin":{"residentPromptId":"selected-source","promptOperationId":1}});

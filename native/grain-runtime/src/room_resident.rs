@@ -448,7 +448,7 @@ mod tests {
     #[test]
     fn source_preadmission_receiver_closes_only_retained_exact_refusal_and_never_missing_proof() {
         let (root,rt)=crate::tests::restart_resolution_fixture("resident-refusal-receiving");
-        let dir=root.join("resident");fs::create_dir(&dir).unwrap();
+        let dir=root.join("resident");fs::create_dir(&dir).unwrap();fs::set_permissions(&dir,std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
         let p=json!({"requestBinding":{"world":{"domain":"1","expectedSeed":"2"},"roomCell":"99","assignment":"1","task":rt.config.task},
             "sourceRoom":{"members":[{"subject":"20","stream":"201"}]},"acceptedHeight":"0","me":"8",
             "sourceRequests":[{"author":"20","cell":"201","height":1,"sequence":1,"n":1,"kind":"say","text":"question","to":"8"}]});
@@ -482,7 +482,7 @@ mod tests {
     #[test]
     fn source_preflight_failure_leaves_selected_request_unstarted_without_dispatch() {
         let (root,rt)=crate::tests::restart_resolution_fixture("resident-preflight-declined");
-        let resident_dir=root.join("resident");fs::create_dir(&resident_dir).unwrap();
+        let resident_dir=root.join("resident");fs::create_dir(&resident_dir).unwrap();fs::set_permissions(&resident_dir,std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
         let prepared=json!({"requestBinding":{"world":{"domain":"1","expectedSeed":"2"},"roomCell":"99","assignment":"1","task":rt.config.task},
             "sourceRoom":{"members":[{"subject":"20","stream":"201"}]},"acceptedHeight":"0","me":"8",
             "sourceRequests":[{"author":"20","cell":"201","height":1,"sequence":1,"n":1,"kind":"say","text":"question","to":"8"}]});
