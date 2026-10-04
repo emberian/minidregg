@@ -1392,6 +1392,10 @@ A Minidregg.Theory.ObjectiveBendTyping.InferredFields.derivation : propext
 A Minidregg.Theory.ObjectiveBendTyping.InferredFields.type : propext
 A Minidregg.Theory.ObjectiveBendTyping.InferredFields.uses : propext
 A Minidregg.Theory.ObjectiveBendTyping.LawProvider.evidence : -
+A Minidregg.Theory.ObjectiveBendTyping.PacketParts.annotations : -
+A Minidregg.Theory.ObjectiveBendTyping.PacketParts.assumptions : -
+A Minidregg.Theory.ObjectiveBendTyping.PacketParts.context : -
+A Minidregg.Theory.ObjectiveBendTyping.PacketParts.fuel : -
 A Minidregg.Theory.ObjectiveBendTyping.RefusalKind.budget.elim : -
 A Minidregg.Theory.ObjectiveBendTyping.RefusalKind.ofNat : -
 A Minidregg.Theory.ObjectiveBendTyping.RefusalKind.ofNat_ctorIdx : -
@@ -1422,6 +1426,7 @@ A Minidregg.Theory.ObjectiveBendTyping.custody_in_once_closure_accepted : Classi
 A Minidregg.Theory.ObjectiveBendTyping.custody_in_reusable_closure_refused : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.decodeLambda : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.decodePacket : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTyping.decodePacketParts : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.decodePrimitive : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.decodeQuantity : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.decodeReuse : Classical.choice, Quot.sound, propext
@@ -1510,6 +1515,7 @@ A Minidregg.Theory.ObjectiveBendTyping.shapeCase : -
 A Minidregg.Theory.ObjectiveBendTyping.shapeInjection : -
 A Minidregg.Theory.ObjectiveBendTyping.shapeRow : -
 A Minidregg.Theory.ObjectiveBendTyping.stringConjunction : -
+A Minidregg.Theory.ObjectiveBendTyping.termNestingCapacity : -
 A Minidregg.Theory.ObjectiveBendTyping.typeJson : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.typeNestingCapacity : -
 A Minidregg.Theory.ObjectiveBendTyping.unannotated_injection_refused : Classical.choice, Quot.sound, propext
