@@ -4,6 +4,7 @@ edition ObjectiveBend 1
 import ./MarketMath.obend as Math
 import ./SingleSellerAllocation.obend as Seller
 import ./UniformProRata.obend as Uniform
+import ./CanonicalBookSettlement.obend as Book
 
 # ---- MarketMath: arithmetic spot checks ----
 def divideQuotient(n: Nat, divisor: Nat) -> Nat:
@@ -182,3 +183,187 @@ def uniEmpty(which: Nat) -> Nat:
 # An empty grid is refused (invalid_grid_refused), for any book.
 def uniGridCleared(levels: Nat) -> Bool:
   uniformCleared(Uniform.allocate(levels, rationedBook()))
+
+# ---- CanonicalBookSettlement ----
+# The named receiving scenario (STATUS.txt, CollectiveDemonstration.bend): stock 7 and
+# proceeds 10 in account 1 (goods asset 7, money asset 8); A bids limit 5 qty 4 with
+# funds 20 / goods 0 (account 2); B bids limit 3 qty 5 with funds 15 / goods 2 (account 3).
+# The allocation clears at price 3 filling 4 and 3, so the book transfers are
+# 1->2 goods 4, 2->1 money 12, 1->3 goods 3, 3->1 money 9; the private results are
+# A: units 4 price 3 payment 12 unspent 8, B: units 3 price 3 payment 9 unspent 6.
+def account(id: Nat, asset: Nat, balance: Nat) -> Book.Account:
+  {account: id, asset: asset, balance: balance}
+
+def bookBid(order: Seller.Order, funds: Book.Account, goods: Book.Account, audience: String) -> Book.Bid:
+  {order: order, funds: funds, goods: goods, audience: audience, keyEpoch: "epoch1"}
+
+def bookInput(fundsA: Nat, fundsAssetA: Nat, accountB: Nat) -> Book.Input:
+  {book: 9n, root: "root0", stock: account(1n, 7n, 7n), proceeds: account(1n, 8n, 10n), bids: Book.BidList.cons({head: bookBid(order("A", "21", 5n, 4n), account(2n, fundsAssetA, fundsA), account(2n, 7n, 0n), "audA"), tail: Book.BidList.cons({head: bookBid(order("B", "31", 3n, 5n), account(accountB, 8n, 15n), account(accountB, 7n, 2n), "audB"), tail: Book.BidList.nil()})})}
+
+def bookSettled(fundsA: Nat, fundsAssetA: Nat, accountB: Nat) -> Book.Result:
+  Book.settle(bookInput(fundsA, fundsAssetA, accountB))
+
+def bookScenario() -> Book.Result:
+  bookSettled(20n, 8n, 3n)
+
+def bookPrepared(fundsA: Nat, fundsAssetA: Nat, accountB: Nat) -> Bool:
+  match bookSettled(fundsA, fundsAssetA, accountB):
+    case refused(_): false
+    case prepared(_): true
+
+def transfer(source: Nat, destination: Nat, asset: Nat, amount: Nat) -> Book.Transfer:
+  {source: source, destination: destination, asset: asset, amount: amount}
+
+def privateResult(recipient: String, audience: String, reservation: String, units: Nat, price: Nat, payment: Nat, unspent: Nat) -> Book.PrivateResult:
+  {recipient: recipient, audience: audience, keyEpoch: "epoch1", reservation: reservation, units: units, price: price, payment: payment, unspentReserved: unspent}
+
+def expectedBook() -> Book.Result:
+  Book.Result.prepared({book: 9n, expectedRoot: "root0", operations: Book.TransferList.cons({head: transfer(1n, 2n, 7n, 4n), tail: Book.TransferList.cons({head: transfer(2n, 1n, 8n, 12n), tail: Book.TransferList.cons({head: transfer(1n, 3n, 7n, 3n), tail: Book.TransferList.cons({head: transfer(3n, 1n, 8n, 9n), tail: Book.TransferList.nil()})})})}), returns: Book.PrivateResultList.cons({head: privateResult("A", "audA", "21", 4n, 3n, 12n, 8n), tail: Book.PrivateResultList.cons({head: privateResult("B", "audB", "31", 3n, 3n, 9n, 6n), tail: Book.PrivateResultList.nil()})}), allocation: {price: 3n, fills: Seller.FillList.cons({head: {position: 0n, subject: "A", reservation: "21", units: 4n}, tail: Seller.FillList.cons({head: {position: 1n, subject: "B", reservation: "31", units: 3n}, tail: Seller.FillList.nil()})}), remaining: 0n}})
+
+def transferEqual(a: Book.Transfer, b: Book.Transfer) -> Bool:
+  a.source == b.source && a.destination == b.destination && a.asset == b.asset && a.amount == b.amount
+
+def transfersEqual(a: Book.TransferList, b: Book.TransferList) -> Bool:
+  match a:
+    case nil(_):
+      match b:
+        case nil(_): true
+        case cons(_): false
+    case cons(x):
+      match b:
+        case nil(_): false
+        case cons(y): transferEqual(x.head, y.head) && transfersEqual(x.tail, y.tail)
+
+def privateResultEqual(a: Book.PrivateResult, b: Book.PrivateResult) -> Bool:
+  a.recipient == b.recipient && a.audience == b.audience && a.keyEpoch == b.keyEpoch && a.reservation == b.reservation && a.units == b.units && a.price == b.price && a.payment == b.payment && a.unspentReserved == b.unspentReserved
+
+def privateResultsEqual(a: Book.PrivateResultList, b: Book.PrivateResultList) -> Bool:
+  match a:
+    case nil(_):
+      match b:
+        case nil(_): true
+        case cons(_): false
+    case cons(x):
+      match b:
+        case nil(_): false
+        case cons(y): privateResultEqual(x.head, y.head) && privateResultsEqual(x.tail, y.tail)
+
+def fillEqual(a: Seller.Fill, b: Seller.Fill) -> Bool:
+  a.position == b.position && a.subject == b.subject && a.reservation == b.reservation && a.units == b.units
+
+def fillsEqual(a: Seller.FillList, b: Seller.FillList) -> Bool:
+  match a:
+    case nil(_):
+      match b:
+        case nil(_): true
+        case cons(_): false
+    case cons(x):
+      match b:
+        case nil(_): false
+        case cons(y): fillEqual(x.head, y.head) && fillsEqual(x.tail, y.tail)
+
+def allocationEqual(a: Seller.Allocation, b: Seller.Allocation) -> Bool:
+  a.price == b.price && a.remaining == b.remaining && fillsEqual(a.fills, b.fills)
+
+def preparedEqual(a: Book.Prepared, b: Book.Prepared) -> Bool:
+  a.book == b.book && a.expectedRoot == b.expectedRoot && transfersEqual(a.operations, b.operations) && privateResultsEqual(a.returns, b.returns) && allocationEqual(a.allocation, b.allocation)
+
+def resultEqual(a: Book.Result, b: Book.Result) -> Bool:
+  match a:
+    case refused(_):
+      match b:
+        case refused(_): true
+        case prepared(_): false
+    case prepared(x):
+      match b:
+        case refused(_): false
+        case prepared(y): preparedEqual(x, y)
+
+# The old actual_source_settlement law: settle(input) == expected, as one Bool.
+def bookMatchesExpected(fundsA: Nat, fundsAssetA: Nat, accountB: Nat) -> Bool:
+  resultEqual(bookSettled(fundsA, fundsAssetA, accountB), expectedBook())
+
+# The prepared payload; a refusal reads as the all-zero payload.
+def preparedOf(result: Book.Result) -> Book.Prepared:
+  match result:
+    case refused(_): {book: 0n, expectedRoot: "", operations: Book.TransferList.nil(), returns: Book.PrivateResultList.nil(), allocation: {price: 0n, fills: Seller.FillList.nil(), remaining: 0n}}
+    case prepared(p): p
+
+def transferField(t: Book.Transfer, field: Nat) -> Nat:
+  match field:
+    case 0n: t.source
+    case 1n+f1:
+      match f1:
+        case 0n: t.destination
+        case 1n+f2:
+          match f2:
+            case 0n: t.asset
+            case 1n+f3: t.amount
+
+def transferAt(ts: Book.TransferList, index: Nat, field: Nat) -> Nat:
+  match ts:
+    case nil(_): 0n
+    case cons(c):
+      match index:
+        case 0n: transferField(c.head, field)
+        case 1n+i: transferAt(c.tail, i, field)
+
+def returnField(r: Book.PrivateResult, field: Nat) -> Nat:
+  match field:
+    case 0n: r.units
+    case 1n+f1:
+      match f1:
+        case 0n: r.price
+        case 1n+f2:
+          match f2:
+            case 0n: r.payment
+            case 1n+f3: r.unspentReserved
+
+def returnAt(rs: Book.PrivateResultList, index: Nat, field: Nat) -> Nat:
+  match rs:
+    case nil(_): 0n
+    case cons(c):
+      match index:
+        case 0n: returnField(c.head, field)
+        case 1n+i: returnAt(c.tail, i, field)
+
+def transferCount(ts: Book.TransferList) -> Nat:
+  match ts:
+    case nil(_): 0n
+    case cons(c): 1n + transferCount(c.tail)
+
+def returnCount(rs: Book.PrivateResultList) -> Nat:
+  match rs:
+    case nil(_): 0n
+    case cons(c): 1n + returnCount(c.tail)
+
+# Transfer `index` of the named scenario: field 0 source, 1 destination, 2 asset, 3 amount.
+def bookTransfer(index: Nat, field: Nat) -> Nat:
+  transferAt(preparedOf(bookScenario()).operations, index, field)
+
+# Private result `index`: field 0 units, 1 price, 2 payment, 3 unspent reserved.
+def bookReturn(index: Nat, field: Nat) -> Nat:
+  returnAt(preparedOf(bookScenario()).returns, index, field)
+
+# 0 book id, 1 transfer count, 2 private-result count, 3 allocation price, 4 allocation remaining.
+def bookTop(which: Nat) -> Nat:
+  match which:
+    case 0n: preparedOf(bookScenario()).book
+    case 1n+w1:
+      match w1:
+        case 0n: transferCount(preparedOf(bookScenario()).operations)
+        case 1n+w2:
+          match w2:
+            case 0n: returnCount(preparedOf(bookScenario()).returns)
+            case 1n+w3:
+              match w3:
+                case 0n: preparedOf(bookScenario()).allocation.price
+                case 1n+w4: preparedOf(bookScenario()).allocation.remaining
+
+# Unspent funds of bid A stay reserved: with funds f, A's unspent is f - 12.
+def bookUnspentA(fundsA: Nat) -> Nat:
+  returnAt(preparedOf(bookSettled(fundsA, 8n, 3n)).returns, 0n, 3n)
+
+# The prepared result carries exactly the input book id and expected root.
+def bookExactRoot() -> Bool:
+  preparedOf(bookScenario()).book == 9n && preparedOf(bookScenario()).expectedRoot == "root0"

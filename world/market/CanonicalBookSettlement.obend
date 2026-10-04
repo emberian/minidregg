@@ -1,0 +1,151 @@
+edition ObjectiveBend 1
+# The monetary settlement over ONE canonical resource book. It derives only
+# Operation.transfer-shaped intents (source, destination, asset, amount) in admitted
+# book order over one book id and root, never scalar balance writes. Every Account
+# coordinate is read from that one authenticated book; negative balances do not exist
+# in this Nat domain. Coordinate identity is (account, asset), so one account may own
+# both money and goods; duplicate coordinates refuse. Unspent funds stay reserved: no
+# refund transfer is invented. PrivateResult is typed intended-recipient data, not a
+# privacy certificate. The result is a sum: refused, or prepared with the transfer list.
+#
+# Port of examples/objective-bend-collective/CanonicalBookSettlement.bend.
+# Representation changes: root, subject, reservation, audience and keyEpoch (Gen-1
+# byte lists) are opaque String labels; each list type is a Nil/Cons sum.
+# Omitted (Objective laws are retained, never checked; kept as a named property):
+#   chosen_book_exact: choose(book, root, ...) is either refused or prepared with exactly
+#   this book id and this expected root (ExactBook).  The Demonstration executes it on samples.
+import ./MarketMath.obend as Math
+import ./SingleSellerAllocation.obend as Seller
+
+record Account:
+  account: Nat
+  asset: Nat
+  balance: Nat
+
+record Bid:
+  order: Seller.Order
+  funds: Account
+  goods: Account
+  audience: String
+  keyEpoch: String
+
+record Input:
+  book: Nat
+  root: String
+  stock: Account
+  proceeds: Account
+  bids: BidList
+
+# Exactly the four Nat arguments of CanonicalResourceKernel.Operation.transfer.
+record Transfer:
+  source: Nat
+  destination: Nat
+  asset: Nat
+  amount: Nat
+
+record PrivateResult:
+  recipient: String
+  audience: String
+  keyEpoch: String
+  reservation: String
+  units: Nat
+  price: Nat
+  payment: Nat
+  unspentReserved: Nat
+
+record Batch:
+  operations: TransferList
+  returns: PrivateResultList
+
+record Prepared:
+  book: Nat
+  expectedRoot: String
+  operations: TransferList
+  returns: PrivateResultList
+  allocation: Seller.Allocation
+
+# A coordinate, not an account alone, is the reusable-value identity.
+record Coordinate:
+  account: Nat
+  asset: Nat
+
+sum Result:
+  refused: {}
+  prepared: Prepared
+
+sum BidList:
+  nil: {}
+  cons: {head: Bid, tail: BidList}
+
+sum TransferList:
+  nil: {}
+  cons: {head: Transfer, tail: TransferList}
+
+sum PrivateResultList:
+  nil: {}
+  cons: {head: PrivateResult, tail: PrivateResultList}
+
+sum CoordinateList:
+  nil: {}
+  cons: {head: Coordinate, tail: CoordinateList}
+
+def coordinate(account: Account) -> Coordinate:
+  {account: account.account, asset: account.asset}
+
+def coordinateEq(a: Coordinate, b: Coordinate) -> Bool:
+  a.account == b.account && a.asset == b.asset
+
+def contains(coordinate: Coordinate, coordinates: CoordinateList) -> Bool:
+  match coordinates:
+    case nil(_): false
+    case cons(c): if coordinateEq(coordinate, c.head) then true else contains(coordinate, c.tail)
+
+def distinct(coordinates: CoordinateList) -> Bool:
+  match coordinates:
+    case nil(_): true
+    case cons(c): Math.not(contains(c.head, c.tail)) && distinct(c.tail)
+
+def coordinates(bids: BidList) -> CoordinateList:
+  match bids:
+    case nil(_): CoordinateList.nil()
+    case cons(c): CoordinateList.cons({head: coordinate(c.head.funds), tail: CoordinateList.cons({head: coordinate(c.head.goods), tail: coordinates(c.tail)})})
+
+def orders(bids: BidList) -> Seller.OrderList:
+  match bids:
+    case nil(_): Seller.OrderList.nil()
+    case cons(c): Seller.OrderList.cons({head: c.head.order, tail: orders(c.tail)})
+
+def unitsAt(position: Nat, fills: Seller.FillList) -> Nat:
+  match fills:
+    case nil(_): 0n
+    case cons(c): Math.chooseNat(c.head.units, unitsAt(position, c.tail), position == c.head.position)
+
+def validBid(bid: Bid, units: Nat, paymentAsset: Nat, goodsAsset: Nat, price: Nat) -> Bool:
+  paymentAsset == bid.funds.asset && goodsAsset == bid.goods.asset && Math.le(bid.order.price * bid.order.quantity, bid.funds.balance) && Math.le(units, bid.order.quantity) && Math.le(price * units, bid.funds.balance) && Math.chooseBool(true, Math.le(price, bid.order.price), units == 0n)
+
+def validBids(bids: BidList, fills: Seller.FillList, paymentAsset: Nat, goodsAsset: Nat, price: Nat, position: Nat) -> Bool:
+  match bids:
+    case nil(_): true
+    case cons(c): validBid(c.head, unitsAt(position, fills), paymentAsset, goodsAsset, price) && validBids(c.tail, fills, paymentAsset, goodsAsset, price, position + 1n)
+
+def prepend(stock: Account, proceeds: Account, bid: Bid, units: Nat, price: Nat, batch: Batch) -> Batch:
+  prependPayment(stock, proceeds, bid, units, price, price * units, batch)
+
+def prependPayment(stock: Account, proceeds: Account, bid: Bid, units: Nat, price: Nat, payment: Nat, batch: Batch) -> Batch:
+  {operations: TransferList.cons({head: {source: stock.account, destination: bid.goods.account, asset: stock.asset, amount: units}, tail: TransferList.cons({head: {source: bid.funds.account, destination: proceeds.account, asset: proceeds.asset, amount: payment}, tail: batch.operations})}), returns: PrivateResultList.cons({head: {recipient: bid.order.subject, audience: bid.audience, keyEpoch: bid.keyEpoch, reservation: bid.order.reservation, units: units, price: price, payment: payment, unspentReserved: Math.sub(bid.funds.balance, payment)}, tail: batch.returns})}
+
+# All operations belong to one book batch, in admitted book order. Canonical native
+# Batch.Admission applies each operation to the preceding resulting book.
+def batch(bids: BidList, fills: Seller.FillList, stock: Account, proceeds: Account, price: Nat, position: Nat) -> Batch:
+  match bids:
+    case nil(_): {operations: TransferList.nil(), returns: PrivateResultList.nil()}
+    case cons(c): prepend(stock, proceeds, c.head, unitsAt(position, fills), price, batch(c.tail, fills, stock, proceeds, price, position + 1n))
+
+def choose(book: Nat, root: String, allocation: Seller.Allocation, batch: Batch, allowed: Bool) -> Result:
+  if allowed then Result.prepared({book: book, expectedRoot: root, operations: batch.operations, returns: batch.returns, allocation: allocation}) else Result.refused()
+
+def prepare(book: Nat, root: String, stock: Account, proceeds: Account, bids: BidList, allocation: Seller.Allocation) -> Result:
+  choose(book, root, allocation, batch(bids, allocation.fills, stock, proceeds, allocation.price, 0n), distinct(CoordinateList.cons({head: coordinate(stock), tail: CoordinateList.cons({head: coordinate(proceeds), tail: coordinates(bids)})})) && validBids(bids, allocation.fills, proceeds.asset, stock.asset, allocation.price, 0n))
+
+def settle(input: Input) -> Result:
+  prepare(input.book, input.root, input.stock, input.proceeds, input.bids, Seller.allocate(input.stock.balance, orders(input.bids)))
