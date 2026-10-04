@@ -148,3 +148,4 @@ import Kernel.Contracts.Identities
 import Kernel.Contracts.Cuts
 import Kernel.Contracts.Snapshot
 import Kernel.Contracts.Futures
+import Kernel.Contracts.Intents
