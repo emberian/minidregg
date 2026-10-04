@@ -45,13 +45,15 @@ inductive Role where
   | slot
   | state
   | package
+  /-- An object's record (`Kernel.ObjectRecord`): pin, law, upgrade policy, payer. -/
+  | object
   deriving DecidableEq, Repr
 
 def Role.tag : Role → Nat
-  | .record => 0 | .slot => 1 | .state => 2 | .package => 3
+  | .record => 0 | .slot => 1 | .state => 2 | .package => 3 | .object => 4
 
 def Role.ofTag : Nat → Role
-  | 0 => .record | 1 => .slot | 2 => .state | _ => .package
+  | 0 => .record | 1 => .slot | 2 => .state | 3 => .package | _ => .object
 
 def roleStream : StreamCodec Role :=
   StreamCodec.xmap StreamCodec.nat Role.tag Role.ofTag (by intro role; cases role <;> rfl)
