@@ -460,8 +460,8 @@ theorem of_fails (law : Pred) (old new : State) (leaf : LawLeaf)
 
 `field N` is `resource/field/N/after`; `field N before|delta` the other views;
 `pair A,B delta`; `subject`, `verb`, `cost` the request slots, with verbs by name
-(`read` 1, `write` 2, `delegate` 3, `install` 4, `revoke` 5: the tags `request/verb`
-carries); any other slot is `slot "…"`. `sealed` is `any []`, `open` is `all []`;
+(`read` 1, `write` 2, `delegate` 3, `install` 4, `revoke` 5, `append` 7, `place` 10: the tags
+`request/verb` carries, the same table as the shell's `VERBS` in `shell/law.rs`); any other slot is `slot "…"`. `sealed` is `any []`, `open` is `all []`;
 lists are `[ a, b ]` and a negation is `not (X)`. -/
 
 def renderSlot (slot : Slot) : String :=
@@ -481,6 +481,8 @@ def verbName : Int → String
   | 3 => "delegate"
   | 4 => "install"
   | 5 => "revoke"
+  | 7 => "append"
+  | 10 => "place"
   | value => toString value
 
 def renderValue (slot : Slot) (value : Int) : String :=
@@ -605,6 +607,14 @@ theorem sample_management_rendered_compiled :
     renderClause (Pred.any [.eq "request/verb" 1, .eq "request/verb" 2,
         Pred.all [.memberOf "request/verb" [3, 4, 5], .eq "request/subject" 7]]) =
       "any [ verb == read, verb == write, all [ verb in {delegate,install,revoke}, subject == 7 ] ]" := by
+  native_decide
+
+/-- The room verbs read back by name, in the spelling the shell law grammar parses
+(`verb == place`, `verb == append`); an unnamed tag still prints as its number. -/
+theorem sample_room_verbs_rendered_compiled :
+    renderClause (Pred.all [.eq "request/verb" 10, .eq "request/verb" 7,
+        .memberOf "request/verb" [7, 10], .eq "request/verb" 6]) =
+      "all [ verb == place, verb == append, verb in {append,place}, verb == 6 ]" := by
   native_decide
 
 /-! ### What a field-narrowed requester is told (FIX-DISCLOSE)
