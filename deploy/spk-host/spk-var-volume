@@ -35,6 +35,28 @@ if [[ $action == create-from ]]; then
   source_image=$7
   [[ $source_image == "$root/volumes/.import-$store-$resource" ]] || usage
 fi
+
+# An imported image is operator-supplied bytes: nothing signs it, and its
+# SHA-256 is the one the requester named. It is never mounted. e2fsprogs
+# parses it in userspace, as the application's own uid with no privileges
+# (untrusted_reader), and copies its file tree into a filesystem this script
+# made itself (mkfs.ext4) and mounted; that copy is bounded by the class size
+# because it is written into the mounted fresh filesystem. Device nodes,
+# sockets and FIFOs are not copied (debugfs rdump skips them); symlinks are
+# recreated, never followed. $1 holds untrusted.ext4 (reader-readable), $2 is
+# the destination directory (reader-writable). Errors of single entries are
+# logged to $3; an image that is not a clean ext4 is refused before any copy.
+import_untrusted_tree() {
+  local stage=$1 dest=$2 log=$3 type
+  type=$(cd -- "$stage" && "${untrusted_reader[@]}" /usr/sbin/blkid -p -s TYPE -o value -- untrusted.ext4) || type=
+  [[ $type == ext4 ]] || { echo 'import image is not ext4' >&2; return 1; }
+  (cd -- "$stage" && "${untrusted_reader[@]}" /usr/sbin/e2fsck -fn -- untrusted.ext4) >/dev/null 2>&1 || {
+    echo 'import image fails e2fsck' >&2; return 1;
+  }
+  (cd -- "$stage" && "${untrusted_reader[@]}" /usr/sbin/debugfs -R "rdump / $dest" untrusted.ext4) \
+    >> "$log" 2>&1 || { echo 'import tree copy failed' >&2; return 1; }
+}
+
 (( EUID == 0 )) || { echo 'spk-var-volume requires root' >&2; exit 1; }
 
 name=$store-$resource
@@ -142,48 +164,69 @@ if [[ $action == create || $action == create-from ]]; then
     echo 'resource image or mountpoint already exists; refusing overwrite' >&2; exit 1;
   }
   umask 077
-  if [[ $action == create ]]; then
-    image_tmp=$(mktemp "$image_dir/.image.XXXXXXXX")
-    trap 'rm -f -- "$image_tmp"' EXIT
-    chmod 600 -- "$image_tmp"
-    chown root:root -- "$image_tmp"
-    fallocate -l "$bytes" -- "$image_tmp"
-    /usr/sbin/mkfs.ext4 -q -F -- "$image_tmp"
-  else
-    # An imported image is the broker's own root copy whose SHA-256 it
-    # checked against the signed export; it is still untrusted filesystem
-    # input to the kernel, so it must be a clean ext4 of exactly the class
-    # size before it is ever mounted.
-    image_tmp=$source_image
-    trap 'rm -f -- "$image_tmp"' EXIT
-    [[ -f $image_tmp && ! -L $image_tmp ]] || { echo 'import image missing' >&2; exit 1; }
-    [[ $(stat -c '%u:%a:%s:%h' -- "$image_tmp") == "0:600:$bytes:1" ]] || {
+  app_gid=$(getent passwd "$app_uid" | cut -d: -f4)
+  [[ $app_gid =~ ^[1-9][0-9]{0,9}$ ]] || { echo 'app primary group refused' >&2; exit 1; }
+  stage=
+  untrusted=
+  image_tmp=$(mktemp "$image_dir/.image.XXXXXXXX")
+  fresh=0
+  cleanup_create() {
+    local code=$?
+    rm -f -- "$image_tmp"
+    [[ -z $untrusted ]] || rm -f -- "$untrusted"
+    [[ -z $stage ]] || rm -rf -- "$stage"
+    # A failed create leaves no unregistered image or mount behind.
+    if (( code != 0 && fresh == 1 )); then
+      /usr/bin/umount -- "$target" 2>/dev/null || true
+      rmdir -- "$target" 2>/dev/null || true
+      rm -f -- "$image"
+    fi
+  }
+  trap cleanup_create EXIT
+  if [[ $action == create-from ]]; then
+    untrusted=$source_image
+    [[ -f $untrusted && ! -L $untrusted ]] || { echo 'import image missing' >&2; exit 1; }
+    [[ $(stat -c '%u:%a:%s:%h' -- "$untrusted") == "0:600:$bytes:1" ]] || {
       echo 'import image identity or size refused' >&2; exit 1;
     }
-    [[ $(/usr/sbin/blkid -p -s TYPE -o value -- "$image_tmp") == ext4 ]] || {
-      echo 'import image is not ext4' >&2; exit 1;
-    }
-    /usr/sbin/e2fsck -fn -- "$image_tmp" >/dev/null 2>&1 || {
-      echo 'import image fails e2fsck' >&2; exit 1;
-    }
   fi
+  # Every mounted filesystem is one this script made.
+  chmod 600 -- "$image_tmp"
+  chown root:root -- "$image_tmp"
+  fallocate -l "$bytes" -- "$image_tmp"
+  /usr/sbin/mkfs.ext4 -q -F -- "$image_tmp"
   ln -- "$image_tmp" "$image"
+  fresh=1
   /usr/bin/sync -f "$image_dir"
   rm -- "$image_tmp"
   /usr/bin/sync -f "$image_dir"
-  trap - EXIT
   install -d -o root -g root -m 700 -- "$target"
   /usr/bin/mount -t ext4 -o loop,nosuid,nodev,noatime -- "$image" "$target"
-  app_gid=$(getent passwd "$app_uid" | cut -d: -f4)
-  [[ $app_gid =~ ^[1-9][0-9]{0,9}$ ]] || { echo 'app primary group refused' >&2; exit 1; }
-  if [[ $action == create-from ]]; then
-    # An imported /var belongs to the exporting grain's app UID; this grain
-    # runs under its own. Re-own every entry without following a symlink
-    # (-P, -h); root-owned entries (lost+found) stay root's.
-    /usr/bin/find "$target" -xdev ! -uid 0 -exec /usr/bin/chown -h "$app_uid:$app_gid" -- {} +
-  fi
   chown "$app_uid:$app_gid" -- "$target"
   chmod 700 -- "$target"
+  if [[ $action == create-from ]]; then
+    # The reader gets a private copy it can open by a cwd-relative name; it
+    # never needs to traverse the root-only image directory.
+    stage=$mount_dir/.import-$name
+    [[ ! -e $stage && ! -L $stage ]] || { echo 'import stage already exists' >&2; exit 1; }
+    install -d -o "$app_uid" -g "$app_gid" -m 700 -- "$stage"
+    cp --reflink=auto -- "$untrusted" "$stage/untrusted.ext4"
+    chown "$app_uid:$app_gid" -- "$stage/untrusted.ext4"
+    chmod 400 -- "$stage/untrusted.ext4"
+    rm -f -- "$untrusted"
+    untrusted=
+    untrusted_reader=(/usr/bin/setpriv --reuid="$app_uid" --regid="$app_gid" --clear-groups
+      --no-new-privs --inh-caps=-all --bounding-set=-all --)
+    import_untrusted_tree "$stage" "$target" "$handoff_dir/$name.import.log" || exit 1
+    rm -rf -- "$stage"
+    stage=
+    # Entries the reader made are the app's already; re-own anything else
+    # (never following a symlink) except root's own lost+found.
+    /usr/bin/find "$target" -xdev ! -uid 0 ! -uid "$app_uid" -exec /usr/bin/chown -h "$app_uid:$app_gid" -- {} +
+    chown "$app_uid:$app_gid" -- "$target"
+    chmod 700 -- "$target"
+  fi
+  trap - EXIT
 fi
 
 [[ -f $image && ! -L $image ]] || { echo 'image missing or symlinked' >&2; exit 1; }

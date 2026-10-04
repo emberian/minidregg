@@ -127,8 +127,9 @@ generation STOPped by a completed STOP and writes `var.ext4`, `manifest.json`
 and `manifest.sig` (the Store's completion custodian over the manifest bytes).
 `grain install … --import DIR --exporter-key HEX` verifies signature, image
 bytes, package and class before any Mini effect, installs on a **new**
-application resource, and the broker creates the volume from the checked
-image after `e2fsck -fn`.
+application resource, and the broker creates the volume from the image. The
+broker itself checks only the SHA-256 its requester names, so the image is
+treated as untrusted bytes: it is never mounted (see `create-from` below).
 
 Deployment: install `mini-spk-broker.service` and `/etc/mini/spk-broker.json`
 (root 0600; `mini-spk-broker.example.json`), the binaries root-owned, the app
@@ -159,8 +160,14 @@ blindly repeated.
 (called only by the broker) provisions a root-private backing image
 `GRAINS/volumes/STORE-RESOURCE_ID.ext4`, mounts it at the task-traversable
 `GRAINS/vars/STORE-RESOURCE_ID`, and verifies the loop device, backing path,
-size, owner and ext4 type; `create-from` does the same from a broker-checked
-import image that must be a clean ext4 of exactly the class size; `verify`
+size, owner and ext4 type; `create-from` makes and mounts the same fresh
+filesystem and then copies the import into it: the import must be exactly the
+class size, and e2fsprogs (`blkid -p`, `e2fsck -fn`, `debugfs rdump`) parse it
+in userspace as the application uid with no privileges, so the kernel never
+mounts operator bytes. Device nodes, sockets and FIFOs are dropped, symlinks
+are recreated unfollowed, and the copy is bounded by the fresh filesystem;
+per-entry copy errors go to `GRAINS/attest/STORE-RESOURCE_ID.import.log`
+(`deploy/spk-host/tests/var-volume-import-untrusted.sh`). `verify`
 only checks an existing mount. Sizes are 64 MiB–16 GiB. `SOURCE_VOLUME_HEX` is
 the exact 32-byte lowercase-hex volume identity authored by Mini for the
 deployment domain and application; an arbitrary identifier or an empty
