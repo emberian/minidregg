@@ -982,6 +982,7 @@ fn read_journal(root: &Path, height: &str, outcome: &str, now: &str, name: &str)
     if fs::metadata(&path).map(|meta| meta.len() >= READ_JOURNAL_LIMIT).unwrap_or(false) {
         fs::rename(&path, root.join(format!("{READ_JOURNAL}.1")))
             .map_err(|error| format!("cannot rotate {}: {error}", path.display()))?;
+        crate::fsio::sync_parent(&path)?;
     }
     let unix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
