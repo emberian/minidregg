@@ -5,8 +5,8 @@
 
 Runs where the merge queue file lives (the boxes cannot reach it). Every S seconds (default 120):
 for each $JOURNEY_ROOT/<tip>/DONE on the box not yet relayed, copy table.txt and results.tsv to
-DIR/<tip>.{txt,tsv} and insert into the queue file, under the "## JOURNEYS" heading (created at the
-end if absent), one summary line for the tip and one line per red row (red.txt, written by
+DIR/<tip>.{txt,tsv} and insert into the queue file, under the "## JOURNEYS" heading (created before
+"## LOG" if absent), one summary line for the tip and one line per red row (red.txt, written by
 journey-runner, with the owning lane where it can tell). DIR/relayed lists relayed tips. The
 insertion re-reads the file and replaces it atomically, so a concurrent writer loses at most a
 window of milliseconds; it never rewrites other sections.
@@ -39,9 +39,9 @@ def insert(lines):
             end -= 1
         rows[end:end] = lines
     except StopIteration:
-        while rows and rows[-1] == "":
-            rows.pop()
-        rows += ["", "## JOURNEYS", "(scripts/pipeline/journey-runner on the journey box; one summary line per tip, one line per red row)"] + lines + [""]
+        # before "## LOG" when there is one: the keeper appends its log at the end of the file
+        at = next((i for i, l in enumerate(rows) if l.strip() == "## LOG"), len(rows))
+        rows[at:at] = ["## JOURNEYS", "(scripts/pipeline/journey-runner on the journey box; one summary line per tip, one line per red row)"] + lines + [""]
     fd, tmp = tempfile.mkstemp(dir=q.parent, prefix=".mq.")
     with os.fdopen(fd, "w") as f:
         f.write("\n".join(rows) if rows[-1] == "" else "\n".join(rows) + "\n")

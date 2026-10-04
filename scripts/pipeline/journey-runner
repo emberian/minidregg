@@ -73,6 +73,7 @@ run_tip() {
     if [ -s "$O/subrows.tsv" ]; then
       while IFS=$'\t' read -r id sst wall sdet; do
         local so=$owner
+        sdet=${sdet//"$R/j/steps/"/"$O/step-"}   # the scratch run is gone; its red steps' logs were kept here
         [[ $sdet =~ \(lane\ ([A-Za-z0-9_-]+)\) ]] && so="lane ${BASH_REMATCH[1]}"
         [ "$sst" = PASS ] || so=$( [[ $so == lane* ]] && echo "$so" || owner_for "$set" "$id" "$src")
         printf '%s/%s\t%s\t%s\t%s\t%s\n' "$row" "$id" "$sst" "$wall" "$so" "${sdet:0:300}" >>"$J/results.tsv"
