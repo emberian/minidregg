@@ -1,8 +1,12 @@
 /- Executable demand/sharing candidate for the NEW Objective Bend runtime core.
 It consumes actual elaborated Objective terms, not a linked method dictionary.
 Thunk identity is stable through evaluating→cached update; Fix uses one tied
-heap address. All values here are effect-free: native authority and affine
-continuations are not constructors and cannot be minted/copied by this machine.
+heap address. Values are effect-free. The one effect is a yield: `perform`
+outside every shared-thunk update suspends the WHOLE program as `yielded`, with
+its plan as one lazy cell; only `resume` continues it, with the same heap and
+stack. A perform reached while a shared cell is being forced is refused, never
+run once-for-all or once-per-demand. Native authority and affine continuations
+are not constructors and cannot be minted/copied by this machine.
 Weak-head reference adequacy, graph/capture ownership and new type metatheory
 remain obligations; old BendTT metatheory is not asserted for this edition. -/
 import Theory.ObjectiveBendOpenRecursion
@@ -46,6 +50,10 @@ inductive Frame where
   deriving Repr
 inductive Refusal where
   | unbound | missingCell | missingField | wrongValue | invalidUpdate | capacity | missingArm
+  /-- A perform reached while forcing a shared cell (an `update` frame is on the
+  stack): its effect would be cached and shared, so it is refused. Typed programs
+  never reach it (computation types are never cell types). -/
+  | sharedEffect
   deriving Repr
 inductive Control where
   | evaluate (term : Term) (environment : Environment)
@@ -54,6 +62,8 @@ inductive Control where
   | returned (value : RuntimeValue)
   | complete (value : RuntimeValue)
   | refused (reason : Refusal)
+  /-- The program yielded the plan stored at this address; it waits for `resume`. -/
+  | yielded (plan : Address)
   deriving Repr
 structure State where
   heap : Array Cell
@@ -78,9 +88,13 @@ def scalarValue : Term → Option RuntimeValue
   | .nat n => some (.natural n) | .boolean value => some (.boolean value)
   | .label name => some (.label name) | _ => none
 
+/-- A shared cell is being forced exactly when an update frame is on the stack. -/
+def forcingShared (stack : List Frame) : Bool :=
+  stack.any fun frame => match frame with | .update _ => true | _ => false
+
 def stepRaw (state : State) : State :=
   match state.control with
-  | .complete _ | .refused _ | .blackhole _ => state
+  | .complete _ | .refused _ | .blackhole _ | .yielded _ => state
   | .enter address => match state.heap[address]? with
     | none => {state with control:=.refused .missingCell}
     | some (.evaluating _) => {state with control:=.blackhole address}
@@ -122,6 +136,11 @@ def stepRaw (state : State) : State :=
       {state with heap:=state.heap.push (.suspended ⟨payload,environment⟩),control:=.returned (.variant tag address)}
     | .case scrutinee arms => {state with control:=.evaluate scrutinee environment, stack:=.case arms environment::state.stack}
     | .ifBool condition whenTrue whenFalse => {state with control:=.evaluate condition environment, stack:=.ifBool whenTrue whenFalse environment::state.stack}
+    | .done value => {state with control:=.evaluate value environment}
+    | .perform plan =>
+      if forcingShared state.stack then {state with control:=.refused .sharedEffect} else
+      let address := state.heap.size
+      {state with heap:=state.heap.push (.suspended ⟨plan,environment⟩),control:=.yielded address}
   | .returned value => match state.stack with
     | [] => {state with control:=.complete value}
     | frame::rest => match frame with
@@ -188,6 +207,8 @@ inductive Outcome where
   | suspended (reason : Suspension) (state : State)
   | divergent (address : Address) (state : State)
   | refused (reason : Refusal) (state : State)
+  /-- The exact yielded state; the plan cell's address is reported. -/
+  | yielded (plan : Address) (state : State)
   deriving Repr
 
 def step (limits : Limits) (state : State) : Outcome :=
@@ -195,6 +216,7 @@ def step (limits : Limits) (state : State) : Outcome :=
   | .complete value => .finished value state
   | .blackhole address => .divergent address state
   | .refused reason => .refused reason state
+  | .yielded plan => .yielded plan state
   | _ =>
     let next := stepRaw state
     if next.heap.size ≤ limits.heap && next.stack.length ≤ limits.stack then
@@ -206,6 +228,7 @@ def runBounded (limits : Limits) : Nat → State → Outcome
     | .complete value => .finished value state
     | .blackhole address => .divergent address state
     | .refused reason => .refused reason state
+    | .yielded plan => .yielded plan state
     | _ => .suspended .ticks state
   | ticks+1,state => match step limits state with
     | .suspended .ticks next => runBounded limits ticks next
@@ -215,6 +238,60 @@ def runBounded (limits : Limits) : Nat → State → Outcome
 used when distinguishing completion, suspension and divergence matters. -/
 def run (limits : Limits) (ticks : Nat) (state : State) : State :=
   match runBounded limits ticks state with
-  | .finished _ retained | .suspended _ retained | .divergent _ retained | .refused _ retained => retained
+  | .finished _ retained | .suspended _ retained | .divergent _ retained | .refused _ retained
+  | .yielded _ retained => retained
+
+/-- Resume a yielded program with the kernel's response, a closed term (decoded
+data). Heap and stack are unchanged: the yielded state IS the checkpoint.
+Any other state cannot be resumed. -/
+def resume (response : Term) (state : State) : Option State :=
+  match state.control with
+  | .yielded _ => some {state with control:=.evaluate response []}
+  | _ => none
+
+theorem resume_requires_yield (response : Term) (state : State)
+    (resumed : (resume response state).isSome = true) : ∃ plan, state.control = .yielded plan := by
+  unfold resume at resumed
+  split at resumed
+  · rename_i plan h; exact ⟨plan,h⟩
+  · simp at resumed
+
+theorem resume_keeps_heap_and_stack (response : Term) (state next : State)
+    (resumed : resume response state = some next) :
+    next.heap = state.heap ∧ next.stack = state.stack ∧ next.control = .evaluate response [] := by
+  unfold resume at resumed
+  split at resumed
+  · cases resumed; exact ⟨rfl,rfl,rfl⟩
+  · simp at resumed
+
+/-- The shared-thunk rule, exactly: a perform under an update frame is refused. -/
+theorem perform_under_update_refused (heap : Array Cell) (plan : Term) (environment : Environment)
+    (address : Address) (rest : List Frame) :
+    (stepRaw ⟨heap,.evaluate (.perform plan) environment,.update address :: rest⟩).control =
+      .refused .sharedEffect := by
+  simp [stepRaw, forcingShared]
+
+/-- Outside every shared cell a perform yields, allocating its plan lazily. -/
+theorem perform_yields (heap : Array Cell) (plan : Term) (environment : Environment)
+    (stack : List Frame) (direct : forcingShared stack = false) :
+    stepRaw ⟨heap,.evaluate (.perform plan) environment,stack⟩ =
+      ⟨heap.push (.suspended ⟨plan,environment⟩),.yielded heap.size,stack⟩ := by
+  simp [stepRaw, direct]
+
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandMachine.perform_yields' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms perform_yields
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandMachine.perform_under_update_refused' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms perform_under_update_refused
+/--
+info: 'Minidregg.Theory.ObjectiveBendDemandMachine.resume_requires_yield' depends on axioms: [propext]
+-/
+#guard_msgs in
+#print axioms resume_requires_yield
 
 end Minidregg.Theory.ObjectiveBendDemandMachine

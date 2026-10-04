@@ -2,6 +2,7 @@
 node/tick/canonical encoded output budgets are shared across all fields. Budget suspension
 retains the exact graph, never a partial successful Plan or invalid-program claim. -/
 import Theory.ObjectiveBendDemandMachine
+import Theory.ObjectiveBendTypes
 namespace Minidregg.Theory.ObjectiveBendDemandData
 open ObjectiveBendDemandMachine
 inductive Data where
@@ -23,6 +24,8 @@ def encoded : Nat → Data → Option (List UInt8)
       pure ([4] ++ lengthBytes label.utf8ByteSize ++ label.toUTF8.toList ++ (← encoded depth payload))
 inductive Failure where
   | budget | duplicateField | executableValue | suspended | divergent | refused
+  /-- The program yielded a Plan: it is an activity, not a pure value. -/
+  | yielded
   deriving Repr
 structure Budget where
   nodes : Nat
@@ -80,7 +83,8 @@ def materializeWith (policy : State → Bool) (limits : Limits) : Nat → Budget
           pure ((field.1,child.value)::prior.1,child.state,child.remaining)
         | .suspended _ retained => throw (.suspended,retained)
         | .divergent _ retained => throw (.divergent,retained)
-        | .refused _ retained => throw (.refused,retained)) ([],state,remaining)
+        | .refused _ retained => throw (.refused,retained)
+        | .yielded _ retained => throw (.yielded,retained)) ([],state,remaining)
       pure ⟨.record pair.1.reverse,pair.2.1,pair.2.2⟩
     | .variant label payload =>
       let bytes := label.utf8ByteSize+(toString label.utf8ByteSize).utf8ByteSize+2
@@ -95,6 +99,7 @@ def materializeWith (policy : State → Bool) (limits : Limits) : Nat → Budget
       | .suspended _ retained => throw (.suspended,retained)
       | .divergent _ retained => throw (.divergent,retained)
       | .refused _ retained => throw (.refused,retained)
+      | .yielded _ retained => throw (.yielded,retained)
     | .closure _ _ | .specification _ _ | .prototype _ _ => throw (.executableValue,state)
 
 def completeWith (policy : State → Bool) (limits : Limits) (budget : Budget) (state : State) : Except (Failure × State) Result :=
@@ -140,6 +145,7 @@ def executeWith (policy : State → Bool) (limits : Limits) (budget : Budget)
   | (.suspended _ state,_) => .error (.suspended,state)
   | (.divergent _ state,_) => .error (.divergent,state)
   | (.refused _ state,_) => .error (.refused,state)
+  | (.yielded _ state,_) => .error (.yielded,state)
 /-- Existing clear preview behavior remains the unrestricted raw language. -/
 def force := forceWith (fun _ => true)
 def materialize := materializeWith (fun _ => true)
@@ -148,4 +154,72 @@ abbrev Extraction := ExtractionWith (fun _ => true)
 def extract := extractWith (fun _ => true)
 abbrev Execution := ExecutionWith (fun _ => true)
 def execute := executeWith (fun _ => true)
+
+/-! ## Activities: the yielded Plan is data; the response is typed data -/
+
+open Minidregg.Theory.ObjectiveBendTypes in
+/-- The member type of a first-order row (no rigid variables in data types). -/
+def rowMember : Ty → String → Option Ty
+  | .field name member tail, query => if name = query then some member else rowMember tail query
+  | _, _ => none
+
+open Minidregg.Theory.ObjectiveBendTypes in
+def rowNames : Ty → List String
+  | .field name _ tail => name :: rowNames tail
+  | _ => []
+
+open Minidregg.Theory.ObjectiveBendTypes in
+mutual
+/-- Exact first-order conformance of data to a data type: every record field
+is declared once and every declared field is present; a variant's label is one
+of the sum's labels and its payload conforms. -/
+def Data.conforms : Data → Ty → Bool
+  | .natural _, .natural | .boolean _, .boolean | .label _, .label => true
+  | .record fields, row =>
+      fields.length == (rowNames row).length &&
+      (fields.map Prod.fst).eraseDups.length == fields.length && fieldsConform fields row
+  | .variant label payload, .variant row => match rowMember row label with
+      | some member => payload.conforms member
+      | none => false
+  | _, _ => false
+def fieldsConform : List (String × Data) → Ty → Bool
+  | [], _ => true
+  | (name,value) :: rest, row =>
+      (match rowMember row name with
+        | some member => value.conforms member
+        | none => false) && fieldsConform rest row
+end
+
+mutual
+/-- A closed Core4 term for decoded data: the response a kernel resumes with. -/
+def Data.term : Data → Minidregg.Theory.ObjectiveBendOpenRecursion.Term
+  | .natural n => .nat n
+  | .boolean b => .boolean b
+  | .label s => .label s
+  | .record fields => .record (fieldsTerm fields)
+  | .variant label payload => .inject label payload.term
+def fieldsTerm : List (String × Data) → List (String × Minidregg.Theory.ObjectiveBendOpenRecursion.Term)
+  | [] => []
+  | (name,value) :: rest => (name,value.term) :: fieldsTerm rest
+end
+
+/-- Extract the Plan of a yielded state through the same budgeted
+materialization as every other Data: enter its cell with an empty stack. -/
+def yieldedPlanWith (policy : State → Bool) (limits : Limits) (budget : Budget) (state : State) :
+    Except (Failure × State) Result :=
+  match state.control with
+  | .yielded plan =>
+    let entered : State := {state with control:=.enter plan,stack:=[]}
+    match forceWith policy limits budget.ticks entered with
+    | (.finished forced retained,ticks) => do
+      -- Materialization runs on the scratch copy; the checkpoint keeps its stack.
+      let result ← materializeWith policy limits budget.nodes {budget with ticks:=ticks} forced retained
+      pure {result with state:={result.state with control:=state.control,stack:=state.stack}}
+    | (.suspended _ retained,_) => .error (.suspended,retained)
+    | (.divergent _ retained,_) => .error (.divergent,retained)
+    | (.refused _ retained,_) => .error (.refused,retained)
+    | (.yielded _ retained,_) => .error (.yielded,retained)
+  | _ => .error (.suspended,state)
+def yieldedPlan := yieldedPlanWith (fun _ => true)
+
 end Minidregg.Theory.ObjectiveBendDemandData

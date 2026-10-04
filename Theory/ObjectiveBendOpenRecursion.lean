@@ -38,6 +38,11 @@ inductive Term where
   | case (scrutinee : Term) (arms : List (String × Term))
   /-- The Boolean eliminator. Booleans are not labels, so this is not a case. -/
   | ifBool (condition whenTrue whenFalse : Term)
+  /-- Yield a typed Plan to the kernel. Not a value and never a reduction: a
+  program stuck here has yielded, and continues only when resumed (`Yields`). -/
+  | perform (plan : Term)
+  /-- A pure value where an activity is expected (return). Reduces to its value. -/
+  | done (value : Term)
   deriving Repr
 
 def liftRename (rename : Nat → Nat) : Nat → Nat
@@ -70,6 +75,8 @@ def Term.rename (rename : Nat → Nat) : Term → Term
       (arms.map fun field => (field.1,field.2.rename (liftRename rename)))
   | .ifBool condition whenTrue whenFalse =>
       .ifBool (condition.rename rename) (whenTrue.rename rename) (whenFalse.rename rename)
+  | .perform plan => .perform (plan.rename rename)
+  | .done value => .done (value.rename rename)
 
 termination_by source => sizeOf source
 decreasing_by
@@ -115,6 +122,8 @@ def Term.substitute (substitution : Nat → Term) : Term → Term
   | .ifBool condition whenTrue whenFalse =>
       .ifBool (condition.substitute substitution) (whenTrue.substitute substitution)
         (whenFalse.substitute substitution)
+  | .perform plan => .perform (plan.substitute substitution)
+  | .done value => .done (value.substitute substitution)
 
 termination_by source => sizeOf source
 decreasing_by
@@ -225,12 +234,93 @@ inductive Step : Term → Term → Prop where
       Step condition next → Step (.ifBool condition whenTrue whenFalse) (.ifBool next whenTrue whenFalse)
   | ifTrue (whenTrue whenFalse : Term) : Step (.ifBool (.boolean true) whenTrue whenFalse) whenTrue
   | ifFalse (whenTrue whenFalse : Term) : Step (.ifBool (.boolean false) whenTrue whenFalse) whenFalse
+  /-- `done` is administrative: the activity returns its pure value. -/
+  | done (value : Term) : Step (.done value) value
 
 inductive Steps : Term → Term → Prop where
   | refl (term : Term) : Steps term term
   | next {initial middle result : Term} : Step initial middle → Steps middle result → Steps initial result
 
 def Evaluates (initial result : Term) : Prop := Steps initial result ∧ Value result
+
+/-! ## Activities: a perform in evaluation position is a yield
+
+The pure reference `Step` has no rule for `perform`: a program whose next redex
+is a perform has YIELDED its plan to the kernel. Evaluation contexts are data,
+one frame per congruence rule of `Step`, innermost first. Resuming plugs the
+kernel's response into the context. A turn is one segment from a resume (or the
+start) to the next yield or value. -/
+
+inductive SourceFrame where
+  | application (argument : Term)
+  | field (name : String)
+  | extend (fields : List (String × Term))
+  | binaryLeft (primitive : Primitive) (right : Term)
+  | binaryRight (primitive : Primitive) (left : Term)
+  | condition (zero successorBody : Term)
+  | case (arms : List (String × Term))
+  | ifBool (whenTrue whenFalse : Term)
+  | reflect | metadata | project
+  deriving Repr
+
+def SourceFrame.plug : SourceFrame → Term → Term
+  | .application argument, hole => .app hole argument
+  | .field name, hole => .get hole name
+  | .extend fields, hole => .extend hole fields
+  | .binaryLeft primitive right, hole => .binary primitive hole right
+  | .binaryRight primitive left, hole => .binary primitive left hole
+  | .condition zero successorBody, hole => .ifZero hole zero successorBody
+  | .case arms, hole => .case hole arms
+  | .ifBool whenTrue whenFalse, hole => .ifBool hole whenTrue whenFalse
+  | .reflect, hole => .reflect hole
+  | .metadata, hole => .metadata hole
+  | .project, hole => .project hole
+
+/-- Plug a hole into a context listed innermost first. -/
+def plug (context : List SourceFrame) (hole : Term) : Term :=
+  context.foldl (fun term frame => frame.plug term) hole
+
+/-- `Yields term plan context`: the next redex of `term` is `perform plan` in
+`context`. Each constructor mirrors exactly one congruence rule of `Step`. -/
+inductive Yields : Term → Term → List SourceFrame → Prop where
+  | perform (plan : Term) : Yields (.perform plan) plan []
+  | application {function plan : Term} {context : List SourceFrame} (argument : Term) :
+      Yields function plan context → Yields (.app function argument) plan (context ++ [.application argument])
+  | field {target plan : Term} {context : List SourceFrame} (name : String) :
+      Yields target plan context → Yields (.get target name) plan (context ++ [.field name])
+  | extend {inherited plan : Term} {context : List SourceFrame} (fields : List (String × Term)) :
+      Yields inherited plan context → Yields (.extend inherited fields) plan (context ++ [.extend fields])
+  | binaryLeft {left plan : Term} {context : List SourceFrame} (primitive : Primitive) (right : Term) :
+      Yields left plan context →
+      Yields (.binary primitive left right) plan (context ++ [.binaryLeft primitive right])
+  | binaryRight {left right plan : Term} {context : List SourceFrame} (primitive : Primitive) :
+      Value left → Yields right plan context →
+      Yields (.binary primitive left right) plan (context ++ [.binaryRight primitive left])
+  | condition {value plan : Term} {context : List SourceFrame} (zero successorBody : Term) :
+      Yields value plan context →
+      Yields (.ifZero value zero successorBody) plan (context ++ [.condition zero successorBody])
+  | case {scrutinee plan : Term} {context : List SourceFrame} (arms : List (String × Term)) :
+      Yields scrutinee plan context → Yields (.case scrutinee arms) plan (context ++ [.case arms])
+  | ifBool {condition plan : Term} {context : List SourceFrame} (whenTrue whenFalse : Term) :
+      Yields condition plan context →
+      Yields (.ifBool condition whenTrue whenFalse) plan (context ++ [.ifBool whenTrue whenFalse])
+  | reflect {target plan : Term} {context : List SourceFrame} :
+      Yields target plan context → Yields (.reflect target) plan (context ++ [.reflect])
+  | metadata {target plan : Term} {context : List SourceFrame} :
+      Yields target plan context → Yields (.metadata target) plan (context ++ [.metadata])
+  | project {target plan : Term} {context : List SourceFrame} :
+      Yields target plan context → Yields (.project target) plan (context ++ [.project])
+
+/-- An activity's run against a list of turns: each turn yields a plan and is
+resumed with the kernel's response; the last segment finishes with a value.
+One list entry is one admitted turn. -/
+inductive Interaction : Term → List (Term × Term) → Term → Prop where
+  | finish {term value : Term} : Evaluates term value → Interaction term [] value
+  | turn {term yielded plan response value : Term} {context : List SourceFrame}
+      {rest : List (Term × Term)} :
+      Steps term yielded → Yields yielded plan context →
+      Interaction (plug context response) rest value →
+      Interaction term ((plan,response) :: rest) value
 
 /-- Refinement is a substantive consumer obligation over independently defined
 source steps. It cannot be discharged by naming a resolved method a new Eval. -/
@@ -333,6 +423,123 @@ theorem equality_drives_branch (left right : Nat) :
   · exact .next (.ifFalse _ _) (by simp; exact .refl _)
   · exact .next (.ifTrue _ _) (by simp; exact .refl _)
 
+theorem yields_plug {term plan : Term} {context : List SourceFrame}
+    (yielded : Yields term plan context) : term = plug context (.perform plan) := by
+  induction yielded <;> simp_all [plug, List.foldl_append, SourceFrame.plug]
+
+theorem value_no_step {term next : Term} (value : Value term) : ¬ Step term next := by
+  intro step; cases value <;> cases step
+
+theorem yields_not_value {term plan : Term} {context : List SourceFrame}
+    (yielded : Yields term plan context) : ¬ Value term := by
+  intro value; cases yielded <;> cases value
+
+/-- A yielded program is stuck for the pure reference: only a resume moves it. -/
+theorem yields_no_step {term plan : Term} {context : List SourceFrame}
+    (yielded : Yields term plan context) : ∀ next, ¬ Step term next := by
+  induction yielded with
+  | perform plan => intro next step; cases step
+  | application argument inner ih =>
+      intro next step; cases step with
+      | beta => cases inner
+      | application _ prior => exact ih _ prior
+      | applySpecification => cases inner
+  | field name inner ih =>
+      intro next step; cases step with
+      | target _ prior => exact ih _ prior
+      | field => cases inner
+  | extend fields inner ih =>
+      intro next step; cases step with
+      | extendTarget _ prior => exact ih _ prior
+      | extendRecord => cases inner
+  | binaryLeft primitive right inner ih =>
+      intro next step; cases step with
+      | binaryLeft _ _ prior => exact ih _ prior
+      | binaryRight _ _ value _ => exact yields_not_value inner value
+      | primitive _ _ _ _ value _ _ => exact yields_not_value inner value
+  | binaryRight primitive leftValue inner ih =>
+      intro next step; cases step with
+      | binaryLeft _ _ prior => exact value_no_step leftValue prior
+      | binaryRight _ _ _ prior => exact ih _ prior
+      | primitive _ _ _ _ _ value _ => exact yields_not_value inner value
+  | condition zero successorBody inner ih =>
+      intro next step; cases step with
+      | condition _ _ prior => exact ih _ prior
+      | zero => cases inner
+      | successor => cases inner
+  | case arms inner ih =>
+      intro next step; cases step with
+      | caseTarget _ prior => exact ih _ prior
+      | caseInject => cases inner
+  | ifBool whenTrue whenFalse inner ih =>
+      intro next step; cases step with
+      | ifCondition _ _ prior => exact ih _ prior
+      | ifTrue => cases inner
+      | ifFalse => cases inner
+  | reflect inner ih =>
+      intro next step; cases step with
+      | reflectPrototype => cases inner
+      | reflectStep prior => exact ih _ prior
+  | metadata inner ih =>
+      intro next step; cases step with
+      | metadataSpecification => cases inner
+      | metadataStep prior => exact ih _ prior
+  | project inner ih =>
+      intro next step; cases step with
+      | projectPrototype => cases inner
+      | projectStep prior => exact ih _ prior
+
+/-- The yielded plan and its continuation are unique. -/
+theorem yields_deterministic {term plan plan' : Term} {context context' : List SourceFrame}
+    (first : Yields term plan context) (second : Yields term plan' context') :
+    plan = plan' ∧ context = context' := by
+  induction first generalizing plan' context' with
+  | perform plan => cases second; exact ⟨rfl,rfl⟩
+  | application argument inner ih =>
+      cases second with
+      | application _ inner' => obtain ⟨h1,h2⟩ := ih inner'; exact ⟨h1,by rw [h2]⟩
+  | field name inner ih =>
+      cases second with
+      | field _ inner' => obtain ⟨h1,h2⟩ := ih inner'; exact ⟨h1,by rw [h2]⟩
+  | extend fields inner ih =>
+      cases second with
+      | extend _ inner' => obtain ⟨h1,h2⟩ := ih inner'; exact ⟨h1,by rw [h2]⟩
+  | binaryLeft primitive right inner ih =>
+      cases second with
+      | binaryLeft _ _ inner' => obtain ⟨h1,h2⟩ := ih inner'; exact ⟨h1,by rw [h2]⟩
+      | binaryRight _ value _ => exact absurd value (yields_not_value inner)
+  | binaryRight primitive leftValue inner ih =>
+      cases second with
+      | binaryLeft _ _ inner' => exact absurd leftValue (yields_not_value inner')
+      | binaryRight _ _ inner' => obtain ⟨h1,h2⟩ := ih inner'; exact ⟨h1,by rw [h2]⟩
+  | condition zero successorBody inner ih =>
+      cases second with
+      | condition _ _ inner' => obtain ⟨h1,h2⟩ := ih inner'; exact ⟨h1,by rw [h2]⟩
+  | case arms inner ih =>
+      cases second with
+      | case _ inner' => obtain ⟨h1,h2⟩ := ih inner'; exact ⟨h1,by rw [h2]⟩
+  | ifBool whenTrue whenFalse inner ih =>
+      cases second with
+      | ifBool _ _ inner' => obtain ⟨h1,h2⟩ := ih inner'; exact ⟨h1,by rw [h2]⟩
+  | reflect inner ih =>
+      cases second with
+      | reflect inner' => obtain ⟨h1,h2⟩ := ih inner'; exact ⟨h1,by rw [h2]⟩
+  | metadata inner ih =>
+      cases second with
+      | metadata inner' => obtain ⟨h1,h2⟩ := ih inner'; exact ⟨h1,by rw [h2]⟩
+  | project inner ih =>
+      cases second with
+      | project inner' => obtain ⟨h1,h2⟩ := ih inner'; exact ⟨h1,by rw [h2]⟩
+
+/-- A one-turn activity: perform a write, resume with `written`, select the arm.
+The plan and the response are both ordinary injected data. -/
+theorem one_turn_interaction (plan : Term) :
+    Interaction (.case (.perform plan) [("written",.done (.nat 1)),("refused",.done (.nat 0))])
+      [(plan,.inject "written" (.record []))] (.nat 1) := by
+  refine .turn (.refl _) (.case _ (.perform plan)) ?_
+  refine .finish ⟨.next (.caseInject "written" (.record []) _ (.done (.nat 1)) rfl) ?_,.natural 1⟩
+  simpa [instantiate, Term.substitute] using Steps.next (Step.done (.nat 1)) (.refl _)
+
 /--
 info: 'Minidregg.Theory.ObjectiveBendOpenRecursion.label_equality_boolean_exact' depends on axioms: [propext]
 -/
@@ -353,5 +560,25 @@ info: 'Minidregg.Theory.ObjectiveBendOpenRecursion.equality_drives_branch' depen
 -/
 #guard_msgs in
 #print axioms equality_drives_branch
+/--
+info: 'Minidregg.Theory.ObjectiveBendOpenRecursion.yields_no_step' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms yields_no_step
+/--
+info: 'Minidregg.Theory.ObjectiveBendOpenRecursion.yields_deterministic' does not depend on any axioms
+-/
+#guard_msgs in
+#print axioms yields_deterministic
+/--
+info: 'Minidregg.Theory.ObjectiveBendOpenRecursion.yields_plug' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms yields_plug
+/--
+info: 'Minidregg.Theory.ObjectiveBendOpenRecursion.one_turn_interaction' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms one_turn_interaction
 
 end Minidregg.Theory.ObjectiveBendOpenRecursion

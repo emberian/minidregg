@@ -15,7 +15,10 @@ def Assumptions.valid (assumptions : Assumptions) : Bool :=
   assumptions.shareableVariables.all (fun index =>
     match assumptions.bounds.lookup index with
     | none => false
-    | some bound => bound.shareableUnder assumptions.shareableVariables)
+    | some bound => bound.shareableUnder assumptions.shareableVariables) &&
+  -- No rigid variable names an activity, so a type agreement never turns an
+  -- activity into a suspendable type or back (`Ty.isComputation` is invariant).
+  assumptions.bounds.all (fun bound => !bound.2.isComputation)
 
 /-- Annotated recursive aliases unfold one declared head only. This explicit
 fragment supports the generated global-record knot without an arbitrary subtype
@@ -49,11 +52,13 @@ def reusableAllowed (assumptions : Assumptions) (reuse : Reuse)
     (context : Context) (uses : Uses) : Bool :=
   reuse != .reusable || reusableCaptures assumptions.shareableVariables context uses
 
+/-- An argument becomes a shared heap thunk, so it is never an activity (rule
+`effect-as-argument`); an unrestricted one must also be shareable. -/
 def argumentAllowed (assumptions : Assumptions) (quantity : Quantity)
     (context : Context) (type : Ty) (uses : Uses) : Bool :=
-  quantity != .unrestricted ||
+  !type.isComputation && (quantity != .unrestricted ||
     (type.shareableUnder assumptions.shareableVariables &&
-      reusableCaptures assumptions.shareableVariables context uses)
+      reusableCaptures assumptions.shareableVariables context uses))
 
 def overlay : Ty → Ty → Ty
   | .field name member rest, inherited => .field name member (overlay rest inherited)
@@ -114,10 +119,12 @@ inductive PartialTyping (assumptions : Assumptions) : Context → Term → Ty �
   | specification {context : Context} {metadata extension : Term} {metadataType extensionType : Ty} {mu eu : Uses} :
       PartialTyping assumptions context metadata metadataType mu →
       PartialTyping assumptions context extension extensionType eu →
+      metadataType.isComputation = false → extensionType.isComputation = false →
       PartialTyping assumptions context (.specification metadata extension)
         (.specification metadataType extensionType) (addUses mu eu)
   | prototype {context : Context} {spec target : Term} {specType targetType : Ty} {su tu : Uses} :
       PartialTyping assumptions context spec specType su → PartialTyping assumptions context target targetType tu →
+      specType.isComputation = false → targetType.isComputation = false →
       PartialTyping assumptions context (.prototype spec target) (.prototype specType targetType) (addUses su tu)
   | reflect {context : Context} {target : Term} {specType targetType : Ty} {uses : Uses} :
       PartialTyping assumptions context target (.prototype specType targetType) uses →
@@ -159,6 +166,7 @@ inductive PartialTyping (assumptions : Assumptions) : Context → Term → Ty �
   | inject {context : Context} {tag : String} {payload : Term} {payloadType row : Ty} {uses : Uses} {fuel : Nat} :
       PartialTyping assumptions context payload payloadType uses →
       row.lookup assumptions.bounds fuel tag = some payloadType →
+      payloadType.isComputation = false →
       PartialTyping assumptions context (.inject tag payload) (.variant row) uses
   | case {context : Context} {scrutinee : Term} {arms : List (String × Term)} {row result : Ty} {su au : Uses} :
       PartialTyping assumptions context scrutinee (.variant row) su →
@@ -169,10 +177,28 @@ inductive PartialTyping (assumptions : Assumptions) : Context → Term → Ty �
       PartialTyping assumptions context whenTrue result tu →
       PartialTyping assumptions context whenFalse result fu →
       PartialTyping assumptions context (.ifBool condition whenTrue whenFalse) result (addUses cu (addUses tu fu))
+  /-- Yield a Plan (a sum of first-order actions); the response is data. -/
+  | perform {context : Context} {plan : Term} {planType response : Ty} {uses : Uses} :
+      PartialTyping assumptions context plan planType uses →
+      planType.isPlan = true → response.isData = true →
+      PartialTyping assumptions context (.perform plan) (.computation planType response response) uses
+  /-- A pure value where an activity is expected. -/
+  | done {context : Context} {value : Term} {planType response result : Ty} {uses : Uses} :
+      PartialTyping assumptions context value result uses → result.isComputation = false →
+      PartialTyping assumptions context (.done value) (.computation planType response result) uses
+  /-- Sequencing: the activity's result selects an arm; every arm is an activity
+  over the same plan/response types. This is the only `bind`. -/
+  | effectCase {context : Context} {scrutinee : Term} {arms : List (String × Term)}
+      {planType response row result : Ty} {su au : Uses} :
+      PartialTyping assumptions context scrutinee (.computation planType response (.variant row)) su →
+      ArmsTyping assumptions context arms row (.computation planType response result) au →
+      result.isComputation = false →
+      PartialTyping assumptions context (.case scrutinee arms) (.computation planType response result) (addUses su au)
 inductive FieldsTyping (assumptions : Assumptions) : Context → List (String × Term) → Ty → Uses → Prop where
   | nil (context : Context) : FieldsTyping assumptions context [] .emptyRow (zeroUses context)
   | cons {context : Context} {name : String} {body : Term} {rest : List (String × Term)} {type row : Ty} {bu ru : Uses} :
       PartialTyping assumptions context body type bu → FieldsTyping assumptions context rest row ru →
+      type.isComputation = false →
       FieldsTyping assumptions context ((name,body) :: rest) (.field name type row) (addUses bu ru)
 /-- Arms in source order build a CLOSED row: with the scrutinee at that variant
 row, every label has exactly the arm the machine's first-match lookup selects.
@@ -265,12 +291,21 @@ def infer (assumptions : Assumptions) (annotations : Annotations) (context : Con
   | fuel + 1, .specification metadata extension => do
       let descriptor ← infer assumptions annotations context (position ++ [0]) fuel metadata
       let body ← infer assumptions annotations context (position ++ [1]) fuel extension
-      some ⟨.specification descriptor.type body.type, addUses descriptor.uses body.uses,
-        .specification descriptor.derivation body.derivation⟩
+      if hm : descriptor.type.isComputation = false then
+        if he : body.type.isComputation = false then
+          some ⟨.specification descriptor.type body.type, addUses descriptor.uses body.uses,
+            .specification descriptor.derivation body.derivation hm he⟩
+        else none
+      else none
   | fuel + 1, .prototype spec target => do
       let code ← infer assumptions annotations context (position ++ [0]) fuel spec
       let value ← infer assumptions annotations context (position ++ [1]) fuel target
-      some ⟨.prototype code.type value.type, addUses code.uses value.uses, .prototype code.derivation value.derivation⟩
+      if hs : code.type.isComputation = false then
+        if ht : value.type.isComputation = false then
+          some ⟨.prototype code.type value.type, addUses code.uses value.uses,
+            .prototype code.derivation value.derivation hs ht⟩
+        else none
+      else none
   | fuel + 1, .reflect target => do
       let result ← infer assumptions annotations context (position ++ [0]) fuel target
       match ht : result.type with
@@ -359,13 +394,46 @@ def infer (assumptions : Assumptions) (annotations : Annotations) (context : Con
         | .variant row =>
             if hm : row.lookup assumptions.bounds (fuel + 1) tag = some annotation.domain then
               if hs : sameType assumptions value.type annotation.domain = true then
-                some ⟨.variant row, value.uses, .inject (.conversion value.derivation hs) hm⟩
+                if hp : annotation.domain.isComputation = false then
+                  some ⟨.variant row, value.uses, .inject (.conversion value.derivation hs) hm hp⟩
+                else none
               else none
             else none
+        | .variable index =>
+          -- A recursive sum is declared as its bounded variable: inject at the
+          -- bound's row, then convert to the variable (one declared head unfolds),
+          -- so a nested injection already carries the sum's declared name.
+          match assumptions.bounds.lookup index with
+          | some (.variant row) =>
+            if hm : row.lookup assumptions.bounds (fuel + 1) tag = some annotation.domain then
+              if hs : sameType assumptions value.type annotation.domain = true then
+                if hp : annotation.domain.isComputation = false then
+                  if hc : sameType assumptions (.variant row) (.variable index) = true then
+                    some ⟨.variable index, value.uses,
+                      .conversion (.inject (.conversion value.derivation hs) hm hp) hc⟩
+                  else none
+                else none
+              else none
+            else none
+          | _ => none
         | _ => none
       else none
   | fuel + 1, .case scrutinee arms => do
       let value ← infer assumptions annotations context (position ++ [0]) fuel scrutinee
+      match value.type with
+      | .computation _ _ produced =>
+        let row ← variantRow assumptions produced
+        let typed ← inferArms assumptions annotations context (position ++ [1]) 0 row none fuel arms
+        match hr : typed.result with
+        | .computation planType response result =>
+          if hc : sameType assumptions value.type (.computation planType response (.variant typed.row)) = true then
+            if hn : result.isComputation = false then
+              some ⟨.computation planType response result, addUses value.uses typed.uses,
+                .effectCase (.conversion value.derivation hc) (hr ▸ typed.derivation) hn⟩
+            else none
+          else none
+        | _ => none
+      | _ =>
       let row ← variantRow assumptions value.type
       let typed ← inferArms assumptions annotations context (position ++ [1]) 0 row none fuel arms
       if hc : sameType assumptions value.type (.variant typed.row) = true then
@@ -381,6 +449,27 @@ def infer (assumptions : Assumptions) (annotations : Annotations) (context : Con
             .ifBool (hc ▸ c.derivation) t.derivation (hb ▸ f.derivation)⟩
         else none
       else none
+  | fuel + 1, .perform plan => do
+      -- The annotation at a perform's position is its effect signature:
+      -- domain = the Plan sum, codomain = the response data type.
+      let annotation ← annotations position
+      let value ← infer assumptions annotations context (position ++ [0]) fuel plan
+      if hs : sameType assumptions value.type annotation.domain = true then
+        if hp : annotation.domain.isPlan = true then
+          if hr : annotation.codomain.isData = true then
+            some ⟨.computation annotation.domain annotation.codomain annotation.codomain, value.uses,
+              .perform (.conversion value.derivation hs) hp hr⟩
+          else none
+        else none
+      else none
+  | fuel + 1, .done inner => do
+      -- The annotation at `done` names the activity's Plan and response types.
+      let annotation ← annotations position
+      let value ← infer assumptions annotations context (position ++ [0]) fuel inner
+      if hn : value.type.isComputation = false then
+        some ⟨.computation annotation.domain annotation.codomain value.type, value.uses,
+          .done value.derivation hn⟩
+      else none
 
 def inferFields (assumptions : Assumptions) (annotations : Annotations) (context : Context)
     (position : List Nat) (index : Nat) : Nat → (fields : List (String × Term)) → Option (InferredFields assumptions context fields)
@@ -389,7 +478,9 @@ def inferFields (assumptions : Assumptions) (annotations : Annotations) (context
   | fuel + 1, (name,body) :: rest => do
       let first ← infer assumptions annotations context (position ++ [index]) fuel body
       let later ← inferFields assumptions annotations context position (index + 1) fuel rest
-      some ⟨.field name first.type later.type, addUses first.uses later.uses, .cons first.derivation later.derivation⟩
+      if hc : first.type.isComputation = false then
+        some ⟨.field name first.type later.type, addUses first.uses later.uses, .cons first.derivation later.derivation hc⟩
+      else none
 
 /-- Every arm body is checked under its label's payload type in the scrutinee
 row; all arms must agree exactly on the result type. Empty arm lists have no
@@ -554,7 +645,7 @@ theorem future_row_instantiation_accepted (self super : Ty)
   simp [check, infer, inferFields, futureRowInstantiation, futureRowSource,
     sameType, Assumptions.valid, overlay, zeroUses, variableUses, addUses, safeUses, safeQuantity,
     validContext, reusableAllowed, reusableCaptures,
-    List.range_succ, List.zipWith, selfShareable, superShareable, superRow]
+    List.range_succ, List.zipWith, selfShareable, superShareable, superRow, Ty.isComputation]
 
 /-- A total law provider proves a law ABOUT the partial runtime term; source
 law names alone cannot construct this evidence. Compatible retention is chosen
@@ -584,7 +675,7 @@ theorem future_row_typed : FutureRowTyped futureRowInstantiation := by
   simp [futureRowInstanceChecked, check, infer, inferFields, futureRowInstantiation,
     futureRowSource, sameType, Assumptions.valid, overlay, zeroUses, variableUses, addUses, safeUses, safeQuantity,
     validContext, reusableAllowed, reusableCaptures,
-    List.range_succ, List.zipWith, hs, ht, hr]
+    List.range_succ, List.zipWith, hs, ht, hr, Ty.isComputation]
 
 /-- Independently authored code changes a self-sensitive method type at every
 future Self instantiation, including negative arrow occurrences. -/
@@ -606,7 +697,7 @@ theorem future_binary_instantiation_accepted (self super : Ty)
   simp [check, infer, inferFields, futureBinaryInstantiation, sameType, Assumptions.valid, overlay,
     zeroUses, variableUses, addUses, safeUses, safeQuantity,
     validContext, reusableAllowed, reusableCaptures,
-    List.range_succ, List.zipWith, selfShareable, superShareable, superRow]
+    List.range_succ, List.zipWith, selfShareable, superShareable, superRow, Ty.isComputation]
 
 def scalarExtend : AnnotatedTerm :=
   ⟨.extend (.nat 3) [("answer",.nat 42)], fun _ => none, {}⟩
@@ -763,6 +854,10 @@ def decodeType : Nat → Json → Except String Ty
         (← decodeType fuel (← value.getObjVal? "spec"))
         (← decodeType fuel (← value.getObjVal? "target")))
     | "variant" => return .variant (← decodeType fuel (← value.getObjVal? "row"))
+    | "computation" => return (.computation
+        (← decodeType fuel (← value.getObjVal? "plan"))
+        (← decodeType fuel (← value.getObjVal? "response"))
+        (← decodeType fuel (← value.getObjVal? "result")))
     | _ => .error "unknown Objective type constructor"
 
 def decodePrimitive (value : Json) : Except String Primitive := do
@@ -808,6 +903,8 @@ def decodeTerm : Nat → Json → Except String Term
           return (← arm.getObjValAs? String "label", ← decodeTerm fuel (← arm.getObjVal? "body"))
         return .case (← sub "scrutinee") arms
     | "ifBool" => return .ifBool (← sub "condition") (← sub "whenTrue") (← sub "whenFalse")
+    | "perform" => return .perform (← sub "plan")
+    | "done" => return .done (← sub "value")
     | _ => .error "unknown Objective runtime constructor"
 
 def decodeLambda (value : Json) : Except String LambdaAnnotation := do
@@ -869,6 +966,8 @@ def typeJson : Ty → Json
   | .prototype spec target => Json.mkObj [("tag",toJson "prototype"),
       ("spec",typeJson spec),("target",typeJson target)]
   | .variant row => Json.mkObj [("tag",toJson "variant"),("row",typeJson row)]
+  | .computation plan response result => Json.mkObj [("tag",toJson "computation"),
+      ("plan",typeJson plan),("response",typeJson response),("result",typeJson result)]
 
 def packetReceipt (value : Json) : Except String Json := do
   let packet ← decodePacket value
@@ -897,6 +996,69 @@ def checkPacketFile (path : String) : IO UInt32 := do
         ("status",toJson "refused"),("stage",toJson "objective-source-type-check"),("message",toJson message)]).compress
       return 2
 
+
+
+/-! ## Activities: effects as a type, never in a shared position -/
+
+def planRow : Ty := .field "write" (.field "after" .natural .emptyRow) .emptyRow
+def planType : Ty := .variant planRow
+def responseType : Ty := .variant (.field "written" .emptyRow (.field "refused" .emptyRow .emptyRow))
+def writeAction : LambdaAnnotation := ⟨.field "after" .natural .emptyRow,planType,.unrestricted,.reusable⟩
+def effectSignature : LambdaAnnotation := ⟨planType,responseType,.unrestricted,.reusable⟩
+def writePlan : Term := .inject "write" (.record [("after",.nat 1)])
+/-- Annotations for a perform at `site` (its plan injection one level down). -/
+def performAt (site : List Nat) (rest : Annotations) : Annotations := fun position =>
+  if position = site then some effectSignature else if position = site ++ [0] then some writeAction
+  else rest position
+def writeActivity (written refused : Term) : Term :=
+  .case (.perform writePlan) [("written",written),("refused",refused)]
+def armsDone : Annotations := fun position =>
+  if position = [1,0] ∨ position = [1,1] then some effectSignature else none
+
+/-- Perform a write, resume with its outcome, select the arm: an activity. -/
+theorem effect_case_accepted :
+    (check ⟨writeActivity (.done (.nat 1)) (.done (.nat 0)),performAt [0] armsDone,{}⟩ [] 32).map
+      (fun checked => checked.type) = some (.computation planType responseType .natural) := by decide
+/-- Every arm of an effect case is an activity; a pure arm needs `done`. -/
+theorem pure_arm_without_done_refused :
+    (check ⟨writeActivity (.nat 1) (.nat 0),performAt [0] armsDone,{}⟩ [] 32).isNone = true := by decide
+/-- Rule effect-as-argument: an argument is a shared thunk, so an activity is
+refused there even for an affine (non-shareable) parameter... -/
+theorem effect_as_argument_refused :
+    (check ⟨.app (.lam (.nat 0)) (.perform writePlan),
+      performAt [1] (fun position => if position = [0] then
+        some ⟨.computation planType responseType responseType,.natural,.affine,.reusable⟩ else none),{}⟩ [] 32).isNone = true := by decide
+/-- ...while the same affine parameter accepts a pure argument. -/
+theorem pure_affine_argument_accepted :
+    (check ⟨.app (.lam (.nat 0)) (.nat 3),
+      fun position => if position = [0] then some ⟨.natural,.natural,.affine,.reusable⟩ else none,{}⟩ [] 32).map
+      (fun checked => checked.type) = some .natural := by decide
+/-- Rule effect-in-field: a record field is a shared cell. -/
+theorem effect_in_record_field_refused :
+    (check ⟨.record [("next",.perform writePlan)],performAt [0] (fun _ => none),{}⟩ [] 32).isNone = true := by decide
+/-- Rule effect-in-payload: a sum payload is a shared cell. -/
+theorem effect_in_payload_refused :
+    (check ⟨.inject "later" (.perform writePlan),
+      performAt [0] (fun position => if position = [] then
+        some ⟨.computation planType responseType responseType,
+          .variant (.field "later" (.computation planType responseType responseType) .emptyRow),
+          .unrestricted,.reusable⟩ else none),{}⟩ [] 32).isNone = true := by decide
+/-- Rule effect-in-specification: specification components are shared cells. -/
+theorem effect_in_specification_refused :
+    (check ⟨.specification (.perform writePlan) (.nat 0),performAt [0] (fun _ => none),{}⟩ [] 32).isNone = true := by decide
+/-- Rule plan-is-a-sum: a perform's plan is a sum of first-order actions. -/
+theorem scalar_plan_refused :
+    (check ⟨.perform (.nat 1),fun position => if position = [] then
+      some ⟨.natural,responseType,.unrestricted,.reusable⟩ else none,{}⟩ [] 32).isNone = true := by decide
+/-- Rule response-is-data: a closure cannot be a response. -/
+theorem closure_response_refused :
+    (check ⟨.perform writePlan,fun position =>
+      if position = [] then some ⟨planType,.arrow .reusable .unrestricted .natural .natural,.unrestricted,.reusable⟩
+      else if position = [0] then some writeAction else none,{}⟩ [] 32).isNone = true := by decide
+/-- An activity is never shareable, so it is never a fix target, mix operand or
+unrestricted binder either. -/
+theorem computation_not_shareable (plan response result : Ty) (variables : List Nat) :
+    (Ty.computation plan response result).shareableUnder variables = false := rfl
 
 /--
 info: 'Minidregg.Theory.ObjectiveBendTyping.exhaustive_case_accepted' depends on axioms: [propext,
@@ -983,5 +1145,65 @@ info: 'Minidregg.Theory.ObjectiveBendTyping.affine_in_one_arm_accepted' depends 
 -/
 #guard_msgs in
 #print axioms affine_in_one_arm_accepted
+
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.effect_case_accepted' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms effect_case_accepted
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.pure_arm_without_done_refused' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms pure_arm_without_done_refused
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.effect_as_argument_refused' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms effect_as_argument_refused
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.pure_affine_argument_accepted' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms pure_affine_argument_accepted
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.effect_in_record_field_refused' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms effect_in_record_field_refused
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.effect_in_payload_refused' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms effect_in_payload_refused
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.effect_in_specification_refused' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms effect_in_specification_refused
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.scalar_plan_refused' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms scalar_plan_refused
+/--
+info: 'Minidregg.Theory.ObjectiveBendTyping.closure_response_refused' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms closure_response_refused
 
 end Minidregg.Theory.ObjectiveBendTyping

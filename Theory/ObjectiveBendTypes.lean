@@ -25,6 +25,11 @@ inductive Ty where
   /-- A sum over the labels of an ordinary field row. A `.emptyRow` tail is a
   closed (exhaustively eliminable) sum; a variable tail is an open sum. -/
   | variant (row : Ty)
+  /-- An activity: a computation that may yield Plans of type `plan`, is resumed
+  with responses of type `response`, and finishes with `result`. Only a direct
+  (never suspended) position may hold it: it is not shareable, and every
+  cell-allocating typing rule refuses it. Surface: `Activity<Plan, Response, Result>`. -/
+  | computation (plan response result : Ty)
   deriving Repr, DecidableEq
 
 /-- A reusable closure is shareable only after its captures have been checked.
@@ -37,6 +42,7 @@ def Ty.shareable : Ty → Bool
   | .specification metadata extension => metadata.shareable && extension.shareable
   | .prototype spec target => spec.shareable && target.shareable
   | .variant row => row.shareable
+  | .computation _ _ _ => false
 
 /-- Rigid variables may be quantified over shareable future types explicitly.
 Every instantiation must discharge this finite premise; an unknown row is never
@@ -51,6 +57,36 @@ def Ty.shareableUnder (variables : List Nat) : Ty → Bool
 
 @[simp] theorem Ty.shareableUnder_empty (type : Ty) : type.shareableUnder [] = type.shareable := by
   induction type <;> simp_all [Ty.shareableUnder, Ty.shareable]
+
+/-- The head of an activity type. Only the head is inspected: canonical row
+equality preserves it, and bounds never name an activity (`Assumptions.valid`),
+so this is invariant under every checked type agreement. -/
+def Ty.isComputation : Ty → Bool
+  | .computation _ _ _ => true
+  | _ => false
+
+/-- First-order data: what a Plan, a response and a checkpointed reply can be.
+No closures, specifications, prototypes, custody, rigid variables (so no
+recursive sums yet) and no activities. -/
+def Ty.isData : Ty → Bool
+  | .natural | .label | .boolean | .emptyRow => true
+  | .field _ member tail => member.isData && tail.isData
+  | .variant row => row.isData
+  | _ => false
+
+/-- A Plan is a sum of typed actions over first-order data. -/
+def Ty.isPlan : Ty → Bool
+  | .variant row => row.isData
+  | _ => false
+
+theorem Ty.shareable_not_computation (type : Ty) (shareable : type.shareable = true) :
+    type.isComputation = false := by
+  cases type <;> simp_all [Ty.shareable, Ty.isComputation]
+
+theorem Ty.shareableUnder_not_computation (variables : List Nat) (type : Ty)
+    (shareable : type.shareableUnder variables = true) : type.isComputation = false := by
+  cases type <;> simp_all [Ty.shareableUnder, Ty.shareable, Ty.isComputation]
+
 
 /-- Shadowing changes this field only; unknown future tail stays present. -/
 def Ty.put (row : Ty) (name : String) (member : Ty) : Ty :=
@@ -87,7 +123,19 @@ def Ty.canonical : Ty → Ty
   | .specification metadata extension => .specification metadata.canonical extension.canonical
   | .prototype spec target => .prototype spec.canonical target.canonical
   | .variant row => .variant row.canonical
+  | .computation plan response result =>
+      .computation plan.canonical response.canonical result.canonical
   | other => other
+
+theorem Ty.insertCanonical_not_computation (row : Ty) (name : String) (member : Ty) :
+    (row.insertCanonical name member).isComputation = false := by
+  cases row <;> simp only [Ty.insertCanonical]
+  all_goals repeat' first | split
+  all_goals rfl
+
+theorem Ty.canonical_isComputation (type : Ty) : type.canonical.isComputation = type.isComputation := by
+  cases type <;> try rfl
+  exact Ty.insertCanonical_not_computation _ _ _
 
 /-- Explicit finite bounds disclose the members available on a rigid self/super
 variable. Recursive bounds are explored only to the requested finite depth. -/
@@ -200,6 +248,9 @@ def Ty.instantiate (arguments : Nat → Ty) : Ty → Ty
       .specification (metadata.instantiate arguments) (extension.instantiate arguments)
   | .prototype spec target => .prototype (spec.instantiate arguments) (target.instantiate arguments)
   | .variant row => .variant (row.instantiate arguments)
+  | .computation plan response result =>
+      .computation (plan.instantiate arguments) (response.instantiate arguments)
+        (result.instantiate arguments)
   | other => other
 
 /-- Families are independently authored expressions over future type variables.
