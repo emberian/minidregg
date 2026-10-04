@@ -4781,7 +4781,7 @@
     {
       "module": "Kernel",
       "path": "Kernel.lean",
-      "sha256": "507d0383f86653bfebd704baf769e06c06e0123d99c7f5bf1871f11c9b8635c5",
+      "sha256": "5f6a2b36772320a76aa156d27f49d7600dfa99a7f0f30a6ca96d70b83577a75c",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6091,6 +6091,13 @@
       "module": "Kernel.ContentResourceAudit",
       "path": "Kernel/ContentResourceAudit.lean",
       "sha256": "06cc7e990c0ca4de7e6057939a87ccf9a8b9826adde13bf70a1e892f78134715",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Kernel.ContentResourceForestInstances",
+      "path": "Kernel/ContentResourceForestInstances.lean",
+      "sha256": "1245dbf7fb6e820ced5eb3299db44c81a4bad94a9c6ac97ce62eab56c942a1d1",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7523,6 +7530,13 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Kernel.PayEnrolClaimInstances",
+      "path": "Kernel/PayEnrolClaimInstances.lean",
+      "sha256": "c18a36ad05dba69ea5c01db75c24844b528b1138824d377798f35af946756ade",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
       "module": "Kernel.PayEnrolDecision",
       "path": "Kernel/PayEnrolDecision.lean",
       "sha256": "cdb076c9aae36eb726e46b3ea0a2b224aea7ebe6517c0caea1fa6b7b34505388",
@@ -8316,7 +8330,7 @@
     {
       "module": "ResearchWip",
       "path": "ResearchWip.lean",
-      "sha256": "c48f0528bc68b714d9646c1734677c090b1296e26633ddc3b1a7b1e95094f979",
+      "sha256": "302f21ccec98377bb3cb8c2a7ca1ce955a675525eea625c673584ee83cb519fc",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -10521,9 +10535,9 @@
     {
       "module": "Theory.ObjectiveBendDemandAdequacy",
       "path": "Theory/ObjectiveBendDemandAdequacy.lean",
-      "sha256": "46dff1a178a83334318a11390795b5af71515fdf0c6a26069744baa6a12da845",
+      "sha256": "12c79e4a506369a64dcd981207b6a78198ef9747912eb95763698be471cb1513",
       "surface": "authored-research",
-      "ownerReportedStatus": "Exact frozen Core4-r7 scoped Lean PASS with guarded axiom footprints; general observed output soundness. Aggregate source/native authority qualification remains separate."
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Theory.ObjectiveBendDemandCapacity",
@@ -10531,6 +10545,13 @@
       "sha256": "af8b1c98a8624ec6fb93557af3e24577bc05640a0b2b1e817a354a93f6f3b462",
       "surface": "authored-research",
       "ownerReportedStatus": "Exact owner r7 Lean and actual source/LoadedDirectory/PreparedOutput PASS; no Accepted or submission"
+    },
+    {
+      "module": "Theory.ObjectiveBendDemandCompleteness",
+      "path": "Theory/ObjectiveBendDemandCompleteness.lean",
+      "sha256": "c811933609aa7a1d85ea55343fd0872746a590dfb7f8a852de8a911a49a3690e",
+      "surface": "authored-research",
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Theory.ObjectiveBendDemandData",
