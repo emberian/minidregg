@@ -761,8 +761,12 @@ A Minidregg.Theory.ObjectiveBendDemandDataSoundness.FieldsInvariant : Quot.sound
 A Minidregg.Theory.ObjectiveBendDemandDataSoundness.Settled : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandDataSoundness.Terminal : propext
 A Minidregg.Theory.ObjectiveBendDemandDataSoundness.deepEvaluates_steps : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandDataSoundness.deepEvaluates_unique : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandDataSoundness.deepFields_append : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandDataSoundness.deepFields_unique : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandDataSoundness.except_bind_ok : -
+A Minidregg.Theory.ObjectiveBendDemandDataSoundness.execution_data_unique : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandDataSoundness.execution_deepEvaluates : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandDataSoundness.execution_source_semantics : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandDataSoundness.foldlM_fieldsInvariant : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandDataSoundness.forceWith_finished : Quot.sound, propext
@@ -773,6 +777,8 @@ A Minidregg.Theory.ObjectiveBendDemandDataSoundness.materialize_sound : Classica
 A Minidregg.Theory.ObjectiveBendDemandDataSoundness.runBounded_terminal : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandDataSoundness.sampleRecord : -
 A Minidregg.Theory.ObjectiveBendDemandDataSoundness.sampleRecord_closed : propext
+A Minidregg.Theory.ObjectiveBendDemandDataSoundness.sampleRecord_data : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandDataSoundness.sampleRecord_deepEvaluates : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandDataSoundness.sampleRecord_executes : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandDataSoundness.sampleRecord_executes_native : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandDataSoundness.sampleRecord_native_source_semantics : Classical.choice, Quot.sound, propext

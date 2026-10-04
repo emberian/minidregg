@@ -245,8 +245,8 @@ the C4 implementation. Their output is not trusted blindly:
 front end's own packet (`ObjectiveBendFrontEnd.accept`), the erasure of the
 elaborator's term is closed and typed by the checker's derivation (`accepted_typed`),
 is never refused by the bounded demand machine at any budget
-(`accepted_never_refused`), and a finished run of it is a deep source evaluation of it
-(`accepted_execution_semantics`); `accept_inhabited` exhibits a surface program it
+(`accepted_never_refused`), and a finished run of it extracts the unique deep source
+evaluation of it (`accepted_execution_semantics`); `accept_inhabited` exhibits a surface program it
 holds for. `Kernel/ObjectiveBendAdmissionSemantics.admitted_front_end` proves an
 admitted invocation's typed core is byte-for-byte this front end's lowering of the
 package's sources. The link from the packet to the term is a theorem: the checker's decoder inverts the

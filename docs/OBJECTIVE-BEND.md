@@ -201,7 +201,8 @@ equalities are theorems.
 | `state_roundTrip` | The checkpoint codec restores every machine state exactly. | none |
 | `machine_evaluation_complete` (from `rawRun_finite_completion`) | Completeness: a closed source that the reference semantics evaluates to a value with a ground observation is finished by the machine with that observation, in finitely many transitions. `coreRepresentation` inhabits `Representation` (soundness, completeness, observation) for every closed source. | `Scoped 0 source`, `Evaluates source value`, `Observes value result`; the machine step is the bounded `step` at limits that admit each next transition. |
 | `forceWith_unrestricted`, `forceWith_policy_suspends` | `forceWith` under the always-true policy is `runBounded`; any other policy can only stop early with a capacity suspension that retains the state the unrestricted bounded run had reached at that point. | none |
-| `materialize_sound`, `execution_source_semantics` | The Plan path is source semantics: a successful `executeWith` on a closed term, under any policy, limits and budget, is a finished `runBounded` of the same term, and the extracted Data is a deep reference evaluation (`DeepEvaluates`) of the source term. | `Scoped 0 term`; an `ExecutionWith` value |
+| `materialize_sound`, `execution_source_semantics` | The Plan path is source semantics: a successful `executeWith` on a closed term, under any policy, limits and budget, is a finished `runBounded` of the same term, and the extracted Data is THE deep reference evaluation (`DeepEvaluates`) of the source term: a Data deep-evaluates the term exactly when it is the extracted Data. | `Scoped 0 term`; an `ExecutionWith` value |
+| `deepEvaluates_unique`, `execution_data_unique` | `DeepEvaluates` is deterministic (from `source_evaluates_unique`), so two successful executions of one closed term extract the same Data under any two policies (e.g. the native capacity profile and the unrestricted reference), limits and budgets. `sampleRecord_data` consumes it: every execution of `{answer: 6 * 7}` extracts `{answer: 42}`. | two `DeepEvaluates` derivations; `Scoped 0 term` and two `ExecutionWith` values |
 | `mix_append`, `composition_associative` | Folding a list of homogeneous extensions distributes over append, and specification composition is associative, on the list model in `ObjectiveBendExtensions`. | none; but it is a separate model, and no theorem ties it to `Term.mix` |
 
 The no-refusal theorems are about the same function the preview runs: the preview
@@ -218,9 +219,6 @@ calls `check` on the empty context and then `runBounded` on the same decoded ter
   instance mean something is that `Supported` is the real admission predicate, which
   is a reading of the definition, not a theorem; the non-vacuity theorems are
 `lazyFixedSeed_supported_by_representation` and `open_term_not_started`. (The docstring on `Representation`, `Theory/ObjectiveBendOpenRecursion.lean:361-365`, still says "no instance is claimed here"; `coreRepresentation` at `Theory/ObjectiveBendDemandCompleteness.lean:1127` is the instance.)
-- **Uniqueness of deep Data.** `DeepEvaluates` relates the extracted Data to the
-  source term. No theorem says the Data is the only Data it relates to, so "the Data"
-  means "a deep evaluation", not "the unique one".
 - **`OrderedPresentationInvariant`.** The C4 renaming-invariance statement is a `Prop`
   that nothing proves (see the roadmap).
 - **Front-end adequacy.** No theorem relates `.obend` source to the core term (see
@@ -266,9 +264,9 @@ when no built tree exists, and its TypeScript rows only drive the Lean front end
 A Plan or result produced on the native path is **"Core4 `executeWith` output"**: what
 the evaluator computed, re-executed deterministically at admission and on every
 replay. `execution_source_semantics` relates it to the source: the run is a finished
-`runBounded` of the same term and the Data is *a* deep reference evaluation of it.
-That is not "the meaning of the source" as a unique value (see the open list), and it
-says nothing about the front end that produced the term.
+`runBounded` of the same term and the Data is THE deep reference evaluation of it
+(`deepEvaluates_unique`): the Core4 meaning of the term, the same under every policy
+that lets the run finish. It says nothing about the front end that produced the term.
 
 ## Execution paths
 

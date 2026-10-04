@@ -3,9 +3,12 @@
 `executeWith` evidence on the checked applied source; by W1.4's
 `execution_source_semantics` that run is a finished reference `runBounded` run of
 the same term and the extracted Data (from which the plan and the result atom
-are decoded) is A deep source evaluation of it. Caveat kept in every label:
-`DeepEvaluates` is not yet proved deterministic, so this is "a deep evaluation",
-not "the unique one". Lives in the ObjectiveProofs gate. -/
+are decoded) is THE deep source evaluation of it (`deepEvaluates_unique`): no
+other Data deep-evaluates that term, so the output Data is a function of the
+applied term alone, whatever capacity envelope admitted it
+(`admitted_data_unique`). The same holds of the bare prepared scalar output
+(`prepared_source_semantics`). Lives in the ObjectiveProofs gate: the proofs stay
+out of the Host closure, which consumes `Prepared`/`Admitted` as definitions. -/
 import Kernel.ObjectiveBendNativeAdmission
 import Theory.ObjectiveBendDemandDataSoundness
 import Theory.ObjectiveBendDemandTyping
@@ -28,12 +31,58 @@ theorem admitted_source_semantics {F : Type} [Field F] [DecidableEq F] {deployme
     runBounded (limits admitted.claim.capacity) (budget admitted.claim.capacity).ticks
         (initial admitted.core.applied.term) =
       .finished admitted.output.execution.value admitted.output.execution.state ∧
-    DeepEvaluates admitted.core.applied.term admitted.output.execution.extraction.result.value :=
+    ∀ data, DeepEvaluates admitted.core.applied.term data ↔
+      data = admitted.output.execution.extraction.result.value :=
   execution_source_semantics
     (Minidregg.Theory.ObjectiveBendDemandTyping.source_scoped admitted.core.typed.derivation)
     admitted.output.execution
 
+/-- The output Data of an admission is a function of the applied term: two admitted
+invocations that ran the same applied term (under any two deployments, ambients,
+capacity claims and output codecs) extracted the same Data. A capacity envelope
+admits or refuses a run; it never changes what the run means. -/
+theorem admitted_data_unique {F : Type} [Field F] [DecidableEq F]
+    {deployment deployment' : Deployment} {profile profile' : CanonicalRuntimeProfile.Profile F}
+    {ambient ambient' : Ambient} {durable durable' : Durable} {command command' : Command}
+    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared' : PreparedInvocation deployment' profile' ambient' durable' command'}
+    {ingress ingress' : List UInt8} {writes writes' : List DataWrite} {guards guards' : List ReadGuard}
+    (admitted : Admitted prepared ingress writes guards) (other : Admitted prepared' ingress' writes' guards')
+    (same : admitted.core.applied.term = other.core.applied.term) :
+    admitted.output.execution.extraction.result.value = other.output.execution.extraction.result.value := by
+  have deep : DeepEvaluates admitted.core.applied.term _ := (execution_deepEvaluates
+    (Minidregg.Theory.ObjectiveBendDemandTyping.source_scoped admitted.core.typed.derivation)
+    admitted.output.execution).2
+  have otherDeep : DeepEvaluates other.core.applied.term _ := (execution_deepEvaluates
+    (Minidregg.Theory.ObjectiveBendDemandTyping.source_scoped other.core.typed.derivation)
+    other.output.execution).2
+  rw [←same] at otherDeep
+  exact deepEvaluates_unique deep otherDeep
+
+/-- The prepared scalar output (`ObjectiveBendPreparedOutput.prepare`'s evidence,
+which the native admission's `.scalar` output carries) is source semantics: its
+execution is a finished `runBounded` run of the checked source term at the prepared
+limits and budget, and its extracted Data, from which the native Plan is lowered,
+is THE deep evaluation of that term. Closedness comes from the token's own typing
+derivation, so the only premise is the token. -/
+theorem prepared_source_semantics
+    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+    {command : Command} {source : Minidregg.Theory.ObjectiveBendTyping.AnnotatedTerm} {limits : Limits}
+    {budget : Minidregg.Theory.ObjectiveBendDemandData.Budget}
+    {capacity : Minidregg.Theory.ObjectiveBendDemandCapacity.Profile}
+    (prepared : ObjectiveBendPreparedOutput.Prepared deployment loaded command source limits budget capacity) :
+    runBounded limits budget.ticks (initial source.term) =
+      .finished prepared.execution.value prepared.execution.state ∧
+    ∀ data, DeepEvaluates source.term data ↔ data = prepared.execution.extraction.result.value :=
+  execution_source_semantics
+    (Minidregg.Theory.ObjectiveBendDemandTyping.source_scoped prepared.checked.derivation)
+    prepared.execution
+
 #assert_axioms admitted_source_semantics
+#assert_axioms admitted_data_unique
+#assert_axioms prepared_source_semantics
 
 /-- An admitted invocation runs the front end's own output on its package, and it cannot
 refuse. The package names THIS receiver's front end (`ObjectiveBendFrontEndIdentity.identity`,

@@ -317,7 +317,7 @@ def prepareIntent (derived : Derived) (intentNonce : Nat) : NativeObservationCod
 def toJson (derived : Derived) (intentNonce : Nat) : Json :=
   Json.mkObj [
     ("schema","dregg.objective-bend.quote.v2"),
-    ("evidence","a deep source evaluation (not proved unique): Core4 executeWith output"),
+    ("evidence","the deep source evaluation (deepEvaluates_unique): Core4 executeWith output"),
     ("semanticId",ObjectiveBendNativeInput.hex (digestStream.encode
       (ObjectiveBendNativeAdmission.methodSemanticId derived.artifact))),
     ("artifactId",ObjectiveBendNativeInput.hex (digestStream.encode

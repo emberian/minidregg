@@ -11,8 +11,9 @@ end accepts:
   typing derivation;
 * `accepted_never_refused`: the bounded demand machine never refuses it, at any
   tick, heap or stack budget (it finishes, yields, suspends or blackholes);
-* `accepted_execution_semantics`: a finished bounded run of it is a deep source
-  evaluation of that term.
+* `accepted_execution_semantics`: a finished bounded run of it extracts THE deep
+  source evaluation of that term (`deepEvaluates_unique`): a Data deep-evaluates
+  the term exactly when it is the extracted Data, under every policy and budget.
 
 `accept_inhabited` exhibits a real `.obend` program the front end accepts, so the
 premises are inhabited. What is NOT stated (no surface semantics exists): that the
@@ -52,7 +53,7 @@ theorem accepted_execution_semantics (l : Lowering) (a : Accepted l) {policy : S
     {limits : Limits} {budget : Minidregg.Theory.ObjectiveBendDemandData.Budget}
     (execution : Minidregg.Theory.ObjectiveBendDemandData.ExecutionWith policy limits budget a.erased) :
     runBounded limits budget.ticks (initial a.erased) = .finished execution.value execution.state ∧
-      DeepEvaluates a.erased execution.extraction.result.value :=
+      ∀ data, DeepEvaluates a.erased data ↔ data = execution.extraction.result.value :=
   execution_source_semantics (accepted_typed l a).2.2 execution
 
 /-! ## Inhabitant: a surface program the front end accepts -/

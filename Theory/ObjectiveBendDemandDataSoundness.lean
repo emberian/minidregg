@@ -9,7 +9,11 @@ extracts by re-entering lazy record fields.
   the native capacity profile) on a closed term is a finished `runBounded`, and
   the extracted Data is a DEEP reference evaluation of the source term:
   every scalar is an `Evaluates` of the term at its path, every record level an
-  `Evaluates` to a record literal whose field terms deep-evaluate in order. -/
+  `Evaluates` to a record literal whose field terms deep-evaluate in order.
+* `deepEvaluates_unique`: a term deep-evaluates to at most one Data, so the
+  extracted Data is THE deep evaluation of the source term, and
+  `execution_data_unique`: every successful execution of a closed term, under
+  any two policies, limits and budgets, extracts the same Data. -/
 import Theory.ObjectiveBendDemandCompleteness
 import Theory.ObjectiveBendDemandData
 import Theory.ObjectiveBendDemandCapacity
@@ -147,6 +151,70 @@ end
   | cons field rest ih =>
       cases prefixFields with
       | cons head tail => exact .cons head (ih tail)
+
+/-! ## Deep evaluation is a function of the term
+
+The reference `Step` is deterministic and values do not step
+(`source_evaluates_unique`), so every level of a deep evaluation is forced:
+the term evaluates to exactly one weak-head value, a record literal fixes its
+field terms, and an injection fixes its payload term. -/
+
+/-- DEEP DATA UNIQUENESS. A term deep-evaluates to at most one Data. -/
+ theorem deepEvaluates_unique {term : Term} {first second : Data}
+    (left : DeepEvaluates term first) (right : DeepEvaluates term second) : first = second := by
+  refine DeepEvaluates.rec
+    (motive_1 := fun term first _ => ∀ second, DeepEvaluates term second → first = second)
+    (motive_2 := fun fields data _ => ∀ other, DeepFields fields other → data = other)
+    ?natural ?boolean ?label ?record ?variant ?nil ?cons left second right
+  case natural =>
+    intro term number evaluates second right
+    cases right with
+    | natural other | boolean other | label other | record other _ | variant other _ =>
+        cases source_evaluates_unique evaluates other <;> rfl
+  case boolean =>
+    intro term flag evaluates second right
+    cases right with
+    | natural other | boolean other | label other | record other _ | variant other _ =>
+        cases source_evaluates_unique evaluates other <;> rfl
+  case label =>
+    intro term name evaluates second right
+    cases right with
+    | natural other | boolean other | label other | record other _ | variant other _ =>
+        cases source_evaluates_unique evaluates other <;> rfl
+  case record =>
+    intro term fields data evaluates _ fieldsUnique second right
+    cases right with
+    | natural other | boolean other | label other | variant other _ =>
+        cases source_evaluates_unique evaluates other
+    | record other otherFields =>
+        cases source_evaluates_unique evaluates other
+        rw [fieldsUnique _ otherFields]
+  case variant =>
+    intro term payload tag data evaluates _ payloadUnique second right
+    cases right with
+    | natural other | boolean other | label other | record other _ =>
+        cases source_evaluates_unique evaluates other
+    | variant other otherPayload =>
+        cases source_evaluates_unique evaluates other
+        rw [payloadUnique _ otherPayload]
+  case nil =>
+    intro other right
+    cases right; rfl
+  case cons =>
+    intro name term value fields data _ _ headUnique tailUnique other right
+    cases right with
+    | cons otherHead otherTail => rw [headUnique _ otherHead,tailUnique _ otherTail]
+
+/-- Deep evaluation of record fields is a function of the field terms. -/
+ theorem deepFields_unique {fields : List (String × Term)} {first second : List (String × Data)}
+    (left : DeepFields fields first) (right : DeepFields fields second) : first = second := by
+  induction fields generalizing first second with
+  | nil => cases left; cases right; rfl
+  | cons field rest ih =>
+      cases left with
+      | cons head tail =>
+          cases right with
+          | cons otherHead otherTail => rw [deepEvaluates_unique head otherHead,ih tail otherTail]
 
 /-! ## Materialization re-enters fields soundly -/
 
@@ -360,11 +428,9 @@ the value's source meaning, and leaves a settled heap extending the names. -/
                   obtain ⟨deepFields,current,agree,currentSettled,grown⟩ := done
                   refine ⟨.record ⟨.refl _,.record _⟩ (by simpa using deepFields),current,agree,currentSettled,grown⟩
 
-/-- THE PLAN OUTPUT IS SOURCE SEMANTICS. Every `ExecutionWith` (the evidence
-`executeWith` returns, under any policy — in particular the native capacity
-profile — and any limits/budget) of a closed term is a finished `runBounded`
-run of the same term, and its extracted Data deep-evaluates the source term. -/
- theorem execution_source_semantics {policy : State → Bool} {limits : Limits} {budget : Budget} {term : Term}
+/-- The extracted Data deep-evaluates the source term (the soundness half of
+`execution_source_semantics`). -/
+ theorem execution_deepEvaluates {policy : State → Bool} {limits : Limits} {budget : Budget} {term : Term}
     (closed : Scoped 0 term) (execution : ExecutionWith policy limits budget term) :
     runBounded limits budget.ticks (initial term) = .finished execution.value execution.state ∧
       DeepEvaluates term execution.extraction.result.value := by
@@ -396,6 +462,30 @@ run of the same term, and its extracted Data deep-evaluates the source term. -/
     all_goals (try split at exact)
     all_goals (first | (cases exact; exact deepEvaluates_steps sourceSteps sound.1) | cases exact)
 
+/-- THE PLAN OUTPUT IS SOURCE SEMANTICS. Every `ExecutionWith` (the evidence
+`executeWith` returns, under any policy — in particular the native capacity
+profile — and any limits/budget) of a closed term is a finished `runBounded`
+run of the same term, and its extracted Data is THE deep evaluation of the
+source term: a Data deep-evaluates the term exactly when it is that Data. -/
+ theorem execution_source_semantics {policy : State → Bool} {limits : Limits} {budget : Budget} {term : Term}
+    (closed : Scoped 0 term) (execution : ExecutionWith policy limits budget term) :
+    runBounded limits budget.ticks (initial term) = .finished execution.value execution.state ∧
+      ∀ data, DeepEvaluates term data ↔ data = execution.extraction.result.value := by
+  obtain ⟨run,deep⟩ := execution_deepEvaluates closed execution
+  refine ⟨run,fun data => ⟨fun other => deepEvaluates_unique other deep,?_⟩⟩
+  rintro rfl
+  exact deep
+
+/-- POLICY INDEPENDENCE OF THE OUTPUT. Two successful executions of the same
+closed term extract the same Data, whatever the two policies (the native
+capacity profile, the unrestricted reference, two scalar widths), limits and
+budgets: a capacity policy can refuse a run, never change its Data. -/
+ theorem execution_data_unique {policy policy' : State → Bool} {limits limits' : Limits}
+    {budget budget' : Budget} {term : Term} (closed : Scoped 0 term)
+    (execution : ExecutionWith policy limits budget term) (other : ExecutionWith policy' limits' budget' term) :
+    execution.extraction.result.value = other.extraction.result.value :=
+  deepEvaluates_unique (execution_deepEvaluates closed execution).2 (execution_deepEvaluates closed other).2
+
 /-! ## Non-vacuity: a real execution exists -/
 
 /-- `{answer: 6 * 7}`: a lazy record whose field is demanded by extraction. -/
@@ -404,7 +494,7 @@ def sampleRecord : Term := .record [("answer",.binary .multiply (.nat 6) (.nat 7
 theorem sampleRecord_closed : Scoped 0 sampleRecord := by
   refine .record ?_
   intro field member
-  simp [List.mem_singleton] at member
+  simp at member
   subst member
   exact .binary (.natural _) (.natural _)
 
@@ -419,7 +509,7 @@ theorem sampleRecord_source_semantics :
       have ok := sampleRecord_executes
       rw [executed] at ok
       cases ok
-  | ok execution => exact ⟨execution,(execution_source_semantics sampleRecord_closed execution).2⟩
+  | ok execution => exact ⟨execution,(execution_deepEvaluates sampleRecord_closed execution).2⟩
 
 /-- The same program under the native scalar capacity profile (64-bit). -/
 theorem sampleRecord_executes_native :
@@ -435,13 +525,30 @@ theorem sampleRecord_native_source_semantics :
       have ok := sampleRecord_executes_native
       rw [executed] at ok
       cases ok
-  | ok execution => exact ⟨execution,execution_source_semantics sampleRecord_closed execution⟩
+  | ok execution => exact ⟨execution,execution_deepEvaluates sampleRecord_closed execution⟩
+
+/-- The source meaning of `sampleRecord`, derived by hand from the reference `Step`
+alone: the record literal is a value and its field `6 * 7` steps to `42`. -/
+theorem sampleRecord_deepEvaluates : DeepEvaluates sampleRecord (.record [("answer",.natural 42)]) :=
+  .record ⟨.refl _,.record _⟩
+    (.cons (.natural ⟨.next (.primitive .multiply (.nat 6) (.nat 7) (.nat 42) (.natural 6) (.natural 7) rfl)
+      (.refl _),.natural 42⟩) .nil)
+
+/-- Uniqueness, consumed: EVERY successful execution of `sampleRecord`, under every
+policy, limits and budget, extracts exactly `{answer: 42}`. No run is consulted;
+the Data is pinned by the source semantics. Its premise is inhabited by
+`sampleRecord_executes` and `sampleRecord_executes_native`. -/
+theorem sampleRecord_data {policy : State → Bool} {limits : Limits} {budget : Budget}
+    (execution : ExecutionWith policy limits budget sampleRecord) :
+    execution.extraction.result.value = .record [("answer",.natural 42)] :=
+  ((execution_source_semantics sampleRecord_closed execution).2 _).1 sampleRecord_deepEvaluates |>.symm
 
 
 /-! Axiom pins. -/
 #assert_axioms runBounded_terminal forceWith_unrestricted forceWith_policy_suspends
   forceWith_finished deepEvaluates_steps deepFields_append force_field_sound foldlM_fieldsInvariant
-  except_bind_ok materialize_sound execution_source_semantics sampleRecord_closed
+  except_bind_ok materialize_sound execution_deepEvaluates execution_source_semantics
+  deepEvaluates_unique deepFields_unique execution_data_unique sampleRecord_closed
   sampleRecord_executes sampleRecord_source_semantics sampleRecord_executes_native
-  sampleRecord_native_source_semantics
+  sampleRecord_native_source_semantics sampleRecord_deepEvaluates sampleRecord_data
 end Minidregg.Theory.ObjectiveBendDemandDataSoundness

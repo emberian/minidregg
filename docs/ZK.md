@@ -58,7 +58,7 @@ The audit is a written artifact with one line per check. Its reviewer is not its
 | # | check |
 |---|---|
 | 1 | The `verify` in the theorem **is** the function the kernel invokes: a Lean `def` the Host calls, or its `@[export]`. A model beside the code does not count. No `@[extern]` may sit on the path from bytes to verdict. |
-| 2 | `Holds x` is the kernel's own semantic object. For an Objective run, it is the conclusion of `admitted_source_semantics`: a finished `runBounded` run of the admitted term at the envelope's limits, whose result is a deep source evaluation. |
+| 2 | `Holds x` is the kernel's own semantic object. For an Objective run, it is the conclusion of `admitted_source_semantics`: a finished `runBounded` run of the admitted term at the envelope's limits, whose result Data is the unique deep source evaluation of that term (`deepEvaluates_unique`). |
 | 3 | The kernel builds the statement `x` from its own state and the signed claim: source and input identities, the envelope, the layout and the output codec. The proof bytes carry no statement and no parameter. In particular, no size, height, round count, query count or **tick count** is read from the proof (B8). |
 | 4 | **Premise inhabitation at the deployed parameters.** The build checks a true `x` with an accepted `π`, produced by the real pipeline. |
 | 5 | **Teeth.** A false `x` is rejected. A mutation harness flips each proof field, asserts that the bytes changed, and requires the verdict to flip. |
