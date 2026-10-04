@@ -297,6 +297,11 @@ for pair in host:minidregg-host mini:mini store:minidregg-link-sqlite-store \
   roles=$(printf '%s' "$roles" | jq --arg r "$role" --arg p "$file" --arg h "$(candidate_sha256 "$file")" \
     '.[$r] = $p | .sha256[$r] = $h')
 done
+# The local signing consent pair (W1.9), when this build produced it.
+if [ -x "$out/bin/minidregg-client-consent" ]; then
+  roles=$(printf '%s' "$roles" | jq --arg p "$out/bin/minidregg-client-consent" \
+    --arg h "$(candidate_sha256 "$out/bin/minidregg-client-consent")" '.consent = $p | .sha256.consent = $h')
+fi
 printf '%s' "$roles" | jq --arg c "$commit" '. + {sourceCommit: $c, origin: "build.sh"}' >"$roles_json"
 jq -n --arg leanPin "$lean_pin" --arg lean "$lean_version" --arg lake "$lake_version" \
   --arg mathlib "$(jq -r '.packages[] | select(.name == "mathlib") | .rev' "$src/lake-manifest.json")" \

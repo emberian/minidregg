@@ -55,6 +55,7 @@ import time
 # browserProxy = spkBrowserProxy) are names for these, never separate bytes.
 ROLES = {
     "host": "minidregg-host",
+    "consent": "minidregg-client-consent",
     "mini": "mini",
     "store": "minidregg-link-sqlite-store",
     "verifier": "minidregg-credential-signature-verifier",
@@ -69,7 +70,12 @@ ROLES = {
     "payWatcher": "pay-watcher",
 }
 REQUIRED = ("host", "mini", "store", "verifier")
-ALIASES = {"shell": "mini", "hermes": "grainRuntime", "browserProxy": "spkBrowserProxy"}
+ALIASES = {"shell": "mini", "hermes": "grainRuntime", "browserProxy": "spkBrowserProxy", "consentHost": "consent"}
+# The Linux friend bundle (W1.9 consent shipping): one directory a friend copies
+# whole, hard links to bin/, present when the candidate carries the consent pair.
+LINUX = "x86_64-unknown-linux-gnu"
+BUNDLE = ("mini", "minidregg-host", "minidregg-client-consent",
+          "minidregg-credential-signature-verifier", "minidregg-link-sqlite-store")
 # The operator scripts travel with the binaries, from the same archive.
 SCRIPTS = {"run.sh": ("deploy/candidate/run.sh", 0o555), "lib.sh": ("deploy/candidate/lib.sh", 0o555),
            "genesis.sh": ("native/resource-client/genesis.sh", 0o555),
@@ -293,15 +299,36 @@ def package(chosen, archive, commit, out, toolchains, origin, host_build_manifes
     }
     if host_build_manifest is not None:
         provenance["hostBuildManifest"] = {"path": str(host_build_manifest), "sha256": sha(host_build_manifest)}
-    clients = {"x86_64-unknown-linux-gnu": {"path": "bin/mini", "sha256": binaries["mini"]["sha256"]}}
+    clients = {LINUX: {"path": "bin/mini", "sha256": binaries["mini"]["sha256"], "consent": None}}
+    bundle_files = []
+    if "consent" in chosen:
+        bundle = out / "bin" / "clients" / LINUX
+        bundle.mkdir(parents=True, exist_ok=True)
+        for name in BUNDLE:
+            link = bundle / name
+            if not link.exists():
+                os.link(out / "bin" / name, link)
+            if sha(link) != sha(out / "bin" / name):
+                die(f"friend bundle {name} differs from bin/{name}")
+            bundle_files.append(f"bin/clients/{LINUX}/{name}")
+        rel = f"bin/clients/{LINUX}"
+        pin = lambda name: sha(out / "bin" / name)
+        clients[LINUX]["consent"] = {
+            "localHost": {"env": "MINI_LOCAL_HOST", "path": f"{rel}/minidregg-host", "sha256": pin("minidregg-host")},
+            "consentHost": {"env": "MINI_CONSENT_HOST", "path": f"{rel}/minidregg-client-consent",
+                            "sha256": pin("minidregg-client-consent")},
+            "verifier": {"path": f"{rel}/minidregg-credential-signature-verifier",
+                         "sha256": pin("minidregg-credential-signature-verifier")},
+            "store": {"path": f"{rel}/minidregg-link-sqlite-store", "sha256": pin("minidregg-link-sqlite-store")}}
     extra_clients = sorted((out / "bin" / "clients").glob("*/mini")) if (out / "bin" / "clients").is_dir() else []
     for client in extra_clients:
-        clients[client.parent.name] = {"path": str(client.relative_to(out)), "sha256": sha(client)}
+        if client.parent.name != LINUX:
+            clients[client.parent.name] = {"path": str(client.relative_to(out)), "sha256": sha(client), "consent": None}
     provenance["clients"] = clients
     write_json(out / "provenance.json", provenance)
     listed = [f"bin/{ROLES[r]}" for r in sorted(chosen)] + [c["path"] for t, c in sorted(clients.items())
                                                             if c["path"] != "bin/mini"]
-    listed += ["provenance.json", *SCRIPTS, "source.tar", "logs/source-files.sha256"]
+    listed += bundle_files + ["provenance.json", *SCRIPTS, "source.tar", "logs/source-files.sha256"]
     with open(out / "SHA256SUMS", "w") as stream:
         for rel in listed:
             stream.write(f"{sha(out / rel)}  {rel}\n")
