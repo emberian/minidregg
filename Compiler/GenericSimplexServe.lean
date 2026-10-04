@@ -151,11 +151,17 @@ def serviceRequests {config : SourceConfig} (p : Participant config)
 partial def serveLoop {config : SourceConfig} (p : Participant config) (spool : System.FilePath)
     (budget : Budget) (tickMs retryMs : Nat) (entries : List SpoolEntry) : IO Unit := do
   let helper := p.runtime.native.helper
+  let t0 ← IO.monoMsNow
   let inbound ← helper.receive budget.inbound
   let (p,packets,report) ← iteration p inbound budget
+  let t1 ← IO.monoMsNow
   for (recipient,packet) in packets do
     helper.send recipient packet
+  let t2 ← IO.monoMsNow
   let (p,entries) ← serviceRequests p spool entries retryMs
+  let t3 ← IO.monoMsNow
+  if t3 - t0 ≥ 1000 then
+    IO.eprintln s!"iteration ms: receive+service {t1-t0} ({inbound.length} in) send {t2-t1} ({packets.length} out) requests {t3-t2}"
   if report.refused > 0 then
     IO.eprintln s!"serve: dropped {report.refused} unauthenticated packets"
   if report.status == "applied" then

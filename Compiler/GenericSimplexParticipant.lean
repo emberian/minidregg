@@ -345,9 +345,11 @@ Ordinary callers await exact source receipt, never an engine-local flag. -/
 def service {config : SourceConfig} (p : Participant config)
     (validationBudget freshBudget retryBudget : Nat) :
     IO (Participant config × List (Nat × Bytes) × List GenericSimplexController.Outcome × String) := do
+  let t0 ← IO.monoMsNow
   let (pending,checks) ← GenericSimplexController.service p.runtime config p.source.verified.origin
     validationBudget p.pending
   let p := {p with pending := pending}
+  let t1 ← IO.monoMsNow
   -- A standing replica serves on a fixed tick. Journal a poll or tick only when
   -- step can act on it: an exhausted pump (needsPoll), or a due timer not yet
   -- fired. Otherwise a tick changes only the logical clock, which every
@@ -360,9 +362,15 @@ def service {config : SourceConfig} (p : Participant config)
     let now ← p.runtime.now
     if state.needsPoll || (now ≥ state.deadline && !(viewAt state state.current).disableRequested) then
       let _ ← GenericSimplexNative.tick p.runtime
+  let t2 ← IO.monoMsNow
   let (p,packets) ← outgoing p freshBudget retryBudget
+  let t3 ← IO.monoMsNow
   let (p,candidates) ← candidateSlice p
+  let t4 ← IO.monoMsNow
   let (p,certificates,status) ← certificateSlice p
+  let t5 ← IO.monoMsNow
+  if t5 - t0 ≥ 1000 then
+    IO.eprintln s!"service ms: validation {t1-t0} ({checks.length} checks, {p.pending.pending.length} pending) clock {t2-t1} outgoing {t3-t2} ({packets.length}) candidate {t4-t3} certificate {t5-t4} [{status}]"
   return (p,packets ++ candidates ++ certificates,checks,status)
 
 theorem invocation_call_preserves_signed (config : SourceConfig)
