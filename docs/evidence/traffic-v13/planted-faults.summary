@@ -1,0 +1,3 @@
+plant wrong-slot-key exit=1 (0 would mean the plant was NOT detected)
+plant drop-cover exit=1 (0 would mean the plant was NOT detected)
+DONE

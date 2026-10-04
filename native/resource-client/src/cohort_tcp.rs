@@ -986,6 +986,14 @@ fn await_inputs(inputs: &[PathBuf], epoch: u64, until: u64) -> Result<Option<Vec
         thread::sleep(Duration::from_millis(1));
     }
 }
+/// The mix layer public keys a cover worker seals under: hybrid X25519 || ML-KEM-768 keys
+/// (`mix --action key` writes them), so the read bound is the hybrid public length.
+fn read_layer_keys(paths: &[PathBuf]) -> Result<Vec<Vec<u8>>> {
+    paths
+        .iter()
+        .map(|v| read_private(v, hybrid_kem::PUBLIC_LEN))
+        .collect()
+}
 fn worker(
     action: &str,
     mut args: Args,
@@ -1001,10 +1009,7 @@ fn worker(
     } else {
         Vec::new()
     };
-    let keys = keypaths
-        .iter()
-        .map(|v| read_private(v, 1184))
-        .collect::<Result<Vec<_>>>()?;
+    let keys = read_layer_keys(&keypaths)?;
     let authpaths = if action == "registrar" {
         paths(args.required("auth-keys")?)?
     } else {
@@ -1450,6 +1455,21 @@ mod tests {
             first: 0,
             epochs: 2,
         }
+    }
+    #[test]
+    fn cover_worker_reads_the_hybrid_layer_public_keys_the_mix_key_action_writes() {
+        // Found live on Linux: the reader still bounded a layer key at the bare ML-KEM
+        // 1184 bytes after the hybrid conversion, so every cover worker refused its own
+        // keys while every unit test (which hands keys over in memory) stayed green.
+        let dir = temp();
+        let secret = HybridSecret::generate().unwrap();
+        let public = secret.public().to_bytes();
+        assert_eq!(public.len(), hybrid_kem::PUBLIC_LEN);
+        persist(&dir.join("k0.pub"), &public).unwrap();
+        persist(&dir.join("big.pub"), &vec![1; hybrid_kem::PUBLIC_LEN + 1]).unwrap();
+        assert_eq!(read_layer_keys(&[dir.join("k0.pub")]).unwrap(), vec![public]);
+        assert!(read_layer_keys(&[dir.join("big.pub")]).is_err());
+        fs::remove_dir_all(dir).unwrap();
     }
     fn temp() -> PathBuf {
         let p = std::env::temp_dir().join(format!(

@@ -42,9 +42,10 @@ corruption, a malicious intended recipient's own observations.
 
 ## Cryptography
 
-- Each packet has four onion layers (three relays + receiver), each ML-KEM-768
-  + XChaCha20-Poly1305, +1,160 bytes per layer. Pure ML-KEM, **no classical
-  hybrid**.
+- Each packet has four onion layers (three relays + receiver), each a hybrid
+  X25519 + ML-KEM-768 KEM (one cSHAKE256 combiner over both shared secrets and
+  the transcript) + XChaCha20-Poly1305, +1,192 bytes per layer. Either primitive
+  alone keeps a layer key secret.
 - Link admission: each fixed link opens only for the roster's member or
   operator, by a signed challenge-bound enrollment (see "Enrollment" below).
 - **Not post-quantum end to end.** Native Mini authority (call signatures,
@@ -54,13 +55,13 @@ corruption, a malicious intended recipient's own observations.
 ## Cost (exact codec arithmetic, not provider bills)
 
 Per epoch, for W members and payload P, all fixed links together carry
-`P·(W² + 5W) + 17237·W + 1016` bytes, before TCP/IP.
+`P·(W² + 5W) + 17685·W + 1016` bytes, before TCP/IP.
 
 At the measured profile **W = 4, P = 4096, one epoch per second**:
 
-- 217,420 bytes per epoch over all links;
-- per member: 8,985 B/s up, 16,492 B/s down (the whole broadcast);
-- **≈ 66 GB per member per 30 days** (66.036 GB), ≈ 564 GB across all physical legs;
+- 219,212 bytes per epoch over all links;
+- per member: 9,113 B/s up, 16,492 B/s down (the whole broadcast);
+- **≈ 66 GB per member per 30 days** (66.368 GB), ≈ 568 GB across all physical legs;
 - the broadcast is O(W²·P): every member downloads every reply.
 
 This is a fixed reservation whether or not you send anything: cover traffic
@@ -126,16 +127,56 @@ roster. The roster is public by design (P1 makes membership public).
 
 ## Evidence
 
-- v12 (single host, 2026-10-03): all 768 fixed records within 100 ms of
-  schedule (max lateness 2.276 ms), identical broadcast to all four members in
-  all 64 epochs, identical public shape between an all-cover run and a run
-  carrying real work, 16/16 exact outcomes for a **replayed read-only lookup**.
-  Every role ran on one machine; that shows schedule shape and exactly-once
-  delivery, not anonymity against anyone who can see the co-located processes.
-- None yet: no run on two hosts and no run carrying a new effect is recorded in
-  this repository (`docs/evidence/` has no traffic directory). The traffic lane was wound down
-  on 2026-10-04 before its two-host run (swarm ledger, 03:55); the single-host v12 run
-  above is all the evidence this card has.
+All runs below use a **scratch plain Host world** (never a common or live world), run on
+two rented bare-metal boxes in one datacentre (Latitude LAX2, wired, same site), 2026-10-04.
+Logs, summaries and the secrecy/verification JSON are in `docs/evidence/traffic-v13/`
+(sizes and times only; no packet body or key). Keys were generated in the run and deleted.
+
+- **v12 original** (single host, 2026-10-03, pre-MCE): all 768 fixed records within 100 ms
+  of schedule (max lateness 2.276 ms), identical broadcast to all four members in all 64
+  epochs, identical public shape between an all-cover run and a run carrying real work,
+  16/16 exact outcomes for a replayed read-only lookup.
+- **v12 baseline re-run on Linux** (commit c8fdd000 binary and script, scratch world,
+  one host): PASS both poles; 768 records each; max lateness 9.16 ms (all-cover) and
+  4.10 ms (native-delayed); 16/16 exact outcomes; 16 source submissions. The box was at
+  load average 31-40 on 24 threads (other tenants' builds), so these are not quiet numbers.
+- **MCE3 roster enrollment, one host** (this tree, hybrid KEM): PASS both poles; 768 records;
+  max lateness 2.91 / 4.12 ms; every v12 assertion holds through roster enrollment.
+- **Two hosts, v13** (registrar, mailbox, clients, observers on one box; the three relays on the
+  other; every link through a byte-transparent observer on the box's public NIC): PASS both
+  poles, 768 records each, every record within the unchanged 100 ms tolerance. Max
+  lateness 10.25 ms (all-cover) / 7.42 ms (native-delayed); by LAN legs crossed (0/1/2),
+  native-delayed p99 3.10 / 1.93 / 3.48 ms, max 3.18 / 2.08 / 7.42 ms; 16/16 exact outcomes.
+  Cross-box ICMP RTT (same site): 300 samples before the run min 0.085 / avg 0.125 /
+  max 0.159 ms; 420 samples during the run p50 0.117, p99 0.149, max 0.153 ms, 0% loss,
+  none over 1 ms. The earlier WiFi finding (RTT max 614 ms) does not apply to these wired
+  boxes; the 100 ms tolerance was NOT loosened.
+- **A new private effect, carried once** (two-host, P = 32768, a signed content write
+  carried into the scratch Host, first reply lost to a 2 s delay and recovered by the reserved
+  repair fetch): the Host's captured reply decodes as an installed receipt; the member's
+  retained attempt recovers the same receipt by read-only lookup; the signed read-back returns
+  the written value; the Store advanced by exactly one accepted record (`verification.json`).
+- **Transcript secrecy of that effect** (`cohort-secrecy-check.py`): the call fragments and
+  the value appear only in the carrying client's own source/worker/opened/scan state, the
+  mailbox worker and the Host's captured reply; they appear nowhere in the registrar, relay,
+  link-record, broadcast, observer or log files, locally or on the relay host. The scan is
+  guarded by a positive control (it must find the plaintext where it belongs) and by planted
+  leaks: a value appended to a relay-input directory, the mailbox broadcast output, another
+  member's broadcast directory, and a relay-host directory each turn it red.
+- **Planted protocol faults turn the run red** (`--plant`): a roster that names the wrong
+  native key at a slot (link enrollment refused, run exits 1) and a deleted client cover
+  inventory record (run exits 1).
+- Linux qualification of the Rust: 36/36 filtered tests (`pq_mailbox`, `cohort`, `registrar`).
+  The first live Linux run found a real defect that every unit test had missed: the cover
+  worker still bounded a layer key file at the bare ML-KEM 1,184 bytes after the hybrid
+  conversion (hybrid public key: 1,216), so every cover worker refused its own keys. Fixed
+  and pinned by `cover_worker_reads_the_hybrid_layer_public_keys_the_mix_key_action_writes`.
+
+Not shown: the registrar and the mailbox ran as the same OS user (separate processes with
+separate 0700 state, not separate uids); the observers listened on the boxes' public
+addresses (enrollment drops strangers); the two boxes are one site, so this is not a
+wide-area measurement; no adversarial observer was run, only schedule shape, exactly-once
+delivery and plaintext absence from the files.
 
 Sources: `WHY-TRAFFIC-PRIVACY-20261003.txt` lines 18–39 and its cost section;
 `PRIVACY-COMPOSITION-REVIEW-20261003.txt` profile P1; `PQ-MAILBOX.md`.

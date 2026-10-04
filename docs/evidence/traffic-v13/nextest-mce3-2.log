@@ -1,0 +1,165 @@
+   Compiling minidregg-resource-client v0.1.0 (/srv/lanes/W15-TRAFFIC-V13/src/native/resource-client)
+warning: unused doc comment
+   --> src/main.rs:342:1
+    |
+342 | / /// A refused `doc push`'s diagnosis: which pulled lines changed since the
+343 | | /// pull (`workspace::stale_lines`). The shell prints it as the refusal's first
+344 | | /// line, above the Host's own decoding of the same refusal.
+    | |_-----------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+    = note: `#[warn(unused_doc_comments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `MetadataExt`
+  --> src/keys.rs:32:25
+   |
+32 | use std::os::unix::fs::{MetadataExt, PermissionsExt};
+   |                         ^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `PermissionsExt`
+  --> src/keys.rs:32:38
+   |
+32 | use std::os::unix::fs::{MetadataExt, PermissionsExt};
+   |                                      ^^^^^^^^^^^^^^
+
+warning: unused variable: `host`
+    --> src/transport.rs:1465:23
+     |
+1465 |     fn pinned_command(host: &Path, config: &Path, image: &fs::File, config_image: Option<&fs::File>) -> Result<Command, String> {
+     |                       ^^^^ help: if this is intentional, prefix it with an underscore: `_host`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `config`
+    --> src/transport.rs:1465:36
+     |
+1465 |     fn pinned_command(host: &Path, config: &Path, image: &fs::File, config_image: Option<&fs::File>) -> Result<Command, String> {
+     |                                    ^^^^^^ help: if this is intentional, prefix it with an underscore: `_config`
+
+warning: unused variable: `presentation`
+    --> src/main.rs:1891:9
+     |
+1891 |     let presentation = match provider_continuity {
+     |         ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_presentation`
+
+warning: unused variable: `presentation`
+    --> src/main.rs:2033:9
+     |
+2033 |     let presentation = inspect(
+     |         ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_presentation`
+
+warning: fields `authority_root`, `pay_root`, `as_of_slot`, `as_of_block_time`, and `index` are never read
+   --> src/pay_memo_v2.rs:214:5
+    |
+210 | pub(crate) struct ValidatedQuote {
+    |                   -------------- fields in this struct
+...
+214 |     authority_root: [u8; 32],
+    |     ^^^^^^^^^^^^^^
+215 |     pay_root: [u8; 32],
+    |     ^^^^^^^^
+216 |     as_of_slot: u64,
+    |     ^^^^^^^^^^
+217 |     as_of_block_time: u64,
+    |     ^^^^^^^^^^^^^^^^
+218 |     index: u64,
+    |     ^^^^^
+    |
+    = note: `ValidatedQuote` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: methods `context`, `authority_root`, `pay_root`, `as_of`, and `index` are never used
+   --> src/pay_memo_v2.rs:224:19
+    |
+220 | impl ValidatedQuote {
+    | ------------------- methods in this implementation
+...
+224 |     pub(crate) fn context(&self) -> &Context {
+    |                   ^^^^^^^
+...
+230 |     pub(crate) fn authority_root(&self) -> &[u8; 32] {
+    |                   ^^^^^^^^^^^^^^
+...
+233 |     pub(crate) fn pay_root(&self) -> &[u8; 32] {
+    |                   ^^^^^^^^
+...
+236 |     pub(crate) fn as_of(&self) -> (u64, u64) {
+    |                   ^^^^^
+...
+239 |     pub(crate) fn index(&self) -> u64 {
+    |                   ^^^^^
+
+warning: method `matches_u64` is never used
+  --> src/pay_status.rs:46:19
+   |
+15 | impl Nat {
+   | -------- method in this implementation
+...
+46 |     pub(crate) fn matches_u64(&self, value: u64) -> bool {
+   |                   ^^^^^^^^^^^
+
+warning: function `resource_link_of` is never used
+    --> src/workspace.rs:5187:4
+     |
+5187 | fn resource_link_of(target: &Value) -> Option<(String, String)> {
+     |    ^^^^^^^^^^^^^^^^
+
+warning: function `member_status` is never used
+   --> src/app_document.rs:677:15
+    |
+677 | pub(crate) fn member_status(root: &Path, id: &str) -> Result<Value> {
+    |               ^^^^^^^^^^^^^
+
+warning: constant `KEY_ID_LABEL` is never used
+  --> src/private.rs:46:7
+   |
+46 | const KEY_ID_LABEL: &[u8] = b"DREGG.CLIENT.ENC-KEY-ID/v1";
+   |       ^^^^^^^^^^^^
+
+warning: `minidregg-resource-client` (bin "mini" test) generated 13 warnings (run `cargo fix --bin "mini" -p minidregg-resource-client --tests` to apply 5 suggestions)
+    Finished `release` profile [optimized] target(s) in 48.59s
+────────────
+ Nextest run ID 3ee982d6-2d17-43f4-9a3f-07b67a94ca2e with nextest profile: default
+    Starting 36 tests across 1 binary (933 tests skipped)
+        PASS [   0.019s] ( 1/36) minidregg-resource-client::bin/mini cohort_tcp::tests::authenticated_cohort_record_binds_generation_slot_stage_epoch_and_padding
+        PASS [   0.021s] ( 2/36) minidregg-resource-client::bin/mini pq_mailbox::tests::crash_after_batch_claim_does_not_repeat_native_dispatch_or_shuffle
+        PASS [   0.025s] ( 3/36) minidregg-resource-client::bin/mini cohort_tcp::tests::the_link_combiner_matches_an_independent_known_answer
+        PASS [   0.025s] ( 4/36) minidregg-resource-client::bin/mini cohort_tcp::tests::registrar_worker_refuses_input_directory_of_another_enrolled_slot
+        PASS [   0.027s] ( 5/36) minidregg-resource-client::bin/mini cohort_tcp::tests::mce2_v1_rosters_and_bare_ml_kem_link_keys_refuse_by_name
+        PASS [   0.043s] ( 6/36) minidregg-resource-client::bin/mini cohort_tcp::tests::cached_readiness_alias_preserves_exact_source_inode_and_refuses_conflicts
+        PASS [   0.047s] ( 7/36) minidregg-resource-client::bin/mini cohort_tcp::tests::cover_worker_reads_the_hybrid_layer_public_keys_the_mix_key_action_writes
+        PASS [   0.041s] ( 8/36) minidregg-resource-client::bin/mini pq_mailbox::tests::epoch_profile_binding_cannot_equivocate_clock_or_registered_sets
+        PASS [   0.067s] ( 9/36) minidregg-resource-client::bin/mini cohort_tcp::tests::public_cohort_lifetime_and_profile_changes_fail_closed
+        PASS [   0.077s] (10/36) minidregg-resource-client::bin/mini cohort_tcp::tests::visible_unqualified_record_waits_for_exact_durable_adoption
+        PASS [   0.080s] (11/36) minidregg-resource-client::bin/mini cohort_tcp::tests::preexisting_future_intent_prepares_before_idle_gap_without_changed_body_replacement
+        PASS [   0.082s] (12/36) minidregg-resource-client::bin/mini cohort_tcp::tests::durable_epoch_adoption_refuses_changed_record_and_preserves_exact_readback
+        PASS [   0.067s] (13/36) minidregg-resource-client::bin/mini pq_mailbox::tests::live_cap_contention_waits_without_skipping_retained_cap_or_weakening_identity
+        PASS [   0.019s] (14/36) minidregg-resource-client::bin/mini pq_mailbox::tests::scheduled_broadcast_cover_is_exact_batch_without_client_receipt_or_native_job
+        PASS [   0.102s] (15/36) minidregg-resource-client::bin/mini cohort_tcp::tests::registrar_enrollment_admits_only_roster_member_signature_under_fresh_challenge
+        PASS [   0.035s] (16/36) minidregg-resource-client::bin/mini pq_mailbox::tests::reply_capability_duplicate_drain_and_consumed_crash_are_fenced
+        PASS [   0.029s] (17/36) minidregg-resource-client::bin/mini pq_mailbox::tests::v1_pure_ml_kem_mix_frames_and_keys_refuse_by_name
+        PASS [   0.123s] (18/36) minidregg-resource-client::bin/mini pq_mailbox::tests::authenticated_stage_sets_refuse_valid_replacement_and_corrupt_operator_forgery
+        PASS [   0.096s] (19/36) minidregg-resource-client::bin/mini pq_mailbox::tests::malicious_tag_epoch_replay_and_reply_drain_refuse
+        PASS [   0.065s] (20/36) minidregg-resource-client::bin/mini pq_mailbox::tests::shared_crypto_preserves_maximum_profile_through_all_layers
+        PASS [   0.129s] (21/36) minidregg-resource-client::bin/mini pq_mailbox::tests::hybrid_layers_open_only_for_their_recipient_and_refuse_tampering_of_either_component
+        PASS [   0.151s] (22/36) minidregg-resource-client::bin/mini pq_mailbox::tests::async_custody_reply_cap_reservation_preserves_exact_retry_at_capacity
+        PASS [   0.154s] (23/36) minidregg-resource-client::bin/mini cohort_tcp::tests::cohort_sender_refuses_receiver_without_roster_link_secret
+        PASS [   0.195s] (24/36) minidregg-resource-client::bin/mini cohort_tcp::tests::cohort_roster_digest_profile_and_shape_bind_every_link
+        PASS [   0.194s] (25/36) minidregg-resource-client::bin/mini cohort_tcp::tests::the_link_key_needs_both_receiver_halves_and_binds_both_ciphertext_components
+        PASS [   0.202s] (26/36) minidregg-resource-client::bin/mini pq_mailbox::tests::async_custody_live_mailbox_continuation_then_bound_fetch_without_second_dispatch
+        PASS [   0.179s] (27/36) minidregg-resource-client::bin/mini pq_mailbox::tests::live_relay_grouped_admission_exact_replay_crash_and_conflict_fences
+        PASS [   0.167s] (28/36) minidregg-resource-client::bin/mini pq_mailbox::tests::pq_multihop_native_delivery_broadcast_and_replay_fence
+        PASS [   0.193s] (29/36) minidregg-resource-client::bin/mini pq_mailbox::tests::live_mailbox_grouped_exact_input_replay_crash_and_orphan_fences
+        PASS [   0.182s] (30/36) minidregg-resource-client::bin/mini pq_mailbox::tests::private_capacity_or_oversize_refusal_still_emits_registered_cover
+        PASS [   0.318s] (31/36) minidregg-resource-client::bin/mini cohort_tcp::tests::enrolled_contribution_selects_cover_even_without_ready_real_work
+        PASS [   0.722s] (32/36) minidregg-resource-client::bin/mini cohort_tcp::tests::loopback_fixed_tcp_emits_both_ready_and_unavailable_at_same_public_size
+        PASS [   0.737s] (33/36) minidregg-resource-client::bin/mini cohort_tcp::tests::scheduled_broadcast_uses_shared_cover_when_actual_source_output_is_not_ready
+        PASS [   0.851s] (34/36) minidregg-resource-client::bin/mini cohort_tcp::tests::local_adoption_conflict_drains_public_lifetime_without_releasing_changed_record
+        PASS [   3.122s] (35/36) minidregg-resource-client::bin/mini cohort_tcp::tests::late_durable_producer_is_selected_without_outer_cache_write
+        PASS [   6.067s] (36/36) minidregg-resource-client::bin/mini cohort_tcp::tests::a_stalled_stranger_cannot_tie_up_the_cohort_listener
+────────────
+     Summary [   6.068s] 36 tests run: 36 passed, 933 skipped

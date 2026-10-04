@@ -1,0 +1,90 @@
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+no next key (--no-prerotation): this identity can never rotate; a stolen key is replaced only by enrolling a new subject
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+ab9b9cba1f13e9cd47f7900a5dcd423635ecb68cd5d7fb3a4de01a1602613a75
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+no next key (--no-prerotation): this identity can never rotate; a stolen key is replaced only by enrolling a new subject
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+95b012ef55a1924afb31fe412a310827ddde38588fc05dfdbe60c6a39e55f3fb
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+no next key (--no-prerotation): this identity can never rotate; a stolen key is replaced only by enrolling a new subject
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+62abd7aa7bd45f9622c1503fdd51da0469ef2a2832f28dd9216676107230762e
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+no next key (--no-prerotation): this identity can never rotate; a stolen key is replaced only by enrolling a new subject
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+47cc2d8aa8f408618c5cd0e2acf466b2ae76e90417fe1ec9a4a2c72403cf4aa3
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+no next key (--no-prerotation): this identity can never rotate; a stolen key is replaced only by enrolling a new subject
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+7574bd150c47a81eaca9cfbf5b2dea83a04ed1bf9d5d868d1f7e528c6715d434
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+no next key (--no-prerotation): this identity can never rotate; a stolen key is replaced only by enrolling a new subject
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+35cf99aee47980f41f5e457b4a3c363c85df4f2d070e48e6a5f770245b0689e7
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+no next key (--no-prerotation): this identity can never rotate; a stolen key is replaced only by enrolling a new subject
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+c0933179d1b0da0a00f2a5423a89611b1b40708f3d2e2395a3fd1c73cae3d368
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+no next key (--no-prerotation): this identity can never rotate; a stolen key is replaced only by enrolling a new subject
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+5ca83a733471e830679db0d4c37e770225c434357d8d6f7ac0769d16f12f9d46
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+no next key (--no-prerotation): this identity can never rotate; a stolen key is replaced only by enrolling a new subject
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+3b8017385beda59b24446b42a71f815a3b2083f459c730851e1f9b461ed9cc7b
+ROSTER sha256 7006372cd0785e2910d35e7b36abb47b840d80cd1c79ad7f59c50705cbf6f203 generation b3c24e629a704c1bee4ac975773a02dd
+PLANTED FAULT drop-cover: removed epoch-8.cover from client2 cover inventory
+mini: cannot read key file /srv/lanes/W15-TRAFFIC-V13/evidence/planted-drop-cover/all-cover/client2-out/epoch-8.cover: No such file or directory (os error 2)
+mini: declared enrolled link fault: failed to fill whole buffer
+REFUTED all-cover: RuntimeError("client2-registrar: RuntimeError('short byte-transparent frame'); actor failed 1: ['/srv/lanes/W15-TRAFFIC-V13/artifacts/mini-mce3-r2', 'mix-live', '--action', 'receive', '--state', '/srv/lanes/W15-TRAFFIC-V13/evidence/planted-drop-cover/all-cover/client2-registrar-receive-state', '--generation', 'b3c24e629a704c1bee4ac975773a02dd', '--slot', '2', '--phase', '0', '--width', '4', '--payload-bytes', '4096', '--origin-ms', '1791147399489', '--tick-ms', '1000', '--processing-slots', '2', '--epochs', '16', '--records', '/srv/lanes/W15-TRAFFIC-V13/evidence/planted-drop-cover/all-cover/client2-incoming', '--roster', '/srv/lanes/W15-TRAFFIC-V13/evidence/planted-drop-cover/common/roster.json', '--link-secret', '/srv/lanes/W15-TRAFFIC-V13/evidence/planted-drop-cover/common/registrar.link.secret', '--link-public', '/srv/lanes/W15-TRAFFIC-V13/evidence/planted-drop-cover/common/registrar.link.pub', '--endpoint', '127.0.0.1:43381']; actor failed 1: ['/srv/lanes/W15-TRAFFIC-V13/artifacts/mini-mce3-r2', 'mix-live', '--action', 'send', '--state', '/srv/lanes/W15-TRAFFIC-V13/evidence/planted-drop-cover/all-cover/client2-registrar-send-state', '--generation', 'b3c24e629a704c1bee4ac975773a02dd', '--slot', '2', '--phase', '0', '--width', '4', '--payload-bytes', '4096', '--origin-ms', '1791147399489', '--tick-ms', '1000', '--processing-slots', '2', '--epochs', '16', '--records', '/srv/lanes/W15-TRAFFIC-V13/evidence/planted-drop-cover/all-cover/client2-out', '--roster', '/srv/lanes/W15-TRAFFIC-V13/evidence/planted-drop-cover/common/roster.json', '--native-key', '/srv/lanes/W15-TRAFFIC-V13/evidence/planted-drop-cover/common/member2.native', '--endpoint', '127.0.0.1:48183']; check records_12N")
+PLANTED FAULT drop-cover: removed epoch-8.cover from client2 cover inventory
+mini: cannot read key file /srv/lanes/W15-TRAFFIC-V13/evidence/planted-drop-cover/native-delayed/client2-out/epoch-8.cover: No such file or directory (os error 2)
+mini: declared enrolled link fault: failed to fill whole buffer
+REFUTED native-delayed: RuntimeError("client2-registrar: RuntimeError('short byte-transparent frame'); actor failed 1: ['/srv/lanes/W15-TRAFFIC-V13/artifacts/mini-mce3-r2', 'mix-live', '--action', 'receive', '--state', '/srv/lanes/W15-TRAFFIC-V13/evidence/planted-drop-cover/native-delayed/client2-registrar-receive-state', '--generation', 'b3c24e629a704c1bee4ac975773a02dd', '--slot', '2', '--phase', '0', '--width', '4', '--payload-bytes', '4096', '--origin-ms', '1791147468606', '--tick-ms', '1000', '--processing-slots', '2', '--epochs', '16', '--records', '/srv/lanes/W15-TRAFFIC-V13/evidence/planted-drop-cover/native-delayed/client2-incoming', '--roster', '/srv/lanes/W15-TRAFFIC-V13/evidence/planted-drop-cover/common/roster.json', '--link-secret', '/srv/lanes/W15-TRAFFIC-V13/evidence/planted-drop-cover/common/registrar.link.secret', '--link-public', '/srv/lanes/W15-TRAFFIC-V13/evidence/planted-drop-cover/common/registrar.link.pub', '--endpoint', '127.0.0.1:59259']; actor failed 1: ['/srv/lanes/W15-TRAFFIC-V13/artifacts/mini-mce3-r2', 'mix-live', '--action', 'send', '--state', '/srv/lanes/W15-TRAFFIC-V13/evidence/planted-drop-cover/native-delayed/client2-registrar-send-state', '--generation', 'b3c24e629a704c1bee4ac975773a02dd', '--slot', '2', '--phase', '0', '--width', '4', '--payload-bytes', '4096', '--origin-ms', '1791147468606', '--tick-ms', '1000', '--processing-slots', '2', '--epochs', '16', '--records', '/srv/lanes/W15-TRAFFIC-V13/evidence/planted-drop-cover/native-delayed/client2-out', '--roster', '/srv/lanes/W15-TRAFFIC-V13/evidence/planted-drop-cover/common/roster.json', '--native-key', '/srv/lanes/W15-TRAFFIC-V13/evidence/planted-drop-cover/common/member2.native', '--endpoint', '127.0.0.1:57333']; check records_12N; check exactly_once_source_submissions; check exact_outcomes_after_lost_reply_recovery")

@@ -1,0 +1,85 @@
+remote mini sha256 f2c4d0116edd2237f855fa418173242b95b1a93b4ebfb4dd00ac917701bfe676 local f2c4d0116edd2237f855fa418173242b95b1a93b4ebfb4dd00ac917701bfe676
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+no next key (--no-prerotation): this identity can never rotate; a stolen key is replaced only by enrolling a new subject
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+570dc72bf245f7ada35aea1d05803f368931d8de3b798816209e97f08c5d0f43
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+no next key (--no-prerotation): this identity can never rotate; a stolen key is replaced only by enrolling a new subject
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+6e431c50d4a19a7f5d86cc5f79e8bec27f7ac693583da669d51cbce825514db0
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+no next key (--no-prerotation): this identity can never rotate; a stolen key is replaced only by enrolling a new subject
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+3d12166edaf26282ee33b130f3f44766988eebcdf84385e82792ef855c4e0605
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+no next key (--no-prerotation): this identity can never rotate; a stolen key is replaced only by enrolling a new subject
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+2de697ac1211d6b677953a20c10ae0d73af40d1b6dc6105f0c8ac2c4e1068fde
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+no next key (--no-prerotation): this identity can never rotate; a stolen key is replaced only by enrolling a new subject
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+6a32cd64012decfae68eb8feba01a054c7de11fe19a398c43c2d1b25df7b7ec5
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+no next key (--no-prerotation): this identity can never rotate; a stolen key is replaced only by enrolling a new subject
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+no next key (--no-prerotation): this identity can never rotate; a stolen key is replaced only by enrolling a new subject
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+no next key (--no-prerotation): this identity can never rotate; a stolen key is replaced only by enrolling a new subject
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+This key is the only copy. It signs as you and opens your private rooms.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
+Room content comes back by re-wrap at the current epoch; older epochs come back
+only from a member who kept them. Your old posts stay under the old subject.
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
+to your sponsor, which lets your sponsor sign as you.
+no next key (--no-prerotation): this identity can never rotate; a stolen key is replaced only by enrolling a new subject
+Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.
+caf21650627d68c2e846c2f707a4d40074025519284fd9b981c40bc598788232
+ROSTER sha256 6072da3f4e9f73944e95ccac7821f88eda5cc8d2d8f40bb6108a660891935c80 generation d11bc1c3e7dc92ca6392b03f03d43ef1
+REMOTE tmux session traffic-2562496-all-cover on w15b
+PASS all-cover: 768 roster-enrolled fixed TCP records, valid broadcast every epoch, 0 exact original source calls.
+REMOTE tmux session traffic-2562496-native-delayed on w15b
+PASS native-delayed: 768 roster-enrolled fixed TCP records, valid broadcast every epoch, 16 exact original source calls.
+PASS matched public shapes at 1s: all-cover and delayed actual native work; no missing broadcast, no catch-up burst; retained requests and authorized fresh-cap repair fetch returned exact source outcomes; exactly 16 source submissions.

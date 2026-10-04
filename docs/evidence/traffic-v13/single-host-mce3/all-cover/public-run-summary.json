@@ -1,0 +1,123 @@
+{
+  "plant": null,
+  "topology": "single",
+  "bind_ip": "127.0.0.1",
+  "remote": null,
+  "remote_ip": null,
+  "roster_sha256": "9a8cde3efc3621ecf806b40776ddcacdd985df345bb48c45d1f4136072b3176e",
+  "tick_ms": 1000,
+  "processing_slots": 2,
+  "epochs": 64,
+  "width": 4,
+  "payload_bytes": 4096,
+  "epoch_buffer_lengths": 32.0,
+  "contribution_to_broadcast_schedule_ms": 10000,
+  "origin_to_first_broadcast_ms": 11000,
+  "records_observed": 768,
+  "records_expected": 768,
+  "min_wire_lateness_ms": 0.12109375,
+  "max_wire_lateness_ms": 2.90576171875,
+  "wire_lateness_ms": {
+    "n": 768,
+    "min": 0.12109375,
+    "p50": 0.744873046875,
+    "p90": 1.25048828125,
+    "p99": 2.195068359375,
+    "max": 2.90576171875,
+    "over_100ms": 0
+  },
+  "wire_lateness_ms_by_lan_legs": {
+    "0": {
+      "n": 768,
+      "min": 0.12109375,
+      "p50": 0.744873046875,
+      "p90": 1.25048828125,
+      "p99": 2.195068359375,
+      "max": 2.90576171875,
+      "over_100ms": 0
+    }
+  },
+  "wire_lateness_ms_by_phase": {
+    "0": {
+      "n": 256,
+      "min": 0.12109375,
+      "p50": 0.7080078125,
+      "p90": 1.21923828125,
+      "p99": 2.3369140625,
+      "max": 2.90576171875,
+      "over_100ms": 0
+    },
+    "1": {
+      "n": 64,
+      "min": 0.169189453125,
+      "p50": 0.749755859375,
+      "p90": 1.205078125,
+      "p99": 2.010498046875,
+      "max": 2.010498046875,
+      "over_100ms": 0
+    },
+    "2": {
+      "n": 64,
+      "min": 0.18603515625,
+      "p50": 0.754638671875,
+      "p90": 1.160400390625,
+      "p99": 2.103759765625,
+      "max": 2.103759765625,
+      "over_100ms": 0
+    },
+    "3": {
+      "n": 64,
+      "min": 0.158203125,
+      "p50": 0.79931640625,
+      "p90": 1.234130859375,
+      "p99": 2.195068359375,
+      "max": 2.195068359375,
+      "over_100ms": 0
+    },
+    "4": {
+      "n": 64,
+      "min": 0.1669921875,
+      "p50": 0.738525390625,
+      "p90": 1.17138671875,
+      "p99": 2.669189453125,
+      "max": 2.669189453125,
+      "over_100ms": 0
+    },
+    "5": {
+      "n": 256,
+      "min": 0.158935546875,
+      "p50": 0.766357421875,
+      "p90": 1.301025390625,
+      "p99": 2.22900390625,
+      "max": 2.877685546875,
+      "over_100ms": 0
+    }
+  },
+  "durable_produced_epoch_counts": {
+    "batch0-out": 64,
+    "batch1-out": 64,
+    "batch2-out": 64,
+    "batch3-out": 64,
+    "broadcast-out": 64
+  },
+  "valid_delivered_broadcast_epochs": {
+    "client0": 64,
+    "client1": 64,
+    "client2": 64,
+    "client3": 64
+  },
+  "native_workload": "every-eight",
+  "expect": "file",
+  "real_clients": 2,
+  "source_jobs_expected": 0,
+  "exact_native_final_outcomes": [],
+  "actual_source_submissions": 0,
+  "checks": {
+    "records_12N": true,
+    "every_record_within_100ms": true,
+    "valid_broadcast_every_epoch_every_client": true,
+    "identical_broadcast_to_every_client": true,
+    "nothing_forwarded_without_work": true
+  },
+  "errors": []
+}

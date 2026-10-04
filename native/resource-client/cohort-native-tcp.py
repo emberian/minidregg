@@ -111,6 +111,10 @@ parser.add_argument('--remote',default='')
 parser.add_argument('--remote-ip',default='')
 parser.add_argument('--remote-dir',default='')
 parser.add_argument('--startup-s',type=int,default=60)
+# Planted faults: a NAMED defect a correct run must refuse. A run with --plant must end red.
+#   wrong-slot-key: the roster names member 1's native key at slot 0 (and slot 0's at slot 1).
+#   drop-cover:     one client's cover inventory record is deleted after the inventory check.
+parser.add_argument('--plant',choices=['','wrong-slot-key','drop-cover'],default='')
 a=parser.parse_args()
 mini=a.mini;fixture=a.fixture;e=a.evidence;e.mkdir(mode=0o700)
 log=(e/'receiving.log').open('wb',buffering=0)
@@ -187,9 +191,12 @@ for i in range(4):
     if remote:
         for f in [f'k{i}.pub',f'a{i}.key']:
             path=common/f;path.write_bytes(fetch(str(base/f)));path.chmod(0o600)
+roster_members=[dict(native=m['native_pub'].hex(),linkKey=m['link_pub'].hex()) for m in members]
+if a.plant=='wrong-slot-key':
+    roster_members[0]['native'],roster_members[1]['native']=roster_members[1]['native'],roster_members[0]['native']
 (common/'roster.json').write_text(json.dumps({
     'type':'minidregg-cohort-roster-v3','generation':generation,'width':W,
-    'members':[{'native':m['native_pub'].hex(),'linkKey':m['link_pub'].hex()} for m in members],
+    'members':roster_members,
     'operators':[{'native':o['native_pub'].hex(),'linkKey':o['link_pub'].hex()} for o in operators]}))
 roster=common/'roster.json'
 if two:push(roster,str(RD/'common'/'roster.json'))
@@ -316,6 +323,9 @@ def scenario(name,real):
             if all((d/f'client{i}-out'/f'epoch-{N-1}.cover').exists() for i in range(W)):break
             time.sleep(.005)
         else:raise RuntimeError('cover inventory did not finish before original public startup cutoff')
+        if a.plant=='drop-cover':
+            victim=d/'client2-out'/f'epoch-{N//2}.cover';assert victim.exists();victim.unlink()
+            say('PLANTED FAULT drop-cover: removed '+victim.name+' from client2 cover inventory')
         registrar_sources=[directory(d/f'client{i}-incoming') for i in range(W)]
         # Stage directories live where their consumer/producer lives.
         def stage_dir(i,kind):  # kind: out (producer of stage i) / incoming (consumer)
@@ -461,6 +471,7 @@ def scenario(name,real):
         want_path=lambda i,begin:d/f'client{i}-opened'/f'epoch-{begin+7 if a.native_workload=="every-eight" else N-1}.payload'
         final_want=(b'\x00'+replies[0]) if (a.expect=='capture' and replies) else expected
         (d/'public-run-summary.json').write_text(json.dumps({
+            'plant':a.plant or None,
             'topology':a.topology,'bind_ip':a.bind_ip,'remote':a.remote or None,'remote_ip':a.remote_ip or None,
             'roster_sha256':hashlib.sha256(roster.read_bytes()).hexdigest(),
             'tick_ms':T,'processing_slots':G,'epochs':N,'width':W,'payload_bytes':P,'epoch_buffer_lengths':N/G,

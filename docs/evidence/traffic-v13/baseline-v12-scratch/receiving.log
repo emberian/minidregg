@@ -1,0 +1,3 @@
+PASS all-cover: 768 authenticated fixed TCP records, valid broadcast every epoch, 0 exact original source calls.
+PASS native-delayed: 768 authenticated fixed TCP records, valid broadcast every epoch, 16 exact original source calls.
+PASS matched public shapes at 1s: all-cover and delayed actual native work; no missing broadcast, no catch-up burst; retained requests and authorized fresh-cap repair fetch returned exact source outcomes; exactly 16 source submissions.

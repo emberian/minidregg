@@ -1,0 +1,30 @@
+{
+  "tick_ms": 1000,
+  "processing_slots": 2,
+  "epochs": 64,
+  "epoch_buffer_lengths": 32.0,
+  "contribution_to_broadcast_schedule_ms": 10000,
+  "origin_to_first_broadcast_ms": 11000,
+  "records_observed": 768,
+  "records_expected": 768,
+  "min_wire_lateness_ms": 0.131103515625,
+  "max_wire_lateness_ms": 9.16015625,
+  "durable_produced_epoch_counts": {
+    "batch0-out": 64,
+    "batch1-out": 64,
+    "batch2-out": 64,
+    "batch3-out": 64,
+    "broadcast-out": 64
+  },
+  "valid_delivered_broadcast_epochs": {
+    "client0": 64,
+    "client1": 64,
+    "client2": 64,
+    "client3": 64
+  },
+  "native_workload": "every-eight",
+  "source_jobs_expected": 0,
+  "exact_native_final_outcomes": [],
+  "actual_source_submissions": 0,
+  "errors": []
+}

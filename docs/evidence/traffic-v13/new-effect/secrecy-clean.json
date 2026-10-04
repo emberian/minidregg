@@ -1,0 +1,37 @@
+{
+ "type": "minidregg-cohort-transcript-secrecy-v1",
+ "needles": {
+  "value": 19,
+  "call-head": 32,
+  "call-mid": 32,
+  "call-tail": 32
+ },
+ "endpointSideHits": {
+  "call-head": [
+   "native-delayed/client0-worker/epoch-1.intent",
+   "native-delayed/client0-worker/epoch-0.intent",
+   "native-delayed/client0-source/epoch-1.intent",
+   "native-delayed/client0-source/epoch-0.intent",
+   "native-delayed/mailbox-worker/gateway/e23f59ea8dcaa162fa6f661bf92ef32a.request"
+  ],
+  "call-mid": [
+   "native-delayed/client0-worker/epoch-1.intent",
+   "native-delayed/client0-worker/epoch-0.intent",
+   "native-delayed/client0-source/epoch-1.intent",
+   "native-delayed/client0-source/epoch-0.intent",
+   "native-delayed/mailbox-worker/gateway/e23f59ea8dcaa162fa6f661bf92ef32a.request"
+  ],
+  "call-tail": [
+   "native-delayed/client0-worker/epoch-1.intent",
+   "native-delayed/client0-worker/epoch-0.intent",
+   "native-delayed/client0-source/epoch-1.intent",
+   "native-delayed/client0-source/epoch-0.intent",
+   "native-delayed/mailbox-worker/gateway/e23f59ea8dcaa162fa6f661bf92ef32a.request"
+  ]
+ },
+ "leaksOutsideEndpointSide": {},
+ "leaksOnRemoteHost": {},
+ "positiveControlMissing": [],
+ "planted": null,
+ "pass": true
+}

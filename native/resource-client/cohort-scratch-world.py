@@ -141,13 +141,15 @@ elif a.verb=='verify':
     man=json.loads((fx/'manifest.json').read_text());attempt=pathlib.Path(man['attempt'])
     reply=(ev/'native-delayed'/'captured-native-reply.bin').read_bytes()
     v=root/'verify';v.mkdir(mode=0o700,exist_ok=True)
-    (v/'carried-outcome.bin').write_bytes(reply)
+    # The Host answers an op2 envelope with one tag byte (2) then the exact outcome record.
+    if reply[:1]!=b'\x02':raise SystemExit('captured reply is not an op2 answer: tag '+reply[:1].hex())
+    (v/'carried-outcome.bin').write_bytes(reply[1:])
     sh(m['host'],m['config'],'inspect','outcome',v/'carried-outcome.bin',v/'carried-outcome.json',out=v/'inspect.log')
     receipt=json.loads((v/'carried-outcome.json').read_text())
     if receipt.get('type')!='confirmed' or receipt.get('confirmation')!='installed':
         raise SystemExit('carried reply is not an installed receipt: '+json.dumps(receipt))
     # The member's own retained attempt recovers the receipt by READ-ONLY lookup.
-    printed=sh(m['mini'],'--socket',m['socket'],'retry','--attempt',attempt,'--mode','lookup',out=v/'retry-lookup.log')
+    printed=sh(m['mini'],'retry','--attempt',attempt,'--mode','lookup','--socket',m['socket'],out=v/'retry-lookup.log')
     looked=receipt_fields(json.loads(printed))
     after=read_height(m,'effect-after')
     got=field(after,'3')
