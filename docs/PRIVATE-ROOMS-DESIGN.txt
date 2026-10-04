@@ -1,7 +1,12 @@
 PRIVATE ROOMS — devnet design (lane W1.9b, 2026-10-04). Code: native/resource-client/src/{roomkey,private}.rs.
 Tags: READ = re-read at source in this clone (c8fdd000); DECIDED = this note's design choice.
 
-0. WHAT HEAD IS (READ)
+0. WHAT HEAD WAS at c8fdd000 (READ at that commit; HISTORICAL)
+Superseded by the landing of this design: commit 4564a8fa (2026-10-03) implements the sections
+below and deletes the always-refusing stubs and current_recipient_source.rs. At main 5216e02f
+roomkey.rs contains none of authenticate_current_wraps, authorize_wrap_publication or
+current_recipient_source (READ, grep). The text of this section is kept as the record of what
+the design replaced; do not read it as the state of main.
 Private rooms are dead three ways at c8fdd000, not one: (a) authenticate_current_wraps always
 refuses (roomkey.rs:371); (b) authorize_wrap_publication always refuses (:1349), so no wrap can be
 written; (c) every write path (found/invite/rotate/rewrap) builds UNSIGNED wraps and write_wraps
