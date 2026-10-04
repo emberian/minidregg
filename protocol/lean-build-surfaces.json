@@ -6628,7 +6628,7 @@
     {
       "module": "Kernel.ObjectiveResumeContract",
       "path": "Kernel/ObjectiveResumeContract.lean",
-      "sha256": "aa965f8df37cb00894f3798e83ddbd1650ab9289fea5d59d8f2c3c72aa07fde6",
+      "sha256": "dc803ecedecbf9ccea2b62532c5dff85bf82ff04ecf4a3455d8246e7d5b049eb",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },

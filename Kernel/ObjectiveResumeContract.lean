@@ -507,6 +507,123 @@ theorem not_forcingTransparent_lostStack :
     ¬ ForcingTransparent tallyConfig tallyYield {tallyForced with stack := []} tallyReply 200000 :=
   not_forcingTransparent_of_refute (by native_decide)
 
+/-! ## A delivery advances the record (what `second_delivery_refused` leaves unstated)
+
+`ObjectiveActivity.second_delivery_refused` assumes that a delivery admitted
+from the post-state of an installed delivery ends the SAME await id. After the
+first delivery installs, its record cell holds `first.next`, whose generation is
+one more than the record it consumed (`Delivery.installed_record`,
+`delivery_advances_generation`), and the id of any await that record holds is
+`awaitId cell (generation + 1) …`. So that premise holds only when `awaitId`
+collides across two generations of one cell
+(`second_same_await_is_collision`): the protection against a second resume of
+one await is the spent claim (`resume_consumes_once`) together with this
+generation advance.
+
+A delivery that ENDS the activity is disposal: the record cell is reclaimed to the
+empty tombstone (`delivery_end_vacates`), so the installed cell holds no record
+(`Delivery.installed_record_ended`) and no second delivery of it exists. -/
+
+/-- The registry image of an activity cell reads back its own body. -/
+theorem bodyOf_image (role : ObjectiveActivityCell.Role) (key body : Bytes) :
+    bodyOf role (image role key body) = some body := by
+  unfold bodyOf payloadOf image
+  rw [show ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry
+        (.live ⟨.objectiveActivity, ObjectiveActivityCell.cellOf ⟨role, key, body⟩⟩) =
+      (ResourceBirthCodec.LifecycleImage.codec CanonicalCellRegistry.registry).encode
+        (.live ⟨.objectiveActivity, ObjectiveActivityCell.cellOf ⟨role, key, body⟩⟩) from rfl,
+    ResourceBirthCodec.LifecycleImage.decode_encode]
+  simp
+
+/-- The record a segment ends carries exactly the generation it was given. -/
+theorem nextRecord_generation (base : Record) (generation : Nat)
+    (segment : Segment) (yielded : Option YieldCommit) :
+    (nextRecord base generation segment yielded).generation = generation := by
+  cases segment <;> cases yielded <;> rfl
+
+/-- A delivery writes the record one generation on. -/
+theorem Delivery.next_generation {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : DeliverRequest}
+    (delivery : Delivery config snapshot height request) :
+    delivery.next.generation = delivery.record.generation + 1 := by
+  rw [delivery.nextExact, nextRecord_generation]
+
+/-- A stored record is never the empty (reclaimed) body: the codec writes its frame first. -/
+theorem encodeRecord_ne_nil (record : Record) : encodeRecord record ≠ [] := by
+  have frame : recordFrame ≠ [] := by decide +kernel
+  obtain ⟨b, bs, h⟩ := List.exists_cons_of_ne_nil frame
+  show recordFrame ++ _ ≠ []
+  rw [h]; simp
+
+/-- **After a delivery that keeps the activity awaiting installs, its record cell
+holds exactly the record it wrote**: the executor's accepted snapshot reads
+`delivery.next` at the record cell (the record post is the intent's first write),
+whatever seal it carried. -/
+theorem Delivery.installed_record {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot next : Snapshot rootBytes} {height : Nat} {request : DeliverRequest}
+    (delivery : Delivery config snapshot height request) (sealing : Seal)
+    (installed : DurableDataIntent.execute .complete snapshot (delivery.intent sealing) = .accepted next)
+    {await : Await} (awaiting : delivery.next.phase = .awaiting await) :
+    readRecord next request.record = some delivery.next := by
+  unfold readRecord
+  rw [execute_accepted_install installed, DataSnapshot.install_canonicalBytes]
+  simp [Delivery.intent, intentOf, delivery.postsExact, DataSnapshot.lookupPostBytes, Post.write,
+    recordPost, postAt, bodyOf_image, recordBody, awaiting, recordOfBody, record_roundTrip,
+    encodeRecord_ne_nil]
+
+/-- **After a delivery that ENDS the activity installs, its record cell is
+reclaimed**: it holds no record (disposal, `delivery_end_vacates`). -/
+theorem Delivery.installed_record_ended {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot next : Snapshot rootBytes} {height : Nat} {request : DeliverRequest}
+    (delivery : Delivery config snapshot height request) (sealing : Seal)
+    (installed : DurableDataIntent.execute .complete snapshot (delivery.intent sealing) = .accepted next)
+    (ended : ∀ await, delivery.next.phase ≠ .awaiting await) :
+    readRecord next request.record = none := by
+  unfold readRecord
+  rw [execute_accepted_install installed, DataSnapshot.install_canonicalBytes]
+  simp [Delivery.intent, intentOf, delivery.postsExact, DataSnapshot.lookupPostBytes, Post.write,
+    recordPost, postAt, bodyOf_image, recordBody_ended _ ended, recordOfBody_vacant]
+
+/-- **A second delivery of one record consumes the NEXT generation.** Any
+delivery admitted from the snapshot an installed delivery produced, on the same
+record cell, read exactly the record the first wrote, one generation on. (If the
+first delivery ended the activity its record is reclaimed and no second delivery
+exists, `Delivery.installed_record_ended`; so the statement needs no awaiting
+premise.) -/
+theorem delivery_advances_generation {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot next : Snapshot rootBytes} {height later : Nat} {request again : DeliverRequest}
+    (first : Delivery config snapshot height request) (sealing : Seal)
+    (installed : DurableDataIntent.execute .complete snapshot (first.intent sealing) = .accepted next)
+    (second : Delivery config next later again) (sameRecord : again.record = request.record) :
+    second.record = first.next ∧ second.record.generation = first.record.generation + 1 := by
+  have read := second.recordExact
+  rw [sameRecord] at read
+  have awaiting : ∃ await, first.next.phase = .awaiting await := by
+    by_contra none
+    have ended : ∀ await, first.next.phase ≠ .awaiting await := fun await h => none ⟨await, h⟩
+    rw [Delivery.installed_record_ended first sealing installed ended] at read
+    cases read
+  obtain ⟨await, awaiting⟩ := awaiting
+  rw [Delivery.installed_record first sealing installed awaiting] at read
+  have same : second.record = first.next := (Option.some.inj read).symm
+  exact ⟨same, by rw [same, Delivery.next_generation first]⟩
+
+/-- **`second_delivery_refused`'s premise is a collision.** If a second delivery
+of the same record cell ends the same await id as the first, `awaitId` takes one
+value at two consecutive generations of that cell. -/
+theorem second_same_await_is_collision {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot next : Snapshot rootBytes} {height later : Nat} {request again : DeliverRequest}
+    (first : Delivery config snapshot height request) (sealing : Seal)
+    (installed : DurableDataIntent.execute .complete snapshot (first.intent sealing) = .accepted next)
+    (second : Delivery config next later again) (sameRecord : again.record = request.record)
+    (sameAwait : second.await.id = first.await.id) :
+    awaitId request.record (first.record.generation + 1) first.next.checkpointDigest =
+      awaitId request.record first.record.generation first.record.checkpointDigest := by
+  obtain ⟨same, _⟩ := delivery_advances_generation first sealing installed second sameRecord
+  have secondId := second.idExact
+  rw [sameAwait, first.idExact, sameRecord, same, Delivery.next_generation first] at secondId
+  exact secondId.symm
+
 #assert_axioms decodeCheckpoint_checkpointBytes
 #assert_axioms typed_runBounded_yielded
 #assert_axioms runSegment_yielded
@@ -524,4 +641,12 @@ theorem not_forcingTransparent_lostStack :
 #assert_axioms not_forcingTransparent_of_refute
 #assert_compiled forcingTransparent_tally
 #assert_compiled not_forcingTransparent_lostStack
+#assert_axioms bodyOf_image
+#assert_axioms nextRecord_generation
+#assert_axioms Delivery.next_generation
+#assert_axioms encodeRecord_ne_nil
+#assert_axioms Delivery.installed_record
+#assert_axioms Delivery.installed_record_ended
+#assert_axioms delivery_advances_generation
+#assert_axioms second_same_await_is_collision
 end Minidregg.Kernel.ObjectiveResumeContract
