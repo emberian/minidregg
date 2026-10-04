@@ -23,6 +23,7 @@
 # updated 2026-10-04: fn boundary: Host.FnOutcome (fn exit classes) and Kernel.Base64 (the one base64) enter via Host.Main / FnPortableSource  [counts: Minidregg 0 1, Theory 69 151, Kernel 341 496, Pred 7 11, Effects 0 3, Compiler 139 306, Selvage 12 153, Assurance 0 151, Host 75 109, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 11, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-04: object-record R3: Kernel.ObjectiveTariff (the one public tariff, moved out of Kernel.ObjectiveBendNativeAdmission) enters with its importer (merge-keeper batch c5)  [counts: Minidregg 0 1, Theory 69 151, Kernel 342 498, Pred 7 11, Effects 0 3, Compiler 139 306, Selvage 12 153, Assurance 0 151, Host 75 109, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 11, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-04: Compiler.ObjectiveBendTermWire: the proved decode link the front end accept uses (elaborator-2, rebased by merge-keeper onto c5)  [counts: Minidregg 0 1, Theory 69 151, Kernel 342 498, Pred 7 11, Effects 0 3, Compiler 140 307, Selvage 12 153, Assurance 0 151, Host 75 109, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 11, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-04: fn-wire: Host reads the fncu cursor with Mini's grammar interpreter (Compiler.FnWireFncu) instead of the fn consumer-inspect subprocess  [counts: Minidregg 0 1, Theory 69 154, Kernel 342 494, Pred 7 11, Effects 0 3, Compiler 144 314, Selvage 12 153, Assurance 0 151, Host 75 108, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 11, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -36,6 +37,7 @@ Compiler.BabyBear
 Compiler.BendWorldPlan
 Compiler.BignumKernelABI
 Compiler.BinaryTower256Profile
+Compiler.Blake3
 Compiler.CandidateLawResolution
 Compiler.CanonicalAccountView
 Compiler.CanonicalCellRegistry
@@ -71,6 +73,9 @@ Compiler.Evaluator
 Compiler.FiniteDependentMapCachedOrdering
 Compiler.FiniteDependentMapCodec
 Compiler.FnEvidenceCodec
+Compiler.FnWireFncu
+Compiler.FnWireGrammar
+Compiler.FnWireRoundTrip
 Compiler.GenericSimplexCodec
 Compiler.GenericSimplexIO
 Compiler.GenericSimplexSourceAnchor

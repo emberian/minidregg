@@ -88,6 +88,7 @@ frame boundary ends normally; truncated/oversized/unknown frames terminate.
 -/
 import Kernel.NativeHost
 import Compiler.GenericSimplexSourceAnchor
+import Compiler.FnWireFncu
 import Kernel.NativeHostObjectAudience
 import Kernel.NativeHostSession
 import Kernel.NativeReserveContinuity
@@ -3035,12 +3036,6 @@ def exactNamedDecimal (name field : String) : Except String Nat := do
   unless label == name do throw s!"fn {name} field has unexpected label"
   exactDecimal name value
 
-def exactNamedHex (name field : String) : Except String (List UInt8) := do
-  let [label, value] := field.splitOn "="
-    | throw s!"fn {name} field has unexpected framing"
-  unless label == name do throw s!"fn {name} field has unexpected label"
-  decodeCanonicalHex name value
-
 structure FnConsumerStatus where
   committedAck : Nat
   frontier : Nat
@@ -3059,29 +3054,6 @@ def parseFnConsumerStatus (output : String) : Except String FnConsumerStatus := 
       frontier ≤ 4294967295 do
     throw "fn consumer status has invalid positions"
   return ⟨committedAck, frontier, distance⟩
-
-def parseFnConsumerInspect (output : String) :
-    Except String (FnConsumerProgress.Scope × Nat) := do
-  let [line, ""] := output.splitOn "\n"
-    | throw "fn consumer inspect has unexpected framing"
-  let ["fn-consumer-inspect-v1", history, incarnation, consumer, principal,
-       query, qver, view, epoch, position,
-       "currentness=unverified", "acceptance=unverified",
-       "processing=unverified"] := line.splitOn " "
-    | throw "fn consumer inspect has unexpected fields"
-  let scope : FnConsumerProgress.Scope :=
-    ⟨← exactNamedHex "history" history,
-     ← exactNamedHex "incarnation" incarnation,
-     ← exactNamedHex "consumer" consumer,
-     ← exactNamedHex "principal" principal,
-     ← exactNamedHex "query" query,
-     ← exactNamedDecimal "query-version" qver,
-     ← exactNamedDecimal "view-version" view,
-     ← exactNamedDecimal "registration-epoch" epoch⟩
-  let position ← exactNamedDecimal "position" position
-  unless scope.valid && position ≤ 4294967295 do
-    throw "fn consumer inspect has invalid scope or position"
-  return (scope, position)
 
 def projectFnPoll (fnBinary : String) (pin : FnPollScopePin)
     (cursorPath reportPath : String) : IO (List UInt8 × List UInt8 × FnPollProjection) := do
@@ -3171,43 +3143,20 @@ def queryFnConsumerStatus (fnBinary : String) (scope : FnPollScopePin)
     throw (fnLocalRefusal "local consumer status" exitCode output stderrBytes)
   IO.ofExcept (parseFnConsumerStatus (String.fromUTF8! output.toByteArray))
 
-def inspectFnConsumerCursor (fnBinary : String) (cursorPath : String) :
-    IO (FnConsumerProgress.Scope × Nat) := do
-  let cursor ← readBoundedBytes cursorPath 346
-  let mut selected : Option (FnConsumerProgress.Scope × Nat) := none
-  let mut framingDiagnostic := "none"
-  for _ in [:2] do
-    if selected.isNone then do
-      let child ← IO.Process.spawn
-        { cmd := fnBinary, args := #["--fn", "consumer-inspect", cursorPath],
-          stdin := .null, stdout := .piped, stderr := .piped }
-      let stderrTask ← IO.asTask (readDiagnosticStderr child.stderr 2048)
-      let output ← try readBoundedLoop child.stdout 1024
-        catch error =>
-          child.kill
-          discard <| child.wait
-          throw error
-      let exitCode ← child.wait
-      let stderrBytes ← match stderrTask.get with
-        | .ok bytes => pure bytes
-        | .error error => throw error
-      let digest := fun (label : String) (bytes : List UInt8) =>
-        (Sp800185Cshake256.hash label.toUTF8.toList bytes).digest.value
-      let diagnostic := s!"exit={exitCode}, stdoutBytes={output.length}, stdoutLF={(output.filter (· == 10)).length}, stdoutDigest={digest "DREGG.FN.INSPECT-STDOUT/v1" output}, stderrPrefixBytes={stderrBytes.size}, stderrPrefixDigest={digest "DREGG.FN.INSPECT-STDERR/v1" stderrBytes.toList}"
-      unless cursor == (← readBoundedBytes cursorPath 346) do
-        throw (IO.userError "fn consumer cursor changed during inspect")
-      unless exitCode == 0 && output.all (fun byte => byte.toNat < 128) do
-        throw (IO.userError s!"fn consumer cursor inspect refused ({diagnostic})")
-      match parseFnConsumerInspect (String.fromUTF8! output.toByteArray) with
-      | .ok value => selected := some value
-      | .error detail =>
-          unless detail == "fn consumer inspect has unexpected framing" do
-            throw (IO.userError s!"{detail} ({diagnostic})")
-          IO.eprintln s!"minidregg-host: fn cursor inspect framing retry ({diagnostic})"
-          framingDiagnostic := diagnostic
-  let some value := selected
-    | throw (IO.userError s!"fn consumer inspect framing refused after retry ({framingDiagnostic})")
-  return value
+/-- The scope and position of an `fncu` cursor file, read by Mini's own interpreter at fn's
+exported `fncu.cursor` grammar (`Compiler.FnWireFncu`; the grammar is fn's, pinned with its
+vectors by `Compiler.FnWirePinned`). No fn subprocess and no text line: the cursor octets are
+read once, within the cursor bound, and an accepted cursor is canonical
+(`FnWire.decodeCursor_canonical`). -/
+def inspectFnConsumerCursor (cursorPath : String) : IO (FnConsumerProgress.Scope × Nat) := do
+  let cursor ← readBoundedBytes cursorPath FnWire.maxCursorOctets
+  match FnWire.decodeCursor cursor with
+  | .error refusal =>
+      throw (IO.userError s!"fn consumer cursor refused: {refusal.fnWord} ({cursor.length} octets)")
+  | .ok (scope, position) =>
+      unless FnConsumerProgress.Scope.valid scope do
+        throw (IO.userError "fn consumer cursor names an invalid scope")
+      return (scope, position)
 
 /-- The local owner supplies a fresh committed-position cursor. Inspecting a
 caller file would establish only syntax; this path binds the inspected full
@@ -3226,7 +3175,7 @@ def queryFnConsumerPosition (fnBinary : String) (scope : FnPollScopePin)
     let cursor ← readBoundedBytes path 346
     unless !cursor.isEmpty do
       throw (IO.userError "fn current position returned no cursor")
-    let (inspectedScope, position) ← inspectFnConsumerCursor fnBinary path
+    let (inspectedScope, position) ← inspectFnConsumerCursor path
     let selectedScope ← IO.ofExcept scope.progressScope
     unless inspectedScope == selectedScope &&
         cursor == (← readBoundedBytes path 346) do
@@ -3263,7 +3212,7 @@ bounded empty page that can be recorded and ACKed after Mini admission. -/
 def classifyFnEmptyPoll (fnBinary : String) (scope : FnPollScopePin)
     (controlPath cursorPath reportPath : String) (cursor : List UInt8)
     (before : FnConsumerStatus) : IO (Option (Nat × Nat)) := do
-  let (inspectedScope, position) ← inspectFnConsumerCursor fnBinary cursorPath
+  let (inspectedScope, position) ← inspectFnConsumerCursor cursorPath
   let selectedScope ← IO.ofExcept scope.progressScope
   let after ← queryFnConsumerStatus fnBinary scope controlPath
   unless inspectedScope == selectedScope &&
@@ -4123,7 +4072,7 @@ def selectedReleaseFnLegacyPoll (fnBinary scopePath controlPath expectedArticleP
       controlPath cursorPath reportPath
     unless report.take 5 == [68, 102, 110, 45, 114] do
       throw (IO.userError "selected-release legacy fn poll requires fn-r report")
-    let (inspectedScope, position) ← inspectFnConsumerCursor executable cursorPath
+    let (inspectedScope, position) ← inspectFnConsumerCursor cursorPath
     unless inspectedScope == (← IO.ofExcept scope.progressScope) &&
         fromPosition < position &&
         position ≤ fromPosition + FnConsumerProgress.maxPollScan do
@@ -4308,7 +4257,7 @@ def selectedEmptyFnAck (config : NativeHost.Config) (service : FnPollService)
     let report ← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes
     unless !cursor.isEmpty && report.isEmpty do
       throw (IO.userError "empty fn ACK retained poll is not empty")
-    let (inspectedScope, position) ← inspectFnConsumerCursor executable cursorPath
+    let (inspectedScope, position) ← inspectFnConsumerCursor cursorPath
     unless inspectedScope == progressScope do
       throw (IO.userError "empty fn ACK cursor differs from pinned scope")
     let target ← IO.ofExcept (← DurableReceiverIO.load config.transport
@@ -4668,7 +4617,7 @@ def runCatalogOwnRDecisionLoaded (config : NativeHost.Config)
   let gateway ← requireGateway config
   let (prepared, outbox) ← verifyCatalogOwnR config opened service projection carrierPath true
   let (inspectedScope, position) ←
-    inspectFnConsumerCursor service.qExecutable cursorPath
+    inspectFnConsumerCursor cursorPath
   let selectedScope ← IO.ofExcept scope.progressScope
   let after ← queryFnConsumerStatus service.qExecutable scope service.controlPath
   unless inspectedScope == selectedScope &&
@@ -4993,7 +4942,7 @@ def runFnSkipAckSession (pin : FnPortablePin) (scope : FnPollScopePin)
     let cursorPath := (directory / "retained-skip.fncu").toString
     writeBytes cursorPath skipped.cursor
     let (inspectedScope, position) ←
-      inspectFnConsumerCursor pin.executable cursorPath
+      inspectFnConsumerCursor cursorPath
     let selectedScope ← IO.ofExcept scope.progressScope
     unless inspectedScope == selectedScope && position == skipped.toPosition &&
         skipped.cursor == (← readBoundedBytes cursorPath 346) do
@@ -5083,7 +5032,7 @@ def runFnAckSession (config : NativeHost.Config)
     let eventPath := (directory / "retained-report.fn-e").toString
     writeBytes cursorPath stored.cursor
     writeBytes eventPath stored.event
-    let (oldScope, oldPosition) ← inspectFnConsumerCursor pin.executable cursorPath
+    let (oldScope, oldPosition) ← inspectFnConsumerCursor cursorPath
     unless oldScope == selectedScope && oldPosition == stored.sequence + 1 &&
         stored.cursor == (← readBoundedBytes cursorPath 346) do
       throw (IO.userError "fn ack retained cursor differs from signed Mini position")
@@ -5503,7 +5452,7 @@ def runCatalogOwnRAckSession (config : NativeHost.Config)
     writeBytes cursorPath evidence.poll.cursor
     writeBytes eventPath evidence.poll.event
     writeBytes carrierPath evidence.portable.carrier
-    let (inspectedScope, position) ← inspectFnConsumerCursor pin.executable cursorPath
+    let (inspectedScope, position) ← inspectFnConsumerCursor cursorPath
     let selectedScope ← IO.ofExcept scope.progressScope
     unless inspectedScope == selectedScope && position == evidence.toPosition &&
         evidence.poll.sequence + 1 == position do
@@ -5615,7 +5564,7 @@ def runFnReplyAckSession (config : NativeHost.Config)
     let eventPath := (directory / "retained-report.fn-e").toString
     writeBytes cursorPath stored.cursor
     writeBytes eventPath stored.event
-    let (oldScope, oldPosition) ← inspectFnConsumerCursor pin.executable cursorPath
+    let (oldScope, oldPosition) ← inspectFnConsumerCursor cursorPath
     unless oldScope == selectedScope && oldPosition == stored.sequence + 1 &&
         stored.cursor == (← readBoundedBytes cursorPath 346) do
       throw (IO.userError "A reply ack retained cursor differs from signed Mini position")

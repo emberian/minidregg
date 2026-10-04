@@ -14,6 +14,7 @@ What this module establishes, at build time, against the vendored bytes:
   the decoder answer the file prints, and the coverage fn §3 promises is present;
 * `fncuCursor_is_pinned` — the `fncu.cursor` grammar Mini runs (`cursorGrammar`) is the
   file's family of that name;
+* `fn_written_cursor` — a cursor fn wrote (evidence) decodes to its scope and position;
 * teeth: a file with one vector's `consumed` changed, or one `rest` changed, or one refusal
   word swapped, is refused.
 
@@ -73,5 +74,42 @@ theorem pinned_refuses_word_fault :
 #assert_compiled pinned_refuses_consumed_fault
 #assert_compiled pinned_refuses_rest_fault
 #assert_compiled pinned_refuses_word_fault
+
+/-! ## A cursor fn wrote
+
+`docs/evidence/2026-09-26-workroom-content-reply/a-retained.fncu`, written by fn's local
+consumer (sha256 in that directory's `sha256.txt`); `scripts/check-fn-wire.sh` checks that
+the literal below is that file. -/
+
+/-- The octets of the evidence cursor. -/
+def fnWrittenCursorHex : String :=
+  "666e63750120eb87ce0258e3522fb13f96b9daaaef0767285055daeb6076d789c1f169cefd50204b319ac4f9f145a8e705a02714b7583e3c2bfcdacbdd9d4a0552b576bd8b05c606776f726b6572056c6f63616c07666e2e7465737400000001000000000000000100000006"
+
+def fnWrittenCursor : List UInt8 := (hexBytes? fnWrittenCursorHex.toList).getD []
+
+def cursorIs (xs : List UInt8) (consumer principal query : String) (qv vv epoch pos : Nat) : Bool :=
+  match decodeCursor xs with
+  | .ok (s, p) =>
+      s.consumer == consumer.toUTF8.toList && s.principal == principal.toUTF8.toList &&
+        s.query == query.toUTF8.toList && s.history.length == 32 &&
+        s.incarnation.length == 32 && s.queryVersion == qv && s.viewVersion == vv &&
+        s.registrationEpoch == epoch && p == pos
+  | .error _ => false
+
+/-- fn's cursor reads as consumer `worker`, principal `local`, query `fn.test` v1, view 0,
+epoch 1, position 6 (and, by `decodeCursor_canonical`, re-encodes to the same octets). -/
+theorem fn_written_cursor :
+    fnWrittenCursor.length = 108 ∧ cursorIs fnWrittenCursor "worker" "local" "fn.test" 1 0 1 6 = true := by
+  native_decide
+
+/-- Teeth: one trailing octet, and registration epoch 0, are each refused `malformed`. -/
+theorem fn_written_cursor_mutants :
+    decodeCursor (fnWrittenCursor ++ [0]) = .error .malformed ∧
+      decodeCursor (fnWrittenCursor.take 100 ++ [0, 0, 0, 0] ++ fnWrittenCursor.drop 104) =
+        .error .malformed := by
+  native_decide
+
+#assert_compiled fn_written_cursor
+#assert_compiled fn_written_cursor_mutants
 
 end Minidregg.Compiler.FnWire

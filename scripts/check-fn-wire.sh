@@ -12,7 +12,8 @@
 #      off by one, one accepted vector's `rest` changed, one trailer refusal renamed
 #      `malformed` -> RED naming the fault (unpinned); the same mutated file pinned -> RED by
 #      digest; the unmutated copy unpinned -> OK.
-#   4. With FN_REPO set (an fn clone holding the pinned revision): the vendored file is
+#   4. fnWrittenCursorHex (FnWirePinned's fn-written cursor) is the evidence file's octets.
+#   5. With FN_REPO set (an fn clone holding the pinned revision): the vendored file is
 #      byte-identical to `git show REV:specs/wire-grammar.json`. Without it, says so.
 # Exit status: the number of failed checks. Run after the lake-build gate (needs the oleans).
 set -uo pipefail
@@ -64,6 +65,11 @@ control word '"refused":"trailer"' '"refused":"malformed"' 'refused trailer wher
 cp "$file" "$tmp/copy.json"
 o=$(run "$tmp/copy.json" --unpinned); r=$?
 if [ "$r" = 0 ] && grep -q '^fn-wire: OK ' <<<"$o"; then ok "control copy (unmutated, unpinned) passes"; else fail "control copy (rc=$r): $o"; fi
+
+ev=docs/evidence/2026-09-26-workroom-content-reply/a-retained.fncu
+evhex=$(od -An -tx1 -v "$ev" | tr -d ' \n')
+if [ -n "$evhex" ] && grep -q "\"$evhex\"" Compiler/FnWirePinned.lean; then ok "fnWrittenCursorHex is $ev"
+else fail "fnWrittenCursorHex is not the octets of $ev"; fi
 
 rev=$(sed -n 's/^def pinnedRevision : String := "\([0-9a-f]*\)"$/\1/p' Compiler/FnWirePinned.lean)
 [ -n "$rev" ] || fail "no pinnedRevision in Compiler/FnWirePinned.lean"
