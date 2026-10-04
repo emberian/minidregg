@@ -88,6 +88,17 @@ def nockProgramWire : Wire NockProgramCodec.layout where
   keyCodecId := fun _ => "unit"
   valueCodecId := fun _ => "dregg/nock-program/v1"
 
+/-- A kernel activity cell: one RAM address holding its payload. -/
+def objectiveActivityWire : Wire Kernel.ObjectiveActivityCell.layout where
+  name := "dregg/objective-activity-address/v1"
+  namespaces := [()]
+  namespaces_complete := by intro u; cases u; simp
+  namespaceStream := unitStream
+  keyStream := fun _ => unitStream
+  valueStream := fun _ => Kernel.ObjectiveActivityCell.payloadStream
+  keyCodecId := fun _ => "unit"
+  valueCodecId := fun _ => "dregg/objective-activity-cell/v1"
+
 /-- **One wire per registered kind.** -/
 def wireOf : (k : deployedR.Kind) → Wire (deployedR.layout k)
   | .content => HyperdocumentCell.contentWire
@@ -106,6 +117,7 @@ def wireOf : (k : deployedR.Kind) → Wire (deployedR.layout k)
   | .system => Kernel.SystemCell.wire
   | .worldKind => WorldKindCell.definitionWire
   | .worldInstance => WorldKindCell.instanceWire
+  | .objectiveActivity => objectiveActivityWire
 
 /-! ## The cell decoder -/
 

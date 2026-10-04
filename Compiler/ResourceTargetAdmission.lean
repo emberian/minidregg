@@ -34,6 +34,8 @@ def externalKind : CanonicalCellRegistry.Kind → Option ResourceKind
   -- A stream entry is read through its head's `tail` view, never observed itself.
   | .eventHistory | .authority | .resourceBook | .policySource | .nockProgram | .clock
   | .streamEntry | .system => none
+  -- An activity cell is read through the activity view, never observed as a resource.
+  | .objectiveActivity => none
 
 structure Observed (deployment : CanonicalCellRegistry.Deployment)
     (directory : Directory Nat Registry) (kind : ResourceKind) (target : Nat) (expectedRoot : Digest) where

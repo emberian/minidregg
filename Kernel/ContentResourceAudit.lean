@@ -116,11 +116,12 @@ def birth : CellRegistry.PackedCell CanonicalCellRegistry.registry :=
 
 theorem neutral_content_birth_admitted :
     CanonicalCellRegistry.UserInitial deployment 100 birth := by
-  refine ⟨⟨by decide, ?_⟩, ?_⟩
+  refine ⟨⟨⟨by decide, ?_⟩, ?_⟩, ?_⟩
   · intro left member
     exact ((DFinsupp.mem_support_toFun _ _).mp member rfl).elim
   · intro address member
     exact ((DFinsupp.mem_support_toFun _ _).mp member rfl).elim
+  · unfold Kernel.ObjectiveActivityCell.reservedBase; decide
 
 theorem authored_history_cannot_be_injected_at_birth :
     ¬CanonicalCellRegistry.UserInitial deployment 100
@@ -132,7 +133,7 @@ theorem authored_history_cannot_be_injected_at_birth :
     rw [create_exact_bytes_and_provenance]
     simp
   -- A birth may hold only its blinding; an atom is not one.
-  have shape := admitted.2 _ supported
+  have shape := admitted.1.2 _ supported
   cases shape
 
 def runId : RunId := ⟨⟨103⟩⟩
