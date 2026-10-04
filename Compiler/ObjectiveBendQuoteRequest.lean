@@ -6,7 +6,7 @@ import Compiler.ObjectiveInvocationClaim
 import Compiler.NativeObservationCodec
 import Kernel.RunComputeBudgetDomain
 namespace Minidregg.Compiler.ObjectiveBendQuoteRequest
-open Minidregg.Theory Minidregg.Theory.TypedAuthorization
+open Minidregg.Theory Minidregg.Theory.TypedAuthorization Minidregg.Theory.IndexedProgram
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Kernel.RunComputeBudgetDomain
@@ -128,12 +128,15 @@ theorem decoded_canonical {bytes : List UInt8} {request : Request}
   unfold decode at h
   split at h
   · cases h
-  · cases hr : codec.decode bytes <;> simp only [hr,Option.bind_none,Option.bind_some] at h
-    rename_i r
-    split at h
-    · cases Option.some.inj h
-      exact NativeHostCodec.framed_canonical frame requestStream hr
-    · cases h
+  · match hr : codec.decode bytes with
+    | none => rw [hr] at h; cases h
+    | some r =>
+      rw [hr] at h
+      change (if wellFormed r = true then some r else none) = some request at h
+      split at h
+      · cases Option.some.inj h
+        exact NativeHostCodec.framed_canonical frame requestStream hr
+      · cases h
 
 #assert_axioms decoded_canonical
 end Minidregg.Compiler.ObjectiveBendQuoteRequest

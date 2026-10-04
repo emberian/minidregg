@@ -30,10 +30,10 @@ open Minidregg.Theory.IndexedProgram
 open Minidregg.Kernel.DeclaredResourceController
 set_option autoImplicit false
 
-/-- The TT-free scalar binder lives in `Compiler.ObjectiveNativeScalarBinding`
-(the Objective native route imports only that). This module keeps only the
-BendTT term ABI over it; the names below are aliases, not a second copy. -/
-export ObjectiveNativeScalarBinding (Ref Write Scalar NativePlan rootCodec writeKey action sourcePatch sourcePatch_native effect indexOf BoundScalar bindScalar Ordered bindOrdered BoundRead bindRead OrderedReads bindReads ordered_reads_complete BoundPlan bindPlan ordered_length no_missing_effects exact_native_effects write_admitted source_before_at_prefix aliased_command_refused aliased_effect_refused stale_root_impossible ordered_correspondence)
+-- The TT-free scalar binder lives in `Compiler.ObjectiveNativeScalarBinding`
+-- (the Objective native route imports only that). This module keeps only the
+-- BendTT term ABI over it; the names below are aliases, not a second copy.
+export Minidregg.Compiler.ObjectiveNativeScalarBinding (Ref Write Scalar NativePlan rootCodec writeKey action sourcePatch sourcePatch_native effect indexOf BoundScalar bindScalar Ordered bindOrdered BoundRead bindRead OrderedReads bindReads ordered_reads_complete BoundPlan bindPlan ordered_length no_missing_effects exact_native_effects write_admitted source_before_at_prefix aliased_command_refused aliased_effect_refused stale_root_impossible ordered_correspondence)
 
 /-- Exact type declarations captured from the emitted sealed WorldPlanScalar
 module. Constructor names alone are insufficient: the complete definitions and
@@ -279,18 +279,8 @@ theorem completed_source_exact_native {durable : DurableReceiverIO.Loaded Resour
     {command : Command} (result : BoundResult core initial deployment loaded command) :
     result.bound.plan.effects = BendWorldPlan.effectsOf command := exact_native_effects result.bound
 
-#assert_axioms BoundRead.guard_current
-#assert_axioms ordered_reads_complete
 #assert_axioms completed_refusal_inert
 #assert_axioms completed_source_exact_native
-#assert_axioms aliased_command_refused
-#assert_axioms aliased_effect_refused
-#assert_axioms stale_root_impossible
-#assert_axioms ordered_correspondence
-#assert_axioms exact_native_effects
-#assert_axioms write_admitted
-#assert_axioms sourcePatch_native
-#assert_axioms source_before_at_prefix
 #assert_axioms decode_refTerm
 #assert_axioms decode_writeTerm
 #assert_axioms decode_listTerm
@@ -300,5 +290,4 @@ theorem completed_source_exact_native {durable : DurableReceiverIO.Loaded Resour
 #assert_axioms decode_planTerm
 #assert_axioms planTerm_injective
 #assert_axioms native_lower_roundtrip
-#assert_axioms no_missing_effects
 end Minidregg.Compiler.BendScalarPlanAdapter

@@ -24,10 +24,10 @@ structure Environment (deployment : Deployment) (durable : Durable) where
 
 inductive Failure where
   | malformed | selection | capacity
-  | authorization (reason : NativeObservationController.Refusal)
+  | authorization (reason : Minidregg.Compiler.Refusal)
   deriving Repr
 
-def matches (environment : Environment deployment durable)
+def queryMatches (environment : Environment deployment durable)
     (ref : ObjectiveInvocationClaim.InputRef) (signed : Signed) : Bool :=
   decide (signed.challenge.intent.subject = environment.subject ∧
     signed.challenge.intent.nonce = environment.nonce ∧
@@ -40,7 +40,7 @@ structure Query (environment : Environment deployment durable)
   private mk ::
   signed : Signed
   decoded : signedCodec.decode bytes = some signed
-  shapeExact : matches environment ref signed = true
+  shapeExact : queryMatches environment ref signed = true
   authorized : NativeObservationController.AuthorizedIntent environment.context profile
     environment.federation environment.genesisHeight signed.challenge.intent
   read : ObjectiveBendNativeInput.AdmittedRead environment.context profile environment.subject
@@ -57,7 +57,7 @@ def fromAuthorized (environment : Environment deployment durable)
     (authorized : NativeObservationController.AuthorizedIntent environment.context profile
       environment.federation environment.genesisHeight signed.challenge.intent) :
     Option (Query environment profile ref bytes) := do
-  if shape : matches environment ref signed = true then
+  if shape : queryMatches environment ref signed = true then
     have components := (of_decide_eq_true shape : signed.challenge.intent.subject = environment.subject ∧
       signed.challenge.intent.nonce = environment.nonce ∧
       signed.challenge.intent.purpose = .query ⟨ref.kind,ref.resource,.resourceScope⟩ ∧
@@ -75,7 +75,7 @@ def fromAuthorized (environment : Environment deployment durable)
         let guards := inputGuard :: admitted.preparation.clock.readGuard ::
           (laws.map fun (cell,root) => (⟨⟨cell⟩,root⟩ : ReadGuard))
         if roots : ∀ guard ∈ guards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId then
-          some ⟨signed,decoded,shape,authorized,read,selector,root,guards,roots,by simp [guards]⟩
+          some ⟨signed,decoded,shape,authorized,read,selector,root,guards,roots,by simp [guards, inputGuard]⟩
         else none
       else none
     else none
@@ -90,7 +90,7 @@ def authorizeQuery (native : CredentialSignatureIO.NativeConfig)
   | some signed =>
     -- Pure request-shape checks precede crypto. All state-dependent checks are
     -- still performed by the existing signature-first observation receiver.
-    if matches environment ref signed != true then return .error .selection
+    if queryMatches environment ref signed != true then return .error .selection
     match ← NativeObservationController.authorize native environment.context profile
         environment.federation environment.genesisHeight signed with
     | .error reason => return .error (.authorization reason)

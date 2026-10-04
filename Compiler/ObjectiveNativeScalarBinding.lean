@@ -295,4 +295,17 @@ theorem ordered_correspondence {durable : DurableReceiverIO.Loaded ResourceBirth
   | cons bound tail ih => exact .cons ⟨bound, rfl⟩ ih
 
 
+#assert_axioms BoundRead.guard_current
+#assert_axioms ordered_reads_complete
+#assert_axioms aliased_command_refused
+#assert_axioms aliased_effect_refused
+#assert_axioms stale_root_impossible
+#assert_axioms ordered_correspondence
+#assert_axioms exact_native_effects
+#assert_axioms write_admitted
+#assert_axioms sourcePatch_native
+#assert_axioms source_before_at_prefix
+#assert_axioms no_missing_effects
+#assert_axioms ordered_length
+
 end Minidregg.Compiler.ObjectiveNativeScalarBinding
