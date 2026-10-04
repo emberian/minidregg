@@ -13,7 +13,7 @@ export LC_ALL=C
 
 usage() {
   cat <<'EOF'
-usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSHOT BUILD_OUTPUT] [--incremental-suffix-from SNAPSHOT BUILD_OUTPUT MODULE [--allow-suffix-change MODULE ...] [--allow-inserted-module MODULE ...] [--allow-unchanged-restart]] [--checkpoint-resume | --resume-failed BUILD_OUTPUT | --resume-complete-lean BUILD_OUTPUT BUILDER_SHA256 | --reuse-success-prefix-from SNAPSHOT BUILD_OUTPUT] [--output DIR] [--binary PATH]
+usage: scripts/build-native-host.sh [--root MODULE --usage-prefix TEXT [--companion-of BUILD_OUTPUT]] [--umbrella] [--incremental-host-from SNAPSHOT BUILD_OUTPUT] [--incremental-suffix-from SNAPSHOT BUILD_OUTPUT MODULE [--allow-suffix-change MODULE ...] [--allow-inserted-module MODULE ...] [--allow-unchanged-restart]] [--checkpoint-resume | --resume-failed BUILD_OUTPUT | --resume-complete-lean BUILD_OUTPUT BUILDER_SHA256 | --reuse-success-prefix-from SNAPSHOT BUILD_OUTPUT] [--output DIR] [--binary PATH]
 
   --umbrella  run the literal `lake build Minidregg` gate through a serialized
               Lean wrapper, build Host.Main leanArts, then link the native host
@@ -54,6 +54,19 @@ usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSH
               source/artifact and external-input qualification; compile every
               module from the first changed or inserted source onward
   --binary    output executable path (default: .lake/build/bin/minidregg-host)
+  --root MODULE
+              link the executable whose `main` is MODULE (default Host.Main);
+              requires --usage-prefix; a non-Host.Main root also requires
+              --binary and is exclusive with --umbrella and incremental modes
+  --usage-prefix TEXT
+              the linked executable, run without arguments, must print a line
+              starting with TEXT (default `minidregg-host:`)
+  --companion-of BUILD_OUTPUT
+              a second executable from this SAME snapshot: reuse every closure
+              module that BUILD_OUTPUT (a successful build of this root
+              directory) compiled, after checking its source, OLean, ILean, C
+              and object bytes against that build's manifests; any mismatch
+              refuses. Modules outside that closure are compiled here
 
 Environment:
   MINIDREGG_NATIVE_ALLOW_SHARED=1  permit a tree without the snapshot marker
@@ -81,6 +94,11 @@ resume_complete_builder_sha=""
 checkpoint_resume=0
 success_baseline_root=""
 success_baseline_output=""
+root_module=Host.Main
+usage_prefix='minidregg-host:'
+root_given=0
+usage_given=0
+companion_output=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --umbrella)
@@ -165,6 +183,24 @@ while [[ $# -gt 0 ]]; do
       binary_path=$2
       shift 2
       ;;
+    --root)
+      [[ $# -ge 2 && "$2" =~ ^[A-Z][A-Za-z0-9_]*(\.[A-Z][A-Za-z0-9_]*)+$ && "$root_given" == 0 ]] \
+        || { usage >&2; exit 64; }
+      root_module=$2
+      root_given=1
+      shift 2
+      ;;
+    --usage-prefix)
+      [[ $# -ge 2 && -n "$2" && "$usage_given" == 0 ]] || { usage >&2; exit 64; }
+      usage_prefix=$2
+      usage_given=1
+      shift 2
+      ;;
+    --companion-of)
+      [[ $# -ge 2 && -z "$companion_output" ]] || { usage >&2; exit 64; }
+      companion_output=$2
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -178,6 +214,20 @@ while [[ $# -gt 0 ]]; do
 done
 if [[ "$build_umbrella" == 1 && -n "$incremental_baseline_root" ]]; then
   printf 'build-native-host: --umbrella and incremental modes are exclusive\n' >&2
+  exit 64
+fi
+if [[ "$root_given" != "$usage_given" ]]; then
+  printf 'build-native-host: --root and --usage-prefix go together\n' >&2
+  exit 64
+fi
+if [[ "$root_module" != Host.Main &&
+      ( "$build_umbrella" == 1 || -n "$incremental_baseline_root" || -z "$binary_path" ) ]]; then
+  printf 'build-native-host: a non-Host.Main root needs --binary and excludes --umbrella/incremental modes\n' >&2
+  exit 64
+fi
+if [[ -n "$companion_output" &&
+      ( "$build_umbrella" == 1 || -n "$incremental_baseline_root" || "$checkpoint_resume" == 1 ) ]]; then
+  printf 'build-native-host: --companion-of is exclusive with umbrella, incremental and resume modes\n' >&2
   exit 64
 fi
 if [[ "$checkpoint_resume" == 1 &&
@@ -345,7 +395,7 @@ printf 'start_utc=%s\nroot=%s\nlean_threads=%s\nnative_jobs=%s\nseat_root=%s\nse
 # facet fetches import artifacts and can fan out compilers.
 closure="$output_dir/transitive-imports.json"
 env LEAN_NUM_THREADS="$lean_threads" \
-  lake --reconfigure query +Host.Main:transImports --json \
+  lake --reconfigure query "+$root_module:transImports" --json \
   > "$closure" 2> "$output_dir/transitive-imports.log"
 jq -e 'type == "array" and length > 0' "$closure" >/dev/null
 
@@ -355,7 +405,7 @@ jq -r '.[]' "$closure" | while IFS= read -r module; do
   relative=${module//./\/}.lean
   [[ -f "$relative" ]] && printf '%s\n' "$module"
 done > "$source_modules"
-grep -qxF Host.Main "$source_modules" || printf '%s\n' Host.Main >> "$source_modules"
+grep -qxF "$root_module" "$source_modules" || printf '%s\n' "$root_module" >> "$source_modules"
 
 package_required="$output_dir/package-modules.txt"
 jq -r '.[]' "$closure" | while IFS= read -r module; do
@@ -1177,6 +1227,59 @@ if [[ -n "$incremental_baseline_root" ]]; then
     "$validated_sources" "$validated_additional_changes" "$validated_insertions" "$validated_tail_sources" "$validated_packages" | tee -a "$output_dir/build.log"
 fi
 
+# A companion executable reuses only what a successful build of this same
+# snapshot compiled, byte for byte. Every module it names must still match
+# that build's source and artifact manifests; drift refuses rather than
+# recompiling a module whose importers were already checked against it.
+companion_reused="$output_dir/companion-reused-modules.txt"
+companion_compiled="$output_dir/companion-compiled-modules.txt"
+: > "$companion_reused"
+: > "$companion_compiled"
+if [[ -n "$companion_output" ]]; then
+  companion_output=$(cd "$companion_output" && pwd -P)
+  for required in manifest.txt source-sha256.txt reusable-artifact-sha256.txt; do
+    [[ -f "$companion_output/$required" ]] || {
+      printf 'build-native-host: companion build lacks %s\n' "$required" >&2
+      exit 65
+    }
+  done
+  grep -qxF "root=$root" "$companion_output/manifest.txt" || {
+    printf 'build-native-host: companion build is not of this snapshot: %s\n' "$root" >&2
+    exit 65
+  }
+  grep -qxF "lean=$(lean --version | sed -n '1p')" "$companion_output/manifest.txt" || {
+    printf 'build-native-host: companion build used another Lean\n' >&2
+    exit 65
+  }
+  companion_check="$output_dir/companion-expected-sha256.txt"
+  : > "$companion_check"
+  while IFS= read -r module; do
+    stem=${module//./\/}
+    if grep -qE "^[[:xdigit:]]{64}  $stem\.lean\$" "$companion_output/source-sha256.txt"; then
+      grep -E "^[[:xdigit:]]{64}  $stem\.lean\$" "$companion_output/source-sha256.txt" >> "$companion_check"
+      for path in ".lake/build/lib/lean/$stem.olean" ".lake/build/lib/lean/$stem.ilean" \
+          ".lake/build/ir/$stem.c" ".lake/build/ir/$stem.c.o.export"; do
+        grep -E "^[[:xdigit:]]{64}  $path\$" "$companion_output/reusable-artifact-sha256.txt" \
+          >> "$companion_check" || {
+          printf 'build-native-host: companion manifest lacks %s\n' "$path" >&2
+          exit 65
+        }
+      done
+      printf '%s\n' "$module" >> "$companion_reused"
+    else
+      printf '%s\n' "$module" >> "$companion_compiled"
+    fi
+  done < "$source_modules"
+  if ! shasum -a 256 -c "$companion_check" > "$output_dir/companion-check.log" 2>&1; then
+    printf 'build-native-host: companion artifacts drifted; see %s\n' \
+      "$output_dir/companion-check.log" >&2
+    exit 65
+  fi
+  printf 'companion %s: %s reused modules, %s compiled here\n' "$companion_output" \
+    "$(wc -l < "$companion_reused" | tr -d ' ')" "$(wc -l < "$companion_compiled" | tr -d ' ')" \
+    | tee -a "$output_dir/build.log"
+fi
+
 compiled_sources=0
 if [[ "$build_umbrella" == 0 ]]; then
   index=0
@@ -1184,6 +1287,10 @@ if [[ "$build_umbrella" == 0 ]]; then
   total=$(wc -l < "$build_modules" | tr -d ' ')
   while IFS= read -r module; do
     if [[ "$resume_prefix" -gt 0 && "$index" -lt "$resume_prefix" ]]; then
+      index=$((index + 1))
+      continue
+    fi
+    if [[ -n "$companion_output" ]] && grep -qxF "$module" "$companion_reused"; then
       index=$((index + 1))
       continue
     fi
@@ -1389,6 +1496,9 @@ fi
 
 export toolchain output_dir
 project_c_modules="$source_modules"
+if [[ -n "$companion_output" ]]; then
+  project_c_modules="$companion_compiled"
+fi
 if [[ -n "$success_baseline_root" ]]; then
   project_c_modules="$output_dir/project-c-recompiled-modules.txt"
   tail -n "+$((resume_prefix + 1))" "$source_modules" > "$project_c_modules"
@@ -1531,7 +1641,7 @@ if grep -vF "$native_object_description" "$output_dir/package-object-types-final
   exit 66
 fi
 
-response="$output_dir/minidregg-host.rsp"
+response="$output_dir/${binary##*/}.rsp"
 : > "$response"
 while IFS= read -r module; do
   stem=${module//./\/}
@@ -1552,7 +1662,8 @@ set +e
 "$binary" > "$output_dir/usage.txt" 2>&1
 usage_exit=$?
 set -e
-grep -q '^minidregg-host:' "$output_dir/usage.txt" || {
+awk -v prefix="$usage_prefix" 'index($0, prefix) == 1 { found = 1 } END { exit !found }' \
+    "$output_dir/usage.txt" || {
   printf 'build-native-host: linked binary did not print its usage contract\n' >&2
   exit 70
 }
@@ -1642,6 +1753,11 @@ fi
   printf 'toolchain=%s\n' "$toolchain"
   printf 'native_target=%s:%s\n' "$(uname -s)" "$(uname -m)"
   printf 'umbrella=%s\n' "$build_umbrella"
+  printf 'root_module=%s\n' "$root_module"
+  if [[ -n "$companion_output" ]]; then
+    printf 'companion_of=%s\n' "$companion_output"
+    printf 'companion_reused_modules=%s\n' "$(wc -l < "$companion_reused" | tr -d ' ')"
+  fi
   if [[ -n "$incremental_baseline_root" ]]; then
     printf 'incremental_baseline=%s\n' "$incremental_baseline_output"
     printf 'incremental_changed_module=%s\n' "$incremental_changed_module"

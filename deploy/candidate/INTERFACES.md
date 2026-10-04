@@ -61,7 +61,9 @@ that can find the versioned one) for the Store helper.
 | path | what |
 | --- | --- |
 | `OUT/bin/minidregg-host` | Lean-authored native Host, built by `scripts/build-native-host.sh` (bounded Lean compiler; shared seats in `MINIDREGG_LEAN_SEAT_ROOT`, independent of per-build evidence) |
+| `OUT/bin/minidregg-client-consent` | local signing consent provider (`Host.ClientConsentSession`), built by the same builder as a companion of the Host build (`--root Host.ClientConsentSession --companion-of OUT/work/host-build`): every module the Host build compiled is byte-checked and reused, only consent-only modules compile; evidence `OUT/work/consent-build/`. Pinned as `provenance.json` `.binaries.consent` and `manifest.json` `.consentHost`. `package.py` REQUIRES it (a roles manifest or sealed family without it is refused: a candidate whose friends cannot sign is not shippable), and `build.sh` re-checks the pins and the bundle after packaging. `deploy/candidate/test-package.py` runs the packager on stub roles (no Lean) |
 | `OUT/bin/mini` | client (`native/resource-client`); also the Linux x86-64 friend client (`provenance.json` `.clients["x86_64-unknown-linux-gnu"]`) |
+| `OUT/bin/clients/x86_64-unknown-linux-gnu/` | the Linux friend bundle, hard links of `bin/mini`, `bin/minidregg-host` (`MINI_LOCAL_HOST`), `bin/minidregg-client-consent` (`MINI_CONSENT_HOST`), the verifier and the Store helper; `.clients["x86_64-unknown-linux-gnu"].consent` pins them (see section 8, signing consent) |
 | `OUT/bin/clients/TARGET/mini` | friend clients for each target in `MINI_CLIENT_TARGETS` (default `aarch64-apple-darwin`, cross-linked with `zig cc -target aarch64-macos`, ad-hoc signed by the linker; `zig` is then required). Hashed in `provenance.json` `.clients`, `SHA256SUMS`, and `manifest.json` `.clients` (absolute paths). `MINI_CLIENT_TARGETS=` builds none. `--client-only` builds only `bin/mini` and these, writes `provenance.json` of type `minidregg-client-provenance-v1` and `SHA256SUMS`, and no manifest |
 | `OUT/bin/minidregg-link-sqlite-store` | Store helper (`native/hyperdocument-link-sqlite-store`) |
 | `OUT/bin/minidregg-credential-signature-verifier` | Ed25519 verifier helper (`native/credential-signature-verifier`) |
@@ -435,6 +437,12 @@ must stay where it was when `init` ran (or re-run `init` on a new Store).
   delegation hand-off `recipient-reference.json`,
   `minidregg-delegated-reference-v1`): `authority: "hint-only"`. Names are
   local hints; the Host decides use from signed observations and current law.
+
+* **Signing consent**: the client signs only after a locally selected consent
+  provider reconstructs the bytes; `MINI_LOCAL_HOST`, `MINI_CONSENT_HOST` and
+  `MINI_CONSENT_CONFIG` select it (absolute paths, all three together). Without
+  them the client refuses to sign. Details: `deploy/shell/README.md`,
+  "Signing consent: the three variables".
 
 ## 9. What the operator decides
 

@@ -49,6 +49,38 @@ mini --remote mini-box shell --workspace ~/.mini/box/workspace --home ~/.mini/ho
 is the same shell as the hosted one (every verb below), running on your
 machine. `MINI_SSH` names another ssh program, as `GIT_SSH` does.
 
+## Signing consent: the three variables
+
+`mini` signs nothing the box chose. Before any key signs an intent, an
+observation or a plan, a **consent provider selected on the signing machine**
+rebuilds the exact bytes from the retained request and an independently
+admitted copy of the source, and the client refuses on any difference (one
+changed byte included; `client_consent::tests::remote_signing_plan_with_one_changed_byte_is_refused_before_signing`).
+Without a provider the client refuses to sign at all. Three variables select it,
+always as absolute paths, and always together:
+
+| variable | names | from the candidate |
+|---|---|---|
+| `MINI_LOCAL_HOST` | the native Host image used for pure codecs (author, inspect, signatures, assemble) | `bin/minidregg-host` |
+| `MINI_CONSENT_HOST` | the consent provider, run as `PROVIDER CONFIG stdio` | `bin/minidregg-client-consent` |
+| `MINI_CONSENT_CONFIG` | the provider's configuration: the deployment config, whose `storageBinary`, `storageRoot` and `signatureBinary` name a Store helper, a **locally admitted** Store and a verifier on the signing machine | your own file |
+
+The Linux friend bundle is `bin/clients/x86_64-unknown-linux-gnu/` (mini, both
+consent executables, the verifier and the Store helper; `provenance.json`
+`.clients["x86_64-unknown-linux-gnu"].consent` pins each). A workspace records
+the three paths when it is made and refuses a different selection later in the
+same process.
+
+What this does **not** yet give a proxy friend: the provider is a full peer. It
+replays the Store named by `storageRoot` from genesis and refuses a rollback or
+a rewritten prefix, and there is no command that hands a friend such a Store;
+so on a friend's own machine signing stays refused until one exists. The macOS
+client has no consent pair (`consent: null` in provenance) and cannot sign.
+When the client is given a Host path and `MINI_CONSENT_HOST` is unset, it takes
+`minidregg-client-consent` beside that Host (the hosted shell's case, since the
+candidate ships both in `bin/`), and the provider then reads the deployment
+config and its Store with the session's own permissions.
+
 The sponsor's side, in their (hosted) shell:
 
 ```

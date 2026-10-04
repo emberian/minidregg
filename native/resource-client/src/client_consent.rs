@@ -170,6 +170,77 @@ mod tests {
         let mut session=Session{child,input,output,executable:"/bin/sh".into(),settings_bytes:vec![]};
         assert!(round_trip(&mut session,222,b"retained").is_err());
     }
+
+    // A friend's client reaches the box over `--remote` (an `ssh:DEST` socket
+    // address relayed by `mini socket-proxy`). The box answers a plan request;
+    // the client's independently selected consent provider reconstructs the
+    // plan it expects. One changed byte in the served plan must refuse before
+    // any signing consumer receives the bytes.
+    const STUB_PLAN: &[u8] = b"DREGG/PLAN/stub-transfer-10";
+    const STUB_OPERATION: u8 = 32;
+    fn stub_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("mini-remote-consent-{label}-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir(&dir).unwrap();
+        dir
+    }
+    fn framed(body: &[u8]) -> Vec<u8> {
+        [(body.len() as u32).to_le_bytes().as_slice(), body].concat()
+    }
+    /// One frame in (exact-length reads: dd bs=1), one canned frame out, until EOF.
+    fn frame_stub(path: &Path, reply: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        fs::write(path, format!("#!/bin/sh\nwhile :; do\n  n=$(dd bs=1 count=4 2>/dev/null | od -An -tu4 | tr -d ' \\n')\n  [ -n \"$n\" ] || exit 0\n  dd bs=1 count=\"$n\" of=/dev/null 2>/dev/null\n  cat '{}'\ndone\n", reply.display())).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    fn remote_plan_run(served_plan: &[u8]) -> std::process::Output {
+        let dir = stub_dir("run");
+        // Box side: the ssh program the client starts is a stub serving `served_plan`.
+        fs::write(dir.join("socket-reply"), framed(&[[STUB_OPERATION].as_slice(), served_plan].concat())).unwrap();
+        frame_stub(&dir.join("ssh"), &dir.join("socket-reply"));
+        // Friend side: the local consent provider derives the exact expected plan.
+        fs::write(dir.join("consent-reply"), framed(&[[224u8].as_slice(), STUB_PLAN].concat())).unwrap();
+        frame_stub(&dir.join("consent"), &dir.join("consent-reply"));
+        fs::write(dir.join("consent.json"), br#"{"stub":"consent settings"}"#).unwrap();
+        fs::write(dir.join("host.json"), br#"{"domain":"7"}"#).unwrap();
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "client_consent::tests::remote_plan_stub_worker", "--ignored", "--nocapture", "--test-threads=1"])
+            .env("MINI_SSH", dir.join("ssh"))
+            .env("MINI_CONSENT_HOST", dir.join("consent"))
+            .env("MINI_CONSENT_CONFIG", dir.join("consent.json"))
+            .env_remove("MINI_LOCAL_HOST")
+            .env("MINI_REMOTE_CONSENT_STUB_CONFIG", dir.join("host.json"))
+            .output().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+        output
+    }
+    #[test]
+    #[ignore = "worker for remote_signing_plan_with_one_changed_byte_is_refused_before_signing"]
+    fn remote_plan_stub_worker() {
+        let config = PathBuf::from(std::env::var_os("MINI_REMOTE_CONSENT_STUB_CONFIG").expect("stub config"));
+        match crate::transport::invoke(Path::new("ssh:plan-stub"), &config, STUB_OPERATION, b"retained request") {
+            Ok(reply) => println!("REMOTE-PLAN-ACCEPTED {}", hex(&reply)),
+            Err(error) => println!("REMOTE-PLAN-REFUSED {error}"),
+        }
+    }
+    #[test]
+    fn remote_signing_plan_with_one_changed_byte_is_refused_before_signing() {
+        // Control: the served plan equals the local reconstruction and passes.
+        let honest = remote_plan_run(STUB_PLAN);
+        let text = String::from_utf8_lossy(&honest.stdout);
+        assert!(honest.status.success(), "{text}");
+        let expected = hex(&[[STUB_OPERATION].as_slice(), STUB_PLAN].concat());
+        assert!(text.contains(&format!("REMOTE-PLAN-ACCEPTED {expected}")), "{text}");
+        // One plan byte changed by the box: refused, and no plan bytes returned.
+        let mut changed = STUB_PLAN.to_vec();
+        let last = changed.len() - 1;
+        changed[last] ^= 0x01;
+        let forged = remote_plan_run(&changed);
+        let text = String::from_utf8_lossy(&forged.stdout);
+        assert!(forged.status.success(), "{text}");
+        assert!(!text.contains("REMOTE-PLAN-ACCEPTED"), "{text}");
+        assert!(text.contains("REMOTE-PLAN-REFUSED local native specialized consent returned a different plan"), "{text}");
+    }
 }
 
 /// Local producer for wrappers retaining native session frames themselves.

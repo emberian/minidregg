@@ -69,10 +69,12 @@ ROLES = {
     "discord": "mini-discord",
     "payWatcher": "pay-watcher",
 }
-REQUIRED = ("host", "mini", "store", "verifier")
+# consent is required: a candidate whose friends cannot sign (the client refuses to sign without a
+# locally selected consent pair) is not shippable, so a roles manifest or sealed family without it is refused.
+REQUIRED = ("host", "consent", "mini", "store", "verifier")
 ALIASES = {"shell": "mini", "hermes": "grainRuntime", "browserProxy": "spkBrowserProxy", "consentHost": "consent"}
 # The Linux friend bundle (W1.9 consent shipping): one directory a friend copies
-# whole, hard links to bin/, present when the candidate carries the consent pair.
+# whole, hard links to bin/ (every candidate carries the consent pair).
 LINUX = "x86_64-unknown-linux-gnu"
 BUNDLE = ("mini", "minidregg-host", "minidregg-client-consent",
           "minidregg-credential-signature-verifier", "minidregg-link-sqlite-store")
@@ -301,25 +303,24 @@ def package(chosen, archive, commit, out, toolchains, origin, host_build_manifes
         provenance["hostBuildManifest"] = {"path": str(host_build_manifest), "sha256": sha(host_build_manifest)}
     clients = {LINUX: {"path": "bin/mini", "sha256": binaries["mini"]["sha256"], "consent": None}}
     bundle_files = []
-    if "consent" in chosen:
-        bundle = out / "bin" / "clients" / LINUX
-        bundle.mkdir(parents=True, exist_ok=True)
-        for name in BUNDLE:
-            link = bundle / name
-            if not link.exists():
-                os.link(out / "bin" / name, link)
-            if sha(link) != sha(out / "bin" / name):
-                die(f"friend bundle {name} differs from bin/{name}")
-            bundle_files.append(f"bin/clients/{LINUX}/{name}")
-        rel = f"bin/clients/{LINUX}"
-        pin = lambda name: sha(out / "bin" / name)
-        clients[LINUX]["consent"] = {
-            "localHost": {"env": "MINI_LOCAL_HOST", "path": f"{rel}/minidregg-host", "sha256": pin("minidregg-host")},
-            "consentHost": {"env": "MINI_CONSENT_HOST", "path": f"{rel}/minidregg-client-consent",
-                            "sha256": pin("minidregg-client-consent")},
-            "verifier": {"path": f"{rel}/minidregg-credential-signature-verifier",
-                         "sha256": pin("minidregg-credential-signature-verifier")},
-            "store": {"path": f"{rel}/minidregg-link-sqlite-store", "sha256": pin("minidregg-link-sqlite-store")}}
+    bundle = out / "bin" / "clients" / LINUX
+    bundle.mkdir(parents=True, exist_ok=True)
+    for name in BUNDLE:
+        link = bundle / name
+        if not link.exists():
+            os.link(out / "bin" / name, link)
+        if sha(link) != sha(out / "bin" / name):
+            die(f"friend bundle {name} differs from bin/{name}")
+        bundle_files.append(f"bin/clients/{LINUX}/{name}")
+    rel = f"bin/clients/{LINUX}"
+    pin = lambda name: sha(out / "bin" / name)
+    clients[LINUX]["consent"] = {
+        "localHost": {"env": "MINI_LOCAL_HOST", "path": f"{rel}/minidregg-host", "sha256": pin("minidregg-host")},
+        "consentHost": {"env": "MINI_CONSENT_HOST", "path": f"{rel}/minidregg-client-consent",
+                        "sha256": pin("minidregg-client-consent")},
+        "verifier": {"path": f"{rel}/minidregg-credential-signature-verifier",
+                     "sha256": pin("minidregg-credential-signature-verifier")},
+        "store": {"path": f"{rel}/minidregg-link-sqlite-store", "sha256": pin("minidregg-link-sqlite-store")}}
     extra_clients = sorted((out / "bin" / "clients").glob("*/mini")) if (out / "bin" / "clients").is_dir() else []
     for client in extra_clients:
         if client.parent.name != LINUX:

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build a Mini candidate from one exact source archive:
 #   bin/minidregg-host                          Lean-authored native Host
+#   bin/minidregg-client-consent                local signing consent (MINI_CONSENT_HOST)
 #   bin/mini                                    participant/operator client
 #   bin/minidregg-link-sqlite-store             durable Store helper
 #   bin/minidregg-credential-signature-verifier Ed25519 verifier helper
@@ -14,6 +15,14 @@
 # provenance.json (source commit, toolchains, hashes, each ELF's glibc needs),
 # SHA256SUMS, and manifest.json (the journey-format manifest: absolute paths +
 # SHA-256 pins). package.py --capsule packages a sealed hbox family the same way.
+# Signing needs a locally selected consent pair: MINI_LOCAL_HOST (the native
+# Host, for pure codecs) and MINI_CONSENT_HOST (minidregg-client-consent, which
+# reconstructs every plan before a key signs it), plus MINI_CONSENT_CONFIG.
+# Without the pair the client refuses to sign; it never signs the box's bytes.
+# package.py links bin/clients/x86_64-unknown-linux-gnu/ (the Linux friend bundle:
+# mini, both consent executables, the verifier and the Store helper) and refuses a
+# candidate without the consent pair. The macOS client has no native consent pair
+# yet (provenance .clients[..].consent is null); it cannot sign.
 # Friend builds of the client ride along: bin/mini is the Linux x86-64 client,
 # and each target in MINI_CLIENT_TARGETS (default aarch64-apple-darwin) is
 # cross-built to bin/clients/TARGET/mini, hashed into provenance.json
@@ -43,7 +52,7 @@ while [ $# -gt 0 ]; do
     --out) [ $# -ge 2 ] || candidate_die "--out needs a value"; out=$2; shift 2 ;;
     --source-archive) [ $# -ge 2 ] || candidate_die "--source-archive needs a value"; archive=$2; shift 2 ;;
     --client-only) client_only=1; shift ;;
-    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,/^# usage:/p' "$0"; exit 0 ;;
     *) candidate_die "unknown argument: $1" ;;
   esac
 done
@@ -149,6 +158,19 @@ stamp "lean packages + mathlib cache: $((t_cache - t_lean))s"
 install -m 0555 "$out/work/host-bin/minidregg-host" "$out/bin/minidregg-host"
 t_host=$(date +%s)
 stamp "native Host: $((t_host - t_cache))s"
+
+# 4b. Local signing consent from the same snapshot. Every module the Host build
+# compiled is reused after a byte check; only the consent-only modules compile.
+(cd "$src" && MINIDREGG_CYCLE_DIR="$out/work/host-cycle" \
+  scripts/build-native-host.sh --root Host.ClientConsentSession \
+    --usage-prefix 'minidregg-client-consent:' --companion-of "$out/work/host-build" \
+    --output "$out/work/consent-build" \
+    --binary "$out/work/consent-bin/minidregg-client-consent") >"$out/logs/consent-build.log" 2>&1 \
+  || { tail -60 "$out/logs/consent-build.log" >&2; candidate_die "native consent build failed"; }
+install -m 0555 "$out/work/consent-bin/minidregg-client-consent" "$out/bin/minidregg-client-consent"
+t_consent=$(date +%s)
+stamp "native consent: $((t_consent - t_host))s"
+t_host=$t_consent
 fi
 
 # 5. Rust binaries. Paths are remapped so the bytes do not depend on where the
@@ -192,7 +214,7 @@ fi
 zig_version=""
 clients_json='{}'
 clients_json=$(jq -n --arg sha "$(candidate_sha256 "$out/bin/mini")" \
-  '{"x86_64-unknown-linux-gnu": {path: "bin/mini", sha256: $sha}}')
+  '{"x86_64-unknown-linux-gnu": {path: "bin/mini", sha256: $sha, consent: null}}')
 for target in $client_targets; do
   zig_version=$(zig version)
   cc_wrap="$out/work/zig-cc-$target"
@@ -236,7 +258,7 @@ WRAP
     || candidate_die "$target client is not a Mach-O arm64 executable"
   clients_json=$(printf '%s' "$clients_json" | jq --arg t "$target" --arg p "bin/clients/$target/mini" \
     --arg sha "$(candidate_sha256 "$out/bin/clients/$target/mini")" --arg linker "zig $zig_version cc -target aarch64-macos" \
-    '.[$t] = {path: $p, sha256: $sha, linker: $linker}')
+    '.[$t] = {path: $p, sha256: $sha, linker: $linker, consent: null}')
 done
 t_rust=$(date +%s)
 stamp "Rust binaries: $((t_rust - t_host))s"
@@ -270,6 +292,9 @@ if [ "$client_only" = 1 ]; then
 fi
 "$out/bin/minidregg-host" >"$out/logs/usage-host.txt" 2>&1 || true
 grep -q '^minidregg-host:' "$out/logs/usage-host.txt" || candidate_die "Host did not print its usage"
+"$out/bin/minidregg-client-consent" >"$out/logs/usage-consent.txt" 2>&1 || true
+grep -q '^minidregg-client-consent: .*minidregg-client-consent CONFIG stdio' "$out/logs/usage-consent.txt" \
+  || candidate_die "consent provider did not print its usage"
 # The Host starts without doing work: every start of `mini serve` pays its initializers.
 "$src/scripts/check-host-cold-start.sh" "$out/bin/minidregg-host" >"$out/logs/host-cold-start.txt" 2>&1 \
   || { cat "$out/logs/host-cold-start.txt" >&2; candidate_die "Host cold start over budget"; }
@@ -277,7 +302,7 @@ grep -q '^minidregg-host:' "$out/logs/usage-host.txt" || candidate_die "Host did
 grep -q '^usage:' "$out/logs/usage-store.txt" || candidate_die "Store helper did not print its usage"
 "$out/bin/minidregg-credential-signature-verifier" >"$out/logs/usage-verifier.txt" 2>&1 || true
 grep -q '^usage:' "$out/logs/usage-verifier.txt" || candidate_die "verifier did not print its usage"
-file "$out"/bin/minidregg-host "$out"/bin/mini "$out"/bin/minidregg-link-sqlite-store \
+file "$out"/bin/minidregg-host "$out"/bin/minidregg-client-consent "$out"/bin/mini "$out"/bin/minidregg-link-sqlite-store \
   "$out"/bin/minidregg-credential-signature-verifier "$out"/bin/clients/*/mini \
   > "$out/logs/file-types.txt" 2>/dev/null || true
 
@@ -297,11 +322,10 @@ for pair in host:minidregg-host mini:mini store:minidregg-link-sqlite-store \
   roles=$(printf '%s' "$roles" | jq --arg r "$role" --arg p "$file" --arg h "$(candidate_sha256 "$file")" \
     '.[$r] = $p | .sha256[$r] = $h')
 done
-# The local signing consent pair (W1.9), when this build produced it.
-if [ -x "$out/bin/minidregg-client-consent" ]; then
-  roles=$(printf '%s' "$roles" | jq --arg p "$out/bin/minidregg-client-consent" \
-    --arg h "$(candidate_sha256 "$out/bin/minidregg-client-consent")" '.consent = $p | .sha256.consent = $h')
-fi
+# The local signing consent pair (step 4b): a candidate that cannot sign is not a candidate.
+[ -x "$out/bin/minidregg-client-consent" ] || candidate_die "bin/minidregg-client-consent is absent after step 4b"
+roles=$(printf '%s' "$roles" | jq --arg p "$out/bin/minidregg-client-consent" \
+  --arg h "$(candidate_sha256 "$out/bin/minidregg-client-consent")" '.consent = $p | .sha256.consent = $h')
 printf '%s' "$roles" | jq --arg c "$commit" '. + {sourceCommit: $c, origin: "build.sh"}' >"$roles_json"
 jq -n --arg leanPin "$lean_pin" --arg lean "$lean_version" --arg lake "$lake_version" \
   --arg mathlib "$(jq -r '.packages[] | select(.name == "mathlib") | .rev' "$src/lake-manifest.json")" \
@@ -319,5 +343,17 @@ python3 "$src/deploy/candidate/package.py" --roles "$roles_json" --source-archiv
   --out "$out" --into-existing --toolchains "$out/work/toolchains.json" \
   --host-build-manifest "$out/work/host-build/manifest.txt" >"$out/logs/package.json" \
   || candidate_die "package.py refused the build (above)"
+# The consent pair is in the shipped candidate, not just built: provenance pins it as a binary and
+# as the Linux friend bundle, and the bundle's files are the pinned bytes.
+jq -e '.binaries.consent.path == "bin/minidregg-client-consent"
+    and (.clients["x86_64-unknown-linux-gnu"].consent.consentHost.sha256 == .binaries.consent.sha256)
+    and (.clients["x86_64-unknown-linux-gnu"].consent.localHost.sha256 == .binaries.host.sha256)' \
+  "$out/provenance.json" >/dev/null \
+  || candidate_die "provenance.json does not pin the consent pair in .binaries and the Linux friend bundle"
+for exe in mini minidregg-host minidregg-client-consent minidregg-credential-signature-verifier \
+    minidregg-link-sqlite-store; do
+  cmp -s "$out/bin/$exe" "$out/bin/clients/x86_64-unknown-linux-gnu/$exe" \
+    || candidate_die "friend bundle file $exe is absent or differs from bin/$exe"
+done
 stamp "done: $out/manifest.json"
 cat "$out/SHA256SUMS"
