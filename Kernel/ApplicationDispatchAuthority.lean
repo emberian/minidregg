@@ -175,7 +175,10 @@ theorem decodeInstalled_refuses_tombstoned (domain : Digest) (resource : Nat)
     (found : Hyperdocument.lookup page .atoms (ticketAtom domain resource) = some record)
     (retired : record.tombstonedAt.isSome = true) :
     decodeInstalled domain resource page = none := by
-  simp [decodeInstalled, found, retired]
+  unfold decodeInstalled
+  rw [found]
+  show (if _ then none else _) = none
+  simp [retired]
 
 def initialAction (domain : Digest) (ticket : Ticket) : ContentResource.Action :=
   .createAtom (ticketAtom domain ticket.resource) (.inlineObject ⟨15⟩)
