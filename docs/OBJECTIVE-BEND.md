@@ -59,7 +59,9 @@ constructor, with its one-line semantics:
 | `record fields` | fields are separate suspensions; lookup takes the first match | records of suspensions (slots and methods are not distinguished) |
 | `extend inherited fields` | defined only when `inherited` is a record; new fields shadow | method override |
 | `get t name` | field selection by a static name | — |
-| `ifZero v z s` | case on a Nat; the successor branch binds the predecessor | the only branch |
+| `ifZero v z s` | case on a Nat; the successor branch binds the predecessor | — |
+| `inject l p`, `case s arms`, `ifBool c t f` | sums: a lazy injection, case on its label (first matching arm), the Boolean branch | variants, lists, branching |
+| `perform plan`, `done v` | an activity yields a typed Plan and is resumed with a typed response; `done` returns a pure value from an activity | effects as yield ([activities and events](OBJECTIVE-BEND-EVENTS.md)) |
 
 **Types and quantities** ([Types](../Theory/ObjectiveBendTypes.lean),
 [Typing](../Theory/ObjectiveBendTyping.lean)). `check` is proof-producing: it returns
@@ -108,17 +110,17 @@ Ranked by how much later work each one unblocks. *Elaboration* means expressible
 by compiling into existing constructors; *core* means new constructors, new machine
 frames and new preservation and adequacy cases.
 
-1. **Sums with case** (core). Booleans have no eliminator today: `a == b` cannot
-   drive control flow, and there are no lists or variants. Cost: an injection, a
-   `case` over labels (`if` is a two-arm case), one machine frame, one new value
-   form, a variant row type with exhaustive-case typing. Unblocks a Plan that is a
-   sum of actions, lists for linearization, and method-combination lists.
-2. **An activity: effects as yield, plus a checkpoint codec** (core; FCI §5.2;
-   Faré's persistence model). One `perform plan` constructor and a yielded control
-   state with a resume rule. The machine `State` is already first-order data, so the
-   codec needs no constructors. Open design question: whether partiality is a type
-   or a judgment, and how effects interact with shared thunks (an effect must never
-   execute inside a forced shared thunk).
+Landed since this list was written: **sums with case** (`inject`, `case`,
+`ifBool`, `labelEqual`; design [SUMS-DESIGN.txt](../SUMS-DESIGN.txt)) and **an
+activity** (`perform`/`done`, a yielded machine state with a resume rule, effects as
+a type, an effect never inside a forced shared thunk, and a checkpoint codec with a
+proved round trip; [activities and events](OBJECTIVE-BEND-EVENTS.md)).
+
+1. **Kernel delivery of activities** (integration). The kernel admits a yielded
+   Plan, persists the checkpoint in the activity record, resumes with a typed
+   response under one generation per resume. Not built.
+2. **A guardedness check** (typing). Every self-call of a resident under a perform,
+   so that a well-typed resident never diverges inside a turn.
 3. **Declared ancestry with C4 linearization and method combination**
    (elaboration; poof §4.3; ltuo §7.3–7.4, §9.2). Today `compose(a, b, c)` is a left
    fold of `mix`: mixin inheritance, which ltuo §11.1.8 ranks below the two
@@ -171,8 +173,10 @@ no `sorry`, `axiom`, `native_decide`, `partial` or `extern` in those files.
 | `runBounded_value_sound` | A finished run of any value (closure, record, spec, prototype) has a meaning for every heap address, the final heap realizes it, and the source evaluates to the returned value's meaning. Weak-head only. | closed; finished |
 | `runBounded_observes_sound`, `runBounded_observation_sound`, `runBounded_resource_independent` | Ground observations of finished runs agree with the reference semantics, and two finished runs under different limits observe the same result. | closed; finished |
 | `typed_stepRaw_preserved` | Every raw machine step preserves heap, control and stack typing, over an address typing that only grows. | a typed state (`checked_initial_state` builds one from any `Checked` term) |
-| `checked_reachable_no_refusal`, `check_runBounded_no_refusal` | A closed term the checker accepts never reaches any refusal (wrong operand, missing field, unbound reference), for every limit and tick count. Divergence, blackholes and resource suspension remain possible. | `Checked source []` |
+| `checked_reachable_no_refusal`, `check_runBounded_no_refusal` | A closed term the checker accepts never reaches any refusal (wrong operand, missing field, unbound reference, an effect inside a forced shared thunk), for every limit and tick count. Divergence, blackholes and resource suspension remain possible. | `Checked source []` |
 | `reachable_no_internalRefusal` | Closed scoped executions never refuse for an unbound variable, a missing cell or an invalid update. | closed |
+| `typed_yield_quiescent`, `stack_activity_signature`, `typed_resume_preserved` | A typed yield forces no shared cell and has no half-evaluated cell; it carries the program's own Plan/Response types; resuming it with a closed response of that type gives a typed state. | a typed state; the response typed at the program's Response type |
+| `state_roundTrip` | The checkpoint codec restores every machine state exactly. | none |
 | `mix_append`, `composition_associative` | Folding a list of homogeneous extensions distributes over append, and specification composition is associative, on the list model in `ObjectiveBendExtensions`. | none; but it is a separate model, and no theorem ties it to `Term.mix` |
 
 The no-refusal theorems are about the same function the preview runs: the preview
@@ -305,8 +309,9 @@ oblivious-execution and circuit families (`BendOblivious*`, `BendLogic*`,
 hypothesis that nothing inhabits for a real program. The FHE route that runs today
 evaluates a public natural-number expression, not an Objective method. Laziness
 leaks through access pattern and timing: forcing order and cache state are
-data-dependent. So a private backend needs a both-arms (mux) lowering of `case`, an
-explicit public resource bound, and no effect inside a forced shared thunk.
+data-dependent. So a private backend needs a both-arms (mux) lowering of `case` and
+an explicit public resource bound; the type system already keeps every effect out of
+forced shared thunks.
 Source `Nat` is unbounded; a native or circuit backend needs a bounded domain that
 fails stop, never wraps. A private profile names observers and permitted leakage
 (code, branches, memory access, timing, output shape, failure); encryption alone
@@ -328,6 +333,8 @@ hides none of these.
 | `x.f`, `f(a, b)`, `()` | `get`, curried `app`, `record []` |
 | `+ * == &&` | `add`, `multiply`, `equal`, `conjunction` |
 | `match n: case 0n / case 1n+p` | `ifZero`; exactly those two branches |
+| `sum S: …`, `S.l(e)`, `match s: case l(x): …`, `if c then a else b` | `inject`, `case` (exhaustive), `ifBool` |
+| `-> Activity<P, R, A>`, `perform(plan)`, `match perform(…): case l(x): …` | `perform`; a pure tail becomes `done`; the match is the same `case`, typed as an effect case |
 | `true`/`false`, strings, `7n` | `boolean`, `label`, `nat` |
 
 Arguments and fields stay thunks; laziness is preserved.
