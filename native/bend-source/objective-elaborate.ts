@@ -49,8 +49,9 @@ const canonicalTy=(t:Ty):Ty=>{
 type LamProposal={domain:Ty|null,codomain:Ty|null,parameter:string,reuse:string,reason?:string};
 const proposals=new WeakMap<Core,LamProposal>();
 const lam=(body:Core,proposal?:LamProposal)=>{const t=term("lam",{body});if(proposal)proposals.set(t,proposal);return t;};
-// Injection proposals: the declared sum type of each `inject` (packet field
-// `injections`, SUMS-DESIGN §5); absent when the program has no injection.
+// Injection proposals: each `inject` is annotated at its own path in the
+// ordinary annotations list as the constructor-function type
+// payload -> variant (SUMS-DESIGN §11).
 const injections=new WeakMap<Core,{type:Ty|null,reason?:string}>();
 
 // Source quantity -> checker quantity. `default`/`copy` are unrestricted.
@@ -465,7 +466,7 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
 export function literalAnnotations(output:any){
  try{
   const typing=output.typing;if(!typing)throw Error("typing proposal requires the in-process elaboration output");
-  const annotations:any[]=[];const injectionList:any[]=[];
+  const annotations:any[]=[];
   const visit=(t:Core,path:number[])=>{
    if(t.tag==="lam"){
     const p=proposals.get(t);
@@ -484,7 +485,10 @@ export function literalAnnotations(output:any){
    else if(t.tag==="ifBool"){sub("condition",0);sub("whenTrue",1);sub("whenFalse",2);}
    else if(t.tag==="inject"){
     const p=injections.get(t);if(!p?.type)throw Error(p?.reason??"injection at "+path.join(".")+" has no declared sum type");
-    injectionList.push({path:path.map(String),type:p.type});sub("payload",0);
+    const variant=p.type.tag==="variable"?typing.sumBounds.get(Number(p.type.index)):p.type;
+    const payload=variant?.tag==="variant"?lookupRow(variant.row,t.label):null;
+    if(!payload)throw Error("injection label "+t.label+" absent from its declared sum");
+    annotations.push({path:path.map(String),domain:payload,codomain:variant,parameter:"unrestricted",reuse:"reusable"});sub("payload",0);
    }
    else if(t.tag==="case"){sub("scrutinee",0);t.arms.forEach((a:any,i:number)=>visit(a.body,[...path,1,i]));}
    else if(t.tag==="record")t.fields.forEach((f:any,i:number)=>visit(f.value,[...path,i]));
@@ -494,7 +498,6 @@ export function literalAnnotations(output:any){
   if(!typing.globalRow)throw Error(typing.typeErrors[0]??"global row unresolved");
   const sumBounds=[...typing.sumBounds.entries()].sort((a:any,b:any)=>a[0]-b[0]).map(([k,type]:any)=>({index:String(k),type}));
   return {schema:"dregg.objective-bend.typed-core.v2",term:output.term,annotations,
-   ...(injectionList.length?{injections:injectionList}:{}),
    bounds:[{index:"0",type:typing.globalRow},...sumBounds],shareableVariables:["0",...sumBounds.map((b:any)=>b.index)],fuel:"4096",context:[],
    sourceEntry:output.sourceEntry,sourceModules:output.sourceModules,
    status:"exact core annotation proposal; actual checker must return Checked; no law proof or effect authority"};

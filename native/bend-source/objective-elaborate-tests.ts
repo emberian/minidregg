@@ -75,9 +75,11 @@ const g=(name:string)=>findTag(sumsOut.term,'fix').spec.body.body.fields.find((f
 if(findTag(g('area'),'case')?.arms.map((a:any)=>a.label).join()!=='circle,square,none')throw Error('sum match did not lower to case');
 if(findTag(g('pick'),'ifBool')===null||findTag(g('same'),'binary').primitive!=='labelEqual'||findTag(g('differ'),'ifBool').condition.primitive!=='equal'||findTag(g('either'),'ifBool').whenTrue.value!==true)throw Error('Bool/label lowering lost');
 const sumsTyped=literalAnnotations(sumsOut);
-if(sumsTyped.schema!=='dregg.objective-bend.typed-core.v2'||sumsTyped.injections.length!==3)throw Error('injection proposals lost: '+JSON.stringify(sumsTyped.message??sumsTyped.injections?.length));
+const injectAnnotations=sumsTyped.annotations?.filter((a:any)=>a.codomain.tag==='variant')??[];
+if(sumsTyped.schema!=='dregg.objective-bend.typed-core.v2'||injectAnnotations.length!==3||'injections' in sumsTyped)throw Error('injection annotations lost: '+JSON.stringify(sumsTyped.message??injectAnnotations.length));
+if(!injectAnnotations.some((a:any)=>a.domain.tag==='field'&&a.domain.name==='side'))throw Error('injection domain is not the payload type');
 if(!sumsTyped.bounds.some((b:any)=>b.index==='1'&&b.type.tag==='variant')||!sumsTyped.shareableVariables.includes('1'))throw Error('recursive sum not a bounded shareable variable');
-if('injections' in literalAnnotations(run('7n','Nat')))throw Error('sum-free packet gained an injections field');
+if(JSON.stringify(Object.keys(literalAnnotations(run('7n','Nat'))))!=='["schema","term","annotations","bounds","shareableVariables","fuel","context","sourceEntry","sourceModules","status"]')throw Error('sum-free packet shape changed');
 expectThrow(()=>elaborate([moduleFor(shapes.replace('    case none(_): 0n\n',''))],0,'main',[]),/not exhaustive: missing \[none\]/,'non-exhaustive match');
 expectThrow(()=>elaborate([moduleFor(shapes.replace('Shape.square({side: 4n})','Shape.triangle(4n)'))],0,'main',[]),/has no case triangle/,'unknown sum case');
 expectThrow(()=>elaborate([moduleFor('edition ObjectiveBend 1\ndef eq(a, b) -> Bool:\n  a == b\n')],0,'eq',[]),/operands' types resolved/,'untyped ==');
