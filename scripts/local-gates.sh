@@ -30,7 +30,7 @@
 #   drift          the build changed no tracked file (Lean-emitted descriptors, vectors,
 #                  glue); compared against the tree as it stood before the build
 #   prover-glue    the Lean-emitted prover glue is byte-identical to what its source emits
-#   build-closure  source classification/target coverage and gate regression tests
+#   build-closure  source classification/target coverage, the obsolete-policy-verifier source scan, and gate regression tests
 #   host-closure   the import closure of Host.Main equals scripts/gates/host-closure.pin
 #   import-tiers   every import is inside the tier table of scripts/check-import-boundary.sh
 #   exports        every @[export] is called from native/ or allowlisted with a reason
@@ -94,7 +94,7 @@ g_drift() {
   echo "drift: the build changed no tracked file"
 }
 g_prover-glue()   { bash scripts/check-prover-glue.sh; }
-g_build-closure() { bash scripts/check-build-closure.sh && python3 scripts/test_build_gate_boundaries.py && python3 scripts/test_lean_build_surfaces.py; }
+g_build-closure() { bash scripts/check-build-closure.sh && bash scripts/check-canonical-policy-portal.sh && python3 scripts/test_build_gate_boundaries.py && python3 scripts/test_lean_build_surfaces.py; }
 g_host-closure()  { bash scripts/check-host-closure.sh; }
 g_import-tiers()  { bash scripts/check-import-boundary.sh; }
 g_exports()       { bash scripts/check-exports.sh; }

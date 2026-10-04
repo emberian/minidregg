@@ -34,6 +34,7 @@ run build-surfaces  python3 scripts/lean-build-surfaces.py check
 # (gen-sheetlaw), a stale status page (website).
 run build-closure   bash -c 'bash scripts/check-build-closure.sh && python3 scripts/test_build_gate_boundaries.py && python3 scripts/test_lean_build_surfaces.py'
 run exports         bash scripts/check-exports.sh
+run policy-portal   bash scripts/check-canonical-policy-portal.sh
 run shell-paths     bash scripts/check-shell-paths.sh
 run host-operations bash -c 'python3 scripts/host-operations.py check && python3 scripts/test-host-operations.py'
 run gen-sheetlaw    python3 scripts/gen-sheetlaw.py --check
