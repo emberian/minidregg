@@ -108,11 +108,24 @@ pub(crate) fn check_room_view(view: &Value) -> Result<(), String> {
              from field {ROSTER_FROM}). A v1 world is re-genesised, not migrated."
         ));
     }
+    if narrowed(view) {
+        // A K-FIELDS reader is shown only its own fields' declaration; it
+        // cannot see the tail and is not judged by it.
+        return Ok(());
+    }
     Err(format!(
         "this cell is not a room of schema v{ROOM_SCHEMA_EPOCH}: its declaration has no roster \
          tail from field {ROSTER_FROM} beside the room's fields {ROOM_FIELDS_START}..{}",
         ASSIGNMENT_FIELD
     ))
+}
+
+/// Whether the view was cut for a reader narrowed to named fields: its opening
+/// seals more than the cell's hiding key (every reader's one sealed leaf).
+fn narrowed(view: &Value) -> bool {
+    view.pointer("/opening/items")
+        .and_then(Value::as_array)
+        .is_some_and(|items| items.iter().filter(|item| item.get("salt").is_none()).count() > 1)
 }
 
 #[cfg(test)]
@@ -165,5 +178,14 @@ mod tests {
         assert!(check_room_view(&plain).unwrap_err().contains("not a room"));
         let open = json!({"cell":{"declaration":"open","entries":[]}});
         assert!(check_room_view(&open).is_err());
+        // A reader narrowed to the names field sees one declaration and several
+        // sealed leaves: not judged.
+        let narrow = json!({"cell":{"declaration":["1010"],"entries":[]},
+            "opening":{"items":[{"leaf":"00"},{"leaf":"01"},{"salt":"02","entry":"03"}]}});
+        assert!(check_room_view(&narrow).is_ok());
+        // One sealed leaf (the hiding key) is every full view: judged.
+        let full = json!({"cell":{"declaration":["1","2"],"entries":[]},
+            "opening":{"items":[{"leaf":"00"},{"salt":"02","entry":"03"}]}});
+        assert!(check_room_view(&full).is_err());
     }
 }
