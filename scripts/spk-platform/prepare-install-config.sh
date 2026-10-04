@@ -239,7 +239,14 @@ UPGRADE="$PREPARE_STEP/host-upgrade"
   echo "Host upgrade attempt already exists" >&2; exit 2;
 }
 mkdir -m 700 "$UPGRADE"
-"$STORE_BINARY" read-to "$STORE_ROOT" "$UPGRADE/store-before.bin"
+# The Store's durable image (seed + every log record) under its own anchor
+# identity, which the Host prints (`describe`.storeAnchorIdentity). The Store keeps
+# a durable log; the legacy single-blob `read-to` refuses on it.
+durable_image() {
+  "$STORE_BINARY" --anchor-identity "$("$HOST" "$CONFIG" describe | jq -er .storeAnchorIdentity)" \
+    durable-read "$1" 1 1 "$2"
+}
+durable_image "$STORE_ROOT" "$UPGRADE/store-before.bin"
 "$BASE_HOST" "$BASE_REBOUND_CONFIG" describe >"$UPGRADE/base-description.json"
 "$HOST" "$CONFIG" describe >"$UPGRADE/successor-description.json"
 for description in "$UPGRADE/base-description.json" \
@@ -282,7 +289,7 @@ jq -S '{transactionId,eventId,acceptedCount,worldRoot}' \
   "$UPGRADE/successor-outcome.json" >"$UPGRADE/successor-receipt.json"
 cmp "$UPGRADE/original-receipt.json" "$UPGRADE/base-receipt.json"
 cmp "$UPGRADE/original-receipt.json" "$UPGRADE/successor-receipt.json"
-"$STORE_BINARY" read-to "$STORE_ROOT" "$UPGRADE/store-after.bin"
+durable_image "$STORE_ROOT" "$UPGRADE/store-after.bin"
 cmp "$UPGRADE/store-before.bin" "$UPGRADE/store-after.bin"
 UPGRADE_STORE_SHA=$(sha256sum "$UPGRADE/store-before.bin" | cut -d ' ' -f 1)
 jq -n --arg base "$BASE_HOST" --arg baseSha "$BASE_HOST_SHA" \

@@ -216,11 +216,16 @@ def Config.otherFacetGate (config : Config) (own : ControlFacet)
     Except DurableDataIntent.RejectReason Unit :=
   config.sourceGate (some own) snapshot intent
 
+/-- The identity the Store's durable anchor is enrolled and read under. The one
+spelling: the Host's transport uses it, and `describe` prints it
+(`storeAnchorIdentity`) so a script reading the Store never re-derives it. -/
+def Config.anchorIdentity (config : Config) : String :=
+  s!"domain:{config.deployment.domain.value};semantics:{config.profile.semantics.value};seed:{config.expectedSeed.value}"
+
 /-- The Store transport keeps the actual system-cell tail law and checks every
 protected facet before physical append. -/
 def Config.physicalTransport (config : Config) : DurableReceiverIO.Transport :=
-  let storage := { config.storage with anchorIdentity :=
-    s!"domain:{config.deployment.domain.value};semantics:{config.profile.semantics.value};seed:{config.expectedSeed.value}" }
+  let storage := { config.storage with anchorIdentity := config.anchorIdentity }
   { storage.transport config.logStart config.systemCell with sourceGate := config.sourceGate none }
 
 /-- In an agreed domain the ordinary receiving loop must propose its source

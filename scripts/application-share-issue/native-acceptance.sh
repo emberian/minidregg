@@ -202,14 +202,23 @@ jq -e --slurpfile funded "$EVIDENCE/request-inspected.json" \
   '.canonicalSpec == $funded[0].canonicalSpec and
    .canonicalRequest != $funded[0].canonicalRequest' \
   "$EVIDENCE/shortage-request-inspected.json" >/dev/null
-"$STORE_BINARY" read-to "$STORE" "$EVIDENCE/before-shortage-image.bin"
+# The Store's durable image (seed + every log record), read under the Store's own
+# anchor identity, as the Host's transport opens it (`Config.anchorIdentity`,
+# printed by `describe` as storeAnchorIdentity; never re-derived here). The legacy single-blob `read-to` image no longer
+# exists: the Store keeps a durable log, so `read-to` refuses ("published byte
+# record is missing").
+durable_image() {
+  _image_id=$("$HOST" "$CONFIG" describe | jq -er .storeAnchorIdentity)
+  "$STORE_BINARY" --anchor-identity "$_image_id" durable-read "$1" 1 1 "$2"
+}
+durable_image "$STORE" "$EVIDENCE/before-shortage-image.bin"
 if "$HOST" "$CONFIG" application-share-issue-plan \
     "$EVIDENCE/shortage-request.bin" "$EVIDENCE/shortage-plan.bin" \
     >"$EVIDENCE/shortage.stdout" 2>"$EVIDENCE/shortage.stderr"; then
   echo "underfunded positive-rate ticket planned" >&2; exit 1
 fi
 [ ! -e "$EVIDENCE/shortage-plan.bin" ]
-"$STORE_BINARY" read-to "$STORE" "$EVIDENCE/after-shortage-image.bin"
+durable_image "$STORE" "$EVIDENCE/after-shortage-image.bin"
 cmp "$EVIDENCE/before-shortage-image.bin" "$EVIDENCE/after-shortage-image.bin"
 # Approval covers payer, funding and source capabilities, not only ticket Spec.
 jq '.funding = [{source:"8",destination:"8",asset:"0",amount:"1"}]' \
@@ -244,7 +253,7 @@ rg -q 'signing header differs from exact operator approval' \
 "$FEE_INSPECTOR" "$EVIDENCE/issue/plan.bin" \
   >"$EVIDENCE/signed-birth-fee.txt"
 query_payer_balance payer-before 86000
-"$STORE_BINARY" read-to "$STORE" "$EVIDENCE/before-issue-image.bin"
+durable_image "$STORE" "$EVIDENCE/before-issue-image.bin"
 "$MINI" share-issue-submit --socket "$SOCKET" --attempt "$EVIDENCE/issue" \
   >"$EVIDENCE/submit.stdout"
 jq -e '.type == "confirmed" and .confirmation == "installed"' \
@@ -262,7 +271,7 @@ if "$MINI" share-issue-submit --socket "$SOCKET" --attempt "$EVIDENCE/issue" \
   echo "second submit was attempted" >&2; exit 1
 fi
 rg -q 'submit already attempted' "$EVIDENCE/second-submit.stderr"
-"$STORE_BINARY" read-to "$STORE" "$EVIDENCE/before-lookup-image.bin"
+durable_image "$STORE" "$EVIDENCE/before-lookup-image.bin"
 stop_service
 start_service serve ticket-read-service
 jq -n '{subject:"8",nonce:"85100",purpose:{type:"query",kind:"object",
@@ -285,7 +294,7 @@ jq -S '{transactionId,eventId,acceptedCount,worldRoot}' \
 jq -S '{transactionId,eventId,acceptedCount,worldRoot}' \
   "$EVIDENCE/issue/lookup-0000.outcome.json" >"$EVIDENCE/issue/recovered-receipt.json"
 cmp "$EVIDENCE/issue/original-receipt.json" "$EVIDENCE/issue/recovered-receipt.json"
-"$STORE_BINARY" read-to "$STORE" "$EVIDENCE/after-lookup-image.bin"
+durable_image "$STORE" "$EVIDENCE/after-lookup-image.bin"
 cmp "$EVIDENCE/before-lookup-image.bin" "$EVIDENCE/after-lookup-image.bin"
 stop_service
 

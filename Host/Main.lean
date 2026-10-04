@@ -869,6 +869,9 @@ def profileDescription (config : NativeHost.Config)
      -- the SPK host reads it here and never derives its own.
      ("storeTag", toJson (Minidregg.Kernel.ApplicationLifecycleResidentProfile.storeTag
        config.expectedSeed)),
+     -- The Store's durable-anchor identity (`Config.anchorIdentity`): a script that
+     -- reads the Store's image (`durable-read`) takes it from here.
+     ("storeAnchorIdentity", toJson config.anchorIdentity),
      ("federation", n config.federation.value),
      ("factoryId", n config.deployment.factoryId),
      ("resourceBookId", n config.deployment.resourceBookId),

@@ -80,7 +80,16 @@ query_payer() {
 # Public signed read is a separate route from the owner-private submit.
 start_service serve public-before
 query_payer payer-before 86000
-"$STORE_BINARY" read-to "$STORE" "$CONT/before-issue-image.bin"
+# The Store's durable image (seed + every log record), read under the Store's own
+# anchor identity, as the Host's transport opens it (`Config.anchorIdentity`,
+# printed by `describe` as storeAnchorIdentity; never re-derived here). The legacy single-blob `read-to` image no longer
+# exists: the Store keeps a durable log, so `read-to` refuses ("published byte
+# record is missing").
+durable_image() {
+  _image_id=$("$HOST" "$CONFIG" describe | jq -er .storeAnchorIdentity)
+  "$STORE_BINARY" --anchor-identity "$_image_id" durable-read "$1" 1 1 "$2"
+}
+durable_image "$STORE" "$CONT/before-issue-image.bin"
 stop_service
 
 start_service serve-operator operator-submit
@@ -108,7 +117,7 @@ jq -n '{subject:"8",nonce:"85100",purpose:{type:"query",kind:"object",
   --dir "$CONT/ticket-read" >"$CONT/ticket-read.stdout"
 jq -e '.type == "resource" and (.cell.entries | length) == 1' \
   "$CONT/ticket-read/view.json" >/dev/null
-"$STORE_BINARY" read-to "$STORE" "$CONT/before-lookup-image.bin"
+durable_image "$STORE" "$CONT/before-lookup-image.bin"
 stop_service
 
 # Lookup runs after a second service open, from the original retained ingress.
@@ -122,7 +131,7 @@ jq -S '{transactionId,eventId,acceptedCount,worldRoot}' \
 jq -S '{transactionId,eventId,acceptedCount,worldRoot}' \
   "$ISSUE/lookup-0000.outcome.json" >"$CONT/recovered-receipt.json"
 cmp "$CONT/original-receipt.json" "$CONT/recovered-receipt.json"
-"$STORE_BINARY" read-to "$STORE" "$CONT/after-lookup-image.bin"
+durable_image "$STORE" "$CONT/after-lookup-image.bin"
 cmp "$CONT/before-lookup-image.bin" "$CONT/after-lookup-image.bin"
 stop_service
 sha256sum -c "$CONT/input-sha256.txt" >"$CONT/input-recheck.txt"

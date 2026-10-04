@@ -206,11 +206,20 @@ for target in app package snapshot; do
 done
 
 query app-tool-before-reopen 8 7902 81 "$EVIDENCE/workroom/tool.key" 43206
-"$STORE_BINARY" read-to "$EVIDENCE/workroom/store" "$EVIDENCE/app-before-reopen-image.bin"
+# The Store's durable image (seed + every log record), read under the Store's own
+# anchor identity, as the Host's transport opens it (`Config.anchorIdentity`,
+# printed by `describe` as storeAnchorIdentity; never re-derived here). The legacy single-blob `read-to` image no longer
+# exists: the Store keeps a durable log, so `read-to` refuses ("published byte
+# record is missing").
+durable_image() {
+  _image_id=$("$HOST" "$CONFIG" describe | jq -er .storeAnchorIdentity)
+  "$STORE_BINARY" --anchor-identity "$_image_id" durable-read "$1" 1 1 "$2"
+}
+durable_image "$EVIDENCE/workroom/store" "$EVIDENCE/app-before-reopen-image.bin"
 stop_session
 start_session reopened-session
 check_replay app
-"$STORE_BINARY" read-to "$EVIDENCE/workroom/store" "$EVIDENCE/app-after-lookup-image.bin"
+durable_image "$EVIDENCE/workroom/store" "$EVIDENCE/app-after-lookup-image.bin"
 cmp "$EVIDENCE/app-before-reopen-image.bin" "$EVIDENCE/app-after-lookup-image.bin"
 query app-tool-after-lookup 8 7902 81 "$EVIDENCE/workroom/tool.key" 43207
 jq -S '.cell.grain | {generation,status,remaining,reserved}' \
@@ -247,11 +256,11 @@ for target in session descriptor; do
     "$EVIDENCE/$target-policy/view.json" >/dev/null
 done
 query session-tool-before-reopen 8 7902 81 "$EVIDENCE/workroom/tool.key" 44206
-"$STORE_BINARY" read-to "$EVIDENCE/workroom/store" "$EVIDENCE/session-before-reopen-image.bin"
+durable_image "$EVIDENCE/workroom/store" "$EVIDENCE/session-before-reopen-image.bin"
 stop_session
 start_session session-reopened
 check_replay session
-"$STORE_BINARY" read-to "$EVIDENCE/workroom/store" "$EVIDENCE/session-after-lookup-image.bin"
+durable_image "$EVIDENCE/workroom/store" "$EVIDENCE/session-after-lookup-image.bin"
 cmp "$EVIDENCE/session-before-reopen-image.bin" "$EVIDENCE/session-after-lookup-image.bin"
 query session-tool-after-lookup 8 7902 81 "$EVIDENCE/workroom/tool.key" 44207
 jq -S '.cell.grain | {generation,status,remaining,reserved}' \
