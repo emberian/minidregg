@@ -2,7 +2,7 @@
 name = "minidregg-credential-signature-verifier"
 version = "0.1.0"
 edition = "2021"
-description = "Opaque Ed25519 (and OpenSSH SSHSIG/ssh-ed25519) signature transport for Lean-owned frames."
+description = "Opaque Ed25519, ML-DSA-65 (the hybrid scheme's second half) and OpenSSH SSHSIG/ssh-ed25519 signature transport for Lean-owned frames."
 license = "AGPL-3.0-or-later"
 publish = false
 
@@ -14,3 +14,5 @@ path = "src/main.rs"
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "fast", "zeroize"] }
 # SHA-512 for SSHSIG's message digest only (the same sha2 ed25519-dalek already links).
 sha2 = { version = "=0.10.9", default-features = false }
+# The ML-DSA half of the hybrid scheme: FIPS 204, pure Rust, the same pin as mini-sdk's signer.
+fips204 = { version = "=0.4.6", default-features = false, features = ["ml-dsa-65"] }
