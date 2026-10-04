@@ -88,6 +88,15 @@ structure Answer where
   detail : List UInt8
   deriving DecidableEq, Repr
 
+/-- Split on newlines, keeping empty lines. -/
+def splitOnLf : List UInt8 → List (List UInt8)
+  | [] => [[]]
+  | b :: rest =>
+      if b = 10 then [] :: splitOnLf rest
+      else match splitOnLf rest with
+        | w :: ws => (b :: w) :: ws
+        | [] => [[b]]
+
 /-- Split on single spaces, keeping empty words (as `String.splitOn " "`). -/
 def splitOnSpace : List UInt8 → List (List UInt8)
   | [] => [[]]
@@ -135,6 +144,28 @@ def describe (verb : String) (code : Nat) (stdout : List UInt8) : String :=
   | some .interrupted => s!"fn {verb} lost its connection (exit 6); fn may have acted"
   | some .accepted => s!"fn {verb} accepted but its answer was not the expected line ({reason})"
   | none => s!"fn {verb} exited {code}, which is no fn outcome class; treated as may-have-acted"
+
+/-- `hybrid-author`'s answer: the last non-empty line fn writes to stderr,
+`CLASS hybrid-author WORD` (fn `host/native/hybrid-control.lisp`
+`fnn-command-hybrid-author`, the status word upper-cased). CLI text, as
+`answerLine` is; it goes when M5 exports the status words. -/
+def authorAnswer (stderr : List UInt8) : Option (List UInt8 × List UInt8) :=
+  let lines := (splitOnLf stderr).filter (· ≠ [])
+  match lines.getLast? with
+  | some line =>
+      match splitOnSpace line with
+      | [cls, verb, word] =>
+          if verb = "hybrid-author".toUTF8.toList ∧ cls ≠ [] ∧ word ≠ [] then some (cls, word)
+          else none
+      | _ => none
+  | none => none
+
+theorem authorAnswer_samples :
+    authorAnswer "accepted hybrid-author DUPLICATE\n".toUTF8.toList =
+      some ("accepted".toUTF8.toList, "DUPLICATE".toUTF8.toList) ∧
+    authorAnswer "note\nrefused hybrid-author CONFLICT\n".toUTF8.toList =
+      some ("refused".toUTF8.toList, "CONFLICT".toUTF8.toList) ∧
+    authorAnswer "refused hybrid-enroll CONFLICT\n".toUTF8.toList = none := by decide +kernel
 
 /-- What an ack site records. `refused` is fn's exit 1 (or 7: no request
 left the node) and nothing else; `uncertain` is the fence; every other answer
@@ -211,6 +242,6 @@ theorem answerLine_refuses_other_verbs :
 #assert_axioms classify_code classify_two mayHaveActed_false_iff
   ackStatus_refused_iff ackStatus_uncertain_iff classify_eq_some ackStatus_durableAccepted_iff
   ackStatus_samples answerLine_refused_busy
-  answerLine_refuses_other_verbs
+  answerLine_refuses_other_verbs authorAnswer_samples
 
 end Minidregg.Host.FnOutcome

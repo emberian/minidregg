@@ -108,6 +108,7 @@ import Kernel.FnCatalogOwnRProgress
 import Kernel.FnReplyPublication
 import Kernel.FnReplyConsumption
 import Kernel.FnOriginOutbox
+import Host.FnArchivePublisher
 import Kernel.FnPortableSource
 import Host.FnOutcome
 import Kernel.FnSelectiveReleaseReceiver
@@ -5958,6 +5959,24 @@ def run (arguments : List String) : IO UInt32 := do
           IO.FS.writeFile configOutput (toJson pinned).pretty
           pure 0
       | "describe", [] => IO.println (← description config).pretty; pure 0
+      -- The fn archive (FN-DIRECT): posts through the control socket only; the
+      -- fn-facing helpers are this file's, injected so their text decoding stays
+      -- in one place for the M5 decoders to replace.
+      | "fn-archive", pinPath :: archiveArgs =>
+          let pin : FnPortablePin ← IO.ofExcept (fromJson? (← readJson pinPath))
+          let ops : FnArchivePublisher.Ops :=
+            { runFn := fun args => runFnLocal pin.executable (#["--fn"] ++ args) 4096
+              sign := fun keys sourcePath => do
+                let (code, output, stderrBytes) ← runFnLocal pin.executable
+                  #["--fn", "hybrid-sign", keys.principal, keys.edPublic, keys.edSecret,
+                    keys.mlPublic, keys.mlSecret, sourcePath] 7000
+                unless code == 0 && output.all (fun b => b.toNat < 128) do
+                  throw (fnLocalRefusal "hybrid-sign" code output stderrBytes)
+                IO.ofExcept (parseFnHybridSignLine (String.fromUTF8! output.toByteArray))
+              verifySource := fun carrierPath => do
+                let (_, verified) ← verifyFnCarrierUnclaimed pin carrierPath
+                pure verified.source }
+          FnArchivePublisher.run config ops archiveArgs
       | "stdio", [] =>
           withPinnedSignature config fun pinnedConfig => do
             withFnPollService settings fun service => do
