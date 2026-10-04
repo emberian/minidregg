@@ -1,50 +1,60 @@
 /- The kernel activity: a Core4 activity persisted between turns, its awaits,
-and the resume contract.
+the resume contract, and its fees on the Book.
 
-An activity of an object is a cell under the object (`recordCell object
-activity`) holding its `Record`: the exact machine checkpoint (the bytes of
-`ObjectiveBendCheckpoint.encodeState`, never a summary), the checkpoint's
-digest, the pinned package identity, the generation, the read versions the
-continuation depends on, the escrowed fee pair, and its phase. While awaiting,
-the phase names one `Await`: its id `H(record cell, generation, checkpoint
-digest)`, its source (an answer slot with one decider, or a height), and a
-mandatory deadline height.
+An activity of an object is a cell of the deployment's activity role
+(`Kernel.ObjectiveActivityCell`) at its protected coordinate
+(`recordCell domain object activity`), holding its `Record`: the exact machine
+checkpoint (the bytes of `ObjectiveBendCheckpoint.encodeState`, never a
+summary), the checkpoint's digest, the pinned package identity, the generation,
+the read versions the continuation depends on, the escrow terms, and its phase.
+While awaiting, the phase names one `Await`: its id `H(record cell, generation,
+checkpoint digest)`, its source (an answer slot with one decider, or a height),
+and a mandatory deadline height. The object is a native resource (`object`, a
+cell id the authority layer issues capabilities on); its declared state lives in
+its own protected state cell (`stateCell domain object`).
 
-Five kernel turns; each is ONE `DataIntent` built by `intentOf`, so its writes
-commit all together or not at all (`DurableDataIntent.execute_no_partial_data_commit`)
-and nothing it does is visible before it commits:
+Six kernel turns; each is ONE `DataIntent` built by `intentOf` with the sealing of
+the receiver that admitted it (`ObjectiveActivityReceiver`: the signed marker,
+the authority guards, the replay event), so its writes commit all together or
+not at all (`DurableDataIntent.execute_no_partial_data_commit`):
 
 * `publish`: the package (a checked `ObjectiveBendSourceArtifact`) into its
-  content-addressed cell.
+  content-addressed package cell.
 * `birth`: instantiate the pinned definition with typed input, run to the
-  first yield, commit the record, the Plan's declared-state write, the answer
-  slot it awaits and the escrow, all at once.
+  first yield, commit the record, the declared-state write, the answer slot it
+  awaits and the Book postings, all at once.
 * `resolve`: the slot's one decider decides it (typed against the awaiting
   activity's own response type) at or before the deadline; spends the slot claim.
 * `deliver`: anyone resumes the activity with the typed outcome of its await.
   The await id is spent as a nullifier bound to the checkpoint digest, AND the
   record cell is written against its current root: consume-once is a
   compare-and-swap at admission's decide point. Recorded reads are revalidated
-  (stale: the activity receives `conflict`, never the bare outcome). Past the
-  deadline an open slot expires in the same turn and the activity receives
-  `timedOut`. The checkpoint is decoded from the record cell (no state is ever
-  accepted from a request), resumed with the typed response, run to its next
-  yield or end, and the new checkpoint, the Plan's write and the next await
-  commit together.
-* `writeState`: the activity owner writes the object's declared state directly
+  (stale: the activity receives `conflict` carrying the outcome it lost, never
+  the bare outcome). Past the deadline an open slot expires in the same turn and
+  the activity receives `timedOut`. The checkpoint is decoded from the record
+  cell (no state is ever accepted from a request), resumed with the typed
+  response, run to its next yield or end, and the new checkpoint, the Plan's
+  write, the next await and the Book postings commit together.
+* `topUp`: anyone funds an activity's purse on the Book.
+* `writeState`: a holder of the object writes its declared state directly
   (what makes a recorded read stale).
 
-Fees. Every await escrows a pair priced from DECLARED envelopes
-(`Tariff.price resumeTicks`, `Tariff.price timeoutTicks`); exactly one of the
-pair pays the turn that ends the await and the other is returned to the payer.
-No refund depends on how much computation ran (`refund_measurement_free`).
-
-What is not here: collection at the yield (checkpoints grow with the heap),
-upgrade dispositions, sends/inboxes (a `message` await is refused by name), the
-native signed-command route, and the resource Book: fee accounts here are
-kernel cells (`accountCell`) that stand in for the Book rail. -/
+Fees are Book postings in the deployment's credit asset. An activity's purse is
+a Book account of its own, `heldAccount cell` (the record cell's id), registered
+by the birth. Every turn that runs Core4 pays the public price of its DECLARED
+envelope (`Tariff.price`) to the collector. A yield reserves, in the purse, the
+fee pair of the await (`resumeFee`, `timeoutFee`): exactly one of the pair pays
+the turn that ends the await, the other stays in the purse, and the purse is
+returned to the payer's account when the activity ends. A yield the purse cannot
+reserve is refused (the activity stays parked at its previous yield until a
+`topUp`). Every posting is one `CanonicalResourceKernel.Batch`, admitted on the
+loaded Book (`AcceptedBatch`), so every turn conserves every asset
+(`Birth.conserves`, `Delivery.conserves`). No amount depends on how much
+computation ran (`refund_measurement_free`). -/
 import Kernel.AnswerSlot
 import Compiler.ObjectiveBendSourceArtifact
+import Compiler.CanonicalCellRegistry
+import Theory.ObjectiveBendDemandCollect
 
 namespace Minidregg.Kernel.ObjectiveActivity
 open Minidregg.Theory Minidregg.Compiler
@@ -57,7 +67,11 @@ open Minidregg.Theory.ObjectiveBendTypes (Ty Bounds LambdaAnnotation Quantity Re
 open Minidregg.Theory.ObjectiveBendTyping
 open Minidregg.Theory.ObjectiveBendDemandMachine (State Limits initial runBounded resume)
 open Minidregg.Theory.ObjectiveBendDemandData (Data Budget)
+open Minidregg.Compiler.ResourceBirthCodec (LifecycleImage)
+open Minidregg.Theory.CanonicalResourceKernel (Book Batch Operation AccountId AssetId logicalBook AcceptedBatch)
 set_option autoImplicit false
+
+abbrev Role := ObjectiveActivityCell.Role
 
 /-! ## The record -/
 
@@ -75,8 +89,11 @@ structure Await where
   yieldedAt : Nat
   deriving DecidableEq, Repr
 
+/-- The escrow terms of an activity: who pays, the Book account its purse is
+returned to, and the fee pair each await reserves in the purse. -/
 structure Escrow where
   payer : SubjectId
+  account : AccountId
   resumeTicks : Nat
   timeoutTicks : Nat
   resumeFee : Nat
@@ -127,9 +144,10 @@ def awaitStream : StreamCodec Await :=
 def escrowStream : StreamCodec Escrow :=
   StreamCodec.xmap
     (StreamCodec.product subjectStream (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat))))
-    (fun e => (e.payer, e.resumeTicks, e.timeoutTicks, e.resumeFee, e.timeoutFee))
-    (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2⟩)
+      (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))
+    (fun e => (e.payer, e.account, e.resumeTicks, e.timeoutTicks, e.resumeFee, e.timeoutFee))
+    (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2⟩)
     (by intro e; cases e; rfl)
 
 def phaseStream : StreamCodec Phase :=
@@ -157,7 +175,8 @@ def recordStream : StreamCodec Record :=
       w.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.2⟩)
     (by intro r; cases r; rfl)
 
-def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v1".toUTF8.toList
+/-- v2: the escrow names the payer's Book account (fees moved onto the Book). -/
+def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v2".toUTF8.toList
 def recordCodec := framed recordFrame recordStream
 def encodeRecord (record : Record) : Bytes := recordCodec.encode record
 def decodeRecord (bytes : Bytes) : Option Record := recordCodec.decode bytes
@@ -165,26 +184,49 @@ def decodeRecord (bytes : Bytes) : Option Record := recordCodec.decode bytes
 theorem record_roundTrip (record : Record) : decodeRecord (encodeRecord record) = some record :=
   framed_roundTrip _ _ record
 
-/-- Fee accounts: a kernel cell per payer holding a balance. They stand in for
-the resource Book until escrow postings bind to it. -/
-def accountFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY/FEE-ACCOUNT/v1".toUTF8.toList
-def accountCodec := framed accountFrame StreamCodec.nat
-def balanceBytes (balance : Nat) : Bytes := accountCodec.encode balance
-def decodeBalance (bytes : Bytes) : Option Nat := accountCodec.decode bytes
+/-! ## Cells: protected coordinates
 
-/-! ## Cell and claim identities -/
+Every activity cell is a registry cell of role `objectiveActivity` at
+`ObjectiveActivityCell.coordinate domain role key`; its body is the kernel's own
+framed bytes. The registry's law pins each cell to its coordinate, no birth may
+install the role, and only `ObjectiveActivityReceiver` writes it. -/
 
-def recordCell (object : CellId) (activity : Digest) : CellId :=
-  tagged "DREGG/OBJECTIVE/ACTIVITY/RECORD-CELL/v1" (digestStream.encode object ++ digestStream.encode activity)
+def recordKey (object : CellId) (activity : Digest) : Bytes :=
+  digestStream.encode object ++ digestStream.encode activity
 
-def accountCell (payer : SubjectId) : CellId :=
-  tagged "DREGG/OBJECTIVE/ACTIVITY/FEE-ACCOUNT-CELL/v1" (subjectStream.encode payer)
+def recordCell (domain : Digest) (object : CellId) (activity : Digest) : CellId :=
+  ⟨ObjectiveActivityCell.coordinate domain .record (recordKey object activity)⟩
 
-def packageCell (pin : Digest) : CellId :=
-  tagged "DREGG/OBJECTIVE/ACTIVITY/PACKAGE-CELL/v1" (digestStream.encode pin)
+def stateKey (object : CellId) : Bytes := digestStream.encode object
+
+/-- The object's declared state: one cell per object, beside the object's own
+native resource cell. -/
+def stateCell (domain : Digest) (object : CellId) : CellId :=
+  ⟨ObjectiveActivityCell.coordinate domain .state (stateKey object)⟩
+
+def packageKey (pin : Digest) : Bytes := digestStream.encode pin
+
+def packageCell (domain : Digest) (pin : Digest) : CellId :=
+  ⟨ObjectiveActivityCell.coordinate domain .package (packageKey pin)⟩
 
 def activityId (object : CellId) (birth : TransactionId) : Digest :=
   tagged "DREGG/OBJECTIVE/ACTIVITY/ID/v1" (digestStream.encode object ++ digestStream.encode birth)
+
+/-- The registry image of an activity cell. -/
+def image (role : Role) (key body : Bytes) : Bytes :=
+  LifecycleImage.bytes CanonicalCellRegistry.registry
+    (.live ⟨.objectiveActivity, ObjectiveActivityCell.cellOf ⟨role, key, body⟩⟩)
+
+/-- The activity payload a cell's canonical bytes hold, if it is an activity cell. -/
+def payloadOf (bytes : Bytes) : Option ObjectiveActivityCell.Payload :=
+  match (LifecycleImage.codec CanonicalCellRegistry.registry).decode bytes with
+  | some (.live ⟨.objectiveActivity, payload⟩) => ObjectiveActivityCell.payloadAt payload.logical
+  | _ => none
+
+/-- The kernel bytes of an activity cell of one role. -/
+def bodyOf (role : Role) (bytes : Bytes) : Option Bytes := do
+  let payload ← payloadOf bytes
+  if payload.role = role then some payload.body else none
 
 /-- The await id: the record cell, the generation of the yield, and the digest
 of the checkpoint it resumes. -/
@@ -201,6 +243,11 @@ replay, any different delivery is a transaction conflict. -/
 def deliveryTransaction (id : Digest) : TransactionId :=
   tagged "DREGG/OBJECTIVE/ACTIVITY/TX/DELIVER/v1" (digestStream.encode id)
 
+/-- An activity's purse on the Book: the account whose id is its record cell's
+id. The directory gives that id to the record cell, so no account cell (and so
+no account capability) can exist at it; the birth registers it fresh. -/
+def heldAccount (cell : CellId) : AccountId := cell.value
+
 /-! ## Configuration and fees -/
 
 /-- The public price of a DECLARED envelope of ticks. -/
@@ -212,6 +259,11 @@ structure Tariff where
 def Tariff.price (tariff : Tariff) (ticks : Nat) : Nat := tariff.base + tariff.perTick * ticks
 
 structure Config where
+  /-- The deployment: its domain names the activity coordinates; its Book holds the fees. -/
+  deployment : CanonicalCellRegistry.Deployment
+  /-- The credit asset fees are paid in, and the account that collects them. -/
+  asset : AssetId
+  collector : AccountId
   limits : Limits
   planBudget : Budget
   maxTicks : Nat
@@ -220,9 +272,13 @@ structure Config where
   maxArtifactBytes : Nat
   tariff : Tariff
 
-/-- The escrow of the fee pair for one await. -/
-def escrowOf (tariff : Tariff) (payer : SubjectId) (resumeTicks timeoutTicks : Nat) : Escrow :=
-  ⟨payer, resumeTicks, timeoutTicks, tariff.price resumeTicks, tariff.price timeoutTicks⟩
+def Config.domain (config : Config) : Digest := config.deployment.domain
+def Config.bookCell (config : Config) : CellId := ⟨config.deployment.resourceBookId⟩
+
+/-- The escrow terms for an activity. -/
+def escrowOf (tariff : Tariff) (payer : SubjectId) (account : AccountId) (resumeTicks timeoutTicks : Nat) :
+    Escrow :=
+  ⟨payer, account, resumeTicks, timeoutTicks, tariff.price resumeTicks, tariff.price timeoutTicks⟩
 
 def Escrow.pair (escrow : Escrow) : Nat := escrow.resumeFee + escrow.timeoutFee
 
@@ -233,8 +289,8 @@ inductive Path where
   | timedOut
   deriving DecidableEq, Repr
 
-/-- The fee the ending turn uses, and the one returned. Functions of the escrow
-and the path only. -/
+/-- The fee the ending turn uses, and the one that stays in the purse.
+Functions of the escrow and the path only. -/
 def Escrow.used (escrow : Escrow) : Path → Nat
   | .resumed => escrow.resumeFee
   | .timedOut => escrow.timeoutFee
@@ -258,8 +314,20 @@ inductive Refusal where
   | responseType (label : String)
   | slotMissing | slotFresh | slotMismatch | slot (reason : AnswerSlot.Refusal)
   | notYetDecided (deadline height : Nat) | notYetDue (due height : Nat)
-  | accountMissing (payer : SubjectId) | unfunded (payer : SubjectId) (balance needed : Nat)
-  | notOwner
+  /-- The Book is not a live Book cell at the deployment's Book id. -/
+  | bookUnavailable
+  /-- The purse is already a Book account (a second birth of one record). -/
+  | purseTaken
+  /-- The payer is the issuer well, the collector or the purse itself. -/
+  | payerInvalid
+  /-- The deposit cannot reserve the first await's fee pair. -/
+  | underfunded (deposit pair : Nat)
+  /-- The purse cannot reserve the next await's fee pair: the activity stays
+  parked at its yield until a `topUp`. -/
+  | awaitsFunding (available pair : Nat)
+  /-- The Book refused the postings (an account absent or overdrawn). -/
+  | bookRefused
+  | zeroAmount
   deriving Repr
 
 /-! ## Typing data against declared types
@@ -318,7 +386,8 @@ theorem TypedData.typed {assumptions : Assumptions} {data : Data} {type : Ty}
 /-! ## Await outcomes -/
 
 /-- Every await resolves to exactly one of these (the root's sum, with
-`conflict` added: B2). -/
+`conflict` added: B2). A `conflict` carries the outcome the await DID resolve
+to (`decided`), so the activity sees the reply it lost to a stale read. -/
 inductive AwaitOutcome where
   | reply (value : Data)
   | refused
@@ -326,29 +395,42 @@ inductive AwaitOutcome where
   | timedOut
   | broken
   | upgraded
-  | conflict (stale : Nat)
+  | conflict (stale : Nat) (decided : AwaitOutcome)
   deriving Repr
 
 def AwaitOutcome.label : AwaitOutcome → String
   | .reply _ => "reply" | .refused => "refused" | .unknown => "unknown" | .timedOut => "timedOut"
-  | .broken => "broken" | .upgraded => "upgraded" | .conflict _ => "conflict"
+  | .broken => "broken" | .upgraded => "upgraded" | .conflict _ _ => "conflict"
 
 /-- The response datum the activity is resumed with. -/
 def AwaitOutcome.data : AwaitOutcome → Data
   | .reply value => .variant "reply" value
-  | .conflict stale => .variant "conflict" (.record [("stale", .natural stale)])
-  | other => .variant other.label (.record [])
+  | .conflict stale decided =>
+      .variant "conflict" (.record [("stale", .natural stale), ("decided", decided.data)])
+  | .refused => .variant "refused" (.record [])
+  | .unknown => .variant "unknown" (.record [])
+  | .timedOut => .variant "timedOut" (.record [])
+  | .broken => .variant "broken" (.record [])
+  | .upgraded => .variant "upgraded" (.record [])
 
 /-- The kernel's own outcomes, which every activity's response type must type
-at birth (a reply is typed when it is decided). -/
+at birth, bare and inside a `conflict` (a reply is typed when it is decided). -/
 def kernelOutcomes : List AwaitOutcome :=
-  [.refused, .unknown, .timedOut, .broken, .upgraded, .conflict 0]
+  let bare : List AwaitOutcome := [.refused, .unknown, .timedOut, .broken, .upgraded]
+  bare ++ bare.map (.conflict 0)
 
 /-- The type a reply must have: the `reply` member of the response sum. -/
 def replyType (assumptions : Assumptions) (response : Ty) : Option Ty :=
   match unalias assumptions.bounds response with
   | .variant row => row.lookup assumptions.bounds 64 "reply"
   | _ => none
+
+/-- The reply type a `conflict` carries in its `decided` field. -/
+def conflictReplyType (assumptions : Assumptions) (response : Ty) : Option Ty := do
+  let .variant row := unalias assumptions.bounds response | none
+  let lost ← row.lookup assumptions.bounds 64 "conflict"
+  let decided ← (unalias assumptions.bounds lost).lookup assumptions.bounds 64 "decided"
+  replyType assumptions decided
 
 /-! ## The pinned program -/
 
@@ -376,6 +458,11 @@ structure Program (config : Config) (pin : Digest) (input : Data) where
 
 def Program.assumptions {config : Config} {pin : Digest} {input : Data} (program : Program config pin input) :
     Assumptions := program.applied.assumptions
+
+/-- The package bytes a snapshot holds for a pin (empty when absent). -/
+def packageBytes {rootBytes : Bytes → Digest} (config : Config) (snapshot : DataSnapshot rootBytes)
+    (pin : Digest) : Bytes :=
+  (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain pin))).getD []
 
 /-- Load the artifact from its cell, check the definition, instantiate it with
 the input (typed at the declared domain), and check the instantiation. -/
@@ -414,6 +501,21 @@ def typeOutcome {config : Config} {pin : Digest} {input : Data} (program : Progr
   | some typed => .ok typed
   | none => .error (.responseType outcome.label)
 
+/-- At birth: every kernel outcome is typed at the response type, bare and in a
+`conflict`, and a `conflict`'s decided reply has the reply type itself, so no
+outcome the kernel can deliver is ill-typed later (an ill-typed delivery would
+park the activity for ever). -/
+def outcomeProtocol {config : Config} {pin : Digest} {input : Data} (program : Program config pin input) :
+    Except Refusal Unit := do
+  for outcome in kernelOutcomes do
+    if (typeData program.assumptions config.typeFuel outcome.data program.responseType).isNone then
+      throw (.outcomeProtocol outcome.label)
+  match conflictReplyType program.assumptions program.responseType with
+  | some lost =>
+    if sameType program.assumptions lost program.reply then pure ()
+    else throw (.outcomeProtocol "conflict.decided.reply")
+  | none => throw (.outcomeProtocol "conflict.decided.reply")
+
 /-! ## Plans the kernel performs -/
 
 inductive PlanSource where
@@ -422,8 +524,8 @@ inductive PlanSource where
   deriving DecidableEq, Repr
 
 /-- A yielded Plan: `await {state, on, patience}`. The declared state is
-written to the object; `on` names what the activity waits for; the deadline is
-the yield height plus `patience`. -/
+written to the object's state cell; `on` names what the activity waits for; the
+deadline is the yield height plus `patience`. -/
 structure PlanAwait where
   state : Data
   source : PlanSource
@@ -449,8 +551,12 @@ def decodePlan : Data → Except Refusal PlanAwait
     pure ⟨state, source, patience⟩
   | _ => throw (.plan "the kernel performs only `await` Plans")
 
-/-- What one segment of an activity ends in. A yield keeps the EXACT yielded
-machine state (the Plan is extracted from a copy). -/
+/-- What one segment of an activity ends in. A yield keeps the yielded machine
+state COLLECTED (`ObjectiveBendDemandCollect.collect`: only what the yielded
+Plan and the stack reach, compacted), so a checkpoint is storage-charged for
+what the continuation can use, not for every cell the run ever allocated; the
+Plan is extracted from the uncollected state. Resuming the collected state is
+resuming the original (`ObjectiveResumeContract.runSegment_collect`). -/
 inductive Segment where
   | yielded (state : State) (plan : PlanAwait)
   | finished (result : Data)
@@ -464,7 +570,7 @@ def runSegment (config : Config) (ticks : Nat) (start : State) : Except Refusal 
     match ObjectiveBendDemandData.yieldedPlan config.limits config.planBudget yielded with
     | .ok extracted => do
       let plan ← decodePlan extracted.value
-      pure (.yielded yielded plan)
+      pure (.yielded (ObjectiveBendDemandCollect.collect yielded) plan)
     | .error (failure, _) => .error (.planExtraction (reprStr failure))
   | .finished _ finished =>
     match ObjectiveBendDemandData.complete config.limits config.planBudget finished with
@@ -473,6 +579,10 @@ def runSegment (config : Config) (ticks : Nat) (start : State) : Except Refusal 
   | .divergent _ _ => .ok (.faulted "divergent")
   | .refused reason _ => .ok (.faulted (reprStr reason))
   | .suspended _ _ => .error .exhausted
+
+def Segment.yields : Segment → Bool
+  | .yielded _ _ => true
+  | _ => false
 
 /-! ## Turns -/
 
@@ -484,30 +594,67 @@ def postAt {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (cell 
 def guardAt {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (cell : CellId) : ReadGuard :=
   ⟨cell, snapshot.model.roots cell⟩
 
-def balanceAt {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (payer : SubjectId) :
-    Except Refusal Nat :=
-  match decodeBalance (snapshot.canonicalBytes (accountCell payer)) with
-  | some balance => .ok balance
-  | none => .error (.accountMissing payer)
+def recordPost {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (cell : CellId) (record : Record) : Post :=
+  postAt snapshot cell (image .record (recordKey record.object record.activity) (encodeRecord record))
 
-/-- Movements merged per payer: one (payer, debit, credit) per distinct payer. -/
-def aggregate : List (SubjectId × Nat × Nat) → List (SubjectId × Nat × Nat)
-  | [] => []
-  | (payer, debit, credit) :: rest =>
-    let merged := aggregate rest
-    match merged.find? (fun entry => entry.1 == payer) with
-    | some (_, debits, credits) =>
-      (payer, debit + debits, credit + credits) :: merged.filter (fun entry => entry.1 != payer)
-    | none => (payer, debit, credit) :: merged
+def slotPost {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (slot : AnswerSlot.Slot) : Post :=
+  postAt snapshot (AnswerSlot.cell config.domain slot.name) (image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot))
 
-/-- Account posts for a set of (payer, debit, credit) movements, one post per
-distinct payer, refused when a balance would go negative. -/
-def accountPosts {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes)
-    (entries : List (SubjectId × Nat × Nat)) : Except Refusal (List Post) :=
-  (aggregate entries).mapM fun (payer, debit, credit) => do
-    let balance ← balanceAt snapshot payer
-    if balance + credit < debit then throw (.unfunded payer (balance + credit) debit)
-    pure (postAt snapshot (accountCell payer) (balanceBytes (balance + credit - debit)))
+/-- The image a declared-state write installs. -/
+def stateImage (object : CellId) (value : Data) : Bytes := image .state (stateKey object) (dataBytes value)
+
+def readRecord {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (cell : CellId) : Option Record :=
+  (bodyOf .record (snapshot.canonicalBytes cell)).bind decodeRecord
+
+def readSlot {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (name : Digest) :
+    Option AnswerSlot.Slot :=
+  (bodyOf .slot (snapshot.canonicalBytes (AnswerSlot.cell config.domain name))).bind AnswerSlot.decode
+
+/-! ### The Book -/
+
+abbrev BookCell := CellState.Materialized (CanonicalCellRegistry.materializer .resourceBook)
+
+/-- The Book a cell's canonical bytes hold, if it is a live Book cell. -/
+def bookOf (bytes : Bytes) : Option BookCell :=
+  match (LifecycleImage.codec CanonicalCellRegistry.registry).decode bytes with
+  | some (.live ⟨.resourceBook, payload⟩) => some payload
+  | _ => none
+
+def loadBook {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) :
+    Except Refusal BookCell :=
+  match bookOf (snapshot.canonicalBytes config.bookCell) with
+  | some book => .ok book
+  | none => .error .bookUnavailable
+
+/-- Postings admitted on the loaded Book: the accepted batch and its post. -/
+structure Postings (pre : BookCell) where
+  private mk ::
+  batch : Batch
+  accepted : AcceptedBatch pre batch
+
+def postings (pre : BookCell) (batch : Batch) : Except Refusal (Postings pre) :=
+  if admitted : batch.Admission (logicalBook pre.logical) then
+    .ok ⟨batch, AcceptedBatch.ofAdmission admitted⟩
+  else .error .bookRefused
+
+def Postings.post {pre : BookCell} (posted : Postings pre) : BookCell := posted.accepted.post
+
+def Postings.write {rootBytes : Bytes → Digest} {pre : BookCell} (config : Config) (snapshot : Snapshot rootBytes)
+    (posted : Postings pre) : Post :=
+  postAt snapshot config.bookCell
+    (LifecycleImage.bytes CanonicalCellRegistry.registry (.live ⟨.resourceBook, posted.post⟩))
+
+/-- Every admitted posting conserves every asset (the Book's posting theorem). -/
+theorem Postings.conserves {pre : BookCell} (posted : Postings pre) (asset : AssetId) :
+    (logicalBook posted.post.logical).totalAsset asset = (logicalBook pre.logical).totalAsset asset :=
+  posted.accepted.conserves asset
+
+/-- The purse balance on a Book, as a natural. -/
+def purse (book : Book) (asset : AssetId) (held : AccountId) : Nat := (book.balance held asset).toNat
+
+/-! ### Yields -/
 
 /-- What a yield commits besides the record: the declared-state write, the
 answer slot it opens, and the await. -/
@@ -523,24 +670,21 @@ def commitYield {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
     throw (.patience plan.patience config.maxPatience)
   let deadline := height + plan.patience
   let id := awaitId cell generation checkpoint
-  let stateBytes := dataBytes plan.state
-  let statePost := postAt snapshot object stateBytes
-  let reads : List ReadGuard := [⟨object, rootBytes stateBytes⟩]
+  let stateBytes := stateImage object plan.state
+  let statePost := postAt snapshot (stateCell config.domain object) stateBytes
+  let reads : List ReadGuard := [⟨stateCell config.domain object, rootBytes stateBytes⟩]
   match plan.source with
   | .reply decider =>
     let slotName := AnswerSlot.name transaction cell generation
-    let slotCell := AnswerSlot.cell slotName
-    if (AnswerSlot.decode (snapshot.canonicalBytes slotCell)).isSome then throw .slotFresh
+    if (readSlot config snapshot slotName).isSome then throw .slotFresh
     let slot : AnswerSlot.Slot := ⟨slotName, cell, decider, deadline, .opened⟩
-    pure ⟨⟨id, .reply slotName decider, deadline, height⟩,
-      [statePost, postAt snapshot slotCell (AnswerSlot.encode slot)], reads⟩
+    pure ⟨⟨id, .reply slotName decider, deadline, height⟩, [statePost, slotPost config snapshot slot], reads⟩
   | .height due =>
     if deadline < due then throw (.plan "a height await is due after its deadline")
     pure ⟨⟨id, .height due, deadline, height⟩, [statePost], reads⟩
 
-/-- The record that ends a segment, and the escrow it posts. -/
-def nextRecord (base : Record) (escrow : Escrow) (generation : Nat) :
-    Segment → Option YieldCommit → Record
+/-- The record that ends a segment. -/
+def nextRecord (base : Record) (generation : Nat) : Segment → Option YieldCommit → Record
   | .yielded state _, some yielded =>
     let encoded := checkpointBytes state
     { base with
@@ -548,7 +692,6 @@ def nextRecord (base : Record) (escrow : Escrow) (generation : Nat) :
       checkpoint := encoded
       checkpointDigest := ObjectiveActivityWire.checkpointDigest encoded
       reads := yielded.reads
-      escrow := escrow
       phase := .awaiting yielded.await }
   | .finished result, _ =>
     { base with
@@ -556,7 +699,6 @@ def nextRecord (base : Record) (escrow : Escrow) (generation : Nat) :
       checkpoint := []
       checkpointDigest := ObjectiveActivityWire.checkpointDigest []
       reads := []
-      escrow := ⟨escrow.payer, escrow.resumeTicks, escrow.timeoutTicks, 0, 0⟩
       phase := .done (dataBytes result) }
   | .faulted reason, _ =>
     { base with
@@ -564,15 +706,9 @@ def nextRecord (base : Record) (escrow : Escrow) (generation : Nat) :
       checkpoint := []
       checkpointDigest := ObjectiveActivityWire.checkpointDigest []
       reads := []
-      escrow := ⟨escrow.payer, escrow.resumeTicks, escrow.timeoutTicks, 0, 0⟩
       phase := .faulted reason }
   | .yielded _ _, none =>
     { base with generation := generation, phase := .faulted "internal: yield without commit" }
-
-/-- The escrow a segment posts: the pair, when it yielded. -/
-def pairOf (escrow : Escrow) : Option YieldCommit → Nat
-  | some _ => escrow.pair
-  | none => 0
 
 /-- The yield commit of a segment, when it yielded. -/
 def segmentCommit {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
@@ -584,6 +720,19 @@ def segmentCommit {rootBytes : Bytes → Digest} (config : Config) (snapshot : S
     pure (some committed)
   | _ => pure none
 
+/-- After a segment: a yield must leave the purse able to pay the await's fee
+pair (it stays reserved there); an end returns the purse to the payer. The
+ending turn's own postings come first (`before`). -/
+def settlePurse (config : Config) (book : Book) (held : AccountId) (escrow : Escrow)
+    (before : Batch) (segment : Segment) : Except Refusal Batch :=
+  let after := purse (before.apply book) config.asset held
+  if segment.yields then
+    if escrow.pair ≤ after then .ok before
+    else .error (.awaitsFunding after escrow.pair)
+  else if after = 0 then .ok before
+  else .ok ⟨before.registrations,
+    before.operations ++ [.transfer held escrow.account config.asset after]⟩
+
 /-! ### publish -/
 
 /-- The output codec an activity artifact names: its entry returns an
@@ -593,23 +742,31 @@ def codecId : Digest := tagged "DREGG/OBJECTIVE/ACTIVITY/OUTPUT-CODEC/v1" []
 def publishTransaction (pin : Digest) : TransactionId :=
   tagged "DREGG/OBJECTIVE/ACTIVITY/TX/PUBLISH/v1" (digestStream.encode pin)
 
+structure Publication {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (artifactBytes : Bytes) where
+  private mk ::
+  pin : Digest
+  posts : List Post
+  postsExact : posts = [postAt snapshot (packageCell config.domain pin) (image .package (packageKey pin) artifactBytes)]
+
 def publish {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
-    (subject : SubjectId) (artifactBytes : Bytes) : Except Refusal (Digest × DataIntent rootBytes) := do
+    (artifactBytes : Bytes) : Except Refusal (Publication config snapshot artifactBytes) := do
   let some artifact := ObjectiveBendSourceArtifact.decode artifactBytes | throw .packageMissing
   if artifact.outputCodec ≠ codecId then throw (.packageType "not an activity artifact")
   let pin := ObjectiveBendSourceArtifact.identity artifact
-  let cell := packageCell pin
-  if (ObjectiveBendSourceArtifact.decode (snapshot.canonicalBytes cell)).isSome then throw .packageExists
+  if (payloadOf (snapshot.canonicalBytes (packageCell config.domain pin))).isSome then throw .packageExists
   let definition ← match ObjectiveBendSourceArtifact.checkWithin artifact config.maxArtifactBytes config.typeFuel with
     | .ok checked => pure checked
     | .error reason => throw (.packageType reason)
   match callable definition.typed.type with
   | .arrow _ _ _ (.computation _ _ _) => pure ()
   | _ => throw (.packageType "an activity package selects a definition `Input -> Activity<P,R,A>`")
-  let transaction := publishTransaction pin
-  pure (pin, intentOf rootBytes transaction [postAt snapshot cell artifactBytes] [] []
-    (event "publish" (digestStream.encode pin)) (some subject))
+  pure ⟨pin, _, rfl⟩
 
+def Publication.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {artifactBytes : Bytes} (publication : Publication config snapshot artifactBytes) (sealing : Seal) :
+    DataIntent rootBytes :=
+  intentOf rootBytes (publishTransaction publication.pin) publication.posts [] [] sealing
 
 /-! ### birth -/
 
@@ -622,23 +779,38 @@ structure BirthRequest where
   ticks : Nat
   resumeTicks : Nat
   timeoutTicks : Nat
+  /-- The payer's Book account: it pays the birth's envelope and the deposit,
+  and receives the purse when the activity ends. -/
+  account : AccountId
+  /-- Moved into the activity's purse; must reserve the first await's fee pair. -/
+  deposit : Nat
 
 def birthTransaction (request : BirthRequest) : TransactionId :=
-  tagged "DREGG/OBJECTIVE/ACTIVITY/TX/BIRTH/v1"
+  tagged "DREGG/OBJECTIVE/ACTIVITY/TX/BIRTH/v2"
     (subjectStream.encode request.subject ++ digestStream.encode request.object ++
       digestStream.encode request.pin ++ bytesStream.encode (dataBytes request.input) ++
       StreamCodec.nat.encode request.nonce)
 
+/-- The birth's postings: register the purse, pay the birth's declared envelope
+to the collector, move the deposit into the purse; then the purse settles
+(`settlePurse`). -/
+def birthBatch (config : Config) (book : Book) (held : AccountId) (request : BirthRequest)
+    (escrow : Escrow) (segment : Segment) : Except Refusal Batch :=
+  settlePurse config (Batch.apply ⟨[held], []⟩ book) held escrow
+    ⟨[], [.fee request.account config.collector config.asset (config.tariff.price request.ticks)] ++
+      (if request.deposit = 0 then [] else [.transfer request.account held config.asset request.deposit])⟩ segment
+  |>.map fun settled => ⟨held :: settled.registrations, settled.operations⟩
+
 /-- An admitted birth: the program, its first segment from its initial state,
-and the one intent that commits the record, the yield and the escrow. -/
+and the posts that commit the record, the yield and the Book postings. -/
 structure Birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : BirthRequest) where
   private mk ::
   program : Program config request.pin request.input
-  programExact : loadProgram config (snapshot.canonicalBytes (packageCell request.pin)) request.pin request.input =
+  programExact : loadProgram config (packageBytes config snapshot request.pin) request.pin request.input =
     .ok program
   cell : CellId
-  cellExact : cell = recordCell request.object (activityId request.object (birthTransaction request))
+  cellExact : cell = recordCell config.domain request.object (activityId request.object (birthTransaction request))
   segment : Segment
   segmentExact : runSegment config request.ticks (initial program.applied.erase) = .ok segment
   yielded : Option YieldCommit
@@ -647,48 +819,69 @@ structure Birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
   record : Record
   recordExact : record = nextRecord
     ⟨request.object, activityId request.object (birthTransaction request), request.pin, dataBytes request.input,
-      0, [], checkpointDigest [], [], escrowOf config.tariff request.subject request.resumeTicks request.timeoutTicks,
-      .faulted "unborn"⟩
-    (escrowOf config.tariff request.subject request.resumeTicks request.timeoutTicks) 0 segment yielded
+      0, [], checkpointDigest [], [],
+      escrowOf config.tariff request.subject request.account request.resumeTicks request.timeoutTicks,
+      .faulted "unborn"⟩ 0 segment yielded
+  book : BookCell
+  bookExact : loadBook config snapshot = .ok book
+  posted : Postings book
   posts : List Post
-  recordPost : posts.head? = some (postAt snapshot cell (encodeRecord record))
-  intent : DataIntent rootBytes
-  intentExact : intent = intentOf rootBytes (birthTransaction request) posts
-    [guardAt snapshot (packageCell request.pin)] []
-    (event "birth" (digestStream.encode (birthTransaction request) ++ StreamCodec.nat.encode height))
-    (some request.subject)
+  recordFirst : posts.head? = some (recordPost config snapshot cell record)
+  postsExact : posts = recordPost config snapshot cell record ::
+    ((yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
+  guards : List ReadGuard
+  guardsExact : guards = [guardAt snapshot (packageCell config.domain request.pin)]
 
 def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : BirthRequest) : Except Refusal (Birth config snapshot height request) := do
   if config.maxTicks < request.ticks then throw (.envelope request.ticks config.maxTicks)
   if config.maxTicks < request.resumeTicks then throw (.envelope request.resumeTicks config.maxTicks)
   if config.maxTicks < request.timeoutTicks then throw (.envelope request.timeoutTicks config.maxTicks)
-  match programExact : loadProgram config (snapshot.canonicalBytes (packageCell request.pin)) request.pin request.input with
+  match programExact : loadProgram config (packageBytes config snapshot request.pin) request.pin request.input with
   | .error reason => throw reason
   | .ok program =>
-    for outcome in kernelOutcomes do
-      if (typeData program.assumptions config.typeFuel outcome.data program.responseType).isNone then
-        throw (.outcomeProtocol outcome.label)
+    outcomeProtocol program
     let transaction := birthTransaction request
     let activity := activityId request.object transaction
-    let cell := recordCell request.object activity
-    if (decodeRecord (snapshot.canonicalBytes cell)).isSome then throw .recordExists
-    match segmentExact : runSegment config request.ticks (initial program.applied.erase) with
+    let cell := recordCell config.domain request.object activity
+    if (payloadOf (snapshot.canonicalBytes cell)).isSome then throw .recordExists
+    let held := heldAccount cell
+    if request.account = config.asset ∨ request.account = config.collector ∨ request.account = held then
+      throw .payerInvalid
+    match bookExact : loadBook config snapshot with
     | .error reason => throw reason
-    | .ok segment =>
-      match yieldedExact : segmentCommit config snapshot height transaction cell request.object 0 segment with
+    | .ok book =>
+      if held ∈ (logicalBook book.logical).accounts then throw .purseTaken
+      match segmentExact : runSegment config request.ticks (initial program.applied.erase) with
       | .error reason => throw reason
-      | .ok yielded =>
-        let escrow := escrowOf config.tariff request.subject request.resumeTicks request.timeoutTicks
-        let base : Record := ⟨request.object, activity, request.pin, dataBytes request.input, 0, [],
-          checkpointDigest [], [], escrow, .faulted "unborn"⟩
-        let record := nextRecord base escrow 0 segment yielded
-        let accounts ← accountPosts snapshot
-          [(request.subject, config.tariff.price request.ticks + pairOf escrow yielded, 0)]
-        let posts := postAt snapshot cell (encodeRecord record) ::
-          ((yielded.map YieldCommit.posts).getD [] ++ accounts)
-        pure ⟨program, programExact, cell, rfl, segment, segmentExact, yielded, yieldedExact, record, rfl,
-          posts, rfl, _, rfl⟩
+      | .ok segment =>
+        match yieldedExact : segmentCommit config snapshot height transaction cell request.object 0 segment with
+        | .error reason => throw reason
+        | .ok yielded =>
+          let escrow := escrowOf config.tariff request.subject request.account request.resumeTicks request.timeoutTicks
+          if segment.yields ∧ request.deposit < escrow.pair then
+            throw (.underfunded request.deposit escrow.pair)
+          let batch ← birthBatch config (logicalBook book.logical) held request escrow segment
+          let posted ← postings book batch
+          let base : Record := ⟨request.object, activity, request.pin, dataBytes request.input, 0, [],
+            checkpointDigest [], [], escrow, .faulted "unborn"⟩
+          let record := nextRecord base 0 segment yielded
+          let posts := recordPost config snapshot cell record ::
+            ((yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
+          pure ⟨program, programExact, cell, rfl, segment, segmentExact, yielded, yieldedExact, record, rfl,
+            book, bookExact, posted, posts, rfl, rfl, [guardAt snapshot (packageCell config.domain request.pin)], rfl⟩
+
+def Birth.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request) (sealing : Seal) :
+    DataIntent rootBytes :=
+  intentOf rootBytes (birthTransaction request) born.posts born.guards [] sealing
+
+/-- **A birth conserves every asset**: its postings are one admitted batch on
+the loaded Book. -/
+theorem Birth.conserves {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request) (asset : AssetId) :
+    (logicalBook born.posted.post.logical).totalAsset asset = (logicalBook born.book.logical).totalAsset asset :=
+  born.posted.conserves asset
 
 /-! ### resolve -/
 
@@ -717,12 +910,12 @@ def resolveTransaction (slot : Digest) : TransactionId :=
 def replyTyped {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (activity : CellId) (slot : Digest) : Answer → Except Refusal Unit
   | .reply value => do
-    let some record := decodeRecord (snapshot.canonicalBytes activity) | throw .recordMissing
+    let some record := readRecord snapshot activity | throw .recordMissing
     let .awaiting await := record.phase | throw .notAwaiting
     let .reply named _ := await.source | throw .slotMismatch
     if named ≠ slot then throw .slotMismatch
     let some input := decodeDataBytes record.input | throw .inputType
-    let program ← loadProgram config (snapshot.canonicalBytes (packageCell record.pin)) record.pin input
+    let program ← loadProgram config (packageBytes config snapshot record.pin) record.pin input
     match typeData program.assumptions config.typeFuel value program.reply with
     | some _ => pure ()
     | none => throw (.responseType "reply")
@@ -732,20 +925,17 @@ structure Resolution {rootBytes : Bytes → Digest} (config : Config) (snapshot 
     (height : Nat) (request : ResolveRequest) where
   private mk ::
   slot : AnswerSlot.Slot
-  slotExact : AnswerSlot.decode (snapshot.canonicalBytes (AnswerSlot.cell request.slot)) = some slot
+  slotExact : readSlot config snapshot request.slot = some slot
   named : slot.name = request.slot
   decided : AnswerSlot.Slot
   decidedExact : AnswerSlot.decide slot request.subject height request.answer.decision = .ok decided
   typed : replyTyped config snapshot slot.activity request.slot request.answer = .ok ()
-  intent : DataIntent rootBytes
-  intentExact : intent = intentOf rootBytes (resolveTransaction request.slot)
-    [postAt snapshot (AnswerSlot.cell request.slot) (AnswerSlot.encode decided)]
-    [guardAt snapshot slot.activity] [AnswerSlot.decisionClaim request.slot]
-    (event "resolve" (digestStream.encode request.slot ++ StreamCodec.nat.encode height)) (some request.subject)
+  posts : List Post
+  postsExact : posts = [slotPost config snapshot decided]
 
 def resolve {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : ResolveRequest) : Except Refusal (Resolution config snapshot height request) :=
-  match slotExact : AnswerSlot.decode (snapshot.canonicalBytes (AnswerSlot.cell request.slot)) with
+  match slotExact : readSlot config snapshot request.slot with
   | none => .error .slotMissing
   | some slot =>
     if named : slot.name = request.slot then
@@ -756,6 +946,12 @@ def resolve {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
         | .error reason => .error reason
         | .ok () => .ok ⟨slot, slotExact, named, decided, decidedExact, typed, _, rfl⟩
     else .error .slotMismatch
+
+def Resolution.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : ResolveRequest} (resolution : Resolution config snapshot height request)
+    (sealing : Seal) : DataIntent rootBytes :=
+  intentOf rootBytes (resolveTransaction request.slot) resolution.posts
+    [guardAt snapshot resolution.slot.activity] [AnswerSlot.decisionClaim request.slot] sealing
 
 /-! ### deliver -/
 
@@ -777,22 +973,22 @@ def outcomeOfDecision : AnswerSlot.Decision → Except Refusal AwaitOutcome
 
 /-- How the await ends at this height: its decided slot, its due height, or its
 deadline. A function of the snapshot, the height and the await only. -/
-def settle {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (height : Nat)
+def settle {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (height : Nat)
     (cell : CellId) (await : Await) : Except Refusal Settlement :=
   match await.source with
   | .reply slotName _ =>
-    let slotCell := AnswerSlot.cell slotName
-    match AnswerSlot.decode (snapshot.canonicalBytes slotCell) with
+    match readSlot config snapshot slotName with
     | none => .error .slotMissing
     | some slot =>
       if slot.name ≠ slotName ∨ slot.activity ≠ cell then .error .slotMismatch else
       match slot.phase with
       | .decided decision _ => do
         let outcome ← outcomeOfDecision decision
-        pure ⟨if decision = .expired then .timedOut else .resumed, outcome, [], [guardAt snapshot slotCell], []⟩
+        pure ⟨if decision = .expired then .timedOut else .resumed, outcome, [],
+          [guardAt snapshot (AnswerSlot.cell config.domain slotName)], []⟩
       | .opened =>
         match AnswerSlot.expire slot height with
-        | .ok expired => .ok ⟨.timedOut, .timedOut, [postAt snapshot slotCell (AnswerSlot.encode expired)], [],
+        | .ok expired => .ok ⟨.timedOut, .timedOut, [slotPost config snapshot expired], [],
             [AnswerSlot.decisionClaim slotName]⟩
         | .error _ => .error (.notYetDecided await.deadline height)
   | .height due =>
@@ -804,27 +1000,32 @@ def settle {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (heigh
 def staleCount {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (reads : List ReadGuard) : Nat :=
   (reads.filter (fun guard => snapshot.model.roots guard.cellId != guard.expectedRoot)).length
 
+/-- A stale read wraps the decided outcome; it never replaces it. -/
 def revalidate (stale : Nat) (decided : AwaitOutcome) : AwaitOutcome :=
-  if stale = 0 then decided else .conflict stale
+  if stale = 0 then decided else .conflict stale decided
 
 /-- No state, no checkpoint and no outcome is ever taken from a request: the
-submitter names the record and may add envelope it pays for. -/
+submitter names the record and may add envelope it pays for from `account`. -/
 structure DeliverRequest where
   subject : SubjectId
   record : CellId
   extraTicks : Nat
+  account : AccountId
 
-def movements (config : Config) (record : Record) (path : Path) (pair : Nat) (request : DeliverRequest) :
-    List (SubjectId × Nat × Nat) :=
-  (record.escrow.payer, pair, record.escrow.unused path) ::
-    (if request.extraTicks = 0 then [] else [(request.subject, config.tariff.price request.extraTicks, 0)])
+/-- The ending turn's own postings: the used fee from the purse, and the
+submitter's added envelope from its account, both to the collector. -/
+def deliveryCharges (config : Config) (record : Record) (cell : CellId) (path : Path)
+    (request : DeliverRequest) : Batch :=
+  ⟨[], [.fee (heldAccount cell) config.collector config.asset (record.escrow.used path)] ++
+    (if request.extraTicks = 0 then []
+     else [.fee request.account config.collector config.asset (config.tariff.price request.extraTicks)])⟩
 
 structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : DeliverRequest) where
   private mk ::
   record : Record
-  recordExact : decodeRecord (snapshot.canonicalBytes request.record) = some record
-  located : request.record = recordCell record.object record.activity
+  recordExact : readRecord snapshot request.record = some record
+  located : request.record = recordCell config.domain record.object record.activity
   await : Await
   awaiting : record.phase = .awaiting await
   idExact : await.id = awaitId request.record record.generation record.checkpointDigest
@@ -832,9 +1033,9 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   input : Data
   inputExact : decodeDataBytes record.input = some input
   program : Program config record.pin input
-  programExact : loadProgram config (snapshot.canonicalBytes (packageCell record.pin)) record.pin input = .ok program
+  programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input = .ok program
   settlement : Settlement
-  settled : settle snapshot height request.record await = .ok settlement
+  settled : settle config snapshot height request.record await = .ok settlement
   outcome : AwaitOutcome
   outcomeExact : outcome = revalidate (staleCount snapshot record.reads) settlement.decided
   response : TypedData program.assumptions outcome.data program.responseType
@@ -850,30 +1051,30 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   yieldedExact : segmentCommit config snapshot height (deliveryTransaction await.id) request.record record.object
     (record.generation + 1) segment = .ok yielded
   next : Record
-  nextExact : next = nextRecord record
-    (escrowOf config.tariff record.escrow.payer record.escrow.resumeTicks record.escrow.timeoutTicks)
-    (record.generation + 1) segment yielded
-  accounts : List Post
-  accountsExact : accountPosts snapshot (movements config record settlement.path
-    (pairOf (escrowOf config.tariff record.escrow.payer record.escrow.resumeTicks record.escrow.timeoutTicks) yielded)
-    request) = .ok accounts
+  nextExact : next = nextRecord record (record.generation + 1) segment yielded
+  book : BookCell
+  bookExact : loadBook config snapshot = .ok book
+  batch : Batch
+  batchExact : settlePurse config (logicalBook book.logical) (heldAccount request.record) record.escrow
+    (deliveryCharges config record request.record settlement.path request) segment = .ok batch
+  posted : Postings book
+  postedBatch : posted.batch = batch
   posts : List Post
-  recordPost : posts.head? = some (postAt snapshot request.record (encodeRecord next))
-  intent : DataIntent rootBytes
-  intentExact : intent = intentOf rootBytes (deliveryTransaction await.id) posts
-    (guardAt snapshot (packageCell record.pin) ::
-      (settlement.guards ++ record.reads.map (fun guard => guardAt snapshot guard.cellId)))
-    (awaitClaim await.id :: settlement.claims)
-    (event "deliver" (digestStream.encode await.id ++ StreamCodec.nat.encode height ++
-      stringStream.encode outcome.label ++ StreamCodec.nat.encode envelope))
-    (some request.subject)
+  recordFirst : posts.head? = some (recordPost config snapshot request.record next)
+  postsExact : posts = recordPost config snapshot request.record next ::
+    (settlement.posts ++ (yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
+  guards : List ReadGuard
+  guardsExact : guards = guardAt snapshot (packageCell config.domain record.pin) ::
+    (settlement.guards ++ record.reads.map (fun guard => guardAt snapshot guard.cellId))
+  claims : List StableNullifier
+  claimsExact : claims = awaitClaim await.id :: settlement.claims
 
 def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : DeliverRequest) : Except Refusal (Delivery config snapshot height request) :=
-  match recordExact : decodeRecord (snapshot.canonicalBytes request.record) with
+  match recordExact : readRecord snapshot request.record with
   | none => .error .recordMissing
   | some record =>
-  if located : request.record = recordCell record.object record.activity then
+  if located : request.record = recordCell config.domain record.object record.activity then
   match awaiting : record.phase with
   | .done _ | .faulted _ => .error .notAwaiting
   | .awaiting await =>
@@ -882,10 +1083,10 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   match inputExact : decodeDataBytes record.input with
   | none => .error .inputType
   | some input =>
-  match programExact : loadProgram config (snapshot.canonicalBytes (packageCell record.pin)) record.pin input with
+  match programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input with
   | .error reason => .error reason
   | .ok program =>
-  match settled : settle snapshot height request.record await with
+  match settled : settle config snapshot height request.record await with
   | .error reason => .error reason
   | .ok settlement =>
   let outcome := revalidate (staleCount snapshot record.reads) settlement.decided
@@ -908,20 +1109,98 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
       (record.generation + 1) segment with
   | .error reason => .error reason
   | .ok yielded =>
-  let escrow := escrowOf config.tariff record.escrow.payer record.escrow.resumeTicks record.escrow.timeoutTicks
-  let next := nextRecord record escrow (record.generation + 1) segment yielded
-  match accountsExact : accountPosts snapshot
-      (movements config record settlement.path (pairOf escrow yielded) request) with
+  let next := nextRecord record (record.generation + 1) segment yielded
+  match bookExact : loadBook config snapshot with
   | .error reason => .error reason
-  | .ok accounts =>
-  let posts := postAt snapshot request.record (encodeRecord next) ::
-    (settlement.posts ++ (yielded.map YieldCommit.posts).getD [] ++ accounts)
+  | .ok book =>
+  match batchExact : settlePurse config (logicalBook book.logical) (heldAccount request.record) record.escrow
+      (deliveryCharges config record request.record settlement.path request) segment with
+  | .error reason => .error reason
+  | .ok batch =>
+  match postings book batch with
+  | .error reason => .error reason
+  | .ok posted =>
+  if postedBatch : posted.batch = batch then
+  let posts := recordPost config snapshot request.record next ::
+    (settlement.posts ++ (yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
+  let guards := guardAt snapshot (packageCell config.domain record.pin) ::
+    (settlement.guards ++ record.reads.map (fun guard => guardAt snapshot guard.cellId))
   .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, program, programExact,
     settlement, settled, outcome, rfl, response, state, stateExact, resumed, resumeExact, envelope, rfl,
-    segment, segmentExact, yielded, yieldedExact, next, rfl, accounts, accountsExact, posts, rfl, _, rfl⟩
+    segment, segmentExact, yielded, yieldedExact, next, rfl, book, bookExact, batch, batchExact, posted,
+    postedBatch, posts, rfl, rfl, guards, rfl, awaitClaim await.id :: settlement.claims, rfl⟩
+  else .error .bookRefused
   else .error .checkpointDigest
   else .error .awaitMismatch
   else .error .recordMisplaced
+
+def Delivery.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) (sealing : Seal) :
+    DataIntent rootBytes :=
+  intentOf rootBytes (deliveryTransaction delivery.await.id) delivery.posts delivery.guards delivery.claims sealing
+
+/-- **A delivery conserves every asset.** -/
+theorem Delivery.conserves {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) (asset : AssetId) :
+    (logicalBook delivery.posted.post.logical).totalAsset asset =
+      (logicalBook delivery.book.logical).totalAsset asset :=
+  delivery.posted.conserves asset
+
+/-! ### topUp -/
+
+structure TopUpRequest where
+  subject : SubjectId
+  record : CellId
+  account : AccountId
+  amount : Nat
+  nonce : Nat
+
+def topUpTransaction (request : TopUpRequest) : TransactionId :=
+  tagged "DREGG/OBJECTIVE/ACTIVITY/TX/TOP-UP/v1"
+    (subjectStream.encode request.subject ++ digestStream.encode request.record ++
+      StreamCodec.nat.encode request.account ++ StreamCodec.nat.encode request.amount ++
+      StreamCodec.nat.encode request.nonce)
+
+structure TopUp {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (request : TopUpRequest) where
+  private mk ::
+  record : Record
+  recordExact : readRecord snapshot request.record = some record
+  book : BookCell
+  bookExact : loadBook config snapshot = .ok book
+  posted : Postings book
+  postedBatch : posted.batch = ⟨[], [.transfer request.account (heldAccount request.record) config.asset request.amount]⟩
+
+def topUp {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (request : TopUpRequest) : Except Refusal (TopUp config snapshot request) :=
+  match recordExact : readRecord snapshot request.record with
+  | none => .error .recordMissing
+  | some record =>
+    match record.phase with
+    | .done _ | .faulted _ => .error .notAwaiting
+    | .awaiting _ =>
+    if request.amount = 0 then .error .zeroAmount else
+    if request.account = config.asset ∨ request.account = heldAccount request.record then .error .payerInvalid else
+    match bookExact : loadBook config snapshot with
+    | .error reason => .error reason
+    | .ok book =>
+      match postings book ⟨[], [.transfer request.account (heldAccount request.record) config.asset request.amount]⟩ with
+      | .error reason => .error reason
+      | .ok posted =>
+        if postedBatch : posted.batch = ⟨[], [.transfer request.account (heldAccount request.record) config.asset request.amount]⟩ then
+          .ok ⟨record, recordExact, book, bookExact, posted, postedBatch⟩
+        else .error .bookRefused
+
+def TopUp.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {request : TopUpRequest} (topped : TopUp config snapshot request) (sealing : Seal) : DataIntent rootBytes :=
+  intentOf rootBytes (topUpTransaction request) [topped.posted.write config snapshot]
+    [guardAt snapshot request.record] [] sealing
+
+/-- **A top-up conserves every asset.** -/
+theorem TopUp.conserves {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {request : TopUpRequest} (topped : TopUp config snapshot request) (asset : AssetId) :
+    (logicalBook topped.posted.post.logical).totalAsset asset = (logicalBook topped.book.logical).totalAsset asset :=
+  topped.posted.conserves asset
 
 /-! ### writeState -/
 
@@ -931,14 +1210,30 @@ structure StateWriteRequest where
   value : Data
   nonce : Nat
 
-def writeState {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (request : StateWriteRequest) :
-    Except Refusal (DataIntent rootBytes) := do
-  let some record := decodeRecord (snapshot.canonicalBytes request.record) | throw .recordMissing
-  if request.subject ≠ record.escrow.payer then throw .notOwner
-  let transaction := tagged "DREGG/OBJECTIVE/ACTIVITY/TX/STATE/v1"
+def stateTransaction (request : StateWriteRequest) : TransactionId :=
+  tagged "DREGG/OBJECTIVE/ACTIVITY/TX/STATE/v2"
     (digestStream.encode request.record ++ StreamCodec.nat.encode request.nonce ++ dataBytes request.value)
-  pure (intentOf rootBytes transaction [postAt snapshot record.object (dataBytes request.value)]
-    [guardAt snapshot request.record] [] (event "state" (digestStream.encode transaction)) (some request.subject))
+
+/-- The object a state write targets: the record names it. Who may write it is
+the receiver's question (a holder of a capability on the object). -/
+structure StateWrite {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (request : StateWriteRequest) where
+  private mk ::
+  record : Record
+  recordExact : readRecord snapshot request.record = some record
+  posts : List Post
+  postsExact : posts = [postAt snapshot (stateCell config.domain record.object) (stateImage record.object request.value)]
+
+def writeState {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (request : StateWriteRequest) : Except Refusal (StateWrite config snapshot request) :=
+  match recordExact : readRecord snapshot request.record with
+  | none => .error .recordMissing
+  | some record => .ok ⟨record, recordExact, _, rfl⟩
+
+def StateWrite.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {request : StateWriteRequest} (written : StateWrite config snapshot request) (sealing : Seal) :
+    DataIntent rootBytes :=
+  intentOf rootBytes (stateTransaction request) written.posts [guardAt snapshot request.record] [] sealing
 
 /-! ## The resume contract -/
 
@@ -988,44 +1283,44 @@ theorem installed_retry_replays {rootBytes : Bytes → Digest} {snapshot next : 
   simp [DurableDataIntent.execute, DataSnapshot.install, DurableCommitProtocol.Snapshot.install,
     DurableCommitProtocol.Snapshot.lookupRecorded, DurableCommitProtocol.Intent.sameCheck_self]
 
+/-- Whatever sealing the admitting receiver adds, a delivery's intent spends its
+await's claim. -/
 theorem Delivery.spends {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) :
-    awaitClaim delivery.await.id ∈ delivery.intent.nullifiers := by
-  rw [delivery.intentExact]; simp
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) (sealing : Seal) :
+    awaitClaim delivery.await.id ∈ (delivery.intent sealing).nullifiers := by
+  simp [Delivery.intent, delivery.claimsExact]
 
-/-- **Consume-once.** Once a delivery of an await installs, no second turn that
-ends that await (another delivery, a timeout, a forged intent claiming it) is
-ever accepted, and the exact retry of the delivery replays. -/
+/-- **Consume-once.** Once a delivery of an await installs (under any sealing), no
+second turn that ends that await (another delivery, a timeout, a forged intent
+claiming it) is ever accepted, and the exact retry of the delivery replays. -/
 theorem resume_consumes_once {rootBytes : Bytes → Digest} {config : Config} {snapshot next : Snapshot rootBytes}
-    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request)
-    (installed : DurableDataIntent.execute .complete snapshot delivery.intent = .accepted next) :
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) (sealing : Seal)
+    (installed : DurableDataIntent.execute .complete snapshot (delivery.intent sealing) = .accepted next) :
     (∀ (later : DataIntent rootBytes), awaitClaim delivery.await.id ∈ later.nullifiers →
       ∀ schedule after, DurableDataIntent.execute schedule next later ≠ .accepted after) ∧
-    (∀ schedule, DurableDataIntent.execute schedule next delivery.intent = .replayed delivery.intent.erase) :=
+    (∀ schedule, DurableDataIntent.execute schedule next (delivery.intent sealing) =
+      .replayed (delivery.intent sealing).erase) :=
   ⟨fun later again schedule after =>
-      spent_claim_never_accepted delivery.spends installed later again schedule after,
+      spent_claim_never_accepted (delivery.spends sealing) installed later again schedule after,
     installed_retry_replays installed⟩
 
-/-- A delivery from the post-state of a delivery of the same record can never
-again end the await it ended: the await it would spend is a different one, so
-the record moved (the generation advanced), or the record is no longer awaiting. -/
+/-- A delivery from the post-state of a delivery of the same await is never
+accepted, whatever seals the two carry. -/
 theorem second_delivery_refused {rootBytes : Bytes → Digest} {config : Config} {snapshot next : Snapshot rootBytes}
     {height later : Nat} {request again : DeliverRequest} (first : Delivery config snapshot height request)
-    (installed : DurableDataIntent.execute .complete snapshot first.intent = .accepted next)
-    (second : Delivery config next later again) (sameAwait : second.await.id = first.await.id) :
-    DurableDataIntent.execute .complete next second.intent ≠ .accepted next ∧
-      ∀ schedule after, DurableDataIntent.execute schedule next second.intent ≠ .accepted after := by
-  have spent := (resume_consumes_once first installed).1 second.intent (sameAwait ▸ second.spends)
-  exact ⟨spent .complete next, spent⟩
+    (sealing : Seal) (installed : DurableDataIntent.execute .complete snapshot (first.intent sealing) = .accepted next)
+    (second : Delivery config next later again) (secondSeal : Seal) (sameAwait : second.await.id = first.await.id) :
+    ∀ schedule after, DurableDataIntent.execute schedule next (second.intent secondSeal) ≠ .accepted after :=
+  (resume_consumes_once first sealing installed).1 (second.intent secondSeal) (sameAwait ▸ second.spends secondSeal)
 
 /-- **The slot is decided once.** -/
 theorem slot_decided_once {rootBytes : Bytes → Digest} {config : Config} {snapshot next : Snapshot rootBytes}
-    {height : Nat} {request : ResolveRequest} (resolution : Resolution config snapshot height request)
-    (installed : DurableDataIntent.execute .complete snapshot resolution.intent = .accepted next)
+    {height : Nat} {request : ResolveRequest} (resolution : Resolution config snapshot height request) (sealing : Seal)
+    (installed : DurableDataIntent.execute .complete snapshot (resolution.intent sealing) = .accepted next)
     (later : DataIntent rootBytes) (again : AnswerSlot.decisionClaim request.slot ∈ later.nullifiers)
     (schedule : DurableCommitProtocol.Schedule) (after : Snapshot rootBytes) :
     DurableDataIntent.execute schedule next later ≠ .accepted after :=
-  spent_claim_never_accepted (by rw [resolution.intentExact]; simp) installed later again schedule after
+  spent_claim_never_accepted (by simp [Resolution.intent]) installed later again schedule after
 
 /-- **Exactly one decider.** An admitted resolution was made by the slot's
 decider, on an open slot, at or before its deadline. -/
@@ -1036,13 +1331,14 @@ theorem slot_single_decider {rootBytes : Bytes → Digest} {config : Config} {sn
   let decided := AnswerSlot.decide_single_decider resolution.decidedExact
   ⟨decided.1, decided.2.1, decided.2.2.1⟩
 
-/-- **Stale reads deliver `conflict`.** If any read the activity recorded at
-its yield has moved, the activity is resumed with `conflict`, never with the
-bare outcome, and the count it receives is positive. -/
+/-- **Stale reads deliver `conflict`, carrying what was decided.** If any read
+the activity recorded at its yield has moved, the activity is resumed with
+`conflict`, never with the bare outcome; the count it receives is positive and
+the outcome the await resolved to travels inside it. -/
 theorem stale_reads_conflict {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request)
     (moved : ∃ guard ∈ delivery.record.reads, snapshot.model.roots guard.cellId ≠ guard.expectedRoot) :
-    ∃ stale, 0 < stale ∧ delivery.outcome = .conflict stale := by
+    ∃ stale, 0 < stale ∧ delivery.outcome = .conflict stale delivery.settlement.decided := by
   obtain ⟨guard, member, differs⟩ := moved
   have positive : 0 < staleCount snapshot delivery.record.reads := by
     unfold staleCount
@@ -1071,7 +1367,7 @@ of the state comes from the request. -/
 theorem resume_binds_checkpoint {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) :
     ∃ record state,
-      decodeRecord (snapshot.canonicalBytes request.record) = some record ∧
+      readRecord snapshot request.record = some record ∧
       record.phase = .awaiting delivery.await ∧
       delivery.await.id = awaitId request.record record.generation (checkpointDigest record.checkpoint) ∧
       decodeCheckpoint record.checkpoint = some state ∧
@@ -1115,16 +1411,19 @@ theorem resume_deterministic {rootBytes : Bytes → Digest} {config : Config} {s
   refine ⟨resumedEq, segments, ?_⟩
   rw [one.nextExact, two.nextExact, records, segments, yieldeds]
 
-/-- **No refund depends on computation.** The fee returned to the payer when an
-await ends is the unused half of its escrowed pair, chosen by how the await
-ended (settled from the snapshot and height) and nothing else: two deliveries
-of the same record at the same snapshot and height return the same amount,
-whatever envelopes they declared and whatever their runs did. -/
+/-- **No fee depends on computation.** The fee the ending turn takes from the
+purse is the used half of the escrowed pair, chosen by how the await ended
+(settled from the snapshot and height) and nothing else: two deliveries of the
+same record at the same snapshot and height take the same amount, whatever
+envelopes they declared and whatever their runs did, and the submitter's added
+envelope is the public price of what it DECLARED. -/
 theorem refund_measurement_free {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {first second : DeliverRequest} (one : Delivery config snapshot height first)
     (two : Delivery config snapshot height second) (sameRecord : first.record = second.record) :
-    (movements config one.record one.settlement.path 0 first).head? =
-        some (one.record.escrow.payer, 0, one.record.escrow.unused one.settlement.path) ∧
+    (deliveryCharges config one.record first.record one.settlement.path first).operations.head? =
+        some (Operation.fee (heldAccount first.record) config.collector config.asset
+          (one.record.escrow.used one.settlement.path)) ∧
+      one.record.escrow.used one.settlement.path = two.record.escrow.used two.settlement.path ∧
       one.record.escrow.unused one.settlement.path = two.record.escrow.unused two.settlement.path := by
   have records : one.record = two.record := by
     have := one.recordExact; rw [sameRecord, two.recordExact] at this; exact (Option.some.inj this).symm
@@ -1134,20 +1433,52 @@ theorem refund_measurement_free {rootBytes : Bytes → Digest} {config : Config}
   have settlements : one.settlement = two.settlement := by
     have a := one.settled; have b := two.settled
     rw [sameRecord, awaits, b] at a; exact (Except.ok.inj a).symm
-  exact ⟨rfl, by rw [records, settlements]⟩
+  exact ⟨rfl, by rw [records, settlements], by rw [records, settlements]⟩
 
 /-- The submitter's charge for added envelope is the public price of what it
 DECLARED, never of what ran. -/
-theorem submitter_charge_declared (config : Config) (record : Record) (path : Path) (pair : Nat)
+theorem submitter_charge_declared (config : Config) (record : Record) (cell : CellId) (path : Path)
     (request : DeliverRequest) (extra : 0 < request.extraTicks) :
-    (request.subject, config.tariff.price request.extraTicks, 0) ∈ movements config record path pair request := by
-  simp [movements, Nat.pos_iff_ne_zero.mp extra]
+    Operation.fee request.account config.collector config.asset (config.tariff.price request.extraTicks) ∈
+      (deliveryCharges config record cell path request).operations := by
+  simp [deliveryCharges, Nat.pos_iff_ne_zero.mp extra]
+
+/-- A yield never leaves its purse short: the postings a yielding segment
+commits leave at least the await's fee pair in the purse. -/
+theorem yield_reserves_pair (config : Config) (book : Book) (held : AccountId) (escrow : Escrow)
+    (before batch : Batch) (state : State) (plan : PlanAwait)
+    (settled : settlePurse config book held escrow before (.yielded state plan) = .ok batch) :
+    batch = before ∧ escrow.pair ≤ purse (before.apply book) config.asset held := by
+  unfold settlePurse at settled
+  simp only [Segment.yields] at settled
+  by_cases enough : escrow.pair ≤ purse (before.apply book) config.asset held
+  · simp [enough] at settled
+    exact ⟨settled.symm, enough⟩
+  · simp [enough] at settled
+
+/-- An ending segment returns the whole purse to the payer's account. -/
+theorem end_returns_purse (config : Config) (book : Book) (held : AccountId) (escrow : Escrow)
+    (before batch : Batch) (result : Data)
+    (settled : settlePurse config book held escrow before (.finished result) = .ok batch)
+    (nonempty : purse (before.apply book) config.asset held ≠ 0) :
+    batch.operations = before.operations ++
+      [Operation.transfer held escrow.account config.asset (purse (before.apply book) config.asset held)] := by
+  unfold settlePurse at settled
+  simp only [Segment.yields] at settled
+  simp [nonempty] at settled
+  subst settled
+  rfl
 
 #assert_axioms record_roundTrip
 #assert_axioms TypedData.typed
+#assert_axioms Postings.conserves
+#assert_axioms Birth.conserves
+#assert_axioms Delivery.conserves
+#assert_axioms TopUp.conserves
 #assert_axioms execute_accepted_install
 #assert_axioms spent_claim_never_accepted
 #assert_axioms installed_retry_replays
+#assert_axioms Delivery.spends
 #assert_axioms resume_consumes_once
 #assert_axioms second_delivery_refused
 #assert_axioms slot_decided_once
@@ -1158,4 +1489,6 @@ theorem submitter_charge_declared (config : Config) (record : Record) (path : Pa
 #assert_axioms resume_deterministic
 #assert_axioms refund_measurement_free
 #assert_axioms submitter_charge_declared
+#assert_axioms yield_reserves_pair
+#assert_axioms end_returns_purse
 end Minidregg.Kernel.ObjectiveActivity

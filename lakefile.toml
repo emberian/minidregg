@@ -118,13 +118,6 @@ root = "Host.CshakeBench"
 name = "minidregg-carry-verifier"
 root = "Host.CarryVerifierMain"
 
-# The kernel activity's durable scratch world (Host/ObjectiveActivityWorld.lean):
-# birth, answer slots, delivery, timeout, refusals; driven by
-# native/resource-client/objective-activity-demo.py. Not part of the umbrella gate.
-[[lean_exe]]
-name = "objective-activity-world"
-root = "Host.ObjectiveActivityWorldMain"
-
 # Explicit qualification roots. Compilation does not imply native deployment.
 [[lean_lib]]
 name = "Verify"

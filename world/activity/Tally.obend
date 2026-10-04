@@ -3,8 +3,10 @@ edition ObjectiveBend 1
 # (Kernel/ObjectiveActivity). Each yield publishes the running total as the
 # object's declared state and awaits one answer slot that exactly one named
 # subject decides within `patience` heights. It is resumed with the kernel's
-# await outcome sum; a stale total (someone else wrote the object) arrives as
-# `conflict`, and the deadline as `timedOut`, which ends the tally.
+# await outcome sum. A stale total (someone else wrote the object's state)
+# arrives as `conflict`, carrying the outcome the await DID resolve to, so a
+# reply is never lost to a stale read: the tally still adds it. The deadline
+# arrives as `timedOut`, which ends the tally.
 record Start:
   total: Nat
   decider: Nat
@@ -23,8 +25,16 @@ sum Plan:
   await: Await
 record Reply:
   amount: Nat
-record Stale:
+sum Decided:
+  reply: Reply
+  refused: {}
+  unknown: {}
+  timedOut: {}
+  broken: {}
+  upgraded: {}
+record Lost:
   stale: Nat
+  decided: Decided
 sum Outcome:
   reply: Reply
   refused: {}
@@ -32,11 +42,18 @@ sum Outcome:
   timedOut: {}
   broken: {}
   upgraded: {}
-  conflict: Stale
+  conflict: Lost
 def tally(start: Start) -> Activity<Plan, Outcome, Nat>:
   match perform(Plan.await({state: start.total, on: Source.reply({decider: start.decider}), patience: 4n})):
     case reply(r): tally({total: start.total + r.amount, decider: start.decider})
-    case conflict(_): tally(start)
+    case conflict(lost):
+      match lost.decided:
+        case reply(r): tally({total: start.total + r.amount, decider: start.decider})
+        case unknown(_): tally(start)
+        case refused(_): start.total
+        case timedOut(_): start.total
+        case broken(_): start.total
+        case upgraded(_): start.total
     case unknown(_): tally(start)
     case refused(_): start.total
     case timedOut(_): start.total

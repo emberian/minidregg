@@ -52,7 +52,7 @@ import Kernel.IrreversibleEffectSettlement  -- external actions settle as commit
 import Kernel.CanonicalResourceEffect  -- canonical transfer/mint/burn/fee/lease operations derive the sole accepted effect and patch-bound hyperedge resource law
 import Kernel.AuthorizedResourceCharge  -- authority binds the exact ten-lane codec/tariff charge and its payload-bearing durable settlement
 import Kernel.ReactiveTerminalCell  -- finalize/cancel/expire/break race for one canonical terminal cell and atomic outbox intent
-import Kernel.ObjectiveActivity  -- a Core4 activity across turns: the record cell (checkpoint, pin, generation, reads, escrow), answer slots (Kernel.AnswerSlot), birth/resolve/deliver; resume_consumes_once, stale_reads_conflict, resume_deterministic, refund_measurement_free
+import Kernel.ObjectiveActivity  -- a Core4 activity across turns: the record cell (checkpoint, pin, generation, reads, escrow terms) at its protected coordinate, answer slots (Kernel.AnswerSlot), publish/birth/resolve/deliver/topUp/writeState, fees as Book postings; resume_consumes_once, stale_reads_conflict, resume_deterministic, refund_measurement_free, Birth.conserves, Delivery.conserves
 import Kernel.OutboxDelivery  -- stable terminal/outbox identity, receiver replay, and authenticated acknowledgements without invented transport liveness
 import Kernel.ProviderExecutionLease  -- prepaid provider work, irreversible start, terminal settlement, retries, races, and separately authorized refunds
 import Kernel.CanonicalEscrowMarket  -- authorized deposit/fill/cancel/expire/refund orders conserve resources, settle fees atomically, and reject replay or fill/close races

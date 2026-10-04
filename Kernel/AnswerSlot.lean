@@ -18,6 +18,7 @@ awaiting activity's declared response type before it is ever written
 `broken` the `broken` outcome of the activity. Upgrade-driven `upgraded` and
 kernel-driven `conflict` are outcomes of the activity, never slot decisions. -/
 import Kernel.ObjectiveActivityWire
+import Kernel.ObjectiveActivityCell
 
 namespace Minidregg.Kernel.AnswerSlot
 open Minidregg.Theory Minidregg.Compiler
@@ -100,8 +101,13 @@ def name (turn : TransactionId) (activity : CellId) (generation : Nat) : Digest 
   tagged "DREGG/OBJECTIVE/ANSWER-SLOT/NAME/v1"
     (digestStream.encode turn ++ digestStream.encode activity ++ StreamCodec.nat.encode generation)
 
-def cell (slotName : Digest) : CellId :=
-  tagged "DREGG/OBJECTIVE/ANSWER-SLOT/CELL/v1" (digestStream.encode slotName)
+/-- The coordinate preimage of a slot cell: its name. -/
+def key (slotName : Digest) : Bytes := digestStream.encode slotName
+
+/-- The slot's cell: a protected activity coordinate of the deployment
+(`ObjectiveActivityCell.coordinate`, role `slot`). -/
+def cell (domain : Digest) (slotName : Digest) : CellId :=
+  ⟨ObjectiveActivityCell.coordinate domain .slot (key slotName)⟩
 
 /-- The one claim every decision of this slot spends. -/
 def decisionClaim (slotName : Digest) : StableNullifier :=

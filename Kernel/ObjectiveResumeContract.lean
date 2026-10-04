@@ -20,6 +20,7 @@ delivery decodes only the record cell's own bytes). -/
 import Kernel.ObjectiveActivity
 import Theory.ObjectiveBendDemandPreservation
 import Theory.ObjectiveBendCheckpointRoundTrip
+import Theory.ObjectiveBendDemandCollectProofs
 
 namespace Minidregg.Kernel.ObjectiveResumeContract
 open Minidregg.Theory Minidregg.Compiler
@@ -32,6 +33,8 @@ open Minidregg.Theory.ObjectiveBendTyping
 open Minidregg.Theory.ObjectiveBendDemandMachine
 open Minidregg.Theory.ObjectiveBendDemandTyping
 open Minidregg.Theory.ObjectiveBendDemandPreservation
+open Minidregg.Theory.ObjectiveBendDemandCollect (collect typed_collect collect_resume_segment)
+open Minidregg.Theory.ObjectiveBendOpenRecursion (Term)
 set_option autoImplicit false
 
 /-- The checkpoint bytes decode to exactly the state they encode. -/
@@ -60,10 +63,12 @@ theorem typed_runBounded_yielded {assumptions : Assumptions} {types : AddressTyp
              exact ih next (by simpa [fits] using ran)
            · simp [fits] at ran)
 
-/-- A segment that yielded came from the bounded executor's yield. -/
+/-- A segment that yielded came from the bounded executor's yield, and keeps
+that yield collected. -/
 theorem runSegment_yielded {config : Config} {ticks : Nat} {start state : State} {plan : PlanAwait}
     (ran : runSegment config ticks start = .ok (.yielded state plan)) :
-    ∃ address, runBounded config.limits ticks start = .yielded address state := by
+    ∃ address retained, runBounded config.limits ticks start = .yielded address retained ∧
+      state = collect retained := by
   unfold runSegment at ran
   split at ran
   · rename_i address yielded equation
@@ -71,7 +76,7 @@ theorem runSegment_yielded {config : Config} {ticks : Nat} {start state : State}
     · simp only [bind, Except.bind] at ran
       split at ran
       · cases ran
-      · cases ran; exact ⟨address, equation⟩
+      · cases ran; exact ⟨address, yielded, equation, rfl⟩
     · cases ran
   · split at ran <;> cases ran
   · cases ran
@@ -91,9 +96,9 @@ theorem segmentCommit_yielded {rootBytes : Bytes → Digest} {config : Config}
   · cases ok; exact ⟨_, rfl⟩
 
 /-- The record that ends a yielded segment stores exactly its yielded state. -/
-theorem nextRecord_checkpoint (base : Record) (escrow : Escrow) (generation : Nat) (state : State)
+theorem nextRecord_checkpoint (base : Record) (generation : Nat) (state : State)
     (plan : PlanAwait) (yielded : YieldCommit) :
-    (nextRecord base escrow generation (.yielded state plan) (some yielded)).checkpoint =
+    (nextRecord base generation (.yielded state plan) (some yielded)).checkpoint =
       checkpointBytes state := rfl
 
 /-- **A birth stores a well-typed checkpoint.** -/
@@ -110,9 +115,11 @@ theorem birth_checkpoint_typed {rootBytes : Bytes → Digest} {config : Config} 
     exact decodeCheckpoint_checkpointBytes state
   · have ran := birth.segmentExact
     rw [yieldedSegment] at ran
-    obtain ⟨_, executed⟩ := runSegment_yielded ran
-    exact typed_runBounded_yielded
+    obtain ⟨_, retained, executed, collected⟩ := runSegment_yielded ran
+    obtain ⟨_, ⟨typed⟩⟩ := typed_runBounded_yielded
       (checked_initial_state birth.program.applied birth.program.checked) config.limits request.ticks executed
+    subst collected
+    exact ⟨_, ⟨typed_collect typed⟩⟩
 
 /-- **A delivery stores a well-typed checkpoint.** If the checkpoint it decoded
 from the record cell was typed at the program's checked type (as every
@@ -142,9 +149,73 @@ theorem delivery_checkpoint_typed {rootBytes : Bytes → Digest} {config : Confi
     obtain ⟨resumedState⟩ := resumedTyped
     have ran := delivery.segmentExact
     rw [yieldedSegment] at ran
-    obtain ⟨_, executed⟩ := runSegment_yielded ran
+    obtain ⟨_, retained, executed, collected⟩ := runSegment_yielded ran
     rw [computation]
-    exact typed_runBounded_yielded resumedState config.limits delivery.envelope executed
+    obtain ⟨_, ⟨typedRetained⟩⟩ := typed_runBounded_yielded resumedState config.limits delivery.envelope executed
+    subst collected
+    exact ⟨_, ⟨typed_collect typedRetained⟩⟩
+
+/-- Two segments end alike: the same Plan, the same result, the same fault. -/
+def Segment.Agrees : Segment → Segment → Prop
+  | .yielded _ plan, .yielded _ plan' => plan.state = plan'.state ∧ plan.source = plan'.source ∧
+      plan.patience = plan'.patience
+  | .finished result, .finished result' => result = result'
+  | .faulted reason, .faulted reason' => reason = reason'
+  | _, _ => False
+
+/-- **Collection at the yield preserves behaviour (T5, at the kernel).** Whatever
+a segment resumed from an uncollected yielded state commits, the segment
+resumed from its collection commits alike: the same next Plan (state, source,
+patience), the same result, the same fault. The kernel stores the collection
+(`runSegment`), so every delivery resumes a collected checkpoint and ends as
+the uncollected one would have. -/
+theorem runSegment_collect {config : Config} {ticks : Nat} {state resumed : State} {response : Term}
+    (yielded : resume response state = some resumed) {segment : Segment}
+    (ran : runSegment config ticks resumed = .ok segment) :
+    ∃ resumed' segment', resume response (collect state) = some resumed' ∧
+      runSegment config ticks resumed' = .ok segment' ∧ Segment.Agrees segment segment' := by
+  obtain ⟨resumed', again, onYield, onFinish, onDiverge, onRefuse⟩ :=
+    collect_resume_segment yielded config.limits ticks config.planBudget
+  refine ⟨resumed', ?_⟩
+  unfold runSegment at ran
+  split at ran
+  · rename_i address retained equation
+    split at ran
+    · rename_i extracted extractedExact
+      simp only [bind, Except.bind] at ran
+      split at ran
+      · cases ran
+      · rename_i plan decoded
+        cases ran
+        obtain ⟨y', r', run', _, extracted', same⟩ := onYield address retained extracted equation extractedExact
+        refine ⟨.yielded (collect y') plan, again, ?_, ⟨rfl, rfl, rfl⟩⟩
+        unfold runSegment
+        rw [run']
+        simp only [extracted', same, decoded, bind, Except.bind, pure, Except.pure]
+    · cases ran
+  · rename_i value retained equation
+    split at ran
+    · rename_i result resultExact
+      cases ran
+      obtain ⟨y', r', run', complete', same⟩ := onFinish value retained result equation resultExact
+      refine ⟨.finished r'.value, again, ?_, same.symm⟩
+      unfold runSegment
+      rw [run']
+      simp only [complete']
+    · cases ran
+  · rename_i address retained equation
+    cases ran
+    obtain ⟨y', run'⟩ := onDiverge address retained equation
+    refine ⟨.faulted "divergent", again, ?_, rfl⟩
+    unfold runSegment
+    rw [run']
+  · rename_i reason retained equation
+    cases ran
+    obtain ⟨y', run'⟩ := onRefuse reason retained equation
+    refine ⟨.faulted (reprStr reason), again, ?_, rfl⟩
+    unfold runSegment
+    rw [run']
+  · cases ran
 
 #assert_axioms decodeCheckpoint_checkpointBytes
 #assert_axioms typed_runBounded_yielded
@@ -152,4 +223,5 @@ theorem delivery_checkpoint_typed {rootBytes : Bytes → Digest} {config : Confi
 #assert_axioms segmentCommit_yielded
 #assert_axioms birth_checkpoint_typed
 #assert_axioms delivery_checkpoint_typed
+#assert_axioms runSegment_collect
 end Minidregg.Kernel.ObjectiveResumeContract

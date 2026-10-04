@@ -15,6 +15,7 @@ import Compiler.Tower256ConcreteBackend
 import Compiler.PolicyRecordCodec
 import Compiler.ResourceBirthCodec
 import Theory.AssertAxioms
+import Theory.ResourceCost
 
 namespace Minidregg.Kernel.ObjectiveActivityWire
 open Minidregg.Theory Minidregg.Compiler
@@ -214,18 +215,30 @@ CAS already binds them. -/
 def readOnly (rootBytes : Bytes → Digest) (posts : List Post) (guards : List ReadGuard) : List ReadGuard :=
   guards.filter fun guard => decide (guard.cellId ∉ (posts.map (Post.write rootBytes)).map DataWrite.cellId)
 
+/-- What the admitting receiver adds to a kernel turn: the guards of the
+authority it checked (authority cell, capability laws), its own claims (the
+signed marker), the replay event that carries the signed ingress, the signer,
+and the exact charge of the turn's footprint. The kernel turn is ONE intent
+whatever sealing it carries: `intentOf` below. -/
+structure Seal where
+  guards : List ReadGuard
+  nullifiers : List StableNullifier
+  event : StableEvent
+  subject : Option SubjectId
+  charge : List Post → List ReadGuard → Minidregg.Theory.ResourceCost.Charge
+
 /-- The one constructor of every activity-kernel intent: writes are exactly the
-post images, so their roots are bound by construction. -/
+post images, so their roots are bound by construction; the seal's guards and
+claims join the kernel's. -/
 def intentOf (rootBytes : Bytes → Digest) (transaction : TransactionId) (posts : List Post)
-    (guards : List ReadGuard) (nullifiers : List StableNullifier) (event : StableEvent)
-    (subject : Option SubjectId) : DataIntent rootBytes where
+    (guards : List ReadGuard) (nullifiers : List StableNullifier) (sealing : Seal) : DataIntent rootBytes where
   transactionId := transaction
   writes := posts.map (Post.write rootBytes)
-  readGuards := readOnly rootBytes posts guards
-  nullifiers := nullifiers
-  exactCharge := fun _ => 0
-  event := event
-  subject := subject
+  readGuards := readOnly rootBytes posts (guards ++ sealing.guards)
+  nullifiers := nullifiers ++ sealing.nullifiers
+  exactCharge := sealing.charge posts (readOnly rootBytes posts (guards ++ sealing.guards))
+  event := sealing.event
+  subject := sealing.subject
   postRootsBound := by
     intro write member
     simp only [List.mem_map] at member
@@ -236,15 +249,17 @@ def intentOf (rootBytes : Bytes → Digest) (transaction : TransactionId) (posts
     exact of_decide_eq_true (List.mem_filter.mp member).2
 
 @[simp] theorem intentOf_nullifiers (rootBytes : Bytes → Digest) (transaction : TransactionId)
-    (posts : List Post) (guards : List ReadGuard) (nullifiers : List StableNullifier)
-    (event : StableEvent) (subject : Option SubjectId) :
-    (intentOf rootBytes transaction posts guards nullifiers event subject).nullifiers = nullifiers := rfl
+    (posts : List Post) (guards : List ReadGuard) (nullifiers : List StableNullifier) (sealing : Seal) :
+    (intentOf rootBytes transaction posts guards nullifiers sealing).nullifiers = nullifiers ++ sealing.nullifiers := rfl
 
 @[simp] theorem intentOf_writes (rootBytes : Bytes → Digest) (transaction : TransactionId)
-    (posts : List Post) (guards : List ReadGuard) (nullifiers : List StableNullifier)
-    (event : StableEvent) (subject : Option SubjectId) :
-    (intentOf rootBytes transaction posts guards nullifiers event subject).writes =
+    (posts : List Post) (guards : List ReadGuard) (nullifiers : List StableNullifier) (sealing : Seal) :
+    (intentOf rootBytes transaction posts guards nullifiers sealing).writes =
       posts.map (Post.write rootBytes) := rfl
+
+@[simp] theorem intentOf_transaction (rootBytes : Bytes → Digest) (transaction : TransactionId)
+    (posts : List Post) (guards : List ReadGuard) (nullifiers : List StableNullifier) (sealing : Seal) :
+    (intentOf rootBytes transaction posts guards nullifiers sealing).transactionId = transaction := rfl
 
 /-- A kernel claim: version, the activity kernel's domain, a tagged id, and the
 exact claim bytes (byte-distinct claims stay distinct under a colliding hash). -/
