@@ -42,11 +42,12 @@ def openExisting (config : Config) : IO (Except String (Opened config)) := do
 /-- Operator audit: the genesis re-admission of every retained signed ingress
 by its real native receiver at its original prefix height, compared with the
 stored history record for record (formerly the request path's `verifyLoaded`).
-Returns the number of accepted records audited and the presence and link
-indexes of the re-admitted history (`NativeHostReplay.Verified.index_from_replay`
-and `Verified.linkIndex_from_replay`: they are the stored log's indexes). -/
+Returns the receipts the re-admission recomputed, one per accepted record in
+order, and the presence and link indexes of the re-admitted history
+(`NativeHostReplay.Verified.index_from_replay` and
+`Verified.linkIndex_from_replay`: they are the stored log's indexes). -/
 private def auditWithTiming (config : Config) (timing : AuditTiming.Handle) :
-    IO (Except String (Nat × PresenceIndex.Index × LinkIndex.Index)) := do
+    IO (Except String (List NativeHostCodec.Receipt × PresenceIndex.Index × LinkIndex.Index)) := do
   match ← AuditTiming.measure timing (fun _ => "load")
       (DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes) with
   | .error detail => return .error detail
@@ -54,13 +55,13 @@ private def auditWithTiming (config : Config) (timing : AuditTiming.Handle) :
       match ← NativeHostReplay.verifyLoaded config durable timing with
       | .error failure =>
           return .error s!"audit refused history at entry {failure.index}: {failure.detail}"
-      | .ok verified => return .ok (verified.receipts.length, verified.opened.durable.index,
+      | .ok verified => return .ok (verified.receipts, verified.opened.durable.index,
           verified.opened.durable.links)
 
 /-- Timing is opt-in operator output only; the profile, durable image and
 all receiving judgments are exactly the same arguments as ordinary audit. -/
 def audit (config : Config) :
-    IO (Except String (Nat × PresenceIndex.Index × LinkIndex.Index)) := do
+    IO (Except String (List NativeHostCodec.Receipt × PresenceIndex.Index × LinkIndex.Index)) := do
   let timing ← AuditTiming.fromEnvironment
   let result ← try auditWithTiming config timing catch error =>
     AuditTiming.report timing "exception"

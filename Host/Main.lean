@@ -7227,8 +7227,17 @@ def run (arguments : List String) : IO UInt32 := do
               | .error reason => throw (IO.userError s!"object audience observation refused: {repr reason}")
             writeJson output (objectAudienceJson view)
             pure 0
-      | "audit", [] =>
+      | "audit", options =>
+          -- `--receipts FILE` writes every receipt the re-admission recomputed,
+          -- in order, each in the canonical receipt codec: the control that an
+          -- audit-path change left every original-ingress receipt byte-identical.
+          let receiptsOut ← match options with
+            | [] => pure none
+            | ["--receipts", path] => pure (some path)
+            | _ => throw (IO.userError "usage: audit [--receipts FILE]")
           withPinnedSignature config fun pinnedConfig => do
+            if settings.carryRegistry.isSome && receiptsOut.isSome then
+              throw (IO.userError "audit --receipts is not available for a carried registry")
             let (count, index, links) ← if settings.carryRegistry.isSome then do
               let opened ← IO.ofExcept (← NativeHost.openExisting pinnedConfig)
               let registry ← loadCarryRegistry settings
@@ -7237,7 +7246,11 @@ def run (arguments : List String) : IO UInt32 := do
               let walked ← IO.ofExcept (← CarriedNativeHostSession.start pinnedConfig opened.durable custody)
               pure (walked.verified.opened.durable.height, walked.verified.opened.durable.index,
                  walked.verified.opened.durable.links)
-            else IO.ofExcept (← NativeHost.audit pinnedConfig)
+            else do
+              let (receipts, index, links) ← IO.ofExcept (← NativeHost.audit pinnedConfig)
+              if let some path := receiptsOut then
+                writeBytes path (receipts.flatMap NativeHostCodec.receiptStream.encode)
+              pure (receipts.length, index, links)
             IO.println s!"audited {count} accepted records: every signed ingress re-admitted at its original prefix"
             IO.println s!"index {(presenceIndexJson index).compress}"
             IO.println s!"links {(linkIndexJson links).compress}"
