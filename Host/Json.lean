@@ -1336,24 +1336,20 @@ private def invocationFamily (path : String) (json : Lean.Json) :
 
 private def command (path : String) (json : Lean.Json) : Result DeclaredResourceController.Command := do
   let raw ← object path json
-  let extras := ["run", "bend", "family"].filter (fun key => (raw.get? key).isSome)
+  let extras := ["run", "family"].filter (fun key => (raw.get? key).isSome)
   let obj ← exactObject path (["subject", "nonce", "targets"] ++ extras) json
-  if (raw.get? "bend").isSome then
-    failAt path "retired Bend claim; use the registered Objective invocation family"
-  else
-    let run ← match obj.get? "run" with
-      | none => pure none
-      | some value => some <$> runClaim (path ++ ".run") value
-    let family ← match obj.get? "family" with
-      | none => pure none
-      | some value => some <$> invocationFamily (path ++ ".family") value
-    pure {
-      subject := ⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩
-      nonce := ← nat (path ++ ".nonce") (← field path "nonce" obj)
-      targets := ← list (path ++ ".targets") commandTarget (← field path "targets" obj)
-      run := run
-      bend := none
-      family := family }
+  let run ← match obj.get? "run" with
+    | none => pure none
+    | some value => some <$> runClaim (path ++ ".run") value
+  let family ← match obj.get? "family" with
+    | none => pure none
+    | some value => some <$> invocationFamily (path ++ ".family") value
+  pure {
+    subject := ⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩
+    nonce := ← nat (path ++ ".nonce") (← field path "nonce" obj)
+    targets := ← list (path ++ ".targets") commandTarget (← field path "targets" obj)
+    run := run
+    family := family }
 
 private def canonicalSource {α : Type} (path : String) (codec : IndexedProgram.LawfulCodec α)
     (json : Lean.Json) : Result (List UInt8) := do

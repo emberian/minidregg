@@ -10,8 +10,7 @@
       "Assurance.BendObliviousSourceJoin",
       "Assurance.BendArithmeticQualification",
       "Compiler.BendNaturalRefinement",
-      "Compiler.BendNaturalArtifact",
-      "Kernel.ObjectiveBendCallContext"
+      "Compiler.BendNaturalArtifact"
     ],
     "SimplexQualification": [
       "Kernel.GeneralSimplexReachability",
@@ -27,6 +26,7 @@
     "ResearchWip"
   ],
   "programRoots": [
+    "Compiler.ObjectiveBendEmitCRun",
     "Compiler.PrivateBackendBoundaryFixture",
     "Host.BendActivityAuthor",
     "Host.BendActivityFixture",
@@ -46,22 +46,16 @@
     "Host.BendSessionRetentionCheck",
     "Host.BendSurfaceSmoke",
     "Host.BendTraceIR2Emit",
-    "Host.ObjectiveBendCaptured",
     "Host.ObjectiveBendElaborateRun",
-    "Host.ObjectiveBendPartialAuthor",
     "Host.ObjectiveBendPreview",
-    "Host.ObjectiveBendPublicationAuthor",
+    "Host.ObjectiveStudioPublication",
     "Host.ObliviousNatAddEmit",
     "Host.PortableContinuationProbe",
     "Host.PrivateCircuitPlanFixture",
     "Host.SourceAgreementReader",
     "Host.WorldPrototypeDefinitionAuthor",
     "Verify.BendCommittedIR2Emit",
-    "Verify.BendControllerCommitmentEmit",
     "Verify.BendMinimalCensus",
-    "Verify.BendUnrolledCensus",
-    "Verify.BendUnrolledDirectEmit",
-    "Verify.BendUnrolledIR2Emit",
     "Verify.GenericSimplexHarness",
     "Verify.GenericSimplexNativeHarness",
     "Verify.NativeActivitySourceFixture",
@@ -127,9 +121,9 @@
     {
       "module": "Assurance.BendArithmeticQualification",
       "path": "Assurance/BendArithmeticQualification.lean",
-      "sha256": "5f8baa0b0770d544da5f5f0f33f51569308abb24b94d11a3d8d58980c11d7ffd",
+      "sha256": "b6a227e85e20a05b57e80b3bb454a36789733ff5ce070a82067ceca12094d156",
       "surface": "default",
-      "ownerReportedStatus": "ACTUAL PASS12:45-12:46; conditional source receiver and focused target"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Assurance.BendClosureChecks",
@@ -158,13 +152,6 @@
       "sha256": "ba84f0eefefa815469fbb4a3a02599a31f414c822e204520c8840fab235e5575",
       "surface": "authored-research",
       "ownerReportedStatus": "PASS scoped Lean+axiom accounting; Host separately executed save/resume cuts7/3/12"
-    },
-    {
-      "module": "Assurance.BendDirectUnrolledSource",
-      "path": "Assurance/BendDirectUnrolledSource.lean",
-      "sha256": "df2f0fa2a52f0fee54aee5fc011f91753d6e2efd5b2fdcaabd08019859922276",
-      "surface": "authored-research",
-      "ownerReportedStatus": "PASS exact Lean4.30 scoped source check; general named statements, not closed case substitute"
     },
     {
       "module": "Assurance.BendLiveChecks",
@@ -235,13 +222,6 @@
       "sha256": "0e3a1aa5e40aa5b180ab02bd9144b065ecb3ed9ce10fba0df164b9d4b0cb7a85",
       "surface": "default",
       "ownerReportedStatus": "Captain hunk integration; coherent compilation pending"
-    },
-    {
-      "module": "Assurance.BendUnrolledSource",
-      "path": "Assurance/BendUnrolledSource.lean",
-      "sha256": "a2528eb17bd4d0f430f075d60b5b9840165e621f7e466b6f685614013c528f71",
-      "surface": "default",
-      "ownerReportedStatus": "ACTUAL PASS12:45-12:46; conditional source receiver and focused target"
     },
     {
       "module": "Assurance.BfvAcceptedCellEffect",
@@ -710,6 +690,27 @@
       "path": "Assurance/NoteSpendProofControllerAdmission.lean",
       "sha256": "776307adb5bb56acef3f6f110ad70cee2bfab571eb1094ae0afab842339dba0e",
       "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Assurance.ObjectiveBendCommittedSource",
+      "path": "Assurance/ObjectiveBendCommittedSource.lean",
+      "sha256": "751bb561ccb71e16fd21d5672d68b47bd4e6d08ed8d05184a60606342b30c205",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Assurance.ObjectiveBendProofSource",
+      "path": "Assurance/ObjectiveBendProofSource.lean",
+      "sha256": "fba7b96964744b60f38e4ab2a73ee7e2acded8601b0722e89715d7fe13f480f6",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Assurance.ObjectiveBendZkClaims",
+      "path": "Assurance/ObjectiveBendZkClaims.lean",
+      "sha256": "c07432a72c65e29ef681fcaa7ebc9c3ee21d1ce418ad956255746c8188cb0f68",
+      "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
@@ -1191,7 +1192,7 @@
     {
       "module": "BendQualification",
       "path": "BendQualification.lean",
-      "sha256": "c69aea46242f56e00e9924a98e63578b491468a70c8c060493413112ff8870e0",
+      "sha256": "c1817639de8bea0d82a83ce71d626bb0844f0c4e6f2a34d8389e7bf8950a389e",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -1329,13 +1330,6 @@
       "ownerReportedStatus": "AUTHORED WIP UNCOMPILED; origin codec factored below source admission"
     },
     {
-      "module": "Compiler.BendActivityOutcomeTyping",
-      "path": "Compiler/BendActivityOutcomeTyping.lean",
-      "sha256": "046e981eafb46e43c687f9b7fdcacc4b7cb7be63d6412afdf9416ee025c0f883",
-      "surface": "authored-research",
-      "ownerReportedStatus": "UNCOMPILED WIP; requires frozen Activity v2 Outcome cohort; baseline v1 untouched"
-    },
-    {
       "module": "Compiler.BendActivityPlanAdapter",
       "path": "Compiler/BendActivityPlanAdapter.lean",
       "sha256": "de8563d187115d8762ed1d40b0ca85bf59a6e240ce2be9ee481f5c3700035188",
@@ -1443,9 +1437,9 @@
     {
       "module": "Compiler.BendCommitmentFrame",
       "path": "Compiler/BendCommitmentFrame.lean",
-      "sha256": "d6c48cfad7589def25cf8f15aae2364fb0f8ec7bdc3d812ed84332810a79e97a",
-      "surface": "authored-research",
-      "ownerReportedStatus": "PASS exact byte framing theorem and executable canonical wire framing; generic graph refinement open"
+      "sha256": "3cdbef79ab0cac89c8e3c3ca9c793b483019b4cd30394e17f7f443da961b9e14",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.BendCommitmentFrameChecks",
@@ -1455,52 +1449,45 @@
       "ownerReportedStatus": "PASS 3 compiled salt/empty/private payload and many-hot refusal cases"
     },
     {
-      "module": "Compiler.BendCommitmentReduction",
-      "path": "Compiler/BendCommitmentReduction.lean",
-      "sha256": "dd3a63b3972fee4beee1d0e0801b805c49b8691414da2689bfe3dd5fc640e29a",
-      "surface": "authored-research",
-      "ownerReportedStatus": "PASS complete Result/input opening equivocation constructs actual hash collision"
-    },
-    {
       "module": "Compiler.BendCommittedNetwork",
       "path": "Compiler/BendCommittedNetwork.lean",
-      "sha256": "b5a3e91f1b25349f699819353e9c26c38ecaaf603157e32d7d7adc8e203d14a2",
-      "surface": "authored-research",
-      "ownerReportedStatus": "PASS actual shared-wire producer, exact payload alias theorem, general arbitrary field row forces both graph relations"
+      "sha256": "eb1abd77392911849f805074d9d5caa5a059720f4a9c0d6c2493ff810f75e433",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.BendCommittedNetworkChecks",
       "path": "Compiler/BendCommittedNetworkChecks.lean",
-      "sha256": "42b7ea4e76fd6f68bd483a557fffc21b27f3bb3899cc44300073a759d60d0d6b",
+      "sha256": "a3bc33f561c90fffedd1f65d7e1eaa739f670f5fb056993a56f6f7b170c9ff3f",
       "surface": "authored-research",
-      "ownerReportedStatus": "PASS inhabited exact shared output\u2192canonical frame/hash for two private inputs and malformed map refusal"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.BendCommittedPreparation",
       "path": "Compiler/BendCommittedPreparation.lean",
-      "sha256": "a654882d9988f48b17cd03d1099e964e0591e5ccea2593ca93ac70c4b145e7a6",
+      "sha256": "18b5327ca407573922614f0a66ecfd1ef2854b73fe12e1a10d727eae6bfa3f82",
       "surface": "authored-research",
-      "ownerReportedStatus": "PASS actual scoped Lean checks and V5 native artifact/controller tests; exact scope in QUALIFICATION-R33.txt"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.BendCommittedRun",
       "path": "Compiler/BendCommittedRun.lean",
       "sha256": "37a5b0f28826dbd90a7772f66d8748b850c31034eab29de83e0137da2dad3719",
-      "surface": "authored-research",
+      "surface": "default",
       "ownerReportedStatus": "PASS counted success AND; arbitrary satisfying graph success implies execution handled AND commitment valid, retains original constraints"
     },
     {
       "module": "Compiler.BendCommittedRunSound",
       "path": "Compiler/BendCommittedRunSound.lean",
       "sha256": "c4e27758b91847394f7bba5db326e1c557c3fa75a9a062385e45e0dfabadb5d7",
-      "surface": "authored-research",
+      "surface": "default",
       "ownerReportedStatus": "PASS actual new narrow Lean/native consumers; see QUALIFICATION-R32.txt for exact scope"
     },
     {
       "module": "Compiler.BendCommittedUnroll",
       "path": "Compiler/BendCommittedUnroll.lean",
       "sha256": "7f87dfa210c6086411a5711027e3ffa93dc51a1f7ebf070dc93c56da3caf6ad6",
-      "surface": "authored-research",
+      "surface": "default",
       "ownerReportedStatus": "PASS actual scoped Lean checks and V5 native artifact/controller tests; exact scope in QUALIFICATION-R33.txt"
     },
     {
@@ -1514,7 +1501,7 @@
       "module": "Compiler.BendExecutionClaim",
       "path": "Compiler/BendExecutionClaim.lean",
       "sha256": "b75547c842e6f7705497bbc53a91644a603d7d0212f952d2bf154a270cb19e23",
-      "surface": "default",
+      "surface": "authored-research",
       "ownerReportedStatus": "AUTHORED_UNCOMPILED_DELTA"
     },
     {
@@ -1535,7 +1522,7 @@
       "module": "Compiler.BendInvocation",
       "path": "Compiler/BendInvocation.lean",
       "sha256": "4f8cad525bdb46fb59171655d0d76f3f17fec29dec8f2987f98e1c1370b2cbce",
-      "surface": "default",
+      "surface": "authored-research",
       "ownerReportedStatus": "SCOPED_LEAN_PASS"
     },
     {
@@ -1647,7 +1634,7 @@
       "module": "Compiler.BendNativeInput",
       "path": "Compiler/BendNativeInput.lean",
       "sha256": "c0f10a8b8d65cf147400d10e9e7bab6da3fac1386b41500f2f6318119cdbe042",
-      "surface": "default",
+      "surface": "authored-research",
       "ownerReportedStatus": "ACTUAL_PASS_CONTEXT2 check-native-context-02"
     },
     {
@@ -1850,7 +1837,7 @@
       "module": "Compiler.BendPlanLowering",
       "path": "Compiler/BendPlanLowering.lean",
       "sha256": "733655f77a39fae9f9949b2a90725f8c5af0b6f6a9eda04fd1a7bb0120ceff8c",
-      "surface": "default",
+      "surface": "authored-research",
       "ownerReportedStatus": "SCOPED_LEAN_PASS producer02/04"
     },
     {
@@ -1864,28 +1851,28 @@
       "module": "Compiler.BendPrivateCapacity",
       "path": "Compiler/BendPrivateCapacity.lean",
       "sha256": "83b1f1c428635e8a46eb79a6bde80b671840971edd2bcd35f57575d2c8823e49",
-      "surface": "default",
+      "surface": "authored-research",
       "ownerReportedStatus": "SCOPED_LEAN_PASS"
     },
     {
       "module": "Compiler.BendProofBytes",
       "path": "Compiler/BendProofBytes.lean",
       "sha256": "6059b0342b3e20d0300330b2aa2857a190843fc910bc54530a93b0e65b652909",
-      "surface": "default",
+      "surface": "authored-research",
       "ownerReportedStatus": "AUTHORED UNCOMPILED review delta; native v3 check queued; prior exact qualifications retained in docs"
     },
     {
       "module": "Compiler.BendProofCshake",
       "path": "Compiler/BendProofCshake.lean",
       "sha256": "3ece5abc100b18961c2aa36d0a52fb3baa48927870fde55e2cce930fe80ef6f7",
-      "surface": "authored-research",
+      "surface": "default",
       "ownerReportedStatus": "PASS shared Boolean cSHAKE graph; universal sponge refinement OPEN"
     },
     {
       "module": "Compiler.BendProofCshakeBounded",
       "path": "Compiler/BendProofCshakeBounded.lean",
       "sha256": "41f11ae1a120b7af061596378b6dbb12e213f6301f51b7a2756aba483a5683dd",
-      "surface": "authored-research",
+      "surface": "default",
       "ownerReportedStatus": "PASS public-prefix specification constants variant; original whole-prefix reference retained"
     },
     {
@@ -1906,7 +1893,7 @@
       "module": "Compiler.BendProofKeccak",
       "path": "Compiler/BendProofKeccak.lean",
       "sha256": "c0af4ab93c3354bb4cfca01b43f2a2747f6c7986822fd280f83195a8c356ea47",
-      "surface": "authored-research",
+      "surface": "default",
       "ownerReportedStatus": "ACTUAL PASS generator;3 explicit #assert_compiled conformance facts11:45:02, not general refinement"
     },
     {
@@ -1917,45 +1904,38 @@
       "ownerReportedStatus": "ACTUAL PASS generator;3 explicit #assert_compiled conformance facts11:45:02, not general refinement"
     },
     {
-      "module": "Compiler.BendProofProjection",
-      "path": "Compiler/BendProofProjection.lean",
-      "sha256": "88cc93161a453021a63874203a8a8be7e54328d1655890aa649e961734af9ef6",
-      "surface": "default",
-      "ownerReportedStatus": "ACTUAL PASS12:18:21 five standard-axiom gates"
-    },
-    {
       "module": "Compiler.BendReturnStoragePlan",
       "path": "Compiler/BendReturnStoragePlan.lean",
-      "sha256": "9d2fcd3badb353a3bedfcffec53df1300270269065be284fb9860db69c9a6064",
+      "sha256": "4bdf5401e5e2bb7d47786fbf845240ccbf3eab870f7a837212195f57b8f1b873",
       "surface": "authored-research",
-      "ownerReportedStatus": "AUTHORED_UNCOMPILED"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.BendRunCore",
       "path": "Compiler/BendRunCore.lean",
       "sha256": "139d063c6e8347009495c8cb1608c421cc9e11c45efc98e31946fab8e0fd4179",
-      "surface": "default",
+      "surface": "authored-research",
       "ownerReportedStatus": "PURE6_ACTUAL_PASS; general result_typed preservation AUTHORED_UNCOMPILED"
     },
     {
       "module": "Compiler.BendScalarPlanAdapter",
       "path": "Compiler/BendScalarPlanAdapter.lean",
       "sha256": "21dac834ff0a277a413db624960ea685ccd3649a4053998288dece005cb3e8be",
-      "surface": "default",
+      "surface": "authored-research",
       "ownerReportedStatus": "PASS check-physical-reads-03.log coherent base+directv2consumer allstandard3axiomgates"
     },
     {
       "module": "Compiler.BendScalarPlanBytesAdapter",
       "path": "Compiler/BendScalarPlanBytesAdapter.lean",
       "sha256": "e41f1c77c5e0f57662159d6525af49e56106e2c8e8823cb00330bb58526d2fab",
-      "surface": "default",
+      "surface": "authored-research",
       "ownerReportedStatus": "PASS check-physical-reads-03.log coherent base+directv2consumer allstandard3axiomgates"
     },
     {
       "module": "Compiler.BendScalarPlanCanonical",
       "path": "Compiler/BendScalarPlanCanonical.lean",
       "sha256": "d5fedb224a8d9531e4308e729dc21b27a7406547b8874ddce6c2ff633d18cd73",
-      "surface": "default",
+      "surface": "authored-research",
       "ownerReportedStatus": "PASS check-leaves-04.log boundedleaf4 allaxiomgates standard3"
     },
     {
@@ -1969,14 +1949,14 @@
       "module": "Compiler.BendSourceByteCodec",
       "path": "Compiler/BendSourceByteCodec.lean",
       "sha256": "48d7f8c926f52da38141a3b3b6bd7cf93732244ffbbe8ee9488858ca1578cf40",
-      "surface": "default",
+      "surface": "authored-research",
       "ownerReportedStatus": "qualified-standard-three"
     },
     {
       "module": "Compiler.BendSourceCanonicalCodec",
       "path": "Compiler/BendSourceCanonicalCodec.lean",
       "sha256": "11514e558e0aeffe915baf764c7aca8eecf55600ef69bf2baa5c2b60fcdad5e4",
-      "surface": "default",
+      "surface": "authored-research",
       "ownerReportedStatus": "PASS direct Lean4.30 two threads all #assert_axioms standard-three; actual aux releasedexit0"
     },
     {
@@ -2046,7 +2026,7 @@
       "module": "Compiler.BendTraceDirect",
       "path": "Compiler/BendTraceDirect.lean",
       "sha256": "18e0a57a356561d8867ac27aa18a78ac7b6eadd0f4729bf185c4026b3efd07e5",
-      "surface": "authored-research",
+      "surface": "default",
       "ownerReportedStatus": "PASS generic direct AIR fold equivalence and arbitrary witness network forcing"
     },
     {
@@ -2094,15 +2074,15 @@
     {
       "module": "Compiler.BendWorldPlan",
       "path": "Compiler/BendWorldPlan.lean",
-      "sha256": "78d207e1b365f9bc6ac5a8406bd7e9caec1d3c52a35183c06b319884ba2255d3",
+      "sha256": "8f0f0eb402757959214eb67942b56c999c62c36fb83c0400e54821b9d041ed0b",
       "surface": "default",
-      "ownerReportedStatus": "Captain hunk integration; coherent compilation pending"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.BendWorldProgramCodec",
       "path": "Compiler/BendWorldProgramCodec.lean",
       "sha256": "1a22c68aa7a1e7f7d5e721a501722ade1b2189fd97e9196609be2d0f3d3c00da",
-      "surface": "default",
+      "surface": "authored-research",
       "ownerReportedStatus": "AUTHORED_UNCOMPILED_DELTA"
     },
     {
@@ -2528,9 +2508,9 @@
     {
       "module": "Compiler.DurableReceiverIO",
       "path": "Compiler/DurableReceiverIO.lean",
-      "sha256": "6f7b5650122d9e8ff32698ba36db5e63ffd6e25e629b8503cc1eb5daf8bce1f4",
+      "sha256": "1294cbc0aa65db2a0bbf8d0ec41f9982bbd467cf38f5530cdb717be7a4c933e6",
       "surface": "default",
-      "ownerReportedStatus": "SOURCE_REPAIR_RECHECK_RUNNING"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.Emit",
@@ -2626,9 +2606,9 @@
     {
       "module": "Compiler.FiniteDependentMapCachedOrdering",
       "path": "Compiler/FiniteDependentMapCachedOrdering.lean",
-      "sha256": "f042cefc005fe2544a7d7cee9d7c0d63e907dd099e382f098b42e0995df9e5c9",
+      "sha256": "48f781d8c9d2aff283d2193efc410db9f748439dca70759831fa315107164099",
       "surface": "default",
-      "ownerReportedStatus": "Exact cached dependent-map/support/canonical-list preservation and Store codec Lean+C PASS; historical native successor190 FULL78 audit PASS614.48s; source identity updated; publication copy guards three exact actual log footprints; guarded copy not recompiled, theorem bodies unchanged from qualified51f6adce"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.FiniteDependentMapCodec",
@@ -2717,9 +2697,9 @@
     {
       "module": "Compiler.GenericSimplexParticipant",
       "path": "Compiler/GenericSimplexParticipant.lean",
-      "sha256": "80514e3328650a85cd91fcd7bf51802acc41bd8619772647d9ddaec4e274b052",
+      "sha256": "c2704ca68de101cb4142494bb344fbb831b72aee2104bdd1e46c09cc4638a49a",
       "surface": "authored-research",
-      "ownerReportedStatus": "PASS call-family-check.log Lean and axiom gates"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.GenericSimplexPending",
@@ -2906,16 +2886,16 @@
     {
       "module": "Compiler.NativeInvocationProfile",
       "path": "Compiler/NativeInvocationProfile.lean",
-      "sha256": "2ee47569ac6c5ac77fae0e8a60d15de227a0d185b791f73ae78922ce0db0bdc4",
-      "surface": "authored-research",
-      "ownerReportedStatus": "AUTHORED UNCOMPILED; low2 prior timeout124 no source verdict"
+      "sha256": "00111dbe9ee9b6dfa3f06b847bb4a0efd495f9269dd1493318cd6a503ba85b41",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.NativeInvocationStatement",
       "path": "Compiler/NativeInvocationStatement.lean",
-      "sha256": "8d07325cf35dc956aef77172e27673a991f6f9adf952941102424a224fcf8dd1",
-      "surface": "authored-research",
-      "ownerReportedStatus": "AUTHORED UNCOMPILED; explicit statement family; no activation"
+      "sha256": "1fc4368189b77f023cb2f3a74b18de91ae414efdcbb369e940753a4554030f08",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.NativeKernelPlan",
@@ -3016,102 +2996,109 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
-      "module": "Compiler.ObjectiveBendComposition",
-      "path": "Compiler/ObjectiveBendComposition.lean",
-      "sha256": "66fd25d1dcb5af2ab4e596d0a90521f4fcbf04a2edafd4c6f7ccb37bfa79ded2",
+      "module": "Compiler.ObjectiveBendCombinedResult",
+      "path": "Compiler/ObjectiveBendCombinedResult.lean",
+      "sha256": "d99e48d88aa0e0f65923032ec767470a53d9250fcf6250536b70410f1ca66bae",
       "surface": "default",
-      "ownerReportedStatus": "SCOPED LEAN PASS; all named axiom gates clean; source only, no native Objective Bend object carrier qualification"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
-      "module": "Compiler.ObjectiveBendConstruction",
-      "path": "Compiler/ObjectiveBendConstruction.lean",
-      "sha256": "83d6947f38e93d7d3568e37a94edc24cad2853fef22d902054c0947a88a94a08",
-      "surface": "default",
-      "ownerReportedStatus": "AUTHORED WIP UNCOMPILED"
-    },
-    {
-      "module": "Compiler.ObjectiveBendElaborate",
-      "path": "Compiler/ObjectiveBendElaborate.lean",
-      "sha256": "36c3136d9f38becdfdd4b08bbf320f3853761e0a713fdbf31c76802c9234e328",
+      "module": "Compiler.ObjectiveBendDataWire",
+      "path": "Compiler/ObjectiveBendDataWire.lean",
+      "sha256": "283c33824d44f64feb43fcd861d4751f2d71477e42f9165b5d4425feefcd6655",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
-      "module": "Compiler.ObjectiveBendElaboration",
-      "path": "Compiler/ObjectiveBendElaboration.lean",
-      "sha256": "d7e1faae560fdcc5a66a9de019d20688066f1feea55b9c8d6ff2c4eaa3d7f8a0",
-      "surface": "default",
-      "ownerReportedStatus": "SCOPED LEAN PASS; all named axiom gates clean; source only, no native Objective Bend object carrier qualification"
-    },
-    {
-      "module": "Compiler.ObjectiveBendInstance",
-      "path": "Compiler/ObjectiveBendInstance.lean",
-      "sha256": "f45e507c486781b5c30bb15b86485af68d2a47d579f8ead12564362e9c4c86f7",
-      "surface": "default",
-      "ownerReportedStatus": "ACTUAL scoped Lean PASS; all named general axiom gates clean; native runtime/profile registration and ordinary source storage/birth receiving remain consumer joins"
-    },
-    {
-      "module": "Compiler.ObjectiveBendLinker",
-      "path": "Compiler/ObjectiveBendLinker.lean",
-      "sha256": "3fc544d0ff3d1dd177b5125486ae1faae9799690d0234290e85f0c8e1598dde0",
-      "surface": "default",
-      "ownerReportedStatus": "scoped Lean PASS and named axiom gates PASS"
-    },
-    {
-      "module": "Compiler.ObjectiveBendLinkerRefinement",
-      "path": "Compiler/ObjectiveBendLinkerRefinement.lean",
-      "sha256": "c6796e4edc10d84759ebf107eb7ce4abd97104a8d7a864c582fc2b8b44540a33",
+      "module": "Compiler.ObjectiveBendElaborate",
+      "path": "Compiler/ObjectiveBendElaborate.lean",
+      "sha256": "1f910e560617a4d177ebcb34361eb1b23103ee335e385e26147406fae98b423c",
       "surface": "authored-research",
-      "ownerReportedStatus": "WIP repair after boolpredicate inference failure; generic imported BookTransport checkedPASS; ownjoin uncompiledrepair"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
-      "module": "Compiler.ObjectiveBendOrder",
-      "path": "Compiler/ObjectiveBendOrder.lean",
-      "sha256": "65a80dfab6e090a882a4265e095485ce2f9a4fdb11559c0972859cbc4b82dae2",
-      "surface": "default",
-      "ownerReportedStatus": "SCOPED LEAN PASS; all named axiom gates clean; source only, no native Objective Bend object carrier qualification"
-    },
-    {
-      "module": "Compiler.ObjectiveBendPersistence",
-      "path": "Compiler/ObjectiveBendPersistence.lean",
-      "sha256": "b0b8ef3cb3f7164e5aecc23b19b0e88c4c054fc64e1ceefabdf37e2f28e3cb1b",
+      "module": "Compiler.ObjectiveBendEmitC",
+      "path": "Compiler/ObjectiveBendEmitC.lean",
+      "sha256": "0ba07eca94c8085577e085ef59dcfcab735bc8597c4e06377ca5b0eb6c4d5b39",
       "surface": "authored-research",
-      "ownerReportedStatus": "SOURCE REPAIR AFTER FAILED SCOPED CHECK; UNQUALIFIED/UNCOMPILED"
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.ObjectiveBendEmitCRun",
+      "path": "Compiler/ObjectiveBendEmitCRun.lean",
+      "sha256": "fe94ddde30d4803d481add0b9b2538c8ecf7b3145913e0f82c8ed95c8273d526",
+      "surface": "authored-research",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.ObjectiveBendGenericResult",
+      "path": "Compiler/ObjectiveBendGenericResult.lean",
+      "sha256": "cfb4e975c235daaedceaeb6e25986a47bb91322a976c43148a09ea048c44dade",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.ObjectiveBendNativePlanData",
+      "path": "Compiler/ObjectiveBendNativePlanData.lean",
+      "sha256": "b2a401889761bbad25af91aa716f737bced83b8f8df23460c8bd3b5deacdac27",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.ObjectiveBendPlanAdapter",
       "path": "Compiler/ObjectiveBendPlanAdapter.lean",
-      "sha256": "9c5ce128d7dbc0c111ac189ceb0a0fe22e496f3f89d559b27ffbe5d3e76cc744",
+      "sha256": "8761e7f8763062d8c7cc993b392043361b895ef601e1d9a5d1a3839bb64576ce",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.ObjectiveBendQuoteRequest",
+      "path": "Compiler/ObjectiveBendQuoteRequest.lean",
+      "sha256": "ab284d34c2c150878685e5b8741dd64a112146d8dac9cae0780cf427090adb69",
       "surface": "authored-research",
-      "ownerReportedStatus": "Exact owner r7 Lean and actual source/LoadedDirectory/PreparedOutput PASS; no Accepted or submission"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
-      "module": "Compiler.ObjectiveBendPrototype",
-      "path": "Compiler/ObjectiveBendPrototype.lean",
-      "sha256": "843ae935db4d843126c0584b5f019e2a75248eaa2137c9b512398f90b54520f1",
+      "module": "Compiler.ObjectiveBendResultAdapter",
+      "path": "Compiler/ObjectiveBendResultAdapter.lean",
+      "sha256": "b424405879463e514af8790d2c017a345abc5b14066566e68b534aaa7912c4d2",
       "surface": "default",
-      "ownerReportedStatus": "SCOPED LEAN PASS; all named axiom gates clean; source only, no native Objective Bend object carrier qualification"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
-      "module": "Compiler.ObjectiveBendReference",
-      "path": "Compiler/ObjectiveBendReference.lean",
-      "sha256": "c153e03b6a4a65129df828271a4ffda2eed0e60469b638a6983fd35d6efff601",
+      "module": "Compiler.ObjectiveBendSourceArtifact",
+      "path": "Compiler/ObjectiveBendSourceArtifact.lean",
+      "sha256": "09af5924d833c37a9d1cc2296bfe169b97b111d5272b4783d0e98c832991e390",
       "surface": "default",
-      "ownerReportedStatus": "ACTUAL scoped Lean PASS; all named general axiom gates clean; native runtime/profile registration and ordinary source storage/birth receiving remain consumer joins"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
-      "module": "Compiler.ObjectiveBendReferenceInstance",
-      "path": "Compiler/ObjectiveBendReferenceInstance.lean",
-      "sha256": "573291be9a770c63a873956ce86a182f22fbd467e7863f40f3c9fbd2a97fe482",
+      "module": "Compiler.ObjectiveInvocationClaim",
+      "path": "Compiler/ObjectiveInvocationClaim.lean",
+      "sha256": "ac84454b9d1b004832e5a3bf19c5042330930bd46305e356ae4989f41d10a46c",
       "surface": "default",
-      "ownerReportedStatus": "ACTUAL scoped Lean PASS; all named general axiom gates clean; native runtime/profile registration and ordinary source storage/birth receiving remain consumer joins"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
-      "module": "Compiler.ObjectiveBendWorkshop",
-      "path": "Compiler/ObjectiveBendWorkshop.lean",
-      "sha256": "d73e9684523044f084860132612c51f69926772f4e71061cd48a82801483efeb",
-      "surface": "authored-research",
-      "ownerReportedStatus": "scoped Lean PASS and named axiom gates PASS; actual sealed source helper Book admits complete91/alternate92"
+      "module": "Compiler.ObjectiveNativeScalarBinding",
+      "path": "Compiler/ObjectiveNativeScalarBinding.lean",
+      "sha256": "7e3ee93becfdb1fd807dc5e7b8f6be6fcd49515ccc49f0ef889191cfc40871f7",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.ObjectiveProofContext",
+      "path": "Compiler/ObjectiveProofContext.lean",
+      "sha256": "4d23c74253dd57d72e4f59d6eb7f09c92041f13e33358afe7a28b2172f878df1",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.ObjectiveSourcePackage",
+      "path": "Compiler/ObjectiveSourcePackage.lean",
+      "sha256": "9a828654ae8993452fc36ec9c58360804669d0452126d130f60b50203102eb93",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.ObliviousBuilderSemantics",
@@ -3138,7 +3125,7 @@
       "module": "Compiler.ObliviousEmbedFast",
       "path": "Compiler/ObliviousEmbedFast.lean",
       "sha256": "e221602be0b0a5309a791caa83576001e23f0f6916d8da1dd79c41c2e343bfa9",
-      "surface": "authored-research",
+      "surface": "default",
       "ownerReportedStatus": "PASS linear exact SSA embedding checker equivalence"
     },
     {
@@ -3805,13 +3792,6 @@
       "sha256": "1c90cd91079c500a00e790f8333ef64e107a53b3657a44d044f3b7d864242281",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
-    },
-    {
-      "module": "Compiler.WorkshopCardReturn",
-      "path": "Compiler/WorkshopCardReturn.lean",
-      "sha256": "f863f78627ab9183d950cc91d19da86a5dd10587d9cdc6244d5f7988873286f9",
-      "surface": "authored-research",
-      "ownerReportedStatus": "SOURCE REPAIR WIP: explicit exact Option-bind reduction before proof case split; no weakened law"
     },
     {
       "module": "Compiler.WorldExecutionContract",
@@ -4537,9 +4517,9 @@
     {
       "module": "Host.Json",
       "path": "Host/Json.lean",
-      "sha256": "5bfb6c005c335e75cf5bc641e0394f588695e05b70c0e80206cad316e31ecbbe",
+      "sha256": "ad35f6c2024bd1fa38d3318dde7e3e066124923a63d22f3aa4c3f0366d95c054",
       "surface": "default",
-      "ownerReportedStatus": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Host.KeyCommitmentAdoptionInspection",
@@ -4579,9 +4559,9 @@
     {
       "module": "Host.Main",
       "path": "Host/Main.lean",
-      "sha256": "b53efd56d063558db555153bee098fdafae63767ae94a05b74278eb25986e9d0",
+      "sha256": "82be38f971d2f2931f2419d7efe7ed2aacdc704aa1ec2efd326335b2dadd4476",
       "surface": "default",
-      "ownerReportedStatus": "Remove newly introduced old BendTT activation per explicit sole Objective instruction; successor gate not yet qualified"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Host.NativeLifecycleConsent",
@@ -4619,13 +4599,6 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
-      "module": "Host.ObjectiveBendCaptured",
-      "path": "Host/ObjectiveBendCaptured.lean",
-      "sha256": "f8c88e00a2e68c9abf2861a677514b309dc84f1cef3fd89f602377f1a9812f5d",
-      "surface": "authored-research",
-      "ownerReportedStatus": "AUTHORED WIP UNCOMPILED; generic actualPackage+explicitcanonicalPartial\u2192Construct/export/report; missing metadata refuses; surface emission/native wrapper separate"
-    },
-    {
       "module": "Host.ObjectiveBendElaborateRun",
       "path": "Host/ObjectiveBendElaborateRun.lean",
       "sha256": "ad1b8bdd8c0ff3cfa17f6cc0caf0f121476ecdae3a8661b21c19976768782f97",
@@ -4633,32 +4606,18 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
-      "module": "Host.ObjectiveBendPartialAuthor",
-      "path": "Host/ObjectiveBendPartialAuthor.lean",
-      "sha256": "b41ac090ece84fa73b3aafda59a9c07ec1771ff2e3a362e61583c0c57f757baa",
-      "surface": "authored-research",
-      "ownerReportedStatus": "WIP; Studio Rust parser PASS only, new shared Host library extraction/Partial encoder uncompiled, no native Studio receiving"
-    },
-    {
       "module": "Host.ObjectiveBendPreview",
       "path": "Host/ObjectiveBendPreview.lean",
-      "sha256": "38d55940c445320d85685526ba70071bbd796a4d8116ac70872cccdc16deb429",
+      "sha256": "23712e08439927f579cb5902f88e2cbcfdc17e64e548b163658b2ec8f6b7c49f",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
-      "module": "Host.ObjectiveBendPublicationAuthor",
-      "path": "Host/ObjectiveBendPublicationAuthor.lean",
-      "sha256": "613fff29f28bce923c68c0a7876e6e17368779ebedf737b9cd94801caef2ce3a",
+      "module": "Host.ObjectiveStudioPublication",
+      "path": "Host/ObjectiveStudioPublication.lean",
+      "sha256": "1055b5fd521aeb1239c61562a78dac08554e5ba8cfc74202ee16a2a4e7e41504",
       "surface": "authored-research",
-      "ownerReportedStatus": "ACTUAL scoped Lean PASS; all named general axiom gates clean; native runtime/profile registration and ordinary source storage/birth receiving remain consumer joins"
-    },
-    {
-      "module": "Host.ObjectiveBendSourceInspection",
-      "path": "Host/ObjectiveBendSourceInspection.lean",
-      "sha256": "faafc54e453c97d14a7c5eb603921cbb20e5c83359fe58343c40e98fdef9790d",
-      "surface": "authored-research",
-      "ownerReportedStatus": "WIP; Studio Rust parser PASS only, new shared Host library extraction/Partial encoder uncompiled, no native Studio receiving"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Host.ObliviousNatAddEmit",
@@ -5153,9 +5112,9 @@
     {
       "module": "Kernel.ApplicationFailedStartRecoveryHistory",
       "path": "Kernel/ApplicationFailedStartRecoveryHistory.lean",
-      "sha256": "6ec6095f91c7670be9718e7d056c5cbe3999b957a6a5442d35c15f68b4bcd134",
+      "sha256": "8531281b4832718e87be204f3e37f56caf72c59163f74090f2280b433d4dbcad",
       "surface": "default",
-      "ownerReportedStatus": "SCOPED_LEAN_PASS_MATCHED_HISTORICAL_JOIN"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.ApplicationFailedStartRecoveryIngress",
@@ -5370,7 +5329,7 @@
     {
       "module": "Kernel.ApplicationLifecycleClaimHistory",
       "path": "Kernel/ApplicationLifecycleClaimHistory.lean",
-      "sha256": "3cd6a2afac7305e2baee139352cee31193b03e771903397b4b3c5360229db259",
+      "sha256": "19c98027c9bbb350b52e280e48622523e482876b6cbc8c0bd0d5702cd41afe2d",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -5405,7 +5364,7 @@
     {
       "module": "Kernel.ApplicationLifecycleClaimV2Core",
       "path": "Kernel/ApplicationLifecycleClaimV2Core.lean",
-      "sha256": "7dd7f4cd646d2eb71d4f8722bb125a391b735d03fe06cbd476e1010a912cdc61",
+      "sha256": "93e4184c517ba60c28971dedb0648bf27df35d5b0c02c11849fe25709ac76391",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -5426,7 +5385,7 @@
     {
       "module": "Kernel.ApplicationLifecycleClaimV3Core",
       "path": "Kernel/ApplicationLifecycleClaimV3Core.lean",
-      "sha256": "bbbb00900cb5f86d9fc1d90b2a632be04b14362fb88432a2a9512e8c37d69527",
+      "sha256": "ac0246b08d035eb4493f1fcdc20aac6edb4f75c214c648d08248d99aeecb7f93",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -5475,7 +5434,7 @@
     {
       "module": "Kernel.ApplicationLifecycleCompletionHistory",
       "path": "Kernel/ApplicationLifecycleCompletionHistory.lean",
-      "sha256": "8a1574948933bffa0684225401a52fe2bd713f141155ea8bd618d6cb629e5e59",
+      "sha256": "4aa0472c6c2d091b6c621860194e94f8f800f676c470ff20c25c674be8fd5e19",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -5538,7 +5497,7 @@
     {
       "module": "Kernel.ApplicationLifecycleCompletionV2History",
       "path": "Kernel/ApplicationLifecycleCompletionV2History.lean",
-      "sha256": "5c3e1b47553fcb6cc329cfccd32850e571ac443f63cf55d7cf30b78692dab5eb",
+      "sha256": "64e6e926d2ef996779581526518c7a753bec484a19680c5a358b8a04bb16485a",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -5587,7 +5546,7 @@
     {
       "module": "Kernel.ApplicationLifecycleCreatedHistory",
       "path": "Kernel/ApplicationLifecycleCreatedHistory.lean",
-      "sha256": "5f4d99717b6a1a74aa25698bda57013e0be808510a8f1cd15e61ec7123320377",
+      "sha256": "30d2be48fd7a95d59a496ee008ad426e68829aa07147abbb2006713aec653ce0",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -5784,7 +5743,7 @@
       "module": "Kernel.BendActivity",
       "path": "Kernel/BendActivity.lean",
       "sha256": "f6f79fe2f2fdbeab0f3432d343f0a3fafca98e49336a6d616105a41f208b52b4",
-      "surface": "default",
+      "surface": "authored-research",
       "ownerReportedStatus": "SOURCE REPAIR UNCHECKED; two multiline record literals on one line; theorem unchanged"
     },
     {
@@ -5798,15 +5757,8 @@
       "module": "Kernel.BendActivityControl",
       "path": "Kernel/BendActivityControl.lean",
       "sha256": "c25ea365f8ebd917bc38d7fdbe25548c7186bd4615da7b2390e8ae5a80b73c91",
-      "surface": "default",
-      "ownerReportedStatus": "SOURCE REPAIR UNCHECKED; qualify actual Snapshot.install and Snapshot.install_consumes; statement unchanged"
-    },
-    {
-      "module": "Kernel.BendActivityDispatch",
-      "path": "Kernel/BendActivityDispatch.lean",
-      "sha256": "549f3ffd7888114e9dd560adb3da5b39f548d3e92b0d0f056d9b0685b91cfb5c",
       "surface": "authored-research",
-      "ownerReportedStatus": "AUTHORED UNCOMPILED; real typed Controller consumer; no effect64 activation"
+      "ownerReportedStatus": "SOURCE REPAIR UNCHECKED; qualify actual Snapshot.install and Snapshot.install_consumes; statement unchanged"
     },
     {
       "module": "Kernel.BendActivityHomeGuard",
@@ -5821,13 +5773,6 @@
       "sha256": "6d926969e172050b0b8bc761066c0ac8d126c85890489dc06fe6113a48bbba51",
       "surface": "authored-research",
       "ownerReportedStatus": "SOURCE REPAIR UNCHECKED; escape reserved initialize declaration; one-line native intent record; interfaces/wire unchanged"
-    },
-    {
-      "module": "Kernel.BendActivityOutcome",
-      "path": "Kernel/BendActivityOutcome.lean",
-      "sha256": "0ca94f5aa8fc632f1f3ac8d05bf8293f66ad4f0b055539cc5769b56470999b1f",
-      "surface": "authored-research",
-      "ownerReportedStatus": "SOURCE WIP UNCOMPILED; normalize record layout; actual cancellation-recorded gate and outcome nullifier lemmas"
     },
     {
       "module": "Kernel.BendActivityPendingAdmission",
@@ -5851,13 +5796,6 @@
       "ownerReportedStatus": "AUTHORED WIP UNCOMPILED; general own-facet transport acceptance retains all other facets; receiver exact record/predecessor theorem"
     },
     {
-      "module": "Kernel.BendActivityRecovery",
-      "path": "Kernel/BendActivityRecovery.lean",
-      "sha256": "6d44dd9b205a2375b23332a54175ce82a7aeaa1580337fcad460d69018c48b29",
-      "surface": "authored-research",
-      "ownerReportedStatus": "SOURCE WIP UNCOMPILED; actual recorded native publication or owner cancellation, current phase CAS, retained actual typed resume"
-    },
-    {
       "module": "Kernel.BendActivityRoute",
       "path": "Kernel/BendActivityRoute.lean",
       "sha256": "38166b5e743c0cd4f63c9ee74f26e72c932ca08e1466f5145a571eeed0cc0ec7",
@@ -5875,21 +5813,14 @@
       "module": "Kernel.BendArtifactSource",
       "path": "Kernel/BendArtifactSource.lean",
       "sha256": "d4279d27bf725b4643375775ad6aeccefd83a06de4c985008d114ee5da91937f",
-      "surface": "default",
-      "ownerReportedStatus": "AUTHORED_UNCOMPILED_DELTA"
-    },
-    {
-      "module": "Kernel.BendComputeCapacity",
-      "path": "Kernel/BendComputeCapacity.lean",
-      "sha256": "88128f5b674e3e64d6fc3f09c578c468678d6162af0a0f183731ec6cfe1a63f6",
       "surface": "authored-research",
-      "ownerReportedStatus": "SCOPED_LEAN_PASS producer02/04"
+      "ownerReportedStatus": "AUTHORED_UNCOMPILED_DELTA"
     },
     {
       "module": "Kernel.BendInvocationInput",
       "path": "Kernel/BendInvocationInput.lean",
       "sha256": "4dcd237329f33efa4f6fb1449b691c22c87bd48c29c51e95baf1bca264ef0cef",
-      "surface": "default",
+      "surface": "authored-research",
       "ownerReportedStatus": "ACTUAL_PASS_INPUT1"
     },
     {
@@ -5910,35 +5841,28 @@
       "module": "Kernel.BendNativeRun",
       "path": "Kernel/BendNativeRun.lean",
       "sha256": "f65d15807d05ba8158ae91c4c10fe2d8a9a435b52b3b96b130a2d4bacb8c7c05",
-      "surface": "default",
+      "surface": "authored-research",
       "ownerReportedStatus": "CONTEXT2_ACTUAL_PASS; subsequent exact semantics/arithmetic gates AUTHORED_UNCOMPILED"
     },
     {
       "module": "Kernel.BendOpaqueResultReceiver",
       "path": "Kernel/BendOpaqueResultReceiver.lean",
       "sha256": "a54c361e464348ef99cb1903997c66c4f44cba0e970f3a028578160b25a4f312",
-      "surface": "default",
+      "surface": "authored-research",
       "ownerReportedStatus": "SCOPED_LEAN_PASS"
-    },
-    {
-      "module": "Kernel.BendPreparedOutput",
-      "path": "Kernel/BendPreparedOutput.lean",
-      "sha256": "c098d97de3fab2e031e1a512a0e9e0e785c829576eb6bcd4286f44d97b2272da",
-      "surface": "default",
-      "ownerReportedStatus": "AUTHORED_UNCOMPILED closed bytes/scalar/scalarBytes gate; actual physical-read r5 dependency"
     },
     {
       "module": "Kernel.BendReturnRelease",
       "path": "Kernel/BendReturnRelease.lean",
       "sha256": "59ad245f898b5ad94d454b7c50214097aa247c4b4bcaff20da80fa27ad8e2c67",
-      "surface": "default",
+      "surface": "authored-research",
       "ownerReportedStatus": "SCOPED_LEAN_PASS"
     },
     {
       "module": "Kernel.BendSourcePublication",
       "path": "Kernel/BendSourcePublication.lean",
       "sha256": "557cfeea88955a692f86d4d3f84247ac910cf4c3abeffbb9b3718c4bcd6f13af",
-      "surface": "default",
+      "surface": "authored-research",
       "ownerReportedStatus": "SCOPED_LEAN_PASS"
     },
     {
@@ -6182,9 +6106,9 @@
     {
       "module": "Kernel.DeclaredResourceController",
       "path": "Kernel/DeclaredResourceController.lean",
-      "sha256": "cb558d5c9fe4beafbb7faaecfeadd6fce67d644a46e7c86abde31f220bf68dd2",
+      "sha256": "b82822af441819b66369b52586ae15d083df270422ce072c611c4befabd6b111",
       "surface": "default",
-      "ownerReportedStatus": "Captain hunk integration; coherent compilation pending"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.DeclaredResourceProjection",
@@ -7239,14 +7163,14 @@
     {
       "module": "Kernel.NativeHistorySelection",
       "path": "Kernel/NativeHistorySelection.lean",
-      "sha256": "98b29a9da47eac5075aa4b98f50b60abb99dc7d7db6f0d7aa9c5c1358b60731d",
+      "sha256": "e48b5362f8104fbe435d8a88386c7e7b8923efec5087a01a77a257db2b9991f7",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.NativeHost",
       "path": "Kernel/NativeHost.lean",
-      "sha256": "6092f76df9e596f64e1deaae4aef4bd936ca15c85c54aab83c6af895d51e2ea3",
+      "sha256": "150355e43c792cbbb809cb0c2586521128156d05018bcac430aa7bd6a093074c",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7260,9 +7184,9 @@
     {
       "module": "Kernel.NativeHostContext",
       "path": "Kernel/NativeHostContext.lean",
-      "sha256": "57a6e80b59f99f967229f98cdaf5949863f013a72153e2a7f17dc3ba9263d599",
+      "sha256": "34a95f97b545e2876cef0a4881e4c7c69ae6ec0dda0016a9de8183dfc29b4dce",
       "surface": "default",
-      "ownerReportedStatus": "WIP source integration; native cohort qualification pending"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.NativeHostGenesis",
@@ -7302,9 +7226,9 @@
     {
       "module": "Kernel.NativeHostReplay",
       "path": "Kernel/NativeHostReplay.lean",
-      "sha256": "8a9c214f62aba948fddb4330af28e43f4466ac58391b7f13947659420065c653",
+      "sha256": "7c4fd42b64d9a8134c8f75f94fe813e343a95052fb5e38c427c31b6a84e598b4",
       "surface": "default",
-      "ownerReportedStatus": "Captain hunk integration; coherent compilation pending"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.NativeHostReserveBirth",
@@ -7419,39 +7343,46 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
-      "module": "Kernel.ObjectiveBendCallContext",
-      "path": "Kernel/ObjectiveBendCallContext.lean",
-      "sha256": "990a2feeed955f655e6d3b220f8d368c8be6897f349ef437148b3578e656d5fa",
+      "module": "Kernel.ObjectiveBendArtifactSource",
+      "path": "Kernel/ObjectiveBendArtifactSource.lean",
+      "sha256": "8867cb2355ebc7d54d2594cac1179e95337abbe166fc02931dfb687a4c5ceac5",
       "surface": "default",
-      "ownerReportedStatus": "ACTUAL scoped Lean PASS; all named general axiom gates clean; native runtime/profile registration and ordinary source storage/birth receiving remain consumer joins"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
-      "module": "Kernel.ObjectiveBendInstanceLoader",
-      "path": "Kernel/ObjectiveBendInstanceLoader.lean",
-      "sha256": "4a503f84a8cc849668d8ec686dfba9314d15361e4bfbc9c733954737d04f762b",
+      "module": "Kernel.ObjectiveBendAuthenticatedInputs",
+      "path": "Kernel/ObjectiveBendAuthenticatedInputs.lean",
+      "sha256": "be1fdeab25d4a223223dac86e78ad66b6813704d088feb16571cdbc93070e2fd",
+      "surface": "authored-research",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Kernel.ObjectiveBendNativeAdmission",
+      "path": "Kernel/ObjectiveBendNativeAdmission.lean",
+      "sha256": "a66d40ac822d5de0ff51975018d30b7323e985b2905cbfc51a29bde796bc1101",
       "surface": "default",
-      "ownerReportedStatus": "ACTUAL scoped Lean PASS; all named general axiom gates clean; native runtime/profile registration and ordinary source storage/birth receiving remain consumer joins"
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Kernel.ObjectiveBendNativeInput",
+      "path": "Kernel/ObjectiveBendNativeInput.lean",
+      "sha256": "ff05cfaf792f6f7b82b5def764bccd10638b1f777d04c790f6e6dfa4f0d96b44",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.ObjectiveBendPreparedOutput",
       "path": "Kernel/ObjectiveBendPreparedOutput.lean",
-      "sha256": "6e0e4015521b262ffad340ed7656ac854fc37525761f3b479a9cb9a47ebb1827",
-      "surface": "authored-research",
-      "ownerReportedStatus": "Exact owner r7 Lean and actual source/LoadedDirectory/PreparedOutput PASS; no Accepted or submission"
+      "sha256": "c1205660743b3f40b820048f5a94ca035274c1aacfea3f599ccfc52f27764b00",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
-      "module": "Kernel.ObjectiveBendReferenceLoader",
-      "path": "Kernel/ObjectiveBendReferenceLoader.lean",
-      "sha256": "69c972e1b3af09246d6da68c0930189de3f01165924f4f6ad2e2ed385215dcdf",
+      "module": "Kernel.ObjectiveBendPublishedPackage",
+      "path": "Kernel/ObjectiveBendPublishedPackage.lean",
+      "sha256": "9d4aa02bebd61d67b4326ff173f1ee4fd73a7a53c85d6376ad08d581efc79b9c",
       "surface": "default",
-      "ownerReportedStatus": "ACTUAL scoped Lean PASS; all named general axiom gates clean; native runtime/profile registration and ordinary source storage/birth receiving remain consumer joins"
-    },
-    {
-      "module": "Kernel.ObjectiveBendReferenceSource",
-      "path": "Kernel/ObjectiveBendReferenceSource.lean",
-      "sha256": "f12d48abc7b109a664b0c23f5a7e68f4e3271deebd7409f9463ce28aaa1fd01a",
-      "surface": "default",
-      "ownerReportedStatus": "ACTUAL scoped Lean PASS; all named general axiom gates clean; native runtime/profile registration and ordinary source storage/birth receiving remain consumer joins"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.OutboxDelivery",
@@ -7818,6 +7749,13 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Kernel.ProtectedContentGate",
+      "path": "Kernel/ProtectedContentGate.lean",
+      "sha256": "09ae78ae0c6f302800e51ff60f7094d3a7c5eca1f14bcbe0752d4b31bc3397bc",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
       "module": "Kernel.ProviderExecutionLease",
       "path": "Kernel/ProviderExecutionLease.lean",
       "sha256": "1b007852227aad0830dd50b3a2ae31db6a2fe7c1a16dfe1a41e2c38a665c378a",
@@ -7995,9 +7933,9 @@
     {
       "module": "Kernel.ResourceTransaction",
       "path": "Kernel/ResourceTransaction.lean",
-      "sha256": "e49a6820eba1168857e5c0ba46f9394eca9908b36fb63b8df79d8761db7ecc58",
+      "sha256": "607fc22c64da4d0f7563db3981af229a5092d7508884121b4cccde0598a061e8",
       "surface": "default",
-      "ownerReportedStatus": "Captain hunk integration; coherent compilation pending"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.ResourceTransactionAudit",
@@ -8086,7 +8024,7 @@
     {
       "module": "Kernel.RunComputeBudgetDomain",
       "path": "Kernel/RunComputeBudgetDomain.lean",
-      "sha256": "c9f8ee1faf8e9afbb66c36ae25072485a0b919bbb4997835348cc72663cc0ba2",
+      "sha256": "906a2aa104ea9ae3981c6c2d009774558a1f4aab20d7ebb14fb577ec30a8da1f",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -8387,7 +8325,7 @@
     {
       "module": "ResearchWip",
       "path": "ResearchWip.lean",
-      "sha256": "94fec17bc88b8111e3d410cd2df97eeef73c1d2339e0c14e4ba359281c22f37f",
+      "sha256": "35e412f26c395903e0a3e23fb95dec90367f85005270a5e43d9a384325925b2f",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -9914,7 +9852,7 @@
       "module": "Theory.BendClosureResponse",
       "path": "Theory/BendClosureResponse.lean",
       "sha256": "c0244aa4ed3023e50cbc911415c29605de0763b12bc836546d29715e910f5d9e",
-      "surface": "default",
+      "surface": "authored-research",
       "ownerReportedStatus": "PASS scoped Lean+axiom accounting; Host separately executed save/resume cuts7/3/12"
     },
     {
@@ -10070,13 +10008,6 @@
       "sha256": "d1817813d746a0ab4943389bd01cceedc1470deb248db8a3b356dd5acea2c5d2",
       "surface": "authored-research",
       "ownerReportedStatus": "PASS; central receiving cohort also passed"
-    },
-    {
-      "module": "Theory.BendExecutionTrace",
-      "path": "Theory/BendExecutionTrace.lean",
-      "sha256": "d95368e4597d6bca13aeee70bc405d773ee612522773a7f11824d81352d43779",
-      "surface": "default",
-      "ownerReportedStatus": "PASS Lean4.30 with all named standard-axiom gates"
     },
     {
       "module": "Theory.BendLiveMachine",
@@ -10674,65 +10605,79 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Theory.ObjectiveBendCheckpoint",
+      "path": "Theory/ObjectiveBendCheckpoint.lean",
+      "sha256": "7335f5b3155f423b53d1d08323ae21f702bdc6e48ee8e271d705560b085bf883",
+      "surface": "authored-research",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Theory.ObjectiveBendCheckpointRoundTrip",
+      "path": "Theory/ObjectiveBendCheckpointRoundTrip.lean",
+      "sha256": "c0db39a71e2a820e681f4a463dc20f42198f5fb8ab48a28bc93c5493b162760d",
+      "surface": "authored-research",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
       "module": "Theory.ObjectiveBendDemandAdequacy",
       "path": "Theory/ObjectiveBendDemandAdequacy.lean",
-      "sha256": "42ab01a0707d29687aeba91baf6fbca95d40c0d2b5861df927a4870988a0088e",
-      "surface": "authored-research",
+      "sha256": "b2b9d6438bbdcc453630bb73879eb73bd99e0548336204c4db1a39976dfd714e",
+      "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Theory.ObjectiveBendDemandCapacity",
       "path": "Theory/ObjectiveBendDemandCapacity.lean",
       "sha256": "af8b1c98a8624ec6fb93557af3e24577bc05640a0b2b1e817a354a93f6f3b462",
-      "surface": "authored-research",
+      "surface": "default",
       "ownerReportedStatus": "Exact owner r7 Lean and actual source/LoadedDirectory/PreparedOutput PASS; no Accepted or submission"
     },
     {
       "module": "Theory.ObjectiveBendDemandCompleteness",
       "path": "Theory/ObjectiveBendDemandCompleteness.lean",
-      "sha256": "05a01b5a30546f61f049cbafaab178426b533787addaddcc2c18bca217def261",
+      "sha256": "d52a0a421f3a314e591d31236a2b3406c82127a3f95bafe71ab6facba0bb66d6",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Theory.ObjectiveBendDemandData",
       "path": "Theory/ObjectiveBendDemandData.lean",
-      "sha256": "b82201e996430c2c8b9e23f7e2b4db1d6b4ea51c63827d43f3f080a9d962e67f",
-      "surface": "authored-research",
+      "sha256": "0018be8f4cd03529f05955df24dd86e71c683b3d7ad853f0c265609c4ae6eede",
+      "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Theory.ObjectiveBendDemandDataSoundness",
       "path": "Theory/ObjectiveBendDemandDataSoundness.lean",
-      "sha256": "fc513ace2fd8ad9f563557497bf242d2ba5050fe863657333f5bae6c79c3e326",
+      "sha256": "5838e1ab14b8ef754be554d6ccde1159f40385c793c57e197a6edabddedc9935",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Theory.ObjectiveBendDemandInvariant",
       "path": "Theory/ObjectiveBendDemandInvariant.lean",
-      "sha256": "573e3f5c5ffef49f4ed9cc1d2f8fe929fb9ab5a1cb956a8c12425972b9c17620",
-      "surface": "authored-research",
+      "sha256": "d804913915b4a310658bf7a3b92b9efcfdbcf4fdec3689b53ebc5769ff23410a",
+      "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Theory.ObjectiveBendDemandMachine",
       "path": "Theory/ObjectiveBendDemandMachine.lean",
-      "sha256": "80b1d789cd063b5f1efc70ea86fd41dec4569b1be6596ee642cb95748cafee9d",
-      "surface": "authored-research",
+      "sha256": "e7a7e1867f8a303d2bc62892f55a08572f192b1f7140e42c4768f36d9d736e0e",
+      "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Theory.ObjectiveBendDemandPreservation",
       "path": "Theory/ObjectiveBendDemandPreservation.lean",
-      "sha256": "99f95f6c788130628e51aa428c416b73173ef9a0a832d4cc08012da5742d4596",
+      "sha256": "5873150292faeec3d60356a9d526f2e6c9438b5022cd96f67799b26d70cecfb3",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Theory.ObjectiveBendDemandTyping",
       "path": "Theory/ObjectiveBendDemandTyping.lean",
-      "sha256": "b67f4979370332a66aacbeda7aecf0c2ca89fd0c1defee0e3faf638b6675a9eb",
+      "sha256": "73ee320cdb065a59c0a94c1d11c6147aa362f8fad77413054222f24f8305218a",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -10746,22 +10691,22 @@
     {
       "module": "Theory.ObjectiveBendOpenRecursion",
       "path": "Theory/ObjectiveBendOpenRecursion.lean",
-      "sha256": "30ca4bb0e852936f153be5024a20b5f5d8c17ed0bc6fc8efedfe488c4d2cd545",
-      "surface": "authored-research",
+      "sha256": "85c97838dd910cf254f353bdb13f131a325b7e3a6ea314b42c4b8841b5f57909",
+      "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Theory.ObjectiveBendTypes",
       "path": "Theory/ObjectiveBendTypes.lean",
-      "sha256": "4aa9e91030bbdeb247058847e85416eb7ff7a3ad4518a774cc7f87864d3fb6b2",
-      "surface": "authored-research",
+      "sha256": "59f81d0f55eda4bc4ce8b5496c310db8ebe69615d237dd88c05b3c90e065fab5",
+      "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Theory.ObjectiveBendTyping",
       "path": "Theory/ObjectiveBendTyping.lean",
-      "sha256": "e7f334dd125b4f6f212b77b251af87cb15417e7c2ca87e54a9c31b700e93cd5f",
-      "surface": "authored-research",
+      "sha256": "18e24789fd04c9209b35557aa0797fdc34ba231aa845d934d6f5c22a15f4ae1f",
+      "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
@@ -10961,13 +10906,6 @@
       "ownerReportedStatus": "PASS actual joined emitter; real native proof plus digest/validity refusals56.097s"
     },
     {
-      "module": "Verify.BendControllerCommitmentEmit",
-      "path": "Verify/BendControllerCommitmentEmit.lean",
-      "sha256": "6915ffefcb820d27106bdfff640be09eddd5b64a52681faaeba030b5b57703be",
-      "surface": "authored-research",
-      "ownerReportedStatus": "PASS actual new narrow Lean/native consumers; see QUALIFICATION-R32.txt for exact scope"
-    },
-    {
       "module": "Verify.BendMinimalCensus",
       "path": "Verify/BendMinimalCensus.lean",
       "sha256": "22ce776f07cc7610883585412b699c8834fdb901672e20e5664b2e2ede7cc852",
@@ -10980,27 +10918,6 @@
       "sha256": "0bec4fe76b3503e5752be549177ec370c44f8f4ff67f350ab3cc6b619a628ef9",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
-    },
-    {
-      "module": "Verify.BendUnrolledCensus",
-      "path": "Verify/BendUnrolledCensus.lean",
-      "sha256": "e0e0375305c0681f240bc21baed3911f8e0a6eab27139a0428a87c5e6292b26a",
-      "surface": "authored-research",
-      "ownerReportedStatus": "Diagnostic emitter moved to Verify tier; original isolated same body qualified, new path compilation pending"
-    },
-    {
-      "module": "Verify.BendUnrolledDirectEmit",
-      "path": "Verify/BendUnrolledDirectEmit.lean",
-      "sha256": "50702c4ddfc81c7422255c78991cefb84e88d5b661a164450d02cd7f2bb05847",
-      "surface": "authored-research",
-      "ownerReportedStatus": "Captain hunk integration; coherent compilation pending"
-    },
-    {
-      "module": "Verify.BendUnrolledIR2Emit",
-      "path": "Verify/BendUnrolledIR2Emit.lean",
-      "sha256": "0762d2e1f2a48393cc6fb7ee81e4a07a3bc7f5b9ad8db07923563d0226a1df67",
-      "surface": "authored-research",
-      "ownerReportedStatus": "Captain hunk integration; coherent compilation pending"
     },
     {
       "module": "Verify.GenericSimplexAxioms",
@@ -11033,9 +10950,9 @@
     {
       "module": "Verify.GenericSimplexSourceHarness",
       "path": "Verify/GenericSimplexSourceHarness.lean",
-      "sha256": "8cf67b8380474a71d41940d0e50e878ba51ab8c411d3f407d043a3ce8a638313",
+      "sha256": "17f35759a0e624cd44836e290580d7d762fdde9ed25d951032e82f0457c6b7b3",
       "surface": "authored-research",
-      "ownerReportedStatus": "Harness and Bridge compile to olean/C PASS; same receipt barrier after each durable receive/service. Native relink and next effect latency remain pending"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Verify.JointDecisionRecovery",
@@ -11047,16 +10964,16 @@
     {
       "module": "Verify.NativeActivitySourceFixture",
       "path": "Verify/NativeActivitySourceFixture.lean",
-      "sha256": "06099719c9be6f3e95911c550be20524a29f59e3c0b565ccbd2aa39402a54cc9",
+      "sha256": "fb3891f8643095ecb1d49ca62e2900a0ed75268adadfac23234f9011e1040363",
       "surface": "authored-research",
-      "ownerReportedStatus": "AUTHORED UNCOMPILED; native fixture not yet run"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Verify.NativeJointSourceFixture",
       "path": "Verify/NativeJointSourceFixture.lean",
-      "sha256": "cc8daee06d9b7a02b63eaa5acb476ece17aca329f256aaaef1d4383e6a57dc12",
+      "sha256": "4d16b01abf6f6ffcafaf3851260aa97797bc09092de30d43ab8613e335813bcb",
       "surface": "authored-research",
-      "ownerReportedStatus": "Checked against exact owned warm imports. Initializer general denotation/source-count theorem; actual initializer inhabitant/refuser not run. Fixture actual fresh four-store genesis initialized, zero accepted history; first signed submit held for frontier tag-specific ingress repair."
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Verify.ResourceReserveBirthFixture",

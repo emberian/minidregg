@@ -1561,7 +1561,6 @@ structure AcceptedInvocation [DecidableEq F]
     (signedBytes prepared.authority.snapshot.domain profile.semantics signed)
     (writes prepared) (completeAdmissionGuards prepared signed audience route))
   executionRequired : command.family.any (fun family => family.route == .objectiveMethod) = true → execution.isSome = true
-  historicalSourceDisabled : command.bend = none
   tuple : PreparedTuple (plan prepared)
   checked : (incidence : Incidence command) → CheckedLeg prepared tuple incidence (signed.envelope command incidence)
 
@@ -1624,11 +1623,9 @@ private def finishAdmission [DecidableEq F]
       (signedBytes prepared.authority.snapshot.domain profile.semantics signed)
       (writes prepared) (completeAdmissionGuards prepared signed authority.audience route))) :
     Except Reject (AcceptedInvocation prepared signed) := do
-  if historicalSourceDisabled : command.bend = none then
-    if executionRequired : command.family.any (fun family => family.route == .objectiveMethod) = true → execution.isSome = true then
-      .ok ⟨authority.ingressExact,authority.envelopeCount,authority.observeCount,authority.observations,
-        authority.audience,route,execution,executionRequired,historicalSourceDisabled,authority.tuple,authority.checked⟩
-    else .error .bendExecution
+  if executionRequired : command.family.any (fun family => family.route == .objectiveMethod) = true → execution.isSome = true then
+    .ok ⟨authority.ingressExact,authority.envelopeCount,authority.observeCount,authority.observations,
+      authority.audience,route,execution,executionRequired,authority.tuple,authority.checked⟩
   else .error .bendExecution
 
 /-- Historical ordinary admission refuses every nonordinary statement family.
@@ -1642,12 +1639,6 @@ def admitOrdinary [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     match ← admitAuthority native prepared signed with
     | .error reason => return .error reason
     | .ok authority => return finishAdmission prepared signed authority route none
-
-/-- Historical TT Activity execution is disabled. The new Objective continuation
-route will consume its own source/current-input/residual transition evidence. -/
-def admitActivity [DecidableEq F] (_native : CredentialSignatureIO.NativeConfig)
-    (_prepared : PreparedInvocation deployment profile ambient durable command) (_signed : SignedCommand) :
-    IO (Except Reject (AcceptedInvocation _prepared _signed)) := pure (.error .bendExecution)
 
 /-- New Objective completion admission: ALL native authority/read/law/audience
 checks precede construction or execution of the source's authenticated input.

@@ -385,26 +385,10 @@ fn invocation_family(request: &Value) -> Result<Option<Value>> {
     Ok(Some(family.clone()))
 }
 
-fn invocation_bend(request: &Value) -> Result<Option<Value>> {
-    let Some(bend) = request.get("bend") else { return Ok(None); };
-    if request.get("run").is_some() {
-        return Err("an invocation may contain either run or bend, not both".into());
-    }
-    let claim = bend.as_str().ok_or("bend claim must be canonical hexadecimal")?;
-    if claim.is_empty() || claim.len() > 2 * INVOCATION_CONTEXT_MAX_BYTES || claim.len() % 2 != 0
-        || !claim.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) {
-        return Err("bend claim must be bounded nonempty canonical lowercase hex".into());
-    }
-    // The native author checks BendExecutionClaim.decode/canonical bytes. The
-    // client only preserves the original bytes and does not infer authority.
-    Ok(Some(bend.clone()))
-}
-
 fn unsigned_invocation_command(subject: &str, nonce: &str, targets: Vec<Value>,
-    run: Option<Value>, bend: Option<Value>, family: Option<Value>) -> Value {
+    run: Option<Value>, family: Option<Value>) -> Value {
     let mut command = json!({"subject":subject,"nonce":nonce,"targets":targets});
     if let Some(claim) = run { command["run"] = claim; }
-    if let Some(claim) = bend { command["bend"] = claim; }
     // The exact family is part of the command sent to the native author and
     // signed receiver, never an annotation outside that command.
     if let Some(statement) = family { command["family"] = statement; }
@@ -3107,11 +3091,10 @@ fn propose_summary_once(
         "invoke" => {
             let obj = request.as_object().ok_or("proposal must be an object")?;
             let claimed = obj.contains_key("run");
-            let bend = invocation_bend(&request)?;
             let family = invocation_family(&request)?;
-            if obj.len() != 3 + usize::from(claimed) + usize::from(bend.is_some()) + usize::from(family.is_some())
+            if obj.len() != 3 + usize::from(claimed) + usize::from(family.is_some())
                 || !obj.contains_key("targets") {
-                return Err("invoke proposal may contain only type, action, targets, run, bend, family".into());
+                return Err("invoke proposal may contain only type, action, targets, run, family".into());
             }
             // K-RAN: a Nock run claim rides inside the signed command; the Host
             // parses it exactly (programId, sample, output, steps) and re-executes.
@@ -3308,7 +3291,7 @@ fn propose_summary_once(
                 grants.push(json!({"kind":kind,"target":target,"capability":observe}));
             }
             let command = unsigned_invocation_command(member(workspace,"subject")?,
-                &command_nonce, target_rows, run, bend, family);
+                &command_nonce, target_rows, run, family);
             json!({"subject":member(workspace,"subject")?,"nonce":nonce,
                 "purpose":{"type":"prepare","draft":{"type":"invoke","command":command}},
                 "grants":grants})
@@ -7092,21 +7075,6 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn invocation_bend_preserves_bytes_and_refuses_mixed_or_noncanonical_claims() {
-        use serde_json::json;
-        let selected = super::invocation_bend(&json!({"bend":"00abff"})).unwrap();
-        let command = super::unsigned_invocation_command("7", "29", vec![], None,
-            selected, Some(json!({"route":"objectiveMethod","contextBytes":"cafe"})));
-        assert_eq!(command, json!({"subject":"7","nonce":"29","targets":[],"bend":"00abff",
-            "family":{"route":"objectiveMethod","contextBytes":"cafe"}}));
-        assert!(super::invocation_bend(&json!({"run":{},"bend":"00"})).is_err());
-        for bend in [json!(null), json!(0), json!(""), json!("0"), json!("AA"), json!("é"), json!("gg")] {
-            assert!(super::invocation_bend(&json!({"bend":bend})).is_err());
-        }
-        assert_eq!(super::invocation_bend(&json!({})).unwrap(), None);
-    }
-
-    #[test]
     fn invocation_family_is_preserved_in_actual_unsigned_command() {
         use serde_json::json;
         let targets = vec![json!({"target":"18446744073709551615","payload":{"type":"read"}})];
@@ -7115,11 +7083,11 @@ mod tests {
             let family = json!({"route":route,"contextBytes":"00abff"});
             let selected = super::invocation_family(&json!({"family":family})).unwrap();
             let command = super::unsigned_invocation_command("18446744073709551615", "29",
-                targets.clone(), Some(run.clone()), None, selected);
+                targets.clone(), Some(run.clone()), selected);
             assert_eq!(command, json!({"subject":"18446744073709551615","nonce":"29",
                 "targets":targets,"run":run,"family":family}));
         }
-        let command = super::unsigned_invocation_command("3", "31", targets.clone(), None, None,
+        let command = super::unsigned_invocation_command("3", "31", targets.clone(), None,
             super::invocation_family(&json!({})).unwrap());
         assert_eq!(command, json!({"subject":"3","nonce":"31","targets":targets}));
     }

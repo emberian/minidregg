@@ -84,7 +84,7 @@ theorem projected_nonce (slots : List BendWorldPlan.ReturnSlot) (command : Comma
 
 theorem projected_claims (slots : List BendWorldPlan.ReturnSlot) (command : Command) :
     (applicationCommand slots command).run = command.run ∧
-    (applicationCommand slots command).bend = command.bend := ⟨rfl,rfl⟩
+    (applicationCommand slots command).family = command.family := ⟨rfl,rfl⟩
 
 theorem return_action_exact (slots : List BendWorldPlan.ReturnSlot)
     (content : ContentResource.Command) (carrier : Carrier slots (.content content))
