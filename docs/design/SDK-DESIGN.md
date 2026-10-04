@@ -35,9 +35,13 @@ SignedCall ──► .submit(operator) ──► Receipt | Refused | Uncertain �
 obligation)`, `Release(result projection, audience, law)`, `Retire(obligation, evidence)`, over
 `ObjectRef` (native id + governing domain + kind), `RevisionRef` (exact root, never
 latest-by-name), `ArtifactRef` (digest, length, format). The SDK defines these to match
-SHARED-CONTRACTS; lane W2.A owns the Lean types (`Theory/Contracts/*`, not yet landed at the
-time of writing). Until W2.A lands, the SDK's canonical intent encoding is SDK-owned and
-tagged `MINI/SDK/INTENT/v1`; the TODO is to replace it with W2.A's Lean codec bytes (one
+SHARED-CONTRACTS. The Lean types live in `Kernel/Contracts/{Identities,Cuts,Snapshot,Futures}.lean`
+(READ at main 5216e02f; they are imported by `ResearchWip.lean` only, not by the default umbrella).
+`Identities.lean` has lawful codecs for `ObjectRef`, `RevisionRef`, `InvocationId`, `ArtifactRef` and the
+other identities; `Cuts.lean` defines the six cut structures (`Observe`, `Invoke`, `Reserve`,
+`Install`, `Release`, `Retire`) and has no codec for them (READ: no `Codec` or canonical-bytes
+definition in that file). So the SDK's canonical intent encoding is still SDK-owned and tagged
+`MINI/SDK/INTENT/v1`; the TODO is to replace it with a Lean codec's bytes for the cuts (one
 encoder, Lean-authored, the SDK carrying golden vectors from it) and delete the SDK encoder.
 
 Only `Invoke` (and `Observe` as the read half) lowers to today's wire: the authoring JSON

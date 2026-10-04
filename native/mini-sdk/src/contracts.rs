@@ -1,6 +1,6 @@
 //! Typed intents over the SHARED-CONTRACTS cuts, their canonical bytes and `InvocationId`.
 //!
-//! TODO(W2.A): lane W2.A owns these types in Lean (`Theory/Contracts/*`). When that codec
+//! TODO(W2.A): lane W2.A owns these types in Lean (`Kernel/Contracts/*`). When that codec
 //! lands, replace [`Intent::canonical_bytes`] with golden vectors emitted by the Lean codec and
 //! delete this encoder: one encoder, Lean-authored. Until then the encoding below is SDK-owned,
 //! domain-tagged `MINI/SDK/INTENT/v1`, and pinned by `golden/vectors.json` in both the Rust

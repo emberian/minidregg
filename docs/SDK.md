@@ -112,7 +112,7 @@ exists, a browser surface must not sign Mini plans.
 - **Check plans.** The plan check is the Lean consent process; the SDK is its client.
 - **Decode canonical bytes.** The local Host does (`inspect`); the SDK renders its output.
 - **Lower Reserve/Install/Release/Retire.** Those cuts have no common native wire yet; `lower`
-  refuses them by name. TODO(W2.A): the intent encoding becomes the Lean contract codec's.
+  refuses them by name. TODO: the intent encoding becomes a Lean contract codec's (the types are `Kernel/Contracts/Cuts.lean`; it has no codec for the cuts yet).
 - **Objective consent (op 227)** is not wrapped until lane W1.2 lands its Objective half.
 
 ## Migration (deletion, not addition)
