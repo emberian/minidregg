@@ -1,0 +1,203 @@
+EVENTS-DESIGN — Objective Bend Core4 activities: effects as yield, event handling, and
+Objective Bend as the deos scripting language (lane W3.EVENTS, 2026-10-04)
+Base: minidregg github/main 391311a0. Tags: READ = read in code/docs; DECIDED = this lane.
+
+(a) THE CORE4 ACTIVITY
+
+A1. CONSTRUCTORS (Theory/ObjectiveBendOpenRecursion.lean, DECIDED)
+  Term.perform (plan : Term)   -- yield a typed Plan to the kernel; resumed with a typed response
+  Term.done (value : Term)     -- a pure value used where an activity is expected (return)
+ The plan stays a lazy term: the machine allocates it as one suspended cell and the host
+ materializes it with DemandData (Data.variant from W1.3), so "the Plan is data" is the
+ existing extraction path, not a second codec. `done` exists because an effectful `case`
+ must type every arm alike; the elaborator inserts it, authors never write it.
+
+A2. REFERENCE SEMANTICS. Step stays the reference (council-2 Q1 asked whether effects need
+ "a different reference than Step": they do not). New: Step.done : done t → t. `perform p`
+ has no Step and is not a Value: a program stuck at a perform has YIELDED. Source evaluation
+ contexts are data (SourceFrame: application/field/extend/binaryLeft/binaryRight(Value
+ left)/condition/case/ifBool/reflect/metadata/project — exactly the congruence rules of
+ Step), plug : List SourceFrame → Term → Term, and
+  Yields t plan context      -- t = plug context (perform plan), context in Step's positions
+  Interaction t turns v      -- Steps to a yield, response r, continue from plug context r;
+                              -- turns : List (plan × response); one list cell = one turn
+ Facts: a yielded term does not Step; Yields is deterministic (plan and context unique).
+
+A3. MACHINE (Theory/ObjectiveBendDemandMachine.lean). Limits/run/runBounded keep their shape.
+  Control.yielded (plan : Address)     Outcome.yielded (plan : Address) (state : State)
+  Refusal.sharedEffect
+  evaluate (done t) env    → evaluate t env
+  evaluate (perform p) env → if the stack holds an `update` frame: refused .sharedEffect
+                             else push suspended ⟨p,env⟩ at a = heap.size; control yielded a
+  yielded is terminal for stepRaw/step/runBounded, like complete; step reports .yielded.
+  resume (response : Term) (state) : Option State — only from `yielded`: control :=
+    evaluate response [] with the SAME heap and stack. Nothing else changes, so the yielded
+    State IS the exact pre-resume state (heap, frames, environments, plan cell).
+ The shared-thunk rule: an `update` frame on the stack means a shared cell is being forced;
+ its value will be cached and shared, so an effect there would run once for every demander
+ (call-by-need) or once per demand (call-by-name). Neither is the program's meaning, so the
+ machine refuses instead of choosing. It is defence in depth: typed programs never reach it.
+ At a yield the stack has no update frame, so (BusyInvariant) no cell is `evaluating`: every
+ yield is QUIESCENT — a safe point in council-2 §4(a)'s sense, with nothing half-forced.
+
+A4. TYPES — answering council-2 Q1 (effects only under bind; pure thunks): YES, as a TYPE.
+  Ty.computation (plan response result : Ty)   surface: Activity<Plan, Response, Result>
+  perform : plan : P, P = variant row of data, R data  ⊢ perform plan : computation P R R
+  done    : t : A, A not a computation               ⊢ done t : computation P R A
+  effectCase : s : computation P R (variant row), arms : row ⇒ computation P R B
+                                                     ⊢ case s arms : computation P R B
+  app/case/ifBool/ifZero need nothing new: a codomain or branch type may be a computation.
+ Keeping effects out of thunks is the type's whole job:
+  - computation types are NOT shareable (so fix targets, mix self/inherited/middle, case
+    binders and unrestricted binders are never computations, through existing premises);
+  - new premises "type is not a computation" on the cell-allocating rules that had no
+    shareability premise: FieldsTyping.cons (record/extend fields), specification,
+    prototype, inject payload, and argumentAllowed (application arguments);
+  - Assumptions.valid: no bound is a computation (so sameType preserves "is a computation").
+ Then (proof, step 3): every heap cell's type is a non-computation; a computation-typed
+ control can only sit on frames that pass computations through (effectCase, conversion,
+ the stack bottom); an update frame's type is a cell type; hence a perform is never reached
+ under an update frame and checked_reachable_no_refusal keeps its statement.
+ Why a type and not a judgment mode: an effect must be visible at every CALL SITE, because
+ calling an effectful method inside a field or argument suspends the effect into a shared
+ thunk; only the function's type carries that to the caller. Partiality stays a judgment
+ (PartialTyping, no delay monad): divergence is idempotent under sharing (the blackhole
+ already observes it) and effects are not. That asymmetry is the answer to Q1, and it keeps
+ BendTT-style total laws untouched: no Comp wrapper on non-effectful code.
+ Runtime typing (DemandTyping, step 3): values are never typed at computation types.
+  StackTyping.returns : stack accepts computation P R A, A pure ⇒ stack accepts A
+  FrameTyping.effectCase : (case arms env) : computation P R (variant row) → computation P R B
+  ControlTyping.yielded : types[plan] = P ⇒ yielded plan : computation P R R
+ After `resume d`, control evaluates d's term at R and the stack takes it by `returns`.
+ Since every frame passing a computation keeps (P,R), every yield of a run has the program's
+ own (P,R): the host reads R from the checked entry type, never from the machine.
+
+A5. THE TURN BOUNDARY AS THE LATER MODALITY (FABLE-REVIEW direction 2, DECIDED)
+ Within a turn, recursion is the existing lazy fix and partiality is the judgment: a turn may
+ diverge (blackhole) or run out of ticks (suspension, a resource observation, never a turn).
+ Across turns, a resident is a guarded fixed point: its self-call sits in an arm of an
+ effectCase on a perform, so each unfolding past a yield costs one resume, i.e. one admitted
+ turn. Activity<P,R,A> plays ▷: you cannot get at the A inside without a turn. A syntactic
+ guardedness check (every self-call of an Activity method under a perform's effectCase) is
+ the productivity rule; it is DEFERRED (G3 below), not needed for safety.
+  G1 resume is defined only on a yielded state (one resume per yield; rfl-level).
+  G2 one generation per resume: the host's Activity CAS consumes predecessor+generation
+     (BEND-PERSISTENT-COMPUTATION fencing principle; Kernel/Contracts GenerationId,
+     retry_cannot_reconsume_row). Restore is pure and repeatable, so fencing is the kernel's.
+  G3 a well-typed GUARDED resident never diverges within a turn: needs the guardedness check
+     plus termination of its pure fragment; stated, not proved here.
+
+A6. CHECKPOINT CODEC (Theory/ObjectiveBendCheckpoint.lean, new). State is first-order Lean
+ data (heap of cells with closures, control, frame stack). Codec: State ↔ List Token (Token =
+ nat | text), canonical, length-prefixed lists, decode with fuel = token count; theorem
+ decode (encode s) = some s (step 3). The token list renders to bytes for the native store
+ and its digest is the checkpoint identity. A yielded state is the normal thing to checkpoint
+ (quiescent); any state round-trips. Not in the codec: authority, generation, custody (those
+ are the kernel's Activity record; the checkpoint is one artifact inside it).
+
+A7. OBSERVABILITY. A yield exposes exactly: the materialized Plan (Data at P), the declared
+ (P,R), and that the activity is waiting. Not exposed: heap, closures, stack, tick counts —
+ the checkpoint is private state, readable only under a separate metacontrol inspection
+ authority (PERSISTENT-COMPUTATION "Metacontrol": authority to invoke ≠ authority to dump).
+ Pure steps between yields are not events; their number is a cost, not a meaning.
+
+(b) EVENT HANDLING
+
+ An EVENT is an admitted turn that resumes a resident with a typed response. The resident
+ yields a Plan (often "await": a subscription); the kernel admits an Invoke cut (resource =
+ the resident, actor = sender, command = event bytes, current law), decodes the response
+ against R, resumes, runs to the next yield, and admits that Plan. HANDLERS are the arms of
+ `match perform(...)` on the Response sum: selection is `case`. ORDERING: one activity has
+ one generation chain; each admitted resume consumes it, so resumes are totally ordered and
+ a second event waits in the mailbox (governed state, BEND-WORLD contract 6). DEDUP: a retry
+ is a new AttemptId of the same InvocationId; charging is per invocation and the generation
+ row is consumed once (Identities: same_invocation_charges_once, retry_cannot_reconsume_row),
+ so a duplicate delivery cannot resume twice. Kernel-side delivery is DEFERRED (native lane);
+ the preview drives it with a response list. Examples (tests/objective-bend-source/):
+
+ EventCounter.obend — yields a write, resumes with its outcome, loops (a resident):
+   sum Plan:            sum Response:
+     write: Write         written: {}
+                          refused: {}
+   def serve(count: Nat) -> Activity<Plan, Response, Nat>:
+     match perform(Plan.write({field: 0n, before: count, after: count + 1n})):
+       case written(_): serve(count + 1n)
+       case refused(_): serve(count)
+ DocumentWatcher.obend — handles an append event:
+   def watch(doc: String, seen: Nat) -> Activity<Plan, Event, Nat>:
+     match perform(Plan.await({doc: doc, seen: seen})):
+       case appended(e): if e.doc == doc then watch(doc, e.length) else watch(doc, seen)
+       case closed(_): seen
+ TimerResident.obend — yields a reservation, counts firings until cancelled:
+   def every(period: Nat, at: Nat, fired: Nat) -> Activity<Plan, Tick, Nat>:
+     match perform(Plan.reserve({until: at + period})):
+       case fired(t): every(period, t.at, fired + 1n)
+       case cancelled(_): fired
+ Refusals named in the cohort: perform as an argument, perform in a record field, a nullary
+ effectful definition (a global field is a shared lazy value), a response that does not
+ conform to R.
+
+(c) THE DEOS-JS COMPARISON
+
+ What deos-js is (READ: deos-js/src/{lib,applet,js,portable}.rs, deos-js-core, HIG.md,
+ Dregg2/Deos/Affordance.lean). A SpiderMonkey host (with a boa twin, kept equal by a
+ differential test) over Bread's embedded executor. A cell is an applet: positions = views
+ of its model (state), directions = affordances. An Affordance is {name, required, apply}:
+ apply is a pure function model × arg → slot writes, drawn from a closed ApplyOp vocabulary
+ (AddToSlot, SubFromSlot, SetSlot, SetSlotFromArg, SetRegisterFromArgs); app.fire(name, arg)
+ checks required ⊆ held and commits ONE verified turn leaving a TurnReceipt chained to the
+ previous one. View-state (app.view) is ephemeral, never a turn. deos.ui builds a view tree
+ as data (a button's onClick is {turn, arg}); deos.world/deos.cell crawl and reflect
+ (a read, no authority); deos.editor authors live; deos.compose runs bounded multi-cell
+ stories; deos.server is the trusted GM surface. A portable applet stores its manifest
+ (seed, affordances, held, view JS) in the cell heap. The law it embodies (Starbridge, HIG):
+ affordance = a cap-gated turn template; firing = a turn; history = the receipt chain.
+
+ What Objective Bend provides instead.
+  - Affordances are METHODS: named members of an object/spec, listed by reflection
+    (metadata.interface). apply's closed ApplyOp vocabulary becomes arbitrary pure code.
+  - The turn template is the PLAN: typed data (a sum of actions with guards), produced by
+    the method; the kernel, not the program, checks it.
+  - The cap gate leaves the program: `required ⊆ held` becomes the kernel's Invoke cut under
+    current law (Kernel/Contracts/Cuts); a well-typed program cannot grant itself authority.
+  - Firing is the YIELD: a perform hands the Plan to the kernel; the response (written,
+    refused) resumes the method. A one-shot affordance yields once; a resident yields forever.
+  - History is Mini's accepted history and receipts, not a per-process ledger.
+  - Reflection is inspection: reflect/metadata read specs without forcing them; world
+    observation is the Observe cut, separate from invocation.
+  - Portability is the immutable source package (sha-pinned modules + elaborated core), not
+    JSON in a cell heap.
+ What it cannot yet do: (1) no view library (deos.ui) — a View sum is expressible, but Plans
+ and responses must be non-recursive data, so child lists wait; (2) no `-`, `<`: saturating
+ decrement is written by recursion; (3) no live authoring/evolution (deos.editor; Faré C23);
+ (4) one action per yield, no multi-cell compose in one turn; (5) no world crawl or frustum
+ from inside a program; (6) no snapshot/rewind; (7) the kernel does not yet deliver
+ responses or persist Activity checkpoints (native lane: the first receipt is one-shot);
+ (8) no guardedness check (G3); (9) strings compare only for equality, no bytes; (10)
+ before/after method qualifiers still refused (now buildable on perform); (11) no dynamic get.
+
+ Objective Bend as the deos scripting language. A deos app author writes one .obend package:
+ sums for its Plan, Response and model; methods as affordances returning Activity<Plan,
+ Response, T> (or a Plan, for pure templates); optionally a resident. The Studio lists the
+ methods, dims those the viewer's grants do not cover (computed from the law, not the code),
+ fires one invocation per click, shows the yielded Plan before admission and the receipt
+ after. Bread's smallest app, the counter applet (deos-js/tests/js_drives_substance.rs:
+ inc/dec/reset on slot 0, reset needing Proof), is tests/objective-bend-source/DeosCounter.obend:
+   def inc(count: Nat, by: Nat) -> Activity<Plan, Response, Nat>:
+     commit(count, count + by)
+   def dec(count: Nat, by: Nat) -> Activity<Plan, Response, Nat>:
+     commit(count, minus(count, by))
+   def reset(count: Nat) -> Activity<Plan, Response, Nat>:
+     commit(count, 0n)
+   def commit(before: Nat, after: Nat) -> Activity<Plan, Response, Nat>:
+     match perform(Plan.write({slot: 0n, before: before, after: after})):
+       case written(_): after
+       case refused(_): before
+ reset's Proof requirement is the law on the object, not code: the program cannot see or
+ change it, and the refusal comes back as `refused`.
+
+PROOF CASES THIS OPENS (step 3): DemandInvariant (Scoped/frames/Control.yielded), DemandTyping
+(three constructors above + pure-cells field), Preservation (perform/done/effectCase/yield/
+resume cases, returns-boundary inversions), Adequacy (Yields ↔ machine stack; done), Completeness
+(rank: a yield is a whole-program step), DataSoundness (plan extraction at P), checkpoint
+round trip. Existing statements textually unchanged; existing axiom pins hold.
