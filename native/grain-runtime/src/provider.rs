@@ -1646,7 +1646,20 @@ pub(crate) mod test_broker {
         if let Some(b) = map.get(&key) {
             return b.clone();
         }
-        let dir = std::env::temp_dir().join(format!("mpb-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+        // One base per test process, removed when the process exits (the brokers
+        // serve until then, so nothing earlier may remove their trees).
+        static BASE: OnceLock<PathBuf> = OnceLock::new();
+        let base = BASE.get_or_init(|| {
+            extern "C" fn remove_base() {
+                let _ = fs::remove_dir_all(std::env::temp_dir().join(format!("mpb-{}", std::process::id())));
+            }
+            unsafe { libc::atexit(remove_base) };
+            let base = std::env::temp_dir().join(format!("mpb-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&base);
+            std::os::unix::fs::DirBuilderExt::mode(&mut fs::DirBuilder::new(), 0o700).create(&base).unwrap();
+            base
+        });
+        let dir = base.join(N.fetch_add(1, Ordering::SeqCst).to_string());
         let mk = |p: &Path| {
             fs::create_dir_all(p).unwrap();
             fs::set_permissions(p, fs::Permissions::from_mode(0o700)).unwrap();
@@ -3156,7 +3169,9 @@ mod tests {
             let mut response = Vec::new();
             let _ = stream.read_to_end(&mut response);
         });
-        for _ in 0..100 {
+        // The send crosses the key broker (connect, ticket, curl spawn): allow it up to
+        // 5 s on a loaded box; the loop leaves as soon as the upstream has the request.
+        for _ in 0..500 {
             if deliveries.load(Ordering::SeqCst) > 0 {
                 break;
             }
