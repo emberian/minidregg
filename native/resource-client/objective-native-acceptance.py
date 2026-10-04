@@ -354,10 +354,12 @@ elif a.verb=='publish-variant':
     # variants are two packages): the honest package with its front-end identity's
     # bytes replaced, authored with the honest core by the Lean publication author.
     honest=(pub/'out'/'package.bin').read_bytes()
-    own=s['constants']['frontEnd'].encode()
+    # PolicyRecordCodec.stringStream writes each character as 0xFF then its byte (ASCII hex here).
+    framed=lambda text:b''.join(b'\xff'+bytes([c]) for c in text.encode())
+    own=framed(s['constants']['frontEnd'])
     if honest.count(own)!=1:raise SystemExit('package does not carry the front-end identity exactly once')
     other=hashlib.sha256(f'not-this-front-end:{a.label}'.encode()).hexdigest()
-    (v/'package.bin').write_bytes(honest.replace(own,other.encode()))
+    (v/'package.bin').write_bytes(honest.replace(own,framed(other)))
     (v/'out').mkdir()
     sh(f'variant-{a.label}-publication','lake','env','lean','--run',REPO/'Host/ObjectiveStudioPublication.lean',
        v/'package.bin',v/'package.bin',pub/'out'/'core.canonical.json',pub/'out'/'core.canonical.json',
