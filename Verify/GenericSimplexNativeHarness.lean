@@ -1,6 +1,7 @@
 import Compiler.GenericSimplexNative
 import Kernel.JointSimplexBinding
 namespace Minidregg.Verify.GenericSimplexNativeHarness
+open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Compiler.GenericSimplexCodec
 open Minidregg.Compiler.GenericSimplexIO
 open Minidregg.Compiler.GenericSimplexNative
@@ -11,127 +12,210 @@ def ensure (b : Bool) (why : String) : IO Unit :=
 def helper (binary : String) (args : Array String) : IO Unit := do
   let o ← IO.Process.output {cmd := binary,args := args}
   if o.exitCode != 0 || !o.stderr.isEmpty then throw (IO.userError s!"helper: {o.stderr}")
-def state (n : Native) (c : Context) : IO State := do
-  let some (_,s) := restore c (← (storage n).read) | throw (IO.userError "restore")
-  return s
-def freshPackets (n : Native) (c : Context) (cursor : Nat) : IO (Nat × List (Nat × Bytes)) := do
-  let s ← state n c
-  let mut packets := []
-  for (m,index) in s.outbox.zipIdx do
-    if index ≥ cursor then
-      for recipient in List.range c.config.parties do
-        if recipient != s.self && m.view == 1 then
-          let p ← sealPacket n ⟨c,recipient,index,m⟩
-          packets := packets ++ [(recipient,p)]
-  return (s.outbox.length,packets)
-def drive (binary : String) (nodes : Array Native) (runtimes : Array Runtime) (c : Context)
-    (fuel : Nat) (cursors : Array Nat) (queue : List (Nat × Bytes)) : IO Unit := do
+def image (r : Runtime) : IO (Restored r.context) := do
+  let some prior ← r.current | throw (IO.userError "restore")
+  return prior
+def state (r : Runtime) : IO State := return (← image r).state
+
+structure Keys where
+  dir : System.FilePath
+  binary : String
+
+def spec (k : Keys) (i : Nat) (listen : Option String := none)
+    (peers : List (Nat × String) := []) : HelperSpec :=
+  { binary := k.binary
+    signingKey := some (k.dir / s!"sk-{i}")
+    listen := listen
+    peers := peers
+    pairKeys := ((List.range 4).filter (· != i)).map fun j => (j,k.dir / s!"pair-{min i j}-{max i j}") }
+
+/-- Wait for the next verbatim frame at this replica's listener. -/
+def await (r : Runtime) : IO Bytes := do
+  for _ in List.range 500 do
+    if let some frame := (← r.native.helper.receive 1).head? then return frame
+    IO.sleep 10
+  throw (IO.userError "persistent TCP frame did not arrive")
+
+/-- Send over the sender's persistent connection; deliver at the recipient. -/
+def hop (sender recipient : Runtime) (index : Nat) (packet : Bytes) : IO Result := do
+  sender.native.helper.send index packet
+  receive recipient (← await recipient)
+
+/-- Every node seals its new view-1 outbox to every peer over its persistent
+connections; every node then journals whatever arrived. -/
+def drive (nodes : Array Runtime) (c : Context) (fuel : Nat) (cursors : Array Nat) : IO Unit := do
   match fuel with
   | 0 => throw (IO.userError "network fuel exhausted")
   | fuel+1 =>
-    let states ← nodes.toList.mapM (fun n => state n c)
-    if queue.isEmpty then
-      ensure (states.all (fun s => !s.committedTip.isEmpty)) "network stalled"
-      return
-    let (recipient,packet)::rest := queue | throw (IO.userError "network stalled")
-    let some node := nodes[recipient]? | throw (IO.userError "recipient")
-    -- Every delivered packet actually crosses a framed TCP connection.
-    let received ← IO.FS.withTempDir fun dir => do
-      let p := dir / "sent"
-      let q := dir / "received"
-      writePrivate p packet.toByteArray
-      helper binary #["tcp-hop",p.toString,q.toString]
-      return (← IO.FS.readBinFile q).toList
-    let some runtime := runtimes[recipient]? | throw (IO.userError "runtime")
-    match ← receive runtime received with
-    | .durable _ => pure ()
-    | _ => throw (IO.userError "network receive not durable")
-    let (cursor,outgoing) ← freshPackets node c cursors[recipient]!
-    drive binary nodes runtimes c fuel (cursors.set! recipient cursor) (rest ++ outgoing)
+    let states ← nodes.toList.mapM state
+    if states.all (fun s => !s.committedTip.isEmpty) then return
+    let mut cursors := cursors
+    for i in List.range 4 do
+      let s ← state nodes[i]!
+      for (m,index) in s.outbox.zipIdx do
+        if index ≥ cursors[i]! && m.view == 1 then
+          for recipient in List.range 4 do
+            if recipient != i then
+              nodes[i]!.native.helper.send recipient (← sealPacket nodes[i]!.native ⟨c,recipient,index,m⟩)
+      cursors := cursors.set! i s.outbox.length
+    IO.sleep 20
+    for i in List.range 4 do
+      for frame in ← nodes[i]!.native.helper.receive 512 do
+        match ← receive nodes[i]! frame with
+        | .durable _ => pure ()
+        | _ => throw (IO.userError "network receive not durable")
+    drive nodes c fuel cursors
+
 /-- Byzantine test sender has its own real key, but may sign without following
 the honest durable-send rule. This is deliberately confined to the harness. -/
-def faultyCommitPacket (n : Native) (context : Context) (recipient : Nat) : IO Bytes :=
-  IO.FS.withTempDir fun dir => do
-    let signature ← (crypto n).sign (commitmentBytes context 1 [[]])
-    let envelope : Envelope := ⟨context,recipient,0,⟨3,1,.commit,some [[]]⟩⟩
-    let frame := dir / "frame"
-    let tag := dir / "tag"
-    writePrivate frame (authenticatedFrame envelope signature).toByteArray
-    helper n.binary.toString #["mac",(n.pairKey recipient).toString,frame.toString,tag.toString]
-    return packetStream.encode (wireBody envelope signature,(← IO.FS.readBinFile tag).toList)
-def deliverTCP (binary : String) (runtime : Runtime) (packet : Bytes) : IO Unit :=
-  IO.FS.withTempDir fun dir => do
-    let sent := dir / "sent"
-    let received := dir / "received"
-    writePrivate sent packet.toByteArray
-    helper binary #["tcp-hop",sent.toString,received.toString]
-    match ← receive runtime (← IO.FS.readBinFile received).toList with
-    | .durable _ => pure ()
-    | _ => throw (IO.userError "selective delivery did not persist")
+def faultyCommitPacket (n : Native) (context : Context) (recipient : Nat) : IO Bytes := do
+  let signature ← (crypto n).sign (commitmentBytes context 1 [[]])
+  let envelope : Envelope := ⟨context,recipient,0,⟨3,1,.commit,some [[]]⟩⟩
+  let tag ← n.helper.mac recipient (authenticatedFrame envelope signature)
+  return packetStream.encode (wireBody envelope signature,tag)
+
+def deliver (runtime : Runtime) (packet : Bytes) : IO Unit := do
+  match ← receive runtime packet with
+  | .durable _ => pure ()
+  | _ => throw (IO.userError "selective delivery did not persist")
+
 /-- Actual selective-Byzantine trace: A and B send COMMIT, C first disables,
 and faulty D sends its COMMIT only to A. Exactly A doCommits. A recovers and
-relays the q original COMMIT signatures without asking B or C to doCommit first. -/
-def selectiveCommitRecovery (binary : String) (original : Array Native) (base : Context) : IO Unit := do
+relays the q original COMMIT signatures without asking B or C to doCommit first.
+Selective delivery is injected in-process; the TCP path is exercised above. -/
+def selectiveCommitRecovery (k : Keys) (base : Context) : IO Unit := do
   -- Independent test execution: fresh journals must never reset an existing
   -- committee instance while reusing its signed protocol identity.
   let c := {base with instanceBytes := base.instanceBytes ++ [83,69,76,69,67,84]}
-  let nodes := original.map (fun n => {n with journal := n.journal.toString ++ "-selective"})
+  let journal := fun (i : Nat) => k.dir / s!"journal-{i}-selective"
   for i in List.range 4 do
-    writePrivate nodes[i]!.journal (journalStream.encode (⟨c,i,0,[],[]⟩ : Journal)).toByteArray
-  let runtimes ← nodes.mapM (fun n => openRuntime n c)
-  match ← persist (storage nodes[2]!) c (← (storage nodes[2]!).read) (.tick 70) with
+    createJournal k.binary (journal i) ⟨c,i,0,[],[]⟩
+  let nodes ← (List.range 4).toArray.mapM fun i => openRuntime (spec k i) (journal i) c
+  match ← persist (storage nodes[2]!.native) c (.tick 70) with
   | .durable _ => pure ()
   | _ => throw (IO.userError "C disable persistence")
   let proposal : Message := ⟨0,1,.propose,some [[]]⟩
-  deliverTCP binary runtimes[1]! (← sealPacket nodes[0]! ⟨c,1,0,proposal⟩)
+  deliver nodes[1]! (← sealPacket nodes[0]!.native ⟨c,1,0,proposal⟩)
   for receiver in [0,1,2] do
     for voter in [0,1,3] do
       if receiver != voter then
-        deliverTCP binary runtimes[receiver]!
-          (← sealPacket nodes[voter]! ⟨c,receiver,0,⟨voter,1,.vote,some [[]]⟩⟩)
+        deliver nodes[receiver]!
+          (← sealPacket nodes[voter]!.native ⟨c,receiver,0,⟨voter,1,.vote,some [[]]⟩⟩)
   for receiver in [0,1,2] do
     for sender in [0,1] do
       if receiver != sender then
-        deliverTCP binary runtimes[receiver]!
-          (← sealPacket nodes[sender]! ⟨c,receiver,0,⟨sender,1,.commit,some [[]]⟩⟩)
-  deliverTCP binary runtimes[0]! (← faultyCommitPacket nodes[3]! c 0)
-  let a ← state nodes[0]! c
-  let b ← state nodes[1]! c
-  let third ← state nodes[2]! c
+        deliver nodes[receiver]!
+          (← sealPacket nodes[sender]!.native ⟨c,receiver,0,⟨sender,1,.commit,some [[]]⟩⟩)
+  deliver nodes[0]! (← faultyCommitPacket nodes[3]!.native c 0)
+  let a ← state nodes[0]!
+  let b ← state nodes[1]!
+  let third ← state nodes[2]!
   ensure ((viewAt a 1).committed == some [[]] &&
       (viewAt b 1).committed.isNone && (viewAt third 1).committed.isNone)
     "selective COMMIT counterexample not reached"
-  ensure ((← exportCommitment (storage nodes[1]!) (crypto nodes[1]!) c 1 [[]]).isSome)
+  ensure ((← exportCommitment (storage nodes[1]!.native) (crypto nodes[1]!.native) c 1 [[]]).isSome)
     "durable COMMIT sender incorrectly requires local doCommit"
-  ensure ((← exportCommitment (storage nodes[2]!) (crypto nodes[2]!) c 1 [[]]).isNone)
+  ensure ((← exportCommitment (storage nodes[2]!.native) (crypto nodes[2]!.native) c 1 [[]]).isNone)
     "disabled non-sender exported COMMIT"
-  let some recovered ← recoverCommitment (storage nodes[0]!) (crypto nodes[0]!) c 1 [[]]
+  let some recovered ← recoverCommitment (storage nodes[0]!.native) (crypto nodes[0]!.native) c 1 [[]]
     | throw (IO.userError "one committed replica could not recover transferable certificate")
   -- Reopen the runtime: the witness is journaled, not ephemeral packet state.
-  let restarted ← openRuntime nodes[0]! c
+  nodes[0]!.close
+  let restarted ← openRuntime (spec k 0) (journal 0) c
   let some recoveredAgain ← recoverCommitment (storage restarted.native) (crypto restarted.native) c 1 [[]]
     | throw (IO.userError "restart lost COMMIT witness")
   ensure (recoveredAgain.block == recovered.block) "restart changed recovered block"
   for receiver in [1,2] do
-    match ← receiveFinality runtimes[receiver]! recovered.bytes with
+    match ← receiveFinality nodes[receiver]! recovered.bytes with
     | .durable after =>
       ensure ((viewAt after 1).committed == some [[]]) "relayed quorum did not catch up"
     | _ => throw (IO.userError "recovered quorum import failed")
-  -- A repeated certificate must preserve the exact durable bytes, while the
+  -- A repeated certificate must leave the durable log untouched, while the
   -- first certificate above had to retain the previously missing witness.
-  let oldBytes ← (storage runtimes[2]!.native).read
-  let reopened ← openRuntime nodes[2]! c
+  let oldLength := (← IO.FS.readBinFile (journal 2)).size
+  nodes[2]!.close
+  let reopened ← openRuntime (spec k 2) (journal 2) c
   match ← receiveFinality reopened recovered.bytes with
   | .durable _ => pure ()
   | _ => throw (IO.userError "duplicate finality acknowledgement refused")
-  ensure ((← (storage reopened.native).read) == oldBytes)
+  ensure ((← IO.FS.readBinFile (journal 2)).size == oldLength)
     "duplicate certificate grew the durable journal"
+  for r in [restarted,reopened,nodes[1]!,nodes[3]!] do r.close
   IO.println "PASS duplicate certificate: cold restart retains exact journal, late first witness still catches up"
   IO.println "PASS selective COMMIT: exactly one local output, durable q-send certificate, restart and two-replica catchup"
 
+/-- Append-only journal faults: an acknowledged append whose reply was lost is
+replayed on reopen; a torn unacknowledged tail is removed only on a writable
+open; a stale expected length conflicts; a complete corrupt frame, a legacy
+whole image, or a different context never opens. -/
+def journalFaults (k : Keys) (c : Context) : IO Unit := do
+  let path := k.dir / "journal-faults"
+  createJournal k.binary path ⟨c,0,0,[],[]⟩
+  let r ← openRuntime (spec k 0) path c
+  let prior ← image r
+  let some (next,frame) := appendRestored prior [encodeInput (.tick 1000)] []
+    | throw (IO.userError "append continuation refused")
+  -- Lost reply: the frame reached the disk, the writer died before replying.
+  r.close
+  let h ← IO.FS.Handle.mk path .append
+  h.write frame.toByteArray
+  h.flush
+  let reopened ← openRuntime (spec k 0) path c
+  ensure ((← state reopened) == next.state) "lost reply lost the durable append"
+  -- Stale writer: an append at the old length conflicts and drops the image.
+  match ← (storage reopened.native).append prior.length frame with
+  | .conflict => pure ()
+  | _ => throw (IO.userError "stale append accepted")
+  ensure ((← IO.FS.readBinFile path).size == next.length) "stale append changed the log"
+  reopened.close
+  -- Torn tail: half of a further frame. Read-only ignores it; writable truncates it.
+  let some (_,more) := appendRestored next [encodeInput (.tick 2000)] []
+    | throw (IO.userError "second continuation refused")
+  let torn ← IO.FS.Handle.mk path .append
+  torn.write (more.take (more.length / 2)).toByteArray
+  torn.flush
+  let readOnly ← openRuntime (spec k 0) path c (writable := false)
+  ensure ((← state readOnly) == next.state) "torn tail changed read-only state"
+  readOnly.close
+  let writer ← openRuntime (spec k 0) path c
+  ensure ((← IO.FS.readBinFile path).size == next.length) "torn tail not removed by the writer"
+  writer.close
+  -- Corruption: a complete frame whose payload is not a Delta never opens.
+  let corrupt ← IO.FS.Handle.mk path .append
+  corrupt.write (bytesStream.encode [7,7,7]).toByteArray
+  corrupt.flush
+  let refused ← try
+      let _ ← openRuntime (spec k 0) path c
+      pure false
+    catch _ => pure true
+  ensure refused "complete corrupt frame opened"
+  -- A legacy whole-image journal and a crossed context never open.
+  let legacy := k.dir / "journal-legacy"
+  writePrivate legacy (journalStream.encode (⟨c,0,0,[],[]⟩ : Journal)).toByteArray
+  let legacyRefused ← try
+      let _ ← openRuntime (spec k 0) legacy c
+      pure false
+    catch _ => pure true
+  ensure legacyRefused "legacy whole-image journal opened as a log"
+  let fresh := k.dir / "journal-context"
+  createJournal k.binary fresh ⟨c,0,0,[],[]⟩
+  let crossed ← try
+      let _ ← openRuntime (spec k 0) fresh {c with epoch := c.epoch + 1}
+      pure false
+    catch _ => pure true
+  ensure crossed "journal opened under a different exact context"
+  -- Exclusive writer: a second writable open of a held journal refuses.
+  let held ← openRuntime (spec k 0) fresh c
+  let second ← try
+      let _ ← openRuntime (spec k 0) fresh c
+      pure false
+    catch _ => pure true
+  ensure second "second writer opened a held journal"
+  held.close
+  IO.println "PASS append-only journal: lost reply replayed, stale append conflicts, torn tail removed only by the writer, corrupt/legacy/crossed-context logs refused, single writer"
+
 def main (args : List String) : IO Unit := do
   let some binary := args.head? | throw (IO.userError "expected crypto helper path")
-  let storageBinary := args[1]?.map System.FilePath.mk
   IO.FS.withTempDir fun dir => do
     let mut keys := []
     for i in List.range 4 do
@@ -141,138 +225,95 @@ def main (args : List String) : IO Unit := do
       keys := keys ++ [(← IO.FS.readBinFile pk).toList]
       for j in List.range 4 do
         if i < j then helper binary #["mac-keygen",(dir / s!"pair-{i}-{j}").toString]
+    let k : Keys := ⟨dir,binary⟩
     let c : Context := ⟨[10],0,[20],⟨4,1,70,8⟩,keys⟩
-    let nodes : Array Native := ((List.range 4).map fun i =>
-      {binary := binary,storageBinary := storageBinary,
-       journal := dir / s!"journal-{i}",signingKey := dir / s!"sk-{i}",
-       pairKey := fun j => dir / s!"pair-{min i j}-{max i j}"}).toArray
-    let mut queue := []
-    let mut cursors := Array.replicate 4 0
+    let base := 20000 + (← IO.monoMsNow) % 30000
+    let address := fun (i : Nat) => s!"127.0.0.1:{base + i}"
     for i in List.range 4 do
-      let some node := nodes[i]? | throw (IO.userError "node")
-      let j : Journal := ⟨c,i,0,[],[]⟩
-      writePrivate node.journal (journalStream.encode j).toByteArray
-      let (cursor,packets) ← freshPackets node c 0
-      cursors := cursors.set! i cursor
-      queue := queue ++ packets
-    let runtimes ← nodes.mapM (fun node => openRuntime node c)
-    let some (recipient,packet) := queue.head? | throw (IO.userError "no initial packet")
-    let some recipientNode := nodes[recipient]? | throw (IO.userError "recipient")
+      createJournal binary (dir / s!"journal-{i}") ⟨c,i,0,[],[]⟩
+    let nodes ← (List.range 4).toArray.mapM fun i =>
+      openRuntime (spec k i (some (address i))
+        (((List.range 4).filter (· != i)).map fun j => (j,address j))) (dir / s!"journal-{i}") c
+    let s1 ← state nodes[0]!
+    let some first := s1.outbox.head? | throw (IO.userError "no initial message")
+    let packet ← sealPacket nodes[0]!.native ⟨c,1,0,first⟩
     let tampered := packet.dropLast ++ [if packet.getLast? == some 0 then 1 else 0]
-    ensure ((← authenticate recipientNode c recipient tampered).isNone) "tampered MAC accepted"
-    ensure ((← authenticate recipientNode {c with epoch := 1} recipient packet).isNone) "cross-epoch packet accepted"
-    let some byzantine := nodes[3]? | throw (IO.userError "byzantine")
-    let forged ← sealPacket byzantine ⟨c,recipient,0,⟨0,1,.vote,some [[]]⟩⟩
-    ensure ((← authenticate recipientNode c recipient forged).isNone) "Byzantine peer forged honest sender"
-    drive binary nodes runtimes c 1000 cursors queue
-    let states ← nodes.toList.mapM (fun n => state n c)
+    ensure ((← authenticate nodes[1]!.native c 1 tampered).isNone) "tampered MAC accepted"
+    ensure ((← authenticate nodes[1]!.native {c with epoch := 1} 1 packet).isNone) "cross-epoch packet accepted"
+    let forged ← sealPacket nodes[3]!.native ⟨c,1,0,⟨0,1,.vote,some [[]]⟩⟩
+    ensure ((← authenticate nodes[1]!.native c 1 forged).isNone) "Byzantine peer forged honest sender"
+    drive nodes c 2000 (Array.replicate 4 0)
+    let states ← nodes.toList.mapM state
     ensure (states.all fun s => s.committedTip == [[]]) "TCP four-node common commit"
-    let some sender := nodes[0]? | throw (IO.userError "duplicate sender")
-    let senderState ← state sender c
+    IO.println "PASS persistent TCP four-node commit: one long-lived helper per node, authenticated packets, append-only journals"
+    let senderState ← state nodes[0]!
     let some vote := senderState.outbox.find? (fun message => message.kind == .vote && message.view == 1)
       | throw (IO.userError "missing real durable vote")
-    let target := runtimes[1]!
-    let beforeDuplicate ← (storage target.native).read
-    deliverTCP binary target (← sealPacket sender ⟨c,1,0,vote⟩)
-    ensure ((← (storage target.native).read) == beforeDuplicate)
+    let beforeDuplicate := (← image nodes[1]!).length
+    match ← hop nodes[0]! nodes[1]! 1 (← sealPacket nodes[0]!.native ⟨c,1,0,vote⟩) with
+    | .durable _ => pure ()
+    | _ => throw (IO.userError "duplicate vote refused")
+    ensure ((← image nodes[1]!).length == beforeDuplicate &&
+        (← IO.FS.readBinFile (dir / "journal-1")).size == beforeDuplicate)
       "duplicate authenticated vote grew the journal"
-    IO.println "PASS duplicate authenticated vote: actual TCP/MAC, exact durable bytes unchanged"
+    IO.println "PASS duplicate authenticated vote: actual TCP/MAC, durable log unchanged"
 
     -- Application availability uses a separate authenticated domain. The peer
     -- persists offers and never receives a source-validation grant over wire.
     let candidate : Block := [[90],[91]]
-    let envelope ← sealCandidate runtimes[0]! 1 candidate
-    ensure ((← authenticateCandidate runtimes[1]!.native {c with epoch := 1} 1 envelope).isNone)
+    let envelope ← sealCandidate nodes[0]! 1 candidate
+    ensure ((← authenticateCandidate nodes[1]!.native {c with epoch := 1} 1 envelope).isNone)
       "candidate crossed exact context"
-    ensure ((← authenticateCandidate runtimes[1]!.native c 2 envelope).isNone)
+    ensure ((← authenticateCandidate nodes[1]!.native c 2 envelope).isNone)
       "candidate crossed recipient"
     let corrupted := envelope.dropLast ++ [if envelope.getLast? == some 0 then 1 else 0]
-    ensure ((← authenticateCandidate runtimes[1]!.native c 1 corrupted).isNone)
+    ensure ((← authenticateCandidate nodes[1]!.native c 1 corrupted).isNone)
       "candidate MAC tamper accepted"
-    let beforeCandidate ← state nodes[1]! c
-    let receivedCandidate ← IO.FS.withTempDir fun dir => do
-      let sent := dir / "candidate-sent"
-      let received := dir / "candidate-received"
-      writePrivate sent envelope.toByteArray
-      helper binary #["tcp-hop",sent.toString,received.toString]
-      return (← IO.FS.readBinFile received).toList
-    let (accepted,body) ← receiveCandidate runtimes[1]! receivedCandidate
+    let beforeCandidate ← state nodes[1]!
+    nodes[0]!.native.helper.send 1 envelope
+    let arrived ← await nodes[1]!
+    let (accepted,body) ← receiveCandidate nodes[1]! arrived
     match accepted with
     | .durable after =>
       ensure (body == some candidate && after.checked == beforeCandidate.checked)
         "candidate became a checked grant"
       ensure (candidate.all after.offers.contains) "candidate records not retained"
     | _ => throw (IO.userError "authenticated candidate did not persist")
-    let durableCandidate ← (storage nodes[1]!).read
-    let restartedCandidate ← openRuntime nodes[1]! c
-    let (again,_) ← receiveCandidate restartedCandidate receivedCandidate
+    let durableCandidate := (← IO.FS.readBinFile (dir / "journal-1")).size
+    let (again,_) ← receiveCandidate nodes[1]! arrived
     match again with
     | .durable _ => pure ()
     | _ => throw (IO.userError "candidate retry refused")
-    ensure ((← (storage nodes[1]!).read) == durableCandidate)
+    ensure ((← IO.FS.readBinFile (dir / "journal-1")).size == durableCandidate)
       "candidate retransmission grew journal"
-    IO.println "PASS candidate relay: actual TCP, context/recipient/MAC binding, durable unvalidated offers and exact restart dedup"
+    IO.println "PASS candidate relay: actual TCP, context/recipient/MAC binding, durable unvalidated offers and retransmission dedup"
     let mut attestations := []
     for node in nodes do
-      let some a ← exportCommitment (storage node) (crypto node) c 1 [[]]
+      let some a ← exportCommitment (storage node.native) (crypto node.native) c 1 [[]]
         | throw (IO.userError "durable export")
       attestations := attestations ++ [a]
     let cert : Certificate := ⟨c,1,[[]],attestations.take 3⟩
-    let mut deliveries := 0
-    let mut wireBytes := 0
-    for s in states do
-      for (m,index) in s.outbox.zipIdx do
-        if m.view == 1 then
-          for recipient in List.range c.config.parties do
-            if recipient != s.self then
-              deliveries := deliveries + 1
-              let frame := wireBody ⟨c,recipient,index,m⟩
-                (if m.kind == .commit then List.replicate 3309 0 else [])
-              wireBytes := wireBytes + 8 + (packetStream.encode (frame,List.replicate 32 0)).length
-    IO.println s!"SERIALIZED n=4 f=1 inert first view: TCP deliveries={deliveries}, framed bytes={wireBytes}, engine certificate bytes={(certificateStream.encode cert).length}; all continuation waves included"
-    let some first := nodes[0]? | throw (IO.userError "first")
-    let cachedRuntime ← openRuntime first c
-    let first := cachedRuntime.native
-    ensure (← verifyCertificate (crypto first) c cert) "real PQ certificate"
-    let some verified ← verifyCommitted (crypto first) c cert
+    let firstNative := nodes[0]!.native
+    ensure (← verifyCertificate (crypto firstNative) c cert) "real PQ certificate"
+    let some verified ← verifyCommitted (crypto firstNative) c cert
       | throw (IO.userError "typed commitment verification")
     ensure (verified.context == c && verified.block == cert.block) "typed commitment changed scope/block"
-    ensure (!(← verifyAttestations (crypto first) c
+    ensure (!(← verifyAttestations (crypto firstNative) c
       (Minidregg.Kernel.JointSimplexBinding.sourceAppliedBytes c [7]) cert.signers))
       "engine commit signature accepted as source Applied"
-    ensure (!(← verifyCertificate (crypto first) c {cert with block := [[99]]})) "tampered block accepted"
-    ensure (!(← verifyCertificate (crypto first) c {cert with signers := [attestations[0]!,attestations[0]!,attestations[1]!] })) "duplicate signer accepted"
-    -- Lost CAS reply/restart is reconstructed from the durable input/outbox.
-    let prior ← (storage first).read
-    let some (j,_) := restore c prior | throw (IO.userError "precrash restore")
-    let next := journalStream.encode {j with events := j.events ++ [encodeInput (.tick 1000)]}
-    IO.FS.withTempDir fun faultDir => do
-      let e := faultDir / "expected"
-      let p := faultDir / "next"
-      writePrivate e prior.toByteArray
-      writePrivate p next.toByteArray
-      let lost ← IO.Process.output {cmd := (first.storageBinary.getD first.binary).toString, args := #["cas-lose-reply",first.journal.toString,e.toString,p.toString]}
-      ensure (lost.exitCode != 0) "lost reply was not injected"
-    ensure ((← (storage first).read) == next) "lost reply lost durable append"
-    match ← persist (storage first) c prior (.tick 2000) with
-    | .conflict => pure ()
-    | _ => throw (IO.userError "stale CAS accepted")
-    let some cache := first.restoreCache | throw (IO.userError "runtime cache missing")
-    ensure (← cache.get).isNone "CAS conflict retained a cache hint"
-    ensure ((← restoreCached (storage first) {c with epoch := c.epoch+1} next).isNone)
-      "cached restore crossed exact context boundary"
-    ensure ((← restoreCached (storage first) c (next ++ [255])).isNone)
-      "cached restore accepted noncanonical trailing bytes"
-    let some exact ← restoreCached (storage first) c next
-      | throw (IO.userError "actual lost-response bytes no longer restore")
-    ensure (exact.bytes == next && (← (storage first).read) == next)
-      "memoized restoration changed physical journal"
-    let recovered ← state first c
-    ensure (!recovered.committedTip.isEmpty && !recovered.outbox.isEmpty) "crash replay lost decision/outbox"
-    let resumed ← openRuntime first c
+    ensure (!(← verifyCertificate (crypto firstNative) c {cert with block := [[99]]})) "tampered block accepted"
+    ensure (!(← verifyCertificate (crypto firstNative) c {cert with signers := [attestations[0]!,attestations[0]!,attestations[1]!] })) "duplicate signer accepted"
+    let recovered ← state nodes[0]!
+    ensure (!recovered.committedTip.isEmpty && !recovered.outbox.isEmpty) "decision/outbox missing"
+    nodes[0]!.close
+    let resumed ← openRuntime (spec k 0) (dir / "journal-0") c
+    ensure ((← state resumed) == recovered) "restart replay changed the engine state"
     ensure ((← resumed.now) ≥ recovered.now) "reboot clock moved backwards"
-    selectiveCommitRecovery binary nodes c
-    IO.println "PASS GenericSimplex native harness: four nodes, authenticated TCP packets, durable replay/CAS, real MLDSA65 quorum, tamper/duplicate rejection"
+    resumed.close
+    for i in [1,2,3] do nodes[i]!.close
+    journalFaults k c
+    selectiveCommitRecovery k c
+    IO.println "PASS GenericSimplex native harness: four nodes, persistent authenticated TCP, append-only durable replay, real MLDSA65 quorum, tamper/duplicate rejection"
 end Minidregg.Verify.GenericSimplexNativeHarness
 def main (args : List String) : IO Unit :=
   Minidregg.Verify.GenericSimplexNativeHarness.main args

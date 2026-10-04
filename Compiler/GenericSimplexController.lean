@@ -37,14 +37,13 @@ It does not allocate private custody, issue semantic repair requests, charge a
 source meter, or assert that finite operator capacity guarantees liveness. -/
 def attempt (runtime : Runtime) (config : Minidregg.Kernel.NativeHost.Config) (origin : Opened config)
     (queue : Minidregg.Compiler.GenericSimplexPending.Queue) : IO (Minidregg.Compiler.GenericSimplexPending.Queue × Outcome) := do
-  let bytes ← (storage runtime.native).read
-  let some (_,state) ← restoredPair (storage runtime.native) runtime.context bytes
-    | return (queue,.invalidJournal)
+  let some prior ← runtime.current | return (queue,.invalidJournal)
+  let state := prior.state
   let some (block,rest) := Minidregg.Compiler.GenericSimplexPending.take state queue
     | return (Minidregg.Compiler.GenericSimplexPending.discover state queue,.idle)
   match ← Minidregg.Kernel.JointSourcePrefixValidation.validate config origin runtime.context block with
   | .accepted validated =>
-    match ← persist (storage runtime.native) runtime.context bytes (checkedInput validated) with
+    match ← persist (storage runtime.native) runtime.context (checkedInput validated) with
     | .durable _ => return (rest,.accepted block)
     | .conflict => return (Minidregg.Compiler.GenericSimplexPending.retry rest block,.conflict)
     | .uncertain => return (Minidregg.Compiler.GenericSimplexPending.retry rest block,.uncertain)

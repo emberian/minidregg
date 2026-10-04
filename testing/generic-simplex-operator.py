@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""Owner-configured local four-participant bridge for the native Host frame API.
+"""Owner-configured bridge from the native Host frame API to four standing replicas.
 
-Only op2 may mutate, via the actual Lean source-agreement fixture. Other allowed
-operations go to the same-profile Host's existing read/prepare/author handlers.
-This is a local multi-participant operator, not four independent deployed nodes.
+Only op2 may mutate: it runs one Lean await client that places the exact original
+call in the replicas' request spools and returns the native Outcome. The engines
+are standing serve-replica processes that this bridge never starts or signals.
+Other allowed operations go to the same-profile Host's read/prepare/author handlers.
 """
 import json
 import os
 from pathlib import Path
 import signal
-import select
-import time
 import stat
 import struct
 import subprocess
@@ -108,18 +107,29 @@ def retained_attempt(attempts, payload):
     return ticket, original, outcome
 
 
-def run_submission(prefix, attempts, fuel, seconds, payload):
+# Grace beyond the client's own deadline before the bridge stops waiting.
+CLIENT_GRACE_SECONDS = 30
+
+
+def run_submission(prefix, attempts, seconds, payload, grace=CLIENT_GRACE_SECONDS):
+    """Run one await client: prefix + [CALL, OUTCOME, SECONDS, REQUEST_ID].
+
+    The agreement engines are standing serve-replica processes, never children
+    of this bridge. The client only places the exact original call in the
+    replicas' request spools and waits for four identical receipts; at its own
+    deadline it writes the native `uncertain` Outcome. If it overstays the grace
+    period, only the client's process group is stopped. No engine is signalled,
+    and an uncertain result never causes a second invocation here.
+    """
     ticket, original, outcome = retained_attempt(attempts, payload)
-    # Retain original bytes after success, timeout, or lost response. An
-    # uncertain process result never causes a second invocation here.
     with (ticket / "operator.log").open("xb") as log:
         os.chmod(log.name, 0o600)
         child = subprocess.Popen(
-            prefix + [str(original), str(outcome), str(fuel)],
+            prefix + [str(original), str(outcome), str(seconds), ticket.name],
             stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True,
         )
         try:
-            result = child.wait(timeout=seconds)
+            result = child.wait(timeout=seconds + grace)
         except subprocess.TimeoutExpired:
             os.killpg(child.pid, signal.SIGKILL)
             child.wait()
@@ -127,97 +137,29 @@ def run_submission(prefix, attempts, fuel, seconds, payload):
         log.flush()
         os.fsync(log.fileno())
     if result:
-        raise RuntimeError("agreement process failed; original call retained for lookup")
+        raise RuntimeError("agreement client failed; original call retained for lookup")
     # Only the actual Lean codec producer writes this result; the bridge never
     # translates JSON or a process exit into a confirmation receipt.
     return read_outcome(outcome)
 
 
-class SubmissionSession:
-    """One supervised native participant process; uncertain calls never retry."""
-
-    def __init__(self, prefix, attempts):
-        self.attempts = attempts
-        self.closed = False
-        log_path = attempts / ("session-" + uuid.uuid4().hex + ".log")
-        descriptor = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-        self.log = os.fdopen(descriptor, "wb")
-        try:
-            self.child = subprocess.Popen(prefix, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                          stderr=self.log, start_new_session=True)
-        except BaseException:
-            self.log.close()
-            raise
-
-    def close(self):
-        if self.closed:
-            return
-        self.closed = True
-        if self.child.poll() is None:
-            os.killpg(self.child.pid, signal.SIGTERM)
-            try:
-                self.child.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                os.killpg(self.child.pid, signal.SIGKILL)
-                self.child.wait()
-        self.child.stdin.close()
-        self.child.stdout.close()
-        self.log.flush()
-        os.fsync(self.log.fileno())
-        self.log.close()
-
-    def run(self, fuel, seconds, payload):
-        if self.closed or self.child.poll() is not None:
-            raise RuntimeError("native agreement session stopped; use exact original-call lookup")
-        ticket, original, outcome = retained_attempt(self.attempts, payload)
-        try:
-            request = json.dumps([str(original), str(outcome), str(fuel)]).encode() + b"\n"
-            self.child.stdin.write(request)
-            self.child.stdin.flush()
-            deadline = time.monotonic() + seconds
-            reply = bytearray()
-            while b"\n" not in reply:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0 or not select.select([self.child.stdout], [], [], remaining)[0]:
-                    raise RuntimeError("agreement completion uncertain; use exact original-call lookup")
-                part = os.read(self.child.stdout.fileno(), 256)
-                if not part:
-                    raise RuntimeError("agreement session closed; original call retained for lookup")
-                reply.extend(part)
-                if len(reply) > 256:
-                    raise RuntimeError("invalid native session acknowledgement")
-            if reply != b"done\n":
-                raise RuntimeError("invalid native session acknowledgement")
-            # The acknowledgement is supervision only. Confirmation bytes come
-            # exclusively from the native Outcome file for this exact ticket.
-            return read_outcome(outcome)
-        except BaseException:
-            self.close()
-            raise
-
-
 def serve(profile, source, destination):
     reader_args = command(profile["readerCommand"], "readerCommand")
     submit_args = command(profile["submitCommand"], "submitCommand")
-    session_args = (command(profile["submitSessionCommand"], "submitSessionCommand")
-                    if "submitSessionCommand" in profile else None)
+    if "fuel" in profile or "submitSessionCommand" in profile:
+        raise RuntimeError("profile names the retired driver-owned session; engines are standing replicas")
     attempts = Path(profile["attempts"]).resolve(strict=True)
     private_dir(attempts)
-    fuel, seconds = profile["fuel"], profile["timeoutSeconds"]
-    if type(fuel) is not int or type(seconds) is not int or fuel <= 0 or seconds <= 0:
-        raise RuntimeError("finite positive service fuel and timeout are required")
+    seconds = profile["timeoutSeconds"]
+    if type(seconds) is not int or seconds <= 0:
+        raise RuntimeError("a finite positive client deadline is required")
     reader = subprocess.Popen(reader_args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                               stderr=sys.stderr, start_new_session=True)
-    session = None
     try:
-        if session_args is not None:
-            session = SubmissionSession(session_args, attempts)
         while (request := read_frame(source)) is not None:
             operation, payload = request
             if operation == 2:
-                answer = (session.run(fuel, seconds, payload) if session is not None else
-                          run_submission(submit_args, attempts, fuel, seconds, payload))
-                write_frame(destination, 2, answer)
+                write_frame(destination, 2, run_submission(submit_args, attempts, seconds, payload))
             elif operation in READ_ONLY:
                 write_frame(reader.stdin, operation, payload)
                 response = read_frame(reader.stdout)
@@ -230,8 +172,6 @@ def serve(profile, source, destination):
                 # it makes no semantic rejection/rollback claim.
                 raise RuntimeError("operation is outside the agreed ordinary-call profile")
     finally:
-        if session is not None:
-            session.close()
         if reader.poll() is None:
             os.killpg(reader.pid, signal.SIGTERM)
             try:

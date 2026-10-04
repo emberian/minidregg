@@ -1,8 +1,9 @@
 /-
 Real source fixture for four independently stored Mini agreement participants.
 The initializer derives a fresh source genesis under the actual agreed runtime
-profile, then binds its exact seed to the committee context. Every subsequent
-setup/workdesk ingress goes through GenericSimplexSourceHarness.runCall. No supplied
+profile, then binds its exact seed to the committee context. Each replica then
+runs as its own standing `serve-replica` process; a client only places the exact
+original call with `await-call` and waits for four identical receipts. No supplied
 record, validation callback, checked engine input, or accepted history is seeded.
 This source is WIP until checked with the common receiver's qualified outputs.
 -/
@@ -50,12 +51,20 @@ def replicaDirectory (root : System.FilePath) (index : Nat) : System.FilePath :=
 def pairPath (root : System.FilePath) (left right : Nat) : System.FilePath :=
   root / s!"pair-{min left right}-{max left right}.key"
 
-def native (root : System.FilePath) (helpers : Helpers) (index : Nat) : Native :=
+/-- Append-only engine journal. The legacy whole-image `agreement.bin` is not
+read by this fixture; `convert-journal` re-encodes it explicitly. -/
+def journalPath (root : System.FilePath) (index : Nat) : System.FilePath :=
+  replicaDirectory root index / "agreement.log"
+
+/-- One replica's long-lived helper: its own signing key, the pairwise keys it
+shares with each other member, and (when serving) its listener and peers. -/
+def replicaSpec (root : System.FilePath) (helpers : Helpers) (index : Nat)
+    (listen : Option String := none) (peers : List (Nat × String) := []) : HelperSpec :=
   { binary := helpers.agreement
-    journal := replicaDirectory root index / "agreement.bin"
-    signingKey := replicaDirectory root index / "committee.sk"
-    pairKey := pairPath root index
-    storageBinary := some helpers.agreement }
+    signingKey := some (replicaDirectory root index / "committee.sk")
+    listen := listen
+    peers := peers
+    pairKeys := ((List.range 4).filter (· != index)).map fun peer => (peer,pairPath root index peer) }
 
 def baseConfig (root : System.FilePath) (helpers : Helpers)
     (context : Context) (index : Nat) : NativeHost.Config :=
@@ -149,8 +158,7 @@ def initializeStores (root : System.FilePath) (helpers : Helpers)
     require (config.runtimeParameters == (baseConfig root helpers context 0).runtimeParameters)
       "binding exact source anchor changed the normalized runtime semantics"
     IO.ofExcept (← bootstrapFresh config (DurableReceiverCodec.encode built.image))
-    writePrivate (native root helpers index).journal
-      (journalStream.encode (⟨bound,index,0,[],[]⟩ : Journal)).toByteArray
+    createJournal helpers.agreement (journalPath root index) ⟨bound,index,0,[],[]⟩
   IO.FS.writeFile (root / "manifest.json") (Json.mkObj
     [("state", .str "initialized-source-genesis-no-accepted-history"),
      ("participants", toJson (4 : Nat)), ("faults", toJson (1 : Nat)),
@@ -163,11 +171,14 @@ def initializeStores (root : System.FilePath) (helpers : Helpers)
      ("agreementBinary", .str helpers.agreement.toString)]).compress
   IO.println "INITIALIZED four actual source stores; no source transition accepted yet"
 
-def openReplicas (root : System.FilePath) (helpers : Helpers) :
-    IO (Array GenericSimplexSourceHarness.Replica) := do
+/-- Open one replica: verified source store, exact committee context bound to
+this source genesis, and its engine journal (writer lock when `writable`). -/
+def openReplica (root : System.FilePath) (helpers : Helpers) (index : Nat) (writable : Bool)
+    (listen : Option String := none) (peers : List (Nat × String) := []) :
+    IO GenericSimplexSourceHarness.Replica := do
   let encoded := (← IO.FS.readBinFile (root / "context.bin")).toList
   let some context := contextStream.toLawful.decode encoded
-    | throw (IO.userError "invalid source fixture context")
+    | throw (IO.userError "invalid source fixture context (a pre-epoch context.bin refuses here)")
   require (contextStream.encode context == encoded && context.wellFormed)
     "noncanonical source fixture context"
   let alice := (← IO.FS.readBinFile (root / "subject-7.pub")).toList
@@ -175,31 +186,27 @@ def openReplicas (root : System.FilePath) (helpers : Helpers) :
   let built ← derive root helpers context alice bob
   require (context.instanceBytes == GenericSimplexSourceAnchor.anchorBytes 10 built.image.seed)
     "source fixture context does not bind this exact source genesis"
+  let config := {baseConfig root helpers context index with
+    expectedSeed := NativeHost.seedIdentity built.image.seed}
+  let loaded ← IO.ofExcept (← DurableReceiverIO.load config.physicalTransport ResourceBirthCodec.rootBytes)
+  let verified ← IO.ofExcept ((← NativeHostReplay.verifyLoaded config loaded).mapError
+    (fun failure => s!"source fixture replay refused: {failure.detail}"))
+  let runtime ← openRuntime (replicaSpec root helpers index listen peers)
+    (journalPath root index) context writable
+  let participant ← IO.ofExcept (← openParticipant config runtime ⟨loaded,verified⟩)
+  return ⟨config,participant⟩
+
+def openReplicas (root : System.FilePath) (helpers : Helpers) (writable : Bool) :
+    IO (Array GenericSimplexSourceHarness.Replica) := do
   let mut replicas := #[]
   for index in List.range 4 do
-    let config := {baseConfig root helpers context index with
-      expectedSeed := NativeHost.seedIdentity built.image.seed}
-    let loaded ← IO.ofExcept (← DurableReceiverIO.load config.physicalTransport ResourceBirthCodec.rootBytes)
-    let verified ← IO.ofExcept ((← NativeHostReplay.verifyLoaded config loaded).mapError
-      (fun failure => s!"source fixture replay refused: {failure.detail}"))
-    let participant ← IO.ofExcept (← openParticipant config (native root helpers index)
-      context ⟨loaded,verified⟩)
-    replicas := replicas.push ⟨config,participant⟩
+    replicas := replicas.push (← openReplica root helpers index writable)
   return replicas
-
-/-- Operator output is a native Outcome frame in a private file. Diagnostic
-stdout never substitutes for a receipt. Original signed call bytes are retained. -/
-def submitCall (root : System.FilePath) (helpers : Helpers)
-    (callFile outputFile : System.FilePath) (fuel : Nat) : IO Unit := do
-  let replicas ← openReplicas root helpers
-  let (_, outcome) ← GenericSimplexOperatorBridge.submit fuel replicas
-    (← IO.FS.readBinFile callFile).toList
-  writePrivate outputFile (NativeHostCodec.outcomeCodec.encode outcome).toByteArray
 
 /-- Independent process readback: no drive, proposal, or admission is called. -/
 def lookupAllCall (root : System.FilePath) (helpers : Helpers)
     (callFile outputFile : System.FilePath) : IO Unit := do
-  let replicas ← openReplicas root helpers
+  let replicas ← openReplicas root helpers false
   require (replicas.size == 4) "lookup requires four actual participants"
   let call := (← IO.FS.readBinFile callFile).toList
   let some first := replicas[0]? | throw (IO.userError "missing first source participant")
@@ -221,32 +228,58 @@ def lookupAllCall (root : System.FilePath) (helpers : Helpers)
     writePrivate outputFile (NativeHostCodec.outcomeCodec.encode (.confirmed .replayed receipt)).toByteArray
     IO.println "LOOKUP-ALL exact original receipt and complete prefix on four reopened stores"
 
-/-- One owner-private serial operator session retains only verified replicas and
-exact-byte restore caches between calls. Every request still reloads actual source
-state through the ordinary bridge. A stopped process is recovered from durable
-journals, never from this volatile session. The caller supervises each request and
-must not automatically redispatch after a lost response. -/
-def serveCalls (root : System.FilePath) (helpers : Helpers) : IO Unit := do
-  let input ← IO.getStdin
-  let output ← IO.getStdout
-  let mut replicas ← openReplicas root helpers
-  repeat
-    let line ← input.getLine
-    if line.isEmpty then return
-    let json ← IO.ofExcept (Json.parse line)
-    let values ← IO.ofExcept json.getArr?
-    require (values.size == 3) "session requires exact call, outcome, fuel"
-    let callFile ← IO.ofExcept values[0]!.getStr?
-    let outputFile ← IO.ofExcept values[1]!.getStr?
-    let fuelText ← IO.ofExcept values[2]!.getStr?
-    let some fuel := fuelText.toNat? | throw (IO.userError "invalid session fuel")
-    require (fuel > 0) "positive finite service fuel required"
-    let (next,outcome) ← GenericSimplexOperatorBridge.submit fuel replicas
-      (← IO.FS.readBinFile callFile).toList
-    replicas := next
-    writePrivate outputFile (NativeHostCodec.outcomeCodec.encode outcome).toByteArray
-    output.putStrLn "done"
-    output.flush
+/-- `serve-replica`: one standing replica process. The replica index is the
+`replica-N` directory name; PEERS lists all four `host:port` addresses in index
+order, this replica's own entry being its listener. Never returns. -/
+def serveReplica (replica : System.FilePath) (peers : String) (helpers : Helpers)
+    (tickMs : Nat) : IO Unit := do
+  let some root := replica.parent | throw (IO.userError "replica directory has no parent")
+  let some name := replica.fileName | throw (IO.userError "replica directory name")
+  let some index := (name.toList.drop 8).asString.toNat?
+    | throw (IO.userError "replica directory must be named replica-N")
+  require (name.startsWith "replica-" && index < 4) "replica directory must be named replica-N"
+  let addresses := peers.splitOn ","
+  require (addresses.length == 4 && addresses.all (· != "")) "PEERS must list four host:port addresses"
+  let peerList := ((List.range 4).filter (· != index)).map fun peer => (peer,addresses[peer]!)
+  let replicaState ← openReplica root helpers index true (some addresses[index]!) peerList
+  IO.eprintln s!"SERVE replica {index} listening on {addresses[index]!}"
+  GenericSimplexServe.serveLoop replicaState.participant
+    (GenericSimplexServe.requestDirectory replica) {} tickMs 30000 []
+
+/-- `await-call`: place the exact original call at the proposer and watches at
+the others, then wait for four identical receipts and prefixes. On the deadline
+the outcome is `uncertain`; requests remain and the engines keep serving them.
+Never opens a journal, never signals an engine. -/
+def awaitCall (root : System.FilePath) (callFile outputFile : System.FilePath)
+    (seconds : Nat) (id : String) (proposer : Nat) : IO Unit := do
+  require (proposer < 4 && !id.isEmpty && id.all (fun c => c.isAlphanum || c == '-'))
+    "await-call requires a proposer index and an alphanumeric request id"
+  let call := (← IO.FS.readBinFile callFile).toList
+  let replicas := (List.range 4).map (replicaDirectory root)
+  let outcome : NativeHostCodec.Outcome ←
+    match ← GenericSimplexServe.awaitCall replicas proposer id call (seconds * 1000) with
+    | .confirmed kind receipt => pure (.confirmed kind receipt)
+    | .uncertain => pure (.uncertain "agreement completion unavailable; use exact original-call lookup".toUTF8.toList)
+  writePrivate outputFile (NativeHostCodec.outcomeCodec.encode outcome).toByteArray
+
+/-- `convert-journal`: explicit one-time re-encoding of a legacy whole-image
+`agreement.bin` into the append-only log. The new log is created exclusively and
+must replay to the identical engine state; the legacy file is left untouched. -/
+def convertJournal (root : System.FilePath) (helpers : Helpers) (index : Nat) : IO Unit := do
+  let encoded := (← IO.FS.readBinFile (root / "context.bin")).toList
+  let some context := contextStream.toLawful.decode encoded
+    | throw (IO.userError "invalid source fixture context")
+  let legacy := (← IO.FS.readBinFile (replicaDirectory root index / "agreement.bin")).toList
+  let some (journal,state) := restore context legacy
+    | throw (IO.userError "legacy journal does not replay under this exact context")
+  require (journal.self == index) "legacy journal belongs to another replica"
+  createJournal helpers.agreement (journalPath root index) journal
+  let converted := (← IO.FS.readBinFile (journalPath root index)).toList
+  let some reopened := openRestored context converted
+    | throw (IO.userError "converted log does not replay")
+  require (reopened.state == state && reopened.log.merged == journal)
+    "converted log replays to a different engine state"
+  IO.println s!"CONVERTED replica {index}: {journal.events.length} events, {journal.commitWitnesses.length} witnesses, view {state.current}, identical replayed state"
 
 end Minidregg.Verify.NativeJointSourceFixture
 
@@ -256,11 +289,16 @@ def main (args : List String) : IO Unit := do
   match args with
   | ["init", root, store, signature, agreement, alice, bob] =>
       initializeStores root ⟨store,signature,agreement⟩ alice bob
-  | ["serve-calls",root,store,signature,agreement] =>
-      serveCalls root ⟨store,signature,agreement⟩
+  | ["serve-replica", replica, peers, store, signature, agreement, tick] =>
+      let some tick := tick.toNat? | throw (IO.userError "invalid tick milliseconds")
+      serveReplica replica peers ⟨store,signature,agreement⟩ tick
+  | ["await-call", root, callFile, outputFile, seconds, id, proposer] =>
+      let some seconds := seconds.toNat? | throw (IO.userError "invalid deadline seconds")
+      let some proposer := proposer.toNat? | throw (IO.userError "invalid proposer index")
+      awaitCall root callFile outputFile seconds id proposer
   | ["lookup-all-call", root, store, signature, agreement, callFile, outputFile] =>
       lookupAllCall root ⟨store,signature,agreement⟩ callFile outputFile
-  | ["submit-call", root, store, signature, agreement, callFile, outputFile, fuel] =>
-      let some fuel := fuel.toNat? | throw (IO.userError "invalid finite service fuel")
-      submitCall root ⟨store,signature,agreement⟩ callFile outputFile fuel
-  | _ => throw (IO.userError "usage: NativeJointSourceFixture init ROOT STORE SIGNATURE AGREEMENT ALICE_PUB BOB_PUB | run ROOT STORE SIGNATURE AGREEMENT ORIGINAL_SIGNED_CALL FUEL")
+  | ["convert-journal", root, store, signature, agreement, index] =>
+      let some index := index.toNat? | throw (IO.userError "invalid replica index")
+      convertJournal root ⟨store,signature,agreement⟩ index
+  | _ => throw (IO.userError "usage: NativeJointSourceFixture init ROOT STORE SIGNATURE AGREEMENT ALICE_PUB BOB_PUB | serve-replica REPLICA_DIR PEERS STORE SIGNATURE AGREEMENT TICK_MS | await-call ROOT CALL OUTCOME SECONDS ID PROPOSER | lookup-all-call ROOT STORE SIGNATURE AGREEMENT CALL OUTCOME | convert-journal ROOT STORE SIGNATURE AGREEMENT INDEX")

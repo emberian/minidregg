@@ -25,10 +25,9 @@ def retainedOfferedPayload (replicas : Array Replica) (ingress : Bytes) :
     IO (Option Bytes) := do
   for replica in replicas do
     let p := replica.participant
-    let some (_, state) ← Minidregg.Compiler.GenericSimplexIO.restoredPair
-        (Minidregg.Compiler.GenericSimplexNative.storage p.runtime.native)
-        p.runtime.context (← (Minidregg.Compiler.GenericSimplexNative.storage p.runtime.native).read)
+    let some prior ← p.runtime.current
       | throw (IO.userError "pending recovery journal refused")
+    let state := prior.state
     for payload in state.offers do
       if let some record := DurableCheckpointCodec.recordFrame.decode payload then
         if DurableCheckpointCodec.recordFrame.encode record == payload &&

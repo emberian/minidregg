@@ -29,19 +29,17 @@ class SessionSocketBoundary(unittest.TestCase):
         self.wrapper.write_text(r"""#!/usr/bin/env python3
 import json,os,sys,time
 from pathlib import Path
+call,out,seconds,ticket=sys.argv[1:]
 log=Path(__file__).with_name('dispatches')
-for line in sys.stdin:
-    call,out,fuel=json.loads(line)
-    body=Path(call).read_bytes()
-    with log.open('a') as f:f.write(json.dumps([os.getpid(),body.hex(),fuel])+'\n')
-    if body==b'delay':time.sleep(10)
-    p=Path(out);p.write_bytes(b'native:'+body);os.chmod(p,0o600)
-    print('done',flush=True)
+body=Path(call).read_bytes()
+with log.open('a') as f:f.write(json.dumps([os.getpid(),body.hex(),seconds,ticket])+'\n')
+if body==b'delay':time.sleep(40)
+p=Path(out);p.write_bytes(b'native:'+body);os.chmod(p,0o600)
 """)
         self.wrapper.chmod(0o700)
         self.server = subprocess.Popen(
             [sys.executable, str(path), "serve", str(self.path), str(self.wrapper),
-             str(self.attempts), "12", "1", "owner-private"],
+             str(self.attempts), "1", "owner-private"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
         self.assertTrue(select.select([self.server.stdout], [], [], 3)[0])
         self.assertEqual(self.server.stdout.readline(), b"SESSION BACKEND READY\n")
@@ -66,37 +64,28 @@ for line in sys.stdin:
         path = self.root / "dispatches"
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
-    def test_original_submission_seam_two_calls_one_native_process(self):
+    def test_original_submission_seam_one_client_per_call(self):
         outer = self.root / "outer"
         outer.mkdir(mode=0o700)
         prefix = [sys.executable, str(path), "submit", str(self.path)]
         for payload in [b"first", b"second"]:
-            result = adapter.bridge.run_submission(prefix, outer, 12, 3, payload)
+            result = adapter.bridge.run_submission(prefix, outer, 3, payload)
             self.assertEqual(result, b"native:" + payload)
         calls = self.dispatches()
         self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[0][0], calls[1][0])
         self.assertEqual([bytes.fromhex(x[1]) for x in calls], [b"first", b"second"])
+        self.assertTrue(all(x[2] == "1" for x in calls), "backend did not apply its pinned deadline")
         self.assertEqual(sorted(p.read_bytes() for p in outer.glob("*/call.bin")),
                          [b"first", b"second"])
-
-    def test_wrong_fuel_refused_before_dispatch(self):
-        original = self.call_file("call", b"held")
-        with self.assertRaises(RuntimeError):
-            adapter.submit(self.path, original, self.root / "outcome", 13)
-        self.assertEqual(self.dispatches(), [])
-        self.assertFalse((self.root / "outcome").exists())
 
     def test_timeout_retains_once_no_automatic_dispatch(self):
         original = self.call_file("call", b"delay")
         with self.assertRaises(RuntimeError):
-            adapter.submit(self.path, original, self.root / "outcome", 12)
+            adapter.submit(self.path, original, self.root / "outcome")
         time.sleep(0.1)
         self.assertEqual(len(self.dispatches()), 1)
         self.assertEqual(original.read_bytes(), b"delay")
         self.assertFalse((self.root / "outcome").exists())
-        pid = self.dispatches()[0][0]
-        self.assertFalse(Path('/proc/'+str(pid)).exists())
 
     def test_oversized_request_does_not_dispatch(self):
         with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as connection:
@@ -109,17 +98,16 @@ for line in sys.stdin:
         original = self.call_file("call", b"held")
         original.chmod(0o644)
         with self.assertRaises(RuntimeError):
-            adapter.submit(self.path, original, self.root / "outcome", 12)
+            adapter.submit(self.path, original, self.root / "outcome")
         self.assertEqual(self.dispatches(), [])
 
     def test_socket_owner_permissions_and_shutdown(self):
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
         original = self.call_file("call", b"once")
-        adapter.submit(self.path, original, self.root / "outcome", 12)
-        pid = self.dispatches()[0][0]
+        adapter.submit(self.path, original, self.root / "outcome")
+        self.assertEqual((self.root / "outcome").read_bytes(), b"native:once")
         self.server.terminate();self.server.wait(timeout=3)
         self.assertFalse(self.path.exists())
-        self.assertFalse(Path('/proc/'+str(pid)).exists())
 
 
 if __name__ == '__main__':unittest.main()

@@ -1,4 +1,4 @@
-import Compiler.GenericSimplexParticipant
+import Compiler.GenericSimplexServe
 namespace Minidregg.Verify.GenericSimplexSourceHarness
 open Minidregg.Kernel.GenericSimplex
 open Minidregg.Compiler.GenericSimplexCodec
@@ -15,16 +15,9 @@ structure Replica where
 def require (condition : Bool) (detail : String) : IO Unit :=
   unless condition do throw (IO.userError detail)
 
-def crossTCP (binary : System.FilePath) (packet : Bytes) : IO Bytes :=
-  IO.FS.withTempDir fun dir => do
-    let sent := dir / "sent"
-    let received := dir / "received"
-    writePrivate sent packet.toByteArray
-    let result ← IO.Process.output {cmd := binary.toString,args := #["tcp-hop",sent.toString,received.toString]}
-    if result.exitCode != 0 || !result.stderr.isEmpty then
-      throw (IO.userError ("actual TCP exchange failed: " ++ result.stderr))
-    return (← IO.FS.readBinFile received).toList
-
+/-- In-process four-replica driver over the same per-replica `iteration` the
+standing service runs. Packets are delivered directly between participants in
+this process; the standing service carries them over persistent TCP instead. -/
 def drive (fuel : Nat) (replicas : Array Replica) (payload : Bytes)
     (packets : List (Nat × Bytes)) : IO (Array Replica) := do
   match fuel with
@@ -33,32 +26,18 @@ def drive (fuel : Nat) (replicas : Array Replica) (payload : Bytes)
     if replicas.toList.all (fun r => (completedReceipt r.participant payload).isSome) then
       return replicas
     let mut replicas := replicas
-    let mut later := packets
-    -- Drain a bounded batch before local timers, so retransmission does not
-    -- create a harness-only one-packet bottleneck behind fresh fanout.
-    for _ in List.range 64 do
-      if let (recipient,packet)::rest := later then
-        let some replica := replicas[recipient]? | throw (IO.userError "unknown recipient")
-        let delivered ← crossTCP replica.participant.runtime.native.binary packet
-        let (participant,result) ← Minidregg.Compiler.GenericSimplexParticipant.receive
-          replica.participant delivered
-        match result with
-        | .durable _ => pure ()
-        | _ => throw (IO.userError "native participant ingress was not durable")
-        replicas := replicas.set! recipient ⟨replica.config,participant⟩
-        -- A source receipt may become available on this very certificate arrival.
-        -- Return before spending the rest of the bounded historical packet batch;
-        -- unsent protocol obligations remain in the durable engine journals.
-        if replicas.toList.all (fun r => (completedReceipt r.participant payload).isSome) then
-          return replicas
-        later := rest
+    let mut later := []
     for index in List.range replicas.size do
       let some replica := replicas[index]? | throw (IO.userError "replica index")
-      let serviced ← service replica.participant 1 4 1
-      replicas := replicas.set! index ⟨replica.config,serviced.1⟩
+      let inbound := (packets.filter (·.1 == index)).map (·.2)
+      let (participant,sent,report) ← Minidregg.Compiler.GenericSimplexServe.iteration
+        replica.participant inbound {}
+      if report.refused != 0 then
+        throw (IO.userError "honest in-process packet failed authentication")
+      replicas := replicas.set! index ⟨replica.config,participant⟩
       if replicas.toList.all (fun r => (completedReceipt r.participant payload).isSome) then
         return replicas
-      later := later ++ serviced.2.1
+      later := later ++ sent
     drive fuel replicas payload later
 
 /-- The per-mutation replica comparison: tip height and served world root.
@@ -89,12 +68,9 @@ def run (fuel : Nat) (replicas : Array Replica) (signedIngress : Bytes) : IO (Ar
     "source harness requires four distinct agreement journal paths"
   for index in List.range replicas.size do
     let some replica := replicas[index]? | throw (IO.userError "replica identity index")
-    let some (journal,state) ← Minidregg.Compiler.GenericSimplexIO.restoredPair
-        (Minidregg.Compiler.GenericSimplexNative.storage replica.participant.runtime.native)
-        replica.participant.runtime.context
-        (← (Minidregg.Compiler.GenericSimplexNative.storage replica.participant.runtime.native).read)
+    let some prior ← replica.participant.runtime.current
       | throw (IO.userError "replica identity journal refused")
-    require (journal.self == index && state.self == index)
+    require (prior.self == index && prior.state.self == index)
       "source harness replica array differs from durable signer identity"
   for replica in replicas do
     require (replica.participant.runtime.context == first.participant.runtime.context)

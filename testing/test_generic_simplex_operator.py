@@ -47,15 +47,18 @@ class NativeFrameBoundary(unittest.TestCase):
             root = Path(name)
             code = ("import os,sys;from pathlib import Path;"
                     "p=Path(sys.argv[2]);p.write_bytes(b'opaque-native-frame');"
-                    "os.chmod(p,0o600)")
+                    "os.chmod(p,0o600);"
+                    "Path(sys.argv[1]).with_name('argv').write_text(' '.join(sys.argv[3:]))")
             reply = bridge.run_submission([sys.executable, "-c", code],
-                                          root, 12, 2, b"original-call")
+                                          root, 2, b"original-call")
             self.assertEqual(reply, b"opaque-native-frame")
             tickets = list(root.iterdir())
             self.assertEqual(len(tickets), 1)
             self.assertEqual((tickets[0] / "call.bin").read_bytes(), b"original-call")
+            # The await client receives the deadline and the ticket as its request id.
+            self.assertEqual((tickets[0] / "argv").read_text(), "2 " + tickets[0].name)
 
-    def test_child_timeout_has_no_automatic_redispatch(self):
+    def test_client_overstay_has_no_automatic_redispatch(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
             code = ("import sys,time;from pathlib import Path;"
@@ -63,62 +66,37 @@ class NativeFrameBoundary(unittest.TestCase):
                     "time.sleep(5)")
             with self.assertRaisesRegex(RuntimeError, "completion uncertain"):
                 bridge.run_submission([sys.executable, "-c", code],
-                                      root, 12, 1, b"retained-after-timeout")
+                                      root, 1, b"retained-after-timeout", grace=0)
             tickets = list(root.iterdir())
             self.assertEqual(len(tickets), 1)
             self.assertEqual((tickets[0] / "started").read_text(), "once")
             self.assertEqual((tickets[0] / "call.bin").read_bytes(), b"retained-after-timeout")
             self.assertFalse((tickets[0] / "outcome.bin").exists())
 
-    def test_persistent_session_two_calls_one_process_exact_originals(self):
+    def test_client_deadline_never_signals_a_standing_engine(self):
+        import os
+        import signal
+        import subprocess
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
-            code = """import json,os,sys
-from pathlib import Path
-for line in sys.stdin:
-    call,out,fuel=json.loads(line)
-    p=Path(out);p.write_bytes(b'receipt:'+Path(call).read_bytes());os.chmod(p,0o600)
-    print('done',flush=True)
-"""
-            session = bridge.SubmissionSession([sys.executable, "-c", code], root)
-            pid = session.child.pid
+            engine = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(30)"],
+                                      start_new_session=True)
             try:
-                self.assertEqual(session.run(12, 2, b"first"), b"receipt:first")
-                self.assertEqual(session.run(12, 2, b"second"), b"receipt:second")
-                self.assertEqual(session.child.pid, pid)
-                calls = sorted(p.read_bytes() for p in root.glob("*/call.bin"))
-                self.assertEqual(calls, [b"first", b"second"])
+                code = "import time;time.sleep(5)"
+                with self.assertRaisesRegex(RuntimeError, "completion uncertain"):
+                    bridge.run_submission([sys.executable, "-c", code],
+                                          root, 1, b"call", grace=0)
+                self.assertIsNone(engine.poll(), "client deadline stopped a standing engine")
             finally:
-                session.close()
-            self.assertIsNotNone(session.child.poll())
+                os.killpg(engine.pid, signal.SIGKILL)
+                engine.wait()
 
-    def test_persistent_timeout_retains_once_and_refuses_redispatch(self):
-        with tempfile.TemporaryDirectory() as name:
-            root = Path(name)
-            code = """import json,sys,time
-from pathlib import Path
-for line in sys.stdin:
-    call,out,fuel=json.loads(line)
-    Path(call).with_name('started').write_text('once')
-    time.sleep(5)
-"""
-            session = bridge.SubmissionSession([sys.executable, "-c", code], root)
-            with self.assertRaisesRegex(RuntimeError, "completion uncertain"):
-                session.run(12, 1, b"held-original")
-            with self.assertRaisesRegex(RuntimeError, "session stopped"):
-                session.run(12, 1, b"must-not-dispatch")
-            self.assertEqual(len(list(root.glob("*/call.bin"))), 1)
-            self.assertEqual(next(root.glob("*/call.bin")).read_bytes(), b"held-original")
-            self.assertIsNotNone(session.child.poll())
-
-    def test_session_ack_is_not_a_receipt(self):
-        with tempfile.TemporaryDirectory() as name:
-            root = Path(name)
-            code = "import sys;sys.stdin.readline();print('done',flush=True)"
-            session = bridge.SubmissionSession([sys.executable, "-c", code], root)
-            with self.assertRaises(FileNotFoundError):
-                session.run(12, 2, b"original")
-            self.assertIsNotNone(session.child.poll())
+    def test_retired_session_profile_refused(self):
+        for key in ("fuel", "submitSessionCommand"):
+            profile = {"readerCommand": ["true"], "submitCommand": ["true"],
+                       "attempts": ".", "timeoutSeconds": 1, key: 1}
+            with self.assertRaisesRegex(RuntimeError, "retired"):
+                bridge.serve(profile, None, None)
 
     def test_private_identical_client_config_copy(self):
         with tempfile.TemporaryDirectory() as name:

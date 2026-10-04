@@ -46,14 +46,15 @@ def candidateFrame (bytes : Bytes) : Bytes := frameStream.encode (2,bytes)
 /-- Opening checks the exact configured source genesis against the consensus
 anchor through the real historical validator. A journal alone cannot select the
 source seed or committee. -/
-def openParticipant (config : SourceConfig) (native : Native) (expected : Context)
+def openParticipant (config : SourceConfig) (runtime : Runtime)
     (source : Source config) : IO (Except String (Participant config)) := do
+  let expected := runtime.context
   match ← Minidregg.Kernel.JointSourcePrefixValidation.validate config
       source.verified.origin expected [] with
   | .accepted _ =>
-    let runtime ← openRuntime native expected
-    let some (_,state) ← restoredPair (storage runtime.native) expected (← (storage runtime.native).read)
+    let some prior ← runtime.current
       | return .error "invalid durable agreement journal"
+    let state := prior.state
     -- Current-view traffic must not queue behind every historical send after
     -- each host restart. This is a scheduling hint, never an acknowledgement:
     -- the independent retry round still covers the entire retained old outbox.
@@ -135,8 +136,7 @@ def propose {config : SourceConfig} (p : Participant config) (signedIngress : By
   | .ok derived =>
     let payload := Minidregg.Compiler.DurableCheckpointCodec.recordFrame.encode
       (Minidregg.Kernel.DurableReceiver.IntentRecord.ofIntent derived.intent)
-    let prior ← (storage p.runtime.native).read
-    match ← persist (storage p.runtime.native) p.runtime.context prior (.offer payload) with
+    match ← persist (storage p.runtime.native) p.runtime.context (.offer payload) with
     | .durable state =>
       return ({p with pending :=
         Minidregg.Compiler.GenericSimplexPending.discover state p.pending},.ok payload)
@@ -212,8 +212,8 @@ round finishes its old snapshot before including later messages. No send removes
 a durable obligation or treats a lost reply as semantic failure. -/
 def outgoing {config : SourceConfig} (p : Participant config) (freshBudget retryBudget : Nat) :
     IO (Participant config × List (Nat × Bytes)) := do
-  let some (_,state) ← restoredPair (storage p.runtime.native) p.runtime.context (← (storage p.runtime.native).read)
-    | return (p,[])
+  let some prior ← p.runtime.current | return (p,[])
+  let state := prior.state
   let total := state.outbox.length * p.runtime.context.config.parties
   let mut schedule := p.schedule
   let mut packets := []
@@ -233,9 +233,9 @@ def outgoing {config : SourceConfig} (p : Participant config) (freshBudget retry
 
 /-- A certificate scan round also freezes its finite candidates. Received
 witnesses are durable; a crash only restarts the scan. -/
-def certificateCandidates (journal : Journal) (state : State) : List (Nat × Block) :=
-  ((state.views.filterMap fun view => view.sentCommit.map (fun block => (view.number,block))) ++
-    journal.commitWitnesses.map (fun w => (w.view,w.block))).eraseDups
+def certificateCandidates {context : Context} (prior : Restored context) : List (Nat × Block) :=
+  ((prior.state.views.filterMap fun view => view.sentCommit.map (fun block => (view.number,block))) ++
+    prior.witnesses.map (fun w => (w.view,w.block))).eraseDups
 
 /-- Recover the actual authoritative source after a lost append reply or CAS
 conflict. The retained source is a `Verified` minted by native replay; the
@@ -277,15 +277,14 @@ def applyNext {config : SourceConfig} (p : Participant config)
 
 def certificateSlice {config : SourceConfig} (p : Participant config) :
     IO (Participant config × List (Nat × Bytes) × String) := do
-  let some (journal,state) ← restoredPair (storage p.runtime.native) p.runtime.context (← (storage p.runtime.native).read)
-    | return (p,[],"invalid engine journal")
-  let queue := if p.schedule.certificates.isEmpty then certificateCandidates journal state
+  let some prior ← p.runtime.current | return (p,[],"invalid engine journal")
+  let queue := if p.schedule.certificates.isEmpty then certificateCandidates prior
     else p.schedule.certificates
   let (view,block)::rest := queue | return (p,[],"no certificate work")
   let p := {p with schedule := {p.schedule with certificates := rest}}
   let some certificate ← recoverCommitment (storage p.runtime.native) (crypto p.runtime.native)
       p.runtime.context view block | return (p,[],"waiting for COMMIT witnesses")
-  let packets := ((List.range p.runtime.context.config.parties).filter (· != journal.self)).map
+  let packets := ((List.range p.runtime.context.config.parties).filter (· != prior.self)).map
     (fun recipient => (recipient,certificateFrame certificate.bytes))
   let (next,status) ← applyNext p certificate
   return (next,packets,status)
@@ -295,8 +294,8 @@ leader turn. Each peer independently rechecks it; a MAC never transfers source
 authority. Already installed local prefixes need no offer relay: their original
 COMMIT certificates continue through the separate positive repair budget. -/
 def candidateSlice {config : SourceConfig} (p : Participant config) : IO (List (Nat × Bytes)) := do
-  let some (_,state) ← restoredPair (storage p.runtime.native) p.runtime.context
-      (← (storage p.runtime.native).read) | return []
+  let some prior ← p.runtime.current | return []
+  let state := prior.state
   let height := p.source.verified.opened.durable.image.accepted.length
   let some block := state.checked.find? (fun block => height < (applicationHistory block).length)
     | return []
@@ -317,8 +316,18 @@ def service {config : SourceConfig} (p : Participant config)
   let (pending,checks) ← GenericSimplexController.service p.runtime config p.source.verified.origin
     validationBudget p.pending
   let p := {p with pending := pending}
-  let _ ← GenericSimplexNative.poll p.runtime
-  let _ ← GenericSimplexNative.tick p.runtime
+  -- A standing replica serves on a fixed tick. Journal a poll or tick only when
+  -- step can act on it: an exhausted pump (needsPoll), or a due timer not yet
+  -- fired. Otherwise a tick changes only the logical clock, which every
+  -- deliveryAt input already advances. Omitting an input is always a lawful
+  -- schedule; the retained journal stays the exact input sequence replayed.
+  if let some prior ← p.runtime.current then
+    let state := prior.state
+    if state.needsPoll then
+      let _ ← GenericSimplexNative.poll p.runtime
+    let now ← p.runtime.now
+    if state.needsPoll || (now ≥ state.deadline && !(viewAt state state.current).disableRequested) then
+      let _ ← GenericSimplexNative.tick p.runtime
   let (p,packets) ← outgoing p freshBudget retryBudget
   let candidates ← candidateSlice p
   let (p,certificates,status) ← certificateSlice p
