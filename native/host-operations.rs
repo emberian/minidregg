@@ -354,3 +354,13 @@ pub const APPLICATION_FAILED_START_RECOVERY_ASSEMBLE: u8 = 207;
 pub const APPLICATION_FAILED_START_RECOVERY_SUBMIT: u8 = 208;
 // active; operator; owner: spk-recovery
 pub const APPLICATION_FAILED_START_RECOVERY_LOOKUP: u8 = 209;
+// active; public,operator; owner: activity-native
+pub const ACTIVITY_PLAN: u8 = 210;
+// active; public,operator; owner: activity-native
+pub const ACTIVITY_ASSEMBLE: u8 = 211;
+// active; public,operator; owner: activity-native
+pub const ACTIVITY_SUBMIT: u8 = 212;
+// active; public,operator; owner: activity-native
+pub const ACTIVITY_LOOKUP: u8 = 213;
+// active; public,operator; owner: activity-native
+pub const ACTIVITY_VIEW: u8 = 214;

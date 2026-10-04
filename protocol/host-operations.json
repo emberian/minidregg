@@ -2037,6 +2037,66 @@
       "owner": "spk-recovery",
       "purpose": "Lookup same recovery ingress exact retained receipt only",
       "receiver": "fnDispatch"
+    },
+    {
+      "code": 210,
+      "symbol": "ACTIVITY_PLAN",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "activity-native",
+      "purpose": "Kernel activity signed command: signing plan for one Turn (publish, create, birth, resolve, deliver, topUp, writeState, exhaust, abandon) under the object record; session-opened, bounded canonical plan, no state change",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 211,
+      "symbol": "ACTIVITY_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "activity-native",
+      "purpose": "Kernel activity detached assembly: canonical plan plus exactly one 64-byte signature into the ingress; no session state read",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 212,
+      "symbol": "ACTIVITY_SUBMIT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "activity-native",
+      "purpose": "Kernel activity submit: one signed command through the Objective activity receiver; the signature binds the decided outcome, a stale prepared delivery is refused",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 213,
+      "symbol": "ACTIVITY_LOOKUP",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "activity-native",
+      "purpose": "Kernel activity receipt-only lookup of the same ingress; retained receipt only, no submit",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 214,
+      "symbol": "ACTIVITY_VIEW",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "activity-native",
+      "purpose": "Public read-only kernel activity view: JSON object request (or empty), at most 65536 bytes, JSON reply",
+      "receiver": "fnDispatch"
     }
   ],
   "response_markers": [
