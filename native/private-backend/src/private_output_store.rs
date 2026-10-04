@@ -10,11 +10,7 @@ use crate::{
     reconstruction::Field,
     transition_journal::{Journal, Machine},
 };
-use std::{
-    fs::File,
-    io::{Read, Result},
-    path::Path,
-};
+use std::{io::Result, path::Path};
 const DOMAIN: &[u8] = b"DREGG.PRIVATE.OUTPUT.INIT.FILE\x01";
 fn nat(c: &mut Cursor) -> Result<usize> {
     let mut ds = vec![];
@@ -154,11 +150,17 @@ impl Store {
     fn apply(&mut self, b: &[u8]) -> Result<Vec<Send>> {
         packets(&self.journal.append(b)?, self.state().roster().0)
     }
+    /// Key-polynomial coefficients from a fresh OS stream.
     pub fn start(&mut self) -> Result<Vec<Send>> {
+        self.start_with_entropy(&mut crate::entropy::Entropy::os()?)
+    }
+    /// Key-polynomial coefficients from this holder's own stream. The journaled
+    /// event is the same shape either way: tag 0 and 32*(f+1) random bytes.
+    pub fn start_with_entropy(&mut self, e: &mut crate::entropy::Entropy) -> Result<Vec<Send>> {
         let mut b = vec![0];
-        let mut random = vec![0; 32 * (self.state().roster().1 + 1)];
-        File::open("/dev/urandom")?.read_exact(&mut random)?;
-        b.extend(random);
+        for _ in 0..=self.state().roster().1 {
+            b.extend(e.bytes32());
+        }
         self.apply(&b)
     }
     /// Requires real fresh source release; this method is only environment input.
@@ -181,7 +183,7 @@ impl Store {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::{
         arithmetic_reference,
@@ -235,7 +237,7 @@ mod tests {
             b"fixed reference addition/result recipient1; no native release grant",
         )
     }
-    fn stores_from_completed_descriptor(
+    pub(crate) fn stores_from_completed_descriptor(
         completed: Vec<crate::field_network_layers::LayerEngine>,
         anchors: Vec<crate::triple_king::tests::AnchorFixture>,
         instance: u64,
@@ -275,6 +277,15 @@ mod tests {
         change_cipher: bool,
         drop_zero: bool,
     ) {
+        drive_tapped(stores, q, change_cipher, drop_zero, &mut crate::transcript::Tap::none())
+    }
+    pub(crate) fn drive_tapped(
+        stores: &mut [Option<Store>],
+        q: &mut VecDeque<(u16, Send)>,
+        change_cipher: bool,
+        drop_zero: bool,
+        tap: &mut crate::transcript::Tap,
+    ) {
         let mut steps = 0;
         while let Some((sender, mut p)) = q.pop_front() {
             steps += 1;
@@ -290,6 +301,7 @@ mod tests {
             let raw = private_output::encode_message(&p.message);
             let m = private_output::decode_message(&raw).unwrap();
             let to = p.to;
+            tap.see("output", to, sender, || crate::transcript::Wire::Output(m.clone()));
             q.extend(
                 stores[to as usize]
                     .as_mut()
@@ -447,7 +459,7 @@ mod tests {
                 .unwrap();
                 assert_eq!(exported.journal, live);
             }
-            write(&root.join("PROFILE.txt"),b"PUBLIC255+1 reference integration fixture; actual ACSS/Sh2t/King/LayerMPC/output WAL; deterministic reference preprocessing, no general private-production entropy claim. All original outboxes/spent retained. No source authority, recipient enrollment, current release, Qualified successor, GOD/PQ claim.
+            write(&root.join("PROFILE.txt"),b"PRIVATE-INPUT 255+1 reference integration fixture; holder0 deals left and holder2 deals right from party-local entropy; King preprocessing from per-dealer OS/seeded entropy; actual ACSS/Sh2t/King/LayerMPC/output WAL. All original outboxes/spent retained. No source authority, recipient enrollment, current release, Qualified successor, simulator, GOD/PQ claim.
 ");
         }
     }

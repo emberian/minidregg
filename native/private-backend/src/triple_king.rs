@@ -1129,6 +1129,8 @@ pub(crate) mod tests {
                 while !halt.load(Ordering::SeqCst) {
                     match listener.accept() {
                         Ok((mut s, _)) => {
+                            // BSD sockets inherit the listener's nonblocking flag.
+                            s.set_nonblocking(false).unwrap();
                             let b = custody::read_packet(&mut s).unwrap();
                             let out = a.handle(&b);
                             let mut reply = vec![];
@@ -1184,8 +1186,71 @@ pub(crate) mod tests {
         fault: Option<u16>,
         instance: u64,
     ) -> Vec<Vec<PreparedSource>> {
+        let root = crate::entropy::test_root();
+        let dealings = (0..3u16)
+            .map(|dealer| {
+                let label = format!("king-preparation/{instance}/{count}/{dealer}");
+                PrepDealing::sample(
+                    dealer,
+                    count,
+                    fault == Some(dealer),
+                    &mut root.fork(label.as_bytes()),
+                )
+            })
+            .collect::<Vec<_>>();
+        prepared_from(&dealings, count, instance, &mut crate::transcript::Tap::none())
+    }
+    /// One King dealer's complete preparation randomness, drawn from that
+    /// dealer's own entropy stream: degree-f ACSS seed polynomials (uniform
+    /// secrets and coefficients), degree-2f Sh2t zero polynomials (zero constant,
+    /// uniform higher coefficients) and the two dealing seeds that drive the
+    /// PrivSend key sharings and dZK masks. Nothing here is a public formula.
+    #[derive(Clone)]
+    pub(crate) struct PrepDealing {
+        pub(crate) dealer: u16,
+        pub(crate) acss: Vec<Vec<Field>>,
+        pub(crate) acss_seed: [u8; 32],
+        pub(crate) sh2t: Vec<Vec<Field>>,
+        pub(crate) sh2t_seed: [u8; 32],
+    }
+    impl PrepDealing {
+        pub(crate) fn sample(
+            dealer: u16,
+            count: usize,
+            nonzero_zero_fault: bool,
+            e: &mut crate::entropy::Entropy,
+        ) -> Self {
+            let acss = (0..acss_seed_count(count, 1).unwrap())
+                .map(|_| vec![e.field(), e.field()])
+                .collect();
+            // A faulty dealer's "zero" sharing has a nonzero secret (localization test).
+            let sh2t = (0..16 * per_group(count, 1).unwrap())
+                .map(|_| {
+                    let zero = if nonzero_zero_fault { Field(9) } else { Field(0) };
+                    vec![zero, e.field(), e.field()]
+                })
+                .collect();
+            Self {
+                dealer,
+                acss,
+                acss_seed: e.bytes32(),
+                sh2t,
+                sh2t_seed: e.bytes32(),
+            }
+        }
+    }
+    /// Run the three dealers' actual ACSS-Id and Sh2t-Id instances among four
+    /// parties with the given dealings; every delivery passes the tap.
+    pub(crate) fn prepared_from(
+        dealings: &[PrepDealing],
+        count: usize,
+        instance: u64,
+        tap: &mut crate::transcript::Tap,
+    ) -> Vec<Vec<PreparedSource>> {
+        use crate::transcript::Wire;
         let mut holders = vec![vec![]; 4];
-        for dealer in 0..3u16 {
+        for d in dealings {
+            let dealer = d.dealer;
             let ag = generation(100 + dealer as u64 + 1000 * instance);
             let og = generation(200 + dealer as u64 + 1000 * instance);
             let mut aa = (0..4)
@@ -1193,21 +1258,8 @@ pub(crate) mod tests {
                     AcssId::new(i, dealer, 4, 1, &ag, acss_seed_count(count, 1).unwrap()).unwrap()
                 })
                 .collect::<Vec<_>>();
-            let polys = (0..acss_seed_count(count, 1).unwrap())
-                .map(|i| {
-                    vec![
-                        Field(
-                            0x10000
-                                + dealer as u128 * 157
-                                + i as u128 * 31
-                                + instance as u128 * 419,
-                        ),
-                        Field(i as u128 + 17),
-                    ]
-                })
-                .collect::<Vec<_>>();
             let mut q = aa[dealer as usize]
-                .dealer(&polys, [dealer as u8 + 1; 32])
+                .dealer(&d.acss, d.acss_seed)
                 .unwrap()
                 .into_iter()
                 .map(|p| (dealer, p))
@@ -1217,6 +1269,7 @@ pub(crate) mod tests {
                 steps += 1;
                 assert!(steps < 500000);
                 let to = p.to;
+                tap.see("king-preparation-acss", to, from, || Wire::Acss(p.message.clone()));
                 q.extend(
                     aa[to as usize]
                         .receive(from, p.message)
@@ -1228,17 +1281,8 @@ pub(crate) mod tests {
             let mut oo = (0..4)
                 .map(|i| Sh2tId::new(i, dealer, 4, 1, &og, per_group(count, 1).unwrap()).unwrap())
                 .collect::<Vec<_>>();
-            let zeros = (0..16 * per_group(count, 1).unwrap())
-                .map(|i| {
-                    vec![
-                        Field(if fault == Some(dealer) { 9 } else { 0 }),
-                        Field(i as u128 + 13),
-                        Field(i as u128 + 71),
-                    ]
-                })
-                .collect::<Vec<_>>();
             let mut q = oo[dealer as usize]
-                .dealer(&zeros, [dealer as u8 + 7; 32])
+                .dealer(&d.sh2t, d.sh2t_seed)
                 .unwrap()
                 .into_iter()
                 .map(|p| (dealer, p))
@@ -1248,6 +1292,7 @@ pub(crate) mod tests {
                 steps += 1;
                 assert!(steps < 500000);
                 let to = p.to;
+                tap.see("king-preparation-sh2t", to, from, || Wire::Sh2t(p.message.clone()));
                 q.extend(
                     oo[to as usize]
                         .receive(from, p.message)
@@ -1586,6 +1631,15 @@ pub(crate) mod tests {
         consumer: &Generation,
     ) -> Vec<CheckedTriples> {
         let material = prepared_count_instance(count, None, instance);
+        checked_from_material(material, count, consumer, &mut crate::transcript::Tap::none())
+    }
+    /// Actual King among four parties over prepared material; deliveries pass the tap.
+    pub(crate) fn checked_from_material(
+        material: Vec<Vec<PreparedSource>>,
+        count: usize,
+        consumer: &Generation,
+        tap: &mut crate::transcript::Tap,
+    ) -> Vec<CheckedTriples> {
         let mut anchors = vec![];
         let mut nodes = vec![];
         for (i, sources) in material.iter().enumerate() {
@@ -1605,11 +1659,27 @@ pub(crate) mod tests {
             anchors.push(a);
         }
         let mut q = start(&mut nodes);
-        drive(&mut nodes, &mut q, None);
+        let mut steps = 0;
+        while let Some((from, p)) = q.pop_front() {
+            steps += 1;
+            assert!(steps < 100000);
+            let to = p.to;
+            tap.see("king", to, from, || crate::transcript::Wire::King(p.message.clone()));
+            q.extend(
+                nodes[to as usize]
+                    .receive(from, p.message)
+                    .unwrap()
+                    .into_iter()
+                    .map(|p| (to, p)),
+            );
+        }
         nodes
             .into_iter()
             .map(|n| n.output.expect("actual checked King construction"))
             .collect()
+    }
+    pub(crate) fn test_generation(tag: u64) -> Generation {
+        generation(tag)
     }
 
     pub(crate) fn evaluator_anchor(

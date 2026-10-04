@@ -10,6 +10,11 @@ pub mod private_send;
 pub mod private_send_store;
 pub mod protocol_store;
 pub mod reconstruction;
+pub mod entropy;
+#[cfg(test)]
+pub(crate) mod transcript;
+#[cfg(test)]
+mod private_view;
 pub mod transition_journal;
 pub mod vaba;
 
