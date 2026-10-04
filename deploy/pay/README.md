@@ -12,6 +12,42 @@ The pay rail is described in PAY.md. This directory has what runs it on the box:
 The watcher keeps no ledger, and no cursor except the enrollment row's (P1b, gated by receipts). The ticks connect only through the observer
 workspace's retained attempts and the kernel's nullifiers.
 
+## The price and the address: one source
+
+Ember's ruling (2026-10-04): enrollment costs **50 DREGG per node week**, paid to the Solana pubkey
+**`5N2uUG4TEwvM4acjWRpZ981CJa4p5e9RcuAYQvuUZLp6`** (a fresh devnet-quality key). Both live in
+exactly one file, `enrol-terms.json`, and `render-enrol` turns it into every consumer:
+
+```
+python3 deploy/pay/render-enrol --out OUT --version N --control CAP \
+    --observer-capability C --enrol-capability E [--book-extra FILE]
+```
+
+(`CAP` is genesis `factoryControllerCapability`, `C`/`E` are `payObserver.capability` / `.enrolCapability`
+of THIS genesis, `N` exceeds the installed tariff version.) It writes `book.json` and `tariff-on.json`
+(for `mini pay book`, below), `enrol.json` / `enrol-v2.json` (the friend's pin) and `watcher.env`. Nothing
+else in the repo states the address or the rate; `test-render-enrol.py` pins the integers.
+
+**The exact integers.** The mint has 6 decimals (`decimals: 6`, READ `native/pay-watcher/README.md`) and
+`creditPerAtomic` is 1, so 50 DREGG is `weekPriceAtomic = 50000000` atomic units. The tariff does not
+store a week price; it stores the *hourly* integer `nodeHourRate` and the kernel prices a week as
+`weekCredit = 168 * nodeHourRate` (`Kernel/PayTariff.lean`), an enrollment as `birthFee + weekCredit`
+(`Kernel/PayEnrolDecision.lean` `enrolPrice`) and a renewal as `credit / weekCredit` whole weeks.
+`50000000 / 168` is not an integer, so the script takes the floor: **`nodeHourRate = 297619`,
+`weekCredit = 49999992`** atomic units (49.999992 DREGG, 8 atomic units under the asked price). The floor is
+deliberate: a payer who sends exactly 50 DREGG plus the one-time birth fee is at or over the price
+(`297620` would make the week 50.00016 DREGG and journal that payer `belowPrice`), and exactly 50 DREGG
+renews one whole week. The friend never sees these integers computed on their side: `mini join --solana`
+prints the Host's own quote (op 121; `join_solana.rs` takes `atomicAmount` verbatim, no client formula),
+which is `birthFee + 49999992`. If Ember wants an exact 50.000000 DREGG week, the unit of the tariff
+must change from hourly to weekly (a Lean change to `Tariff`, `weekCredit` and its fixtures, then a
+re-genesis); that is a design choice, not a rounding fix.
+
+The old Lean `genesisDefault` still carries `nodeHourRate := 5952380` (about 1000 DREGG a week, PAY §11.8).
+It is a placeholder that is invalid by construction (`genesisDefault_invalid`: version 0, zero mint) and is
+replaced by the first `mini pay book` tariff before any enrollment can be decided; it is not an operating
+source of the rate.
+
 ## What ember does, once
 
 1. **Genesis names the observer.** Before bootstrap:
@@ -51,13 +87,18 @@ workspace's retained attempts and the kernel's nullifiers.
    `pay/quarantine/`. Back it up with the Store. If you lose it, the next tick resubmits the old
    transfers and the kernel refuses each one once. That costs extra reports; it never credits
    twice.
-3. **The book and the tariff.** Run this from ember's own workspace (the factory controller):
+3. **The book and the tariff.** Render the files (above), then run this from ember's own workspace (the
+   factory controller), in this order:
 
    ```
-   mini pay book --dir EMBER-WS --source book.json
+   mini pay book --dir EMBER-WS --source OUT/book.json       # row 0 = the receiving address; tariff N, enrolIndex null
+   mini pay address --dir FLOAT-WS                           # the enrollment float takes row 0 (prints "index 0 → 5N2u…")
+   mini pay book --dir EMBER-WS --source OUT/tariff-on.json  # tariff N+1 names the enrollment index
    ```
 
-   `book.json` has this shape:
+   The third step must come after the second: the book receiver refuses an `enrolIndex` whose row is not
+   assigned (`enrolIndexUnassigned`). `book.json` has this shape (`render-enrol` writes it; the example
+   shows the fields, not values to copy):
 
    ```
    {"control": "<factory control cap>",
@@ -77,27 +118,36 @@ workspace's retained attempts and the kernel's nullifiers.
    ```
 
    Use two providers. The URLs never reach argv or a log.
-5. **`/etc/mini/pay/watcher.env`:**
+5. **`/etc/mini/pay/watcher.env`:** `render-enrol` writes it (installed with
+   `mini-config install pay-watcher-env`). The enrollment variables are all or none:
 
    ```
    PAY_OBSERVER_WS=/var/lib/mini/pay/observer
-   PAY_OBSERVER_CAPABILITY=C
-   MINI=/opt/mini/bin/mini
-   PAY_WATCHER=/opt/mini/bin/pay-watcher
-   PAY_ENROL_INDEX=0 PAY_JOURNAL_FLOOR=1000000      # PAY §11: the enrollment row
-   PAY_ENROL_CAPABILITY=E                         # genesis payObserver.enrolCapability (C_enrol)
+   PAY_OBSERVER_CAPABILITY=C                 # genesis payObserver.capability
+   PAY_ENROL_INDEX=0                         # from enrol-terms.json (PAY §11: the enrollment row)
+   PAY_JOURNAL_FLOOR=1000000                 # from enrol-terms.json, atomic units
+   PAY_ENROL_CAPABILITY=E                    # genesis payObserver.enrolCapability (C_enrol)
    PAY_OPERATOR_SOCKET=/var/lib/mini/store/node/operator/mini.sock
    ```
 
-   **Self-enrollment needs the Host's operator socket.** Ops 117-120 (the self-enrollment
-   plan, assembly, submit and lookup) are admitted only on an owner-private operator socket,
-   never on the public one (op 117 runs the native verifier twice per call). One Store has one
-   Host, so the service serves both sockets from the same Host process:
-   `mini serve --host HOST --config CONFIG --socket PUBLIC/mini.sock --operator-socket
-   OPERATOR/mini.sock`, with `OPERATOR/` a new `0700` directory owned by `mini` (the tick runs
-   as `mini`; the operator socket checks the peer UID). Without `PAY_ENROL_CAPABILITY` and
-   `PAY_OPERATOR_SOCKET`, an enrollment-index record is left undecided every tick
-   (`enrol-unconfigured`, exit 3) and holds the enrollment cursor.
+   (`MINI`, `PAY_WATCHER` and `PAY_STATE` are the unit's, set from the candidate; they do not go here.)
+   The file holds neither the address nor the rate: the tick reads both from the Host's signed pay view,
+   i.e. from what step 3 installed.
+
+   **Self-enrollment needs the Host's operator socket.** Ops 117-120 (the self-enrollment plan,
+   assembly, submit and lookup) are admitted only on an owner-private operator socket, never on the
+   public one (op 117 runs the native verifier twice per call). On the box the socket is
+   `/var/lib/mini/store/node/operator/mini.sock`, served by `mini serve-operator` (`store-entry.sh`)
+   in a `0700` directory (`mini-service-config` creates it) owned by the Store's uid, with the public
+   socket a filtered relay (`mini-public-ingress`) over it. That is the **ingress topology**
+   (`/etc/mini/ingress.json`, written by `install.sh` on a clean frame and at `ship.sh --regenesis`).
+   The old single-socket entry (`run.sh serve`, DEPLOY-2b's `5688775a`) has no operator socket, so
+   self-enrollment cannot run there. The operator socket checks the peer UID: the tick must run as the
+   Store's uid (`mini`; in split tenancy `install.sh` runs every Mini unit as `mini-core`, tick
+   included). `mini-pay-watcher.service` keeps `ReadWritePaths=/var/lib/mini`, which covers
+   connecting to that socket. Without `PAY_ENROL_CAPABILITY` and `PAY_OPERATOR_SOCKET`, an
+   enrollment-index record is left undecided every tick (`enrol-unconfigured`, exit 3) and holds the
+   enrollment cursor.
 
    `PAY_RPC_FIXTURES="DIR_A DIR_B"` replaces the endpoints for a rehearsal on recorded answers.
 6. **Install the units:**
@@ -184,9 +234,10 @@ workspace's retained attempts and the kernel's nullifiers.
   credited report does, so the offline identity is `-well_now = -well_genesis + Σ reports + Σ
   enrolments/renewals`; a journal row mints nothing.
 - **What the friend runs** is `mini join --solana|--wait|--renew` (deploy/shell/FRIENDS.md,
-  "joining by yourself"). `deploy/pay/enrol.json` is the template of the pin it reads: its
-  `enrolAddress` stays `EMBER_ENROL_ADDRESS` until ember publishes index 0's address, and the
-  client refuses to print a memo until then. The roster sync reads the same view with
+  "joining by yourself"). The pin it reads (`--enrol enrol.json`; `--memo-version v2` reads
+  `enrol-v2.json`) is rendered from `enrol-terms.json` and published with the friend bundle. The client
+  refuses a pin whose address differs from the box's book row at the enrollment index, and refuses an
+  unset one (`EMBER_ENROL_ADDRESS`). The roster sync reads the same view with
   `mini enrollment-view --socket PUBLIC/mini.sock`.
 
 ## What a friend sees (PAY §5)

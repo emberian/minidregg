@@ -1,0 +1,213 @@
+#!/usr/bin/env python3
+"""Render every consumer of the self-enrollment terms from the ONE source, enrol-terms.json.
+
+  render-enrol --out DIR --version N --control CAP --observer-capability C --enrol-capability E
+               [--terms enrol-terms.json] [--book-extra FILE] [--mint BASE58 --token-program BASE58]
+
+enrol-terms.json holds the two operator-ruled values (the receiving address, the price of a
+node week) and the rest of the tariff they sit in. Nothing else in the repo states them. This
+script writes, into a NEW directory DIR:
+
+  book.json        `mini pay book --dir EMBER-WS --source book.json`: the receiving address at book
+                   row 0 (plus any --book-extra rows) and tariff version N, enrolIndex null
+  tariff-on.json   `mini pay book ... --source tariff-on.json`: tariff version N+1 naming the
+                   enrollment index. Run it AFTER the float account took row 0 (`mini pay address`):
+                   the book receiver refuses an enrolIndex whose row is not assigned
+  enrol.json       the pin `mini join --solana --enrol` reads (minidregg-enrol-pin-v1)
+  enrol-v2.json    the pin of `mini join --memo-version v2` (minidregg-enrol-pin-v2)
+  watcher.env      /etc/mini/pay/watcher.env: the observer and the enrollment tick variables
+  report.txt       the exact integers and what they mean
+
+The price. A node week costs 168 * nodeHourRate credit and one atomic unit is creditPerAtomic
+credit, so a week is `weekPriceAtomic * creditPerAtomic` credit only if that is a multiple of 168.
+The tariff stores the HOURLY integer, so this script takes the FLOOR: the realized week is at most
+the asked price, never above it. A payer who sends exactly the asked amount plus the one-time birth
+fee is therefore always at or over the price (a ceiling would journal that payer belowPrice). The
+realized price, the shortfall and the Host-quoted total are printed in report.txt; the friend sees
+the Host's own quote (op 121), never a number computed here.
+
+--mint/--token-program override the terms for a rehearsal on devnet with a throwaway Token-2022
+mint; the override is printed in report.txt. The receiving address is never overridden.
+Python 3 standard library only.
+"""
+import argparse
+import json
+from pathlib import Path
+import sys
+
+ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+HOURS_PER_WEEK = 168
+HERE = Path(__file__).resolve().parent
+EXPECTED_KEYS = {"type", "enrolAddress", "enrolIndex", "mint", "tokenProgram", "decimals", "weekPriceAtomic",
+                 "creditPerAtomic", "maxPerObservation", "journalFloor", "minTickSlots", "slashCallerPermille",
+                 "operatorSocket", "login"}
+
+
+def die(message):
+    print("render-enrol: " + message, file=sys.stderr)
+    raise SystemExit(1)
+
+
+def b58_decode32(text, label):
+    """A canonical base58 string for exactly 32 non-zero bytes, as the client's pin parser demands."""
+    number = 0
+    for char in text:
+        if char not in ALPHABET:
+            die(f"{label} is not base58: {text!r}")
+        number = number * 58 + ALPHABET.index(char)
+    raw = number.to_bytes((number.bit_length() + 7) // 8, "big")
+    raw = b"\0" * (len(text) - len(text.lstrip("1"))) + raw
+    if len(raw) != 32 or raw == b"\0" * 32:
+        die(f"{label} is not a 32-byte non-zero key ({len(raw)} bytes)")
+    if b58_encode(raw) != text:
+        die(f"{label} is not canonical base58")
+    return raw
+
+
+def b58_encode(raw):
+    number = int.from_bytes(raw, "big")
+    out = ""
+    while number:
+        number, rem = divmod(number, 58)
+        out = ALPHABET[rem] + out
+    return "1" * (len(raw) - len(raw.lstrip(b"\0"))) + out
+
+
+def nat(value, label):
+    if not (isinstance(value, str) and value.isascii() and value.isdigit() and (value == "0" or value[0] != "0")):
+        die(f"{label} must be a canonical decimal string, got {value!r}")
+    return int(value)
+
+
+def load_terms(path):
+    terms = json.loads(Path(path).read_text())
+    if terms.get("type") != "minidregg-enrol-terms-v1":
+        die(f"{path} is not a minidregg-enrol-terms-v1")
+    if set(terms) != EXPECTED_KEYS:
+        die(f"{path} fields differ: extra {sorted(set(terms) - EXPECTED_KEYS)}, missing {sorted(EXPECTED_KEYS - set(terms))}")
+    return terms
+
+
+def tokens(atomic, decimals):
+    whole, fraction = divmod(atomic, 10 ** decimals)
+    return str(whole) if not fraction else f"{whole}.{str(fraction).zfill(decimals).rstrip('0')}"
+
+
+def derive(terms):
+    """The tariff integers. Returns (nodeHourRate, realized week in atomic units, shortfall in atomic units)."""
+    asked = nat(terms["weekPriceAtomic"], "weekPriceAtomic")
+    credit_per_atomic = nat(terms["creditPerAtomic"], "creditPerAtomic")
+    if asked == 0 or credit_per_atomic == 0:
+        die("weekPriceAtomic and creditPerAtomic must be positive")
+    week_credit_asked = asked * credit_per_atomic
+    rate = week_credit_asked // HOURS_PER_WEEK
+    if rate == 0:
+        die("the asked week price is below one credit per hour")
+    realized_credit = rate * HOURS_PER_WEEK
+    if realized_credit % credit_per_atomic:
+        die("the realized week is not a whole number of atomic units; choose creditPerAtomic 1 or a price that divides")
+    return rate, realized_credit // credit_per_atomic, asked - realized_credit // credit_per_atomic
+
+
+def render(terms, args):
+    address = terms["enrolAddress"]
+    b58_decode32(address, "enrolAddress")
+    mint = args.mint or terms["mint"]
+    program = args.token_program or terms["tokenProgram"]
+    b58_decode32(mint, "mint")
+    b58_decode32(program, "tokenProgram")
+    decimals = nat(terms["decimals"], "decimals")
+    if decimals > 38:
+        die("decimals exceed the client's exact display bound (38)")
+    rate, realized, shortfall = derive(terms)
+    index = nat(terms["enrolIndex"], "enrolIndex")
+    floor_ = nat(terms["journalFloor"], "journalFloor")
+    if floor_ > nat(terms["weekPriceAtomic"], "weekPriceAtomic"):
+        die("journalFloor above the week price would journal every honest payment")
+    for name in ("maxPerObservation", "minTickSlots", "slashCallerPermille"):
+        nat(terms[name], name)
+    if not terms["operatorSocket"].startswith("/"):
+        die("operatorSocket must be an absolute path")
+    extras = []
+    if args.book_extra:
+        for line in Path(args.book_extra).read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                b58_decode32(line, f"book-extra row {line}")
+                extras.append(line)
+    book = [address] + extras
+    if len(set(book)) != len(book):
+        die("a book row repeats an address")
+    if index != 0:
+        die("the enrollment address is book row 0; enrolIndex must be 0")
+    tariff = {"version": str(args.version), "asset": "0", "mint": mint, "tokenProgram": program,
+              "decimals": str(decimals), "creditPerAtomic": terms["creditPerAtomic"],
+              "maxPerObservation": terms["maxPerObservation"], "minTickSlots": terms["minTickSlots"],
+              "nodeHourRate": str(rate), "enrolIndex": None, "journalFloor": terms["journalFloor"],
+              "slashCallerPermille": terms["slashCallerPermille"]}
+    files = {
+        "book.json": {"control": str(args.control), "book": book, "tariff": tariff},
+        "tariff-on.json": {"control": str(args.control), "book": [],
+                           "tariff": dict(tariff, version=str(args.version + 1), enrolIndex=str(index))},
+        "enrol.json": {"type": "minidregg-enrol-pin-v1", "enrolAddress": address, "login": terms["login"]},
+        "enrol-v2.json": {"type": "minidregg-enrol-pin-v2", "enrolAddress": address, "mint": mint,
+                          "tokenProgram": program, "decimals": str(decimals), "login": terms["login"]},
+    }
+    watcher = "\n".join([
+        "# /etc/mini/pay/watcher.env: rendered by deploy/pay/render-enrol from enrol-terms.json.",
+        "# Install: mini-config install pay-watcher-env FILE. The address and the price are NOT here:",
+        "# the tick reads them from the Host's signed pay view (the tariff and book `mini pay book` installed).",
+        "PAY_OBSERVER_WS=/var/lib/mini/pay/observer",
+        f"PAY_OBSERVER_CAPABILITY={args.observer_capability}",
+        f"PAY_ENROL_INDEX={index}",
+        f"PAY_JOURNAL_FLOOR={floor_}",
+        f"PAY_ENROL_CAPABILITY={args.enrol_capability}",
+        f"PAY_OPERATOR_SOCKET={terms['operatorSocket']}",
+        ""])
+    week_total_note = (f"enrollment total = the box's one-time birth fee + {realized} atomic; "
+                       f"the friend pays the amount `mini join --solana` prints from the Host quote (op 121)")
+    report = "\n".join([
+        f"enrolAddress        {address}  (book row {index}; also the join pin)",
+        f"mint                {mint}" + ("  (OVERRIDE: rehearsal)" if args.mint else ""),
+        f"tokenProgram        {program}" + ("  (OVERRIDE: rehearsal)" if args.token_program else ""),
+        f"decimals            {decimals}  (1 token = 10^{decimals} atomic units)",
+        f"creditPerAtomic     {terms['creditPerAtomic']}",
+        f"asked week price    {terms['weekPriceAtomic']} atomic = {tokens(int(terms['weekPriceAtomic']), decimals)} tokens",
+        f"nodeHourRate        {rate}  (tariff integer; weekCredit = {HOURS_PER_WEEK} * {rate} = {rate * HOURS_PER_WEEK})",
+        f"realized week       {realized} atomic ({shortfall} atomic below the asked price: floor of the hourly integer)",
+        f"journalFloor        {floor_} atomic",
+        f"tariff versions     {args.version} (book, enrolIndex null) then {args.version + 1} (enrolIndex {index})",
+        week_total_note, ""])
+    return files, watcher, report
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--terms", default=str(HERE / "enrol-terms.json"))
+    parser.add_argument("--out", required=True)
+    parser.add_argument("--version", type=int, required=True, help="tariff version of book.json; it must exceed the installed one")
+    parser.add_argument("--control", required=True, help="the factory control capability id (genesis factoryControllerCapability)")
+    parser.add_argument("--observer-capability", required=True, help="genesis payObserver.capability")
+    parser.add_argument("--enrol-capability", required=True, help="genesis payObserver.enrolCapability")
+    parser.add_argument("--book-extra")
+    parser.add_argument("--mint")
+    parser.add_argument("--token-program")
+    args = parser.parse_args()
+    if args.version < 1:
+        die("--version must be at least 1")
+    for name in ("control", "observer_capability", "enrol_capability"):
+        nat(getattr(args, name), "--" + name.replace("_", "-"))
+    files, watcher, report = render(load_terms(args.terms), args)
+    out = Path(args.out)
+    if out.exists() or out.is_symlink():
+        die(f"refusing existing output: {out}")
+    out.mkdir(parents=True, mode=0o700)
+    for name, value in files.items():
+        (out / name).write_text(json.dumps(value, indent=2) + "\n")
+    (out / "watcher.env").write_text(watcher)
+    (out / "report.txt").write_text(report)
+    print(report, end="")
+
+
+if __name__ == "__main__":
+    main()

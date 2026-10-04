@@ -29,7 +29,6 @@ TREE=$(CDPATH='' cd -- "$HERE/../../.." && pwd)
 export PAY_WATCHER_BIN=${PAY_WATCHER_BIN:-$TREE/native/pay-watcher/target/release/pay-watcher}
 export PAY_FIXTURES=$TREE/native/pay-watcher/fixtures
 export PAY_TICK_SCRIPT=$TREE/deploy/pay/mini-pay-watcher
-export ENROL_TEMPLATE=$TREE/deploy/pay/enrol.json
 for tool in python3 jq ssh-keygen xxd flock; do
   command -v "$tool" >/dev/null || { echo "jpay-e4: $tool is required" >&2; exit 2; }
 done
@@ -48,7 +47,7 @@ import nacl.signing
 DIR = sys.argv[1]
 HOST, MINI, STORE, VERIFIER = (os.environ[k] for k in ("HOST", "MINI", "STORE", "VERIFIER"))
 WATCHER, FIXTURES = os.environ["PAY_WATCHER_BIN"], os.environ["PAY_FIXTURES"]
-TICK_SCRIPT, TEMPLATE, EDGE = os.environ["PAY_TICK_SCRIPT"], os.environ["ENROL_TEMPLATE"], os.environ["INFRA_EDGE"]
+TICK_SCRIPT, EDGE = os.environ["PAY_TICK_SCRIPT"], os.environ["INFRA_EDGE"]
 sys.path.insert(0, FIXTURES)
 sys.dont_write_bytecode = True   # never leave __pycache__ in the tree's fixtures
 import generate as gen   # P1b's fixture vocabulary (generate.py runs nothing on import)
@@ -222,8 +221,12 @@ def printed(result, key):
             return line[len(key):].strip()
     return None
 
+# The pin the operator has not filled in. deploy/pay/enrol-terms.json is the one source of the real
+# address (render-enrol writes the pin from it), so the unset pin is built here, not shipped.
+TEMPLATE = path("enrol-unset.json")
+json.dump({"type": "minidregg-enrol-pin-v1", "enrolAddress": "EMBER_ENROL_ADDRESS", "login": LOGIN}, open(TEMPLATE, "w"))
 t = join("template", pin=TEMPLATE)
-row("join --solana with the shipped template (EMBER_ENROL_ADDRESS unset) refuses; no memo printed",
+row("join --solana with an unset pin (EMBER_ENROL_ADDRESS) refuses; no memo printed",
     t.returncode != 0 and "EMBER_ENROL_ADDRESS is unset" in t.stderr and "memo" not in t.stdout,
     t.stderr.strip()[-160:])
 
