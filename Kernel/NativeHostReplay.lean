@@ -40,6 +40,9 @@ import Kernel.ApplicationLifecycleBeginV3Admission
 import Kernel.ApplicationLifecycleClaimV3Core
 import Kernel.ApplicationLifecycleCompletionV2Core
 import Kernel.ApplicationFailedStartRecoveryCore
+import Kernel.ApplicationLifecycleRetryBeginV4Admission
+import Kernel.ApplicationLifecycleRetryClaimV4Core
+import Kernel.ApplicationLifecycleRetryCompletionV4Core
 import Kernel.ApplicationLifecycleCreatedHistory
 import Kernel.ApplicationGrainSessionEnrollmentIntent
 import Kernel.ParticipantKeyEnrollmentReceiver
@@ -480,6 +483,95 @@ def FailedStartRecoveryAt.intent {config : Config} {opened : Opened config}
     (admitted : FailedStartRecoveryAt config opened ingress) : DataIntent rootBytes :=
   ApplicationFailedStartRecoveryCore.intent admitted.conditional
 
+/-- A governed failed-START recovery enters the verified chronology only after
+its full event66 intent, physical record and successor image matched in this
+same walk. A retry BEGIN may name a recovery only through this list. -/
+structure PriorRecovery (config : Config) where
+  private mk ::
+  index : Nat
+  ingress : ApplicationFailedStartRecoveryIngress.Ingress
+  record : DurableReceiver.IntentRecord
+  admitted : ∃ original : Opened config,
+    ∃ accepted : FailedStartRecoveryAt config original ingress,
+      record = DurableReceiver.IntentRecord.ofIntent accepted.intent
+
+/-- Versioned repeat-CREATE BEGIN (event69). The lower admission re-admits the
+named recovery at its structural prefix; this join additionally requires that
+exact recovery record to have been admitted by the chronological walk. -/
+structure BeginAtV4 (config : Config) (opened : Opened config)
+    (ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress) where
+  private mk ::
+  prior : PriorRecovery config
+  indexExact : prior.index = ingress.retry.recoveryIndex
+  ingressExact : prior.ingress = ingress.retry.recovery
+  accepted : ApplicationLifecycleRetryBeginV4Admission.Accepted config opened ingress
+  recoveryExact : prior.record = accepted.evidence.selected.record
+  present : opened.durable.image.accepted[prior.index]? = some prior.record
+
+def BeginAtV4.intent {config : Config} {opened : Opened config}
+    {ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress}
+    (admitted : BeginAtV4 config opened ingress) : DataIntent rootBytes :=
+  admitted.accepted.intent
+
+structure PriorBeginV4 (config : Config) where
+  private mk ::
+  index : Nat
+  ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress
+  record : DurableReceiver.IntentRecord
+  admitted : ∃ original : Opened config,
+    ∃ accepted : BeginAtV4 config original ingress,
+      record = DurableReceiver.IntentRecord.ofIntent accepted.intent
+
+/-- One-use retry CLAIM (event70) joined to a v4 BEGIN retained by this walk. -/
+structure ClaimAtV4 (config : Config) (opened : Opened config)
+    (ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress) where
+  private mk ::
+  prior : PriorBeginV4 config
+  indexExact : prior.index = ingress.base.source.originalIndex
+  ingressExact : prior.ingress = ingress.originalBegin
+  present : opened.durable.image.accepted[prior.index]? = some prior.record
+  conditional : ApplicationLifecycleRetryClaimV4Core.Conditional config opened ingress
+  recordExact : prior.record =
+    DurableReceiver.IntentRecord.ofIntent conditional.originalAccepted.intent
+
+def ClaimAtV4.intent {config : Config} {opened : Opened config}
+    {ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress}
+    (admitted : ClaimAtV4 config opened ingress) : DataIntent rootBytes :=
+  admitted.conditional.intent
+
+structure PriorClaimV4 (config : Config) where
+  private mk ::
+  index : Nat
+  ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress
+  record : DurableReceiver.IntentRecord
+  admitted : ∃ original : Opened config,
+    ∃ accepted : ClaimAtV4 config original ingress,
+      record = DurableReceiver.IntentRecord.ofIntent accepted.intent
+
+/-- Retry completion (event72) joined to a v4 claim retained by this walk. The
+retry is always a START create, so there is no STOP running-incarnation leg. -/
+structure CompletionAtV4 (config : Config) (opened : Opened config)
+    (ingress : ApplicationLifecycleRetryCompletionV4Ingress.Ingress) where
+  private mk ::
+  prior : PriorClaimV4 config
+  conditional : ApplicationLifecycleRetryCompletionV4Admission.Candidate config opened ingress
+  indexExact : prior.index = conditional.historical.index
+  ingressExact : prior.ingress = ingress.source.originalClaim
+  recordExact : prior.record = conditional.historical.selected.record
+  present : opened.durable.image.accepted[prior.index]? = some prior.record
+
+def CompletionAtV4.intent {config : Config} {opened : Opened config}
+    {ingress : ApplicationLifecycleRetryCompletionV4Ingress.Ingress}
+    (admitted : CompletionAtV4 config opened ingress) : DataIntent rootBytes :=
+  ApplicationLifecycleRetryCompletionV4Core.intent admitted.conditional
+
+/-- The failed-create retry chronology minted by one replay walk. Only the
+walk's after-step functions extend it; no caller supplies an element. -/
+structure RetryHistory (config : Config) where
+  recoveries : List (PriorRecovery config) := []
+  beginsV4 : List (PriorBeginV4 config) := []
+  claimsV4 : List (PriorClaimV4 config) := []
+
 inductive CompletionV2Running (config : Config) (opened : Opened config)
     (ingress : ApplicationLifecycleCompletionV2Ingress.Ingress) : Type where
   | other (notStop : ingress.source.originalBegin.base.source.kind ≠ .stop)
@@ -912,6 +1004,18 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       {ingress : ApplicationLifecycleCompletionV2Ingress.Ingress}
       (admitted : CompletionAtV2 config opened ingress) :
       NativeAdmission config opened admitted.intent
+  | applicationRetryBeginV4
+      {ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress}
+      (admitted : BeginAtV4 config opened ingress) :
+      NativeAdmission config opened admitted.intent
+  | applicationRetryClaimV4
+      {ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress}
+      (admitted : ClaimAtV4 config opened ingress) :
+      NativeAdmission config opened admitted.intent
+  | applicationRetryCompletionV4
+      {ingress : ApplicationLifecycleRetryCompletionV4Ingress.Ingress}
+      (admitted : CompletionAtV4 config opened ingress) :
+      NativeAdmission config opened admitted.intent
   | fnConsumerNamespace {ingress : FnConsumerNamespaceRegistration.Ingress}
       {legacy : Option FnConsumerNamespaceAdmissionAt.Legacy}
       (accepted : FnConsumerNamespaceAdmissionAt.Conditional config opened legacy ingress) :
@@ -1003,6 +1107,14 @@ structure Derived (config : Config) (opened : Opened config) where
   judged under the `objectKernel` facet (`Config.kernelTransport`), which alone may
   write the protected coordinates (`Kernel.ObjectiveActivityGate`). -/
   kernel : Option (KernelTurn config opened intent) := none
+  failedStartRecovery : Option (Σ ingress : ApplicationFailedStartRecoveryIngress.Ingress,
+    { admitted : FailedStartRecoveryAt config opened ingress // intent = admitted.intent }) := none
+  beginV4 : Option (Σ ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress,
+    { admitted : BeginAtV4 config opened ingress // intent = admitted.intent }) := none
+  claimV4 : Option (Σ ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress,
+    { admitted : ClaimAtV4 config opened ingress // intent = admitted.intent }) := none
+  completionV4 : Option (Σ ingress : ApplicationLifecycleRetryCompletionV4Ingress.Ingress,
+    { admitted : CompletionAtV4 config opened ingress // intent = admitted.intent }) := none
 
 /-- Controller-only exception for a precisely rederived source-owned operation.
 Ordinary records continue through the centrally installed conflicting-write gate. -/
@@ -1195,7 +1307,8 @@ def FailedStartRecoveryAt.toDerived {config : Config} {opened : Opened config}
     (admitted : FailedStartRecoveryAt config opened ingress) : Derived config opened :=
   { intent := admitted.intent
     admission := .applicationFailedStartRecovery admitted
-    issue := none, begin := none, beginV2 := none, claimV2 := none }
+    issue := none, begin := none, beginV2 := none, claimV2 := none
+    failedStartRecovery := some ⟨ingress, ⟨admitted, rfl⟩⟩ }
 
 theorem FailedStartRecoveryAt.toDerived_intent {config : Config} {opened : Opened config}
     {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
@@ -1212,6 +1325,45 @@ def CompletionAtV2.toDerived {config : Config} {opened : Opened config}
 theorem CompletionAtV2.toDerived_intent {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleCompletionV2Ingress.Ingress}
     (admitted : CompletionAtV2 config opened ingress) :
+    admitted.toDerived.intent = admitted.intent := rfl
+
+def BeginAtV4.toDerived {config : Config} {opened : Opened config}
+    {ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress}
+    (admitted : BeginAtV4 config opened ingress) : Derived config opened :=
+  { intent := admitted.intent
+    admission := .applicationRetryBeginV4 admitted
+    issue := none, begin := none, beginV2 := none, claimV2 := none
+    beginV4 := some ⟨ingress, ⟨admitted, rfl⟩⟩ }
+
+theorem BeginAtV4.toDerived_intent {config : Config} {opened : Opened config}
+    {ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress}
+    (admitted : BeginAtV4 config opened ingress) :
+    admitted.toDerived.intent = admitted.intent := rfl
+
+def ClaimAtV4.toDerived {config : Config} {opened : Opened config}
+    {ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress}
+    (admitted : ClaimAtV4 config opened ingress) : Derived config opened :=
+  { intent := admitted.intent
+    admission := .applicationRetryClaimV4 admitted
+    issue := none, begin := none, beginV2 := none, claimV2 := none
+    claimV4 := some ⟨ingress, ⟨admitted, rfl⟩⟩ }
+
+theorem ClaimAtV4.toDerived_intent {config : Config} {opened : Opened config}
+    {ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress}
+    (admitted : ClaimAtV4 config opened ingress) :
+    admitted.toDerived.intent = admitted.intent := rfl
+
+def CompletionAtV4.toDerived {config : Config} {opened : Opened config}
+    {ingress : ApplicationLifecycleRetryCompletionV4Ingress.Ingress}
+    (admitted : CompletionAtV4 config opened ingress) : Derived config opened :=
+  { intent := admitted.intent
+    admission := .applicationRetryCompletionV4 admitted
+    issue := none, begin := none, beginV2 := none, claimV2 := none
+    completionV4 := some ⟨ingress, ⟨admitted, rfl⟩⟩ }
+
+theorem CompletionAtV4.toDerived_intent {config : Config} {opened : Opened config}
+    {ingress : ApplicationLifecycleRetryCompletionV4Ingress.Ingress}
+    (admitted : CompletionAtV4 config opened ingress) :
     admitted.toDerived.intent = admitted.intent := rfl
 
 theorem CompletionAt.toDerived_intent {config : Config} {opened : Opened config}
@@ -1748,6 +1900,94 @@ private def admitCompletionV2At (config : Config) (opened : Opened config)
     else return .error "v2 completion original claim ingress differs"
   else return .error "v2 completion original claim index differs"
 
+/-- The retry BEGIN names its recovery by index; the recovery must be one this
+walk admitted (and so joined to its own original v3 claim), and the lower
+evidence must have selected that very record. -/
+private def admitBeginV4At (config : Config) (opened : Opened config)
+    (recoveries : List (PriorRecovery config))
+    (ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress) :
+    IO (Except String (BeginAtV4 config opened ingress)) := do
+  let some prior := recoveries.find? (fun prior => prior.index == ingress.retry.recoveryIndex)
+    | return .error "retry BEGIN recovery absent from admitted chronology"
+  if indexExact : prior.index = ingress.retry.recoveryIndex then
+    if ingressExact : prior.ingress = ingress.retry.recovery then
+      match ← ApplicationLifecycleRetryBeginV4Admission.admitNative config opened ingress with
+      | .error detail => return .error detail
+      | .ok accepted =>
+        if recordBytes : DurableReceiverCodec.intentStream.encode prior.record =
+            DurableReceiverCodec.intentStream.encode accepted.evidence.selected.record then
+          have recoveryExact : prior.record = accepted.evidence.selected.record :=
+            (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful) recordBytes
+          have present : opened.durable.image.accepted[prior.index]? = some prior.record := by
+            rw [recoveryExact, indexExact]
+            exact accepted.evidence.selected.atIndex
+          return .ok ⟨prior, indexExact, ingressExact, accepted, recoveryExact, present⟩
+        else return .error "retry BEGIN recovery record differs from admitted chronology"
+    else return .error "retry BEGIN recovery ingress differs from admitted chronology"
+  else return .error "retry BEGIN recovery index differs"
+
+private def admitClaimV4At (config : Config) (opened : Opened config)
+    (begins : List (PriorBeginV4 config))
+    (ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress) :
+    IO (Except String (ClaimAtV4 config opened ingress)) := do
+  let some prior := begins.find? (fun prior => prior.index == ingress.base.source.originalIndex)
+    | return .error "retry BEGIN absent from admitted prefix"
+  if indexExact : prior.index = ingress.base.source.originalIndex then
+    if ingressExact : prior.ingress = ingress.originalBegin then
+      match found : opened.durable.image.accepted[prior.index]? with
+      | none => return .error "retry BEGIN record absent"
+      | some record =>
+        if physicalExact : DurableReceiverCodec.intentStream.encode record =
+            DurableReceiverCodec.intentStream.encode prior.record then
+          have exact : record = prior.record :=
+            (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful)
+              physicalExact
+          have present : opened.durable.image.accepted[prior.index]? =
+              some prior.record := by simpa only [exact] using found
+          match ← ApplicationLifecycleRetryClaimV4Core.prepare config opened ingress with
+          | .error detail => return .error detail
+          | .ok conditional =>
+            if sourceBytes : DurableReceiverCodec.intentStream.encode prior.record =
+                DurableReceiverCodec.intentStream.encode
+                  (DurableReceiver.IntentRecord.ofIntent
+                    conditional.originalAccepted.intent) then
+              have recordExact : prior.record =
+                  DurableReceiver.IntentRecord.ofIntent
+                    conditional.originalAccepted.intent :=
+                (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful)
+                  sourceBytes
+              return .ok ⟨prior, indexExact, ingressExact, present,
+                conditional, recordExact⟩
+            else return .error "retry BEGIN differs from original intent"
+        else return .error "retry BEGIN record differs from prefix"
+    else return .error "retry BEGIN ingress differs"
+  else return .error "retry BEGIN index differs"
+
+private def admitCompletionV4At (config : Config) (opened : Opened config)
+    (claims : List (PriorClaimV4 config))
+    (ingress : ApplicationLifecycleRetryCompletionV4Ingress.Ingress) :
+    IO (Except String (CompletionAtV4 config opened ingress)) := do
+  let conditional ← match ← ApplicationLifecycleRetryCompletionV4Admission.prepareConditional
+      config opened ingress with
+    | .error detail => return .error detail
+    | .ok candidate => pure candidate
+  let some prior := claims.find? (fun prior => prior.index == conditional.historical.index)
+    | return .error "retry completion original claim absent from admitted history"
+  if indexExact : prior.index = conditional.historical.index then
+    if ingressExact : prior.ingress = ingress.source.originalClaim then
+      if recordBytes : DurableReceiverCodec.intentStream.encode prior.record =
+          DurableReceiverCodec.intentStream.encode conditional.historical.selected.record then
+        have recordExact : prior.record = conditional.historical.selected.record :=
+          (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful) recordBytes
+        have present : opened.durable.image.accepted[prior.index]? =
+            some prior.record := by
+          rw [indexExact, recordExact]
+          exact conditional.historical.selected.atIndex
+        return .ok ⟨prior, conditional, indexExact, ingressExact, recordExact, present⟩
+      else return .error "retry completion original claim record differs"
+    else return .error "retry completion original claim ingress differs"
+  else return .error "retry completion original claim index differs"
+
 /-- Fresh native admission is mandatory even if the final image contains an
 identical receipt. The issue context is private to the chronological replay
 walk; no caller-provided signed issue bytes can populate it. -/
@@ -1764,6 +2004,7 @@ private def derive (config : Config) (opened : Opened config)
     (grants : List (PriorLifetimeGrant config))
     (frontier : FnConsumerFrontierReplay.Audit)
     (releases : List PriorSelectedRelease)
+    (retry : RetryHistory config)
     (bytes : List UInt8) :
     IO (Except String (Derived config opened)) := do
   let height := logicalHeight config opened.durable
@@ -2004,6 +2245,18 @@ private def derive (config : Config) (opened : Opened config)
         return .ok ⟨accepted.intent config opened ingress, .selectedSourcePublication accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ApplicationFailedStartRecoveryIngress.codec.decode bytes then
     match ← admitFailedStartRecoveryAt config opened claimsV3 ingress with
+    | .error detail => return .error detail
+    | .ok admitted => return .ok admitted.toDerived
+  if let some ingress := ApplicationLifecycleRetryBeginV4Ingress.codec.decode bytes then
+    match ← admitBeginV4At config opened retry.recoveries ingress with
+    | .error detail => return .error detail
+    | .ok admitted => return .ok admitted.toDerived
+  if let some ingress := ApplicationLifecycleRetryClaimV4Ingress.codec.decode bytes then
+    match ← admitClaimV4At config opened retry.beginsV4 ingress with
+    | .error detail => return .error detail
+    | .ok admitted => return .ok admitted.toDerived
+  if let some ingress := ApplicationLifecycleRetryCompletionV4Ingress.codec.decode bytes then
+    match ← admitCompletionV4At config opened retry.claimsV4 ingress with
     | .error detail => return .error detail
     | .ok admitted => return .ok admitted.toDerived
   if let some ingress := ApplicationLifecycleCompletionV2Ingress.codec.decode bytes then
@@ -2325,6 +2578,34 @@ private def runningV3After (config : Config) (opened : Opened config)
         else running
       else running
 
+/-- Called only after the walk natively admitted, matched in full, advanced and
+validated `record`. Each list gains exactly the element its Derived carries. -/
+private def retryAfter (config : Config) (opened : Opened config)
+    (retry : RetryHistory config) (record : DurableReceiver.IntentRecord)
+    (derived : Derived config opened)
+    (matched : recordMatches record derived.intent = true) :
+    RetryHistory config :=
+  let index := opened.durable.image.accepted.length
+  let exactFor (intent : DataIntent rootBytes) (intentExact : derived.intent = intent) :
+      record = DurableReceiver.IntentRecord.ofIntent intent := by
+    rw [← intentExact]
+    exact (recordMatches_iff record derived.intent).mp matched
+  { recoveries := match derived.failedStartRecovery with
+      | none => retry.recoveries
+      | some ⟨ingress, ⟨admitted, intentExact⟩⟩ =>
+          ⟨index, ingress, record,
+            ⟨opened, admitted, exactFor admitted.intent intentExact⟩⟩ :: retry.recoveries
+    beginsV4 := match derived.beginV4 with
+      | none => retry.beginsV4
+      | some ⟨ingress, ⟨admitted, intentExact⟩⟩ =>
+          ⟨index, ingress, record,
+            ⟨opened, admitted, exactFor admitted.intent intentExact⟩⟩ :: retry.beginsV4
+    claimsV4 := match derived.claimV4 with
+      | none => retry.claimsV4
+      | some ⟨ingress, ⟨admitted, intentExact⟩⟩ =>
+          ⟨index, ingress, record,
+            ⟨opened, admitted, exactFor admitted.intent intentExact⟩⟩ :: retry.claimsV4 }
+
 private def grantsAfter (config : Config) (opened : Opened config)
     (grants : List (PriorLifetimeGrant config))
     (record : DurableReceiver.IntentRecord) (receipt : NativeHostCodec.Receipt)
@@ -2567,6 +2848,7 @@ private structure Walked (config : Config) (start : Opened config)
   createdV3 : List (PriorCreatedV3 config)
   runningV3 : List (PriorRunningV3 config)
   grants : List (PriorLifetimeGrant config)
+  retry : RetryHistory config
 
 /-- Called only after the original record was natively admitted, matched in
 full, advanced, and validated by this replay walk. A legacy tag9 is merely a
@@ -2657,17 +2939,18 @@ private def walk (config : Config) (opened : Opened config)
     (grants : List (PriorLifetimeGrant config))
     (frontier : FnConsumerFrontierReplay.Audit)
     (releases : List PriorSelectedRelease)
+    (retry : RetryHistory config)
     (selectIndex : Option Nat) (timing : AuditTiming.Handle) :
     (records : List DurableReceiver.IntentRecord) →
     IO (Except Failure (Walked config opened records))
   | [] => pure (.ok ⟨opened, [], .nil opened, none, issues, reserves, begins, beginsV2, claimsV2,
-      frontier, releases, beginsV3, claimsV3, createdV3, runningV3, grants⟩)
+      frontier, releases, beginsV3, claimsV3, createdV3, runningV3, grants, retry⟩)
   | record :: rest => do
       let index := opened.durable.image.accepted.length
       AuditTiming.beginRecord timing index (fun _ => admissionPhase record)
       match ← AuditTiming.measure timing (fun _ => admissionPhase record)
           (derive config opened issues reserves begins beginsV2 claimsV2
-            beginsV3 claimsV3 createdV3 runningV3 grants frontier releases
+            beginsV3 claimsV3 createdV3 runningV3 grants frontier releases retry
             record.event.canonicalBytes) with
       | .error detail => return .error ⟨index, detail⟩
       | .ok derived =>
@@ -2707,6 +2990,7 @@ private def walk (config : Config) (opened : Opened config)
               let nextRunningV3 := runningV3After config opened runningV3 record receipt
                 derived matched
               let nextGrants := grantsAfter config opened grants record receipt derived matched
+              let nextRetry := retryAfter config opened retry record derived matched
               let .ok nextFrontier := frontierAfter config frontier record receipt
                 | return .error ⟨index, "fn consumer frontier transition refused"⟩
               let nextReleases := selectedReleaseAfter config after releases record receipt
@@ -2724,7 +3008,7 @@ private def walk (config : Config) (opened : Opened config)
                 NativeHistorySelection.retainPrefix next
               match ← walk config after nextIssues nextReserves nextBegins nextBeginsV2 nextClaimsV2
                   nextBeginsV3 nextClaimsV3 nextCreatedV3 nextRunningV3 nextGrants
-                  nextFrontier nextReleases selectIndex timing rest with
+                  nextFrontier nextReleases nextRetry selectIndex timing rest with
               | .error failure => return .error failure
               | .ok tail =>
                 let step : AdmittedStep config opened after record receipt :=
@@ -2741,7 +3025,7 @@ private def walk (config : Config) (opened : Opened config)
                   .cons step tail.trace, selectedAt, tail.issues, tail.reserves, tail.begins,
                   tail.beginsV2, tail.claimsV2, tail.frontier, tail.releases,
                   tail.beginsV3, tail.claimsV3, tail.createdV3, tail.runningV3,
-                  tail.grants⟩
+                  tail.grants, tail.retry⟩
         else
           return .error ⟨index, "retained intent differs from native-admitted intent"⟩
 
@@ -2768,6 +3052,7 @@ structure Verified (config : Config) (target : Durable) where
   createdV3 : List (PriorCreatedV3 config)
   runningV3 : List (PriorRunningV3 config)
   grants : List (PriorLifetimeGrant config)
+  retry : RetryHistory config
 
 /-- Per-scope current frontier minted by this exact admitted-history walk.
 Ambiguous historical v1 progress refuses new ordered progress for that scope. -/
@@ -2804,7 +3089,7 @@ def deriveVerified {config : Config} {target : Durable}
     IO (Except String (Derived config old.opened)) :=
   derive config old.opened old.issues old.reserves old.begins old.beginsV2 old.claimsV2
     old.beginsV3 old.claimsV3 old.createdV3 old.runningV3 old.grants
-    old.frontier old.releases bytes
+    old.frontier old.releases old.retry bytes
 
 /-- Fresh enrollment uses only the event22 ticket certificate in the verified
 walk and then rechecks the signed joint command and three same-image reads. -/
@@ -2913,6 +3198,26 @@ def admitCompletionV2Verified {config : Config} {target : Durable}
     (ingress : ApplicationLifecycleCompletionV2Ingress.Ingress) :
     IO (Except String (CompletionAtV2 config old.opened ingress)) :=
   admitCompletionV2At config old.opened old.claimsV3 old.runningV3 ingress
+
+/-- Fresh retry BEGIN: the recovery is selected from this verified walk's own
+admitted chronology, never from the request. -/
+def admitRetryBeginV4Verified {config : Config} {target : Durable}
+    (old : Verified config target)
+    (ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress) :
+    IO (Except String (BeginAtV4 config old.opened ingress)) :=
+  admitBeginV4At config old.opened old.retry.recoveries ingress
+
+def admitRetryClaimV4Verified {config : Config} {target : Durable}
+    (old : Verified config target)
+    (ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress) :
+    IO (Except String (ClaimAtV4 config old.opened ingress)) :=
+  admitClaimV4At config old.opened old.retry.beginsV4 ingress
+
+def admitRetryCompletionV4Verified {config : Config} {target : Durable}
+    (old : Verified config target)
+    (ingress : ApplicationLifecycleRetryCompletionV4Ingress.Ingress) :
+    IO (Except String (CompletionAtV4 config old.opened ingress)) :=
+  admitCompletionV4At config old.opened old.retry.claimsV4 ingress
 
 /-- The persistent Host can admit a fresh dispatch from its exact verified tip
 without replaying the whole history for every request. Only that tip's
@@ -3054,6 +3359,7 @@ def extendExact {config : Config} {oldTarget : Durable}
     record receipt readback.derived matched
   let grants := grantsAfter config old.opened old.grants
     record receipt readback.derived matched
+  let retry := retryAfter config old.opened old.retry record readback.derived matched
   -- Existing exact-readback callers are non-frontier operations. If a future
   -- caller extends a frontier event whose transition unexpectedly fails,
   -- poison all frontier projections rather than keeping the prior cursor.
@@ -3064,7 +3370,7 @@ def extendExact {config : Config} {oldTarget : Durable}
   let releases := selectedReleaseAfter config readback.after old.releases record receipt
   exact ⟨old.origin, readback.after, exactImage, old.receipts ++ [receipt], countExact,
     admitted, issues, reserves, begins, beginsV2, claimsV2, frontier, releases,
-    beginsV3, claimsV3, createdV3, runningV3, grants⟩
+    beginsV3, claimsV3, createdV3, runningV3, grants, retry⟩
 
 /-- Exact readback keeps the original accepted-prefix receipt, even when a
 subsequent current tip will contain more accepted entries. -/
@@ -3195,7 +3501,7 @@ def verifyLoaded (config : Config) (target : Durable)
     match openedValidated : openedValue.val with
     | .error detail => return .error ⟨0, s!"pinned genesis: {detail}"⟩
     | .ok opened =>
-      match ← walk config opened [] [] [] [] [] [] [] [] [] [] {} [] none timing target.image.accepted with
+      match ← walk config opened [] [] [] [] [] [] [] [] [] [] {} [] {} none timing target.image.accepted with
       | .error failure => return .error failure
       | .ok walked =>
         -- The walk's final image is the genesis image followed by exactly the
@@ -3209,7 +3515,7 @@ def verifyLoaded (config : Config) (target : Durable)
             countExact, walked.trace, walked.issues, walked.reserves, walked.begins,
             walked.beginsV2, walked.claimsV2, walked.frontier, walked.releases,
             walked.beginsV3, walked.claimsV3, walked.createdV3,
-            walked.runningV3, walked.grants⟩
+            walked.runningV3, walked.grants, walked.retry⟩
         else return .error ⟨target.image.accepted.length, "verified history count mismatch"⟩
 
 /-- **The audit walk rebuilds the stored index**: the genesis re-admission
@@ -3274,7 +3580,7 @@ def verifyLoadedSelected (config : Config) (target : Durable) (index : Nat) :
     match validated : validateLoaded config initial with
     | .error detail => return .error ⟨0, s!"pinned genesis: {detail}"⟩
     | .ok opened =>
-      match ← walk config opened [] [] [] [] [] [] [] [] [] [] {} [] (some index) none target.image.accepted with
+      match ← walk config opened [] [] [] [] [] [] [] [] [] [] {} [] {} (some index) none target.image.accepted with
       | .error failure => return .error failure
       | .ok walked =>
         have exactImage : walked.final.durable.image = target.image :=
@@ -3289,7 +3595,7 @@ def verifyLoadedSelected (config : Config) (target : Durable) (index : Nat) :
                   countExact, walked.trace, walked.issues, walked.reserves, walked.begins,
                   walked.beginsV2, walked.claimsV2, walked.frontier, walked.releases,
                   walked.beginsV3, walked.claimsV3, walked.createdV3,
-                  walked.runningV3, walked.grants⟩
+                  walked.runningV3, walked.grants, walked.retry⟩
               return .ok ⟨verified, selected, indexExact⟩
             else return .error ⟨index, "selected native checkpoint index mismatch"⟩
         else return .error ⟨target.image.accepted.length, "verified history count mismatch"⟩
@@ -3321,7 +3627,7 @@ def extendVerifiedAppended (config : Config) {oldTarget : Durable}
   let suffix := target.image.accepted.drop oldTarget.image.accepted.length
   match ← walk config old.opened old.issues old.reserves old.begins old.beginsV2 old.claimsV2
       old.beginsV3 old.claimsV3 old.createdV3 old.runningV3 old.grants
-      old.frontier old.releases none none suffix with
+      old.frontier old.releases old.retry none none suffix with
   | .error failure => return .error failure
   | .ok walked =>
     have exactImage : walked.final.durable.image = target.image :=
@@ -3335,7 +3641,7 @@ def extendVerifiedAppended (config : Config) {oldTarget : Durable}
       return .ok ⟨old.origin, walked.final, exactImage, receipts, countExact,
         admitted, walked.issues, walked.reserves, walked.begins, walked.beginsV2, walked.claimsV2,
         walked.frontier, walked.releases, walked.beginsV3, walked.claimsV3,
-        walked.createdV3, walked.runningV3, walked.grants⟩
+        walked.createdV3, walked.runningV3, walked.grants, walked.retry⟩
     else return .error ⟨target.image.accepted.length, "verified history count mismatch"⟩
 
 /-- Continue from a previously verified exact tip after an external read.
@@ -3544,6 +3850,7 @@ structure SuffixContext (config : Config) where
   createdV3 : List (PriorCreatedV3 config) := []
   runningV3 : List (PriorRunningV3 config) := []
   grants : List (PriorLifetimeGrant config) := []
+  retry : RetryHistory config := {}
 
 private def deriveSuffixAt (config : Config) (anchor : Opened config)
     (origin : Option (CarriedSegmentIO.PreservedPrefix config anchor.durable))
@@ -3576,7 +3883,7 @@ private def deriveSuffixAt (config : Config) (anchor : Opened config)
         | .ok admitted => return .ok (.carriedDispatch ingress admitted)
   match ← derive config opened context.issues context.reserves context.begins context.beginsV2
       context.claimsV2 context.beginsV3 context.claimsV3 context.createdV3 context.runningV3
-      context.grants context.frontier context.releases bytes with
+      context.grants context.frontier context.releases context.retry bytes with
   | .error detail => return .error detail
   | .ok derived => return .ok (.ordinary derived)
 
@@ -3598,8 +3905,9 @@ private def ordinarySuffixContextAfter (config : Config) (before after : Opened 
   let createdV3 := createdV3After config before context.createdV3 record receipt ordinary matched
   let runningV3 := runningV3After config before context.runningV3 record receipt ordinary matched
   let grants := grantsAfter config before context.grants record receipt ordinary matched
+  let retry := retryAfter config before context.retry record ordinary matched
   pure ⟨issues, reserves, begins, beginsV2, claimsV2, frontier, releases,
-    beginsV3, claimsV3, createdV3, runningV3, grants⟩
+    beginsV3, claimsV3, createdV3, runningV3, grants, retry⟩
 
 private def suffixContextAfter (config : Config) (before after : Opened config)
     (context : SuffixContext config) (record : DurableReceiver.IntentRecord)
@@ -3679,6 +3987,7 @@ structure SuffixVerified (config : Config) (anchor : Opened config) (target : Du
   createdV3 : List (PriorCreatedV3 config)
   runningV3 : List (PriorRunningV3 config)
   grants : List (PriorLifetimeGrant config)
+  retry : RetryHistory config
 
 /-- Global accepted-record index in, original target-segment receipt out.
 The anchor and all earlier records must be selected through their own segment.
@@ -3709,7 +4018,8 @@ def SuffixVerified.context {config : Config} {anchor : Opened config} {target : 
   { issues := verified.issues, reserves := verified.reserves, begins := verified.begins
     beginsV2 := verified.beginsV2, claimsV2 := verified.claimsV2, frontier := verified.frontier
     releases := verified.releases, beginsV3 := verified.beginsV3, claimsV3 := verified.claimsV3
-    createdV3 := verified.createdV3, runningV3 := verified.runningV3, grants := verified.grants }
+    createdV3 := verified.createdV3, runningV3 := verified.runningV3, grants := verified.grants
+    retry := verified.retry }
 
 /-- Fresh admission at the certified tip, retaining either the actual ordinary
 admission or the separately authenticated carried enrollment admission. -/
@@ -3773,7 +4083,8 @@ def verifySuffixFrom (config : Config) (anchor : Opened config) (target : Durabl
             claimsV3 := walked.context.claimsV3
             createdV3 := walked.context.createdV3
             runningV3 := walked.context.runningV3
-            grants := walked.context.grants }
+            grants := walked.context.grants
+            retry := walked.context.retry }
       else return .error ⟨target.image.accepted.length, "suffix receipt count mismatch"⟩
     else return .error ⟨target.image.accepted.length, "suffix final log anchor differs"⟩
 
@@ -3879,7 +4190,8 @@ def extendSuffixAppended (config : Config) {anchor : Opened config} {oldTarget :
             claimsV3 := walked.context.claimsV3
             createdV3 := walked.context.createdV3
             runningV3 := walked.context.runningV3
-            grants := walked.context.grants }
+            grants := walked.context.grants
+            retry := walked.context.retry }
       else return .error ⟨target.image.accepted.length, "extended suffix receipt count mismatch"⟩
     else return .error ⟨target.image.accepted.length, "extended suffix final log anchor differs"⟩
 

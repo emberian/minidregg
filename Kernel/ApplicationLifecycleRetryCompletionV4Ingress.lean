@@ -41,7 +41,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def frame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-COMPLETION-INGRESS/v2".toUTF8.toList
+  "DREGG/APPLICATION/RETRY-CREATE-COMPLETION-INGRESS/v4".toUTF8.toList
 
 def codec : LawfulCodec Ingress := NativeHostCodec.framed frame ingressStream
 

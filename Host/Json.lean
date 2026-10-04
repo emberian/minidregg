@@ -25,6 +25,10 @@ import Host.ApplicationLifecycleLaunchBeginInspection
 import Host.ApplicationLifecycleLaunchClaimInspection
 import Host.ApplicationLifecycleLaunchCompletionInspection
 import Host.ApplicationLifecycleLaunchReportAuthoring
+import Host.ApplicationLifecycleRetryLaunchReportAuthoring
+import Host.ApplicationLifecycleRetryBeginV4Inspection
+import Host.ApplicationLifecycleRetryClaimV4Inspection
+import Host.ApplicationLifecycleRetryCompletionV4Inspection
 import Host.ApplicationAgentLifetimeGrantInspection
 import Host.ApplicationLifecycleClaimOperator
 import Host.ApplicationDispatchAgentPaidInspection
@@ -3030,6 +3034,84 @@ private def completionSource (store : Digest) (json : Lean.Json) : Result (List 
     (← decodeHex "$.signedReport" (← field "$" "signedReport" obj)) current
   return ApplicationLifecycleCompletionSource.codec.encode source
 
+/-- Physical observations are supplied by the protected host. The source
+helper derives the volume identity and canonical retry v4 report. -/
+private def retryPhysicalReport (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["begin", "committedClaim", "nonce", "unit",
+    "materializedImage", "outcome", "invocationId", "controlGroup", "pid",
+    "stopAudit", "volumeWitness"] json
+  let outcome ← match ← string "$.outcome" (← field "$" "outcome" obj) with
+    | "materialized" => pure ApplicationLifecycleCompletionReport.Outcome.materialized
+    | "running" => pure .running
+    | "stopped" => pure .stopped
+    | _ => failAt "$.outcome" "expected materialized, running, or stopped"
+  let observed : ApplicationLifecycleRetryLaunchReportAuthoring.PhysicalObservation := {
+    nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
+    unit := ← decodeHex "$.unit" (← field "$" "unit" obj)
+    materializedImage := ← decodeHex "$.materializedImage" (← field "$" "materializedImage" obj)
+    outcome := outcome
+    invocationId := ← decodeHex "$.invocationId" (← field "$" "invocationId" obj)
+    controlGroup := ← decodeHex "$.controlGroup" (← field "$" "controlGroup" obj)
+    pid := ← nat "$.pid" (← field "$" "pid" obj)
+    stopAudit := ← optional "$.stopAudit" (fun _ value => launchStopAudit value)
+      (← field "$" "stopAudit" obj)
+    volumeWitness := ← optional "$.volumeWitness" decodeHex
+      (← field "$" "volumeWitness" obj) }
+  let report ← ApplicationLifecycleRetryLaunchReportAuthoring.reportPlan
+    (← decodeHex "$.begin" (← field "$" "begin" obj))
+    (← decodeHex "$.committedClaim" (← field "$" "committedClaim" obj)) observed
+  return ApplicationLifecycleRetryCompletionV4Report.codec.encode report
+
+private def retryPhysicalSigningFrame (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["begin", "report"] json
+  ApplicationLifecycleRetryLaunchReportAuthoring.signingPlan
+    (← decodeHex "$.begin" (← field "$" "begin" obj))
+    (← decodeHex "$.report" (← field "$" "report" obj))
+
+private def retryPhysicalSignedReport (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["begin", "report", "signature"] json
+  ApplicationLifecycleRetryLaunchReportAuthoring.signedReport
+    (← decodeHex "$.begin" (← field "$" "begin" obj))
+    (← decodeHex "$.report" (← field "$" "report" obj))
+    (← decodeHex "$.signature" (← field "$" "signature" obj))
+
+private def retryCompletionSource (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["begin", "claimIngress", "signedReport",
+    "appRoot", "packageRoot", "appCapability", "appObserveCapability",
+    "packageCapability", "packageObserveCapability", "packageAtomBefore"] json
+  let current : ApplicationLifecycleRetryLaunchReportAuthoring.CurrentObservation :=
+    { appRoot := ← completionDigest "$.appRoot" (← field "$" "appRoot" obj)
+      packageRoot := ← completionDigest "$.packageRoot" (← field "$" "packageRoot" obj)
+      appCapability := ⟨← nat "$.appCapability" (← field "$" "appCapability" obj)⟩
+      appObserveCapability := ⟨← nat "$.appObserveCapability" (← field "$" "appObserveCapability" obj)⟩
+      packageCapability := ⟨← nat "$.packageCapability" (← field "$" "packageCapability" obj)⟩
+      packageObserveCapability := ⟨← nat "$.packageObserveCapability" (← field "$" "packageObserveCapability" obj)⟩
+      packageAtomBefore := ← optional "$.packageAtomBefore" atomRecord
+        (← field "$" "packageAtomBefore" obj) }
+  let source ← ApplicationLifecycleRetryLaunchReportAuthoring.sourcePlan
+    (← decodeHex "$.begin" (← field "$" "begin" obj))
+    (← decodeHex "$.claimIngress" (← field "$" "claimIngress" obj))
+    (← decodeHex "$.signedReport" (← field "$" "signedReport" obj)) current
+  return ApplicationLifecycleRetryCompletionV4Source.codec.encode source
+
+private def retryCompletionCommand (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["domain", "semantics", "source"] json
+  ApplicationLifecycleRetryLaunchReportAuthoring.commandPlan
+    (← completionDigest "$.domain" (← field "$" "domain" obj))
+    (← completionDigest "$.semantics" (← field "$" "semantics" obj))
+    (← decodeHex "$.source" (← field "$" "source" obj))
+
+private def retryCompletionIngress (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["domain", "semantics", "source", "signedCommand",
+    "packageObservationEnvelope"] json
+  ApplicationLifecycleRetryLaunchReportAuthoring.assemble
+    (← completionDigest "$.domain" (← field "$" "domain" obj))
+    (← completionDigest "$.semantics" (← field "$" "semantics" obj))
+    (← decodeHex "$.source" (← field "$" "source" obj))
+    (← decodeHex "$.signedCommand" (← field "$" "signedCommand" obj))
+    (← decodeHex "$.packageObservationEnvelope"
+      (← field "$" "packageObservationEnvelope" obj))
+
 private def completionCommand (json : Lean.Json) : Result (List UInt8) := do
   let obj ← exactObject "$" ["domain", "semantics", "source"] json
   ApplicationLifecycleCompletionAuthoring.commandPlan
@@ -3087,6 +3169,45 @@ private def residentBeginOperatorRequest (json : Lean.Json) : Result (List UInt8
       operationId := ← nat "$.operationId" (← field "$" "operationId" obj)
       descriptorBytes := ← decodeHex "$.descriptor" (← field "$" "descriptor" obj) }
   return ApplicationLifecycleBeginOperator.requestCodec.encode request
+
+private def retrySelector (json : Lean.Json) :
+    Result ApplicationFailedCreateRetryEvidence.Selector := do
+  let obj ← exactObject "$.retry" ["recoveryIndex", "recoveryIngress"] json
+  let recoveryBytes ← decodeHex "$.retry.recoveryIngress" (← field "$.retry" "recoveryIngress" obj)
+  let some recovery := ApplicationFailedStartRecoveryIngress.codec.decode recoveryBytes
+    | failAt "$.retry.recoveryIngress" "noncanonical failed-start recovery ingress"
+  return { recoveryIndex := ← nat "$.retry.recoveryIndex" (← field "$.retry" "recoveryIndex" obj)
+           recovery := recovery }
+
+private def retryBeginOperatorRequest (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["clientOperationId", "descriptor", "createIndex", "retry"] json
+  let request : ApplicationLifecycleRetryBeginV4Authoring.Request :=
+    { launch :=
+        { kind := .start
+          clientOperationId := ← nat "$.clientOperationId" (← field "$" "clientOperationId" obj)
+          descriptorBytes := ← decodeHex "$.descriptor" (← field "$" "descriptor" obj)
+          createIndex := some (← nat "$.createIndex" (← field "$" "createIndex" obj)) }
+      retry := ← retrySelector (← field "$" "retry" obj) }
+  let bytes := ApplicationLifecycleRetryBeginV4Authoring.requestCodec.encode request
+  let _ ← ApplicationLifecycleRetryBeginV4Inspection.inspectRequest bytes
+  return bytes
+
+private def retryClaimOperatorRequest (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["originalIndex", "queryNonce"] json
+  let request : ApplicationLifecycleRetryClaimV4Authoring.Request :=
+    { originalIndex := ← nat "$.originalIndex" (← field "$" "originalIndex" obj)
+      queryNonce := ← nat "$.queryNonce" (← field "$" "queryNonce" obj) }
+  return ApplicationLifecycleRetryClaimV4Authoring.requestCodec.encode request
+
+private def retryCompletionOperatorRequest (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["begin", "claimIngress", "signedReport"] json
+  let request : ApplicationLifecycleRetryCompletionV4Authoring.Request :=
+    { beginBytes := ← decodeHex "$.begin" (← field "$" "begin" obj)
+      claimIngressBytes := ← decodeHex "$.claimIngress" (← field "$" "claimIngress" obj)
+      signedReportBytes := ← decodeHex "$.signedReport" (← field "$" "signedReport" obj) }
+  let bytes := ApplicationLifecycleRetryCompletionV4Authoring.requestCodec.encode request
+  let _ ← ApplicationLifecycleRetryCompletionV4Inspection.inspectRequest bytes
+  return bytes
 
 private def launchBeginOperatorRequest (json : Lean.Json) : Result (List UInt8) := do
   let obj ← exactObject "$" ["kind", "clientOperationId", "descriptor", "createIndex"] json
@@ -3517,6 +3638,15 @@ def author (kind : String) (json : Lean.Json)
   | "application-lifecycle-launch-physical-signing-frame" => launchPhysicalSigningFrame json
   | "application-lifecycle-launch-physical-signed-report" => launchPhysicalSignedReport json
   | "application-lifecycle-completion-source" => do completionSource (← residentStore deployed) json
+  | "application-lifecycle-retry-physical-report" => retryPhysicalReport json
+  | "application-lifecycle-retry-physical-signing-frame" => retryPhysicalSigningFrame json
+  | "application-lifecycle-retry-physical-signed-report" => retryPhysicalSignedReport json
+  | "application-lifecycle-retry-completion-source" => retryCompletionSource json
+  | "application-lifecycle-retry-completion-command" => retryCompletionCommand json
+  | "application-lifecycle-retry-completion-ingress" => retryCompletionIngress json
+  | "application-lifecycle-retry-begin-request" => retryBeginOperatorRequest json
+  | "application-lifecycle-retry-claim-request" => retryClaimOperatorRequest json
+  | "application-lifecycle-retry-completion-request" => retryCompletionOperatorRequest json
   | "application-lifecycle-completion-command" => completionCommand json
   | "application-lifecycle-completion-signed-command" => completionSignedCommand json
   | "application-lifecycle-completion-ingress" => completionIngress json
@@ -5296,6 +5426,35 @@ private def launchPhysicalReportJson
     ("installedManifestHex", hexJson report.installedManifest),
     ("volumeCustody", custody)]
 
+private def retryPhysicalReportJson
+    (report : ApplicationLifecycleRetryCompletionV4Report.Report) : Result Lean.Json := do
+  let begin := report.claim.originalClaim.originalBegin
+  unless report.validFor begin do
+    throw "retry physical report differs from its BEGIN-v4/claim/volume"
+  let custody := match report.volumeCustody with
+    | none => Lean.Json.null
+    | some value => .mkObj [
+        ("volumeIdHex", hexJson (Sp800185Cshake256.digestBytesLE value.volume)),
+        ("physicalWitnessHex", hexJson value.physicalWitness)]
+  return .mkObj <| ([
+    ("type", .str "application-lifecycle-retry-physical-report-v4"),
+    ("frameHex", hexJson report.canonicalBytes),
+    ("originalBeginHex", hexJson (ApplicationLifecycleRetryBeginV4Ingress.codec.encode begin)),
+    ("committedClaimHex", hexJson
+      (ApplicationLifecycleRetryClaimV4Projection.codec.encode report.claim)),
+    ("nonce", decimal report.nonce),
+    ("unitHex", hexJson report.unit),
+    ("materializedImageHex", hexJson report.materializedImage),
+    ("outcome", .str <| match report.outcome with
+      | .materialized => "materialized" | .running => "running" | .stopped => "stopped"),
+    ("invocationIdHex", hexJson report.invocationId),
+    ("controlGroupHex", hexJson report.controlGroup),
+    ("pid", decimal report.pid),
+    ("stopAuditHex", hexJson report.stopAudit),
+    ("installedManifestHex", hexJson report.installedManifest),
+    ("volumeCustody", custody)] : List (String × Lean.Json)) ++
+    ApplicationLifecycleRetryBeginV4Inspection.selectorFields begin.retry
+
 private def fleetCommandJson (command : FleetTurn.Command) : Lean.Json := .mkObj
   [("type", "fleet-turn-v1"),
    ("canonical", hexJson (FleetTurn.commandCodec.encode command)),
@@ -5417,6 +5576,21 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       let report ← launchPhysicalReportJson signed.report
       pure <| .mkObj [
         ("type", .str "application-lifecycle-launch-physical-signed-report-v2"),
+        ("frameHex", hexJson bytes),
+        ("report", report),
+        ("signatureHex", hexJson signed.signature)]
+  | "application-lifecycle-retry-physical-report" => do
+      let report ← decoded "application-lifecycle-retry-physical-report"
+        ApplicationLifecycleRetryCompletionV4Report.codec bytes
+      retryPhysicalReportJson report
+  | "application-lifecycle-retry-physical-signed-report" => do
+      let signed ← decoded "application-lifecycle-retry-physical-signed-report"
+        ApplicationLifecycleRetryCompletionV4Report.signedCodec bytes
+      unless signed.signature.length == 64 do
+        throw "physical signature must be 64 bytes"
+      let report ← retryPhysicalReportJson signed.report
+      pure <| .mkObj [
+        ("type", .str "application-lifecycle-retry-physical-signed-report-v4"),
         ("frameHex", hexJson bytes),
         ("report", report),
         ("signatureHex", hexJson signed.signature)]
