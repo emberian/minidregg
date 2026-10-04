@@ -81,8 +81,8 @@ def prepare (config : NativeHost.Config) (source target : SourceCapsule)
   catch error => return .error s!"neutral carry preparation refused: {error}"
 
 def unsignedEdge (config : NativeHost.Config) (prepared : Prepared config) : EdgeSeal :=
-  let old := Minidregg.Host.ReceiptContinuity.current prepared.source.durable
-  let next := Minidregg.Host.ReceiptContinuity.current prepared.target.durable
+  let old := Minidregg.Compiler.ReceiptContinuityIO.current prepared.source.durable
+  let next := Minidregg.Compiler.ReceiptContinuityIO.current prepared.target.durable
   ⟨prepared.body, pointOf prepared.target.durable, old.siblings, next.siblings, []⟩
 
 /-- Re-derive the entire plan at receipt of the detached seal. A changed source

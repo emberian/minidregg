@@ -388,20 +388,20 @@ def effectsDigest (domain semantics : Digest) (command : Command) : Digest :=
   (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.EFFECT/v3".toUTF8.toList
     (commandBytes domain semantics command)).digest
 
-/-- Historical operations retain their exact subject/nonce identity. Explicit
-family operations instead bind the complete statement and route; stripping or
-changing the family cannot retain its signed authorization or operation identity.
+/-- The operation identity is (domain, semantics, subject, nonce) for EVERY
+command, family or not: replacing the body, the targets or the family of a
+(subject, nonce) cannot mint a fresh identity, so one nonce is one operation
+(`changed_body_keeps_operation_identity`). A body-derived identity for family
+commands would let a nonce be spent once per distinct body. Stripping or changing the
+family still cannot carry a signature over (the signed bytes are framed by
+transaction10 vs transaction13); it can only collide with the original
+operation, which the exact ingress lookup refuses as a conflicting use.
 Collision resistance is a cryptographic assumption, not codec injectivity. -/
 def operationMarker (domain semantics : Digest) (command : Command) : Nat :=
-  match command.family with
-  | none =>
-    (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.IDENTITY/v3".toUTF8.toList
-      ((StreamCodec.product digestStream (StreamCodec.product digestStream
-        (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream StreamCodec.nat))).encode
-        (domain, semantics, command.subject, command.nonce))).digest.value
-  | some _ =>
-    (Sp800185Cshake256.hash "DREGG.NATIVE.INVOCATION-STATEMENT.IDENTITY/v1".toUTF8.toList
-      (NativeInvocationStatement.encode (statement domain semantics command))).digest.value
+  (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.IDENTITY/v3".toUTF8.toList
+    ((StreamCodec.product digestStream (StreamCodec.product digestStream
+      (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream StreamCodec.nat))).encode
+      (domain, semantics, command.subject, command.nonce))).digest.value
 
 abbrev ordinaryVerb := DeclaredResourceScalar.ordinaryVerb
 

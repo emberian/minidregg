@@ -17,8 +17,8 @@ JSON permission flag enters ordinary birth authoring. Capability identities are
 names only; target, verbs, holder, ancestry and issuer template are source-derived. -/
 def authorAndPrepareLoadedAuthorized (config : NativeHost.Config)
     (opened : NativeHost.Opened config) (signedObservationBytes : List UInt8)
-    (json : Lean.Json) (reserveCapabilityIds : List CapabilityId) :
-    IO (Except String SigningPlan) := do
+    (json : Lean.Json) (reserveCapabilityIds : List TypedAuthorization.CapabilityId) :
+    IO (Except String NativeHostReserveBirth.SigningPlan) := do
   match ← Minidregg.Host.CurrentResourceBirthAuthoring.intentLoadedAuthorized
       config opened signedObservationBytes json with
   | .error reason => return .error reason
@@ -47,6 +47,6 @@ def authorWireLoaded (config : NativeHost.Config) (opened : NativeHost.Opened co
   | .error reason => return .error reason
   | .ok json =>
       return (← authorAndPrepareLoadedAuthorized config opened request.signedObservationBytes
-        json request.reserveCapabilityIds).map signingPlanCodec.encode
+        json request.reserveCapabilityIds).map NativeHostReserveBirth.signingPlanCodec.encode
 
 end Minidregg.Host.NativeReserveBirthAuthoring

@@ -1,7 +1,7 @@
 /-
 # Kernel.TurnCensus — every live admission is expressible as a `Turn` (T1)
 
-SURPASS §2(b), lane T1.  The Host admits through the 43 constructors of
+SURPASS §2(b), lane T1.  The Host admits through the 46 constructors of
 `NativeHostReplay.NativeAdmission` on `final`: T1's 33 plus `final-pay`'s
 `payObservation`, `payEnrol`, `payRefill` and C3's `jobMoney` (rows added at
 the BRAID-PROOF merge), and C14's `certify` (added at the BRAID-COMPUTE merge), and rooms' `renounce` and `subjectKeyRotation`, plus current-key commitment adoption and v2 paid admission/claim.  `Compiler.TurnCensusCoverage` fails the build when
@@ -42,13 +42,13 @@ T3b's create carries its ROM image (`World.applyCreates`), so each of those
 shapes is now a turn.  `Ctor.turn` writes the ROM birth for each of the six
 (`Ctor.romBirth`), and
 
-* `every_admission_is_turn`: every one of the 43 shapes is accepted, and each
-  of the nine ROM-birth receivers (the six above and the enrol branches of
+* `every_admission_is_turn`: every one of the 46 shapes is accepted, and each
+  of the ten ROM-birth receivers (the six above, the control bootstrap and the enrol branches of
   `payEnrol`, `payEnrolV2` and `payClaim`) carries a nonempty ROM image;
 * `theList_empty`: the constructors whose shape is refused -- none;
 * `rom_by_leg_refused` (the pole): T3's encoding of the same births -- an
-  empty create plus a leg allocating the ROM row -- is refused for all nine, so
-  without the ROM birth the list would be exactly those nine
+  empty create plus a leg allocating the ROM row -- is refused for all ten, so
+  without the ROM birth the list would be exactly those ten
   (`theListWithoutRomBirth_eq`).
 
 `payRefill` is a turn, not a meter credit.  T1 and T3 listed it as needing a
@@ -216,6 +216,7 @@ inductive Ctor
   | applicationLifecycleCompletionV2 | fnConsumerNamespace | fnSelectedPoll | fnEmptyPollV2
   | payObservation | payEnrol | payRefill | jobMoney | certify | renounce | subjectKeyRotation
   | subjectKeyCommitmentAdoption | payEnrolV2 | payClaim
+  | jointReserve | bootstrapBundle | applicationFailedStartRecovery
   deriving DecidableEq, Repr
 
 def Ctor.all : List Ctor :=
@@ -228,11 +229,12 @@ def Ctor.all : List Ctor :=
     .applicationLifecycleClaimV2, .applicationLifecycleCompletion, .applicationLifecycleBeginV3,
     .applicationLifecycleClaimV3, .applicationLifecycleCompletionV2, .fnConsumerNamespace,
     .fnSelectedPoll, .fnEmptyPollV2, .payObservation, .payEnrol, .payRefill, .jobMoney,
-    .certify, .renounce, .subjectKeyRotation, .subjectKeyCommitmentAdoption, .payEnrolV2, .payClaim]
+    .certify, .renounce, .subjectKeyRotation, .subjectKeyCommitmentAdoption, .payEnrolV2, .payClaim,
+    .jointReserve, .bootstrapBundle, .applicationFailedStartRecovery]
 
 theorem Ctor.mem_all (c : Ctor) : c ∈ Ctor.all := by cases c <;> decide
 
-theorem Ctor.all_length : Ctor.all.length = 43 := rfl
+theorem Ctor.all_length : Ctor.all.length = 46 := rfl
 
 /-- The capability guard: the authority row the exercised capability lives at. -/
 def capGuard : Leg R := leg cAuth .authority [rd 1 (some 1)]
@@ -336,6 +338,19 @@ def Ctor.turn : Ctor → CTurn
         leg 32 .resource [al 0 0], leg cBook .book [wr 1 0 10, al 3 5]] [146, 147, 148]
   -- acceptance of a pending paid origin: the same account birth legs and
   -- consumed pay index, with a loaded clock guard and operation marker; no clock write
+  -- joint reservation: the control cell gains one held reservation; every
+  -- dependency of the reserved effect is a read-only guard; the control
+  -- operation's marker and the promise nullifier are spent
+  | .jointReserve => mk [] [leg cRes .resource [rd 0 (some 10)], leg cContent .content [al 0 1]]
+      [151, 152]
+  -- control bootstrap: the ordinary owner birth of the content control cell
+  -- (with its ROM source) recorded as one source operation
+  | .bootstrapBundle => mk [(36, fresh .content, some cRoom), (37, src 10, none)]
+      [leg cAuth .authority [rd 1 (some 1), lg 12 1], leg 36 .content [al 0 0]] [153]
+  -- failed-start recovery: the current package read guard and one lifecycle
+  -- record under the original claim's stable nullifier
+  | .applicationFailedStartRecovery => mk [] [leg cRes .resource [rd 0 (some 10)],
+      leg cLife .lifecycle [al 7 1]] [154]
   | .payClaim => mk [(34, fresh .resource, none), (35, src 9, none)]
       [leg cPay .pay [rd 0 (some 1), al 3 1], leg cClock .clock [rd 0 (some 1000)],
         leg cAuth .authority [lg 11 1],
@@ -414,6 +429,15 @@ def Ctor.negation : Ctor → CTurn
         leg cAuth .authority [lg 10 1], leg cRes .resource [wr 0 10 11],
         leg 32 .resource [al 0 0], leg cBook .book [wr 1 0 10, al 3 5]] [146, 147, 148]
   -- the paid source index moved under the acceptance's loaded guard
+  -- a dependency of the reserved effect moved under its guard
+  | .jointReserve => mk [] [leg cRes .resource [rd 0 (some 9)], leg cContent .content [al 0 1]]
+      [151, 152]
+  -- the control cell already exists (bootstrap phase is not absent)
+  | .bootstrapBundle => mk [(cContent, fresh .content, some cRoom), (37, src 10, none)]
+      [leg cAuth .authority [rd 1 (some 1), lg 12 1], leg cContent .content [al 0 0]] [153]
+  -- the package moved under the recovery's current read guard
+  | .applicationFailedStartRecovery => mk [] [leg cRes .resource [rd 0 (some 9)],
+      leg cLife .lifecycle [al 7 1]] [154]
   | .payClaim => mk [(34, fresh .resource, none), (35, src 9, none)]
       [leg cPay .pay [rd 0 (some 0), al 3 1], leg cClock .clock [rd 0 (some 1000)],
         leg cAuth .authority [lg 11 1],
@@ -464,6 +488,9 @@ def Ctor.refusal : Ctor → Reject
   | .subjectKeyRotation => .guardFailed cAuth 0
   | .subjectKeyCommitmentAdoption => .guardFailed cAuth 0
   | .payEnrolV2 => .guardFailed cClock 0
+  | .jointReserve => .guardFailed cRes 0
+  | .bootstrapBundle => .cellPresent cContent
+  | .applicationFailedStartRecovery => .guardFailed cRes 0
   | .payClaim => .guardFailed cPay 0
 
 /-! ## The poles -/
@@ -505,7 +532,8 @@ theorem no_cell_ctors_nullifier_only :
 /-- The receivers whose accepted intents create a ROM policy-source cell. -/
 def Ctor.romBirth : Ctor → Bool
   | .birth | .grainBirth | .install | .applicationShareIssue | .applicationGrainShareIssue
-  | .applicationAgentLifetimeGrantIssue | .payEnrol | .payEnrolV2 | .payClaim => true
+  | .applicationAgentLifetimeGrantIssue | .payEnrol | .payEnrolV2 | .payClaim
+  | .bootstrapBundle => true
   | _ => false
 
 /-- A ROM birth: a create carrying a nonempty, ROM-only image. -/
@@ -539,6 +567,9 @@ def Ctor.romByLeg : Ctor → CTurn
         leg cAuth .authority [lg 10 1], leg cRes .resource [wr 0 10 11],
         leg 32 .resource [al 0 0], leg cBook .book [wr 1 0 10, al 3 5],
         leg 33 .source [sa 8]] [146, 147, 148]
+  | .bootstrapBundle => mk [(36, fresh .content, some cRoom), (37, fresh .source, none)]
+      [leg cAuth .authority [rd 1 (some 1), lg 12 1], leg 36 .content [al 0 0],
+        leg 37 .source [sa 10]] [153]
   | .payClaim => mk [(34, fresh .resource, none), (35, fresh .source, none)]
       [leg cPay .pay [rd 0 (some 1), al 3 1], leg cClock .clock [rd 0 (some 1000)],
         leg cAuth .authority [lg 11 1],
@@ -556,6 +587,7 @@ def Ctor.sourceCell : Ctor → CellId
   | .applicationAgentLifetimeGrantIssue => 29
   | .payEnrol => 31
   | .payEnrolV2 => 33
+  | .bootstrapBundle => 37
   | .payClaim => 35
   | _ => 0
 
@@ -573,7 +605,7 @@ theorem every_admission_is_turn_all :
       (c.romBirth = true → HasRomBirth c.turn = true) := by
   decide +kernel
 
-/-- **`every_admission_is_turn`.**  Each of the 43 admission shapes is
+/-- **`every_admission_is_turn`.**  Each of the 46 admission shapes is
 accepted by the one transition, and each receiver that creates a ROM
 policy-source cell does so by a create carrying its image. -/
 theorem every_admission_is_turn (c : Ctor) :
@@ -589,16 +621,17 @@ theorem rom_by_leg_refused_all :
       rejectOf (World.admit censusH w0 c.romByLeg) = some (.guardFailed c.sourceCell 0) := by
   decide +kernel
 
-/-- **The pole: without the ROM birth, the nine are not turns.**  Writing the
+/-- **The pole: without the ROM birth, the ten are not turns.**  Writing the
 source row by a leg after an empty create is the ROM write refusal. -/
 theorem rom_by_leg_refused (c : Ctor) (rom : c.romBirth = true) :
     rejectOf (World.admit censusH w0 c.romByLeg) = some (.guardFailed c.sourceCell 0) :=
   rom_by_leg_refused_all c (Ctor.mem_all c) rom
 
-/-- Without ROM birth THE LIST is exactly the nine. -/
+/-- Without ROM birth THE LIST is exactly the ten. -/
 theorem theListWithoutRomBirth_eq :
     theListWithoutRomBirth = [.birth, .grainBirth, .install, .applicationShareIssue,
-      .applicationGrainShareIssue, .applicationAgentLifetimeGrantIssue, .payEnrol, .payEnrolV2, .payClaim] := by
+      .applicationGrainShareIssue, .applicationAgentLifetimeGrantIssue, .payEnrol, .payEnrolV2, .payClaim,
+      .bootstrapBundle] := by
   decide +kernel
 
 /-! ## `step_conserves`: a Book leg of postings conserves its totals (T9) -/

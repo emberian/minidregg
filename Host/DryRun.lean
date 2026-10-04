@@ -46,6 +46,9 @@ def dryTransport (t : DurableReceiverIO.Transport) (reached : IO.Ref Bool) :
   checkpointEvery := t.checkpointEvery
   logStart := t.logStart
   systemCell := t.systemCell
+  -- The dry run judges with the Store's own source gate: leaving the field to
+  -- its accept-all default would let a dry run admit what submission refuses.
+  sourceGate := t.sourceGate
 
 /-- The dry run's writer does not depend on the Store's writers at all: any two
 transports that read alike give the same dry transport. -/

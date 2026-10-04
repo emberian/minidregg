@@ -436,7 +436,7 @@ theorem operationAtom_ne_replyAtom (domain semantics : Digest)
 choice depends on the local consumer subject and stable operation nonce. -/
 def marker (domain semantics : Digest) (subject : SubjectId) (nonce : Nat) : Digest :=
   DeclaredResourceController.transactionId domain semantics
-    ⟨subject, nonce, [], none⟩
+    { subject := subject, nonce := nonce, targets := [] }
 
 def bindingCommand (domain semantics : Digest) (report : Report)
     (receipt : Receipt) : Except String DeclaredResourceController.Command := do
@@ -461,10 +461,10 @@ def bindingCommand (domain semantics : Digest) (report : Report)
     | some inbox =>
         [.createAtom (storeOperationAtom domain semantics report.application report.operation)
           (.inlineObject ⟨5⟩) (storePollCodec.encode inbox)]
-  pure ⟨report.subject,
-    operationNonce domain semantics report.application report.operation,
-    [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
-      .content ⟨actions⟩, none, none, none⟩], none⟩
+  pure { subject := report.subject
+         nonce := operationNonce domain semantics report.application report.operation
+         targets := [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
+           .content ⟨actions⟩, none, none, none⟩] }
 
 def conflictCommand (domain semantics : Digest) (report : Report) :
     DeclaredResourceController.Command :=
@@ -482,10 +482,10 @@ def conflictCommand (domain semantics : Digest) (report : Report) :
     | some inbox =>
         [.createAtom (storeConflictAtom domain semantics report)
           (.inlineObject ⟨5⟩) (storePollCodec.encode inbox)]
-  ⟨report.subject,
-   conflictNonce domain semantics report,
-   [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
-     .content ⟨actions⟩, none, none, none⟩], none⟩
+  { subject := report.subject
+    nonce := conflictNonce domain semantics report
+    targets := [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
+      .content ⟨actions⟩, none, none, none⟩] }
 
 inductive Decision where
   | fresh (command : DeclaredResourceController.Command) (reply : Reply)
