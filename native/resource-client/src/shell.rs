@@ -2529,29 +2529,52 @@ fn decode_refusal(session: &Session, command: &str, encoded: &[u8]) -> (Option<P
     (Some(bin.clone()), super::inspect(&session.host, &session.config, "outcome", &bin, &json))
 }
 
+/// The session's own folders, then the confinement of every path a line hands
+/// the client inside the session home: real directories down from the home and
+/// no link or special file at the leaf. Paths outside the home are the
+/// deployment's (Host, config, the sponsor's workspace), never a friend's argument.
+///
+/// The folders come FIRST: confinement walks every directory from the home down,
+/// so on a fresh home (no `keys/` yet) `keygen mini.key` was refused as
+/// "cannot open session directory" before the shell created the folder it was
+/// about to use. Each folder is created from the held home descriptor,
+/// owner-private, and refused unless it is a directory of this user
+/// (`session_fs::private_folder`): the standard `keys` and `enroll`, and the
+/// first component of every request the line writes.
+fn admit_session_paths(session: &Session, flags: &[(String, OsString)], writes: &[(PathBuf, Vec<u8>)]) -> Result<()> {
+    let mut folders = vec!["keys".to_owned(), "enroll".to_owned()];
+    for (path, _) in writes {
+        if let Ok(relative) = path.strip_prefix(&session.home) {
+            let mut parts = relative.components();
+            if let (Some(std::path::Component::Normal(first)), Some(_)) = (parts.next(), parts.next()) {
+                let first = first.to_str().ok_or_else(|| format!("{}: session folder is not UTF-8", path.display()))?;
+                if !folders.iter().any(|f| f == first) {
+                    folders.push(first.to_owned());
+                }
+            }
+        }
+    }
+    for folder in &folders {
+        session_fs::private_folder(&session.home, folder)?;
+    }
+    for path in writes.iter().map(|(path, _)| path.as_os_str()).chain(flags.iter().map(|(_, value)| value.as_os_str())) {
+        let path = Path::new(path);
+        if path.starts_with(&session.home) {
+            session_fs::confined(&session.home, path).map_err(|e| format!("{}: {e}", path.display()))?;
+        }
+    }
+    Ok(())
+}
+
 fn execute(session: &Session, plan: Plan) -> Ending {
     let Plan::Client { command, flags, writes } = plan else {
         return Ending::Done;
     };
-    // Every path this line hands the client inside the session home is
-    // confined there: real directories down from the home, and no link or
-    // special file at the leaf. Paths outside the home are the deployment's
-    // (Host, config, the sponsor's workspace), never a friend's argument.
-    for path in writes.iter().map(|(path, _)| path.as_os_str()).chain(flags.iter().map(|(_, value)| value.as_os_str())) {
-        let path = Path::new(path);
-        if path.starts_with(&session.home) {
-            if let Err(e) = session_fs::confined(&session.home, path) {
-                return Ending::Client(format!("{}: {e}", path.display()));
-            }
-        }
+    if let Err(e) = admit_session_paths(session, &flags, &writes) {
+        return Ending::Client(e);
     }
     for (path, bytes) in &writes {
         if let Err(e) = write_once(path, bytes) {
-            return Ending::Client(e);
-        }
-    }
-    for folder in ["keys", "enroll"] {
-        if let Err(e) = private_dir(&session.home.join(folder)) {
             return Ending::Client(e);
         }
     }
@@ -3151,6 +3174,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     fn session() -> Session {
         Session {
@@ -3170,6 +3194,31 @@ mod tests {
             flags.into_iter().map(|(k, v)| (k, v.into_string().unwrap())).collect(),
             writes.into_iter().map(|(p, b)| (p, String::from_utf8(b).unwrap())).collect(),
         )
+    }
+
+    #[test]
+    fn a_fresh_home_admits_keygen_and_requests_and_still_refuses_a_linked_folder() {
+        let home = std::env::temp_dir().join(format!("mini-shell-fresh-home-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        fs::create_dir(&home).unwrap();
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).unwrap();
+        let session = Session { home: home.clone(), ..session() };
+        let Plan::Client { flags, writes, .. } = plan(&session, "keygen mini.key").unwrap() else { panic!("keygen is a client plan") };
+        assert!(writes.is_empty());
+        assert!(flags.iter().any(|(_, v)| Path::new(v).starts_with(home.join("keys"))), "keygen hands the client HOME/keys/...");
+        admit_session_paths(&session, &flags, &writes).expect("a fresh home admits keygen");
+        assert!(home.join("keys").is_dir() && home.join("enroll").is_dir());
+        let request = vec![(home.join("requests").join("a.json"), b"{}".to_vec())];
+        admit_session_paths(&session, &[], &request).expect("a fresh home admits a request");
+        assert!(home.join("requests").is_dir());
+        let outside = home.with_extension("outside");
+        let _ = fs::remove_dir_all(&outside);
+        fs::create_dir(&outside).unwrap();
+        fs::remove_dir(home.join("keys")).unwrap();
+        std::os::unix::fs::symlink(&outside, home.join("keys")).unwrap();
+        assert!(admit_session_paths(&session, &flags, &writes).is_err(), "a linked keys folder is refused");
+        fs::remove_dir_all(&home).unwrap();
+        fs::remove_dir_all(&outside).unwrap();
     }
 
     fn pairs(items: &[(&str, &str)]) -> Vec<(String, String)> {
