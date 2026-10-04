@@ -298,9 +298,12 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
      const l=synth(e.left,env,m),r=synth(e.right,env,m);
      const not=(x:Core)=>term("ifBool",{condition:x,whenTrue:term("boolean",{value:false}),whenFalse:term("boolean",{value:true})});
      if(sameTy(l,T.boolean)&&sameTy(r,T.boolean)){
-      // Bool equality is an ifBool lowering: if a then b else not b.
+      // Bool equality: (λr. if a then r else not r) b. The right operand is
+      // bound once (no term duplication); `a` is elaborated under the binder.
       const right=expression(e.right,env,m);
-      const eq=term("ifBool",{condition:expression(e.left,env,m),whenTrue:right,whenFalse:not(right)});
+      const left=expression(e.left,[{name:"$right",ty:T.boolean,quantity:"unrestricted"},...env],m);
+      const eq=app(lam(term("ifBool",{condition:left,whenTrue:bound(0),whenFalse:not(bound(0))}),
+       {domain:T.boolean,codomain:T.boolean,parameter:"unrestricted",reuse:env.some(b=>restricted(b.quantity))?"once":"reusable"}),right);
       return e.op==="=="?eq:not(eq);
      }
      const primitive=sameTy(l,T.natural)&&sameTy(r,T.natural)?"equal":sameTy(l,T.label)&&sameTy(r,T.label)?"labelEqual":null;
@@ -454,16 +457,17 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
    // Simple combinations: every primary-group method of one name across the
    // precedence list must share one qualifier; the combination's identity is
    // the bottom layer.
-   const qualifiers=new Map<string,{q:string,method:any}>();
+   const qualifiers=new Map<string,{q:string,method:any,moduleName:string}>();
    for(const ancestor of list)for(const method of declarations.get(ancestor)!.d.methods){
     const q=method.qualifier??"primary";if(qualifierGroup(q)!=="primary")continue;
     const prior=qualifiers.get(method.name);
     if(prior&&prior.q!==q)failure(d,"method "+method.name+" is "+prior.q+" in one ancestor and "+q+" in another of "+key);
-    if(!prior)qualifiers.set(method.name,{q,method});
+    if(!prior)qualifiers.set(method.name,{q,method,moduleName:declarations.get(ancestor)!.m.name});
    }
    const layers:Core[]=[];
-   for(const [name,{q,method}] of qualifiers){const combination=combinations[q];if(!combination)continue;
-    const init=abstract(method.parameters,selfSuperOf(target),()=>combination.zero,method,method.resultType,m.name);
+   for(const [name,{q,method,moduleName}] of qualifiers){const combination=combinations[q];if(!combination)continue;
+    // The identity method is typed in the module that declared the signature.
+    const init=abstract(method.parameters,selfSuperOf(target),()=>combination.zero,method,method.resultType,moduleName);
     layers.push(abstract([{name:"self",type:d.targetType},{name:"super",type:d.targetType}],outer,
      ()=>term("extend",{inherited:bound(0),fields:[{name,value:init}]}),d,d.targetType,m.name));
    }
@@ -480,7 +484,7 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
   const laws=d.laws.map((law:any)=>({name:law.name,value:abstract([{name:"self",type:d.targetType},{name:"super",type:d.targetType},...law.parameters],outer,
      inner=>expression(law.body,inner,m),law,"Bool",m.name)}));
   return term("specification",{metadata:record([{name:"name",value:label(key)},
-     {name:"interface",value:label(JSON.stringify({targetType:d.targetType,suffix:d.suffix,parents:d.parents,precedence:list,requirements:d.requirements,
+     {name:"interface",value:label(canonicalJson({targetType:d.targetType,suffix:d.suffix,parents:d.parents,precedence:list,requirements:d.requirements,
          methods:d.methods.map(({body,...signature}:any)=>signature)}))},{name:"laws",value:record(laws)}]),extension});
  }
  // Free de Bruijn indices of a closed-over-outer reference shift under binders.
@@ -511,14 +515,14 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
  // extensible value, not a closed record (scout A finding 4).
  const rootExtension=lam(lam(term("extend",{inherited:bound(0),fields}),{domain:T.emptyRow,codomain:T.variable(0),parameter:"unrestricted",reuse:"reusable",reason:knotReason}),
   {domain:T.variable(0),codomain:T.arrow(T.emptyRow,T.variable(0)),parameter:"unrestricted",reuse:"reusable",reason:knotReason});
- const rootSpecification=term("specification",{metadata:record([{name:"package",value:label(JSON.stringify(modules.map(m=>m.name)))}]),extension:rootExtension});
+ const rootSpecification=term("specification",{metadata:record([{name:"package",value:label(canonicalJson(modules.map(m=>m.name)))}]),extension:rootExtension});
  const root=term("fix",{spec:rootSpecification,seed:record([])});
  const entry=modules[entryModule];if(!entry||!declarations.has(entry.name+"."+entryDefinition))failure(null,"missing selected entry");
  let selected=get(root,entry.name+"."+entryDefinition);
  const argument=(a:any):Core=>{
   if(typeof a==="string"&&/^(0|[1-9][0-9]*)$/.test(a))return nat(a);
   if(typeof a==="boolean")return term("boolean",{value:a});
-  if(a&&typeof a==="object"&&!Array.isArray(a))return record(Object.entries(a).map(([name,value])=>({name,value:argument(value)})));
+  if(a&&typeof a==="object"&&!Array.isArray(a))return record(Object.keys(a).sort().map(name=>({name,value:argument(a[name])})));
   return failure(null,"runtime arguments are canonical decimal Nat strings, Bool or records");
  };
  const exactKeys=(value:any,expected:string[])=>value&&typeof value==="object"&&!Array.isArray(value)&&
