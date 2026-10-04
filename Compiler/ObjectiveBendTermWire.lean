@@ -12,7 +12,7 @@ The JSON object lookups go through `Std.TreeMap.Raw.getElem?_ofList_of_mem`: eve
 rendered object has literally distinct keys. -/
 import Compiler.ObjectiveBendElaborate
 import Theory.ObjectiveBendTyping
-import Theory.AssertAxioms
+import Theory.AxiomPin
 namespace Minidregg.Compiler.ObjectiveBendTermWire
 open Lean
 open Minidregg.Compiler.ObjectiveBendElaborate
