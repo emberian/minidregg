@@ -233,6 +233,7 @@ import Theory.BendQuotientSelectors
 import Theory.BoundedNockMachine
 import Theory.ObjectiveBendDemandAdequacy
 import Theory.ObjectiveBendDemandCapacity
+import Theory.ObjectiveBendDemandCompleteness
 import Theory.ObjectiveBendDemandData
 import Theory.ObjectiveBendDemandInvariant
 import Theory.ObjectiveBendDemandMachine
