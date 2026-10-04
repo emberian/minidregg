@@ -1,0 +1,16 @@
+edition ObjectiveBend 1
+# A timer-like resident (EVENTS-DESIGN (b)): it yields a reservation until a
+# height, is resumed when it fires, and counts firings until cancelled.
+record Reservation:
+  until: Nat
+record Fired:
+  at: Nat
+sum Plan:
+  reserve: Reservation
+sum Tick:
+  fired: Fired
+  cancelled: {}
+def every(period: Nat, at: Nat, fired: Nat) -> Activity<Plan, Tick, Nat>:
+  match perform(Plan.reserve({until: at + period})):
+    case fired(t): every(period, t.at, fired + 1n)
+    case cancelled(_): fired

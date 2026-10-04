@@ -14,6 +14,9 @@ const repo=resolve(import.meta.dirname,"../..");const cohortDir=dirname(resolve(
 const sha=(path:string)=>createHash("sha256").update(readFileSync(path)).digest("hex");
 const failures:string[]=[];
 const require=(ok:boolean,message:string)=>{if(!ok)failures.push(message);return ok;};
+const canonical=(v:any):string=>JSON.stringify(v&&typeof v==="object"?Array.isArray(v)?v.map(x=>JSON.parse(canonical(x))):Object.fromEntries(Object.keys(v).sort().map(k=>[k,JSON.parse(canonical(v[k]))])):v);
+// Typed data with record fields ordered by name (materialization keeps source order).
+const norm=(d:any):any=>d?.tag==="record"?{...d,fields:d.fields.map((f:any)=>({name:f.name,value:norm(f.value)})).sort((a:any,b:any)=>a.name<b.name?-1:1)}:d?.tag==="variant"?{...d,payload:norm(d.payload)}:d;
 mkdirSync(outputRoot,{recursive:true});
 const tool=(rel:string)=>join(repo,rel);
 const tooling={schema:"dregg.objective-bend.preview-tooling.v2",bunPath,leanPath,oleanRoot,
@@ -33,14 +36,22 @@ for(const item of cohort){
  captureObjective(packagePath,join(dir,"capture"));
  const capturePath=join(dir,"capture","objective.json");
  const request={schema:"dregg.objective-bend.preview-input.v2",capturePath,captureSha256:sha(capturePath),
-  argumentEncoding:item.argumentEncoding??"legacy-values-v1",arguments:item.arguments,projections:item.projections??[],
+  argumentEncoding:item.argumentEncoding??"legacy-values-v1",arguments:item.arguments,projections:item.projections??[],responses:item.responses??[],
   limits:{ticks:"100000",heap:"100000",stack:"10000",typeFuel:"4096"}};
  const requestPath=join(dir,"request.json");writeFileSync(requestPath,JSON.stringify(request,null,2)+"\n",{flag:"wx"});requests.push(requestPath);
  let out:any;try{out=preview(requestPath,join(dir,"preview"),toolingPath);}catch(error){out=error;}
- results.push({name:item.name,status:out.status,type:out.preview?.type?.tag??null,result:out.preview?.result??null,diagnostic:out.diagnostic?.message??null});
+ const turns=out.preview?.turns??[];
+ results.push({name:item.name,status:out.status,type:out.preview?.type?.tag??null,result:out.preview?.result??null,turns:turns.length,diagnostic:out.diagnostic?.message??null});
  if(item.expectedStatus==="refused"){require(out.status==="refused","source typing refusal differs: "+item.name+" "+out.status);continue;}
+ // Activities: every yield is quiescent and its checkpoint round-trips (executed, not proved here).
+ for(const turn of turns)require(turn.quiescent===true&&turn.checkpointRoundTrips===true,"yield not a quiescent round-tripping checkpoint: "+item.name);
+ if(item.expectedTurns!==undefined)require(turns.length===item.expectedTurns,"turn count differs: "+item.name+" "+turns.length);
+ if(item.expectedLastPlan!==undefined)require(turns.length>0&&canonical(norm(turns[turns.length-1].plan))===canonical(norm(item.expectedLastPlan)),"yielded plan differs: "+item.name+" "+JSON.stringify(turns.at(-1)?.plan));
+ if(item.expectedStatus==="yielded"){require(out.status==="yielded"&&out.preview.result===null,"activity did not stop at a yield: "+item.name+" "+out.status);continue;}
  if(!require(out.status==="finished","preview did not finish: "+item.name+" "+out.status+" "+JSON.stringify(out.diagnostic??out.preview?.diagnostic)))continue;
- require(out.preview.type.tag===(item.expectedType??"natural"),"actual typed source result type differs: "+item.name+" "+out.preview.type.tag);
+ // An activity's checked type is Activity<Plan, Response, Result>; its finished value has type Result.
+ const resultType=out.preview.type.tag==="computation"?out.preview.type.result:out.preview.type;
+ require(resultType.tag===(item.expectedType??"natural"),"actual typed source result type differs: "+item.name+" "+resultType.tag);
  require(item.expectedRecord?out.preview.result.tag==="record":out.preview.result.value===item.expected,"actual typed source result differs: "+item.name+" "+JSON.stringify(out.preview.result));
  require(out.preview.sameDecodedTerm===true&&out.preview.uses.length===0,"checked/executed join differs: "+item.name);
 }

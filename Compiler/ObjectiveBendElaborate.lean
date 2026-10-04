@@ -231,6 +231,7 @@ inductive PTy where
   | field (name : String) (member tail : PTy)
   | specification (metadata extension : PTy)
   | variant (row : PTy)
+  | computation (plan response result : PTy)
   deriving Inhabited, Repr, BEq
 
 def PTy.row : List (String × PTy) → PTy
@@ -251,6 +252,7 @@ def PTy.canonical : PTy → PTy
   | .arrow r q d c => .arrow r q d.canonical c.canonical
   | .specification m e => .specification m.canonical e.canonical
   | .variant r => .variant r.canonical
+  | .computation p r a => .computation p.canonical r.canonical a.canonical
   | .field n m t => t.canonical.insertCanonical n m.canonical
   | other => other
 
@@ -276,6 +278,11 @@ def PTy.json : PTy → Json
   | .field n m t => Json.mkObj [("tag", "field"), ("name", n), ("member", m.json), ("tail", t.json)]
   | .specification m e => Json.mkObj [("tag", "specification"), ("metadata", m.json), ("extension", e.json)]
   | .variant r => Json.mkObj [("tag", "variant"), ("row", r.json)]
+  | .computation p r a => Json.mkObj [("tag", "computation"), ("plan", p.json), ("response", r.json), ("result", a.json)]
+
+def isComputation : Option PTy → Bool
+  | some (.computation ..) => true
+  | _ => false
 
 /-! ## Annotated core -/
 
@@ -305,6 +312,10 @@ inductive ATerm where
   | inject (label : String) (type : Option PTy) (reason : Option String) (payload : ATerm)
   | case (scrutinee : ATerm) (arms : List (String × ATerm))
   | ifBool (condition whenTrue whenFalse : ATerm)
+  /-- Yield a Plan; carries the enclosing activity's Plan and Response types. -/
+  | perform (plan response : PTy) (value : ATerm)
+  /-- A pure tail of an activity body (inserted, never authored). -/
+  | done (plan response : PTy) (value : ATerm)
   deriving Inhabited
 
 mutual
@@ -330,6 +341,8 @@ def ATerm.json : ATerm → Json
   | .inject l _ _ p => Json.mkObj [("tag", "inject"), ("label", l), ("payload", p.json)]
   | .case s arms => Json.mkObj [("tag", "case"), ("scrutinee", s.json), ("arms", armsJson arms)]
   | .ifBool c t f => Json.mkObj [("tag", "ifBool"), ("condition", c.json), ("whenTrue", t.json), ("whenFalse", f.json)]
+  | .perform _ _ v => Json.mkObj [("tag", "perform"), ("plan", v.json)]
+  | .done _ _ v => Json.mkObj [("tag", "done"), ("value", v.json)]
 def fieldsJson : List (String × ATerm) → Json
   | fs => Json.arr (fieldsArray fs).toArray
 def fieldsArray : List (String × ATerm) → List Json
@@ -342,10 +355,10 @@ def armsArray : List (String × ATerm) → List Json
   | (l, b) :: rest => Json.mkObj [("label", l), ("body", b.json)] :: armsArray rest
 end
 
-/-- Erasure to the Core4 `Term` the checker and demand machine consume. Sums,
-case and ifBool wait for W1.3's constructors and are refused here until then. -/
+/-- Erasure to the Core4 `Term` the checker and demand machine consume. -/
 def primitiveOf : String → Except String CorePrimitive
   | "add" => .ok .add | "multiply" => .ok .multiply | "equal" => .ok .equal | "conjunction" => .ok .conjunction
+  | "labelEqual" => .ok .labelEqual
   | other => .error ("primitive " ++ other ++ " is not a Core4 constructor yet")
 
 mutual
@@ -368,7 +381,11 @@ def ATerm.erase : ATerm → Except String CoreTerm
   | .record fs => return .record (← eraseFields fs)
   | .get t n => return .get (← t.erase) n
   | .ifZero v z s => return .ifZero (← v.erase) (← z.erase) (← s.erase)
-  | .inject .. | .case .. | .ifBool .. => .error "inject/case/ifBool await the W1.3 Core4 constructors"
+  | .inject l _ _ p => return .inject l (← p.erase)
+  | .case sc arms => return .case (← sc.erase) (← eraseFields arms)
+  | .ifBool c t f => return .ifBool (← c.erase) (← t.erase) (← f.erase)
+  | .perform _ _ v => return .perform (← v.erase)
+  | .done _ _ v => return .done (← v.erase)
 def eraseFields : List (String × ATerm) → Except String (List (String × CoreTerm))
   | [] => .ok []
   | (n, v) :: rest => return (n, ← v.erase) :: (← eraseFields rest)
@@ -397,6 +414,8 @@ structure St where
   precedence : List (String × List String) := []
   linearizing : List String := []
   hidden : Array (String × ATerm × Option PTy) := #[]
+  /-- The Plan/Response of the activity being lowered (none outside one). -/
+  effect : Option (PTy × PTy) := none
 
 abbrev M := StateT St (Except String)
 
@@ -486,11 +505,22 @@ def sumCase (c : Ctx) (callee : Expr) (env : List Binding) (m : Module) : Option
         | _ => none
   | _ => none
 def variantRowOf (s : St) : Option PTy → Option PTy
+  | some (.computation _ _ result) => match result with
+    | .variable i => match s.sumBounds.lookup i with
+      | some (.variant row) => some row
+      | _ => none
+    | .variant row => some row
+    | _ => none
   | some (.variable i) => match s.sumBounds.lookup i with
     | some (.variant row) => some row
     | _ => none
   | some (.variant row) => some row
   | _ => none
+
+def isPerform (c : Ctx) (e : Expr) (env : List Binding) (m : Module) : Bool :=
+  match e with
+  | .call (.var "perform") _ => !env.any (·.name == "perform") && (lookupGlobal c "perform" m).isNone
+  | _ => false
 
 /-! ## Types: source annotations, declaration types, synthesis -/
 
@@ -529,6 +559,17 @@ def sourceType (c : Ctx) : Nat → String → String → List String → M (Opti
     if name == "Nat" then return some .natural
     if name == "Bool" then return some .boolean
     if name == "String" then return some .label
+    if name.startsWith "Activity<" && name.endsWith ">" then
+      let parts := splitTop (dropEndStr (dropStr name "Activity<".length) 1) ","
+      match parts with
+      | [planText, responseText, resultText] =>
+        let plan ← sourceType c fuel planText moduleName seen
+        let response ← sourceType c fuel responseText moduleName seen
+        let result ← sourceType c fuel resultText moduleName seen
+        return match plan, response, result with
+          | some p, some r, some a => some (.computation p r a)
+          | _, _, _ => none
+      | _ => do typeError "Activity<Plan, Response, Result> takes three types"; return none
     for (generic, isExtension) in [("Extension<", true), ("Specification<", false)] do
       if name.startsWith generic && name.endsWith ">" && name.length > generic.length + 1 then
         let some target ← sourceType c fuel (dropEndStr (dropStr name generic.length) 1) moduleName seen | return none
@@ -680,6 +721,8 @@ def synth (c : Ctx) : Nat → Expr → List Binding → Module → M (Option PTy
         | _ => none
     | .closure params resultType _ => signatureTy c fuel params (.source resultType) m.name []
     | .call callee args =>
+      if isPerform c e env m then
+        return (← get).effect.map fun (p, r) => .computation p r r
       if let some sc := sumCase c callee env m then return ← sourceType c fuel sc.2.2 sc.2.1 []
       if let .var name := callee then
         if ["reflect", "metadata", "targetOf", "prototype"].contains name && !env.any (·.name == name) then return none
@@ -696,13 +739,20 @@ def synthBody (c : Ctx) : Nat → Body → List Binding → Module → M (Option
   | fuel + 1, .expr e, env, m => synth c fuel e env m
   | fuel + 1, .cases scrutinee branches, env, m => do
     if branches.any (fun b => match b.1 with | .ctor .. | .bool _ => true | _ => false) then
-      let row := variantRowOf (← get) (← synth c fuel scrutinee env m)
+      let scrutineeTy ← synth c fuel scrutinee env m
+      let row := variantRowOf (← get) scrutineeTy
       let mut types : List (Option PTy) := []
       for (pattern, b) in branches do
         let env' := match pattern with
           | .ctor l binder => ⟨binder, lookupRow row l, "unrestricted"⟩ :: env
           | _ => env
         types := types ++ [← synthBody c fuel b env' m]
+      -- An activity scrutinee makes the whole match an activity; pure arms are lifted.
+      if isComputation scrutineeTy || types.any isComputation then
+        let effect := (← get).effect
+        types := types.map fun t => match t, effect with
+          | some t', some (p, r) => if isComputation (some t') then some t' else some (.computation p r t')
+          | _, _ => t
       return match types with
         | first :: _ => if types.all (fun t => t.isSome && sameTy t first) then first else none
         | [] => none
@@ -734,10 +784,18 @@ def abstract (c : Ctx) (fuel : Nat) (params : List Param) (env : List Binding)
   let mut bindings : List Binding := []
   for p in params do
     bindings := bindings ++ [⟨p.name, ← sourceType c fuel p.type moduleName [], ← quantityOf p⟩]
-  let mut value ← lower (bindings.reverse ++ env)
   let initial : Option PTy ← (match result with
     | .source text => sourceType c fuel text moduleName []
     | .given given => pure given)
+  -- A body whose declared result is an Activity is lowered in effect mode.
+  let saved := (← get).effect
+  modify fun s => { s with effect := match initial with
+    | some (.computation p r _) => some (p, r)
+    | _ => none }
+  -- (A failure aborts the whole elaboration, so only success restores the mode.)
+  let lowered ← lower (bindings.reverse ++ env)
+  modify fun s => { s with effect := saved }
+  let mut value := lowered
   let mut codomain := initial
   for i in (List.range params.length).reverse do
     let b := bindings[i]!
@@ -763,6 +821,16 @@ def rowNames : PTy → List String
 
 def notTerm (x : ATerm) : ATerm := .ifBool x (.boolean false) (.boolean true)
 
+/-- Named refusals: an activity never occupies a shared (suspended) position.
+Outside an activity only a literal perform is checked (the checker refuses the
+rest), so packages without activities elaborate exactly as before. -/
+def noActivity (c : Ctx) (fuel : Nat) (e : Expr) (env : List Binding) (m : Module) (rule why : String) : M Unit := do
+  let flagged ← if isPerform c e env m then pure true
+    else if (← get).effect.isSome then pure (isComputation (← synth c fuel e env m)) else pure false
+  if flagged then
+    fail ("refused (" ++ rule ++ "): an Activity cannot be used here; " ++ why ++
+      ", so its effect would be cached and shared. Match on it first.")
+
 mutual
 def expression (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
   | 0, _, _, _ => fail "elaboration fuel"
@@ -787,9 +855,11 @@ def expression (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
       return .get (← expression c fuel target env m) name
     | .record fields =>
       if duplicate (fields.map (·.1)) then fail "duplicate record field"
+      for (_, v) in fields do noActivity c fuel v env m "effect-in-field" "a record field is a shared lazy cell"
       return .record (← fieldsOf c fuel fields env m)
     | .extend inherited fields =>
       if duplicate (fields.map (·.1)) then fail "duplicate provided field"
+      for (_, v) in fields do noActivity c fuel v env m "effect-in-field" "an extended field is a shared lazy cell"
       let i ← expression c fuel inherited env m
       return .extend i (← fieldsOf c fuel fields env m)
     | .closure params resultType bodyExpr =>
@@ -854,6 +924,14 @@ def expression (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
       let it ← expression c fuel inherited env m
       return .fix st it
     | .call callee args =>
+      if isPerform c e env m then
+        let some (p, r) := (← get).effect
+          | fail "refused (perform-outside-activity): perform needs an enclosing definition whose result type is Activity<Plan, Response, Result>"
+        match args with
+        | [a] =>
+          noActivity c fuel a env m "effect-in-plan" "a Plan is data"
+          return .perform p r (← expression c fuel a env m)
+        | _ => fail "perform takes exactly one Plan"
       if let some (caseLabel, moduleName, sumName) := sumCase c callee env m then
         let key := moduleName ++ "." ++ sumName
         let hasCase := match c.sums.find? (·.1 == key) with
@@ -861,6 +939,7 @@ def expression (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
           | _ => false
         if !hasCase then fail ("sum " ++ key ++ " has no case " ++ caseLabel)
         if args.length > 1 then fail "a sum case carries one payload; use a record"
+        if let [a] := args then noActivity c fuel a env m "effect-in-payload" "a sum payload is a shared lazy cell"
         let payload ← match args with
           | [a] => expression c fuel a env m
           | _ => pure (.record [])
@@ -881,9 +960,24 @@ def expression (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
               let tt ← expression c fuel t env m
               return .prototype st tt
             | _ => fail "prototype expects spec and lazy target"
+      for a in args do noActivity c fuel a env m "effect-as-argument" "an argument is a shared lazy thunk"
       let mut fn ← expression c fuel callee env m
       for a in args do fn := .app fn (← expression c fuel a env m)
       return fn
+
+/-- A tail position of an activity body: pure results are lifted with `done`. -/
+def tail (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
+  | 0, _, _, _ => fail "elaboration fuel"
+  | fuel + 1, e, env, m => do
+    let some (p, r) := (← get).effect | expression c fuel e env m
+    if let .ite condition whenTrue whenFalse := e then
+      let ct ← expression c fuel condition env m
+      let tt ← tail c fuel whenTrue env m
+      let ft ← tail c fuel whenFalse env m
+      return .ifBool ct tt ft
+    if isPerform c e env m || isComputation (← synth c fuel e env m) then
+      return ← expression c fuel e env m
+    return .done p r (← expression c fuel e env m)
 
 def fieldsOf (c : Ctx) : Nat → List (String × Expr) → List Binding → Module → M (List (String × ATerm))
   | 0, _, _, _ => fail "elaboration fuel"
@@ -894,7 +988,7 @@ def fieldsOf (c : Ctx) : Nat → List (String × Expr) → List Binding → Modu
 
 def body (c : Ctx) : Nat → Body → List Binding → Module → M ATerm
   | 0, _, _, _ => fail "elaboration fuel"
-  | fuel + 1, .expr e, env, m => expression c fuel e env m
+  | fuel + 1, .expr e, env, m => tail c fuel e env m
   | fuel + 1, .cases scrutinee branches, env, m => do
     if branches.any (fun b => match b.1 with | .bool _ => true | _ => false) then
       let t := branches.find? (fun b => b.1 == .bool true)
@@ -1129,6 +1223,9 @@ def elaborateM (c : Ctx) (entryModule : Nat) (entryDefinition : String) (args : 
       | .record .. | .sum .. => continue
       | _ => pure ()
       let key := m.name ++ "." ++ d.name
+      if let .function _ [] resultType _ := d then
+        if (trimStr resultType).startsWith "Activity<" then
+          fail ("refused (nullary-activity): " ++ key ++ " has no parameters, so it is a shared lazy value; an Activity needs a parameter, e.g. (start: {})")
       let value ← match d with
         | .function _ params resultType b => do
           let result ← if resultType == "_" then do pure (ResultSpec.given (resultOf (← globalType c fuel key) params.length))
@@ -1232,7 +1329,10 @@ def annotate (bounds : List (Nat × PTy)) : ATerm → List Nat → Except String
       | other => some other
     let some (.variant row) := variant | throw "injection has no declared sum type"
     let some d := lookupRow (some row) l | throw ("injection label " ++ l ++ " absent from its declared sum")
-    return ⟨path, d, .variant row, "unrestricted", "reusable"⟩ :: (← annotate bounds payload (path ++ [0]))
+    -- The codomain is the DECLARED sum type: a recursive sum stays its bounded variable.
+    return ⟨path, d, t, "unrestricted", "reusable"⟩ :: (← annotate bounds payload (path ++ [0]))
+  | .perform p r v, path | .done p r v, path => do
+    return ⟨path, p, r, "unrestricted", "reusable"⟩ :: (← annotate bounds v (path ++ [0]))
   | .app f a, path => return (← annotate bounds f (path ++ [0])) ++ (← annotate bounds a (path ++ [1]))
   | .fix s i, path => return (← annotate bounds s (path ++ [0])) ++ (← annotate bounds i (path ++ [1]))
   | .mix l u, path => return (← annotate bounds l (path ++ [0])) ++ (← annotate bounds u (path ++ [1]))

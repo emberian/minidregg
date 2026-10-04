@@ -32,6 +32,10 @@ export function preview(requestPath:string,outputDirectory:string,toolingPath:st
   binding.argumentEncoding=argumentEncoding;
   const limits={ticks:count(request.limits?.ticks,"ticks",100000),heap:count(request.limits?.heap,"heap",100000),stack:count(request.limits?.stack,"stack",100000)};
   const typeFuel=count(request.limits?.typeFuel,"typeFuel",16384);
+  // Activities: responses stand in for the kernel's resuming turns (typed data,
+  // checked by the Lean host against the entry's declared response type).
+  const responses=request.responses??[];
+  if(!Array.isArray(responses)||responses.length>64)throw new Error("preview responses must be an array of at most 64 typed data values");
   stage="preview-tooling";const toolingBytes=readFileSync(toolingPath),tooling=JSON.parse(toolingBytes.toString());
   if(tooling.schema!=="dregg.objective-bend.preview-tooling.v2"||!Array.isArray(tooling.pins))throw new Error("pinned tooling configuration required");
   for(const pin of tooling.pins)if(sha(readFileSync(pin.path))!==pin.sha256)throw new Error("changed preview tooling: "+pin.role);
@@ -49,7 +53,8 @@ export function preview(requestPath:string,outputDirectory:string,toolingPath:st
   if(canonical(typed.term)!==canonical(core.term))throw new Error("checker packet term differs from actual elaborated core");
   typed.fuel=typeFuel;const submitted=join(outputDirectory,"typed-input.json"),limitsPath=join(outputDirectory,"limits.json");
   writeFileSync(submitted,encode(typed),{flag:"wx"});writeFileSync(limitsPath,encode(limits),{flag:"wx"});binding.typedPacketSha256=sha(readFileSync(submitted));
-  stage="objective-typed-preview";const actual=child(tooling.leanPath,["-j","2","--run",tooling.previewHostPath,submitted,limitsPath],{LEAN_PATH:tooling.oleanRoot,LEAN_NUM_THREADS:"2"});
+  const responsesPath=join(outputDirectory,"responses.json");writeFileSync(responsesPath,encode(responses),{flag:"wx"});binding.responsesSha256=sha(readFileSync(responsesPath));
+  stage="objective-typed-preview";const actual=child(tooling.leanPath,["-j","2","--run",tooling.previewHostPath,submitted,limitsPath,responsesPath],{LEAN_PATH:tooling.oleanRoot,LEAN_NUM_THREADS:"2"});
   const result=JSON.parse(actual.trim());if(result.schema!=="dregg.objective-bend.typed-preview.v2"||result.sameDecodedTerm!==true||result.typing!=="accepted by actual annotated checker")throw new Error("typed preview receiver shape differs");
   const output={schema:"dregg.objective-bend.preview-result.v2",status:result.status,binding,preview:result,authority:"none; source preview only"};
   writeFileSync(join(outputDirectory,"preview.json"),encode(output),{flag:"wx"});return output;

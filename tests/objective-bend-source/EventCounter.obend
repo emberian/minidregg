@@ -1,0 +1,21 @@
+edition ObjectiveBend 1
+# A counter resident (EVENTS-DESIGN (b)): each turn yields one write Plan and
+# is resumed with its outcome. `serve` never finishes: it is a guarded fixed
+# point whose every unfolding costs one admitted turn.
+record Write:
+  field: Nat
+  before: Nat
+  after: Nat
+sum Plan:
+  write: Write
+sum Response:
+  written: {}
+  refused: {}
+def bump(count: Nat) -> Activity<Plan, Response, Nat>:
+  match perform(Plan.write({field: 0n, before: count, after: count + 1n})):
+    case written(_): count + 1n
+    case refused(_): count
+def serve(count: Nat) -> Activity<Plan, Response, Nat>:
+  match perform(Plan.write({field: 0n, before: count, after: count + 1n})):
+    case written(_): serve(count + 1n)
+    case refused(_): serve(count)

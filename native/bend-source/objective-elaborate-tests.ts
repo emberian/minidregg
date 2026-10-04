@@ -76,7 +76,9 @@ const g=(name:string)=>findTag(sumsOut.term,'fix').spec.extension.body.body.fiel
 if(findTag(g('area'),'case')?.arms.map((a:any)=>a.label).join()!=='circle,square,none')throw Error('sum match did not lower to case');
 if(findTag(g('pick'),'ifBool')===null||findTag(g('same'),'binary').primitive!=='labelEqual'||findTag(g('differ'),'ifBool').condition.primitive!=='equal'||findTag(g('either'),'ifBool').whenTrue.value!==true)throw Error('Bool/label lowering lost');
 const sumsTyped=literalAnnotations(sumsOut);
-const injectAnnotations=sumsTyped.annotations?.filter((a:any)=>a.codomain.tag==='variant')??[];
+// An injection's codomain is its declared sum: a variant, or a recursive sum's bounded variable (index >= 1).
+const injectAnnotations=sumsTyped.annotations?.filter((a:any)=>a.codomain.tag==='variant'||(a.codomain.tag==='variable'&&a.codomain.index!=='0'))??[];
+if(injectAnnotations.filter((a:any)=>a.codomain.tag==='variable').length!==2)throw Error('recursive-sum injections do not carry the declared sum variable');
 if(sumsTyped.schema!=='dregg.objective-bend.typed-core.v2'||injectAnnotations.length!==3||'injections' in sumsTyped)throw Error('injection annotations lost: '+JSON.stringify(sumsTyped.message??injectAnnotations.length));
 if(!injectAnnotations.some((a:any)=>a.domain.tag==='field'&&a.domain.name==='side'))throw Error('injection domain is not the payload type');
 if(!sumsTyped.bounds.some((b:any)=>b.index==='1'&&b.type.tag==='variant')||!sumsTyped.shareableVariables.includes('1'))throw Error('recursive sum not a bounded shareable variable');

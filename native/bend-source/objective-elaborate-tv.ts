@@ -36,6 +36,7 @@ for(const item of JSON.parse(readFileSync(join(testDir,"preview-cohort.json"),"u
 // Inline probes: refusals both elaborators must agree on, and lowering paths
 // the in-repo programs do not reach.
 const R="record R:\n  v(n: Nat) -> Nat\n";
+const A="sum P:\n  go: {}\nsum R:\n  ok: {}\n";
 const sp=(name:string,head:string,body="    super.v(n) + 1n")=>head.replace("NAME",name)+"\n  def v(n: Nat) -> Nat:\n"+body+"\n";
 const probes:[string,string][]=[
  ["refuse-unbound","def f() -> Nat:\n  missing\n"],
@@ -56,6 +57,12 @@ const probes:[string,string][]=[
  ["accept-affine-closure","def f(affine x: Nat) -> Nat -> Nat:\n  fn(y: Nat) -> Nat: x + y\n"],
  ["accept-specification-type",R+sp("O","spec NAME for R:","    n")+"def s() -> Specification<R>:\n  O\n"],
  ["accept-single-layer",R+sp("O","spec NAME for R:","    n")+"spec E extends O for R:\n  requires v(n: Nat) -> Nat\n"],
+ // Activities (EVENTS-DESIGN): named refusals of an Activity in a shared position.
+ ["refuse-activity-argument",A+"def g(x: Nat) -> Nat:\n  x\ndef f(n: Nat) -> Activity<P, R, Nat>:\n  g(perform(P.go({})))\n"],
+ ["refuse-activity-field",A+"def f(n: Nat) -> Activity<P, R, Nat>:\n  match perform(P.go({})):\n    case ok(_): {x: perform(P.go({}))}.x\n"],
+ ["refuse-perform-outside-activity",A+"def f(n: Nat) -> R:\n  perform(P.go({}))\n"],
+ ["refuse-nullary-activity",A+"def f() -> Activity<P, R, Nat>:\n  match perform(P.go({})):\n    case ok(_): 1n\n"],
+ ["accept-activity-pure-and-effect-arms",A+"def f(n: Nat) -> Activity<P, R, Nat>:\n  match perform(P.go({})):\n    case ok(_): if n == 0n then 1n else f(0n)\n"],
  ["accept-times-and",R+"record W:\n  w() -> Nat\n  ok() -> Bool\nspec A for W:\n  combine * w() -> Nat:\n    2n\n  combine and ok() -> Bool:\n    true\nspec B extends A for W:\n  combine * w() -> Nat:\n    3n\n  combine and ok() -> Bool:\n    false\n"],
 ];
 for(const [name,body] of probes){

@@ -1,0 +1,19 @@
+edition ObjectiveBend 1
+# A document watcher (EVENTS-DESIGN (b)): it yields an `await` Plan naming the
+# document and how much of it it has seen; an append event resumes it. The
+# handlers are the arms of the match on the Event sum.
+record Watch:
+  doc: String
+  seen: Nat
+record Appended:
+  doc: String
+  length: Nat
+sum Plan:
+  await: Watch
+sum Event:
+  appended: Appended
+  closed: {}
+def watch(doc: String, seen: Nat) -> Activity<Plan, Event, Nat>:
+  match perform(Plan.await({doc: doc, seen: seen})):
+    case appended(e): if e.doc == doc then watch(doc, e.length) else watch(doc, seen)
+    case closed(_): seen

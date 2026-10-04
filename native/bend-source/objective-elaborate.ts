@@ -38,6 +38,7 @@ const canonicalTy=(t:Ty):Ty=>{
  if(t.tag==="specification")return {...t,metadata:canonicalTy(t.metadata),extension:canonicalTy(t.extension)};
  if(t.tag==="prototype")return {...t,spec:canonicalTy(t.spec),target:canonicalTy(t.target)};
  if(t.tag==="variant")return {...t,row:canonicalTy(t.row)};
+ if(t.tag==="computation")return {...t,plan:canonicalTy(t.plan),response:canonicalTy(t.response),result:canonicalTy(t.result)};
  if(t.tag==="field"){
   const insert=(row:Ty,name:string,member:Ty):Ty=>row.tag!=="field"?{tag:"field",name,member,tail:row}:
    name===row.name?{tag:"field",name,member,tail:row.tail}:name<row.name?{tag:"field",name,member,tail:row}:{...row,tail:insert(row.tail,name,member)};
@@ -54,6 +55,10 @@ const lam=(body:Core,proposal?:LamProposal)=>{const t=term("lam",{body});if(prop
 // ordinary annotations list as the constructor-function type
 // payload -> variant (SUMS-DESIGN §11).
 const injections=new WeakMap<Core,{type:Ty|null,reason?:string}>();
+// Activities (EVENTS-DESIGN A4): `perform` and the elaborator-inserted `done`
+// carry the enclosing activity's Plan and Response types at their own path.
+const effects=new WeakMap<Core,{plan:Ty,response:Ty}>();
+const isComputation=(t:Ty|null)=>t?.tag==="computation";
 
 // Source quantity -> checker quantity. `default`/`copy` are unrestricted.
 export const quantityOf=(p:any):string=>{
@@ -126,6 +131,10 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
    const fs=splitTop(inner,",").map(f=>{const m=/^([A-Za-z_]\w*)\s*:\s*(.+)$/.exec(f);return m?{name:m[1],type:sourceType(m[2],moduleName,seen)}:null;});
    return fs.every(f=>f&&f.type)?T.row(fs as {name:string,type:Ty}[]):null;}
   if(name==="Nat")return T.natural;if(name==="Bool")return T.boolean;if(name==="String")return T.label;
+  const activity=/^Activity<(.+)>$/.exec(name);
+  if(activity){const parts=splitTop(activity[1],",");if(parts.length!==3){typeErrors.push("Activity<Plan, Response, Result> takes three types");return null;}
+   const [plan,response,result]=parts.map(x=>sourceType(x,moduleName,seen));
+   return plan&&response&&result?{tag:"computation",plan,response,result}:null;}
   const generic=/^(Extension|Specification)<(.+)>$/.exec(name);
   if(generic){const target=sourceType(generic[2],moduleName,seen);if(!target)return null;
    return generic[1]==="Extension"?extensionTy(target):T.spec(specMetadataTy(T.emptyRow),extensionTy(target));}
@@ -208,7 +217,10 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
   return {key:resolved.key,moduleName:resolved.moduleName,sum,label:callee.name};
  };
  const sumTypeOf=(c:{key:string,moduleName:string,sum:any})=>sourceType(c.sum.name,c.moduleName);
- const variantRow=(t:Ty|null):Ty|null=>{if(t?.tag==="variable"){const b=sumBounds.get(Number(t.index));return b?.tag==="variant"?b.row:null;}return t?.tag==="variant"?t.row:null;};
+ const variantRow=(t:Ty|null):Ty|null=>{if(t?.tag==="computation")return variantRow(t.result);if(t?.tag==="variable"){const b=sumBounds.get(Number(t.index));return b?.tag==="variant"?b.row:null;}return t?.tag==="variant"?t.row:null;};
+ // The Plan/Response of the definition being lowered (null outside an activity).
+ let currentEffect:{plan:Ty,response:Ty}|null=null;
+ const isPerform=(e:any,env:Binding[],m:any)=>e.kind==="call"&&e.callee.kind==="var"&&e.callee.name==="perform"&&!env.some(b=>b.name==="perform")&&!lookupGlobal("perform",m);
  const synth=(e:any,env:Binding[],m:any):Ty|null=>{
   switch(e.kind){
    case "nat":return T.natural;case "bool":return T.boolean;case "string":return T.label;case "unit":return T.emptyRow;
@@ -229,6 +241,7 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
    case "fix":{const s=callable(synth(e.specification,env,m));return s?.tag==="arrow"?s.domain:null;}
    case "lambda":case "extension-value":return signatureTy(e.parameters,e.targetType??e.resultType,m.name);
    case "call":{
+    if(isPerform(e,env,m))return currentEffect?{tag:"computation",plan:currentEffect.plan,response:currentEffect.response,result:currentEffect.response}:null;
     {const c=sumCase(e.callee,env,m);if(c)return sumTypeOf(c);}
     if(e.callee.kind==="var"&&["reflect","metadata","targetOf","prototype"].includes(e.callee.name)&&!env.some(x=>x.name===e.callee.name))return null;
     let t=synth(e.callee,env,m);for(const _ of e.args){t=callable(t);if(t?.tag!=="arrow")return null;t=t.codomain;}return t;
@@ -239,8 +252,10 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
  const synthBody=(b:any,env:Binding[],m:any):Ty|null=>{
   if(b.kind==="expression")return synth(b.expression,env,m);
   if(b.branches.some((x:any)=>x.pattern.kind==="constructor"||x.pattern.kind==="bool")){
-   const row=variantRow(synth(b.scrutinee,env,m));
-   const types=b.branches.map((x:any)=>synthBody(x.body,x.pattern.kind==="constructor"?[{name:x.pattern.binder,ty:lookupRow(row,x.pattern.label),quantity:"unrestricted"},...env]:env,m));
+   const scrutineeTy=synth(b.scrutinee,env,m);const row=variantRow(scrutineeTy);
+   let types=b.branches.map((x:any)=>synthBody(x.body,x.pattern.kind==="constructor"?[{name:x.pattern.binder,ty:lookupRow(row,x.pattern.label),quantity:"unrestricted"},...env]:env,m));
+   // An activity scrutinee makes the whole match an activity; pure arms are lifted.
+   if(isComputation(scrutineeTy)||types.some(isComputation))types=types.map((t:Ty|null)=>!t||isComputation(t)||!currentEffect?t:{tag:"computation",plan:currentEffect.plan,response:currentEffect.response,result:t});
    return types.every((t:Ty|null)=>t&&sameTy(t,types[0]))?types[0]:null;
   }
   const zero=b.branches.find((x:any)=>x.pattern.kind==="zero"),succ=b.branches.find((x:any)=>x.pattern.kind==="succ");
@@ -262,8 +277,10 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
   if(duplicate(parameters.map(p=>p.name)))failure(node,"duplicate lexical parameter");
   const bindings:Binding[]=parameters.map(p=>({name:p.name,ty:typeof p.ty==="object"&&p.ty?p.ty:sourceType(p.type??"_",moduleName),quantity:quantityOf(p)}));
   const inner=[...bindings].reverse().concat(env);
-  let value=lower(inner);
   let codomain:Ty|null=typeof resultType==="string"?sourceType(resultType,moduleName):resultType;
+  // A body whose declared result is an Activity is lowered in effect mode.
+  const saved=currentEffect;currentEffect=codomain?.tag==="computation"?{plan:codomain.plan,response:codomain.response}:null;
+  let value:Core;try{value=lower(inner);}finally{currentEffect=saved;}
   for(let i=parameters.length-1;i>=0;i--){
    const visible=[...bindings.slice(0,i),...env];
    const reuse=visible.some(b=>restricted(b.quantity))?"once":"reusable";
@@ -271,6 +288,19 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
    value=lam(value,{domain:bindings[i].ty,codomain,parameter:bindings[i].quantity,reuse,reason});
    codomain=bindings[i].ty&&codomain?T.arrow(bindings[i].ty!,codomain,bindings[i].quantity,reuse):null;
   }return value;
+ };
+ // Named refusals: an activity never occupies a shared (suspended) position.
+ const noActivity=(e:any,env:Binding[],m:any,rule:string,why:string)=>{
+  // Outside an activity only a literal perform is checked here (the checker refuses the rest), so
+  // packages without activities elaborate exactly as before; inside one, synthesis names the rule.
+  if(isPerform(e,env,m)||(currentEffect&&isComputation(synth(e,env,m))))failure(e,"refused ("+rule+"): an Activity cannot be used here; "+why+", so its effect would be cached and shared. Match on it first.");
+ };
+ // A tail position of an activity body: pure results are lifted with `done`.
+ const tail=(e:any,env:Binding[],m:any):Core=>{
+  if(!currentEffect)return expression(e,env,m);
+  if(e.kind==="if")return term("ifBool",{condition:expression(e.condition,env,m),whenTrue:tail(e.whenTrue,env,m),whenFalse:tail(e.whenFalse,env,m)});
+  if(isPerform(e,env,m)||isComputation(synth(e,env,m)))return expression(e,env,m);
+  const t=term("done",{value:expression(e,env,m)});effects.set(t,currentEffect);return t;
  };
  const expression=(e:any,env:Binding[],m:any):Core=>{
   switch(e.kind){
@@ -288,8 +318,10 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
     return get(expression(e.target,env,m),e.name);
    }
    case "record":if(duplicate(e.fields.map((f:any)=>f.name)))failure(e,"duplicate record field");
+    for(const f of e.fields)noActivity(f.value,env,m,"effect-in-field","a record field is a shared lazy cell");
     return record(e.fields.map((f:any)=>({name:f.name,value:expression(f.value,env,m)})));
    case "extend":if(duplicate(e.fields.map((f:any)=>f.name)))failure(e,"duplicate provided field");
+    for(const f of e.fields)noActivity(f.value,env,m,"effect-in-field","an extended field is a shared lazy cell");
     return term("extend",{inherited:expression(e.inherited,env,m),fields:e.fields.map((f:any)=>({name:f.name,value:expression(f.value,env,m)}))});
    case "lambda":case "extension-value":return abstract(e.parameters,env,next=>expression(e.body,next,m),e,e.targetType??e.resultType,m.name);
    case "binary":{
@@ -335,10 +367,17 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
    }
    case "fix":return term("fix",{spec:expression(e.specification,env,m),seed:expression(e.inherited,env,m)});
    case "call":{
+    if(isPerform(e,env,m)){
+     if(!currentEffect)failure(e,"refused (perform-outside-activity): perform needs an enclosing definition whose result type is Activity<Plan, Response, Result>");
+     if(e.args.length!==1)failure(e,"perform takes exactly one Plan");
+     noActivity(e.args[0],env,m,"effect-in-plan","a Plan is data");
+     const t=term("perform",{plan:expression(e.args[0],env,m)});effects.set(t,currentEffect!);return t;
+    }
     const c=sumCase(e.callee,env,m);
     if(c){
      if(!c.sum.cases.some((x:any)=>x.label===c.label))failure(e,"sum "+c.key+" has no case "+c.label);
      if(e.args.length>1)failure(e,"a sum case carries one payload; use a record");
+     if(e.args.length)noActivity(e.args[0],env,m,"effect-in-payload","a sum payload is a shared lazy cell");
      const t=term("inject",{label:c.label,payload:e.args.length?expression(e.args[0],env,m):record([])});
      const type=sumTypeOf(c);injections.set(t,{type,reason:type?undefined:"sum "+c.key+" type unresolved"});return t;
     }
@@ -353,13 +392,14 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
       return term("prototype",{spec:expression(e.args[0],env,m),target:expression(e.args[1],env,m)});
      }
     }
+    for(const arg of e.args)noActivity(arg,env,m,"effect-as-argument","an argument is a shared lazy thunk");
     let fn=expression(e.callee,env,m);for(const arg of e.args)fn=app(fn,expression(arg,env,m));return fn;
    }
    default:return failure(e,"unsupported Objective expression "+e.kind);
   }
  };
  const body=(b:any,env:Binding[],m:any):Core=>{
-  if(b.kind==="expression")return expression(b.expression,env,m);
+  if(b.kind==="expression")return tail(b.expression,env,m);
   if(b.kind!=="match")failure(b,"unsupported body "+b.kind);
   if(b.branches.some((x:any)=>x.pattern.kind==="bool")){
    const t=b.branches.find((x:any)=>x.pattern.kind==="bool"&&x.pattern.value),f=b.branches.find((x:any)=>x.pattern.kind==="bool"&&!x.pattern.value);
@@ -497,6 +537,8 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
   let value:Core;
   if(d.kind==="record"||d.kind==="sum")continue;
   const key=m.name+"."+declName(d);
+  if(d.kind==="function"&&!d.signature.parameters.length&&/^Activity</.test(d.signature.resultType.trim()))
+   failure(d,"refused (nullary-activity): "+key+" has no parameters, so it is a shared lazy value; an Activity needs a parameter, e.g. (start: {})");
   if(d.kind==="function")value=abstract(d.signature.parameters,outer,next=>body(d.body,next,m),d,
    d.signature.resultType==="_"?((globalType(key) as any)?.tag?resultOf(globalType(key),d.signature.parameters.length):null):d.signature.resultType,m.name);
   else if(d.kind==="extension")value=abstract(d.parameters,outer,next=>body(d.body,next,m),d,d.targetType,m.name);
@@ -584,7 +626,13 @@ export function literalAnnotations(output:any){
     const variant=p.type.tag==="variable"?typing.sumBounds.get(Number(p.type.index)):p.type;
     const payload=variant?.tag==="variant"?lookupRow(variant.row,t.label):null;
     if(!payload)throw Error("injection label "+t.label+" absent from its declared sum");
-    annotations.push({path:path.map(String),domain:payload,codomain:variant,parameter:"unrestricted",reuse:"reusable"});sub("payload",0);
+    // The codomain is the DECLARED sum type: a recursive sum stays its bounded variable.
+    annotations.push({path:path.map(String),domain:payload,codomain:p.type,parameter:"unrestricted",reuse:"reusable"});sub("payload",0);
+   }
+   else if(t.tag==="perform"||t.tag==="done"){
+    const e=effects.get(t);if(!e)throw Error(t.tag+" at "+path.join(".")+" has no activity signature");
+    annotations.push({path:path.map(String),domain:e.plan,codomain:e.response,parameter:"unrestricted",reuse:"reusable"});
+    sub(t.tag==="perform"?"plan":"value",0);
    }
    else if(t.tag==="case"){sub("scrutinee",0);t.arms.forEach((a:any,i:number)=>visit(a.body,[...path,1,i]));}
    else if(t.tag==="record")t.fields.forEach((f:any,i:number)=>visit(f.value,[...path,i]));

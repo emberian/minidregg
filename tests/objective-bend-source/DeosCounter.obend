@@ -1,0 +1,33 @@
+edition ObjectiveBend 1
+# Bread's counter applet (deos-js/tests/js_drives_substance.rs: inc/dec/reset
+# on slot 0, reset needing a Proof credential) as Objective Bend. Each
+# affordance is a method; firing it yields one write Plan (the turn template)
+# and the kernel's outcome resumes it. The Proof requirement on reset is the
+# object's law, checked by the kernel; the program cannot see or change it.
+record Write:
+  slot: Nat
+  before: Nat
+  after: Nat
+sum Plan:
+  write: Write
+sum Response:
+  written: {}
+  refused: {}
+def commit(before: Nat, after: Nat) -> Activity<Plan, Response, Nat>:
+  match perform(Plan.write({slot: 0n, before: before, after: after})):
+    case written(_): after
+    case refused(_): before
+def inc(count: Nat, by: Nat) -> Activity<Plan, Response, Nat>:
+  commit(count, count + by)
+def dec(count: Nat, by: Nat) -> Activity<Plan, Response, Nat>:
+  commit(count, minus(count, by))
+def reset(count: Nat) -> Activity<Plan, Response, Nat>:
+  commit(count, 0n)
+def predecessor(n: Nat) -> Nat:
+  match n:
+    case 0: 0n
+    case 1+p: p
+def minus(a: Nat, b: Nat) -> Nat:
+  match b:
+    case 0: a
+    case 1+q: minus(predecessor(a), q)
