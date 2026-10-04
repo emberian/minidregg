@@ -81,6 +81,8 @@ mod relay;
 mod channel;
 #[cfg(unix)]
 mod scheduled_transport;
+#[path = "../../hybrid_kem.rs"]
+mod hybrid_kem;
 #[cfg(unix)]
 #[path = "../../crypto_transit.rs"]
 mod crypto_transit;
