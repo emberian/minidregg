@@ -147,6 +147,7 @@ structure Derived where
   claim : ObjectiveInvocationClaim.Claim
   command : Command
   plan : BendWorldPlan.Plan
+  artifact : ObjectiveBendSourceArtifact.Artifact
 
 def planBytes (plan : BendWorldPlan.Plan) : List UInt8 :=
   (plan.effects.map BendWorldPlan.effectStream.encode).flatten ++
@@ -160,6 +161,11 @@ def derive (config : Config) (opened : Opened config) (request : Request) :
   let environment ← match environmentOf config opened request with
     | .error reason => return .error reason
     | .ok environment => pure environment
+  if let some policyBytes := NativeInvocationProfile.binding config.profile.receiverParameters .objectiveMethod then
+    if let some policy := ObjectiveBendNativeAdmission.decodePolicy policyBytes then
+      let price := policy.tariff.workOf request.capacity
+      if request.capacity.proofWork != price then
+        return .error s!"proofWork {request.capacity.proofWork} is not the tariff price {price} of the declared envelope"
   let draft := claimOf request (ObjectiveInvocationClaim.inputCommitment [])
   let authenticated ← match ← ObjectiveBendAuthenticatedInputs.authorize config.signature environment
       config.profile draft with
@@ -203,7 +209,7 @@ def derive (config : Config) (opened : Opened config) (request : Request) :
         decide (guard.cellId ∉ (writes prepared).map DataWrite.cellId)
       match ObjectiveBendNativeAdmission.admit selection (commandCodec.encode command) (writes prepared) guards with
       | .error reason => return .error s!"final output gate refused: {repr reason}"
-      | .ok admitted => return .ok ⟨claim,command,admitted.output.plan⟩
+      | .ok admitted => return .ok ⟨claim,command,admitted.output.plan,admitted.core.source.loaded.artifact⟩
 
 
 /-! ## Request authoring from JSON (all numbers canonical decimal strings,
@@ -299,8 +305,13 @@ def requestOfJson (json : Json) : Except String Request := do
 
 def toJson (derived : Derived) : Json :=
   Json.mkObj [
-    ("schema","dregg.objective-bend.quote.v1"),
-    ("evidence","Core4 executeWith output"),
+    ("schema","dregg.objective-bend.quote.v2"),
+    ("evidence","a deep source evaluation (not proved unique): Core4 executeWith output"),
+    ("semanticId",ObjectiveBendNativeInput.hex (digestStream.encode
+      (ObjectiveBendNativeAdmission.methodSemanticId derived.artifact))),
+    ("artifactId",ObjectiveBendNativeInput.hex (digestStream.encode
+      (ObjectiveBendNativeAdmission.methodArtifactId derived.artifact))),
+    ("proofWork",toString derived.claim.capacity.proofWork),
     ("evaluator",ObjectiveBendNativeInput.hex (digestStream.encode ObjectiveBendNativeAdmission.evaluatorId)),
     ("claim",ObjectiveBendNativeInput.hex (ObjectiveInvocationClaim.encode derived.claim)),
     ("expectedInput",ObjectiveBendNativeInput.hex (digestStream.encode derived.claim.expectedInput)),
@@ -339,10 +350,18 @@ def authorPolicy (json : Json) : Except String String := do
     let some bytes := ObjectiveBendPlanAdapter.unhex hex.toList | throw "outputs must be lowercase hex"
     let some digest := ObjectiveNativeScalarBinding.rootCodec.decode bytes | throw "outputs must be digests"
     pure digest
+  let tariff ← field json "tariff"
+  let tariff : ObjectiveBendNativeAdmission.Tariff := ⟨← natOf tariff "version",← natOf tariff "base",
+    ← natOf tariff "typeFuel",← natOf tariff "sourceTicks",← natOf tariff "heap",← natOf tariff "stack",
+    ← natOf tariff "outputNodes",← natOf tariff "outputBytes",← natOf tariff "inputBytes"⟩
+  if !tariff.valid then
+    throw s!"tariff must be version {ObjectiveBendNativeAdmission.tariffVersion} with a positive base"
   let policy : ObjectiveBendNativeAdmission.Policy := ⟨ObjectiveBendNativeAdmission.semanticsId,← natOf json "sourceBytes",
     ← capacityOf (← field json "maximum"),outputs,← digestOf json "clearAudience",
-    ⟨← text tooling "parserSha256",← text tooling "frontendSha256",← text tooling "elaboratorSha256"⟩⟩
-  pure (ObjectiveBendNativeInput.hex (ObjectiveBendNativeAdmission.encodePolicy policy))
+    ⟨← text tooling "parserSha256",← text tooling "frontendSha256",← text tooling "elaboratorSha256"⟩,tariff⟩
+  let encoded := ObjectiveBendNativeAdmission.encodePolicy policy
+  if ObjectiveBendNativeAdmission.decodePolicy encoded != some policy then throw "policy does not round-trip"
+  pure (ObjectiveBendNativeInput.hex encoded)
 
 /-- Host operation `author objective-request`: JSON → canonical request bytes. -/
 def authorRequest (json : Json) : Except String (List UInt8) :=

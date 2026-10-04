@@ -6,6 +6,7 @@ created by source publication. -/
 import Compiler.ObjectiveSourcePackage
 import Compiler.ObjectiveBendSourceArtifact
 import Kernel.ObjectiveBendNativeInput
+import Kernel.ObjectiveBendPublishedPackage
 namespace Minidregg.Host.ObjectiveStudioPublication
 open Minidregg.Compiler
 open Lean Minidregg.Theory Minidregg.Theory.TypedAuthorization
@@ -21,9 +22,8 @@ private def atom (id schema : Digest) (bytes : List UInt8) : Json := Json.mkObj 
   ("kind",Json.mkObj [("type",toJson "inlineObject"),("schema",decimal schema)]),
   ("payload",toJson (hex bytes))]
 
-def packageSchema : Digest := (Sp800185Cshake256.hash
-  "DREGG.OBJECTIVE-BEND.SOURCE-PACKAGE-SCHEMA/v1".toUTF8.toList
-  Minidregg.Compiler.ObjectiveSourcePackage.frame).digest
+/-- The receiver's package schema, never a local copy of its derivation. -/
+abbrev packageSchema : Digest := Minidregg.Kernel.ObjectiveBendPublishedPackage.schema
 
 def author (packageBytes replayedPackage offeredCore expectedCore outputCodecBytes : List UInt8) : Except String Json := do
   if packageBytes.length > 12582912 || offeredCore.length > 4194304 || expectedCore.length > 4194304 || outputCodecBytes.length > 1024 then throw "source publication byte capacity"

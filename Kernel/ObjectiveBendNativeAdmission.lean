@@ -65,6 +65,73 @@ def toolingStream : StreamCodec Tooling := StreamCodec.xmap
   (fun t => (t.parserSha256,t.frontendSha256,t.elaboratorSha256))
   (fun t => ⟨t.1,t.2.1,t.2.2⟩) (by intro t; cases t; rfl)
 
+/-- The public, versioned price of a DECLARED execution envelope (the charge
+law of 2026-10-04): the caller declares its envelope in the signed claim, the
+claim's `proofWork` must equal this price of it, execution beyond the envelope
+refuses, and nothing is refunded when a run uses less. The price is a function
+of the signed public envelope only, never of measured ticks, so a private
+branch cannot leak through the charge. `base ≥ 1` (`Tariff.valid`) makes every
+admitted invocation cost work: a caller cannot choose zero. -/
+structure Tariff where
+  version : Nat
+  base : Nat
+  typeFuel : Nat
+  sourceTicks : Nat
+  heap : Nat
+  stack : Nat
+  outputNodes : Nat
+  outputBytes : Nat
+  inputBytes : Nat
+  deriving DecidableEq, Repr
+
+def tariffStream : StreamCodec Tariff := StreamCodec.xmap
+  (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))))
+  (fun t => (t.version,t.base,t.typeFuel,t.sourceTicks,t.heap,t.stack,t.outputNodes,t.outputBytes,t.inputBytes))
+  (fun t => ⟨t.1,t.2.1,t.2.2.1,t.2.2.2.1,t.2.2.2.2.1,t.2.2.2.2.2.1,t.2.2.2.2.2.2.1,t.2.2.2.2.2.2.2.1,
+    t.2.2.2.2.2.2.2.2⟩) (by intro t; cases t; rfl)
+
+/-- The tariff edition this receiver prices with. -/
+def tariffVersion : Nat := 1
+
+/-- The work units a declared envelope costs. -/
+def Tariff.workOf (t : Tariff) (c : ObjectiveInvocationClaim.Capacity) : Nat :=
+  t.base + t.typeFuel * c.typeFuel + t.sourceTicks * c.sourceTicks + t.heap * c.heap +
+    t.stack * c.stack + t.outputNodes * c.outputNodes + t.outputBytes * c.outputBytes +
+    t.inputBytes * c.inputBytes
+
+def Tariff.valid (t : Tariff) : Bool := t.version == tariffVersion && decide (0 < t.base)
+
+/-- A valid tariff prices every envelope, the empty one included, above zero. -/
+theorem Tariff.workOf_pos {t : Tariff} (valid : t.valid = true) (c : ObjectiveInvocationClaim.Capacity) :
+    0 < t.workOf c := by
+  simp only [Tariff.valid, Bool.and_eq_true, decide_eq_true_eq] at valid
+  unfold Tariff.workOf
+  omega
+
+/-- Monotone in the envelope: declaring more never costs less. -/
+theorem Tariff.workOf_mono (t : Tariff) {a b : ObjectiveInvocationClaim.Capacity}
+    (typeFuel : a.typeFuel ≤ b.typeFuel) (sourceTicks : a.sourceTicks ≤ b.sourceTicks)
+    (heap : a.heap ≤ b.heap) (stack : a.stack ≤ b.stack) (outputNodes : a.outputNodes ≤ b.outputNodes)
+    (outputBytes : a.outputBytes ≤ b.outputBytes) (inputBytes : a.inputBytes ≤ b.inputBytes) :
+    t.workOf a ≤ t.workOf b := by
+  unfold Tariff.workOf
+  have := Nat.mul_le_mul_left t.typeFuel typeFuel
+  have := Nat.mul_le_mul_left t.sourceTicks sourceTicks
+  have := Nat.mul_le_mul_left t.heap heap
+  have := Nat.mul_le_mul_left t.stack stack
+  have := Nat.mul_le_mul_left t.outputNodes outputNodes
+  have := Nat.mul_le_mul_left t.outputBytes outputBytes
+  have := Nat.mul_le_mul_left t.inputBytes inputBytes
+  omega
+
+/-- An inhabitant of `Tariff.valid`: one work unit per call and per declared
+source tick (the premise of `workOf_pos` is satisfiable). -/
+def Tariff.unit : Tariff := ⟨tariffVersion,1,0,1,0,0,0,0,0⟩
+theorem Tariff.unit_valid : Tariff.unit.valid = true := by decide
+
 structure Policy where
   edition : Digest
   sourceBytes : Nat
@@ -72,27 +139,51 @@ structure Policy where
   outputs : List Digest
   /-- CLEAR disclosure audience; current native audience checks are additional. -/
   clearAudience : Digest
-  /-- Explicit trusted elaborator boundary, included in the runtime profile. -/
+  /-- Explicit trusted parser/frontend/elaborator boundary. Each pin is compared
+  with the selected package's own pin (`SourceSelection`). -/
   tooling : Tooling
+  /-- The public price of a declared envelope. -/
+  tariff : Tariff
   deriving DecidableEq, Repr
 
 def policyStream : StreamCodec Policy := StreamCodec.xmap
   (StreamCodec.product digestStream (StreamCodec.product StreamCodec.nat (StreamCodec.product ObjectiveInvocationClaim.capacityStream
-    (StreamCodec.product (StreamCodec.list digestStream) (StreamCodec.product digestStream toolingStream)))))
-  (fun p => (p.edition,p.sourceBytes,p.maximum,p.outputs,p.clearAudience,p.tooling))
-  (fun p => ⟨p.1,p.2.1,p.2.2.1,p.2.2.2.1,p.2.2.2.2.1,p.2.2.2.2.2⟩) (by intro p; cases p; rfl)
+    (StreamCodec.product (StreamCodec.list digestStream) (StreamCodec.product digestStream
+    (StreamCodec.product toolingStream tariffStream))))))
+  (fun p => (p.edition,p.sourceBytes,p.maximum,p.outputs,p.clearAudience,p.tooling,p.tariff))
+  (fun p => ⟨p.1,p.2.1,p.2.2.1,p.2.2.2.1,p.2.2.2.2.1,p.2.2.2.2.2.1,p.2.2.2.2.2.2⟩) (by intro p; cases p; rfl)
 
-def policyFrame : List UInt8 := "DREGG/OBJECTIVE-BEND/NATIVE-POLICY".toUTF8.toList ++ [2]
+/-- Edition 3: the tariff joined the policy. A policy of an earlier frame does
+not decode; neither does one whose tariff is not valid. -/
+def policyFrame : List UInt8 := "DREGG/OBJECTIVE-BEND/NATIVE-POLICY".toUTF8.toList ++ [3]
 def encodePolicy (p : Policy) : List UInt8 := policyFrame ++ policyStream.encode p
-def decodePolicy (bytes : List UInt8) : Option Policy := do
-  if bytes.take policyFrame.length != policyFrame then none else do
-    let p ← policyStream.toLawful.decode (bytes.drop policyFrame.length)
-    if encodePolicy p == bytes then some p else none
+def decodePolicy (bytes : List UInt8) : Option Policy :=
+  if bytes.take policyFrame.length != policyFrame then none else
+    match policyStream.toLawful.decode (bytes.drop policyFrame.length) with
+    | none => none
+    | some p => if encodePolicy p == bytes && p.tariff.valid then some p else none
+
+theorem decodePolicy_tariff_valid {bytes : List UInt8} {p : Policy}
+    (decoded : decodePolicy bytes = some p) : p.tariff.valid = true := by
+  unfold decodePolicy at decoded
+  split at decoded
+  · cases decoded
+  · split at decoded
+    · cases decoded
+    · split at decoded
+      · rename_i ok
+        cases Option.some.inj decoded
+        simp only [Bool.and_eq_true] at ok
+        exact ok.2
+      · cases decoded
 
 instance chargeLeDecidable (a b : ResourceCost.Charge) : Decidable (a ≤ b) :=
   decidable_of_iff (ResourceCost.Lane.allCheck (fun lane => decide (a lane ≤ b lane)) = true)
     (by simpa only [ResourceCost.Charge.le_iff,decide_eq_true_eq] using
       ResourceCost.Lane.allCheck_eq_true_iff (fun lane => decide (a lane ≤ b lane)))
+
+/-- A decided proposition as an optional proof, for flat guarded admission code. -/
+def ensure (p : Prop) [Decidable p] : Option (PLift p) := if h : p then some ⟨h⟩ else none
 
 def capacityWithin (a b : ObjectiveInvocationClaim.Capacity) : Bool :=
   decide (charge a ≤ charge b) && decide (a.typeFuel ≤ b.typeFuel) &&
@@ -130,6 +221,37 @@ def resultProfile (policy : Policy) (artifact : ObjectiveBendSourceArtifact.Arti
     (command : Command) : Option ObjectiveBendResultAdapter.Profile := do
   let [target] := returnTargets command | none
   pure (profileAt policy artifact command.subject command.nonce target)
+
+/-- What a published Objective method MEANS: the receiving semantics edition,
+the evaluator, the exact typed Core4 of the selected declaration and its input
+and output codecs. Tool pins, source bytes and the package are provenance and
+do not enter it (`methodSemanticId_provenance_free`). -/
+def methodSemanticId (artifact : ObjectiveBendSourceArtifact.Artifact) : Digest :=
+  (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.METHOD-SEMANTIC-ID/v1".toUTF8.toList
+    (digestStream.encode semanticsId ++ digestStream.encode evaluatorId ++
+      bytesStream.encode artifact.typedCore ++ digestStream.encode artifact.inputCodec ++
+      digestStream.encode artifact.outputCodec)).digest
+
+/-- The exact published method: its package (sources, ASTs, import locks,
+parser/frontend/elaborator pins), selected declaration, typed core and codecs.
+This is the atom id a claim names (`claim.sourceAtom`). -/
+def methodArtifactId (artifact : ObjectiveBendSourceArtifact.Artifact) : Digest :=
+  ObjectiveBendSourceArtifact.identity artifact
+
+/-- Re-publishing the same typed core from another package (other source
+spelling, other tool pins) keeps the method's semantic id; its artifact id is
+the artifact's own identity and commits the package. -/
+theorem methodSemanticId_provenance_free {a b : ObjectiveBendSourceArtifact.Artifact}
+    (core : a.typedCore = b.typedCore) (input : a.inputCodec = b.inputCodec)
+    (output : a.outputCodec = b.outputCodec) : methodSemanticId a = methodSemanticId b := by
+  unfold methodSemanticId; rw [core,input,output]
+
+/-- The premise of `methodSemanticId_provenance_free` with distinct packages is
+inhabited: two artifacts that differ only in their package. -/
+theorem methodSemanticId_provenance_free_inhabited (core : List UInt8) (input output : Digest)
+    (p q : Digest) (declaration : String) :
+    methodSemanticId ⟨p,declaration,core,input,output⟩ = methodSemanticId ⟨q,declaration,core,input,output⟩ :=
+  methodSemanticId_provenance_free rfl rfl rfl
 
 def limits (c : ObjectiveInvocationClaim.Capacity) : Limits := ⟨c.heap,c.stack⟩
 def budget (c : ObjectiveInvocationClaim.Capacity) : Budget := {ticks:=c.sourceTicks,nodes:=c.outputNodes,bytes:=c.outputBytes}
@@ -338,6 +460,9 @@ structure SourceSelection {F : Type} [Field F] [DecidableEq F] {deployment : Dep
   declarationExact : ObjectiveSourcePackage.selectedDeclaration package.package = some loaded.artifact.declaration
   parserExact : package.package.parserSha256 = policy.tooling.parserSha256
   frontendExact : package.package.frontendSha256 = policy.tooling.frontendSha256
+  /-- The package names the elaborator that produced its typed core, and it is
+  the operator's pinned one. -/
+  elaboratorExact : package.package.elaboratorSha256 = policy.tooling.elaboratorSha256
   inputCodecExact : loaded.artifact.inputCodec = ObjectiveBendNativeInput.codecId
   claimInputExact : claim.inputCodec = loaded.artifact.inputCodec
   outputCodecExact : claim.outputCodec = loaded.artifact.outputCodec
@@ -356,15 +481,18 @@ private def selectSource {F : Type} [Field F] [DecidableEq F] {deployment : Depl
       if declaration : ObjectiveSourcePackage.selectedDeclaration package.package = some loaded.artifact.declaration then
         if parser : package.package.parserSha256 = policy.tooling.parserSha256 then
           if frontend : package.package.frontendSha256 = policy.tooling.frontendSha256 then
+           if elaborator : package.package.elaboratorSha256 = policy.tooling.elaboratorSha256 then
             if input : loaded.artifact.inputCodec = ObjectiveBendNativeInput.codecId then
               if claimInput : claim.inputCodec = loaded.artifact.inputCodec then
                 if output : claim.outputCodec = loaded.artifact.outputCodec then
                   if registered : loaded.artifact.outputCodec ∈ policy.outputs then
-                    some ⟨full,payload,observed,loaded,package,declaration,parser,frontend,input,claimInput,output,registered⟩
+                    some ⟨full,payload,observed,loaded,package,declaration,parser,frontend,elaborator,input,
+                      claimInput,output,registered⟩
                   else none
                 else none
               else none
             else none
+           else none
           else none
         else none
       else none
@@ -404,6 +532,9 @@ structure Core {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {d
   policyExact : NativeInvocationProfile.binding profile.receiverParameters .objectiveMethod = some (encodePolicy policy)
   policyEdition : policy.edition = semanticsId
   capacities : capacityWithin claim.capacity policy.maximum = true
+  /-- The signed work is the public tariff's price of the signed envelope. -/
+  tariffExact : claim.capacity.proofWork = policy.tariff.workOf claim.capacity
+  tariffValid : policy.tariff.valid = true
   funding : ∃ funded, environment.compute = some funded ∧
     funded.steps = claim.capacity.proofWork ∧ funded.credits = claim.capacity.feeDebit
   authenticated : Authenticated environment profile claim
@@ -417,6 +548,15 @@ structure Core {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {d
   inputTerm : ObjectiveBendOpenRecursion.Term
   inputTermExact : ObjectiveBendNativeInput.sourceTerm input claim.capacity.inputBytes claim.capacity.scalarBits = .ok inputTerm
   typed : Checked (ObjectiveBendNativeInput.instantiate source.loaded.checked.packet.source inputTerm) []
+
+/-- Every admitted Objective invocation is charged positive work: the signed
+`proofWork` (which `checkedFunding` binds to the fee-first compute preparation)
+is the tariff price of the envelope, and a decodable policy's tariff is valid. -/
+theorem Core.proofWork_pos {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {durable : Durable}
+    {environment : Environment deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
+    {claim : ObjectiveInvocationClaim.Claim} (core : Core environment profile claim) :
+    0 < claim.capacity.proofWork := by
+  rw [core.tariffExact]; exact Tariff.workOf_pos core.tariffValid claim.capacity
 
 def Core.guards {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {durable : Durable}
     {environment : Environment deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
@@ -441,37 +581,39 @@ def prepareCore {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {
     (native : CredentialSignatureIO.NativeConfig) (oracle : ReadOracle)
     (environment : Environment deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (claim : ObjectiveInvocationClaim.Claim) : IO (Except Reject (Core environment profile claim)) := do
-  if semantics : NativeInvocationProfile.registered profile.receiverParameters .objectiveMethod = true then
-    let some policyBytes := NativeInvocationProfile.binding profile.receiverParameters .objectiveMethod
-      | return .error .bendExecution
-    let some policy := decodePolicy policyBytes | return .error .bendExecution
-    if policyExact : NativeInvocationProfile.binding profile.receiverParameters .objectiveMethod = some (encodePolicy policy) then
-      if policyEdition : policy.edition = semanticsId then
-        if capacities : capacityWithin claim.capacity policy.maximum = true then
-          if evaluatorId ∈ profile.disabledEvaluators then return .error .bendExecution
-          if !ObjectiveSourcePackage.shaPin policy.tooling.elaboratorSha256 then return .error .bendExecution
-          let some funding := checkedFunding environment.compute claim | return .error .computeFunding
-          match ← oracle.authenticate native environment profile claim with
-          | .error reason => return .error reason
-          | .ok authenticated =>
-           match guardsExact : (authenticated.source :: authenticated.inputs).mapM readGuardsOf with
-           | none => return .error .observationRejected
-           | some guardLists =>
-            let some source := selectSource claim authenticated.source policy | return .error .bendExecution
-            let input := inputOf authenticated
-            if inputCommitted : ObjectiveInvocationClaim.inputCommitment (ObjectiveBendNativeInput.encode input) = claim.expectedInput then
-              match inputTermExact : ObjectiveBendNativeInput.sourceTerm input claim.capacity.inputBytes claim.capacity.scalarBits with
-              | .error _ => return .error .bendExecution
-              | .ok inputTerm =>
-                let some typed := check (ObjectiveBendNativeInput.instantiate source.loaded.checked.packet.source inputTerm)
-                  [] claim.capacity.typeFuel | return .error .bendExecution
-                return .ok ⟨semantics,policy,policyExact,policyEdition,capacities,⟨funding.1,funding.2⟩,
-                  authenticated,guardLists,guardsExact,source,input,rfl,inputCommitted,inputTerm,inputTermExact,typed⟩
-            else return .error .bendExecution
-        else return .error .bendExecution
+  let some ⟨semantics⟩ := ensure (NativeInvocationProfile.registered profile.receiverParameters .objectiveMethod = true) | return .error .bendExecution
+  let some policyBytes := NativeInvocationProfile.binding profile.receiverParameters .objectiveMethod
+    | return .error .bendExecution
+  let some policy := decodePolicy policyBytes | return .error .bendExecution
+  let some ⟨policyExact⟩ := ensure (NativeInvocationProfile.binding profile.receiverParameters .objectiveMethod =
+      some (encodePolicy policy)) | return .error .bendExecution
+  let some ⟨policyEdition⟩ := ensure (policy.edition = semanticsId)
+    | return .error .bendExecution
+  let some ⟨capacities⟩ := ensure (capacityWithin claim.capacity policy.maximum = true)
+    | return .error .bendExecution
+  let some ⟨tariffValid⟩ := ensure (policy.tariff.valid = true)
+    | return .error .bendExecution
+  let some ⟨tariffExact⟩ := ensure (claim.capacity.proofWork = policy.tariff.workOf claim.capacity) | return .error .objectiveTariff
+  if evaluatorId ∈ profile.disabledEvaluators then return .error .bendExecution
+  let some funding := checkedFunding environment.compute claim | return .error .computeFunding
+  match ← oracle.authenticate native environment profile claim with
+  | .error reason => return .error reason
+  | .ok authenticated =>
+    match guardsExact : (authenticated.source :: authenticated.inputs).mapM readGuardsOf with
+    | none => return .error .observationRejected
+    | some guardLists =>
+      let some source := selectSource claim authenticated.source policy | return .error .bendExecution
+      let input := inputOf authenticated
+      if inputCommitted : ObjectiveInvocationClaim.inputCommitment (ObjectiveBendNativeInput.encode input) = claim.expectedInput then
+        match inputTermExact : ObjectiveBendNativeInput.sourceTerm input claim.capacity.inputBytes claim.capacity.scalarBits with
+        | .error _ => return .error .bendExecution
+        | .ok inputTerm =>
+          let some typed := check (ObjectiveBendNativeInput.instantiate source.loaded.checked.packet.source inputTerm)
+            [] claim.capacity.typeFuel | return .error .bendExecution
+          return .ok ⟨semantics,policy,policyExact,policyEdition,capacities,tariffExact,tariffValid,
+            ⟨funding.1,funding.2⟩,authenticated,guardLists,guardsExact,source,input,rfl,inputCommitted,
+            inputTerm,inputTermExact,typed⟩
       else return .error .bendExecution
-    else return .error .bendExecution
-  else return .error .bendExecution
 
 /-- This evidence is indexed by the SAME prepared native command/image and
 final full ingress/write/guard lists. It contains no signature/law permission. -/
@@ -604,4 +746,11 @@ def admit {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
 #assert_axioms refMatches_sound
 #assert_axioms Authenticated.sound
 #assert_axioms ReadOracle.refuse_refuses
+#assert_axioms Tariff.workOf_pos
+#assert_axioms Tariff.workOf_mono
+#assert_axioms Tariff.unit_valid
+#assert_axioms decodePolicy_tariff_valid
+#assert_axioms Core.proofWork_pos
+#assert_axioms methodSemanticId_provenance_free
+#assert_axioms methodSemanticId_provenance_free_inhabited
 end Minidregg.Kernel.ObjectiveBendNativeAdmission

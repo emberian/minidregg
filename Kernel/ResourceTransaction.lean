@@ -507,6 +507,9 @@ inductive Reject where
   /-- An Objective command reached an admission caller that installed no
   signed-query read oracle: a wiring refusal, never a policy verdict. -/
   | noReadOracle
+  /-- An Objective claim's signed `proofWork` is not the operator tariff's
+  price of its own declared envelope (`ObjectiveBendNativeAdmission.Tariff.workOf`). -/
+  | objectiveTariff
   | observationRequired | observationRejected | clockUnavailable
   | streamTopic | streamPayload
   | worldKind | kindDefinition
