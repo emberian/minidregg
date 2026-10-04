@@ -349,18 +349,37 @@ theorem wrong_typed_candidate_rejected
 
 /-! ## Explicit signature-origin/EUF boundary -/
 
-/-- A verification accepted by `portal` either corresponds to a signature in
-the deployment issuance relation or witnesses an EUF break.  In a concrete
-game this implication normally carries a probability bound; this logical
-interface exposes only the exact bad event and never claims it impossible. -/
+/-- The deployment's issuance relation: which signatures its keys issued.  An
+accepted verification either corresponds to an issued signature or witnesses
+an EUF break (`SignatureOrigin.verify_origin`).  The bad event is DEFINED from
+the relation and the portal (`SignatureOrigin.EUFBreak`), never chosen: a free
+`EUFBreak : Prop` field let `EUFBreak := True` satisfy the origin law, so
+`¬ EUFBreak` could not be stated of it and the law said nothing. In a concrete
+game the bad event carries a probability bound; this logical interface exposes
+the exact event and never claims it impossible. -/
 structure SignatureOrigin
     (payloadCodec : LawfulCodec VotePayload)
     (portal : SignaturePortal PublicKey Signature) where
   Issued : VersionedPublicKeyIdentity PublicKey -> VotePayload -> Signature -> Prop
-  EUFBreak : Prop
-  verify_origin : forall identity payload signature,
-    portal.verify identity.publicKey (payloadCodec.encode payload) signature = true ->
-      Issued identity payload signature ∨ EUFBreak
+
+/-- The EUF bad event of an issuance relation: the portal accepts a signature
+the deployment never issued. -/
+def SignatureOrigin.EUFBreak {payloadCodec : LawfulCodec VotePayload}
+    {portal : SignaturePortal PublicKey Signature} (origin : SignatureOrigin payloadCodec portal) : Prop :=
+  exists identity payload signature,
+    portal.verify identity.publicKey (payloadCodec.encode payload) signature = true ∧
+      ¬ origin.Issued identity payload signature
+
+/-- Every accepted verification is issued, or is the EUF bad event. -/
+theorem SignatureOrigin.verify_origin {payloadCodec : LawfulCodec VotePayload}
+    {portal : SignaturePortal PublicKey Signature} (origin : SignatureOrigin payloadCodec portal) :
+    forall identity payload signature,
+      portal.verify identity.publicKey (payloadCodec.encode payload) signature = true ->
+        origin.Issued identity payload signature ∨ origin.EUFBreak := by
+  intro identity payload signature verified
+  by_cases issued : origin.Issued identity payload signature
+  · exact Or.inl issued
+  · exact Or.inr ⟨identity, payload, signature, verified, issued⟩
 
 /-- Key-custody/consensus discipline at the issuance boundary.  Across key
 rotation, the same subject may use different public keys, but it must not issue
@@ -643,4 +662,6 @@ structure DeploymentRefinement
 /-- info: 'Minidregg.Kernel.AuthenticatedSettlementFinality.no_conflicting_authenticated_finalization' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_conflicting_authenticated_finalization
 
+/-- info: 'Minidregg.Kernel.AuthenticatedSettlementFinality.SignatureOrigin.verify_origin' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms SignatureOrigin.verify_origin
 end Minidregg.Kernel.AuthenticatedSettlementFinality

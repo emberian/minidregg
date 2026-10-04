@@ -107,14 +107,17 @@ end Candidate
 
 /-! ## Quorums, votes, and safety -/
 
-/-- A quorum system exposes only the safety fact needed here: any two admitted
-quorums share a node.  It does not prescribe majority arithmetic or membership
-reconfiguration. -/
+/-- A quorum system: any two admitted quorums share a node, and some set is a
+quorum.  It does not prescribe majority arithmetic or membership
+reconfiguration.  `nonempty` is the non-triviality condition: without it the
+system in which nothing is a quorum satisfies `intersects` vacuously, and every
+theorem "a quorum certified X" holds of it for no reason. -/
 structure QuorumSystem (Node : Type n) [DecidableEq Node] where
   isQuorum : Finset Node -> Prop
   intersects : forall left right,
     isQuorum left -> isQuorum right ->
       exists node, node ∈ left ∧ node ∈ right
+  nonempty : exists quorum, isQuorum quorum
 
 variable {Node : Type n} [DecidableEq Node]
 
@@ -343,18 +346,6 @@ def finalized_of_available_fair_responsive
   voted := fun node member => responsive node candidate
     (available.online_voters node member) (fair.eventually node member)
 
-/-- If no quorum is available, no theorem in this layer manufactures a
-certificate. -/
-theorem no_finality_without_any_quorum
-    (quorums : QuorumSystem Node)
-    (book : VoteBook (Node := Node) (TxId := TxId) (CellId := CellId)
-      (Nullifier := Nullifier) (Event := Event))
-    (candidate : Candidate TxId CellId Nullifier Event)
-    (none : forall voters, ¬ quorums.isQuorum voters) :
-    ¬ Nonempty (Finalized quorums book candidate) := by
-  rintro ⟨finalized⟩
-  exact none finalized.voters finalized.quorum
-
 /-! ## Closed non-vacuous witnesses -/
 
 namespace ClosedInstance
@@ -380,6 +371,7 @@ def quorums : QuorumSystem ReplicaNode where
   intersects := by
     intro left right leftQuorum rightQuorum
     refine ⟨0, leftQuorum ?_, rightQuorum ?_⟩ <;> simp [core]
+  nonempty := ⟨core, Finset.Subset.refl _⟩
 
 def candidate : Candidate Nat Nat Nat Nat where
   epoch := 4

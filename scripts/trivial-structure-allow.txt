@@ -1,26 +1,32 @@
 # scripts/trivial-structure-allow.txt -- hypothesis STRUCTURES the ledger's trivial-inhabitant probe
-# inhabits on 2026-10-04 (lane PROOF-ENG; persvati ledger run over the research umbrella): every
-# predicate field constantly True (or False), Option fields none, other data default, every proof
-# field closed by a fixed battery, for every parameter at once. By itself such a structure certifies
-# nothing; whatever its consumers prove must come from their other premises.
-# Format: <structure> <reason>. A RATCHET, not a pardon: a structure that becomes TRIVIAL and is not
-# listed FAILS the gate (PackedRefinement, the regression this exists for, would); an entry that is no
-# longer TRIVIAL FAILS until deleted. Each line is an open review: does the premise carry content?
-Minidregg.Assurance.Ext6GateProofDeploymentAdmission.Deployment.ControlledExecution  [7 consumers; predicates := True; Assurance.Ext6GateProofDeploymentAdmission] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
-Minidregg.Assurance.HyperdocumentHistoryAdmission.PostSpan  [1 consumers; predicates := True; Assurance.HyperdocumentHistoryAdmission] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
-Minidregg.Assurance.NoteSpendProofControllerAdmission.SameCoinHidingLaws  [2 consumers; predicates := True; Assurance.NoteSpendProofControllerAdmission] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
-Minidregg.Compiler.NativeWorkProfiles.Tower256DotProductRequest  [1 consumers; predicates := True; Compiler.NativeWorkProfiles] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
-Minidregg.Compiler.NextgenLightClientPublicInputs.TowerElem  [3 consumers; predicates := True; Compiler.NextgenLightClientPublicInputs] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
-Minidregg.Compiler.Tower256NativeByteBoundary.SemanticChecker  [5 consumers; predicates := False; Compiler.Tower256NativeByteBoundary] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
-Minidregg.Kernel.AuthenticatedSettlementFinality.SignatureOrigin  [6 consumers; predicates := True; Kernel.AuthenticatedSettlementFinality] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
-Minidregg.Kernel.OutboxDelivery.AckVerifier  [13 consumers; predicates := True; Kernel.OutboxDelivery] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
-Minidregg.Kernel.ProviderExecutionLease.CompletionBoundary  [16 consumers; predicates := False; Kernel.ProviderExecutionLease] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
-Minidregg.Kernel.ReplicatedSettlementFinality.QuorumSystem  [21 consumers; predicates := False; Kernel.ReplicatedSettlementFinality] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
-Minidregg.Kernel.WorldKindInstance.Prepared  [2 consumers; predicates := True; Kernel.WorldKindInstance] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
-Minidregg.Selvage.Oracle  [110 consumers; predicates := True; Selvage.FiatShamir] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
-Minidregg.Selvage.ProofSystem  [8 consumers; predicates := True; Selvage.HeteroComposition] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
-Minidregg.Theory.PlanBinding.Plan  [5 consumers; predicates := True; Theory.PlanBinding] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
-Minidregg.Theory.PrivateEvidencePortal  [1 consumers; predicates := True; Theory.PrivateComputationDeclaration] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
-Minidregg.Theory.ResourceCost.Quote  [4 consumers; predicates := True; Theory.ResourceCost] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
-Minidregg.Theory.TypedAuthorization.Parentage  [57 consumers; predicates := True; Theory.TypedAuthorization] baseline 2026-10-04: degenerate inhabitant; review whether the premise carries content
-Minidregg.Kernel.Receiving.Payload  [1 consumers; predicates := True; Kernel.Receiving] 2026-10-04 integrator (RECEIVER-COLLAPSE): Payload is DATA, not a premise -- the writes/guards/charge/subject of one intent with its two well-formedness proofs; its degenerate inhabitant (no writes, no guards) is a real no-op intent. Its one consumer, lookup_install, is a store law true of EVERY payload (install then lookup returns the recorded identity), so nothing is certified by the payload premise and nothing needs to be
+# inhabits (scripts/HypothesisLedger.lean): every predicate field constantly True (or False), Option
+# fields none, other data default, every proof field closed by a fixed battery, for every parameter.
+# Such an inhabitant means one of three things, and each entry says which (REVIEW-SCHOLAR-BREAD-META
+# 2026-10-05 §2; classified 2026-10-05 by lane CHECKPOINT-INVARIANT):
+#   DATA       the structure is a value and its trivial inhabitant is a real value. Harmless.
+#   PARAMETER  consumers quantify over it and the trivial instance is a legitimate one; the entry
+#              names an instance the consumers are used at: instance=<declaration> (the gate checks
+#              it exists).
+#   PREMISE    the trivial inhabitant makes the consumers vacuous; the entry names a non-triviality
+#              field (field=<declaration>) or an instance and a consumer theorem instantiated at it
+#              (instance=<declaration> theorem=<declaration>). A PREMISE with neither is RED.
+# Format: <structure> <DATA|PARAMETER|PREMISE> [key=<declaration>...] <reason>.
+# A RATCHET: a TRIVIAL structure not listed is RED (PackedRefinement, the regression this exists
+# for, would be); an entry that is no longer TRIVIAL is RED until deleted. QuorumSystem (field
+# `nonempty`), SignatureOrigin (`EUFBreak` a definition) and SameCoinHidingLaws (the hiding claim
+# a parameter) left this list on 2026-10-05: the fix removed their degenerate inhabitant.
+Minidregg.Assurance.Ext6GateProofDeploymentAdmission.Deployment.ControlledExecution DATA instance=Minidregg.Assurance.Ext6GateProofPositiveExecution.Positive.control  [7 consumers] an execution, its runner and the runner's exactness; the trivial value is the execution with no receipt on any coin. It carries no semantic or probabilistic premise (its docstring); the security content is in SecurityResidual.
+Minidregg.Assurance.HyperdocumentHistoryAdmission.PostSpan DATA instance=Minidregg.Assurance.HyperdocumentLinkReopenWitness.linkSpan  [1 consumer] start, width, withinBounds; the trivial value is the empty interval, a real span. Non-emptiness is required where it matters (CanonicalPostLayout.spanNonempty).
+Minidregg.Compiler.NativeWorkProfiles.Tower256DotProductRequest DATA instance=Minidregg.Compiler.NativeWorkProfiles.tower256DotProductBenchmarkSentinelRequest  [1 consumer] the trivial value is the request over empty vectors, a real request.
+Minidregg.Compiler.NextgenLightClientPublicInputs.TowerElem DATA  [3 consumers] level 0, bits 0: the canonical zero element, a real value (built by parseTower).
+Minidregg.Compiler.Tower256NativeByteBoundary.SemanticChecker DATA  [5 consumers] check_iff is a biconditional, so Accepts is fixed by check; the trivial value is the refuse-all checker, which fails closed. No instance exists anywhere: an unused seam (instantiate it or delete it).
+Minidregg.Kernel.OutboxDelivery.AckVerifier PARAMETER instance=Minidregg.Kernel.OutboxDelivery.tagVerifier theorem=Minidregg.Kernel.OutboxDelivery.tagVerifier_accepted_exact  [13 consumers] the authentication relation is a structure PARAMETER since 2026-10-05 (it was a field: Authenticated := True with an accept-all verify satisfied sound). The trivial value left is the refuse-all verifier, which fails closed; 11 consumers are refusal-order laws true of every verifier. The tag verifier refuses every wrong tag (tagVerifier_refuses_wrong_tag).
+Minidregg.Kernel.ProviderExecutionLease.CompletionBoundary PARAMETER instance=Minidregg.Kernel.ProviderExecutionLease.Witness.completionBoundary  [16 consumers] Evidence := False removes only Outcome.completed; cancel, compensate, expire and quarantine stay meaningful. Every instance (all fixtures) uses the rootBound equation as Evidence, which anyone can compute, so it authenticates nothing: soundness of completion needs the separately supplied CompletionRefinement.
+Minidregg.Kernel.WorldKindInstance.Prepared DATA instance=Minidregg.Kernel.WorldKindInstance.prepare  [2 consumers] a patch with its ValidFrom proof; the trivial value is the empty patch, a valid no-op, and prepared_preserves_rom holds for every valid patch. Built by the deployed constructor prepare.
+Minidregg.Selvage.Oracle DATA instance=Minidregg.Selvage.Oracle.empty  [110 consumers] the trivial value is Oracle.empty, the intended fresh-handler witness (research, Selvage).
+Minidregg.Selvage.ProofSystem PARAMETER instance=Minidregg.Selvage.verifierRelationSystem theorem=Minidregg.Selvage.rung_sound  [8 consumers] the trivial value is the system that rejects everything; rung_sound and ivc_tower_sound take KnowledgeSound as a separate premise. No deployed instance by decision (2026-10-01: Mini admits by re-execution, the proof slot is empty).
+Minidregg.Theory.PlanBinding.Plan DATA instance=Minidregg.Theory.PlanBinding.Example.planA  [5 consumers] footprint, patch, covers; the trivial value is the no-op plan, and the commutation theorems hold of it legitimately.
+Minidregg.Theory.PrivateEvidencePortal PARAMETER instance=Minidregg.Assurance.BfvPrivateComputationJoin.coreEvidencePortal theorem=Minidregg.Assurance.BfvPrivateComputationJoin.core_bfv_bound_semantics  [1 consumer] every instance (all research fixtures) is the decide-portal of a named relation; the soundness law points one way into a relation that is a field, so the accept-all/True pair also satisfies it: make Accepts a parameter, as AckVerifier's was (open).
+Minidregg.Theory.ResourceCost.Quote DATA instance=Minidregg.Theory.ResourceCost.Quote.zero  [4 consumers] the trivial value is Quote.zero, a real quote; deployed constructors at ResourceCost.lean:302 and DurableCommitProtocol.lean:697.
+Minidregg.Theory.TypedAuthorization.Parentage DATA instance=Minidregg.Theory.TypedAuthorization.Parentage.empty  [57 consumers] the trivial value is Parentage.empty, the real empty parent map; the deployed instance is CredentialAuthorityState.parentageOf.
+Minidregg.Kernel.Receiving.Payload DATA  [1 consumer] 2026-10-04 integrator (RECEIVER-COLLAPSE): the writes/guards/charge/subject of one intent with its two well-formedness proofs; its degenerate inhabitant (no writes, no guards) is a real no-op intent. Its one consumer, lookup_install, is a store law true of EVERY payload, so nothing is certified by the payload premise and nothing needs to be.

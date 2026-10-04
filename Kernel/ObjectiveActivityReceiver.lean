@@ -16,7 +16,7 @@ The turn the kernel decides is its intent, under this receiver's seal:
 `Decided.intent` is literally `Birth.intent` / `Delivery.intent` / ... of
 `Kernel.ObjectiveActivity` with the sealing `seal`, so every resume-contract
 theorem stated there for every sealing holds of the intent this receiver commits
-(`native_delivery_consumes_once`, `native_resume_binds_checkpoint`).
+(`native_delivery_consumes_once`, `native_delivery_fields_bind_checkpoint`).
 
 **Objects** (ROOT ruling OBJECT AUTHORITY). A cell is an object to the kernel
 only with a record (`Kernel.ObjectRecord`: the pinned package, the law that
@@ -317,18 +317,11 @@ def createRequest (command : Command) (object : Nat) (pin : Digest) (law : Minid
     (upgrade : ObjectRecord.UpgradePolicy) (payer : Nat) : CreateRequest :=
   ⟨command.subject, ⟨object⟩, pin, law, upgrade, payer⟩
 
-/-- The kernel's decision of one command, indexed by the command. -/
-inductive Decided {rootBytes : List UInt8 → Digest} (config : Config) (snapshot : DataSnapshot rootBytes)
-    (height : Nat) (command : Command) : Type where
-  | publish (stored : ObjectiveActivity.Stored) (publication : Publication config snapshot stored)
-  | create (request : CreateRequest) (created : Creation config snapshot request)
-  | birth (request : BirthRequest) (born : Birth config snapshot height request)
-  | resolve (request : ResolveRequest) (resolution : Resolution config snapshot height request)
-  | deliver (request : DeliverRequest) (delivery : Delivery config snapshot height request)
-  | topUp (request : TopUpRequest) (topped : TopUp config snapshot request)
-  | writeState (request : StateWriteRequest) (written : StateWrite config snapshot height request)
-  | exhaust (request : ExhaustRequest) (exhausted : Exhaustion config snapshot height request)
-  | abandon (request : AbandonRequest) (abandoned : Abandonment config snapshot height request)
+/-- The kernel turn a command decided: one `ObjectiveActivity.AdmittedTurn`
+(the command fixes which admission function ran). -/
+abbrev Decided {rootBytes : List UInt8 → Digest} (config : Config) (snapshot : DataSnapshot rootBytes)
+    (height : Nat) (_command : Command) : Type :=
+  ObjectiveActivity.AdmittedTurn config snapshot height
 
 /-- The transaction a command's turn commits under: the kernel's own ids,
 computable from the command alone (so a retry finds its record by them). -/
@@ -411,31 +404,6 @@ def decideTurn {rootBytes : List UInt8 → Digest} (config : Config) (snapshot :
       let abandoned ← kernel (ObjectiveActivity.abandon config snapshot height request)
       if abandoned.await.id ≠ await then throw .staleAwait
       pure (.abandon request abandoned)
-
-def Decided.posts {rootBytes : List UInt8 → Digest} {config : Config} {snapshot : DataSnapshot rootBytes}
-    {height : Nat} {command : Command} : Decided config snapshot height command → List Post
-  | .publish _ publication => publication.posts
-  | .create _ created => created.posts
-  | .birth _ born => born.posts
-  | .resolve _ resolution => resolution.posts
-  | .deliver _ delivery => delivery.posts
-  | .topUp _ topped => [topped.posted.write config snapshot]
-  | .writeState _ written => written.posts
-  | .exhaust _ exhausted => exhausted.posts
-  | .abandon _ abandoned => abandoned.posts
-
-def Decided.intent {rootBytes : List UInt8 → Digest} {config : Config} {snapshot : DataSnapshot rootBytes}
-    {height : Nat} {command : Command} (sealing : Seal) :
-    Decided config snapshot height command → DataIntent rootBytes
-  | .publish _ publication => publication.intent sealing
-  | .create _ created => created.intent sealing
-  | .birth _ born => born.intent sealing
-  | .resolve _ resolution => resolution.intent sealing
-  | .deliver _ delivery => delivery.intent sealing
-  | .topUp _ topped => topped.intent sealing
-  | .writeState _ written => written.intent sealing
-  | .exhaust _ exhausted => exhausted.intent sealing
-  | .abandon _ abandoned => abandoned.intent sealing
 
 def postStream : StreamCodec Post :=
   StreamCodec.xmap (StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream))
@@ -828,13 +796,13 @@ theorem native_delivery_consumes_once
       ∀ schedule after, DurableDataIntent.execute schedule next later ≠ .accepted after) ∧
     (∀ schedule, DurableDataIntent.execute schedule next (intent accepted) = .replayed (intent accepted).erase) := by
   have exact : intent accepted = delivery.intent (admissionSeal accepted.prepared ingress) := by
-    simp [intent, Prepared.intent, decided, Decided.intent]
+    simp [intent, Prepared.intent, decided, ObjectiveActivity.AdmittedTurn.intent]
   rw [exact] at installed ⊢
   exact ObjectiveActivity.resume_consumes_once delivery _ installed
 
-/-- **The native delivery resumes the stored checkpoint** (the kernel's
-`resume_binds_checkpoint`, at the Host's own snapshot). -/
-theorem native_resume_binds_checkpoint
+/-- **The native delivery's fields bind the stored checkpoint** (the kernel's
+projection `delivery_fields_bind_checkpoint`, at the Host's own snapshot). -/
+theorem native_delivery_fields_bind_checkpoint
     (accepted : Accepted deployment profile ambient durable ingress)
     {request : DeliverRequest}
     {delivery : Delivery accepted.prepared.config durable.snapshot ambient.height request}
@@ -848,7 +816,7 @@ theorem native_resume_binds_checkpoint
       Minidregg.Theory.ObjectiveBendDemandMachine.resume
         (ObjectiveActivity.responseData delivery.settlement.decided delivery.view).term state =
           some delivery.resumed :=
-  let ⟨record, state, a, b, c, d, e, _⟩ := ObjectiveActivity.resume_binds_checkpoint delivery
+  let ⟨record, state, a, b, c, d, e, _⟩ := ObjectiveActivity.delivery_fields_bind_checkpoint delivery
   ⟨record, state, a, b, c, d, e⟩
 
 structure Receipt where
@@ -950,6 +918,6 @@ def signingPlanCodec : LawfulCodec SigningPlan :=
 #assert_axioms native_birth_on_pinned_object
 #assert_axioms stranger_birth_refused
 #assert_axioms native_delivery_consumes_once
-#assert_axioms native_resume_binds_checkpoint
+#assert_axioms native_delivery_fields_bind_checkpoint
 
 end Minidregg.Kernel.ObjectiveActivityReceiver

@@ -9,6 +9,7 @@ import Compiler.GrainResourceBirthController
 
 import Compiler.JointControlFrame
 import Kernel.ProtectedContentGate
+import Kernel.ObjectiveActivityGate
 import Compiler.NativeInvocationProfile
 import Compiler.GenericSimplexCodec
 namespace Minidregg.Kernel.NativeHost
@@ -179,7 +180,13 @@ def Config.systemCell (config : Config) : Minidregg.Kernel.DurableDataIntent.Cel
 /-- Private receiving adapters select a facet only AFTER constructing their
 actual typed source-admission token. This discriminator is never decoded from
 network or client input; this helper alone grants no exception authority. -/
-inductive ControlFacet | joint | activity deriving DecidableEq
+inductive ControlFacet
+  | joint
+  | activity
+  /-- The kernel activity's own typed turns (`ObjectiveActivityReceiver.Accepted`):
+  the one facet that may write the protected activity coordinates. -/
+  | objectiveActivity
+  deriving DecidableEq
 
 /-- Whole-cell roots are shared protection coordinates. This first concrete
 composition requires separate physical cells; overlapping facets refuse all
@@ -197,6 +204,8 @@ def Config.sourceGate (config : Config) (own : Option ControlFacet)
     (intent : DurableDataIntent.DataIntent rootBytes) :
     Except DurableDataIntent.RejectReason Unit := do
   if !config.controlLayoutValid then throw (.durable .transactionConflict)
+  -- The protected activity coordinates: only the kernel activity's own facet writes them.
+  if own ≠ some .objectiveActivity then ObjectiveActivityGate.ordinaryGate intent
   match config.jointControl with
   | none => pure ()
   | some pin =>
@@ -222,6 +231,45 @@ spelling: the Host's transport uses it, and `describe` prints it
 def Config.anchorIdentity (config : Config) : String :=
   s!"domain:{config.deployment.domain.value};semantics:{config.profile.semantics.value};seed:{config.expectedSeed.value}"
 
+/-- **Every facet but the kernel activity's own runs the ordinary gate.** A
+source transition any other facet admits writes no protected activity
+coordinate (`ObjectiveActivityGate.ordinaryGate`). -/
+theorem Config.sourceGate_ordinary (config : Config) {own : Option ControlFacet}
+    {rootBytes : List UInt8 → Digest}
+    {snapshot : DurableDataIntent.DataSnapshot rootBytes} {intent : DurableDataIntent.DataIntent rootBytes}
+    (foreign : own ≠ some .objectiveActivity)
+    (admitted : config.sourceGate own snapshot intent = .ok ()) :
+    ObjectiveActivityGate.ordinaryGate intent = .ok () := by
+  cases layout : config.controlLayoutValid with
+  | false =>
+      have refused : config.sourceGate own snapshot intent = .error (.durable .transactionConflict) := by
+        simp [Config.sourceGate, layout]; rfl
+      rw [refused] at admitted
+      cases admitted
+  | true =>
+      cases gate : ObjectiveActivityGate.ordinaryGate intent with
+      | error reason =>
+          simp [Config.sourceGate, layout, foreign, gate, bind, Except.bind, pure, Except.pure] at admitted
+      | ok value => cases value; rfl
+
+/-- **A write to a protected activity cell from any other facet is refused by
+name**: the source gate answers `protectedWrite`, naming a protected cell the
+intent writes. -/
+theorem Config.sourceGate_refuses_protected (config : Config) {own : Option ControlFacet}
+    {rootBytes : List UInt8 → Digest}
+    {snapshot : DurableDataIntent.DataSnapshot rootBytes} {intent : DurableDataIntent.DataIntent rootBytes}
+    (foreign : own ≠ some .objectiveActivity) (layout : config.controlLayoutValid = true)
+    {write : DurableDataIntent.DataWrite} (writes : write ∈ intent.writes)
+    (isProtected : ObjectiveActivityGate.Protected write.cellId) :
+    ∃ cell, config.sourceGate own snapshot intent = .error (.protectedWrite cell) ∧
+      ObjectiveActivityGate.Protected cell := by
+  obtain ⟨cell, refused, protectedCell, _⟩ := ObjectiveActivityGate.ordinaryGate_refuses writes isProtected
+  refine ⟨cell, ?_, protectedCell⟩
+  simp [Config.sourceGate, layout, foreign, refused, bind, Except.bind, pure, Except.pure]
+
+#assert_axioms Config.sourceGate_ordinary
+#assert_axioms Config.sourceGate_refuses_protected
+
 /-- The Store transport keeps the actual system-cell tail law and checks every
 protected facet before physical append. -/
 def Config.physicalTransport (config : Config) : DurableReceiverIO.Transport :=
@@ -243,6 +291,16 @@ theorem Config.transport_systemCell (config : Config) :
 
 theorem Config.physicalTransport_systemCell (config : Config) :
     config.physicalTransport.systemCell = some config.systemCell := rfl
+
+/-- The transport of the kernel activity's own typed turns: the deployment's
+transport with the `objectiveActivity` facet, so the protected activity
+coordinates may be written, and every other facet's law still applies. -/
+def Config.activityTransport (config : Config) : DurableReceiverIO.Transport :=
+  { config.transport with sourceGate := config.sourceGate (some .objectiveActivity) }
+
+theorem Config.activityTransport_systemCell (config : Config) :
+    config.activityTransport.systemCell = some config.systemCell :=
+  config.transport_systemCell
 
 def logicalHeight (config : Config) (durable : Durable) : Height :=
   config.genesisHeight + durable.image.accepted.length

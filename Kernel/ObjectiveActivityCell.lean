@@ -15,9 +15,11 @@ activity package. Each holds one value:
 preimage, and the cell's identifier is a function of the deployment domain, the
 role and the key alone (`coordinate`). The registry's loaded-and-final law is
 `CellValid`: a cell of this role sits exactly at its coordinate. With
-`UserShape` false for the role, no resource birth may install one, and no other
-receiver selects the role, so these coordinates are protected: only the
-activity receiver writes them (`Kernel.ObjectiveActivityReceiver`).
+`UserShape` false for the role, no resource birth may install one, and every
+other source facet's intents are refused by name if they write any coordinate at
+or above `reservedBase` (`Kernel.ObjectiveActivityGate.ordinaryGate`,
+`protectedWrite`): only the kernel activity's own typed turns write them
+(`Kernel.ObjectiveActivityReceiver` under `ControlFacet.objectiveActivity`).
 -/
 import Compiler.PolicyRecordCodec
 import Theory.ResourceBirth

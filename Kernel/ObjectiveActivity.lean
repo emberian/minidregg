@@ -241,7 +241,9 @@ theorem record_roundTrip (record : Record) : decodeRecord (encodeRecord record) 
 Every activity cell is a registry cell of role `objectiveActivity` at
 `ObjectiveActivityCell.coordinate domain role key`; its body is the kernel's own
 framed bytes. The registry's law pins each cell to its coordinate, no birth may
-install the role, and only `ObjectiveActivityReceiver` writes it. -/
+install the role, and every intent from outside the kernel activity that writes
+a coordinate in the protected space is refused by name
+(`ObjectiveActivityGate.ordinaryGate`, `protectedWrite`). -/
 
 def recordKey (object : CellId) (activity : Digest) : Bytes :=
   digestStream.encode object ++ digestStream.encode activity
@@ -1121,7 +1123,8 @@ def commitYield {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
   | .ok written =>
   match plan.source with
   | .reply decider =>
-    if (readSlot config snapshot (AnswerSlot.name transaction cell generation)).isSome ||
+    if (payloadOf (snapshot.canonicalBytes (AnswerSlot.cell config.domain
+        (AnswerSlot.name transaction cell generation)))).isSome ||
         isRetired (snapshot.canonicalBytes (AnswerSlot.cell config.domain (AnswerSlot.name transaction cell generation)))
       then .error .slotFresh else
     .ok ⟨⟨awaitId cell generation checkpoint, .reply (AnswerSlot.name transaction cell generation) decider,
@@ -1359,6 +1362,8 @@ structure Publication {rootBytes : Bytes → Digest} (config : Config) (snapshot
     (stored : Stored) where
   private mk ::
   pin : Digest
+  /-- The package cell held no activity cell at all: a package is installed once, never overwritten. -/
+  fresh : payloadOf (snapshot.canonicalBytes (packageCell config.domain pin)) = none
   /-- The front end's replay of the stored package, which produced the artifact's core. -/
   replay : Replay config pin
   /-- The payer is a registered account of the loaded Book, and neither the credit asset's
@@ -1377,7 +1382,9 @@ def publish {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   let some artifact := ObjectiveBendSourceArtifact.decode stored.artifact | throw .packageMissing
   if artifact.outputCodec ≠ codecId then throw (.packageType "not an activity artifact")
   let pin := ObjectiveBendSourceArtifact.identity artifact
-  if (payloadOf (snapshot.canonicalBytes (packageCell config.domain pin))).isSome then throw .packageExists
+  match fresh : payloadOf (snapshot.canonicalBytes (packageCell config.domain pin)) with
+  | some _ => throw .packageExists
+  | none =>
   if stored.payer = config.asset ∨ stored.payer = config.collector then throw .payerInvalid
   match bookExact : loadBook config snapshot with
   | .error reason => throw reason
@@ -1387,7 +1394,7 @@ def publish {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
       match callable definition.replayed.accepted.typed.type with
       | .arrow _ _ _ (.computation _ _ _) => pure ()
       | _ => throw (.packageType "an activity package selects a definition `Input -> Activity<P,R,A>`")
-      pure ⟨pin, definition, book, bookExact, payerRegistered, _, rfl, _, rfl⟩
+      pure ⟨pin, fresh, definition, book, bookExact, payerRegistered, _, rfl, _, rfl⟩
     else throw .payerInvalid
 
 def Publication.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -1440,6 +1447,8 @@ structure Birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
     .ok program
   cell : CellId
   cellExact : cell = recordCell config.domain request.object (activityId request.object (birthTransaction request))
+  /-- The record cell held no activity cell at all. -/
+  fresh : payloadOf (snapshot.canonicalBytes cell) = none
   /-- The object's declared state as the birth found it (the first segment is
   not shown it: its write may not `set` present state). -/
   current : Option ObjectState
@@ -1497,7 +1506,9 @@ def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
         let activity := activityId request.object transaction
         let cell := recordCell config.domain request.object activity
         if isRetired (snapshot.canonicalBytes cell) then throw .recordRetired
-        if (payloadOf (snapshot.canonicalBytes cell)).isSome then throw .recordExists
+        match fresh : payloadOf (snapshot.canonicalBytes cell) with
+        | some _ => throw .recordExists
+        | none =>
         let held := heldAccount cell
         if request.account = config.asset ∨ request.account = config.collector ∨ request.account = held then
           throw .payerInvalid
@@ -1537,7 +1548,7 @@ def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
                   let posted ← postings book batch
                   let posts := recordPost config snapshot cell record ::
                     ((yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
-                  pure ⟨program, programExact, cell, rfl, current, currentExact, segment, segmentExact, yielded,
+                  pure ⟨program, programExact, cell, rfl, fresh, current, currentExact, segment, segmentExact, yielded,
                     yieldedExact, record, rfl, book, bookExact, posted, posts, rfl, rfl,
                     [guardAt snapshot (objectCell config.domain request.object),
                       guardAt snapshot (packageCell config.domain request.pin),
@@ -2263,6 +2274,61 @@ def Creation.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot :
   intentOf rootBytes (createTransaction request) created.posts
     [guardAt snapshot (packageCell config.domain request.pin)] [] sealing
 
+/-! ## One admitted turn -/
+
+/-- **One admitted kernel turn** on a snapshot at a height: the witness of
+exactly one of the kernel's admission functions (each `private mk`, so built
+only by `publish`, `create`, `birth`, `resolve`, `deliver`, `topUp`,
+`writeState`, `exhaust` or `abandon`). Every write the kernel activity commits
+is `AdmittedTurn.intent` of one (the native receiver's decided turn is this
+type, `ObjectiveActivityReceiver.Decided`), and the invariant
+`stored_checkpoints_typed` (`Kernel.ObjectiveCheckpointInvariant`) is stated
+over exactly these. -/
+inductive AdmittedTurn {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) : Type where
+  | publish (stored : Stored) (publication : Publication config snapshot stored)
+  | create (request : CreateRequest) (created : Creation config snapshot request)
+  | birth (request : BirthRequest) (born : Birth config snapshot height request)
+  | resolve (request : ResolveRequest) (resolution : Resolution config snapshot height request)
+  | deliver (request : DeliverRequest) (delivery : Delivery config snapshot height request)
+  | topUp (request : TopUpRequest) (topped : TopUp config snapshot request)
+  | writeState (request : StateWriteRequest) (written : StateWrite config snapshot height request)
+  | exhaust (request : ExhaustRequest) (exhausted : Exhaustion config snapshot height request)
+  | abandon (request : AbandonRequest) (abandoned : Abandonment config snapshot height request)
+
+/-- The posts a turn commits. -/
+def AdmittedTurn.posts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} : AdmittedTurn config snapshot height → List Post
+  | .publish _ publication => publication.posts
+  | .create _ created => created.posts
+  | .birth _ born => born.posts
+  | .resolve _ resolution => resolution.posts
+  | .deliver _ delivery => delivery.posts
+  | .topUp _ topped => [topped.posted.write config snapshot]
+  | .writeState _ written => written.posts
+  | .exhaust _ exhausted => exhausted.posts
+  | .abandon _ abandoned => abandoned.posts
+
+/-- The one intent a turn commits under a receiver's sealing. -/
+def AdmittedTurn.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} (sealing : Seal) : AdmittedTurn config snapshot height → DataIntent rootBytes
+  | .publish _ publication => publication.intent sealing
+  | .create _ created => created.intent sealing
+  | .birth _ born => born.intent sealing
+  | .resolve _ resolution => resolution.intent sealing
+  | .deliver _ delivery => delivery.intent sealing
+  | .topUp _ topped => topped.intent sealing
+  | .writeState _ written => written.intent sealing
+  | .exhaust _ exhausted => exhausted.intent sealing
+  | .abandon _ abandoned => abandoned.intent sealing
+
+/-- Every turn's intent is `intentOf` its posts: its writes are exactly the
+post images, nothing else. -/
+theorem AdmittedTurn.intent_writes {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} (sealing : Seal) (turn : AdmittedTurn config snapshot height) :
+    (turn.intent sealing).writes = turn.posts.map (Post.write rootBytes) := by
+  cases turn <;> rfl
+
 /-! ## The resume contract -/
 
 /-- An accepted durable execution installs exactly its intent. -/
@@ -2331,15 +2397,6 @@ theorem resume_consumes_once {rootBytes : Bytes → Digest} {config : Config} {s
   ⟨fun later again schedule after =>
       spent_claim_never_accepted (delivery.spends sealing) installed later again schedule after,
     installed_retry_replays installed⟩
-
-/-- A delivery from the post-state of a delivery of the same await is never
-accepted, whatever seals the two carry. -/
-theorem second_delivery_refused {rootBytes : Bytes → Digest} {config : Config} {snapshot next : Snapshot rootBytes}
-    {height later : Nat} {request again : DeliverRequest} (first : Delivery config snapshot height request)
-    (sealing : Seal) (installed : DurableDataIntent.execute .complete snapshot (first.intent sealing) = .accepted next)
-    (second : Delivery config next later again) (secondSeal : Seal) (sameAwait : second.await.id = first.await.id) :
-    ∀ schedule after, DurableDataIntent.execute schedule next (second.intent secondSeal) ≠ .accepted after :=
-  (resume_consumes_once first sealing installed).1 (second.intent secondSeal) (sameAwait ▸ second.spends secondSeal)
 
 /-- **The slot is decided once.** -/
 theorem slot_decided_once {rootBytes : Bytes → Digest} {config : Config} {snapshot next : Snapshot rootBytes}
@@ -2783,11 +2840,13 @@ theorem stateWrite_unviewed_never_sets {rootBytes : Bytes → Digest} {config : 
     stateWrite config snapshot object (some present) false write = .error .blindWrite := by
   simp [stateWrite, decoded, sets, bind, Except.bind]
 
-/-- **The resume binds the stored checkpoint.** The machine state a delivery
-resumes is decoded from the record cell's own checkpoint bytes, whose digest
-the record and the await id name; the response is the typed outcome with the
-view; nothing of the state comes from the request. -/
-theorem resume_binds_checkpoint {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+/-- **An admitted delivery's fields bind the stored checkpoint.** A projection
+of the `Delivery` witness, not a computation: its content is that `Delivery` is
+`private mk`, built only by `deliver`, which decodes the machine state from the
+record cell's own checkpoint bytes (whose digest the record and the await id
+name) and resumes it with the typed outcome and view; nothing of the state
+comes from the request. -/
+theorem delivery_fields_bind_checkpoint {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) :
     ∃ record state,
       readRecord snapshot request.record = some record ∧
@@ -2837,6 +2896,20 @@ theorem resume_deterministic {rootBytes : Bytes → Digest} {config : Config} {s
   refine ⟨resumedEq, segments, ?_⟩
   rw [one.nextExact, two.nextExact, records, segments, yieldeds]
 
+/-- Settling the purse keeps the ending turn's own postings first. -/
+theorem settlePurse_prefix {config : Config} {book : Book} {held : AccountId} {escrow : Escrow}
+    {before batch : Batch} {segment : Segment}
+    (ok : settlePurse config book held escrow before segment = .ok batch) :
+    ∃ rest, batch.operations = before.operations ++ rest := by
+  unfold settlePurse at ok
+  split at ok
+  · split at ok
+    · cases ok; exact ⟨[], by simp⟩
+    · cases ok
+  · split at ok
+    · cases ok; exact ⟨[], by simp⟩
+    · cases ok; exact ⟨_, rfl⟩
+
 /-- **No fee depends on computation.** The fee the ending turn takes from the
 purse is the used half of the escrowed pair, chosen by how the await ended
 (settled from the snapshot and height) and nothing else: two deliveries of the
@@ -2846,7 +2919,7 @@ envelope is the public price of what it DECLARED. -/
 theorem refund_measurement_free {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {first second : DeliverRequest} (one : Delivery config snapshot height first)
     (two : Delivery config snapshot height second) (sameRecord : first.record = second.record) :
-    (deliveryCharges config one.record first.record one.settlement.path first).operations.head? =
+    one.posted.batch.operations.head? =
         some (Operation.fee (heldAccount first.record) config.collector config.asset
           (one.record.escrow.used one.settlement.path)) ∧
       one.record.escrow.used one.settlement.path = two.record.escrow.used two.settlement.path ∧
@@ -2859,7 +2932,13 @@ theorem refund_measurement_free {rootBytes : Bytes → Digest} {config : Config}
   have settlements : one.settlement = two.settlement := by
     have a := one.settled; have b := two.settled
     rw [sameRecord, awaits, b] at a; exact (Except.ok.inj a).symm
-  exact ⟨rfl, by rw [records, settlements], by rw [records, settlements]⟩
+  have posted : one.posted.batch.operations.head? =
+      (deliveryCharges config one.record first.record one.settlement.path first).operations.head? := by
+    rw [one.postedBatch]
+    obtain ⟨rest, prefix_⟩ := settlePurse_prefix one.batchExact
+    rw [prefix_]
+    simp [deliveryCharges]
+  exact ⟨posted, by rw [records, settlements], by rw [records, settlements]⟩
 
 /-- The submitter's charge for added envelope is the public price of what it
 DECLARED, never of what ran. -/
@@ -3411,7 +3490,6 @@ theorem create_refuses_existing {rootBytes : Bytes → Digest} {config : Config}
 #assert_axioms installed_retry_replays
 #assert_axioms Delivery.spends
 #assert_axioms resume_consumes_once
-#assert_axioms second_delivery_refused
 #assert_axioms slot_decided_once
 #assert_axioms slot_single_decider
 #assert_axioms settle_posts_current
@@ -3429,7 +3507,8 @@ theorem create_refuses_existing {rootBytes : Bytes → Digest} {config : Config}
 #assert_axioms editField_add_comm
 #assert_axioms editFields_add_comm
 #assert_axioms add_writes_commute
-#assert_axioms resume_binds_checkpoint
+#assert_axioms delivery_fields_bind_checkpoint
+#assert_axioms AdmittedTurn.intent_writes
 #assert_axioms faultOr_refused
 #assert_axioms faultOr_ok
 #assert_axioms resumedSegment_never_refuses_program_fault
@@ -3441,6 +3520,7 @@ theorem create_refuses_existing {rootBytes : Bytes → Digest} {config : Config}
 #assert_axioms law_denial_is_not_a_fault
 #assert_axioms exhaustion_below_cap_is_not_a_fault
 #assert_axioms resume_deterministic
+#assert_axioms settlePurse_prefix
 #assert_axioms refund_measurement_free
 #assert_axioms submitter_charge_declared
 #assert_axioms yield_reserves_pair

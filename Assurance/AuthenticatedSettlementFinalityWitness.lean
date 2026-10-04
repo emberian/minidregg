@@ -302,6 +302,7 @@ def quorums : QuorumSystem Node where
   intersects := by
     intro left right leftQuorum rightQuorum
     refine ⟨0, leftQuorum ?_, rightQuorum ?_⟩ <;> simp [quorumCore]
+  nonempty := ⟨quorumCore, Finset.Subset.refl _⟩
 
 def book (boundary : VerifiedSignatureBoundary) :
     AuthenticatedVoteBook Node Nat boundary.Signature Nat Nat Nat Nat :=

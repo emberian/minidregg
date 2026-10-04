@@ -274,9 +274,9 @@ A delivery spends the await as a nullifier bound to the checkpoint digest AND wr
 record cell against its current root, so consume-once is a compare-and-swap at
 admission's decide point (`Kernel/ObjectiveActivity.lean:36-39`). Proved:
 `resume_consumes_once` (`:2067`: after a delivery installs, no intent spending its await
-is ever accepted, and its exact retry replays), `second_delivery_refused` (`:2080`),
+is ever accepted, and its exact retry replays),
 `resume_outcome_preserved` (`:2311`: an await answered by its slot reaches the activity
-exactly as decided), `resume_binds_checkpoint` (`:2531`), `resume_deterministic`
+exactly as decided), `delivery_fields_bind_checkpoint` (`:2531`), `resume_deterministic`
 (`:2547`). In `ObjectiveProofs`: a delivery advances the record one generation
 (`delivery_advances_generation`, `Kernel/ObjectiveResumeContract.lean:593`); the installed
 record is stated per phase, awaiting: the record just written

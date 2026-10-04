@@ -201,9 +201,11 @@ structure Ack (AuthTag : Type) where
 
 /-- Deployment authentication boundary.  `verify` is executable policy;
 `sound` is the required refinement from acceptance to the external
-authentication relation.  This module supplies no instance. -/
-structure AckVerifier (AuthTag : Type) where
-  Authenticated : Ack AuthTag → Prop
+authentication relation `Authenticated`, which is a PARAMETER every use site
+names: as a field it let `Authenticated := True` with an accept-all `verify`
+satisfy `sound`, so "an accepted ack is authenticated" said nothing.  This
+module supplies no instance. -/
+structure AckVerifier (AuthTag : Type) (Authenticated : Ack AuthTag → Prop) where
   verify : Ack AuthTag → Bool
   sound : ∀ ack, verify ack = true → Authenticated ack
 
@@ -225,7 +227,7 @@ inductive AckOutcome where
 not merely the stable message.  This rejects late acknowledgements for an
 attempt superseded by a retry. -/
 def checkAck {rootBytes : List UInt8 → Digest} {AuthTag : Type}
-    (verifier : AckVerifier AuthTag) (message : Message rootBytes)
+    {Authenticated : Ack AuthTag → Prop} (verifier : AckVerifier AuthTag Authenticated) (message : Message rootBytes)
     (currentAttempt : Nat) (ack : Ack AuthTag) : AckOutcome :=
   if verifier.verify ack ≠ true then
     .rejected .unauthenticated
@@ -242,9 +244,9 @@ def checkAck {rootBytes : List UInt8 → Digest} {AuthTag : Type}
     .accepted
 
 def Ack.ExactFor {rootBytes : List UInt8 → Digest} {AuthTag : Type}
-    (verifier : AckVerifier AuthTag) (message : Message rootBytes)
+    {Authenticated : Ack AuthTag → Prop} (verifier : AckVerifier AuthTag Authenticated) (message : Message rootBytes)
     (currentAttempt : Nat) (ack : Ack AuthTag) : Prop :=
-  verifier.Authenticated ack ∧
+  Authenticated ack ∧
     ack.messageId = message.messageId ∧
     ack.attempt = currentAttempt ∧
     ack.outboxRoot = message.outboxRoot ∧
@@ -252,7 +254,7 @@ def Ack.ExactFor {rootBytes : List UInt8 → Digest} {AuthTag : Type}
 
 theorem accepted_ack_exact
     {rootBytes : List UInt8 → Digest} {AuthTag : Type}
-    (verifier : AckVerifier AuthTag) (message : Message rootBytes)
+    {Authenticated : Ack AuthTag → Prop} (verifier : AckVerifier AuthTag Authenticated) (message : Message rootBytes)
     (currentAttempt : Nat) (ack : Ack AuthTag)
     (accepted : checkAck verifier message currentAttempt ack = .accepted) :
     ack.ExactFor verifier message currentAttempt := by
@@ -272,10 +274,10 @@ theorem accepted_ack_exact
 
 theorem accepted_ack_binds_exact_outbox
     {rootBytes : List UInt8 → Digest} {AuthTag : Type}
-    (verifier : AckVerifier AuthTag) (message : Message rootBytes)
+    {Authenticated : Ack AuthTag → Prop} (verifier : AckVerifier AuthTag Authenticated) (message : Message rootBytes)
     (currentAttempt : Nat) (ack : Ack AuthTag)
     (accepted : checkAck verifier message currentAttempt ack = .accepted) :
-    verifier.Authenticated ack ∧
+    Authenticated ack ∧
       ack.outboxBytes = message.outboxBytes ∧
       ack.outboxRoot = message.outboxRoot ∧
       rootBytes ack.outboxBytes = ack.outboxRoot := by
@@ -286,7 +288,7 @@ theorem accepted_ack_binds_exact_outbox
 
 theorem stale_ack_rejected
     {rootBytes : List UInt8 → Digest} {AuthTag : Type}
-    (verifier : AckVerifier AuthTag) (message : Message rootBytes)
+    {Authenticated : Ack AuthTag → Prop} (verifier : AckVerifier AuthTag Authenticated) (message : Message rootBytes)
     (currentAttempt : Nat) (ack : Ack AuthTag)
     (authenticated : verifier.verify ack = true)
     (id : ack.messageId = message.messageId)
@@ -297,7 +299,7 @@ theorem stale_ack_rejected
 
 theorem wrong_ack_message_rejected
     {rootBytes : List UInt8 → Digest} {AuthTag : Type}
-    (verifier : AckVerifier AuthTag) (message : Message rootBytes)
+    {Authenticated : Ack AuthTag → Prop} (verifier : AckVerifier AuthTag Authenticated) (message : Message rootBytes)
     (currentAttempt : Nat) (ack : Ack AuthTag)
     (authenticated : verifier.verify ack = true)
     (wrong : ack.messageId ≠ message.messageId) :
@@ -307,7 +309,7 @@ theorem wrong_ack_message_rejected
 
 theorem future_ack_rejected
     {rootBytes : List UInt8 → Digest} {AuthTag : Type}
-    (verifier : AckVerifier AuthTag) (message : Message rootBytes)
+    {Authenticated : Ack AuthTag → Prop} (verifier : AckVerifier AuthTag Authenticated) (message : Message rootBytes)
     (currentAttempt : Nat) (ack : Ack AuthTag)
     (authenticated : verifier.verify ack = true)
     (id : ack.messageId = message.messageId)
@@ -320,7 +322,7 @@ theorem future_ack_rejected
 
 theorem wrong_ack_root_rejected
     {rootBytes : List UInt8 → Digest} {AuthTag : Type}
-    (verifier : AckVerifier AuthTag) (message : Message rootBytes)
+    {Authenticated : Ack AuthTag → Prop} (verifier : AckVerifier AuthTag Authenticated) (message : Message rootBytes)
     (currentAttempt : Nat) (ack : Ack AuthTag)
     (authenticated : verifier.verify ack = true)
     (id : ack.messageId = message.messageId)
@@ -331,7 +333,7 @@ theorem wrong_ack_root_rejected
 
 theorem wrong_ack_bytes_rejected
     {rootBytes : List UInt8 → Digest} {AuthTag : Type}
-    (verifier : AckVerifier AuthTag) (message : Message rootBytes)
+    {Authenticated : Ack AuthTag → Prop} (verifier : AckVerifier AuthTag Authenticated) (message : Message rootBytes)
     (currentAttempt : Nat) (ack : Ack AuthTag)
     (authenticated : verifier.verify ack = true)
     (id : ack.messageId = message.messageId)
@@ -370,11 +372,43 @@ structure ProgressRefinement
   eventuallyAcknowledged : EventuallyAcknowledgedWithin message
     (schedulerCeiling + networkCeiling + acknowledgementCeiling)
 
+/-! ## A named verifier instance
+
+The tag verifier: the authentication relation is "the tag is the expected tag
+for this message and attempt", and `verify` decides exactly that relation. It is
+the instance the consumers are instantiated at (`tagVerifier_accepted_exact`),
+and it refuses every other tag (`tagVerifier_refuses_wrong_tag`). -/
+
+def tagVerifier (expected : MessageId → Nat → Nat) :
+    AckVerifier Nat (fun ack => ack.authTag = expected ack.messageId ack.attempt) where
+  verify ack := decide (ack.authTag = expected ack.messageId ack.attempt)
+  sound ack ok := of_decide_eq_true ok
+
+/-- At the tag verifier, an accepted acknowledgement carries the expected tag
+and binds the exact outstanding attempt and outbox. -/
+theorem tagVerifier_accepted_exact {rootBytes : List UInt8 → Digest} (expected : MessageId → Nat → Nat)
+    (message : Message rootBytes) (currentAttempt : Nat) (ack : Ack Nat)
+    (accepted : checkAck (tagVerifier expected) message currentAttempt ack = .accepted) :
+    ack.authTag = expected ack.messageId ack.attempt ∧ ack.messageId = message.messageId ∧
+      ack.attempt = currentAttempt ∧ ack.outboxRoot = message.outboxRoot ∧
+      ack.outboxBytes = message.outboxBytes :=
+  accepted_ack_exact (tagVerifier expected) message currentAttempt ack accepted
+
+/-- The tag verifier refuses an acknowledgement whose tag is not the expected one. -/
+theorem tagVerifier_refuses_wrong_tag {rootBytes : List UInt8 → Digest} (expected : MessageId → Nat → Nat)
+    (message : Message rootBytes) (currentAttempt : Nat) (ack : Ack Nat)
+    (wrong : ack.authTag ≠ expected ack.messageId ack.attempt) :
+    checkAck (tagVerifier expected) message currentAttempt ack = .rejected .unauthenticated := by
+  simp [checkAck, tagVerifier, wrong]
+
 /-! ## Axiom audit -/
 
 /-- info: 'Minidregg.Kernel.OutboxDelivery.duplicate_retry_replays' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms duplicate_retry_replays
 /-- info: 'Minidregg.Kernel.OutboxDelivery.accepted_ack_binds_exact_outbox' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms accepted_ack_binds_exact_outbox
+
+#assert_axioms tagVerifier_accepted_exact
+#assert_axioms tagVerifier_refuses_wrong_tag
 
 end Minidregg.Kernel.OutboxDelivery

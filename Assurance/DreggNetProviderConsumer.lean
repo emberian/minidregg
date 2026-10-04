@@ -896,6 +896,7 @@ def quorums : QuorumSystem ReplicaNode where
   intersects := by
     intro left right leftQ rightQ
     refine ⟨0, leftQ ?_, rightQ ?_⟩ <;> simp [quorumCore]
+  nonempty := ⟨quorumCore, Finset.Subset.refl _⟩
 
 noncomputable def terminalCandidate :
     Candidate TransactionId CellId StableNullifier ReplayEnvelope :=

@@ -811,6 +811,32 @@ def run : MetaM Unit := do
   for (a, reason) in trivialAllow do
     if reason.isEmpty then
       failures := failures.push s!"trivial-allowlist: {a} carries no reason"
+    -- Polarity (REVIEW-SCHOLAR-BREAD-META §2): DATA (the trivial inhabitant is a real value),
+    -- PARAMETER (consumers quantify over it; `instance=` names an instance they are used at),
+    -- PREMISE (the trivial inhabitant makes consumers vacuous: `field=` names a non-triviality
+    -- field, or `instance=` and `theorem=` name an instance and a consumer instantiated at it).
+    let words := (reason.splitOn " ").filter (· ≠ "")
+    let named (key : String) : Option Name := words.findSome? fun word =>
+      match word.splitOn "=" with
+      | [k, v] => if k == key && v != "" then some v.toName else none
+      | _ => none
+    let present (key : String) : Bool := match named key with
+      | some n => env.contains n
+      | none => false
+    for key in ["instance", "theorem", "field"] do
+      if let some n := named key then
+        unless env.contains n do
+          failures := failures.push s!"trivial-allowlist: {a} names {key}={n}, which is not a declaration"
+    match words.head? with
+    | some "DATA" => pure ()
+    | some "PARAMETER" =>
+      unless present "instance" do
+        failures := failures.push s!"trivial-allowlist: {a} PARAMETER names no instance (instance=<declaration>)"
+    | some "PREMISE" =>
+      unless present "field" || (present "instance" && present "theorem") do
+        failures := failures.push s!"trivial-allowlist: {a} PREMISE has no non-triviality field and no instance with a theorem (field=<declaration> | instance=<declaration> theorem=<declaration>)"
+    | _ =>
+      failures := failures.push s!"trivial-allowlist: {a} names no polarity (DATA | PARAMETER | PREMISE)"
     unless trivials.any (·.1 == a) do
       failures := failures.push s!"trivial-allowlist: {a} is not a TRIVIAL bound structure -- delete the entry"
   for (a, reason) in allow do

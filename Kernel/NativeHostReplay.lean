@@ -979,6 +979,13 @@ structure Derived (config : Config) (opened : Opened config) where
   bootstrapBundle : Option (Σ source : JointControlBootstrapBundle.Source,
     { accepted : JointControlBootstrapBundle.Accepted config opened source //
       intent = accepted.intent }) := none
+  /-- The kernel activity's own typed turn: the one admission judged under the
+  `objectiveActivity` facet (`Config.activityTransport`), which alone may write
+  the protected activity coordinates (`Kernel.ObjectiveActivityGate`). -/
+  activity : Option (Σ ingress : ObjectiveActivityReceiver.DecodedIngress,
+    { accepted : ObjectiveActivityReceiver.Accepted config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector⟩
+        opened.durable ingress // intent = ObjectiveActivityReceiver.intent accepted }) := none
 
 /-- Controller-only exception for a precisely rederived source-owned operation.
 Ordinary records continue through the centrally installed conflicting-write gate. -/
@@ -1000,6 +1007,9 @@ private def Derived.bootstrapAdmission {config : Config} {opened : Opened config
 No normal source transition receives it while the pinned control is uninitialized. -/
 def Derived.transport {config : Config} {opened : Opened config}
     (derived : Derived config opened) : DurableReceiverIO.Transport :=
+  match derived.activity with
+  | some _ => config.activityTransport
+  | none =>
   match derived.jointReservation with
   | some held => JointReceiver.reservedTransport config opened held.val
   | none => match derived.bootstrapBundle with
@@ -1011,6 +1021,8 @@ def Derived.transport {config : Config} {opened : Opened config}
 theorem Derived.transport_systemCell {config : Config} {opened : Opened config}
     (derived : Derived config opened) : derived.transport.systemCell = some config.systemCell := by
   unfold Derived.transport
+  split
+  · exact config.activityTransport_systemCell
   split
   · exact Config.physicalTransport_systemCell config
   · split
@@ -1087,7 +1099,7 @@ def Derived.ofInvoke {config : Config} {opened : Opened config}
     Derived config opened :=
   ⟨accepted.dataIntent shape, .invoke prepared signed shape accepted,
     none, none, none, none, some ⟨_, signed, prepared, shape, accepted, rfl⟩,
-    none, none, none, none, none, none, none⟩
+    none, none, none, none, none, none, none, none⟩
 
 /-- Reuse the very same typed dispatch admission for the exact CAS readback
 fast path. No second signature check or caller-created Derived is needed. -/
@@ -1095,13 +1107,13 @@ def DispatchAt.toDerived {config : Config} {opened : Opened config}
     {ingress : ApplicationDispatchAdmissionIngress.Ingress}
     (admitted : DispatchAt config opened ingress) : Derived config opened :=
   ⟨admitted.intent, .applicationDispatch admitted, none, none, none, none, none,
-    none, none, none, none, none, none, none⟩
+    none, none, none, none, none, none, none, none⟩
 
 def SessionEnrollmentAt.toDerived {config : Config} {opened : Opened config}
     {ingress : ApplicationGrainSessionEnrollmentSource.Ingress}
     (admitted : SessionEnrollmentAt config opened ingress) : Derived config opened :=
   ⟨admitted.intent, .applicationSessionEnrollment admitted,
-    none, none, none, none, none, none, none, none, none, none, none, none⟩
+    none, none, none, none, none, none, none, none, none, none, none, none, none⟩
 
 theorem SessionEnrollmentAt.toDerived_intent {config : Config} {opened : Opened config}
     {ingress : ApplicationGrainSessionEnrollmentSource.Ingress}
@@ -1112,13 +1124,13 @@ def AgentDispatchAt.toDerived {config : Config} {opened : Opened config}
     {ingress : ApplicationDispatchAgentIngress.Ingress}
     (admitted : AgentDispatchAt config opened ingress) : Derived config opened :=
   ⟨admitted.intent, .applicationAgentDispatch admitted, none, none, none, none, none,
-    none, none, none, none, none, none, none⟩
+    none, none, none, none, none, none, none, none⟩
 
 def LifetimeDispatchAt.toDerived {config : Config} {opened : Opened config}
     {ingress : ApplicationAgentLifetimeDispatchIngress.Ingress}
     (admitted : LifetimeDispatchAt config opened ingress) : Derived config opened :=
   ⟨admitted.intent, .applicationAgentLifetimeDispatch admitted, none, none, none,
-    none, none, none, none, none, none, none, none, none⟩
+    none, none, none, none, none, none, none, none, none, none⟩
 
 theorem LifetimeDispatchAt.toDerived_intent {config : Config} {opened : Opened config}
     {ingress : ApplicationAgentLifetimeDispatchIngress.Ingress}
@@ -1134,27 +1146,27 @@ def ClaimAt.toDerived {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleClaimIngress.Ingress}
     (admitted : ClaimAt config opened ingress) : Derived config opened :=
   ⟨admitted.intent, .applicationLifecycleClaim admitted, none, none, none, none, none,
-    none, none, none, none, none, none, none⟩
+    none, none, none, none, none, none, none, none⟩
 
 def ClaimAtV2.toDerived {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleClaimV2Ingress.Ingress}
     (admitted : ClaimAtV2 config opened ingress) : Derived config opened :=
   ⟨admitted.intent, .applicationLifecycleClaimV2 admitted,
     none, none, none, some ⟨ingress, ⟨admitted, rfl⟩⟩, none,
-    none, none, none, none, none, none, none⟩
+    none, none, none, none, none, none, none, none⟩
 
 def CompletionAt.toDerived {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleCompletionIngress.Ingress}
     (admitted : CompletionAt config opened ingress) : Derived config opened :=
   ⟨admitted.intent, .applicationLifecycleCompletion admitted,
-    none, none, none, none, none, none, none, none, none, none, none, none⟩
+    none, none, none, none, none, none, none, none, none, none, none, none, none⟩
 
 def ClaimAtV3.toDerived {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleClaimV3Ingress.Ingress}
     (admitted : ClaimAtV3 config opened ingress) : Derived config opened :=
   ⟨admitted.intent, .applicationLifecycleClaimV3 admitted,
     none, none, none, none, none, none,
-    some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none, none, none, none⟩
+    some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none, none, none, none, none⟩
 
 theorem ClaimAtV3.toDerived_intent {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleClaimV3Ingress.Ingress}
@@ -1178,7 +1190,7 @@ def CompletionAtV2.toDerived {config : Config} {opened : Opened config}
     (admitted : CompletionAtV2 config opened ingress) : Derived config opened :=
   ⟨admitted.intent, .applicationLifecycleCompletionV2 admitted,
     none, none, none, none, none, none, none,
-    some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none, none, none⟩
+    some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none, none, none, none⟩
 
 theorem CompletionAtV2.toDerived_intent {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleCompletionV2Ingress.Ingress}
@@ -1752,77 +1764,77 @@ private def derive (config : Config) (opened : Opened config)
     | .error reason => return .error s!"fleet turn refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨FleetTurnReceiver.intent accepted,
-          .fleetTurn accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          .fleetTurn accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ParticipantKeyEnrollment.decodeIngress bytes then
     match ← ParticipantKeyEnrollmentReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"participant key enrollment refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨ParticipantKeyEnrollmentReceiver.intent accepted,
-          .participantKeyEnrollment accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          .participantKeyEnrollment accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := SubjectKeyRotation.decodeIngress bytes then
     match ← SubjectKeyRotation.family.admitNative config.profile.compilerProfile config.deployment
         config.signature (rotationEnv config) opened.durable ingress with
     | .error reason => return .error s!"subject key rotation refused: {repr reason}"
     | .ok admission =>
         return .ok ⟨(SubjectKeyRotation.receiver (receivingLaws config)).intent admission.accepted,
-          .subjectKeyRotation admission, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          .subjectKeyRotation admission, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := SubjectKeyCommitmentAdoption.decodeIngress bytes then
     match ← SubjectKeyCommitmentAdoption.admitDecodedNative config.deployment config.profile.semantics
         opened.durable config.signature ingress with
     | .error reason => return .error s!"next-key adoption refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨SubjectKeyCommitmentAdoption.intent accepted,
-          .subjectKeyCommitmentAdoption accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          .subjectKeyCommitmentAdoption accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ParticipantFactoryProvisioning.decodeIngress bytes then
     match ← ParticipantFactoryProvisioningReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"participant factory provisioning refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨ParticipantFactoryProvisioningReceiver.intent accepted,
-          .participantFactoryProvisioning accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          .participantFactoryProvisioning accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := PayBookReceiver.decodeIngress bytes then
     match ← PayBookReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"pay book refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨PayBookReceiver.intent accepted,
-          .payBook accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          .payBook accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := PayAssignmentReceiver.decodeIngress bytes then
     match ← PayAssignmentReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"pay assignment refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨PayAssignmentReceiver.intent accepted,
-          .payAssignment accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          .payAssignment accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := RealmWellReceiver.decodeIngress bytes then
     match ← RealmWellReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height, config.tariff.asset⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"realm well command refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨RealmWellReceiver.intent accepted,
-          .realmWell accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          .realmWell accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ClockTickReceiver.decodeIngress bytes then
     match ← ClockTickReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"clock tick refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨ClockTickReceiver.intent accepted,
-          .clockTick accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          .clockTick accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := PayObservationReceiver.decodeIngress bytes then
     match ← PayObservationReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"pay observation refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨PayObservationReceiver.intent accepted,
-          .payObservation accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          .payObservation accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := PayClaimCommand.decodeIngress bytes then
     match ← PayClaimReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height, config.tariff⟩ config.expectedSeed opened.durable config.signature ingress with
     | .error reason => return .error s!"paid claim refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨PayClaimReceiver.intent accepted,
-          .payClaim accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          .payClaim accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := PayEnrolReceiver.decodeIngress bytes then
     if (PayEnrolV2Receiver.parsedMemo ingress.command.observation).isSome then
       match ← PayEnrolV2Receiver.admitDecodedNative config.deployment config.profile
@@ -1830,27 +1842,27 @@ private def derive (config : Config) (opened : Opened config)
       | .error reason => return .error s!"v2 paid enrollment refused: {repr reason}"
       | .ok accepted =>
           return .ok ⟨PayEnrolV2Receiver.intent accepted,
-            .payEnrolV2 accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+            .payEnrolV2 accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
     match ← PayEnrolReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height, config.tariff⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"pay enrolment refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨PayEnrolReceiver.intent accepted,
-          .payEnrol accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          .payEnrol accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := PurseRefillReceiver.decodeIngress bytes then
     match ← PurseRefillReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"pay refill refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨PurseRefillReceiver.intent accepted,
-          .payRefill accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          .payRefill accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := JobMoneyReceiver.decodeIngress bytes then
     match ← JobMoneyReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"job money refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨JobMoneyReceiver.intent accepted,
-          .jobMoney accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          .jobMoney accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ObjectiveActivityReceiver.decodeIngress bytes then
     match ← ObjectiveActivityReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height, config.tariff.asset, config.tariff.collector⟩ opened.durable
@@ -1858,31 +1870,32 @@ private def derive (config : Config) (opened : Opened config)
     | .error reason => return .error s!"activity turn refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨ObjectiveActivityReceiver.intent accepted,
-          .activity accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          .activity accepted, none, none, none, none, none, none, none, none, none, none, none, none,
+          some ⟨ingress, ⟨accepted, rfl⟩⟩⟩
   if let some ingress := CertifyReceiver.decodeIngress bytes then
     match ← CertifyReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"certify refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨CertifyReceiver.intent accepted,
-          .certify accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          .certify accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := CapabilityRevocationReceiver.decodeIngress bytes then
     match ← CapabilityRevocationReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"revocation refused: {repr reason}"
-    | .ok accepted => return .ok ⟨CapabilityRevocationReceiver.intent accepted, .revoke accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+    | .ok accepted => return .ok ⟨CapabilityRevocationReceiver.intent accepted, .revoke accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := CapabilityRenounce.decodeIngress bytes then
     match ← CapabilityRenounce.admitDecodedNative config.deployment config.profile.semantics
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
     | .rejected reason => return .error s!"renounce refused: {repr reason}"
     | .refusedToHolder refusal => return .error s!"renounce refused: {repr refusal.reason}"
     | .accepted accepted =>
-        return .ok ⟨CapabilityRenounce.intent accepted, .renounce accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+        return .ok ⟨CapabilityRenounce.intent accepted, .renounce accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := FnSelectiveReleaseIngress.ingressCodec.decode bytes then
     match ← FnSelectiveReleaseAdmission.admit config opened ingress with
     | .error _ => return .error "historical selected release admission refused"
     | .ok accepted =>
-        return .ok ⟨accepted.intent config opened ingress, .selectiveRelease accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+        return .ok ⟨accepted.intent config opened ingress, .selectiveRelease accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := FnConsumerNamespaceRegistration.ingressCodec.decode bytes then
     unless frontier.registrationAbsent ingress.spec.consumerNamespace do
       return .error "fn consumer namespace already registered"
@@ -1892,7 +1905,7 @@ private def derive (config : Config) (opened : Opened config)
     | .error detail => return .error detail
     | .ok accepted =>
         return .ok ⟨accepted.intent config opened legacy ingress,
-          .fnConsumerNamespace accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          .fnConsumerNamespace accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := FnSelectedPollCoverage.ingressCodec.decode bytes then
     let .ok cursor := frontier.cursor ingress.spec.evidence.key
       | return .error "historical selected fn frontier is ambiguous"
@@ -1906,7 +1919,7 @@ private def derive (config : Config) (opened : Opened config)
     | .error detail => return .error detail
     | .ok accepted =>
         return .ok ⟨accepted.intent config opened cursor original registration ingress,
-          .fnSelectedPoll accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          .fnSelectedPoll accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := FnEmptyPollProgressV2.ingressCodec.decode bytes then
     let .ok cursor := frontier.cursor ingress.spec.evidence.key
       | return .error "historical empty fn frontier is ambiguous"
@@ -1917,7 +1930,7 @@ private def derive (config : Config) (opened : Opened config)
     | .error detail => return .error detail
     | .ok accepted =>
         return .ok ⟨accepted.intent config opened cursor registration ingress,
-          .fnEmptyPollV2 accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          .fnEmptyPollV2 accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if (ApplicationShareIssueSource.ingressCodec.decode bytes).isSome then
     match ← ApplicationShareIssueAdmission.admitNative config.profile config opened.pins
         config.signature opened.durable height bytes with
@@ -1925,7 +1938,7 @@ private def derive (config : Config) (opened : Opened config)
     | .ok ⟨issueIngress, accepted⟩ =>
         return .ok ⟨ApplicationShareIssueReceiver.intent accepted,
           .applicationShareIssue accepted, some (.legacy issueIngress accepted rfl),
-          none, none, none, none, none, none, none, none, none, none, none⟩
+          none, none, none, none, none, none, none, none, none, none, none, none⟩
   if (ApplicationShareIssueGrainSource.codec.decode bytes).isSome then
     let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩
     match ← ApplicationShareIssueGrainAdmission.admitNative config.profile config opened.pins
@@ -1934,7 +1947,7 @@ private def derive (config : Config) (opened : Opened config)
     | .ok ⟨issueIngress, accepted⟩ =>
         return .ok ⟨ApplicationShareIssueGrainReceiver.intent accepted,
           .applicationGrainShareIssue accepted, some (.grain issueIngress accepted rfl),
-          none, none, none, none, none, none, none, none, none, none, none⟩
+          none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ApplicationGrainSessionEnrollmentSource.ingressCodec.decode bytes then
     match ← admitSessionEnrollmentAt config opened issues ingress with
     | .error detail => return .error detail
@@ -1944,7 +1957,7 @@ private def derive (config : Config) (opened : Opened config)
     | .error detail => return .error detail
     | .ok admitted => return .ok ⟨admitted.intent,
         .applicationAgentLifetimeGrantIssue admitted, none, none, none, none, none,
-        none, none, none, some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none, none⟩
+        none, none, none, some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none, none, none⟩
   if let some ingress := ApplicationAgentLifetimeDispatchIngress.codec.decode bytes then
     match ← admitLifetimeDispatchAt config opened grants reserves ingress with
     | .error detail => return .error detail
@@ -1957,12 +1970,12 @@ private def derive (config : Config) (opened : Opened config)
     match ← admitDispatchAt config opened issues ingress with
     | .error detail => return .error detail
     | .ok admitted =>
-        return .ok ⟨admitted.intent, .applicationDispatch admitted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+        return .ok ⟨admitted.intent, .applicationDispatch admitted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := FnSelectiveReleaseSourcePublication.ingressCodec.decode bytes then
     match ← FnSelectiveReleaseSourceReceiver.admitLoaded config opened ingress with
     | .error _ => return .error "historical selected source publication admission refused"
     | .ok accepted =>
-        return .ok ⟨accepted.intent config opened ingress, .selectedSourcePublication accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+        return .ok ⟨accepted.intent config opened ingress, .selectedSourcePublication accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ApplicationFailedStartRecoveryIngress.codec.decode bytes then
     match ← admitFailedStartRecoveryAt config opened claimsV3 ingress with
     | .error detail => return .error detail
@@ -1973,21 +1986,21 @@ private def derive (config : Config) (opened : Opened config)
     | .ok admitted =>
         return .ok ⟨admitted.intent, .applicationLifecycleCompletionV2 admitted,
           none, none, none, none, none, none, none,
-          some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none, none, none⟩
+          some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none, none, none, none⟩
   if let some ingress := ApplicationLifecycleClaimV3Ingress.codec.decode bytes then
     match ← admitClaimV3At config opened beginsV3 ingress with
     | .error detail => return .error detail
     | .ok admitted =>
         return .ok ⟨admitted.intent, .applicationLifecycleClaimV3 admitted,
           none, none, none, none, none, none,
-          some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none, none, none, none⟩
+          some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none, none, none, none, none⟩
   if let some ingress := ApplicationLifecycleBeginV3Ingress.codec.decode bytes then
     match ← admitBeginV3At config opened createdV3 runningV3 ingress with
     | .error detail => return .error detail
     | .ok admitted =>
         return .ok ⟨admitted.intent, .applicationLifecycleBeginV3 admitted,
           none, none, none, none, none,
-          some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none, none, none, none, none⟩
+          some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none, none, none, none, none, none⟩
   if let some ingress := ApplicationLifecycleCompletionIngress.codec.decode bytes then
     match ← admitCompletionAt config opened claimsV2 ingress with
     | .error detail => return .error detail
@@ -1997,25 +2010,25 @@ private def derive (config : Config) (opened : Opened config)
     | .error detail => return .error detail
     | .ok admitted =>
         return .ok ⟨admitted.intent, .applicationLifecycleClaimV2 admitted,
-          none, none, none, some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none, none, none, none, none, none, none⟩
+          none, none, none, some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ApplicationLifecycleClaimIngress.codec.decode bytes then
     match ← admitClaimAt config opened begins ingress with
     | .error detail => return .error detail
     | .ok admitted =>
-        return .ok ⟨admitted.intent, .applicationLifecycleClaim admitted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+        return .ok ⟨admitted.intent, .applicationLifecycleClaim admitted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ApplicationLifecycleBeginV2Ingress.codec.decode bytes then
     match ← ApplicationLifecycleBeginV2Admission.admitNative config.deployment
         config.profile ⟨config.federation, height⟩ config.signature opened.durable ingress with
     | .error _ => return .error "historical descriptor-bound lifecycle BEGIN refused"
     | .ok accepted =>
         return .ok ⟨accepted.intent, .applicationLifecycleBeginV2 accepted,
-          none, none, some ⟨ingress, ⟨accepted, rfl⟩⟩, none, none, none, none, none, none, none, none, none⟩
+          none, none, some ⟨ingress, ⟨accepted, rfl⟩⟩, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ApplicationLifecycleBeginIngress.codec.decode bytes then
     match ← ApplicationLifecycleBeginReceiver.admitLoaded config.deployment config.profile
         ⟨config.federation, height⟩ config.signature opened.durable ingress with
     | .error _ => return .error "historical application lifecycle begin admission refused"
     | .ok accepted => return .ok ⟨accepted.intent, .applicationLifecycleBegin accepted,
-        none, some ⟨ingress, ⟨accepted, rfl⟩⟩, none, none, none, none, none, none, none, none, none, none⟩
+        none, some ⟨ingress, ⟨accepted, rfl⟩⟩, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := GrainResourceBirthPolicyController.decodeIngress bytes then
     match pinned : config.grainBirthTariffValue with
     | .error detail => return .error s!"historical grain-backed birth tariff: {detail}"
@@ -2036,7 +2049,7 @@ private def derive (config : Config) (opened : Opened config)
                 | .error _ => return .error "historical grain-backed birth admission refused"
                 | .ok accepted =>
                     return .ok ⟨GrainResourceBirthReceiver.intent accepted,
-                      .grainBirth pinned accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+                      .grainBirth pinned accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   match ResourceBirthPolicyController.Concrete.decodeIngress bytes with
   | some ingress =>
       match ← ResourceBirthPolicyController.Concrete.admitDecodedNative config.profile config.deployment
@@ -2049,14 +2062,14 @@ private def derive (config : Config) (opened : Opened config)
         match ← PolicyInstallReceiver.admitDecodedNative config.profile config.deployment config.signature
             opened.durable config.federation height ingress with
         | .error reason => return .error s!"policy installation refused: {repr reason}"
-        | .ok accepted => return .ok ⟨PolicyInstallReceiver.intent accepted, .install accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+        | .ok accepted => return .ok ⟨PolicyInstallReceiver.intent accepted, .install accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
     | none =>
       match CapabilityDelegationReceiver.decodeIngress bytes with
       | some ingress =>
           match ← CapabilityDelegationReceiver.admitDecodedNative config.deployment config.profile
               ⟨config.federation, height⟩ opened.durable config.signature ingress with
           | .error reason => return .error s!"delegation refused: {repr reason}"
-          | .ok accepted => return .ok ⟨CapabilityDelegationReceiver.intent accepted, .delegate accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          | .ok accepted => return .ok ⟨CapabilityDelegationReceiver.intent accepted, .delegate accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
       | none =>
         match DeclaredResourceController.decodeSignedBytes bytes with
         | none => return .error "unsupported or noncanonical signed historical ingress"
@@ -2078,7 +2091,7 @@ private def derive (config : Config) (opened : Opened config)
                   | .error reason => return .error s!"invocation admission refused: {repr reason}"
                   | .ok accepted => return .ok ⟨accepted.dataIntent shape,
                       .invoke prepared signed shape accepted, none, none, none, none,
-                      some ⟨command, signed, prepared, shape, accepted, rfl⟩, none, none, none, none, none, none, none⟩
+                      some ⟨command, signed, prepared, shape, accepted, rfl⟩, none, none, none, none, none, none, none, none⟩
                 else return .error "historical invocation physical shape refused"
 
 /-- Compare the complete existing canonical record codec. Function-valued
@@ -2814,7 +2827,7 @@ def admitBeginV3Verified {config : Config} {target : Durable}
     | .ok admitted => pure admitted
   return .ok ⟨admitted.intent, .applicationLifecycleBeginV3 admitted,
     none, none, none, none, none,
-    some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none, none, none, none, none⟩
+    some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none, none, none, none, none, none⟩
 
 def beginV2Derived {config : Config} {target : Durable}
     (old : Verified config target)
@@ -2825,7 +2838,7 @@ def beginV2Derived {config : Config} {target : Durable}
       old.opened.durable ingress) : Derived config old.opened :=
   ⟨accepted.intent, .applicationLifecycleBeginV2 accepted,
     none, none, some ⟨ingress, ⟨accepted, rfl⟩⟩, none, none,
-    none, none, none, none, none, none, none⟩
+    none, none, none, none, none, none, none, none⟩
 
 def admitCompletionVerified {config : Config} {target : Durable}
     (old : Verified config target)

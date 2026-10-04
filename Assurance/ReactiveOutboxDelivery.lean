@@ -259,17 +259,17 @@ replay, even though the attempt number changed. -/
 /-- Any accepted agent acknowledgement is externally authenticated and binds
 the literal installed outbox bytes and root. -/
 theorem accepted_ack_binds_installed_outbox
-    {AuthTag : Type} (verifier : AckVerifier AuthTag)
+    {AuthTag : Type} {Authenticated : Ack AuthTag → Prop} (verifier : AckVerifier AuthTag Authenticated)
     (currentAttempt : Nat) (ack : Ack AuthTag)
     (accepted : checkAck verifier message currentAttempt ack = .accepted) :
-    verifier.Authenticated ack ∧
+    Authenticated ack ∧
       ack.outboxBytes = settlement.terminalPlan.outboxBytes ∧
       ack.outboxRoot = settlement.terminalPlan.outboxRoot ∧
       Link.materializer.rootBytes ack.outboxBytes = ack.outboxRoot :=
   accepted_ack_binds_exact_outbox verifier message currentAttempt ack accepted
 
 theorem stale_ack_rejected
-    {AuthTag : Type} (verifier : AckVerifier AuthTag)
+    {AuthTag : Type} {Authenticated : Ack AuthTag → Prop} (verifier : AckVerifier AuthTag Authenticated)
     (currentAttempt : Nat) (ack : Ack AuthTag)
     (authenticated : verifier.verify ack = true)
     (id : ack.messageId = message.messageId)
@@ -280,7 +280,7 @@ theorem stale_ack_rejected
     authenticated id stale
 
 theorem wrong_ack_message_rejected
-    {AuthTag : Type} (verifier : AckVerifier AuthTag)
+    {AuthTag : Type} {Authenticated : Ack AuthTag → Prop} (verifier : AckVerifier AuthTag Authenticated)
     (currentAttempt : Nat) (ack : Ack AuthTag)
     (authenticated : verifier.verify ack = true)
     (wrong : ack.messageId ≠ message.messageId) :
@@ -290,7 +290,7 @@ theorem wrong_ack_message_rejected
     authenticated wrong
 
 theorem future_ack_rejected
-    {AuthTag : Type} (verifier : AckVerifier AuthTag)
+    {AuthTag : Type} {Authenticated : Ack AuthTag → Prop} (verifier : AckVerifier AuthTag Authenticated)
     (currentAttempt : Nat) (ack : Ack AuthTag)
     (authenticated : verifier.verify ack = true)
     (id : ack.messageId = message.messageId)
@@ -301,7 +301,7 @@ theorem future_ack_rejected
     authenticated id future
 
 theorem wrong_ack_root_rejected
-    {AuthTag : Type} (verifier : AckVerifier AuthTag)
+    {AuthTag : Type} {Authenticated : Ack AuthTag → Prop} (verifier : AckVerifier AuthTag Authenticated)
     (currentAttempt : Nat) (ack : Ack AuthTag)
     (authenticated : verifier.verify ack = true)
     (id : ack.messageId = message.messageId)
@@ -312,7 +312,7 @@ theorem wrong_ack_root_rejected
     authenticated id attemptExact wrong
 
 theorem wrong_ack_bytes_rejected
-    {AuthTag : Type} (verifier : AckVerifier AuthTag)
+    {AuthTag : Type} {Authenticated : Ack AuthTag → Prop} (verifier : AckVerifier AuthTag Authenticated)
     (currentAttempt : Nat) (ack : Ack AuthTag)
     (authenticated : verifier.verify ack = true)
     (id : ack.messageId = message.messageId)

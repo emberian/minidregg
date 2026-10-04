@@ -340,12 +340,14 @@ structure SameCoinReductionLaws
     RelationWitness statement
 
 /-- Hiding is optional and required only by a privacy theorem.  Relation
-satisfaction and proof of knowledge do not manufacture this object. -/
+satisfaction and proof of knowledge do not manufacture this object.  The hiding
+claim is a PARAMETER every privacy theorem names: as a field, `HidingClaim :=
+True` satisfied `proveHiding`, emptied `HidingFailure`, and made
+`hidingFailure_le` hold of nothing. -/
 structure SameCoinHidingLaws
     {Omega : Type} [Fintype Omega] (ledger : FailureLedger Omega)
     {statement : NoteSpendProofController.Statement}
-    (bound : BoundReflectedSuite statement) where
-  HidingClaim : Receipt → Prop
+    (bound : BoundReflectedSuite statement) (HidingClaim : Receipt → Prop) where
   proveHiding : ∀ omega receipt,
     ControlAccepts statement receipt →
     bound.suite.ReflectedAccepts statement receipt →
@@ -569,14 +571,14 @@ theorem witness_of_not_soundnessBad
 /-! ### Optional privacy game -/
 
 def HidingFailure (family : CommonGameFamily Omega Error bound)
-    (privacy : SameCoinHidingLaws family.ledger bound)
+    {HidingClaim : Receipt → Prop} (privacy : SameCoinHidingLaws family.ledger bound HidingClaim)
     (omega : Omega) : Prop :=
   ∃ reply, family.execution omega = some reply ∧
-    ¬privacy.HidingClaim reply.controlled.receipt
+    ¬HidingClaim reply.controlled.receipt
 
 theorem hidingFailure_event
     (family : CommonGameFamily Omega Error bound)
-    (privacy : SameCoinHidingLaws family.ledger bound)
+    {HidingClaim : Receipt → Prop} (privacy : SameCoinHidingLaws family.ledger bound HidingClaim)
     (omega : Omega) (failure : family.HidingFailure privacy omega) :
     (family.ledger .zeroKnowledgeHiding).event omega := by
   by_contra good
@@ -586,7 +588,7 @@ theorem hidingFailure_event
 
 theorem hidingFailure_le
     (family : CommonGameFamily Omega Error bound)
-    (privacy : SameCoinHidingLaws family.ledger bound) :
+    {HidingClaim : Receipt → Prop} (privacy : SameCoinHidingLaws family.ledger bound HidingClaim) :
     uniformProb Omega (family.HidingFailure privacy) ≤
       family.ledger.privacyPrice :=
   le_trans (uniformProb_mono (family.hidingFailure_event privacy))

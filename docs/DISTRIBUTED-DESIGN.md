@@ -198,10 +198,12 @@ stalls finality; it cannot forge it" becomes two theorems, not a sentence.
 
 LANDED (2026-09-05): `Kernel/FinalityLiveness.lean` (259 lines) and
 `Theory/RevocationConsensus.lean` (221 lines). `PostGSTProgress` is the one carrier;
-`cannot_forge` carries no liveness premise; `no_progress_without_quorum : IsEmpty
-PostGSTProgress`; the closed realizer is built and refuted at three broken siblings (dead
-quorum system, partition with only node 2 online, never-delivering schedule — the last
-refuted at the fair leg alone, provably not vacuously). `dead_undecidable` ported and
+the closed realizer is built and refuted at two broken siblings (partition with only node 2
+online, never-delivering schedule — the last refuted at the fair leg alone, provably not
+vacuously). (2026-10-05: `cannot_forge`, `no_progress_without_quorum`,
+`no_finality_without_any_quorum` and the dead-quorum sibling are DELETED: they assumed no set
+is a quorum, which `QuorumSystem.nonempty` now refutes; per-certificate refusal is
+`FinalityGate.check_false_of_not_quorum`.) `dead_undecidable` ported and
 elaborated. `[LIVENESS-authenticated]`: the authenticated layer's bare `Prop` fields should be
 replaced by this carrier; named, not done.
 

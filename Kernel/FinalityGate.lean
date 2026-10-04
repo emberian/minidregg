@@ -23,8 +23,8 @@ nothing is exported.  This module is the decider.
   `check_complete` closes the loop: every `Finalized` certificate's voter set
   checks `true`; `check_eq_true_iff_exists_finalized` is the exact
   characterization.
-* **Fail-closed teeth**: `check_false_of_not_quorum`, `check_false_of_unvoted`,
-  `check_false_of_no_quorum` -- each with the OTHER condition still available,
+* **Fail-closed teeth**: `check_false_of_not_quorum`, `check_false_of_unvoted`
+  -- each with the OTHER condition still available,
   so a refusal is attributable to exactly one leg.
 * **Closed instance, computed**: on `ReplicatedSettlementFinality.ClosedInstance`
   (`Fin 3`, core quorum `{0, 1}`), the honest cert and its superset are
@@ -188,13 +188,6 @@ theorem check_false_of_unvoted {candidate : Candidate TxId CellId Nullifier Even
     check quorums book candidate cert = false :=
   Bool.eq_false_iff.mpr fun accepted =>
     absent (((check_eq_true_iff quorums book candidate cert).mp accepted).2 node member)
-
-/-- No quorum system-wide: the decider manufactures nothing (the computed face
-of `no_finality_without_any_quorum`). -/
-theorem check_false_of_no_quorum {candidate : Candidate TxId CellId Nullifier Event}
-    (cert : Cert Node) (none : ∀ voters, ¬ quorums.isQuorum voters) :
-    check quorums book candidate cert = false :=
-  check_false_of_not_quorum quorums book (none cert.voters)
 
 end Generic
 

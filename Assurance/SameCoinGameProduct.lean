@@ -314,7 +314,8 @@ def game {Omega Error : Type} [Fintype Omega]
     {statement : Minidregg.Compiler.NoteSpendProofController.Statement}
     {bound : Minidregg.Compiler.NoteSpendProofController.BoundReflectedSuite statement}
     (family : CommonGameFamily Omega Error bound)
-    (privacy : SameCoinHidingLaws family.ledger bound) :
+    {HidingClaim : Minidregg.Compiler.NoteSpendProofController.Receipt → Prop}
+    (privacy : SameCoinHidingLaws family.ledger bound HidingClaim) :
     RegisteredGame NoteFailureClass Omega where
   ledger := family.ledger
   falseAccept := fun omega =>

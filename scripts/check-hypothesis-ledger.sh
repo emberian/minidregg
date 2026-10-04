@@ -29,6 +29,8 @@
 #   (f) the inhabitation check on an instance's binders is deleted (D6); the
 #       `Unshowable` plant, whose only satisfying "instance" ranges over an
 #       uninhabited carrier, must stop reading TOOTHLESS and fail the instrument.
+#   (g) one allowlist entry is rewritten as a PREMISE with no non-triviality field
+#       and no instance; the run must turn RED.
 # The copies are written to a temporary directory; the tree is never edited.
 #
 # usage: scripts/check-hypothesis-ledger.sh [--no-self-test]
@@ -167,6 +169,28 @@ EOF
     echo "self-test (f) instance inhabitation check deleted: PASS (exit $status; $(grep -a -m1 'Unshowable expected' "$tmp/noinhabit.log"))"
   else
     echo "self-test (f) instance inhabitation check deleted: FAIL (exit $status)"; cat "$tmp/noinhabit.log"; failed=1
+  fi
+
+  # (g) a PREMISE entry with neither a non-triviality field nor an instance and a theorem
+  #     must turn the run RED (the allowlist is a classification, not a pardon list)
+  python3 - "$HYP_TRIVIAL_ALLOW" "$tmp/premise-allow.txt" <<'EOF'
+import sys
+lines = open(sys.argv[1]).read().splitlines()
+out, done = [], False
+for line in lines:
+    if not done and line and not line.startswith("#"):
+        out.append(line.split()[0] + " PREMISE self-test: no field, no instance")
+        done = True
+    else:
+        out.append(line)
+assert done, "self-test: no allowlist entry to rewrite"
+open(sys.argv[2], "w").write("\n".join(out) + "\n")
+EOF
+  status=$(HYP_TRIVIAL_ALLOW="$tmp/premise-allow.txt" run "$ledger" "$tmp/premise.log")
+  if [ "$status" != 0 ] && grep -aq "PREMISE has no non-triviality field" "$tmp/premise.log"; then
+    echo "self-test (g) unclassified PREMISE: PASS (exit $status)"
+  else
+    echo "self-test (g) unclassified PREMISE: FAIL (exit $status)"; cat "$tmp/premise.log"; failed=1
   fi
 fi
 

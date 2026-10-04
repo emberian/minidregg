@@ -16,5 +16,7 @@ import Theory.ObjectiveBendTemplates
 import Theory.ObjectiveBendCheckpointRoundTrip
 import Kernel.ObjectiveBendAdmissionSemantics
 import Kernel.ObjectiveResumeContract
+import Kernel.ObjectiveCheckpointInvariant
+import Kernel.ObjectiveActivityGateRoute
 import Compiler.ObjectiveBendFrontEndAdequacy
 import Compiler.ObjectiveBendSpecificationClosure

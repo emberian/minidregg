@@ -19,17 +19,16 @@ realizer slot (ATLAS §6 law 1) and turns the sentence into two theorems.
 * **`progress`** is the replicated layer's `finalized_of_available_fair_responsive`
   applied to the carrier (reused, not re-proved); **`checked_of_progress`**:
   under the carrier the DECIDER accepts (`FinalityGate.check_complete`).
-* **The two poles, kept separate.**  `cannot_forge`: with no quorum anywhere,
-  every presented certificate is refused -- NO liveness premise appears
-  (`check_false_of_no_quorum`; safety needs none).  `no_progress_without_quorum`:
-  with no quorum anywhere, the carrier has NO realizer (`IsEmpty`) -- the
-  network stalls.
+* **No quorum anywhere is not a quorum system.**  `QuorumSystem.nonempty`
+  excludes it, so the earlier poles over it (`cannot_forge`,
+  `no_progress_without_quorum`, the `deadQuorums` sibling) are gone: each
+  assumed a premise the structure now refutes.  Refusal is per certificate
+  (`FinalityGate.check_false_of_not_quorum`); stalling is the partition sibling.
 * **Closed instance, computed.**  `realizer` inhabits the carrier on
   `ReplicatedSettlementFinality.ClosedInstance` (its schedule / online /
   available / fair / responsive, reused); `progress realizer` is the honest
-  certificate and its voters check `true` by `decide`.  Three broken siblings:
-  `deadQuorums` (no set is a quorum) -- the carrier is empty AND every cert is
-  refused, both instantiated; `partitioned` (only node 2 online, the core on the
+  certificate and its voters check `true` by `decide`.  Two broken siblings:
+  `partitioned` (only node 2 online, the core on the
   far side) -- no `AvailableQuorum`, so no realizer with that online predicate;
   `neverSchedule` (nothing is ever delivered) -- `FairDelivery` fails for the
   honest quorum while `Responsive` still holds, so the refusal is the fair
@@ -104,22 +103,6 @@ theorem checked_of_progress [DecidablePred quorums.isQuorum]
     check quorums book candidate ⟨(progress quorums book candidate p).voters⟩ = true :=
   check_complete quorums book (progress quorums book candidate p)
 
-/-! ## §3. The constitution's sentence as two theorems, kept apart. -/
-
-/-- *It cannot forge it.*  With no quorum anywhere, every presented certificate
-is refused.  No liveness premise appears: safety needs none. -/
-theorem cannot_forge [DecidablePred quorums.isQuorum]
-    [DecidableEq (Candidate TxId CellId Nullifier Event)]
-    (none : ∀ voters, ¬ quorums.isQuorum voters) :
-    ∀ cert : Cert Node, check quorums book candidate cert = false :=
-  fun cert => check_false_of_no_quorum quorums book cert none
-
-/-- *It stalls.*  With no quorum anywhere, the carrier has no realizer: no
-schedule, online set, or responsiveness manufactures an available quorum. -/
-theorem no_progress_without_quorum (none : ∀ voters, ¬ quorums.isQuorum voters) :
-    IsEmpty (PostGSTProgress quorums book candidate) :=
-  ⟨fun p => none p.available.voters p.available.quorum⟩
-
 end Generic
 
 /-! ## §4. The closed instance: the carrier inhabited, and refuted at three
@@ -150,30 +133,6 @@ theorem realizer_checked :
 
 example : check quorums book candidate ⟨(progress quorums book candidate realizer).voters⟩ = true := by
   decide
-
-/-! ### Broken sibling 1: no set is a quorum.  Both poles instantiate. -/
-
-/-- The quorum system in which nothing is a quorum; intersection is vacuous. -/
-def deadQuorums : QuorumSystem ReplicaNode where
-  isQuorum := fun _ => False
-  intersects := fun _ _ absurd _ => absurd.elim
-
-instance deadQuorumsDecidable : DecidablePred deadQuorums.isQuorum :=
-  fun _ => isFalse id
-
-theorem deadQuorums_none : ∀ voters, ¬ deadQuorums.isQuorum voters := fun _ absurd => absurd
-
-/-- The carrier over `deadQuorums` has no realizer: finality stalls. -/
-theorem dead_stalls : IsEmpty (PostGSTProgress deadQuorums book candidate) :=
-  no_progress_without_quorum deadQuorums book candidate deadQuorums_none
-
-/-- Every presented certificate over `deadQuorums` is refused: finality is not
-forged.  The honest wire included -- decided. -/
-theorem dead_cannot_forge : ∀ cert : Cert ReplicaNode, check deadQuorums book candidate cert = false :=
-  cannot_forge deadQuorums book candidate deadQuorums_none
-
-example : check deadQuorums book candidate honest = false := by decide
-example : check deadQuorums book candidate full = false := by decide
 
 /-! ### Broken sibling 2: a partition.  The quorum system is intact; only node
 `2` is online and the core `{0, 1}` is on the far side. -/
@@ -224,28 +183,12 @@ end ClosedInstance
 /-- info: 'Minidregg.Kernel.FinalityLiveness.checked_of_progress' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms checked_of_progress
 
-/-- info: 'Minidregg.Kernel.FinalityLiveness.cannot_forge' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs in #print axioms cannot_forge
-
-/-- info: 'Minidregg.Kernel.FinalityLiveness.no_progress_without_quorum' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs in #print axioms no_progress_without_quorum
-
 /--
 info: 'Minidregg.Kernel.FinalityLiveness.ClosedInstance.realizer_checked' depends on axioms: [propext,
  Classical.choice,
  Quot.sound]
 -/
 #guard_msgs in #print axioms ClosedInstance.realizer_checked
-
-/-- info: 'Minidregg.Kernel.FinalityLiveness.ClosedInstance.dead_stalls' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs in #print axioms ClosedInstance.dead_stalls
-
-/--
-info: 'Minidregg.Kernel.FinalityLiveness.ClosedInstance.dead_cannot_forge' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
-#guard_msgs in #print axioms ClosedInstance.dead_cannot_forge
 
 /-- info: 'Minidregg.Kernel.FinalityLiveness.ClosedInstance.partition_stalls' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms ClosedInstance.partition_stalls

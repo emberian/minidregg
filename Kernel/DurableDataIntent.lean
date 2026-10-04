@@ -311,6 +311,12 @@ inductive RejectReason
   /-- **`tailBound`**: a record at height `head` is more than `bound` heights
   past the last certified head `certified` (`Kernel.TailBound.tail_bounded`). -/
   | tailBound (head certified bound : Nat)
+  /-- **`protectedWrite`**: an intent from outside the kernel activity writes a
+  cell in the activity's protected coordinate space (an activity record, answer
+  slot, declared state, package or object record;
+  `Kernel.ObjectiveActivityGate.ordinaryGate`). Only the kernel activity's own
+  typed turns write those cells. -/
+  | protectedWrite (cellId : CellId)
   deriving DecidableEq, Repr
 
 namespace DataIntent

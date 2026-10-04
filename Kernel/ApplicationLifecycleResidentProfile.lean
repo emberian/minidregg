@@ -49,9 +49,16 @@ theorem storeTag_length (store : Digest) : (storeTag store).length = 16 := by
   simp only [storeTag, String.length_ofList, List.length_append, List.length_replicate]
   omega
 
-/-- Two Stores whose tags differ name different units for the same app and
-generation: a scratch copy of a world never claims the live world's unit. -/
-theorem unitName_separates_stores (store other : Digest) (app : Nat) (generation : Int)
+/-- Two Stores whose 64-bit TAGS differ name different units for the same app
+and generation. This separates tags, not Stores: `storeTag` keeps the low 64
+bits of the seed identity, so two distinct Stores can share a tag and a unit
+(`unitName_collides`). That a scratch copy of a world never claims the live
+world's unit therefore rests on the two seed identities differing in their low
+64 bits. For identities drawn uniformly, one Store's tag is matched by a given
+other with probability 2^-64 (second preimage), and some pair among n Stores on
+one host collides with probability about n^2 / 2^65 (birthday: an even chance
+near 2^32 Stores). -/
+theorem unitName_separates_tags (store other : Digest) (app : Nat) (generation : Int)
     (tags : storeTag store ≠ storeTag other) :
     unitName store app generation ≠ unitName other app generation := by
   intro same
@@ -60,6 +67,17 @@ theorem unitName_separates_stores (store other : Digest) (app : Nat) (generation
   have lists := congrArg String.toList same
   simp only [unitName, String.toList_append, List.append_assoc] at lists
   exact List.append_cancel_right (List.append_cancel_left lists)
+
+/-- **`storeTag` is not injective on Stores**: it keeps 64 bits. -/
+theorem storeTag_collides : storeTag ⟨0⟩ = storeTag ⟨2 ^ 64⟩ := by
+  simp [storeTag]
+
+/-- **Two distinct Stores, one unit**: Store separation by unit name is a
+collision assumption on the seeds' low 64 bits, never a theorem. -/
+theorem unitName_collides (app : Nat) (generation : Int) :
+    (⟨0⟩ : Digest) ≠ ⟨2 ^ 64⟩ ∧ unitName ⟨0⟩ app generation = unitName ⟨2 ^ 64⟩ app generation := by
+  refine ⟨by simp, ?_⟩
+  simp only [unitName, storeTag_collides]
 
 def beginMatches (store : Digest) (ingress : ApplicationLifecycleBeginV2Ingress.Ingress) : Bool :=
   ingress.base.source.imageIdentity == ingress.descriptor.imageIdentity &&
@@ -113,7 +131,9 @@ theorem claimMatches_wrong_unit (store : Digest) (claim : ApplicationLifecycleCl
 
 /-- info: 'Minidregg.Kernel.ApplicationLifecycleResidentProfile.storeTag_length' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms storeTag_length
-/-- info: 'Minidregg.Kernel.ApplicationLifecycleResidentProfile.unitName_separates_stores' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms unitName_separates_stores
+/-- info: 'Minidregg.Kernel.ApplicationLifecycleResidentProfile.unitName_separates_tags' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms unitName_separates_tags
+#assert_axioms storeTag_collides
+#assert_axioms unitName_collides
 
 end Minidregg.Kernel.ApplicationLifecycleResidentProfile

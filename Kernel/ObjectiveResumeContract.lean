@@ -507,18 +507,17 @@ theorem not_forcingTransparent_lostStack :
     ¬ ForcingTransparent tallyConfig tallyYield {tallyForced with stack := []} tallyReply 200000 :=
   not_forcingTransparent_of_refute (by native_decide)
 
-/-! ## A delivery advances the record (what `second_delivery_refused` leaves unstated)
+/-! ## A delivery advances the record
 
-`ObjectiveActivity.second_delivery_refused` assumes that a delivery admitted
-from the post-state of an installed delivery ends the SAME await id. After the
-first delivery installs, its record cell holds `first.next`, whose generation is
-one more than the record it consumed (`Delivery.installed_record`,
+After a delivery installs, its record cell holds `first.next`, whose generation
+is one more than the record it consumed (`Delivery.installed_record`,
 `delivery_advances_generation`), and the id of any await that record holds is
-`awaitId cell (generation + 1) …`. So that premise holds only when `awaitId`
-collides across two generations of one cell
-(`second_same_await_is_collision`): the protection against a second resume of
-one await is the spent claim (`resume_consumes_once`) together with this
-generation advance.
+`awaitId cell (generation + 1) …`. So a second delivery of the same record that
+ended the SAME await id needs `awaitId` to collide across two generations of one
+cell (`second_same_await_is_collision`); a statement assuming such a pair (the
+deleted `second_delivery_refused`) has a premise only a collision inhabits. The
+protection against a second resume of one await is the spent claim
+(`resume_consumes_once`) together with this generation advance.
 
 A delivery that ENDS the activity is disposal: the record cell is RETIRED
 (`delivery_end_vacates`: the registry's retired image), so the installed cell
@@ -600,9 +599,10 @@ theorem delivery_advances_generation {rootBytes : Bytes → Digest} {config : Co
   have same : second.record = first.next := (Option.some.inj read).symm
   exact ⟨same, by rw [same, Delivery.next_generation first]⟩
 
-/-- **`second_delivery_refused`'s premise is a collision.** If a second delivery
-of the same record cell ends the same await id as the first, `awaitId` takes one
-value at two consecutive generations of that cell. -/
+/-- **A second delivery of one await is a collision.** If a second delivery of
+the same record cell, admitted after the first installed, ends the same await id
+as the first, `awaitId` takes one value at two consecutive generations of that
+cell. -/
 theorem second_same_await_is_collision {rootBytes : Bytes → Digest} {config : Config}
     {snapshot next : Snapshot rootBytes} {height later : Nat} {request again : DeliverRequest}
     (first : Delivery config snapshot height request) (sealing : Seal)

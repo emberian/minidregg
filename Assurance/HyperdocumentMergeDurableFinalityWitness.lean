@@ -371,6 +371,7 @@ noncomputable def quorums : QuorumSystem Replica where
   intersects := by
     intro left right leftQuorum rightQuorum
     refine ⟨0, leftQuorum ?_, rightQuorum ?_⟩ <;> simp [quorumCore]
+  nonempty := ⟨quorumCore, Finset.Subset.refl _⟩
 
 noncomputable def candidate : Candidate TransactionId CellId StableNullifier
     ReplayEnvelope :=
