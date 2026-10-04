@@ -66,8 +66,8 @@ def WorldSource.toIdentity (s : WorldSource) : ReceiptContinuity.Identity :=
   ⟨s.domain, s.semantics, s.seed⟩
 
 theorem worldSource_equiv :
-    (∀ i, (WorldSource.ofIdentity i).toIdentity = i) ∧
-    (∀ s, WorldSource.ofIdentity s.toIdentity = s) :=
+    (∀ i, WorldSource.toIdentity (WorldSource.ofIdentity i) = i) ∧
+    (∀ s, WorldSource.ofIdentity (WorldSource.toIdentity s) = s) :=
   ⟨fun i => by cases i; rfl, fun s => by cases s; rfl⟩
 
 def RevisionRef.ofPoint (i : ReceiptContinuity.Identity) (p : ReceiptContinuity.Point) :
@@ -138,7 +138,7 @@ digest is the intent's own `postRootsBound`, not a hash assumption. -/
 theorem artifactRef_ofWrite_matches {rootBytes : List UInt8 → Digest}
     (intent : DataIntent rootBytes) (format : Digest) (origin : RevisionRef)
     (w : DataWrite) (member : w ∈ intent.writes) :
-    (ArtifactRef.ofWrite format origin w).Matches rootBytes w.canonicalPostBytes :=
+    ArtifactRef.Matches rootBytes (ArtifactRef.ofWrite format origin w) w.canonicalPostBytes :=
   ⟨intent.postRootsBound w member, rfl⟩
 
 /-! ## Invoke: the pay "observation" command -/
