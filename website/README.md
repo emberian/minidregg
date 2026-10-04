@@ -1,38 +1,30 @@
-# minidregg project site
+# The Mini project site
 
-Static multi-page site for GitHub Pages. No build step — HTML + CSS only.
+Static pages for GitHub Pages: plain HTML and one stylesheet (`site.css`, light and dark),
+no JavaScript, no external fonts or scripts.
 
-| Page | Role |
-|---|---|
-| `index.html` | thesis, four pillars, honesty policy |
-| `why.html` | breadstuffs diagnosis + founding inversion |
-| `architecture.html` | narrow waist, repo carve, pillar detail |
-| `maturity.html` | S/A/P/D/B legend + current residuals |
-| `laws.html` | sixteen ATLAS design laws |
+| Page | Content |
+| --- | --- |
+| `index.html` | what Mini is, who it is for, its state in one paragraph |
+| `language.html` | Objective Bend: Core4, two tutorial programs, what is and is not proved |
+| `architecture.html` | admission, store and laws, receipts, SDK, private rooms, agreement, what is not done |
+| `status.html` | **generated**: the README's Honest state table (`gen-status.py`) |
+| `join.html` | a pointer to `deploy/shell/FRIENDS.md` and what a newcomer can do today |
+
+## Rules
+
+- Every factual sentence comes from a file at main, and `SOURCES.md` maps it to file and
+  lines. When a source changes, change the page and the map together. Where a page and
+  the repository disagree, the repository is right.
+- Never edit `status.html`. Edit the Honest state table in `README.md`, then run
+  `python3 website/gen-status.py`. The header and footer are copied from `index.html`.
+- A code block marked `<pre data-source="PATH">` must be text of `PATH`.
+- `python3 website/gen-status.py --check` (the `website` row of `scripts/local-gates.sh`,
+  and a step of `.github/workflows/pages.yml`) fails on a stale status page or a drifted
+  code block, and runs two controls that must be refused.
 
 ## Deploy
 
-On push to `main` (when `website/**` changes), `.github/workflows/pages.yml` uploads
-this directory as the Pages artifact.
-
-One-time repo setup (owner):
-
-```bash
-gh api -X POST repos/emberian/minidregg/pages \
-  -f build_type=workflow \
-  -f source[branch]=main \
-  -f source[path]=/
-# or: Settings → Pages → Source: GitHub Actions
-```
-
-Local preview: open `index.html` in a browser, or
-
-```bash
-python3 -m http.server -d website 8080
-```
-
-## Editing
-
-Keep maturity claims synchronized with the root `README.md` / `GOAL.md`. Prefer
-pessimistic labels over marketing prose. Relative links only (project Pages live at
-`/minidregg/`).
+`.github/workflows/pages.yml` publishes this directory on every push to `main` that
+touches `website/` or `README.md`, after the check passes. Local preview: open
+`index.html`, or `python3 -m http.server -d website 8080`.

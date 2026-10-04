@@ -1,284 +1,184 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Architecture — minidregg</title>
-  <meta name="description" content="How minidregg is carved: Theory, Kernel, Loom, Hyperdocuments, Compiler, and the narrow waist of one semantic event." />
-  <link rel="stylesheet" href="css/site.css" />
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture · Mini</title>
+<meta name="description" content="How Mini is built: admission by re-execution, the store and laws, receipts, the SDK consent boundary, private rooms, the agreement mesh, and what is not done.">
+<link rel="stylesheet" href="site.css">
 </head>
 <body>
-  <header class="site-header">
-    <div class="inner">
-      <a class="brand" href="index.html">
-        <span class="mark">◆</span> minidregg
-        <span class="tag">research</span>
-      </a>
-      <nav class="nav" aria-label="Primary">
-        <a href="index.html">Home</a>
-        <a href="why.html">Why</a>
-        <a href="architecture.html" aria-current="page">Architecture</a>
-        <a href="maturity.html">Maturity</a>
-        <a href="laws.html">Laws</a>
-        <a class="ext" href="https://github.com/emberian/minidregg">GitHub ↗</a>
-      </nav>
-    </div>
-  </header>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site">
+<div class="wrap wide">
+<a class="brand" href="index.html">Mini</a>
+<nav class="primary" aria-label="Site">
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="language.html">Language</a></li>
+<li><a href="architecture.html" aria-current="page">Architecture</a></li>
+<li><a href="status.html">Status</a></li>
+<li><a href="join.html">Join</a></li>
+<li><a href="https://github.com/emberian/minidregg">Source</a></li>
+</ul>
+</nav>
+</div>
+</header>
+<main id="main">
+<div class="wrap">
+<h1>Architecture</h1>
+<p class="lede">Lean owns semantics and admission. Rust owns the physical boundary. Every
+change is a proposal, and the Lean kernel admits or refuses it.</p>
 
-  <main>
-    <div class="shell">
-      <header class="page-hero">
-        <p class="section-label">Construction</p>
-        <h1>Architecture</h1>
-        <p class="lede">
-          One canonical semantic event is the narrow waist. Dialects may differ in
-          representation; they do not get parallel mutable state or parallel authorization.
-        </p>
-      </header>
+<pre><code>authored source + partial specifications
+                   ↓
+        checked program + pinned profile
+                   ↓
+authorized inputs → computation → typed effects and results
+                   ↓
+   current grants · laws · read roots · funding
+                   ↓
+         admitted durable transition
+                   ↓
+ views · retained outcomes · delivery · authorized private release</code></pre>
+<p class="small muted">This is the shared contract, not a claim that every arrow is wired
+for every language and backend.</p>
 
-      <section>
-        <p class="section-label">Target composition</p>
-        <pre class="flow">typed request + current authority + canonical pre-state
-                         |
-                         v
-              Lean-owned effect family
-                         |
-                         v
-        accepted effect + exact validated patch
-                         |
-                         v
-       flat balanced multi-cell semantic hyperedge
-                         |
-             +-----------+-----------+
-             |                       |
-             v                       v
-     durable settlement       causal receipt/history
-             |                       |
-             v                       v
-       physical handler       Loom proof/checkpoint
-                                     |
-                        +------------+------------+
-                        |            |            |
-                     lookup      private/FHE    hypermedia</pre>
-      </section>
+<h2>Admission by re-execution</h2>
+<p>The Lean kernel admits or refuses each proposed change against current capabilities,
+laws, exact read roots and funding. It checks a computation by running it again: at
+admission, and again on every replay when a Store is reopened. No admission uses a proof.
+The deployed Host's Lean umbrella leaves out the proof-system research, because nothing on
+the admission path needs it; the Host still imports twelve of its modules through a digest
+backend.</p>
+<p>That research layer is called Selvage: hash-based, small-field machinery for proximity
+testing, sumcheck, transcript compilation, accumulation and verifiable history. It is
+research, and it has no role in admission today.</p>
+<p>The Rust side supplies clients, signing and custody, storage, transport and
+hosted-service adapters, and decides nothing semantic.</p>
 
-      <section>
-        <p class="section-label">The narrow waist</p>
-        <h2>One verified semantic event</h2>
-        <div class="grid-2">
-          <div class="card">
-            <ul class="clean">
-              <li>native statement</li>
-              <li>canonical representation / opening relation</li>
-              <li>one exact typed receipt clause</li>
-              <li>one shared transcript and failure ledger (when security is claimed)</li>
-            </ul>
-          </div>
-          <div class="card">
-            <h3>Hard invariant</h3>
-            <p class="dim">
-              Lean owns state meaning, request meaning, protocol control, and acceptance.
-              Rust has no semantics or refinement theorem in this repository. Native work
-              returns bytes or an opaque error; failure may block availability, never authorize.
-            </p>
-          </div>
-        </div>
-      </section>
+<h2>The store and laws</h2>
+<p>One Store is one directory with a SQLite log, plus one key file and an anchor for its
+head kept outside the directory. Every log entry and every checkpoint carries a KMAC tag
+under the Store's key. A valid tag means this Host executed and accepted this history. It
+does not mean that every signed request was admitted again.</p>
+<p>What lives in the store are resources: governed state with an exact current
+representation and history. Access is by capability: an owner delegates a grant with
+specific verbs to another member, and can revoke it, after which the holder's next request
+is refused <code>revoked</code>. Each resource also has a law, a predicate the Host checks on
+every change. Laws are written in JSON or, on main, a one-line grammar, and on main the Host
+can say before installation whether a law can ever be satisfied. A law can lock a resource for good:</p>
+<pre><code>mini&gt; law lock notes {"type":"any","predicates":[]} --allow-unsatisfiable   # "any of nothing": denies everything
+mini&gt; submit lock
+mini&gt; read notes                                       # refused: law-denied: sealed   (exit 3)
+mini&gt; law unlock notes {"type":"all","predicates":[]}  # refused: law-denied: …</code></pre>
+<p>Neither the owner nor the operator can get past that law. A capability and a law are
+separate: neither is replaced by an object reference.</p>
 
-      <section>
-        <p class="section-label">Repository carve</p>
-        <h2>Where meaning lives</h2>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Tree</th>
-                <th>Role</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td class="mono">Theory/</td>
-                <td class="dim">Candidate-independent core: verify/find seam, cameras, verbs, governed dynamics. Import boundary mechanically enforced.</td>
-              </tr>
-              <tr>
-                <td class="mono">Kernel/</td>
-                <td class="dim">State, turns, hyperedges, durable commit models, hyperdocument merge/publication, receipts.</td>
-              </tr>
-              <tr>
-                <td class="mono">Pred/</td>
-                <td class="dim">One predicate algebra, syntactic AST end-to-end — no opaque functions on the policy path.</td>
-              </tr>
-              <tr>
-                <td class="mono">Effects/</td>
-                <td class="dim">Open effect-spec surface from which executor equality, descriptors, and teeth are derived.</td>
-              </tr>
-              <tr>
-                <td class="mono">Compiler/</td>
-                <td class="dim">Arithmetization spine, artifact emission, native work profiles, controllers, codecs.</td>
-              </tr>
-              <tr>
-                <td class="mono">Loom/</td>
-                <td class="dim">Proof fabric: FRI regimes, sumcheck, proximity, light client shapes, ZK games, sponge/ROM.</td>
-              </tr>
-              <tr>
-                <td class="mono">Assurance/</td>
-                <td class="dim">Admission bridges, error budgets, history/family instances, receipt games, deployment joins.</td>
-              </tr>
-              <tr>
-                <td class="mono">prover/</td>
-                <td class="dim">Opaque fallible native compute + generated dispatch glue. Authors nothing semantic.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
+<h2>Turns and receipts</h2>
+<p>Every action is a signed request. An admitted one leaves a receipt with a confirmation
+(<code>installed</code>, <code>replayed</code> or <code>recoveredAfterUncertainResponse</code>),
+a transaction id, an event id, an accepted count and the resulting world root. A refused one
+names its reason from a closed set: <code>no-grant</code>, <code>unknown-key</code>,
+<code>law-denied</code>, <code>revoked</code>, <code>stale-root</code>,
+<code>stale-grant</code>, <code>bad-signature</code>, <code>malformed</code>,
+<code>operation-rejected</code>, <code>conflict</code>, <code>outside-validity</code>,
+<code>law-input-range</code>, <code>tail-bound</code> and <code>undisclosed</code>.</p>
+<p>A lost reply is answered by looking up the same call bytes, never by sending a new
+request. Retrying after a restart returns the same receipt, with
+<code>replayed</code> and the same transaction id.</p>
 
-      <section>
-        <p class="section-label">Pillar detail</p>
-        <div class="stack">
-          <article class="card accent-ember">
-            <div class="num">SEMANTIC KERNEL</div>
-            <h3>Turn = attenuable token over owned state → receipt</h3>
-            <p class="dim">
-              One typed request names subject, target, verb, arguments, effects, policy,
-              nonce, and exact pre-root. A validated patch derives one canonical post-state
-              and exact footprint. Multi-resource actions are flat finite hyperedges with
-              one shared apex and aggregate law — not a hidden call forest.
-            </p>
-            <p class="dim">
-              Rejection has no post-state unless explicitly modeled as a charged committed effect.
-            </p>
-          </article>
+<h2>The SDK and the consent boundary</h2>
+<p>The client SDK (a Rust crate, and a TypeScript package that matches the Rust core byte
+for byte) is how an app, an agent, a bot or a
+browser extension asks the world to act for a member without the member's key ever signing
+bytes the member did not see:</p>
+<pre><code>Profile ─► Intent (one typed cut) ─► explain() ─► Confirmation (nonce-bound)
+        ─► sign (only consent-returned headers, only under the Confirmation) ─► sealed call
+        ─► submit ─► Receipt | Refused | Uncertain ─► lookup (the SAME call bytes)</code></pre>
+<ul>
+<li>It runs on the member's device, and key material never leaves it.</li>
+<li>It trusts a local Host image and consent executable that the member selects, never ones
+the operator chooses.</li>
+<li>It does not trust the operator. Before a key signs, the Lean consent process re-derives
+the plan from the retained intent and returns the exact header bytes this key may sign. The
+SDK signs those bytes and nothing else.</li>
+<li>A confirmation is for one invocation, attempt, intent, plan, header list and reading;
+change any of them and nothing signs.</li>
+<li>A browser has no consent process. Until a bridge to a member-held replica exists, a
+browser surface must not sign Mini plans.</li>
+</ul>
 
-          <article class="card accent-teal">
-            <div class="num">LOOM</div>
-            <h3>Heterogeneous dialects, owned joints</h3>
-            <p class="dim">
-              Binary towers, prime-field gates, LogUp/lookup, additive FRI, history BCS,
-              private/sealed computation — each keeps honest native work. Shared control:
-              roots before challenges, common-coin transport obligations, explicit failure
-              classes on one ledger, Lean-owned admission of accepted bytes.
-            </p>
-          </article>
+<h2>Private rooms</h2>
+<div class="note"><p>Devnet quality; privacy not audited. Private rooms are on main only, not
+on the public node, and no run on a real Host is recorded.</p></div>
+<p>A room is a resource that other things are born in. In a private room, what a member says
+is sealed on their own machine under the room key before it leaves. The node holds that key
+only wrapped to each member. Each wrap is to an X25519 + ML-KEM-768 pair, so what a recorded
+wrap protects is post-quantum; the signatures that vouch for the founder are not. Kicking a member revokes their grant and makes a fresh room key for
+everyone else: they keep what they could already read and get nothing new.</p>
+<p>What it does not hide, or does not stop:</p>
+<ul>
+<li>The node sees who is in the room, who wrote when, and how big each line is, in 64-byte
+steps.</li>
+<li>The founder key is pinned trust-on-first-use. If it reached a member through the node and
+nobody compared fingerprints, the node could have substituted its own key.</li>
+<li>A misbehaving node can hide a key change from a member until that member has seen it
+once, so a member who has not synced since a kick can be kept on the old key.</li>
+<li>In the hosted shell the member's key and the room key are files on the operator's box,
+so a private room needs <code>mini</code> on the member's own machine.</li>
+</ul>
 
-          <article class="card accent-violet">
-            <div class="num">HYPERDOCUMENTS</div>
-            <h3>Causal medium for users and agents</h3>
-            <p class="dim">
-              Typed content, stable ranges, transclusion, backlinks, annotations, offline
-              branches, explicit conflicts, versioned history. Merge preserves every current
-              parent: singleton field sources write; multi-source fields become
-              provenance-bearing conflict records. Ancestry-backed accepted merge retains
-              the selected base; ambiguous bases stay absent.
-            </p>
-            <div class="callout warn" style="margin-top: 0.85rem; margin-bottom: 0;">
-              <p>
-                <strong>Current caveat:</strong> some document cells are still uninhabitable
-                at deployed schemas (infinite total-function logical state). See
-                <a href="maturity.html">maturity</a>.
-              </p>
-            </div>
-          </article>
+<h2>The agreement mesh</h2>
+<p>The agreement mesh is a Generic Simplex BFT engine written in Lean and compiled native,
+so that a world can be replicated across replicas that agree on its history. Its model is a
+fixed committee of n = 3f + 1 with at most f Byzantine members, authenticated reliable
+delivery and partial synchrony.</p>
+<ul>
+<li><strong>Built:</strong> the engine, and a safety theorem over the Lean engine model. A
+four-node native harness passes with real TCP, ML-DSA signatures, selective Byzantine COMMIT
+delivery, durable certificate recovery after restart, and lost compare-and-swap replies.</li>
+<li><strong>Not built or not shown:</strong> liveness is not established. The executed run had
+four replicas on one host, which is one failure domain. Changing membership is separate
+work, and the workdesk fixture has not run.</li>
+</ul>
 
-          <article class="card accent-amber">
-            <div class="num">COMPILER &amp; NATIVE BOUNDARY</div>
-            <h3>Artifacts describe work; Lean alone accepts</h3>
-            <p class="dim">
-              Generated artifacts contain first-order data and dispatch identity, not verdicts.
-              The clause-406 path authenticates arithmetic work with exact byte codecs:
-              Rust returns candidate bytes; Lean decodes and constructs the certificate.
-              Native failure can block availability. It cannot create an accepted receipt.
-            </p>
-          </article>
-        </div>
-      </section>
+<h2>Other parts, briefly</h2>
+<ul>
+<li><strong>Hosted applications (SPK).</strong> Sandstorm-style packages run as grains under
+Mini authority. Install, start, supervised restart and export are integrated on development
+worlds; no application has served a browser session yet.</li>
+<li><strong>Hermes.</strong> Agents summoned into a room with selected context and delegated
+tools. Run only with a scripted provider on a private Store; off on the public node.</li>
+<li><strong>Traffic privacy.</strong> A post-quantum onion cohort with cover traffic, executed
+on one host with an honest registrar; the endpoint sees the plaintext call, and there is no
+anonymity proof.</li>
+<li><strong>MPC and FHE.</strong> Research: an MPC width-8 adder over private inputs, and FHE
+on a public two-input expression with one owner.</li>
+</ul>
 
-      <section>
-        <p class="section-label">Privacy &amp; external effects</p>
-        <div class="grid-2">
-          <div class="card">
-            <h3>Computation ≠ disclosure</h3>
-            <p class="dim">
-              Private computation is sealed by default. A later release needs new authority
-              and a causal link to an output commitment.
-            </p>
-          </div>
-          <div class="card">
-            <h3>Intent is not completion</h3>
-            <p class="dim">
-              An admission receipt is not proof that external I/O happened.
-              Completion or refusal is a later event.
-            </p>
-          </div>
-        </div>
-      </section>
+<h2>What is not done</h2>
+<ul>
+<li>No Objective Bend program has produced a native accepted receipt on main.</li>
+<li>No kernel delivers a response to a yielded activity or persists its checkpoint.</li>
+<li>The Objective Bend proofs are not checked by the default build.</li>
+<li>Chat is compiled, with no recorded run joining it to a native Host.</li>
+<li>Studio has no member-reachable route.</li>
+<li>Payments ran only on fixtures; nothing is deployed and no mainnet transaction has been
+made.</li>
+<li>None of the private execution paths runs a member's program privately.</li>
+<li>Agreement liveness, and more than one failure domain.</li>
+</ul>
+<p>Per-component evidence is on the <a href="status.html">status page</a>.</p>
 
-      <section>
-        <p class="section-label">Analogy, not lineage</p>
-        <h2>Compound documents, after removing ambient authority</h2>
-        <p class="dim narrow">
-          Older compound-document systems had useful instincts: active documents, links,
-          remote activation, interface negotiation. minidregg studies those ideas after
-          removing ambient pointers, hidden mutation, location authority, and runtime
-          object identity.
-        </p>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Earlier idea</th>
-                <th>minidregg contrast</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>monikers</td>
-                <td class="dim">stable typed content-addressed references</td>
-              </tr>
-              <tr>
-                <td>structured storage</td>
-                <td class="dim">canonical sparse authenticated cells</td>
-              </tr>
-              <tr>
-                <td>embed / link</td>
-                <td class="dim">authenticated transclusion, backlinks, causal history</td>
-              </tr>
-              <tr>
-                <td><code>QueryInterface</code></td>
-                <td class="dim">explicit typed effect family; no runtime object authority</td>
-              </tr>
-              <tr>
-                <td>COM aggregation</td>
-                <td class="dim">one flat typed multi-cell hyperedge</td>
-              </tr>
-              <tr>
-                <td>DTC-style commit</td>
-                <td class="dim">fail-closed multi-root / nullifier / budget / history journal model</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section>
-        <p class="section-label">In-repo design docs</p>
-        <ul class="clean">
-          <li><code>docs/HYPEREDGE-DESIGN.md</code> — one turn model</li>
-          <li><code>docs/LOOM-RECOMPOSITION.md</code> — proof system + obligation ledger</li>
-          <li><code>docs/KERNEL-NECESSITY.md</code> — exhibit the kernel, don’t design it</li>
-          <li><code>docs/PROOF-SYSTEM-SURVEY.md</code> — backend survey</li>
-          <li><code>docs/decisions/</code> — numbered decision records</li>
-        </ul>
-      </section>
-    </div>
-  </main>
-
-  <footer class="site-footer">
-    <div class="inner">
-      <span><a href="why.html">← why</a></span>
-      <span><a href="maturity.html">maturity →</a></span>
-    </div>
-  </footer>
+</div>
+</main>
+<footer class="site">
+<div class="wrap wide">
+<p>Mini. Every statement on this site is taken from a file in the
+<a href="https://github.com/emberian/minidregg">repository</a> at main; where the site and
+the repository disagree, the repository is right.</p>
+</div>
+</footer>
 </body>
 </html>

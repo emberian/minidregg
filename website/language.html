@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Objective Bend · Mini</title>
+<meta name="description" content="Objective Bend, Mini's language: Core4, two programs that run in the preview, and exactly what is proved and what is not.">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site">
+<div class="wrap wide">
+<a class="brand" href="index.html">Mini</a>
+<nav class="primary" aria-label="Site">
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="language.html" aria-current="page">Language</a></li>
+<li><a href="architecture.html">Architecture</a></li>
+<li><a href="status.html">Status</a></li>
+<li><a href="join.html">Join</a></li>
+<li><a href="https://github.com/emberian/minidregg">Source</a></li>
+</ul>
+</nav>
+</div>
+</header>
+<main id="main">
+<div class="wrap">
+<h1>Objective Bend</h1>
+<p class="lede">Objective Bend is Mini's authored language. Its model is François-René
+Rideau's (Faré's) account of objects: lazy open recursion over first-class, partial,
+composable specifications.</p>
+<p>The language computes. Mini supplies what the language does not: durable identity,
+current authority, effect admission, funding and controlled disclosure.</p>
+
+<h2>Core4</h2>
+<p>The core calculus is called Core4. It is the <code>Term</code> type in
+<code>Theory/ObjectiveBendOpenRecursion.lean</code>, and it has these parts:</p>
+<ul>
+<li><strong>Laziness.</strong> The reference semantics is call-by-name. The machine is
+call-by-need: an argument becomes a shared heap thunk, evaluated at most once. Laziness is
+part of the meaning, not an optimisation: <code>{good = 7, bad = self.bad}.good</code> is
+<code>7</code>, and an unused divergent argument is never forced.</li>
+<li><strong>Specifications.</strong> A specification is a first-class partial extension
+<code>C → V → W</code>: given the final <em>self</em> and the inherited <em>super</em>, it
+produces a new value. It is a value before any target exists.</li>
+<li><strong>Mixins and fixpoints.</strong> <code>mix(lower, upper) = λself. λsuper. upper self
+(lower self super)</code> composes two layers under one final self. <code>fix(spec,
+inherited)</code> closes the knot, and it is a computation, not an equation.</li>
+<li><strong>Prototypes and reflection.</strong> A prototype pairs a specification with its
+target. <code>reflect</code>, <code>metadata</code> and <code>project</code> take one part
+without forcing the other.</li>
+<li><strong>Records and sums.</strong> Records hold each field as a separate suspension;
+<code>extend</code> overrides fields. Sums have lazy injections, <code>case</code> and a
+Boolean branch.</li>
+<li><strong>Activities.</strong> An activity yields a typed Plan with <code>perform</code> and
+is resumed with a typed response. Effects are part of the type, and the checker never lets an
+effect sit inside a shared thunk.</li>
+<li><strong>Types and quantities.</strong> The checker is proof-producing: it returns a typing
+derivation for the actual term. Quantities are erased, affine, linear and unrestricted;
+affine and linear are both checked as at most once, not exactly once.</li>
+</ul>
+<p>The front end, which turns <code>.obend</code> source into Core4 terms, is written in
+TypeScript. It is a named trusted boundary: no theorem relates the source text to the core
+term.</p>
+
+<h2>Two programs</h2>
+<p>Both are files in the repository's tutorial. The output under each is the tutorial's
+printed output, and the tutorial gate (<code>scripts/check-objective-tutorial.ts</code>)
+re-runs every command in the tutorial and fails if one prints something else.</p>
+
+<h3>Specifications and late binding</h3>
+<p><code>Billing</code> calls <code>self.price</code>, so it sees a surcharge that a later
+layer adds. Nobody edits <code>Billing</code>.</p>
+<figure>
+<figcaption>docs/tutorial/ch4-specs.obend</figcaption>
+<pre data-source="docs/tutorial/ch4-specs.obend"><code>edition ObjectiveBend 1
+# Chapter 4: specifications. A spec is a named, reusable layer for a record.
+# def adds or replaces a method. super.m is the method below; self.m is the
+# method of the final object.
+
+record Shop:
+  price(n: Nat) -&gt; Nat
+  bill(n: Nat) -&gt; Nat
+
+spec Base for Shop:
+  def price(n: Nat) -&gt; Nat:
+    n * 3n
+
+spec Billing for Shop:
+  def bill(n: Nat) -&gt; Nat:
+    self.price(n) + 1n
+
+spec Surcharge for Shop:
+  def price(n: Nat) -&gt; Nat:
+    super.price(n) + 2n
+
+# fix needs something to start from. These methods are replaced by the specs.
+def blank() -&gt; Shop:
+  {price: fn(n: Nat) -&gt; Nat: 0n, bill: fn(n: Nat) -&gt; Nat: 0n}
+
+def shop() -&gt; Shop:
+  fix(compose(Base, Billing), blank())
+
+def surcharged() -&gt; Shop:
+  fix(compose(Base, Billing, Surcharge), blank())
+
+def billOfTwo() -&gt; Nat:
+  shop().bill(2n)
+
+def surchargedBillOfTwo() -&gt; Nat:
+  surcharged().bill(2n)
+
+def surchargedPriceOfTwo() -&gt; Nat:
+  surcharged().price(2n)</code></pre>
+</figure>
+<pre data-source="docs/OBJECTIVE-BEND-TUTORIAL.md"><code>```sh
+$ bun docs/tutorial/run.ts docs/tutorial/ch4-specs.obend billOfTwo
+status: finished
+type: Nat
+result: 7
+
+$ bun docs/tutorial/run.ts docs/tutorial/ch4-specs.obend surchargedPriceOfTwo
+status: finished
+type: Nat
+result: 8
+
+$ bun docs/tutorial/run.ts docs/tutorial/ch4-specs.obend surchargedBillOfTwo
+status: finished
+type: Nat
+result: 9</code></pre>
+<p>Without <code>Surcharge</code>, <code>bill(2)</code> is 7: the price is 6 and the fee
+is 1. With it, the price is 8 and the bill is 9.</p>
+
+<h3>An activity</h3>
+<p><code>serve</code> asks its host to move a counter from <code>count</code> to
+<code>count + 1</code>, then asks again after every response. It never finishes; each
+response resumes it once.</p>
+<figure>
+<figcaption>docs/tutorial/ch8-counter.obend</figcaption>
+<pre data-source="docs/tutorial/ch8-counter.obend"><code>edition ObjectiveBend 1
+# Chapter 8: an activity. It hands a Plan to its host, waits for a response,
+# and carries on with the response in hand.
+
+record Write:
+  field: Nat
+  before: Nat
+  after: Nat
+
+sum Plan:
+  write: Write
+
+sum Response:
+  written: {}
+  refused: {}
+
+# One turn: ask for count to become count + 1, and report the new count.
+def bump(count: Nat) -&gt; Activity&lt;Plan, Response, Nat&gt;:
+  match perform(Plan.write({field: 0n, before: count, after: count + 1n})):
+    case written(_): count + 1n
+    case refused(_): count
+
+# A resident: it asks again after every response, and never finishes.
+def serve(count: Nat) -&gt; Activity&lt;Plan, Response, Nat&gt;:
+  match perform(Plan.write({field: 0n, before: count, after: count + 1n})):
+    case written(_): serve(count + 1n)
+    case refused(_): serve(count)</code></pre>
+</figure>
+<pre data-source="docs/OBJECTIVE-BEND-TUTORIAL.md"><code>$ bun docs/tutorial/run.ts docs/tutorial/ch8-counter.obend serve '["0"]' '["written","written","refused"]'
+status: yielded
+type: Activity&lt;sum {write: {field: Nat, before: Nat, after: Nat}}, sum {written: {}, refused: {}}, Nat&gt;
+turn 1: yield write({field: 0, before: 0, after: 1})  &lt;- written({})
+turn 2: yield write({field: 0, before: 1, after: 2})  &lt;- written({})
+turn 3: yield write({field: 0, before: 2, after: 3})  &lt;- refused({})
+turn 4: yield write({field: 0, before: 2, after: 3})  (waiting)
+diagnostic: waiting for a response</code></pre>
+<p>Turn 3 is refused, so the count stays 2 and turn 4 asks for the same write again. These
+responses are typed in by hand: the preview stands in for the kernel and admits nothing.
+No kernel delivers responses to an activity or stores its checkpoint yet.</p>
+
+<h2>What is proved</h2>
+<p>The proofs are in <code>Theory/ObjectiveBend*.lean</code>. Every theorem below has its
+axioms pinned to <code>propext</code>, <code>Classical.choice</code> and
+<code>Quot.sound</code>; those files contain no <code>sorry</code>, <code>axiom</code>,
+<code>native_decide</code>, <code>partial</code> or <code>extern</code>. The statements here
+are paraphrased from the language guide's table; the hypotheses column is the part to
+read.</p>
+<table class="stack">
+<thead><tr><th>Property</th><th>Theorem</th><th>What it says</th><th>Hypotheses</th></tr></thead>
+<tbody>
+<tr><td data-label="Property">Soundness</td><td data-label="Theorem"><code>runBounded_natural_sound</code>, <code>_boolean_sound</code>, <code>_label_sound</code>, <code>runBounded_value_sound</code></td><td data-label="What it says">If the bounded machine finishes, the reference semantics evaluates the term to the same scalar, or (for any value) to the returned value's meaning. Weak-head only.</td><td data-label="Hypotheses">The term is closed and the run finished. Holds for every heap and stack limit and tick count.</td></tr>
+<tr><td data-label="Property">Preservation</td><td data-label="Theorem"><code>typed_stepRaw_preserved</code></td><td data-label="What it says">Every raw machine step preserves heap, control and stack typing, including perform, done and a yield.</td><td data-label="Hypotheses">A typed state; one is built from any checked term.</td></tr>
+<tr><td data-label="Property">No refusal</td><td data-label="Theorem"><code>checked_reachable_no_refusal</code></td><td data-label="What it says">A closed term the checker accepts never reaches a refusal: wrong operand, missing field, unbound reference, or an effect inside a forced shared thunk. Divergence, blackholes and running out of resources remain possible.</td><td data-label="Hypotheses">The checker accepted the closed term.</td></tr>
+<tr><td data-label="Property">Completeness</td><td data-label="Theorem"><code>machine_evaluation_complete</code></td><td data-label="What it says">A closed source that the reference semantics evaluates to a value with a ground observation is finished by the machine, with that observation, in finitely many transitions. With soundness this inhabits <code>Representation</code> (<code>coreRepresentation</code>) for every closed source.</td><td data-label="Hypotheses">Closed; the source evaluates; limits that admit each next transition. No bound on those limits is proved.</td></tr>
+<tr><td data-label="Property">Data soundness</td><td data-label="Theorem"><code>materialize_sound</code>, <code>execution_source_semantics</code></td><td data-label="What it says">A successful execution is a finished run of the same term, and the extracted data is a deep reference evaluation of the source term.</td><td data-label="Hypotheses">Closed term. Uniqueness of that data is not proved.</td></tr>
+<tr><td data-label="Property">Activities</td><td data-label="Theorem"><code>typed_yield_quiescent</code>, <code>stack_activity_signature</code>, <code>typed_resume_preserved</code>, <code>state_roundTrip</code></td><td data-label="What it says">A typed yield is a safe point; it carries the program's own Plan and Response types; resuming with a well-typed response gives a typed state; the checkpoint codec restores every machine state exactly.</td><td data-label="Hypotheses">A typed state; a response typed at the program's Response type.</td></tr>
+<tr><td data-label="Property">Fast machine</td><td data-label="Theorem"><code>stepRaw_eq_fast</code>, <code>step_eq_fast</code>, <code>runBounded_eq_fast</code>, <code>forceWith_eq_fast</code></td><td data-label="What it says">The machine functions equal linear-heap implementations, installed with <code>@[csimp]</code>, so every compiled call (admission re-execution, preview) runs the fast code and every theorem above still applies. Axioms <code>propext</code>, <code>Quot.sound</code>.</td><td data-label="Hypotheses">None. Added trust: the compiler's csimp substitution.</td></tr>
+</tbody>
+</table>
+<p>On a stress workload of 524,293 ticks, compiled <code>runBounded</code> went from 14,885 ms
+to 41–43 ms. On a second workload, with a stack about 20,000 frames deep, it went from
+37,684 ms to between 36 and 292 ms on a loaded machine.</p>
+
+<h3>What is not proved, and what is not wired</h3>
+<ul>
+<li><strong>The proofs are not in the default build.</strong> At main, the Objective Bend
+proof modules are imported only by an opt-in research library, so a green default build
+re-checks none of them.</li>
+<li><strong>Front-end adequacy.</strong> No theorem relates <code>.obend</code> source to the
+core term. The TypeScript parser and elaborator are trusted and checked only by replay.</li>
+<li><strong>A resource bound for completeness.</strong> Completeness gives finite completion,
+not a bound on the limits that suffice.</li>
+<li><strong>Linearization.</strong> Declared ancestry (<code>spec S extends A, B</code>) is
+linearized with C4 by the elaborator; the invariance statement is stated and not
+proved.</li>
+<li><strong>Quantities at run time.</strong> Use counts are checked statically only.</li>
+<li><strong>Native admission.</strong> On main, no Objective Bend source has produced a
+native accepted receipt. The admission modules compiled in lanes and are being integrated.
+On that path, the caller still chooses the work it is charged for, and zero work means free
+execution up to the policy maximum.</li>
+<li><strong>Studio's preview route.</strong> On main the Rust side and the TypeScript side
+speak different preview wire versions, so the route is broken; the tools run directly.</li>
+</ul>
+
+<h2>Backends</h2>
+<table class="stack">
+<thead><tr><th>Backend</th><th>Evidence</th><th>Relation to the specified machine</th></tr></thead>
+<tbody>
+<tr><td data-label="Backend">Preview interpreter</td><td data-label="Evidence">executed</td><td data-label="Relation">It is the function the theorems are about, run by Lean's interpreter.</td></tr>
+<tr><td data-label="Backend">Compiled Lean, fast</td><td data-label="Evidence">executed</td><td data-label="Relation">Equal by theorem (the fast-machine row above).</td></tr>
+<tr><td data-label="Backend">Re-execution at admission</td><td data-label="Evidence">designed; no Objective Bend receipt on main yet</td><td data-label="Relation">The Lean function itself.</td></tr>
+<tr><td data-label="Backend">C machine</td><td data-label="Evidence">executed in a differential harness; no Mini path invokes it</td><td data-label="Relation">Differential only, no theorem: 340 of 340 cases agree, and four seeded mutants are caught.</td></tr>
+<tr><td data-label="Backend">Oblivious network, zk trace, FHE</td><td data-label="Evidence">research; none runs Objective Bend on main</td><td data-label="Relation">Open. The zk statements are conditional on a hypothesis that nothing inhabits for a real program.</td></tr>
+</tbody>
+</table>
+
+<h2>What you will meet quickly</h2>
+<ul>
+<li>No <code>-</code>, <code>&lt;</code>, <code>&gt;</code>, <code>&lt;=</code>, <code>&gt;=</code>
+or <code>/</code>: they parse and are refused at elaboration. Subtraction is written by
+recursion.</li>
+<li>A <code>match</code> on a Nat takes exactly a zero case and a successor case; a match on
+a sum has no wildcard.</li>
+<li><code>requires</code> is carried as a string and never checked. Spec laws are closures
+that nothing discharges.</li>
+<li><code>before</code> and <code>after</code> methods are refused.</li>
+<li>Plans and responses must be non-recursive data, so a view library waits.</li>
+</ul>
+
+<h2>Read more</h2>
+<ul>
+<li><a href="https://github.com/emberian/minidregg/blob/main/docs/OBJECTIVE-BEND-TUTORIAL.md">The tutorial</a>, nine short chapters, every result printed by a real run.</li>
+<li><a href="https://github.com/emberian/minidregg/blob/main/docs/OBJECTIVE-BEND.md">The language guide</a>, with the full theorem table, the ranked roadmap and the trusted boundary.</li>
+<li><a href="https://github.com/emberian/minidregg/blob/main/docs/OBJECTIVE-BEND-EVENTS.md">Activities and events</a> and <a href="https://github.com/emberian/minidregg/blob/main/docs/OBJECTIVE-BEND-BACKENDS.md">backends</a>.</li>
+</ul>
+
+</div>
+</main>
+<footer class="site">
+<div class="wrap wide">
+<p>Mini. Every statement on this site is taken from a file in the
+<a href="https://github.com/emberian/minidregg">repository</a> at main; where the site and
+the repository disagree, the repository is right.</p>
+</div>
+</footer>
+</body>
+</html>

@@ -1,198 +1,103 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>minidregg — proof-native semantic computer</title>
-  <meta name="description" content="A Lean-first semantic kernel, heterogeneous proof fabric, and authenticated causal medium for users and agents." />
-  <meta property="og:title" content="minidregg" />
-  <meta property="og:description" content="Lean-owned semantic kernel · Loom proof fabric · Hyperdocuments · derived, never hand-written." />
-  <meta property="og:type" content="website" />
-  <link rel="stylesheet" href="css/site.css" />
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini</title>
+<meta name="description" content="Mini is a programmable shared world for people and agents: Lean admits every change by re-executing it, Rust is the client and custody boundary. A devnet; privacy not audited.">
+<link rel="stylesheet" href="site.css">
 </head>
 <body>
-  <header class="site-header">
-    <div class="inner">
-      <a class="brand" href="index.html">
-        <span class="mark">◆</span> minidregg
-        <span class="tag">research</span>
-      </a>
-      <nav class="nav" aria-label="Primary">
-        <a href="index.html" aria-current="page">Home</a>
-        <a href="why.html">Why</a>
-        <a href="architecture.html">Architecture</a>
-        <a href="maturity.html">Maturity</a>
-        <a href="laws.html">Laws</a>
-        <a class="ext" href="https://github.com/emberian/minidregg">GitHub ↗</a>
-      </nav>
-    </div>
-  </header>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site">
+<div class="wrap wide">
+<a class="brand" href="index.html">Mini</a>
+<nav class="primary" aria-label="Site">
+<ul>
+<li><a href="index.html" aria-current="page">Overview</a></li>
+<li><a href="language.html">Language</a></li>
+<li><a href="architecture.html">Architecture</a></li>
+<li><a href="status.html">Status</a></li>
+<li><a href="join.html">Join</a></li>
+<li><a href="https://github.com/emberian/minidregg">Source</a></li>
+</ul>
+</nav>
+</div>
+</header>
+<main id="main">
+<div class="wrap">
 
-  <main>
-    <div class="shell">
-      <section class="hero">
-        <p class="kicker"><span>formal-first · derived path only</span></p>
-        <h1>A proof-native semantic computer.</h1>
-        <p class="lede">
-          minidregg is a Lean-owned kernel for authorized state change: typed requests,
-          multi-cell hyperedges, heterogeneous proofs, and causal documents that agents
-          and humans can actually inspect.
-        </p>
-        <div class="hero-actions">
-          <a class="btn btn-primary" href="architecture.html">How it’s built</a>
-          <a class="btn btn-ghost" href="maturity.html">What’s closed (honestly)</a>
-          <a class="btn btn-ghost" href="https://github.com/emberian/minidregg">Source on GitHub</a>
-        </div>
-      </section>
+<h1>Mini</h1>
+<p class="lede">Mini is a programmable shared world for people and agents. Documents,
+applications, communities and continuing computations share one set of rules for
+authority, resources, privacy and history.</p>
 
-      <section>
-        <p class="section-label">One sentence</p>
-        <h2>Lean owns meaning. Native code returns bytes or fails.</h2>
-        <p class="dim narrow">
-          Users and agents authorize, execute, inspect, link, merge, and compress
-          heterogeneous state transitions — without giving native code, runtime objects,
-          or storage handlers a second source of meaning.
-        </p>
-      </section>
+<p>Underneath, Mini is a small store of owned resources. Every action is a signed
+request that the Host, a program written in Lean, admits or refuses. An admitted
+request leaves a receipt. A refused one comes back with a reason.</p>
 
-      <section>
-        <p class="section-label">Four pillars</p>
-        <p class="pillars-intro dim">
-          Built as one construction, not four side projects. Each pillar advances
-          through explicit maturity boundaries (S → A → P → D → B).
-        </p>
-        <div class="grid-4">
-          <article class="card accent-ember">
-            <div class="num">01</div>
-            <h3>Semantic kernel</h3>
-            <p class="dim">
-              Typed requests, request-indexed authority, canonical transitions,
-              flat multi-cell hyperedges, and receipts.
-            </p>
-          </article>
-          <article class="card accent-teal">
-            <div class="num">02</div>
-            <h3>Loom</h3>
-            <p class="dim">
-              Heterogeneous proof fabric: binary fields, prime fields, lookup/RAM,
-              FHE rings, privacy, and history meet at checked joints.
-            </p>
-          </article>
-          <article class="card accent-violet">
-            <div class="num">03</div>
-            <h3>Hyperdocuments</h3>
-            <p class="dim">
-              Proof-native causal medium: typed content, transclusion, backlinks,
-              offline branches, explicit conflicts, versioned history.
-            </p>
-          </article>
-          <article class="card accent-amber">
-            <div class="num">04</div>
-            <h3>Compiler boundary</h3>
-            <p class="dim">
-              Lean-owned artifacts describe native work. Opaque native code returns
-              bytes or an error. Only Lean accepts a turn.
-            </p>
-          </article>
-        </div>
-      </section>
+<div class="note">
+<p><strong>State, in one paragraph.</strong> Mini is a devnet. When the data model or the
+kernel wire changes, the store is re-genesised and everything made on it is gone. Nothing
+has an uptime promise. The public node runs a candidate from 2026-10-01 with the shell,
+documents and boards. It has no rooms, chat, key rotation or proxy mode, and no outside
+member is enrolled. No admission uses a proof: admission is checked by re-execution.
+Private rooms are devnet quality and their privacy is not audited. None of the private
+execution research runs a member's program privately today.
+<a href="status.html">Full status</a>.</p>
+</div>
 
-      <section>
-        <p class="section-label">What you should be able to ask</p>
-        <div class="grid-2">
-          <div class="card">
-            <h3>As a user</h3>
-            <ul class="clean">
-              <li>What exactly changed, root → root?</li>
-              <li>Which request, authority, and private work justified it?</li>
-              <li>Which causal parents made this document current?</li>
-              <li>Is a conflict explicit, or was a writer silently lost?</li>
-              <li>Can I hand a compact proof of this history to another device?</li>
-            </ul>
-          </div>
-          <div class="card">
-            <h3>As an agent</h3>
-            <ul class="clean">
-              <li>Follow typed content-addressed links and backlinks</li>
-              <li>Inspect only authenticated coordinates of large objects</li>
-              <li>Publish several effects as one balanced hyperedge</li>
-              <li>Branch offline and merge without erasing provenance</li>
-              <li>Invoke sealed computation without disclosure authority</li>
-            </ul>
-          </div>
-        </div>
-      </section>
+<h2>How it is built</h2>
+<ul>
+<li><strong>Lean owns semantics and admission.</strong> Every change is a proposal that the
+Lean kernel admits or refuses against current capabilities, laws, exact read roots and
+funding. The kernel checks a computation by running it again, at admission and again on
+every replay.</li>
+<li><strong>Rust owns the physical boundary.</strong> The Rust side supplies clients, signing
+and custody, storage, transport and hosted-service adapters. It decides nothing
+semantic.</li>
+<li><strong>Resources carry laws.</strong> A law is a predicate the Host checks on every
+change to a resource. A law that forbids everything locks the resource: neither its owner
+nor the operator can get past it.</li>
+<li><strong>Computation proposes; authority admits.</strong> A correct calculation cannot grant
+itself permission, a reference is not ownership, and a lost reply keeps the original
+operation and its exact retry rather than licensing a second one.</li>
+<li><strong>Objective Bend is the language.</strong> It is a lazy language of first-class,
+partial, composable specifications, after Faré's account of objects. Its core has
+machine-checked soundness, preservation and completeness theorems, which the default build
+does not yet re-check. No Objective Bend program has yet been admitted by a native
+Host.</li>
+</ul>
 
-      <section>
-        <p class="section-label">Founding move</p>
-        <h2>The derived path is the only path.</h2>
-        <p class="dim narrow">
-          minidregg reimplements the lessons of a multi-million-line formal stack at a
-          fraction of the size. The diagnosis: every lowering was sound, but almost none
-          of them replaced the hand-written twins they should have deleted.
-          Here, nothing lands beside what it supersedes.
-        </p>
-        <div class="callout">
-          <p>
-            <strong>Statement-first.</strong> Keystones enter as propositions with
-            satisfiability, teeth, and premise-inhabitation <em>before</em> proof work.
-            A wrong statement proved fast is the expensive failure.
-          </p>
-        </div>
-        <div class="hero-actions" style="margin-top: 1.25rem;">
-          <a class="btn btn-ghost" href="why.html">Read the diagnosis →</a>
-          <a class="btn btn-ghost" href="laws.html">Sixteen design laws →</a>
-        </div>
-      </section>
+<h2>Who it is for</h2>
+<p>The design aim is a world where members inspect how their tools work, compose new
+behaviour, delegate bounded work to agents, and change their shared world without handing
+any application unrestricted access to the rest of it.</p>
+<p>Today that means two groups. Friends can use a hosted shell on the public node, with the
+limits on the <a href="join.html">join page</a>. Contributors can read and build the
+repository: useful work improves a tool or world, closes a source-to-runtime connection,
+deletes a duplicated mechanism, strengthens a proof, or exposes a claim the evidence does
+not support.</p>
 
-      <section>
-        <p class="section-label">Honesty policy</p>
-        <div class="grid-2">
-          <div class="card">
-            <h3>Maturity labels, not vibes</h3>
-            <p class="dim">
-              Every substantial claim is labeled by the strongest boundary actually closed:
-              <span class="badge badge-s">S</span>
-              <span class="badge badge-a">A</span>
-              <span class="badge badge-p">P</span>
-              <span class="badge badge-d">D</span>
-              <span class="badge badge-b">B</span>
-            </p>
-            <p class="dim">
-              “Complete” without one of these is avoided.
-              <a href="maturity.html">See current status</a>.
-            </p>
-          </div>
-          <div class="card">
-            <h3>Frontier research, not a product</h3>
-            <p class="dim">
-              This is a frontier research stack. Several carriers are exhibited at built
-              parameters; some deployed schemas are still uninhabitable. Nothing proved is
-              false — and vacuity is called out by name.
-            </p>
-          </div>
-        </div>
-      </section>
+<h2>Read next</h2>
+<ul class="cards">
+<li><a href="language.html">Language</a><p>Objective Bend: Core4, two programs that run, and exactly what is proved.</p></li>
+<li><a href="architecture.html">Architecture</a><p>Admission by re-execution, laws, receipts, the SDK, private rooms, agreement.</p></li>
+<li><a href="status.html">Status</a><p>The component table from the README, by evidence class.</p></li>
+<li><a href="join.html">Join</a><p>What a newcomer can and cannot do on the public node today.</p></li>
+</ul>
 
-      <section>
-        <p class="section-label">North star</p>
-        <h2>Fit to carry tools like helm.</h2>
-        <p class="dim narrow">
-          The fleet-coordination layer — rooms as cells, posts as signed turns, premises
-          as attested claims, review verdicts and land-receipts as receipts on chain —
-          is a first-class target application. Our own development fleet is the first user.
-        </p>
-      </section>
-    </div>
-  </main>
+<p class="small muted">The project is called Mini. Its repository and its host binary keep
+the older name, minidregg.</p>
 
-  <footer class="site-footer">
-    <div class="inner">
-      <span>minidregg · Lean-first · <a href="https://ember.software">ember arlynx</a></span>
-      <span>
-        <a href="https://github.com/emberian/minidregg">github.com/emberian/minidregg</a>
-      </span>
-    </div>
-  </footer>
+</div>
+</main>
+<footer class="site">
+<div class="wrap wide">
+<p>Mini. Every statement on this site is taken from a file in the
+<a href="https://github.com/emberian/minidregg">repository</a> at main; where the site and
+the repository disagree, the repository is right.</p>
+</div>
+</footer>
 </body>
 </html>
