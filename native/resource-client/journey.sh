@@ -86,6 +86,12 @@
 # JOURNEY_GROWTH_FULL=1 keeps measuring after two rising levels already exceed
 # the 1000-record thresholds (default stops, see step G);
 # JOURNEY_GROWTH_BUDGET_S (default 10800, the bake-off's three-hour rule);
+# JOURNEY_BUDGET_S (unset or 0: none): a wall budget for the WHOLE run, started
+# when this script starts. Every `call` and every hook is capped at what is left
+# of it, and a step that would START after it is spent is recorded FAIL with the
+# budget, the elapsed time and the slowest steps named, so a journey that runs
+# long (a store whose writes slow with every record) goes red in bounded time
+# and says why, instead of being cut by the CI job limit with no verdict.
 # JOURNEY_STEPS (default: every step) runs only the named steps, in this
 # script's order; the frontier is computed over those alone. A step whose
 # dependency is not selected is blocked, so a subset must carry its deps.
@@ -163,8 +169,22 @@ cp "$MANIFEST" "$RUN/manifest.json"
 # ---------------------------------------------------------------- framework
 
 now() { date +%s.%N; }
+JOURNEY_T0=$(now)
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
+# budget_left: whole seconds left of JOURNEY_BUDGET_S, rounded up (0 only when spent); fails when no budget is set.
+budget_left() {
+  [ "${JOURNEY_BUDGET_S:-0}" -gt 0 ] 2>/dev/null || return 1
+  awk -v t0="$JOURNEY_T0" -v n="$(now)" -v b="$JOURNEY_BUDGET_S" 'BEGIN{l=b-(n-t0); printf "%d", (l>0?int(l)+(l>int(l)):0)}'
+}
+# cap_s WANT: WANT seconds, or what is left of the run budget when that is less (at least 1).
+cap_s() {
+  local want=$1 left
+  left=$(budget_left) || { echo "$want"; return; }
+  [ "$left" -lt "$want" ] && want=$left
+  [ "$want" -lt 1 ] && want=1
+  echo "$want"
+}
 
 STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT K12I K12T K12E K12M K12R K12H WEB KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JDISCLOSE)
 if [ -n "${JOURNEY_STEPS:-}" ]; then
@@ -267,8 +287,12 @@ call() {
   { printf '%q ' "$@"; echo; } >"$SD/$name.cmd"
   local t0 t1 rc
   t0=$(now)
-  timeout 600 "$@" >"$SD/$name.out" 2>"$SD/$name.err"
+  local cap; cap=$(cap_s 600)
+  timeout "$cap" "$@" >"$SD/$name.out" 2>"$SD/$name.err"
   rc=$?
+  # The last line of a call's stderr is what a step reports as its cause, so a
+  # kill by the clock names the clock: never a refusal the Host did not give.
+  [ "$rc" = 124 ] && echo "journey: $name killed at its ${cap}s limit (600 s per-operation rule; JOURNEY_BUDGET_S ${JOURNEY_BUDGET_S:-unset}, left $(budget_left || echo none)s)" >>"$SD/$name.err"
   t1=$(now)
   echo "$rc" >"$SD/$name.rc"
   elapsed "$t0" "$t1" >"$SD/$name.wall"
@@ -410,6 +434,15 @@ run_step() {
       return
     fi
   done
+  if [ "$(budget_left || echo none)" = 0 ]; then
+    local slow; slow=$(for dep in "${!WALL[@]}"; do echo "${WALL[$dep]} $dep"; done | sort -gr | head -3 | awk '{printf "%s%s %ss", (NR>1?", ":""), $2, $1}')
+    STATUS[$id]=FAIL; WALL[$id]=0.000; ART[$id]=""
+    DET[$id]="journey wall budget spent before this step started: JOURNEY_BUDGET_S=$JOURNEY_BUDGET_S, elapsed $(elapsed "$JOURNEY_T0" "$(now)")s, slowest steps: $slow"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$id" FAIL 0.000 "" "${DET[$id]}" >>"$TSV"
+    echo "STEP $id FAIL ${DET[$id]}" >&2
+    result_json "$(frontier)"
+    return
+  fi
   echo "STEP $id: ${TITLE[$id]} ..." >&2
   t0=$(now)
   "step_$id"
@@ -718,6 +751,7 @@ step_G() {
   local levels=${JOURNEY_GROWTH_LEVELS:-"10 100 500 1000"} budget=${JOURNEY_GROWTH_BUDGET_S:-10800}
   local L i t0 t1 wm ww rm rw bytes verdict="" over_prev=0 prev_wm="" g0
   g0=$(now)
+  budget=$(cap_s "$budget")
   ARTIFACT=$SD/levels.tsv
   mkdir -p "$SD/w" "$SD/r"
   printf 'level\twrite_median_s\twrite_worst_s\tread_median_s\tread_worst_s\treopen_s\tstore_bytes\tsampled_records\tloadavg\n' >"$ARTIFACT"
@@ -887,7 +921,8 @@ hook() {
   fi
   export JOURNEY_RUN=$RUN JOURNEY_WORLD=$W JOURNEY_STEP_DIR=$SD MINI HOST STORE VERIFIER CONFIG SOCKET \
     SPONSOR_WS NEWCOMER_WS SPONSOR_SUBJECT NEWCOMER_SUBJECT SHELL_BIN HERMES_BIN SPK_HOST_BIN CANDIDATE
-  timeout "${HOOK_TIMEOUT_S:-3600}" "$file" >"$SD/hook.out" 2>"$SD/hook.err"
+  local hook_cap; hook_cap=$(cap_s "${HOOK_TIMEOUT_S:-3600}")
+  timeout "$hook_cap" "$file" >"$SD/hook.out" 2>"$SD/hook.err"
   rc=$?
   ARTIFACT=$(tail -1 "$SD/hook.out")
   DETAIL=$(tail -1 "$SD/hook.err")
@@ -896,6 +931,9 @@ hook() {
   if [ -f "$SD/rt.origin" ]; then
     local origin; origin=$(cat "$SD/rt.origin")
     ARTIFACT=${ARTIFACT//"$origin"/"$SD/rt"}; DETAIL=${DETAIL//"$origin"/"$SD/rt"}
+  fi
+  if [ "$rc" = 124 ]; then
+    DETAIL="hook killed at its ${hook_cap}s limit (HOOK_TIMEOUT_S ${HOOK_TIMEOUT_S:-3600}, journey budget left $(budget_left || echo none)s): $DETAIL"; return 1
   fi
   [ "$rc" = 0 ] || { DETAIL="hook exit $rc: $DETAIL"; return 1; }
   # The live service must still be ours and alive; a hook may not take it down.

@@ -24,6 +24,7 @@
 #   LOCAL_GATES_CANDIDATE (a deploy/candidate/build.sh output dir)   M7
 #   LOCAL_GATES_GROWTH_LEVELS (default "10 100 500 1000": G at its real level)
 #   LOCAL_GATES_JOURNEY_ONLY (passed as JOURNEY_ONLY; the skipped steps are red)
+#   LOCAL_GATES_JOURNEY_BUDGET_S (default 14400; wall budget of the whole journey, 0 = none)
 # Prints the journey's step table and frontier; the last line is the verdict.
 set -uo pipefail
 root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
@@ -60,7 +61,13 @@ echo "journey-gate: run root $run (manifest $man)"
 jq -r '.sha256 | to_entries[] | "  \(.key) \(.value)"' "$man"
 
 levels=${LOCAL_GATES_GROWTH_LEVELS:-10 100 500 1000}
-env_args=(JOURNEY_GROWTH_LEVELS="$levels" PAY_WATCHER_BIN="$bin/pay-watcher")
+# The whole journey is bounded: past this wall budget every step not yet started is
+# recorded FAIL naming the budget and the slowest steps, and every call and hook is
+# capped at what is left (journey.sh, JOURNEY_BUDGET_S). 4 h leaves the 350 min CI job
+# its lake build and the other gates; a run that reaches it is red with a reason, never
+# cut by the job limit with no verdict. LOCAL_GATES_JOURNEY_BUDGET_S=0 removes it.
+env_args=(JOURNEY_GROWTH_LEVELS="$levels" PAY_WATCHER_BIN="$bin/pay-watcher"
+  JOURNEY_BUDGET_S="${LOCAL_GATES_JOURNEY_BUDGET_S:-14400}")
 [ -n "${LOCAL_GATES_JOURNEY_ONLY:-}" ] && env_args+=(JOURNEY_ONLY="$LOCAL_GATES_JOURNEY_ONLY")
 for v in NOCK_TEMPLATES NOCK_RUN NOCK_DOOR_JAM NOCK_DOOR_FUEL; do
   src=LOCAL_GATES_$v
