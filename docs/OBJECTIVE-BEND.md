@@ -132,7 +132,7 @@ and **the package root as a specification**.
    proved (publish, create, birth, resolve, deliver, exhaust, abandon, topUp, writeState;
    [the kernel activity](OBJECTIVE-BEND-EVENTS.md#the-kernel-activity)), but no Host
    operation reaches them: `Kernel.ObjectiveActivity` is not in the Host closure
-   (`scripts/gates/host-closure.pin:490-500`). In flight: ACTIVITY-ROUTE.
+   (`scripts/gates/host-closure.pin`). In flight: ACTIVITY-ROUTE.
 2. **A guardedness check** (typing). Every self-call of a resident under a perform,
    so that a well-typed resident never diverges inside a turn.
 3. **The theorem for declared ancestry** (proof; poof §4.3; ltuo §7.3–7.4, §9.2). The

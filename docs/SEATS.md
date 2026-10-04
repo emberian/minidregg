@@ -9,7 +9,7 @@ Miller, Van Cutsem and Tulloh, ESOP 2013 §6).
 **Evidence class: compiled and proved in Lean, not integrated.** The model is
 [Kernel/Seat](../Kernel/Seat.lean) (one transition function, invariant and theorems) and
 [Kernel/Invitation](../Kernel/Invitation.lean) (the pure invitation rules). Neither is
-in the Host closure (`scripts/gates/host-closure.pin:490-500` has no `Kernel.Seat` or
+in the Host closure (`scripts/gates/host-closure.pin` has no `Kernel.Seat` or
 `Kernel.Invitation`; `Kernel.lean:58` imports `Kernel.Seat`), no Host operation, `mini`
 verb or `.obend` program emits a seat action, and no journey runs one
 (`scripts/pipeline/journey-rows:80-91` finds no seat driver). Activities do not yet hold

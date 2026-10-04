@@ -14,7 +14,7 @@ an activity and delivers its responses, is [below](#the-kernel-activity): compil
 proved in Lean on main, with the stored checkpoint's transparency executed by a gate.
 **No native route reaches it on main**: `Kernel.ObjectiveActivity`, `Kernel.AnswerSlot`,
 `Kernel.ObjectRecord` and `Kernel.ObjectState` are not in the Host closure
-(`scripts/gates/host-closure.pin:490-500` lists only `Kernel.ObjectiveActivityCell` of
+(`scripts/gates/host-closure.pin` lists only `Kernel.ObjectiveActivityCell` of
 them), so no Host operation births, delivers to or writes an activity, and no activity
 has run on a native Host. In flight: ACTIVITY-ROUTE (the receiver and Host ops),
 RETENTION-PAYERS, UPGRADE, CHECKPOINT-INVARIANT, FORCING-TRANSPARENT, SCHOLAR-CALLS.
