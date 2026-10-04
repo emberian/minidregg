@@ -36,6 +36,8 @@ pub mod triple_king;
 
 pub mod source_endpoint;
 
+#[path = "../../hybrid_kem.rs"]
+pub mod hybrid_kem;
 #[path = "../../crypto_transit.rs"]
 pub mod crypto_transit;
 pub mod recipient_seal;

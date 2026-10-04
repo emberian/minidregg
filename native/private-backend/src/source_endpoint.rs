@@ -499,7 +499,7 @@ mod tests {
         let envelope = old.protocol_binding().unwrap();
         let keys = crypto_transit::generate_keypair().unwrap();
         let spec = RecipientSpec {
-            algorithm: Nat::new(1),
+            algorithm: Nat::new(2),
             key_epoch: Nat::new(3),
             key_id: recipient_key_id(&keys.public),
             plaintext_bound: 4096,

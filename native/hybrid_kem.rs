@@ -98,10 +98,12 @@ impl std::fmt::Debug for HybridPublic {
 }
 
 impl HybridPublic {
+    #[cfg(test)]
     pub fn x25519(&self) -> &[u8; 32] {
         &self.x25519
     }
 
+    #[cfg(test)]
     pub fn kem(&self) -> &[u8; KEM_EK_LEN] {
         &self.kem
     }

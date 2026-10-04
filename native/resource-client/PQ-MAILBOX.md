@@ -12,7 +12,7 @@ network or a whole-world privacy theorem.
 A public fixed cohort contributes exactly one equal-size packet per epoch,
 including dummy traffic. Epoch classes repeat application/application/control/
 repair. Three fixed independent relay operators process complete batches before a
-separate mailbox receiver. Every hop has an ML-KEM768 key pinned outside the
+separate mailbox receiver. Every hop has a hybrid X25519 + ML-KEM-768 key pinned outside the
 packet. At least two honest client inputs, at least one honest whole-batch shuffle,
 an honest noncolluding registrar, an honest receiver, authenticated confidential
 client-to-registrar enrollment/commitment submission, bounded processing before
@@ -24,11 +24,15 @@ consequence of 'one honest relay'. It sees private paired route commitments and
 could identify mappings if compromised/colluding. Receiver sees ordinary native
 signatures and graph; this does not hide source author from that receiver.
 
-All four layers instantiate AWS-LC's existing ML-KEM768 with XChaCha20Poly1305,
-HMAC-SHA256 context key derivation and key/cipher binding. The complete next packet
+All four layers are sealed to a hybrid X25519 + ML-KEM-768 key pair (`hybrid_kem`,
+the combiner private rooms use: one cSHAKE256 over BOTH shared secrets and the
+full transcript, so either primitive alone keeps a layer sealed; ML-KEM is
+AWS-LC's) with XChaCha20Poly1305 and a key/cipher binding under a separate
+subkey. The v1 mix (pure ML-KEM-768: 1,160-byte layers, `MPB1`/`MPM1` frames,
+2400-byte operator secrets, 1184-byte public keys) refuses by name. The complete next packet
 is AEAD-covered at each layer. Public epoch, cohort width, payload capacity and hop
-are bound as associated data. Every encapsulation and nonce is fresh. A layer adds
-1,160 bytes:1088 KEM,24 nonce,32 key/cipher binding,16 AEAD tag. Logical body
+are bound as transcript and associated data. Every encapsulation and nonce is fresh. A layer adds
+1,192 bytes:1120 hybrid ciphertext (32 ephemeral X25519 + 1088 ML-KEM),24 nonce,32 key/cipher binding,16 AEAD tag. Logical body
 payload P defaults65,536 and is publicly bounded1,024..262,144. The core includes
 an immutable operation ID and random32-byte reply capability. Native carrier size
 must fit P-66 before dispatch. Large native frames require a future matched
@@ -96,7 +100,8 @@ antirollback anchor, filesystem rollback defense or forward secrecy is claimed.
 ## Executable operator path
 
 `mini mix --action key --state PRIVATE --secret SK --public PK` generates an
-ML-KEM768 operator/receiver key. `registrar-key --state PRIVATE --secret KEY`
+hybrid X25519 + ML-KEM-768 operator/receiver key (SK is a 96-byte seed, PK 1,216
+bytes). `registrar-key --state PRIVATE --secret KEY`
 generates an independent32-byte registrar/operator authentication pin. There are
 three relay pairs plus the separate receiver, and FOUR distinct registrar pins.
 
@@ -126,18 +131,18 @@ proxy/native status is inferred from a missing reply or packet.
 
 ## Costs and proof boundaries
 
-Each client uploads P+4,640 bytes per batch before access framing; internal layers
-are P+3,480/P+2,320/P+1,160 bytes per packet. Each client receives W*P+19 bytes of
+Each client uploads P+4,768 bytes per batch before access framing; internal layers
+are P+3,576/P+2,384/P+1,192 bytes per packet. Each client receives W*P+19 bytes of
 broadcast. Registrar manifest is18+160*W+128 bytes, plus secret160-byte commitment
 submission per client and authenticated enrollment/control framing. MAC/KEM key
 provision and public key rollover are extra. At P65,536,W16,T1s, client raw request
-plus broadcast is1,118,771B/s, or2,899.854432GB/30days; app/control/repair ratios
+plus broadcast is1,118,899B/s, or2,900.186208GB/30days; app/control/repair ratios
 split useful opportunities1/2,1/4,1/4. These are parameter calculations, not Mini
-measurements. P4,096,W4,T1s gives25,139B/s/client,65.160288GB/30days. Broadcast
+measurements. P4,096,W4,T1s gives25,267B/s/client,65.492064GB/30days. Broadcast
 fanout and scans grow linearly PER CLIENT; aggregate downlink is quadratic in W.
 This buys retrieval privacy without assuming an undefined malicious/PQ PIR.
 
-One batch has four per-packet ML-KEM encapsulations at the client and four
+One batch has four per-packet hybrid (X25519 + ML-KEM) encapsulations at the client and four
 operator decapsulations across the chain. Current guard also decapsulates for
 preflight then processes, so operator computation repeats twice; this is an
 implementation cost, not a paper performance claim. Operator release lag is five
@@ -146,8 +151,8 @@ public processing allowance; source async continuation/service fairness and WCET
 must be qualified. Variable native Host work is not private MPC or hidden access.
 All key histories, later opening, compromised endpoints, side channels, public
 application outputs and authorized Pending retain their declared leakage/trust.
-Ordinary native signatures remain classical: PQ packet encryption is not a full
-PQ OO/agreement stack. Fixed routes avoid independent-route bad-event accumulation
+Ordinary native signatures remain classical: the packet key exchange is hybrid
+post-quantum, not a full PQ OO/agreement stack. Fixed routes avoid independent-route bad-event accumulation
 but require an honest shuffle operator over the entire claimed lifetime. Historical
 key compromise or disclosed registrar pairing invalidates that lifetime premise.
 

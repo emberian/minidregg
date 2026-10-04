@@ -706,7 +706,7 @@ mod tests {
     }
     fn spec(public: &[u8]) -> RecipientSpec {
         RecipientSpec {
-            algorithm: Nat::new(1),
+            algorithm: Nat::new(2),
             key_epoch: Nat::from_be(&[255; 32]),
             key_id: recipient_seal::recipient_key_id(public),
             plaintext_bound: 4096,
@@ -925,17 +925,29 @@ mod tests {
         wrong.context.protocol = Protocol::Dzk;
         assert!(sealed.open(&k.secret, &k.public, &wrong, 7, &sp).is_err());
         assert!(sealed.open(&k.secret, &k.public, &p, 8, &sp).is_err());
-        for field in 0..5 {
+        for field in 0..8 {
             let mut bad = sealed.clone();
             match field {
-                0 => bad.kem_ciphertext[0] ^= 1,
+                0 => bad.hybrid_ciphertext[0] ^= 1,
                 1 => bad.nonce[0] ^= 1,
                 2 => bad.key_cipher_commitment[0] ^= 1,
                 3 => bad.ciphertext[0] ^= 1,
+                // Either hybrid ciphertext component: the ephemeral X25519 key
+                // (bytes 0..32, field 0) and the ML-KEM-768 ciphertext (32..).
+                4 => bad.hybrid_ciphertext[32] ^= 1,
+                5 => bad.hybrid_ciphertext[1119] ^= 1,
+                6 => bad.hybrid_ciphertext[31] ^= 1,
                 _ => bad.semantic_commitment[0] ^= 1,
             }
-            assert!(bad.open(&k.secret, &k.public, &p, 7, &sp).is_err());
+            assert!(bad.open(&k.secret, &k.public, &p, 7, &sp).is_err(), "field {field}");
         }
+        // The pre-hybrid suite refuses by name: recipient algorithm 1 and the v2 frame.
+        let mut pure = sp.clone();
+        pure.algorithm = Nat::new(1);
+        assert!(pure.validate().unwrap_err().to_string().contains("pre-hybrid pure ML-KEM-768"));
+        let mut v2 = raw.clone();
+        v2[28] = 2; // the version byte after "DREGG.PRIVATE.SEALED.INGRESS"
+        assert!(SealedIngress::decode(&v2).unwrap_err().to_string().contains("v2 frame"));
         let mut suffix = raw;
         suffix.push(0);
         assert!(SealedIngress::decode(&suffix).is_err());

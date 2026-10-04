@@ -12,8 +12,13 @@ use std::{
     fs::File,
     io::{Read, Result},
 };
-const FRAME: &[u8] = b"DREGG.PRIVATE.SEALED.INGRESS\x02";
-const SIGN: &[u8] = b"DREGG.PRIVATE.SEALED.SOURCE.SIGN\x02";
+const FRAME: &[u8] = b"DREGG.PRIVATE.SEALED.INGRESS\x03";
+/// The v2 frame (pure ML-KEM-768 recipient suite, algorithm 1): refused by name.
+const FRAME_V2: &[u8] = b"DREGG.PRIVATE.SEALED.INGRESS\x02";
+/// The recipient suite id: 2 = hybrid X25519 + ML-KEM-768 (`hybrid_kem`). Suite 1
+/// was pure ML-KEM-768 and is refused.
+const ALGORITHM_HYBRID: u64 = 2;
+const SIGN: &[u8] = b"DREGG.PRIVATE.SEALED.SOURCE.SIGN\x03";
 const PAD: &[u8] = b"DREGG.PRIVATE.RECIPIENT.PAD\x02";
 pub const MAX_PLAINTEXT: usize = 131168;
 pub const MAX_SEALED: usize = 262078;
@@ -26,7 +31,12 @@ pub struct RecipientSpec {
 }
 impl RecipientSpec {
     pub fn validate(&self) -> Result<()> {
-        if self.algorithm != Nat::new(1)
+        if self.algorithm == Nat::new(1) {
+            return Err(bad(
+                "recipient algorithm 1 is the pre-hybrid pure ML-KEM-768 suite: refused; the suite is algorithm 2, hybrid X25519 + ML-KEM-768",
+            ));
+        }
+        if self.algorithm != Nat::new(ALGORITHM_HYBRID)
             || self.key_id.is_empty()
             || self.key_id.len() > 128
             || self.plaintext_bound < PAD.len() + 37
@@ -43,7 +53,7 @@ impl RecipientSpec {
     }
 }
 pub fn recipient_key_id(public_key: &[u8]) -> Vec<u8> {
-    let mut b = b"DREGG.PRIVATE.RECIPIENT.KEY.ID\x02".to_vec();
+    let mut b = b"DREGG.PRIVATE.RECIPIENT.KEY.ID\x03".to_vec();
     bytes(public_key, &mut b);
     Sha512::digest(&b).to_vec()
 }
@@ -138,7 +148,7 @@ pub struct SealedIngress {
     pub sequence: u64,
     pub recipient: RecipientSpec,
     pub semantic_commitment: [u8; 64],
-    pub kem_ciphertext: [u8; 1088],
+    pub hybrid_ciphertext: [u8; crypto_transit::HYBRID_CIPHERTEXT_BYTES],
     pub nonce: [u8; 24],
     pub key_cipher_commitment: [u8; 32],
     pub ciphertext: Vec<u8>,
@@ -164,7 +174,7 @@ impl SealedIngress {
     pub fn source_signing_bytes(&self) -> Vec<u8> {
         let mut b = SIGN.to_vec();
         bytes(&self.public_binding(), &mut b);
-        b.extend(self.kem_ciphertext);
+        b.extend(self.hybrid_ciphertext);
         b.extend(self.nonce);
         b.extend(self.key_cipher_commitment);
         bytes(&self.ciphertext, &mut b);
@@ -176,7 +186,7 @@ impl SealedIngress {
             return Err(bad("recipient fixed ciphertext shape"));
         }
         let mut b = self.public_binding();
-        b.extend(self.kem_ciphertext);
+        b.extend(self.hybrid_ciphertext);
         b.extend(self.nonce);
         b.extend(self.key_cipher_commitment);
         bytes(&self.ciphertext, &mut b);
@@ -187,6 +197,11 @@ impl SealedIngress {
         Ok(b)
     }
     pub fn decode(b: &[u8]) -> Result<Self> {
+        if b.starts_with(FRAME_V2) {
+            return Err(bad(
+                "sealed ingress is a v2 frame (pure ML-KEM-768 recipient suite): refused; the frame is v3, hybrid X25519 + ML-KEM-768",
+            ));
+        }
         if b.len() > MAX_SEALED || !b.starts_with(FRAME) {
             return Err(bad("sealed ingress frame/capacity"));
         }
@@ -198,7 +213,7 @@ impl SealedIngress {
         let key_id = c.bytes()?;
         let plaintext_bound = cursor_nat(&mut c)?.value()? as usize;
         let semantic_commitment = c.take(64)?.try_into().unwrap();
-        let kem_ciphertext = c.take(1088)?.try_into().unwrap();
+        let hybrid_ciphertext = c.take(crypto_transit::HYBRID_CIPHERTEXT_BYTES)?.try_into().unwrap();
         let nonce = c.take(24)?.try_into().unwrap();
         let key_cipher_commitment = c.take(32)?.try_into().unwrap();
         let ciphertext = c.bytes()?;
@@ -214,7 +229,7 @@ impl SealedIngress {
                 plaintext_bound,
             },
             semantic_commitment,
-            kem_ciphertext,
+            hybrid_ciphertext,
             nonce,
             key_cipher_commitment,
             ciphertext,
@@ -245,13 +260,13 @@ impl SealedIngress {
         if recipient_key_id(retained_public_key) != expected_recipient.key_id {
             return Err(bad("recipient retained public enrollment key binding"));
         }
-        // AWS-LC raw restored decapsulation keys cannot export their public key.
-        // Use the ORIGINAL endpoint-retained public pair, then actual KEM pair
-        // validation; never infer it from network claims or a latest-key lookup.
+        // The secret is a seed, so the ORIGINAL endpoint-retained public key is
+        // checked against the public key the secret regenerates; never infer it
+        // from network claims or a latest-key lookup.
         crypto_transit::validate_keypair(secret_key, retained_public_key)
             .map_err(|_| bad("recipient retained key pair refused"))?;
         let parts = crypto_transit::SealedParts {
-            kem_ciphertext: self.kem_ciphertext,
+            hybrid_ciphertext: self.hybrid_ciphertext,
             nonce: self.nonce,
             commitment: self.key_cipher_commitment,
             ciphertext: self.ciphertext.clone(),
@@ -442,7 +457,7 @@ impl HidingDraft {
             sequence: inner.sequence,
             recipient: self.recipient,
             semantic_commitment: self.commitment,
-            kem_ciphertext: [0; 1088],
+            hybrid_ciphertext: [0; crypto_transit::HYBRID_CIPHERTEXT_BYTES],
             nonce: [0; 24],
             key_cipher_commitment: [0; 32],
             ciphertext: vec![],
@@ -455,7 +470,7 @@ impl HidingDraft {
             &plaintext,
         )
         .map_err(|_| bad("recipient encryption refused"))?;
-        out.kem_ciphertext = parts.kem_ciphertext;
+        out.hybrid_ciphertext = parts.hybrid_ciphertext;
         out.nonce = parts.nonce;
         out.key_cipher_commitment = parts.commitment;
         out.ciphertext = parts.ciphertext;
@@ -504,7 +519,7 @@ impl KeyRecord {
     }
     pub fn recipient_spec(&self, plaintext_bound: usize) -> Result<RecipientSpec> {
         let spec = RecipientSpec {
-            algorithm: Nat::new(1),
+            algorithm: Nat::new(ALGORITHM_HYBRID),
             key_epoch: self.epoch.clone(),
             key_id: recipient_key_id(&self.public_key),
             plaintext_bound,

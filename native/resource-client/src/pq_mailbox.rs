@@ -3,7 +3,7 @@
 use crate::crypto_transit::{self, SealedRef};
 use crate::scheduled_transport::{self as native, directory, persist, random, read_private};
 use crate::{transport, Args, Result};
-use aws_lc_rs::kem::{DecapsulationKey, ML_KEM_768};
+use crate::hybrid_kem::{self, HybridSecret};
 use chacha20poly1305::{
     aead::{Aead, Payload},
     KeyInit, XChaCha20Poly1305, XNonce,
@@ -16,10 +16,17 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 const LAYERS: usize = 4; // three independently administered relays + mailbox receiver
-const OVERHEAD: usize = 1088 + 24 + 32 + 16;
+const OVERHEAD: usize = crypto_transit::OVERHEAD_BYTES;
+/// The v1 (pure ML-KEM-768) layer overhead: 1088 KEM + 24 + 32 + 16. Kept only to
+/// recognise and refuse a v1 packet by name.
+const V1_OVERHEAD: usize = 1088 + 24 + 32 + 16;
 const CORE: usize = 4 + 8 + 1 + 1 + 16 + 32 + 4;
 const REPLY: usize = 4 + 8 + 1 + 16 + 4;
-const DOMAIN: &[u8] = b"Mini/PQ-batch-mailbox/v1";
+const DOMAIN: &[u8] = b"Mini/PQ-batch-mailbox/v2";
+/// Batch and manifest frames: v2 carries hybrid X25519 + ML-KEM-768 layers.
+const BATCH_MAGIC: &[u8; 4] = b"MPB2";
+const MANIFEST_MAGIC: &[u8; 4] = b"MPM2";
+const V1_REFUSAL: &str = "this is a v1 pure ML-KEM-768 mix frame (no X25519 component): refused; the mix is hybrid X25519 + ML-KEM-768 (v2). Re-key the operators (`mix --action key`) and re-seal";
 #[derive(Clone)]
 struct Profile {
     epoch: u64,
@@ -52,19 +59,28 @@ impl Profile {
     fn size(&self, hop: usize) -> usize {
         self.payload + (LAYERS - hop) * OVERHEAD
     }
+    fn v1_size(&self, hop: usize) -> usize {
+        self.payload + (LAYERS - hop) * V1_OVERHEAD
+    }
 }
 fn wrap(p: &Profile, hop: usize, key: &[u8], body: &[u8]) -> Result<Vec<u8>> {
     if body.len() != p.size(hop + 1) {
         return Err("PQ layer body shape mismatch".into());
     }
     let sealed = crypto_transit::seal_raw_context(key, &p.aad(hop), body)?;
-    let mut out = sealed.kem_ciphertext.to_vec();
+    let mut out = sealed.hybrid_ciphertext.to_vec();
     out.extend_from_slice(&sealed.nonce);
     out.extend_from_slice(&sealed.commitment);
     out.extend_from_slice(&sealed.ciphertext);
     Ok(out)
 }
-fn peel(p: &Profile, hop: usize, key: &DecapsulationKey, packet: &[u8]) -> Result<Vec<u8>> {
+fn peel(p: &Profile, hop: usize, key: &HybridSecret, packet: &[u8]) -> Result<Vec<u8>> {
+    const H: usize = crypto_transit::HYBRID_CIPHERTEXT_BYTES;
+    const N: usize = crypto_transit::NONCE_BYTES;
+    const C: usize = crypto_transit::COMMITMENT_BYTES;
+    if hop < LAYERS && packet.len() == p.v1_size(hop) {
+        return Err(format!("PQ layer packet: {V1_REFUSAL}"));
+    }
     if hop >= LAYERS || packet.len() != p.size(hop) {
         return Err("PQ layer packet shape mismatch".into());
     }
@@ -72,10 +88,10 @@ fn peel(p: &Profile, hop: usize, key: &DecapsulationKey, packet: &[u8]) -> Resul
         key,
         &p.aad(hop),
         SealedRef {
-            kem_ciphertext: &packet[..1088],
-            nonce: &packet[1088..1112],
-            commitment: &packet[1112..1144],
-            ciphertext: &packet[1144..],
+            hybrid_ciphertext: &packet[..H],
+            nonce: &packet[H..H + N],
+            commitment: &packet[H + N..H + N + C],
+            ciphertext: &packet[H + N + C..],
         },
     )
 }
@@ -98,7 +114,7 @@ fn batch(p: &Profile, hop: usize, packets: &[Vec<u8>]) -> Result<Vec<u8>> {
     if hop > LAYERS || packets.len() != p.width || packets.iter().any(|v| v.len() != p.size(hop)) {
         return Err("PQ batch fixed shape mismatch".into());
     }
-    let mut out = b"MPB1".to_vec();
+    let mut out = BATCH_MAGIC.to_vec();
     out.extend_from_slice(&p.epoch.to_le_bytes());
     out.push(hop as u8);
     out.extend_from_slice(&(p.width as u16).to_le_bytes());
@@ -109,9 +125,12 @@ fn batch(p: &Profile, hop: usize, packets: &[Vec<u8>]) -> Result<Vec<u8>> {
     Ok(out)
 }
 fn unbatch(p: &Profile, hop: usize, bytes: &[u8]) -> Result<Vec<Vec<u8>>> {
+    if bytes.get(..4) == Some(b"MPB1") {
+        return Err(format!("PQ batch (MPB1): {V1_REFUSAL}"));
+    }
     if hop > LAYERS
         || bytes.len() != 19 + p.width * p.size(hop)
-        || bytes.get(..4) != Some(b"MPB1")
+        || bytes.get(..4) != Some(BATCH_MAGIC)
         || u64::from_le_bytes(bytes[4..12].try_into().unwrap()) != p.epoch
         || bytes[12] as usize != hop
         || u16::from_le_bytes(bytes[13..15].try_into().unwrap()) as usize != p.width
@@ -166,7 +185,7 @@ fn process_relay(
     root: &Path,
     p: &Profile,
     hop: usize,
-    key: &DecapsulationKey,
+    key: &HybridSecret,
     input: &[u8],
 ) -> Result<Vec<u8>> {
     if hop >= 3 {
@@ -277,7 +296,7 @@ fn open_reply(p: &Profile, id: [u8; 16], key: [u8; 32], v: &[u8]) -> Result<Vec<
 fn process_mailbox(
     root: &Path,
     p: &Profile,
-    key: &DecapsulationKey,
+    key: &HybridSecret,
     input: &[u8],
     target: &Path,
     config: &[u8],
@@ -380,7 +399,7 @@ fn manifest(
     {
         return Err("cohort input differs from private registered commitment".into());
     }
-    let mut out = b"MPM1".to_vec();
+    let mut out = MANIFEST_MAGIC.to_vec();
     out.extend_from_slice(&p.epoch.to_le_bytes());
     out.extend_from_slice(&(p.width as u16).to_le_bytes());
     out.extend_from_slice(&(p.payload as u32).to_le_bytes());
@@ -412,11 +431,14 @@ fn stage_set(p: &Profile, hop: usize, m: &[u8]) -> Vec<Vec<u8>> {
         .collect()
 }
 fn verify_manifest(p: &Profile, hop: usize, m: &[u8], auth: &[u8]) -> Result<()> {
+    if m.get(..4) == Some(b"MPM1") {
+        return Err(format!("authenticated cohort manifest (MPM1): {V1_REFUSAL}"));
+    }
     let n = 18 + (LAYERS + 1) * p.width * 32;
     if hop >= LAYERS
         || auth.len() != 32
         || m.len() != n + LAYERS * 32
-        || m.get(..4) != Some(b"MPM1")
+        || m.get(..4) != Some(MANIFEST_MAGIC)
         || u64::from_le_bytes(m[4..12].try_into().unwrap()) != p.epoch
         || u16::from_le_bytes(m[12..14].try_into().unwrap()) as usize != p.width
         || u32::from_le_bytes(m[14..18].try_into().unwrap()) as usize != p.payload
@@ -442,7 +464,7 @@ fn verify_manifest(p: &Profile, hop: usize, m: &[u8], auth: &[u8]) -> Result<()>
 fn verify_transition(
     p: &Profile,
     hop: usize,
-    key: &DecapsulationKey,
+    key: &HybridSecret,
     input: &[u8],
     m: &[u8],
     auth: &[u8],
@@ -452,7 +474,7 @@ fn verify_transition(
 fn prepare_transition(
     p: &Profile,
     hop: usize,
-    key: &DecapsulationKey,
+    key: &HybridSecret,
     input: &[u8],
     m: &[u8],
     auth: &[u8],
@@ -568,9 +590,10 @@ fn num(args: &mut Args, name: &str, default: usize) -> Result<usize> {
         })
         .unwrap_or(Ok(default))
 }
-fn read_key(path: &Path) -> Result<DecapsulationKey> {
-    DecapsulationKey::new(&ML_KEM_768, &read_private(path, 2400)?)
-        .map_err(|_| "invalid ML-KEM768 secret".into())
+/// The bound is the v1 secret size, so a v1 (2400-byte pure ML-KEM) key file is
+/// read and refused by name instead of by a size bound.
+fn read_key(path: &Path) -> Result<HybridSecret> {
+    HybridSecret::from_bytes(&read_private(path, 2400)?)
 }
 fn consume_broadcast(state: &Path, p: &Profile, input: &[u8]) -> Result<Vec<Vec<u8>>> {
     let cells = unbatch(p, LAYERS, input)?;
@@ -1078,19 +1101,9 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         let secret = PathBuf::from(args.required("secret")?);
         let public = PathBuf::from(args.required("public")?);
         args.finish()?;
-        let k = DecapsulationKey::generate(&ML_KEM_768).map_err(|_| "ML-KEM generation")?;
-        persist(
-            &secret,
-            k.key_bytes().map_err(|_| "ML-KEM serialize")?.as_ref(),
-        )?;
-        return persist(
-            &public,
-            k.encapsulation_key()
-                .map_err(|_| "ML-KEM public")?
-                .key_bytes()
-                .map_err(|_| "ML-KEM public serialize")?
-                .as_ref(),
-        );
+        let k = HybridSecret::generate()?;
+        persist(&secret, &k.to_bytes())?;
+        return persist(&public, &k.public().to_bytes());
     }
     let p = Profile {
         epoch: num(&mut args, "epoch", 0)? as u64,
@@ -1106,7 +1119,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 .map_err(|_| "invalid pinned keys")?;
             let keys = files
                 .split(',')
-                .map(|v| read_private(Path::new(v), 1184))
+                .map(|v| read_private(Path::new(v), hybrid_kem::PUBLIC_LEN))
                 .collect::<Result<Vec<_>>>()?;
             let input = args.optional("request").map(PathBuf::from);
             let mut body = input
@@ -1300,21 +1313,11 @@ mod tests {
         directory(&p).unwrap();
         p
     }
-    fn keys() -> (Vec<DecapsulationKey>, Vec<Vec<u8>>) {
+    fn keys() -> (Vec<HybridSecret>, Vec<Vec<u8>>) {
         let secrets: Vec<_> = (0..LAYERS)
-            .map(|_| DecapsulationKey::generate(&ML_KEM_768).unwrap())
+            .map(|_| HybridSecret::generate().unwrap())
             .collect();
-        let publics = secrets
-            .iter()
-            .map(|k| {
-                k.encapsulation_key()
-                    .unwrap()
-                    .key_bytes()
-                    .unwrap()
-                    .as_ref()
-                    .to_vec()
-            })
-            .collect();
+        let publics = secrets.iter().map(|k| k.public().to_bytes()).collect();
         (secrets, publics)
     }
     #[test]
@@ -1380,6 +1383,69 @@ mod tests {
         assert_eq!(packet, original);
     }
     #[test]
+    fn hybrid_layers_open_only_for_their_recipient_and_refuse_tampering_of_either_component() {
+        let p = Profile { epoch: 3, width: 2, payload: 1024 };
+        p.check().unwrap();
+        let (secret, public) = keys();
+        let body = vec![5; p.size(1)];
+        let packet = wrap(&p, 0, &public[0], &body).unwrap();
+        assert_eq!(packet.len(), p.size(0));
+        assert_eq!(OVERHEAD, 1120 + 24 + 32 + 16, "a layer is hybrid ciphertext + nonce + commitment + tag");
+        assert_eq!(peel(&p, 0, &secret[0], &packet).unwrap(), body);
+        // Wrong recipient; and a split identity: one right half with the other's other half.
+        assert!(peel(&p, 0, &secret[1], &packet).is_err());
+        assert!(peel(&p, 0, &secret[0].with_kem_of(&secret[1]).unwrap(), &packet).is_err());
+        assert!(peel(&p, 0, &secret[0].with_x25519_of(&secret[1]).unwrap(), &packet).is_err());
+        // Wrong hop (the AAD binds it), epoch and shape.
+        assert!(peel(&p, 1, &secret[0], &packet).is_err());
+        assert!(peel(&Profile { epoch: 4, ..p.clone() }, 0, &secret[0], &packet).is_err());
+        // Either ciphertext component, the nonce, the commitment, the box: each refuses.
+        for (what, at) in [
+            ("X25519 ephemeral, first", 0),
+            ("X25519 ephemeral, last", 31),
+            ("ML-KEM ciphertext, first", 32),
+            ("ML-KEM ciphertext, middle", 32 + 544),
+            ("ML-KEM ciphertext, last", 1119),
+            ("nonce", 1120),
+            ("commitment", 1120 + 24),
+            ("box", packet.len() - 1),
+        ] {
+            let mut bad = packet.clone();
+            bad[at] ^= 1;
+            assert!(peel(&p, 0, &secret[0], &bad).is_err(), "{what} flipped must refuse");
+        }
+    }
+    #[test]
+    fn v1_pure_ml_kem_mix_frames_and_keys_refuse_by_name() {
+        let p = Profile { epoch: 3, width: 2, payload: 1024 };
+        let (secret, public) = keys();
+        // A bare 1184-byte ML-KEM key is not an operator key.
+        let refusal = wrap(&p, 0, &public[0][32..], &vec![0; p.size(1)]).unwrap_err();
+        assert!(refusal.contains("pre-hybrid"), "{refusal}");
+        // A v1-shaped packet (1088-byte KEM ciphertext, 1160-byte layers).
+        let refusal = peel(&p, 0, &secret[0], &vec![0; p.v1_size(0)]).unwrap_err();
+        assert!(refusal.contains("v1 pure ML-KEM-768"), "{refusal}");
+        // A v1 batch and a v1 manifest.
+        let mut v1_batch = b"MPB1".to_vec();
+        v1_batch.extend_from_slice(&vec![0; 15 + p.width * p.v1_size(0)]);
+        let refusal = unbatch(&p, 0, &v1_batch).unwrap_err();
+        assert!(refusal.contains("MPB1") && refusal.contains("v1 pure ML-KEM-768"), "{refusal}");
+        let mut v1_manifest = b"MPM1".to_vec();
+        v1_manifest.extend_from_slice(&[0; 200]);
+        let refusal = verify_manifest(&p, 0, &v1_manifest, &[0; 32]).unwrap_err();
+        assert!(refusal.contains("MPM1") && refusal.contains("v1 pure ML-KEM-768"), "{refusal}");
+        // A v1 operator key file (2400-byte ML-KEM secret) is read and refused by name.
+        let root = scratch();
+        let path = root.join("v1.secret");
+        persist(&path, &vec![7; 2400]).unwrap();
+        let refusal = read_key(&path).err().unwrap();
+        assert!(refusal.contains("pre-hybrid"), "{refusal}");
+        // The v2 key file round-trips: the secret is a seed and regenerates the same public key.
+        let path = root.join("v2.secret");
+        persist(&path, &secret[0].to_bytes()).unwrap();
+        assert_eq!(read_key(&path).unwrap().public().to_bytes(), public[0]);
+    }
+    #[test]
     fn live_mailbox_grouped_exact_input_replay_crash_and_orphan_fences() {
         let root = scratch();
         let (secrets, publics) = keys();
@@ -1388,7 +1454,7 @@ mod tests {
             .enumerate()
             .map(|(i, key)| {
                 let path = root.join(format!("key-{i}"));
-                persist(&path, key.key_bytes().unwrap().as_ref()).unwrap();
+                persist(&path, &key.to_bytes()).unwrap();
                 path
             })
             .collect();
@@ -1484,7 +1550,7 @@ mod tests {
         let root = scratch();
         let (secret, public) = keys();
         let keypath = root.join("key");
-        persist(&keypath, secret[0].key_bytes().unwrap().as_ref()).unwrap();
+        persist(&keypath, &secret[0].to_bytes()).unwrap();
         let p = Profile {
             epoch: 3,
             width: 2,
@@ -1766,7 +1832,7 @@ mod tests {
             .enumerate()
             .map(|(i, k)| {
                 let path = root.join(format!("key-{i}"));
-                persist(&path, k.key_bytes().unwrap().as_ref()).unwrap();
+                persist(&path, &k.to_bytes()).unwrap();
                 path
             })
             .collect();

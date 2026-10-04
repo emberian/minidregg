@@ -2,8 +2,9 @@
 """Receiving orchestration and byte-transparent observers; no evaluator.
 
 Every fixed link is admitted by the public cohort roster (`mini mix-live`
-MCE2 enrollment): members and operators sign challenge-bound enrollments with
-their own native Ed25519 keys and receive under roster-pinned ML-KEM keys. The
+MCE3 enrollment): members and operators sign challenge-bound enrollments with
+their own native Ed25519 keys and receive under roster-pinned hybrid X25519 +
+ML-KEM-768 keys. The
 orchestrator generates public test identities; it provisions no link secret.
 
 Topologies. `single`: every role on this host, observers on --bind-ip.
@@ -184,9 +185,9 @@ for i in range(4):
         for f in [f'k{i}.pub',f'a{i}.key']:
             path=common/f;path.write_bytes(fetch(str(base/f)));path.chmod(0o600)
 (common/'roster.json').write_text(json.dumps({
-    'type':'minidregg-cohort-roster-v1','generation':generation,'width':W,
-    'members':[{'native':m['native_pub'].hex(),'linkKem':m['link_pub'].hex()} for m in members],
-    'operators':[{'native':o['native_pub'].hex(),'linkKem':o['link_pub'].hex()} for o in operators]}))
+    'type':'minidregg-cohort-roster-v2','generation':generation,'width':W,
+    'members':[{'native':m['native_pub'].hex(),'linkKey':m['link_pub'].hex()} for m in members],
+    'operators':[{'native':o['native_pub'].hex(),'linkKey':o['link_pub'].hex()} for o in operators]}))
 roster=common/'roster.json'
 if two:push(roster,str(RD/'common'/'roster.json'))
 def roster_for(remote):return str(RD/'common'/'roster.json') if remote else str(roster)
@@ -196,10 +197,10 @@ say('ROSTER sha256 '+hashlib.sha256(roster.read_bytes()).hexdigest()+' generatio
 
 def frame_size(phase):
     mf=18+160*W+128
-    return ([P+4640+160]+[mf+19+W*(P+(5-i)*1160) for i in range(1,5)]+[19+W*P])[phase]+89
-# MCE2: receiver challenge (MCE2|nonce32|ephemeral ML-KEM ek), sender response
-# (two ML-KEM ciphertexts|Ed25519 signature), receiver acknowledgement.
-HANDSHAKE=[(False,4+32+1184),(True,2*1088+64),(False,32)]
+    return ([P+4768+160]+[mf+19+W*(P+(5-i)*1192) for i in range(1,5)]+[19+W*P])[phase]+89
+# MCE3: receiver challenge (MCE3|nonce32|ephemeral hybrid public key), sender response
+# (two hybrid X25519 + ML-KEM-768 ciphertexts|Ed25519 signature), receiver acknowledgement.
+HANDSHAKE=[(False,4+32+1216),(True,2*1120+64),(False,32)]
 def link_parties(phase,slot):
     """(sender identity, receiver identity) of the roster for this link."""
     return (members[slot] if phase==0 else operators[phase-1],
@@ -263,7 +264,7 @@ def scenario(name,real):
                         except ConnectionRefusedError:time.sleep(.005)
                     else:raise RuntimeError('fixed receiver not listening')
                     incoming.settimeout(240);outgoing.settimeout(240)
-                    # Fixed MCE2 startup exchange precedes epochs; the transparent
+                    # Fixed MCE3 startup exchange precedes epochs; the transparent
                     # observer neither supplies nor verifies any enrollment.
                     for from_sender,n in HANDSHAKE:
                         if from_sender:outgoing.sendall(readn(incoming,n))

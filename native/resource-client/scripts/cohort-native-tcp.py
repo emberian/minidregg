@@ -38,7 +38,7 @@ def readn(s,n):
 def directory(p):p.mkdir(mode=0o700,parents=True,exist_ok=True);return p
 def frame_size(phase):
     mf=18+160*W+128
-    return ([P+4640+160]+[mf+19+W*(P+(5-i)*1160) for i in range(1,5)]+[19+W*P])[phase]+89
+    return ([P+4768+160]+[mf+19+W*(P+(5-i)*1192) for i in range(1,5)]+[19+W*P])[phase]+89
 def scenario(name,real):
     d=directory(e/name);origin=int(time.time()*1000)+60000
     processes=[];observers=[];public=[];errors=[];forwarded=[]

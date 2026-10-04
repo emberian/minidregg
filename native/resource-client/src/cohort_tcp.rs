@@ -1,9 +1,9 @@
 //! Fixed enrolled-link TCP records for the guarded PQ cohort. Every link is
 //! admitted by the public cohort roster through a signed, challenge-bound
-//! ML-KEM enrollment (MCE2); this layer does not manufacture Mini outcomes.
+//! hybrid X25519 + ML-KEM-768 enrollment (MCE3); this layer does not manufacture Mini outcomes.
 use crate::scheduled_transport::{directory, persist, random, read_private};
 use crate::{transport, Args, Result};
-use aws_lc_rs::kem::{Ciphertext, DecapsulationKey, EncapsulationKey, ML_KEM_768};
+use crate::hybrid_kem::{self, HybridPublic, HybridSecret};
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use chacha20poly1305::{
     aead::{Aead, Payload},
@@ -20,7 +20,10 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-const DOMAIN: &[u8] = b"Mini/PQ-cohort/fixed-link/v2";
+const DOMAIN: &[u8] = b"Mini/PQ-cohort/fixed-link/v3";
+/// One mix layer's overhead (hybrid ciphertext + nonce + commitment + tag); the
+/// cascade has four layers.
+const LAYER: usize = crate::crypto_transit::OVERHEAD_BYTES;
 const HEADER: usize = 4 + 32 + 8;
 const OVERHEAD: usize = HEADER + 24 + 16;
 
@@ -41,9 +44,9 @@ impl Profile {
     fn capacity(&self) -> usize {
         let manifest = 18 + 160 * self.width + 128;
         match self.purpose {
-            0 => self.payload + 4640 + 160,
+            0 => self.payload + 4 * LAYER + 160,
             1..=4 => {
-                manifest + 19 + self.width * (self.payload + (5 - self.purpose as usize) * 1160)
+                manifest + 19 + self.width * (self.payload + (5 - self.purpose as usize) * LAYER)
             }
             5 => 19 + self.width * self.payload,
             _ => 0,
@@ -395,20 +398,29 @@ fn send(
     }
     Ok(())
 }
-// LINK ENROLLMENT (MCE2). Every fixed link is admitted only by the public
+// LINK ENROLLMENT (MCE3). Every fixed link is admitted only by the public
 // cohort roster: the sender proves the roster's native Ed25519 key for this
 // exact (generation, slot, phase, profile, roster, start) under a FRESH
-// receiver challenge, and the link key comes from two ML-KEM-768
-// encapsulations -- one to the receiver's roster-pinned static key (only the
-// enrolled receiver can answer, which authenticates it to the sender) and one
-// to a per-connection ephemeral key (a later static-key compromise does not
-// open recorded link traffic). No operator-provisioned shared secret exists.
-// Native signatures stay classical Ed25519: this is NOT a PQ authentication.
-const KEM_PUBLIC: usize = 1184;
-const KEM_SECRET: usize = 2400;
-const KEM_CIPHER: usize = 1088;
+// receiver challenge, and the link key comes from two HYBRID X25519 +
+// ML-KEM-768 encapsulations (`hybrid_kem`, the combiner private rooms use) --
+// one to the receiver's roster-pinned static key pair (only the enrolled
+// receiver can answer, which authenticates it to the sender) and one to a
+// per-connection ephemeral pair (a later static-key compromise does not open
+// recorded link traffic). Either primitive alone keeps the link key secret.
+// No operator-provisioned shared secret exists. MCE2 (pure ML-KEM) refuses by
+// name. Native signatures stay classical Ed25519: the KEY EXCHANGE is hybrid
+// but this is NOT a PQ authentication of the signer.
+const KEM_PUBLIC: usize = hybrid_kem::PUBLIC_LEN;
+/// The v1 (pure ML-KEM) link secret size: a bound wide enough to READ a v1 key
+/// file so it is refused by name, not by size.
+const V1_KEM_SECRET: usize = 2400;
+const KEM_CIPHER: usize = hybrid_kem::CIPHERTEXT_LEN;
 const CHALLENGE: usize = 4 + 32 + KEM_PUBLIC;
 const RESPONSE: usize = 2 * KEM_CIPHER + 64;
+const ENROLL_MAGIC: &[u8; 4] = b"MCE3";
+const LINK_SUITE: &[u8] = b"DREGG.COHORT-LINK.KEK/x25519+ml-kem-768/v3";
+const LINK_FRAME_FIXED: &[u8] = b"DREGG/COHORT-LINK/v3/fixed";
+const LINK_FRAME_FRESH: &[u8] = b"DREGG/COHORT-LINK/v3/fresh";
 const ACK: usize = 32;
 const ROSTER_LIMIT: usize = 1 << 20;
 // Public handshake bound per read/write. A LAN round trip must fit; a peer that
@@ -417,7 +429,7 @@ const HANDSHAKE_MS: u64 = 3000;
 
 struct RosterEntry {
     native: VerifyingKey,
-    link_kem: Vec<u8>,
+    link_key: Vec<u8>,
 }
 /// The public fixed cohort: `width` members (phase-0 senders, phase-5
 /// receivers) and five operators (registrar, relay0, relay1, relay2, mailbox).
@@ -441,20 +453,20 @@ fn roster_entry(v: &serde_json::Value) -> Result<RosterEntry> {
     if native.is_weak() {
         return Err("roster native key is a weak Ed25519 point".into());
     }
-    let link_kem = field("linkKem")?;
-    if link_kem.len() != KEM_PUBLIC {
-        return Err("roster link key must be an ML-KEM-768 encapsulation key".into());
-    }
-    EncapsulationKey::new(&ML_KEM_768, &link_kem).map_err(|_| "roster link key refused")?;
+    let link_key = field("linkKey")?;
+    HybridPublic::from_bytes(&link_key).map_err(|e| format!("roster link key refused: {e}"))?;
     if v.as_object().map(|o| o.len()) != Some(2) {
-        return Err("roster entry has exactly native and linkKem".into());
+        return Err("roster entry has exactly native and linkKey".into());
     }
-    Ok(RosterEntry { native, link_kem })
+    Ok(RosterEntry { native, link_key })
 }
 fn parse_roster(bytes: &[u8]) -> Result<Roster> {
     let v: serde_json::Value =
         serde_json::from_slice(bytes).map_err(|e| format!("cohort roster JSON: {e}"))?;
-    if v["type"] != "minidregg-cohort-roster-v1" || v.as_object().map(|o| o.len()) != Some(5) {
+    if v["type"] == "minidregg-cohort-roster-v1" {
+        return Err("cohort roster is a v1 roster (pure ML-KEM-768 link keys, linkKem): refused; the roster is v2 with hybrid X25519 + ML-KEM-768 link keys (linkKey)".into());
+    }
+    if v["type"] != "minidregg-cohort-roster-v2" || v.as_object().map(|o| o.len()) != Some(5) {
         return Err("cohort roster type/shape refused".into());
     }
     let generation: [u8; 16] =
@@ -479,7 +491,7 @@ fn parse_roster(bytes: &[u8]) -> Result<Roster> {
     }
     let all = members.iter().chain(operators.iter());
     let natives: std::collections::BTreeSet<_> = all.clone().map(|e| e.native.to_bytes()).collect();
-    let kems: std::collections::BTreeSet<_> = all.map(|e| e.link_kem.clone()).collect();
+    let kems: std::collections::BTreeSet<_> = all.map(|e| e.link_key.clone()).collect();
     if natives.len() != members.len() + 5 || kems.len() != members.len() + 5 {
         return Err("roster native and link keys must be pairwise distinct".into());
     }
@@ -514,14 +526,14 @@ impl Roster {
     /// Phase k<5 is received by operator k; phase 5 by member `slot`.
     fn receiver(&self, p: &Profile) -> &[u8] {
         match p.purpose {
-            5 => &self.members[p.slot as usize].link_kem,
-            k => &self.operators[k as usize].link_kem,
+            5 => &self.members[p.slot as usize].link_key,
+            k => &self.operators[k as usize].link_key,
         }
     }
 }
 fn link_pin(root: &Path, p: &Profile, roster: &Roster, role: &[u8]) -> Result<()> {
     // A retained link of an earlier codec, roster or role refuses to resume.
-    let mut b = b"Mini/cohort-startup:MCE2/v1".to_vec();
+    let mut b = b"Mini/cohort-startup:MCE3/v1".to_vec();
     b.extend_from_slice(&p.identity());
     b.extend_from_slice(&roster.digest);
     b.extend_from_slice(&Sha256::digest(role));
@@ -556,7 +568,7 @@ fn enrollment_transcript(
     challenge: &[u8],
     response_kems: &[u8],
 ) -> Vec<u8> {
-    let mut t = b"Mini/cohort-link-enrollment/v2".to_vec();
+    let mut t = b"Mini/cohort-link-enrollment/v3".to_vec();
     t.extend_from_slice(&p.identity());
     t.extend_from_slice(&roster.digest);
     t.extend_from_slice(&start.to_le_bytes());
@@ -564,8 +576,42 @@ fn enrollment_transcript(
     t.extend_from_slice(response_kems);
     t
 }
+/// The two hybrid encapsulations of one enrollment, bound to the exact link
+/// profile, roster, start and the receiver's fresh challenge nonce. The two
+/// frames differ so the fixed and the ephemeral key encapsulation can never be
+/// swapped for each other.
+fn link_context(p: &Profile, roster: &Roster, start: u64, nonce: &[u8]) -> Vec<Vec<u8>> {
+    vec![p.identity(), roster.digest.to_vec(), start.to_le_bytes().to_vec(), nonce.to_vec()]
+}
+fn as_parts(parts: &[Vec<u8>]) -> Vec<&[u8]> {
+    parts.iter().map(|v| v.as_slice()).collect()
+}
+struct SenderKems {
+    /// `fixed hybrid ciphertext || fresh hybrid ciphertext`
+    response: Vec<u8>,
+    fixed_kek: zeroize::Zeroizing<[u8; 32]>,
+    fresh_kek: zeroize::Zeroizing<[u8; 32]>,
+}
+/// What a sender does with a receiver's challenge: encapsulate to the roster's
+/// pinned static key pair and to the challenge's ephemeral key pair.
+fn sender_kems(p: &Profile, roster: &Roster, start: u64, challenge: &[u8]) -> Result<SenderKems> {
+    if challenge.len() != CHALLENGE || &challenge[..4] != ENROLL_MAGIC {
+        return Err("enrollment challenge framing refused".into());
+    }
+    let fresh = HybridPublic::from_bytes(&challenge[36..])
+        .map_err(|e| format!("enrollment ephemeral key refused: {e}"))?;
+    let fixed = HybridPublic::from_bytes(roster.receiver(p))
+        .map_err(|e| format!("roster receiver key refused: {e}"))?;
+    let context = link_context(p, roster, start, &challenge[4..36]);
+    let parts = as_parts(&context);
+    let fixed_e = hybrid_kem::encapsulate(LINK_SUITE, LINK_FRAME_FIXED, &parts, &fixed)?;
+    let fresh_e = hybrid_kem::encapsulate(LINK_SUITE, LINK_FRAME_FRESH, &parts, &fresh)?;
+    let mut response = fixed_e.ciphertext.to_vec();
+    response.extend_from_slice(&fresh_e.ciphertext);
+    Ok(SenderKems { response, fixed_kek: fixed_e.kek, fresh_kek: fresh_e.kek })
+}
 fn link_keys(transcript: &[u8], signature: &[u8], fixed: &[u8], fresh: &[u8]) -> ([u8; 32], [u8; 32]) {
-    let mut secret = b"Mini/cohort-link-secret/v2".to_vec();
+    let mut secret = b"Mini/cohort-link-secret/v3".to_vec();
     secret.extend_from_slice(fixed);
     secret.extend_from_slice(fresh);
     let secret = Sha256::digest(&secret);
@@ -581,8 +627,8 @@ fn link_keys(transcript: &[u8], signature: &[u8], fixed: &[u8], fresh: &[u8]) ->
             .try_into()
             .unwrap()
     };
-    let key = tag(b"Mini/cohort-link-key/v2", &secret);
-    let ack = tag(b"Mini/cohort-link-ack/v2", &key);
+    let key = tag(b"Mini/cohort-link-key/v3", &secret);
+    let ack = tag(b"Mini/cohort-link-ack/v3", &key);
     (key, ack)
 }
 fn handshake_timeouts(stream: &TcpStream, ms: u64) -> Result<()> {
@@ -602,26 +648,24 @@ fn enroll_sender(
     }
     handshake_timeouts(stream, HANDSHAKE_MS)?;
     let mut challenge = [0; CHALLENGE];
+    // The magic is read first: an MCE2 challenge is shorter than an MCE3 one,
+    // and is refused by name rather than by waiting out a short read.
     stream
-        .read_exact(&mut challenge)
+        .read_exact(&mut challenge[..4])
         .map_err(|e| e.to_string())?;
-    if &challenge[..4] != b"MCE2" {
-        return Err("enrollment challenge framing refused".into());
+    if &challenge[..4] == b"MCE2" {
+        return Err("enrollment challenge is MCE2 (pure ML-KEM-768 link enrollment): refused; the link enrollment is MCE3, hybrid X25519 + ML-KEM-768".into());
     }
-    let fresh = EncapsulationKey::new(&ML_KEM_768, &challenge[36..])
-        .map_err(|_| "enrollment ephemeral key refused")?;
-    let fixed = EncapsulationKey::new(&ML_KEM_768, roster.receiver(p))
-        .map_err(|_| "roster receiver key refused")?;
-    let (fixed_ct, fixed_ss) = fixed.encapsulate().map_err(|_| "ML-KEM encapsulation")?;
-    let (fresh_ct, fresh_ss) = fresh.encapsulate().map_err(|_| "ML-KEM encapsulation")?;
-    let mut kems = fixed_ct.as_ref().to_vec();
-    kems.extend_from_slice(fresh_ct.as_ref());
+    stream
+        .read_exact(&mut challenge[4..])
+        .map_err(|e| e.to_string())?;
+    let SenderKems { response: kems, fixed_kek, fresh_kek } = sender_kems(p, roster, start, &challenge)?;
     let transcript = enrollment_transcript(p, roster, start, &challenge, &kems);
     let signature = signing.sign(&transcript).to_bytes();
     let mut response = kems;
     response.extend_from_slice(&signature);
     stream.write_all(&response).map_err(|e| e.to_string())?;
-    let (key, ack) = link_keys(&transcript, &signature, fixed_ss.as_ref(), fresh_ss.as_ref());
+    let (key, ack) = link_keys(&transcript, &signature, &fixed_kek[..], &fresh_kek[..]);
     let mut got = [0; ACK];
     stream.read_exact(&mut got).map_err(|e| e.to_string())?;
     if !constant_eq(&got, &ack) {
@@ -643,14 +687,13 @@ fn answer_enrollment(
     stream: &mut TcpStream,
     p: &Profile,
     roster: &Roster,
-    fixed: &DecapsulationKey,
+    fixed: &HybridSecret,
     start: u64,
 ) -> Option<([u8; 32], Vec<u8>)> {
-    let fresh = DecapsulationKey::generate(&ML_KEM_768).ok()?;
-    let fresh_public = fresh.encapsulation_key().ok()?.key_bytes().ok()?;
-    let mut challenge = b"MCE2".to_vec();
+    let fresh = HybridSecret::generate().ok()?;
+    let mut challenge = ENROLL_MAGIC.to_vec();
     challenge.extend_from_slice(&random::<32>().ok()?);
-    challenge.extend_from_slice(fresh_public.as_ref());
+    challenge.extend_from_slice(&fresh.public().to_bytes());
     stream.write_all(&challenge).ok()?;
     let mut response = [0; RESPONSE];
     stream.read_exact(&mut response).ok()?;
@@ -661,13 +704,13 @@ fn answer_enrollment(
         .sender(p)
         .verify_strict(&transcript, &Signature::from_bytes(&signature_bytes))
         .ok()?;
-    let fixed_ss = fixed
-        .decapsulate(Ciphertext::from(&kems[..KEM_CIPHER]))
-        .ok()?;
-    let fresh_ss = fresh
-        .decapsulate(Ciphertext::from(&kems[KEM_CIPHER..]))
-        .ok()?;
-    let (key, ack) = link_keys(&transcript, signature, fixed_ss.as_ref(), fresh_ss.as_ref());
+    let context = link_context(p, roster, start, &challenge[4..36]);
+    let parts = as_parts(&context);
+    let (fixed_kek, _) =
+        hybrid_kem::decapsulate(LINK_SUITE, LINK_FRAME_FIXED, &parts, fixed, &kems[..KEM_CIPHER]).ok()?;
+    let (fresh_kek, _) =
+        hybrid_kem::decapsulate(LINK_SUITE, LINK_FRAME_FRESH, &parts, &fresh, &kems[KEM_CIPHER..]).ok()?;
+    let (key, ack) = link_keys(&transcript, signature, &fixed_kek[..], &fresh_kek[..]);
     stream.write_all(&ack).ok()?;
     let mut signed = transcript;
     signed.extend_from_slice(signature);
@@ -680,7 +723,7 @@ fn accept_enrolled(
     listener: &TcpListener,
     p: &Profile,
     roster: &Roster,
-    fixed: &DecapsulationKey,
+    fixed: &HybridSecret,
     start: u64,
 ) -> Result<Enrolled> {
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
@@ -1126,7 +1169,7 @@ fn worker(
                 .ok_or("actor clock exhausted")?;
             match action {
                 "registrar" => {
-                    let n = p.payload + 4640 + 160;
+                    let n = p.payload + 4 * LAYER + 160;
                     let contributions = incoming
                         .iter()
                         .map(|v| {
@@ -1148,7 +1191,7 @@ fn worker(
                 }
                 "relay" => {
                     let n =
-                        18 + 160 * p.width + 128 + 19 + p.width * (p.payload + (4 - hop) * 1160);
+                        18 + 160 * p.width + 128 + 19 + p.width * (p.payload + (4 - hop) * LAYER);
                     let segment = read_record(incoming[0].parent().unwrap(), epoch, n)?
                         .ok_or("physical input unavailable")?;
                     pq::live_relay(
@@ -1165,7 +1208,7 @@ fn worker(
                     )
                 }
                 "mailbox" => {
-                    let n = 18 + 160 * p.width + 128 + 19 + p.width * (p.payload + 1160);
+                    let n = 18 + 160 * p.width + 128 + 19 + p.width * (p.payload + LAYER);
                     let segment = read_record(incoming[0].parent().unwrap(), epoch, n)?
                         .ok_or("physical input unavailable")?;
                     pq::live_mailbox(
@@ -1291,18 +1334,17 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             send(stream, &files, &p, &key, start)
         }
         "receive" => {
-            let secret = read_private(&PathBuf::from(args.required("link-secret")?), KEM_SECRET)?;
+            let secret = read_private(&PathBuf::from(args.required("link-secret")?), V1_KEM_SECRET)?;
             let public = read_private(&PathBuf::from(args.required("link-public")?), KEM_PUBLIC)?;
             args.finish()?;
-            // aws-lc cannot derive the public half of a restored ML-KEM secret,
-            // so the retained pair is checked by a real encapsulation and the
-            // public half must be the roster's key for this exact link.
+            // The secret is a seed, so the retained pair is checked by
+            // regenerating the public key; it must be the roster's key for
+            // this exact link.
             crate::crypto_transit::validate_keypair(&secret, &public)?;
             if public != roster.receiver(&p) {
                 return Err("this link key is not the roster receiver of this link".into());
             }
-            let fixed = DecapsulationKey::new(&ML_KEM_768, &secret)
-                .map_err(|_| "ML-KEM link secret refused")?;
+            let fixed = HybridSecret::from_bytes(&secret)?;
             link_pin(&state, &p, &roster, &public)?;
             if now_ms()? >= p.when(start)? {
                 return Err("live link must start before first public slot".into());
@@ -1403,10 +1445,10 @@ mod tests {
             .collect();
         let entry = |s: &SigningKey, k: &crate::crypto_transit::KeyPair| {
             serde_json::json!({"native": crate::hex(s.verifying_key().as_bytes()),
-                "linkKem": crate::hex(&k.public)})
+                "linkKey": crate::hex(&k.public)})
         };
         let bytes = serde_json::to_vec(&serde_json::json!({
-            "type": "minidregg-cohort-roster-v1",
+            "type": "minidregg-cohort-roster-v2",
             "generation": crate::hex(&generation),
             "width": width,
             "members": members.iter().zip(&member_kems).map(|(s, k)| entry(s, k)).collect::<Vec<_>>(),
@@ -1421,8 +1463,8 @@ mod tests {
             operator_kems,
         }
     }
-    fn decap(k: &crate::crypto_transit::KeyPair) -> DecapsulationKey {
-        DecapsulationKey::new(&ML_KEM_768, &k.secret).unwrap()
+    fn decap(k: &crate::crypto_transit::KeyPair) -> HybridSecret {
+        HybridSecret::from_bytes(&k.secret).unwrap()
     }
     /// Answer one connection as an honest sender would, but hand back the raw
     /// response so a test can replay it against a later challenge.
@@ -1435,10 +1477,7 @@ mod tests {
     ) -> Vec<u8> {
         let mut challenge = [0; CHALLENGE];
         stream.read_exact(&mut challenge).unwrap();
-        let fresh = EncapsulationKey::new(&ML_KEM_768, &challenge[36..]).unwrap();
-        let fixed = EncapsulationKey::new(&ML_KEM_768, roster.receiver(p)).unwrap();
-        let mut kems = fixed.encapsulate().unwrap().0.as_ref().to_vec();
-        kems.extend_from_slice(fresh.encapsulate().unwrap().0.as_ref());
+        let mut kems = sender_kems(p, roster, start, &challenge).unwrap().response;
         let t = enrollment_transcript(p, roster, start, &challenge, &kems);
         kems.extend_from_slice(&signing.sign(&t).to_bytes());
         kems
@@ -1467,7 +1506,7 @@ mod tests {
         let mut garbage = TcpStream::connect(address).unwrap();
         let mut challenge = [0; CHALLENGE];
         garbage.read_exact(&mut challenge).unwrap();
-        assert_eq!(&challenge[..4], b"MCE2");
+        assert_eq!(&challenge[..4], b"MCE3");
         garbage.write_all(&[0; RESPONSE]).unwrap();
         drop(garbage);
         // 2. A valid response captured under one challenge cannot be replayed.
@@ -1615,7 +1654,7 @@ mod tests {
         v["width"] = 5.into();
         assert!(parse_roster(&serde_json::to_vec(&v).unwrap()).is_err(), "width mismatch");
         let mut v: serde_json::Value = serde_json::from_slice(&c.bytes).unwrap();
-        v["members"][0]["linkKem"] = crate::hex(&[1; 32]).into();
+        v["members"][0]["linkKey"] = crate::hex(&[1; 32]).into();
         assert!(parse_roster(&serde_json::to_vec(&v).unwrap()).is_err(), "short link key");
         let mut wrong = p.clone();
         wrong.generation[0] ^= 1;
@@ -1634,6 +1673,108 @@ mod tests {
         broadcast.slot = 3;
         assert_eq!(roster.sender(&broadcast), &c.operators[4].verifying_key());
         assert_eq!(roster.receiver(&broadcast), c.member_kems[3].public.as_slice());
+    }
+    #[test]
+    fn the_link_key_needs_both_receiver_halves_and_binds_both_ciphertext_components() {
+        let c = cohort([8; 16], 4);
+        let roster = parse_roster(&c.bytes).unwrap();
+        let p = profile();
+        let fresh = HybridSecret::generate().unwrap();
+        let mut challenge = ENROLL_MAGIC.to_vec();
+        challenge.extend_from_slice(&[7; 32]);
+        challenge.extend_from_slice(&fresh.public().to_bytes());
+        let sent = sender_kems(&p, &roster, 0, &challenge).unwrap();
+        assert_eq!(sent.response.len(), 2 * KEM_CIPHER);
+        let context = link_context(&p, &roster, 0, &challenge[4..36]);
+        let parts = as_parts(&context);
+        let open = |frame: &[u8], key: &HybridSecret, ct: &[u8]| {
+            hybrid_kem::decapsulate(LINK_SUITE, frame, &parts, key, ct).map(|(kek, _)| kek)
+        };
+        let (fixed_ct, fresh_ct) = sent.response.split_at(KEM_CIPHER);
+        let registrar = decap(&c.operator_kems[0]);
+        // The honest receiver and the honest ephemeral key derive the sender's keys.
+        assert_eq!(open(LINK_FRAME_FIXED, &registrar, fixed_ct).unwrap()[..], sent.fixed_kek[..]);
+        assert_eq!(open(LINK_FRAME_FRESH, &fresh, fresh_ct).unwrap()[..], sent.fresh_kek[..]);
+        assert_ne!(sent.fixed_kek[..], sent.fresh_kek[..]);
+        // Wrong recipient; and a split identity (one right half, one wrong half).
+        let other = decap(&c.operator_kems[1]);
+        let right_x = registrar.with_kem_of(&other).unwrap();
+        let right_kem = registrar.with_x25519_of(&other).unwrap();
+        for wrong in [&other, &right_x, &right_kem] {
+            let kek = open(LINK_FRAME_FIXED, wrong, fixed_ct).unwrap();
+            assert_ne!(kek[..], sent.fixed_kek[..], "a receiver missing either half derives another key");
+        }
+        // Tampering either ciphertext component changes the key (or refuses).
+        for at in [0, 31, 32, 32 + 544, KEM_CIPHER - 1] {
+            let mut bad = fixed_ct.to_vec();
+            bad[at] ^= 1;
+            if let Ok(kek) = open(LINK_FRAME_FIXED, &registrar, &bad) {
+                assert_ne!(kek[..], sent.fixed_kek[..], "ciphertext byte {at} flipped");
+            }
+        }
+        // The two encapsulations are not interchangeable.
+        assert_ne!(open(LINK_FRAME_FRESH, &registrar, fixed_ct).unwrap()[..], sent.fixed_kek[..]);
+        // The context binds the link: another start, another key.
+        let moved = link_context(&p, &roster, 1, &challenge[4..36]);
+        let moved = hybrid_kem::decapsulate(LINK_SUITE, LINK_FRAME_FIXED, &as_parts(&moved), &registrar, fixed_ct)
+            .unwrap()
+            .0;
+        assert_ne!(moved[..], sent.fixed_kek[..]);
+    }
+    /// The link combiner's known answer, reusing the rooms' input vector (shared
+    /// secrets 0x11 x32 / 0x22 x32, ephemeral 0x33 x32, KEM ciphertext 0x44 x1088,
+    /// X25519 key 0x55 x32, ML-KEM key 0x66 x1184) under the link suite and the
+    /// fixed-link frame, context "kat-context". Expected values from an
+    /// independent cSHAKE256 (Python, pycryptodome).
+    #[test]
+    fn the_link_combiner_matches_an_independent_known_answer() {
+        let recipient = HybridPublic::from_raw_unchecked([0x55; 32], [0x66; hybrid_kem::KEM_EK_LEN]);
+        let transcript = hybrid_kem::transcript(
+            b"DREGG/COHORT-LINK/v3",
+            &[b"kat-context"],
+            &[0x33; 32],
+            &[0x44; hybrid_kem::KEM_CT_LEN],
+            &recipient,
+        );
+        let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+        assert_eq!(hex(&Sha256::digest(&transcript)), "8a4ca4c498ff6a08641fe91ba671836b8a2311a3281c47a5e2711c4fefa39f30");
+        let kek = hybrid_kem::combine(LINK_SUITE, &[0x11; 32], &[0x22; 32], &transcript);
+        assert_eq!(hex(&kek[..]), "cb54d24b78c8747aba524b9b4b73507f7e9ada833f2f71bbb35486a37b707847");
+    }
+    #[test]
+    fn mce2_v1_rosters_and_bare_ml_kem_link_keys_refuse_by_name() {
+        let c = cohort([8; 16], 4);
+        let roster = parse_roster(&c.bytes).unwrap();
+        // A v1 roster (pure ML-KEM link keys, `linkKem`).
+        let mut v: serde_json::Value = serde_json::from_slice(&c.bytes).unwrap();
+        v["type"] = "minidregg-cohort-roster-v1".into();
+        let refusal = parse_roster(&serde_json::to_vec(&v).unwrap()).err().unwrap();
+        assert!(refusal.contains("v1 roster"), "{refusal}");
+        // A bare 1184-byte ML-KEM link key in a v2 roster.
+        let mut v: serde_json::Value = serde_json::from_slice(&c.bytes).unwrap();
+        v["members"][0]["linkKey"] = crate::hex(&c.member_kems[0].public[32..]).into();
+        let refusal = parse_roster(&serde_json::to_vec(&v).unwrap()).err().unwrap();
+        assert!(refusal.contains("pre-hybrid"), "{refusal}");
+        // An MCE2 challenge reaches a sender: refused by name, not by a timeout.
+        let mut p = profile();
+        p.origin = now_ms().unwrap() + 20000;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut v1 = b"MCE2".to_vec();
+            v1.extend_from_slice(&[0; 32 + 1184]);
+            s.write_all(&v1).unwrap();
+            let mut rest = Vec::new();
+            let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
+            let _ = s.read_to_end(&mut rest);
+        });
+        let started = std::time::Instant::now();
+        let error =
+            enroll_sender(&mut TcpStream::connect(address).unwrap(), &p, &roster, &c.members[0], 0).unwrap_err();
+        assert!(error.contains("MCE2") && error.contains("refused"), "{error}");
+        assert!(started.elapsed() < Duration::from_millis(HANDSHAKE_MS), "refused without waiting out a short read");
+        server.join().unwrap();
     }
     #[test]
     fn registrar_worker_refuses_input_directory_of_another_enrolled_slot() {

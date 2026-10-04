@@ -452,7 +452,7 @@ impl PrivateEnvelope {
 /// of the X25519 + ML-KEM-768 combiner serves rooms, the traffic mix and every
 /// other key exchange.
 pub(crate) use crate::hybrid_kem::{
-    HybridPublic as MemberPublic, HybridSecret as MemberSecret, KEM_CT_LEN,
+    HybridPublic as MemberPublic, HybridSecret as MemberSecret,
     KEM_SEED_LEN, PUBLIC_LEN as MEMBER_PUBLIC_LEN,
 };
 
@@ -984,6 +984,7 @@ fn private_note(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hybrid_kem::KEM_CT_LEN;
     use ed25519_dalek::SigningKey;
 
     /// nextest runs each test in its own process, so this owns the OnceLock.

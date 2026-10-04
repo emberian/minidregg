@@ -8,26 +8,33 @@ private route commitments on the client-to-registrar links. The honest
 noncolluding registrar remains an explicit additional trust premise; receiver
 still sees ordinary native signatures/graph.
 
-## Roster enrollment (MCE2)
+## Roster enrollment (MCE3, hybrid X25519 + ML-KEM-768)
 
-The public cohort roster (`minidregg-cohort-roster-v1` JSON: `generation`,
-`width`, `members[width]`, `operators[5]`, each `{native, linkKem}` hex) is the
+The public cohort roster (`minidregg-cohort-roster-v2` JSON: `generation`,
+`width`, `members[width]`, `operators[5]`, each `{native, linkKey}` hex, `linkKey`
+being the 1,216-byte hybrid public key X25519 || ML-KEM-768) is the
 only admission authority. Phase 0 slot i is sent by member i; phase k>0 by
 operator k-1 (registrar, relay0, relay1, relay2, mailbox); phase k<5 is received
 by operator k and phase 5 slot i by member i. Its exact-byte SHA-256 enters
 every transcript and pin, so both ends must hold the same roster.
 
-The receiver sends `MCE2 | nonce32 | ephemeral ML-KEM-768 key` (1,220 bytes).
-The sender answers with an encapsulation to the receiver's roster link key, an
-encapsulation to the ephemeral key, and an Ed25519 signature by its own roster
-native key over (domain, profile identity, roster digest, start epoch, the whole
-challenge, both ciphertexts) (2,240 bytes). The link key is HMAC-derived from
-both shared secrets and the signed transcript; the receiver's 32-byte
+The receiver sends `MCE3 | nonce32 | ephemeral hybrid public key` (1,252 bytes).
+The sender answers with a hybrid encapsulation to the receiver's roster link key,
+a hybrid encapsulation to the ephemeral key (each 1,120 bytes: an ephemeral
+X25519 key and an ML-KEM-768 ciphertext), and an Ed25519 signature by its own
+roster native key over (domain, profile identity, roster digest, start epoch,
+the whole challenge, both ciphertexts) (2,304 bytes). Each encapsulation is
+`hybrid_kem` (one cSHAKE256 over BOTH shared secrets and the full transcript,
+the combiner private rooms use; either primitive alone keeps the key secret).
+The link key is HMAC-derived from both encapsulation keys and the signed
+transcript; the receiver's 32-byte
 acknowledgement proves it holds the roster link secret. Garbage, a non-roster
 or wrong-slot key, a response replayed from an earlier challenge and a stalled
 peer are dropped and the listener re-accepts until the public start deadline;
 none consumes the link. Handshake reads/writes are bounded at 3 s (a LAN round
-trip must fit). Native signatures are classical Ed25519.
+trip must fit). Native signatures are classical Ed25519: the key exchange is
+hybrid, the signer authentication is not yet. A v1 roster, an `MCE2` challenge
+and a bare ML-KEM link key refuse by name.
 
 The receiver retains the signed transcript (`enrollment-*.signed`, admission
 evidence) and writes `enrolled-link` into its record directory before adopting
@@ -36,10 +43,11 @@ any record. Network-fed workers (`registrar`, `relay`, `mailbox`, `scan`) take
 upstream link (phase, slot) and the roster's sender key: an operator directory
 list cannot relabel slots. Senders take `--native-key SEED` (a `mini keygen`
 seed); receivers take `--link-secret/--link-public` (a `mini mix --action key`
-pair, checked by a real encapsulation and against the roster). Outer wires are
+pair, the secret a 96-byte seed that regenerates the public key, checked against
+it and against the roster). Outer wires are
 sealed under the connection's key and never persisted; a resumed link re-enrolls
-and reseals its durable inner inventory. Profile pins carry codec `MCE2`: state
-from the pre-shared-key codec refuses to resume.
+and reseals its durable inner inventory. Profile pins carry codec `MCE3`: state
+from the pre-shared-key codec and from MCE2 refuses to resume.
 This is neither a full private evaluator nor a formal active/lifetime anonymity
 proof. See `PQ-MAILBOX.md` for the restricted shuffle/exact-set construction.
 
@@ -113,7 +121,7 @@ required. Source-visible Pending is leakage only where explicitly declared.
 ## Incremental emission repair
 
 Sender seals its fallback inventory in memory before the public lifetime (since
-MCE2 the outer wires are never persisted; the inner cover is the durable inventory);
+MCE2/MCE3 the outer wires are never persisted; the inner cover is the durable inventory);
 client fallbacks are valid registered cover contributions, later stages use padded
 physical unavailable records. A separate worker prepares exact ready wires. The
 clocked network loop only reads in-memory buffers and writes the socket; no fsync,
