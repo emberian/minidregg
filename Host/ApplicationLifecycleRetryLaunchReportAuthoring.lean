@@ -100,11 +100,11 @@ abbrev CurrentObservation := ApplicationLifecycleCompletionAuthoring.CurrentObse
 
 /-- Source-owned retry completion source. The roots and prior atom are
 candidates; op38 rechecks them against the current single durable image. -/
-def sourcePlan (beginBytes claimIngressBytes signedReportBytes : List UInt8)
+def sourcePlan (store : Minidregg.Theory.TypedAuthorization.Digest) (beginBytes claimIngressBytes signedReportBytes : List UInt8)
     (current : CurrentObservation) :
     Except String ApplicationLifecycleRetryCompletionV4Source.Source := do
   let begin ← decodeBegin beginBytes
-  unless ApplicationLifecycleResidentProfile.beginMatchesV3 begin.begin do
+  unless ApplicationLifecycleResidentProfile.beginMatchesV3 store begin.begin do
     throw "retry BEGIN-v4 is outside the resident signed-SPK physical hosting profile"
   let some claim := ApplicationLifecycleRetryClaimV4Ingress.codec.decode claimIngressBytes
     | throw "noncanonical retry claim-v4 ingress"

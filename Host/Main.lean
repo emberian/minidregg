@@ -5827,6 +5827,103 @@ def objectKernelOperation (pinnedConfig : NativeHost.Config)
       return ((219 : UInt8), json.compress.toUTF8.toList)
   | _ => throw (IO.userError "unsupported object kernel operation")
 
+/-- The v4 failed-create retry routes of ops 66-71 (frame first; a payload that
+is not a retry request/plan returns `none` and falls through to v3). They live
+outside `run` so its elaboration stays inside the heartbeat budget. -/
+-- The retry kinds `run` routes by name, kept out of its long `||` chains.
+def retryAuthorKind (kind : String) : Bool :=
+  kind == "application-lifecycle-retry-physical-report" ||
+  kind == "application-lifecycle-retry-physical-signing-frame" ||
+  kind == "application-lifecycle-retry-physical-signed-report" ||
+  kind == "application-lifecycle-retry-begin-request" ||
+  kind == "application-lifecycle-retry-claim-request" ||
+  kind == "application-lifecycle-retry-completion-request"
+
+def retryInspectKind (kind : String) : Bool :=
+  kind == "application-lifecycle-claim-committed-v4" ||
+  kind == "application-lifecycle-retry-begin-request" ||
+  kind == "application-lifecycle-retry-begin-plan" ||
+  kind == "application-lifecycle-retry-claim-request" ||
+  kind == "application-lifecycle-retry-claim-plan" ||
+  kind == "application-lifecycle-retry-completion-request" ||
+  kind == "application-lifecycle-retry-completion-plan"
+
+def retryPhysicalKind (kind : String) : Bool :=
+  kind == "application-lifecycle-retry-physical-report" ||
+  kind == "application-lifecycle-retry-physical-signed-report"
+
+def retryLifecycleBeginPlan (config : NativeHost.Config)
+    (session : NativeHostSession.Walked config)
+    (pin : ApplicationLifecycleBeginOperator.Pin) (payload : List UInt8) :
+    IO (Option (UInt8 × List UInt8)) := do
+  let some retry := ApplicationLifecycleRetryBeginV4Authoring.requestCodec.decode payload
+    | return none
+  let plan ← IO.ofExcept <|
+    (← ApplicationLifecycleRetryBeginV4Authoring.prepareVerified
+      config session.verified pin retry)
+  let bytes := ApplicationLifecycleRetryBeginV4Authoring.planCodec.encode plan
+  unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+    throw (IO.userError "retry BEGIN plan exceeds host frame bound")
+  return some (66, bytes)
+
+def retryLifecycleBeginAssemble (planBytes : List UInt8) (signatures : List (List UInt8)) :
+    IO (Option (UInt8 × List UInt8)) := do
+  let some plan := ApplicationLifecycleRetryBeginV4Authoring.planCodec.decode planBytes
+    | return none
+  let ingress ← IO.ofExcept <|
+    ApplicationLifecycleRetryBeginV4Authoring.assemble plan signatures
+  unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+    throw (IO.userError "retry BEGIN ingress exceeds host frame bound")
+  return some (67, ingress)
+
+def retryLifecycleClaimPlan (config : NativeHost.Config)
+    (session : NativeHostSession.Walked config)
+    (pin : ApplicationLifecycleClaimOperator.Pin) (payload : List UInt8) :
+    IO (Option (UInt8 × List UInt8)) := do
+  unless (ApplicationLifecycleRetryClaimV4Authoring.requestCodec.decode payload).isSome do
+    return none
+  let plan ← IO.ofExcept <|
+    ApplicationLifecycleRetryClaimV4Authoring.prepareRequestVerified
+      config session.verified pin payload
+  let bytes := ApplicationLifecycleRetryClaimV4Authoring.planCodec.encode plan
+  unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+    throw (IO.userError "retry claim plan exceeds host frame bound")
+  return some (68, bytes)
+
+def retryLifecycleClaimAssemble (store : Minidregg.Theory.TypedAuthorization.Digest) (planBytes : List UInt8)
+    (signatures : List (List UInt8)) : IO (Option (UInt8 × List UInt8)) := do
+  let some plan := ApplicationLifecycleRetryClaimV4Authoring.planCodec.decode planBytes
+    | return none
+  let ingress ← IO.ofExcept <|
+    ApplicationLifecycleRetryClaimV4Authoring.assemble store plan signatures
+  unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+    throw (IO.userError "retry claim ingress exceeds host frame bound")
+  return some (69, ingress)
+
+def retryLifecycleCompletionPlan (config : NativeHost.Config)
+    (session : NativeHostSession.Walked config)
+    (pin : ApplicationLifecycleCompletionOperator.Pin) (payload : List UInt8) :
+    IO (Option (UInt8 × List UInt8)) := do
+  unless (ApplicationLifecycleRetryCompletionV4Authoring.requestCodec.decode payload).isSome do
+    return none
+  let plan ← IO.ofExcept <|
+    (← ApplicationLifecycleRetryCompletionV4Authoring.prepareRequestVerified
+      config session.verified pin payload)
+  let bytes := ApplicationLifecycleRetryCompletionV4Authoring.planCodec.encode plan
+  unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+    throw (IO.userError "retry completion plan exceeds host frame bound")
+  return some (70, bytes)
+
+def retryLifecycleCompletionAssemble (planBytes : List UInt8)
+    (signatures : List (List UInt8)) : IO (Option (UInt8 × List UInt8)) := do
+  let some plan := ApplicationLifecycleRetryCompletionV4Authoring.planCodec.decode planBytes
+    | return none
+  let ingress ← IO.ofExcept <|
+    ApplicationLifecycleRetryCompletionV4Authoring.assemble plan signatures
+  unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+    throw (IO.userError "retry completion ingress exceeds host frame bound")
+  return some (71, ingress)
+
 def usage : String :=
 "enroll-key-plan OBSERVED.bin COMMAND.bin PLAN.bin|enroll-key-assemble PLAN.bin SPONSOR-SIG.bin POSSESSION-SIG.bin NEXT.pub NEXT-SIG.bin INGRESS.bin|enroll-key-submit INGRESS.bin OUTCOME.bin|enroll-key-lookup INGRESS.bin OUTCOME.bin\n" ++
 "inspect-agent-lifetime-paid-ingress PAID-PLAN.bin INGRESS.bin RESULT.json\ninspect-stop-claim STOP-PLAN.bin FRESH-COMMITTED-CLAIM.bin RESULT.json\nfn-frontier-request selected MINI-TX REQUEST.bin|fn-frontier-request empty - REQUEST.bin|fn-frontier-plan selected MINI-TX PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-plan empty - PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-export PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-assemble PLAN.bin RAW64-SIGNATURE.bin INGRESS.bin|fn-selected-poll-submit INGRESS.bin OUTCOME.bin|fn-selected-poll-lookup INGRESS.bin OUTCOME.bin|fn-empty-poll-submit INGRESS.bin OUTCOME.bin|fn-empty-poll-lookup INGRESS.bin OUTCOME.bin|fn-empty-page-ack CURSOR.fncu REPORT.fn-e COVERAGE19.bin RESULT.json\n" ++
@@ -6006,12 +6103,7 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-lifecycle-launch-physical-report" ||
               kind == "application-lifecycle-launch-physical-signing-frame" ||
               kind == "application-lifecycle-launch-physical-signed-report" ||
-              kind == "application-lifecycle-retry-physical-report" ||
-              kind == "application-lifecycle-retry-physical-signing-frame" ||
-              kind == "application-lifecycle-retry-physical-signed-report" ||
-              kind == "application-lifecycle-retry-begin-request" ||
-              kind == "application-lifecycle-retry-claim-request" ||
-              kind == "application-lifecycle-retry-completion-request" ||
+              retryAuthorKind kind ||
               kind == "application-agent-lifetime-grant-request" ||
               kind == "application-session-enrollment-request" ||
               kind == "participant-key-enrollment" ||
@@ -6040,13 +6132,7 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-dispatch-committed" ||
               kind == "application-lifecycle-claim-committed-v2" ||
               kind == "application-lifecycle-claim-committed-v3" ||
-              kind == "application-lifecycle-claim-committed-v4" ||
-              kind == "application-lifecycle-retry-begin-request" ||
-              kind == "application-lifecycle-retry-begin-plan" ||
-              kind == "application-lifecycle-retry-claim-request" ||
-              kind == "application-lifecycle-retry-claim-plan" ||
-              kind == "application-lifecycle-retry-completion-request" ||
-              kind == "application-lifecycle-retry-completion-plan" ||
+              retryInspectKind kind ||
               kind == "fn-consumer-namespace-plan" ||
               kind == "application-agent-reserve-plan" ||
               kind == "application-agent-paid-dispatch-plan" ||
@@ -6066,8 +6152,7 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-lifecycle-launch-completion-plan" ||
               kind == "application-lifecycle-launch-physical-report" ||
               kind == "application-lifecycle-launch-physical-signed-report" ||
-              kind == "application-lifecycle-retry-physical-report" ||
-              kind == "application-lifecycle-retry-physical-signed-report" ||
+              retryPhysicalKind kind ||
               kind == "application-agent-lifetime-grant-request" ||
               kind == "application-agent-lifetime-grant-plan" ||
               kind == "application-session-enrollment-request" ||
@@ -6087,13 +6172,7 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-dispatch-committed" ||
               kind == "application-lifecycle-claim-committed-v2" ||
               kind == "application-lifecycle-claim-committed-v3" ||
-              kind == "application-lifecycle-claim-committed-v4" ||
-              kind == "application-lifecycle-retry-begin-request" ||
-              kind == "application-lifecycle-retry-begin-plan" ||
-              kind == "application-lifecycle-retry-claim-request" ||
-              kind == "application-lifecycle-retry-claim-plan" ||
-              kind == "application-lifecycle-retry-completion-request" ||
-              kind == "application-lifecycle-retry-completion-plan" ||
+              retryInspectKind kind ||
               kind == "fn-consumer-namespace-plan" ||
               kind == "application-agent-reserve-plan" ||
               kind == "application-agent-paid-dispatch-plan" ||
@@ -6113,8 +6192,7 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-lifecycle-launch-completion-plan" ||
               kind == "application-lifecycle-launch-physical-report" ||
               kind == "application-lifecycle-launch-physical-signed-report" ||
-              kind == "application-lifecycle-retry-physical-report" ||
-              kind == "application-lifecycle-retry-physical-signed-report" ||
+              retryPhysicalKind kind ||
               kind == "application-agent-lifetime-grant-request" ||
               kind == "application-agent-lifetime-grant-plan" ||
               kind == "application-session-enrollment-request" ||
@@ -7174,15 +7252,9 @@ def run (arguments : List String) : IO UInt32 := do
                             let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
                             let pin := selector.beginPin management
                             let session ← sessionWalked pinnedConfig state
-                            if let some retry :=
-                                ApplicationLifecycleRetryBeginV4Authoring.requestCodec.decode payload then
-                              let plan ← IO.ofExcept <|
-                                (← ApplicationLifecycleRetryBeginV4Authoring.prepareVerified
-                                  pinnedConfig session.verified pin retry)
-                              let bytes := ApplicationLifecycleRetryBeginV4Authoring.planCodec.encode plan
-                              unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
-                                throw (IO.userError "retry BEGIN plan exceeds host frame bound")
-                              return ((66 : UInt8), bytes)
+                            if let some routed ←
+                                retryLifecycleBeginPlan pinnedConfig session pin payload then
+                              return routed
                             let bytes ← if let some request :=
                                 ApplicationLifecycleLaunchBeginAuthoring.requestCodec.decode payload then
                               if request.kind == .stop then do
@@ -7206,13 +7278,8 @@ def run (arguments : List String) : IO UInt32 := do
                         | 67 =>
                             let (planBytes, signaturesBytes) ← splitPair payload
                             let signatures ← decodeSignatures signaturesBytes
-                            if let some plan :=
-                                ApplicationLifecycleRetryBeginV4Authoring.planCodec.decode planBytes then
-                              let ingress ← IO.ofExcept <|
-                                ApplicationLifecycleRetryBeginV4Authoring.assemble plan signatures
-                              unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
-                                throw (IO.userError "retry BEGIN ingress exceeds host frame bound")
-                              return ((67 : UInt8), ingress)
+                            if let some routed ← retryLifecycleBeginAssemble planBytes signatures then
+                              return routed
                             let ingress ← if let some plan :=
                                 ApplicationLifecycleLaunchBeginAuthoring.stopPlanCodec.decode
                                   planBytes then
@@ -7234,14 +7301,9 @@ def run (arguments : List String) : IO UInt32 := do
                             let (selectorBytes, payload) ← splitPair payload
                             let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
                             let session ← sessionWalked pinnedConfig state
-                            if (ApplicationLifecycleRetryClaimV4Authoring.requestCodec.decode payload).isSome then
-                              let plan ← IO.ofExcept <|
-                                ApplicationLifecycleRetryClaimV4Authoring.prepareRequestVerified
-                                  pinnedConfig session.verified (selector.claimPin management) payload
-                              let bytes := ApplicationLifecycleRetryClaimV4Authoring.planCodec.encode plan
-                              unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
-                                throw (IO.userError "retry claim plan exceeds host frame bound")
-                              return ((68 : UInt8), bytes)
+                            if let some routed ← retryLifecycleClaimPlan pinnedConfig session
+                                (selector.claimPin management) payload then
+                              return routed
                             let plan ← IO.ofExcept <|
                               ApplicationLifecycleLaunchClaimAuthoring.prepareRequestVerified
                                 pinnedConfig session.verified (selector.claimPin management) payload
@@ -7251,14 +7313,9 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((68 : UInt8), bytes)
                         | 69 =>
                             let (planBytes, signaturesBytes) ← splitPair payload
-                            if let some plan :=
-                                ApplicationLifecycleRetryClaimV4Authoring.planCodec.decode planBytes then
-                              let signatures ← decodeSignatures signaturesBytes
-                              let ingress ← IO.ofExcept <|
-                                ApplicationLifecycleRetryClaimV4Authoring.assemble plan signatures
-                              unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
-                                throw (IO.userError "retry claim ingress exceeds host frame bound")
-                              return ((69 : UInt8), ingress)
+                            if let some routed ← retryLifecycleClaimAssemble pinnedConfig.expectedSeed
+                                planBytes (← decodeSignatures signaturesBytes) then
+                              return routed
                             let some plan := ApplicationLifecycleLaunchClaimAuthoring.planCodec.decode
                                 planBytes
                               | throw (RequestRefusal.malformed "noncanonical launch claim plan")
@@ -7275,14 +7332,9 @@ def run (arguments : List String) : IO UInt32 := do
                             let (selectorBytes, payload) ← splitPair payload
                             let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
                             let session ← sessionWalked pinnedConfig state
-                            if (ApplicationLifecycleRetryCompletionV4Authoring.requestCodec.decode payload).isSome then
-                              let plan ← IO.ofExcept <|
-                                (← ApplicationLifecycleRetryCompletionV4Authoring.prepareRequestVerified
-                                  pinnedConfig session.verified (selector.completionPin management) payload)
-                              let bytes := ApplicationLifecycleRetryCompletionV4Authoring.planCodec.encode plan
-                              unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
-                                throw (IO.userError "retry completion plan exceeds host frame bound")
-                              return ((70 : UInt8), bytes)
+                            if let some routed ← retryLifecycleCompletionPlan pinnedConfig session
+                                (selector.completionPin management) payload then
+                              return routed
                             let plan ← IO.ofExcept <|
                               (← ApplicationLifecycleLaunchCompletionAuthoring.prepareRequestVerified
                                 pinnedConfig session.verified (selector.completionPin management) payload)
@@ -7292,14 +7344,9 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((70 : UInt8), bytes)
                         | 71 =>
                             let (planBytes, signaturesBytes) ← splitPair payload
-                            if let some plan :=
-                                ApplicationLifecycleRetryCompletionV4Authoring.planCodec.decode planBytes then
-                              let signatures ← decodeSignatures signaturesBytes
-                              let ingress ← IO.ofExcept <|
-                                ApplicationLifecycleRetryCompletionV4Authoring.assemble plan signatures
-                              unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
-                                throw (IO.userError "retry completion ingress exceeds host frame bound")
-                              return ((71 : UInt8), ingress)
+                            if let some routed ← retryLifecycleCompletionAssemble planBytes
+                                (← decodeSignatures signaturesBytes) then
+                              return routed
                             let some plan := ApplicationLifecycleLaunchCompletionAuthoring.planCodec.decode
                                 planBytes
                               | throw (RequestRefusal.malformed "noncanonical launch completion plan")

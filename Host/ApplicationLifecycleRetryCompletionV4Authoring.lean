@@ -95,7 +95,7 @@ def prepareVerified (config : Config) {target : Durable}
       beginSource.packageManifest != pin.packageManifest ||
       beginSource.managementSubject.value != pin.managementSubject then
     return .error "retry completion subject or resource differs from operator pin"
-  if !ApplicationLifecycleResidentProfile.beginMatchesV3 begin.begin then
+  if !ApplicationLifecycleResidentProfile.beginMatchesV3 config.expectedSeed begin.begin then
     return .error "retry completion BEGIN is outside resident host profile"
   let some key := config.completionCustodianKey
     | return .error "pinned physical custodian key unavailable"

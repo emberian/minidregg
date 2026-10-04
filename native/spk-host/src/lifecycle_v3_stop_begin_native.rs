@@ -5,7 +5,7 @@ use crate::dispatch_author::SignerPin;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::lifecycle_v3_native::{decimal, framed_payload, hex, sign_pinned_slots, text};
 use crate::lifecycle_v3_stop_claim_native::ExactReceipt;
-use crate::resident_begin_native::allocate_operation_id;
+use crate::operation_ledger::allocate_operation_id;
 use crate::resident_launch::SourceBoundLaunch;
 use serde::Deserialize;
 use serde_json::{json, Value};

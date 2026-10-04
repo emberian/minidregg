@@ -258,7 +258,7 @@ pub(crate) fn prepare_report_once(
     semantics: &str,
     attempt_dir: &Path,
 ) -> io::Result<SignedRetryPhysicalReport> {
-    crate::completion_native::preflight_custodian(operator, custodian_seed, semantics)?;
+    crate::completion_custodian::preflight_custodian(operator, custodian_seed, semantics)?;
     let observation = checked_observation(&input)?;
     let begin = input.begin;
     let parent = attempt_dir
@@ -742,7 +742,8 @@ mod tests {
     fn retry_v4_completion_request_is_three_length_prefixed_byte_strings() {
         let mut expected =
             b"DREGG/APPLICATION/RETRY-CREATE-COMPLETION-OPERATOR-REQUEST/v4".to_vec();
-        expected.extend_from_slice(&[1, 255, b'b', 2, 255, b'c', b'c', 0, 255]);
+        // An empty byte string is the zero length: the single terminator 255.
+        expected.extend_from_slice(&[1, 255, b'b', 2, 255, b'c', b'c', 255]);
         assert_eq!(request_bytes(b"b", b"cc", b""), expected);
     }
 

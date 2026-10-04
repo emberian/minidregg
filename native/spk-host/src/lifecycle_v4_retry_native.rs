@@ -18,7 +18,7 @@ use crate::lifecycle_v3_native::{
     decimal, framed_payload, hex, lowercase_hex, sign_pinned_slots, text, AcceptedLaunchBegin,
     LaunchBeginAction,
 };
-use crate::resident_begin_native::allocate_operation_id;
+use crate::operation_ledger::allocate_operation_id;
 use crate::resident_launch::SourceBoundLaunch;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -255,13 +255,11 @@ impl RetrySelection {
     }
 }
 
-/// `mini-spk-a{app}-g{generation}.service`, the only unit grammar a resident
-/// config accepts for the generation it is about to claim.
+/// `mini-spk-s{store}-a{app}-g{generation}.service`, the only unit grammar a
+/// resident config accepts for the generation it is about to claim.
 pub(crate) fn unit_generation(unit: &str, app: u64) -> io::Result<u64> {
-    let generation = unit
-        .strip_prefix(&format!("mini-spk-a{app}-g"))
-        .and_then(|rest| rest.strip_suffix(".service"))
-        .filter(|value| decimal(value))
+    let (_, _, generation) = crate::broker::parse_resident_unit(unit)
+        .filter(|(_, unit_app, _)| *unit_app == app.to_string())
         .ok_or_else(|| invalid("resident unit is not this app's generation unit"))?;
     generation
         .parse::<u64>()
@@ -441,11 +439,16 @@ fn checked_physical_identity(
     let expected = before
         .checked_add(1)
         .ok_or_else(|| invalid("v4 retry generation overflow"))?;
+    // Mini names the unit with its own Store key; the resident checks the app
+    // and generation here and the Store against its pinned unit when it runs.
+    let unit = String::from_utf8(crate::lifecycle_v3_native::unhex(text(view, "processIdentityHex")?)?)
+        .map_err(|_| invalid("v4 retry unit is not UTF-8"))?;
     if app == 0
         || before != selection.before_generation
         || generation != expected
-        || text(view, "processIdentityHex")?
-            != hex(format!("mini-spk-a{app}-g{generation}.service").as_bytes())
+        || !crate::broker::parse_resident_unit(&unit).is_some_and(|(_, unit_app, unit_generation)| {
+            unit_app == app.to_string() && unit_generation == generation.to_string()
+        })
         || text(view, "imageIdentityHex")? != hex(&launch.descriptor().package.image_identity)
     {
         return Err(invalid("v4 retry physical unit, generation or image differs"));
@@ -966,9 +969,9 @@ mod tests {
         assert_eq!(retry_generations(false, 4), None);
         assert_eq!(retry_generations(true, 2), None);
         assert_eq!(retry_generations(true, 1), None);
-        assert_eq!(unit_generation("mini-spk-a8502-g4.service", 8502).unwrap(), 4);
-        assert!(unit_generation("mini-spk-a8502-g4.service", 8503).is_err());
-        assert!(unit_generation("mini-spk-a8502-g04.service", 8502).is_err());
+        assert_eq!(unit_generation("mini-spk-s0123456789abcdef-a8502-g4.service", 8502).unwrap(), 4);
+        assert!(unit_generation("mini-spk-s0123456789abcdef-a8502-g4.service", 8503).is_err());
+        assert!(unit_generation("mini-spk-s0123456789abcdef-a8502-g04.service", 8502).is_err());
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -982,7 +985,7 @@ mod tests {
         DirBuilder::new().mode(0o700).create(&journal).unwrap();
         // No failed generation record: unchanged v3 create.
         assert_eq!(
-            select_retry(&journal, "mini-spk-a8502-g4.service", 8502, true).unwrap(),
+            select_retry(&journal, "mini-spk-s0123456789abcdef-a8502-g4.service", 8502, true).unwrap(),
             None
         );
         let failed = apps.join("g2");
@@ -1005,19 +1008,19 @@ mod tests {
         };
         write(failed.join(RECOVERED_RECORD), &record("78", "2", "3", &sha));
         write(failed.join(RECOVERY_DIR).join("ingress.bin"), &ingress);
-        let selected = select_retry(&journal, "mini-spk-a8502-g4.service", 8502, true)
+        let selected = select_retry(&journal, "mini-spk-s0123456789abcdef-a8502-g4.service", 8502, true)
             .unwrap()
             .unwrap();
         assert_eq!(selected.recovery_index, "77");
         assert_eq!((selected.failed_generation, selected.before_generation), (2, 3));
         // Continue never retries, even with the record present.
         assert_eq!(
-            select_retry(&journal, "mini-spk-a8502-g4.service", 8502, false).unwrap(),
+            select_retry(&journal, "mini-spk-s0123456789abcdef-a8502-g4.service", 8502, false).unwrap(),
             None
         );
         // A later generation does not reuse an older recovery.
         assert_eq!(
-            select_retry(&journal, "mini-spk-a8502-g5.service", 8502, true).unwrap(),
+            select_retry(&journal, "mini-spk-s0123456789abcdef-a8502-g5.service", 8502, true).unwrap(),
             None
         );
         fs::remove_dir_all(apps).unwrap();

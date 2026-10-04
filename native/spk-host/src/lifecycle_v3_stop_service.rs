@@ -4,7 +4,7 @@
 //! a crash, retained artifacts may resume an already-fsynced Fenced journal
 //! or audit Stopped, but can never mint another fresh callback or fence Running.
 
-use crate::completion_native::preflight_custodian;
+use crate::completion_custodian::preflight_custodian;
 use crate::dispatch_author::private_signing_key;
 use crate::dispatch_author::SignerPin;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};

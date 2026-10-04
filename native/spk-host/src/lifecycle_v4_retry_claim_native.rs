@@ -18,7 +18,7 @@ use crate::lifecycle_v4_retry_native::{
     checked_retry_fields, decimal_predecessor, encode_nat_decimal, lookup_retained,
     retained_submitted_ingress, RecoveredRetryReceipt, RetrySelection, BEGIN_TAG,
 };
-use crate::resident_begin_native::allocate_operation_id;
+use crate::operation_ledger::allocate_operation_id;
 use crate::resident_launch::SourceBoundLaunch;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -459,8 +459,11 @@ fn verified_physical_begin(
     {
         return Err(invalid("v4 retry claimed physical identity malformed"));
     }
-    let unit = format!("mini-spk-a{app}-g{generation}.service");
-    if begin.process_identity_hex != hex(unit.as_bytes()) {
+    let unit = String::from_utf8(crate::lifecycle_v3_native::unhex(&begin.process_identity_hex)?)
+        .map_err(|_| invalid("v4 retry claimed unit is not UTF-8"))?;
+    if !crate::broker::parse_resident_unit(&unit).is_some_and(|(_, unit_app, unit_generation)| {
+        unit_app == app.to_string() && unit_generation == generation.to_string()
+    }) {
         return Err(invalid("v4 retry claimed unit differs from inspected BEGIN"));
     }
     Ok(VerifiedBegin {

@@ -3075,7 +3075,7 @@ private def retryPhysicalSignedReport (json : Lean.Json) : Result (List UInt8) :
     (← decodeHex "$.report" (← field "$" "report" obj))
     (← decodeHex "$.signature" (← field "$" "signature" obj))
 
-private def retryCompletionSource (json : Lean.Json) : Result (List UInt8) := do
+private def retryCompletionSource (store : Minidregg.Theory.TypedAuthorization.Digest) (json : Lean.Json) : Result (List UInt8) := do
   let obj ← exactObject "$" ["begin", "claimIngress", "signedReport",
     "appRoot", "packageRoot", "appCapability", "appObserveCapability",
     "packageCapability", "packageObserveCapability", "packageAtomBefore"] json
@@ -3088,7 +3088,7 @@ private def retryCompletionSource (json : Lean.Json) : Result (List UInt8) := do
       packageObserveCapability := ⟨← nat "$.packageObserveCapability" (← field "$" "packageObserveCapability" obj)⟩
       packageAtomBefore := ← optional "$.packageAtomBefore" atomRecord
         (← field "$" "packageAtomBefore" obj) }
-  let source ← ApplicationLifecycleRetryLaunchReportAuthoring.sourcePlan
+  let source ← ApplicationLifecycleRetryLaunchReportAuthoring.sourcePlan store
     (← decodeHex "$.begin" (← field "$" "begin" obj))
     (← decodeHex "$.claimIngress" (← field "$" "claimIngress" obj))
     (← decodeHex "$.signedReport" (← field "$" "signedReport" obj)) current
@@ -3641,7 +3641,7 @@ def author (kind : String) (json : Lean.Json)
   | "application-lifecycle-retry-physical-report" => retryPhysicalReport json
   | "application-lifecycle-retry-physical-signing-frame" => retryPhysicalSigningFrame json
   | "application-lifecycle-retry-physical-signed-report" => retryPhysicalSignedReport json
-  | "application-lifecycle-retry-completion-source" => retryCompletionSource json
+  | "application-lifecycle-retry-completion-source" => do retryCompletionSource (← residentStore deployed) json
   | "application-lifecycle-retry-completion-command" => retryCompletionCommand json
   | "application-lifecycle-retry-completion-ingress" => retryCompletionIngress json
   | "application-lifecycle-retry-begin-request" => retryBeginOperatorRequest json

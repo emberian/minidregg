@@ -227,6 +227,7 @@ inductive Ctor
   | seat
   | subjectKeyCommitmentAdoption | payEnrolV2 | payClaim
   | jointReserve | bootstrapBundle | applicationFailedStartRecovery
+  | applicationRetryBeginV4 | applicationRetryClaimV4 | applicationRetryCompletionV4
   deriving DecidableEq, Repr
 
 def Ctor.all : List Ctor :=
@@ -240,11 +241,12 @@ def Ctor.all : List Ctor :=
     .applicationLifecycleClaimV3, .applicationLifecycleCompletionV2, .fnConsumerNamespace,
     .fnSelectedPoll, .fnEmptyPollV2, .payObservation, .payEnrol, .payRefill, .jobMoney,
     .certify, .renounce, .subjectKeyRotation, .activity, .seat, .subjectKeyCommitmentAdoption, .payEnrolV2, .payClaim,
-    .jointReserve, .bootstrapBundle, .applicationFailedStartRecovery]
+    .jointReserve, .bootstrapBundle, .applicationFailedStartRecovery,
+    .applicationRetryBeginV4, .applicationRetryClaimV4, .applicationRetryCompletionV4]
 
 theorem Ctor.mem_all (c : Ctor) : c ∈ Ctor.all := by cases c <;> decide
 
-theorem Ctor.all_length : Ctor.all.length = 48 := rfl
+theorem Ctor.all_length : Ctor.all.length = 51 := rfl
 
 /-- The capability guard: the authority row the exercised capability lives at. -/
 def capGuard : Leg R := leg cAuth .authority [rd 1 (some 1)]
@@ -368,6 +370,10 @@ def Ctor.turn : Ctor → CTurn
   -- record under the original claim's stable nullifier
   | .applicationFailedStartRecovery => mk [] [leg cRes .resource [rd 0 (some 10)],
       leg cLife .lifecycle [al 7 1]] [154]
+  -- retry (repeat-CREATE) lifecycle: the v3 shapes on their own record rows
+  | .applicationRetryBeginV4 => mk [] [leg cLife .lifecycle [al 8 1]] [155]
+  | .applicationRetryClaimV4 => mk [] [leg cLife .lifecycle [rd 0 (some 0), al 9 1]] [156]
+  | .applicationRetryCompletionV4 => mk [] [leg cLife .lifecycle [wr 0 0 2]] [157]
   | .payClaim => mk [(34, fresh .resource, none), (35, src 9, none)]
       [leg cPay .pay [rd 0 (some 1), al 3 1], leg cClock .clock [rd 0 (some 1000)],
         leg cAuth .authority [lg 11 1],
@@ -460,6 +466,11 @@ def Ctor.negation : Ctor → CTurn
   -- the package moved under the recovery's current read guard
   | .applicationFailedStartRecovery => mk [] [leg cRes .resource [rd 0 (some 9)],
       leg cLife .lifecycle [al 7 1]] [154]
+  -- retry lifecycle refusals: a replayed BEGIN, a moved claim guard, a rewritten log row
+  | .applicationRetryBeginV4 => mk [] [leg cLife .lifecycle [al 8 1]] [155] (x := 7)
+  | .applicationRetryClaimV4 => mk [] [leg cLife .lifecycle [rd 0 (some 3), al 9 1]] [156]
+  | .applicationRetryCompletionV4 => mk []
+      [leg cLife .lifecycle [rewriteLog 0 0 2]] [157]
   | .payClaim => mk [(34, fresh .resource, none), (35, src 9, none)]
       [leg cPay .pay [rd 0 (some 0), al 3 1], leg cClock .clock [rd 0 (some 1000)],
         leg cAuth .authority [lg 11 1],
@@ -515,6 +526,9 @@ def Ctor.refusal : Ctor → Reject
   | .jointReserve => .guardFailed cRes 0
   | .bootstrapBundle => .cellPresent cContent
   | .applicationFailedStartRecovery => .guardFailed cRes 0
+  | .applicationRetryBeginV4 => .replayedTransaction
+  | .applicationRetryClaimV4 => .guardFailed cLife 0
+  | .applicationRetryCompletionV4 => .guardFailed cLife 0
   | .payClaim => .guardFailed cPay 0
 
 /-! ## The poles -/

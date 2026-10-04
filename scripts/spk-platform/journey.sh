@@ -16,7 +16,6 @@ usage: journey.sh status ROOT
        journey.sh install-complete ROOT SPK_HOST SPK_HOST_SHA256 INSTALL_JOURNAL
        journey.sh adopt-volume ROOT INSTALL_JOURNAL SIZE_MIB
        journey.sh delegate-observe ROOT QUALIFIED_HOST HOST_SHA256 MINI OPERATOR_SOCKET
-       journey.sh prepare-resident ROOT INSTALL_JOURNAL NEW_RESIDENT_JOURNAL PRIVATE_REQUEST.json
 
 This driver does not retry the timed-out birth, launch a resident, issue a
 ticket, or dispatch browser/API traffic. Those require separate exact native
@@ -142,7 +141,7 @@ case "$ACTION" in
       fi
     fi
     base=false; if base_ready; then base=true; fi
-    install=none; resident=none
+    install=none
     if [ -d "$JOURNEY" ]; then
       prepare_path=''
       for candidate in "$JOURNEY"/prepare-install-????; do
@@ -156,23 +155,16 @@ case "$ACTION" in
         elif [ -s "$install_path/install-prepared-v2.json" ]; then install=prepared
         else install=attempted; fi
       fi
-      if [ -s "$JOURNEY/prepare-resident-0001/resident-path.txt" ]; then
-        resident_path=$(cat "$JOURNEY/prepare-resident-0001/resident-path.txt")
-        if [ -s "$resident_path/start-completed-v3.json" ]; then resident=completed
-        elif [ -s "$resident_path/resident.json" ]; then resident=configured
-        else resident=attempted; fi
-      fi
     fi
     if [ "$birth" = absent-at-last-lookup ]; then next_gate=profile-and-recover-original-birth
     elif [ "$base" = false ]; then next_gate=resume-original-base
     elif [ "$install" = none ]; then next_gate=prepare-qualified-install
     elif [ "$install" = prepared ]; then next_gate=complete-original-install
-    elif [ "$install" = completed ] && [ "$resident" = none ]; then next_gate=prepare-human-resident
-    else next_gate=qualified-resident-browser-and-v3-agent-dispatch; fi
+    else next_gate=grain-start-resident-then-qualified-browser-and-v3-agent-dispatch; fi
     jq -n --arg root "$ROOT" --arg birth "$birth" --argjson base "$base" \
-      --arg install "$install" --arg resident "$resident" --arg next "$next_gate" '
+      --arg install "$install" --arg next "$next_gate" '
       {protocol:"mini-spk-gitweb-journey-status-v1",root:$root,
-       firstBirth:$birth,baseReady:$base,install:$install,resident:$resident,nextGate:$next,
+       firstBirth:$birth,baseReady:$base,install:$install,nextGate:$next,
        humanBrowserQualified:false,agentApiQualified:false,
        sameAppContentQualified:false,
        note:"component receipts are not final browser/API or same-app content acceptance"}'
@@ -477,43 +469,6 @@ case "$ACTION" in
       /bin/sh "$HERE/delegate-app-observe.sh" "$ROOT" "$host" "$mini" \
       "$socket" "$evidence" >"$STEP/stdout" 2>"$STEP/stderr"
     [ "$(wc -l <"$evidence/delegations.jsonl")" -eq 3 ] || fail "three signed observe grants absent"
-    sha256sum -c "$STEP/input-sha256.txt" >"$STEP/input-postcheck.txt"
-    finish
-    ;;
-  prepare-resident)
-    [ "$#" -eq 3 ] || usage
-    base_ready || fail "same-Store base incomplete"
-    install_dir=$1 resident_dir=$2 request=$3
-    for path in "$install_dir" "$resident_dir" "$request"; do absolute "$path"; done
-    [ -s "$install_dir/install-completed-v2.json" ] || fail "INSTALL completion absent"
-    volume_action=$(selected_action adopt-volume)
-    volume_adoption="$volume_action/adoption.json"
-    jq -e --arg install "$install_dir" \
-      --arg volume "$(jq -er .begin.volumeIdHex "$install_dir/install-prepared-v2.json")" '
-      .protocol == "mini-spk-volume-adoption-v1" and
-      .executionClaim == "read-only-root-witness" and .installJournal == $install and
-      .sourceVolumeIdHex == $volume and
-      .rootWitness == "/run/minidregg/spk/volume-attest/8401.witness" and
-      (.sizeMiB | type == "number" and . >= 64 and . <= 16384 and floor == .)
-      ' "$volume_adoption" >/dev/null ||
-      fail "volume adoption malformed"
-    [ "$(jq -er .completedSha256 "$volume_adoption")" = \
-      "$(sha "$install_dir/install-completed-v2.json")" ] ||
-      fail "INSTALL completion changed after volume adoption"
-    sha256sum -c "$volume_action/input-sha256.txt" >/dev/null ||
-      fail "source or physical volume changed after adoption"
-    [ ! -e "$resident_dir" ] || fail "resident attempt already exists"
-    jq -e '.protocol == "mini-spk-resident-config-request-v1" and
-      (.agents | type == "array" and all(.[]; .protocol == "mini-spk-agent-api-v3"))' \
-      "$request" >/dev/null ||
-      fail "journey requires explicit v3 lifetime agent routes (or no agents)"
-    claim prepare-resident-0001
-    printf '%s\n' "$resident_dir" >"$STEP/resident-path.txt"
-    sha256sum "$install_dir/install-completed-v2.json" "$request" \
-      "$HERE/prepare-resident-config.sh" >"$STEP/input-sha256.txt"
-    /bin/sh "$HERE/prepare-resident-config.sh" "$ROOT" "$install_dir" \
-      "$resident_dir" "$request" >"$STEP/stdout" 2>"$STEP/stderr"
-    [ -s "$resident_dir/resident.json" ] || fail "resident config absent"
     sha256sum -c "$STEP/input-sha256.txt" >"$STEP/input-postcheck.txt"
     finish
     ;;

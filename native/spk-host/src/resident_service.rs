@@ -10,7 +10,7 @@ use crate::agent_api_lifetime_reverse_v3::LifetimeReverseClient;
 use crate::agent_api_lifetime_server_v3::{self, ResidentLifetimeAgent};
 use crate::agent_api_native::ReverseCustodyClient;
 use crate::agent_api_server::{AgentApiListener, ResidentAgent};
-use crate::completion_native::preflight_custodian;
+use crate::completion_custodian::preflight_custodian;
 use crate::dispatch_author::FixedAuthoring;
 use crate::dispatch_delivery::{ResidentHuman, UpgradeRequest};
 use crate::dispatch_inspection::{HttpProjection, Route};
@@ -269,6 +269,134 @@ struct SavedStartStage {
     claim_inspection_sha256: String,
     begin: SavedStartBegin,
     claim: SavedStartClaim,
+    /// Present exactly in a governed repeat CREATE's marker (v4).
+    #[serde(default)]
+    retry: Option<Value>,
+}
+
+/// Which lawful lifecycle lane a retained START belongs to. The two lanes keep
+/// disjoint artifact names, so exactly one admitted marker can exist.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StartLane {
+    V3,
+    RetryV4,
+}
+
+impl StartLane {
+    /// The lane of the admitted marker in `journal_dir`. Both markers present
+    /// is refused: two lanes cannot both own one generation's journal.
+    fn of_journal(journal_dir: &Path) -> io::Result<Self> {
+        let present = |name: &str| -> io::Result<bool> {
+            match fs::symlink_metadata(journal_dir.join(name)) {
+                Ok(_) => Ok(true),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+                Err(error) => Err(error),
+            }
+        };
+        match (
+            present("start-admitted-v3.json")?,
+            present("start-admitted-retry-v4.json")?,
+        ) {
+            (true, true) => Err(invalid(
+                "both v3 and retry-v4 START markers are retained for one generation",
+            )),
+            (false, true) => Ok(Self::RetryV4),
+            // A missing v3 marker is refused by the load that follows.
+            (_, false) => Ok(Self::V3),
+        }
+    }
+
+    fn admitted_name(self) -> &'static str {
+        match self {
+            Self::V3 => "start-admitted-v3.json",
+            Self::RetryV4 => "start-admitted-retry-v4.json",
+        }
+    }
+
+    fn admitted_protocol(self) -> &'static str {
+        match self {
+            Self::V3 => "mini-spk-resident-start-admitted-v3",
+            Self::RetryV4 => "mini-spk-resident-start-admitted-retry-v4",
+        }
+    }
+
+    fn completed_name(self) -> &'static str {
+        match self {
+            Self::V3 => "start-completed-v3.json",
+            Self::RetryV4 => "start-completed-retry-v4.json",
+        }
+    }
+
+    fn completed_protocol(self) -> &'static str {
+        match self {
+            Self::V3 => "mini-spk-resident-start-completed-v3",
+            Self::RetryV4 => "mini-spk-resident-start-completed-retry-v4",
+        }
+    }
+
+    fn reconciliation_protocol(self) -> &'static str {
+        match self {
+            Self::V3 => "mini-spk-resident-start-reconciliation-v3",
+            Self::RetryV4 => "mini-spk-resident-start-reconciliation-retry-v4",
+        }
+    }
+
+    fn begin_ingress(self, config: &ResidentConfig) -> PathBuf {
+        match self {
+            Self::V3 => config.begin_attempt_dir.join("begin-v3.bin"),
+            Self::RetryV4 => config
+                .journal_dir
+                .join(crate::lifecycle_v4_retry_native::BEGIN_ATTEMPT_DIR)
+                .join(crate::lifecycle_v4_retry_native::BEGIN_INGRESS_FILE),
+        }
+    }
+
+    fn claim_dir(self, config: &ResidentConfig) -> PathBuf {
+        match self {
+            Self::V3 => config.claim_author_attempt_dir.clone(),
+            Self::RetryV4 => config
+                .journal_dir
+                .join(crate::lifecycle_v4_retry_claim_native::CLAIM_ATTEMPT_DIR),
+        }
+    }
+
+    fn claim_ingress_file(self) -> &'static str {
+        match self {
+            Self::V3 => "claim-v3.bin",
+            Self::RetryV4 => crate::lifecycle_v4_retry_claim_native::CLAIM_INGRESS_FILE,
+        }
+    }
+
+    fn committed_file(self) -> &'static str {
+        match self {
+            Self::V3 => "committed-v3.bin",
+            Self::RetryV4 => crate::lifecycle_v4_retry_claim_native::COMMITTED_FILE,
+        }
+    }
+
+    fn committed_inspection_file(self) -> &'static str {
+        match self {
+            Self::V3 => "committed-v3.json",
+            Self::RetryV4 => crate::lifecycle_v4_retry_claim_native::COMMITTED_INSPECTION_FILE,
+        }
+    }
+
+    fn committed_view_type(self) -> &'static str {
+        match self {
+            Self::V3 => "application-lifecycle-claim-committed-v3",
+            Self::RetryV4 => crate::lifecycle_v4_retry_claim_native::COMMITTED_VIEW_TYPE,
+        }
+    }
+
+    /// Where op38 and its op39 lookups retain their evidence.
+    fn completion_sign_dir(self, config: &ResidentConfig) -> PathBuf {
+        match self {
+            Self::V3 => config.completion_sign_attempt_dir.clone(),
+            Self::RetryV4 => config
+                .journal_dir
+                .join(crate::lifecycle_v4_retry_completion_native::COMPLETION_ATTEMPT_DIR),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -470,28 +598,22 @@ fn start_retry(config: &ResidentConfig) -> io::Result<Option<RetrySelection>> {
 
 fn load_retained_start(
     config: &ResidentConfig,
+    lane: StartLane,
 ) -> io::Result<(Vec<u8>, AcceptedLaunchBegin, CommittedLaunchClaim)> {
     let admitted_bytes = private_file(
-        &config.journal_dir.join("start-admitted-v3.json"),
+        &config.journal_dir.join(lane.admitted_name()),
         MAX_CONFIG,
     )?;
     let stage: SavedStartStage = serde_json::from_slice(&admitted_bytes)?;
     let qualification: QualifiedLaunch =
         serde_json::from_slice(&private_file(&config.launch_qualification, MAX_CONFIG)?)?;
-    let begin_ingress = private_file(
-        &config.begin_attempt_dir.join("begin-v3.bin"),
-        MAX_LIFECYCLE,
-    )?;
-    let claim_ingress = private_file(
-        &config.claim_author_attempt_dir.join("claim-v3.bin"),
-        MAX_LIFECYCLE,
-    )?;
-    let committed = private_file(
-        &config.claim_author_attempt_dir.join("committed-v3.bin"),
-        MAX_LIFECYCLE,
-    )?;
+    let begin_ingress = private_file(&lane.begin_ingress(config), MAX_LIFECYCLE)?;
+    let claim_dir = lane.claim_dir(config);
+    let claim_ingress = private_file(&claim_dir.join(lane.claim_ingress_file()), MAX_LIFECYCLE)?;
+    let committed = private_file(&claim_dir.join(lane.committed_file()), MAX_LIFECYCLE)?;
     let sha = |bytes: &[u8]| format!("{:x}", Sha256::digest(bytes));
-    if stage.protocol != "mini-spk-resident-start-admitted-v3"
+    if stage.protocol != lane.admitted_protocol()
+        || stage.retry.is_some() != (lane == StartLane::RetryV4)
         || stage.raw_sha256 != config.expected_raw_sha256
         || stage.launch_root != qualification.launch_root
         || stage.start_action != config.start_action
@@ -568,7 +690,7 @@ fn load_retained_start(
         return Err(invalid("retained START claim differs from BEGIN or unit"));
     }
     let inspection = private_file(
-        &config.claim_author_attempt_dir.join("committed-v3.json"),
+        &claim_dir.join(lane.committed_inspection_file()),
         8 * MAX_LIFECYCLE,
     )?;
     if stage.claim_inspection_sha256 != sha(&inspection) {
@@ -584,7 +706,7 @@ fn load_retained_start(
     let receipt = source
         .get("receipt")
         .ok_or_else(|| invalid("retained START source claim receipt absent"))?;
-    if source_field("type")? != "application-lifecycle-claim-committed-v3"
+    if source_field("type")? != lane.committed_view_type()
         || source_field("frameHex")? != crate::lifecycle_v3_native::hex(&committed)
         || source_field("originalClaimHex")? != crate::lifecycle_v3_native::hex(&claim_ingress)
         || source_field("originalBeginHex")? != crate::lifecycle_v3_native::hex(&begin.ingress)
@@ -689,14 +811,15 @@ fn checked_completion_evidence(
 
 fn read_completed_start(
     config: &ResidentConfig,
+    lane: StartLane,
     admitted_bytes: &[u8],
     claim: &CommittedLaunchClaim,
 ) -> io::Result<ConfirmedLaunchCompletion> {
     let saved: Value = serde_json::from_slice(&private_file(
-        &config.journal_dir.join("start-completed-v3.json"),
+        &config.journal_dir.join(lane.completed_name()),
         MAX_CONFIG,
     )?)?;
-    if saved.get("protocol").and_then(Value::as_str) != Some("mini-spk-resident-start-completed-v3")
+    if saved.get("protocol").and_then(Value::as_str) != Some(lane.completed_protocol())
         || saved.get("admittedSha256").and_then(Value::as_str)
             != Some(format!("{:x}", Sha256::digest(admitted_bytes)).as_str())
     {
@@ -705,7 +828,7 @@ fn read_completed_start(
         ));
     }
     checked_completion_evidence(
-        &config.completion_sign_attempt_dir,
+        &lane.completion_sign_dir(config),
         &saved,
         &claim.accepted_count,
     )
@@ -716,7 +839,8 @@ fn reconcile_prior_start(
     operator: &PrivateOperator,
     journal: &Journal,
 ) -> io::Result<()> {
-    let (admitted_bytes, begin, claim) = load_retained_start(config)?;
+    let lane = StartLane::of_journal(&config.journal_dir)?;
+    let (admitted_bytes, begin, claim) = load_retained_start(config, lane)?;
     let record = journal
         .read()?
         .ok_or_else(|| invalid("prior START journal absent"))?;
@@ -732,16 +856,15 @@ fn reconcile_prior_start(
             "prior START journal differs from retained fresh claim",
         ));
     }
-    let op38_marker = config
-        .completion_sign_attempt_dir
-        .join("op38-requested.json");
+    let sign_dir = lane.completion_sign_dir(config);
+    let op38_marker = sign_dir.join("op38-requested.json");
     let submitted = match fs::symlink_metadata(&op38_marker) {
         Ok(meta) if meta.is_file() && !meta.file_type().is_symlink() => true,
         Ok(_) => return Err(invalid("retained START op38 marker identity refused")),
         Err(error) if error.kind() == io::ErrorKind::NotFound => false,
         Err(error) => return Err(error),
     };
-    let completed_marker = config.journal_dir.join("start-completed-v3.json");
+    let completed_marker = config.journal_dir.join(lane.completed_name());
     let completed = match fs::symlink_metadata(&completed_marker) {
         Ok(meta) if meta.is_file() && !meta.file_type().is_symlink() => {
             if !submitted {
@@ -749,30 +872,34 @@ fn reconcile_prior_start(
                     "START completion has no original op38 submit marker",
                 ));
             }
-            Some(read_completed_start(config, &admitted_bytes, &claim)?)
+            Some(read_completed_start(config, lane, &admitted_bytes, &claim)?)
         }
         Ok(_) => return Err(invalid("START completion marker identity refused")),
         Err(error) if error.kind() == io::ErrorKind::NotFound => None,
         Err(error) => return Err(error),
     };
     let completed = if submitted && completed.is_none() {
-        let signed_report = private_file(
-            &config.completion_attempt_dir.join("signed-report.bin"),
-            MAX_LIFECYCLE,
-        )?;
-        let assembled = load_v3_completion(
-            &config.completion_sign_attempt_dir,
-            &begin,
-            &claim,
-            &signed_report,
-        )?;
-        let recovered =
-            recover_v3_completion(operator, &assembled, &begin, &claim, &signed_report)?;
+        // Op39 reads the one original receipt of the exact retained op38
+        // ingress; it never submits, assembles or arms a launch.
+        let recovered = match lane {
+            StartLane::V3 => {
+                let signed_report = private_file(
+                    &config.completion_attempt_dir.join("signed-report.bin"),
+                    MAX_LIFECYCLE,
+                )?;
+                let assembled =
+                    load_v3_completion(&sign_dir, &begin, &claim, &signed_report)?;
+                recover_v3_completion(operator, &assembled, &begin, &claim, &signed_report)?
+            }
+            StartLane::RetryV4 => crate::lifecycle_v4_retry_completion_native::recover_receipt_only(
+                operator, &sign_dir, &claim,
+            )?,
+        };
         write_new(
             &config.journal_dir,
-            "start-completed-v3.json",
+            lane.completed_name(),
             &serde_json::to_vec(&json!({
-                "protocol":"mini-spk-resident-start-completed-v3",
+                "protocol":lane.completed_protocol(),
                 "admittedSha256":format!("{:x}", Sha256::digest(&admitted_bytes)),
                 "evidenceName":recovered.inspection_name,
                 "evidenceSha256":recovered.inspection_sha256,
@@ -789,7 +916,10 @@ fn reconcile_prior_start(
         completed
     };
     if let Some(receipt) = &completed {
-        retire_start_markers(config, receipt)?;
+        match lane {
+            StartLane::V3 => retire_start_markers(config, receipt)?,
+            StartLane::RetryV4 => retire_retry_v4_markers(config)?,
+        }
     }
     let physical = journal.audit_prior_running(&claim.physical_begin)?;
     let physical_label = match physical {
@@ -806,7 +936,7 @@ fn reconcile_prior_start(
             crate::lifecycle_v3_native::hex(&random)
         ),
         &serde_json::to_vec(&json!({
-            "protocol":"mini-spk-resident-start-reconciliation-v3",
+            "protocol":lane.reconciliation_protocol(),
             "admittedSha256":format!("{:x}", Sha256::digest(&admitted_bytes)),
             "completion":completed.as_ref().map(|receipt| json!({
                 "transactionId":receipt.transaction_id,
@@ -1079,15 +1209,6 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         config_sha256: config.mini_config_sha256.clone(),
     };
     if journal.read()?.is_some() {
-        match fs::symlink_metadata(config.journal_dir.join("start-admitted-retry-v4.json")) {
-            Ok(_) => {
-                return Err(invalid(
-                    "prior retry-v4 START has no reconciliation path; source STOP is required",
-                ))
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
         return reconcile_prior_start(&config, &operator, &journal);
     }
     Journal::preflight_current_unit(&config.unit)?;
@@ -1923,6 +2044,34 @@ mod tests {
     use std::os::unix::fs::DirBuilderExt;
     use std::os::unix::net::UnixStream;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn retry_v4_restart_selects_the_lane_of_the_retained_admitted_marker() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "mini-spk-start-lane-{}-{nonce}",
+            std::process::id()
+        ));
+        DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        // Neither marker: the v3 load that follows refuses the absence.
+        assert_eq!(StartLane::of_journal(&dir).unwrap(), StartLane::V3);
+        fs::write(dir.join("start-admitted-retry-v4.json"), b"{}").unwrap();
+        // A retained retry-v4 START is reconciled by the retry lane, not refused.
+        assert_eq!(StartLane::of_journal(&dir).unwrap(), StartLane::RetryV4);
+        assert_eq!(
+            StartLane::RetryV4.completed_name(),
+            "start-completed-retry-v4.json"
+        );
+        // Both lanes retained for one generation is a refusal.
+        fs::write(dir.join("start-admitted-v3.json"), b"{}").unwrap();
+        assert!(StartLane::of_journal(&dir).is_err());
+        fs::remove_file(dir.join("start-admitted-retry-v4.json")).unwrap();
+        assert_eq!(StartLane::of_journal(&dir).unwrap(), StartLane::V3);
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn retained_completion_requires_exact_source_evidence_after_restart() {

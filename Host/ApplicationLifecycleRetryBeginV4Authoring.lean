@@ -127,7 +127,7 @@ def prepareVerified (config : Config) {target : Durable}
       imageIdentity := descriptor.package.imageIdentity
       processGeneration := before.generation + 1
       processIdentity := ApplicationLifecycleResidentProfile.processIdentity
-        pin.app (if launch.kind == .stop then before.generation
+        config.expectedSeed pin.app (if launch.kind == .stop then before.generation
                  else before.generation + 1) }
   if launch.kind == .stop then
     match verified.selectRunning source with

@@ -5,7 +5,7 @@
 
 use crate::dispatch_author::{private_signing_key, SignerPin};
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
-use crate::resident_begin_native::allocate_operation_id;
+use crate::operation_ledger::allocate_operation_id;
 use crate::resident_launch::SourceBoundLaunch;
 use ed25519_dalek::Signer;
 use serde::Deserialize;

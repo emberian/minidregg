@@ -61,13 +61,13 @@ def inspectVerified {config : NativeHost.Config} {target : NativeHost.Durable}
     throw "STOP committed claim receipt differs from verified history"
   let running ← verified.selectRunning begin.base.source
   let prior := running.prior
-  let physical := prior.ingress.source.physical.report
+  let physical := prior.ingress.physical
   let some custody := physical.volumeCustody
     | throw "admitted running completion lacks volume custody"
   let selected : RunningWitness :=
     { index := prior.index
       receipt := prior.receipt
-      generation := prior.ingress.source.originalBegin.base.source.processGeneration
+      generation := prior.ingress.beginSource.processGeneration
       unit := physical.unit
       image := physical.materializedImage
       invocationId := physical.invocationId

@@ -199,7 +199,7 @@ pub(crate) fn prepare_once(
         launch,
         mode,
     } = input;
-    crate::completion_native::preflight_custodian(operator, custodian_seed, semantics)?;
+    crate::completion_custodian::preflight_custodian(operator, custodian_seed, semantics)?;
     let observation = checked_observation(begin, claim, launch, &mode)?;
     let parent = attempt_dir
         .parent()

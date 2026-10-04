@@ -30,9 +30,8 @@ pub mod broker;
 #[cfg(target_os = "linux")]
 mod claim_descriptor;
 #[cfg(target_os = "linux")]
-mod claim_native;
 #[cfg(target_os = "linux")]
-mod completion_native;
+mod completion_custodian;
 #[cfg(target_os = "linux")]
 mod descriptor_native;
 #[cfg(target_os = "linux")]
@@ -96,7 +95,7 @@ pub mod materialize;
 #[cfg(target_os = "linux")]
 mod native_dispatch;
 #[cfg(target_os = "linux")]
-mod resident_begin_native;
+mod operation_ledger;
 #[cfg(target_os = "linux")]
 mod resident_launch;
 #[cfg(target_os = "linux")]

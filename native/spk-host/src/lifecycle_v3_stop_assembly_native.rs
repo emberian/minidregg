@@ -8,7 +8,7 @@ use crate::lifecycle_v3_native::{
 };
 use crate::lifecycle_v3_stop_begin_native::AcceptedStopBegin;
 use crate::lifecycle_v3_stop_claim_native::{self, FreshStopClaim};
-use crate::resident_begin_native::allocate_operation_id;
+use crate::operation_ledger::allocate_operation_id;
 use crate::resident_launch::SourceBoundLaunch;
 use serde::Deserialize;
 use serde_json::{json, Value};

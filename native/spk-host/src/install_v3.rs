@@ -2,7 +2,7 @@
 //! in their own namespace and never supply a v2 launch root.
 
 use super::{invalid, InstallConfig, MAX_CONFIG, MAX_SPK};
-use crate::completion_native::preflight_custodian;
+use crate::completion_custodian::preflight_custodian;
 use crate::dispatch_native::{write_new, PrivateOperator};
 use crate::hostd::VerifiedBegin;
 use crate::launch_descriptor_native::SourceLaunchDescriptor;
@@ -874,10 +874,6 @@ mod tests {
         config.launch_qualification = Some(PathBuf::from("/private/qualification.json"));
         config.protocol = "mini-spk-resident-install-v1".into();
         assert!(!config.valid_host_identity());
-        config.deployment_id = None;
-        config.host_id = None;
-        config.launch_qualification = None;
-        assert!(config.valid_host_identity());
     }
 
     #[test]

@@ -6,26 +6,14 @@
 #[path = "install_v3.rs"]
 mod install_v3;
 
-use crate::claim_native::{
-    match_signed_install_package, submit_once as submit_claim_once, CapturedClaim,
-};
-use crate::completion_native::{
-    assemble_current_completion, preflight_custodian, prepare_materialized_report,
-    submit_materialized_completion_once, FixedCompletionSigners, MaterializedObservation,
-};
-use crate::descriptor_native::author_signed_package;
-use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
-use crate::materialize::{qualify_bridge_spk, verify_installed_spk};
-use crate::resident_begin_native::{
-    assemble_current_claim, submit_once as submit_begin_once, FixedBeginSigners, FixedClaimSigners,
-};
+use crate::dispatch_native::{private_dir, PrivateOperator};
+#[cfg(test)]
+use crate::dispatch_native::write_new;
 use crate::sandbox::open_protected_directory;
 use serde::Deserialize;
-use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::fs::{self, DirBuilder, OpenOptions};
 use std::io::{self, Read};
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 const MAX_CONFIG: u64 = 16 * 1024;
@@ -124,11 +112,6 @@ struct InstallConfig {
 impl InstallConfig {
     fn valid_host_identity(&self) -> bool {
         match self.protocol.as_str() {
-            "mini-spk-resident-install-v1" => {
-                self.deployment_id.is_none()
-                    && self.host_id.is_none()
-                    && self.launch_qualification.is_none()
-            }
             "mini-spk-resident-install-v2" => {
                 self.deployment_id.as_deref().is_some_and(hex64)
                     && self.host_id.as_deref().is_some_and(hex64)
@@ -143,10 +126,8 @@ impl InstallConfig {
 
     fn load(path: &Path) -> io::Result<Self> {
         let config: Self = serde_json::from_slice(&private_file(path, MAX_CONFIG)?)?;
-        if !matches!(
-            config.protocol.as_str(),
-            "mini-spk-resident-install-v1" | "mini-spk-resident-install-v2"
-        ) || path.parent() != Some(config.journal_dir.as_path())
+        if config.protocol != "mini-spk-resident-install-v2"
+            || path.parent() != Some(config.journal_dir.as_path())
             || !config.valid_host_identity()
             || !hex64(&config.expected_raw_sha256)
             || !hex64(&config.mini_host_sha256)
@@ -264,207 +245,14 @@ impl InstallConfig {
 /// Run inside a bounded offline operator unit: Bread's XZ decoder has a
 /// whole-block peak not constrained by its archive output limit.
 pub fn prepare(config_path: &Path) -> io::Result<()> {
-    let config = InstallConfig::load(config_path)?;
-    if config.protocol == "mini-spk-resident-install-v2" {
-        return install_v3::preflight_prepare(&config);
-    }
-    config.preflight_artifacts()?;
-    config.preflight_operator_paths()?;
-    open_protected_directory(
-        config
-            .source_spk
-            .parent()
-            .ok_or_else(|| invalid("SPK parent absent"))?,
-        config.app_uid,
-        false,
-    )?;
-    // The operator receives a private exact-byte copy of the root inbox SPK.
-    // The root-only ingest later checks that inbox file's raw SHA separately.
-    let source = private_file(&config.source_spk, MAX_SPK)?;
-    if hex(&Sha256::digest(&source)) != config.expected_raw_sha256 {
-        return Err(invalid("operator SPK copy differs from pinned raw SHA"));
-    }
-    drop(source);
-    let (package, _) = qualify_bridge_spk(&config.source_spk)?;
-    if package.raw_sha256 != config.expected_raw_sha256 {
-        return Err(invalid("signed source SPK changed during qualification"));
-    }
-    let operator = config.operator();
-    preflight_custodian(
-        &operator,
-        &config.completion_custodian_seed,
-        &config.completion_semantics,
-    )?;
-    let descriptor = author_signed_package(&operator, &package, &config.artifact("descriptor"))?;
-    let begin_signers: FixedBeginSigners =
-        serde_json::from_slice(&private_file(&config.begin_management_custody, MAX_CONFIG)?)?;
-    let claim_signers: FixedClaimSigners =
-        serde_json::from_slice(&private_file(&config.claim_management_custody, MAX_CONFIG)?)?;
-    let begin = submit_begin_once(
-        &operator,
-        &begin_signers,
-        config.app_uid,
-        &descriptor.canonical,
-        "install",
-        &config.artifact("begin-operation-ledger"),
-        &config.artifact("begin"),
-    )?;
-    let ingress = assemble_current_claim(
-        &operator,
-        &claim_signers,
-        config.app_uid,
-        &begin,
-        &config.artifact("claim-nonce-ledger"),
-        &config.artifact("claim-author"),
-    )?;
-    let captured = submit_claim_once(&operator, &ingress, &config.artifact("claim"))?;
-    let matched =
-        match_signed_install_package(&operator, &package, &captured, &config.artifact("claim"))?;
-    if matched.descriptor_root != descriptor.root
-        || matched.begin.image_identity != hex(&descriptor.image_identity)
-    {
-        return Err(invalid("INSTALL claim differs from signed SPK descriptor"));
-    }
-    let stage = json!({
-        "protocol":"mini-spk-install-prepared-v1",
-        "rawSha256":package.raw_sha256,
-        "descriptorRoot":descriptor.root,
-        "imageIdentityHex":hex(&descriptor.image_identity),
-        "unit":matched.begin.unit,
-        "beginSha256":hex(&Sha256::digest(&begin.ingress)),
-        "claimSha256":hex(&Sha256::digest(&captured.payload)),
-        "claimReceipt":{"transactionId":matched.begin.transaction_id,
-            "eventId":matched.begin.event_id},
-    });
-    write_new(
-        &config.journal_dir,
-        "install-prepared.json",
-        &serde_json::to_vec(&stage)?,
-    )?;
-    Ok(())
+    install_v3::preflight_prepare(&InstallConfig::load(config_path)?)
 }
 
 /// After the separately bounded root `spk-ingest` reports exact image SHA,
 /// independently reparse that protected image and join it to the retained
 /// INSTALL claim. Neither this phase nor Mini completion starts an app child.
 pub fn complete(config_path: &Path) -> io::Result<()> {
-    let config = InstallConfig::load(config_path)?;
-    if config.protocol == "mini-spk-resident-install-v2" {
-        return install_v3::preflight_complete(&config);
-    }
-    config.preflight_operator_paths()?;
-    private_dir(&config.journal_dir)?;
-    for name in [
-        "materialized-verify",
-        "materialized-report",
-        "completion-author",
-        "completion-submit",
-        "install-completed.json",
-    ] {
-        match fs::symlink_metadata(config.artifact(name)) {
-            Ok(_) => return Err(invalid("INSTALL completion attempt already exists")),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
-    }
-    let stage: Value = serde_json::from_slice(&private_file(
-        &config.artifact("install-prepared.json"),
-        MAX_CONFIG,
-    )?)?;
-    if stage.get("protocol").and_then(Value::as_str) != Some("mini-spk-install-prepared-v1")
-        || stage.get("rawSha256").and_then(Value::as_str)
-            != Some(config.expected_raw_sha256.as_str())
-    {
-        return Err(invalid("retained INSTALL preparation differs"));
-    }
-    let package = verify_installed_spk(&config.image_dir, config.app_uid)?;
-    if package.raw_sha256 != config.expected_raw_sha256 {
-        return Err(invalid("root-published image differs from prepared SPK"));
-    }
-    let begin = private_file(&config.artifact("begin/begin-v2.bin"), MAX_CLAIM)?;
-    let claim_ingress = private_file(&config.artifact("claim-author/claim-v2.bin"), MAX_CLAIM)?;
-    let claim = private_file(&config.artifact("claim/committed-v2.bin"), MAX_CLAIM)?;
-    if stage.get("beginSha256").and_then(Value::as_str)
-        != Some(hex(&Sha256::digest(&begin)).as_str())
-        || stage.get("claimSha256").and_then(Value::as_str)
-            != Some(hex(&Sha256::digest(&claim)).as_str())
-    {
-        return Err(invalid("retained INSTALL ingress or claim changed"));
-    }
-    let operator = config.operator();
-    let verify_dir = config.artifact("materialized-verify");
-    DirBuilder::new().mode(0o700).create(&verify_dir)?;
-    let inspection = operator.tool(
-        "inspect",
-        "application-lifecycle-claim-committed-v2",
-        &config.artifact("claim/committed-v2.bin"),
-        &verify_dir.join("claim-inspection.json"),
-    )?;
-    let captured = CapturedClaim {
-        payload: claim.clone(),
-        inspection,
-    };
-    let matched = match_signed_install_package(&operator, &package, &captured, &verify_dir)?;
-    if stage.get("descriptorRoot").and_then(Value::as_str) != Some(matched.descriptor_root.as_str())
-        || stage.get("unit").and_then(Value::as_str) != Some(matched.begin.unit.as_str())
-        || stage.get("imageIdentityHex").and_then(Value::as_str)
-            != Some(matched.begin.image_identity.as_str())
-    {
-        return Err(invalid(
-            "published image differs from prepared INSTALL claim",
-        ));
-    }
-    let mut image_identity = b"DREGG/SPK-IMAGE/v1".to_vec();
-    image_identity.extend_from_slice(&package.raw_sha256_bytes);
-    preflight_custodian(
-        &operator,
-        &config.completion_custodian_seed,
-        &config.completion_semantics,
-    )?;
-    let signers: FixedCompletionSigners = serde_json::from_slice(&private_file(
-        &config.completion_management_custody,
-        MAX_CONFIG,
-    )?)?;
-    signers.validate(&operator, config.app_uid)?;
-    let report = prepare_materialized_report(
-        &operator,
-        &begin,
-        &claim,
-        MaterializedObservation {
-            unit: &matched.begin.unit,
-            image_identity: &image_identity,
-        },
-        &config.completion_custodian_seed,
-        &config.completion_semantics,
-        &config.artifact("materialized-report"),
-    )?;
-    let ingress = assemble_current_completion(
-        &operator,
-        &begin,
-        &claim_ingress,
-        &report.signed_report,
-        &signers,
-        config.app_uid,
-        &config.artifact("completion-author"),
-    )?;
-    let receipt = submit_materialized_completion_once(
-        &operator,
-        &ingress,
-        &config.artifact("completion-submit"),
-    )?;
-    write_new(
-        &config.journal_dir,
-        "install-completed.json",
-        &serde_json::to_vec(&json!({
-            "protocol":"mini-spk-install-completed-v1",
-            "transactionId":receipt.transaction_id,
-            "eventId":receipt.event_id,
-            "acceptedCount":receipt.accepted_count,
-            "worldRoot":receipt.world_root,
-            "rawSha256":package.raw_sha256,
-        }))?,
-    )?;
-    Ok(())
+    install_v3::preflight_complete(&InstallConfig::load(config_path)?)
 }
 
 #[cfg(test)]
@@ -497,7 +285,7 @@ mod tests {
         ));
         DirBuilder::new().mode(0o700).create(&directory).unwrap();
         let config = InstallConfig {
-            protocol: "mini-spk-resident-install-v1".into(),
+            protocol: "mini-spk-resident-install-v2".into(),
             journal_dir: directory.clone(),
             source_spk: PathBuf::from("/nonexistent/source.spk"),
             image_dir: PathBuf::from("/nonexistent/image"),

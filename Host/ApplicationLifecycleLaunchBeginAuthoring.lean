@@ -309,7 +309,7 @@ def prepareStopVerified (config : Config) {target : Durable}
   let base ← prepareSelectedVerified config verified pin request descriptor none
   let running ← verified.selectRunning base.unsigned.base.source
   let prior := running.prior
-  let physical := prior.ingress.source.physical.report
+  let physical := prior.ingress.physical
   let some custody := physical.volumeCustody
     | throw "admitted running completion has no volume custody"
   let plan : StopPlan :=
@@ -317,7 +317,7 @@ def prepareStopVerified (config : Config) {target : Durable}
       running :=
         { index := prior.index
           receipt := prior.receipt
-          generation := prior.ingress.source.originalBegin.base.source.processGeneration
+          generation := prior.ingress.beginSource.processGeneration
           unit := physical.unit
           image := physical.materializedImage
           invocationId := physical.invocationId
@@ -353,18 +353,19 @@ private def checkCreatedReference {config : Config} {target : Durable}
       receipt.transactionId == record.transactionId &&
       receipt.eventId == record.event.eventId do
     throw "completed-create original receipt differs from admitted history"
-  unless record.event.codecVersion == 25 &&
+  let codecVersion : Nat := match prior.ingress with
+    | .v2 _ => 25
+    | .v4 _ => 72
+  unless record.event.codecVersion == codecVersion &&
       record.event.canonicalBytes == prior.ingress.canonicalBytes &&
       prior.ingress.creationMarker.isSome do
     throw "completed-create ingress differs from admitted history"
-  unless (match prior.ingress.source.originalBegin.start.map (·.choice) with
-      | some (.create _) => true
-      | _ => false) do
+  unless prior.ingress.createChoice do
     throw "selected completion was not a create action"
-  unless prior.ingress.source.app == binding.app &&
-      prior.ingress.source.originalBegin.volume == binding.volume do
+  unless prior.ingress.beginSource.app == binding.app &&
+      prior.ingress.volume == binding.volume do
     throw "completed-create application or volume differs"
-  let some custody := prior.ingress.source.physical.report.volumeCustody
+  let some custody := prior.ingress.physical.volumeCustody
     | throw "selected successful create lacks volume custody"
   unless binding.priorCreate == some (receipt, custody) do
     throw "completed-create custody or receipt differs"
@@ -380,7 +381,7 @@ def prepareContinueRequestVerified (config : Config) {target : Durable}
   unless descriptor.valid do return .error "invalid signed-SPK launch descriptor"
   let some prior := verified.createdV3.find? (fun prior => prior.index == request.createdIndex)
     | return .error "selected successful create absent from verified history"
-  let some custody := prior.ingress.source.physical.report.volumeCustody
+  let some custody := prior.ingress.physical.volumeCustody
     | return .error "selected successful create lacks volume custody"
   let binding : ApplicationLifecycleLaunchBinding.Binding :=
     { app := pin.app

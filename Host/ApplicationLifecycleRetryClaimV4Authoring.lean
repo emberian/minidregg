@@ -96,7 +96,7 @@ def prepareVerified (config : Config) {target : Durable}
       beginSource.managementSubject.value == pin.managementSubject &&
       beginSource.capability == pin.appCapability do
     throw "historical retry BEGIN differs from fixed claim operator pin"
-  unless begin.shape && ApplicationLifecycleResidentProfile.beginMatchesV3 begin.begin do
+  unless begin.shape && ApplicationLifecycleResidentProfile.beginMatchesV3 config.expectedSeed begin.begin do
     throw "historical retry BEGIN is outside resident host profile"
   let opened := verified.opened
   let some retained := opened.durable.image.accepted[prior.index]?
@@ -206,7 +206,7 @@ private def envelope (slot : SigningSlot) (signature : List UInt8) :
 /-- Detached assembly does not mint current authority. Op26 refreshes the
 verified tip and admits the exact three signed incidences and the one-use
 retry token through `ApplicationLifecycleRetryClaimV4Receiver`. -/
-def assemble (plan : Plan) (signatures : List (List UInt8)) :
+def assemble (store : Minidregg.Theory.TypedAuthorization.Digest) (plan : Plan) (signatures : List (List UInt8)) :
     Except String (List UInt8) := do
   let invocationCount := plan.invocation.slots.length
   unless signatures.length == invocationCount + 2 do
@@ -227,7 +227,7 @@ def assemble (plan : Plan) (signatures : List (List UInt8)) :
       plan.originalBeginReceipt.eventId ==
         (ApplicationLifecycleRetryBeginV4Admission.event begin).eventId &&
       plan.originalBeginReceipt.acceptedCount == source.originalIndex + 1 &&
-      ApplicationLifecycleResidentProfile.beginMatchesV3 begin.begin &&
+      ApplicationLifecycleResidentProfile.beginMatchesV3 store begin.begin &&
       plan.invocation.finalizedDraft == .invoke
         (DeclaredResourceController.commandCodec.encode
           (ApplicationLifecycleClaim.command plan.invocation.domain
