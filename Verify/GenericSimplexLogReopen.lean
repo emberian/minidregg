@@ -28,7 +28,7 @@ def entries : Nat := 100000
 
 /-- A well-formed n=4 f=1 context: four distinct 1952-byte public keys. -/
 def context : Context :=
-  ⟨[1,2,3], 0, [4,5,6], ⟨4,1,100000,8⟩,
+  ⟨[1,2,3], 0, [4,5,6], ⟨4,1,100000,8,3⟩,
     (List.range 4).map fun i => List.replicate 1952 (UInt8.ofNat (i + 1))⟩
 
 /-- Inputs that replay without failing: polls and in-view clock ticks. -/

@@ -48,12 +48,14 @@ def decodeInput (e : Event) : Option Input := do
         return .deliveryAt t m
     | _ => none
   if encodeInput input == e then some input else none
+/-- Five fields since the timeout-backoff epoch. A four-field pre-epoch
+Context does not decode: such journals and contexts refuse to load. -/
 def configStream : StreamCodec Config :=
   StreamCodec.xmap
     (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product StreamCodec.nat StreamCodec.nat)))
-    (fun c => (c.parties,c.faults,c.timeout,c.pumpBudget))
-    (fun (n,f,t,p) => ⟨n,f,t,p⟩) (by intro c; cases c; rfl)
+      (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat))))
+    (fun c => (c.parties,c.faults,c.timeout,c.pumpBudget,c.backoffCap))
+    (fun (n,f,t,p,b) => ⟨n,f,t,p,b⟩) (by intro c; cases c; rfl)
 /-- Exact deployment/epoch/instance bytes, not an unqualified digest. -/
 structure Context where
   scope : Bytes

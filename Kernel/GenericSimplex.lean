@@ -1,7 +1,12 @@
 /- Complete executable Generic Simplex, arXiv:2609.32985v1 Figures 1,3,4,5.
 Fixed static n=3f+1 committee, authenticated reliable delivery, known delay bound
 after unknown GST. Past views remain active. Exact block ancestry replaces hashes.
-Source checking is an INTERNAL controller input, never a network packet. -/
+Source checking is an INTERNAL controller input, never a network packet.
+
+Deviation from the paper's known-Delta timer: a view's timeout doubles with each
+consecutive view entered since this replica's last local commit, up to
+2^backoffCap (backoffCap = 0 is the paper's fixed timer). The deadline only
+decides when this replica sends CANDIDATE(⊥); no safety rule reads it. -/
 import Std
 namespace Minidregg.Kernel.GenericSimplex
 set_option autoImplicit false
@@ -22,6 +27,8 @@ structure Config where
   faults : Nat
   timeout : Nat
   pumpBudget : Nat := 64
+  /-- Exponent cap for the view-timeout backoff; 0 keeps the fixed timer. -/
+  backoffCap : Nat := 0
   deriving DecidableEq, BEq, Repr, Inhabited
 def Config.wellFormed (c : Config) : Bool :=
   c.parties == 3 * c.faults + 1 && c.timeout > 0 && c.pumpBudget > 0
@@ -194,8 +201,16 @@ def propose (s : State) : State :=
     let v := viewAt s s.current
     if v.proposal.isNone then putView s { v with proposal := some block } else s
   else { s with failed := true }
+/-- The highest view this replica has locally committed (0 if none). -/
+def lastCommittedView (s : State) : Nat :=
+  s.views.foldl (fun acc v => if v.committed.isSome then max acc v.number else acc) 0
+/-- View timer: `timeout · 2^min(k, backoffCap)` where `k` counts the views
+entered since the last local commit. An underestimated Delta is outgrown after
+finitely many views instead of failing every view forever. -/
+def viewTimeout (c : Config) (s : State) (number : Nat) : Nat :=
+  c.timeout * 2 ^ min (number - (lastCommittedView s + 1)) c.backoffCap
 def enterView (c : Config) (s : State) (number : Nat) : State :=
-  let s := { s with current := number, deadline := s.now + c.timeout }
+  let s := { s with current := number, deadline := s.now + viewTimeout c s number }
   let s := putView s (viewAt s number)
   if c.leader number == s.self then propose s else s
 def progressOuter (c : Config) (s : State) : State := Id.run do

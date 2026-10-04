@@ -36,6 +36,67 @@ The changed journal and wire schema are not an implicit migration path from the
 old local-output profile. Reconfiguration must preserve existing liabilities; a
 fresh file or epoch number is not proof that old certificates cannot complete.
 
+## Departure from the paper: the view timer (fix C)
+
+**The paper.** One fixed view timer: a replica that enters a view sets its
+deadline to `now + timeout`, and the liveness argument needs `timeout ≥ 7Δ` for
+the delay bound Δ that holds after GST (the profile's stated premise). An
+underestimated Δ is never repaired: every view can time out forever.
+
+**Here, exactly.** `enterView` sets the deadline to `now + viewTimeout c s number`
+(Kernel/GenericSimplex.lean), where
+
+    viewTimeout c s number = timeout · 2^min(number − (lastCommittedView s + 1), backoffCap)
+
+with truncated subtraction, and `lastCommittedView s` the highest view this
+replica has locally committed (`doCommit`), 0 if none. So the exponent counts the
+views strictly between this replica's latest local commit and the view being
+entered, capped at `backoffCap`. That is the whole delta from the paper:
+
+- `backoffCap = 0` is the paper's timer exactly (`viewTimeout_fixed_of_cap_zero`).
+- For every cap, `timeout ≤ viewTimeout ≤ timeout · 2^backoffCap`
+  (`viewTimeout_bounds`), and the view right after a local commit runs on the
+  fixed timer again (`viewTimeout_after_commit`). All three are theorems in
+  Kernel/GenericSimplexEngineSafety.lean with pinned axioms.
+- The exponent is LOCAL: replicas that committed different latest views run
+  different deadlines in the same view. A late certificate for an older view
+  does not reset the exponent unless that view is the highest committed one.
+- The deadline is read only by the `tick` branch of `step`, to decide when this
+  replica sends CANDIDATE(⊥) for its current view. No VOTE, COMMIT, prepare,
+  disable or safe-parent rule reads it. The safety theorems
+  (GenericSimplexEngineSafety, SimplexQualification) quantify over the
+  executable `start`/`step` with this `enterView`; they were rebuilt against it
+  with their statements and axiom pins unchanged.
+- Liveness is NOT a theorem here, for either timer. The intended argument
+  (INFERRED, not formalised): after finitely many uncommitted views the timer
+  reaches `timeout · 2^backoffCap`; if that is at least 7Δ the paper's argument
+  applies from then on. A Δ above `timeout · 2^backoffCap / 7` is still not
+  survived.
+- The cost: after a stall, a view whose leader has crashed costs up to
+  `timeout · 2^backoffCap` before CANDIDATE(⊥), until some view commits.
+
+`backoffCap` is the fifth `Config` field, so it is part of the agreed `Context`
+and every replica of one instance runs the same policy. The four-source fixture
+uses `backoffCap = 3` (a view timer of 100 s growing to 800 s).
+
+**What broke.** Contexts carry five `Config` fields; a four-field `context.bin`
+does not decode. The journal magic is `MINI-SIMPLEX-LOG` version 2; a version-1
+journal refuses at the magic instead of being reinterpreted. COMMIT signatures
+cover the encoded context, so no old certificate verifies. A mesh moves to fix C
+by re-genesis (`init` a new context), not by conversion.
+
+**The test.** `Verify.GenericSimplexHarness` (exe `generic-simplex-harness`)
+replays the recorded 00f711 stall in the pure kernel: in views 1 and 2 the
+VOTEs to replicas 0 and 1 arrive after their deadlines, so under both timers
+those views end with COMMITs from exactly replicas 2 and 3, CANDIDATE(⊥) from 0
+and 1, and no certificate. From view 3 every message takes 1.5·timeout (ten
+times the timeout/7 premise). The backoff timer (`backoffCap = 3`) then commits
+the pending block in view 3 at all four replicas, with no resubmission and
+prefix-consistent deliveries; the fixed timer under the same schedule commits
+nothing, which the harness asserts, so the check fails without fix C (removing
+the backoff from `viewTimeout` turns it red: "backoff: pending block never
+committed").
+
 ## Native source consumer
 
 GenericSimplexParticipant calls the real admission, historical replay and ordered
@@ -151,12 +212,13 @@ reader submission and both enrolled current signing keys passed.
 
 A development mesh of four replicas in one process on one host has since committed two
 application records and then stalled on the third (scout R2-3, 2026-10-03; recorded
-outside this repository, and not reproduced here). Its diagnosis: two replicas reached
+outside this repository; the kernel schedule is reproduced in `Verify.GenericSimplexHarness`). Its diagnosis: two replicas reached
 their view timeout before collecting a quorum of VOTEs, because one drive iteration took
 15-27 s against a timeout that needs Delta below timeout/7, and the engine ran only while
 a client request was open. That is lawful behaviour of the engine, not a safety fault.
-The liveness fixes (standing replicas, a cheaper iteration, an adaptive timeout) are not
-on main, so liveness is not established; the safety theorems are over the Lean engine model.
+The liveness fixes are standing replicas, a cheaper iteration and the adaptive timeout
+above. Liveness is still not established as a theorem; the safety theorems are over the
+Lean engine model.
 This local four-participant driver does not claim four independent processes or
 failure domains. Operator service fuel is not a source-funded recovery grant.
 

@@ -106,6 +106,27 @@ theorem overfault_execution_faithful :
     LocalFaithful (auditTrace hostileRun) (Finset.range config.parties) excessFaulty config.faults :=
   actual_local_faithful hostile_run_reachable (by decide)
 
+/-- The timeout-backoff departure (fix C) is confined to the view deadline.
+With `backoffCap = 0` the timer is the paper's fixed `timeout`; otherwise it
+lies between `timeout` and `timeout · 2^backoffCap`. The safety theorems above
+quantify over this same executable `step`, deadline included. -/
+theorem viewTimeout_fixed_of_cap_zero (c : Config) (s : State) (number : Nat)
+    (fixed : c.backoffCap = 0) : viewTimeout c s number = c.timeout := by
+  simp [viewTimeout, fixed]
+
+theorem viewTimeout_bounds (c : Config) (s : State) (number : Nat) :
+    c.timeout ≤ viewTimeout c s number ∧ viewTimeout c s number ≤ c.timeout * 2 ^ c.backoffCap := by
+  unfold viewTimeout
+  constructor
+  · exact Nat.le_mul_of_pos_right _ (Nat.two_pow_pos _)
+  · exact Nat.mul_le_mul_left _ (Nat.pow_le_pow_right (by decide) (Nat.min_le_right _ _))
+
+/-- The backoff exponent restarts after a local commit: the view right after
+the highest locally committed view runs on the fixed timer. -/
+theorem viewTimeout_after_commit (c : Config) (s : State) :
+    viewTimeout c s (lastCommittedView s + 1) = c.timeout := by
+  simp [viewTimeout]
+
 #assert_axioms reachable_emission_invariants
 #assert_axioms actual_local_faithful
 #assert_axioms actual_committed_prefix_consistency
@@ -113,4 +134,7 @@ theorem overfault_execution_faithful :
 #assert_axioms actual_certified_next_record_unique
 #assert_axioms honest_execution_faithful
 #assert_axioms overfault_execution_faithful
+#assert_axioms viewTimeout_fixed_of_cap_zero
+#assert_axioms viewTimeout_bounds
+#assert_axioms viewTimeout_after_commit
 end Minidregg.Kernel.GenericSimplexEngineSafety

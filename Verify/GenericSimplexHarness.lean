@@ -2,7 +2,7 @@ import Kernel.GenericSimplex
 namespace Minidregg.Verify.GenericSimplexHarness
 open Minidregg.Kernel.GenericSimplex
 set_option autoImplicit false
-def cfg : Config := ⟨4,1,70,8⟩
+def cfg : Config := ⟨4,1,70,8,0⟩
 def payload : Bytes := [42]
 def block : Block := [payload]
 structure Network where
@@ -74,7 +74,142 @@ def adversarial : Nat → Nat → Network → IO Network
       let n := if m.sender == 3 then n else act n i (.delivery m)
       let n := if fuel % 64 == 0 then tickAll n (1000-fuel) else n
       adversarial fuel seed n
+/-! ## Timed reproduction of the 00f711 stall (R2-3)
+
+Every emitted message gets an explicit arrival time per recipient and every
+replica ticks on a fixed period. The schedule is the recorded one: in views 1
+and 2 the VOTEs addressed to replicas 0 and 1 arrive after those replicas'
+view deadlines, while replicas 2 and 3 collect q VOTEs inside theirs. So 2 and
+3 send COMMIT, 0 and 1 send CANDIDATE(⊥) first, and since a replica that sent
+CANDIDATE(⊥) never sends COMMIT for that view, no view gathers q = 3 COMMITs.
+Afterwards every message takes 1.5·timeout, ten times the paper's timeout/7
+premise: under the fixed timer every replica fires CANDIDATE(⊥) before any
+proposal arrives, so no later view commits, while the backoff timer outgrows
+the delay. The offer is given once, at start: nothing resubmits. -/
+structure Timed where
+  cfg : Config
+  nodes : Array State
+  logs : Array (List Input)
+  arrivals : List (Nat × Nat × Message)
+  now : Nat
+
+/-- (sendTime, recipient, message) ↦ transit delay. -/
+abbrev Delay := Nat → Nat → Message → Nat
+
+def Timed.act (t : Timed) (delay : Delay) (i : Nat) (input : Input) : Timed :=
+  let old := t.nodes[i]!
+  let next := step t.cfg old input
+  let fresh := next.outbox.drop old.outbox.length
+  let sent := fresh.flatMap fun m =>
+    ((List.range t.cfg.parties).filter (· != i)).map fun r => (t.now + delay t.now r m,r,m)
+  let nodes := t.nodes.set! i next
+  let logs := t.logs.set! i (t.logs[i]! ++ [input])
+  { t with nodes := nodes, logs := logs, arrivals := t.arrivals ++ sent }
+
+def Timed.initial (cfg : Config) (delay : Delay) : Timed := Id.run do
+  let nodes := (List.range cfg.parties).map fun i => start cfg i 0 [payload] [block]
+  let arrivals := nodes.flatMap fun s =>
+    s.outbox.flatMap fun m => ((List.range cfg.parties).filter (· != s.self)).map fun r => (delay 0 r m,r,m)
+  return ⟨cfg,nodes.toArray,Array.replicate cfg.parties [],arrivals,0⟩
+
+/-- Deliver the earliest due arrival (stable among equal times), else tick all. -/
+def Timed.advance (t : Timed) (delay : Delay) (period : Nat) : Timed :=
+  let nextTick := (t.now / period + 1) * period
+  let earliest := t.arrivals.zipIdx.foldl (fun best (entry,index) =>
+    match best with
+    | none => if entry.1 ≤ nextTick then some (entry,index) else none
+    | some (b,_) => if entry.1 < b.1 then some (entry,index) else best) none
+  match earliest with
+  | some ((time,recipient,m),index) =>
+    let t := {t with now := max t.now time, arrivals := t.arrivals.eraseIdx index}
+    t.act delay recipient (.deliveryAt t.now m)
+  | none =>
+    let t := {t with now := nextTick}
+    (List.range t.cfg.parties).foldl (fun t i => t.act delay i (.tick nextTick)) t
+
+def Timed.runUntil (t : Timed) (delay : Delay) (period stop : Nat) : Nat → Timed
+  | 0 => t
+  | fuel+1 => if t.now ≥ stop then t else (t.advance delay period).runUntil delay period stop fuel
+
+/-- Distinct members that sent COMMIT in this view, across all replicas. -/
+def commitSenders (t : Timed) (view : Nat) : List Nat :=
+  (t.nodes.toList.flatMap fun s => s.outbox.filter fun m => m.kind == .commit && m.view == view)
+    |>.map Message.sender |>.eraseDups
+
+/-- Distinct members that sent CANDIDATE(⊥) (a timeout) in this view. -/
+def bottomSenders (t : Timed) (view : Nat) : List Nat :=
+  (t.nodes.toList.flatMap fun s => s.outbox.filter fun m => m.kind == .candidate && m.view == view && m.value.isNone)
+    |>.map Message.sender |>.eraseDups
+
+def timedSafe (t : Timed) : Bool :=
+  let all := t.nodes.toList.flatMap State.delivered
+  t.nodes.all (fun s => !s.failed) &&
+    all.all fun a => all.all fun b => isPrefix a b || isPrefix b a
+
+def committedPayload (s : State) : Bool := (applicationHistory s.committedTip).contains payload
+
+/-- View in which this replica's tip first carried the payload (0: never). -/
+def payloadView (s : State) : Nat :=
+  ((s.views.filter fun v => (v.committed.map fun b => (applicationHistory b).contains payload).getD false)
+    |>.map View.number |>.foldl (fun acc v => if acc == 0 then v else min acc v) 0)
+
+def noResubmit (t : Timed) : Bool :=
+  t.logs.all fun log => log.all fun input =>
+    match input with
+    | .offer _ | .checked _ => false
+    | _ => true
+
+/-- The recorded stall schedule (R2-3 timeline, view 17 onward).
+- View 1: the proposal reaches replicas 1, 2, 3 at 0.7·timeout (in the record
+  replica 1 validated the new record only late in its window), so every vote
+  is cast late. VOTEs to 2 and 3 take 1; VOTEs to 0 and 1 take 1.1·timeout,
+  so even the leader's own early VOTE reaches replica 1 after its deadline:
+  neither 0 nor 1 holds f+1 VOTEs, hence neither can relay CANDIDATE(b) and
+  reach READY, before its timer fires.
+- View 2: replicas 0 and 1 enter it about 0.1·timeout after 2 and 3, so the
+  leader's (replica 1) proposal reaches 2 and 3 inside their windows. VOTEs to
+  0 and 1 take 2.5·timeout, longer than their view-2 timer under both the fixed
+  timer (timeout) and the backoff timer (2·timeout, one view since a commit).
+- Every other message in views 1 and 2 takes 1; from view 3 on every message
+  takes 1.5·timeout (an underestimated Δ: the fixed timer needs Δ ≤ timeout/7). -/
+def stallDelay (timeout : Nat) : Delay := fun _ recipient m =>
+  if m.view ≤ 2 then
+    if m.kind == .vote && recipient < 2 then
+      if m.view == 1 then 11 * timeout / 10 else 5 * timeout / 2
+    else if m.kind == .propose && m.view == 1 then 7 * timeout / 10
+    else 1
+  else 15 * timeout / 10
+
 def main : IO Unit := do
+  -- (1) The recorded stall, under the paper's fixed timer and under backoff.
+  for cap in [0,3] do
+    let cfgT : Config := {cfg with timeout := 100, backoffCap := cap}
+    let stalled := (Timed.initial cfgT (stallDelay 100)).runUntil (stallDelay 100) 10 1500 200000
+    IO.println s!"cap {cap}: COMMIT senders view 1 {commitSenders stalled 1} view 2 {commitSenders stalled 2}; CANDIDATE(⊥) senders view 1 {bottomSenders stalled 1} view 2 {bottomSenders stalled 2}"
+    for view in [1,2] do
+      ensure (commitSenders stalled view == [2,3] || commitSenders stalled view == [3,2])
+        s!"cap {cap}: view {view} did not end with exactly the COMMITs of 2 and 3"
+      ensure (stalled.nodes.all fun s => (viewAt s view).committed.isNone)
+        s!"cap {cap}: view {view} reached a certificate under the stall"
+    ensure (timedSafe stalled) s!"cap {cap}: stall broke prefix consistency"
+  IO.println "PASS stall reproduced: views 1 and 2 end with exactly 2 COMMITs (replicas 2,3), no certificate"
+  (← IO.getStdout).flush
+  -- (2) Every later delay is 1.5·timeout. With backoff the pending block
+  -- commits with no resubmission, prefix-consistent everywhere; the paper's
+  -- fixed timer under the same schedule commits nothing (the falsifier: this
+  -- schedule discriminates fix C, it does not pass without it).
+  let cfgC : Config := {cfg with timeout := 100, backoffCap := 3}
+  let recovered := (Timed.initial cfgC (stallDelay 100)).runUntil (stallDelay 100) 10 4000 400000
+  ensure (recovered.nodes.all committedPayload) "backoff: pending block never committed"
+  let views := recovered.nodes.toList.map payloadView
+  ensure (views.all (fun v => 2 < v && v ≤ 8)) s!"backoff: payload committed outside views 3..8: {views}"
+  ensure (noResubmit recovered) "backoff: payload was resubmitted"
+  ensure (timedSafe recovered) "backoff: delivered histories not prefix-consistent"
+  let fixed := (Timed.initial {cfgC with backoffCap := 0} (stallDelay 100)).runUntil (stallDelay 100) 10 4000 400000
+  ensure (fixed.nodes.all fun s => !committedPayload s && s.committedTip.isEmpty)
+    "fixed timer committed under the 1.5·timeout schedule: the recovery check does not discriminate backoff"
+  ensure (timedSafe fixed) "fixed timer: delivered histories not prefix-consistent"
+  IO.println s!"PASS backoff recovery: payload committed at views {views} on all four, no resubmit, delivered prefix-consistent; the fixed timer under the same schedule committed nothing by t=4000 (views reached {fixed.nodes.toList.map (·.current)})"
   let normal := run 4000 initial (fun _ => false)
   ensure (normal.nodes.all (fun s => !s.committedTip.isEmpty)) "normal progress"
   ensure (safe normal && restarted normal) "normal safety/replay"

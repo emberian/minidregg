@@ -226,7 +226,7 @@ def main (args : List String) : IO Unit := do
       for j in List.range 4 do
         if i < j then helper binary #["mac-keygen",(dir / s!"pair-{i}-{j}").toString]
     let k : Keys := ⟨dir,binary⟩
-    let c : Context := ⟨[10],0,[20],⟨4,1,70,8⟩,keys⟩
+    let c : Context := ⟨[10],0,[20],⟨4,1,70,8,3⟩,keys⟩
     let base := 20000 + (← IO.monoMsNow) % 30000
     let address := fun (i : Nat) => s!"127.0.0.1:{base + i}"
     for i in List.range 4 do

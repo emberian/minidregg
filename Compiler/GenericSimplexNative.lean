@@ -162,6 +162,9 @@ and removes only a torn unacknowledged tail; a read-only open ignores it. -/
 def openNative (spec : HelperSpec) (journal : System.FilePath) (context : Context)
     (writable : Bool) : IO Native := do
   let bytes := (← IO.FS.readBinFile journal).toList
+  if let some version := logFormatVersion bytes then
+    if some version != logMagic.getLast? then
+      throw (IO.userError s!"agreement journal {journal} is log format version {version}; this build reads only version {(logMagic.getLast?.map UInt8.toNat).getD 0} (the timeout-backoff epoch, five-field Config). An older mesh is re-genesised with init, never converted")
   let some valid := scanLog bytes
     | throw (IO.userError "agreement journal is not an append-only log or has a corrupt frame")
   let some restored := openRestored context (bytes.take valid)

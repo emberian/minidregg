@@ -134,6 +134,12 @@ name = "ObjectiveProofs"
 [[lean_lib]]
 name = "ResearchWip"
 
+# Pure-kernel Generic Simplex event harness, incl. the timed 00f711 stall
+# reproduction and backoff recovery (compiled; run the binary).
+[[lean_exe]]
+name = "generic-simplex-harness"
+root = "Verify.GenericSimplexHarness"
+
 # Reopen of 100 000-entry agreement journals in constant stack (compiled; run the binary).
 [[lean_exe]]
 name = "generic-simplex-log-reopen"

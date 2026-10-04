@@ -57,8 +57,17 @@ one appended delta. Nothing is rewritten: a legacy whole-image `agreement.bin`
 is not this shape and does not decode (`convert-journal` re-encodes it
 explicitly and checks the replayed state is identical). -/
 
-/-- ASCII "MINI-SIMPLEX-LOG" and format version 1. -/
-def logMagic : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,1]
+/-- ASCII "MINI-SIMPLEX-LOG" and format version 2. Version 2 is the timeout
+backoff epoch: its base frame carries a five-field `Config`. A version-1 log
+(four-field `Config`) refuses at this magic rather than being reinterpreted. -/
+def logMagic : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,2]
+
+/-- The format version byte of an image that carries the "MINI-SIMPLEX-LOG"
+magic, whatever its version; `none` for anything else. Lets an open refuse an
+older format by name instead of as a corrupt image. -/
+def logFormatVersion (bytes : Bytes) : Option UInt8 :=
+  if bytes.take logMagic.dropLast.length == logMagic.dropLast then
+    bytes[logMagic.dropLast.length]? else none
 
 /-- One acknowledged append: the exact inputs replayed through `step`, and the
 transferable COMMIT witnesses verified in the same transaction. -/

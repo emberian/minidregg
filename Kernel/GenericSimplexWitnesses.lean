@@ -31,7 +31,7 @@ theorem runSchedule_reachable {c : Config} {faulty : Finset Nat}
     rcases action with ⟨party,input⟩
     exact ih (.next reachable party input allowed.1) allowed.2
 
-def config : Config := ⟨4,1,10,4⟩
+def config : Config := ⟨4,1,10,4,0⟩
 def baseBlock : Block := [[]]
 def otherBlock : Block := [[1]]
 def checked (_ : Network) (_ : Nat) (block : Block) : Prop := block = otherBlock

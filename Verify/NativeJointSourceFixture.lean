@@ -145,7 +145,7 @@ def initializeStores (root : System.FilePath) (helpers : Helpers)
       if left ≤ right then
         helper helpers.agreement #["mac-keygen", (pairPath root left right).toString]
   let context : Context :=
-    ⟨digestStream.encode ⟨8500⟩, 0, [], ⟨4,1,100000,8⟩, publicKeys⟩
+    ⟨digestStream.encode ⟨8500⟩, 0, [], ⟨4,1,100000,8,3⟩, publicKeys⟩
   require context.wellFormed "real committee context is malformed"
   let built ← derive root helpers context alice bob
   require built.image.accepted.isEmpty "genesis unexpectedly contains accepted history"
@@ -178,7 +178,7 @@ def openReplica (root : System.FilePath) (helpers : Helpers) (index : Nat) (writ
     IO GenericSimplexSourceHarness.Replica := do
   let encoded := (← IO.FS.readBinFile (root / "context.bin")).toList
   let some context := contextStream.toLawful.decode encoded
-    | throw (IO.userError "invalid source fixture context (a pre-epoch context.bin refuses here)")
+    | throw (IO.userError "invalid source fixture context: context.bin does not decode as a five-field Config context (a pre-timeout-backoff four-field context.bin refuses here; re-genesis with init)")
   require (contextStream.encode context == encoded && context.wellFormed)
     "noncanonical source fixture context"
   let alice := (← IO.FS.readBinFile (root / "subject-7.pub")).toList
@@ -280,7 +280,7 @@ must replay to the identical engine state; the legacy file is left untouched. -/
 def convertJournal (root : System.FilePath) (helpers : Helpers) (index : Nat) : IO Unit := do
   let encoded := (← IO.FS.readBinFile (root / "context.bin")).toList
   let some context := contextStream.toLawful.decode encoded
-    | throw (IO.userError "invalid source fixture context")
+    | throw (IO.userError "invalid source fixture context: context.bin does not decode as a five-field Config context (a pre-timeout-backoff four-field context.bin refuses here; re-genesis with init)")
   let legacy := (← IO.FS.readBinFile (replicaDirectory root index / "agreement.bin")).toList
   let some (journal,state) := restore context legacy
     | throw (IO.userError "legacy journal does not replay under this exact context")
