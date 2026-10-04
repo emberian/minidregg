@@ -14,9 +14,7 @@ fn source_bytes(v: &Value, name: &str) -> Result<[u8; 32]> {
     let text = v[name]
         .as_str()
         .ok_or_else(|| format!("source lacks {name}"))?;
-    if text.is_empty()
-        || !text.bytes().all(|c| c.is_ascii_digit())
-        || (text.len() > 1 && text.starts_with('0'))
+    if !mini_sdk::decimal::is_canonical(text)
     {
         return Err(format!("noncanonical source {name}"));
     }
@@ -158,19 +156,7 @@ mod tests {
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
         use std::io::Write;
 
-        fn decimal(bytes: &[u8]) -> String {
-            let mut digits=vec![0u8];
-            for byte in bytes {
-                let mut carry=*byte as u16;
-                for digit in &mut digits {
-                    carry+=(*digit as u16)*256;
-                    *digit=(carry%10) as u8;
-                    carry/=10;
-                }
-                while carry>0 { digits.push((carry%10) as u8); carry/=10; }
-            }
-            digits.iter().rev().map(|digit|(b'0'+digit) as char).collect()
-        }
+        use mini_sdk::decimal::from_be_bytes as decimal;
 
         let mut random=[0;16];SystemRandom::new().fill(&mut random).unwrap();
         let root=std::env::temp_dir().join(format!("mini-receive-epoch-{}",crate::hex(&random)));

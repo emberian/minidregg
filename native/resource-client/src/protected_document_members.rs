@@ -13,9 +13,10 @@ fn rows(value: &Value) -> Result<Vec<Value>> {
     value.as_array().cloned().ok_or("retained member list is not an array".into())
 }
 fn increment(value: &str) -> Result<String> {
-    let mut n=nat32(value)?;
-    for byte in n.iter_mut().rev() {let (next,overflow)=byte.overflowing_add(1);*byte=next;if !overflow{return Ok(decimal(&n));}}
-    Err("document epoch exceeds supported natural range".into())
+    nat32(value)?;
+    let next=mini_sdk::decimal::successor(value)?;
+    if nat32(&next).is_err() {return Err("document epoch exceeds supported natural range".into());}
+    Ok(next)
 }
 fn replace_json(path:&Path,value:&Value)->Result<()> {
     crate::fsio::replace_private(path,&serde_json::to_vec_pretty(value).map_err(|e|e.to_string())?)

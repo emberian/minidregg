@@ -154,10 +154,7 @@ impl Uint256 {
         Self([n, 0, 0, 0])
     }
     fn parse(text: &str) -> Result<Self> {
-        if text.is_empty()
-            || text.len() > 78
-            || (text.len() > 1 && text.starts_with('0'))
-            || !text.bytes().all(|b| b.is_ascii_digit())
+        if !mini_sdk::decimal::is_canonical_max(text, 78)
         {
             return Err("canonical decimal string required".into());
         }
@@ -192,22 +189,11 @@ impl Uint256 {
         self.0.iter().rev().cmp(rhs.0.iter().rev()).is_ge()
     }
     pub(crate) fn decimal(self) -> String {
-        if self == Self([0; 4]) {
-            return "0".into();
+        let mut big_endian = [0u8; 32];
+        for (index, limb) in self.0.iter().rev().enumerate() {
+            big_endian[index * 8..index * 8 + 8].copy_from_slice(&limb.to_be_bytes());
         }
-        let mut limbs = self.0;
-        let mut digits = Vec::new();
-        while limbs != [0; 4] {
-            let mut remainder = 0u128;
-            for limb in limbs.iter_mut().rev() {
-                let current = (remainder << 64) | u128::from(*limb);
-                *limb = (current / 10) as u64;
-                remainder = current % 10;
-            }
-            digits.push(b'0' + remainder as u8);
-        }
-        digits.reverse();
-        String::from_utf8(digits).expect("decimal ASCII")
+        mini_sdk::decimal::from_be_bytes(&big_endian)
     }
 }
 
@@ -275,9 +261,7 @@ fn text<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
 }
 fn nat(value: &Value, name: &str) -> Result<u64> {
     let string = text(value, name)?;
-    if string.is_empty()
-        || (string.len() > 1 && string.starts_with('0'))
-        || !string.bytes().all(|b| b.is_ascii_digit())
+    if !mini_sdk::decimal::is_canonical(string)
     {
         return Err(format!("quote {name} must be a canonical decimal string"));
     }

@@ -248,9 +248,7 @@ fn joined(flags: &Flags, profile: &Profile) -> Result<(fleet::Agent, Value, Valu
 }
 
 fn decimal(value: &str, label: &str) -> Result<()> {
-    if value.is_empty()
-        || !value.bytes().all(|b| b.is_ascii_digit())
-        || (value.len() > 1 && value.starts_with('0'))
+    if !mini_sdk::decimal::is_canonical(value)
     {
         return Err(format!("{label} must be a canonical decimal"));
     }

@@ -25,7 +25,7 @@ fn exact(value: &Value, fields: &[&str]) -> Result<()> {
 
 fn decimal(value: &Value) -> Result<()> {
     let n = value.as_str().ok_or("content identifier must be a decimal string")?;
-    if n.is_empty() || !n.bytes().all(|c| c.is_ascii_digit()) {
+    if !mini_sdk::decimal::is_digits(n) {
         return Err("content identifier must be a decimal string".into());
     }
     Ok(())

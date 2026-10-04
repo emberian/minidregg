@@ -67,10 +67,7 @@ fn confirmed_fields(value: &Value) -> Result<Value> {
             .get(name)
             .and_then(Value::as_str)
             .ok_or_else(|| format!("confirmed outcome lacks {name}"))?;
-        if field.is_empty()
-            || field.len() > 80
-            || !field.bytes().all(|b| b.is_ascii_digit())
-            || (field.len() > 1 && field.starts_with('0'))
+        if !mini_sdk::decimal::is_canonical_max(field, 80)
         {
             return Err(format!("confirmed outcome has noncanonical {name}"));
         }
@@ -680,10 +677,7 @@ fn outcome_transaction(path: &Path) -> Result<Option<String>> {
         .get("transactionId")
         .and_then(Value::as_str)
         .ok_or("confirmed outcome lacks transactionId")?;
-    if txn.is_empty()
-        || txn.len() > 80
-        || !txn.bytes().all(|c| c.is_ascii_digit())
-        || (txn.len() > 1 && txn.starts_with('0'))
+    if !mini_sdk::decimal::is_canonical_max(txn, 80)
     {
         return Err("confirmed outcome has noncanonical transactionId".to_owned());
     }

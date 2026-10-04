@@ -14,9 +14,7 @@ fn read(path: &Path) -> Result<Value> {
 }
 fn number(value: &Value, name: &str) -> Result<u64> {
     let text = field(value, name)?;
-    if text.is_empty()
-        || (text.len() > 1 && text.starts_with('0'))
-        || !text.bytes().all(|b| b.is_ascii_digit())
+    if !mini_sdk::decimal::is_canonical(text)
     {
         return Err(format!("noncanonical reenrollment {name}"));
     }

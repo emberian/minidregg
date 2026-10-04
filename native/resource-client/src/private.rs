@@ -135,22 +135,7 @@ pub(crate) fn schema_decimal() -> String {
 
 /// The schema digest of an atom whose payload is framed by `frame`.
 pub(crate) fn schema_decimal_of(frame: &[u8]) -> String {
-    let mut digits = Vec::new();
-    let mut value = cshake(SCHEMA_LABEL, &[frame]).to_vec();
-    while value.iter().any(|byte| *byte != 0) {
-        let mut remainder = 0u32;
-        for byte in value.iter_mut() {
-            let current = (remainder << 8) | u32::from(*byte);
-            *byte = (current / 10) as u8;
-            remainder = current % 10;
-        }
-        digits.push(b'0' + remainder as u8);
-    }
-    if digits.is_empty() {
-        digits.push(b'0');
-    }
-    digits.reverse();
-    String::from_utf8(digits).expect("decimal digits")
+    mini_sdk::decimal::from_be_bytes(&cshake(SCHEMA_LABEL, &[frame]))
 }
 
 // ---------------------------------------------------------------- room keys

@@ -390,10 +390,7 @@ fn command_action(command: &Value, action: &str) -> Result<Vec<u8>> {
 
 fn decimal(value: &Value, field: &str) -> Result<String> {
     let value = text(value, field)?;
-    if value.is_empty()
-        || value.len() > 78
-        || !value.bytes().all(|b| b.is_ascii_digit())
-        || (value.len() > 1 && value.starts_with('0'))
+    if !mini_sdk::decimal::is_canonical_max(value, 78)
     {
         return Err(format!("source {field} is not a bounded canonical decimal"));
     }

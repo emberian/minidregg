@@ -33,10 +33,7 @@ pub(super) fn sign_source(
     if SOCKET.get().is_some() {
         return Err("selected source signer requires direct source Host validation".into());
     }
-    if capability.is_empty()
-        || capability.len() > 80
-        || !capability.bytes().all(|b| b.is_ascii_digit())
-        || (capability.len() > 1 && capability.starts_with('0'))
+    if !mini_sdk::decimal::is_canonical_max(capability, 80)
     {
         return Err("source delegate capability must be canonical decimal".into());
     }
@@ -123,10 +120,7 @@ fn confirmed(value: &Value) -> Result<()> {
             .get(field)
             .and_then(Value::as_str)
             .ok_or_else(|| format!("selected source receipt lacks {field}"))?;
-        if number.is_empty()
-            || number.len() > 80
-            || !number.bytes().all(|b| b.is_ascii_digit())
-            || (number.len() > 1 && number.starts_with('0'))
+        if !mini_sdk::decimal::is_canonical_max(number, 80)
         {
             return Err(format!("selected source receipt has noncanonical {field}"));
         }

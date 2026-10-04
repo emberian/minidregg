@@ -55,10 +55,7 @@ fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
 
 fn decimal<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
     let value = field(value, name)?;
-    if value.len() > 80
-        || !value.bytes().all(|b| b.is_ascii_digit())
-        || (value.len() > 1 && value.starts_with('0'))
-    {
+    if !mini_sdk::decimal::is_canonical_max(value, 80) {
         return Err(format!("selected exchange {name} is not canonical decimal"));
     }
     Ok(value)

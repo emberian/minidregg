@@ -13,14 +13,14 @@
 pub(crate) fn doc_flags(words: &[String]) -> Result<Vec<(&'static str, String)>, String> {
     let w: Vec<&str> = words.iter().map(String::as_str).collect();
     let number = |value: &str, what: &str| -> Result<String, String> {
-        if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) && value != "0" {
+        if mini_sdk::decimal::is_digits(value) && value != "0" {
             Ok(value.to_owned())
         } else {
             Err(format!("{what} is a line number (1, 2, …), not {value:?}"))
         }
     };
     let decimal = |value: &str, what: &str| -> Result<String, String> {
-        if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) {
+        if mini_sdk::decimal::is_digits(value) {
             Ok(value.to_owned())
         } else {
             Err(format!("{what} is a decimal id, not {value:?}"))

@@ -128,10 +128,7 @@ fn int(value: &Value, what: &str) -> Result<i128> {
 }
 
 fn decimal(text: &str, what: &str) -> Result<String> {
-    if text.is_empty()
-        || text.len() > 80
-        || !text.bytes().all(|b| b.is_ascii_digit())
-        || (text.len() > 1 && text.starts_with('0'))
+    if !mini_sdk::decimal::is_canonical_max(text, 80)
     {
         return Err(format!("job: {what} must be a canonical decimal"));
     }

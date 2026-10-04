@@ -287,7 +287,7 @@ fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
 /// A decimal the Host renders as a string (or a JSON number in the pinned config).
 fn natural(value: &Value, name: &str) -> Result<u128> {
     match value.get(name) {
-        Some(Value::String(text)) if !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit()) => {
+        Some(Value::String(text)) if mini_sdk::decimal::is_digits(text) => {
             text.parse().map_err(|_| format!("{name} out of range"))
         }
         Some(Value::Number(number)) => number

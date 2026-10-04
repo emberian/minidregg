@@ -128,9 +128,7 @@ fn decimal_arg(args: &mut Args, name: &str) -> Result<Option<String>> {
         None => Ok(None),
         Some(value) => {
             let text = value.into_string().map_err(|_| format!("--{name} must be UTF-8"))?;
-            if text.is_empty()
-                || !text.bytes().all(|b| b.is_ascii_digit())
-                || (text.len() > 1 && text.starts_with('0'))
+            if !mini_sdk::decimal::is_canonical(&text)
             {
                 return Err(format!("--{name} must be a canonical unsigned decimal"));
             }
@@ -315,7 +313,7 @@ fn init(mut args: Args) -> Result<Value> {
     let capability = text("capability")?;
     args.finish()?;
     for (name, value) in [("subject", &subject), ("capability", &capability)] {
-        if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+        if !mini_sdk::decimal::is_digits(value) {
             return Err(format!("--{name} must be a canonical unsigned decimal"));
         }
     }

@@ -37,18 +37,6 @@ fn point(value: &Value) -> Result<Point> {
     full(&point)?;
     Ok(point)
 }
-fn next_height(height: &str) -> String {
-    let mut digits = height.as_bytes().to_vec();
-    for byte in digits.iter_mut().rev() {
-        if *byte < b'9' {
-            *byte += 1;
-            return String::from_utf8(digits).unwrap();
-        }
-        *byte = b'0';
-    }
-    digits.insert(0, b'1');
-    String::from_utf8(digits).unwrap()
-}
 fn same_manifest(root: &Path, workspace: &Value) -> Result<()> {
     if read_json(&root.join("workspace.json"))? != *workspace {
         return Err(fail(
@@ -143,7 +131,7 @@ fn validate_transition(value: &Value) -> Result<()> {
         || next["anchor"]["chain"] != result["newStart"]["logChain"]
         || next["anchor"]["siblings"] != result["newStart"]["systemSiblings"]
         || compare(&cut.height, &old_anchor.height) == Ordering::Less
-        || start.height != next_height(&cut.height)
+        || mini_sdk::decimal::successor(&cut.height).map_or(true, |next| start.height != next)
         || result["operatorPublicKey"] != old["authority"]["operatorPublicKey"]
         || result["targetVerifierDigest"] != next["settings"]["verifierSha256"]
         || old["manifest"]["freshContinuity"] != next["manifest"]["freshContinuity"]
@@ -199,7 +187,7 @@ fn check_result(
         || result["targetVerifierDigest"] != replacement.verifier_sha256
         || compare(&cut.height, &retained.height) == Ordering::Less
         || (cut.height == retained.height && cut != *retained)
-        || start.height != next_height(&cut.height)
+        || mini_sdk::decimal::successor(&cut.height).map_or(true, |next| start.height != next)
     {
         return Err(fail(
             "carry verifier result does not bind the locally selected transition",
@@ -960,9 +948,9 @@ mod tests {
     }
     #[test]
     fn carry_decimal_successor_has_no_machine_word_truncation() {
-        assert_eq!(next_height("0"), "1");
+        assert_eq!(mini_sdk::decimal::successor("0").unwrap(), "1");
         assert_eq!(
-            next_height("99999999999999999999999999999999"),
+            mini_sdk::decimal::successor("99999999999999999999999999999999").unwrap(),
             "100000000000000000000000000000000"
         );
     }

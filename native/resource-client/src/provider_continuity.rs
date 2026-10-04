@@ -67,10 +67,7 @@ fn natural<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
         .get(name)
         .and_then(Value::as_str)
         .ok_or("continuity natural must be a string")?;
-    if s.is_empty()
-        || s.len() > 80
-        || !s.bytes().all(|b| b.is_ascii_digit())
-        || (s.len() > 1 && s.starts_with('0'))
+    if !mini_sdk::decimal::is_canonical_max(s, 80)
     {
         return Err(format!("noncanonical continuity natural: {name}"));
     }
@@ -459,26 +456,6 @@ pub(crate) fn guard(
 
 // Read-only resolution keeps the retained signed call immutable. The physical
 // caller still binds this report to its current Pending and held request.
-fn nat_cmp(a: &str, b: &str) -> std::cmp::Ordering {
-    (a.len(), a).cmp(&(b.len(), b))
-}
-fn nat_add(a: &str, b: &str) -> String {
-    let mut a = a.bytes().rev();
-    let mut b = b.bytes().rev();
-    let mut carry = 0;
-    let mut digits = Vec::new();
-    loop {
-        let left = a.next();
-        let right = b.next();
-        if left.is_none() && right.is_none() && carry == 0 {
-            break;
-        }
-        let n = left.map(|v| v - b'0').unwrap_or(0) + right.map(|v| v - b'0').unwrap_or(0) + carry;
-        digits.push(b'0' + n % 10);
-        carry = n / 10;
-    }
-    String::from_utf8(digits.into_iter().rev().collect()).expect("decimal digits")
-}
 fn expiration(
     profile: &Value,
     original_prefix: &Value,
@@ -491,14 +468,14 @@ fn expiration(
     let genesis = natural(profile, "genesisHeight")?;
     let old_count = natural(original_prefix, "checkedAcceptedCount")?;
     let new_count = natural(fresh_prefix, "checkedAcceptedCount")?;
-    if nat_add(genesis, old_count) != natural(pinned, "height")?
-        || nat_cmp(new_count, old_count) != std::cmp::Ordering::Greater
+    if mini_sdk::decimal::add(genesis, old_count)? != natural(pinned, "height")?
+        || mini_sdk::decimal::compare(new_count, old_count) != std::cmp::Ordering::Greater
     {
         return Err(
             "continuity resolution has no extension of the original admission prefix".into(),
         );
     }
-    let current_height = nat_add(genesis, new_count);
+    let current_height = mini_sdk::decimal::add(genesis, new_count)?;
     let slots = pinned["slots"]
         .as_array()
         .ok_or("retained signed plan lacks slots")?;
@@ -510,7 +487,7 @@ fn expiration(
         let deadline = natural(&slot["signing"], "validUntil")?;
         if slot["signing"]["decoded"] != true
             || slot["header"] != slot["signing"]["canonical"]
-            || nat_cmp(&current_height, deadline) != std::cmp::Ordering::Greater
+            || mini_sdk::decimal::compare(&current_height, deadline) != std::cmp::Ordering::Greater
         {
             return Err("at least one actual signed deadline has not expired".into());
         }
@@ -1027,7 +1004,7 @@ mod tests {
         bad_plan["slots"].as_array_mut().unwrap().push(later);
         assert!(expiration(&profile, &old, &bad_plan, &fresh).is_err());
         assert_eq!(
-            nat_add("999999999999999999999999999999999999999999", "1"),
+            mini_sdk::decimal::add("999999999999999999999999999999999999999999", "1").unwrap(),
             "1000000000000000000000000000000000000000000"
         );
     }

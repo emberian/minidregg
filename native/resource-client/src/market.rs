@@ -150,29 +150,7 @@ pub(crate) fn digest(preimage: &[u8]) -> [u8; 32] {
 }
 
 /// A big-endian natural as a decimal string.
-pub(crate) fn decimal(bytes: &[u8]) -> String {
-    let mut digits = Vec::new();
-    let mut n: Vec<u8> = bytes.iter().copied().skip_while(|b| *b == 0).collect();
-    while !n.is_empty() {
-        let mut rem = 0u32;
-        let mut next = Vec::with_capacity(n.len());
-        for byte in &n {
-            let acc = rem * 256 + u32::from(*byte);
-            let q = acc / 10;
-            rem = acc % 10;
-            if !(next.is_empty() && q == 0) {
-                next.push(q as u8);
-            }
-        }
-        digits.push(b'0' + rem as u8);
-        n = next;
-    }
-    if digits.is_empty() {
-        return "0".into();
-    }
-    digits.reverse();
-    String::from_utf8(digits).expect("ASCII digits")
-}
+pub(crate) use mini_sdk::decimal::from_be_bytes as decimal;
 
 /// The commitment slot `k` of the market cell `cell` carries for (price, qty).
 pub(crate) fn commitment(cell: u64, k: u64, price: i128, qty: i128, blinder: &[u8; 32]) -> String {

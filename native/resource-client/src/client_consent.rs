@@ -289,7 +289,7 @@ pub(crate) fn operator_plan(host:&Path,config:&Path,operation:u8,request:&[u8],c
 /// Enrollment possession is a source-independent native domain frame over the
 /// complete retained command, with the selected new custody key and subject.
 pub(crate) fn possession(host:&Path,config:&Path,command:&[u8],subject:&str,key:&SigningKey,candidate:&[u8])->Result<Vec<u8>> {
-    if subject.is_empty() || !subject.bytes().all(|b|b.is_ascii_digit()) || (subject.len()>1 && subject.starts_with('0')) {return Err("possession subject must be canonical decimal".into());}
+    if !mini_sdk::decimal::is_canonical(subject) {return Err("possession subject must be canonical decimal".into());}
     let selected=serde_json::to_vec(&json!({"subject":subject.to_string(),"publicKey":hex(key.verifying_key().as_bytes())})).map_err(|e|e.to_string())?;
     let checked=invoke(host,config,226,&pair(command,&pair(&selected,candidate)?)?)?;
     if checked!=candidate{return Err("native possession frame changed".into());}Ok(checked)

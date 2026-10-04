@@ -32,10 +32,7 @@ fn transaction(path: &Path) -> Result<Option<String>> {
         .get("transactionId")
         .and_then(Value::as_str)
         .ok_or("confirmed outbox outcome lacks transactionId")?;
-    if txn.is_empty()
-        || txn.len() > 80
-        || !txn.bytes().all(|b| b.is_ascii_digit())
-        || (txn.len() > 1 && txn.starts_with('0'))
+    if !mini_sdk::decimal::is_canonical_max(txn, 80)
     {
         return Err("outbox transaction ID is not canonical decimal".into());
     }

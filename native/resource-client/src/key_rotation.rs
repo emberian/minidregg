@@ -91,7 +91,7 @@ pub(crate) fn next_key_digest(
         &json!({"publicKey":hex(public)}),
     )?;
     let text = String::from_utf8(body).map_err(|_| "next-key digest is not UTF-8")?;
-    if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+    if !mini_sdk::decimal::is_digits(&text) {
         return Err("next-key digest is not a canonical decimal".into());
     }
     Ok(text)

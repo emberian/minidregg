@@ -1035,7 +1035,7 @@ fn hex_bytes(word: &str, length: usize) -> Option<Vec<u8>> {
 }
 
 fn decimal(value: &str, label: &str) -> std::result::Result<(), String> {
-    if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+    if !mini_sdk::decimal::is_digits(value) {
         return Err(format!("{label} must be a decimal number"));
     }
     Ok(())

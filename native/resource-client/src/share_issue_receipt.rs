@@ -52,10 +52,7 @@ fn bounded(path: &Path, maximum: usize) -> Result<Vec<u8>> {
 }
 
 fn decimal(value: &str, label: &str) -> Result<()> {
-    if value.is_empty()
-        || value.len() > 80
-        || (value.len() > 1 && value.starts_with('0'))
-        || !value.bytes().all(|byte| byte.is_ascii_digit())
+    if !mini_sdk::decimal::is_canonical_max(value, 80)
     {
         return Err(format!("share receipt {label} is not canonical decimal"));
     }

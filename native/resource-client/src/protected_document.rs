@@ -27,32 +27,15 @@ const MESSAGE_FRAME: &[u8] = b"MINI/OBJECT-MESSAGE/v1";
 const OP_FRAME: &[u8] = b"MINI/PROTECTED-DOCUMENT-ATOM-OP/v1";
 
 fn nat32(text: &str) -> Result<[u8; 32]> {
-    if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit())
-        || (text.len() > 1 && text.starts_with('0')) {
+    if !mini_sdk::decimal::is_canonical(text) {
         return Err("protected document identifier must be a canonical Nat".into());
     }
-    let mut out = [0u8; 32];
-    for digit in text.bytes() {
-        let mut carry = (digit - b'0') as u16;
-        for byte in out.iter_mut().rev() {
-            carry += (*byte as u16) * 10; *byte = carry as u8; carry >>= 8;
-        }
-        if carry != 0 { return Err("protected document identifier exceeds 256 bits".into()); }
-    }
-    Ok(out)
+    mini_sdk::decimal::to_be_bytes32(text).map_err(|_| "protected document identifier exceeds 256 bits".to_owned())
 }
 fn text<'a>(v: &'a Value, key: &str) -> Result<&'a str> {
     v[key].as_str().ok_or_else(|| format!("protected document lacks {key}"))
 }
-fn decimal(bytes: &[u8]) -> String {
-    let mut digits = vec![0u8];
-    for byte in bytes {
-        let mut carry = *byte as u16;
-        for digit in &mut digits { carry += (*digit as u16) * 256; *digit = (carry % 10) as u8; carry /= 10; }
-        while carry > 0 { digits.push((carry % 10) as u8); carry /= 10; }
-    }
-    digits.iter().rev().map(|d| (b'0' + d) as char).collect()
-}
+use mini_sdk::decimal::from_be_bytes as decimal;
 pub(crate) fn schema() -> String { decimal(&Sha256::digest(FRAME)) }
 pub(crate) fn is_kind(kind: &Value) -> bool {
     if atoms::is_kind(kind){return true;}

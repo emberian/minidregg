@@ -125,7 +125,7 @@ fn parse_head(bytes: &[u8]) -> HttpResult<(Request, usize)> {
     }
     let length = match headers.get("content-length") {
         Some(value) => {
-            if value.is_empty() || !value.bytes().all(|c| c.is_ascii_digit()) {
+            if !mini_sdk::decimal::is_digits(value) {
                 return Err(HttpError(400, "invalidContentLength"));
             }
             value
@@ -258,11 +258,7 @@ fn lower_hex(value: &str, size: usize) -> bool {
 }
 fn decimal(value: &Value, positive: bool) -> bool {
     value.as_str().is_some_and(|s| {
-        !s.is_empty()
-            && s.len() <= 20
-            && s.bytes().all(|c| c.is_ascii_digit())
-            && (s.len() == 1 || !s.starts_with('0'))
-            && s.parse::<u64>().is_ok_and(|n| !positive || n > 0)
+        mini_sdk::decimal::is_canonical_max(s, 20) && s.parse::<u64>().is_ok_and(|n| !positive || n > 0)
     })
 }
 fn quote_body(body: &[u8]) -> HttpResult<Vec<u8>> {
@@ -339,7 +335,7 @@ fn metadata(configured: Value, profile: &Value, sha: &str) -> Result<Value> {
     for field in ["domain", "semantics"] {
         let value = profile[field]
             .as_str()
-            .filter(|s| !s.is_empty() && s.len() <= 80 && s.bytes().all(|c| c.is_ascii_digit()))
+            .filter(|s| s.len() <= 80 && mini_sdk::decimal::is_digits(s))
             .ok_or("invalid public profile identity")?;
         result[field] = json!(value);
     }

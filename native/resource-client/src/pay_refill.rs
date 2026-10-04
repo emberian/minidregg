@@ -60,10 +60,7 @@ fn canonical(value: OsString, name: &str) -> Result<String> {
     let value = value
         .into_string()
         .map_err(|_| format!("--{name} must be UTF-8"))?;
-    if value.is_empty()
-        || value.len() > 80
-        || !value.bytes().all(|byte| byte.is_ascii_digit())
-        || (value.len() > 1 && value.starts_with('0'))
+    if !mini_sdk::decimal::is_canonical_max(&value, 80)
     {
         return Err(format!("--{name} must be a canonical decimal"));
     }

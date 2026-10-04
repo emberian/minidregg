@@ -42,10 +42,7 @@ fn text<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
         .ok_or_else(|| fail(format!("missing {key}")))
 }
 fn decimal(value: &str) -> Result<()> {
-    if value.is_empty()
-        || value.len() > 80
-        || (value.len() > 1 && value.starts_with('0'))
-        || !value.bytes().all(|c| c.is_ascii_digit())
+    if !mini_sdk::decimal::is_canonical_max(value, 80)
     {
         return Err(fail(
             "expected a canonical decimal string of at most 80 digits",
@@ -53,9 +50,7 @@ fn decimal(value: &str) -> Result<()> {
     }
     Ok(())
 }
-fn compare(left: &str, right: &str) -> Ordering {
-    left.len().cmp(&right.len()).then(left.cmp(right))
-}
+use mini_sdk::decimal::compare;
 
 #[derive(Clone, Debug)]
 struct Point {

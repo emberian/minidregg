@@ -28,16 +28,10 @@ fn member<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
         .ok_or_else(|| format!("missing string field {key}"))
 }
 
-fn is_decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 80
-        && value.bytes().all(|b| b.is_ascii_digit())
-        && (value.len() == 1 || !value.starts_with('0'))
-}
 
 /// A workspace reference name, or a decimal resource id.
 fn resolve(root: &Path, name: &str) -> Result<(String, Option<Value>)> {
-    if is_decimal(name) {
+    if mini_sdk::decimal::is_canonical_max(name, 80) {
         return Ok((name.to_owned(), None));
     }
     let reference = workspace::reference(root, name)?;
@@ -105,7 +99,7 @@ fn command(root: &Path, mut args: Args, op: &str) -> Result<()> {
     let (well, well_ref) = resolve(root, &text(args.required("well")?, "well")?)?;
     let (account, account_ref) = resolve(root, &text(args.required("account")?, "account")?)?;
     let amount = text(args.required("amount")?, "amount")?;
-    if !is_decimal(&amount) {
+    if !mini_sdk::decimal::is_canonical_max(&amount, 80) {
         return Err("amount must be decimal".into());
     }
     let capability = match args.optional("capability") {
@@ -113,7 +107,7 @@ fn command(root: &Path, mut args: Args, op: &str) -> Result<()> {
         None if op == "mint" => reference_capability(&well_ref, "well")?,
         None => reference_capability(&account_ref, "account")?,
     };
-    if !is_decimal(&capability) {
+    if !mini_sdk::decimal::is_canonical_max(&capability, 80) {
         return Err("capability must be decimal".into());
     }
     let attempt = match args.optional("attempt") {
@@ -263,9 +257,9 @@ mod tests {
 
     #[test]
     fn decimal_names_are_ids() {
-        assert!(is_decimal("0"));
-        assert!(is_decimal("1234"));
-        assert!(!is_decimal("01"));
-        assert!(!is_decimal("gold"));
+        assert!(mini_sdk::decimal::is_canonical_max("0", 80));
+        assert!(mini_sdk::decimal::is_canonical_max("1234", 80));
+        assert!(!mini_sdk::decimal::is_canonical_max("01", 80));
+        assert!(!mini_sdk::decimal::is_canonical_max("gold", 80));
     }
 }

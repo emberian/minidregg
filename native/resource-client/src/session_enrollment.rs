@@ -392,12 +392,7 @@ fn receipt(value: &Value) -> Result<Value> {
     let mut fields = serde_json::Map::new();
     for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         let value = field(value, name)?;
-        if value.is_empty()
-            || value.len() > 80
-            || (value.len() > 1 && value.starts_with('0'))
-            || !value.bytes().all(|digit| digit.is_ascii_digit())
-            || (name == "acceptedCount" && value == "0")
-        {
+        if !mini_sdk::decimal::is_canonical_max(value, 80) || (name == "acceptedCount" && value == "0") {
             return Err(format!("enrollment receipt has invalid {name}"));
         }
         fields.insert(name.to_owned(), Value::String(value.to_owned()));

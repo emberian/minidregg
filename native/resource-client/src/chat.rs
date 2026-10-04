@@ -193,7 +193,7 @@ pub(crate) fn ref_name(value: &str, label: &str) -> Result<(), String> {
 }
 
 pub(crate) fn decimal(value: &str, label: &str) -> Result<(), String> {
-    if value.is_empty() || value.len() > 40 || !value.bytes().all(|b| b.is_ascii_digit()) {
+    if value.len() > 40 || !mini_sdk::decimal::is_digits(value) {
         return Err(format!("{label} must be a decimal number"));
     }
     Ok(())

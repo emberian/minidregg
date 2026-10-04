@@ -165,10 +165,7 @@ fn exact_receipt(value: &Value) -> Result<Value> {
     let mut receipt = serde_json::Map::new();
     for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         let value = field(value, name)?;
-        if value.is_empty()
-            || value.len() > 80
-            || (value.len() > 1 && value.starts_with('0'))
-            || !value.bytes().all(|byte| byte.is_ascii_digit())
+        if !mini_sdk::decimal::is_canonical_max(value, 80)
         {
             return Err(format!("agent reserve receipt has noncanonical {name}"));
         }
@@ -188,27 +185,8 @@ fn exact_receipt(value: &Value) -> Result<Value> {
 }
 
 fn previous_decimal(value: &str) -> Result<String> {
-    if value.is_empty()
-        || value == "0"
-        || (value.len() > 1 && value.starts_with('0'))
-        || !value.bytes().all(|byte| byte.is_ascii_digit())
-    {
-        return Err("agent reserve accepted count cannot select an index".into());
-    }
-    let mut digits = value.as_bytes().to_vec();
-    for digit in digits.iter_mut().rev() {
-        if *digit == b'0' {
-            *digit = b'9';
-        } else {
-            *digit -= 1;
-            break;
-        }
-    }
-    let first = digits.iter().position(|digit| *digit != b'0');
-    match first {
-        Some(index) => String::from_utf8(digits[index..].to_vec()).map_err(|e| e.to_string()),
-        None => Ok("0".to_owned()),
-    }
+    mini_sdk::decimal::predecessor(value)
+        .map_err(|_| "agent reserve accepted count cannot select an index".to_owned())
 }
 
 struct Pin {

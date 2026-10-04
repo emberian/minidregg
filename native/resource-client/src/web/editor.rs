@@ -32,7 +32,7 @@ pub(super) fn body_length(request: &Request) -> Result<usize> {
         return Err("expected a document form".into());
     }
     let length = one("content-length")?;
-    if length.is_empty() || !length.bytes().all(|b| b.is_ascii_digit()) {
+    if !mini_sdk::decimal::is_digits(length) {
         return Err("invalid content length".into());
     }
     let length = length

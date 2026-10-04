@@ -35,15 +35,9 @@ fn expect_reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     }
 }
 
-fn canonical_decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 80
-        && (value.len() == 1 || !value.starts_with('0'))
-        && value.bytes().all(|digit| digit.is_ascii_digit())
-}
 
 fn preceding(value: &str) -> Result<String> {
-    if !canonical_decimal(value) || value == "0" {
+    if !mini_sdk::decimal::is_canonical_max(value, 80) || value == "0" {
         return Err("grant accepted count cannot select an index".into());
     }
     let mut digits = value.as_bytes().to_vec();
@@ -71,7 +65,7 @@ fn exact_receipt(value: &Value) -> Result<Value> {
     let mut receipt = serde_json::Map::new();
     for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         let text = field(value, name)?;
-        if !canonical_decimal(text) {
+        if !mini_sdk::decimal::is_canonical_max(text, 80) {
             return Err(format!("grant receipt has noncanonical {name}"));
         }
         receipt.insert(name.to_owned(), Value::String(text.to_owned()));

@@ -29,10 +29,7 @@ fn receipt(directory: &Path) -> Result<Value> {
     let mut exact = serde_json::Map::new();
     for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         let decimal = field(&value, name)?;
-        if decimal.is_empty()
-            || decimal.len() > 80
-            || (decimal.len() > 1 && decimal.starts_with('0'))
-            || !decimal.bytes().all(|byte| byte.is_ascii_digit())
+        if !mini_sdk::decimal::is_canonical_max(decimal, 80)
         {
             return Err(format!("noncanonical lifetime receipt {name}"));
         }
@@ -563,10 +560,7 @@ fn four_fields(value: &Value) -> Result<Value> {
     let mut fields = serde_json::Map::new();
     for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         let decimal = field(value, name)?;
-        if decimal.is_empty()
-            || decimal.len() > 80
-            || (decimal.len() > 1 && decimal.starts_with('0'))
-            || !decimal.bytes().all(|byte| byte.is_ascii_digit())
+        if !mini_sdk::decimal::is_canonical_max(decimal, 80)
         {
             return Err(format!("noncanonical lifetime paid receipt {name}"));
         }

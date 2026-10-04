@@ -204,10 +204,7 @@ fn receipt(value: &Value) -> Result<Value> {
     let mut fields = serde_json::Map::new();
     for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         let number = member(value, name)?;
-        if number.is_empty()
-            || number.len() > 80
-            || (number.len() > 1 && number.starts_with('0'))
-            || !number.bytes().all(|b| b.is_ascii_digit())
+        if !mini_sdk::decimal::is_canonical_max(number, 80)
         {
             return Err(format!("fn frontier receipt {name} is not canonical"));
         }

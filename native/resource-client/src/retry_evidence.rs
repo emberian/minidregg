@@ -21,7 +21,7 @@ fn parse(name: &str) -> Option<(u64, Kind)> {
     let digits = stem.strip_prefix("retry-")?;
     // Existing clients used zero-padded names of several widths. Preserve that
     // evidence; new names use a minimum width of four, without a four-digit cap.
-    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) { return None }
+    if !mini_sdk::decimal::is_digits(digits) { return None }
     Some((digits.parse().ok()?, kind))
 }
 

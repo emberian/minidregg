@@ -79,10 +79,7 @@ mod law_export;
 pub(crate) mod app_lifecycle;
 
 pub(crate) fn decimal(value: &str, field: &str) -> Result<()> {
-    if value.is_empty()
-        || value.len() > 39
-        || (value.len() > 1 && value.starts_with('0'))
-        || !value.bytes().all(|byte| byte.is_ascii_digit())
+    if !mini_sdk::decimal::is_canonical_max(value, 39)
     {
         return Err(format!("{field} must be a canonical bounded decimal"));
     }
@@ -90,10 +87,7 @@ pub(crate) fn decimal(value: &str, field: &str) -> Result<()> {
 }
 
 fn field_decimal(value: &str, field: &str) -> Result<()> {
-    if value.is_empty()
-        || value.len() > 80
-        || (value.len() > 1 && value.starts_with('0'))
-        || !value.bytes().all(|byte| byte.is_ascii_digit())
+    if !mini_sdk::decimal::is_canonical_max(value, 80)
     {
         return Err(format!("{field} must be a canonical bounded decimal"));
     }
@@ -103,29 +97,13 @@ fn field_decimal(value: &str, field: &str) -> Result<()> {
 /// A canonical signed decimal, as the Host's `int` parser accepts it: the
 /// declared value is an unbounded `Int` (a subject id above 2^63 is a value).
 fn signed_decimal(value: &str, field: &str) -> Result<()> {
-    let magnitude = value.strip_prefix('-').unwrap_or(value);
-    if magnitude.is_empty()
-        || magnitude.len() > 80
-        || (magnitude.len() > 1 && magnitude.starts_with('0'))
-        || value == "-0"
-        || !magnitude.bytes().all(|byte| byte.is_ascii_digit())
-    {
+    if !mini_sdk::decimal::is_canonical_signed_max(value, 80) {
         return Err(format!("{field} must be a canonical signed decimal"));
     }
     Ok(())
 }
 
-fn decimal_leq(left: &str, right: &str) -> bool {
-    left.len() < right.len() || left.len() == right.len() && left <= right
-}
-
-fn decimal_max<'a>(left: &'a str, right: &'a str) -> &'a str {
-    if decimal_leq(left, right) {
-        right
-    } else {
-        left
-    }
-}
+use mini_sdk::decimal::{leq as decimal_leq, max as decimal_max};
 
 fn readable_delegation_verbs(selected: &[Value], parent: &[Value]) -> Result<()> {
     let mut unique = std::collections::BTreeSet::new();

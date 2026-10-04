@@ -126,6 +126,24 @@ pub fn from_be_bytes(bytes: &[u8]) -> String {
     String::from_utf8(digits).expect("ASCII digits")
 }
 
+/// A canonical decimal as a 32-byte big-endian integer; a value of 2^256 or more is refused.
+pub fn to_be_bytes32(text: &str) -> Result<[u8; 32]> {
+    let text = natural(text)?;
+    let mut out = [0u8; 32];
+    for digit in text.bytes() {
+        let mut carry = u16::from(digit - b'0');
+        for byte in out.iter_mut().rev() {
+            carry += u16::from(*byte) * 10;
+            *byte = carry as u8;
+            carry >>= 8;
+        }
+        if carry != 0 {
+            return Err(Error(format!("{text} exceeds 256 bits")));
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,6 +180,16 @@ mod tests {
                 assert_eq!(compare(&a.to_string(), &b.to_string()), a.cmp(&b));
             }
         }
+    }
+
+    #[test]
+    fn decimals_round_trip_through_32_big_endian_bytes_and_refuse_overflow() {
+        for text in ["0", "1", "255", "256", "18446744073709551616", "115792089237316195423570985008687907853269984665640564039457584007913129639935"] {
+            assert_eq!(from_be_bytes(&to_be_bytes32(text).unwrap()), text);
+        }
+        assert_eq!(to_be_bytes32("256").unwrap()[30..], [1, 0]);
+        assert!(to_be_bytes32("115792089237316195423570985008687907853269984665640564039457584007913129639936").is_err());
+        assert!(to_be_bytes32("01").is_err() && to_be_bytes32("").is_err() && to_be_bytes32("-1").is_err());
     }
 
     #[test]

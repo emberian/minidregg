@@ -255,10 +255,7 @@ fn outcome_at(
 
 pub(super) fn receipt_field<'a>(value: &'a Value, field: &str) -> Result<&'a str> {
     let text = member(value, field)?;
-    if text.is_empty()
-        || text.len() > 80
-        || !text.bytes().all(|b| b.is_ascii_digit())
-        || (text.len() > 1 && text.starts_with('0'))
+    if !mini_sdk::decimal::is_canonical_max(text, 80)
     {
         return Err(format!("share issue receipt has noncanonical {field}"));
     }

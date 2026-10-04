@@ -15,64 +15,24 @@ fn text<'a>(v: &'a Value, n: &str) -> Result<&'a str> {
 }
 fn natural(v: &Value, n: &str) -> Result<String> {
     let s = text(v, n)?;
-    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) || (s.len() > 1 && s.starts_with('0'))
+    if !mini_sdk::decimal::is_canonical(s)
     {
         return Err(format!("noncanonical {n}"));
     }
     Ok(s.into())
 }
 fn next(s: &str) -> Result<String> {
-    let mut b = s.as_bytes().to_vec();
-    if b.is_empty() || !b.iter().all(u8::is_ascii_digit) {
-        return Err("invalid decimal counter".into());
-    }
-    for i in (0..b.len()).rev() {
-        if b[i] != b'9' {
-            b[i] += 1;
-            return String::from_utf8(b).map_err(|e| e.to_string());
-        }
-        b[i] = b'0';
-    }
-    b.insert(0, b'1');
-    String::from_utf8(b).map_err(|e| e.to_string())
+    mini_sdk::decimal::successor(s).map_err(|_| "invalid decimal counter".to_owned())
 }
 fn fixed(v: &Value, n: &str) -> Result<[u8; 32]> {
-    let s = natural(v, n)?;
-    let mut b = [0u8; 32];
-    for d in s.bytes() {
-        let mut c = (d - b'0') as u16;
-        for x in b.iter_mut().rev() {
-            c += (*x as u16) * 10;
-            *x = c as u8;
-            c >>= 8;
-        }
-        if c != 0 {
-            return Err(format!("{n} exceeds 256 bits"));
-        }
-    }
-    Ok(b)
+    mini_sdk::decimal::to_be_bytes32(&natural(v, n)?).map_err(|_| format!("{n} exceeds 256 bits"))
 }
 fn hex32(v: &Value, n: &str) -> Result<[u8; 32]> {
     crate::decode_hex(text(v, n)?)?
         .try_into()
         .map_err(|_| format!("{n} must be 32 bytes"))
 }
-fn decimal(bytes: &[u8; 32]) -> String {
-    let mut d = vec![0u8];
-    for b in bytes {
-        let mut carry = *b as u16;
-        for x in &mut d {
-            carry += (*x as u16) * 256;
-            *x = (carry % 10) as u8;
-            carry /= 10;
-        }
-        while carry > 0 {
-            d.push((carry % 10) as u8);
-            carry /= 10;
-        }
-    }
-    d.iter().rev().map(|x| (b'0' + x) as char).collect()
-}
+use mini_sdk::decimal::from_be_bytes as decimal;
 fn inspect_policy(host: &Path, config: &Path, source: &Value, dir: &Path) -> Result<Value> {
     let input = dir.join("planned-policy.json");
     let binary = dir.join("planned-policy.bin");

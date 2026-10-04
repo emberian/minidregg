@@ -16,10 +16,7 @@ fn field<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
 }
 fn decimal(value: &Value, key: &str) -> Result<String> {
     let text = field(value, key)?;
-    if text.is_empty()
-        || text.len() > 80
-        || (text.starts_with('0') && text != "0")
-        || !text.bytes().all(|b| b.is_ascii_digit())
+    if !mini_sdk::decimal::is_canonical_max(text, 80)
     {
         return Err(format!("append proof {key} is not canonical decimal"));
     }

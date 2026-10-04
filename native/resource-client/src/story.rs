@@ -537,7 +537,7 @@ fn story_name(w: &str) -> Result<String, String> {
 }
 
 fn subject_word(w: &str) -> Result<String, String> {
-    if w.is_empty() || w.len() > 40 || !w.bytes().all(|b| b.is_ascii_digit()) {
+    if w.len() > 40 || !mini_sdk::decimal::is_digits(w) {
         return Err(format!("{w} is not a subject (a decimal number)"));
     }
     Ok(w.to_owned())

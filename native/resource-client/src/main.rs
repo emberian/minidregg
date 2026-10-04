@@ -2565,10 +2565,7 @@ fn canonical_poll_decimal<'a>(value: &'a Value, field: &str) -> Result<&'a str> 
         .get(field)
         .and_then(Value::as_str)
         .ok_or_else(|| format!("fn progress lacks {field}"))?;
-    if text.is_empty()
-        || text.len() > 80
-        || !text.bytes().all(|byte| byte.is_ascii_digit())
-        || (text.len() > 1 && text.starts_with('0'))
+    if !mini_sdk::decimal::is_canonical_max(text, 80)
     {
         return Err(format!("fn progress has noncanonical {field}"));
     }
@@ -2762,9 +2759,7 @@ fn parse_ack_result(value: &Value, route: ConsumerRoute, transaction: &str) -> R
                 .and_then(Value::as_str)
                 .ok_or("fn coverage lacks committed ACK frontier")?;
             let decimal = |s: &str| -> Result<u128> {
-                if s.is_empty()
-                    || !s.bytes().all(|b| b.is_ascii_digit())
-                    || (s.len() > 1 && s.starts_with('0'))
+                if !mini_sdk::decimal::is_canonical(s)
                 {
                     return Err("fn coverage position is not canonical decimal".into());
                 }
@@ -2798,14 +2793,10 @@ fn consumer_ack(
     route: ConsumerRoute,
 ) -> Result<()> {
     let socket = SOCKET.get().ok_or("consumer ack requires --socket")?;
-    let bytes = transaction.as_bytes();
-    if bytes.is_empty()
-        || bytes.len() > 80
-        || bytes.iter().any(|b| !b.is_ascii_digit())
-        || (bytes.len() > 1 && bytes[0] == b'0')
-    {
+    if !mini_sdk::decimal::is_canonical_max(transaction, 80) {
         return Err("--mini-transaction must be canonical decimal (1–80 bytes)".to_owned());
     }
+    let bytes = transaction.as_bytes();
     let retained_config = private_consumer_attempt(host, config, directory, route.ack_command)?;
     write_new(&directory.join("transaction-id.txt"), bytes)?;
     let frame = session_invoke(host, socket, &retained_config, route.ack_opcode, bytes)?;
@@ -2925,10 +2916,7 @@ fn origin_outbox_export(
     let socket = SOCKET
         .get()
         .ok_or("origin-outbox-export requires --socket")?;
-    if transaction.is_empty()
-        || transaction.len() > 80
-        || !transaction.bytes().all(|byte| byte.is_ascii_digit())
-        || (transaction.len() > 1 && transaction.starts_with('0'))
+    if !mini_sdk::decimal::is_canonical_max(transaction, 80)
     {
         return Err("--mini-transaction must be canonical decimal (1–80 bytes)".into());
     }
@@ -2967,10 +2955,7 @@ fn origin_outbox_export(
         let Some(text) = value.get(name).and_then(Value::as_str) else {
             return Err(format!("origin outbox export lacks {name}"));
         };
-        if text.is_empty()
-            || text.len() > 80
-            || !text.bytes().all(|byte| byte.is_ascii_digit())
-            || (text.len() > 1 && text.starts_with('0'))
+        if !mini_sdk::decimal::is_canonical_max(text, 80)
         {
             return Err(format!("origin outbox export has noncanonical {name}"));
         }
@@ -3013,12 +2998,7 @@ fn continuity_reply(value: &Value) -> Result<bool> {
     if value.get("type").and_then(Value::as_str) != Some("minidregg-provider-continuity-v1") {
         return Err("unexpected provider continuity reply type; complete frame retained".into());
     }
-    let canonical = |text: &str| -> bool {
-        !text.is_empty()
-            && text.len() <= 80
-            && text.bytes().all(|byte| byte.is_ascii_digit())
-            && (text.len() == 1 || !text.starts_with('0'))
-    };
+    let canonical = |text: &str| -> bool { mini_sdk::decimal::is_canonical_max(text, 80) };
     let decimal = |object: &Value, name: &str| -> Result<()> {
         if object
             .get(name)

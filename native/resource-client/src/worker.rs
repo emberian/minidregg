@@ -339,9 +339,7 @@ fn parse_group(line: &[u8], group: &str) -> Result<GroupHint> {
         return Err("NNTP GROUP did not return exact 211 count/first/last/group".into());
     }
     let parse = |s: &str| -> Result<u64> {
-        if s.is_empty()
-            || !s.bytes().all(|b| b.is_ascii_digit())
-            || (s.len() > 1 && s.starts_with('0'))
+        if !mini_sdk::decimal::is_canonical(s)
         {
             return Err("NNTP GROUP has noncanonical decimal".into());
         }

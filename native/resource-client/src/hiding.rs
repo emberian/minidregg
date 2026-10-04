@@ -184,7 +184,7 @@ impl Nat {
         Nat(limbs).normalize()
     }
     fn from_decimal(text: &str) -> Result<Self> {
-        if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        if !mini_sdk::decimal::is_digits(text) {
             return Err(format!("not a decimal natural: {text:?}"));
         }
         let mut value = Nat::zero();
@@ -194,18 +194,8 @@ impl Nat {
         Ok(value)
     }
     fn to_decimal(&self) -> String {
-        if self.is_zero() {
-            return "0".to_owned();
-        }
-        let mut digits = Vec::new();
-        let mut value = self.clone();
-        while !value.is_zero() {
-            let (quotient, digit) = value.divmod(10);
-            digits.push(b'0' + digit as u8);
-            value = quotient;
-        }
-        digits.reverse();
-        String::from_utf8(digits).expect("ascii digits")
+        let big_endian: Vec<u8> = self.0.iter().rev().flat_map(|limb| limb.to_be_bytes()).collect();
+        mini_sdk::decimal::from_be_bytes(&big_endian)
     }
     /// `StreamCodec.nat`: base-255 little-endian digits, then the terminator 255.
     fn encode(&self) -> Vec<u8> {

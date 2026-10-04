@@ -34,9 +34,7 @@ fn text<'a>(value: &'a Value, field: &str) -> Result<&'a str> {
     value.get(field).and_then(Value::as_str).ok_or_else(|| format!("{field} must be a string"))
 }
 fn decimal(value: &str) -> Result<()> {
-    if value.is_empty() || value.len() > MAX_DECIMAL_DIGITS
-        || (value.len() > 1 && value.starts_with('0'))
-        || !value.bytes().all(|byte| byte.is_ascii_digit())
+    if !mini_sdk::decimal::is_canonical_max(value, MAX_DECIMAL_DIGITS)
     {
         return Err("formatting identifiers must be canonical bounded decimal strings".into());
     }

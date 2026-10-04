@@ -33,12 +33,6 @@ fn member<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
         .ok_or_else(|| format!("fn namespace custody lacks {name}"))
 }
 
-fn canonical_decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 80
-        && value.bytes().all(|b| b.is_ascii_digit())
-        && (value.len() == 1 || !value.starts_with('0'))
-}
 
 
 
@@ -296,7 +290,7 @@ fn receipt(value: &Value) -> Result<Value> {
     let mut fields = serde_json::Map::new();
     for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         let number = member(value, name)?;
-        if !canonical_decimal(number) {
+        if !mini_sdk::decimal::is_canonical_max(number, 80) {
             return Err(format!("fn namespace receipt {name} is not canonical"));
         }
         fields.insert(name.to_owned(), Value::String(number.to_owned()));

@@ -29,12 +29,6 @@ fn bounded(path: &Path, maximum: usize) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn canonical_decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 80
-        && (value.len() == 1 || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-}
 
 fn exact_receipt(value: &Value, expected: [&str; 4]) -> Result<()> {
     if value.get("type").and_then(Value::as_str) != Some("confirmed")
@@ -46,7 +40,7 @@ fn exact_receipt(value: &Value, expected: [&str; 4]) -> Result<()> {
         .into_iter()
         .zip(expected)
     {
-        if !canonical_decimal(wanted) || value.get(field).and_then(Value::as_str) != Some(wanted) {
+        if !mini_sdk::decimal::is_canonical_max(wanted, 80) || value.get(field).and_then(Value::as_str) != Some(wanted) {
             return Err(format!("native exact call historical {field} differs"));
         }
     }
@@ -112,7 +106,7 @@ pub(super) fn lookup_verified(
     }
     if directory.exists()
         || expected[2] == "0"
-        || expected.iter().any(|value| !canonical_decimal(value))
+        || expected.iter().any(|value| !mini_sdk::decimal::is_canonical_max(value, 80))
     {
         return Err("historical call receipt destination or expected fields are invalid".into());
     }

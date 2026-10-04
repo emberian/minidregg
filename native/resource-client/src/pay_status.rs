@@ -23,11 +23,8 @@ impl Nat {
         }
     }
     pub(crate) fn parse(text: &str) -> Result<Self> {
-        if text.is_empty()
-            || !text.bytes().all(|b| b.is_ascii_digit())
-            || (text.len() > 1 && text.starts_with('0'))
-            || text.len() > MAX_NAT.len()
-            || (text.len() == MAX_NAT.len() && text > MAX_NAT)
+        if !mini_sdk::decimal::is_canonical(text)
+            || mini_sdk::decimal::compare(text, MAX_NAT) == std::cmp::Ordering::Greater
         {
             return Err("paid status requires canonical decimal below 2^256".into());
         }
@@ -72,22 +69,7 @@ impl Nat {
         Self(result)
     }
     fn add(&self, other: &Self) -> Result<Self> {
-        let mut a = self.0.bytes().rev();
-        let mut b = other.0.bytes().rev();
-        let mut digits = Vec::new();
-        let mut carry = 0u8;
-        loop {
-            let x = a.next();
-            let y = b.next();
-            if x.is_none() && y.is_none() && carry == 0 {
-                break;
-            }
-            let n = x.map(|v| v - b'0').unwrap_or(0) + y.map(|v| v - b'0').unwrap_or(0) + carry;
-            digits.push(b'0' + n % 10);
-            carry = n / 10;
-        }
-        digits.reverse();
-        Self::parse(std::str::from_utf8(&digits).map_err(|_| "internal decimal sum")?)
+        Self::parse(&mini_sdk::decimal::add(&self.0, &other.0)?)
     }
 }
 impl Ord for Nat {

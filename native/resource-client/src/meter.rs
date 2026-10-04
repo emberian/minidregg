@@ -35,10 +35,7 @@ fn canonical_decimal(value: &Value, name: &str) -> Result<()> {
         .get(name)
         .and_then(Value::as_str)
         .ok_or_else(|| format!("provider quote lacks {name}"))?;
-    if text.is_empty()
-        || text.len() > 80
-        || !text.bytes().all(|byte| byte.is_ascii_digit())
-        || (text.len() > 1 && text.starts_with('0'))
+    if !mini_sdk::decimal::is_canonical_max(text, 80)
     {
         return Err(format!("provider quote has noncanonical {name}"));
     }
@@ -62,12 +59,7 @@ fn selected_provider(metadata: &[u8]) -> Result<Selection> {
         .get("providerResourceId")
         .and_then(Value::as_str)
         .ok_or("metering metadata lacks providerResourceId")?;
-    if id == "0"
-        || id.is_empty()
-        || id.len() > 80
-        || !id.bytes().all(|byte| byte.is_ascii_digit())
-        || (id.len() > 1 && id.starts_with('0'))
-    {
+    if id == "0" || !mini_sdk::decimal::is_canonical_max(id, 80) {
         return Err("metering metadata providerResourceId is not canonical".into());
     }
     let route = value

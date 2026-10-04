@@ -55,10 +55,7 @@ fn opt(args: &mut Args, key: &str) -> Result<Option<String>> {
 }
 
 fn decimal(value: &str, label: &str) -> Result<()> {
-    if value.is_empty()
-        || value.len() > 40
-        || value.starts_with('0') && value != "0"
-        || !value.bytes().all(|byte| byte.is_ascii_digit())
+    if !mini_sdk::decimal::is_canonical_max(value, 40)
     {
         return Err(format!("{label} must be a canonical decimal"));
     }
