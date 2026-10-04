@@ -503,15 +503,17 @@ theorem lookupPostBytes_some {c : DurableDataIntent.CellId} :
 
 omit [DecidableEq D] in
 theorem decodes_of_derived {B : Bridge R D} {H : History R TransactionId StableEvent D}
-    {cells : CellId → Option (Cell R)} {intent : DataIntent rootBytes} {t : DTurn R D}
-    (d : Derived B H cells intent t) {w0 : DurableDataIntent.DataWrite} (hw : w0 ∈ intent.writes) :
+    {cells : CellId → Option (Cell R)} {retired : CellId → Bool} {intent : DataIntent rootBytes}
+    {t : DTurn R D}
+    (d : Derived B H cells retired intent t) {w0 : DurableDataIntent.DataWrite} (hw : w0 ∈ intent.writes) :
     ∃ v, B.codec.decode w0.canonicalPostBytes = some v := by
   obtain ⟨δ, hδ, -, -⟩ := delta_of_write d hw
   have spec := deltaOf_spec hδ
   cases δ with
-  | absent => exact ⟨_, spec.2⟩
+  | absent => exact ⟨_, spec.2.1⟩
   | create => exact ⟨_, spec.2⟩
   | change => exact ⟨_, spec.2⟩
+  | retire => exact ⟨_, spec.2.1⟩
 
 theorem lookupPostBytes_none_unwritten {c : CellId} :
     ∀ {ws : List DurableDataIntent.DataWrite}, DataSnapshot.lookupPostBytes ⟨c⟩ ws = none →
@@ -660,7 +662,8 @@ theorem ofIntent_run (B : Bridge R D) (H : History R TransactionId StableEvent D
         · rw [if_neg (fun m => r (iff.mp m))]
           have unretired := written_unretired (ofCells_ok derived') hw
           rw [same] at unretired
-          rw [unretired]
+          have unretired' : (w.system ⟨SysSpace.retired, c⟩).isSome = false := unretired
+          rw [unretired']
           cases hb : B.codec.retires w0.canonicalPostBytes
           · rfl
           · exact absurd hb r
@@ -1082,11 +1085,13 @@ abbrev DeployedRepresents (p : Loaded Minidregg.Compiler.ResourceBirthCodec.root
   Represents bridge p w
 
 /-- Its cells field, instantiated: every deployed cell's bytes are the
-canonical lifecycle encoding of the world's cell. -/
+canonical lifecycle encoding of the world's cell, or the retired image over an
+absent one. -/
 theorem deployedRepresents_cells {p : Loaded Minidregg.Compiler.ResourceBirthCodec.rootBytes}
     {w : World deployedR TransactionId Theory.TypedAuthorization.Digest}
     (rep : DeployedRepresents p w) (c : CellId) :
-    p.snapshot.canonicalBytes ⟨c⟩ = encodeCell (w.cells c) :=
+    p.snapshot.canonicalBytes ⟨c⟩ = encodeCell (w.cells c) ∨
+      (w.cells c = none ∧ Minidregg.Kernel.DeployedBridge.retiresCell (p.snapshot.canonicalBytes ⟨c⟩) = true) :=
   (Minidregg.Kernel.DeployedBridge.deployed_cells_iff (fun c => p.snapshot.canonicalBytes ⟨c⟩)
     (fun c => w.cells c)).mp rep.cells c
 
@@ -1113,8 +1118,9 @@ theorem ofIntent_policySource_birth {D' : Type} [DecidableEq D']
     exact Minidregg.Kernel.DeployedBridge.bridge_decode_total_on_registry _
   rw [d.eq]
   cases δ with
-  | absent => rw [spec.2] at dec; cases dec
+  | absent => rw [spec.2.1] at dec; cases dec
   | change k s s' => exact absurd (spec.1.symm.trans absent) (Option.some_ne_none _)
+  | retire k s => exact absurd (spec.1.symm.trans absent) (Option.some_ne_none _)
   | create k s' =>
       rw [spec.2] at dec
       have e := Option.some.inj (Option.some.inj dec)
