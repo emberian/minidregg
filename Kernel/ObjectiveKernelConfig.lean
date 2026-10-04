@@ -33,6 +33,10 @@ structure Ambient where
 /-- The longest patience an await may declare. -/
 def maxPatience : Nat := 64
 
+/-- The storage deposit, in the deployment's credit asset, per byte of a retained
+activity record: every yield reserves  in the purse. -/
+def storageRate : Nat := 1
+
 /-- The kernel configuration of a deployment: its Objective policy's envelope
 ceilings, price and source bound, its Book and its credit; an await may be
 abandoned `maxPatience` heights past its deadline. Refused when the
@@ -51,6 +55,6 @@ def configOf {F : Type} [Field F] (deployment : Deployment) (profile : Canonical
          maxTicks := policy.maximum.sourceTicks, maxPatience := maxPatience
          typeFuel := policy.maximum.typeFuel, maxArtifactBytes := policy.sourceBytes
          tariff := policy.tariff
-         abandonGrace := maxPatience }
+         abandonGrace := maxPatience, storageRate := storageRate }
 
 end Minidregg.Kernel.ObjectiveKernelConfig

@@ -521,13 +521,13 @@ before_timeout = state('tally-two', 'before-timeout', tx2)
 turn('deliver-timed-out', second, {'kind': 'deliver', 'record': REC2, 'await': await_of(t1)['id'],
                                    'account': '0', 'accountCapability': '0'}, 'installed')
 t2 = state('tally-two', 'timed-out', tx2)
-check('timed-out-ends-and-reclaims', t2['recordKind'] == 'reclaimed' and t2['purse'] == 0
+check('timed-out-ends-and-reclaims', t2['recordKind'] == 'retired' and t2['purse'] == 0
       and balance(t2, SPONSOR_ACCOUNT) == balance(before_timeout, SPONSOR_ACCOUNT) + 20000 - PRICE,
       {'recordKind': t2['recordKind'], 'purse': t2['purse'],
        'sponsor': [balance(before_timeout, SPONSOR_ACCOUNT), balance(t2, SPONSOR_ACCOUNT)]})
 slot_t = await_of(t1)['source']['slotCell']
 sv = view('timed-out-slot', {'cells': [slot_t]})
-check('timed-out-slot-reclaimed', cell_of(sv, slot_t).get('kind') == 'reclaimed', cell_of(sv, slot_t))
+check('timed-out-slot-reclaimed', cell_of(sv, slot_t).get('kind') == 'retired', cell_of(sv, slot_t))
 turn('deliver-after-end-refused', sponsor, {'kind': 'deliver', 'record': REC2, 'await': await_of(t1)['id'],
                                             'account': '0', 'accountCapability': '0'},
      'conflict')
@@ -600,14 +600,14 @@ abandon_ingress = attempts / 'abandon-prepared' / 'ingress.bin'
 resubmit('abandon', abandon_ingress, 'installed')
 a2 = state('tally-abandon', 'abandoned', tx6)
 fee6 = min(a_before['purse'], PRICE)
-check('abandon-returns-escrow', a2['recordKind'] == 'reclaimed' and a2['purse'] == 0
+check('abandon-returns-escrow', a2['recordKind'] == 'retired' and a2['purse'] == 0
       and balance(a2, COLLECTOR) == balance(a_before, COLLECTOR) + fee6
       and balance(a2, SPONSOR_ACCOUNT) == balance(a_before, SPONSOR_ACCOUNT) + a_before['purse'] - fee6,
       {'recordKind': a2['recordKind'], 'purse': [a_before['purse'], a2['purse']],
        'collector': [balance(a_before, COLLECTOR), balance(a2, COLLECTOR)],
        'sponsor': [balance(a_before, SPONSOR_ACCOUNT), balance(a2, SPONSOR_ACCOUNT)]})
 sv6 = view('abandoned-slot', {'cells': [slot6cell]})
-check('abandon-reclaims-slot', cell_of(sv6, slot6cell).get('kind') == 'reclaimed', cell_of(sv6, slot6cell))
+check('abandon-reclaims-slot', cell_of(sv6, slot6cell).get('kind') == 'retired', cell_of(sv6, slot6cell))
 resubmit('abandon-retry-replays', abandon_ingress, 'replayed')
 turn('late-decider-finds-no-slot', second, {'kind': 'resolve', 'slot': slot6,
                                             'answer': {'reply': record(amount=nat(1))}}, 'refused', 'slotMissing')
@@ -628,7 +628,7 @@ deliver7 = {'kind': 'deliver', 'record': REC7, 'await': await7, 'account': '0',
 f_before = state('tally-fault', 'fault-before', tx7)
 turn('fault-delivery-commits', second, deliver7, 'installed')
 e2 = state('tally-fault', 'faulted', tx7)
-check('fault-ends-and-returns-escrow', e2['recordKind'] == 'reclaimed' and e2['purse'] == 0
+check('fault-ends-and-returns-escrow', e2['recordKind'] == 'retired' and e2['purse'] == 0
       and balance(e2, SPONSOR_ACCOUNT) == balance(f_before, SPONSOR_ACCOUNT) + f_before['purse'] - PRICE
       and balance(e2, COLLECTOR) == balance(f_before, COLLECTOR) + PRICE
       and total_of(e2) == 0 and e2.get('stateVersion') == '1',
@@ -637,7 +637,7 @@ check('fault-ends-and-returns-escrow', e2['recordKind'] == 'reclaimed' and e2['p
        'collector': [balance(f_before, COLLECTOR), balance(e2, COLLECTOR)],
        'state': e2.get('state'), 'version': e2.get('stateVersion')})
 sv7 = view('faulted-slot', {'cells': [slot7cell]})
-check('fault-reclaims-slot', cell_of(sv7, slot7cell).get('kind') == 'reclaimed', cell_of(sv7, slot7cell))
+check('fault-reclaims-slot', cell_of(sv7, slot7cell).get('kind') == 'retired', cell_of(sv7, slot7cell))
 turn('fault-later-delivery-refused', sponsor, dict(deliver7, **{'await': '1'}), 'refused', 'recordMissing')
 turn('fault-retry-other-ingress-conflicts', sponsor, deliver7, 'conflict')
 

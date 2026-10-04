@@ -280,7 +280,7 @@ exactly as decided), `resume_binds_checkpoint` (`:2531`), `resume_deterministic`
 (`:2547`). In `ObjectiveProofs`: a delivery advances the record one generation
 (`delivery_advances_generation`, `Kernel/ObjectiveResumeContract.lean:593`); the installed
 record is stated per phase, awaiting: the record just written
-(`Delivery.installed_record`, `:562`), ended: reclaimed (`Delivery.installed_record_ended`,
+(`Delivery.installed_record`, `:562`), ended: retired (`Delivery.installed_record_ended`,
 `:576`); a second delivery of one await is a hash collision
 (`second_same_await_is_collision`, `:614`). The stored checkpoint is typed
 (`birth_checkpoint_typed`, `:124`; `delivery_checkpoint_typed`, `:151`) and resuming it ends
@@ -335,12 +335,14 @@ loaded Book, so every turn conserves every asset: `Birth.conserves` (`:1303`),
   `exhaustion_excludes_delivery` (`:2683`: for one record, snapshot, height and added
   envelope an exhaustion and a delivery never both exist), `exhaustion_charge_measurement_free`
   (`:2713`).
-- **Tombstones.** An ended activity's record cell and a settled slot are written to the
-  empty-body cell (`vacant`, `:790`; `recordBody_ended`, `:2743`): `delivery_end_vacates`
-  (`:2769`), `birth_end_vacates` (`:2782`), `settle_reclaims_slot` (`:2797`),
-  `delivery_reclaims_slot` (`:2831`). A reclaimed cell reads as nothing, by name: a late
-  delivery is refused `recordMissing`, a late decision `slotMissing` (`recordOfBody_vacant`,
-  `:2738`; `slotOfBody_vacant`, `:2740`).
+- **Retirement.** An ended activity's record cell and a settled slot are written as the
+  registry's retired lifecycle image (`retiredImage`, `recordImage`, `slotRetire`): the
+  bridge derives the World's retire from it (`TurnOfIntent.retires_iff`), so the id never
+  returns. `delivery_end_vacates`, `birth_end_vacates`, `settle_reclaims_slot`,
+  `delivery_reclaims_slot`. A retired cell reads as nothing, by name: a late delivery is
+  refused `recordRetired`, a late decision `slotRetired` (`*_retired_refused`). The
+  ending turn also sweeps the purse (every asset) to the payer and closes it on the Book
+  (`Delivery.end_closes_purse`, `Abandonment.closes_purse`).
 - **Abandonment.** An await nobody ended (its decider never decided, its timeout was never
   delivered, every attempt exhausted and nobody funded the next) may be abandoned by
   anyone once the height passes its deadline plus `Config.abandonGrace` (`:339`). It

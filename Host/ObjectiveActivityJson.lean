@@ -267,12 +267,11 @@ def slotJson (slot : AnswerSlot.Slot) : Json :=
 def cellJson (domain : Digest) (cell : Nat) (root : Digest) (bytes : List UInt8) : Json :=
   let described : List (String × Json) :=
     match ObjectiveActivity.payloadOf bytes with
-    | none => [("kind", if bytes.isEmpty then "absent" else "not-an-activity-cell")]
+    | none => [("kind", if bytes.isEmpty then "absent"
+        else if bytes = ObjectiveActivity.retiredImage then "retired" else "not-an-activity-cell")]
     | some payload =>
       let at_ := decide (cell = ObjectiveActivityCell.coordinate domain payload.role payload.key)
       [("atCoordinate", toJson at_)] ++
-      if payload.body.isEmpty then ([("kind", toJson "reclaimed"), ("role", toJson (reprStr payload.role)),
-        ("tombstoneBytes", decimal bytes.length)] : List (String × Json)) else
       match payload.role with
       | .record => match ObjectiveActivity.decodeRecord payload.body with
         | some record => [("kind", "activity-record"), ("record", recordJson domain record),
