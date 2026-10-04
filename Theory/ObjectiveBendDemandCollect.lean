@@ -162,6 +162,38 @@ def collect (state : State) : State :=
   let f := relocate state.heap.size ranked.2 ranked.1
   ⟨compact f state.heap marks, renameControl f state.control, state.stack.map (renameFrame f)⟩
 
+/-! ## Settling: a cached cell's origin is no longer a root
+
+A cached cell keeps the closure it was forced from (`Cell.cached origin value`). The
+machine never reads it again: entering a cached cell returns its value, and only an
+`evaluating` cell's origin is read (by its update frame). It is ghost data, kept by the
+running machine because the source-correspondence proofs (`ObjectiveBendDemandAdequacy`)
+name a cell's meaning by it. In a checkpoint it is worse than dead: `collect` traces it,
+so a forced accumulator keeps alive every environment it was ever computed from (a
+`tally` holds its whole history through its total's origin).
+
+`settle` gives every cached cell the SELF origin `⟨.bound 0, [address]⟩` ("read this
+cell"): it retains nothing but the cell itself, it is lexically valid wherever the cell
+is, and it is typed at the cell's own assigned type, so a settled state is typed exactly
+when the state was (`typed_settle`). Suspended and evaluating cells are untouched (their
+origin is what they will run). Settling changes no transition (`settle_resume_segment`
+in `Theory.ObjectiveBendDemandSettleProofs`: every bounded run, extraction and resume
+agrees exactly, capacity suspensions included, because heap sizes are unchanged). -/
+
+/-- The origin a settled cached cell keeps: itself. -/
+def selfOrigin (address : Nat) : Closure := ⟨.bound 0, [address]⟩
+
+def settleCell (address : Nat) : Cell → Cell
+  | .cached _ value => .cached (selfOrigin address) value
+  | cell => cell
+
+/-- Replace every cached cell's origin by its self origin. -/
+def settle (state : State) : State :=
+  {state with heap := state.heap.mapIdx settleCell}
+
+/-- What a yield stores: the settled state, collected. -/
+def checkpoint (state : State) : State := collect (settle state)
+
 /-! ## Measurement: collection drops garbage
 
 A yielded state whose heap holds a finished demand's leftovers: cell 1 (a spent argument

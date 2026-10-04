@@ -390,8 +390,22 @@ A Minidregg.Theory.ObjectiveBendDemandCapacity.bits : -
 A Minidregg.Theory.ObjectiveBendDemandCapacity.decodeNatural : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCapacity.primitiveFits : propext
 A Minidregg.Theory.ObjectiveBendDemandCapacity.valueFits : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.Agree : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.Agree.control : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.Agree.heap : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.Agree.mk' : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.Agree.refl : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.Agree.size : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.Agree.stack : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.Agree.symm : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.Agree.trans : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.AllIn : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.Covers : -
+A Minidregg.Theory.ObjectiveBendDemandCollect.HeapGood.assumptionsValid : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.HeapGood.idle : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.HeapGood.size_le : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.HeapGood.typed : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.HeapGood.valid : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.HeapRel.beyond : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.HeapRel.cellIn : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.HeapRel.cells : -
@@ -401,6 +415,7 @@ A Minidregg.Theory.ObjectiveBendDemandCollect.HeapRel.lookup : Quot.sound, prope
 A Minidregg.Theory.ObjectiveBendDemandCollect.HeapRel.push : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.HeapRel.set : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.HeapRel.size_le : -
+A Minidregg.Theory.ObjectiveBendDemandCollect.OutcomeAgree : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.OutcomeRel : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.Related.control : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.Related.controlIn : -
@@ -410,11 +425,25 @@ A Minidregg.Theory.ObjectiveBendDemandCollect.Related.stack : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.Related.stackIn : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.Related.stack_length : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.Related.trans : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.ResultAgree : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.ResultRel : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.Traced : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.TypesRel : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.active : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.active_of_agree : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.active_rename : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.agree_completeWith : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.agree_entered : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.agree_eraseState : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.agree_forceWith : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.agree_materializeWith : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.agree_resume : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.agree_runBounded : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.agree_runBounded_zero : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.agree_settle : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.agree_step : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.agree_stepRaw : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.agree_yieldedPlanWith : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.allIn_append : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.allIn_cons : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.allIn_nil : -
@@ -423,10 +452,12 @@ A Minidregg.Theory.ObjectiveBendDemandCollect.allocateFields_foldl : Classical.c
 A Minidregg.Theory.ObjectiveBendDemandCollect.allocateFields_related : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.bound_of_some : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.busy_related : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.busy_settle : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.cellAddresses : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.cellAddresses_rename : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.cellTyping_rename : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.cellValid_rename : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.checkpoint : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.children : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.closureTyping_rename : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.closureValid_rename : Quot.sound, propext
@@ -461,8 +492,21 @@ A Minidregg.Theory.ObjectiveBendDemandCollect.count_take_lt : Quot.sound, propex
 A Minidregg.Theory.ObjectiveBendDemandCollect.count_take_lt_count : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.count_take_succ : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.count_take_surj : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.enteredTyping : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.environmentTyping_rename : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.environmentValid_rename : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.eraseCell : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.eraseCell_cached : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.eraseCell_comp : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.eraseCell_eraseCell : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.eraseCell_evaluating : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.eraseCell_suspended : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.eraseOutcome : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.eraseState : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.eraseState_eraseState : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.erase_allocateFields : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.erase_set! : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.erase_stepRaw : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.exampleBudget : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.exampleLimits : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.exampleYield : Quot.sound, propext
@@ -477,13 +521,17 @@ A Minidregg.Theory.ObjectiveBendDemandCollect.except_map_throw : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.except_pure_ok : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.except_throw_bind : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.except_throw_ok : -
+A Minidregg.Theory.ObjectiveBendDemandCollect.extension_length_le : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.filterMap_zip_getElem : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.filterMap_zip_length : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.finalStack_related : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.foldlM_agree : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.foldlM_related : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.foldl_rankStep : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.forceWith_finished_control : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.forceWith_succ_active : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.forceWith_succ_inactive : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.forcingShared_false_iff : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.forcingShared_rename : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.frameAddresses : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.frameAddresses_rename : propext
@@ -496,9 +544,19 @@ A Minidregg.Theory.ObjectiveBendDemandCollect.garbageTyped : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.garbageTyped_collect_typed : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.garbageTyped_collected : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.garbageTyping : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.good_foldlM : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.good_forceWith : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.good_materializeWith : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.good_of_finished : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.heapTyping_rename : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.heapTyping_settle : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.image_lt : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.largerBudget : -
+A Minidregg.Theory.ObjectiveBendDemandCollect.largerLimits : -
+A Minidregg.Theory.ObjectiveBendDemandCollect.largerYield : -
+A Minidregg.Theory.ObjectiveBendDemandCollect.largerYield_checkpoint_grows : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.lexical_related : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.lexical_settle : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.liveDomain : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.liveDomain_of_not_false : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.liveMarks : propext
@@ -506,6 +564,8 @@ A Minidregg.Theory.ObjectiveBendDemandCollect.liveMarks_spec : Quot.sound, prope
 A Minidregg.Theory.ObjectiveBendDemandCollect.markFrom : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.markFrom_spec : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.nodup_map_on : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.outcomeState : -
+A Minidregg.Theory.ObjectiveBendDemandCollect.outcomeState_runBounded_zero : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.pending : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.pending_cons : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.pending_nil : propext
@@ -534,21 +594,41 @@ A Minidregg.Theory.ObjectiveBendDemandCollect.renameFrame_comp : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.renameValue : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.renameValue_comp : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.rootAddresses : -
+A Minidregg.Theory.ObjectiveBendDemandCollect.runBounded_finished_control : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.runBounded_of_yielded : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.runBounded_succ_active : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.runBounded_succ_inactive : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.runBounded_yields_outside : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.runBounded_zero_related : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.runBounded_zero_yielded : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.runtimeValueValid_rename : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.scalarValue_rename : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.selfOrigin : -
+A Minidregg.Theory.ObjectiveBendDemandCollect.selfOriginTyping : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.settle : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.settleCell : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.settle_getElem? : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.settle_heap_erased : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.settle_resume_runBounded : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.settle_resume_segment : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.settle_size : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.stackTyping_rename : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.stackUpdates_in : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.stackUpdates_rename : propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.stepRaw_yields_outside : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.typed_checkpoint : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.typed_collect : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.typed_collect_exists : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.typed_forceWith_any : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.typed_related : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.typed_runBounded_any : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.typed_settle : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.typed_yieldedPlanWith : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.valueAddresses : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.valueAddresses_rename : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.valueTerm_rename : propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.valueTyping_rename : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendDemandCollect.yieldedPlanWith_control : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCollect.yieldingTerm : -
 A Minidregg.Theory.ObjectiveBendDemandCollect.yieldingTerm_yields : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendDemandCompleteness.Represents : Quot.sound, propext
@@ -1195,6 +1275,17 @@ A Minidregg.Theory.ObjectiveBendExtensions.replacing_then_wrapping : -
 A Minidregg.Theory.ObjectiveBendExtensions.scalar_fixed_point : -
 A Minidregg.Theory.ObjectiveBendExtensions.wrapping : -
 A Minidregg.Theory.ObjectiveBendExtensions.wrapping_then_replacing : -
+A Minidregg.Theory.ObjectiveBendLedgerPoles.conversionPath_head : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendLedgerPoles.conversionPath_natural : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendLedgerPoles.evaluatingSegment_entry_cell : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendLedgerPoles.evaluatingSegment_started : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendLedgerPoles.meaningsScoped_unallocated : -
+A Minidregg.Theory.ObjectiveBendLedgerPoles.not_conversionPath_natural_boolean : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendLedgerPoles.not_evaluatingSegment_unallocated : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendLedgerPoles.not_meaningsScoped_open : propext
+A Minidregg.Theory.ObjectiveBendLedgerPoles.not_stepCases_false : -
+A Minidregg.Theory.ObjectiveBendLedgerPoles.poleEntered : -
+A Minidregg.Theory.ObjectiveBendLedgerPoles.stepCases_trivial : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.Evaluates : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.Observation.boolean.elim : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.Observation.label.elim : -

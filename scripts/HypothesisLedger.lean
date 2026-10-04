@@ -92,6 +92,8 @@ Run: `lake env lean scripts/HypothesisLedger.lean`
 import AxiomCensusResearch
 import Selvage.PolishchukSpielmanRefutation
 import Theory.ObjectiveBendDemandMachine
+import Kernel.ObjectiveResumeContract
+import Theory.ObjectiveBendLedgerPoles
 
 open Lean Elab Meta
 

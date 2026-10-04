@@ -1,0 +1,829 @@
+[
+ {
+  "name": "TallyTwelve",
+  "modules": [
+   {
+    "name": "Tally",
+    "source": "../../world/activity/Tally.obend"
+   },
+   {
+    "name": "TallyFromZero",
+    "source": "../../tests/objective-activity/TallyFromZero.obend",
+    "imports": [
+     {
+      "alias": "Tally",
+      "path": "./Tally.obend",
+      "module": "0"
+     }
+    ]
+   }
+  ],
+  "entry": "fromZero",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "natural",
+    "value": "9"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "record",
+         "fields": [
+          {
+           "name": "amount",
+           "value": {
+            "tag": "natural",
+            "value": "5"
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "total",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "record",
+         "fields": [
+          {
+           "name": "amount",
+           "value": {
+            "tag": "natural",
+            "value": "5"
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "total",
+             "value": {
+              "tag": "natural",
+              "value": "5"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "record",
+         "fields": [
+          {
+           "name": "amount",
+           "value": {
+            "tag": "natural",
+            "value": "5"
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "total",
+             "value": {
+              "tag": "natural",
+              "value": "10"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "record",
+         "fields": [
+          {
+           "name": "amount",
+           "value": {
+            "tag": "natural",
+            "value": "5"
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "4"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "total",
+             "value": {
+              "tag": "natural",
+              "value": "15"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "record",
+         "fields": [
+          {
+           "name": "amount",
+           "value": {
+            "tag": "natural",
+            "value": "5"
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "5"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "total",
+             "value": {
+              "tag": "natural",
+              "value": "20"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "record",
+         "fields": [
+          {
+           "name": "amount",
+           "value": {
+            "tag": "natural",
+            "value": "5"
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "6"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "total",
+             "value": {
+              "tag": "natural",
+              "value": "25"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "record",
+         "fields": [
+          {
+           "name": "amount",
+           "value": {
+            "tag": "natural",
+            "value": "5"
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "7"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "total",
+             "value": {
+              "tag": "natural",
+              "value": "30"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "record",
+         "fields": [
+          {
+           "name": "amount",
+           "value": {
+            "tag": "natural",
+            "value": "5"
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "8"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "total",
+             "value": {
+              "tag": "natural",
+              "value": "35"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "record",
+         "fields": [
+          {
+           "name": "amount",
+           "value": {
+            "tag": "natural",
+            "value": "5"
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "9"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "total",
+             "value": {
+              "tag": "natural",
+              "value": "40"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "record",
+         "fields": [
+          {
+           "name": "amount",
+           "value": {
+            "tag": "natural",
+            "value": "5"
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "10"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "total",
+             "value": {
+              "tag": "natural",
+              "value": "45"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "record",
+         "fields": [
+          {
+           "name": "amount",
+           "value": {
+            "tag": "natural",
+            "value": "5"
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "11"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "total",
+             "value": {
+              "tag": "natural",
+              "value": "50"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "record",
+         "fields": [
+          {
+           "name": "amount",
+           "value": {
+            "tag": "natural",
+            "value": "5"
+           }
+          }
+         ]
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "12"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "total",
+             "value": {
+              "tag": "natural",
+              "value": "55"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "unknown",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "13"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "total",
+             "value": {
+              "tag": "natural",
+              "value": "60"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "timedOut",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "14"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "total",
+             "value": {
+              "tag": "natural",
+              "value": "60"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   }
+  ],
+  "expectedTurns": 14
+ }
+]

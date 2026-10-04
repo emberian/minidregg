@@ -1,0 +1,8 @@
+edition ObjectiveBend 1
+# The Tally activity (world/activity/Tally.obend) born with a total of 0, decided by
+# one subject: the program the checkpoint-transparency gate and the ForcingTransparent
+# points (Kernel/ObjectiveResumeContract) run. The argument wire carries no variants,
+# so the Start record is built here.
+import ./Tally.obend as Tally
+def fromZero(decider: Nat) -> Activity<Tally.Plan, Tally.Resumed, Nat>:
+  Tally.tally({init: Tally.EditNat.set(0n), decider: decider})

@@ -1,0 +1,215 @@
+{"term":
+ {"tag": "app",
+  "fn":
+  {"target":
+   {"tag": "fix",
+    "spec":
+    {"tag": "specification",
+     "metadata":
+     {"tag": "record",
+      "fields":
+      [{"value": {"value": "[\"Tally\",\"TallyFromZero\"]", "tag": "label"},
+        "name": "package"}]},
+     "extension":
+     {"tag": "lam",
+      "body":
+      {"tag": "lam",
+       "body":
+       {"tag": "extend",
+        "inherited": {"tag": "bound", "index": 0},
+        "fields":
+        [{"value":
+          {"tag": "lam",
+           "body":
+           {"tag": "lam",
+            "body":
+            {"tag": "case",
+             "scrutinee":
+             {"tag": "perform",
+              "plan":
+              {"tag": "inject",
+               "payload":
+               {"tag": "record",
+                "fields":
+                [{"value": {"tag": "bound", "index": 0}, "name": "write"},
+                 {"value":
+                  {"tag": "inject",
+                   "payload":
+                   {"tag": "record",
+                    "fields":
+                    [{"value":
+                      {"target": {"tag": "bound", "index": 1},
+                       "tag": "get",
+                       "name": "decider"},
+                      "name": "decider"}]},
+                   "label": "reply"},
+                  "name": "on"},
+                 {"value": {"value": "4", "tag": "nat"}, "name": "patience"}]},
+               "label": "await"}},
+             "arms":
+             [{"label": "resumed",
+               "body":
+               {"tag": "case",
+                "scrutinee":
+                {"target": {"tag": "bound", "index": 0},
+                 "tag": "get",
+                 "name": "outcome"},
+                "arms":
+                [{"label": "reply",
+                  "body":
+                  {"tag": "app",
+                   "fn":
+                   {"tag": "app",
+                    "fn":
+                    {"target": {"tag": "bound", "index": 5},
+                     "tag": "get",
+                     "name": "Tally.ask"},
+                    "arg": {"tag": "bound", "index": 3}},
+                   "arg":
+                   {"tag": "record",
+                    "fields":
+                    [{"value":
+                      {"tag": "inject",
+                       "payload":
+                       {"target": {"tag": "bound", "index": 0},
+                        "tag": "get",
+                        "name": "amount"},
+                       "label": "add"},
+                      "name": "total"}]}}},
+                 {"label": "unknown",
+                  "body":
+                  {"tag": "app",
+                   "fn":
+                   {"tag": "app",
+                    "fn":
+                    {"target": {"tag": "bound", "index": 5},
+                     "tag": "get",
+                     "name": "Tally.ask"},
+                    "arg": {"tag": "bound", "index": 3}},
+                   "arg":
+                   {"tag": "record",
+                    "fields":
+                    [{"value":
+                      {"tag": "inject",
+                       "payload": {"tag": "record", "fields": []},
+                       "label": "keep"},
+                      "name": "total"}]}}},
+                 {"label": "refused",
+                  "body":
+                  {"value":
+                   {"target":
+                    {"target":
+                     {"target": {"tag": "bound", "index": 1},
+                      "tag": "get",
+                      "name": "view"},
+                     "tag": "get",
+                     "name": "state"},
+                    "tag": "get",
+                    "name": "total"},
+                   "tag": "done"}},
+                 {"label": "timedOut",
+                  "body":
+                  {"value":
+                   {"target":
+                    {"target":
+                     {"target": {"tag": "bound", "index": 1},
+                      "tag": "get",
+                      "name": "view"},
+                     "tag": "get",
+                     "name": "state"},
+                    "tag": "get",
+                    "name": "total"},
+                   "tag": "done"}},
+                 {"label": "broken",
+                  "body":
+                  {"value":
+                   {"target":
+                    {"target":
+                     {"target": {"tag": "bound", "index": 1},
+                      "tag": "get",
+                      "name": "view"},
+                     "tag": "get",
+                     "name": "state"},
+                    "tag": "get",
+                    "name": "total"},
+                   "tag": "done"}},
+                 {"label": "upgraded",
+                  "body":
+                  {"value":
+                   {"target":
+                    {"target":
+                     {"target": {"tag": "bound", "index": 1},
+                      "tag": "get",
+                      "name": "view"},
+                     "tag": "get",
+                     "name": "state"},
+                    "tag": "get",
+                    "name": "total"},
+                   "tag": "done"}}]}}]}}},
+          "name": "Tally.ask"},
+         {"value":
+          {"tag": "lam",
+           "body":
+           {"tag": "app",
+            "fn":
+            {"tag": "app",
+             "fn":
+             {"target": {"tag": "bound", "index": 2},
+              "tag": "get",
+              "name": "Tally.ask"},
+             "arg": {"tag": "bound", "index": 0}},
+            "arg":
+            {"tag": "record",
+             "fields":
+             [{"value":
+               {"target": {"tag": "bound", "index": 0},
+                "tag": "get",
+                "name": "init"},
+               "name": "total"}]}}},
+          "name": "Tally.tally"},
+         {"value":
+          {"tag": "lam",
+           "body":
+           {"tag": "app",
+            "fn":
+            {"target": {"tag": "bound", "index": 2},
+             "tag": "get",
+             "name": "Tally.tally"},
+            "arg":
+            {"tag": "record",
+             "fields":
+             [{"value":
+               {"tag": "inject",
+                "payload": {"value": "0", "tag": "nat"},
+                "label": "set"},
+               "name": "init"},
+              {"value": {"tag": "bound", "index": 0}, "name": "decider"}]}}},
+          "name": "TallyFromZero.fromZero"}]}}}},
+    "seed": {"tag": "record", "fields": []}},
+   "tag": "get",
+   "name": "TallyFromZero.fromZero"},
+  "arg": {"value": "9", "tag": "nat"}},
+ "status":
+ "elaborated executable term; typing is checked by the actual checker, adequacy in ObjectiveBendFrontEndAdequacy",
+ "sourceModules":
+ [{"sourceSha256":
+   "a43aa5dba44578f69213cd977a081818e1edbc32025eb4ae9c37c6126ef43407",
+   "name": "Tally",
+   "imports": []},
+  {"sourceSha256":
+   "af761d8ee44b33f2481c89b6cef2842aaec54aa889ecd965039cc9f049be5098",
+   "name": "TallyFromZero",
+   "imports":
+   [{"span": {"start": 319, "line": 6, "end": 348},
+     "sha256":
+     "a43aa5dba44578f69213cd977a081818e1edbc32025eb4ae9c37c6126ef43407",
+     "path": "./Tally.obend",
+     "moduleName": "Tally",
+     "module": "0",
+     "alias": "Tally"}]}],
+ "sourceEntry": "TallyFromZero.fromZero",
+ "selectionMode": "application",
+ "schema": "dregg.objective-bend.core.v2",
+ "limits": {"ticks": "1000000", "stack": "1000000", "heap": "1000000"},
+ "edition": "objective-bend-1",
+ "argumentCodec": "dregg.objective-bend.argument-values.v1"}

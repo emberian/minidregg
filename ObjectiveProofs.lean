@@ -9,6 +9,9 @@ import Theory.ObjectiveBendDemandAdequacy
 import Theory.ObjectiveBendDemandCompleteness
 import Theory.ObjectiveBendDemandDataSoundness
 import Theory.ObjectiveBendDemandCollectProofs
+import Theory.ObjectiveBendDemandSettleProofs
+import Theory.ObjectiveBendDemandForceProofs
+import Theory.ObjectiveBendLedgerPoles
 import Theory.ObjectiveBendCheckpointRoundTrip
 import Kernel.ObjectiveBendAdmissionSemantics
 import Kernel.ObjectiveResumeContract

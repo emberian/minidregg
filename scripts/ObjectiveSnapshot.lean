@@ -38,6 +38,9 @@ import Theory.ObjectiveBendCheckpointRoundTrip
 import Theory.ObjectiveBendExtensions
 import Theory.ObjectiveBendDemandCapacity
 import Theory.ObjectiveBendDemandCollectProofs
+import Theory.ObjectiveBendDemandSettleProofs
+import Theory.ObjectiveBendDemandForceProofs
+import Theory.ObjectiveBendLedgerPoles
 
 open Lean Meta
 

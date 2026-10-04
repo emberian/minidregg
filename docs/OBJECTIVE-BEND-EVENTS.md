@@ -163,9 +163,12 @@ Design: `redregg/designs/MINI-PROGRAM-MODEL-20261004.md` §A, §B, §D (answer s
   the registry's loaded-and-final law pins every such cell to its coordinate, no birth
   may install the role (`UserShape`), and nothing but the activity kernel's turns writes
   it: these are protected coordinates (ids at or above 2^256, which no birth may use).
-- **The record.** The yielded machine state, collected
-  ([Theory/ObjectiveBendDemandCollect](../Theory/ObjectiveBendDemandCollect.lean): only
-  the cells the yielded Plan and the stack reach, compacted and renumbered), as
+- **The record.** The checkpoint of the yield
+  ([Theory/ObjectiveBendDemandCollect](../Theory/ObjectiveBendDemandCollect.lean)
+  `checkpoint`): the state the Plan extraction left (every cell it forced is stored as
+  its value), settled (a cached cell's origin closure, which the machine never reads
+  again, becomes the cell itself, so it retains nothing) and collected (only the cells
+  the yielded Plan and the stack reach, compacted and renumbered), as
   checkpoint bytes (the token stream of `encodeState`), their digest, the pinned package identity, the instantiating input,
   the generation, the escrow terms, and its phase
   (`awaiting await | done result | faulted reason`). An await has an id
@@ -233,17 +236,31 @@ view, version + 1, against the view's root), `moved_state_refuses`,
 `stateWrite_unviewed_never_sets`, `resume_binds_checkpoint`, `resume_deterministic`,
 `refund_measurement_free`, `submitter_charge_declared`, `yield_reserves_pair`,
 `end_returns_purse`, `Birth.conserves`, `Delivery.conserves`, `TopUp.conserves`; in `ObjectiveProofs`,
-`birth_checkpoint_typed` and `delivery_checkpoint_typed` (the collected checkpoint is
-typed: `typed_collect`), `runSegment_collect` (resuming the collected checkpoint ends
-the segment exactly as resuming the uncollected one: the same Plan, result or fault;
-from `collect_resume_segment`, `related_collect` and the lockstep simulation of
-`Theory/ObjectiveBendDemandCollectProofs`).
+`birth_checkpoint_typed` and `delivery_checkpoint_typed` (the stored checkpoint is
+typed: `typed_checkpoint`, from `typed_yieldedPlanWith`, `typed_settle`,
+`typed_collect`), `runSegment_checkpoint` (resuming the stored checkpoint ends the
+segment exactly as resuming the extraction's state: the same Plan, result or fault;
+from `settle_resume_segment`, an exact lockstep, and `collect_resume_segment`, a
+renaming), and `runSegment_stored_complete` (resuming the stored checkpoint ends every
+segment the program's own yield ends, alike, with heap headroom of the forced state's
+size) under the OPEN premise `ForcingTransparent` (sharing transparency of the Plan
+extraction's forcing: a satisfying point `forcingTransparent_tally`, a refuting point
+`not_forcingTransparent_lostStack`; the forced checkpoint can be larger,
+`largerYield_checkpoint_grows`, hence the headroom).
+
+Executed (`scripts/check-objective-proofs.sh transparency`): every activity of the
+preview cohort and the Tally run (`native/objective-emit/activity-cohort.json`, twelve
+replies, unknown, timeout) resumed from the stored checkpoint and from its own yield
+end every segment alike, the stored side in no more ticks; Tally's stored checkpoint is
+2315 B at its first yield and 2334 B after each of the twelve replies (0 B per resume;
+the yield collected alone grows 4224 to 10918 B, +558 B per resume); a planted
+checkpoint that drops the stack's cells goes red.
 
 Executed (on the WIP route, `lane/activity-native-wip`): the native acceptance drives
 [world/activity/Tally.obend](../world/activity/Tally.obend) on a scratch native world,
 every turn a signed command, 59 rows, before resume with view (ownership, slot decider, typed replies, retry and
 conflict, conflict carrying the reply, funding park, timeout, Book conservation, reopen,
-and the collected checkpoint's size across twelve resumes).
+and the checkpoint's size across twelve resumes).
 
 Not yet: the native route (above); the object record (L3); a theorem that `add`-only
 writes commute (executed by the two-tallies acceptance scenario on the native route);

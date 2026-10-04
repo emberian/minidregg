@@ -728,12 +728,17 @@ def decodePlan : Data → Except Refusal PlanAwait
     pure ⟨write, source, patience⟩
   | _ => throw (.plan "the kernel performs only `await` Plans")
 
-/-- What one segment of an activity ends in. A yield keeps the yielded machine
-state COLLECTED (`ObjectiveBendDemandCollect.collect`: only what the yielded
-Plan and the stack reach, compacted), so a checkpoint is storage-charged for
-what the continuation can use, not for every cell the run ever allocated; the
-Plan is extracted from the uncollected state. Resuming the collected state is
-resuming the original (`ObjectiveResumeContract.runSegment_collect`). -/
+/-- What one segment of an activity ends in. A yield stores the state the Plan
+extraction left (`ObjectiveBendDemandData.yieldedPlan`: the yielded control and
+stack over the heap in which every cell the extraction forced is cached), settled
+and collected (`ObjectiveBendDemandCollect.checkpoint`: cached cells stop retaining
+the closures they were forced from; only what the yielded Plan and the stack reach
+is kept, compacted). So a checkpoint is storage-charged for what the continuation
+can use: a Plan field the extraction evaluated is stored as its value, never as the
+chain of suspended computations that produced it. Resuming the stored state is
+resuming the extracted one exactly (`ObjectiveResumeContract.runSegment_checkpoint`);
+that resuming the extracted state is resuming the yielded one is the premise
+`ObjectiveResumeContract.ForcingTransparent`, an open obligation of this lane. -/
 inductive Segment where
   | yielded (state : State) (plan : PlanAwait)
   | finished (result : Data)
@@ -747,7 +752,7 @@ def runSegment (config : Config) (ticks : Nat) (start : State) : Except Refusal 
     match ObjectiveBendDemandData.yieldedPlan config.limits config.planBudget yielded with
     | .ok extracted => do
       let plan ← decodePlan extracted.value
-      pure (.yielded (ObjectiveBendDemandCollect.collect yielded) plan)
+      pure (.yielded (ObjectiveBendDemandCollect.checkpoint extracted.state) plan)
     | .error (failure, _) => .error (.planExtraction (reprStr failure))
   | .finished _ finished =>
     match ObjectiveBendDemandData.complete config.limits config.planBudget finished with

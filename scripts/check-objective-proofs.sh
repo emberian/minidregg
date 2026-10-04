@@ -16,8 +16,17 @@
 #   c         the C differential (native/objective-emit/differential.py) over the
 #             packets of the preview cohort and native/objective-emit/extra-cohort.json:
 #             runtime.c against runBounded, per case, State bytes included.
+#   transparency  the checkpoint-transparency differential
+#             (native/objective-emit/transparency.py + scripts/ObjectiveCheckpointTransparency.lean)
+#             over every activity of the preview cohort and native/objective-emit/activity-cohort.json:
+#             resuming what the kernel stores (the Plan extraction's state, settled and
+#             collected) against resuming the machine's own yielded state, per segment:
+#             outcome, Plan/result Data, kernel ticks <= lazy ticks; plus the growth leg
+#             (TallyTwelve stored checkpoint has one byte count over segments 1..12, the twelve replies).
+#             Executed evidence for the open premise ForcingTransparent, not a proof.
+#             Self-tested every run: the planted `drop-stack-roots` checkpoint must go red.
 #
-# usage: scripts/check-objective-proofs.sh [proofs|c|all] [--update]
+# usage: scripts/check-objective-proofs.sh [proofs|c|transparency|all] [--update]
 #   --update rewrites the two snapshot files (proofs only); commit them with the change
 #   they announce. Requires `bun` for c (BUN=/path/to/bun or on PATH):
 #   absent, those gates are RED, never skipped. Logs: build-logs/objective/<gate>/.
@@ -140,14 +149,61 @@ gate_c() {
   [ "$failed" = 0 ]
 }
 
+gate_transparency() {
+  local bun; bun=$(bun_bin)
+  # `lean --run scripts/ObjectiveCheckpointTransparency.lean` needs every import built
+  "$lake" build Kernel.ObjectiveActivityWire Compiler.ObjectiveBendDataWire Theory.ObjectiveBendDemandCollect
+  # the preview cohort's activities (sources made absolute: packets.ts resolves them
+  # against the cohort file's directory)
+  python3 - tests/objective-bend-source/preview-cohort.json "$tmp/activities.json" <<'EOF'
+import json, os, sys
+cohort = os.path.abspath(sys.argv[1]); base = os.path.dirname(cohort)
+items = [i for i in json.load(open(cohort)) if i.get("responses")]
+for i in items:
+    for m in i["modules"]: m["source"] = os.path.join(base, m["source"])
+assert items, "no activity in the preview cohort"
+json.dump(items, open(sys.argv[2], "w"))
+EOF
+  echo "== packets"
+  "$bun" native/objective-emit/packets.ts "$tmp/activity-packets" "$tmp/activities.json" \
+    native/objective-emit/activity-cohort.json
+  local failed=0 total
+  # the elaborated Tally the ForcingTransparent points (Kernel/ObjectiveResumeContract) read
+  if cmp -s "$tmp/activity-packets/TallyTwelve/source.core.json" tests/objective-activity/TallyTwelve.core.json; then
+    echo "fixture tests/objective-activity/TallyTwelve.core.json: fresh"
+  else
+    echo "fixture tests/objective-activity/TallyTwelve.core.json: STALE (the re-elaborated packet differs)"; failed=1
+  fi
+  echo "== self-test: the planted drop-stack-roots checkpoint must go red"
+  if python3 native/objective-emit/transparency.py "$tmp/activity-packets" "$logs/transparency-mutant.log" \
+       --mutant drop-stack-roots >/dev/null; then
+    echo "self-test (mutant): FAIL (the planted checkpoint agreed)"; failed=1
+  else
+    total=$(grep '^# TOTAL' "$logs/transparency-mutant.log" || true)
+    if [[ "$total" =~ fail=([0-9]+)$ ]] && [ "${BASH_REMATCH[1]}" != 0 ]; then
+      echo "self-test (mutant): PASS ($total)"
+    else
+      echo "self-test (mutant): FAIL (no verdicts: ${total:-no TOTAL line})"; failed=1
+    fi
+  fi
+  echo "== transparency"
+  python3 native/objective-emit/transparency.py "$tmp/activity-packets" "$logs/transparency.log" \
+    --growth TallyTwelve:1:12 || true
+  total=$(grep '^# TOTAL' "$logs/transparency.log" || true)
+  echo "transparency: ${total:-no TOTAL line}"
+  if ! [[ "$total" =~ pass=([0-9]+)\ fail=0$ ]] || [ "${BASH_REMATCH[1]}" = 0 ]; then failed=1; fi
+  [ "$failed" = 0 ]
+}
+
 case "$what" in
   proofs) gate_proofs 2>&1 | tee "$logs/proofs.log"; exit "${PIPESTATUS[0]}" ;;
   c) gate_c 2>&1 | tee "$logs/c.log"; exit "${PIPESTATUS[0]}" ;;
+  transparency) gate_transparency 2>&1 | tee "$logs/transparency-gate.log"; exit "${PIPESTATUS[0]}" ;;
   all)
     red=0
-    for g in proofs c; do
+    for g in proofs c transparency; do
       if "$0" "$g"; then echo "objective $g: PASS"; else echo "objective $g: RED"; red=$((red+1)); fi
     done
     exit "$red" ;;
-  *) echo "usage: $0 [proofs|c|all] [--update]" >&2; exit 64 ;;
+  *) echo "usage: $0 [proofs|c|transparency|all] [--update]" >&2; exit 64 ;;
 esac
