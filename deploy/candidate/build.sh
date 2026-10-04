@@ -10,6 +10,7 @@
 #   bin/spk-host                                application custody and broker
 #   bin/spk-browser-proxy                       TLS browser entrance
 #   bin/mini-discord                            Discord entrance
+#   bin/mini-keys                               key broker (seal key, provider and Discord secrets)
 #   bin/pay-watcher                             Solana pay watcher
 # packaged by deploy/candidate/package.py into the one candidate format:
 # provenance.json (source commit, toolchains, hashes, each ELF's glibc needs),
@@ -229,6 +230,7 @@ if [ "$client_only" = 0 ]; then
   build_rust spk-host spk-host
   build_rust spk-host spk-browser-proxy
   build_rust discord-entrance mini-discord
+  build_rust mini-keys mini-keys
   build_rust pay-watcher pay-watcher
 fi
 
@@ -343,7 +345,8 @@ roles='{}'
 for pair in host:minidregg-host mini:mini store:minidregg-link-sqlite-store \
     verifier:minidregg-credential-signature-verifier grainRuntime:grain-runtime \
     grainProviderBridge:grain-provider-bridge inferenceScheduler:mini-inference-scheduler \
-    spkHost:spk-host spkBrowserProxy:spk-browser-proxy discord:mini-discord payWatcher:pay-watcher; do
+    spkHost:spk-host spkBrowserProxy:spk-browser-proxy discord:mini-discord payWatcher:pay-watcher \
+    keys:mini-keys; do
   role=${pair%%:*} file=$out/bin/${pair#*:}
   roles=$(printf '%s' "$roles" | jq --arg r "$role" --arg p "$file" --arg h "$(candidate_sha256 "$file")" \
     '.[$r] = $p | .sha256[$r] = $h')

@@ -171,7 +171,7 @@ fn binding(broker: &Broker) -> Result<Binding, String> {
     Ok(Binding {
         host_sha: native::host_sha256(&c.host)?,
         config: native::host_config(&c.host_config)?,
-        table_sha: ProviderTable::load(&c.providers, broker.config.trust_owner)?.sha256,
+        table_sha: super::provider_table(&c.providers, broker.config.trust_owner)?.sha256,
         key_sha: native::sha256_hex(&std::fs::read(&c.key).map_err(|_| "credential key unavailable")?),
     })
 }
@@ -253,7 +253,7 @@ pub fn exchange(broker: &Broker, _peer: &Peer, stream: &mut UnixStream, note: &m
         }
         let response: Result<Value, String> = (|| {
             let store = CredentialStore::open(&c.root, &c.key)?;
-            let table = ProviderTable::load(&c.providers, broker.config.trust_owner)?;
+            let table = super::provider_table(&c.providers, broker.config.trust_owner)?;
             if table.sha256 != captured.table_sha {
                 return Err("credential service binding changed during exchange".into());
             }

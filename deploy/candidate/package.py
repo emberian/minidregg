@@ -68,6 +68,7 @@ ROLES = {
     "spkHostd": "spk-hostd",
     "discord": "mini-discord",
     "payWatcher": "pay-watcher",
+    "keys": "mini-keys",
 }
 # consent is required: a candidate whose friends cannot sign (the client refuses to sign without a
 # locally selected consent pair) is not shippable, so a roles manifest or sealed family without it is refused.

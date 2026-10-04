@@ -267,6 +267,27 @@ mod tests {
     }
 
     #[test]
+    fn a_full_backlog_obeys_the_admission_deadline() {
+        use std::os::fd::AsRawFd;
+        let d = dir("backlog");
+        let path = d.join("s.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        assert_eq!(unsafe { libc::listen(listener.as_raw_fd(), 1) }, 0);
+        // Fill the backlog with connects that themselves cannot block.
+        let mut held = Vec::new();
+        for _ in 0..4 {
+            if let Ok(s) = connect(&path, Instant::now() + Duration::from_millis(40)) {
+                held.push(s);
+            }
+        }
+        let start = Instant::now();
+        assert!(connect(&path, start + Duration::from_millis(40)).is_err(), "a full backlog admitted another connect");
+        assert!(start.elapsed() < Duration::from_secs(1));
+        drop(held);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
     fn answers_are_ok_or_named() {
         assert!(answer(json!({"ok":true,"x":1})).is_ok());
         assert_eq!(answer(json!({"refused":"op-not-granted","detail":"d"})).unwrap_err().code, "op-not-granted");

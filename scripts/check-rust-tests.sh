@@ -138,6 +138,17 @@ exact store-anchor-head      hyperdocument-link-sqlite-store --lib -- \
   anchor_tests::anchor_loss_refuses_until_explicit_enrollment_and_foreign_anchor_refuses \
   anchor_tests::whole_database_replacement_is_detected_by_sibling_anchor \
   anchor_tests::anchor_custody_refuses_a_foreign_owner_and_a_shared_directory
+# TENANCY-B: the key broker. Custody refusals at start, role/op refusals by name,
+# member keys sealed and never returned, tickets bound to one body and one uid,
+# echo withheld, caller hang-up stops the provider call, Discord's one channel.
+exact mini-keys-broker       mini-keys --test broker -- \
+  start_refuses_every_unsafe_custody_by_name \
+  a_peer_without_a_role_and_an_op_outside_its_role_are_refused_by_name \
+  member_keys_are_sealed_by_the_broker_and_never_come_back \
+  a_ticket_forwards_one_exact_body_with_the_bearer_the_caller_never_sees \
+  an_upstream_that_echoes_the_bearer_is_withheld_and_a_kind_mismatch_refuses \
+  a_caller_that_hangs_up_stops_the_provider_call \
+  the_mirror_posts_and_reads_its_one_channel_without_holding_the_token
 # D9-D11: Discord durable custody, mirror cursor after custody, paged backfill (bce707b7);
 # the custody lease itself moved into mini-sdk (4b2f299d): row sdk-custody
 exact discord-custody        discord-entrance --bin mini-discord-mirror --test endpoint -- \
@@ -397,6 +408,8 @@ exact sdk-golden             mini-sdk --features native --test golden -- \
 # failure, incl. sudo refusing). Unarmed, each run prints NOT-ARMED by name.
 sudo_exact store-anchor-two-uid  hyperdocument-link-sqlite-store --lib -- \
   anchor_tests::anchor_rewritten_by_a_session_uid_refuses
+sudo_exact mini-keys-two-uid    mini-keys --test broker -- \
+  two_uid_a_foreign_account_reaches_only_its_role_and_cannot_read_a_secret
 sudo_exact rc-operator-two-uid   resource-client --bin mini -- \
   transport::tests::transport_operator_socket_two_uid_foreign_process_is_refused
 

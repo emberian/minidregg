@@ -233,6 +233,18 @@ impl Config {
         })
     }
 
+    /// The broker's own load (`mini-keys serve`): the config belongs to root or to
+    /// the broker's own account, and that owner (with root) is the one trusted
+    /// for every root-custody input. On a box it is root; in a sandbox journey
+    /// that runs everything as one account, it is that account.
+    pub fn load_for_broker(path: &Path) -> Result<Self, String> {
+        let owner = std::fs::symlink_metadata(path).map_err(|_| format!("{} is unavailable", path.display()))?.uid();
+        if owner != 0 && owner != peer::euid() {
+            return Err(format!("{} must belong to root or to the broker's own account (uid {})", path.display(), peer::euid()));
+        }
+        Self::load(path, owner)
+    }
+
     pub fn roles_of(&self, peer: &Peer) -> Vec<Role> {
         let mut roles = Vec::new();
         for rule in &self.peers {
@@ -242,6 +254,16 @@ impl Config {
         }
         roles
     }
+}
+
+/// The provider table names where money and members' keys may be sent: it
+/// belongs to root or to the config's owner, and nobody else may write it.
+pub fn provider_table(path: &Path, trust_owner: u32) -> Result<credentials::ProviderTable, String> {
+    let owner = std::fs::symlink_metadata(path).map_err(|e| format!("provider table: {e}"))?.uid();
+    if owner != 0 && owner != trust_owner {
+        return Err("the provider table must belong to root (or the broker config's owner)".into());
+    }
+    credentials::ProviderTable::load(path, owner)
 }
 
 /// A directory nobody but `owner` (or root) may write: a file in it cannot be
@@ -333,7 +355,7 @@ impl Broker {
         if let Some(c) = &config.credentials {
             secret_file(&c.key, "the seal key", 32)?;
             credentials::CredentialStore::open(&c.root, &c.key)?;
-            credentials::ProviderTable::load(&c.providers, config.trust_owner)?;
+            provider_table(&c.providers, config.trust_owner)?;
         }
         if let Some(d) = &config.discord {
             discord::Secrets::load(&d.mirror)?;
@@ -506,7 +528,7 @@ impl Broker {
 
 /// `mini-keys serve`: load a root-owned config and serve forever.
 pub fn serve_box(config: &Path) -> Result<(), String> {
-    let config = Config::load(config, 0)?;
+    let config = Config::load_for_broker(config)?;
     let (broker, listener) = Broker::start(config)?;
     broker.serve(listener)
 }

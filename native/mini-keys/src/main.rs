@@ -62,7 +62,8 @@ fn broker(args: &mut Args) -> Broker {
         }
         (None, None) => {
             let path = args.take("client-config").unwrap_or_else(|| CLIENT_CONFIG.to_owned());
-            Broker::load(Path::new(&path), 0).unwrap_or_else(|e| fail(e))
+            // Root's file on a box (the default); a sandbox's own account's in a journey.
+            Broker::load(Path::new(&path), peer::euid()).unwrap_or_else(|e| fail(e))
         }
         _ => fail("--socket and --uid go together"),
     }
@@ -185,7 +186,7 @@ fn main() {
             let public_key = args.need("public-key");
             args.done();
             let owner = credentials::Owner::new(&subject, &public_key).unwrap_or_else(|e| fail(e));
-            let config = Config::load(&config_path, 0).unwrap_or_else(|e| fail(e));
+            let config = Config::load_for_broker(&config_path).unwrap_or_else(|e| fail(e));
             let c = config.credentials.as_ref().unwrap_or_else(|| fail("the broker config has no credential store"));
             let namespace = credentials::namespace_path(&c.root, credentials::Namespace::Owner(&owner)).unwrap_or_else(|e| fail(e));
             println!(
