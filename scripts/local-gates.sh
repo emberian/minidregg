@@ -38,6 +38,10 @@
 #                  the Lean front end: identity manifest, elaboration cohort, C4 vectors, parser,
 #                  preview cohort, typed examples, and the tutorial re-run; a row with no built
 #                  tree is RED ("needs warm base")
+#   world-cohorts every world/*/*cohort*.json (the worlds ported from Bread: bounty, play, story,
+#                  market, commons, ...) run through the Lean front end preview, every row checked
+#                  against its `expected`; a row count that differs from the file is red, and a
+#                  planted wrong expectation must be refused each run (scripts/check-world-cohorts.sh)
 #   website        website/status.html is what website/gen-status.py generates from README.md's
 #                  Honest state table, and every <pre data-source=PATH> block on a page is text
 #                  of PATH; two controls (a mutated README row, a mutated block) must be refused
@@ -65,7 +69,7 @@ mkdir -p "$logdir"
 lib_targets=$(sed -n '/^\[\[lean_lib\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | grep -v '^ResearchWip$' | tr '\n' ' ')
 exe_targets=$(sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 
-GATES=(host-operations hygiene lake-build cold-start fn-wire hyp-ledger objective-proofs objective-c drift prover-glue build-closure host-closure import-tiers exports shell-paths objective-frontend website rust-tests deploy-scripts spk-shell journey)
+GATES=(host-operations hygiene lake-build cold-start fn-wire hyp-ledger objective-proofs objective-c drift prover-glue build-closure host-closure import-tiers exports shell-paths objective-frontend world-cohorts website rust-tests deploy-scripts spk-shell journey)
 declare -A STATUS SECS LAST
 red=0
 only=${LOCAL_GATES_ONLY:-}
@@ -93,6 +97,7 @@ g_import-tiers()  { bash scripts/check-import-boundary.sh; }
 g_exports()       { bash scripts/check-exports.sh; }
 g_shell-paths()   { bash scripts/check-shell-paths.sh; }
 g_objective-frontend() { bash scripts/check-objective-frontend.sh; }
+g_world-cohorts() { bash scripts/check-world-cohorts.sh; }
 g_website()       { python3 website/gen-status.py --check; }
 g_rust-tests()    { bash scripts/check-rust-tests.sh; }
 g_deploy-scripts() { python3 deploy/pay/test-render-enrol.py && python3 deploy/candidate/test-package.py && bash deploy/candidate/test-lane-build.sh; }
