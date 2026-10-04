@@ -10,3 +10,4 @@ import Theory.ObjectiveBendDemandCompleteness
 import Theory.ObjectiveBendDemandDataSoundness
 import Theory.ObjectiveBendCheckpointRoundTrip
 import Kernel.ObjectiveBendAdmissionSemantics
+import Kernel.ObjectiveResumeContract
