@@ -110,6 +110,10 @@ pub enum Outcome {
     Cancelled,
     Expired,
     Drained,
+    /// The operator attested that the physical execution is over (the lease
+    /// holder is gone and the backend was stopped or checked). Frees the slot;
+    /// a late report from the old holder is then a no-op.
+    OperatorResolved,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -601,6 +605,11 @@ impl Core {
                 lease: Some(actual),
             } if actual == lease
                 && (saved == outcome
+                    || saved == Outcome::OperatorResolved
+                        && matches!(
+                            outcome,
+                            Outcome::Ended | Outcome::NotSent | Outcome::Uncertain
+                        )
                     || outcome == Outcome::NotSent
                         && matches!(
                             saved,
@@ -611,8 +620,13 @@ impl Core {
             }
             _ => return Err("completion does not match an active placement".into()),
         };
-        self.credit(&old.principal, estimated);
-        let service = self.service_us.entry(old.principal).or_default();
+        self.complete(id, old.principal, estimated, elapsed, next);
+        Ok(())
+    }
+
+    fn complete(&mut self, id: &str, principal: String, estimated: u64, elapsed: u64, next: State) {
+        self.credit(&principal, estimated);
+        let service = self.service_us.entry(principal).or_default();
         *service = service.saturating_add(elapsed);
         let completed_service = *service;
         self.jobs.get_mut(id).unwrap().state = next;
@@ -623,6 +637,25 @@ impl Core {
         {
             self.virtual_floor = self.virtual_floor.max(completed_service);
         }
+    }
+
+    /// Operator `resolve`: a sent or uncertain job whose lease holder will never
+    /// report (it died, its controller was retired) holds its group slot forever.
+    /// The operator attests the physical execution is over; the slot is freed
+    /// and the elapsed wall time is charged to the principal as service.
+    pub fn resolve(&mut self, id: &str, now: u64) -> Result<()> {
+        let old = self.jobs.get(id).ok_or("resolve: no live job with that id")?.clone();
+        let (lease, started_ms, estimated_us) = match old.state {
+            State::Dispatched { lease, started_ms, estimated_us, .. }
+            | State::Uncertain { lease, started_ms, estimated_us, .. } => (lease, started_ms, estimated_us),
+            State::Terminal { outcome: Outcome::OperatorResolved, .. } => return Ok(()),
+            _ => return Err("resolve applies only to dispatched or uncertain work; cancel or drain the rest".into()),
+        };
+        let elapsed = now.saturating_sub(started_ms).saturating_mul(1000);
+        self.complete(id, old.principal, estimated_us, elapsed, State::Terminal {
+            outcome: Outcome::OperatorResolved,
+            lease: Some(lease),
+        });
         Ok(())
     }
 

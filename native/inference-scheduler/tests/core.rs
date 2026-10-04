@@ -667,3 +667,35 @@ fn selected_population_concurrency_pairs_share_principals_and_preserve_held_slot
         }
     }
 }
+
+#[test]
+fn dead_lease_holder_frees_its_slot_only_by_operator_resolve() {
+    let cfg = config();
+    let mut core = Core::new(&cfg).unwrap();
+    // gpu-a has one slot. The holder dispatches, then dies; restart quarantines
+    // the attempt as uncertain, which keeps the slot.
+    let held = enqueue(&mut core, &cfg, "a1", "held");
+    let ticket = lease(&core, "a1", &held);
+    core.dispatch("a1", &held.id, ticket, "attempt-held".into(), 5).unwrap();
+    let mut core: Core = serde_json::from_slice(&serde_json::to_vec(&core).unwrap()).unwrap();
+    core.recover(&cfg).unwrap();
+    assert!(matches!(state(&core, "a1", &held), State::Uncertain { .. }));
+    let waiting = enqueue(&mut core, &cfg, "b", "waiting");
+    core.schedule(&cfg, 100).unwrap();
+    assert_eq!(state(&core, "b", &waiting), State::Queued, "slot still held");
+    // Queued work cannot be "resolved"; only the stuck slot can.
+    assert!(core.resolve(&waiting.id, 100).is_err());
+    core.resolve(&held.id, 105).unwrap();
+    assert_eq!(
+        state(&core, "a1", &held),
+        State::Terminal { outcome: Outcome::OperatorResolved, lease: Some(ticket) }
+    );
+    core.schedule(&cfg, 106).unwrap();
+    assert!(matches!(state(&core, "b", &waiting), State::Placed { .. }), "freed slot is reused");
+    // The old holder's late report is a no-op, and charges nothing twice.
+    let service = core.service_us.clone();
+    core.finish("a1", &held.id, ticket, Outcome::Ended, 200).unwrap();
+    assert_eq!(core.service_us, service);
+    core.resolve(&held.id, 300).unwrap();
+    assert_eq!(core.service_us, service);
+}

@@ -181,6 +181,15 @@ occupancy. `uncertain` requires actual transport/backend evidence and controller
 reconciliation; resume never erases it. A page with `quiescent: true` describes
 physical occupancy, not completion of Mini settlement or response delivery.
 
+When the lease holder of dispatched or uncertain work is gone for good (its
+controller died or was retired), only the operator can release the slot:
+`sudo "$B" resolve "$S" JOB_ID` attests that the physical execution is over
+(the backend was stopped or checked), terminalizes the job as
+`operator-resolved`, frees its group slot and charges the elapsed wall time as
+service. It refuses queued and placed work (cancel or drain those). A late
+report from the old holder is then a no-op. Snapshots carrying
+`operator-resolved` do not load in older binaries.
+
 The unit drains on intentional stop/restart, waits up to 50 seconds, then stops.
 Restart retains that flag until explicit resume. `mini-components --apply` and
 `--check` surface `DRAINED; explicit resume required` and return nonzero instead

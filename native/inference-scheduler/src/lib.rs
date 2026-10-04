@@ -53,6 +53,11 @@ pub enum Command {
         controller: String,
         id: String,
     },
+    /// Operator only: free the slot of dispatched/uncertain work whose lease
+    /// holder is gone (`Core::resolve`).
+    Resolve {
+        id: String,
+    },
 }
 
 impl Command {
@@ -63,7 +68,10 @@ impl Command {
             | Self::Dispatch { controller, .. }
             | Self::Finish { controller, .. }
             | Self::Cancel { controller, .. } => Some(controller),
-            Self::Status { .. } | Self::StatusGroups { .. } | Self::Drain { .. } => None,
+            Self::Status { .. }
+            | Self::StatusGroups { .. }
+            | Self::Drain { .. }
+            | Self::Resolve { .. } => None,
         }
     }
 }

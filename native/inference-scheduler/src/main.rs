@@ -40,8 +40,13 @@ fn run() -> Result<(), String> {
             if wait != 0 && !status.quiescent { return Err("drain is durable; running or uncertain work remains (no capacity was erased)".into()); }
             Ok(())
         }
+        ["resolve", socket, id] => {
+            // The operator attests the job's physical execution is over.
+            let status = operate(Path::new(socket), &Command::Resolve { id: (*id).to_owned() })?;
+            println!("{}", serde_json::to_string_pretty(&status).map_err(|e| e.to_string())?); Ok(())
+        }
         [path, state, socket] => Service::open(config(path, 0)?, Path::new(state))?.serve(Path::new(socket)),
-        _ => Err("usage: mini-inference-scheduler CONFIG STATE_DIR SOCKET | check CONFIG | status SOCKET [AFTER_ID] | status-groups SOCKET [AFTER_GROUP] | drain SOCKET [WAIT_SECONDS] | resume SOCKET".into()),
+        _ => Err("usage: mini-inference-scheduler CONFIG STATE_DIR SOCKET | check CONFIG | status SOCKET [AFTER_ID] | status-groups SOCKET [AFTER_GROUP] | drain SOCKET [WAIT_SECONDS] | resume SOCKET | resolve SOCKET JOB_ID".into()),
     }
 }
 

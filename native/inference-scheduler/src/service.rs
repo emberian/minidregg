@@ -336,7 +336,10 @@ impl Service {
             }
         }
         let id = match command {
-            Command::Status { .. } | Command::StatusGroups { .. } | Command::Drain { .. } => {
+            Command::Status { .. }
+            | Command::StatusGroups { .. }
+            | Command::Drain { .. }
+            | Command::Resolve { .. } => {
                 return Err("operator command requires operator path".into())
             }
             Command::Enqueue { job, .. } => {
@@ -398,17 +401,23 @@ impl Service {
         limit: u16,
         now: u64,
     ) -> Result<Status> {
-        self.operator_page(uid, draining, after, limit, None, now)
+        self.operator_page(uid, draining, None, after, limit, None, now)
     }
 
     pub fn operator_groups(&mut self, uid: u32, after: Option<&str>, now: u64) -> Result<Status> {
-        self.operator_page(uid, None, None, 32, after, now)
+        self.operator_page(uid, None, None, None, 32, after, now)
     }
 
+    pub fn operator_resolve(&mut self, uid: u32, id: &str, now: u64) -> Result<Status> {
+        self.operator_page(uid, None, Some(id), None, 64, None, now)
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn operator_page(
         &mut self,
         uid: u32,
         draining: Option<bool>,
+        resolve: Option<&str>,
         after: Option<&str>,
         limit: u16,
         group_after: Option<&str>,
@@ -426,6 +435,9 @@ impl Service {
         let mut next = self.core.clone();
         if let Some(enabled) = draining {
             next.set_draining(enabled);
+        }
+        if let Some(id) = resolve {
+            next.resolve(id, now)?;
         }
         next.schedule(&self.config, now)?;
         if next != self.core {
@@ -495,6 +507,11 @@ impl Service {
                         }),
                     Command::Drain { enabled } => self
                         .operator(uid, Some(enabled), None, 64, now_ms())
+                        .map(|status| Reply::Status {
+                            status: Box::new(status),
+                        }),
+                    Command::Resolve { id } => self
+                        .operator_resolve(uid, &id, now_ms())
                         .map(|status| Reply::Status {
                             status: Box::new(status),
                         }),
