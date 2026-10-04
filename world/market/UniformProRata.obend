@@ -1,0 +1,154 @@
+edition ObjectiveBend 1
+# The distinct DrEX mechanism: two-sided uniform price, lowest-grid-index volume
+# argmax, exact integer largest-remainder allocation, original-index tie-break.
+# The complete admitted ordered book and the public grid (a level count) are inputs,
+# never worker output: there is no float tolerance and no worker-selected order.
+#
+# Port of examples/objective-bend-collective/UniformProRata.bend.
+# Representation changes: subject and reservation are opaque String labels; `Side` is
+# a two-case sum; lists are Nil/Cons sums per element type (Core4 sums are monomorphic).
+# Omitted (Objective laws are retained, never checked; kept as a named property):
+#   invalid_grid_refused: allocate(0, orders) == InvalidGrid  (for every book)
+# Still open as in the Gen-1 source: general conservation, capacity and optimality.
+import ./MarketMath.obend as Math
+
+sum Side:
+  bid: {}
+  ask: {}
+
+record Order:
+  subject: String
+  reservation: String
+  side: Side
+  limit: Nat
+  quantity: Nat
+
+record Fill:
+  position: Nat
+  order: Order
+  units: Nat
+
+record Clearing:
+  price: Nat
+  volume: Nat
+  fills: FillList
+
+record Crossing:
+  price: Nat
+  volume: Nat
+
+record Share:
+  position: Nat
+  order: Order
+  enabled: Bool
+  floor: Nat
+  remainder: Nat
+
+sum Result:
+  invalidGrid: {}
+  cleared: Clearing
+
+sum OrderList:
+  nil: {}
+  cons: {head: Order, tail: OrderList}
+
+sum FillList:
+  nil: {}
+  cons: {head: Fill, tail: FillList}
+
+sum ShareList:
+  nil: {}
+  cons: {head: Share, tail: ShareList}
+
+def sameSide(a: Side, b: Side) -> Bool:
+  match a:
+    case bid(_):
+      match b:
+        case bid(_): true
+        case ask(_): false
+    case ask(_):
+      match b:
+        case bid(_): false
+        case ask(_): true
+
+# An order trades at a price when the price is inside its limit.
+def active(side: Side, limit: Nat, price: Nat) -> Bool:
+  match side:
+    case bid(_): Math.le(price, limit)
+    case ask(_): Math.le(limit, price)
+
+def total(side: Side, price: Nat, orders: OrderList) -> Nat:
+  match orders:
+    case nil(_): 0n
+    case cons(c): Math.chooseNat(c.head.quantity, 0n, sameSide(side, c.head.side) && active(c.head.side, c.head.limit, price)) + total(side, price, c.tail)
+
+def volume(price: Nat, orders: OrderList) -> Nat:
+  Math.min(total(Side.bid(), price, orders), total(Side.ask(), price, orders))
+
+# Scans `levels` grid prices upward from `price`; a strictly better volume replaces
+# the best so far, so the lowest grid index wins ties.
+def scan(levels: Nat, price: Nat, orders: OrderList, bestPrice: Nat, bestVolume: Nat) -> Crossing:
+  match levels:
+    case 0n: {price: bestPrice, volume: bestVolume}
+    case 1n+remaining: scanStep(remaining, price, orders, bestPrice, bestVolume, volume(price, orders))
+
+def scanStep(remaining: Nat, price: Nat, orders: OrderList, bestPrice: Nat, bestVolume: Nat, current: Nat) -> Crossing:
+  scanNext(remaining, price, orders, bestPrice, bestVolume, current, Math.lt(bestVolume, current))
+
+def scanNext(remaining: Nat, price: Nat, orders: OrderList, bestPrice: Nat, bestVolume: Nat, current: Nat, better: Bool) -> Crossing:
+  scan(remaining, price + 1n, orders, Math.chooseNat(price, bestPrice, better), Math.chooseNat(current, bestVolume, better))
+
+def sideValue(side: Side, bid: Nat, ask: Nat) -> Nat:
+  match side:
+    case bid(_): bid
+    case ask(_): ask
+
+def makeShare(position: Nat, order: Order, enabled: Bool, division: Math.Division) -> Share:
+  {position: position, order: order, enabled: enabled, floor: division.quotient, remainder: division.remainder}
+
+def shareDivision(quantity: Nat, volume: Nat, denominator: Nat, enabled: Bool) -> Math.Division:
+  if enabled then Math.divide(quantity * volume, denominator) else {quotient: 0n, remainder: 0n}
+
+def shares(price: Nat, volume: Nat, bidTotal: Nat, askTotal: Nat, orders: OrderList, position: Nat) -> ShareList:
+  match orders:
+    case nil(_): ShareList.nil()
+    case cons(c): sharesFor(c.head, c.tail, price, volume, bidTotal, askTotal, position, active(c.head.side, c.head.limit, price))
+
+def sharesFor(order: Order, rest: OrderList, price: Nat, volume: Nat, bidTotal: Nat, askTotal: Nat, position: Nat, enabled: Bool) -> ShareList:
+  ShareList.cons({head: makeShare(position, order, enabled, shareDivision(order.quantity, volume, sideValue(order.side, bidTotal, askTotal), enabled)), tail: shares(price, volume, bidTotal, askTotal, rest, position + 1n)})
+
+def floors(side: Side, entries: ShareList) -> Nat:
+  match entries:
+    case nil(_): 0n
+    case cons(c): Math.chooseNat(c.head.floor, 0n, sameSide(side, c.head.order.side)) + floors(side, c.tail)
+
+# Other has a strictly better remainder, or an equal one at an earlier position.
+def better(position: Nat, remainder: Nat, otherPosition: Nat, otherRemainder: Nat) -> Bool:
+  Math.chooseBool(Math.lt(otherPosition, position), Math.lt(remainder, otherRemainder), remainder == otherRemainder)
+
+# Number of enabled same-side entries ranked strictly ahead. Deriving the rank from
+# the complete book keeps a certificate from selecting the tie order.
+def rank(side: Side, position: Nat, remainder: Nat, entries: ShareList) -> Nat:
+  match entries:
+    case nil(_): 0n
+    case cons(c): Math.chooseNat(1n, 0n, c.head.enabled && sameSide(side, c.head.order.side) && better(position, remainder, c.head.position, c.head.remainder)) + rank(side, position, remainder, c.tail)
+
+def unitsFor(share: Share, all: ShareList, bonus: Nat) -> Nat:
+  Math.chooseNat(share.floor + 1n, share.floor, share.enabled && Math.lt(rank(share.order.side, share.position, share.remainder, all), bonus))
+
+def finish(entries: ShareList, all: ShareList, bidBonus: Nat, askBonus: Nat) -> FillList:
+  match entries:
+    case nil(_): FillList.nil()
+    case cons(c): FillList.cons({head: {position: c.head.position, order: c.head.order, units: unitsFor(c.head, all, sideValue(c.head.order.side, bidBonus, askBonus))}, tail: finish(c.tail, all, bidBonus, askBonus)})
+
+def clear(orders: OrderList, crossing: Crossing) -> Result:
+  clearEntries(crossing.price, crossing.volume, shares(crossing.price, crossing.volume, total(Side.bid(), crossing.price, orders), total(Side.ask(), crossing.price, orders), orders, 0n))
+
+def clearEntries(price: Nat, vol: Nat, entries: ShareList) -> Result:
+  Result.cleared({price: price, volume: vol, fills: finish(entries, entries, Math.sub(vol, floors(Side.bid(), entries)), Math.sub(vol, floors(Side.ask(), entries)))})
+
+# `levels` is the public grid size: prices 0 .. levels-1. An empty grid is refused.
+def allocate(levels: Nat, orders: OrderList) -> Result:
+  match levels:
+    case 0n: Result.invalidGrid()
+    case 1n+remaining: clear(orders, scan(remaining + 1n, 0n, orders, 0n, 0n))

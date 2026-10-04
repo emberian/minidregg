@@ -3,6 +3,7 @@ edition ObjectiveBend 1
 # Each entry returns a Nat or Bool so the preview cohort can pin the value.
 import ./MarketMath.obend as Math
 import ./SingleSellerAllocation.obend as Seller
+import ./UniformProRata.obend as Uniform
 
 # ---- MarketMath: arithmetic spot checks ----
 def divideQuotient(n: Nat, divisor: Nat) -> Nat:
@@ -88,3 +89,96 @@ def allocEmpty(which: Nat) -> Nat:
 
 def allocDry(which: Nat) -> Nat:
   readout(Seller.allocate(0n, one(order("A", "21", 5n, 4n))), which)
+
+# ---- UniformProRata ----
+def uniformOrder(subject: String, isBid: Bool, limit: Nat, quantity: Nat) -> Uniform.Order:
+  {subject: subject, reservation: subject, side: if isBid then Uniform.Side.bid() else Uniform.Side.ask(), limit: limit, quantity: quantity}
+
+def uniformCons(head: Uniform.Order, tail: Uniform.OrderList) -> Uniform.OrderList:
+  Uniform.OrderList.cons({head: head, tail: tail})
+
+def uniformNil() -> Uniform.OrderList:
+  Uniform.OrderList.nil()
+
+def uniformUnits(side: Uniform.Side, fills: Uniform.FillList) -> Nat:
+  match fills:
+    case nil(_): 0n
+    case cons(c): Math.chooseNat(c.head.units, 0n, Uniform.sameSide(side, c.head.order.side)) + uniformUnits(side, c.tail)
+
+def uniformUnitsAt(fills: Uniform.FillList, position: Nat) -> Nat:
+  match fills:
+    case nil(_): 0n
+    case cons(c): if c.head.position == position then c.head.units else uniformUnitsAt(c.tail, position)
+
+def uniformFillCount(fills: Uniform.FillList) -> Nat:
+  match fills:
+    case nil(_): 0n
+    case cons(c): 1n + uniformFillCount(c.tail)
+
+# 0 price, 1 volume, 2 number of fills, 3 total bid units, 4 total ask units,
+# 5 + p the units filled at original position p.
+def clearingReadout(c: Uniform.Clearing, which: Nat) -> Nat:
+  match which:
+    case 0n: c.price
+    case 1n+w1:
+      match w1:
+        case 0n: c.volume
+        case 1n+w2:
+          match w2:
+            case 0n: uniformFillCount(c.fills)
+            case 1n+w3:
+              match w3:
+                case 0n: uniformUnits(Uniform.Side.bid(), c.fills)
+                case 1n+w4:
+                  match w4:
+                    case 0n: uniformUnits(Uniform.Side.ask(), c.fills)
+                    case 1n+position: uniformUnitsAt(c.fills, position)
+
+def uniformReadout(r: Uniform.Result, which: Nat) -> Nat:
+  match r:
+    case invalidGrid(_): 0n
+    case cleared(c): clearingReadout(c, which)
+
+def uniformCleared(r: Uniform.Result) -> Bool:
+  match r:
+    case invalidGrid(_): false
+    case cleared(_): true
+
+# Bids B1 (limit 6, 4) and B2 (limit 5, 4) against asks A1 (limit 3, 3) and A2 (limit 5, 4).
+# Volume peaks at 7 at price 5. The bid side is rationed 4*7/8 = 3.5: both floor to 3
+# with equal remainder 4, and the single bonus unit goes to the earlier position.
+def rationedBook() -> Uniform.OrderList:
+  uniformCons(uniformOrder("B1", true, 6n, 4n), uniformCons(uniformOrder("B2", true, 5n, 4n), uniformCons(uniformOrder("A1", false, 3n, 3n), uniformCons(uniformOrder("A2", false, 5n, 4n), uniformNil()))))
+
+# Bids of 5, 5 and 2 (limits 5, 5, 4) against two asks: volume 7 at price 4. The bids
+# (total 12) floor to 2, 2, 1 with remainders 11, 11, 2; the two bonus units go to the
+# two bids with the best remainder (positions 0 and 2), giving 3, 3, 1.
+def threeBidsBook() -> Uniform.OrderList:
+  uniformCons(uniformOrder("B1", true, 5n, 5n), uniformCons(uniformOrder("A1", false, 2n, 4n), uniformCons(uniformOrder("B2", true, 5n, 5n), uniformCons(uniformOrder("B3", true, 4n, 2n), uniformCons(uniformOrder("A2", false, 4n, 3n), uniformNil())))))
+
+# The limits never cross: volume 0 everywhere, so the lowest index (price 0) wins.
+def noCrossBook() -> Uniform.OrderList:
+  uniformCons(uniformOrder("B1", true, 2n, 5n), uniformCons(uniformOrder("A1", false, 4n, 5n), uniformNil()))
+
+# Volume 2 at both price 1 and price 2: the lowest grid index wins.
+def lowestIndexBook() -> Uniform.OrderList:
+  uniformCons(uniformOrder("B1", true, 3n, 2n), uniformCons(uniformOrder("A1", false, 1n, 2n), uniformNil()))
+
+def uniRationed(which: Nat) -> Nat:
+  uniformReadout(Uniform.allocate(9n, rationedBook()), which)
+
+def uniThreeBids(which: Nat) -> Nat:
+  uniformReadout(Uniform.allocate(8n, threeBidsBook()), which)
+
+def uniNoCross(which: Nat) -> Nat:
+  uniformReadout(Uniform.allocate(6n, noCrossBook()), which)
+
+def uniLowestIndex(which: Nat) -> Nat:
+  uniformReadout(Uniform.allocate(6n, lowestIndexBook()), which)
+
+def uniEmpty(which: Nat) -> Nat:
+  uniformReadout(Uniform.allocate(4n, uniformNil()), which)
+
+# An empty grid is refused (invalid_grid_refused), for any book.
+def uniGridCleared(levels: Nat) -> Bool:
+  uniformCleared(Uniform.allocate(levels, rationedBook()))
