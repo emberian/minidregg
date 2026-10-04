@@ -12,6 +12,7 @@ open Minidregg.Compiler
 open Minidregg.Compiler.ResourceBirthCodec
 open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Kernel.NativeHost
+open Minidregg.Theory.TypedAuthorization (Digest)
 
 set_option autoImplicit false
 
