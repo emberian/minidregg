@@ -3,6 +3,16 @@
 //! No ideal rank oracle/stock: every newly entered view uses fresh ASKS.
 //! The author-code availability/value adapters below differ from two printed
 //! predicates; this implementation does not claim the printed theorem transfers.
+//! Evidence for the choice is executed, in `vaba/byz.rs` (seeded Byzantine
+//! schedules, `cfg(test)` only): read literally, Alg6 L11 (`P_j subset Valid_i`)
+//! and Alg5 L18 (`vote_j in IGValid_i`, vote value read as a broadcaster index)
+//! each lose TERMINATION in schedules where the implemented predicates decide
+//! (`printed_predicates::*`) and stay safe. The implemented L18 predicate is what
+//! keeps every view-v+1 tally entry equal to a locked value (Lemma 5.2 as printed);
+//! RA-input agreement (Lemma 5.3) is argued not to need it (a mutant without it
+//! trips only the LOCK check). Lemma 4.5's cover set Y is
+//! the union of honest LOCALLY VALIDATED sets, not of IGValid
+//! (`pinned::icg_cover_is_union_of_locally_validated_not_of_igvalid`).
 //! Pure transition state: caller must persist event + exact outbox BEFORE send,
 //! and entropy coefficients BEFORE their first emitted share. Use vaba_store.
 use crate::{
@@ -150,6 +160,24 @@ pub struct Vaba {
     final_ra: Bracha,
     stop_after: Option<u64>,
     pub output: Option<u16>,
+    #[cfg(test)]
+    pub(crate) knobs: Knobs,
+}
+/// Test-only instruments for the adversarial harness. Production behaviour is
+/// the `Default`; nothing outside `cfg(test)` can name or set these.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Knobs {
+    /// (seed, per-mille; >= 2000 means a deterministic rotation that keeps
+    /// honest parties on different leaders): with this probability a party picks its leader as a
+    /// pseudo-random member of its ICG output instead of the maximum rank.
+    /// Models ranks wholly controlled by the adversary; the paper's validity
+    /// and agreement arguments claim not to depend on ranks.
+    pub chaos: Option<(u64, u64)>,
+    /// Alg6 L11 read literally: `P_j subset Valid_i` (external validity of ASKS dealers).
+    pub printed_availability: bool,
+    /// Alg5 L18 read literally: `vote_j in IGValid_i` with the vote VALUE read as a broadcaster index.
+    pub printed_vote_membership: bool,
 }
 impl Vaba {
     pub fn new(me: u16, n: usize, f: usize, g: &Generation) -> Result<Self> {
@@ -173,6 +201,8 @@ impl Vaba {
             final_ra: Bracha::new(n, f, None),
             stop_after: None,
             output: None,
+            #[cfg(test)]
+            knobs: Knobs::default(),
         };
         s.add_view(0, None, Votes::new())?;
         Ok(s)
@@ -393,11 +423,14 @@ impl Vaba {
                             .all(|(k, x)| previous.get(k) == Some(x))
                         && is_most_frequent(&p.justification, p.value)
                 };
-                if self.valid.contains(&p.value)
-                    && p.keys.len() > self.f
-                    && p.keys.is_subset(&s.shared)
-                    && prior_ok
-                {
+                let available = p.keys.is_subset(&s.shared);
+                #[cfg(test)]
+                let available = if self.knobs.printed_availability {
+                    p.keys.is_subset(&self.valid)
+                } else {
+                    available
+                };
+                if self.valid.contains(&p.value) && p.keys.len() > self.f && available && prior_ok {
                     s.locally_validated.insert(j);
                     cover_out.extend(s.cover.validate(j)?);
                 }
@@ -426,6 +459,27 @@ impl Vaba {
                                 (rank(s.context, **j, &s.proposals[*j].keys, &s.asks), **j)
                             })
                             .unwrap();
+                        #[cfg(test)]
+                        let leader = match self.knobs.chaos {
+                            Some((seed, per_mille)) => {
+                                let mut h = seed
+                                    ^ (self.me as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                                    ^ v.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+                                h = (h ^ (h >> 30)).wrapping_mul(0x94D0_49BB_1331_11EB);
+                                h ^= h >> 31;
+                                if per_mille >= 2000 {
+                                    // Anti-agreement: honest parties rotate through different members.
+                                    let members: Vec<_> = x.iter().collect();
+                                    members[(self.me as usize + v as usize) % members.len()]
+                                } else if h % 1000 < per_mille {
+                                    let members: Vec<_> = x.iter().collect();
+                                    members[((h >> 20) as usize) % members.len()]
+                                } else {
+                                    leader
+                                }
+                            }
+                            None => leader,
+                        };
                         s.vote_sent = true;
                         bodies.push(Body::Vote(
                             self.me,
@@ -439,11 +493,18 @@ impl Vaba {
                     let value = read_vote(b, self.n)?;
                     // Proposal VALUE versus broadcaster index. Author predicate:
                     // exists completed validated prevote with this value.
-                    if s.proposals.iter().any(|(k, p)| {
+                    let admitted = s.proposals.iter().any(|(k, p)| {
                         s.locally_validated.contains(k)
                             && s.cover.ig_valid.contains(k)
                             && p.value == value
-                    }) {
+                    });
+                    #[cfg(test)]
+                    let admitted = if self.knobs.printed_vote_membership {
+                        s.cover.ig_valid.contains(&value)
+                    } else {
+                        admitted
+                    };
+                    if admitted {
                         s.tally.entry(j as u16).or_insert(value);
                     }
                 }
@@ -552,6 +613,8 @@ fn rank(context: [u8; 32], j: u16, keys: &Set, asks: &[Asks]) -> [u8; 32] {
     }
     sum
 }
+#[cfg(test)]
+mod byz;
 #[cfg(test)]
 mod tests {
     use super::*;

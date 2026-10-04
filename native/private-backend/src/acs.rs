@@ -102,6 +102,10 @@ impl Acs {
     pub fn entropy_needed(&self) -> Vec<u64> {
         self.vaba.entropy_needed()
     }
+    #[cfg(test)]
+    pub(crate) fn selector_outputs_for_test(&self) -> Vec<Option<Vec<u8>>> {
+        self.selectors.iter().map(|s| s.output.clone()).collect()
+    }
     pub fn dealer(&mut self, v: u64, c: &[Vec<crate::reconstruction::Field>]) -> Result<Vec<Send>> {
         let out = self.vaba.dealer(v, c)?;
         let mut out = self.packets(out);
