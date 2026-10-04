@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -71,6 +71,49 @@ pub fn path(root: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
+/// The anchor is the Store's durable high-water mark, so its custody is the
+/// Store's account alone: the anchor and its lock are regular files owned by
+/// the Store's effective uid with no group/other bits, and their directory is
+/// one that no other account can rename into or out of — owned by the Store's
+/// uid or root, and either not writable by group/others or sticky (where only
+/// a file's owner may rename or unlink it). Anything else refuses: an account
+/// that could rewrite the anchor could rewind the Store below its checkpoint
+/// and re-derive a matching head (the head is an unkeyed digest).
+pub(crate) fn custody(
+    file: Option<&fs::Metadata>,
+    directory: &fs::Metadata,
+    owner: u32,
+) -> Result<(), StoreError> {
+    if !directory.is_dir() || (directory.uid() != owner && directory.uid() != 0) {
+        return Err(StoreError::Anchor("anchor directory is not owned by the Store's user or root"));
+    }
+    if directory.mode() & 0o022 != 0 && directory.mode() & 0o1000 == 0 {
+        return Err(StoreError::Anchor("anchor directory is writable by another account"));
+    }
+    if let Some(file) = file {
+        if !file.is_file() || file.mode() & 0o077 != 0 {
+            return Err(StoreError::Anchor("anchor must be a private regular file"));
+        }
+        if file.uid() != owner {
+            return Err(StoreError::Anchor("anchor is not owned by the Store's user"));
+        }
+    }
+    Ok(())
+}
+
+fn store_uid() -> u32 {
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    unsafe { libc::geteuid() }
+}
+
+fn directory_of(path: &Path) -> Result<fs::Metadata, StoreError> {
+    let parent = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    Ok(fs::metadata(parent)?)
+}
+
 pub(crate) struct Guard {
     path: PathBuf,
     _lock: File,
@@ -91,6 +134,7 @@ impl Guard {
         if !lock.metadata()?.is_file() {
             return Err(StoreError::Anchor("anchor lock is not a regular file"));
         }
+        custody(Some(&lock.metadata()?), &directory_of(&path)?, store_uid())?;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
             // SAFETY: this owned file descriptor remains open throughout the guard.
@@ -122,9 +166,7 @@ impl Guard {
             Err(e) => return Err(e.into()),
         };
         let metadata = file.metadata()?;
-        if !metadata.is_file() || metadata.permissions().mode() & 0o077 != 0 {
-            return Err(StoreError::Anchor("anchor must be a private regular file"));
-        }
+        custody(Some(&metadata), &directory_of(&self.path)?, store_uid())?;
         let mut bytes = Vec::new();
         file.take(81).read_to_end(&mut bytes)?;
         Ok(Some(Head::decode(&bytes)?))

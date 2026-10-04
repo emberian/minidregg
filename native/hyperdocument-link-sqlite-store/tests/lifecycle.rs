@@ -24,6 +24,9 @@ impl TempDir {
             std::process::id()
         ));
         fs::create_dir(&path).expect("create test directory");
+        // The anchor's directory must be the Store account's alone (anchor custody).
+        fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .expect("make test directory private");
         Self(path)
     }
 

@@ -393,7 +393,13 @@ impl SqliteByteStore {
         if identity.len() > 65536 {
             return Err(StoreError::Anchor("identity exceeds 64 KiB"));
         }
-        fs::create_dir_all(root.as_ref())?;
+        // The Store's directories are its own account's: created owner-private
+        // whatever the caller's umask, so the sibling anchor's directory passes
+        // its custody check (anchor::custody) by construction.
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            fs::DirBuilder::new().recursive(true).mode(0o700).create(root.as_ref())?;
+        }
         // Canonicalize the already-created directory before asking SQLite for
         // `SQLITE_OPEN_NOFOLLOW`.  On macOS `/var` itself is a compatibility
         // symlink to `/private/var`; retaining that spelling would make the
@@ -1209,6 +1215,86 @@ mod anchor_tests {
         ));
         a.durable_anchor_enroll().unwrap();
         assert_eq!(a.durable_read(3, false).unwrap().head, 2);
+    }
+    #[test]
+    fn anchor_custody_refuses_a_foreign_owner_and_a_shared_directory() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = store();
+        let anchor_path = anchor::path(s.root());
+        let directory = anchor_path.parent().unwrap().to_owned();
+        let me = unsafe { libc::geteuid() };
+        let file = fs::metadata(&anchor_path).unwrap();
+        let dir = fs::metadata(&directory).unwrap();
+        assert!(anchor::custody(Some(&file), &dir, me).is_ok());
+        // The same bytes held by another account: refused, whoever wrote them.
+        assert!(matches!(
+            anchor::custody(Some(&file), &dir, me.wrapping_add(1)),
+            Err(StoreError::Anchor(_))
+        ));
+        // A directory another account may write (rename a forged anchor in): refused.
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o770)).unwrap();
+        assert!(matches!(
+            s.durable_read(1, true),
+            Err(StoreError::Anchor("anchor directory is writable by another account"))
+        ));
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o757)).unwrap();
+        assert!(matches!(s.durable_read(1, true), Err(StoreError::Anchor(_))));
+        // Sticky: only the owner may rename or unlink its files there.
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o1777)).unwrap();
+        assert_eq!(s.durable_read(1, true).unwrap().head, 2);
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(s.durable_read(1, true).unwrap().head, 2);
+        // A loose mode on the anchor itself refuses as before.
+        fs::set_permissions(&anchor_path, fs::Permissions::from_mode(0o640)).unwrap();
+        assert!(matches!(s.durable_read(1, true), Err(StoreError::Anchor(_))));
+    }
+
+    /// Two real uids (Linux, `sudo -n setpriv`):
+    /// MINI_TEST_FOREIGN_UID=65534 cargo nextest run --run-ignored all -E 'test(anchor_rewritten_by_a_session_uid)'
+    /// A session account cannot write the Store's anchor in place, cannot rename
+    /// over it in a sticky directory, and a forged anchor it does manage to
+    /// install (a misdeployed, other-writable directory) refuses every read.
+    #[test]
+    #[ignore]
+    fn anchor_rewritten_by_a_session_uid_refuses() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::Command;
+        let foreign: u32 = std::env::var("MINI_TEST_FOREIGN_UID").expect("MINI_TEST_FOREIGN_UID").parse().unwrap();
+        let s = store();
+        let anchor_path = anchor::path(s.root());
+        let directory = anchor_path.parent().unwrap().to_owned();
+        let older = fs::read(&anchor_path).unwrap();
+        s.durable_append(3, b"third", b"tag-three").unwrap();
+        // The session account's attempt: write the older head in place, else
+        // rename a forged copy over the anchor. Prints what happened.
+        let attempt = |label: &str| -> String {
+            let script = "import os,sys\npath,older=sys.argv[1],bytes.fromhex(sys.argv[2])\ntry:\n  open(path,'r+b').write(older); print('WROTE'); sys.exit(0)\nexcept PermissionError: pass\ntry:\n  forged=path+'.forged.'+str(os.getpid())\n  f=os.open(forged,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600); os.write(f,older); os.close(f)\n  os.rename(forged,path); print('RENAMED')\nexcept PermissionError: print('EACCES')";
+            let hex: String = older.iter().map(|b| format!("{b:02x}")).collect();
+            let output = Command::new("sudo")
+                .args(["-n", "setpriv", &format!("--reuid={foreign}"), &format!("--regid={foreign}"), "--clear-groups", "--", "python3", "-c", script, anchor_path.to_str().unwrap(), &hex])
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{label}: {}", String::from_utf8_lossy(&output.stderr));
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(attempt("private directory"), "EACCES");
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o1777)).unwrap();
+        assert_eq!(attempt("sticky directory"), "EACCES");
+        assert_eq!(s.durable_read(1, true).unwrap().head, 3);
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o777)).unwrap();
+        assert_eq!(attempt("misdeployed directory"), "RENAMED");
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        // The forged anchor (the session's older head, the session's file)
+        // refuses: by custody, or before it by being unreadable to the Store.
+        let forged = fs::symlink_metadata(&anchor_path).unwrap();
+        assert_eq!(std::os::unix::fs::MetadataExt::uid(&forged), foreign);
+        assert!(matches!(
+            anchor::custody(Some(&forged), &fs::metadata(&directory).unwrap(), unsafe { libc::geteuid() }),
+            Err(StoreError::Anchor("anchor is not owned by the Store's user"))
+        ));
+        assert!(s.durable_read(1, true).is_err());
+        assert!(s.durable_append(4, b"four", b"tag-four").is_err());
     }
     #[test]
     fn whole_database_replacement_is_detected_by_sibling_anchor() {

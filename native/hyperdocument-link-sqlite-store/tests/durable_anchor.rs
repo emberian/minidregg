@@ -16,6 +16,8 @@ fn directory() -> PathBuf {
             .as_nanos()
     ));
     fs::create_dir(&path).unwrap();
+    // The anchor's directory must be the Store account's alone (anchor custody).
+    fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
     path
 }
 
