@@ -16,7 +16,8 @@ namespace Minidregg.Kernel.PayEnrolMemoV2
 open Minidregg.Compiler
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization (Digest)
-open PayEnrolMemo (b64Encode b64Decode cut cut_append)
+open PayEnrolMemo (cut cut_append)
+open Base64 (b64Encode b64Decode)
 
 set_option autoImplicit false
 
@@ -244,7 +245,7 @@ theorem binary_length {memo : Memo} (wf : memo.WellFormed) :
 theorem encode_length {memo : Memo} (wf : memo.WellFormed) :
     (encode memo).length = memoLength := by
   have divisible : (binary memo).length % 3 = 0 := by rw [binary_length wf]; decide
-  rw [encode, List.length_append, PayEnrolMemo.b64Encode_length _ divisible, binary_length wf]
+  rw [encode, List.length_append, Base64.b64Encode_length _ divisible, binary_length wf]
   norm_num [memoPrefix, memoLength, binaryLength]
   decide +kernel
 
@@ -267,7 +268,7 @@ theorem rawParse_encode {memo : Memo} (wf : memo.WellFormed) :
   unfold rawParse encode
   simp only [List.flatten_cons, List.flatten_nil, List.append_nil] at pieces
   rw [pieces]
-  simp [PayEnrolMemo.b64Decode_b64Encode _ divisible, decodeBinary_binary wf]
+  simp [Base64.b64Decode_b64Encode _ divisible, decodeBinary_binary wf]
 
 /-- Every well-formed source value is accepted with every field intact. -/
 theorem parse_encode {memo : Memo} (wf : memo.WellFormed) :

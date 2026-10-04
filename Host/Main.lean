@@ -105,6 +105,7 @@ import Kernel.FnReplyPublication
 import Kernel.FnReplyConsumption
 import Kernel.FnOriginOutbox
 import Kernel.FnPortableSource
+import Host.FnOutcome
 import Kernel.FnSelectiveReleaseReceiver
 import Kernel.ApplicationShareIssueReceiver
 import Kernel.ApplicationShareIssueAuthoring
@@ -3130,6 +3131,30 @@ def projectFnPoll (fnBinary : String) (pin : FnPollScopePin)
   IO.ofExcept (pin.check projection)
   pure (cursor, report, projection)
 
+/-- One local fn command: stdout bounded, a stderr prefix drained concurrently
+so fn can never block on it, and the exit code. -/
+def runFnLocal (fnBinary : String) (args : Array String) (stdoutBound : Nat) :
+    IO (Nat × List UInt8 × ByteArray) := do
+  let child ← IO.Process.spawn
+    { cmd := fnBinary, args := args, stdin := .null, stdout := .piped, stderr := .piped }
+  let stderrTask ← IO.asTask (readDiagnosticStderr child.stderr 2048)
+  let output ← try readBoundedLoop child.stdout stdoutBound
+    catch error =>
+      child.kill
+      discard <| child.wait
+      throw error
+  let exitCode ← child.wait
+  let stderrBytes ← match stderrTask.get with
+    | .ok bytes => pure bytes
+    | .error error => throw error
+  return (exitCode.toNat, output, stderrBytes)
+
+/-- The refusal names fn's outcome class and reason word (`Host.FnOutcome`):
+refused, uncertain, fault, usage and the transport classes stay distinct. -/
+def fnLocalRefusal (verb : String) (exitCode : Nat) (output : List UInt8)
+    (stderrBytes : ByteArray) : IO.Error :=
+  IO.userError s!"{FnOutcome.describe verb exitCode output} (stderrPrefixBytes={stderrBytes.size})"
+
 def fnConsumerAscii (scope : FnPollScopePin) : IO String := do
   let consumer ← IO.ofExcept (decodeCanonicalHex "pinned fn consumer" scope.consumer)
   unless !consumer.isEmpty && consumer.length ≤ 64 &&
@@ -3140,17 +3165,10 @@ def fnConsumerAscii (scope : FnPollScopePin) : IO String := do
 def queryFnConsumerStatus (fnBinary : String) (scope : FnPollScopePin)
     (controlPath : String) : IO FnConsumerStatus := do
   let consumer ← fnConsumerAscii scope
-  let child ← IO.Process.spawn
-    { cmd := fnBinary, args := #["--fn", "consumer", "status", controlPath, consumer],
-      stdin := .null, stdout := .piped, stderr := .null }
-  let output ← try readBoundedLoop child.stdout 256
-    catch error =>
-      child.kill
-      discard <| child.wait
-      throw error
-  let exitCode ← child.wait
+  let (exitCode, output, stderrBytes) ← runFnLocal fnBinary
+    #["--fn", "consumer", "status", controlPath, consumer] 256
   unless exitCode == 0 && output.all (fun byte => byte.toNat < 128) do
-    throw (IO.userError "fn local consumer status refused or was uncertain")
+    throw (fnLocalRefusal "local consumer status" exitCode output stderrBytes)
   IO.ofExcept (parseFnConsumerStatus (String.fromUTF8! output.toByteArray))
 
 def inspectFnConsumerCursor (fnBinary : String) (cursorPath : String) :
@@ -3201,18 +3219,10 @@ def queryFnConsumerPosition (fnBinary : String) (scope : FnPollScopePin)
   IO.FS.withTempDir fun directory => do
     let path := (directory / "current-position.fncu").toString
     let consumer ← fnConsumerAscii scope
-    let child ← IO.Process.spawn
-      { cmd := fnBinary, args := #["--fn", "consumer", "position",
-        controlPath, consumer, path],
-        stdin := .null, stdout := .piped, stderr := .null }
-    let output ← try readBoundedLoop child.stdout 128
-      catch error =>
-        child.kill
-        discard <| child.wait
-        throw error
-    let exitCode ← child.wait
+    let (exitCode, output, stderrBytes) ← runFnLocal fnBinary
+      #["--fn", "consumer", "position", controlPath, consumer, path] 128
     unless exitCode == 0 && output == "consumer accepted\n".toUTF8.toList do
-      throw (IO.userError "fn current consumer position refused or uncertain")
+      throw (fnLocalRefusal "current consumer position" exitCode output stderrBytes)
     let cursor ← readBoundedBytes path 346
     unless !cursor.isEmpty do
       throw (IO.userError "fn current position returned no cursor")
@@ -3238,18 +3248,10 @@ def invokeFnConsumerPollRaw (fnBinary : String) (scope : FnPollScopePin)
     if ← (System.FilePath.mk path).pathExists then
       throw (IO.userError "fn poll output path already exists")
   let consumer ← fnConsumerAscii scope
-  let child ← IO.Process.spawn
-    { cmd := fnBinary, args := #["--fn", "consumer", "poll", controlPath,
-      consumer, cursorPath, reportPath],
-      stdin := .null, stdout := .piped, stderr := .null }
-  let output ← try readBoundedLoop child.stdout 512
-    catch error =>
-      child.kill
-      discard <| child.wait
-      throw error
-  let exitCode ← child.wait
+  let (exitCode, output, stderrBytes) ← runFnLocal fnBinary
+    #["--fn", "consumer", "poll", controlPath, consumer, cursorPath, reportPath] 512
   unless exitCode == 0 && output == "consumer accepted\n".toUTF8.toList do
-    throw (IO.userError "authenticated fn local consumer poll refused or was uncertain")
+    throw (fnLocalRefusal "authenticated local consumer poll" exitCode output stderrBytes)
   let cursor ← readBoundedBytes cursorPath 346
   let event ← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes
   unless !cursor.isEmpty do
@@ -3302,22 +3304,11 @@ def invokeFnConsumerPoll (fnBinary : String) (scope : FnPollScopePin)
   for path in [cursorPath, reportPath, carrierPath] do
     if ← (System.FilePath.mk path).pathExists then
       throw (IO.userError "fn poll output path already exists")
-  let consumer ← IO.ofExcept (decodeCanonicalHex "pinned fn consumer" scope.consumer)
-  unless !consumer.isEmpty && consumer.length ≤ 64 &&
-      consumer.all (fun b => 33 ≤ b.toNat && b.toNat ≤ 126) do
-    throw (IO.userError "pinned fn consumer is outside local CLI ASCII profile")
-  let child ← IO.Process.spawn
-    { cmd := fnBinary, args := #["--fn", "consumer", "poll", controlPath,
-      String.fromUTF8! consumer.toByteArray, cursorPath, reportPath],
-      stdin := .null, stdout := .piped, stderr := .null }
-  let output ← try readBoundedLoop child.stdout 512
-    catch error =>
-      child.kill
-      discard <| child.wait
-      throw error
-  let exitCode ← child.wait
-  unless exitCode == 0 && output.all (fun b => b.toNat < 128) do
-    throw (IO.userError "authenticated fn local consumer poll refused or was uncertain")
+  let consumer ← fnConsumerAscii scope
+  let (exitCode, output, stderrBytes) ← runFnLocal fnBinary
+    #["--fn", "consumer", "poll", controlPath, consumer, cursorPath, reportPath] 512
+  unless exitCode == 0 && output == "consumer accepted\n".toUTF8.toList do
+    throw (fnLocalRefusal "authenticated local consumer poll" exitCode output stderrBytes)
   let (cursor, event, projected) ←
     projectFnPoll fnBinary scope cursorPath reportPath
   IO.FS.writeBinFile carrierPath projected.received.toByteArray
@@ -4272,11 +4263,7 @@ def selectedReleaseFnAck (config : NativeHost.Config) (service : FnPollService)
       unless cursor == (← readBoundedBytes cursorPath 346) &&
           sameBytes report (← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes) do
         throw (IO.userError "selected-release fn ACK inputs changed during local call")
-      status := if exitCode == 0 && output == "consumer accepted\n".toUTF8.toList then
-          "durable-accepted"
-        else if exitCode == 2 then "refused"
-        else if exitCode == 3 then "uncertain"
-        else "transport-fault"
+      status := (FnOutcome.ackStatus exitCode.toNat output).word
       let (afterPosition, after) ← queryFnConsumerPosition executable scope controlPath
       unless afterPosition == after.committedAck do
         throw (IO.userError "selected-release fn ACK changed consumer scope")
@@ -4375,11 +4362,7 @@ def selectedEmptyFnAck (config : NativeHost.Config) (service : FnPollService)
       unless cursor == (← readBoundedBytes cursorPath 346) &&
           report == (← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes) do
         throw (IO.userError "empty fn ACK inputs changed during local call")
-      status := if exitCode == 0 && output == "consumer accepted\n".toUTF8.toList then
-          "durable-accepted"
-        else if exitCode == 2 then "refused"
-        else if exitCode == 3 then "uncertain"
-        else "transport-fault"
+      status := (FnOutcome.ackStatus exitCode.toNat output).word
       let (afterPosition, after) ← queryFnConsumerPosition executable scope controlPath
       unless afterPosition == after.committedAck do
         throw (IO.userError "empty fn ACK changed consumer scope")
@@ -5033,11 +5016,7 @@ def runFnSkipAckSession (pin : FnPortablePin) (scope : FnPollScopePin)
     let exitCode ← child.wait
     unless skipped.cursor == (← readBoundedBytes cursorPath 346) do
       throw (IO.userError "empty-page ACK cursor changed during local call")
-    let status := if exitCode == 0 && output == "consumer accepted\n".toUTF8.toList then
-        "durable-accepted"
-      else if exitCode == 2 then "refused"
-      else if exitCode == 3 then "uncertain"
-      else "transport-fault"
+    let status := (FnOutcome.ackStatus exitCode.toNat output).word
     if status == "refused" then
       let (latestPosition, latestStatus) ←
         queryFnConsumerPosition pin.executable scope controlPath
@@ -5143,11 +5122,7 @@ def runFnAckSession (config : NativeHost.Config)
     unless cursor == (← readBoundedBytes cursorPath 346) &&
         sameBytes event (← readBoundedBytes eventPath FnEvidenceCodec.maxStorePollEventBytes) do
       throw (IO.userError "fn ack inputs changed during local control call")
-    let status := if exitCode == 0 && output == "consumer accepted\n".toUTF8.toList then
-        "durable-accepted"
-      else if exitCode == 2 then "refused"
-      else if exitCode == 3 then "uncertain"
-      else "transport-fault"
+    let status := (FnOutcome.ackStatus exitCode.toNat output).word
     if status == "refused" then
       let (latestPosition, latestStatus) ←
         queryFnConsumerPosition pin.executable scope service.controlPath
@@ -5576,11 +5551,7 @@ def runCatalogOwnRAckSession (config : NativeHost.Config)
         sameBytes evidence.poll.event
           (← readBoundedBytes eventPath FnEvidenceCodec.maxStorePollEventBytes) do
       throw (IO.userError "A own-R ACK inputs changed during local control call")
-    let status := if exitCode == 0 && output == "consumer accepted\n".toUTF8.toList then
-        "durable-accepted"
-      else if exitCode == 2 then "refused"
-      else if exitCode == 3 then "uncertain"
-      else "transport-fault"
+    let status := (FnOutcome.ackStatus exitCode.toNat output).word
     if status == "refused" then
       let (latestPosition, latestStatus) ←
         queryFnConsumerPosition pin.executable scope service.controlPath
@@ -5683,11 +5654,7 @@ def runFnReplyAckSession (config : NativeHost.Config)
     unless cursor == (← readBoundedBytes cursorPath 346) &&
         sameBytes event (← readBoundedBytes eventPath FnEvidenceCodec.maxStorePollEventBytes) do
       throw (IO.userError "A reply ack inputs changed during local control call")
-    let status := if exitCode == 0 && output == "consumer accepted\n".toUTF8.toList then
-        "durable-accepted"
-      else if exitCode == 2 then "refused"
-      else if exitCode == 3 then "uncertain"
-      else "transport-fault"
+    let status := (FnOutcome.ackStatus exitCode.toNat output).word
     if status == "refused" then
       let (latestPosition, latestStatus) ←
         queryFnConsumerPosition pin.executable scope service.controlPath
@@ -8150,11 +8117,7 @@ def run (arguments : List String) : IO UInt32 := do
           unless cursor == (← readBoundedBytes cursorPath 346) &&
               sameBytes event (← readBoundedBytes eventPath FnEvidenceCodec.maxStorePollEventBytes) do
             throw (IO.userError "A reply ack inputs changed during local call")
-          let status := if exitCode == 0 && output == "consumer accepted\n".toUTF8.toList then
-              "durable-accepted"
-            else if exitCode == 2 then "refused"
-            else if exitCode == 3 then "uncertain"
-            else "transport-fault"
+          let status := (FnOutcome.ackStatus exitCode.toNat output).word
           writeJson resultPath <| Lean.Json.mkObj
             [("type", toJson "fn-a-reply-ack-after-mini-v1"),
              ("miniTransactionId", toJson transaction),
@@ -8258,11 +8221,7 @@ def run (arguments : List String) : IO UInt32 := do
           unless cursor == (← readBoundedBytes cursorPath 346) &&
               sameBytes event (← readBoundedBytes eventPath FnEvidenceCodec.maxStorePollEventBytes) do
             throw (IO.userError "fn ack inputs changed during local control call")
-          let status := if exitCode == 0 && output == "consumer accepted\n".toUTF8.toList then
-              "durable-accepted"
-            else if exitCode == 2 then "refused"
-            else if exitCode == 3 then "uncertain"
-            else "transport-fault"
+          let status := (FnOutcome.ackStatus exitCode.toNat output).word
           writeJson resultPath <| Lean.Json.mkObj
             [("type", toJson "fn-consumer-ack-after-mini-v1"),
              ("miniTransactionId", toJson transaction),

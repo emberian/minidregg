@@ -28,32 +28,6 @@ private def cleanGroup (value : String) : Bool :=
   cleanHeader value 128 && value.toList.all (fun c =>
     c.isAlphanum || c == '.' || c == '-' || c == '_')
 
-private def alphabet : Array Char :=
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".toList.toArray
-
-private def base64Line (bytes : ByteArray) (start stop : Nat) : String := Id.run do
-  let mut chars : Array Char := #[]
-  let mut i := start
-  while i < stop do
-    let a := bytes[i]!.toNat
-    let b := if i + 1 < stop then bytes[i + 1]!.toNat else 0
-    let c := if i + 2 < stop then bytes[i + 2]!.toNat else 0
-    chars := chars.push alphabet[a / 4]!
-    chars := chars.push alphabet[(a % 4) * 16 + b / 16]!
-    chars := chars.push (if i + 1 < stop then alphabet[(b % 16) * 4 + c / 64]! else '=')
-    chars := chars.push (if i + 2 < stop then alphabet[c % 64]! else '=')
-    i := i + 3
-  return String.ofList chars.toList
-
-private def base64Lines (bytes : ByteArray) : String := Id.run do
-  let mut lines : Array String := #[]
-  let mut i := 0
-  while i < bytes.size do
-    let stop := min bytes.size (i + 57)
-    lines := lines.push (base64Line bytes i stop)
-    i := stop
-  return String.intercalate "\r\n" lines.toList ++ "\r\n"
-
 private def writePair (task field : Nat) : Minidregg.Theory.DeclaredActionLowering.Action →
     Option (Int × Int)
   | .write (.objectField resource fieldId) (some before) after =>
@@ -142,7 +116,7 @@ def main (args : List String) : IO Unit := do
     "Message-ID: " ++ messageId ++ "\r\n" ++
     "Content-Type: application/vnd.dregg.fn-native-prefix; version=1\r\n" ++
     "Content-Transfer-Encoding: base64\r\n\r\n" ++
-    base64Lines packageBytes.toByteArray
+    Base64.encodeLines packageBytes
   let .ok extracted := FnPortableSource.extract source.toUTF8.toList
     | throw (IO.userError "authored fn source fails Mini's strict source parser")
   require (extracted.package.toByteArray == packageBytes.toByteArray &&

@@ -30,12 +30,15 @@ too long (`invalid`).
 -/
 import Compiler.ResourceBirthCodec
 import Kernel.PayTariff
+import Kernel.Base64
 
 namespace Minidregg.Kernel.PayEnrolMemo
 
 open Minidregg.Compiler
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Kernel.PayTariff (Address32)
+open Minidregg.Kernel.Base64 (b64Encode b64Decode b64Encode_length b64Decode_b64Encode
+  b64Encode_b64Decode)
 
 set_option autoImplicit false
 
@@ -116,110 +119,9 @@ theorem hexEncode_hexDecode : ∀ {text bytes : List UInt8},
       | some _, none, _ => rw [hh, hl] at h; simp at h
       | some _, some _, none => rw [hh, hl, ht] at h; simp at h
 
-/-! ## Standard base64, no padding, whole 3-byte groups -/
+/-! ## Standard base64, no padding, whole 3-byte groups
 
-def b64Char (n : Nat) : UInt8 :=
-  if n < 26 then UInt8.ofNat (65 + n)
-  else if n < 52 then UInt8.ofNat (71 + n)
-  else if n < 62 then UInt8.ofNat (n - 4)
-  else if n = 62 then 43 else 47
-
-def b64Val (c : UInt8) : Option Nat :=
-  if 65 ≤ c.toNat ∧ c.toNat ≤ 90 then some (c.toNat - 65)
-  else if 97 ≤ c.toNat ∧ c.toNat ≤ 122 then some (c.toNat - 71)
-  else if 48 ≤ c.toNat ∧ c.toNat ≤ 57 then some (c.toNat + 4)
-  else if c.toNat = 43 then some 62
-  else if c.toNat = 47 then some 63
-  else none
-
-theorem b64Val_b64Char_table : ∀ n, n < 64 → b64Val (b64Char n) = some n := by decide
-
-def b64Inverts (k : Nat) : Bool :=
-  match b64Val (UInt8.ofNat k) with
-  | some n => decide (n < 64) && b64Char n == UInt8.ofNat k
-  | none => true
-
-theorem b64Char_b64Val_table : ∀ k, k < 256 → b64Inverts k = true := by decide +kernel
-
-theorem b64Char_b64Val {c : UInt8} {n : Nat} (h : b64Val c = some n) :
-    n < 64 ∧ b64Char n = c := by
-  have table := b64Char_b64Val_table c.toNat c.toNat_lt
-  simp only [b64Inverts, uint8_ofNat_toNat, h, Bool.and_eq_true, decide_eq_true_eq,
-    beq_iff_eq] at table
-  exact table
-
-def b64Encode : List UInt8 → List UInt8
-  | b₀ :: b₁ :: b₂ :: rest =>
-      b64Char (b₀.toNat / 4) :: b64Char (b₀.toNat % 4 * 16 + b₁.toNat / 16) ::
-        b64Char (b₁.toNat % 16 * 4 + b₂.toNat / 64) :: b64Char (b₂.toNat % 64) :: b64Encode rest
-  | _ => []
-
-def b64Decode : List UInt8 → Option (List UInt8)
-  | [] => some []
-  | c₀ :: c₁ :: c₂ :: c₃ :: rest =>
-      match b64Val c₀, b64Val c₁, b64Val c₂, b64Val c₃, b64Decode rest with
-      | some s₀, some s₁, some s₂, some s₃, some tail =>
-          some (UInt8.ofNat (s₀ * 4 + s₁ / 16) :: UInt8.ofNat (s₁ % 16 * 16 + s₂ / 4) ::
-            UInt8.ofNat (s₂ % 4 * 64 + s₃) :: tail)
-      | _, _, _, _, _ => none
-  | _ => none
-
-theorem b64Decode_b64Encode : ∀ (bytes : List UInt8), bytes.length % 3 = 0 →
-    b64Decode (b64Encode bytes) = some bytes
-  | [], _ => rfl
-  | [_], h => by simp at h
-  | [_, _], h => by simp at h
-  | b₀ :: b₁ :: b₂ :: rest, h => by
-      have h₀ := b₀.toNat_lt
-      have h₁ := b₁.toNat_lt
-      have h₂ := b₂.toNat_lt
-      have tail := b64Decode_b64Encode rest (by simp at h; omega)
-      simp only [b64Encode, b64Decode,
-        b64Val_b64Char_table _ (show b₀.toNat / 4 < 64 by omega),
-        b64Val_b64Char_table _ (show b₀.toNat % 4 * 16 + b₁.toNat / 16 < 64 by omega),
-        b64Val_b64Char_table _ (show b₁.toNat % 16 * 4 + b₂.toNat / 64 < 64 by omega),
-        b64Val_b64Char_table _ (show b₂.toNat % 64 < 64 by omega), tail]
-      have e₀ : b₀.toNat / 4 * 4 + (b₀.toNat % 4 * 16 + b₁.toNat / 16) / 16 = b₀.toNat := by omega
-      have e₁ : (b₀.toNat % 4 * 16 + b₁.toNat / 16) % 16 * 16 +
-          (b₁.toNat % 16 * 4 + b₂.toNat / 64) / 4 = b₁.toNat := by omega
-      have e₂ : (b₁.toNat % 16 * 4 + b₂.toNat / 64) % 4 * 64 + b₂.toNat % 64 = b₂.toNat := by omega
-      rw [e₀, e₁, e₂, uint8_ofNat_toNat, uint8_ofNat_toNat, uint8_ofNat_toNat]
-
-theorem b64Encode_b64Decode : ∀ {text bytes : List UInt8},
-    b64Decode text = some bytes → b64Encode bytes = text
-  | [], bytes, h => by simp [b64Decode] at h; subst h; rfl
-  | [_], _, h => by simp [b64Decode] at h
-  | [_, _], _, h => by simp [b64Decode] at h
-  | [_, _, _], _, h => by simp [b64Decode] at h
-  | c₀ :: c₁ :: c₂ :: c₃ :: rest, bytes, h => by
-      simp only [b64Decode] at h
-      match h₀ : b64Val c₀, h₁ : b64Val c₁, h₂ : b64Val c₂, h₃ : b64Val c₃,
-          ht : b64Decode rest with
-      | some s₀, some s₁, some s₂, some s₃, some tail =>
-          rw [h₀, h₁, h₂, h₃, ht] at h
-          simp only [Option.some.injEq] at h
-          subst h
-          obtain ⟨l₀, e₀⟩ := b64Char_b64Val h₀
-          obtain ⟨l₁, e₁⟩ := b64Char_b64Val h₁
-          obtain ⟨l₂, e₂⟩ := b64Char_b64Val h₂
-          obtain ⟨l₃, e₃⟩ := b64Char_b64Val h₃
-          have v₀ : (UInt8.ofNat (s₀ * 4 + s₁ / 16)).toNat = s₀ * 4 + s₁ / 16 := by
-            exact UInt8.toNat_ofNat_of_lt' (by simp only [UInt8.size]; omega)
-          have v₁ : (UInt8.ofNat (s₁ % 16 * 16 + s₂ / 4)).toNat = s₁ % 16 * 16 + s₂ / 4 := by
-            exact UInt8.toNat_ofNat_of_lt' (by simp only [UInt8.size]; omega)
-          have v₂ : (UInt8.ofNat (s₂ % 4 * 64 + s₃)).toNat = s₂ % 4 * 64 + s₃ := by
-            exact UInt8.toNat_ofNat_of_lt' (by simp only [UInt8.size]; omega)
-          simp only [b64Encode, v₀, v₁, v₂, b64Encode_b64Decode ht]
-          have a₀ : (s₀ * 4 + s₁ / 16) / 4 = s₀ := by omega
-          have a₁ : (s₀ * 4 + s₁ / 16) % 4 * 16 + (s₁ % 16 * 16 + s₂ / 4) / 16 = s₁ := by omega
-          have a₂ : (s₁ % 16 * 16 + s₂ / 4) % 16 * 4 + (s₂ % 4 * 64 + s₃) / 64 = s₂ := by omega
-          have a₃ : (s₂ % 4 * 64 + s₃) % 64 = s₃ := by omega
-          rw [a₀, a₁, a₂, a₃, e₀, e₁, e₂, e₃]
-      | none, _, _, _, _ => rw [h₀] at h; simp at h
-      | some _, none, _, _, _ => rw [h₀, h₁] at h; simp at h
-      | some _, some _, none, _, _ => rw [h₀, h₁, h₂] at h; simp at h
-      | some _, some _, some _, none, _ => rw [h₀, h₁, h₂, h₃] at h; simp at h
-      | some _, some _, some _, some _, none => rw [h₀, h₁, h₂, h₃, ht] at h; simp at h
+The codec and its round trips are `Kernel.Base64`'s `b64Encode` / `b64Decode`. -/
 
 /-! ## The ssh-ed25519 wire blob -/
 
@@ -350,16 +252,6 @@ def parse (bytes : List UInt8) : Except Refusal Memo :=
   | _ => .error .shape
 
 /-! ### Round trip and canonicity -/
-
-theorem b64Encode_length : ∀ (bytes : List UInt8), bytes.length % 3 = 0 →
-    (b64Encode bytes).length = 4 * (bytes.length / 3)
-  | [], _ => rfl
-  | [_], h => by simp at h
-  | [_, _], h => by simp at h
-  | _ :: _ :: _ :: rest, h => by
-      have tail := b64Encode_length rest (by simp at h; omega)
-      simp only [b64Encode, List.length_cons, tail]
-      omega
 
 theorem sshBlob_length {memo : Memo} (wf : memo.WellFormed) : memo.sshBlob.length = 51 := by
   simp [Memo.sshBlob, sshBlobOf, sshBlobPrefix, sshEd25519Name, wf.2.1]
@@ -710,10 +602,6 @@ theorem bad_ssh_sig_refused : parse (mutate 399 71 fixtureBytes) = .error .badSs
 #assert_axioms hexChar_hexVal_table
 #assert_axioms hexDecode_hexEncode
 #assert_axioms hexEncode_hexDecode
-#assert_axioms b64Val_b64Char_table
-#assert_axioms b64Char_b64Val_table
-#assert_axioms b64Decode_b64Encode
-#assert_axioms b64Encode_b64Decode
 #assert_axioms sshEd25519Name_utf8
 #assert_axioms memoPrefix_utf8
 #assert_axioms possessionTag_utf8

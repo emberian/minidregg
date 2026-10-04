@@ -39,32 +39,6 @@ private def cleanMessageId (value : String) : Bool :=
     value.startsWith "<" && value.endsWith ">" &&
     value.toUTF8.toList.all (fun byte => 33 ≤ byte.toNat && byte.toNat ≤ 126)
 
-private def alphabet : Array Char :=
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".toList.toArray
-
-private def base64Line (bytes : ByteArray) (start stop : Nat) : String := Id.run do
-  let mut chars : Array Char := #[]
-  let mut i := start
-  while i < stop do
-    let a := bytes[i]!.toNat
-    let b := if i + 1 < stop then bytes[i + 1]!.toNat else 0
-    let c := if i + 2 < stop then bytes[i + 2]!.toNat else 0
-    chars := chars.push alphabet[a / 4]!
-    chars := chars.push alphabet[(a % 4) * 16 + b / 16]!
-    chars := chars.push (if i + 1 < stop then alphabet[(b % 16) * 4 + c / 64]! else '=')
-    chars := chars.push (if i + 2 < stop then alphabet[c % 64]! else '=')
-    i := i + 3
-  return String.ofList chars.toList
-
-private def base64Lines (bytes : ByteArray) : String := Id.run do
-  let mut lines : Array String := #[]
-  let mut i := 0
-  while i < bytes.size do
-    let stop := min bytes.size (i + 57)
-    lines := lines.push (base64Line bytes i stop)
-    i := stop
-  return String.intercalate "\r\n" lines.toList ++ "\r\n"
-
 def Article.render (article : Article) : Except String (List UInt8) := do
   let release := article.packet.release
   unless article.packet.signature.length == 64 do
@@ -88,7 +62,7 @@ def Article.render (article : Article) : Except String (List UInt8) := do
     "Message-ID: " ++ messageId ++ "\r\n" ++
     "Content-Type: application/vnd.dregg.selective-release; version=2\r\n" ++
     "Content-Transfer-Encoding: base64\r\n\r\n" ++
-    base64Lines packetBytes.toByteArray).toUTF8.toList
+    Base64.encodeLines packetBytes).toUTF8.toList
   unless source.length ≤ FnEvidenceCodec.maxSourceBytes do
     throw "selected release article exceeds source profile"
   pure source
@@ -125,12 +99,11 @@ def extract (source : List UInt8) : Except String Article := do
       lines.all (fun line => !line.isEmpty && line.length ≤ 76) &&
       (lines.reverse.drop 1).all (fun line => line.length == 76) do
     throw "selected release base64 line width exceeds profile"
-  let some bytes := FnPortableSource.decodeGroups
-      (String.intercalate "" lines).toList #[]
+  let some bytes := Base64.decode (String.intercalate "" lines).toUTF8.toList
     | throw "selected release base64 body is noncanonical"
-  unless bytes.size ≤ FnEvidenceCodec.maxCarrierBytes + 8192 do
+  unless bytes.length ≤ FnEvidenceCodec.maxCarrierBytes + 8192 do
     throw "selected release packet exceeds bound"
-  let some packet := packetCodec.decode bytes.toList
+  let some packet := packetCodec.decode bytes
     | throw "selected release packet is noncanonical"
   let article : Article := ⟨fromMailbox, date, subject, packet⟩
   unless packet.release.destination.group == group.toUTF8.toList &&
