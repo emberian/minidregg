@@ -4,7 +4,7 @@
 # A friend enrolls with a committed next key kept on "other media"; writes; a
 # thief holding a copy of the friend's daily key tries to rotate the subject to
 # its own key (refused: notPrecommitted) and to the committed next key signing
-# with the daily key (refused: noPossession); the friend rotates with the next
+# with the daily key (refused: unauthenticated, before the gate runs); the friend rotates with the next
 # key (admitted); the thief's next write with the old daily key is refused; the
 # friend's grant and resource still work under the new key; a second rotation
 # works; a subject enrolled --no-prerotation cannot rotate (notPrerotated), as no
@@ -152,10 +152,22 @@ run trot1 "$MINI" rotate-key --workspace "$AW" --next-key "$D/thief.key"
 row "the thief (daily key) rotates to its own key: refused by name" "exit 3, notPrecommitted" \
   "rc=$(cat "$D/trot1.rc") $(refusal trot1)" \
   "$([ "$(cat "$D/trot1.rc")" = 3 ] && grep -q notPrecommitted "$D/trot1.err" && echo 1 || echo 0)"
-run trot2 "$MINI" rotate-key --workspace "$AW" --next-key "$D/stolen.key" --to-public-key "$D/friend.key.next.pub"
-row "the thief names the committed next key but signs with the daily key: refused by name" \
-  "exit 3, noPossession" "rc=$(cat "$D/trot2.rc") $(refusal trot2)" \
-  "$([ "$(cat "$D/trot2.rc")" = 3 ] && grep -q noPossession "$D/trot2.err" && echo 1 || echo 0)"
+# The client refuses NEXT == its own daily key file, so the thief signs with a
+# copy of the stolen daily key. The generic Receiver verifies the one possession
+# claim (the named key over the possession frame) BEFORE the gate runs
+# (Kernel.Receiving, 66967962): the refusal is `unauthenticated <claim>`.
+# The Host refused trot1 at its plan (op 140): nothing was signed or submitted, so
+# the client records that attempt refused, and the next request is a new attempt.
+row "a rotation the Host refuses at its plan is recorded refused by the client (no ingress, not wedged)" \
+  "custody phase refused, no ingress.bin" \
+  "$(jq -r .phase "$AW/attempts/rotate-default/custody.json" 2>/dev/null) ingress=$([ -e "$AW/attempts/rotate-default/ingress.bin" ] && echo yes || echo no)" \
+  "$([ "$(jq -r .phase "$AW/attempts/rotate-default/custody.json" 2>/dev/null)" = refused ] && [ ! -e "$AW/attempts/rotate-default/ingress.bin" ] && echo 1 || echo 0)"
+cp "$D/stolen.key" "$D/stolen-as-next.key"
+run trot2 "$MINI" rotate-key --workspace "$AW" --next-key "$D/stolen-as-next.key" --to-public-key "$D/friend.key.next.pub" \
+  --new-attempt possession
+row "the thief names the committed next key but signs with the daily key: refused unauthenticated, before the gate" \
+  "exit 3, unauthenticated" "rc=$(cat "$D/trot2.rc") $(refusal trot2)" \
+  "$([ "$(cat "$D/trot2.rc")" = 3 ] && grep -q unauthenticated "$D/trot2.err" && echo 1 || echo 0)"
 status_of st1 "$FW" >/dev/null
 row "after both thief attempts the subject is still at epoch 1 under the daily key" "1 true" \
   "$(jq -r '"\(.keyEpoch) \(.isCurrent)"' "$D/st1.out")" \
@@ -197,7 +209,8 @@ row "the grant survives: the friend writes and reads under the new key" "field 3
 row "nothing the thief tried is in the resource" "field 9 absent" "f9=$(field_value "$D/fread1.out" 9)" \
   "$([ $? = 0 ] && echo 1 || echo 0)"
 
-run frot2 "$MINI" rotate-key --workspace "$FW" --next-key "$D/offline/friend.next"
+# A completed rotation attempt replays its own result; a new succession names a new attempt.
+run frot2 "$MINI" rotate-key --workspace "$FW" --next-key "$D/offline/friend.next" --new-attempt second
 write "$FW" w-second 4
 row "a second rotation works and the friend still writes" "epoch 3, installed" \
   "rc=$(cat "$D/frot2.rc") epoch=$(jq -r .keyEpoch "$D/frot2.out" 2>/dev/null)" \

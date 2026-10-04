@@ -629,7 +629,20 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
                 &source,
             )?
         };
-        let plan = call(&ws.host, &ws.socket, &ws.config, 140, &command)?;
+        // A plan or assembly the Host REFUSES signed and submitted nothing: the
+        // attempt is recorded refused, so a corrected request runs as a new
+        // attempt instead of wedging behind an unresolved one. A transport
+        // failure leaves it preparing (re-planning is pure).
+        let refuse = |error: String, state: &Value| -> Result<Vec<u8>> {
+            if error.starts_with("host refused") {
+                let _ = custody::phase(&state_path, state, "refused")?;
+            }
+            Err(error)
+        };
+        let plan = match call(&ws.host, &ws.socket, &ws.config, 140, &command) {
+            Ok(plan) => plan,
+            Err(error) => return refuse(error, &state).map(|_| ()),
+        };
         let plan_view = if let Some(identity) = &identity {
             let bytes = receipt_continuity::key_source(
                 &root,
@@ -657,13 +670,16 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
                 .ok_or("rotation plan lacks possession header")?,
         )?;
         let signature = signer.sign(&header).to_bytes();
-        let ingress = call(
+        let ingress = match call(
             &ws.host,
             &ws.socket,
             &ws.config,
             141,
             &pair(&plan, &signature)?,
-        )?;
+        ) {
+            Ok(ingress) => ingress,
+            Err(error) => return refuse(error, &state).map(|_| ()),
+        };
         custody::immutable(&ingress_path, &ingress)?;
     }
     let ingress = custody::bytes(&ingress_path, transport::HOST_MAX_FRAME)?;
