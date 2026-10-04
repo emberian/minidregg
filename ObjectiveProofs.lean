@@ -8,6 +8,7 @@ import Theory.ObjectiveBendDemandPreservation
 import Theory.ObjectiveBendDemandAdequacy
 import Theory.ObjectiveBendDemandCompleteness
 import Theory.ObjectiveBendDemandDataSoundness
+import Theory.ObjectiveBendDemandCollectProofs
 import Theory.ObjectiveBendCheckpointRoundTrip
 import Kernel.ObjectiveBendAdmissionSemantics
 import Kernel.ObjectiveResumeContract
