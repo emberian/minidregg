@@ -1054,10 +1054,18 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
         if (NativeHost.historicalReceipt config durable r.transactionId r.event.eventId).isSome then
           n := n + 1
     pure n
-  -- History lookups (deos efficiency B): a transaction's index by the log's
-  -- `findIdx?`, and a receipt for the record in the middle of the log (a
-  -- non-head receipt: `receiptRoot` of its prefix).
+  -- Session indexes (deos efficiency B): the cached enumeration and
+  -- transaction lookup beside the List functions they refine.
+  discard <| timed "cellIds (cached) x10" do
+    let mut n := 0
+    for _ in [0:10] do n := n + durable.cellIds.length
+    pure n
   let middle := durable.image.accepted[durable.image.accepted.length / 2]?
+  discard <| timed "middle transaction index (cached) x1000" do
+    let mut n := 0
+    if let some r := middle then
+      for _ in [0:1000] do n := n + (durable.firstIndex r.transactionId).getD 0
+    pure n
   discard <| timed "middle transaction index (findIdx?) x1000" do
     let mut n := 0
     if let some r := middle then
@@ -1071,6 +1079,40 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
       if let some receipt := NativeHost.historicalReceipt config durable r.transactionId r.event.eventId then
         n := n + receipt.worldRoot.value % 7
     pure n
+  discard <| timed "middle receipt x1000" do
+    let mut n := 0
+    if let some r := middle then
+      for _ in [0:1000] do
+        if let some receipt := NativeHost.historicalReceipt config durable r.transactionId r.event.eventId then
+          n := n + receipt.worldRoot.value % 7
+    pure n
+  -- `Image.append`'s list snoc at this height (what `Loaded.extend` pays per
+  -- record for the in-memory log), x1000.
+  discard <| timed "image.append list snoc x1000" do
+    let mut n := 0
+    if let some r := durable.image.accepted.getLast? then
+      for i in [0:1000] do
+        n := n + ((durable.image.accepted ++ [r]).length + i) % 7
+    pure n
+  -- The specification root of the same prefix, evaluated in full: what every
+  -- non-head receipt paid before the log kept its roots.
+  discard <| timedPure "middle receipt root, specification (prefix evaluated) x1" fun _ =>
+    (NativeHost.receiptRootSpec config durable (durable.image.accepted.length / 2)).value % 7
+  -- Control: every kept root against its prefix's specification root, at
+  -- STORE_BENCH_ROOT_STRIDE spaced heights (0 = skip).
+  let stride := ((← IO.getEnv "STORE_BENCH_ROOT_STRIDE").bind String.toNat?).getD 0
+  if stride > 0 then
+    let mut checked := 0
+    let mut differ := 0
+    for i in [0:durable.image.accepted.length:stride] do
+      if let some (some kept) := durable.rootLog[i]? then
+        let spec := NativeHost.worldRoot config ⟨durable.image.seed, durable.image.accepted.take (i + 1)⟩
+        checked := checked + 1
+        if kept != spec then
+          differ := differ + 1
+          IO.println s!"root differs at height {i + 1}: kept {kept.value} spec {spec.value}"
+        else IO.println s!"root height {i + 1} {kept.value}"
+    IO.println s!"kept roots checked {checked}, differing {differ}"
 
 /-- The whole presence index, log heights (operator output only). -/
 def presenceIndexJson (index : PresenceIndex.Index) : Lean.Json :=

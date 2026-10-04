@@ -207,7 +207,8 @@ def withOpenedFreshTip {config : Config} {α : Type}
     | return .error "authority physical key unavailable"
   let entry : DurableReceiverIO.Entry :=
     ⟨DurableCheckpointCodec.recordFrame.encode record,
-      DurableCheckpointCodec.entryTag key durable.image.accepted.length durable.chain⟩
+      DurableCheckpointCodec.entryTag key durable.image.accepted.length durable.chain
+        durable.worldRoot⟩
   let .ok current ← DurableReceiverIO.tipIs config.transport
       durable.image.accepted.length entry
     | return .error "authority physical tip unavailable"

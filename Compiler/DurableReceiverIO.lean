@@ -28,6 +28,7 @@ import Compiler.DurableLogTags
 import Kernel.PresenceIndex
 import Kernel.TailBound
 import Kernel.LinkIndex
+import Kernel.SessionIndex
 
 namespace Minidregg.Compiler.DurableReceiverIO
 
@@ -629,6 +630,22 @@ structure Loaded (rootBytes : List UInt8 → Digest) where
   beside the presence index and advanced the same way (K-DOC-INDEX). -/
   links : LinkIndex.Index
   linksExact : links = LinkIndex.ofRecords image.accepted
+  /-- Every enumerable cell id (`Image.cellIds`), cached in that order with a
+  membership set and advanced by one record per append (`SessionIndex.CellIds`):
+  no `eraseDups` over the log on a request. -/
+  ids : SessionIndex.CellIds
+  idsExact : ids.Exact (SessionIndex.rawIds image)
+  /-- Transaction id ↦ first accepted index (`SessionIndex.TxIndex`): no
+  `findIdx?` over the log on a receipt lookup. -/
+  txs : SessionIndex.TxIndex
+  txsExact : txs.Exact image.accepted
+  /-- The receipt root after each accepted record, oldest first: read from each
+  entry's verified tag on open (`DurableLogTags.verifyTags_root`), pushed at
+  every append (`Loaded.extend`). `none` where this image never saw the root
+  (a log replayed from genesis in memory, `loadImage`): the receipt lookup
+  evaluates that prefix instead. -/
+  rootLog : Array (Option Digest)
+  rootLogSize : rootLog.size = image.accepted.length
 
 def Loaded.height {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) : Nat :=
   loaded.image.accepted.length
@@ -654,6 +671,44 @@ def Loaded.cells {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
     List (CellId × List UInt8) :=
   loaded.image.cellIds.map fun cellId => (cellId, loaded.snapshot.canonicalBytes cellId)
 
+/-- The enumeration read off the cache (`Loaded.ids`), in `Image.cellIds` order. -/
+def Loaded.cellIds {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) : List CellId :=
+  loaded.ids.order.toList
+
+/-- **Refinement**: the cached enumeration is the image's. -/
+theorem Loaded.cellIds_eq {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
+    loaded.cellIds = loaded.image.cellIds :=
+  SessionIndex.CellIds.toList_eq loaded.idsExact
+
+/-- `Loaded.cells` over the cached enumeration. -/
+def Loaded.cellsCached {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
+    List (CellId × List UInt8) :=
+  loaded.cellIds.map fun cellId => (cellId, loaded.snapshot.canonicalBytes cellId)
+
+/-- **Refinement, compiled**: the host runs `cellsCached` wherever it runs
+`cells`; the replacement is this theorem, not a trusted `implemented_by`. -/
+@[csimp] theorem Loaded.cells_eq_cellsCached :
+    @Loaded.cells = @Loaded.cellsCached := by
+  funext rootBytes loaded
+  unfold Loaded.cells Loaded.cellsCached
+  rw [Loaded.cellIds_eq]
+
+/-- A transaction id's first accepted index, read off the cache. -/
+def Loaded.firstIndex {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (transactionId : TransactionId) : Option Nat :=
+  loaded.txs[transactionId]?
+
+/-- **Refinement**: the cached lookup is the log's `findIdx?`. -/
+theorem Loaded.firstIndex_eq {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (transactionId : TransactionId) :
+    loaded.firstIndex transactionId =
+      loaded.image.accepted.findIdx? (fun record => record.transactionId == transactionId) :=
+  SessionIndex.TxIndex.lookup_eq loaded.txsExact transactionId
+
+#assert_axioms Loaded.cellIds_eq
+#assert_axioms Loaded.cells_eq_cellsCached
+#assert_axioms Loaded.firstIndex_eq
+
 /-- The log chain after appending this intent's record. -/
 def Loaded.chainAfterIntent {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
     (intent : DataIntent rootBytes) : Digest :=
@@ -671,7 +726,11 @@ def loadImage (rootBytes : List UInt8 → Digest) (logStart : Digest) (image : I
       .ok ⟨image, 0, State.ofSeed image.seed, snapshot, Nat.zero_le _, resumed, logStart, chain,
         rfl, RootCache.ofEntries (entriesOf image snapshot chain),
         RootsExact.ofEntries (entriesOf image snapshot chain),
-        PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl⟩
+        PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl,
+        SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
+        SessionIndex.TxIndex.ofRecords image.accepted,
+        SessionIndex.TxIndex.ofRecords_exact image.accepted,
+        Array.replicate image.accepted.length none, Array.size_replicate⟩
 
 theorem loadImage_image {rootBytes : List UInt8 → Digest} {logStart : Digest} {image : Image}
     {loaded : Loaded rootBytes} (built : loadImage rootBytes logStart image = .ok loaded) :
@@ -736,15 +795,34 @@ def load (transport : Transport) (rootBytes : List UInt8 → Digest) :
       if let .error message := verifyTags key 0 chains (stored.entries.map (·.tag)) then
         return .error message
       let image : Image := ⟨seed, records⟩
-      if within : baseHeight ≤ image.accepted.length then
+      -- Every entry's verified tag carries the receipt root after it
+      -- (`DurableLogTags.verifyTags_root`).
+      let rootLog : Array (Option Digest) :=
+        (stored.entries.map fun entry => some ((tagRoot entry.tag).getD ⟨0⟩)).toArray
+      if sized : rootLog.size ≠ image.accepted.length then
+        return .error "durable log entries and records differ in number"
+      else if within : baseHeight ≤ image.accepted.length then
         match resumed : resume rootBytes image baseHeight base with
         | none => return .error "durable log suffix does not replay through the canonical executor"
         | some snapshot =>
-            return .ok ⟨image, baseHeight, base, snapshot, within, resumed, logStart, headChain,
+            let loaded : Loaded rootBytes :=
+              ⟨image, baseHeight, base, snapshot, within, resumed, logStart, headChain,
               DurableLogTags.chainPrefixes_getLast? logStart records,
               RootCache.ofEntries (entriesOf image snapshot headChain),
               RootsExact.ofEntries (entriesOf image snapshot headChain),
-              PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl⟩
+              PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl,
+              SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
+              SessionIndex.TxIndex.ofRecords image.accepted,
+              SessionIndex.TxIndex.ofRecords_exact image.accepted,
+              rootLog, Decidable.of_not_not sized⟩
+            -- The head's stored root is the root this open just served: a
+            -- rewritten head root refuses here, not at a later receipt.
+            match rootLog.back? with
+            | some (some stored) =>
+                if stored ≠ loaded.worldRoot then
+                  return .error "durable log head root differs from the replayed root"
+            | _ => pure ()
+            return .ok loaded
       else return .error "checkpoint beyond the log head"
 
 inductive Confirmation where
@@ -793,6 +871,10 @@ def Loaded.extend {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
   let chain := chainStep loaded.chain record
   let roots := loaded.rootsExact.advance (recordSlots (loaded.image.accepted.length + 1) chain record)
     (entriesOf_step loaded.image loaded.snapshot ready.next intent loaded.chain chain ready.executed)
+  -- The served root after this record (`Loaded.worldRoot` of the result), kept
+  -- as its receipt root.
+  let served := if roots.2.injective then roots.1.root
+    else deployedRoot (entriesOf (loaded.image.append intent) ready.next chain)
   ⟨loaded.image.append intent, loaded.baseHeight, loaded.base, ready.next,
     by simp only [Image.append, List.length_append]; exact Nat.le_add_right_of_le loaded.withinLog,
     ready.resumed, loaded.logStart, chain,
@@ -804,7 +886,35 @@ def Loaded.extend {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
        exact (PresenceIndex.ofRecords_snoc loaded.image.accepted record).symm,
     loaded.links.admit (loaded.image.accepted.length + 1) record,
     by rw [loaded.linksExact]
-       exact (LinkIndex.ofRecords_snoc loaded.image.accepted record).symm⟩
+       exact (LinkIndex.ofRecords_snoc loaded.image.accepted record).symm,
+    loaded.ids.admit record,
+    by unfold Image.append
+       exact SessionIndex.CellIds.admit_exact loaded.idsExact record,
+    loaded.txs.admitAt loaded.image.accepted.length record,
+    by unfold Image.append
+       exact SessionIndex.TxIndex.admitAt_exact loaded.txsExact record,
+    loaded.rootLog.push (some served),
+    by simp [Image.append, loaded.rootLogSize]⟩
+
+/-- **The root log keeps the served root**: after an append, the newest stored
+receipt root is the root the extended image serves. -/
+theorem Loaded.extend_rootLog_back {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    {intent : DataIntent rootBytes}
+    (ready : Ready rootBytes loaded.image loaded.baseHeight loaded.base loaded.snapshot intent) :
+    (loaded.extend ready).rootLog.back? = some (some (loaded.extend ready).worldRoot) := by
+  simp only [Loaded.extend, Loaded.worldRoot, Array.back?_push]
+
+/-- An append keeps every earlier stored root. -/
+theorem Loaded.extend_rootLog_prefix {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    {intent : DataIntent rootBytes}
+    (ready : Ready rootBytes loaded.image loaded.baseHeight loaded.base loaded.snapshot intent)
+    (index : Nat) (earlier : index < loaded.image.accepted.length) :
+    (loaded.extend ready).rootLog[index]? = loaded.rootLog[index]? := by
+  simp only [Loaded.extend, Array.getElem?_push, loaded.rootLogSize]
+  rw [if_neg (Nat.ne_of_lt earlier)]
+
+#assert_axioms Loaded.extend_rootLog_back
+#assert_axioms Loaded.extend_rootLog_prefix
 
 /-- Materialize the head as a fresh base (no replayed suffix), as a cold
 open of a checkpoint at the head would. The root cache carries over: the
@@ -821,7 +931,9 @@ def Loaded.rebase {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
         loaded.chain, loaded.chainExact, loaded.roots,
         ⟨fun k => by rw [same]; exact loaded.rootsExact.agree k, loaded.rootsExact.injective,
           loaded.rootsExact.injectiveSound⟩,
-        loaded.index, loaded.indexExact, loaded.links, loaded.linksExact⟩
+        loaded.index, loaded.indexExact, loaded.links, loaded.linksExact,
+        loaded.ids, loaded.idsExact, loaded.txs, loaded.txsExact,
+        loaded.rootLog, loaded.rootLogSize⟩
 
 def Loaded.rebaseD {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
     Loaded rootBytes :=
@@ -1111,7 +1223,10 @@ def receiveLoadedDetailedWithFresh (transport : Transport) (rootBytes : List UIn
       let height := loaded.image.accepted.length + 1
       let recordBytes := recordFrame.encode (IntentRecord.ofIntent intent)
       let chain := loaded.chainAfterIntent intent
-      let entry : Entry := ⟨recordBytes, entryTag key height chain⟩
+      -- The tag keeps this record's receipt root (`entryTag`), the root the
+      -- extended image serves.
+      let extended := loaded.extend ready
+      let entry : Entry := ⟨recordBytes, entryTag key height chain extended.worldRoot⟩
       let confirm := fun (installed : Bool) (kind : Confirmation) => do
         match ← readBackEntry transport height with
         | .error message =>
@@ -1120,7 +1235,6 @@ def receiveLoadedDetailedWithFresh (transport : Transport) (rootBytes : List UIn
             return (false, .ordinary (.uncertain "append attempted; entry absent on readback"))
         | .ok (some stored) =>
             if stored = entry then
-              let extended := loaded.extend ready
               let checkpointStored ←
                 if checkpointDue transport extended then storeCheckpoint transport rootBytes extended
                 else pure false
@@ -1198,6 +1312,10 @@ def extendFrom (transport : Transport) (rootBytes : List UInt8 → Digest)
         | .inl ready => current := current.extend ready
         | .inr _ => return .error "durable log suffix does not replay through the canonical executor"
       if current.chain ≠ chain then return .error "durable log chain mismatch"
+      -- Every new entry's stored root is the root its replay served.
+      let replayed := (current.rootLog.extract height current.rootLog.size).toList
+      if replayed ≠ stored.entries.map (fun entry => some ((tagRoot entry.tag).getD ⟨0⟩)) then
+        return .error "durable log root tag differs from the replayed root"
       if current.image.accepted.length ≥ current.baseHeight + 2 * max 1 transport.checkpointEvery then
         match current.rebase with
         | some rebased => return .ok rebased

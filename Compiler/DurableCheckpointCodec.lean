@@ -158,12 +158,29 @@ def systemLeaf (height : Nat) (chain : Digest) : Digest :=
   (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.SYSTEM/v1".toUTF8.toList
     ((StreamCodec.product StreamCodec.nat digestStream).encode (height, chain))).digest
 
-def tagInputStream : StreamCodec (List UInt8 × Nat × Digest) :=
-  StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat digestStream)
+def tagInputStream : StreamCodec (List UInt8 × Nat × Digest × Digest) :=
+  StreamCodec.product bytesStream
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product digestStream digestStream))
 
-def entryTag (key : MacKey) (height : Nat) (chain : Digest) : List UInt8 :=
-  kmac256Bytes key.bytes "DREGG/NATIVE-HOST/LOG-TAG/v1".toUTF8.toList
-    (tagInputStream.encode (key.id, height, chain))
+/-- Entry `h`'s tag: the world root after entry `h` — its receipt root, kept at
+append — then the KMAC of the key id, `h`, the chain after `h` and that root.
+A historical receipt reads its root here instead of re-evaluating its prefix
+(`NativeHost.receiptRoot`); the MAC binds the root to its height and chain, so
+a moved, swapped or rewritten root refuses exactly as a moved chain does
+(`DurableLogTags.verifyTags`). v2: v1 tags carried no root and refuse. -/
+def entryTag (key : MacKey) (height : Nat) (chain root : Digest) : List UInt8 :=
+  digestStream.encode root ++
+    kmac256Bytes key.bytes "DREGG/NATIVE-HOST/LOG-TAG/v2".toUTF8.toList
+      (tagInputStream.encode (key.id, height, chain, root))
+
+/-- The root a stored tag carries (its prefix), whether or not its MAC verifies;
+`verifyTags` is what binds it. -/
+def tagRoot (tag : List UInt8) : Option Digest :=
+  (digestStream.decodePrefix tag).map Prod.fst
+
+@[simp] theorem tagRoot_entryTag (key : MacKey) (height : Nat) (chain root : Digest) :
+    tagRoot (entryTag key height chain root) = some root := by
+  simp [tagRoot, entryTag, digestStream.decodePrefix_encode]
 
 /-! ## Checkpoints -/
 

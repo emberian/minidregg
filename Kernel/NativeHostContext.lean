@@ -277,6 +277,18 @@ def cellsLawful (config : Config) (durable : Durable)
     (directory : Directory Nat CanonicalCellRegistry.registry) : Bool :=
   durable.image.cellIds.all (cellLawful config directory)
 
+/-- `cellsLawful` over the loaded image's cached enumeration (`Loaded.cellIds`). -/
+def cellsLawfulCached (config : Config) (durable : Durable)
+    (directory : Directory Nat CanonicalCellRegistry.registry) : Bool :=
+  durable.cellIds.all (cellLawful config directory)
+
+/-- **Refinement, compiled**: the host evaluates the cached enumeration
+wherever it evaluates `cellsLawful`. -/
+@[csimp] theorem cellsLawful_eq_cached : @cellsLawful = @cellsLawfulCached := by
+  funext config durable directory
+  unfold cellsLawful cellsLawfulCached
+  rw [DurableReceiverIO.Loaded.cellIds_eq]
+
 structure Opened (config : Config) where
   private mk ::
   durable : Durable
@@ -407,6 +419,21 @@ def cellsLawfulFrom (config : Config) (prior : Opened config) (durable : Durable
   durable.image.cellIds.all fun identifier =>
     prior.durable.snapshot.canonicalBytes identifier == durable.snapshot.canonicalBytes identifier ||
       cellLawful config loaded.directory identifier
+
+/-- `cellsLawfulFrom` over the cached enumeration. -/
+def cellsLawfulFromCached (config : Config) (prior : Opened config) (durable : Durable)
+    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable) : Bool :=
+  durable.cellIds.all fun identifier =>
+    prior.durable.snapshot.canonicalBytes identifier == durable.snapshot.canonicalBytes identifier ||
+      cellLawful config loaded.directory identifier
+
+@[csimp] theorem cellsLawfulFrom_eq_cached : @cellsLawfulFrom = @cellsLawfulFromCached := by
+  funext config prior durable loaded
+  unfold cellsLawfulFrom cellsLawfulFromCached
+  rw [DurableReceiverIO.Loaded.cellIds_eq]
+
+#assert_axioms cellsLawful_eq_cached
+#assert_axioms cellsLawfulFrom_eq_cached
 
 theorem cellsLawfulFrom_eq (config : Config) (prior : Opened config) (durable : Durable)
     (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable) :

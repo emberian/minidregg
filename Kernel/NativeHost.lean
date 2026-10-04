@@ -882,12 +882,106 @@ def assemble (plan : SigningPlan) (signatures : List (List UInt8)) : Except Stri
       | [envelope] => pure (.renounce (CapabilityRenounce.ingressCodec.encode ⟨bytes, envelope⟩))
       | _ => .error "renounce signing slots mismatch"
 
-/-- The world root after accepted record `index`: at the head it is the served
-image's cached root (one read); an earlier prefix is evaluated from its image
-(the specification root; a lookup of old history pays for it). -/
-def receiptRoot (config : Config) (durable : Durable) (index : Nat) : Digest :=
+/-- The specification of a receipt root: the world root of the accepted prefix
+through record `index` (at the head, the served root). -/
+def receiptRootSpec (config : Config) (durable : Durable) (index : Nat) : Digest :=
   if index + 1 = durable.image.accepted.length then durable.worldRoot
   else worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
+
+/-- The world root after accepted record `index`: at the head the served
+image's cached root; below it the root the record's log entry kept at append
+(`Loaded.rootLog`, read from the verified tag); only a prefix whose root this
+image never saw (an in-memory genesis replay) is evaluated in full. -/
+def receiptRoot (config : Config) (durable : Durable) (index : Nat) : Digest :=
+  if index + 1 = durable.image.accepted.length then durable.worldRoot
+  else match durable.rootLog[index]? with
+    | some (some root) => root
+    | _ => worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
+
+/-- Every root the log keeps is its prefix's specification root. This is the
+trust the host places in its own past execution under its MAC key (DATAMODEL
+§6 Q1 (ii)), the trust its checkpoints already carry: `load` reads the roots
+from MAC-verified tags and refuses a head root that differs from the replayed
+one; `extend` keeps the root it served (`RootLogHonest.extend`). -/
+def RootLogHonest (config : Config) (durable : Durable) : Prop :=
+  ∀ index root, durable.rootLog[index]? = some (some root) →
+    root = worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
+
+/-- **Refinement**: over an honest root log, the kept root IS the specification root. -/
+theorem receiptRoot_eq_spec (config : Config) (durable : Durable)
+    (honest : RootLogHonest config durable) (index : Nat) :
+    receiptRoot config durable index = receiptRootSpec config durable index := by
+  unfold receiptRoot receiptRootSpec
+  split
+  · rfl
+  · split
+    · rename_i root kept
+      exact honest index root kept
+    · rfl
+
+/-- The pole that keeps `RootLogHonest` from being a projection: a log that
+keeps any other root at a non-head index is not honest, and the receipt it
+serves differs from the specification there. -/
+theorem receiptRoot_ne_spec_of_wrong (config : Config) (durable : Durable) (index : Nat)
+    (notHead : index + 1 ≠ durable.image.accepted.length) (root : Digest)
+    (kept : durable.rootLog[index]? = some (some root))
+    (wrong : root ≠ worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩) :
+    ¬ RootLogHonest config durable ∧
+      receiptRoot config durable index ≠ receiptRootSpec config durable index := by
+  refine ⟨fun honest => wrong (honest index root kept), ?_⟩
+  unfold receiptRoot receiptRootSpec
+  rw [if_neg notHead, if_neg notHead, kept]
+  exact wrong
+
+/-- A log that keeps no root (`loadImage`'s) is honest: every lookup below the
+head evaluates its prefix. -/
+theorem RootLogHonest.of_none (config : Config) (durable : Durable)
+    (none : ∀ index, durable.rootLog[index]? = some none ∨ durable.rootLog[index]? = none) :
+    RootLogHonest config durable := by
+  intro index root kept
+  rcases none index with absent | absent <;> rw [absent] at kept <;> cases kept
+
+/-- **The invariant an append keeps**: an honest log stays honest when the
+extended image's served root is its specification root — the premises of
+`loadedRoot_eq_worldRoot` (the snapshot is the genesis replay, the chain is
+rooted at this deployment), which the host's validation establishes. -/
+theorem RootLogHonest.extend (config : Config) {loaded : Durable}
+    {intent : DurableDataIntent.DataIntent ResourceBirthCodec.rootBytes}
+    (ready : DurableCheckpoint.Ready ResourceBirthCodec.rootBytes loaded.image loaded.baseHeight
+      loaded.base loaded.snapshot intent)
+    (honest : RootLogHonest config loaded)
+    (restored : (loaded.extend ready).image.restore ResourceBirthCodec.rootBytes =
+      some (loaded.extend ready).snapshot)
+    (rooted : (loaded.extend ready).chain =
+      NativeHostCodec.logRoot config.deployment.domain config.profile.semantics
+        (loaded.extend ready).image) :
+    RootLogHonest config (loaded.extend ready) := by
+  intro index root kept
+  have imageEq : (loaded.extend ready).image = loaded.image.append intent := rfl
+  by_cases earlier : index < loaded.image.accepted.length
+  · rw [DurableReceiverIO.Loaded.extend_rootLog_prefix loaded ready index earlier] at kept
+    rw [honest index root kept, imageEq]
+    simp only [DurableReceiver.Image.append]
+    rw [List.take_append_of_le_length (by omega)]
+  · have sizeEq : (loaded.extend ready).rootLog.size = loaded.image.accepted.length + 1 := by
+      rw [(loaded.extend ready).rootLogSize, imageEq]
+      simp [DurableReceiver.Image.append]
+    have last : index = loaded.image.accepted.length := by
+      by_contra other
+      have beyond : (loaded.extend ready).rootLog.size ≤ index := by omega
+      rw [Array.getElem?_eq_none beyond] at kept
+      cases kept
+    subst last
+    have back := DurableReceiverIO.Loaded.extend_rootLog_back loaded ready
+    rw [Array.back?_eq_getElem?, sizeEq, Nat.add_sub_cancel, kept] at back
+    cases back
+    rw [loadedRoot_eq_worldRoot config (loaded.extend ready) restored rooted, imageEq]
+    simp [DurableReceiver.Image.append]
+
+#assert_axioms receiptRoot_eq_spec
+#assert_axioms receiptRoot_ne_spec_of_wrong
+#assert_axioms RootLogHonest.of_none
+#assert_axioms RootLogHonest.extend
 
 /-- Seal the ORIGINAL accepted prefix, even when a later transaction was
 published before physical confirmation/readback completed. -/
@@ -897,6 +991,25 @@ def historicalReceipt (config : Config) (durable : Durable) (transactionId event
   let record ← durable.image.accepted[index]?
   if record.event.eventId != eventId then none else
     some ⟨transactionId, eventId, index + 1, receiptRoot config durable index⟩
+
+/-- `historicalReceipt` with the transaction's index read off the loaded
+image's cache (`Loaded.firstIndex`) instead of a `findIdx?` over the log. -/
+def historicalReceiptCached (config : Config) (durable : Durable) (transactionId eventId : Digest) :
+    Option NativeHostCodec.Receipt := do
+  let index ← durable.firstIndex transactionId
+  let record ← durable.image.accepted[index]?
+  if record.event.eventId != eventId then none else
+    some ⟨transactionId, eventId, index + 1, receiptRoot config durable index⟩
+
+/-- **Refinement, compiled**: the host selects every historical receipt through
+the cache; the selection is `findIdx?`'s, by `Loaded.firstIndex_eq`. -/
+@[csimp] theorem historicalReceipt_eq_cached :
+    @historicalReceipt = @historicalReceiptCached := by
+  funext config durable transactionId eventId
+  unfold historicalReceipt historicalReceiptCached
+  rw [DurableReceiverIO.Loaded.firstIndex_eq]
+
+#assert_axioms historicalReceipt_eq_cached
 
 /-- **Receipt binding (DATAMODEL §3.4).**  A sealed receipt names its
 transaction's accepted prefix, and carries exactly that prefix's world root and

@@ -1,7 +1,8 @@
 /-
 # Compiler.DurableLogTags — every stored log tag is read
 
-Entry `h` of the durable log carries `entryTag key h chainₕ`
+Entry `h` of the durable log carries `entryTag key h chainₕ rootₕ` (the root after
+entry `h`, kept at append, then the MAC binding it)
 (`Compiler.DurableCheckpointCodec`). Open (`DurableReceiverIO.load`) and the
 live extension (`DurableReceiverIO.extendFrom`) verify the tag of EVERY entry
 they read against the chain prefix at its height, and refuse the first one
@@ -158,66 +159,139 @@ def verifyTagsWith {D T : Type} [DecidableEq T] (tag : Nat → D → T) (height 
   | none => .ok ()
   | some bad => .error (tagRefusal bad)
 
+/-- Each chain value beside the root the stored tag after it carries: element
+`i + 1` is (the chain after entry `i + 1`, the root stored tag `i` carries).
+Element `0` (the chain before the first entry) carries no tag. -/
+def rootedChains (chains : List Digest) (tags : List (List UInt8)) : List (Digest × Digest) :=
+  match chains with
+  | [] => []
+  | first :: rest => (first, ⟨0⟩) :: rest.zipWith (fun chain tag => (chain, (tagRoot tag).getD ⟨0⟩)) tags
+
+/-- The deployed tag of a height at a (chain, root) pair. -/
+def rootedTag (key : MacKey) (height : Nat) (point : Digest × Digest) : List UInt8 :=
+  entryTag key height point.1 point.2
+
 /-- Every stored tag, the first entry at `height + 1`, against `chains`
-(`chainPrefixes` from the chain at `height`). -/
+(`chainPrefixes` from the chain at `height`) and the root it carries. -/
 def verifyTags (key : MacKey) (height : Nat) (chains : List Digest) (tags : List (List UInt8)) :
     Except String Unit :=
-  verifyTagsWith (entryTag key) height chains tags
+  verifyTagsWith (rootedTag key) height (rootedChains chains tags) tags
+
+theorem rootedChains_getElem? (chains : List Digest) (tags : List (List UInt8)) (i : Nat)
+    (tag : List UInt8) (stored : tags[i]? = some tag) :
+    (rootedChains chains tags)[i + 1]? =
+      chains[i + 1]?.map fun chain => (chain, (tagRoot tag).getD ⟨0⟩) := by
+  cases chains with
+  | nil => simp [rootedChains]
+  | cons first rest =>
+      simp only [rootedChains, List.getElem?_cons_succ, List.getElem?_zipWith, stored]
+      cases rest[i]? <;> rfl
 
 /-- **The stored check is read**: the verifier accepts exactly the stores whose
-every tag is the MAC of its height and the chain after the records up to it. -/
+every tag is the MAC of its height, the chain after the records up to it, and
+the root it carries. -/
 theorem verifyTags_ok_iff (key : MacKey) (height : Nat) (start : Digest)
     (records : List IntentRecord) (tags : List (List UInt8)) (lengths : tags.length ≤ records.length) :
     verifyTags key height (chainPrefixes start records) tags = .ok () ↔
-      ∀ i (hi : i < tags.length),
-        tags[i] = entryTag key (height + i + 1) (chainAfter start (records.take (i + 1))) := by
-  have none_iff := firstBadTag_eq_none_iff (entryTag key) height (chainPrefixes start records) tags
+      ∀ i (hi : i < tags.length), ∃ root,
+        tags[i] = entryTag key (height + i + 1) (chainAfter start (records.take (i + 1))) root := by
+  have none_iff := firstBadTag_eq_none_iff (rootedTag key) height
+    (rootedChains (chainPrefixes start records) tags) tags
+  have pointAt : ∀ i (hi : i < tags.length),
+      (rootedChains (chainPrefixes start records) tags)[i + 1]? =
+        some (chainAfter start (records.take (i + 1)), (tagRoot tags[i]).getD ⟨0⟩) := by
+    intro i hi
+    rw [rootedChains_getElem? _ tags i tags[i] (List.getElem?_eq_getElem hi),
+      chainPrefixes_getElem? start records (i + 1) (by omega)]
+    rfl
   constructor
   · intro accepted i hi
-    have : firstBadTag (entryTag key) height (chainPrefixes start records) tags = none := by
+    have : firstBadTag (rootedTag key) height (rootedChains (chainPrefixes start records) tags)
+        tags = none := by
       unfold verifyTags verifyTagsWith at accepted
       split at accepted
       · assumption
       · cases accepted
-    obtain ⟨chain, at_, eq⟩ := none_iff.mp this i hi
-    rw [chainPrefixes_getElem? start records (i + 1) (by omega)] at at_
+    obtain ⟨point, at_, eq⟩ := none_iff.mp this i hi
+    rw [pointAt i hi] at at_
     cases at_
-    exact eq
+    exact ⟨_, eq⟩
   · intro honest
-    have : firstBadTag (entryTag key) height (chainPrefixes start records) tags = none :=
-      none_iff.mpr fun i hi =>
-        ⟨_, chainPrefixes_getElem? start records (i + 1) (by omega), honest i hi⟩
+    have : firstBadTag (rootedTag key) height (rootedChains (chainPrefixes start records) tags)
+        tags = none :=
+      none_iff.mpr fun i hi => by
+        obtain ⟨root, eq⟩ := honest i hi
+        refine ⟨_, pointAt i hi, ?_⟩
+        unfold rootedTag
+        rw [eq, tagRoot_entryTag]
+        rfl
     simp [verifyTags, verifyTagsWith, this]
 
 /-- **A wrong tag at any height refuses, naming that height** — the first wrong
-one; the entries after it do not matter. -/
+one, whatever root it claims; the entries after it do not matter. -/
 theorem verifyTags_refuses_at (key : MacKey) (height : Nat) (start : Digest)
     (records : List IntentRecord) (pre post : List (List UInt8)) (stored : List UInt8)
     (within : pre.length < records.length)
-    (honest : ∀ i (hi : i < pre.length),
-      pre[i] = entryTag key (height + i + 1) (chainAfter start (records.take (i + 1))))
-    (bad : stored ≠ entryTag key (height + pre.length + 1)
-      (chainAfter start (records.take (pre.length + 1)))) :
+    (honest : ∀ i (hi : i < pre.length), ∃ root,
+      pre[i] = entryTag key (height + i + 1) (chainAfter start (records.take (i + 1))) root)
+    (bad : ∀ root, stored ≠ entryTag key (height + pre.length + 1)
+      (chainAfter start (records.take (pre.length + 1))) root) :
     verifyTags key height (chainPrefixes start records) (pre ++ stored :: post) =
       .error (tagRefusal (height + pre.length + 1)) := by
-  have named := firstBadTag_names_first (entryTag key) height (chainPrefixes start records)
-    pre post stored _
-    (fun i hi => ⟨_, chainPrefixes_getElem? start records (i + 1) (by omega), honest i hi⟩)
-    (chainPrefixes_getElem? start records (pre.length + 1) (by omega)) bad
-  simp [verifyTags, verifyTagsWith, named]
+  let tags := pre ++ stored :: post
+  have pointAt : ∀ i (hi : i < tags.length) (hr : i < records.length),
+      (rootedChains (chainPrefixes start records) tags)[i + 1]? =
+        some (chainAfter start (records.take (i + 1)), (tagRoot tags[i]).getD ⟨0⟩) := by
+    intro i hi hr
+    rw [rootedChains_getElem? _ tags i tags[i] (List.getElem?_eq_getElem hi),
+      chainPrefixes_getElem? start records (i + 1) (by omega)]
+    rfl
+  have named := firstBadTag_names_first (rootedTag key) height
+    (rootedChains (chainPrefixes start records) tags) pre post stored _
+    (fun i hi => by
+      obtain ⟨root, eq⟩ := honest i hi
+      have hi' : i < tags.length := by simp [tags]; omega
+      refine ⟨_, pointAt i hi' (by omega), ?_⟩
+      have same : tags[i] = pre[i] := by simp [tags, List.getElem_append_left hi]
+      unfold rootedTag
+      rw [same, eq, tagRoot_entryTag]
+      rfl)
+    (pointAt pre.length (by simp [tags]) within)
+    (by
+      have same : tags[pre.length]'(by simp [tags]) = stored := by simp [tags]
+      unfold rootedTag
+      simp only [same]
+      exact bad _)
+  simp [verifyTags, verifyTagsWith, tags, named]
 
 /-- **The head is no exception**: a wrong last tag refuses at the head's height. -/
 theorem verifyTags_refuses_head (key : MacKey) (height : Nat) (start : Digest)
     (records : List IntentRecord) (pre : List (List UInt8)) (stored : List UInt8)
     (exact : pre.length + 1 = records.length)
-    (honest : ∀ i (hi : i < pre.length),
-      pre[i] = entryTag key (height + i + 1) (chainAfter start (records.take (i + 1))))
-    (bad : stored ≠ entryTag key (height + records.length) (chainAfter start records)) :
+    (honest : ∀ i (hi : i < pre.length), ∃ root,
+      pre[i] = entryTag key (height + i + 1) (chainAfter start (records.take (i + 1))) root)
+    (bad : ∀ root, stored ≠ entryTag key (height + records.length) (chainAfter start records) root) :
     verifyTags key height (chainPrefixes start records) (pre ++ [stored]) =
       .error (tagRefusal (height + records.length)) := by
   have := verifyTags_refuses_at key height start records pre [] stored (by omega) honest
-    (by rw [exact, List.take_of_length_le (by omega), Nat.add_assoc, exact]; exact bad)
+    (by
+      intro root
+      rw [exact, List.take_of_length_le (by omega), Nat.add_assoc, exact]
+      exact bad root)
   rw [this, ← exact, Nat.add_assoc]
+
+/-- **Every verified root is bound**: a store the verifier accepts carries, at
+each height, exactly the root its tag was sealed with — the root a historical
+receipt reads (`DurableReceiverIO.Loaded.rootLog`). -/
+theorem verifyTags_root (key : MacKey) (height : Nat) (start : Digest)
+    (records : List IntentRecord) (tags : List (List UInt8)) (lengths : tags.length ≤ records.length)
+    (accepted : verifyTags key height (chainPrefixes start records) tags = .ok ())
+    (i : Nat) (hi : i < tags.length) :
+    tags[i] = entryTag key (height + i + 1) (chainAfter start (records.take (i + 1)))
+      ((tagRoot tags[i]).getD ⟨0⟩) := by
+  obtain ⟨root, eq⟩ := (verifyTags_ok_iff key height start records tags lengths).mp accepted i hi
+  rw [eq, tagRoot_entryTag]
+  rfl
 
 /-! ## Decided poles: three records, tag = (height, chain), chain = running sum -/
 
@@ -249,6 +323,8 @@ theorem pole_base_height_named :
 #assert_axioms verifyTags_ok_iff
 #assert_axioms verifyTags_refuses_at
 #assert_axioms verifyTags_refuses_head
+#assert_axioms rootedChains_getElem?
+#assert_axioms verifyTags_root
 #assert_axioms pole_honest_accepted
 #assert_axioms pole_middle_refused
 #assert_axioms pole_head_refused
