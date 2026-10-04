@@ -1,5 +1,10 @@
 # Authored canonical settlement Plan
 
+> **Status (2026-10-04).** This program is upstream-Bend source checked through the
+> retiring BendTT path, not Objective Bend. The design below survives; the checked
+> artifacts do not carry over and the program must be ported to `.obend` to run on
+> Core4. See [Objective Bend](OBJECTIVE-BEND.md).
+
 The `CanonicalSettlementPlan.settle` and `settle_shared` methods invoke the
 existing single-seller allocation and settlement sources. They convert the
 computed transfer sequence into `WorldPlanMoney.NativePlan`, mark the room's
@@ -94,7 +99,6 @@ CanonicalSettlementPlan and its demonstration. General constructor/refusal
 laws and source cases cover ordered mapping, missing assets, duplicate tokens,
 split native aliases, two orders using one balance, insufficient aggregate
 backing, stale book roots, and the actual room transition.
-Actual BendTT Book checks and native adapter compilation/receiving are separate
-qualification steps. The earlier five canonical allocation/settlement Books
-have passed actual no-opaque Book checking. This document does not turn source
-elaboration into a native settlement receipt.
+The earlier five canonical allocation/settlement Books passed no-opaque BendTT
+`Book.check` (historical; BendTT path). No native settlement receipt exists, and
+none of this qualifies an Objective Bend program.

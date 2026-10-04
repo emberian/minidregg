@@ -1,148 +1,40 @@
-BEND AUTHORED-DATA REPRESENTATION — 2026-10-03
-Owner: Codex bend_data_representation. STATUS: first three modules QUALIFIED; five extensions pending.
-No installed native result/runtime claim in this receipt.
+BEND AUTHORED-DATA REPRESENTATION
+Rewritten 2026-10-04. The 2026-10-03 version was a lane receipt for data
+representation on the retiring BendTT path; Git history keeps it.
 
-Fresh additive source, agreed with compiler owner:
- hbox:/home/hbox/workbox/codex-bend-logic-20261003/src/Compiler/
-  BendSourceRepresentation.lean
-  BendSourceTypedRepresentation.lean
-  BendSourceByteCodec.lean
-  BendSourceCanonicalCodec.lean
-  BendSourceWordCodec.lean
-  BendSourceNatOperation.lean
-  BendSourceNatTyped.lean
-  BendSourceListTyped.lean
-Initial focused check script checks first three, before compiler/world consumers:
- ../check-representation.sh; captain owns sole Lean seat. First three checked through captain-assigned auxiliary lease, details below.
-Mac drafting copies: redregg/work/bend-data-representation-20261003/.
-No upstream source edits, git, stash, cache deletion or native builds.
+WHAT IS TRUE NOW (Objective Bend Core4)
+Core4 has three scalar kinds and records, nothing else:
+ - Term.nat n (unbounded Nat), Term.boolean b, Term.label s (opaque string).
+ - Term.record fields: lazy fields, first match wins on lookup.
+ No sums, lists, bytes, words or case on constructors; the only branch is ifZero
+ on a Nat. Booleans have no eliminator (`==` yields one, nothing consumes it).
+A finished result leaves the demand machine as a RuntimeValue (closure, scalar,
+record of heap addresses, specification, prototype). Theory/ObjectiveBendDemandData
+extracts deep first-order Data (natural, boolean, label, record of Data) by
+re-entering field addresses, and refuses on budget exhaustion, duplicate fields,
+a closure reaching data, or a cycle. Its canonical byte encoding tags each kind
+(0 nat as decimal text, 1 bool, 2 label with byte length, then records).
+Extraction has unit tests (tests/objective-bend-source/CheckDemandData.lean) but
+no soundness theorem relating the extracted Data to the source meaning.
 
-Actual sources read:
- /Users/ember/dev/bend/bend2/base.bend types Bool/Nat/List/Word, Bool.not/Nat.add;
- safe.ts ctr_term 1264ff, ADT emission and name_tt; bend.ts word_to_term1064ff
- and u32_from_term1114ff; bendtt.lean Term/Def/Book/Typed/Data/Value/Walk/Eval.
- Captured actual safe_emit after Bend parser/checker for three independent small
- authored surface files (cheap emission, no Lean/C/native build): BoolSource,
- NatSource, WordSource. Surface+emitted files copied to remote lane parent.
- Also read actual workshop Prelude and emitted WorkshopFaces Book first60lines,
- with sealed-results source/import/Book paths. The workshop's bytes are List Nat,
- requiring per-member <256; they are not intrinsically UInt8 source values.
+PRINCIPLES THAT CARRY OVER
+ - A codec refuses what it cannot represent; it never wraps, truncates or
+   saturates. A byte is a Nat < 256 checked before conversion; a word refuses an
+   out-of-range value instead of reducing it.
+ - Source Nat, bounded native words, field elements and BFV plaintext rings are
+   different domains. Every crossing names its bound and its failure.
+ - A unary or structural source encoding can be a proof witness without being
+   materialized by a native implementation.
+ - Source step charge and physical work are separate quantities.
 
-Exact actual frontend:
- Bool False{} / True{} -> TupQ1(Lab False/True)(Lab '()').
- Bool.arms -> MatFalse(Enu['()'])(MatTrue(Enu['()'])Efq).
- Bool -> SigQ1(Enu[False,True])(AppQ1(Ref Bool.arms)(Var0)).
- Bool.not -> Prj(MatFalse(MatUnit(pairTrue)Efq)(MatTrue(MatUnit(pairFalse)Efq)Efq)).
- Capture BoolSource.bendtt SHA256:
- 20ee16d2324107b2068f5871ff3c71ffd4e12af0e67fbec8af19c8a937fdd6ed
- This is not the earlier lowercase bare-core enum compiler's source type.
+WHAT CORE4 STILL NEEDS HERE
+Sums with case, then lists (sums plus records) and bytes as a checked list of
+bounded Nat, then a typed Plan ABI that is a sum of actions. Ranked in
+docs/OBJECTIVE-BEND.md.
 
-General laws (first three checked; named extensions pending below):
- - Exact RepBool and canonical uniqueness, Data and Value; actual Eval split,
-   hit/miss and unit case normalization for every Plan and input. Existing
-   descriptor_correct forces this source output for arbitrary auxiliary vector
-   with original input/output pinning; no honest-generator assumption.
- - BoolBookBinding compares full actual arms/type definitions plus whole Book.check;
-   boolTerm_typed retains emitted dependent Ref Bool.arms type and Ref Bool result.
- - Source Nat and List Nat exact structural codecs, general encode/decode laws.
-   Reverse decoder laws reject changed quantity, tag, field shape or unit tail.
-   Unary source AST is mathematical witness in RepNat Prop; native numeric path
-   need not materialize it. Decoder is for receiving an actual supplied AST.
- - RepBytes requires every Nat member<256 before UInt8.ofNat; UInt8 byte source
-   encoder and decoder left inverse, and reverse accepted decoder->exact source
-   encoder equality. No modular reduction can turn256 into0 at this boundary.
- - Word exact WCon Bool/head/tail/unit layout, little-endian head confirmed in
-   actual word_to_term/u32_from_term. Width-indexed bitlist representation and
-   source Data; bitsOf/value roundtrips over declared n<2^width, length and range.
-   encodeWord explicitly refuses oversized n; it does not expose truncation.
- - Exact captured Nat.add body + Book lookup identity -> general live Eval
-   normalization to canonical source integer(a+b). Native boundedNatAdd admits
-   exactly declared a+b<cap and explicitly refuses overflow. This is not a
-   claim about existing comp.ts optimized Nat implementation or field arithmetic.
-   Source step charge and physical optimized work are separate, not equated.
- - NatBookBinding full Nat.arms/Nat definitions+Book.check and source constructor
-   typing by induction. ListBookBinding exact emitted List.q2/arms+Book.check
-   gives natListTerm_typed at actual AppQ0(Ref List.q2)(Ref Nat). General Word
-   source typing and parameterized freshening remain outstanding.
-
-Actual consumers coordinated:
- Compiler owner authors BendLogicPreludeCase exact method/type/body admission
- retaining same Plan, descriptor and constructive DAG. Captured Book is supplied
- for actual parser/check/Ref execution fixture rather than regenerated source spec.
- World owner authors BendPlanLowering native typed Payload/readGuard stream codec
- importing UInt8 source-byte API. Canonical Plan stream receiving is that owner's
- work; this lane does not silently equate source bytes and native commands.
- ClosureArena owner plans runtime pointer relation:
-   exists t, Denotes program heap ptr t and RepBool t bit,
- where t stays erased. FHE owner consumes same 0/1 Plan, with separate bit/key/
- same-opening/domain admission and prime1032193/no-wrap/limb requirements.
-
-Evidence distinctions and open joins:
- Pending extension checks can refute those authored proof scripts. No native
- Plan consumer, FHE or zkVM admission is asserted by these source modules.
- Actual upstream checker/safe_emit capture does not prove safe.ts universally.
- Bool/Word/Nat source names can be freshened in other closures; current exact
- binding applies to captured literal names, future imports need parameterized
- actual definition references. Backend fields, signed integers, BFV rings and
- source Nat/Word are distinct; no lossy field folds, implicit overflow or saturation.
- Captured Nat.add is actual source operation; field-gadget integer addition and
- complete arbitrary auxiliary carry/range proof remains next compiler join.
-
-Reading boundaries: complete redregg/AGENTS and work/REENTRY; relevant compiler,
- audit and landscape records were initially fetched together with truncated
- output, so that fetch is partial reading, not whole-doc attestation. Source
- citations/captures above are actual narrower reads. No vision-level replacement
- for root's broader objective: full ObjectiveBend and user worlds across modes.
-
-2026-10-03 QUALIFIED FIRST BATCH
-Auxiliary captain-assigned lease, memory4G, two threads,180sec cap; readonly
-warm dependencies, own three new .olean outputs; no dependency rebuild/full lake.
-Actual final run09:35:22Z->09:35:28Z, exit0, wrapper explicitly RELEASED.
-Stdout: BEND SOURCE REPRESENTATION CHECK PASS.
-Qualified: BendSourceRepresentation, BendSourceTypedRepresentation,
-BendSourceByteCodec. All their #assert_axioms gates passed standard three.
-Observed source proof failures repaired before qualification: multiline branch
-indentation, Bool condition simplification, explicit byte-bound conclusion,
-and UInt8 map composition simplification. No incomplete proofs are qualified.
-Additive derived DecidableEq BendTT.Def supports exact field-by-field Book
-equality without editing the pinned upstream kernel/vendor source.
-Compiler Prelude parser/check/actual Ref consumer and world Plan byte-stream
-consumer have qualified dependencies; their execution results are separate.
-Extension script check-representation-extension.sh contains ONLY new five files:
-CanonicalCodec, WordCodec, NatOperation, NatTyped, ListTyped. It is queued after
-compiler Prelude consumer under captain-owned auxiliary chain, not running yet.
-Mini AirBignum actual next numeric consumer identified by compiler owner:
-AddWires/addGadget/addGadget_sound/emit_addGadget_iff with AirRange and integer
-denoteNat, explicit no-wrap2*2^limbBits<=p and carry/top boundaries. Recommended
-first full-byte addition domain uses two8bit limbs, input upperlimbs0 and
-operands<256; every sum<=510 is preserved.7bit narrowing is unnecessary.
-
-COMPILER CONSUMER JOIN (owner report, 2026-10-03)
-Compiler owner reports actual Prelude consumer first-pass PASS in
-check-prelude-01.log: full parsed Book structural equality to captured safe_emit,
-Book.check, actual Bool/arms and method type/body binding, Ref source execution
-for both inputs, changed same-name Bool type and method interface refused.
-All standard-three gates passed. Actual emitted source Prelude artifact SHA256:
-51efc99c33b1a87b476dbf9aa9fcc2b89acd5c431b21c1e4a71126c7ed33da29.
-This is compiler-owner evidence, not a second run by this representation lane.
-FHE owner receives that actual source-bound artifact for the physical consumer.
-
-PHYSICAL FHE CONSUMER JOIN (owner report, 2026-10-03)
-Homomorphic owner reports actual qualified captured-safe_emit Prelude artifact
-consumed by real BFV through SAME unary signed DAG, explicit Sigma/tag/unit
-profile. All4096 slots correct; independent replay/refusals PASS. Source surface,
-emitted Book and qualified representation modules are snapshotted run-prelude-01.
-This closes the first actual authored-data source representation -> physical
-consumer seam. Honest encrypted-Bool domain, same-opening/key membership and
-noise/security/release obligations remain separate and are not codec theorems.
-
-NEXT DYNAMIC AUTHORED BOOL JOIN — SEPARATE FROZEN INPUT
-Compiler owner requested additive captured SourceBool.choose(c:Bool,a:Bool,b:Bool)
-normalization after the current extension batch. Actual parser/checker+safe_emit
-capture now exists BoolChooseSource.bend/.bendtt in remote lane parent. Exact
-source is selector Prj/False or True/unit match before binding the remaining
-onTrue/onFalse Q1 arguments; this differs from the previous core enum's three
-initial lambdas. Fresh BendSourceBoolChoose.lean is source-only, not included in
-the existing extension script. It supplies generic actual Walk/Eval.call and
-same BendLogicMux arbitrary-descriptor witness source-result theorem; compiler
-owner owns exact method/Bool Book admission and actual physical consumer.
+HISTORICAL (BendTT path)
+Compiler/BendSource{Representation,TypedRepresentation,ByteCodec,...}.lean prove
+exact codecs for upstream-Bend Bool, Nat, List Nat, bytes and words as emitted by
+the upstream safe emitter into BendTT Books; the first three passed scoped checks
+on 2026-10-03 and a captured Bool Prelude artifact reached a real BFV consumer.
+Those results bind BendTT Book shapes and do not apply to Core4 terms.

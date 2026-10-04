@@ -1,64 +1,64 @@
-# Authored workshop programs
+# Authored workshop and community domains (upstream-Bend source)
 
-These upstream Bend modules describe a workshop that can serve as a technical
-commons or an institution inside an authored world. They contain reusable source
-bodies and general domain laws. Labels are authored data.
+The `.bend` modules here are **upstream Bend** source, checked through the
+retiring BendTT path (sealed upstream parser and emitter, then `Book.check` in
+`check-core.lean`). They are not Objective Bend. Objective Bend Core4 is Mini's
+only Bend language; see [Objective Bend](../../docs/OBJECTIVE-BEND.md). What
+survives from this directory is the **domain design**; the checked Books do not
+carry over, and each domain must be ported to `.obend` to run on Core4.
 
-Start with `Demonstration.bend`: three contributed capacity tokens and ordered
-requests for two units each produce two tokens for member A, one for member B,
-and no remainder. Its identifiers are synthetic source inputs, not deployed rights.
+## The domains
 
-`OrderedCapacity.bend` defines a named nonmarket policy: allocate each request a
-prefix of the remaining inventory, in frozen request order. Empty grants remain
-in the output. Its general conservation law preserves complete token references
-and order, rather than only a quantity sum.
+`Demonstration.bend` and `OrderedCapacity.bend`: a named nonmarket allocation
+policy. Each request receives a prefix of the remaining inventory in frozen
+request order; empty grants stay in the output; the conservation law keeps
+complete token references and order, not only a quantity sum. Identifiers are
+synthetic source inputs, not deployed rights.
 
-`CatalogReview.bend` binds recommendations and decisions to the complete source,
-program, revision and policy. General equality soundness laws support its
-eligibility relation. Every successful adoption proposal preserves its expected
-predecessor and selected candidate. A proposal still faces current native authority.
+`CatalogReview.bend`: recommendations and decisions bound to the complete source,
+program, revision and policy. A successful adoption proposal preserves its
+expected predecessor and selected candidate and still faces current native
+authority.
 
-`ReusableWorkshop.bend` supplies catalog, review, audit and presentation bodies.
-Method callbacks are affine invocation closures; persistent prototypes retain
-immutable source references and qualified Data environments. Environment-first
-helpers permit the linker to derive partial applications from exact source entries.
-`MemberExtension.bend` supplies a missing audit method, delegates inherited review,
-and changes presentation without editing the original modules.
+`ReusableWorkshop.bend` and `MemberExtension.bend`: catalog, review, audit and
+presentation, with a second author supplying a missing audit method and changing
+presentation without editing the original modules. This was the Gen-1 example:
+the Gen-1 linker that composed it into one checked BendTT Book was deleted on
+2026-10-04. The review composition is ported to Core4 as
+[ReviewBase](../../tests/objective-bend-source/ReviewBase.obend),
+[ReviewMember](../../tests/objective-bend-source/ReviewMember.obend) and
+[TwiceReview](../../tests/objective-bend-source/TwiceReview.obend).
 
-`ContractedReview.bend` demonstrates dependent result interfaces carrying live,
-affine contract terms. These Type values are not persistent Data. Their backend
-encoding and evidence erasure require explicit refinement; dead proof metadata
-does not replace current world law or admission.
+`ContractedReview.bend`: dependent result interfaces carrying affine contract
+terms. This relies on BendTT's dependent types; Core4 has no counterpart.
 
-`WorkshopFaces.bend` uses the shared `WorldSurface.bend` interface to select
-individually admitted catalog, capacity, review, source and activity slots, plus
-exact independently prepared intents. It contains no hidden object lookup,
-private journal copy, authored enabled flag or special renderer authority.
+`WorkshopFaces.bend` over `WorldSurface.bend`: presentation faces selecting
+individually admitted observation slots and independently prepared intents
+(contract in [authored surfaces](../../docs/OBJECTIVE-BEND-SURFACE.md)).
 
-`Prelude.bend` is an explicit pure source library with Nat, List, Bool, Sigma,
-equality checks and their soundness proofs. The sealed package maps `import Base`
-to these exact bytes. It contains no foreign IO, unsafe definition or opaque
-implementation; invoking the ordinary upstream filesystem loader with ambient
-Base is a different package and does not reproduce this source profile.
+`CollectiveAdoption`, `MarketMath`, `SingleSellerAllocation`, `UniformProRata`,
+the settlement modules, `ResidentServiceCommons` and the coauthoring modules: see
+[collective domains](../../docs/BEND-COLLECTIVE-DOMAINS.md),
+[canonical settlement](../../docs/BEND-CANONICAL-SETTLEMENT-PLAN.md),
+[service commons](../../docs/BEND-RESIDENT-SERVICE-COMMONS.md) and
+[coauthoring](COAUTHORING.md).
 
-## Qualification
+`Prelude.bend` is the explicit pure library (Nat, List, Bool, Sigma) these modules
+import as `Base`.
 
-On 2026-10-03 all seven consumer Books passed the exact upstream parser/checker,
-sealed import adapter and BendTT emission, then the installed exact BendTT
-`Book.parse` and `Book.check`, with no opaque definitions. This checks the emitted
-programs and general live proof terms. It is not a theorem that the surface
-elaborator or native compiler preserves their semantics.
+## Evidence, historical
 
-The pinned upstream revision is `947db722640c86247849343657bf2f7ef01cb7f1`.
-`native/bend-source/check-workshop.ts` reproduces the sealed source check and
-emission with pinned upstream component bytes; `check-core.lean` checks the
-emitted Books through `Theory.BendTTSource`. The relocated check-script entry is
-source work pending its own receiving qualification.
+On 2026-10-03 the seven Workshop consumer Books passed the pinned upstream
+parser/checker (revision `947db722640c86247849343657bf2f7ef01cb7f1`), sealed import
+adapter and BendTT emission, then BendTT `Book.parse` and `Book.check`, with no
+opaque definitions. That checks the emitted BendTT programs. It says nothing about
+Objective Bend, and it is not a theorem that any elaborator or native compiler
+preserves their meaning.
 
-Actual Objective Bend composition, source publication, native effects, fresh
-instances, independent private returns, generic surface rendering and resident
-review remain joined construction work. Ordinary signature compatibility alone
-does not establish policy-preserving override. Contracts must bind the executed
-immutable entry and actual effect trace, while current governing laws retain
-authority. List-of-Nat byte representations require checked byte, digest and text
-bounds in the shared bridge; truncation is not an encoding.
+## What porting needs
+
+Core4 lacks several things these domains use: a Boolean eliminator and sums with
+case (only `ifZero` on Nat branches), lists, label equality, effects, and checked
+`requires`. Ranked in the [language guide](../../docs/OBJECTIVE-BEND.md#what-core4-lacks-the-roadmap).
+List-of-Nat byte representations need checked byte, digest and text bounds;
+truncation is not an encoding.

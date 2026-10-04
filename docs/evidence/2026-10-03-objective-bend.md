@@ -32,9 +32,6 @@ source paths from 27 contributors, including authored WIP. Subsequent source
 integration at `9c39e5898e73691344ba8e4ec7392bf0409991f8` includes later
 construction deltas. These are source-publication checkpoints; shared-interface
 reconciliation and receiving qualification continue independently.
-The public Workshop raw source, checked static core Book, linker and Run/Export
-drivers are present at the paths in the developer guide. Documentation links,
-driver arguments and the core Book hash were rechecked against this source.
 This publication did not rebuild or requalify the native Host. Checked owner
 results below retain their exact earlier scope; newer authored persistence,
 refinement, runtime and protocol joins do not become checked merely by landing.
@@ -50,9 +47,6 @@ execution qualification of newer source.
 | --- | --- |
 | [Studio and authored Surface](../OBJECTIVE-BEND-SURFACE.md) | Authored Surface route is not registered. Source-return lowering, exact provider attribution, native preparation and editor/publication must join before it is a usable Studio route. |
 | [Resident current-base review](../RESIDENT-CONTEXT.md) | Projection/component checks are separate from matched native receiving. `mini_doc_review` is authored WIP; the receiving journey is not yet a completed resident review-and-land path. |
-| [Workshop](../../world/Workshop/README.md) | Actual full-Card source executions are recorded. Rendering, exact decoded result binding and governed effect preparation remain native joins; a linked source Card is not an installed interface. |
-| [Shared station](../../examples/objective-bend-station/STATUS.txt) | Initial Books checked; later scalar/native-plan cases and scripted resident still need their receiving qualification. No hosted GM or installed shared consequence is inferred. |
-| [Collective and allocation](../BEND-COLLECTIVE-DOMAINS.md) | Checked domain decisions do not install adopted source or settle money. Canonical Book funding, exact input membership and atomic native transfers remain explicit joins. |
 | [Portable continuation](../PORTABLE-CONTINUATION.md) | Five native archive component tests do not establish complete inventory, successor authority, private rekey, old-worker fencing or whole-home transfer. |
 
 ## Recorded qualification and open join
@@ -62,13 +56,8 @@ execution qualification of newer source.
 | Native objects, definitions and methods | Selected Host/client received 51 OO actions; 35 object-face checks; stale-parent and field-narrow observer refusals preserved state and balances. | This is the native method route, not an installed arbitrary Objective Bend driver. |
 | Documents, source/history and resident-facing views | Native tranches recorded 69 checks and 62 rows / 21 assertions. | Complete cross-product journeys and current-context resident actuation remain distinct joins. |
 | Native performance | Two-target member proposal/submit/readback and out-of-room refusal passed; the pair used 51 Host exchanges / three op5 cycles. | Counts describe real exchange work, not a latency speedup or a general performance theorem. |
-| Pinned Bend kernel and reference execution | Exact upstream vendor, namespace wrapper and two Lean 4.30 compatibility proof rewrites; proof-carrying bounded `Eval`/`Walk` executor checked. | Not optimized compiler correctness or native evaluator registration. |
-| Objective Bend composition | Four semantic/elaboration modules checked; linker rejected missing audit and accepted complete 91-definition and extended 92-definition Books. Six complete Card outputs ran through the source evaluator. | General composition-to-native Plan/view/effects and persisted prototype identity remain receiving joins. |
-| Authored domain examples | Workshop seven Books, Collective five and Station three passed actual core checks. | Their useful native effects, private returns and continuing residents are not inferred from source checking. |
-| Closure machine | Bounded representation has 18 code constructors; ten machine checks recorded. | Complete source/controller simulation remains open; newer microstep/continuation source must receive its own checks. |
+| Objective Bend Core4 | Lazy reference semantics, demand machine and checker with machine-checked soundness of `runBounded` and preservation/no-refusal for checked closed terms (theorem list and premises in the [language guide](../OBJECTIVE-BEND.md#formal-status)). Proofs compile only in the opt-in `ResearchWip` library at this revision. | Completeness, the `forceWith`/`executeWith` path used for Plans, deep Data soundness and front-end adequacy are open. No native accepted receipt from Objective Bend source exists on main. |
 | Source artifacts, Plan and publication | Seven world-language modules and four invocation/attribution/opaque-return modules passed scoped checks. | Native input binding, funded Plan admission, source driver, return release and Studio remain an integration cohort. |
-| Bool circuit and homomorphic fragment | Exact source Bool specialization reached emitted constraints and real BFV evaluation; dynamic mux covered all eight inputs across 4096 slots, retry and depth refusal. | Honest-owner plaintext ingress assumptions remain explicit. No arbitrary language compiler, typed third-party effects, general zkVM or full malicious MPC qualification. |
-| Persistent computation | Complete-state continuation/codec and native activity work is under construction. | A codec law or pure process-restart probe does not establish source simulation, safe CPU interruption, durable source admission or duplicate-worker fencing. |
 | Agreement | Operational Simplex and durable protocol checks exist; global/local proof work and native joint reservation/installation continue. | Engine decision, actual source authority, physical install and recoverable private custody must be joined. |
 | Traffic privacy | PQ mailbox/relay and bounded asynchronous custody components have executed. | Actual schedule/failure/privacy composition and the joined native path remain requirements; a passing encrypted-message demo is insufficient. |
 | SPK service family | Matching family sealed for baseline source with explicit executable provenance and root-staging checks. | Fresh joined SPK/Hermes/browser/restart/restore qualification is runtime work; seal does not establish it. |
@@ -80,27 +69,44 @@ the matched client is
 Its transaction frame is v10 and receiving contract v2. These identify the
 recorded run; they are not instructions to accept an arbitrary binary by name.
 
-## Source-checkable Workshop capsule
+## Historical: Gen-1 and BendTT results (Gen-1 deleted 2026-10-04)
 
-The frozen passing linker source packet has SHA-256
+Gen-1 Objective Bend elaborated an OO surface into checked BendTT Books
+(`Compiler/ObjectiveBendLinker` and its siblings); it was deleted on 2026-10-04 and
+the results below describe that deleted path or the retiring BendTT machine, not
+Objective Bend Core4. They remain true of the exact artifacts they name.
+
+| Path or area | Recorded result | Note |
+| --- | --- | --- |
+| [Workshop](../../world/Workshop/README.md) | Actual full-Card source executions are recorded. Rendering, exact decoded result binding and governed effect preparation remain native joins; a linked source Card is not an installed interface. | Upstream-Bend source checked through BendTT `Book.check`; the domain design survives, the checked artifacts do not carry over to Core4. |
+| [Shared station](../../examples/objective-bend-station/STATUS.txt) | Initial Books checked; later scalar/native-plan cases and scripted resident still need their receiving qualification. No hosted GM or installed shared consequence is inferred. | Upstream-Bend source checked through BendTT `Book.check`; the domain design survives, the checked artifacts do not carry over to Core4. |
+| [Collective and allocation](../BEND-COLLECTIVE-DOMAINS.md) | Checked domain decisions do not install adopted source or settle money. Canonical Book funding, exact input membership and atomic native transfers remain explicit joins. | Upstream-Bend source checked through BendTT `Book.check`; the domain design survives, the checked artifacts do not carry over to Core4. |
+| Pinned Bend kernel and reference execution | Exact upstream vendor, namespace wrapper and two Lean 4.30 compatibility proof rewrites; proof-carrying bounded `Eval`/`Walk` executor checked. | Not optimized compiler correctness or native evaluator registration. |
+| Objective Bend composition | Four semantic/elaboration modules checked; linker rejected missing audit and accepted complete 91-definition and extended 92-definition Books. Six complete Card outputs ran through the source evaluator. | General composition-to-native Plan/view/effects and persisted prototype identity remain receiving joins. |
+| Authored domain examples | Workshop seven Books, Collective five and Station three passed actual core checks. | Their useful native effects, private returns and continuing residents are not inferred from source checking. |
+| Closure machine | Bounded representation has 18 code constructors; ten machine checks recorded. | Complete source/controller simulation remains open; newer microstep/continuation source must receive its own checks. |
+| Bool circuit and homomorphic fragment | Exact source Bool specialization reached emitted constraints and real BFV evaluation; dynamic mux covered all eight inputs across 4096 slots, retry and depth refusal. | Honest-owner plaintext ingress assumptions remain explicit. No arbitrary language compiler, typed third-party effects, general zkVM or full malicious MPC qualification. |
+| Persistent computation | Complete-state continuation/codec and native activity work is under construction. | A codec law or pure process-restart probe does not establish source simulation, safe CPU interruption, durable source admission or duplicate-worker fencing. |
+
+The Gen-1 Workshop capsule. The frozen passing linker source packet has SHA-256
 `6fe1ceb2938ff1b98b96c68bac1f82bd9a475c7eb45d2523a2db0d4e247a6e1f`.
 The separate passing publication/export packet has SHA-256
 `8acf8aae82804ec54026e35dbdf443dba56fbc7f92ab94b4a27bf321f3e961d4`.
 These packets contain the actual linker/Workshop source and scoped results.
-The public raw package is [world/Workshop](../../world/Workshop/MemberExtension.bend).
-The public [driver](../../examples/objective-bend-workshop/Run.lean) and
-[static emitted Book](../../examples/objective-bend-workshop/MemberExtension.bendtt)
-provide the [developer recipe](../DEVELOPING.md#check-the-authored-example).
+The raw package was `world/Workshop/MemberExtension.bend`; its driver and emitted
+Book (`examples/objective-bend-workshop/`) were deleted with Gen-1.
 The emitted Book SHA-256 is
 `b7bc7c8e5445c2a810ba2e51f930e732cb6a84d42bac536a956296046e3e91bb`.
 Its source-only publication packet has SHA-256
 `229e920581658b4c1e621893fdae551eab3912d368e524a47b3d1dfb67af7782`.
 
-The incomplete composition must fail for `finalSelf.audit` at owner 3. Completion
-and alternate presentation must check exact 91/92-definition Books. This is an
-actual dependency/body/type check, not a host-side list of declared method names.
-The source evaluator's Card cases have their own execution evidence; the linker
-command alone does not rerun them.
+The incomplete composition failed for `finalSelf.audit` at owner 3; completion and
+alternate presentation checked as exact 91- and 92-definition Books.
+
+The review composition is ported to Core4 as
+[ReviewBase](../../tests/objective-bend-source/ReviewBase.obend),
+[ReviewMember](../../tests/objective-bend-source/ReviewMember.obend) and
+[TwiceReview](../../tests/objective-bend-source/TwiceReview.obend).
 
 ## What a newer claim needs
 

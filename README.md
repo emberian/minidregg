@@ -73,41 +73,19 @@ the contracts and source modules at each boundary.
 
 ## Objective Bend
 
-[Objective Bend](docs/OBJECTIVE-BEND.md) is Mini's primary authored language and
-live-environment direction. Nock remains supported for existing programs and
-history. Bend starts from a pinned dependent affine core; its implementation and
-language may evolve with explicit semantics, versioning and refinement.
+[Objective Bend](docs/OBJECTIVE-BEND.md) is Mini's authored language: lazy open
+recursion with first-class partial specifications, composed with final self and
+whole super. Its core (Core4) has a reference semantics, a call-by-need demand
+machine and a checker in `Theory/ObjectiveBend*.lean`. Nock remains supported for
+existing programs and history.
 
-A partial specification provides methods and declares what it requires. Authors
-compose these specifications using final self and prior super, then check the
-actual linked program. Immutable source, typed captures and per-invocation closures
-connect reusable behavior to persistent objects. Methods return typed proposed
-effects and independent results; reflective views use authorized observations.
-
-The [Workshop example](world/Workshop/README.md) demonstrates this directly:
-one author supplies catalog and review, another adds an audit requirement, and
-a third completes it and changes presentation without editing the original
-modules. Its driver rejects the incomplete composition and checks the completed
-program. The [language guide](docs/OBJECTIVE-BEND.md) explains the example and
-its path toward native admission.
-
-## Try a checked composition
-
-Prerequisites: this repository, the toolchain pinned in
-[lean-toolchain](lean-toolchain), and matching compiled imports for
-`Compiler.ObjectiveBendWorkshop`. Prepare dependencies through the
-[bounded build workflow](docs/DEVELOPING.md#build-and-verify-without-disturbing-another-run);
-a fresh clone alone does not contain those artifacts. From the repository root:
-
-```sh
-lake env lean --run examples/objective-bend-workshop/Run.lean \
-  examples/objective-bend-workshop/MemberExtension.bendtt
-```
-
-The driver reports the expected missing `finalSelf.audit`, then accepts the
-completed and extended compositions. It checks the committed emitted Book;
-regenerating that Book is a separate step when editing the original `.bend`
-source. This command needs no running Mini world or credentials.
+The review composition in
+[ReviewBase](tests/objective-bend-source/ReviewBase.obend) /
+[ReviewMember](tests/objective-bend-source/ReviewMember.obend) shows two authors
+composing specifications without editing each other's modules. The
+[language guide](docs/OBJECTIVE-BEND.md) states what is proven and how to run the
+examples. (The earlier Workshop `.bendtt` quickstart belonged to Gen-1, which was
+deleted on 2026-10-04.)
 
 For an enrolled participant with a matched native client, Host configuration,
 workspace and session home, inspect the actual shell interface:

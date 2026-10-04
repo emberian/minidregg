@@ -26,7 +26,7 @@ perform a second one.
 ```text
 source modules + sealed imports + partial specifications
                          |
-            checked core Book + exact entry
+            checked core term + exact entry
                          |
   authorized invocation sample -> computation -> typed Plan / result
                          |
@@ -81,7 +81,7 @@ or implementation; there is no second manual for each subsystem.
 
 | Area | Start here | Semantic / physical owner in source |
 | --- | --- | --- |
-| Language and object composition | [Objective Bend](OBJECTIVE-BEND.md) | `Compiler/ObjectiveBend*`, `Theory/BendTTSource.lean`; receiving scope in the evidence index |
+| Language and object composition | [Objective Bend](OBJECTIVE-BEND.md) | `Theory/ObjectiveBend*.lean` (semantics, demand machine, typing, proofs); `native/bend-source/objective-*.ts` (front end); `Host/ObjectiveBendPreview.lean` |
 | Native kinds and methods | [World programmer](../native/resource-client/WORLD-PROGRAMMER.md) | [WorldKindMethods](../Kernel/WorldKindMethods.lean), [WorldPrototypeConstruction](../Kernel/WorldPrototypeConstruction.lean), [WorldMethodTrace](../Kernel/WorldMethodTrace.lean) |
 | Authority and transactions | [Client contract](../native/resource-client/README.md) | [ResourceTransaction](../Kernel/ResourceTransaction.lean), [Run](../Kernel/Run.lean) |
 | Durability, retry and history | [Durable store](DURABLE-STORE.md), [receipt continuity](RECEIPT-CONTINUITY.md) | [DurableReceiver](../Kernel/DurableReceiver.lean), [DurableReceiverIO](../Compiler/DurableReceiverIO.lean) |

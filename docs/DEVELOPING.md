@@ -9,56 +9,54 @@ proposal, and qualifying a new runtime are different operations.
 
 | Question | Source to follow |
 | --- | --- |
-| What is live Bend execution? | [BendTTSource](../Theory/BendTTSource.lean): `Book`, `Eval`, `Walk`; [BendLiveMachine](../Theory/BendLiveMachine.lean): checked bounded execution |
-| Where are the exact upstream bytes and adaptation? | [Vendor provenance](../vendor/bend/PROVENANCE.json), [patch](../vendor/bend/lean430.patch), [license](../vendor/bend/LICENSE) |
+| What does an Objective Bend program mean? | [OpenRecursion](../Theory/ObjectiveBendOpenRecursion.lean): `Term`, `Step`, `Evaluates` (the lazy reference semantics) |
+| How does it execute? | [DemandMachine](../Theory/ObjectiveBendDemandMachine.lean): `stepRaw`, `runBounded`; [DemandData](../Theory/ObjectiveBendDemandData.lean) and [DemandCapacity](../Theory/ObjectiveBendDemandCapacity.lean): deep result extraction under a capacity policy |
+| How is it typed? | [Types](../Theory/ObjectiveBendTypes.lean), [Typing](../Theory/ObjectiveBendTyping.lean): `check` returns an actual derivation |
+| Where is the original Bend calculus? | [Vendor provenance](../vendor/bend/PROVENANCE.json) and [BendTTSource](../Theory/BendTTSource.lean): a reference artifact only, not a language target |
 | What does a program identity commit? | [Evaluator](../Compiler/Evaluator.lean), [Program codec](../Compiler/NockProgramCodec.lean); the codec's historical name does not mean the record can identify only Nock |
 | How does a real method become checked effects? | [WorldKindMethods](../Kernel/WorldKindMethods.lean) → [ResourceTransaction](../Kernel/ResourceTransaction.lean) → [Run](../Kernel/Run.lean) → [WorldMethodTrace](../Kernel/WorldMethodTrace.lean) |
 | Where do native fields and signed views come from? | [WorldKindDescriptor](../Compiler/WorldKindDescriptor.lean), [WorldKindProjection](../Kernel/WorldKindProjection.lean), [Host JSON](../Host/Json.lean) |
 | Where is the client method/proposal path? | [world_kind.rs](../native/resource-client/src/world_kind.rs), [workspace.rs](../native/resource-client/src/workspace.rs), [shell.rs](../native/resource-client/src/shell.rs) |
 | What owns durability? | [DurableReceiver](../Kernel/DurableReceiver.lean), [DurableReceiverIO](../Compiler/DurableReceiverIO.lean), [store contract](DURABLE-STORE.md) |
-| What is the first circuit specialization? | [BendLogicSpecialization](../Compiler/BendLogicSpecialization.lean) → [BendLogicTrace](../Compiler/BendLogicTrace.lean) → [BendLogicEmit](../Host/BendLogicEmit.lean) |
+| Is there a circuit or FHE specialization? | Not on main for Objective Bend. `Compiler/BendLogic*` specializes the retiring BendTT core and must be re-targeted at the demand machine before it says anything about Objective Bend |
 
-For Objective Bend, the source cohort adds `Compiler/ObjectiveBendComposition`,
-`ObjectiveBendElaboration`, `ObjectiveBendOrder`, `ObjectiveBendPrototype`,
-and the separately authored `ObjectiveBendPersistence`,
-`ObjectiveBendLinker` and `ObjectiveBendWorkshop`. The world-language cohort adds
-`BendWorldSource`, `BendCoreAdmission`, `BendWorldProgramCodec`, `BendWorldPlan`
-and their publication/admission consumers. Consult the
-[dated index](evidence/2026-10-03-objective-bend.md) before treating an owner-checked
-module as part of the selected native Host. A native registry/profile must
-actually consume the module; an importable theorem alone does not install it.
+Objective Bend's semantics, machine and typing live in `Theory/ObjectiveBend*.lean`.
+The front end is TypeScript: `native/bend-source/objective-parser.ts`,
+`objective-frontend.ts` (capture), `objective-elaborate.ts` (surface to core) and
+`objective-preview.ts`. `Host/ObjectiveBendPreview.lean` checks and runs a decoded
+core term; `Kernel/ObjectiveBendPreparedOutput.lean` and
+`Compiler/ObjectiveBendPlanAdapter.lean` turn a result into a scalar Plan. The
+[language guide](OBJECTIVE-BEND.md) states what each of these proves and where
+the trusted boundary sits. At this revision the `Theory/ObjectiveBend*` proofs are
+compiled only by the opt-in `ResearchWip` library, so a green default build says
+nothing about them. A native registry/profile must actually consume a module; an
+importable theorem alone does not install it.
 
-## Check the authored example
+## Run an Objective Bend example
 
-The readable source package is [world/Workshop](../world/Workshop/MemberExtension.bend).
-The committed [core Book](../examples/objective-bend-workshop/MemberExtension.bendtt)
-is static emitted source, with the exact original helper closure. The
-[driver](../examples/objective-bend-workshop/Run.lean) checks its real composition:
+With the pinned Lean toolchain and the imported `Theory` modules compiled under the
+[bounded build policy](#build-and-verify-without-disturbing-another-run), from the
+repository root:
 
 ```sh
-lake env lean --run examples/objective-bend-workshop/Run.lean \
-  examples/objective-bend-workshop/MemberExtension.bendtt
+lake env lean --run tests/objective-bend-source/CheckDemandData.lean
+lake env lean --run tests/objective-bend-source/CheckDemandCapacity.lean
+lake env lean --run examples/objective-bend-world/reference/GenericExtension.lean
 ```
 
-Run from the repository root with the repository's pinned Lean toolchain and
-already-built matching imports. This narrow driver canonicalizes the supplied
-core Book, admits it with the real checker, resolves the actual helper entries
-and exercises incomplete, completed and extended compositions. It should refuse
-the missing `finalSelf.audit` and accept the two complete cases. The counts and
-frozen source qualification belong in the evidence index.
+The first two are unit tests of the demand machine: deep result extraction and its
+failures (budget, duplicate field, closure leaked into data, cycle), and a capacity
+policy that suspends and later resumes a computation. They report through their exit
+status and printed lines. The third runs a pre-elaborated core term for
+[GenericExtension.obend](../tests/objective-bend-source/GenericExtension.obend) on
+the demand machine and prints its final state. The `reference/` drivers are
+generated and untyped (they do not call `check`) and contain no assertions; editing
+the `.obend` file does not change them. The source-to-execution route (capture,
+elaborate, check, run) is the preview tooling described in the
+[language guide](OBJECTIVE-BEND.md#execution-paths).
 
-The `.bendtt` input is the emitted Book. Merely editing `.bend` and rerunning a
-previous `.bendtt` checks the previous program. Re-elaboration must use the exact
-sealed parser/elaborator, pinned pure Prelude and retained dependency transcript.
-Do not invoke an unrestricted upstream loader as if it enforced Mini's sealed
-imports. The relocated `native/bend-source/check-workshop.ts` wrapper is separately marked
-WIP until its public setup/import path is qualified. The checked core recipe above
-is available independently; it does not promise an end-to-end source-edit workflow.
-
-What this command does **not** do: install a method, create an instance, spend
-credits, emit a world effect, verify a private backend, or prove the optimized
-native compiler equivalent. The separate [source exporter](../examples/objective-bend-workshop/Export.lean)
-exercises actual whole-Card method outputs.
+None of these commands installs a method, creates an instance, spends credits,
+emits a world effect or verifies a private backend.
 
 ## Use existing native methods
 
@@ -109,11 +107,11 @@ native definition and program authoring details, including a real poll method.
 
 For a new authored method or reusable spec:
 
-1. Define its input/result types and exact required/provided interfaces. Keep
-   persistent Data captures distinct from per-invocation closures. Include a
-   composition that is incomplete until another author supplies a requirement.
-2. Retain the original source, locked imports and emitted core. Check the actual
-   body/type and the complete linked Book; exercise the corresponding live entry.
+1. Define its input/result types and its required and provided methods. Include
+   a composition that is incomplete until another author supplies a requirement.
+   `requires` is not yet checked at composition; say so in the test.
+2. Retain the original source, locked imports and elaborated core. Check the
+   actual core term with the Objective Bend checker and run that same term.
 3. Specify exact typed Plan outputs, dependencies, ordering, charge and independent
    return schema. Missing samples refuse; placeholder zeroes are not bindings.
 4. Follow those bytes into actual native prepared effects and current authority.

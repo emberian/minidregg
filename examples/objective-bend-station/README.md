@@ -1,5 +1,10 @@
 # Authored shared station consequences
 
+> **Status (2026-10-04).** These are upstream-Bend modules on the retiring BendTT
+> path, not Objective Bend; the directory name predates the cutover. The design
+> survives and must be ported to `.obend`; see [STATUS.txt](STATUS.txt). The
+> commands below run only while the BendTT tooling exists.
+
 `EngineeringStation.bend` supplies an author-owned airlock/engineering/infirmary
 graph and movement costs. `SharedConsequences.bend` supplies reusable take, drop
 and movement methods over one global property owner and shared oxygen supply.

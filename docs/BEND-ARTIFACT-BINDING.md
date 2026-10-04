@@ -1,5 +1,9 @@
 # Compiler artifact binding
 
+> **Status (2026-10-04).** This binding consumes checked **BendTT** Books
+> (`BendCoreAdmission`) and belongs to the retiring BendTT stack. It does not bind
+> Objective Bend programs, which have no artifact binding or circuit route on main.
+
 `Compiler.BendArtifactBinding.check nativeArtifact compilerBytes` returns a proof-carrying checked mapping or an error. It consumes an actual canonical checked Book receipt, matches the selected source module bytes and core entry, re-runs the supported source specialization, and regenerates the retained constructive signed graph, field graph and AIR descriptor. Native plan identity is cSHAKE with domain `DREGG.BEND.CONSTRUCTIVE-PLAN/v1` over exact compiler bytes. Deployment SHA remains a separate byte fingerprint.
 
 The carrier must retain canonical Book bytes as program.jam and `DREGG/BEND/ENTRY/v1` plus canonical string-stream entry encoding as program.params. The source evaluator/charge and exact structural Nat semantics remain source identities; BFV arithmetic is separately plan bound. Source capacity uses profile.bounds[7], which the actual BendNativeRun checks, and must cover the admitted source reservation. Physical gate count does not substitute for source charge.

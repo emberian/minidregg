@@ -1,5 +1,10 @@
 # Resident service commons
 
+> **Status (2026-10-04).** ResidentServiceCommons is upstream-Bend source checked through the
+> retiring BendTT path, not Objective Bend. The design below survives; the checked
+> artifacts do not carry over and the program must be ported to `.obend` to run on
+> Core4. See [Objective Bend](OBJECTIVE-BEND.md).
+
 ResidentServiceCommons is an authored world program. It proposes ordinary
 state, canonical money and Activity effects; it is not a second execution,
 custody or authorization controller.
@@ -67,9 +72,9 @@ link survives uncertainty and delivery. The resident home and request are
 ordinary admitted object/document mounts; source code is inspected through the
 same Studio, not an untrusted renderer script.
 
-Current source packages are published before remaining checks. Source, actual
-BendTT Book checking, typed source-to-native effect adaptation and native
-receiving must each report their own result. This contract serves research
+The published source was checked only on the retiring BendTT path. An
+Objective Bend port, typed source-to-native effect adaptation and native receiving
+must each report their own result. This contract serves research
 reviews, authored tools, world participation and service exchange. It does not
 turn every resident action into a paid numeric market or assert current private
 execution supports arbitrary model/provider tasks.

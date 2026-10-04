@@ -1,10 +1,13 @@
 # Authored collective and allocation domains
 
-These are ordinary Bend source modules for authored worlds, community decisions,
-resource exchange and service markets. Their effects must use the shared Mini
-Plan and receiver; a successful domain decision never grants authority.
+These are **upstream-Bend** source modules (`world/Workshop/*.bend`) for authored
+worlds, community decisions, resource exchange and service markets, checked through
+the retiring BendTT path. They are not Objective Bend; the mechanism designs below
+survive and must be ported to `.obend` to run on Core4 (see
+[Objective Bend](OBJECTIVE-BEND.md)). Their effects must use the shared Mini Plan
+and receiver; a successful domain decision never grants authority.
 
-| Module | Purpose | Current qualification |
+| Module | Purpose | Qualification (BendTT path, historical) |
 | --- | --- | --- |
 | MarketMath | Exact structural natural arithmetic | Source and BendTT Book checked |
 | CollectiveAdoption | Unique ballot use, derived tally, exact reviewed-source adoption proposal | Source and BendTT Book checked |
@@ -72,6 +75,9 @@ explicit charge conversion. Silent machine overflow, floating tolerances and
 an arbitrary small order ceiling are not substitutes.
 
 ## Checks
+
+These checks run on the retiring BendTT path and stop running when it is
+deleted. They qualify the upstream-Bend artifacts only.
 
 Run the portable source driver with the qualified Bend tooling directory:
 

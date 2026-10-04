@@ -1,5 +1,11 @@
 # Bend representation efficiency
 
+> **Status (2026-10-04).** Everything below concerns the retiring BendTT machine
+> (`BendBookIndex`, `BendLiveMachine`), not Objective Bend Core4. The Core4 demand
+> machine has its own efficiency questions (shared thunks by heap address, the
+> elaborator's 2^k `compose` duplication, an unpriced execution path); see
+> [Objective Bend](OBJECTIVE-BEND.md).
+
 Two implementation improvements preserve the pinned BendTT source meaning.
 They apply to ordinary clear execution/publication. Private execution continues
 to use its fixed-access controller and separately declared capacity profile.

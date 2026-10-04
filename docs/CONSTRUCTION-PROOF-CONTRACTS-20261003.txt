@@ -1,6 +1,9 @@
 OBJECTIVE BEND: CONSTRUCTION PROOF CONTRACTS — 2026-10-03
 Dated implementation/proof map; qualification applies only to the stated revision.
 This is a live proof-work map, not a certification or a new execution taxonomy.
+Updated 2026-10-04: Objective Bend Core4 is the only Bend language. Entries that
+cite BendTTSource, BendLiveMachine, BendClosure*, BendActivity* or BendCoreAdmission
+describe the retiring BendTT stack; their results do not qualify Core4.
 Destination: Objective Bend integrates object/module composition, partial specs,
 reflective source and persistent identity with Bend semantics and admitted world
 operations. Native, oblivious, proof-producing and homomorphic routes must refine
@@ -37,29 +40,29 @@ observeProject_unjoint. These establish stated representation/frame facts.
 WorldPrototypeConstructionChecks includes named decided byte-copy Nock cases;
 those are V, not general OO linearization/construction correctness.
 
-Missing S/R, owned member_oo_construction with bend_world_language:
- - Partial-spec/module elaboration produces an exact typed Bend Book/entry or
-   explicit rejection; all unresolved requirements survive until discharged.
- - Final-self lookup and prior-super prefix dispatch select the correct
-   provision/source/environment and retain the same final-self handle.
- - Composition dependency certificate contains every graph/source/state edge
-   actually used; no method-selected authority disappears in elaboration.
- - Elaboration preserves source typing and live evaluation, including identity,
-   dispatch precedence, diamond/repeated providers, and explicit overrides.
- - Reflective source retrieval returns exact admitted version; persistent object
-   identity and source version differ deliberately. Evolution proves compatibility
-   or explicit migration, with current authorization and revoked handles checked.
-New member OO authored UNCOMPILED ObjectiveBendComposition/Elaboration:
-finalSelf_cursor_independent, priorSuper_is_prefix, same_final_self,
-dispatched_source, reference_exact, rewrite_identity, constructed_method_exact.
-Types/bodies are actual BendTT.Term. Construction requires lawful parent closure/
-order, discharged requirements, Data captures, actual BendCoreAdmission.Checked
-and exact Book.get for every emitted method. This is a semantic certificate
-contract, not yet a constructive frontend: canonical partial-source loader, finite
-graph validator, generated complete Book+certificate and native Objective consumer
-remain required. No general surface parser/type-elaboration refinement asserted.
-Actual ordinary native receiving now owner-reported PASS primary51 plus stale/
-narrow refusals; that does not qualify the new Objective source tranche.
+Objective Bend Core4 (Theory/ObjectiveBend*; see docs/OBJECTIVE-BEND.md) has
+compiled S for the core: runBounded_*_sound, typed_stepRaw_preserved and
+check_runBounded_no_refusal, compiled only in the opt-in ResearchWip library at
+this revision. Surface-to-core elaboration is TypeScript (objective-elaborate.ts)
+and is a trusted boundary with no S or R.
+Missing S/R:
+ - Surface-to-core: a Lean elaborator or a checked translation-validation
+   statement; `requires` checked at compose/fix; spec laws discharged (today they
+   are callable closures in metadata).
+ - Composition: compose is a left fold of mix. No declared ancestry,
+   linearization or generative identity, so diamond/repeated providers have no
+   semantics yet.
+ - Plan path: forceWith/executeWith equal to runBounded, and soundness of the
+   deep Data extraction that becomes the Plan.
+ - Completeness: reference termination implies machine termination with
+   sufficient resources (no Representation instance exists).
+ - Reflective retrieval, persistent identity and evolution: no Core4 construct;
+   Mini owns identity and versioning.
+Historical: the Gen-1 certificate contract (ObjectiveBendComposition/Elaboration
+over BendTT.Term and BendCoreAdmission.Checked) was deleted on 2026-10-04 with its
+modules; its theorem names do not exist any more.
+Actual ordinary native receiving owner-reported PASS primary51 plus stale/narrow
+refusals; that does not qualify Objective Bend source.
 Falsifiers: same method name in two ancestors; final-self called from super;
 source changed after planning; schema change with stale persistent handle.
 
