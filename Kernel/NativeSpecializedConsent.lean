@@ -26,7 +26,7 @@ theorem changed_plan_refused (expected candidate : List UInt8) (changed : expect
   simp [checkExact, changed]
 
 def supported (operation : UInt8) : Bool :=
-  [86, 92, 96, 103, 108, 113, 117, 123, 126, 140, 160, 170, 183].contains operation
+  [86, 92, 96, 103, 108, 113, 117, 123, 126, 140, 160, 170, 183, 210].contains operation
 
 private def splitPair (payload : List UInt8) : IO (List UInt8 × List UInt8) := do
   unless payload.length ≥ 4 do throw (IO.userError "truncated specialized request pair")
@@ -78,6 +78,9 @@ def expectedPlanBytes (config : NativeHost.Config) {target : NativeHost.Durable}
       pure (CertifyReceiver.signingPlanCodec.encode (← IO.ofExcept (NativeHost.certifyPlanLoaded config opened request)))
   | 183 =>
       pure (NativeHost.claimSigningPlanCodec.encode (← IO.ofExcept (NativeHost.payClaimPlanLoaded config opened request)))
+  | 210 =>
+      pure (ObjectiveActivityReceiver.signingPlanCodec.encode
+        (← IO.ofExcept (NativeHost.activityPlanLoaded config opened request)))
   | _ => throw (IO.userError "specialized consent operation is unsupported")
 
 end Minidregg.Kernel.NativeSpecializedConsent

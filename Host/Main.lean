@@ -64,6 +64,8 @@ behind a signed account observation, 102=exact receipt by transaction id,
 128=clock tick submit, 129=public clock view.
 160=job money (fund/claim/settle) signing plan, 161=job money detached assembly,
 162=job money submit (blind, as 115), 163=job money receipt-only lookup.
+210=activity signing plan, 211=activity detached assembly, 212=activity submit,
+213=activity receipt-only lookup, 214=public activity view (JSON request and reply).
 170=certify signing plan, 171=certify detached assembly, 172=certify submit,
 173=public system view (certified head, tail bound, current head and chain).
 
@@ -87,6 +89,7 @@ The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
 -/
 import Kernel.NativeHost
+import Host.ObjectiveActivityJson
 import Compiler.GenericSimplexSourceAnchor
 import Compiler.FnWireFncu
 import Kernel.NativeHostObjectAudience
@@ -6566,6 +6569,38 @@ def run (arguments : List String) : IO UInt32 := do
                             let opened ← sessionOpened pinnedConfig state
                             let view ← IO.ofExcept (NativeHost.certifyViewLoaded pinnedConfig opened)
                             return ((173 : UInt8), CertifyReceiver.viewCodec.encode view)
+                        | 210 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let plan ← IO.ofExcept (NativeHost.activityPlanLoaded pinnedConfig opened payload)
+                            let bytes := ObjectiveActivityReceiver.signingPlanCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "activity plan exceeds host frame bound")
+                            return ((210 : UInt8), bytes)
+                        | 211 =>
+                            let (planBytes, signature) ← splitPair payload
+                            let some plan := ObjectiveActivityReceiver.signingPlanCodec.decode planBytes
+                              | throw (IO.userError "noncanonical activity plan")
+                            let ingress ← IO.ofExcept (NativeHost.activityAssemble plan signature)
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "activity ingress exceeds host frame bound")
+                            return ((211 : UInt8), ingress)
+                        | 212 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome ← NativeHost.activitySubmitLoaded pinnedConfig opened payload
+                            return ((212 : UInt8), outcomeCodec.encode outcome)
+                        | 213 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome := NativeHost.activityLookupLoaded pinnedConfig opened payload
+                            return ((213 : UInt8), outcomeCodec.encode outcome)
+                        | 214 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let request ← IO.ofExcept (Minidregg.Host.ObjectiveActivityJson.parseViewRequest payload)
+                            let domain := pinnedConfig.deployment.domain
+                            let view ← IO.ofExcept (NativeHost.activityViewLoaded pinnedConfig opened
+                              (Minidregg.Host.ObjectiveActivityJson.viewCells domain request))
+                            let json := Minidregg.Host.ObjectiveActivityJson.viewJson domain
+                              pinnedConfig.tariff.asset request view
+                            return ((214 : UInt8), json.compress.toUTF8.toList)
                         | 60 =>
                             let outcome ← fnSelectedPollSubmitSession
                               pinnedConfig state payload

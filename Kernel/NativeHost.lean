@@ -2046,6 +2046,81 @@ def jobMoneyLookupLoaded (config : Config) (opened : Opened config) (bytes : Lis
           | some original => .confirmed .replayed original
           | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
 
+/-! ## The kernel activity (ACTIVITY-NATIVE): session operations 210–214
+
+Publish, object creation, birth, resolve, deliver, top-up, declared-state write,
+exhaustion and abandonment
+(`DREGG/OBJECTIVE/ACTIVITY/COMMAND/v2`) share one plan/assembly/submission/
+lookup quartet; the signed ingress is `DREGG/OBJECTIVE/ACTIVITY/SIGNED/v1`;
+214 is the public activity view. A refusal names its reason to the signer:
+every activity cell is public (op 214), so the reason discloses nothing the
+view does not. -/
+
+def activityAmbient (config : Config) (opened : Opened config) : ObjectiveKernelConfig.Ambient :=
+  ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector⟩
+
+def activityPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
+    Except String ObjectiveActivityReceiver.SigningPlan := do
+  let command ← need "noncanonical activity command"
+    (ObjectiveActivityReceiver.commandCodec.decode commandBytes)
+  let header ← ObjectiveActivityReceiver.signingHeader config.deployment config.profile
+    (activityAmbient config opened) opened.durable command
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    CredentialSignedEnvelopeController.headerCodec.encode header⟩
+
+def activityAssemble (plan : ObjectiveActivityReceiver.SigningPlan) (signature : List UInt8) :
+    Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "activity signature must be 64 bytes"
+  let header ← need "noncanonical activity header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  check (ObjectiveActivityReceiver.commandCodec.decode plan.commandBytes).isSome
+    "noncanonical activity plan command"
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  pure (ObjectiveActivityReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+
+def activitySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+    IO Outcome := do
+  match ← ObjectiveActivityReceiver.receiveLoaded config.deployment config.profile
+      (activityAmbient config opened) config.signature config.transport opened.durable bytes with
+  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused .operationRejected "activity" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- Receipt-only historical lookup of an activity turn. Absence never submits. -/
+def activityLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) : Outcome :=
+  match ObjectiveActivityReceiver.decodeIngress bytes with
+  | none => refused .malformed "activity" "noncanonical signed ingress"
+  | some ingress =>
+      match ObjectiveActivityReceiver.replay config.deployment.domain config.profile.semantics
+          opened.durable ingress with
+      | none => .absent
+      | some (.error _) => refused .conflict "replay" "transaction identity conflict"
+      | some (.ok receipt) =>
+          match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
+          | some original => .confirmed .replayed original
+          | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+
+/-- The public activity view's raw material: the logical height, the authority
+root a command pins, the Book, and the canonical bytes of each named cell. -/
+structure ActivityView where
+  height : Nat
+  authorityRoot : Digest
+  book : Option ObjectiveActivity.BookCell
+  cells : List (Nat × Digest × List UInt8)
+
+def activityViewLoaded (config : Config) (opened : Opened config) (cells : List Nat) :
+    Except String ActivityView := do
+  let authority ← need "authority unavailable"
+    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment opened.durable.snapshot)
+  let snapshot := opened.durable.snapshot
+  pure ⟨logicalHeight config opened.durable, authority.snapshot.cell.root,
+    ObjectiveActivity.bookOf (snapshot.canonicalBytes ⟨config.deployment.resourceBookId⟩),
+    cells.map fun cell => (cell, snapshot.model.roots ⟨cell⟩, snapshot.canonicalBytes ⟨cell⟩)⟩
+
 /-- The operator's local read of one job (not a socket operation): its root,
 its eight money fields, and what the Book's held account for it (the account
 with the job's id) holds in the credit asset. -/

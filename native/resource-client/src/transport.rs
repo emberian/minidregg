@@ -497,6 +497,14 @@ pub(crate) fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         [171, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
             .is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64),
         [173] => true,
+        // ACTIVITY-NATIVE: the kernel activity's signed commands (210 plan, 211 assembly,
+        // 212 submit, 213 receipt-only lookup) and its public view (214, a JSON object or
+        // empty). Each command is authorized by its own signature inside the Host.
+        [210 | 212 | 213, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        [211, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
+            .is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64),
+        [214, payload @ ..] => payload.is_empty() || (payload.len() <= 65536
+            && serde_json::from_slice::<serde_json::Value>(payload).is_ok_and(|v| v.is_object())),
         _ => false,
     }
 }

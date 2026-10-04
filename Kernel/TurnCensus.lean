@@ -1,10 +1,10 @@
 /-
 # Kernel.TurnCensus — every live admission is expressible as a `Turn` (T1)
 
-SURPASS §2(b), lane T1.  The Host admits through the 46 constructors of
+SURPASS §2(b), lane T1.  The Host admits through the 47 constructors of
 `NativeHostReplay.NativeAdmission` on `final`: T1's 33 plus `final-pay`'s
 `payObservation`, `payEnrol`, `payRefill` and C3's `jobMoney` (rows added at
-the BRAID-PROOF merge), and C14's `certify` (added at the BRAID-COMPUTE merge), and rooms' `renounce` and `subjectKeyRotation`, plus current-key commitment adoption and v2 paid admission/claim.  `Compiler.TurnCensusCoverage` fails the build when
+the BRAID-PROOF merge), and C14's `certify` (added at the BRAID-COMPUTE merge), ACTIVITY-NATIVE's `activity`, and rooms' `renounce` and `subjectKeyRotation`, plus current-key commitment adoption and v2 paid admission/claim.  `Compiler.TurnCensusCoverage` fails the build when
 `Ctor` and `NativeAdmission` disagree on their constructor names.  T0's census
 (`planning/surpass/t0-receiver-census.md`) lists, per constructor, the cells it
 reads and writes, its nullifiers, its charge and its clock pin.  This module
@@ -42,7 +42,7 @@ T3b's create carries its ROM image (`World.applyCreates`), so each of those
 shapes is now a turn.  `Ctor.turn` writes the ROM birth for each of the six
 (`Ctor.romBirth`), and
 
-* `every_admission_is_turn`: every one of the 46 shapes is accepted, and each
+* `every_admission_is_turn`: every one of the 47 shapes is accepted, and each
   of the ten ROM-birth receivers (the six above, the control bootstrap and the enrol branches of
   `payEnrol`, `payEnrolV2` and `payClaim`) carries a nonempty ROM image;
 * `theList_empty`: the constructors whose shape is refused -- none;
@@ -87,6 +87,8 @@ inductive Kind
   | source
   /-- The system cell (C14): the certified height a certify advances. -/
   | system
+  /-- A kernel activity cell (record, slot, declared state, package). -/
+  | activity
   deriving DecidableEq, Repr
 
 /-- Every census cell has a RAM row namespace, an append-only log and a ROM
@@ -158,19 +160,21 @@ def cContent : CellId := 10
 def cRoom : CellId := 11
 def cPay : CellId := 12
 def cSystem : CellId := 13
+def cActivity : CellId := 14
 
 def cellOf (k : Kind) (rows : List (Nat × Int)) : Cell R :=
   ⟨k, rows.foldl (fun (s : Store layout) e => s.set ⟨Space.rows, e.1⟩ (some e.2)) 0⟩
 
 def cells0 : Cells R :=
-  ((((((((((((((0 : Cells R).update cAuth (some (cellOf .authority [(1, 1)]))).update cRes
+  (((((((((((((((0 : Cells R).update cAuth (some (cellOf .authority [(1, 1)]))).update cRes
     (some (cellOf .resource [(0, 10)]))).update cPolicy (some (cellOf .policy [(0, 1)]))).update
     cBook (some (cellOf .book [(0, 100), (1, 0)]))).update cStream
     (some (cellOf .stream []))).update cTicket (some (cellOf .ticket []))).update cLife
     (some (cellOf .lifecycle [(0, 0)]))).update cGate (some (cellOf .gateway [(0, 1)]))).update
     cClock (some (cellOf .clock [(0, 1000)]))).update cWell (some (cellOf .well [(0, 50)]))).update
     cContent (some (cellOf .content []))).update cRoom (some (cellOf .resource []))).update
-    cPay (some (cellOf .pay [(0, 1)]))).update cSystem (some (cellOf .system [(0, 0)]))
+    cPay (some (cellOf .pay [(0, 1)]))).update cSystem (some (cellOf .system [(0, 0)]))).update
+    cActivity (some (cellOf .activity [(0, 1)]))
 
 /-- The meter every lane starts with. -/
 def budget : Nat := 10000
@@ -215,6 +219,7 @@ inductive Ctor
   | applicationLifecycleCompletion | applicationLifecycleBeginV3 | applicationLifecycleClaimV3
   | applicationLifecycleCompletionV2 | fnConsumerNamespace | fnSelectedPoll | fnEmptyPollV2
   | payObservation | payEnrol | payRefill | jobMoney | certify | renounce | subjectKeyRotation
+  | activity
   | subjectKeyCommitmentAdoption | payEnrolV2 | payClaim
   | jointReserve | bootstrapBundle | applicationFailedStartRecovery
   deriving DecidableEq, Repr
@@ -229,12 +234,12 @@ def Ctor.all : List Ctor :=
     .applicationLifecycleClaimV2, .applicationLifecycleCompletion, .applicationLifecycleBeginV3,
     .applicationLifecycleClaimV3, .applicationLifecycleCompletionV2, .fnConsumerNamespace,
     .fnSelectedPoll, .fnEmptyPollV2, .payObservation, .payEnrol, .payRefill, .jobMoney,
-    .certify, .renounce, .subjectKeyRotation, .subjectKeyCommitmentAdoption, .payEnrolV2, .payClaim,
+    .certify, .renounce, .subjectKeyRotation, .activity, .subjectKeyCommitmentAdoption, .payEnrolV2, .payClaim,
     .jointReserve, .bootstrapBundle, .applicationFailedStartRecovery]
 
 theorem Ctor.mem_all (c : Ctor) : c ∈ Ctor.all := by cases c <;> decide
 
-theorem Ctor.all_length : Ctor.all.length = 46 := rfl
+theorem Ctor.all_length : Ctor.all.length = 47 := rfl
 
 /-- The capability guard: the authority row the exercised capability lives at. -/
 def capGuard : Leg R := leg cAuth .authority [rd 1 (some 1)]
@@ -324,6 +329,10 @@ def Ctor.turn : Ctor → CTurn
   -- certify (C14): the certifier's capability guard and the system cell's
   -- certified height advanced at its signed pre-value; one nullifier
   | .certify => mk [] [capGuard, leg cSystem .system [wr 0 0 64]] [142]
+  -- activity (ACTIVITY-NATIVE): the record written at its loaded root and the
+  -- Book postings (the purse registered fresh); the signed marker and the await claim
+  | .activity => mk [] [leg cActivity .activity [wr 0 1 2], leg cBook .book [wr 0 100 90, al 5 10]]
+      [155, 156]
   -- holder renunciation appends the authority revocation and spends one marker
   | .renounce => mk [] [leg cAuth .authority [rd 1 (some 1), lg 8 1]] [143]
   -- key rotation reads the current authority and appends its successor record
@@ -420,6 +429,9 @@ def Ctor.negation : Ctor → CTurn
       leg cBook .book [wr 0 100 90, al 4 10]] [141]
   -- a certify signed against a stale certified height (`certify_not_advancing_refused`)
   | .certify => mk [] [capGuard, leg cSystem .system [wr 0 1 64]] [142]
+  -- a delivery against a record that moved under its signed outcome
+  | .activity => mk [] [leg cActivity .activity [wr 0 9 2], leg cBook .book [wr 0 100 90, al 5 10]]
+      [155, 156]
   | .renounce => mk [] [leg cAuth .authority [rd 1 (some 1), lg 8 1]] [99]
   | .subjectKeyRotation => mk [] [leg cAuth .authority [rd 1 (some 0), lg 9 1]] [144]
   | .subjectKeyCommitmentAdoption => mk [] [leg cAuth .authority [wr 1 0 2]] [145]
@@ -484,6 +496,7 @@ def Ctor.refusal : Ctor → Reject
   | .payRefill => .guardFailed cRes 0
   | .jobMoney => .guardFailed cPay 0
   | .certify => .guardFailed cSystem 0
+  | .activity => .guardFailed cActivity 0
   | .renounce => .nullifierSpent
   | .subjectKeyRotation => .guardFailed cAuth 0
   | .subjectKeyCommitmentAdoption => .guardFailed cAuth 0
@@ -605,7 +618,7 @@ theorem every_admission_is_turn_all :
       (c.romBirth = true → HasRomBirth c.turn = true) := by
   decide +kernel
 
-/-- **`every_admission_is_turn`.**  Each of the 46 admission shapes is
+/-- **`every_admission_is_turn`.**  Each of the 47 admission shapes is
 accepted by the one transition, and each receiver that creates a ROM
 policy-source cell does so by a create carrying its image. -/
 theorem every_admission_is_turn (c : Ctor) :

@@ -26,6 +26,8 @@ done
 # observation costs its byte length, so a fixture that births a Nock program
 # (J-NOCK-2b, ~566 KB) raises it; the default is unchanged.
 OWNER_BUDGET=${NEWPARTICIPANT_OWNER_BUDGET:-100000}
+SPONSOR_BALANCE=${NEWPARTICIPANT_SPONSOR_BALANCE:-100000}
+case "$SPONSOR_BALANCE" in ''|*[!0-9]*) echo 'NEWPARTICIPANT_SPONSOR_BALANCE must be decimal' >&2; exit 2;; esac
 # Compiled-in evaluators this Store's operator disables (space-separated registry
 # names, e.g. "nock"; K-EVAL). Written into the genesis params; default none.
 DISABLED_EVALUATORS=${NEWPARTICIPANT_DISABLED_EVALUATORS:-}
@@ -114,10 +116,10 @@ EOF
 # The one genesis template (genesis.sh) from the example params, with this
 # Store's domain and sponsor subject; it honours EXTRA_GENESIS_ENROLLMENTS and
 # MINI_TAIL_BOUND (the tail bound L, default the example's 256 = 4 x 64).
-jq --argjson domain "$DOMAIN" --argjson subject "$SUBJECT" --argjson budget "$OWNER_BUDGET" \
+jq --argjson domain "$DOMAIN" --argjson subject "$SUBJECT" --argjson budget "$OWNER_BUDGET" --argjson balance "$SPONSOR_BALANCE" \
   --arg disabled "$DISABLED_EVALUATORS" --argjson tail "${MINI_TAIL_BOUND:-256}" \
   --arg objective "${OBJECTIVE_INVOCATION_POLICY:-}" \
-  '.domain = $domain | .sponsor.subject = $subject | .ownerBudget = $budget | .tailBound = $tail
+  '.domain = $domain | .sponsor.subject = $subject | .sponsor.initialBalance = $balance | .ownerBudget = $budget | .tailBound = $tail
    | ($disabled | split(" ") | map(select(length > 0))) as $off
    | if ($off | length) > 0 then .disabledEvaluators = $off else . end
    | if $objective != "" then .objectiveInvocation = $objective else . end' \

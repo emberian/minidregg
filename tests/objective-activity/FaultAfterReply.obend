@@ -1,0 +1,14 @@
+edition ObjectiveBend 1
+# A resident that faults after its first reply (scenario E of the native activity
+# acceptance). Its first await is ordinary; after the reply it yields a second await
+# whose patience no deployment admits (the kernel's bound is maxPatience). That is a
+# fault of the resumed program itself, which every later delivery would meet again,
+# so the delivery commits the activity `faulted` and returns its unused escrow
+# (Kernel/ObjectiveActivity.programFault, resumedSegment_never_refuses_program_fault)
+# instead of refusing and wedging the await with its escrow locked.
+import ./Tally.obend as Tally
+def impatient(start: Tally.Start) -> Activity<Tally.Plan, Tally.Resumed, Nat>:
+  match perform(Tally.Plan.await({write: {total: start.init}, on: Tally.Source.reply({decider: start.decider}), patience: 4n})):
+    case resumed(_):
+      match perform(Tally.Plan.await({write: {total: Tally.EditNat.keep()}, on: Tally.Source.reply({decider: start.decider}), patience: 1000000n})):
+        case resumed(again): again.view.state.total

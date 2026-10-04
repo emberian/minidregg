@@ -138,6 +138,7 @@ mod story;
 mod keys;
 #[cfg(unix)]
 mod job;
+mod activity;
 #[cfg(unix)]
 mod shell;
 #[cfg(unix)]
@@ -3182,6 +3183,7 @@ fn run(mut args: Args) -> Result<()> {
         "checkpoint" => checkpoint::run(args),
         #[cfg(unix)]
         "job" => job::run(args),
+        "activity" => activity::run(args),
         #[cfg(unix)]
         "shell" => shell::run(args),
         // mini key carries two verb families: the credential store (keys.rs) and the
