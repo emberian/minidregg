@@ -515,12 +515,30 @@ const STATUS_RATE: RatePolicy = RatePolicy {
     burst: 2,
     burst_window: Duration::from_secs(POLL_SECONDS),
 };
+/// What one rate budget belongs to. An IPv6 site is routinely delegated a
+/// whole /64, so one holder can spray 2^64 source addresses; the budget is
+/// per /64. IPv4 (including v4-mapped IPv6) stays per address.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum RateKey {
+    V4(u32),
+    V6Prefix64(u64),
+}
+fn rate_key(ip: IpAddr) -> RateKey {
+    match ip {
+        IpAddr::V4(v4) => RateKey::V4(u32::from(v4)),
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => RateKey::V4(u32::from(v4)),
+            None => RateKey::V6Prefix64((u128::from(v6) >> 64) as u64),
+        },
+    }
+}
 #[derive(Default)]
 struct RateLimit {
-    clients: HashMap<IpAddr, VecDeque<Instant>>,
+    clients: HashMap<RateKey, VecDeque<Instant>>,
 }
 impl RateLimit {
     fn allow(&mut self, ip: IpAddr, now: Instant, policy: RatePolicy) -> bool {
+        let key = rate_key(ip);
         self.clients.retain(|_, times| {
             while times
                 .front()
@@ -530,10 +548,22 @@ impl RateLimit {
             }
             !times.is_empty()
         });
-        if !self.clients.contains_key(&ip) && self.clients.len() >= MAX_RATE_CLIENTS {
-            return false;
+        // A full table evicts the least recently active budget instead of
+        // refusing every newcomer: a full table must not lock out a fresh
+        // client. An evicted holder restarts with an empty budget, which is
+        // what any new key already gets, so eviction adds no admission rate
+        // beyond the number of keys a holder controls.
+        if !self.clients.contains_key(&key) && self.clients.len() >= MAX_RATE_CLIENTS {
+            let oldest = self
+                .clients
+                .iter()
+                .min_by_key(|(_, times)| times.back().copied())
+                .map(|(key, _)| *key);
+            if let Some(oldest) = oldest {
+                self.clients.remove(&oldest);
+            }
         }
-        let times = self.clients.entry(ip).or_default();
+        let times = self.clients.entry(key).or_default();
         if times.len() >= policy.per_minute
             || times
                 .iter()
@@ -1140,13 +1170,46 @@ mod tests {
                 QUOTE_RATE
             ));
         }
-        assert!(!rate.allow("192.0.2.1".parse().unwrap(), now, QUOTE_RATE));
+        // Full: a fresh client evicts the least recently active budget.
+        assert_eq!(rate.clients.len(), MAX_RATE_CLIENTS);
+        assert!(rate.allow("192.0.2.1".parse().unwrap(), now + Duration::from_secs(1), QUOTE_RATE));
         assert_eq!(rate.clients.len(), MAX_RATE_CLIENTS);
         assert!(rate.allow(
             "192.0.2.1".parse().unwrap(),
             now + Duration::from_secs(60),
             QUOTE_RATE
         ));
+    }
+    #[test]
+    fn one_ipv6_slash64_is_one_budget_and_cannot_lock_out_a_fresh_ipv4_client() {
+        let now = Instant::now();
+        let mut rate = RateLimit::default();
+        // 10k distinct /128s inside 2001:db8:0:1::/64 share one budget.
+        let mut admitted = 0;
+        for host in 0..10_000u128 {
+            let ip = IpAddr::V6(std::net::Ipv6Addr::from((0x2001_0db8_0000_0001u128 << 64) | host));
+            if rate.allow(ip, now, QUOTE_RATE) {
+                admitted += 1;
+            }
+        }
+        assert_eq!(admitted, QUOTE_RATE.burst);
+        assert_eq!(rate.clients.len(), 1);
+        // A fresh IPv4 client still has room and its own budget.
+        assert!(rate.allow("198.51.100.7".parse().unwrap(), now, QUOTE_RATE));
+        assert_eq!(rate.clients.len(), 2);
+        // v4-mapped IPv6 is the same budget as the IPv4 address.
+        let mapped: IpAddr = "::ffff:198.51.100.7".parse().unwrap();
+        assert_eq!(rate_key(mapped), rate_key("198.51.100.7".parse().unwrap()));
+        // Even 2000 distinct /64s cannot lock out a fresh client: the table
+        // stays bounded and evicts the least recently active budget.
+        let mut rate = RateLimit::default();
+        for prefix in 0..2_000u128 {
+            let ip = IpAddr::V6(std::net::Ipv6Addr::from(((0x2001_0db8u128 << 32 | prefix) << 64) | 1));
+            assert!(rate.allow(ip, now, QUOTE_RATE));
+        }
+        assert_eq!(rate.clients.len(), MAX_RATE_CLIENTS);
+        assert!(rate.allow("203.0.113.9".parse().unwrap(), now, QUOTE_RATE));
+        assert_eq!(rate.clients.len(), MAX_RATE_CLIENTS);
     }
     #[test]
     fn spoofed_real_ip_cannot_bypass_quote_limit() {
