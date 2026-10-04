@@ -144,7 +144,10 @@ Binary paths here are relative to `OUT`.
 **One packaging format, one packager.** `deploy/candidate/package.py` writes
 every candidate directory: `build.sh` calls it after building (`--roles`, the
 binaries already in `OUT/bin`), a lane build on a build box calls it with its own
-role manifest (`--roles ROLES.json --source-archive SOURCE.tar`), and a sealed
+role manifest (`--roles ROLES.json --source-archive SOURCE.tar`; `deploy/candidate/lane-build.sh
+host|consent|rust|pack` is that path: an incremental native build from a warm base, the consent
+companion, the Rust roles, and a `pack` that refuses unless no compiled input changed since the
+build commits), and a sealed
 hbox family is packaged with `--capsule FAMILY_DIR`. Every binary is claimed to
 be built from the archive's one commit: `--roles` requires the manifest's
 `sourceCommit` to be the archive's commit, and `--capsule` refuses a family any

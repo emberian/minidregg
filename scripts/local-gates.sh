@@ -31,7 +31,8 @@
 #                  tutorial re-run; a Lean row with no built tree is RED ("needs warm base")
 #   rust-tests     the filtered native test lines of scripts/check-rust-tests.sh
 #   deploy-scripts the deploy tooling's own tests, no Lean/Rust build: candidate packager (consent pair
-#                  required; stub roles), self-enrollment terms renderer (50 DREGG/week -> tariff integers)
+#                  required; stub roles), lane-build pack refusals, self-enrollment terms renderer
+#                  (50 DREGG/week -> tariff integers)
 #   journey        native/resource-client/journey.sh from this tree on a fresh Store
 #                  (scripts/check-journey.sh; G at 1000 records unless
 #                  LOCAL_GATES_GROWTH_LEVELS says otherwise, and then G is UNMEASURED)
@@ -76,7 +77,7 @@ g_exports()       { bash scripts/check-exports.sh; }
 g_shell-paths()   { bash scripts/check-shell-paths.sh; }
 g_objective-frontend() { bash scripts/check-objective-frontend.sh; }
 g_rust-tests()    { bash scripts/check-rust-tests.sh; }
-g_deploy-scripts() { python3 deploy/pay/test-render-enrol.py && python3 deploy/candidate/test-package.py; }
+g_deploy-scripts() { python3 deploy/pay/test-render-enrol.py && python3 deploy/candidate/test-package.py && bash deploy/candidate/test-lane-build.sh; }
 g_journey()       { bash scripts/check-journey.sh; }
 
 tree_before=$(git diff --binary | git hash-object --stdin)

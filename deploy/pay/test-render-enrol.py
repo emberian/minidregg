@@ -11,6 +11,8 @@ import sys
 import tempfile
 import unittest
 
+sys.dont_write_bytecode = True
+
 HERE = Path(__file__).resolve().parent
 RENDER = HERE / "render-enrol"
 TERMS = HERE / "enrol-terms.json"
