@@ -56,7 +56,8 @@ not ranked.
 (`hypothesis`, `assumed`, `assumption`, `seam`, `premise`, `obligation`,
 `not proved`, `unproved`, `conjectur`), or whose type is exactly `Prop`
 (a closed statement can only be a claim, never a predicate over data).  The
-tier is where `GameSlotBound`, `HaboeckTheorem2` and `HashEqHiding` live.  The rest are predicates over data; their TOOTHLESS count
+tier is where `GameSlotBound`, `HaboeckTheorem2` and `HashEqHiding` live
+(`PolishchukSpielmanCramer`, proved, has no consumer).  The rest are predicates over data; their TOOTHLESS count
 is the honest frontier, printed but not a gate (red as a steady state hides
 everything).
 
@@ -398,6 +399,7 @@ def verdict (r : Row) : Verdict :=
 changed (re-pin, in the same commit, with the reason) or the query broke. -/
 def mustBe : List (Name × String) :=
   [(`Minidregg.Selvage.GameSlotBound, "PROVED"),
+   (`Minidregg.Selvage.PolishchukSpielmanCramer, "PROVED"),
    (`Minidregg.Selvage.HaboeckTheorem2, "OPEN"),
    (`Minidregg.Pred.HashEqHiding, "OPEN")]
 
