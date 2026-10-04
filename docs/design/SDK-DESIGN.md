@@ -133,6 +133,10 @@ lanes land.
 
 ## 8. The extension (build when Studio/web is member-reachable)
 
+**Precondition (explicit):** the extension needs either a native-messaging bridge to a
+member-held replica or the thin-peer consent producer (R2-1 lists thin remote witnesses as
+OPEN). A member-reachable web surface is necessary but not sufficient.
+
 A Cipherclerk-shaped MV3 extension, same architecture as Bread's (page `window.mini` →
 nonce-scoped content bridge with per-origin/per-method grants → background service worker):
 
