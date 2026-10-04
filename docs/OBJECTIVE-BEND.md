@@ -217,7 +217,7 @@ calls `check` on the empty context and then `runBounded` on the same decoded ter
   stops a degenerate `Supported := fun _ => False` instance, so what makes the
   instance mean something is that `Supported` is the real admission predicate, which
   is a reading of the definition, not a theorem; the non-vacuity theorems are
-`lazyFixedSeed_supported_by_representation` and `open_term_not_started`.
+`lazyFixedSeed_supported_by_representation` and `open_term_not_started`. (The docstring on `Representation`, `Theory/ObjectiveBendOpenRecursion.lean:361-365`, still says "no instance is claimed here"; `coreRepresentation` at `Theory/ObjectiveBendDemandCompleteness.lean:1127` is the instance.)
 - **Uniqueness of deep Data.** `DeepEvaluates` relates the extracted Data to the
   source term. No theorem says the Data is the only Data it relates to, so "the Data"
   means "a deep evaluation", not "the unique one".
