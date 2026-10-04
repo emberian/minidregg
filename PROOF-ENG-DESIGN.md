@@ -162,3 +162,39 @@ absent → the gate is RED, never skipped.
 
 (c)(d)(f) first — cheap and protective; then (e); then (a)+(b) on Preservation as the
 proof of method, statements fixed by (d); then Adequacy's graph lemmas.
+
+## 4. Measured on Preservation (2026-10-04)
+
+Lines (github/main 1ffe6bf3 → this lane): one file of **4043** lines → **3651** over eight
+modules (`Base` 1701, six `Cases/*` 1801, dispatcher umbrella 149) + `ObjectiveBendStepCases`
+143, shared with every future step dispatcher. Of that: 402→30 pin commands (−208); the
+fourteen `PartialTyping.rec` inductions 881 → 637 (`source_bound_assignment` 49→24,
+`source_inject_decomposition` 47→23, `immediate_value_typed` 54→44; `source_insert_binding`
+145→174, the one with no default case: 29 `case c =>` headers is the price of naming).
+13 of the 14 inductions now end in one `all_goals (<default closer>)`. Statements and exact
+axiom sets of all 1721 pre-existing declarations unchanged (snapshot diff: 86 added rows,
+all `StepCases`, nothing changed or removed).
+
+**A no-op `Term` constructor** (`.noop body`, `stepRaw`: evaluate `.noop b` ↦ evaluate `b`;
+typing rule `PartialTyping.noop`) now costs, on the Preservation side (AUTHORED, not landed):
+
+```diff
+ Theory/ObjectiveBendStepCases.lean
++  evaluate_noop : ∀ s body env, s.control = .evaluate (.noop body) env → P s
++      | noop body => exact cases.evaluate_noop s body env control
+ Theory/ObjectiveBendDemandPreservation.lean
++import Theory.ObjectiveBendDemandPreservation.Cases.Noop
++      evaluate_noop := fun _ _ _ control types typed => ⟨types, type_extension_refl types, typed_noop_preserved typed control⟩
+ Theory/ObjectiveBendDemandPreservation/Base.lean  (source_insert_binding, the one induction with no default)
++  case noop =>
++    intro context body type uses bodyTyped ih depth binding bound bindingValid
++    simpa only [Term.rename] using PartialTyping.noop (ih depth binding bound bindingValid)
+ Theory/ObjectiveBendDemandPreservation/Cases/Noop.lean   (new; imports Base only)
++theorem typed_noop_preserved … -- the case's real content
+```
+
+Thirteen inductions absorb it in their `all_goals` line (their motive is `True` off their own
+constructor), no positional bullet is inserted anywhere, and the missing obligations are
+reported by name (`fields missing: evaluate_noop`, `unsolved goals case noop`). Before: a
+bullet at position 26 in each of fourteen `?_ ×29` inductions and a branch inside the nested
+`cases` of `typed_stepRaw_preserved`, all inside one 4043-line file.

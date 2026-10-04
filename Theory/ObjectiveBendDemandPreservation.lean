@@ -7,6 +7,7 @@ import Theory.ObjectiveBendDemandPreservation.Cases.Records
 import Theory.ObjectiveBendDemandPreservation.Cases.Arithmetic
 import Theory.ObjectiveBendDemandPreservation.Cases.Sums
 import Theory.ObjectiveBendDemandPreservation.Cases.Activities
+import Theory.ObjectiveBendStepCases
 namespace Minidregg.Theory.ObjectiveBendDemandPreservation
 open ObjectiveBendTypes ObjectiveBendTyping ObjectiveBendOpenRecursion ObjectiveBendDemandMachine ObjectiveBendDemandTyping
 set_option autoImplicit false
@@ -17,56 +18,56 @@ closures, continuation arguments and generated mix/Fix bodies. -/
 theorem typed_stepRaw_preserved {assumptions : Assumptions} {types : AddressTypes}
     {state : State} {result : Ty} (typed : StateTyping assumptions types state result) :
     ∃ after, TypeExtension types after ∧ Nonempty (StateTyping assumptions after (stepRaw state) result) := by
-  cases control : state.control with
-  | enter address => exact ⟨types,type_extension_refl types,typed_enter_preserved typed control⟩
-  | evaluate term environment =>
-      cases term with
-      | bound index => exact ⟨types,type_extension_refl types,typed_bound_preserved typed control⟩
-      | lam body => exact ⟨types,type_extension_refl types,typed_immediate_preserved typed control rfl⟩
-      | nat number => exact ⟨types,type_extension_refl types,typed_immediate_preserved typed control rfl⟩
-      | boolean boolean => exact ⟨types,type_extension_refl types,typed_immediate_preserved typed control rfl⟩
-      | label label => exact ⟨types,type_extension_refl types,typed_immediate_preserved typed control rfl⟩
-      | app function argument => exact ⟨types,type_extension_refl types,typed_application_focus_preserved typed control⟩
-      | mix lower upper => exact ⟨types,type_extension_refl types,typed_mix_preserved typed control⟩
-      | fix spec seed => exact typed_fix_preserved typed control
-      | record fields => exact typed_record_preserved typed control
-      | specification metadata extension => exact typed_pair_preserved typed true control
-      | prototype spec target => exact typed_pair_preserved typed false control
-      | get target name => exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
-      | extend target fields => exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
-      | reflect target => exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
-      | metadata target => exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
-      | project target => exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
-      | binary primitive left right => exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
-      | ifZero value zero successor => exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
-      | inject tag payload => exact typed_inject_preserved typed control
-      | case scrutinee arms => exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
-      | ifBool condition whenTrue whenFalse =>
-          exact ⟨types,type_extension_refl types,typed_source_focus_preserved typed control rfl⟩
-      | perform plan => exact typed_perform_preserved typed control
-      | done value => exact ⟨types,type_extension_refl types,typed_done_preserved typed control⟩
-  | returned value =>
-      cases stack : state.stack with
-      | nil => exact ⟨types,type_extension_refl types,typed_completion_preserved typed control stack⟩
-      | cons frame rest =>
-          cases frame with
-          | argument argument environment => exact typed_argument_return_preserved typed control stack
-          | update address => exact ⟨types,type_extension_refl types,typed_update_preserved typed control stack⟩
-          | field name => exact ⟨types,type_extension_refl types,typed_field_preserved typed control stack⟩
-          | reflect => exact ⟨types,type_extension_refl types,typed_prototype_projection_preserved typed true control stack⟩
-          | metadata => exact ⟨types,type_extension_refl types,typed_metadata_preserved typed control stack⟩
-          | project => exact ⟨types,type_extension_refl types,typed_prototype_projection_preserved typed false control stack⟩
-          | extend fields environment => exact typed_extend_preserved typed control stack
-          | condition zero successor environment => exact typed_condition_preserved typed control stack
-          | binaryLeft primitive right environment => exact ⟨types,type_extension_refl types,typed_binary_left_preserved typed control stack⟩
-          | binaryRight primitive left => exact ⟨types,type_extension_refl types,typed_binary_right_preserved typed control stack⟩
-          | case arms environment => exact typed_case_preserved typed control stack
-          | ifBool whenTrue whenFalse environment =>
-              exact ⟨types,type_extension_refl types,typed_ifBool_preserved typed control stack⟩
-  | blackhole address => exact ⟨types,type_extension_refl types,by simpa [stepRaw,control] using (Nonempty.intro typed)⟩
-  | complete value => exact ⟨types,type_extension_refl types,by simpa [stepRaw,control] using (Nonempty.intro typed)⟩
-  | yielded plan => exact ⟨types,type_extension_refl types,by simpa [stepRaw,control] using (Nonempty.intro typed)⟩
-  | refused reason => exact False.elim (typed_control_not_refused typed.control reason control)
+  -- one named line per branch of `stepRaw`; the case split itself is `StepCases.apply`
+  refine StepCases.apply (P := fun state => ∀ types, StateTyping assumptions types state result →
+      ∃ after, TypeExtension types after ∧ Nonempty (StateTyping assumptions after (stepRaw state) result))
+    { complete := fun _ _ control types typed => ⟨types, type_extension_refl types, by simpa [stepRaw, control] using (Nonempty.intro typed)⟩
+      refused := fun _ reason control _ typed => False.elim (typed_control_not_refused typed.control reason control)
+      blackhole := fun _ _ control types typed => ⟨types, type_extension_refl types, by simpa [stepRaw, control] using (Nonempty.intro typed)⟩
+      yielded := fun _ _ control types typed => ⟨types, type_extension_refl types, by simpa [stepRaw, control] using (Nonempty.intro typed)⟩
+      enter := fun _ _ control types typed => ⟨types, type_extension_refl types, typed_enter_preserved typed control⟩
+      evaluate_bound := fun _ _ _ control types typed => ⟨types, type_extension_refl types, typed_bound_preserved typed control⟩
+      evaluate_lam := fun _ _ _ control types typed => ⟨types, type_extension_refl types, typed_immediate_preserved typed control rfl⟩
+      evaluate_nat := fun _ _ _ control types typed => ⟨types, type_extension_refl types, typed_immediate_preserved typed control rfl⟩
+      evaluate_boolean := fun _ _ _ control types typed => ⟨types, type_extension_refl types, typed_immediate_preserved typed control rfl⟩
+      evaluate_label := fun _ _ _ control types typed => ⟨types, type_extension_refl types, typed_immediate_preserved typed control rfl⟩
+      evaluate_app := fun _ _ _ _ control types typed => ⟨types, type_extension_refl types, typed_application_focus_preserved typed control⟩
+      evaluate_mix := fun _ _ _ _ control types typed => ⟨types, type_extension_refl types, typed_mix_preserved typed control⟩
+      evaluate_fix := fun _ _ _ _ control _ typed => typed_fix_preserved typed control
+      evaluate_record := fun _ _ _ control _ typed => typed_record_preserved typed control
+      evaluate_specification := fun _ _ _ _ control _ typed => typed_pair_preserved typed true control
+      evaluate_prototype := fun _ _ _ _ control _ typed => typed_pair_preserved typed false control
+      evaluate_get := fun _ _ _ _ control types typed => ⟨types, type_extension_refl types, typed_source_focus_preserved typed control rfl⟩
+      evaluate_extend := fun _ _ _ _ control types typed => ⟨types, type_extension_refl types, typed_source_focus_preserved typed control rfl⟩
+      evaluate_reflect := fun _ _ _ control types typed => ⟨types, type_extension_refl types, typed_source_focus_preserved typed control rfl⟩
+      evaluate_metadata := fun _ _ _ control types typed => ⟨types, type_extension_refl types, typed_source_focus_preserved typed control rfl⟩
+      evaluate_project := fun _ _ _ control types typed => ⟨types, type_extension_refl types, typed_source_focus_preserved typed control rfl⟩
+      evaluate_binary := fun _ _ _ _ _ control types typed => ⟨types, type_extension_refl types, typed_source_focus_preserved typed control rfl⟩
+      evaluate_ifZero := fun _ _ _ _ _ control types typed => ⟨types, type_extension_refl types, typed_source_focus_preserved typed control rfl⟩
+      evaluate_inject := fun _ _ _ _ control _ typed => typed_inject_preserved typed control
+      evaluate_case := fun _ _ _ _ control types typed => ⟨types, type_extension_refl types, typed_source_focus_preserved typed control rfl⟩
+      evaluate_ifBool := fun _ _ _ _ _ control types typed => ⟨types, type_extension_refl types, typed_source_focus_preserved typed control rfl⟩
+      evaluate_perform := fun _ _ _ control _ typed => typed_perform_preserved typed control
+      evaluate_done := fun _ _ _ control types typed => ⟨types, type_extension_refl types, typed_done_preserved typed control⟩
+      return_nil := fun _ _ control stack types typed => ⟨types, type_extension_refl types, typed_completion_preserved typed control stack⟩
+      return_argument := fun _ _ _ _ _ control stack _ typed => typed_argument_return_preserved typed control stack
+      return_update := fun _ _ _ _ control stack types typed => ⟨types, type_extension_refl types, typed_update_preserved typed control stack⟩
+      return_field := fun _ _ _ _ control stack types typed => ⟨types, type_extension_refl types, typed_field_preserved typed control stack⟩
+      return_reflect := fun _ _ _ control stack types typed =>
+        ⟨types, type_extension_refl types, typed_prototype_projection_preserved typed true control stack⟩
+      return_metadata := fun _ _ _ control stack types typed => ⟨types, type_extension_refl types, typed_metadata_preserved typed control stack⟩
+      return_project := fun _ _ _ control stack types typed =>
+        ⟨types, type_extension_refl types, typed_prototype_projection_preserved typed false control stack⟩
+      return_extend := fun _ _ _ _ _ control stack _ typed => typed_extend_preserved typed control stack
+      return_condition := fun _ _ _ _ _ _ control stack _ typed => typed_condition_preserved typed control stack
+      return_binaryLeft := fun _ _ _ _ _ _ control stack types typed =>
+        ⟨types, type_extension_refl types, typed_binary_left_preserved typed control stack⟩
+      return_binaryRight := fun _ _ _ _ _ control stack types typed =>
+        ⟨types, type_extension_refl types, typed_binary_right_preserved typed control stack⟩
+      return_case := fun _ _ _ _ _ control stack _ typed => typed_case_preserved typed control stack
+      return_ifBool := fun _ _ _ _ _ _ control stack types typed =>
+        ⟨types, type_extension_refl types, typed_ifBool_preserved typed control stack⟩ }
+    state types typed
 
 /-- Every finite reachable state of the SAME checked erasure has a typed heap,
 control and continuation. This theorem does not assert that evaluation ends. -/
