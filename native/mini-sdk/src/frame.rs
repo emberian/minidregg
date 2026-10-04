@@ -121,6 +121,23 @@ pub(crate) mod fake {
     //! background job /dev/null as stdin BEFORE applying its explicit redirections (so `<&0` would
     //! duplicate /dev/null), which closes the pipe before the client writes (EPIPE).
     use std::path::PathBuf;
+
+    /// The `ssh` stand-in used by the operator's ssh-route tests. It is run as
+    /// `/bin/sh SCRIPT -T -v -o … -- DEST` and behaves by DEST (its last argument):
+    ///
+    /// * `hostkey` / `denied` / `refused` / `garbled` — ssh's own failure text on stderr, exit 255,
+    ///   BEFORE the "Entering interactive session" line (no request can have been written);
+    /// * `silent` — prints nothing and sleeps (the connect deadline names it);
+    /// * `serve-…` — prints the session lines, then serves frames: each request is appended to
+    ///   `$TMPDIR/mini-sdk-ssh-DEST.req` and answered by a canned reply: `serve-answer` (op 2 + "ok"),
+    ///   `serve-refuse` (255 + "no"), `serve-reject` (254 + "x"), `serve-hangup` (reads one request,
+    ///   exits 255), `serve-garbage` (a zero-length reply frame), `serve-mute` (reads, never answers),
+    ///   `serve-oneshot` (answers one request, then the session ends).
+    ///
+    /// Frames are read with `dd`/`od` (no NULs enter a shell variable). `remote-…` is the same
+    /// server WITHOUT the debug lines, for use as an sshd `RemoteCommand`.
+    pub const SSH_STANDIN: &str = include_str!("../tests/fixtures/ssh-standin.sh");
+
     /// Returns `(/bin/sh, script)`: the frame client runs `EXECUTABLE SETTINGS stdio`, so the
     /// script travels as the "settings" path and nothing freshly written is ever executed
     /// (executing a just-written file races a sibling test's fork on Linux: ETXTBSY).
