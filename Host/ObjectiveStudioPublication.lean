@@ -1,62 +1,8 @@
-/- Ordinary source publication payload author. expectedCore comes from the
-signing consumer's independent pinned replay of the immutable package bytes.
-This module checks exact pairing; supplying that trusted replay is an external
-obligation, not a theorem inferred from arbitrary input JSON. No authority is
-created by source publication. -/
-import Compiler.ObjectiveSourcePackage
-import Compiler.ObjectiveBendSourceArtifact
-import Kernel.ObjectiveBendNativeInput
-import Kernel.ObjectiveBendPublishedPackage
-namespace Minidregg.Host.ObjectiveStudioPublication
-open Minidregg.Compiler
-open Lean Minidregg.Theory Minidregg.Theory.TypedAuthorization
-open Minidregg.Compiler.Tower256ConcreteBackend
-open Minidregg.Compiler.ObjectiveBendSourceArtifact
-set_option autoImplicit false
-private def hex (bytes : List UInt8) : String := String.ofList <| bytes.flatMap fun b =>
-  let chars := "0123456789abcdef".toList
-  [chars[b.toNat/16]!,chars[b.toNat%16]!]
-private def decimal (digest : Digest) : Json := toJson (toString digest.value)
-private def atom (id schema : Digest) (bytes : List UInt8) : Json := Json.mkObj [
-  ("type",toJson "createAtom"),("atom",decimal id),
-  ("kind",Json.mkObj [("type",toJson "inlineObject"),("schema",decimal schema)]),
-  ("payload",toJson (hex bytes))]
-
-/-- The receiver's package schema, never a local copy of its derivation. -/
-abbrev packageSchema : Digest := Minidregg.Kernel.ObjectiveBendPublishedPackage.schema
-
-def author (packageBytes replayedPackage offeredCore expectedCore outputCodecBytes : List UInt8) : Except String Json := do
-  if packageBytes.length > 12582912 || offeredCore.length > 4194304 || expectedCore.length > 4194304 || outputCodecBytes.length > 1024 then throw "source publication byte capacity"
-  let some package := Minidregg.Compiler.ObjectiveSourcePackage.decode packageBytes | throw "canonical Objective package required"
-  if !Minidregg.Compiler.ObjectiveSourcePackage.wellFormed package then throw "Objective package structure/import/pin refusal"
-  let some declaration := Minidregg.Compiler.ObjectiveSourcePackage.selectedDeclaration package | throw "Objective selected declaration missing"
-  if packageBytes != replayedPackage then throw "immutable package differs from pinned source/parser replay"
-  if offeredCore != expectedCore then throw "offered callable differs from independent immutable-package replay"
-  let packet ← parsePacket 4194304 expectedCore
-  if (← packet.getObjValAs? String "sourceEntry") != declaration then throw "package/callable selected declaration mismatch"
-  let some outputCodec := digestStream.toLawful.decode outputCodecBytes | throw "native output codec encoding required"
-  if digestStream.encode outputCodec != outputCodecBytes then throw "noncanonical native output codec"
-  let artifact : Artifact := ⟨Minidregg.Compiler.ObjectiveSourcePackage.identity package,
-    declaration,offeredCore,Minidregg.Kernel.ObjectiveBendNativeInput.codecId,outputCodec⟩
-  let checked ← checkWithin artifact 4194304 16384
-  match checked.typed.type with
-  | .arrow .. => pure ()
-  | _ => throw "unapplied checked callable required"
-  match checked.packet.source.term with
-  | .get _ name => if name != declaration then throw "actual selected core member mismatch"
-  | _ => throw "selected module knot required"
-  let artifactBytes := encode artifact
-  pure <| Json.mkObj [
-    ("schema",toJson "dregg.objective-bend.publication-author.v1"),
-    ("packageId",decimal artifact.package),("artifactId",decimal (identity artifact)),
-    ("sourceEntry",toJson declaration),("inputCodec",decimal artifact.inputCodec),("outputCodec",decimal artifact.outputCodec),
-    ("payload",Json.mkObj [("type",toJson "content"),("actions",toJson ([
-      atom artifact.package packageSchema packageBytes,
-      atom (identity artifact) schema artifactBytes] : List Json))]),
-    ("authority",toJson "none; ordinary current-authorized content proposal required"),
-    ("sourceCorrespondence",toJson "exact offered/independently replayed packet; trusted replay supplied by signing consumer"),
-    ("laws",toJson "undischarged")]
-end Minidregg.Host.ObjectiveStudioPublication
+/- `lean --run` entry for Objective source publication: inspect an imported
+package/artifact pair, replay a package's module sources, or author a
+publication payload. The payload author is `Host.ObjectivePackageAuthor.author`
+(also the native Host's `objective-publication` operation). -/
+import Host.ObjectivePackageAuthor
 
 open Lean
 
@@ -126,7 +72,7 @@ def main (args : List String) : IO UInt32 := do
     let offered ← read offeredPath 4194304
     let expected ← read expectedPath 4194304
     let codec ← read codecPath 1024
-    match Minidregg.Host.ObjectiveStudioPublication.author package replayedPackage offered expected codec with
+    match Minidregg.Host.ObjectivePackageAuthor.author package replayedPackage offered expected codec with
     | .error reason => IO.eprintln reason;return (2 : UInt32)
     | .ok json => IO.FS.writeFile outputPath json.compress;IO.println json.compress;return (0 : UInt32)
   catch error => IO.eprintln error.toString;return (2 : UInt32)

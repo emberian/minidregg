@@ -303,7 +303,17 @@ def requestOfJson (json : Json) : Except String Request := do
   if !ObjectiveBendQuoteRequest.wellFormed request then throw "request is not well formed"
   pure request
 
-def toJson (derived : Derived) : Json :=
+/-- The signer's prepare intent for the derived command: one observe grant per
+target that names an observe capability (the same grants an ordinary workspace
+invocation carries). Its nonce is the intent's own, distinct from the command
+nonce the source/input queries share. -/
+def prepareIntent (derived : Derived) (intentNonce : Nat) : NativeObservationCodec.Intent :=
+  ⟨derived.command.subject,intentNonce,
+    .prepare (.invoke (commandCodec.encode derived.command)),
+    derived.command.targets.filterMap fun target =>
+      target.observeCapability.map fun capability => ⟨target.kind,target.target,capability⟩⟩
+
+def toJson (derived : Derived) (intentNonce : Nat) : Json :=
   Json.mkObj [
     ("schema","dregg.objective-bend.quote.v2"),
     ("evidence","a deep source evaluation (not proved unique): Core4 executeWith output"),
@@ -316,7 +326,9 @@ def toJson (derived : Derived) : Json :=
     ("claim",ObjectiveBendNativeInput.hex (ObjectiveInvocationClaim.encode derived.claim)),
     ("expectedInput",ObjectiveBendNativeInput.hex (digestStream.encode derived.claim.expectedInput)),
     ("command",ObjectiveBendNativeInput.hex (commandCodec.encode derived.command)),
-    ("plan",ObjectiveBendNativeInput.hex (planBytes derived.plan))]
+    ("plan",ObjectiveBendNativeInput.hex (planBytes derived.plan)),
+    ("intent",ObjectiveBendNativeInput.hex
+      (NativeObservationCodec.intentCodec.encode (prepareIntent derived intentNonce)))]
 
 /-- Host operation: decode a retained request, derive on a freshly walked
 image, write the quote. -/
@@ -367,10 +379,13 @@ def authorPolicy (json : Json) : Except String String := do
 def authorRequest (json : Json) : Except String (List UInt8) :=
   (ObjectiveBendQuoteRequest.codec.encode ·) <$> requestOfJson json
 
-def quoteBytes (config : Config) (opened : Opened config) (bytes : List UInt8) : IO (Except String Json) := do
+def quoteBytes (config : Config) (opened : Opened config) (bytes : List UInt8) (intentNonce : Nat) :
+    IO (Except String Json) := do
   let some request := ObjectiveBendQuoteRequest.decode bytes | return .error "noncanonical Objective request"
+  if intentNonce == request.nonce then
+    return .error "the prepare intent nonce must differ from the command nonce"
   match ← derive config opened request with
   | .error reason => return .error reason
-  | .ok derived => return .ok (toJson derived)
+  | .ok derived => return .ok (toJson derived intentNonce)
 
 end Minidregg.Host.ObjectiveInvocationQuote

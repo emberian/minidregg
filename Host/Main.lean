@@ -178,6 +178,8 @@ import Host.FnSelectiveReleaseFnAck
 import Host.Json
 import Kernel.ObjectiveBendNativeAdmission
 import Host.ObjectiveInvocationQuote
+import Host.ObjectiveInvocationSettings
+import Host.ObjectivePackageAuthor
 import Host.PayClaims
 import Host.ApplicationCurrentBirthAuthoring
 import Host.CurrentResourceBirthAuthoring
@@ -339,32 +341,6 @@ instance : FromJson JointConsensusSettings where
 instance : ToJson JointConsensusSettings where
   toJson pin := .str (Minidregg.Host.Json.encodeHex
     (Minidregg.Compiler.GenericSimplexCodec.contextStream.encode pin.context))
-
-/-- Canonical deployment policy for the Objective invocation family. Its
-edition and full capacities enter the native runtime semantics. A network
-request cannot choose or replace this operator pin. -/
-structure ObjectiveInvocationSettings where
-  policy : Minidregg.Kernel.ObjectiveBendNativeAdmission.Policy
-
-instance : FromJson ObjectiveInvocationSettings where
-  fromJson? json := do
-    let value ← json.getStr?
-    unless value.utf8ByteSize ≤ 8192 do
-      throw "objectiveInvocation exceeds the 4096-byte policy envelope"
-    let bytes ← Minidregg.Host.Json.decodeHex "objectiveInvocation" json
-    unless Minidregg.Host.Json.encodeHex bytes == value do
-      throw "objectiveInvocation must use canonical lowercase hex"
-    let some policy := Minidregg.Kernel.ObjectiveBendNativeAdmission.decodePolicy bytes
-      | throw "objectiveInvocation is not a canonical Objective policy"
-    unless policy.edition == Minidregg.Kernel.ObjectiveBendNativeAdmission.semanticsId do
-      throw "objectiveInvocation has an unsupported Objective edition"
-    unless decide policy.outputs.Nodup do
-      throw "objectiveInvocation contains duplicate output schemas"
-    pure ⟨policy⟩
-
-instance : ToJson ObjectiveInvocationSettings where
-  toJson pin := .str (Minidregg.Host.Json.encodeHex
-    (Minidregg.Kernel.ObjectiveBendNativeAdmission.encodePolicy pin.policy))
 
 /-- Operator configuration pins the physical completion custodian's exact
 Ed25519 public key. It is never selected by an incoming request. -/
@@ -678,9 +654,7 @@ def Settings.config (settings : Settings) : NativeHost.Config where
     CompletionCustodianKeySettings.bytes
   nockFSync := settings.nockFSync.getD NativeHost.defaultNockFSync
   jointConsensus := settings.jointConsensus.map JointConsensusSettings.context
-  invocationBindings := settings.objectiveInvocation.map fun pin =>
-    [(Minidregg.Compiler.NativeInvocationStatement.Route.objectiveMethod,
-      Minidregg.Kernel.ObjectiveBendNativeAdmission.encodePolicy pin.policy)]
+  invocationBindings := ObjectiveInvocationSettings.bindings settings.objectiveInvocation
 
 /-- Check the complete declared source genesis before opening or authoring
 under this profile. Membership enters runtime semantics with only the anchor
@@ -5670,20 +5644,22 @@ def usage : String :=
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
+  -- Pure operator authoring before any Store exists: the policy a genesis pins
+  -- and the constants it names do not read the configuration.
+  | [_, "objective-constants"] =>
+      IO.println Minidregg.Host.ObjectiveInvocationQuote.constants.compress
+      pure 0
+  | [_, "author", "objective-policy", input, output] =>
+      let bytes ← readBoundedBytes input 65536
+      let some text := String.fromUTF8? bytes.toByteArray
+        | throw (IO.userError "Objective policy JSON is not UTF-8")
+      let json ← IO.ofExcept (Lean.Json.parse text)
+      IO.FS.writeFile output (← IO.ofExcept (Minidregg.Host.ObjectiveInvocationQuote.authorPolicy json))
+      pure 0
   | configPath :: command :: rest =>
       let settings ← loadSettings configPath
       let config := settings.config
       match command, rest with
-      | "objective-constants", [] =>
-          IO.println Minidregg.Host.ObjectiveInvocationQuote.constants.compress
-          pure 0
-      | "author", ["objective-policy", input, output] =>
-          let bytes ← readBoundedBytes input 65536
-          let some text := String.fromUTF8? bytes.toByteArray
-            | throw (IO.userError "Objective policy JSON is not UTF-8")
-          let json ← IO.ofExcept (Lean.Json.parse text)
-          IO.FS.writeFile output (← IO.ofExcept (Minidregg.Host.ObjectiveInvocationQuote.authorPolicy json))
-          pure 0
       | "author", ["objective-request", input, output] =>
           let bytes ← readBoundedBytes input FnEvidenceCodec.maxHostFrameBytes
           let some text := String.fromUTF8? bytes.toByteArray
@@ -5691,11 +5667,27 @@ def run (arguments : List String) : IO UInt32 := do
           let json ← IO.ofExcept (Lean.Json.parse text)
           writeBytes output (← IO.ofExcept (Minidregg.Host.ObjectiveInvocationQuote.authorRequest json))
           pure 0
-      | "objective-quote", [requestPath, outputPath] =>
+      | "objective-quote", [requestPath, intentNonce, outputPath] =>
           let bytes ← readBoundedBytes requestPath FnEvidenceCodec.maxHostFrameBytes
+          let some nonce := intentNonce.toNat?
+            | throw (IO.userError "intent nonce must be canonical decimal")
+          unless toString nonce == intentNonce do throw (IO.userError "intent nonce must be canonical decimal")
           let walked ← IO.ofExcept (← NativeHostSession.startWalked config)
           writeJson outputPath (← IO.ofExcept
-            (← Minidregg.Host.ObjectiveInvocationQuote.quoteBytes config walked.verified.opened bytes))
+            (← Minidregg.Host.ObjectiveInvocationQuote.quoteBytes config walked.verified.opened bytes nonce))
+          pure 0
+      | "objective-publication", [packageInputPath, corePath, outputCodec, outputDirectory] =>
+          let input ← readBoundedBytes packageInputPath 25165824
+          let core ← readBoundedBytes corePath 4194304
+          let result ← IO.ofExcept (Minidregg.Host.ObjectivePackageAuthor.publication input core outputCodec)
+          let directory := System.FilePath.mk outputDirectory
+          if ← directory.pathExists then throw (IO.userError "publication output directory already exists")
+          IO.FS.createDirAll directory
+          IO.FS.writeBinFile (directory / "package.bin") ⟨result.package.toArray⟩
+          IO.FS.writeBinFile (directory / "artifact.bin") ⟨result.artifact.toArray⟩
+          IO.FS.writeBinFile (directory / "core.canonical.json") ⟨result.core.toArray⟩
+          IO.FS.writeFile (directory / "publication.json") result.json.compress
+          IO.println result.json.compress
           pure 0
       | "carry-plan", [requestPath, outputPath] =>
           let operator ← carryOperator settings

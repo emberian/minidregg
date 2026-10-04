@@ -10,6 +10,7 @@ import Kernel.NativeHostGenesis
 import Compiler.GenericSimplexSourceAnchor
 import Compiler.FnEvidenceCodec
 import Host.SourceAgreementJson
+import Host.ObjectiveInvocationSettings
 import Host.RequestRefusal
 import Lean.Data.Json
 
@@ -92,6 +93,7 @@ structure Settings where
   nockFSync : Option Nat := none
   disabledEvaluators : Option (List String) := none
   lifecycleManagement : Option LifecycleManagementSettings := none
+  objectiveInvocation : Option ObjectiveInvocationSettings := none
   deriving FromJson, ToJson
 
 def Settings.disabledEvaluatorIds (settings : Settings) :
@@ -124,6 +126,7 @@ def Settings.config (settings : Settings) : NativeHost.Config where
   signature := ⟨settings.signatureBinary⟩
   nockFSync := settings.nockFSync.getD NativeHost.defaultNockFSync
   jointConsensus := settings.jointConsensus.map JointConsensusSettings.context
+  invocationBindings := ObjectiveInvocationSettings.bindings settings.objectiveInvocation
   fnGateway := settings.fnGateway.map fun pin =>
     ⟨pin.application.toUTF8.toList, ⟨pin.subject⟩, pin.target,
       ⟨pin.capability⟩, ⟨pin.policyAddress.toNat!⟩⟩
@@ -161,8 +164,12 @@ def loadSettings (path : System.FilePath) : IO Settings := do
     "collector", "asset", "genesisHeight", "expectedSeed", "storageBinary",
     "storageRoot", "signatureBinary", "checkpointKey", "checkpointEvery",
     "jointConsensus", "nockFSync", "disabledEvaluators", "fnGateway",
-    "grainBirthTariff", "completionCustodianKey", "lifecycleManagement"]
-  unless object.foldl (init := true) (fun valid key _ => valid && allowed.contains key) do
+    "grainBirthTariff", "completionCustodianKey", "lifecycleManagement", "objectiveInvocation"]
+  -- A deployment config written by `mini bootstrap` spells every absent Host
+  -- option as null. Null is absence; any other value of a key this provider
+  -- cannot honor refuses, since it would change the semantics it verifies.
+  unless object.foldl (init := true) (fun valid key value =>
+      valid && (allowed.contains key || value == Json.null)) do
     throw (IO.userError "unsupported settings in client consent provider")
   let settings : Settings ← IO.ofExcept (fromJson? json)
   if let some pin := settings.fnGateway then
