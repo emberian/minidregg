@@ -2,8 +2,8 @@
 //!
 //! Custody is checked on the OPENED descriptor (a rename between check and read cannot
 //! substitute another file): a regular file owned by this euid with no group/other permission
-//! bits. [`Custody`] says how a symlink is treated and whether the containing directory must be
-//! owner-private too. Bytes come back in `Zeroizing` buffers.
+//! bits. A secret is never read through a symlink. [`Custody`] says whether the containing
+//! directory must be owner-private too. Bytes come back in `Zeroizing` buffers.
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
@@ -14,8 +14,6 @@ use zeroize::Zeroizing;
 /// How much of the path's custody is checked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Custody {
-    /// The file itself. A symlink is judged by the file it opens (its target's custody).
-    File,
     /// The file itself, never reached through a symlink.
     FileNoFollow,
     /// No symlink, and the file's parent directory must be an owner-private directory.
@@ -85,7 +83,7 @@ fn read_bounded(path: &Path, min: usize, limit: usize, custody: Custody) -> Resu
     }
     let mut file: File = OpenOptions::new()
         .read(true)
-        .custom_flags(if custody == Custody::File { 0 } else { libc::O_NOFOLLOW } | libc::O_NONBLOCK | libc::O_CLOEXEC)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
         .open(path)
         .map_err(|e| fail(SecretErrorKind::Unreadable(e)))?;
     let meta = file.metadata().map_err(|e| fail(SecretErrorKind::Unreadable(e)))?;
@@ -138,22 +136,18 @@ mod tests {
     #[test]
     fn a_private_32_byte_seed_loads_and_every_other_shape_refuses() {
         let dir = scratch("seed", 0o700);
-        assert_eq!(*read_seed(&key(&dir, "ok", &[9; 32], 0o600), Custody::File).unwrap(), [9u8; 32]);
-        let short = read_seed(&key(&dir, "short", &[9; 31], 0o600), Custody::File).unwrap_err().to_string();
+        assert_eq!(*read_seed(&key(&dir, "ok", &[9; 32], 0o600), Custody::FileNoFollow).unwrap(), [9u8; 32]);
+        let short = read_seed(&key(&dir, "short", &[9; 31], 0o600), Custody::FileNoFollow).unwrap_err().to_string();
         assert!(short.contains("exactly 32"), "{short}");
-        assert!(read_seed(&key(&dir, "long", &[9; 33], 0o600), Custody::File).unwrap_err().to_string().contains("exactly 32"));
-        assert!(matches!(read_seed(&key(&dir, "empty", b"", 0o600), Custody::File).unwrap_err().kind, SecretErrorKind::Size { .. }));
-        assert!(read_seed(&key(&dir, "wide", &[9; 32], 0o640), Custody::File).unwrap_err().to_string().contains("group or others"));
-        assert!(read_seed(&key(&dir, "world", &[9; 32], 0o604), Custody::File).is_err());
+        assert!(read_seed(&key(&dir, "long", &[9; 33], 0o600), Custody::FileNoFollow).unwrap_err().to_string().contains("exactly 32"));
+        assert!(matches!(read_seed(&key(&dir, "empty", b"", 0o600), Custody::FileNoFollow).unwrap_err().kind, SecretErrorKind::Size { .. }));
+        assert!(read_seed(&key(&dir, "wide", &[9; 32], 0o640), Custody::FileNoFollow).unwrap_err().to_string().contains("group or others"));
+        assert!(read_seed(&key(&dir, "world", &[9; 32], 0o604), Custody::FileNoFollow).is_err());
         let link = dir.join("link");
         std::os::unix::fs::symlink(dir.join("ok"), &link).unwrap();
-        assert_eq!(*read_seed(&link, Custody::File).unwrap(), [9u8; 32], "a link is judged by the file it opens");
         assert!(read_seed(&link, Custody::FileNoFollow).is_err(), "no-follow custody never reads through a link");
         assert!(read_seed(&link, Custody::FileAndDirectory).is_err());
-        let loose = dir.join("loose");
-        std::os::unix::fs::symlink(dir.join("wide"), &loose).unwrap();
-        assert!(read_seed(&loose, Custody::File).is_err(), "the target's custody is what counts");
-        assert!(read_seed(&dir, Custody::File).is_err(), "a directory is not a key");
+        assert!(read_seed(&dir, Custody::FileNoFollow).is_err(), "a directory is not a key");
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -161,7 +155,7 @@ mod tests {
     fn directory_custody_is_checked_only_when_asked() {
         let open = scratch("open-dir", 0o755);
         let path = key(&open, "k", &[1; 32], 0o600);
-        assert!(read_seed(&path, Custody::File).is_ok());
+        assert!(read_seed(&path, Custody::FileNoFollow).is_ok());
         assert!(read_seed(&path, Custody::FileAndDirectory).unwrap_err().to_string().contains("owner-private directory"));
         fs::set_permissions(&open, fs::Permissions::from_mode(0o700)).unwrap();
         assert!(read_seed(&path, Custody::FileAndDirectory).is_ok());
@@ -171,10 +165,10 @@ mod tests {
     #[test]
     fn read_private_bounds_the_file() {
         let dir = scratch("bound", 0o700);
-        assert_eq!(read_private(&key(&dir, "a", b"abc", 0o600), 3, Custody::File).unwrap().as_slice(), b"abc");
-        assert!(matches!(read_private(&key(&dir, "b", b"abcd", 0o600), 3, Custody::File).unwrap_err().kind, SecretErrorKind::Size { limit: 3 }));
-        assert!(read_private(&key(&dir, "e", b"", 0o600), 3, Custody::File).is_err(), "a secret is never empty");
-        assert!(read_private_or_empty(&key(&dir, "m", b"", 0o600), 0, Custody::File).unwrap().is_empty(), "an empty marker is");
+        assert_eq!(read_private(&key(&dir, "a", b"abc", 0o600), 3, Custody::FileNoFollow).unwrap().as_slice(), b"abc");
+        assert!(matches!(read_private(&key(&dir, "b", b"abcd", 0o600), 3, Custody::FileNoFollow).unwrap_err().kind, SecretErrorKind::Size { limit: 3 }));
+        assert!(read_private(&key(&dir, "e", b"", 0o600), 3, Custody::FileNoFollow).is_err(), "a secret is never empty");
+        assert!(read_private_or_empty(&key(&dir, "m", b"", 0o600), 0, Custody::FileNoFollow).unwrap().is_empty(), "an empty marker is");
         fs::remove_dir_all(dir).unwrap();
     }
 }

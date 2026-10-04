@@ -69,15 +69,15 @@ pub(crate) fn sync_directory_ancestors(directory: &Path) -> Result<()> {
 }
 
 /// The crate's one secret-file loader. Custody is checked on the opened descriptor and the file
-/// must be owner-private (a symlink is judged by the file it opens); the `_in_private_dir` forms
-/// also refuse symlinks and require an owner-private containing directory.
+/// must be owner-private and is never reached through a symlink; the `_in_private_dir` forms
+/// also require an owner-private containing directory.
 fn seed_with(path: &Path, custody: Custody) -> Result<Zeroizing<[u8; 32]>> {
     secret::read_seed(path, custody).map_err(|e| e.to_string())
 }
 
 /// A 32-byte seed file (an Ed25519 signing seed, a symmetric key).
 pub(crate) fn read_seed(path: &Path) -> Result<Zeroizing<[u8; 32]>> {
-    seed_with(path, Custody::File)
+    seed_with(path, Custody::FileNoFollow)
 }
 
 /// [`read_seed`], also requiring an owner-private containing directory.

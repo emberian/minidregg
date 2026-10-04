@@ -486,7 +486,7 @@ pub(crate) fn urandom(out: &mut [u8]) -> Result<()> {
 pub(crate) fn secret_file(path: &Path) -> Result<[u8; 32]> {
     use mini_sdk::secret::{read_seed, Custody, SecretErrorKind};
     for _ in 0..2 {
-        match read_seed(path, Custody::File) {
+        match read_seed(path, Custody::FileNoFollow) {
             Ok(seed) => return Ok(*seed),
             Err(e) if matches!(&e.kind, SecretErrorKind::Unreadable(io) if io.kind() == io::ErrorKind::NotFound) => {
                 let mut s = zeroize::Zeroizing::new([0u8; 32]);

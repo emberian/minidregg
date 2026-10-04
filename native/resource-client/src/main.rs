@@ -4940,10 +4940,10 @@ mod tests {
             assert!(read_secret(&key).unwrap_err().contains("owner-private"), "mode {mode:o}");
         }
         fs::set_permissions(&key, fs::Permissions::from_mode(0o600)).unwrap();
-        // A link is judged by what it opens: the target's custody.
+        // A signing seed is never read through a symlink, even to a private target.
         let link = directory.join("link.key");
         symlink(&key, &link).unwrap();
-        assert!(read_secret(&link).is_ok());
+        assert!(read_secret(&link).is_err());
         assert!(read_secret(&directory).unwrap_err().contains("regular file"));
         let long = directory.join("long.key");
         create_private(&long, &[5u8; 33]).unwrap();
