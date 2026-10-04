@@ -1,10 +1,15 @@
 /- Local full-peer consent process. Settings and executable are selected by
-local custody. The operator supplies proposed frames only. Initial history is
-independently re-admitted once; later frames verify only an exact source suffix.
+local custody. The operator supplies proposed frames only. History is admitted
+before the first consent frame, never for a pure codec frame: from genesis, or,
+when custody offers its retained anchor (frame 228) first, natively after that
+anchor once the Store is shown to extend it (`Kernel.ConsentAnchor`). Later
+frames admit only the exact new suffix (`DurableReceiverIO.extendFrom`). Frame
+229 returns the anchor of what this provider admitted, for custody to retain.
 No protected Store is transmitted by this process. Thin peers need a separate
 selective authenticated witness producer; this executable is not that producer.
 -/
 import Kernel.NativeClientConsent
+import Kernel.ConsentAnchor
 import Kernel.NativeSpecializedConsent
 import Kernel.NativeHostGenesis
 import Compiler.GenericSimplexSourceAnchor
@@ -281,20 +286,57 @@ def codec (config : NativeHost.Config) (operation : UInt8) (payload : List UInt8
   | _ => throw (IO.userError "not a local codec operation")
 
 /-- The retained proof is updated only by independent native admission. The
-physical Store/MAC is merely an input reader, never a semantic trust source. -/
-abbrev Session (config : NativeHost.Config) := Sigma (NativeHostReplay.Verified config)
+physical Store/MAC is merely an input reader, never a semantic trust source.
+The basis is the full re-admission from genesis, or native admission of every
+record after this client's retained anchor (`ConsentAnchor.Basis`). -/
+abbrev Session (config : NativeHost.Config) := Sigma (ConsentAnchor.Basis config)
 
-def verifyInitial (config : NativeHost.Config) : IO (Session config) := do
-  let target ← IO.ofExcept (← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes)
+/-- The full re-admission, for consent that selects from chronology. -/
+abbrev FullSession (config : NativeHost.Config) := Sigma (NativeHostReplay.Verified config)
+
+/-- First admission. A retained anchor the Store contradicts (another genesis
+log, a rolled-back head, a rewritten prefix, another root at the anchor)
+refuses and terminates the provider. A suffix whose admission fails after the
+anchor is re-admitted from genesis instead, which accepts or refuses it. -/
+def verifyInitial (config : NativeHost.Config) (retained : Option ConsentAnchor.Anchor) :
+    IO (Session config) := do
+  let ⟨target, chains, chainsExact⟩ ← IO.ofExcept
+    (← DurableReceiverIO.loadChained config.transport ResourceBirthCodec.rootBytes)
+  if let some anchor := retained then
+    match ← ConsentAnchor.resume config anchor target chains chainsExact with
+    | .ok anchored => return ⟨target, .anchored anchored⟩
+    | .error (.contradicted detail) => throw (IO.userError s!"consent refused: {detail}")
+    | .error (.suffix _) => pure ()
   match ← NativeHostReplay.verifyLoaded config target with
   | .error failure => throw (IO.userError s!"consent prefix refused at {failure.index}: {failure.detail}")
-  | .ok verified => pure ⟨target, verified⟩
+  | .ok verified => pure ⟨target, .full verified⟩
 
+/-- Admit only the records the Store appended since `old` (`extendFrom`: the
+chain continues from the held one and every new tag verifies). An anchored
+basis whose suffix admission fails is re-admitted from genesis. -/
 def refresh (config : NativeHost.Config) (old : Session config) : IO (Session config) := do
-  let target ← IO.ofExcept (← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes)
-  match ← NativeHostReplay.extendVerified config old.2 target with
-  | .error failure => throw (IO.userError s!"consent extension refused at {failure.index}: {failure.detail}")
-  | .ok verified => pure ⟨target, verified⟩
+  let ⟨target, seedExact, acceptedExact, logStartExact⟩ ← IO.ofExcept
+    (← DurableReceiverIO.extendFrom config.transport ResourceBirthCodec.rootBytes old.1)
+  if target.image.accepted.length = old.1.image.accepted.length then return old
+  match ← old.2.extendAppended config target seedExact acceptedExact logStartExact with
+  | .ok basis => pure ⟨target, basis⟩
+  | .error failure =>
+      match old.2 with
+      | .full _ => throw (IO.userError s!"consent extension refused at {failure.index}: {failure.detail}")
+      | .anchored _ =>
+          match ← NativeHostReplay.verifyLoaded config target with
+          | .error failure =>
+              throw (IO.userError s!"consent extension refused at {failure.index}: {failure.detail}")
+          | .ok verified => pure ⟨target, .full verified⟩
+
+/-- The full re-admission of the held target; an anchored session is
+re-admitted from genesis once and then held in full. -/
+def upgrade (config : NativeHost.Config) (session : Session config) :
+    IO (FullSession config × Session config) := do
+  match ← session.2.full? config with
+  | .error failure =>
+      throw (IO.userError s!"consent prefix refused at {failure.index}: {failure.detail}")
+  | .ok verified => pure (⟨session.1, verified⟩, ⟨session.1, .full verified⟩)
 
 def headersBytes (headers : List (List UInt8)) : List UInt8 :=
   (Lean.toJson (headers.map SourceAgreementJson.encodeHex)).compress.toUTF8.toList
@@ -337,16 +379,32 @@ def consent (config : NativeHost.Config) (session : Session config) (operation :
       selectedHeaders config session wanted headers
   | _ => throw (IO.userError "unsupported consent operation")
 
+/-- Entry adapters (lifecycle families) select from the admitted chronology,
+so they receive the full re-admission (`upgrade`). -/
 abbrev ExtraExpected := (settings : Settings) → (config : NativeHost.Config) →
-  Session config → UInt8 → List UInt8 → IO (List UInt8)
+  FullSession config → UInt8 → List UInt8 → IO (List UInt8)
 
-def specialized (extraExpected : ExtraExpected) (settings : Settings) (config : NativeHost.Config) (session : Session config)
+/-- Whether a specialized frame goes to an entry adapter, which needs the full
+re-admission. A malformed frame answers `false` and refuses in `specialized`. -/
+def specializedNeedsFull (payload : List UInt8) : Bool :=
+  match payload.take 4 with
+  | [b0, b1, b2, b3] =>
+      let width := b0.toNat + 256 * b1.toNat + 65536 * b2.toNat + 16777216 * b3.toNat
+      match (payload.drop 4).take width with
+      | operation :: _ => 0 < width && !NativeSpecializedConsent.supported operation
+      | [] => false
+  | _ => false
+
+def specialized (extraExpected : ExtraExpected) (settings : Settings) (config : NativeHost.Config)
+    (session : Session config) (full : Option (FullSession config))
     (payload : List UInt8) : IO (List UInt8) := do
   let (retained, candidate) ← splitPair payload
   let operation :: request := retained | throw (IO.userError "missing retained specialized operation")
   let expected ← if NativeSpecializedConsent.supported operation then
     NativeSpecializedConsent.expectedPlanBytes config session.2 operation request
-  else extraExpected settings config session operation request
+  else match full with
+    | some verified => extraExpected settings config verified operation request
+    | none => throw (IO.userError "entry consent adapter requires the full re-admission")
   let _ ← IO.ofExcept (NativeSpecializedConsent.checkExact expected candidate)
   pure candidate
 
@@ -409,8 +467,14 @@ def objectiveHeaders (extraObjective : ExtraObjective) (settings : Settings)
     throw (IO.userError "source-derived Objective adapter returned invalid header count")
   pure (headersBytes headers)
 
-partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjective) (settings : Settings) (config : NativeHost.Config) (session : Session config)
-    (input output : IO.FS.Stream) : IO Unit := do
+/-- Frame 228 offers custody's retained anchor before the first admission;
+frame 229 returns the anchor of the current admission. Pure codec frames
+(7–11) admit nothing. Every other frame first admits the Store (`verifyInitial`
+once, then `refresh`); a failed admission terminates the provider, so no cached
+success survives an observed rollback, rewritten prefix, or failed suffix. -/
+partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjective) (settings : Settings)
+    (config : NativeHost.Config) (retained : Option ConsentAnchor.Anchor)
+    (held : Option (Session config)) (input output : IO.FS.Stream) : IO Unit := do
   let first ← input.read 1
   if first.isEmpty then return
   let lengthWire ← readExactly input 4 first
@@ -418,18 +482,48 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
   unless 0 < length && length ≤ maxFrame do throw (IO.userError "consent frame exceeds bound")
   let body ← readExactly input length
   let operation := body[0]!
-  -- A failed refresh terminates the provider: no cached success may survive
-  -- an observed rollback, rewritten prefix, or failed semantic suffix.
-  let updated ← refresh config session
-  let answer ← try pure (operation, ← if operation ≥ 7 && operation ≤ 11 then
-      codec config operation (body.toList.drop 1)
-    else if operation == 224 then specialized extraExpected settings config updated (body.toList.drop 1)
-    else if operation == 226 then possession config (body.toList.drop 1)
-    else if operation == 227 then objectiveHeaders extraObjective settings config updated (body.toList.drop 1)
-    else consent config updated operation (body.toList.drop 1))
-    catch error => pure (255, error.toString.toUTF8.toList)
-  writeSessionFrame output answer.1 answer.2
-  serve extraExpected extraObjective settings config updated input output
+  let payload := body.toList.drop 1
+  if operation ≥ 7 && operation ≤ 11 then
+    let answer ← try pure (operation, ← codec config operation payload)
+      catch error => pure (255, error.toString.toUTF8.toList)
+    writeSessionFrame output answer.1 answer.2
+    serve extraExpected extraObjective settings config retained held input output
+  else if operation == 228 then
+    if held.isSome then
+      writeSessionFrame output 255
+        "a retained consent anchor is offered only before the first admission".toUTF8.toList
+      serve extraExpected extraObjective settings config retained held input output
+    else
+      match ConsentAnchor.decode payload with
+      | .error detail =>
+          writeSessionFrame output 255 detail.toUTF8.toList
+          serve extraExpected extraObjective settings config retained held input output
+      | .ok anchor =>
+          writeSessionFrame output 228 []
+          serve extraExpected extraObjective settings config (some anchor) held input output
+  else if operation == 229 then
+    match held with
+    | none =>
+        writeSessionFrame output 255 "no admitted prefix to anchor yet".toUTF8.toList
+    | some session =>
+        writeSessionFrame output 229 (ConsentAnchor.encode session.2.anchor)
+    serve extraExpected extraObjective settings config retained held input output
+  else
+    let admitted ← match held with
+      | none => verifyInitial config retained
+      | some session => refresh config session
+    let (full, updated) ← if operation == 224 && specializedNeedsFull payload then do
+        let (full, upgraded) ← upgrade config admitted
+        pure (some full, upgraded)
+      else pure (none, admitted)
+    let answer ← try pure (operation, ← if operation == 224 then
+        specialized extraExpected settings config updated full payload
+      else if operation == 226 then possession config payload
+      else if operation == 227 then objectiveHeaders extraObjective settings config updated payload
+      else consent config updated operation payload)
+      catch error => pure (255, error.toString.toUTF8.toList)
+    writeSessionFrame output answer.1 answer.2
+    serve extraExpected extraObjective settings config retained (some updated) input output
 
 def run (extraExpected : ExtraExpected) (arguments : List String)
     (extraObjective : ExtraObjective := refuseObjective) : IO UInt32 := do
@@ -437,8 +531,7 @@ def run (extraExpected : ExtraExpected) (arguments : List String)
   | [path, "stdio"] =>
       let settings ← loadSettings path
       withPinnedSignature settings.config fun config => do
-        let session ← verifyInitial config
-        serve extraExpected extraObjective settings config session (← IO.getStdin) (← IO.getStdout)
+        serve extraExpected extraObjective settings config none none (← IO.getStdin) (← IO.getStdout)
         pure 0
   | _ => throw (IO.userError "usage: minidregg-client-consent CONFIG stdio")
 end Minidregg.Host.ClientConsentCore

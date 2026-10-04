@@ -42,9 +42,9 @@ private def admitted {α ε : Type} (result : Except ε α) : IO α :=
 /-- The exact production functions and production encoders used by Host.Main.
 No source mutation or signature creation occurs here. -/
 def expectedPlanBytes (config : NativeHost.Config) {target : NativeHost.Durable}
-    (verified : NativeHostReplay.Verified config target) (operation : UInt8)
+    (basis : ConsentAnchor.Basis config target) (operation : UInt8)
     (request : List UInt8) : IO (List UInt8) := do
-  let opened := verified.opened
+  let opened := basis.opened
   match operation with
   | 86 =>
       let (observation, command) ← splitPair request

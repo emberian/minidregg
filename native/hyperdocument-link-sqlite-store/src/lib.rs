@@ -836,6 +836,15 @@ impl SqliteByteStore {
         Ok(PublishStatus::Installed)
     }
 
+    /// The installed seed bytes alone, without the head anchor: the seed is
+    /// written once and never replaced, and Lean reads only its epoch label
+    /// from it, so a Store of another epoch refuses by name before the anchor
+    /// (whose identity binds that epoch) can only say that it conflicts.
+    /// Nothing read here is accepted; every accepting read is `durable_read`.
+    pub fn durable_seed_bytes(&self) -> Result<Vec<u8>, StoreError> {
+        self.durable_seed()?.ok_or(StoreError::Missing)
+    }
+
     /// One consistent read: the head, optionally the seed and the latest
     /// checkpoint, and every entry at `from` or above.
     pub fn durable_read(&self, from: u64, with_base: bool) -> Result<DurableRead, StoreError> {
@@ -1215,6 +1224,22 @@ mod tests {
             "dregg-durable-{label}-{}-{nonce}",
             std::process::id()
         ))
+    }
+
+    /// The seed read answers before (and whatever) the head anchor would say:
+    /// a Store opened under another anchor identity still reports its seed
+    /// bytes, while every accepting read under that identity refuses.
+    #[test]
+    fn durable_seed_reads_without_the_anchor_and_accepts_nothing() {
+        let root = fresh_root("seed-peek");
+        let store = SqliteByteStore::open_with_identity(&root, b"epoch-a").unwrap();
+        assert!(matches!(store.durable_seed_bytes(), Err(StoreError::Missing)));
+        store.durable_init(b"seed").unwrap();
+        drop(store);
+        let other = SqliteByteStore::open_with_identity(&root, b"epoch-b").unwrap();
+        assert_eq!(other.durable_seed_bytes().unwrap(), b"seed");
+        assert!(matches!(other.durable_read(1, true), Err(StoreError::Anchor(_))));
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

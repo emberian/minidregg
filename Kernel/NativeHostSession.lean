@@ -144,7 +144,7 @@ def refresh (config : Config) (session : Session config) :
   match ← DurableReceiverIO.extendFrom config.transport ResourceBirthCodec.rootBytes
       session.durable with
   | .error detail => return .error detail
-  | .ok durable =>
+  | .ok ⟨durable, _⟩ =>
       if durable.image.accepted.length = session.durable.image.accepted.length then
         return .ok session
       -- `validateLoadedFrom_eq`: the full validation, re-decoding and
@@ -205,7 +205,7 @@ def refreshWalked (config : Config) (session : Session config) :
   let physical ← match ← DurableReceiverIO.extendFrom config.transport
       ResourceBirthCodec.rootBytes session.durable with
     | .error detail => return .error detail
-    | .ok physical => pure physical
+    | .ok ⟨physical, _⟩ => pure physical
   let retained ← walkPhysical config session.walked physical
   match retained with
   | .error detail => return .error detail

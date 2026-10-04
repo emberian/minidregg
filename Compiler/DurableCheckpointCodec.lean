@@ -38,6 +38,7 @@ import Compiler.Sp800185Cshake256
 import Compiler.Sp800185Kmac256
 import Kernel.DurableCheckpoint
 import Kernel.WorldRootCache
+import Theory.AssertAxioms
 
 namespace Minidregg.Compiler.DurableCheckpointCodec
 
@@ -108,7 +109,162 @@ theorem decode_other_frame (framed : Framed α) {other : List UInt8}
 
 end Framed
 
-def seedFrame : Framed Seed := ⟨"DREGG.DURABLE.SEED".toUTF8.toList ++ [1], seedStream⟩
+/-! ## The Store epoch
+
+A Store's bytes commit to three format components: the declared-effect state-key
+codec, the cell schema references (hence every declared cell's layout digest)
+and the log-tag MAC label. The seed frame names all three, so a Store of another
+epoch is refused by name — read from its seed before anything else, including
+the physical head anchor (`DurableReceiverIO.load`). -/
+
+/-- The log-tag MAC customization; `entryTag` uses exactly this label. -/
+def logTagLabel : String := "DREGG/NATIVE-HOST/LOG-TAG/v2"
+
+/-- One Store epoch: the three format components its bytes commit to. -/
+structure StoreEpoch where
+  stateKey : String
+  schemaRefs : String
+  logTag : String
+  deriving DecidableEq, Repr
+
+/-- The epoch this Host writes and reads. `stateKey` is
+`DeclaredEffectCell.stateKeyCodecId` and `schemaRefs` the declared-effect
+schema reference version (`DeployedCellRegistry.declaredEffectSchemaRef`);
+`ConsentAnchor.storeEpoch_stateKey`/`storeEpoch_schemaRefs` fail to build when
+either moves without this value. A change to any component changes the seed
+frame and refuses every older Store by name. -/
+def StoreEpoch.current : StoreEpoch :=
+  ⟨"state-key/tagged-v4", "schema-refs/v5", logTagLabel⟩
+
+/-- The label carried in the seed frame: the three components, `;`-separated. -/
+def StoreEpoch.label (epoch : StoreEpoch) : String :=
+  s!"{epoch.stateKey};{epoch.schemaRefs};{epoch.logTag}"
+
+/-- Exact inverse of `label` on its image. -/
+def StoreEpoch.parse (text : String) : Option StoreEpoch :=
+  match text.splitOn ";" with
+  | [stateKey, schemaRefs, logTag] =>
+      let epoch : StoreEpoch := ⟨stateKey, schemaRefs, logTag⟩
+      if epoch.label = text then some epoch else none
+  | _ => none
+
+/-- The components in which a Store's epoch differs from this Host's, named. -/
+def StoreEpoch.differing (store host : StoreEpoch) : List String :=
+  (if store.stateKey = host.stateKey then [] else
+      [s!"state-key codec: Store {store.stateKey}, this Host {host.stateKey}"]) ++
+    (if store.schemaRefs = host.schemaRefs then [] else
+      [s!"cell schema references: Store {store.schemaRefs}, this Host {host.schemaRefs}"]) ++
+    (if store.logTag = host.logTag then [] else
+      [s!"log tags: Store {store.logTag}, this Host {host.logTag}"])
+
+/-- **No component differs exactly when the epochs are equal.** -/
+theorem StoreEpoch.differing_nil_iff (store host : StoreEpoch) :
+    store.differing host = [] ↔ store = host := by
+  cases store; cases host
+  simp only [StoreEpoch.differing, StoreEpoch.mk.injEq]
+  constructor
+  · intro none
+    refine ⟨?_, ?_, ?_⟩ <;> (apply Classical.byContradiction; intro ne; simp_all)
+  · rintro ⟨rfl, rfl, rfl⟩
+    simp
+
+/-- **A state-key codec break is named, and only it.** -/
+theorem StoreEpoch.differing_stateKey (host : StoreEpoch) (stateKey : String)
+    (changed : stateKey ≠ host.stateKey) :
+    StoreEpoch.differing { host with stateKey } host =
+      [s!"state-key codec: Store {stateKey}, this Host {host.stateKey}"] := by
+  simp [StoreEpoch.differing, changed]
+
+/-- **A schema-reference break is named, and only it.** -/
+theorem StoreEpoch.differing_schemaRefs (host : StoreEpoch) (schemaRefs : String)
+    (changed : schemaRefs ≠ host.schemaRefs) :
+    StoreEpoch.differing { host with schemaRefs } host =
+      [s!"cell schema references: Store {schemaRefs}, this Host {host.schemaRefs}"] := by
+  simp [StoreEpoch.differing, changed]
+
+/-- **A log-tag break is named, and only it.** -/
+theorem StoreEpoch.differing_logTag (host : StoreEpoch) (logTag : String)
+    (changed : logTag ≠ host.logTag) :
+    StoreEpoch.differing { host with logTag } host =
+      [s!"log tags: Store {logTag}, this Host {host.logTag}"] := by
+  simp [StoreEpoch.differing, changed]
+
+def seedFrameName : List UInt8 := "DREGG.DURABLE.SEED".toUTF8.toList
+
+/-- Seed frame v2: the name, version byte 2, then the epoch label. The v1 frame
+(name and byte 1) carried no epoch, so a v1 Store's components are unknown (it
+may be of any earlier epoch, including this one's components): it refuses as
+unlabelled. -/
+def seedFrame : Framed Seed :=
+  ⟨seedFrameName ++ [2] ++ StoreEpoch.current.label.toUTF8.toList, seedStream⟩
+
+/-- What a Store's seed bytes say about its epoch, read from the frame alone. -/
+inductive SeedEpoch where
+  | labelled (epoch : StoreEpoch)
+  | unlabelled (version : UInt8)
+  | foreign
+
+def SeedEpoch.ofBytes (bytes : List UInt8) : SeedEpoch :=
+  match bytesStream.decodePrefix bytes with
+  | none => .foreign
+  | some (frame, _) =>
+      if frame = seedFrame.frame then .labelled StoreEpoch.current
+      else if frame = seedFrameName ++ [1] then .unlabelled 1
+      else if frame.take seedFrameName.length = seedFrameName then
+        match frame.drop seedFrameName.length with
+        | 2 :: label =>
+            match String.fromUTF8? label.toByteArray >>= StoreEpoch.parse with
+            | some epoch => .labelled epoch
+            | none => .foreign
+        | [version] => .unlabelled version
+        | _ => .foreign
+      else .foreign
+
+/-- The refusal naming a Store's epoch, or `none` when it is this Host's. -/
+def SeedEpoch.refusal : SeedEpoch → Option String
+  | .labelled epoch =>
+      match epoch.differing StoreEpoch.current with
+      | [] => none
+      | named => some s!"this Store was born in another epoch ({String.intercalate "; " named}); re-genesis the world"
+  | .unlabelled version =>
+      some s!"this Store's seed frame is version {version}, which carries no epoch label (it was born before Store epochs were labelled, so its state-key codec, schema references and log tags are unknown); this Host reads {StoreEpoch.current.label}; re-genesis the world"
+  | .foreign => some "the Store's seed is not a durable seed frame"
+
+/-- The current seed frame reads back as this Host's labelled epoch. -/
+theorem seedEpoch_ofBytes_current (rest : List UInt8) :
+    SeedEpoch.ofBytes (bytesStream.encode seedFrame.frame ++ rest) =
+      .labelled StoreEpoch.current := by
+  unfold SeedEpoch.ofBytes
+  rw [bytesStream.decodePrefix_encode]
+  simp
+
+/-- **This Host's own seeds pass the epoch check.** -/
+theorem seedEpoch_current (seed : Seed) :
+    (SeedEpoch.ofBytes (seedFrame.encode seed)).refusal = none := by
+  show (SeedEpoch.ofBytes (bytesStream.encode seedFrame.frame ++ seedStream.encode seed)).refusal = none
+  rw [seedEpoch_ofBytes_current]
+  simp [SeedEpoch.refusal, (StoreEpoch.differing_nil_iff _ _).mpr rfl]
+
+/-- **Every v1 Store refuses by name**: its frame carries no epoch. -/
+theorem seedEpoch_v1_refused (rest : List UInt8) :
+    ∃ named, (SeedEpoch.ofBytes (bytesStream.encode (seedFrameName ++ [1]) ++ rest)).refusal =
+      some named := by
+  have older : seedFrameName ++ [1] ≠ seedFrame.frame := by
+    intro same
+    have tails := List.append_cancel_left (same.trans (by simp [seedFrame]) :
+      seedFrameName ++ [1] = seedFrameName ++ (2 :: StoreEpoch.current.label.toUTF8.toList))
+    simp at tails
+  unfold SeedEpoch.ofBytes
+  rw [bytesStream.decodePrefix_encode]
+  simp only [older, if_false, if_true]
+  exact ⟨_, rfl⟩
+
+#assert_axioms StoreEpoch.differing_nil_iff
+#assert_axioms StoreEpoch.differing_stateKey
+#assert_axioms StoreEpoch.differing_schemaRefs
+#assert_axioms StoreEpoch.differing_logTag
+#assert_axioms seedEpoch_current
+#assert_axioms seedEpoch_v1_refused
 /-- Version 2: a record carries its signing subject (`IntentRecord.subject`),
 which the presence index folds. A v1 record refuses (`v1_record_refused`). -/
 def recordFrame : Framed IntentRecord := ⟨"DREGG.DURABLE.LOG".toUTF8.toList ++ [2], intentStream⟩
@@ -170,7 +326,7 @@ a moved, swapped or rewritten root refuses exactly as a moved chain does
 (`DurableLogTags.verifyTags`). v2: v1 tags carried no root and refuse. -/
 def entryTag (key : MacKey) (height : Nat) (chain root : Digest) : List UInt8 :=
   digestStream.encode root ++
-    kmac256Bytes key.bytes "DREGG/NATIVE-HOST/LOG-TAG/v2".toUTF8.toList
+    kmac256Bytes key.bytes logTagLabel.toUTF8.toList
       (tagInputStream.encode (key.id, height, chain, root))
 
 /-- The root a stored tag carries (its prefix), whether or not its MAC verifies;

@@ -23,7 +23,7 @@ fn read_input(path: &Path) -> Result<Vec<u8>, StoreError> {
     Ok(bytes)
 }
 
-const USAGE: &str = "usage:\n  minidregg-link-sqlite-store read ROOT\n  minidregg-link-sqlite-store read-to ROOT OUTPUT\n  minidregg-link-sqlite-store publish ROOT INPUT\n  minidregg-link-sqlite-store cas ROOT EXPECTED|- INPUT\n  minidregg-link-sqlite-store cas-crash ROOT EXPECTED|- INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-crash ROOT INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-hold ROOT INPUT READY RELEASE\n  minidregg-link-sqlite-store database-path ROOT\n  minidregg-link-sqlite-store durable-anchor-enroll ROOT\n  minidregg-link-sqlite-store durable-init ROOT SEED\n  minidregg-link-sqlite-store durable-read ROOT FROM 0|1 OUTPUT\n  minidregg-link-sqlite-store durable-append ROOT HEIGHT RECORD TAG\n  minidregg-link-sqlite-store durable-append-crash ROOT HEIGHT RECORD TAG after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store durable-checkpoint ROOT HEIGHT INPUT\n  minidregg-link-sqlite-store journal-read ROOT FROM OUTPUT\n  minidregg-link-sqlite-store journal-append ROOT SEQ RECORD TAG\n  minidregg-link-sqlite-store journal-append-crash ROOT SEQ RECORD TAG after-begin|after-insert|after-commit|after-anchor-prepare|after-anchor-rename|after-anchor\n  minidregg-link-sqlite-store serve";
+const USAGE: &str = "usage:\n  minidregg-link-sqlite-store read ROOT\n  minidregg-link-sqlite-store read-to ROOT OUTPUT\n  minidregg-link-sqlite-store publish ROOT INPUT\n  minidregg-link-sqlite-store cas ROOT EXPECTED|- INPUT\n  minidregg-link-sqlite-store cas-crash ROOT EXPECTED|- INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-crash ROOT INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-hold ROOT INPUT READY RELEASE\n  minidregg-link-sqlite-store database-path ROOT\n  minidregg-link-sqlite-store durable-anchor-enroll ROOT\n  minidregg-link-sqlite-store durable-init ROOT SEED\n  minidregg-link-sqlite-store durable-read ROOT FROM 0|1 OUTPUT\n  minidregg-link-sqlite-store durable-seed ROOT OUTPUT\n  minidregg-link-sqlite-store durable-append ROOT HEIGHT RECORD TAG\n  minidregg-link-sqlite-store durable-append-crash ROOT HEIGHT RECORD TAG after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store durable-checkpoint ROOT HEIGHT INPUT\n  minidregg-link-sqlite-store journal-read ROOT FROM OUTPUT\n  minidregg-link-sqlite-store journal-append ROOT SEQ RECORD TAG\n  minidregg-link-sqlite-store journal-append-crash ROOT SEQ RECORD TAG after-begin|after-insert|after-commit|after-anchor-prepare|after-anchor-rename|after-anchor\n  minidregg-link-sqlite-store serve";
 
 /// The CLI could not run: usage (exit 2) or a store error.
 enum Failure {
@@ -178,6 +178,10 @@ fn run(mut arguments: Vec<std::ffi::OsString>, out: &mut Vec<u8>) -> Result<(), 
                 output,
                 encode_durable_read(&store.durable_read(from, with_base)?),
             )?;
+        }
+        ("durable-seed", [root, output]) => {
+            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            fs::write(output, store.durable_seed_bytes()?)?;
         }
         ("durable-append", [root, height, record, tag]) => {
             let height = parse_height(height)?;

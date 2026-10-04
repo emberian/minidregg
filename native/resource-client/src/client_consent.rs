@@ -1,15 +1,37 @@
 //! Local native consent over a warm independently admitted source prefix.
 //! The remote transport never supplies this executable or its settings.
+//!
+//! The provider admits the Store's history before its first consent frame. What
+//! it admitted is kept as a retained anchor (`Kernel.ConsentAnchor`) in a private
+//! file under `~/.mini/consent-anchors/` (or `$MINI_CONSENT_ANCHOR_DIR`), named by
+//! and bound to the exact provider file and settings bytes (callers retain the
+//! settings in per-attempt copies, so the name is the binding, not a path). The next process offers it (frame 228) before admission, so
+//! the provider admits only the records after it, and refuses a Store that
+//! rolled back or rewrote the anchored prefix. Another provider build, a
+//! replaced provider file or changed settings never see the anchor: they admit
+//! from genesis.
 use super::*;
 use std::process::{Child, ChildStdin, ChildStdout, Stdio};
 
 const CAP: usize = 12_102_760;
+/// Custody framing of a retained anchor: this tag, a 32-byte binding of the
+/// provider file and settings bytes, then the provider's own anchor bytes.
+const ANCHOR_TAG: &[u8] = b"MINI-CONSENT-ANCHOR-CUSTODY/v1\n";
+const ANCHOR_CAP: u64 = 4096;
 struct Session {
     child: Child,
     input: ChildStdin,
     output: ChildStdout,
     executable: PathBuf,
     settings_bytes: Vec<u8>,
+    /// Where this provider's anchor is retained and what it is bound to; `None`
+    /// for a codec-only process.
+    anchor: Option<AnchorCustody>,
+}
+struct AnchorCustody {
+    path: PathBuf,
+    binding: [u8; 32],
+    retained: Option<Vec<u8>>,
 }
 impl Drop for Session {
     fn drop(&mut self) {
@@ -72,17 +94,127 @@ fn invoke(host: &Path, config: &Path, operation:u8, payload:&[u8]) -> Result<Vec
             return Err("local consent executable or settings changed within signing session".into());
         }
     } else {
-        let mut child=Command::new(&executable).arg(&settings).arg("stdio")
-            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit())
-            .spawn().map_err(|e|format!("cannot start local consent provider {}: {e}",executable.display()))?;
-        let input=child.stdin.take().ok_or("local consent stdin missing")?;
-        let output=child.stdout.take().ok_or("local consent stdout missing")?;
-        *slot=Some(Session{child,input,output,executable,settings_bytes});
+        *slot=Some(start(executable,&settings,settings_bytes)?);
     }
     // Keep the same provider after candidate refusal; restarting would discard
     // its independently verified frontier. A dead provider remains failed for
     // this process rather than silently verifying an older source from genesis.
-    round_trip(slot.as_mut().unwrap(),operation,payload)
+    let session=slot.as_mut().unwrap();
+    let answer=round_trip(session,operation,payload);
+    retain_anchor(session);
+    answer
+}
+
+/// Start a provider and offer it this binding's retained anchor before any
+/// admission. A refusal of the offer (another epoch, noncanonical bytes) is
+/// reported, never silently replaced by a genesis admission.
+fn start(executable:PathBuf,settings:&Path,settings_bytes:Vec<u8>)->Result<Session> {
+    start_in(&anchor_dir()?,executable,settings,settings_bytes)
+}
+fn start_in(anchors:&Path,executable:PathBuf,settings:&Path,settings_bytes:Vec<u8>)->Result<Session> {
+    let binding=anchor_binding(&executable,&settings_bytes)?;
+    let path=anchor_path(anchors,&binding);
+    let retained=read_anchor(&path,&binding)?;
+    let mut child=Command::new(&executable).arg(settings).arg("stdio")
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit())
+        .spawn().map_err(|e|format!("cannot start local consent provider {}: {e}",executable.display()))?;
+    let input=child.stdin.take().ok_or("local consent stdin missing")?;
+    let output=child.stdout.take().ok_or("local consent stdout missing")?;
+    let mut session=Session{child,input,output,executable,settings_bytes,
+        anchor:Some(AnchorCustody{path:path.clone(),binding,retained:retained.clone()})};
+    if let Some(anchor)=retained {
+        round_trip(&mut session,228,&anchor)
+            .map_err(|e|format!("retained consent anchor {}: {e}",path.display()))?;
+    }
+    Ok(session)
+}
+
+/// The private directory of retained anchors.
+fn anchor_dir()->Result<PathBuf> {
+    if let Some(dir)=std::env::var_os("MINI_CONSENT_ANCHOR_DIR") {
+        let dir=PathBuf::from(dir);
+        if !dir.is_absolute() {return Err("MINI_CONSENT_ANCHOR_DIR must be absolute".into());}
+        return Ok(dir);
+    }
+    Ok(PathBuf::from(std::env::var_os("HOME").ok_or("retained consent anchors need $HOME or MINI_CONSENT_ANCHOR_DIR")?)
+        .join(".mini/consent-anchors"))
+}
+/// One file per binding: a provider admits only under its own.
+fn anchor_path(anchors:&Path,binding:&[u8;32])->PathBuf {
+    anchors.join(format!("{}.anchor",hex(binding)))
+}
+/// The provider file (path and inode identity, size and both times) and the
+/// exact settings bytes. A rebuilt, replaced or moved provider, or any settings
+/// change, binds differently and admits from genesis.
+fn anchor_binding(executable:&Path,settings_bytes:&[u8])->Result<[u8;32]> {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::MetadataExt;
+    let meta=fs::metadata(executable).map_err(|e|format!("local consent provider {}: {e}",executable.display()))?;
+    let mut digest=sha2::Sha256::new();
+    digest.update(b"MINI-CONSENT-ANCHOR-BINDING/v1\0");
+    digest.update((executable.as_os_str().len() as u64).to_le_bytes());
+    digest.update(executable.as_os_str().as_bytes());
+    for value in [meta.dev(),meta.ino(),meta.size(),meta.mtime() as u64,meta.mtime_nsec() as u64,
+        meta.ctime() as u64,meta.ctime_nsec() as u64] {
+        digest.update(value.to_le_bytes());
+    }
+    digest.update(sha2::Sha256::digest(settings_bytes));
+    Ok(digest.finalize().into())
+}
+/// The retained anchor bytes for this binding: `None` when there is no file or
+/// it was written under another binding. A file that is not owner-private and
+/// regular, or not this custody format, refuses.
+fn read_anchor(path:&Path,binding:&[u8;32])->Result<Option<Vec<u8>>> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let file=match OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(path) {
+        Ok(file)=>file,
+        Err(e) if e.kind()==io::ErrorKind::NotFound=>return Ok(None),
+        Err(e)=>return Err(format!("retained consent anchor {}: {e}",path.display())),
+    };
+    let meta=file.metadata().map_err(|e|e.to_string())?;
+    if !meta.is_file()||meta.uid()!=unsafe{libc::geteuid()}||meta.mode()&0o077!=0 {
+        return Err(format!("retained consent anchor {} must be an owner-private regular file",path.display()));
+    }
+    let mut bytes=Vec::new();
+    file.take(ANCHOR_CAP+1).read_to_end(&mut bytes).map_err(|e|e.to_string())?;
+    if bytes.len() as u64>ANCHOR_CAP {return Err(format!("retained consent anchor {} exceeds its bound",path.display()));}
+    let Some(rest)=bytes.strip_prefix(ANCHOR_TAG) else {
+        return Err(format!("retained consent anchor {} is not MINI-CONSENT-ANCHOR-CUSTODY/v1",path.display()));
+    };
+    if rest.len()<=32 {return Err(format!("retained consent anchor {} is truncated",path.display()));}
+    if rest[..32]!=binding[..] {return Ok(None);}
+    Ok(Some(rest[32..].to_vec()))
+}
+fn anchor_file(binding:&[u8;32],anchor:&[u8])->Vec<u8> {
+    [ANCHOR_TAG,binding.as_slice(),anchor].concat()
+}
+/// Ask the provider for the anchor of what it admitted and retain it when it
+/// moved. Complete or absent (`mini_sdk::durable::replace`): a crash leaves the
+/// previous anchor, from which the next provider admits a longer suffix. A
+/// failure here costs only that; it is reported, not fatal to the consent.
+fn retain_anchor(session:&mut Session) {
+    retain_anchor_with(session,&mut |_|Ok(()))
+}
+fn retain_anchor_with(session:&mut Session,observe:&mut dyn FnMut(mini_sdk::durable::Stage)->io::Result<()>) {
+    if session.anchor.is_none() {return;}
+    let anchor=match round_trip(session,229,&[]) {
+        Ok(anchor)=>anchor,
+        Err(_)=>return, // nothing admitted yet (a refused first admission ends the provider)
+    };
+    let custody=session.anchor.as_mut().unwrap();
+    if custody.retained.as_deref()==Some(anchor.as_slice()) {return;}
+    if let Some(parent)=custody.path.parent() {
+        use std::os::unix::fs::DirBuilderExt;
+        if let Err(e)=fs::DirBuilder::new().recursive(true).mode(0o700).create(parent) {
+            eprintln!("mini: warning: cannot create {}: {e}",parent.display());
+            return;
+        }
+    }
+    match mini_sdk::durable::replace_with(&custody.path,&anchor_file(&custody.binding,&anchor),
+        mini_sdk::durable::Perm::Private,observe) {
+        Ok(())=>custody.retained=Some(anchor),
+        Err(e)=>eprintln!("mini: warning: cannot retain the consent anchor {}: {e}",custody.path.display()),
+    }
 }
 fn headers(bytes:&[u8])->Result<Vec<Vec<u8>>> {
     let value:Value=serde_json::from_slice(bytes).map_err(|e|format!("local consent headers: {e}"))?;
@@ -167,8 +299,126 @@ mod tests {
         let mut child=Command::new("/bin/sh").args(["-c","printf '\\015\\000\\000\\000\\377changed-plan'"])
             .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
         let input=child.stdin.take().unwrap();let output=child.stdout.take().unwrap();
-        let mut session=Session{child,input,output,executable:"/bin/sh".into(),settings_bytes:vec![]};
+        let mut session=Session{child,input,output,executable:"/bin/sh".into(),settings_bytes:vec![],anchor:None};
         assert!(round_trip(&mut session,222,b"retained").is_err());
+    }
+
+    /// A provider stub that logs each request's opcode and answers every frame
+    /// with that opcode and the fixed body in `reply_229` for frame 229 (the
+    /// retained anchor) or an empty body otherwise.
+    fn opcode_stub(dir: &Path, anchor: &[u8]) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        fs::write(dir.join("anchor-body"), anchor).unwrap();
+        let path = dir.join("provider");
+        fs::write(&path, format!(concat!(
+            "#!/bin/sh\n",
+            "while :; do\n",
+            "  n=$(dd bs=1 count=4 2>/dev/null | od -An -tu4 | tr -d ' \\n')\n",
+            "  [ -n \"$n\" ] || exit 0\n",
+            "  dd bs=1 count=\"$n\" of='{frame}' 2>/dev/null\n",
+            "  op=$(od -An -tu1 -N1 '{frame}' | tr -d ' \\n')\n",
+            "  echo \"$op\" >> '{log}'\n",
+            "  if [ \"$op\" = 229 ]; then\n",
+            "    m=$(( $(wc -c < '{body}') + 1 ))\n",
+            "    printf \"$(printf '\\\\%03o\\\\000\\\\000\\\\000\\\\%03o' \"$m\" 229)\"; cat '{body}'\n",
+            "  else\n",
+            "    printf \"$(printf '\\\\001\\\\000\\\\000\\\\000\\\\%03o' \"$op\")\"\n",
+            "  fi\n",
+            "done\n"), log = dir.join("opcodes").display(), body = dir.join("anchor-body").display(),
+            frame = dir.join("frame").display())).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        path
+    }
+    fn opcodes(dir: &Path) -> Vec<u8> {
+        fs::read_to_string(dir.join("opcodes")).unwrap_or_default().lines()
+            .map(|line| line.trim().parse().unwrap()).collect()
+    }
+
+    #[test]
+    fn retained_anchor_is_offered_only_under_its_exact_binding() {
+        let dir = stub_dir("anchor-offer");
+        let provider = opcode_stub(&dir, b"ANCHOR-AFTER");
+        let settings = dir.join("consent.json");
+        fs::write(&settings, b"{}").unwrap();
+        // No retained anchor: admission from genesis (no 228), then the anchor
+        // of what was admitted is retained.
+        let mut session = start_in(&dir.join("anchors"), provider.clone(), &settings, b"{}".to_vec()).unwrap();
+        round_trip(&mut session, 220, b"intent").unwrap();
+        retain_anchor(&mut session);
+        drop(session);
+        assert_eq!(opcodes(&dir), vec![220, 229]);
+        let binding = anchor_binding(&provider, b"{}").unwrap();
+        assert_eq!(read_anchor(&anchor_path(&dir.join("anchors"), &binding), &binding).unwrap().as_deref(), Some(&b"ANCHOR-AFTER"[..]));
+        // The next provider is offered it first.
+        fs::remove_file(dir.join("opcodes")).unwrap();
+        let mut session = start_in(&dir.join("anchors"), provider.clone(), &settings, b"{}".to_vec()).unwrap();
+        round_trip(&mut session, 220, b"intent").unwrap();
+        drop(session);
+        assert_eq!(opcodes(&dir), vec![228, 220]);
+        // Changed settings bytes: another binding, so no offer.
+        fs::remove_file(dir.join("opcodes")).unwrap();
+        let mut session = start_in(&dir.join("anchors"), provider.clone(), &settings, b"{ }".to_vec()).unwrap();
+        round_trip(&mut session, 220, b"intent").unwrap();
+        drop(session);
+        assert_eq!(opcodes(&dir), vec![220]);
+        // A replaced provider file (new inode) binds differently too.
+        let copy = dir.join("provider-copy");
+        fs::copy(&provider, &copy).unwrap();
+        fs::rename(&copy, &provider).unwrap();
+        assert_ne!(anchor_binding(&provider, b"{}").unwrap(), binding);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn retained_anchor_file_refuses_foreign_or_exposed_bytes() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = stub_dir("anchor-file");
+        let path = dir.join("consent.json.consent-anchor");
+        let binding = [7u8; 32];
+        mini_sdk::durable::replace(&path, &anchor_file(&binding, b"A"), mini_sdk::durable::Perm::Private).unwrap();
+        assert_eq!(read_anchor(&path, &binding).unwrap().as_deref(), Some(&b"A"[..]));
+        assert_eq!(read_anchor(&path, &[8u8; 32]).unwrap(), None);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(read_anchor(&path, &binding).is_err());
+        mini_sdk::durable::replace(&path, b"MINI-CONSENT-ANCHOR-CUSTODY/v0\nxxxx", mini_sdk::durable::Perm::Private).unwrap();
+        assert!(read_anchor(&path, &binding).is_err());
+        mini_sdk::durable::replace(&path, &anchor_file(&binding, b""), mini_sdk::durable::Perm::Private).unwrap();
+        assert!(read_anchor(&path, &binding).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Crash consistency of the retained anchor: a crash at every durable stage
+    /// of retaining a new anchor leaves either the previous anchor or the new
+    /// one, whole, under the same binding. Both are admissible offers: an older
+    /// anchor only makes the next provider admit a longer suffix.
+    #[test]
+    fn retained_anchor_survives_a_crash_at_every_stage() {
+        use mini_sdk::durable::Stage;
+        for stage in [Stage::MidWrite, Stage::BeforeFileSync, Stage::BeforeCommit,
+            Stage::AfterCommit, Stage::AfterDirectorySync] {
+            let dir = stub_dir("anchor-crash");
+            let provider = opcode_stub(&dir, b"NEW-ANCHOR");
+            let settings = dir.join("consent.json");
+            fs::write(&settings, b"{}").unwrap();
+            let binding = anchor_binding(&provider, b"{}").unwrap();
+            let path = anchor_path(&dir.join("anchors"), &binding);
+            fs::create_dir(dir.join("anchors")).unwrap();
+            mini_sdk::durable::replace(&path, &anchor_file(&binding, b"OLD-ANCHOR"), mini_sdk::durable::Perm::Private).unwrap();
+            let mut session = start_in(&dir.join("anchors"), provider.clone(), &settings, b"{}".to_vec()).unwrap();
+            round_trip(&mut session, 220, b"intent").unwrap();
+            retain_anchor_with(&mut session, &mut |at| if at == stage {
+                Err(io::Error::other("crash"))
+            } else { Ok(()) });
+            drop(session);
+            let survived = read_anchor(&path, &binding).unwrap().unwrap();
+            assert!(survived == b"OLD-ANCHOR" || survived == b"NEW-ANCHOR", "{stage:?}: {survived:?}");
+            if matches!(stage, Stage::MidWrite | Stage::BeforeFileSync | Stage::BeforeCommit) {
+                assert_eq!(survived, b"OLD-ANCHOR", "{stage:?}");
+            } else {
+                assert_eq!(survived, b"NEW-ANCHOR", "{stage:?}");
+            }
+            let _ = fs::remove_dir_all(&dir);
+        }
     }
 
     // A friend's client reaches the box over `--remote` (an `ssh:DEST` socket
@@ -266,7 +516,7 @@ fn local_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u
         .spawn().map_err(|e|format!("cannot start local native codec: {e}"))?;
     let input=child.stdin.take().ok_or("local codec stdin missing")?;
     let output=child.stdout.take().ok_or("local codec stdout missing")?;
-    let mut session=Session{child,input,output,executable,settings_bytes:settings_bytes.clone()};
+    let mut session=Session{child,input,output,executable,settings_bytes:settings_bytes.clone(),anchor:None};
     let body=round_trip(&mut session,operation,payload)?;
     if bounded(&settings)?!=settings_bytes{return Err("local native settings changed during codec operation".into());}
     Ok([vec![operation],body].concat())

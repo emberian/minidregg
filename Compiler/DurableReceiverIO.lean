@@ -91,6 +91,10 @@ structure Transport where
   a typed exact-intent capability; raw client records never select an exemption. -/
   sourceGate : {rootBytes : List UInt8 → Digest} → DataSnapshot rootBytes →
     DataIntent rootBytes → Except RejectReason Unit := fun _ _ => .ok ()
+  /-- The seed bytes alone, read before the physical head anchor, so a Store of
+  another epoch is refused by naming its epoch (`SeedEpoch.refusal`), not as an
+  anchor conflict. `none`: no seed, or no such read on this transport. -/
+  peekSeed : IO (Except String (Option (List UInt8))) := pure (.ok none)
 
 structure NativeConfig where
   binary : System.FilePath
@@ -233,10 +237,26 @@ def NativeConfig.readKey (config : NativeConfig) : IO (Except String MacKey) :=
     | none => return .error "checkpoint MAC key must be exactly 32 bytes"
   catch error => pure (.error s!"checkpoint MAC key unavailable: {error}")
 
+/-- The seed bytes alone, without the head anchor (read-only; the Store
+installs a seed once and never replaces it). -/
+def NativeConfig.peekSeed (config : NativeConfig) : IO (Except String (Option (List UInt8))) :=
+  try
+    IO.FS.withTempDir fun directory => do
+      let path := directory / "seed.bin"
+      let output ← runNative config #["durable-seed", config.root.toString, path.toString]
+      if output.exitCode == 0 && output.stdout == "" && output.stderr == "" then
+        return .ok (some (← IO.FS.readBinFile path).toList)
+      else if output.exitCode == 3 && output.stdout == "" then
+        return .ok none
+      else
+        return .error s!"native durable seed read failed (exit {output.exitCode}): {output.stderr}"
+  catch error => pure (.error s!"native durable seed read unavailable: {error}")
+
 def NativeConfig.transport (config : NativeConfig) (logStart : Seed → Digest)
     (systemCell : CellId) : Transport :=
   ⟨config.read, fun height entry => config.append height entry, config.putCheckpoint,
-    config.initialize, config.readKey, config.checkpointEvery, logStart, some systemCell, fun _ _ => .ok ()⟩
+    config.initialize, config.readKey, config.checkpointEvery, logStart, some systemCell, fun _ _ => .ok (),
+    config.peekSeed⟩
 
 /-- ByteArray's derived equality compares every byte, with no digest premise. -/
 theorem byteArray_beq_exact (left right : List UInt8) :
@@ -761,9 +781,18 @@ private def decodeRecords : List Entry → Except String (List IntentRecord)
         | throw "noncanonical durable log record"
       return record :: (← decodeRecords rest)
 
-/-- The single open path. Every check refuses; nothing reinterprets. -/
-def load (transport : Transport) (rootBytes : List UInt8 → Digest) :
-    IO (Except String (Loaded rootBytes)) := do
+/-- The single open path, keeping the chain value after every stored record
+(`chainPrefixes`, which the open computes to check the tags) for a caller that
+cuts the image at a past height (`Loaded.prefixAt`). Every check refuses;
+nothing reinterprets. -/
+def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
+    IO (Except String ((loaded : Loaded rootBytes) ×'
+      {chains : List Digest // chains = chainPrefixes loaded.logStart loaded.image.accepted})) := do
+  -- The Store's epoch, from its seed alone and before the head anchor or any
+  -- other check: a Store of another epoch refuses by naming it.
+  if let .ok (some seedBytes) := ← transport.peekSeed then
+    if let some refusal := (SeedEpoch.ofBytes seedBytes).refusal then
+      return .error s!"durable store refused: {refusal}"
   let key ← match ← transport.key with
     | .error message => return .error message
     | .ok key => pure key
@@ -772,6 +801,8 @@ def load (transport : Transport) (rootBytes : List UInt8 → Digest) :
   | .ok none => return .error "durable store is not initialized"
   | .ok (some stored) =>
       let some seedBytes := stored.seed | return .error "durable seed missing"
+      if let some refusal := (SeedEpoch.ofBytes seedBytes).refusal then
+        return .error s!"durable store refused: {refusal}"
       let some seed := seedFrame.decode seedBytes | return .error "noncanonical durable seed"
       let records ← match decodeRecords stored.entries with
         | .error message => return .error message
@@ -822,8 +853,13 @@ def load (transport : Transport) (rootBytes : List UInt8 → Digest) :
                 if stored ≠ loaded.worldRoot then
                   return .error "durable log head root differs from the replayed root"
             | _ => pure ()
-            return .ok loaded
+            return .ok ⟨loaded, chains, rfl⟩
       else return .error "checkpoint beyond the log head"
+
+/-- The open path (`loadChained` without the chain prefixes). -/
+def load (transport : Transport) (rootBytes : List UInt8 → Digest) :
+    IO (Except String (Loaded rootBytes)) := do
+  return (← loadChained transport rootBytes).map (·.1)
 
 inductive Confirmation where
   | installed
@@ -985,6 +1021,56 @@ theorem Loaded.linkIndex_from_replay {rootBytes : List UInt8 → Digest} (loaded
 def Loaded.prefixImage {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
     (height : Nat) : Image :=
   ⟨loaded.image.seed, loaded.image.accepted.take height⟩
+
+/-- A loaded image from its parts: the resumed snapshot, a full root cache and
+every index built over the image. The physical checks (chain, tags, seal) are
+the caller's; `chainExact` and `rootLogSize` carry what they established. -/
+def Loaded.build {rootBytes : List UInt8 → Digest} (image : Image) (baseHeight : Nat)
+    (base : State) (withinLog : baseHeight ≤ image.accepted.length) (logStart chain : Digest)
+    (chainExact : chain = chainAfter logStart image.accepted)
+    (rootLog : Array (Option Digest)) (rootLogSize : rootLog.size = image.accepted.length) :
+    Except String {built : Loaded rootBytes // built.image = image ∧ built.logStart = logStart} :=
+  match resumed : resume rootBytes image baseHeight base with
+  | none => .error "durable image journal does not replay through the canonical executor"
+  | some snapshot =>
+      .ok ⟨⟨image, baseHeight, base, snapshot, withinLog, resumed, logStart, chain, chainExact,
+        RootCache.ofEntries (entriesOf image snapshot chain),
+        RootsExact.ofEntries (entriesOf image snapshot chain),
+        PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl,
+        SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
+        SessionIndex.TxIndex.ofRecords image.accepted,
+        SessionIndex.TxIndex.ofRecords_exact image.accepted,
+        rootLog, rootLogSize⟩, rfl, rfl⟩
+
+/-- **The loaded image cut at log height `height`**, from an open that kept its
+chain prefixes (`loadChained`): the chain after `height` records is read off
+the prefixes, the state is the checkpoint's resume when the checkpoint is at or
+below `height` (otherwise the genesis fold of the cut), and the stored roots are
+the verified tags' roots up to `height`. Nothing is re-read or re-hashed. -/
+def Loaded.prefixAt {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) (height : Nat)
+    (chains : List Digest) (chainsExact : chains = chainPrefixes loaded.logStart loaded.image.accepted) :
+    Except String {cut : Loaded rootBytes //
+      cut.image = ⟨loaded.image.seed, loaded.image.accepted.take height⟩ ∧
+        cut.logStart = loaded.logStart} :=
+  if within : height ≤ loaded.image.accepted.length then
+    match found : chains[height]? with
+    | none => .error "durable chain prefix unavailable at the requested height"
+    | some chain =>
+        have chainExact : chain = chainAfter loaded.logStart (loaded.image.accepted.take height) := by
+          rw [chainsExact, DurableLogTags.chainPrefixes_getElem? _ _ _ within] at found
+          exact (Option.some.inj found).symm
+        have sized : (loaded.rootLog.extract 0 height).size =
+            (loaded.image.accepted.take height).length := by
+          simp [Array.size_extract, loaded.rootLogSize, List.length_take, Nat.min_eq_left within]
+        if based : loaded.baseHeight ≤ height then
+          Loaded.build ⟨loaded.image.seed, loaded.image.accepted.take height⟩ loaded.baseHeight
+            loaded.base (by simpa [List.length_take, Nat.min_eq_left within] using based)
+            loaded.logStart chain chainExact (loaded.rootLog.extract 0 height) sized
+        else
+          Loaded.build ⟨loaded.image.seed, loaded.image.accepted.take height⟩ 0
+            (State.ofSeed loaded.image.seed) (Nat.zero_le _)
+            loaded.logStart chain chainExact (loaded.rootLog.extract 0 height) sized
+  else .error "durable log is shorter than the requested height"
 
 /-- The state at log height `height`: the loaded checkpoint plus the records
 after it up to `height` (D2's resume, on the cut image) when the checkpoint is
@@ -1279,11 +1365,56 @@ def receive (transport : Transport) (rootBytes : List UInt8 → Digest)
           | .contention => receive transport rootBytes intent attempts
           | result => return result
 
+/-- Rebasing at the head keeps the image and the log start. -/
+theorem Loaded.rebase_image {rootBytes : List UInt8 → Digest} {loaded rebased : Loaded rootBytes}
+    (done : loaded.rebase = some rebased) :
+    rebased.image = loaded.image ∧ rebased.logStart = loaded.logStart := by
+  unfold Loaded.rebase at done
+  dsimp only at done
+  split at done
+  · cases done
+  · cases done
+    exact ⟨rfl, rfl⟩
+
+/-- Replay stored records onto a loaded image through the shared executor, one
+`Loaded.extend` each. The result's image is the given one followed by exactly
+these records. -/
+def Loaded.replay {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
+    (records : List IntentRecord) →
+    Except String {next : Loaded rootBytes //
+      next.image = ⟨loaded.image.seed, loaded.image.accepted ++ records⟩ ∧
+        next.logStart = loaded.logStart}
+  | [] => .ok ⟨loaded, by rw [List.append_nil], rfl⟩
+  | record :: rest =>
+      match bound : record.bind? rootBytes with
+      | none => .error "durable log record does not bind its roots"
+      | some intent =>
+          match prepare loaded.image loaded.baseHeight loaded.base loaded.snapshot
+              loaded.withinLog loaded.resumed intent with
+          | .inl ready =>
+              match (loaded.extend ready).replay rest with
+              | .error message => .error message
+              | .ok ⟨next, imaged, started⟩ =>
+                  .ok ⟨next, by
+                    rw [imaged]
+                    show (⟨loaded.image.seed, (loaded.image.accepted ++
+                      [IntentRecord.ofIntent intent]) ++ rest⟩ : Image) = _
+                    rw [IntentRecord.bind_exact bound, List.append_assoc, List.singleton_append],
+                    started⟩
+          | .inr _ => .error "durable log suffix does not replay through the canonical executor"
+
 /-- Extend a live loaded image by entries a concurrent writer appended after
 it: the chain must continue, every new entry's tag must verify, and every new
-record must be accepted by the shared executor in order. -/
+record must be accepted by the shared executor in order. The result is the
+given image followed by exactly the new records (by construction, so a
+verified history over the old image extends without comparing prefixes:
+`NativeHostReplay.extendVerifiedAppended`). -/
 def extendFrom (transport : Transport) (rootBytes : List UInt8 → Digest)
-    (loaded : Loaded rootBytes) : IO (Except String (Loaded rootBytes)) := do
+    (loaded : Loaded rootBytes) : IO (Except String {next : Loaded rootBytes //
+      next.image.seed = loaded.image.seed ∧
+        next.image.accepted = loaded.image.accepted ++
+          next.image.accepted.drop loaded.image.accepted.length ∧
+        next.logStart = loaded.logStart}) := do
   let key ← match ← transport.key with
     | .error message => return .error message
     | .ok key => pure key
@@ -1292,7 +1423,7 @@ def extendFrom (transport : Transport) (rootBytes : List UInt8 → Digest)
   | .error message => return .error message
   | .ok none => return .error "durable store is not initialized"
   | .ok (some stored) =>
-      if stored.head = height then return .ok loaded
+      if stored.head = height then return .ok ⟨loaded, rfl, by simp, rfl⟩
       if stored.head < height then return .error "durable log shrank beneath the session"
       let records ← match decodeRecords stored.entries with
         | .error message => return .error message
@@ -1303,24 +1434,28 @@ def extendFrom (transport : Transport) (rootBytes : List UInt8 → Digest)
       if let .error message := verifyTags key height (chainPrefixes loaded.chain records)
           (stored.entries.map (·.tag)) then
         return .error message
-      let mut current := loaded
-      for record in records do
-        let some intent := record.bind? rootBytes
-          | return .error "durable log record does not bind its roots"
-        match prepare current.image current.baseHeight current.base current.snapshot
-            current.withinLog current.resumed intent with
-        | .inl ready => current := current.extend ready
-        | .inr _ => return .error "durable log suffix does not replay through the canonical executor"
-      if current.chain ≠ chain then return .error "durable log chain mismatch"
-      -- Every new entry's stored root is the root its replay served.
-      let replayed := (current.rootLog.extract height current.rootLog.size).toList
-      if replayed ≠ stored.entries.map (fun entry => some ((tagRoot entry.tag).getD ⟨0⟩)) then
-        return .error "durable log root tag differs from the replayed root"
-      if current.image.accepted.length ≥ current.baseHeight + 2 * max 1 transport.checkpointEvery then
-        match current.rebase with
-        | some rebased => return .ok rebased
-        | none => return .error "rebase at the head does not resume through the canonical executor"
-      return .ok current
+      match loaded.replay records with
+      | .error message => return .error message
+      | .ok ⟨current, imaged, started⟩ =>
+        have extended : current.image.seed = loaded.image.seed ∧
+            current.image.accepted = loaded.image.accepted ++
+              current.image.accepted.drop loaded.image.accepted.length ∧
+            current.logStart = loaded.logStart := by
+          rw [imaged]
+          exact ⟨rfl, by simp, started⟩
+        if current.chain ≠ chain then return .error "durable log chain mismatch"
+        -- Every new entry's stored root is the root its replay served.
+        let replayed := (current.rootLog.extract height current.rootLog.size).toList
+        if replayed ≠ stored.entries.map (fun entry => some ((tagRoot entry.tag).getD ⟨0⟩)) then
+          return .error "durable log root tag differs from the replayed root"
+        if current.image.accepted.length ≥ current.baseHeight + 2 * max 1 transport.checkpointEvery then
+          match rebased : current.rebase with
+          | some next =>
+              have kept := Loaded.rebase_image rebased
+              return .ok ⟨next, by rw [kept.1]; exact extended.1,
+                by rw [kept.1]; exact extended.2.1, by rw [kept.2]; exact extended.2.2⟩
+          | none => return .error "rebase at the head does not resume through the canonical executor"
+        return .ok ⟨current, extended⟩
 
 /-- Explicit bootstrap, separate from receipt acceptance. An existing different
 seed is never replaced; initialization is confirmed by a full `load`. -/
