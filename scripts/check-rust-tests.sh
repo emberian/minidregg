@@ -190,6 +190,7 @@ exact sdk-custody            mini-sdk --lib --features native -- \
   store::tests::later_outcomes_remain_later_beyond_four_digits_and_legacy_padding_is_preserved \
   store::tests::sparse_history_does_not_reuse_old_attempt_numbers_and_exhaustion_refuses_without_wrapping \
   store::tests::a_phase_record_may_exist_only_once_with_these_contents \
+  durable::tests::sync_ancestors_skips_what_the_account_cannot_open_or_write_and_refuses_what_it_can_write \
   custody::tests::recovered_after_uncertain_is_confirmed_by_exact_lookup_never_a_new_nonce \
   custody::tests::refused_permits_one_successor_with_fresh_nonces_only \
   custody::tests::unsent_is_never_sent_but_unsent_after_uncertain_stays_uncertain \

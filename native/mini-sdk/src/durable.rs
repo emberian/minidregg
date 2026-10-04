@@ -71,13 +71,30 @@ pub fn sync_parent(path: &Path) -> io::Result<()> {
 
 /// `fsync` `directory` and every ancestor up to `/`: a freshly created chain of directories is
 /// durable only when each entry is.
+///
+/// An ancestor this process can neither open nor create entries in is skipped: it holds nothing
+/// this process made. A hosted friend's session directory sits under root's `0711`
+/// `/var/lib/mini/sessions`, which that account may traverse but not read. An ancestor it can
+/// write into but not open still refuses: it may hold this process's own new entries.
 pub fn sync_ancestors(directory: &Path) -> io::Result<()> {
     let mut ancestor = Some(std::path::absolute(directory)?);
     while let Some(path) = ancestor {
-        sync_dir(&path)?;
+        match sync_dir(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied && !can_create_in(&path) => {}
+            Err(e) => return Err(e),
+        }
         ancestor = path.parent().map(Path::to_path_buf);
     }
     Ok(())
+}
+
+/// Whether this process may create entries in `directory` (write and search permission).
+fn can_create_in(directory: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c) = std::ffi::CString::new(directory.as_os_str().as_bytes()) else { return true };
+    // SAFETY: `c` is a valid NUL-terminated path for the duration of the call.
+    unsafe { libc::access(c.as_ptr(), libc::W_OK | libc::X_OK) == 0 }
 }
 
 fn parent_of(path: &Path) -> io::Result<&Path> {
@@ -277,6 +294,31 @@ mod tests {
         let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
         p
+    }
+
+    /// An ancestor the account may traverse but neither read nor write (a hosted friend's session
+    /// under root's 0711 directory) is skipped; one it may write but not read still refuses.
+    /// Root opens anything, so the rows are vacuous there and say so.
+    #[test]
+    fn sync_ancestors_skips_what_the_account_cannot_open_or_write_and_refuses_what_it_can_write() {
+        use std::os::unix::fs::PermissionsExt;
+        if unsafe { libc::geteuid() } == 0 {
+            eprintln!("sync_ancestors permission rows need a non-root account; skipped");
+            return;
+        }
+        let root = scratch("ancestors");
+        let outer = root.join("outer");
+        let inner = outer.join("inner");
+        fs::create_dir_all(&inner).unwrap();
+        let mode = |m: u32| fs::set_permissions(&outer, fs::Permissions::from_mode(m)).unwrap();
+        mode(0o111);
+        let skipped = sync_ancestors(&inner);
+        mode(0o311);
+        let refused = sync_ancestors(&inner);
+        mode(0o755);
+        let _ = fs::remove_dir_all(&root);
+        skipped.expect("a traverse-only ancestor holds nothing this account made");
+        assert_eq!(refused.expect_err("a writable, unreadable ancestor may hold our entries").kind(), io::ErrorKind::PermissionDenied);
     }
 
     fn leftovers(dir: &Path) -> Vec<String> {
