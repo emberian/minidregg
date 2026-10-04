@@ -107,7 +107,13 @@ phase, code checkpoint and ACK do not mint new private execution authority.
 Printed/code repairs are explicit: availability in IndexVABA means completed
 sharing, not external validity; prevote VALUE membership is distinct from
 broadcaster-ID membership. These source corrections do not automatically
-inherit all paper theorem statements. The pinned raw binary_ba b22a6a... is not
+inherit all paper theorem statements. Executed evidence for both repairs is the
+seeded Byzantine harness in src/vaba/byz.rs (n=4 f=1 and n=7 f=2, VABA and ACS,
+equivocation, forged votes, replay, fuzz, adversarial leader choice, view
+change): the literal printed predicates stall schedules the repaired ones
+decide, and stay safe. Lemma 4.5's cover Y must be the union of honest locally
+validated sets, not of IGValid (a fault-free schedule escapes the latter).
+The Gather ACK quorum is not pinned by any adversary in that harness. The pinned raw binary_ba b22a6a... is not
 imported: raw first-threshold interpolation, zero-based evaluation mismatch and
 silent finite coin stock do not qualify malicious common coin/BA.
 
