@@ -63,9 +63,9 @@ def certificateVerify (accepted : Certificate → Bool) : AgreementClaim → Cer
 
 /-- The witness regime needs no refutation system: none is offered. -/
 @[reducible] def noRefutation (accepted : Certificate → Bool) :
-    @Refutable AgreementClaim Certificate Empty (commitEvidence accepted) where
-  Refutes := fun _ r => r.elim
-  refutes_sound := fun _ r => r.elim
+    @Refutable AgreementClaim Certificate Empty (commitEvidence accepted) :=
+  @Refutable.mk AgreementClaim Certificate Empty (commitEvidence accepted)
+    (fun _ r => r.elim) (fun _ r => r.elim)
 
 /-- The deployment verdict: a certificate is accepted exactly when its canonical bytes
 are those of a commit the native verifier returned. -/
@@ -76,6 +76,19 @@ def acceptedByNative (verified : List (Σ expected : Context, VerifiedCommit exp
 /-- A publication about agreement evidence. -/
 abbrev AgreementPublication (accepted : Certificate → Bool) (ι : Type) :=
   @Publication AgreementClaim Certificate Empty ι (commitEvidence accepted) (noRefutation accepted)
+
+/-- The claim of an agreement publication. The evidence instances are parameters (`accepted` is the
+deployment verdict), never global instances, so the projection names them. -/
+abbrev AgreementPublication.claimOf {accepted : Certificate → Bool} {ι : Type}
+    (pub : AgreementPublication accepted ι) : Claim AgreementClaim :=
+  @Publication.claim AgreementClaim Certificate Empty ι (commitEvidence accepted)
+    (noRefutation accepted) pub
+
+/-- How an agreement publication is rendered (see `claimOf`). -/
+abbrev AgreementPublication.renderedOf {accepted : Certificate → Bool} {ι : Type}
+    (pub : AgreementPublication accepted ι) : Regime :=
+  @Publication.renderedAs AgreementClaim Certificate Empty ι (commitEvidence accepted)
+    (noRefutation accepted) pub
 
 /-- **A COMMIT certificate never witnesses authorization**, whatever the native verifier
 accepts. -/
@@ -101,12 +114,13 @@ publication of an authorization claim, whatever regime it was settled in, is not
 as a witness: the honesty field would force a discharging certificate, and none exists. -/
 theorem authorization_never_rendered_as_witness {ι : Type} (accepted : Certificate → Bool)
     (pub : AgreementPublication accepted ι) {context : Context} {block : Block}
-    (hclaim : pub.claim = ⟨.authorized context block⟩) :
-    pub.renderedAs ≠ Regime.witness := by
+    (hclaim : pub.claimOf = ⟨.authorized context block⟩) :
+    pub.renderedOf ≠ Regime.witness := by
   letI := commitEvidence accepted
   letI := noRefutation accepted
   intro hw
   have hup := rendered_witness_is_true pub hw
+  have hclaim : pub.claim = ⟨.authorized context block⟩ := hclaim
   rw [hclaim] at hup
   exact commit_never_witnesses_authorization accepted context block hup
 
@@ -175,7 +189,7 @@ def publication₀ : AgreementPublication accepted₀ Nat :=
 
 /-- **The witness theorem bites on it**: its claim is upheld. -/
 theorem publication₀_upheld :
-    @upheld AgreementClaim Certificate (commitEvidence accepted₀) publication₀.claim :=
+    @upheld AgreementClaim Certificate (commitEvidence accepted₀) publication₀.claimOf :=
   letI := commitEvidence accepted₀
   letI := noRefutation accepted₀
   rendered_witness_is_true publication₀ rfl
@@ -202,12 +216,12 @@ theorem signerBallot_upholds : (signerBallot cert₀).upholds := by
 strength, and its claim is NOT upheld — agreement evidence carries no authorization. -/
 theorem install_by_agreement_carries_no_authorization :
     ¬ @upheld AgreementClaim Certificate (commitEvidence accepted₀)
-        (installByAgreement accepted₀ cert₀ signerBallot_upholds).claim :=
+        (installByAgreement accepted₀ cert₀ signerBallot_upholds).claimOf :=
   commit_never_witnesses_authorization accepted₀ context₀ [[1]]
 
 /-- **And it cannot be re-badged as a witness.** -/
 theorem install_by_agreement_not_witness :
-    (installByAgreement accepted₀ cert₀ signerBallot_upholds).renderedAs ≠ Regime.witness :=
+    (installByAgreement accepted₀ cert₀ signerBallot_upholds).renderedOf ≠ Regime.witness :=
   authorization_never_rendered_as_witness accepted₀ _ rfl
 
 end Keystone
