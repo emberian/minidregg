@@ -40,6 +40,8 @@ mod append_proof;
 mod fleet_sign;
 mod bend_session;
 #[cfg(unix)]
+mod objective_invoke;
+#[cfg(unix)]
 mod fn_namespace;
 #[cfg(unix)]
 mod grain_share_issue;
@@ -700,6 +702,7 @@ usage:
   mini session-enrollment-lookup --attempt PRIVATE-DIR
   mini agent-payer-sign --host HOST --config CONFIG.json --operator-socket PRIVATE-SOCKET --reserve-attempt ORIGINAL-RESERVE-DIR --plan PAID-PLAN.bin --approval OPERATOR-PRIVATE-APPROVAL.json --key PAYER-SEED.bin --dir NEW-PRIVATE-DIR
   mini inspect --host HOST --config CONFIG.json [--socket SOCKET] --kind fn-inbox-resource|application-permission-schema --input VIEW.bin --output RESULT.json
+  mini objective-invoke --host LOCAL-HOST --config CONFIG.json --request REQUEST.json --intent-nonce N --key KEY --dir NEW-ATTEMPT [--prepare-only true]   (lost reply: mini retry --attempt DIR --mode lookup)
   mini submit --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] [--prepare-only true] [--provider-continuity DESCRIPTOR.json] --key KEY --dir ATTEMPT
   mini query --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] --key KEY --view resource|policy|capability [--presentation fn-inbox-resource] --dir ATTEMPT
   mini retry --attempt ATTEMPT [--mode submit|lookup] [--socket SOCKET|--direct true]
@@ -2086,10 +2089,10 @@ pub(crate) fn observation_stale(host: &Path, config: &Path, generation: &Path) -
 fn query_presentation_kind(view: &str, presentation: Option<&str>) -> Result<String> {
     if !matches!(
         view,
-        "resource" | "policy" | "capability" | "who" | "since" | "at" | "backlinks" | "links"
+        "resource" | "resource-scope" | "policy" | "capability" | "who" | "since" | "at" | "backlinks" | "links"
     ) {
         return Err(
-            "--view must be resource, policy, capability, who, since, at, backlinks, or links"
+            "--view must be resource, resource-scope, policy, capability, who, since, at, backlinks, or links"
                 .to_owned(),
         );
     }
@@ -4305,6 +4308,24 @@ fn run(mut args: Args) -> Result<()> {
                 &inspection_kind,
                 &directory,
             )
+        }
+        #[cfg(unix)]
+        "objective-invoke" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let request = path(args.required("request")?);
+            let intent_nonce = args.required("intent-nonce")?.into_string()
+                .map_err(|_| "--intent-nonce must be UTF-8".to_owned())?;
+            let key = path(args.required("key")?);
+            let directory = path(args.required("dir")?);
+            let prepare_only = match args.optional("prepare-only").as_deref() {
+                None => false,
+                Some(value) if value == OsStr::new("false") => false,
+                Some(value) if value == OsStr::new("true") => true,
+                _ => return Err("--prepare-only must be true or false".to_owned()),
+            };
+            args.finish()?;
+            objective_invoke::submit(&host, &config, &request, &intent_nonce, &key, &directory, prepare_only)
         }
         "retry" => {
             let directory = path(args.required("attempt")?);

@@ -1,0 +1,63 @@
+edition ObjectiveBend 1
+
+# The first native Accepted Objective receipt's method: one signed input query
+# over a content document, one createAtom effect on that same document, and a
+# structured result. The atom id and schema are requested DATA; the native
+# content law decides whether they are admitted.
+
+record Empty:
+record ContentObservation:
+  resource: Nat
+  root: String
+  kind: Nat
+  resourceBytes: String
+  accountBytes: String
+  fields: Empty
+record Observations:
+  "0": ContentObservation
+record AtomRequest:
+  atom: String
+  schema: String
+  byte: Nat
+record Arguments:
+  "0": AtomRequest
+record Input:
+  subject: Nat
+  nonce: Nat
+  arguments: Arguments
+  observations: Observations
+record Ref:
+  resource: Nat
+  root: String
+record Bytes:
+  "0": Nat
+record Atom:
+  kind: String
+  atom: String
+  schema: String
+  bytes: Bytes
+record Actions:
+  "0": Atom
+record Content:
+  kind: String
+  actions: Actions
+record ContentEffect:
+  ref: Ref
+  payload: Content
+record Effects:
+  "0": ContentEffect
+record Reads:
+record Plan:
+  reads: Reads
+  effects: Effects
+record Evidence:
+  document: Ref
+  subject: Nat
+  nonce: Nat
+  byte: Nat
+record Result:
+  plan: Plan
+  result: Evidence
+
+def note(hostInput: Input) -> Result:
+  {plan: {reads: {}, effects: {"0": {ref: {resource: hostInput.observations."0".resource, root: hostInput.observations."0".root}, payload: {kind: "content", actions: {"0": {kind: "createAtom", atom: hostInput.arguments."0".atom, schema: hostInput.arguments."0".schema, bytes: {"0": hostInput.arguments."0".byte}}}}}}}, result: {document: {resource: hostInput.observations."0".resource, root: hostInput.observations."0".root}, subject: hostInput.subject, nonce: hostInput.nonce, byte: hostInput.arguments."0".byte}}
