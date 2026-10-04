@@ -60,7 +60,7 @@ def author (j : Json) : Except String (List UInt8) := do
   if entries.size = 0 ∨ entries.size > 64 then throw "release requires1..64deliveries"
   let deliveries ← entries.toList.mapM delivery
   let prior ← field j "priorEpoch"
-  let priorEpoch ← if prior = .null then pure none else some <$> nat prior
+  let priorEpoch ← if prior == .null then pure none else some <$> nat prior
   let r : Request := ⟨← nat (← field j "room"),← nat (← field j "keysCell"),
     ← nat (← field j "decisionCell"),⟨← nat (← field j "keysRoot")⟩,
     ⟨← nat (← field j "decisionRoot")⟩,⟨← nat (← field j "authorityRoot")⟩,

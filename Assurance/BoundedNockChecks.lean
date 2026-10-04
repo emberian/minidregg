@@ -19,7 +19,7 @@ def expected (fuel : Nat) (subject formula : Noun) : BoundedNockMachine.Result :
   | .error .crash => .crash (Nock.steps fuel subject formula)
   | .error .exhausted => .exhausted fuel
 
-def agrees (subject formula : Noun) (fuel := 12) (ticks := 48) : Prop :=
+abbrev agrees (subject formula : Noun) (fuel := 12) (ticks := 48) : Prop :=
   BoundedNockMachine.run bounds ticks fuel subject formula = expected fuel subject formula
 
 theorem quote_exact : agrees (.atom 9) (quote (.cell (.atom 3) (.atom 4))) := by decide

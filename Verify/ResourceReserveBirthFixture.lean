@@ -37,10 +37,10 @@ def ordinaryDescriptor (config : NativeHost.Config) (source : NativeHostGenesis.
   let height := NativeHost.logicalHeight config opened.durable
   let root := fun (kind : ResourceKind) (id : CapabilityId) (owner : SubjectId)
       (target : Nat) (verbs : Finset (Verb kind)) =>
-    { NativeHostGenesis.rootCapability config.profile source kind id owner target verbs with
+    ({ NativeHostGenesis.rootCapability config.profile source kind id owner target verbs with
       issuerEpoch := opened.authority.snapshot.authState.issuerEpoch config.profile.template.issuer
       notBefore := height
-      notAfter := height + config.profile.template.lifetime }
+      notAfter := height + config.profile.template.lifetime } : Capability kind)
   let grants : List AuthorityGrant := born.flatMap fun entry =>
     [⟨entry.item.resourceKind, ⟨root entry.item.resourceKind entry.ownerCapability entry.item.owner
         entry.item.create.cellId (ownerVerbs entry.item.resourceKind), []⟩⟩,
@@ -85,7 +85,7 @@ canonical empty Control and bind its pinned owner/cell/atom/schema. -/
 def initializationCommand (owner : SubjectId) (nonce cell : Nat)
     (ownerCapability : CapabilityId) (preRoot : Digest)
     (atom : Hyperdocument.AtomId) (schema : Digest) (payload : List UInt8) :
-    ResourceTransaction.Command where
+    DeclaredResourceController.Command where
   subject := owner
   nonce := nonce
   targets := [⟨.object, cell, ownerCapability, ContentResource.commandVersion, preRoot,
@@ -99,7 +99,7 @@ def initializerPlanAfterBirth (config : NativeHost.Config)
     (opened : NativeHost.Opened config)
     (accepted : AcceptedBirth config.profile config.deployment opened.pins opened.durable
       (NativeHost.logicalHeight config opened.durable))
-    (command : ResourceTransaction.Command) : Except String NativeHostCodec.SigningPlan := do
+    (command : DeclaredResourceController.Command) : Except String NativeHostCodec.SigningPlan := do
   let intent := ResourceBirthReceiver.intent accepted
   let loaded := opened.durable
   match DurableCheckpoint.prepare loaded.image loaded.baseHeight loaded.base loaded.snapshot

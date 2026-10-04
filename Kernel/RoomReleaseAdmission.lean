@@ -41,10 +41,10 @@ def admit (config : Config) (opened : Opened config) (bytes : List UInt8) :
     IO (Except String (Candidate config opened)) := do
   let some source := RoomReleaseIntent.ingressCodec.decode bytes
     | return .error "noncanonical room release source"
-  let some epoch := RoomKeyReleaseCodec.decodeEpoch source.body.certificate
-    | return .error "invalid room epoch certificate"
-  have decodedEpoch : RoomKeyReleaseCodec.decodeEpoch source.body.certificate = some epoch := by
-    assumption
+  let ⟨epoch, decodedEpoch⟩ ← match decodedAs : RoomKeyReleaseCodec.decodeEpoch source.body.certificate with
+    | none => return .error "invalid room epoch certificate"
+    | some epoch => pure (⟨epoch, decodedAs⟩ :
+        {epoch // RoomKeyReleaseCodec.decodeEpoch source.body.certificate = some epoch})
   if !(decide (source.body.deliveries.length > 0 ∧ source.body.deliveries.length ≤ 64 ∧
       (source.body.deliveries.map RoomKeyReleaseCodec.Delivery.member).Nodup ∧
       (source.body.deliveries.map RoomKeyReleaseCodec.Delivery.atom).Nodup ∧
@@ -56,10 +56,10 @@ def admit (config : Config) (opened : Opened config) (bytes : List UInt8) :
     | .ok previous => pure (⟨previous,previousExact⟩ :
         {previous // RoomReleaseLineage.latest opened.durable.image.accepted
           source.body.room source.body.keysCell = .ok previous})
-  let some fresh := RoomReleaseLineage.nextKind previous.val source epoch
-    | return .error "room release fork, stale head or skipped epoch"
-  have nextExact : RoomReleaseLineage.nextKind previous.val source epoch = some fresh := by
-    assumption
+  let ⟨fresh, nextExact⟩ ← match nextAs : RoomReleaseLineage.nextKind previous.val source epoch with
+    | none => return .error "room release fork, stale head or skipped epoch"
+    | some fresh => pure (⟨fresh, nextAs⟩ :
+        {fresh // RoomReleaseLineage.nextKind previous.val source epoch = some fresh})
   let some (domain,semantics,signed) := decodeSignedBytes source.signedMutation
     | return .error "invalid signed room decision mutation"
   if domain != config.deployment.domain || semantics != config.profile.semantics then

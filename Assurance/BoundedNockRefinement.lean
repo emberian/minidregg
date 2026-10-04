@@ -11,7 +11,7 @@ set_option autoImplicit false
 theorem runTicks_add (first second : Nat) (state : State) :
     runTicks (first + second) state = runTicks second (runTicks first state) := by
   induction first generalizing state with
-  | zero => rfl
+  | zero => simp only [Nat.zero_add, runTicks]
   | succ first ih => simpa only [Nat.succ_add, runTicks] using ih (step state)
 
 /-- Once stopped, padding leaks no later distinction through the result or
@@ -32,10 +32,14 @@ theorem halt_padding (ticks padding : Nat) (state stopped : State)
 existing noun pointer without allocation. This holds for every heap/state. -/
 theorem quote_microstep (state : State) (subject formula value : Nat)
     (mode : state.mode = .eval subject formula) (fuel : state.remaining ≠ 0)
-    (parsed : parse { state with remaining := state.remaining - 1,
-      used := state.used + 1 } formula = some (.quote value)) :
-    step state = { state with remaining := state.remaining - 1,
-      used := state.used + 1, mode := .ret value } := by
+    (parsed : parse { state with
+        remaining := state.remaining - 1
+        used := state.used + 1 } formula = some (.quote value)) :
+    step state = { state with
+      remaining := state.remaining - 1
+      used := state.used + 1
+      mode := .ret value } := by
+  simp only [mode] at parsed
   simp only [step, mode, fuel, ↓reduceIte, parsed, enter]
 
 /-- Native quote source rule. The pointer-to-noun decode/simulation relation

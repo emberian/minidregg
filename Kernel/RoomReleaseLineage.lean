@@ -64,10 +64,11 @@ theorem different_certificate_cannot_reuse {previous : Claim} {source : RoomRele
     (sameEpoch : epoch.epoch = previous.epoch.epoch) :
     nextKind (some previous) source epoch ≠ some false := by
   unfold nextKind
-  split <;> simp only [Option.none_ne_some]
-  split <;> simp only [Option.none_ne_some]
-  simp only [different, ↓reduceIte]
-  split <;> simp
+  split
+  · simp
+  · split
+    · simp
+    · simp [different]
 
 #assert_axioms empty_head
 #assert_axioms different_certificate_cannot_reuse

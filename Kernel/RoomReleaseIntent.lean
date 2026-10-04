@@ -9,6 +9,7 @@ open Minidregg.Compiler
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.Hyperdocument
+open Minidregg.Theory.IndexedProgram (LawfulCodec)
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Kernel.DeclaredResourceController

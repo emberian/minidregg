@@ -153,23 +153,23 @@
     {
       "module": "Assurance.BoundedNockChecks",
       "path": "Assurance/BoundedNockChecks.lean",
-      "sha256": "3be9dae450d3958f465a4596fbc58a4294f67bd08ce0b31d3d6b6ffb1d35db74",
+      "sha256": "1f0d36395f5c3b7919dbd4de36dbfafb488a7e671f8fc862097f9212f83d0b88",
       "surface": "authored-research",
-      "ownerReportedStatus": "authored uncompiled compatibility checkpoint; expansion stopped on user Bend pivot"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Assurance.BoundedNockNetworkChecks",
       "path": "Assurance/BoundedNockNetworkChecks.lean",
-      "sha256": "3ae9bac712d928b6ec24219792cb4876d4c9c9d12015b9adef0c59ac8a8b5d28",
+      "sha256": "1957f9d2c425a02176ea224474b7a435e8e76fd93397e537e8780884e0fbabb7",
       "surface": "authored-research",
-      "ownerReportedStatus": "authored uncompiled compatibility checkpoint; expansion stopped on user Bend pivot"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Assurance.BoundedNockRefinement",
       "path": "Assurance/BoundedNockRefinement.lean",
-      "sha256": "7df67414f79093a60a5a7458a0b130069ef79c66bd535890e4f61724127939ed",
+      "sha256": "57f474face6a6b56458982b752477ec784fdf4cab3eafb584fe08e141729a8af",
       "surface": "authored-research",
-      "ownerReportedStatus": "authored uncompiled compatibility checkpoint; expansion stopped on user Bend pivot"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Assurance.CanonicalResourceBookInvariantAudit",
@@ -3982,9 +3982,9 @@
     {
       "module": "Host.RoomKeyReleaseAuthor",
       "path": "Host/RoomKeyReleaseAuthor.lean",
-      "sha256": "057bc39c08bb79dcbadb68bd1aff9c8cad22602761e610ef68f8e84fe85eca80",
+      "sha256": "0f26ede8afbf1591033a582be8e1f46c40fa6914880525beaf67b87454da5210",
       "surface": "authored-research",
-      "ownerReportedStatus": "AUTHORED UNCOMPILED latestdelta; r4Rust16PASS and r6codec6b6d PASS retained separately. Source latestcertificate independentofwrapdelivery; releaseCapability JSON label; roomroute/Applied producer pending."
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Host.SourceAgreementBirth",
@@ -7251,9 +7251,9 @@
     {
       "module": "Kernel.RoomReleaseAdmission",
       "path": "Kernel/RoomReleaseAdmission.lean",
-      "sha256": "3bf2099b4d4d5344dd7da2c1418b5ca951ea537089f149104a0356ae5fb97513",
+      "sha256": "ecf1931df3d5cdbd2a16f34d2decabb07c71e360aa9a9ddc6f9233e1bd3e5d2a",
       "surface": "authored-research",
-      "ownerReportedStatus": "SOURCE WIP; Intent narrow source diagnostic repair running; Lineage/Admission uncompiled. No release Applied claim"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.RoomReleaseAuthority",
@@ -7272,16 +7272,16 @@
     {
       "module": "Kernel.RoomReleaseIntent",
       "path": "Kernel/RoomReleaseIntent.lean",
-      "sha256": "58635a466f62b1a4510f4a7ada60a1fd732f4be827f86444a0ed36c8ae89e39c",
+      "sha256": "9777fc9a7ee4ff4b5546d0b37a49244a391392f003d586793fe20c69e269d67d",
       "surface": "authored-research",
-      "ownerReportedStatus": "SOURCE WIP; Intent narrow source diagnostic repair running; Lineage/Admission uncompiled. No release Applied claim"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.RoomReleaseLineage",
       "path": "Kernel/RoomReleaseLineage.lean",
-      "sha256": "20d2017cfc02b95276ec0a76928c94427d5cf7b54b93efaedceaf14a0d07e0f8",
+      "sha256": "7a222aed981f042d5491a2b261c46d28661fa8669337bcde695f2d477e56a670",
       "surface": "authored-research",
-      "ownerReportedStatus": "SOURCE WIP; Intent narrow source diagnostic repair running; Lineage/Admission uncompiled. No release Applied claim"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.Run",
@@ -9855,9 +9855,9 @@
     {
       "module": "Verify.ResourceReserveBirthFixture",
       "path": "Verify/ResourceReserveBirthFixture.lean",
-      "sha256": "03c8a43e3405fb3df0cdbec51e9d9174c58c02bcafe2f22cd3510ec195dc2bca",
+      "sha256": "1f7d722614747aa06d60bba37964c7994e3e0a263f42d71f7e9a7383815602de",
       "surface": "authored-research",
-      "ownerReportedStatus": "Authored source, uncompiled; no native success claim"
+      "ownerReportedStatus": "No matching owner source report"
     }
   ]
 }
