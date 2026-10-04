@@ -235,6 +235,7 @@ import Theory.ObjectiveBendDemandAdequacy
 import Theory.ObjectiveBendDemandCapacity
 import Theory.ObjectiveBendDemandCompleteness
 import Theory.ObjectiveBendDemandData
+import Theory.ObjectiveBendDemandDataSoundness
 import Theory.ObjectiveBendDemandInvariant
 import Theory.ObjectiveBendDemandMachine
 import Theory.ObjectiveBendDemandPreservation
