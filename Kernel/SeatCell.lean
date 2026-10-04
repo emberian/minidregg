@@ -57,7 +57,7 @@ def roleStream : StreamCodec Role :=
 
 /-- The seat family: `DREGG.SEAT.CELL.ID/v1`, `DREGG.SEAT.CELL.STATE/v1`,
 frame `DREGG/SEAT-CELL`. -/
-def spec : ProtectedCell.Spec where
+abbrev spec : ProtectedCell.Spec where
   Role := Role
   roleStream := roleStream
   idCustomization := "DREGG.SEAT.CELL.ID/v1".toUTF8.toList

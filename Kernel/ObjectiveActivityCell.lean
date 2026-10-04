@@ -52,7 +52,7 @@ def roleStream : StreamCodec Role :=
 
 /-- The activity family: `DREGG.OBJECTIVE.ACTIVITY.CELL.ID/v1`,
 `DREGG.OBJECTIVE.ACTIVITY.CELL.STATE/v1`, frame `DREGG/OBJECTIVE/ACTIVITY-CELL`. -/
-def spec : ProtectedCell.Spec where
+abbrev spec : ProtectedCell.Spec where
   Role := Role
   roleStream := roleStream
   idCustomization := "DREGG.OBJECTIVE.ACTIVITY.CELL.ID/v1".toUTF8.toList

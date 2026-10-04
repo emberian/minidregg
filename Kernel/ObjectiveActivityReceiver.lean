@@ -58,6 +58,7 @@ its collector.
 import Kernel.CapabilityRevocationController
 import Kernel.ResourceBirthController
 import Kernel.ObjectiveActivity
+import Kernel.ActivitySeatEnd
 import Kernel.ObjectiveKernelConfig
 import Kernel.ObjectiveBendNativeAdmission
 import Kernel.PayAssignmentReceiver
@@ -352,6 +353,8 @@ inductive Reject where
   | malformedIngress | directoryUnavailable | authorityUnavailable | staleAuthority
   | replayedMarker | physicalPreparation | inputUndecodable
   | kernel (reason : ObjectiveActivity.Refusal)
+  /-- The ending activity's held seats could not be closed (`ActivitySeatEnd.join`). -/
+  | seats (reason : SeatStore.Refusal)
   /-- The command's await is not the one the record awaits now. -/
   | staleAwait
   /-- The signer holds no capability admissible for mutating the object. -/
@@ -552,8 +555,10 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   decidedExact : decideTurn config durable.snapshot ambient.height command = .ok decided
   preRoot : Digest
   preRootExact : preRoot = durable.snapshot.model.roots ⟨(signedTarget deployment.domain command).2⟩
+  final : List Post × List ReadGuard
+  finalExact : ActivitySeatEnd.finalize config durable.snapshot ambient.height decided = .ok final
   outcome : Digest
-  outcomeExact : outcome = outcomeDigest decided.posts
+  outcomeExact : outcome = outcomeDigest final.1
   authorizedExact : authorized authority.snapshot profile.semantics ambient command preRoot outcome = .ok ()
 
 def prepare {F : Type} [Field F] (deployment : Deployment)
@@ -570,13 +575,16 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
     match decidedExact : decideTurn config durable.snapshot ambient.height command with
     | .error reason => throw reason
     | .ok decided =>
+      match finalExact : ActivitySeatEnd.finalize config durable.snapshot ambient.height decided with
+      | .error reason => throw (.seats reason)
+      | .ok final =>
       let preRoot := durable.snapshot.model.roots ⟨(signedTarget deployment.domain command).2⟩
-      let outcome := outcomeDigest decided.posts
+      let outcome := outcomeDigest final.1
       match authorizedExact : authorized snapshot profile.semantics ambient command preRoot outcome with
       | .error reason => throw reason
       | .ok () =>
-        pure ⟨directory, authority, config, configExact, decided, decidedExact, preRoot, rfl, outcome, rfl,
-          authorizedExact⟩
+        pure ⟨directory, authority, config, configExact, decided, decidedExact, preRoot, rfl, final, finalExact,
+          outcome, rfl, authorizedExact⟩
 
 variable {F : Type} [Field F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
@@ -617,35 +625,57 @@ def admissionSeal (prepared : Prepared deployment profile ambient durable comman
 
 def Prepared.intent (prepared : Prepared deployment profile ambient durable command) (ingress : DecodedIngress) :
     DataIntent rootBytes :=
-  prepared.decided.intent (admissionSeal prepared ingress)
+  prepared.decided.finalIntent (admissionSeal prepared ingress) prepared.final.1 prepared.final.2
 
-/-- A cell an activity intent writes is an activity cell at its own coordinate, the
-Book, or a cell the kernel retires: the registry's retired image at a protected
-coordinate (an ended record or a settled slot). -/
+/-- A cell an activity intent writes is an activity cell or a seat cell (the seats
+an ending activity held), each at its own protected coordinate; the Book; or a
+cell the kernel retires: the registry's retired image at a protected coordinate
+(an ended record or a settled slot). -/
 def ActivityOrBook (deployment : Deployment) (write : DataWrite) : Prop :=
   write.cellId = ⟨deployment.resourceBookId⟩ ∨
     (∃ payload, ObjectiveActivity.payloadOf write.canonicalPostBytes = some payload ∧
       write.cellId.value = ObjectiveActivityCell.coordinate deployment.domain payload.role payload.key) ∨
+    (∃ payload, SeatStore.payloadOf write.canonicalPostBytes = some payload ∧
+      write.cellId.value = SeatCell.coordinate deployment.domain payload.role payload.key) ∨
     (write.canonicalPostBytes = ObjectiveActivity.retiredImage ∧ ObjectiveActivityCell.reservedBase ≤ write.cellId.value)
 
+def activityCellAt (deployment : Deployment) (write : DataWrite) : Bool :=
+  match ObjectiveActivity.payloadOf write.canonicalPostBytes with
+  | some payload => decide (write.cellId.value = ObjectiveActivityCell.coordinate deployment.domain payload.role payload.key)
+  | none => false
+
+def seatCellAt (deployment : Deployment) (write : DataWrite) : Bool :=
+  match SeatStore.payloadOf write.canonicalPostBytes with
+  | some payload => decide (write.cellId.value = SeatCell.coordinate deployment.domain payload.role payload.key)
+  | none => false
+
+def retiredAt (write : DataWrite) : Bool :=
+  decide (write.canonicalPostBytes = ObjectiveActivity.retiredImage ∧
+    ObjectiveActivityCell.reservedBase ≤ write.cellId.value)
+
+theorem activityOrBook_iff (deployment : Deployment) (write : DataWrite) :
+    ActivityOrBook deployment write ↔
+      (write.cellId = ⟨deployment.resourceBookId⟩ ∨ activityCellAt deployment write = true ∨
+        seatCellAt deployment write = true ∨ retiredAt write = true) := by
+  unfold ActivityOrBook activityCellAt seatCellAt retiredAt
+  constructor
+  · rintro (h | ⟨payload, hp, hat⟩ | ⟨payload, hp, hat⟩ | h)
+    · exact Or.inl h
+    · exact Or.inr (Or.inl (by rw [hp]; simpa using hat))
+    · exact Or.inr (Or.inr (Or.inl (by rw [hp]; simpa using hat)))
+    · exact Or.inr (Or.inr (Or.inr (by simpa using h)))
+  · rintro (h | h | h | h)
+    · exact Or.inl h
+    · split at h
+      · rename_i payload hp; exact Or.inr (Or.inl ⟨payload, hp, by simpa using h⟩)
+      · cases h
+    · split at h
+      · rename_i payload hp; exact Or.inr (Or.inr (Or.inl ⟨payload, hp, by simpa using h⟩))
+      · cases h
+    · exact Or.inr (Or.inr (Or.inr (by simpa using h)))
+
 instance (deployment : Deployment) (write : DataWrite) : Decidable (ActivityOrBook deployment write) :=
-  if book : write.cellId = ⟨deployment.resourceBookId⟩ then isTrue (Or.inl book)
-  else if retired : write.canonicalPostBytes = ObjectiveActivity.retiredImage ∧
-      ObjectiveActivityCell.reservedBase ≤ write.cellId.value then isTrue (Or.inr (Or.inr retired))
-  else match found : ObjectiveActivity.payloadOf write.canonicalPostBytes with
-    | none => isFalse (by
-        rintro (h | ⟨payload, hp, _⟩ | h)
-        · exact book h
-        · rw [found] at hp; cases hp
-        · exact retired h)
-    | some payload =>
-      if at_ : write.cellId.value = ObjectiveActivityCell.coordinate deployment.domain payload.role payload.key then
-        isTrue (Or.inr (Or.inl ⟨payload, found, at_⟩))
-      else isFalse (by
-        rintro (h | ⟨other, hp, hat⟩ | h)
-        · exact book h
-        · rw [found] at hp; cases hp; exact at_ hat
-        · exact retired h)
+  decidable_of_iff _ (activityOrBook_iff deployment write).symm
 
 def PhysicalShape (prepared : Prepared deployment profile ambient durable command) (ingress : DecodedIngress) :
     Prop :=
@@ -803,10 +833,41 @@ theorem native_delivery_consumes_once
     (∀ (later : DataIntent rootBytes), ObjectiveActivity.awaitClaim delivery.await.id ∈ later.nullifiers →
       ∀ schedule after, DurableDataIntent.execute schedule next later ≠ .accepted after) ∧
     (∀ schedule, DurableDataIntent.execute schedule next (intent accepted) = .replayed (intent accepted).erase) := by
-  have exact : intent accepted = delivery.intent (admissionSeal accepted.prepared ingress) := by
-    simp [intent, Prepared.intent, decided, ObjectiveActivity.AdmittedTurn.intent]
-  rw [exact] at installed ⊢
-  exact ObjectiveActivity.resume_consumes_once delivery _ installed
+  have carries : ObjectiveActivity.awaitClaim delivery.await.id ∈ (intent accepted).nullifiers := by
+    simp [intent, Prepared.intent, decided, ObjectiveActivity.AdmittedTurn.finalIntent, delivery.claimsExact]
+  exact ⟨fun later again schedule after =>
+      ObjectiveActivity.spent_claim_never_accepted carries installed later again schedule after,
+    ObjectiveActivity.installed_retry_replays installed⟩
+
+/-- **An ending activity closes the seats it holds, natively.** When an accepted
+turn ends an activity (a birth or delivery that finishes or faults, or an
+abandonment) whose holdings cell lists seats, the turn commits the joint posts
+(`ActivitySeatEnd.Joined.rewrite`: the activity's own, its Book post replaced
+by the joint batch's, and the closed seat cells), every held seat that was open
+is closed, and the Book is the activity's batch followed by the seat closing,
+admitted together on the loaded Book. -/
+theorem native_end_closes_held_seats (accepted : Accepted deployment profile ambient durable ingress)
+    {record : Nat} {pre : ObjectiveActivity.BookCell} {posted : ObjectiveActivity.Postings pre}
+    (ends : ActivitySeatEnd.AdmittedTurn.ending accepted.prepared.decided = some (record, ⟨pre, posted⟩))
+    (holds : SeatStore.readHoldings durable.snapshot accepted.prepared.config.domain record ≠ []) :
+    ∃ joined : ActivitySeatEnd.Joined accepted.prepared.config durable.snapshot ambient.height record posted,
+      accepted.prepared.final.1 = joined.rewrite accepted.prepared.decided.posts ∧
+      (∀ seat ∈ Seats.heldOpen (joined.held.loaded.world
+          (posted.batch.apply (Theory.CanonicalResourceKernel.logicalBook pre.logical))) record,
+        ∀ after ∈ joined.held.next.seats, after.account = seat.account → after.isOpen = false) ∧
+      Seats.Posts (Theory.CanonicalResourceKernel.logicalBook pre.logical)
+        (Seats.seqBatch posted.batch joined.held.batch) joined.held.next.book := by
+  have final := accepted.prepared.finalExact
+  unfold ActivitySeatEnd.finalize at final
+  rw [ends] at final
+  simp only at final
+  split at final
+  · cases final
+  · rename_i none_
+    exact absurd (ActivitySeatEnd.join_none none_) holds
+  · rename_i joined _
+    have same := (Except.ok.inj final).symm
+    exact ⟨joined, by rw [same], joined.closes.1, joined.closes.2.1⟩
 
 /-- **The native delivery's fields bind the stored checkpoint** (the kernel's
 projection `delivery_fields_bind_checkpoint`, at the Host's own snapshot). -/
@@ -890,7 +951,9 @@ def signingHeader (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
     | .error "authority unavailable"
   let outcome := match configOf deployment profile ambient with
     | .ok config => match decideTurn config durable.snapshot ambient.height command with
-      | .ok decided => outcomeDigest decided.posts
+      | .ok decided => match ActivitySeatEnd.finalize config durable.snapshot ambient.height decided with
+        | .ok final => outcomeDigest final.1
+        | .error _ => outcomeDigest []
       | .error _ => outcomeDigest []
     | .error _ => outcomeDigest []
   let preRoot := durable.snapshot.model.roots ⟨(signedTarget deployment.domain command).2⟩
@@ -927,5 +990,6 @@ def signingPlanCodec : LawfulCodec SigningPlan :=
 #assert_axioms stranger_birth_refused
 #assert_axioms native_delivery_consumes_once
 #assert_axioms native_delivery_fields_bind_checkpoint
+#assert_axioms native_end_closes_held_seats
 
 end Minidregg.Kernel.ObjectiveActivityReceiver
