@@ -27,7 +27,7 @@
 #                  (scripts/check-objective-proofs.sh c; needs bun)
 #   objective-cgen the same differential over 1000 GENERATED well-typed Core4 programs (fixed seeds), with two
 #                  planted runtime.c miscompiles that must each turn it red (scripts/check-objective-proofs.sh cgen)
-#   drift          the build changed no tracked file (Lean-emitted descriptors, vectors,
+#   drift          the build changed no tracked file and emitted no new untracked one (Lean-emitted descriptors, vectors,
 #                  glue); compared against the tree as it stood before the build
 #   prover-glue    the Lean-emitted prover glue is byte-identical to what its source emits
 #   build-closure  source classification/target coverage, the obsolete-policy-verifier source scan, and gate regression tests
@@ -85,11 +85,19 @@ g_hyp-ledger()    { bash scripts/check-hypothesis-ledger.sh; }
 g_objective-proofs() { bash scripts/check-objective-proofs.sh proofs; }
 g_objective-c()      { bash scripts/check-objective-proofs.sh c; }
 g_objective-cgen()   { bash scripts/check-objective-proofs.sh cgen; }
+# The state the drift gate compares: tracked changes AND the names and bytes of untracked,
+# non-ignored files. A build that EMITS a new descriptor or vector nobody committed is drift too
+# (W20 mutant drift-new-untracked); the gates' own logs and caches are not.
+tree_state() {
+  { git diff --binary
+    git ls-files --others --exclude-standard -z | grep -zvE '^(build-logs/|target-gates/)|(^|/)__pycache__/' | xargs -0 -r sha256sum
+  } | git hash-object --stdin
+}
 g_drift() {
-  local after; after=$(git diff --binary | git hash-object --stdin)
+  local after; after=$(tree_state)
   if [[ "$tree_before" != "$after" ]]; then
-    git diff --stat
-    echo "drift: the build rewrote tracked files; commit the Lean-emitted copies"; return 1
+    git diff --stat; git ls-files --others --exclude-standard | grep -vE '^(build-logs/|target-gates/)|(^|/)__pycache__/' | sed 's/^/  new untracked: /'
+    echo "drift: the build rewrote tracked files or emitted new ones; commit the Lean-emitted copies"; return 1
   fi
   echo "drift: the build changed no tracked file"
 }
@@ -107,7 +115,7 @@ g_deploy-scripts() { python3 deploy/pay/test-render-enrol.py && python3 deploy/c
 g_spk-shell()     { bash scripts/check-spk-shell-tests.sh; }
 g_journey()       { bash scripts/check-journey.sh; }
 
-tree_before=$(git diff --binary | git hash-object --stdin)
+tree_before=$(tree_state)
 t_all=$(date +%s)
 for g in "${GATES[@]}"; do
   if [ -n "$only" ] && [[ " $only " != *" $g "* ]]; then
