@@ -688,6 +688,14 @@ step_J5() {
   call submit-crafted "$MINI" workspace --action submit --dir "$TW" --intent "$REQ/j5-third-crafted.json"
   call uread "$MINI" workspace --action read --dir "$UW" --name stolen
   call usubmit "$MINI" workspace --action submit --dir "$UW" --intent "$REQ/j5-stranger-crafted.json"
+  # The stranger who skips the client's consent gate (a hostile client): the same read and write
+  # intents, signed with the stranger's own key and sent straight to the Host's observation
+  # challenge, the first thing any read or write needs. Only the Host can refuse these.
+  local rintent; rintent=$(read_attempt uread)/intent.bin
+  [ -s "$rintent" ] || fail "the stranger's read attempt retained no intent.bin ($rintent)" || return
+  call hostile python3 "$HERE/journey-stranger.py" "$MINI" "$HOST" "$CONFIG" "$SOCKET" "$W/stranger.key" "$SD" \
+    "hostile-read=binary:$rintent" "hostile-write=intent:$REQ/j5-stranger-crafted.json" \
+    || fail "the hostile-client leg did not run: $(tail -1 "$SD/hostile.err")" || return
   local c
   # The never-enrolled key is stopped one layer earlier than the Host: the client's
   # consent component holds the verified source, finds no signing key for the intent's
@@ -706,12 +714,17 @@ step_J5() {
       printf '%s\tNOT-REFUSED\trc=%s\n' "$c" "$(cat "$SD/$c.rc")" >>"$ARTIFACT"; n=$((n + 1))
     fi
   done
-  [ "$n" = 0 ] || fail "$n of 6 stranger attempts were refused by neither the Host nor the local consent component (see $ARTIFACT)" || return
+  # Refused is not enough: the Host's own reason for an unenrolled signer is that the key is not
+  # enrolled. Exactly two answers, each with that reason, or the step fails.
+  cat "$SD/hostile.out" >>"$ARTIFACT"
+  n=$((n + $(grep -vc "this key is not enrolled on this Host" "$SD/hostile.out")))
+  [ "$(wc -l <"$SD/hostile.out")" = 2 ] || { n=$((n + 1)); echo "hostile leg answered $(wc -l <"$SD/hostile.out") of 2" >>"$ARTIFACT"; }
+  [ "$n" = 0 ] || fail "$n of 8 stranger attempts were refused by neither the Host nor the local consent component, or by the Host for another reason than the key not being enrolled (see $ARTIFACT)" || return
   # Control: the grant holder still reads, and nothing the strangers did changed the image.
   call control "$MINI" workspace --action read --dir "$NEWCOMER_WS" --name shared || fail "control read failed" || return
   [ "$(field_value "$SD/control.out" 2)" = 1 ] || fail "control read lost field 2" || return
   [ "$(root_of_read control)" = "$before" ] || fail "world root or height moved during refused attempts" || return
-  DETAIL="6/6 refused: $by_host by the Host (enrolled no-grant read x2, propose, crafted submit), $by_consent by local consent before signing (unenrolled read, submit); image unchanged; third = record $LAST_COUNT"
+  DETAIL="8/8 refused: $by_host by the Host (enrolled no-grant read x2, propose, crafted submit), $by_consent by local consent before signing (unenrolled read, submit), and the same unenrolled read and write sent by a hostile client past that gate: the Host refuses both (this key is not enrolled on this Host); image unchanged; third = record $LAST_COUNT"
 }
 
 step_J6() {
