@@ -1,0 +1,339 @@
+edition ObjectiveBend 1
+# DrEX as seats: a uniform-price batch auction whose orders are seats and whose
+# clearing is proposed by an UNTRUSTED clearer with a Cert-F certificate.
+#
+# Every order is a seat of one instance of this package (Kernel/Seat): a bid
+# gives currency and wants goods (`give [(currency, budget)]`,
+# `want [(goods, qty)]`), an ask gives goods and wants currency. A seat's own
+# law is offer safety: it ends with its `want` or with its `give` refunded, so a
+# bid never pays above its budget and an ask never sells below its reserve, and
+# it can always exit with its deposit.
+#
+# Layers:
+# (1) `market`, the contract method (the seat kernel's `invoke`: a function from
+#     the canonical Call to a Plan). It mints the bid/ask invitations while the
+#     window is open; once the window has closed it ROUTES the clearer's fills
+#     into seat-to-seat moves at the one price and returns them with the
+#     clearer's certificate as one `clear` action; after the deadline it exits
+#     every open seat (abort: every deposit goes back). The method computes the
+#     moves; it does not judge them.
+# (2) `batch`, the window as an Activity: it awaits the close, stays clearing
+#     until a clearing is admitted, and aborts at the deadline.
+#
+# The judgment is the kernel's (Kernel/CertifiedClearing.clear): it reads the
+# fills off the moves, refuses a move outside the batch's order seats or the two
+# assets, refuses an order not traded at the one price, and refuses unless the
+# fills and the clearer's dual are a Cert-F certificate of the batch LP within
+# epsilon (Theory/CertF.certifies_epsilon_optimal); then every touched seat's
+# offer-safety law judges the moves and the Book conserves every asset. None of
+# that is re-checked here: a clearer can hand this method any fills, and the
+# kernel refuses what is not certified.
+#
+# Preview evidence only. The native route (`clear` as a Plan action of the seat
+# receiver) waits on SEATS-NATIVE; until then no receipt exists for this
+# package.
+import ./NatOrder.obend as Order
+
+record Amount:
+  asset: Nat
+  amount: Nat
+
+sum Amounts:
+  nil: {}
+  cons: {head: Amount, tail: Amounts}
+
+record Term:
+  name: String
+  value: Nat
+
+sum Terms:
+  nil: {}
+  cons: {head: Term, tail: Terms}
+
+# The seat kernel's view of one open seat (SeatStore.callData), seats sorted by
+# account.
+record SeatView:
+  seat: Nat
+  role: String
+  terms: Terms
+  give: Amounts
+  want: Amounts
+  allocation: Amounts
+
+sum Seats:
+  nil: {}
+  cons: {head: SeatView, tail: Seats}
+
+record Move:
+  source: Nat
+  destination: Nat
+  asset: Nat
+  amount: Nat
+
+sum Moves:
+  nil: {}
+  cons: {head: Move, tail: Moves}
+
+sum Nats:
+  nil: {}
+  cons: {head: Nat, tail: Nats}
+
+# The market's terms: the two assets, the accuracy target, the window.
+record Market:
+  currency: Nat
+  goods: Nat
+  epsilon: Nat
+  close: Nat
+  deadline: Nat
+
+# A clearer's fill for one order seat: the goods it trades.
+record Fill:
+  seat: Nat
+  units: Nat
+
+sum Fills:
+  nil: {}
+  cons: {head: Fill, tail: Fills}
+
+# The Cert-F dual: node potentials (bid side, ask side) and one slack per order
+# seat, by ascending seat account. Natural potentials lose nothing: only their
+# difference enters the dual constraints.
+record Certificate:
+  price: Nat
+  bidPotential: Nat
+  askPotential: Nat
+  slacks: Nats
+
+record Proposal:
+  fills: Fills
+  certificate: Certificate
+
+record MintIn:
+  role: String
+  holder: Nat
+
+sum Input:
+  mint: MintIn
+  clear: Proposal
+  abort: {}
+
+record Call:
+  input: Input
+  height: Nat
+  seats: Seats
+
+record Mint:
+  role: String
+  terms: Terms
+  holder: Nat
+
+record ExitSeat:
+  seat: Nat
+
+record Clearing:
+  moves: Moves
+  certificate: Certificate
+
+sum Action:
+  mint: Mint
+  exit: ExitSeat
+  clear: Clearing
+
+sum Plan:
+  nil: {}
+  cons: {head: Action, tail: Plan}
+
+# ---- routing -----------------------------------------------------------------
+
+record Lot:
+  seat: Nat
+  units: Nat
+
+sum Lots:
+  nil: {}
+  cons: {head: Lot, tail: Lots}
+
+def fillOf(seat: Nat, fills: Fills) -> Nat:
+  match fills:
+    case nil(_): 0n
+    case cons(c): if c.head.seat == seat then c.head.units else fillOf(seat, c.tail)
+
+# The seats of one role that trade, in seat order, with their fills.
+def lots(role: String, seats: Seats, fills: Fills) -> Lots:
+  match seats:
+    case nil(_): Lots.nil()
+    case cons(c): lotFor(role, c.head, fillOf(c.head.seat, fills), lots(role, c.tail, fills))
+
+def lotFor(role: String, view: SeatView, units: Nat, rest: Lots) -> Lots:
+  if view.role == role && Order.not(units == 0n) then Lots.cons({head: {seat: view.seat, units: units}, tail: rest}) else rest
+
+def remainder(lot: Lot, traded: Nat, rest: Lots) -> Lots:
+  if lot.units == traded then rest else Lots.cons({head: {seat: lot.seat, units: Order.minus(lot.units, traded)}, tail: rest})
+
+# Pair bids with asks in seat order: each pairing moves `k` goods from the ask
+# to the bid and `price * k` currency back. Every step consumes a whole lot.
+def route(m: Market, price: Nat, bids: Lots, asks: Lots) -> Moves:
+  match bids:
+    case nil(_): Moves.nil()
+    case cons(b):
+      match asks:
+        case nil(_): Moves.nil()
+        case cons(a): pair(m, price, b.head, b.tail, a.head, a.tail, Order.minimum(b.head.units, a.head.units))
+
+def pair(m: Market, price: Nat, bid: Lot, bids: Lots, ask: Lot, asks: Lots, k: Nat) -> Moves:
+  Moves.cons({head: {source: ask.seat, destination: bid.seat, asset: m.goods, amount: k}, tail: Moves.cons({head: {source: bid.seat, destination: ask.seat, asset: m.currency, amount: price * k}, tail: route(m, price, remainder(bid, k, bids), remainder(ask, k, asks))})})
+
+def clearingOf(m: Market, seats: Seats, proposal: Proposal) -> Clearing:
+  {moves: route(m, proposal.certificate.price, lots("bid", seats, proposal.fills), lots("ask", seats, proposal.fills)), certificate: proposal.certificate}
+
+# ---- (1) the contract method -------------------------------------------------
+
+def one(action: Action) -> Plan:
+  Plan.cons({head: action, tail: Plan.nil()})
+
+def exits(seats: Seats) -> Plan:
+  match seats:
+    case nil(_): Plan.nil()
+    case cons(c): Plan.cons({head: Action.exit({seat: c.head.seat}), tail: exits(c.tail)})
+
+def windowOpen(m: Market, height: Nat) -> Bool:
+  Order.less(height, m.close)
+
+def clearable(m: Market, height: Nat) -> Bool:
+  Order.lessOrEqual(m.close, height) && Order.less(height, m.deadline)
+
+def market(terms: Market, call: Call) -> Plan:
+  match call.input:
+    case mint(m): if windowOpen(terms, call.height) && (m.role == "bid" || m.role == "ask") then one(Action.mint({role: m.role, terms: Terms.nil(), holder: m.holder})) else Plan.nil()
+    case clear(p): if clearable(terms, call.height) then one(Action.clear(clearingOf(terms, call.seats, p))) else Plan.nil()
+    case abort(_): if Order.lessOrEqual(terms.deadline, call.height) then exits(call.seats) else Plan.nil()
+
+# ---- (2) the window as an Activity --------------------------------------------
+# The activity holds the batch's lifecycle, not its data: an Activity's Plans and
+# responses are first-order data without recursive sums (Ty.isData), so the
+# clearer's proposal (lists of fills and slacks) goes to the method `market`
+# above, and the activity learns only whether a clearing was admitted.
+
+record Window:
+  close: Nat
+  deadline: Nat
+
+sum Step:
+  await: Window
+  clearing: Window
+  abort: Window
+
+record Tick:
+  now: Nat
+
+sum Response:
+  tick: Tick
+  settled: {}
+  refused: {}
+
+def window(m: Market) -> Window:
+  {close: m.close, deadline: m.deadline}
+
+# Await the close. Then the batch is clearing: any clearer may invoke the method
+# with a proposal, and the kernel admits it only with a certificate; the first
+# admitted clearing ends the batch ("cleared"). At the deadline the batch
+# aborts: the method exits every seat, and every deposit goes back ("aborted").
+def batch(m: Market) -> Activity<Step, Response, String>:
+  match perform(Step.await(window(m))):
+    case tick(t): if Order.lessOrEqual(m.close, t.now) then clearing(m) else batch(m)
+    case settled(_): batch(m)
+    case refused(_): batch(m)
+
+def clearing(m: Market) -> Activity<Step, Response, String>:
+  match perform(Step.clearing(window(m))):
+    case settled(_): "cleared"
+    case refused(_): clearing(m)
+    case tick(t): if Order.lessOrEqual(m.deadline, t.now) then abort(m) else clearing(m)
+
+def abort(m: Market) -> Activity<Step, Response, String>:
+  match perform(Step.abort(window(m))):
+    case settled(_): "aborted"
+    case refused(_): abort(m)
+    case tick(_): abort(m)
+
+# ---- the named batch (Kernel/CertifiedClearing.Example) ----------------------
+# Goods 100, currency 200, price 4. Bids: Alice (seat 51) 2 goods for at most
+# 10, Bob (52) 3 for at most 12. Asks: Carol (53) 2 for at least 6, Dave (54) 3
+# for at least 12. Window closes at height 6, deadline 20.
+
+def demoMarket() -> Market:
+  {currency: 200n, goods: 100n, epsilon: 0n, close: 6n, deadline: 20n}
+
+def amount(asset: Nat, value: Nat) -> Amounts:
+  Amounts.cons({head: {asset: asset, amount: value}, tail: Amounts.nil()})
+
+def both(first: Amount, second: Amount) -> Amounts:
+  Amounts.cons({head: first, tail: Amounts.cons({head: second, tail: Amounts.nil()})})
+
+def bidView(seat: Nat, budget: Nat, qty: Nat) -> SeatView:
+  {seat: seat, role: "bid", terms: Terms.nil(), give: amount(200n, budget), want: amount(100n, qty), allocation: both({asset: 200n, amount: budget}, {asset: 100n, amount: 0n})}
+
+def askView(seat: Nat, qty: Nat, reserve: Nat) -> SeatView:
+  {seat: seat, role: "ask", terms: Terms.nil(), give: amount(100n, qty), want: amount(200n, reserve), allocation: both({asset: 100n, amount: qty}, {asset: 200n, amount: 0n})}
+
+def demoSeats() -> Seats:
+  Seats.cons({head: bidView(51n, 10n, 2n), tail: Seats.cons({head: bidView(52n, 12n, 3n), tail: Seats.cons({head: askView(53n, 2n, 6n), tail: Seats.cons({head: askView(54n, 3n, 12n), tail: Seats.nil()})})})})
+
+def nats4(a: Nat, b: Nat, c: Nat, d: Nat) -> Nats:
+  Nats.cons({head: a, tail: Nats.cons({head: b, tail: Nats.cons({head: c, tail: Nats.cons({head: d, tail: Nats.nil()})})})})
+
+def fill(seat: Nat, units: Nat, rest: Fills) -> Fills:
+  Fills.cons({head: {seat: seat, units: units}, tail: rest})
+
+# The honest proposal: every order fills; dual (0, 1), slack 2 on each ask.
+def fullProposal() -> Proposal:
+  {fills: fill(51n, 2n, fill(52n, 3n, fill(53n, 2n, fill(54n, 3n, Fills.nil())))), certificate: {price: 4n, bidPotential: 0n, askPotential: 1n, slacks: nats4(0n, 0n, 2n, 2n)}}
+
+# Crossed but suboptimal: only Alice and Carol. The kernel refuses it at
+# epsilon 0 (gap 6; Kernel/CertifiedClearing.Example.suboptimal_refused).
+def partialProposal() -> Proposal:
+  {fills: fill(51n, 2n, fill(53n, 2n, Fills.nil())), certificate: {price: 4n, bidPotential: 0n, askPotential: 1n, slacks: nats4(0n, 0n, 2n, 2n)}}
+
+def demoClear(height: Nat, proposal: Proposal) -> Plan:
+  market(demoMarket(), {input: Input.clear(proposal), height: height, seats: demoSeats()})
+
+# The routed moves of the full book (the kernel example's `fullClearing`).
+def demoFullClearing() -> Plan:
+  demoClear(6n, fullProposal())
+
+def demoPartialClearing() -> Plan:
+  demoClear(6n, partialProposal())
+
+def isEmpty(plan: Plan) -> Bool:
+  match plan:
+    case nil(_): true
+    case cons(_): false
+
+def planLength(plan: Plan) -> Nat:
+  match plan:
+    case nil(_): 0n
+    case cons(c): 1n + planLength(c.tail)
+
+# Before the close a clearing is not even proposed; after the deadline neither.
+def noClearingOutsideWindow() -> Bool:
+  isEmpty(demoClear(5n, fullProposal())) && isEmpty(demoClear(20n, fullProposal())) && Order.not(isEmpty(demoClear(19n, fullProposal())))
+
+# Invitations only while the window is open, and only for the two roles.
+def mintsOnlyWhileOpen() -> Bool:
+  Order.not(isEmpty(market(demoMarket(), {input: Input.mint({role: "bid", holder: 1n}), height: 5n, seats: Seats.nil()}))) && isEmpty(market(demoMarket(), {input: Input.mint({role: "bid", holder: 1n}), height: 6n, seats: Seats.nil()})) && isEmpty(market(demoMarket(), {input: Input.mint({role: "broker", holder: 1n}), height: 1n, seats: Seats.nil()}))
+
+# Abort: only at or after the deadline, and then one exit per open seat.
+def demoAbort(height: Nat) -> Plan:
+  market(demoMarket(), {input: Input.abort(), height: height, seats: demoSeats()})
+
+def abortExitsEverySeat() -> Bool:
+  isEmpty(demoAbort(19n)) && planLength(demoAbort(20n)) == 4n
+
+# Unbalanced fills route only what pairs: 3 goods asked for, 2 offered by asks,
+# so the moves realize 2, and the kernel judges the 2 (not the claimed 3).
+def unbalancedRoutesWhatPairs() -> Plan:
+  demoClear(6n, {fills: fill(52n, 3n, fill(53n, 2n, Fills.nil())), certificate: {price: 4n, bidPotential: 0n, askPotential: 1n, slacks: nats4(0n, 0n, 2n, 2n)}})
+
+# The named batch's window (an Activity needs a parameter: it is not a shared value).
+def demoBatch(start: {}) -> Activity<Step, Response, String>:
+  batch(demoMarket())

@@ -131,7 +131,6 @@ import Theory.BfvParams
 import Theory.BfvRing
 import Theory.BfvSmudging
 import Theory.BoundedNockMachine
-import Theory.CertF
 import Theory.Disputation
 import Theory.ObjectiveTermEquality
 import Theory.OptimisticAdjudication

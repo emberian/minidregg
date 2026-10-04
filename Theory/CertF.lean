@@ -28,10 +28,10 @@ verify/find seam of `Theory.Knowledge`). Generic over any ordered commutative ri
 relaxation). It does not emit a circuit: Bread's §6 (the `Dregg2.Circuit` emit half, BabyBear AIR
 constraints) is dropped, and Mini's admission does not verify proofs.
 
-**The consumer it awaits.** A DrEX settlement plan on the Core4 surface: the clearing turn's
-settlement plan must carry `(f, π, s)` and its admission must run this check before the plan's
-transfers apply. The old `.bend` DrEX sources are being deleted; until the Core4 DrEX plan exists,
-nothing in Mini invokes this module, and it claims no deployment.
+**Its consumer.** `Kernel.CertifiedClearing` (DrEX as seats): a batch clearing is admitted only
+when the fills it reads off the proposed transfers, with the clearer's dual, are `Certified` for the
+batch LP at the clearing price (`clear_certified`, `clear_epsilon_optimal`); the check is decided
+on `ℤ` there.
 
 **Port provenance (Mini, 2026-10-04).** Sections 1–5 copied from breadstuffs
 `metatheory/Market/CertF.lean` (sha256 `f75e10adfc4f41c0239d3b497261b78683fcd45719568eabf46dbdf44df202b4`), renamespaced `Market` → `Minidregg.Theory.CertF`;
@@ -225,11 +225,11 @@ theorem zeroFlow_gap_refused : ¬ Certified ringLP (fun _ => 0) ringπ ringS :=
 
 /-- The objective at the certified optimum is `3`. -/
 theorem ringF_value : ringLP.w ⬝ᵥ ringF = 3 := by
-  simp [ringLP, ringF, dotProduct, Fin.sum_univ_three]
+  simp [ringLP, ringF, dotProduct]
 
 /-- The zero flow against the honest dual has gap exactly `3`: how far it is from optimal. -/
 theorem zeroFlow_gap_value : ringLP.c ⬝ᵥ ringS - ringLP.w ⬝ᵥ (fun _ => (0 : ℤ)) = 3 := by
-  simp [ringLP, ringS, dotProduct, Fin.sum_univ_three]
+  simp [ringLP, ringS, dotProduct]
 
 /-- The worked LP at accuracy target `ε`. -/
 def ringLPAt (ε : ℤ) : FlowLP (Fin 3) (Fin 3) ℤ := { ringLP with ε := ε }
@@ -238,7 +238,7 @@ def ringLPAt (ε : ℤ) : FlowLP (Fin 3) (Fin 3) ℤ := { ringLP with ε := ε }
 but its gap `3` exceeds `ε = 2`, so the triple is not a certificate. -/
 theorem zeroFlow_refused_at_two : ¬ Certified (ringLPAt 2) (fun _ => 0) ringπ ringS := by
   rintro ⟨-, -, hgap⟩
-  simp [ringLPAt, ringLP, ringS, dotProduct, Fin.sum_univ_three] at hgap
+  simp [ringLPAt, ringLP, ringS, dotProduct] at hgap
 
 /-- **Accepted at the boundary:** the same triple certifies the zero flow `3`-optimal at `ε = 3`,
 and the keystone then bounds every feasible flow by `3` — which the true optimum attains. -/
@@ -250,7 +250,7 @@ theorem zeroFlow_certified_at_three : Certified (ringLPAt 3) (fun _ => 0) ringπ
   · intro i; fin_cases i <;> simp [ringS]
   · intro i; fin_cases i <;>
       simp [ringLPAt, ringLP, ringA, ringπ, ringS, Matrix.vecMul, dotProduct]
-  · simp [ringLPAt, ringLP, ringS, dotProduct, Fin.sum_univ_three]
+  · simp [ringLPAt, ringLP, ringS, dotProduct]
 
 #assert_axioms weak_duality
 #assert_axioms certifies_epsilon_optimal
