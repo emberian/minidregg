@@ -1,6 +1,7 @@
 /- Full-peer consent entry with source-native lifecycle adapters. -/
 import Host.ClientConsentCore
 import Host.NativeLifecycleConsent
+import Host.ObjectiveConsent
 open Minidregg.Kernel
 namespace Minidregg.Host.ClientConsentSession
 private def lifecycleExpected : ClientConsentCore.ExtraExpected := fun settings config session operation request => do
@@ -13,7 +14,7 @@ private def lifecycleExpected : ClientConsentCore.ExtraExpected := fun settings 
       management.managementSubject management.managementKeyId operation request
   else throw (IO.userError "unsupported specialized consent adapter")
 def run (arguments : List String) : IO UInt32 :=
-  ClientConsentCore.run lifecycleExpected arguments
+  ClientConsentCore.run lifecycleExpected arguments ObjectiveConsent.extraObjective
 end Minidregg.Host.ClientConsentSession
 def main (arguments : List String) : IO UInt32 := do
   try Minidregg.Host.ClientConsentSession.run arguments

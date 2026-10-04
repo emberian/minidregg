@@ -365,7 +365,46 @@ def possession (config : NativeHost.Config) (payload : List UInt8) : IO (List UI
   let _ ← IO.ofExcept (NativeSpecializedConsent.checkExact expected candidate)
   pure expected
 
-partial def serve (extraExpected : ExtraExpected) (settings : Settings) (config : NativeHost.Config) (session : Session config)
+/-- An entry's source-derived Objective adapter consumes the independently
+retained original request, reproduces its quote/execution from this exact
+Verified prefix, compares the entire canonical signing plan, and binds the
+selected current key. It returns only its derived headers. -/
+abbrev ExtraObjective := (settings : Settings) → (config : NativeHost.Config) →
+  Session config → List UInt8 → List UInt8 → String → List UInt8 → IO (List (List UInt8))
+
+/-- Entries without an installed adapter refuse, naming the missing adapter. -/
+def refuseObjective : ExtraObjective := fun _ _ _ _ _ _ _ =>
+  throw (IO.userError "no source-derived Objective consent adapter is installed")
+
+def objectiveHeaders (extraObjective : ExtraObjective) (settings : Settings)
+    (config : NativeHost.Config) (session : Session config)
+    (payload : List UInt8) : IO (List UInt8) := do
+  let (originalRequest, rest) ← splitPair payload
+  let (selectionBytes, candidate) ← splitPair rest
+  unless !originalRequest.isEmpty && !candidate.isEmpty do
+    throw (IO.userError "missing original Objective request or proposed plan")
+  let some text := String.fromUTF8? selectionBytes.toByteArray
+    | throw (IO.userError "Objective custody selection is not UTF-8")
+  let selected ← IO.ofExcept (SourceAgreementJson.parse text)
+  let object ← IO.ofExcept selected.getObj?
+  unless object.foldl (init := true) (fun valid key _ =>
+      valid && (key == "publicKey" || key == "role")) do
+    throw (IO.userError "unexpected Objective custody selection field")
+  let publicValue ← IO.ofExcept (selected.getObjVal? "publicKey")
+  let publicText ← IO.ofExcept publicValue.getStr?
+  let publicKey ← IO.ofExcept (SourceAgreementJson.decodeHex "publicKey" publicValue)
+  unless publicKey.length == 32 && SourceAgreementJson.encodeHex publicKey == publicText do
+    throw (IO.userError "noncanonical Objective custody public key")
+  let roleValue ← IO.ofExcept (selected.getObjVal? "role")
+  let role ← IO.ofExcept roleValue.getStr?
+  unless !role.isEmpty && role.toUTF8.size ≤ 128 do
+    throw (IO.userError "invalid Objective custody role")
+  let headers ← extraObjective settings config session originalRequest publicKey role candidate
+  unless !headers.isEmpty && headers.length ≤ 32 do
+    throw (IO.userError "source-derived Objective adapter returned invalid header count")
+  pure (headersBytes headers)
+
+partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjective) (settings : Settings) (config : NativeHost.Config) (session : Session config)
     (input output : IO.FS.Stream) : IO Unit := do
   let first ← input.read 1
   if first.isEmpty then return
@@ -381,18 +420,20 @@ partial def serve (extraExpected : ExtraExpected) (settings : Settings) (config 
       codec config operation (body.toList.drop 1)
     else if operation == 224 then specialized extraExpected settings config updated (body.toList.drop 1)
     else if operation == 226 then possession config (body.toList.drop 1)
+    else if operation == 227 then objectiveHeaders extraObjective settings config updated (body.toList.drop 1)
     else consent config updated operation (body.toList.drop 1))
     catch error => pure (255, error.toString.toUTF8.toList)
   writeSessionFrame output answer.1 answer.2
-  serve extraExpected settings config updated input output
+  serve extraExpected extraObjective settings config updated input output
 
-def run (extraExpected : ExtraExpected) (arguments : List String) : IO UInt32 := do
+def run (extraExpected : ExtraExpected) (arguments : List String)
+    (extraObjective : ExtraObjective := refuseObjective) : IO UInt32 := do
   match arguments with
   | [path, "stdio"] =>
       let settings ← loadSettings path
       withPinnedSignature settings.config fun config => do
         let session ← verifyInitial config
-        serve extraExpected settings config session (← IO.getStdin) (← IO.getStdout)
+        serve extraExpected extraObjective settings config session (← IO.getStdin) (← IO.getStdout)
         pure 0
   | _ => throw (IO.userError "usage: minidregg-client-consent CONFIG stdio")
 end Minidregg.Host.ClientConsentCore

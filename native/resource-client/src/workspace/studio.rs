@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 #[path = "studio_preview.rs"]
 mod preview;
 pub(crate) fn preview_available() -> bool { preview::available() }
-pub(crate) fn source_preview(root:&Path, workspace:&Value, id:&str, snapshot:&str, edition:&str) -> Result<Value> { preview::run(root,workspace,id,snapshot,edition) }
+pub(crate) fn source_preview(root:&Path, workspace:&Value, id:&str, snapshot:&str, edition:&str, args:&str) -> Result<Value> { preview::run(root,workspace,id,snapshot,edition,args) }
 pub(crate) fn source_preview_result(root:&Path, workspace:&Value, id:&str, snapshot:&str, run:&str) -> Result<Value> { preview::load(root,workspace,id,snapshot,run) }
 pub(crate) fn source_preview_runs(root:&Path, workspace:&Value, id:&str, snapshot:&str) -> Result<Vec<Value>> { preview::runs(root,workspace,id,snapshot) }
 

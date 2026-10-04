@@ -1,9 +1,16 @@
-/- Independent signed input queries. Proposal and final admission use this SAME
-factory; neither requires a fabricated final application command. Native effect
-permission and publication remain separate. -/
+/- Independent signed source/input queries, authenticated through the actual
+NativeObservationController on ONE current image, delivered to the Objective gate
+as its `ReadOracle`. Proposal (quotation) and final admission use this SAME
+oracle; neither requires a fabricated final application command. The gate itself
+re-checks every read against the signed claim (`ObjectiveBendNativeAdmission.
+Authenticated.sound`) and computes the CAS guards; this module only authenticates.
+
+Import order: NativeObservationController sits ABOVE DeclaredResourceController
+(NativeObservationCodec → NativeHostCodec → DeclaredResourceController, and the
+capability controllers), so this module cannot be imported by the gate; it is
+installed by the hosts that call `DeclaredResourceController.admit`. -/
 import Kernel.NativeObservationController
-import Kernel.ObjectiveBendNativeInput
-import Compiler.ObjectiveInvocationClaim
+import Kernel.ObjectiveBendNativeAdmission
 namespace Minidregg.Kernel.ObjectiveBendAuthenticatedInputs
 open Minidregg.Compiler Minidregg.Theory Minidregg.Theory.TypedAuthorization
 open Minidregg.Kernel.DurableDataIntent
@@ -11,53 +18,31 @@ open Minidregg.Compiler.NativeObservationCodec
 set_option autoImplicit false
 abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Durable := ResourceObservationAdmission.Durable
+abbrev Environment := ObjectiveBendNativeAdmission.Environment
 variable {F : Type} [Field F] [DecidableEq F]
 variable {deployment : Deployment} {durable : Durable}
 
-structure Environment (deployment : Deployment) (durable : Durable) where
-  context : ResourceObservationAdmission.Context deployment durable
-  federation : FederationId
-  genesisHeight : Nat
-  subject : SubjectId
-  nonce : Nat
-  compute : Option (RunComputeBudgetDomain.Prepared deployment durable.snapshot subject)
-
 inductive Failure where
   | malformed | selection | capacity
-  | authorization (reason : Minidregg.Compiler.Refusal)
+  | authorization (reason : NativeObservationController.Refusal)
   deriving Repr
 
-def queryMatches (environment : Environment deployment durable)
+/-- Exactly one resourceScope query by this subject and nonce for this ref. -/
+def matches (environment : Environment deployment durable)
     (ref : ObjectiveInvocationClaim.InputRef) (signed : Signed) : Bool :=
   decide (signed.challenge.intent.subject = environment.subject ∧
     signed.challenge.intent.nonce = environment.nonce ∧
     signed.challenge.intent.purpose = .query ⟨ref.kind,ref.resource,.resourceScope⟩ ∧
     signed.challenge.intent.grants = [⟨ref.kind,ref.resource,ref.capability⟩])
 
-structure Query (environment : Environment deployment durable)
+/-- The admitted read of one authorized single-grant query. -/
+def readOf (environment : Environment deployment durable)
     (profile : CanonicalRuntimeProfile.Profile F)
-    (ref : ObjectiveInvocationClaim.InputRef) (bytes : List UInt8) where
-  private mk ::
-  signed : Signed
-  decoded : signedCodec.decode bytes = some signed
-  shapeExact : queryMatches environment ref signed = true
-  authorized : NativeObservationController.AuthorizedIntent environment.context profile
-    environment.federation environment.genesisHeight signed.challenge.intent
-  read : ObjectiveBendNativeInput.AdmittedRead environment.context profile environment.subject
-  selectorExact : read.kind = ref.kind ∧ read.request.target.value = ref.resource ∧ read.capability = ref.capability
-  valueExact : read.value.root = ref.root
-  guards : List ReadGuard
-  guardsRoots : ∀ guard ∈ guards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId
-  inputGuard : (⟨⟨ref.resource⟩,durable.snapshot.model.roots ⟨ref.resource⟩⟩ : ReadGuard) ∈ guards
-
-def fromAuthorized (environment : Environment deployment durable)
-    (profile : CanonicalRuntimeProfile.Profile F)
-    (ref : ObjectiveInvocationClaim.InputRef) (bytes : List UInt8) (signed : Signed)
-    (decoded : signedCodec.decode bytes = some signed)
+    (ref : ObjectiveInvocationClaim.InputRef) (signed : Signed)
     (authorized : NativeObservationController.AuthorizedIntent environment.context profile
       environment.federation environment.genesisHeight signed.challenge.intent) :
-    Option (Query environment profile ref bytes) := do
-  if shape : queryMatches environment ref signed = true then
+    Option (ObjectiveBendNativeAdmission.Read environment profile) := do
+  if shape : matches environment ref signed = true then
     have components := (of_decide_eq_true shape : signed.challenge.intent.subject = environment.subject ∧
       signed.challenge.intent.nonce = environment.nonce ∧
       signed.challenge.intent.purpose = .query ⟨ref.kind,ref.resource,.resourceScope⟩ ∧
@@ -66,106 +51,71 @@ def fromAuthorized (environment : Environment deployment durable)
     let admitted := authorized.grants index
     let funded : Option (RunComputeBudgetDomain.Prepared deployment durable.snapshot signed.challenge.intent.subject) :=
       components.1.symm ▸ environment.compute
-    let read := ObjectiveBendNativeInput.admitRead environment.subject admitted.preparation admitted.checked
-      (by change signed.challenge.intent.subject = environment.subject; exact components.1) funded
-    if selector : read.kind = ref.kind ∧ read.request.target.value = ref.resource ∧ read.capability = ref.capability then
-      if root : read.value.root = ref.root then
-        let laws ← ResourceObservationAdmission.lawReadGuards admitted.preparation
-        let inputGuard : ReadGuard := ⟨⟨ref.resource⟩,durable.snapshot.model.roots ⟨ref.resource⟩⟩
-        let guards := inputGuard :: admitted.preparation.clock.readGuard ::
-          (laws.map fun (cell,root) => (⟨⟨cell⟩,root⟩ : ReadGuard))
-        if roots : ∀ guard ∈ guards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId then
-          some ⟨signed,decoded,shape,authorized,read,selector,root,guards,roots,by simp [guards, inputGuard]⟩
-        else none
-      else none
-    else none
+    some (ObjectiveBendNativeInput.admitRead environment.subject admitted.preparation admitted.checked
+      (by change signed.challenge.intent.subject = environment.subject; exact components.1) funded)
   else none
 
+/-- Pure request-shape checks precede crypto; every state-dependent check is the
+existing signature-first observation receiver. -/
 def authorizeQuery (native : CredentialSignatureIO.NativeConfig)
     (environment : Environment deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (ref : ObjectiveInvocationClaim.InputRef) (bytes : List UInt8) :
-    IO (Except Failure (Query environment profile ref bytes)) := do
-  match decoded : signedCodec.decode bytes with
+    IO (Except Failure (ObjectiveBendNativeAdmission.Read environment profile)) := do
+  match signedCodec.decode bytes with
   | none => return .error .malformed
   | some signed =>
-    -- Pure request-shape checks precede crypto. All state-dependent checks are
-    -- still performed by the existing signature-first observation receiver.
-    if queryMatches environment ref signed != true then return .error .selection
+    if matches environment ref signed != true then return .error .selection
     match ← NativeObservationController.authorize native environment.context profile
         environment.federation environment.genesisHeight signed with
     | .error reason => return .error (.authorization reason)
     | .ok authorized =>
-      match fromAuthorized environment profile ref bytes signed decoded authorized with
+      match readOf environment profile ref signed authorized with
       | none => return .error .selection
-      | some query => return .ok query
-
-inductive Queries (environment : Environment deployment durable) (profile : CanonicalRuntimeProfile.Profile F) :
-    List ObjectiveInvocationClaim.InputRef → List (List UInt8) → Type
-  | nil : Queries environment profile [] []
-  | cons {ref bytes refs envelopes} (query : Query environment profile ref bytes)
-      (rest : Queries environment profile refs envelopes) :
-      Queries environment profile (ref::refs) (bytes::envelopes)
-
-structure Verified (environment : Environment deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
-    (claim : ObjectiveInvocationClaim.Claim) where
-  private mk ::
-  queries : Queries environment profile claim.inputRefs claim.inputEnvelopes
+      | some read => return .ok read
 
 private def authorizeList (native : CredentialSignatureIO.NativeConfig)
     (environment : Environment deployment durable) (profile : CanonicalRuntimeProfile.Profile F) :
-    (refs : List ObjectiveInvocationClaim.InputRef) → (envelopes : List (List UInt8)) →
-      IO (Except Failure (Queries environment profile refs envelopes))
-  | [],[] => pure (.ok .nil)
+    List ObjectiveInvocationClaim.InputRef → List (List UInt8) →
+      IO (Except Failure (List (ObjectiveBendNativeAdmission.Read environment profile)))
+  | [],[] => pure (.ok [])
   | ref::refs,bytes::envelopes => do
       match ← authorizeQuery native environment profile ref bytes with
       | .error reason => return .error reason
-      | .ok query =>
+      | .ok read =>
         match ← authorizeList native environment profile refs envelopes with
         | .error reason => return .error reason
-        | .ok rest => return .ok (.cons query rest)
+        | .ok rest => return .ok (read :: rest)
   | _,_ => pure (.error .malformed)
 
+/-- Authenticate the claim's source envelope and every input envelope, bounded
+by the signed capacity before any signature work. -/
 def authorize (native : CredentialSignatureIO.NativeConfig)
     (environment : Environment deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
-    (claim : ObjectiveInvocationClaim.Claim) : IO (Except Failure (Verified environment profile claim)) := do
-  if claim.inputEnvelopes.flatten.length > claim.capacity.turnBytes ||
-      claim.inputRefs.length > claim.capacity.incidences then return .error .capacity
-  match ← authorizeList native environment profile claim.inputRefs claim.inputEnvelopes with
+    (claim : ObjectiveInvocationClaim.Claim) :
+    IO (Except Failure (ObjectiveBendNativeAdmission.Authenticated environment profile claim)) := do
+  if claim.sourceEnvelope.length + claim.inputEnvelopes.flatten.length > claim.capacity.turnBytes ||
+      claim.inputRefs.length + 1 > claim.capacity.incidences then return .error .capacity
+  match ← authorizeQuery native environment profile claim.source claim.sourceEnvelope with
   | .error reason => return .error reason
-  | .ok queries => return .ok ⟨queries⟩
+  | .ok source =>
+    match ← authorizeList native environment profile claim.inputRefs claim.inputEnvelopes with
+    | .error reason => return .error reason
+    | .ok inputs =>
+      match ObjectiveBendNativeAdmission.authenticate claim source inputs with
+      | none => return .error .selection
+      | some authenticated => return .ok authenticated
 
-def Queries.reads {environment : Environment deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
-    {refs envelopes} : Queries environment profile refs envelopes →
-    List (ObjectiveBendNativeInput.AdmittedRead environment.context profile environment.subject)
-  | .nil => []
-  | .cons query rest => query.read :: rest.reads
+def Failure.reject : Failure → DeclaredResourceController.Reject
+  | .malformed => .malformedCommand
+  | .capacity => .bendExecution
+  | .selection | .authorization _ => .observationRejected
 
-def Queries.guards {environment : Environment deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
-    {refs envelopes} : Queries environment profile refs envelopes → List ReadGuard
-  | .nil => []
-  | .cons query rest => query.guards ++ rest.guards
+/-- The production oracle. Every host entry that admits Objective commands
+(`NativeHost.submitLoadedVia .invoke`, `NativeHostReplay.derive`) installs it. -/
+def oracle : ObjectiveBendNativeAdmission.ReadOracle :=
+  ⟨fun native environment profile claim => do
+    match ← authorize native environment profile claim with
+    | .error reason => return .error reason.reject
+    | .ok authenticated => return .ok authenticated⟩
 
-def Verified.reads {environment : Environment deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
-    {claim} (verified : Verified environment profile claim) := verified.queries.reads
-
-def Verified.guards {environment : Environment deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
-    {claim} (verified : Verified environment profile claim) := verified.queries.guards
-
-theorem Queries.guards_roots {environment : Environment deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
-    {refs envelopes} (queries : Queries environment profile refs envelopes) :
-    ∀ guard ∈ queries.guards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
-  induction queries with
-  | nil => simp [Queries.guards]
-  | cons query rest ih =>
-    intro guard member
-    rcases List.mem_append.mp member with member | member
-    · exact query.guardsRoots guard member
-    · exact ih guard member
-
-theorem Verified.guards_roots {environment : Environment deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
-    {claim} (verified : Verified environment profile claim) :
-    ∀ guard ∈ verified.guards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId :=
-  verified.queries.guards_roots
-#assert_axioms Queries.guards_roots
-#assert_axioms Verified.guards_roots
 end Minidregg.Kernel.ObjectiveBendAuthenticatedInputs

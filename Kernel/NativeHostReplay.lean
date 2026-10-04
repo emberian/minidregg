@@ -13,6 +13,7 @@ wire versions and unsupported event families refuse rather than becoming opaque
 trusted history. Profile/clock changes require an explicit future migration.
 -/
 import Kernel.NativeHostContext
+import Kernel.ObjectiveBendAuthenticatedInputs
 import Kernel.CarriedSessionEnrollmentAdmission
 import Kernel.CarriedDispatchAdmission
 import Kernel.AuditTiming
@@ -2048,7 +2049,8 @@ private def derive (config : Config) (opened : Opened config)
               | .error reason => return .error s!"invocation preparation refused: {repr reason}"
               | .ok prepared =>
                 if shape : DeclaredResourceController.PhysicalShape prepared then
-                  match ← DeclaredResourceController.admit config.signature prepared signed with
+                  match ← DeclaredResourceController.admit config.signature prepared signed
+                      ObjectiveBendAuthenticatedInputs.oracle with
                   | .error reason => return .error s!"invocation admission refused: {repr reason}"
                   | .ok accepted => return .ok ⟨accepted.dataIntent shape,
                       .invoke prepared signed shape accepted, none, none, none, none,

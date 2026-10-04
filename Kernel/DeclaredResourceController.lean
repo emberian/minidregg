@@ -1485,9 +1485,15 @@ inductive InvocationRouteAdmission [DecidableEq F]
   | ordinary (family : NativeInvocationStatement.Family)
       (selected : command.family = some family) (route : family.route = .ordinary)
       (registered : NativeInvocationProfile.binding profile.receiverParameters .ordinary = some family.contextBytes)
+  /-- The Objective route carries the CAS dependencies of its consumed source
+  and input reads (resource, clock and law cells), less cells the command
+  writes (whose exact pre-state is already guarded by the write). -/
   | objective (family : NativeInvocationStatement.Family)
       (selected : command.family = some family) (route : family.route = .objectiveMethod)
       (registered : (NativeInvocationProfile.binding profile.receiverParameters .objectiveMethod).isSome = true)
+      (guards : List ReadGuard)
+      (readonly : ∀ guard ∈ guards, guard.cellId ∉ (writes prepared).map DataWrite.cellId)
+      (roots : ∀ guard ∈ guards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
 
 def InvocationRouteAdmission.guards [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
@@ -1495,7 +1501,7 @@ def InvocationRouteAdmission.guards [DecidableEq F]
   match route with
   | .legacy _ => []
   | .ordinary _ _ _ _ => []
-  | .objective _ _ _ _ => []
+  | .objective _ _ _ _ guards _ _ => guards
 
 theorem InvocationRouteAdmission.guards_readonly [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
@@ -1504,7 +1510,7 @@ theorem InvocationRouteAdmission.guards_readonly [DecidableEq F]
   cases route with
   | legacy selected => simp [InvocationRouteAdmission.guards]
   | ordinary family selected kind registered => simp [InvocationRouteAdmission.guards]
-  | objective family selected kind registered => simp [InvocationRouteAdmission.guards]
+  | objective family selected kind registered guards readonly roots => exact readonly
 
 theorem InvocationRouteAdmission.guards_roots [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
@@ -1513,7 +1519,7 @@ theorem InvocationRouteAdmission.guards_roots [DecidableEq F]
   cases route with
   | legacy selected => simp [InvocationRouteAdmission.guards]
   | ordinary family selected kind registered => simp [InvocationRouteAdmission.guards]
-  | objective family selected kind registered => simp [InvocationRouteAdmission.guards]
+  | objective family selected kind registered guards readonly roots => exact roots
 
 def completeAdmissionGuards [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
@@ -1557,7 +1563,7 @@ structure AcceptedInvocation [DecidableEq F]
     ReadLeg prepared i (signed.observeEnvelopes[i.val]?.getD [])
   audience : AudienceChecks prepared
   route : InvocationRouteAdmission prepared signed
-  execution : Option (ObjectiveBendNativeAdmission.Admitted prepared signed.observeEnvelopes
+  execution : Option (ObjectiveBendNativeAdmission.Admitted prepared
     (signedBytes prepared.authority.snapshot.domain profile.semantics signed)
     (writes prepared) (completeAdmissionGuards prepared signed audience route))
   executionRequired : command.family.any (fun family => family.route == .objectiveMethod) = true → execution.isSome = true
@@ -1619,7 +1625,7 @@ def admitAuthority [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
 private def finishAdmission [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand)
     (authority : AuthorityInvocation prepared signed) (route : InvocationRouteAdmission prepared signed)
-    (execution : Option (ObjectiveBendNativeAdmission.Admitted prepared signed.observeEnvelopes
+    (execution : Option (ObjectiveBendNativeAdmission.Admitted prepared
       (signedBytes prepared.authority.snapshot.domain profile.semantics signed)
       (writes prepared) (completeAdmissionGuards prepared signed authority.audience route))) :
     Except Reject (AcceptedInvocation prepared signed) := do
@@ -1642,39 +1648,48 @@ def admitOrdinary [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
 
 /-- New Objective completion admission: ALL native authority/read/law/audience
 checks precede construction or execution of the source's authenticated input.
-The completed output token retains exact full native writes/guards/capacity. -/
+Source and inputs arrive as signed queries inside the claim, authenticated by
+`objective` (the default refuses with `noReadOracle`), never as
+command-indexed observe tokens. Their CAS dependencies enter the route guards. -/
 def admitObjective [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
-    (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand) :
+    (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand)
+    (objective : ObjectiveBendNativeAdmission.ReadOracle) :
     IO (Except Reject (AcceptedInvocation prepared signed)) := do
   match selected : command.family with
   | none => return .error .malformedCommand
   | some family =>
     if kind : family.route = .objectiveMethod then
       if registered : (NativeInvocationProfile.binding profile.receiverParameters .objectiveMethod).isSome = true then
-        let route : InvocationRouteAdmission prepared signed := .objective family selected kind registered
-        if needed : command.requiresObservation = true then
-          match ← admitAuthority native prepared signed with
+        match ← admitAuthority native prepared signed with
+        | .error reason => return .error reason
+        | .ok authority =>
+          match ← ObjectiveBendNativeAdmission.select native objective prepared with
           | .error reason => return .error reason
-          | .ok authority =>
-            let reads : ObjectiveBendNativeAdmission.Reads prepared signed.observeEnvelopes := fun i =>
-              let read := authority.observations needed i
-              ObjectiveBendNativeAdmission.bindRead read.selected read.preparedExact read.checked
-            match ObjectiveBendNativeAdmission.admit prepared signed.observeEnvelopes reads
-                (signedBytes prepared.authority.snapshot.domain profile.semantics signed)
-                (writes prepared) (completeAdmissionGuards prepared signed authority.audience route) with
-            | .error reason => return .error reason
-            | .ok completed => return finishAdmission prepared signed authority route (some completed)
-        else return .error .observationRejected
+          | .ok selection =>
+            let guards := selection.core.guards.filter fun guard =>
+              decide (guard.cellId ∉ (writes prepared).map DataWrite.cellId)
+            let readonly : ∀ guard ∈ guards, guard.cellId ∉ (writes prepared).map DataWrite.cellId :=
+              fun guard member => of_decide_eq_true (List.mem_filter.mp member).2
+            if roots : ∀ guard ∈ guards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId then
+              let route : InvocationRouteAdmission prepared signed :=
+                .objective family selected kind registered guards readonly roots
+              match ObjectiveBendNativeAdmission.admit selection
+                  (signedBytes prepared.authority.snapshot.domain profile.semantics signed)
+                  (writes prepared) (completeAdmissionGuards prepared signed authority.audience route) with
+              | .error reason => return .error reason
+              | .ok completed => return finishAdmission prepared signed authority route (some completed)
+            else return .error .staleTarget
       else return .error .malformedCommand
     else return .error .malformedCommand
 
 /-- Shared running receiver dispatches the registered Objective family through
 its actual source gate. Every other special route remains explicitly typed. -/
 def admit [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
-    (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand) :
+    (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand)
+    (objective : ObjectiveBendNativeAdmission.ReadOracle := .refuse) :
     IO (Except Reject (AcceptedInvocation prepared signed)) :=
   if command.family.any (fun family => family.route == .objectiveMethod) then
-    admitObjective native prepared signed
+    admitObjective native prepared signed objective
   else admitOrdinary native prepared signed
 
 def AcceptedInvocation.apex [DecidableEq F]
@@ -1939,7 +1954,8 @@ def withAcceptedLoadedFrom {F : Type} [Field F] [DecidableEq F] {R : Type}
       (prepared : PreparedInvocation deployment profile ambient durable command) →
       (shape : PhysicalShape prepared) →
       AcceptedInvocation prepared signed → IO R)
-    (ordinaryResult : ReceiveResult → IO R) : IO R := do
+    (ordinaryResult : ReceiveResult → IO R)
+    (objective : ObjectiveBendNativeAdmission.ReadOracle := .refuse) : IO R := do
   match commandCodec.decode signed.commandBytes with
   | none => ordinaryResult (.rejected .malformedCommand)
   | some command =>
@@ -1955,7 +1971,7 @@ def withAcceptedLoadedFrom {F : Type} [Field F] [DecidableEq F] {R : Type}
               | .error reason => ordinaryResult (.rejected reason)
               | .ok prepared =>
                   if shape : PhysicalShape prepared then
-                    match ← admit native prepared signed with
+                    match ← admit native prepared signed objective with
                     | .error reason => ordinaryResult (.rejected reason)
                     | .ok accepted => acceptedResult prepared shape accepted
                   else ordinaryResult (.rejected .physicalPreparation))
@@ -1970,9 +1986,10 @@ def withAcceptedLoaded {F : Type} [Field F] [DecidableEq F] {R : Type}
       (prepared : PreparedInvocation deployment profile ambient durable command) →
       (shape : PhysicalShape prepared) →
       AcceptedInvocation prepared signed → IO R)
-    (ordinaryResult : ReceiveResult → IO R) : IO R :=
+    (ordinaryResult : ReceiveResult → IO R)
+    (objective : ObjectiveBendNativeAdmission.ReadOracle := .refuse) : IO R :=
   withAcceptedLoadedFrom deployment profile ambient native durable (loadDirectory durable) signed
-    acceptedResult ordinaryResult
+    acceptedResult ordinaryResult objective
 
 theorem withAcceptedLoaded_eq_from {F : Type} [Field F] [DecidableEq F] {R : Type}
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)

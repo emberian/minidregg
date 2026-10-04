@@ -504,6 +504,9 @@ inductive Reject where
   | capabilityRejected | policyRejected | policyInputRange | policyCastAlias | conflictingIncidences
   | wrongEnvelopeCount
   | bendExecution
+  /-- An Objective command reached an admission caller that installed no
+  signed-query read oracle: a wiring refusal, never a policy verdict. -/
+  | noReadOracle
   | observationRequired | observationRejected | clockUnavailable
   | streamTopic | streamPayload
   | worldKind | kindDefinition

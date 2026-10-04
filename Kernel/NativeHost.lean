@@ -8,6 +8,7 @@ against that exact image. Contention requires preparation/signing against the
 new state. Exact historical replay is looked up before fresh authorization.
 -/
 import Kernel.NativeHostContext
+import Kernel.ObjectiveBendAuthenticatedInputs
 import Kernel.NativeHostGrainBirth
 import Kernel.GrainResourceBirthReceiver
 import Kernel.NativeObservationController
@@ -2148,7 +2149,7 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
                   return .rejected .physicalPreparation
                 return .settlement (← DurableReceiverIO.receiveLoaded
                   transport ResourceBirthCodec.rootBytes opened.durable intent))
-              pure with
+              pure ObjectiveBendAuthenticatedInputs.oracle with
           | .replayed record => confirm .replayed record.transactionId record.event.event.eventId
           | .rejected reason => return refused .operationRejected "invoke" s!"{repr reason}"
           | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"

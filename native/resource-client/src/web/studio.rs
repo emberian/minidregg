@@ -247,8 +247,8 @@ pub(super) fn post(site: &Site, id: Option<&str>, action: &str, body: &[u8]) -> 
         return simple(400, "Source workspace", "package identity required");
     };
     if action == "preview" {
-        if fields.len()!=2 || !fields.contains_key("snapshot") || !fields.contains_key("edition") {return simple(400,"Source preview","expected retained snapshot and explicit edition");}
-        return match studio::source_preview(&site.root,&site.workspace,id,&fields["snapshot"],&fields["edition"]) {
+        if fields.len()!=3 || !fields.contains_key("snapshot") || !fields.contains_key("edition") || !fields.contains_key("arguments") {return simple(400,"Source preview","expected retained snapshot, explicit edition and typed arguments");}
+        return match studio::source_preview(&site.root,&site.workspace,id,&fields["snapshot"],&fields["edition"],&fields["arguments"]) {
             Ok(value)=>preview_render(site,id,&fields["snapshot"],&value),
             Err(e)=>failure_page("Source preview",&e),
         };
@@ -341,7 +341,7 @@ pub(super) fn post(site: &Site, id: Option<&str>, action: &str, body: &[u8]) -> 
 
 fn preview_form(site:&Site,id:&str,snapshot:&str)->String {
     if !studio::preview_available() {return String::new();}
-    format!("<form method=post action=\"{}/studio/{}/preview\"><input type=hidden name=snapshot value=\"{}\"><label>Source edition<select name=edition><option value=objective-bend-1>Objective Bend 1</option></select></label><button>Typecheck and run captured source</button><p>Pure preview of this saved source revision, with bounded execution. Native actions require a separate governed operation.</p></form>",site.base(),escape(id),escape(snapshot))
+    format!("<form method=post action=\"{}/studio/{}/preview\"><input type=hidden name=snapshot value=\"{}\"><label>Source edition<select name=edition><option value=objective-bend-1>Objective Bend 1</option></select></label><label>Arguments (typed values)<textarea name=arguments rows=5 maxlength=16384>[]</textarea></label><p>Example: [{{&quot;tag&quot;:&quot;natural&quot;,&quot;value&quot;:&quot;42&quot;}}]. Bool and String use separate boolean and label tags.</p><button>Typecheck and run captured source</button><p>Pure preview of this saved source revision, with bounded execution. Native actions require a separate governed operation.</p></form>",site.base(),escape(id),escape(snapshot))
 }
 pub(super) fn preview(site:&Site,id:&str,snapshot:&str,run:&str)->Page {
     match studio::source_preview_result(&site.root,&site.workspace,id,snapshot,run) {Ok(value)=>preview_render(site,id,snapshot,&value),Err(e)=>failure_page("Source preview",&e)}
@@ -354,6 +354,6 @@ fn preview_render(site:&Site,id:&str,snapshot:&str,value:&Value)->Page {
     if output["preview"].is_object() {body.push_str(&format!("<section><h2>Typed result and execution</h2><pre>{}</pre></section>",escape(&serde_json::to_string_pretty(&output["preview"]).unwrap_or_default())));}
     let diagnostic=if output["diagnostic"].is_null(){&value["diagnostic"]}else{&output["diagnostic"]};
     if !diagnostic.is_null(){body.push_str(&format!("<section><h2>Source diagnostics</h2><pre>{}</pre></section>",escape(&serde_json::to_string_pretty(diagnostic).unwrap_or_default())));}
-    body.push_str(&format!("<details><summary>Exact source, edition and compiler bindings</summary><pre>{}</pre></details>",escape(&serde_json::to_string_pretty(&serde_json::json!({"sourceRequestSha256":value["sourceRequestSha256"],"sourceHashes":value["sourceHashes"],"edition":value["edition"],"toolingSha256":value["toolingSha256"],"resultBinding":output["binding"]})).unwrap_or_default())));
+    body.push_str(&format!("<details><summary>Exact source, edition and compiler bindings</summary><pre>{}</pre></details>",escape(&serde_json::to_string_pretty(&serde_json::json!({"sourceRequestSha256":value["sourceRequestSha256"],"sourceHashes":value["sourceHashes"],"edition":value["edition"],"arguments":value["arguments"],"toolingSha256":value["toolingSha256"],"resultBinding":output["binding"]})).unwrap_or_default())));
     Page {status:200,title:"Source preview".into(),stamp:Stamp::None,body}
 }

@@ -177,6 +177,7 @@ import Host.FnSelectiveReleaseFnReceiving
 import Host.FnSelectiveReleaseFnAck
 import Host.Json
 import Kernel.ObjectiveBendNativeAdmission
+import Host.ObjectiveInvocationQuote
 import Host.PayClaims
 import Host.ApplicationCurrentBirthAuthoring
 import Host.CurrentResourceBirthAuthoring
@@ -5673,6 +5674,12 @@ def run (arguments : List String) : IO UInt32 := do
       let settings ← loadSettings configPath
       let config := settings.config
       match command, rest with
+      | "objective-quote", [requestPath, outputPath] =>
+          let bytes ← readBoundedBytes requestPath FnEvidenceCodec.maxHostFrameBytes
+          let walked ← IO.ofExcept (← NativeHostSession.startWalked config)
+          writeJson outputPath (← IO.ofExcept
+            (← Minidregg.Host.ObjectiveInvocationQuote.quoteBytes config walked.verified.opened bytes))
+          pure 0
       | "carry-plan", [requestPath, outputPath] =>
           let operator ← carryOperator settings
           let request ← readCarryJson requestPath

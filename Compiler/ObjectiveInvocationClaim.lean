@@ -1,5 +1,6 @@
 /- Objective invocation requests bind source selection, argument/return ABIs and
-all public resource envelopes. They contain neither a caller-selected term nor
+all public resource envelopes. v4: the source enters only through its own
+signed query envelope (no command position). They contain neither a caller-selected term nor
 a claimed result. Native admission independently loads the current source and
 constructs observations from the same authorized snapshot. -/
 import Theory.AssertAxioms
@@ -51,8 +52,13 @@ def inputRefStream : StreamCodec InputRef := StreamCodec.xmap
   (fun r => (r.kind,r.resource,r.root,r.capability))
   (fun (k,r,h,c) => ⟨k,r,h,c⟩) (by intro r; cases r; rfl)
 
+/-- The source is selected by its own independently signed full-scope
+`resourceScope` query over the resource holding the artifact and package (the
+gate requires its observed cell to be a content cell), never by a position in
+the final command. -/
 structure Claim where
-  sourceIndex : Nat
+  source : InputRef
+  sourceEnvelope : List UInt8
   sourceAtom : Digest
   inputCodec : Digest
   outputCodec : Digest
@@ -81,17 +87,17 @@ def capacityStream : StreamCodec Capacity :=
     (by intro c; cases c; rfl)
 
 def stream : StreamCodec Claim :=
-  StreamCodec.xmap (StreamCodec.product StreamCodec.nat
+  StreamCodec.xmap (StreamCodec.product inputRefStream (StreamCodec.product bytesStream
     (StreamCodec.product digestStream (StreamCodec.product digestStream
     (StreamCodec.product digestStream (StreamCodec.product bytesStream
     (StreamCodec.product (StreamCodec.list inputRefStream)
     (StreamCodec.product (StreamCodec.list bytesStream)
-    (StreamCodec.product digestStream capacityStream))))))))
-    (fun c => (c.sourceIndex,c.sourceAtom,c.inputCodec,c.outputCodec,c.arguments,
+    (StreamCodec.product digestStream capacityStream)))))))))
+    (fun c => (c.source,c.sourceEnvelope,c.sourceAtom,c.inputCodec,c.outputCodec,c.arguments,
       c.inputRefs,c.inputEnvelopes,c.expectedInput,c.capacity))
-    (fun (i,a,c,o,b,r,q,e,p) => ⟨i,a,c,o,b,r,q,e,p⟩) (by intro c; cases c; rfl)
+    (fun (s,v,a,c,o,b,r,q,e,p) => ⟨s,v,a,c,o,b,r,q,e,p⟩) (by intro c; cases c; rfl)
 
-def frame : List UInt8 := "DREGG/OBJECTIVE/INVOCATION-CLAIM/v3".toUTF8.toList
+def frame : List UInt8 := "DREGG/OBJECTIVE/INVOCATION-CLAIM/v4".toUTF8.toList
 
 def rawCodec : LawfulCodec Claim where
   encode claim := frame ++ stream.encode claim
@@ -110,10 +116,12 @@ Signature, query scope, actor, nonce and current authority are checked by native
 admission; syntactic validity never grants read authority. -/
 def Valid (claim : Claim) : Prop :=
   (claim.inputRefs.map InputRef.resource).Nodup ∧
-    claim.inputEnvelopes.length = claim.inputRefs.length
+    claim.inputEnvelopes.length = claim.inputRefs.length ∧
+    claim.source.resource ∉ claim.inputRefs.map InputRef.resource
 instance (claim : Claim) : Decidable (Valid claim) := inferInstanceAs
   (Decidable ((claim.inputRefs.map InputRef.resource).Nodup ∧
-    claim.inputEnvelopes.length = claim.inputRefs.length))
+    claim.inputEnvelopes.length = claim.inputRefs.length ∧
+    claim.source.resource ∉ claim.inputRefs.map InputRef.resource))
 
 /-- Duplicate physical resource selections are refused rather than resolved
 by first/last wins. Order remains exactly signed. -/
@@ -167,7 +175,12 @@ theorem decoded_unique {bytes : List UInt8} {claim : Claim}
 
 theorem decoded_envelopes {bytes : List UInt8} {claim : Claim}
     (accepted : decode bytes = some claim) : claim.inputEnvelopes.length = claim.inputRefs.length :=
-  (decoded_valid accepted).2
+  (decoded_valid accepted).2.1
+
+theorem decoded_source_not_input {bytes : List UInt8} {claim : Claim}
+    (accepted : decode bytes = some claim) :
+    claim.source.resource ∉ claim.inputRefs.map InputRef.resource :=
+  (decoded_valid accepted).2.2
 
 theorem decoded_canonical {bytes : List UInt8} {claim : Claim}
     (accepted : decode bytes = some claim) : encode claim = bytes :=
@@ -186,6 +199,7 @@ theorem family_injective {a b : Claim} (same : family a = family b) : a = b :=
 #assert_axioms decoded_valid
 #assert_axioms decoded_unique
 #assert_axioms decoded_envelopes
+#assert_axioms decoded_source_not_input
 #assert_axioms decoded_canonical
 #assert_axioms family_exact
 #assert_axioms family_injective
