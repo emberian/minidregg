@@ -1,4 +1,2 @@
 # sym<TAB>one-line reason it is exported and no native/ code calls it
 minidregg_nock_run_jammed	the oracle's exported byte entry, bound by oracle_is_export (K-RAN §1); consumed by the Nock differential and the runner
-minidregg_intent_encode	the canonical intent bytes entry (Kernel/Contracts/Intents.lean); run by the vector emitter Kernel/Contracts/IntentVectors.lean, whose output native/mini-sdk is held to byte for byte; the SDK links it at runtime once a native archive carries Kernel.Contracts (cv task)
-minidregg_intent_id_preimage	the InvocationId preimage entry beside minidregg_intent_encode (same module, same emitter, same SDK pin)

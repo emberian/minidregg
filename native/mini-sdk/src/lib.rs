@@ -55,6 +55,8 @@ pub mod flow;
 pub mod frame;
 #[cfg(feature = "native")]
 pub mod host;
+#[cfg(feature = "lean-codec")]
+pub mod lean_codec;
 #[cfg(feature = "native")]
 pub mod operator;
 #[cfg(feature = "native")]

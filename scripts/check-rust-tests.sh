@@ -112,6 +112,19 @@ sudo_exact() { # sudo_exact NAME CRATE [cargo args] -- FULL::TEST::PATH... (#[ig
   exact "$name" "$crate" "${args[@]}" -- --ignored "$@"
 }
 
+armed_exact() { # armed_exact NAME ENVVAR WHAT CRATE [cargo args] -- FULL::TEST::PATH... (needs a built Lean archive)
+  local name=$1 var=$2 what=$3
+  if [ -z "${!var:-}" ]; then
+    echo "rust-tests: NOT-ARMED: $name: set $var to $what"
+    return
+  fi
+  if [ ! -e "${!var}" ]; then
+    echo "rust-tests: RED: $name: $var is set but ${!var} does not exist"; red=$((red + 1)); return
+  fi
+  local crate=$4; shift 4
+  exact "$name" "$crate" "$@"
+}
+
 t rc-shell-private-enroll 50 resource-client --bin mini -- shell:: private:: participant_enrollment:: key_generation
 t grain-provider          42 grain-runtime -- provider credential publication_refusal
 t hermes-test-provider    15 hermes-test-provider -- tests::
@@ -201,8 +214,10 @@ exact sdk-custody            mini-sdk --lib --features native -- \
   custody::tests::delivery_unknown_is_resolved_only_by_evidence_never_by_resending \
   custody::tests::standing_is_the_words_alone_while_classify_also_wants_the_receipt
 # The ssh:DEST operator route (cv 01a104fe-958e): named certainly-unsent refusals before the channel
-# opens, uncertain and never resent after the write. Stand-in rows; the real-sshd rows are
-# tests/ssh.rs (--ignored, need a reachable sshd: MINI_SDK_SSH_TEST_HOST / _IDENTITY).
+# opens, uncertain and never resent after the write. Stand-in rows; the real-sshd + real-Host rows are
+# tests/ssh-e2e.sh (an unprivileged sshd it starts itself, throwaway keys, a scratch Store; needs a
+# candidate directory: `native/mini-sdk/tests/ssh-e2e.sh ART_DIR`), and tests/ssh.rs (--ignored, a
+# reachable sshd: MINI_SDK_SSH_TEST_HOST / _IDENTITY).
 exact sdk-ssh                mini-sdk --lib --features native -- \
   operator::tests::addresses_parse_to_routes_and_bad_destinations_refuse_by_name \
   operator::tests::ssh_failures_before_the_channel_opens_are_certainly_unsent_and_named \
@@ -225,6 +240,12 @@ exact sdk-lean-pin           mini-sdk --features native --test golden --test exa
   lean_vectors_are_reproduced_byte_for_byte \
   the_intent_example_prints_exactly_its_pinned_output \
   the_examples_intent_bytes_are_leans
+# The same encoder against Lean's EXPORTED CODE, live (cv 01a105ff-1bf5): dlopens libminidregg-intents.so
+# (native/mini-sdk/lean-codec/build.sh, after `lake build Kernel.Contracts.Intents:o.export`), calls
+# minidregg_intent_encode / minidregg_intent_id_preimage on every golden/intents.json row, and plants a
+# one-bit difference to show the comparison goes red. Armed by MINI_SDK_LEAN_CODEC_LIB.
+armed_exact sdk-lean-codec MINI_SDK_LEAN_CODEC_LIB "the built libminidregg-intents.so" mini-sdk --features lean-codec --test lean_codec -- \
+  the_sdk_encoder_equals_leans_exported_codec_on_every_golden_row
 # resource-client (bin mini), one row per defect so a red names it
 # D1: sparse board rendering never scans the address space (bce707b7)
 exact rc-board-sparse        resource-client --bin mini -- \

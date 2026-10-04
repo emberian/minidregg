@@ -21,6 +21,9 @@ default = []
 # Processes, Unix sockets and the filesystem: the consent-process client, the
 # operator-socket client and the filesystem custody store. Never on wasm32.
 native = ["dep:libc"]
+# dlopen of the Lean archive that carries Kernel.Contracts.Intents (lean-codec/build.sh), so the
+# SDK's encoder is held to Lean's exported entry points at runtime (tests/lean_codec.rs).
+lean-codec = ["native"]
 # wasm-bindgen exports of the offline core (the TS differential oracle).
 wasm = ["dep:wasm-bindgen"]
 
