@@ -1569,12 +1569,20 @@ struct ServeBounds {
     /// Envelopes read and waiting for the Host. The next one is refused
     /// `busy: host queue full` before it reaches the Host.
     host_queue: usize,
+    /// Longest an envelope may wait in the Host queue. When the Host thread
+    /// takes a job that waited longer, or whose caller has already closed its
+    /// connection, the job is answered 254 and never written to the Host.
+    /// It is well inside the client's 600 s reply window, so a live caller
+    /// receives the certain refusal instead of timing out as "uncertain"
+    /// while its request still waits to execute.
+    queue_residence: Duration,
 }
 
 const SERVE_BOUNDS: ServeBounds = ServeBounds {
     read_deadline: Duration::from_secs(10),
     max_connections: 64,
     host_queue: 32,
+    queue_residence: Duration::from_secs(60),
 };
 
 /// One envelope's request, read and checked, handed to the Host thread. The
@@ -1583,6 +1591,62 @@ const SERVE_BOUNDS: ServeBounds = ServeBounds {
 struct HostJob {
     request: Vec<u8>,
     reply: mpsc::SyncSender<Vec<u8>>,
+    /// When the connection thread queued it (residence is measured from here).
+    queued: Instant,
+    /// A duplicate of the caller's connection, used only to observe whether
+    /// the caller hung up while the job waited. Never read or written.
+    caller: Option<UnixStream>,
+}
+
+/// Why a queued job is answered without reaching the Host, if it is.
+/// Judged by the Host thread immediately before the one place a request is
+/// written to the Host (`dispatch_job`), so a 254 can only ever describe a
+/// request that was never forwarded.
+fn unforwardable(job: &HostJob, now: Instant, residence: Duration) -> Option<&'static str> {
+    if job.caller.as_ref().is_some_and(caller_hung_up) {
+        Some("caller abandoned queued request")
+    } else if now.saturating_duration_since(job.queued) > residence {
+        Some("busy: queue residence deadline")
+    } else {
+        None
+    }
+}
+
+/// The caller closed its end. Honest clients never half-close after sending
+/// their envelope, so end-of-stream as well as a hangup means nobody will
+/// read the reply. An unreadable poll is not evidence of abandonment.
+fn caller_hung_up(stream: &UnixStream) -> bool {
+    let mut descriptor = libc::pollfd {
+        fd: stream.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    if unsafe { libc::poll(&mut descriptor, 1, 0) } <= 0 {
+        return false;
+    }
+    if descriptor.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 {
+        return true;
+    }
+    if descriptor.revents & libc::POLLIN == 0 {
+        return false;
+    }
+    let mut byte = 0u8;
+    let peeked = unsafe {
+        libc::recv(
+            descriptor.fd,
+            &mut byte as *mut u8 as *mut libc::c_void,
+            1,
+            libc::MSG_PEEK | libc::MSG_DONTWAIT,
+        )
+    };
+    peeked == 0
+}
+
+/// The refusal frame a connection thread writes for an unforwarded job.
+fn refusal_frame(reason: &str) -> Vec<u8> {
+    let mut refusal = vec![254];
+    refusal.extend_from_slice(reason.as_bytes());
+    refusal
 }
 
 /// What a connection thread needs to judge an envelope before the Host sees it.
@@ -1596,9 +1660,7 @@ struct EnvelopeRules<'a> {
 }
 
 fn refuse(stream: &mut UnixStream, reason: &str) {
-    let mut refusal = vec![254];
-    refusal.extend_from_slice(reason.as_bytes());
-    let _ = write_frame(stream, &refusal);
+    let _ = write_frame(stream, &refusal_frame(reason));
 }
 
 /// The accept loop. Nothing a client sends ends it: a bad envelope is refused
@@ -1649,7 +1711,7 @@ fn supervise_bounded(
         scope.spawn(move || {
             accept_connections(scope, listener, rules, bounds, jobs, stopping, live)
         });
-        let ended = serve_host(&mut process, queue, start);
+        let ended = serve_host(&mut process, queue, start, bounds.queue_residence);
         stopping.store(true, Ordering::SeqCst);
         ended
     })
@@ -1681,7 +1743,13 @@ fn supervise_operator(
             drop(listener);
             state.admission_closed.store(true, Ordering::Release);
         });
-        let ended = serve_host_observed(&mut process, queue, start, Some(state));
+        let ended = serve_host_observed(
+            &mut process,
+            queue,
+            start,
+            SERVE_BOUNDS.queue_residence,
+            Some(state),
+        );
         state.close.store(true, Ordering::Release);
         let accepted = accept.join().map_err(|_| "operator accept thread panicked");
         ended?;
@@ -1703,17 +1771,25 @@ fn serve_host(
     process: &mut HostProcess,
     queue: mpsc::Receiver<HostJob>,
     start: &mut dyn FnMut() -> Result<HostProcess, String>,
+    residence: Duration,
 ) -> Result<(), String> {
-    serve_host_observed(process, queue, start, None)
+    serve_host_observed(process, queue, start, residence, None)
 }
 
 fn serve_host_observed(
     process: &mut HostProcess,
     queue: mpsc::Receiver<HostJob>,
     start: &mut dyn FnMut() -> Result<HostProcess, String>,
+    residence: Duration,
     state: Option<&crate::operator_drain::State>,
 ) -> Result<(), String> {
     for job in queue {
+        // Pre-transmission only: once `exchange` below has begun, the job is
+        // never answered 254 (`serve_refuses_254_only_before_forward`).
+        if let Some(reason) = unforwardable(&job, Instant::now(), residence) {
+            let _ = job.reply.send(refusal_frame(reason));
+            continue;
+        }
         if process.exited() {
             eprintln!("mini: host process {} exited between requests; restarting", process.child.id());
             process.stop();
@@ -1849,7 +1925,15 @@ fn serve_connection(
         return refuse(&mut stream, "operation unavailable on selected socket");
     }
     let (reply, answer) = mpsc::sync_channel(1);
-    match jobs.try_send(HostJob { request, reply }) {
+    // Without a duplicate the job cannot be observed for hangup; it is still
+    // bounded by the residence deadline.
+    let caller = stream.try_clone().ok();
+    match jobs.try_send(HostJob {
+        request,
+        reply,
+        queued: Instant::now(),
+        caller,
+    }) {
         Ok(()) => {}
         Err(mpsc::TrySendError::Full(_)) => return refuse(&mut stream, "busy: host queue full"),
         Err(mpsc::TrySendError::Disconnected(_)) => return,
@@ -2439,10 +2523,12 @@ done"#;
     }
 
     /// A fake Host: answers each frame with its own operation byte; op 8
-    /// sleeps one second first (a slow request); op 9 exits instead.
+    /// sleeps one second first (a slow request); op 9 exits instead. Every
+    /// operation that reaches it is appended to `$MINI_FAKE_HOST_LOG`.
     const FAKE_HOST: &str = r#"while n=$(dd bs=1 count=4 2>/dev/null | od -An -tu4 | tr -d ' \n'); [ -n "$n" ]; do
   op=$(dd bs=1 count=1 2>/dev/null | od -An -tu1 | tr -d ' \n')
   [ "$n" -gt 1 ] && dd bs=1 count=$((n - 1)) of=/dev/null 2>/dev/null
+  echo "$op" >> "$MINI_FAKE_HOST_LOG"
   [ "$op" = 9 ] && exit 3
   [ "$op" = 8 ] && sleep 1
   printf '\001\000\000\000'; printf "\\$(printf %03o "$op")"
@@ -2473,10 +2559,19 @@ done"#;
         let socket = directory.join("test.sock");
         let config = directory.join("config.json");
         fs::write(&config, b"config").unwrap();
+        let log = directory.join("host.log");
+        fs::write(&log, b"").unwrap();
         let listener = UnixListener::bind(&socket).unwrap();
         thread::spawn(move || {
-            let mut start =
-                || HostProcess::start(Command::new("/bin/sh").arg("-c").arg(FAKE_HOST), "fake");
+            let mut start = || {
+                HostProcess::start(
+                    Command::new("/bin/sh")
+                        .arg("-c")
+                        .arg(FAKE_HOST)
+                        .env("MINI_FAKE_HOST_LOG", &log),
+                    "fake",
+                )
+            };
             let rules = EnvelopeRules {
                 operator: None,
                 config_bytes: b"config",
@@ -2490,6 +2585,23 @@ done"#;
             directory,
             socket,
             config,
+        }
+    }
+
+    impl FakeService {
+        /// Every operation the fake Host actually received, in order.
+        fn forwarded(&self) -> Vec<u8> {
+            fs::read_to_string(self.directory.join("host.log"))
+                .unwrap()
+                .lines()
+                .map(|line| line.parse().unwrap())
+                .collect()
+        }
+
+        fn invoke_later(&self, operation: u8) -> thread::JoinHandle<Result<Vec<u8>, String>> {
+            let socket = self.socket.clone();
+            let config = self.config.clone();
+            thread::spawn(move || invoke(&socket, &config, operation, &[]))
         }
     }
 
@@ -2510,6 +2622,7 @@ done"#;
                 read_deadline: Duration::from_secs(3),
                 max_connections: 8,
                 host_queue: 4,
+                queue_residence: Duration::from_secs(60),
             },
         );
         let mut staller = UnixStream::connect(&service.socket).unwrap();
@@ -2537,6 +2650,7 @@ done"#;
                 read_deadline: Duration::from_secs(2),
                 max_connections: 8,
                 host_queue: 1,
+                queue_residence: Duration::from_secs(60),
             },
         );
         let slow = {
@@ -2575,6 +2689,7 @@ done"#;
                 read_deadline: Duration::from_secs(3),
                 max_connections: 6,
                 host_queue: 4,
+                queue_residence: Duration::from_secs(60),
             },
         );
         let idle: Vec<UnixStream> = (0..5)
@@ -2619,6 +2734,105 @@ done"#;
         assert_eq!(answer.unwrap(), vec![5]);
         assert!(waited < Duration::from_secs(1), "honest client waited {waited:?}");
         drop(silent);
+    }
+
+    /// A caller that queues a request behind a slow one and then hangs up is
+    /// never forwarded: the Host sees the slow request and the next live one,
+    /// and nothing in between.
+    #[test]
+    fn serve_a_queued_abandoned_request_never_reaches_the_host() {
+        let service = fake_service(
+            "abandon",
+            ServeBounds {
+                read_deadline: Duration::from_secs(2),
+                max_connections: 8,
+                host_queue: 4,
+                queue_residence: Duration::from_secs(60),
+            },
+        );
+        let slow = service.invoke_later(8);
+        thread::sleep(Duration::from_millis(200));
+        let mut abandoned = UnixStream::connect(&service.socket).unwrap();
+        write_frame(&mut abandoned, &[[1, 6, 0, 0, 0].as_slice(), b"config", &[7]].concat()).unwrap();
+        thread::sleep(Duration::from_millis(200));
+        drop(abandoned);
+        assert_eq!(slow.join().unwrap().unwrap(), vec![8]);
+        assert_eq!(timed_invoke(&service, 5).0.unwrap(), vec![5]);
+        assert_eq!(service.forwarded(), vec![8, 5]);
+    }
+
+    /// A live caller whose request outwaits the residence deadline gets the
+    /// certain 254 refusal, and the request is not forwarded afterwards.
+    #[test]
+    fn serve_a_request_past_queue_residence_is_refused_254_unforwarded() {
+        let service = fake_service(
+            "residence",
+            ServeBounds {
+                read_deadline: Duration::from_secs(2),
+                max_connections: 8,
+                host_queue: 4,
+                queue_residence: Duration::from_millis(300),
+            },
+        );
+        let slow = service.invoke_later(8);
+        thread::sleep(Duration::from_millis(200));
+        let (late, waited) = timed_invoke(&service, 7);
+        assert_eq!(late.unwrap_err(), "socket rejected request: busy: queue residence deadline");
+        assert!(waited < Duration::from_secs(2), "refusal waited {waited:?}");
+        assert_eq!(slow.join().unwrap().unwrap(), vec![8]);
+        assert_eq!(timed_invoke(&service, 5).0.unwrap(), vec![5]);
+        assert_eq!(service.forwarded(), vec![8, 5]);
+    }
+
+    /// 254 is answered only for requests never written to the Host: a request
+    /// whose Host exchange outlasts the residence deadline still gets its
+    /// reply, every 254 corresponds to an operation absent from the Host's
+    /// log, and every reply to one present in it.
+    #[test]
+    fn serve_refuses_254_only_before_forward() {
+        let service = fake_service(
+            "before-forward",
+            ServeBounds {
+                read_deadline: Duration::from_secs(2),
+                max_connections: 16,
+                host_queue: 8,
+                queue_residence: Duration::from_millis(500),
+            },
+        );
+        let slow = service.invoke_later(8);
+        thread::sleep(Duration::from_millis(100));
+        let queued: Vec<_> = [1u8, 2, 3, 4]
+            .into_iter()
+            .map(|operation| (operation, service.invoke_later(operation)))
+            .collect();
+        let mut abandoned = UnixStream::connect(&service.socket).unwrap();
+        write_frame(&mut abandoned, &[[1, 6, 0, 0, 0].as_slice(), b"config", &[6]].concat()).unwrap();
+        thread::sleep(Duration::from_millis(100));
+        drop(abandoned);
+        // The slow exchange itself lasts twice the residence deadline.
+        assert_eq!(slow.join().unwrap().unwrap(), vec![8]);
+        let mut outcomes = vec![(8u8, true)];
+        for (operation, handle) in queued {
+            match handle.join().unwrap() {
+                Ok(reply) => {
+                    assert_eq!(reply, vec![operation]);
+                    outcomes.push((operation, true));
+                }
+                Err(error) => {
+                    assert!(error.starts_with("socket rejected request: "), "{error}");
+                    outcomes.push((operation, false));
+                }
+            }
+        }
+        assert_eq!(timed_invoke(&service, 10).0.unwrap(), vec![10]);
+        outcomes.push((10, true));
+        let forwarded = service.forwarded();
+        assert!(!forwarded.contains(&6), "abandoned request reached the Host");
+        for (operation, answered) in outcomes {
+            assert_eq!(forwarded.contains(&operation), answered, "operation {operation}");
+        }
+        // These four waited behind a one-second exchange with a 500 ms bound.
+        assert_eq!(forwarded, vec![8, 10]);
     }
 
     #[test]
