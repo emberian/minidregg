@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# scripts/pipeline/fetch-artifacts -- a lane's Host (and every other role) WITHOUT building one.
+#
+#   scripts/pipeline/fetch-artifacts TIP DEST [--link]
+#
+# TIP: a commit (40-hex or a unique prefix) or a label (green | next | main) naming a READY set in
+# $ARTIFACT_ROOT (/srv/artifacts on the burst boxes, mirrored from the gate box by
+# scripts/pipeline/publish-artifacts). DEST must not exist. The set is checked against its
+# SHA256SUMS, copied to DEST (--link: hard links instead; read-only use only, the store's files
+# are 0555 and must never be written), and DEST/manifest.json is rewritten to DEST's absolute
+# paths (the sha256 pins are kept and re-checked), so it feeds journey.sh, check-journey,
+# objective-native-acceptance.py --bin DEST/bin and run.sh unchanged.
+# If the set is not on this box and PIPELINE_FETCH_FROM=user@host is set, it is rsynced from there
+# first (over your own ssh). Prints the manifest path last. A lane that CHANGED Lean must not use
+# this: it relinks from its own warm clone (PIPELINE regime item 3).
+set -euo pipefail
+PIPELINE_PROG=fetch-artifacts
+. "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/lib.sh"
+want=${1:?TIP or label}; dest=${2:?DEST}; mode=${3:-}
+t0=$(date +%s.%N)
+resolve() {
+  case "$want" in
+    green|next|main) [ -L "$ARTIFACT_ROOT/$want" ] && readlink "$ARTIFACT_ROOT/$want" ;;
+    *) [[ $want =~ ^[0-9a-f]{7,40}$ ]] || pipeline_die "not a commit or label: $want"
+       local m=( "$ARTIFACT_ROOT"/"$want"* ); [ -d "${m[0]}" ] || return 0
+       [ "${#m[@]}" = 1 ] || pipeline_die "prefix $want is ambiguous: ${m[*]}"
+       basename "${m[0]}" ;;
+  esac
+}
+tip=$(resolve || true)
+if { [ -z "$tip" ] || [ ! -f "$ARTIFACT_ROOT/$tip/READY" ]; } && [ -n "${PIPELINE_FETCH_FROM:-}" ]; then
+  case "$want" in green|next|main) tip=$(ssh "$PIPELINE_FETCH_FROM" "readlink $ARTIFACT_ROOT/$want") ;;
+                  *) tip=$(ssh "$PIPELINE_FETCH_FROM" "cd $ARTIFACT_ROOT && ls -d $want* | head -2" | { read -r a; read -r b && pipeline_die "ambiguous $want"; echo "$a"; }) ;; esac
+  [[ $tip =~ ^[0-9a-f]{40}$ ]] || pipeline_die "$PIPELINE_FETCH_FROM has no set for $want"
+  mkdir -p "$ARTIFACT_ROOT"
+  rsync -a --exclude=/READY "$PIPELINE_FETCH_FROM:$ARTIFACT_ROOT/$tip/" "$ARTIFACT_ROOT/$tip/"
+  rsync -a "$PIPELINE_FETCH_FROM:$ARTIFACT_ROOT/$tip/READY" "$ARTIFACT_ROOT/$tip/READY"
+fi
+[ -n "$tip" ] || pipeline_die "no artifact set for '$want' in $ARTIFACT_ROOT (published: $(cd "$ARTIFACT_ROOT" 2>/dev/null && ls -d [0-9a-f]* 2>/dev/null | cut -c1-12 | paste -sd' '))"
+set_dir=$ARTIFACT_ROOT/$tip
+pipeline_verify_set "$set_dir"
+[ ! -e "$dest" ] || pipeline_die "refusing existing $dest"
+mkdir -p "$(dirname -- "$dest")"
+if [ "$mode" = --link ]; then cp -al "$set_dir" "$dest"; else cp -a "$set_dir" "$dest"; fi
+dest=$(CDPATH='' cd -- "$dest" && pwd -P)
+python3 - "$set_dir" "$dest" <<'PY'
+import hashlib, json, sys
+old, new = sys.argv[1], sys.argv[2]
+m = json.load(open(f"{new}/manifest.json"))
+def mv(v):
+    if isinstance(v, str) and v.startswith(old + "/"): return new + v[len(old):]
+    if isinstance(v, dict): return {k: (mv(x) if k != "sha256" else x) for k, x in v.items()}
+    if isinstance(v, list): return [mv(x) for x in v]
+    return v
+m = mv(m)
+for role, h in m.get("sha256", {}).items():
+    p = m.get(role)
+    if isinstance(p, str) and hashlib.sha256(open(p, "rb").read()).hexdigest() != h:
+        sys.exit(f"fetch-artifacts: {role} at {p} does not match its pin")
+json.dump(m, open(f"{new}/manifest.json", "w"), indent=2, sort_keys=True)
+PY
+printf 'fetched %s (%s) in %.1f s\n' "$tip" "$(cut -d' ' -f1-2 "$set_dir/PROVENANCE" 2>/dev/null)" "$(awk -v a="$t0" -v b="$(date +%s.%N)" 'BEGIN{print b-a}')" >&2
+echo "$dest/manifest.json"

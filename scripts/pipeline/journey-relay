@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""scripts/pipeline/journey-relay -- carry the journey box's red rows into the merge queue.
+
+  scripts/pipeline/journey-relay --box USER@HOST --queue /abs/MERGE-QUEUE.md --keep DIR [--once] [--every S]
+
+Runs where the merge queue file lives (the boxes cannot reach it). Every S seconds (default 120):
+for each $JOURNEY_ROOT/<tip>/DONE on the box not yet relayed, copy table.txt and results.tsv to
+DIR/<tip>.{txt,tsv} and insert into the queue file, under the "## JOURNEYS" heading (created at the
+end if absent), one summary line for the tip and one line per red row (red.txt, written by
+journey-runner, with the owning lane where it can tell). DIR/relayed lists relayed tips. The
+insertion re-reads the file and replaces it atomically, so a concurrent writer loses at most a
+window of milliseconds; it never rewrites other sections.
+"""
+import argparse, os, pathlib, subprocess, sys, tempfile, time
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--box", required=True)
+ap.add_argument("--queue", required=True)
+ap.add_argument("--keep", required=True)
+ap.add_argument("--root", default="/srv/journeys")
+ap.add_argument("--once", action="store_true")
+ap.add_argument("--every", type=int, default=120)
+a = ap.parse_args()
+keep = pathlib.Path(a.keep); keep.mkdir(parents=True, exist_ok=True)
+seen_f = keep / "relayed"; seen_f.touch()
+
+def ssh(cmd):
+    return subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", a.box, cmd],
+                          capture_output=True, text=True, timeout=300)
+
+def insert(lines):
+    q = pathlib.Path(a.queue)
+    text = q.read_text()
+    rows = text.split("\n")
+    try:
+        h = next(i for i, l in enumerate(rows) if l.strip() == "## JOURNEYS")
+        end = next((i for i in range(h + 1, len(rows)) if rows[i].startswith("## ")), len(rows))
+        while end > h + 1 and rows[end - 1].strip() == "":
+            end -= 1
+        rows[end:end] = lines
+    except StopIteration:
+        while rows and rows[-1] == "":
+            rows.pop()
+        rows += ["", "## JOURNEYS", "(scripts/pipeline/journey-runner on the journey box; one summary line per tip, one line per red row)"] + lines + [""]
+    fd, tmp = tempfile.mkstemp(dir=q.parent, prefix=".mq.")
+    with os.fdopen(fd, "w") as f:
+        f.write("\n".join(rows) if rows[-1] == "" else "\n".join(rows) + "\n")
+    os.chmod(tmp, os.stat(q).st_mode & 0o777)
+    os.replace(tmp, q)
+
+while True:
+    seen = set(seen_f.read_text().split())
+    r = ssh(f"cd {a.root} 2>/dev/null && for d in */DONE; do [ -f \"$d\" ] && echo ${{d%/DONE}}; done")
+    for tip in [t for t in r.stdout.split() if len(t) == 40 and t not in seen]:
+        got = {}
+        for f in ("table.txt", "results.tsv", "red.txt", "WALL_S"):
+            got[f] = ssh(f"cat {a.root}/{tip}/{f}").stdout
+        (keep / f"{tip}.txt").write_text(got["table.txt"])
+        (keep / f"{tip}.tsv").write_text(got["results.tsv"])
+        res = [l.split("\t") for l in got["results.tsv"].splitlines() if l.strip()]
+        counts = {}
+        for row in res:
+            counts[row[1]] = counts.get(row[1], 0) + 1
+        head = got["table.txt"].splitlines()[0] if got["table.txt"] else f"tip {tip}"
+        summary = (f"- {time.strftime('%H:%M', time.gmtime())}Z journeys {tip[:12]} ({head.split('labels:')[-1].split('set:')[0].strip() or 'unlabelled'}): "
+                   + " ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+                   + f", wall {got['WALL_S'].strip()} s; table burst-e2e:{a.root}/{tip}/table.txt = {keep}/{tip}.txt")
+        insert([summary] + [l for l in got["red.txt"].splitlines() if l.strip()])
+        with open(seen_f, "a") as f:
+            f.write(tip + "\n")
+        print(summary, flush=True)
+    if a.once:
+        break
+    time.sleep(a.every)

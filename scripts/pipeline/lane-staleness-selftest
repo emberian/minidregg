@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# scripts/pipeline/lane-staleness-selftest -- does a warm lane see a source change? (a falsifier)
+#
+#   scripts/pipeline/lane-staleness-selftest WARM_TREE SCRATCH_DIR
+#
+# Makes a private warm copy (clone-warm) of WARM_TREE in SCRATCH_DIR and plants, in a module M
+# that has an importer D, a new declaration (committed, as a rebase would bring it). Then asserts:
+#   (1) `lake build --no-build M` and `... D` report out-of-date (Lake re-hashes sources; hardlinked
+#       traces carried from the base do not fool it);
+#   (2) the BARE `lake env lean` of a probe file importing M does NOT see the new declaration (the
+#       hazard: it reads M's stale olean) -- if this ever passes, the hazard is gone, say so;
+#   (3) scripts/pipeline/lane-check on the same probe rebuilds M and the probe sees it;
+#   (4) WARM_TREE's M.olean is byte-identical before and after (nothing leaked into the base).
+# Exit 0 only if (1), (3), (4) hold; (2) is reported either way. Builds one module in a slot.
+set -uo pipefail
+PIPELINE_PROG=lane-staleness-selftest
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+. "$here/lib.sh"
+base=${1:?WARM_TREE}; S=${2:?SCRATCH_DIR}
+[ ! -e "$S" ] || pipeline_die "refusing existing $S"
+M=${SELFTEST_MODULE:-Kernel.ObjectRecord}; D=${SELFTEST_IMPORTER:-}
+mf=${M//.//}.lean
+bo=$base/.lake/build/lib/lean/${M//.//}.olean
+[ -f "$base/$mf" ] && [ -f "$bo" ] || pipeline_die "$M is not a built module of $base"
+before=$(sha256sum "$bo" | cut -d' ' -f1)
+"$here/clone-warm" "$base" "$S/src" >/dev/null || exit 1
+cd "$S/src"
+[ -n "$D" ] || D=$(grep -rlE "^import +$M\$" --include=*.lean Kernel Host Compiler Theory Pred Effects 2>/dev/null | head -1 | sed 's|\.lean$||; s|/|.|g')
+[ -n "$D" ] || pipeline_die "no importer of $M found; set SELFTEST_IMPORTER"
+fails=0; ok() { echo "ok   $*"; }; bad() { echo "FAIL $*"; fails=$((fails+1)); }
+cp -p "$mf" "$mf.t" && mv -f "$mf.t" "$mf"      # never write a shared inode in place
+printf '\n/-- lane-staleness-selftest probe. -/\ndef laneStalenessProbe20261004 : Nat := 42\n' >>"$mf"
+git -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qam "selftest: plant a declaration in $M"
+for t in "$M" "$D"; do
+  out=$(lake build --no-build "$t" 2>&1)
+  grep -q 'out-of-date' <<<"$out" && ok "(1) lake build --no-build $t: out-of-date after the planted change" \
+    || bad "(1) lake build --no-build $t says: $(tail -1 <<<"$out")"
+done
+mkdir -p "$S/probe"; printf 'import %s\n#check @laneStalenessProbe20261004\n' "$M" >"$S/probe/Probe.lean"
+if lake env lean "$S/probe/Probe.lean" >"$S/bare.out" 2>&1; then
+  echo "note (2) bare lake env lean SAW the planted declaration: the stale-olean hazard did not reproduce"
+else ok "(2) bare lake env lean reads the STALE olean (the hazard): $(grep -m1 -o 'Unknown.*' "$S/bare.out")"; fi
+if "$here/lane-check" "$S/probe/Probe.lean" >"$S/check.out" 2>&1; then ok "(3) lane-check rebuilt the import and the probe sees the declaration"
+else bad "(3) lane-check: $(tail -3 "$S/check.out" | tr '\n' ' ')"; fi
+after=$(sha256sum "$bo" | cut -d' ' -f1)
+[ "$before" = "$after" ] && ok "(4) base $M.olean unchanged" || bad "(4) BASE $M.olean CHANGED ($before -> $after)"
+[ "$fails" = 0 ] && echo "lane-staleness-selftest: PASS" || { echo "lane-staleness-selftest: $fails FAILED"; exit 1; }

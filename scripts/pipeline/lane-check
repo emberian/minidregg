@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# scripts/pipeline/lane-check -- the SAFE single-file inner loop for a warm lane (PIPELINE item 5).
+#
+#   scripts/pipeline/lane-check FILE.lean...        (in the lane's src/)
+#
+# `lake env lean FILE` elaborates FILE against whatever .olean files its imports have NOW. It
+# never rebuilds an import. After a fetch/rebase (or an edit to a module FILE imports), those
+# oleans can be older than their sources, and the check then runs against stale declarations:
+# a false red, or worse a false green. Lake itself is not fooled (`lake build` and
+# `lake build --no-build` re-hash sources and see the change); only the bare `lake env lean`
+# path skips it. So this script first asks Lake whether every module FILE imports is up to
+# date (`lake build --no-build`, no compile), builds the stale ones in a build slot under
+# swarm-build if not, and only then runs `lake env lean FILE`. Prints which imports it rebuilt.
+# Env: LEAN_NUM_THREADS (4), SWARM_MEM_MAX (32G).
+set -uo pipefail
+PIPELINE_PROG=lane-check
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+. "$here/lib.sh"
+[ $# -ge 1 ] || pipeline_die "usage: lane-check FILE.lean..."
+root=$(git rev-parse --show-toplevel) || pipeline_die "not in a clone"
+cd "$root"
+log=$(mktemp "${TMPDIR:-/tmp}/lane-check.XXXXXX"); trap 'rm -f "$log"' EXIT
+mods=$(for f in "$@"; do sed -n 's/^import[[:space:]]\{1,\}//p' "$f"; done | tr ' ' '\n' | grep -v '^$' |
+  while read -r m; do f=${m//.//}.lean; [ -f "$f" ] && echo "$m"; done | sort -u)
+if [ -n "$mods" ]; then
+  if ! lake build --no-build $mods >"$log" 2>&1; then
+    grep -q 'out-of-date' "$log" || { cat "$log" >&2; pipeline_die "lake could not resolve the imports"; }
+    stale=$(grep -oE 'Building [A-Za-z0-9_.]+' "$log" | awk '{print $2}' | sort -u | paste -sd' ')
+    pipeline_log "imports out of date (first stale: ${stale:-?}); building: $mods"
+    LEAN_NUM_THREADS=${LEAN_NUM_THREADS:-4} SWARM_MEM_MAX=${SWARM_MEM_MAX:-32G} pipeline_slot swarm-build lake build $mods >"$log" 2>&1 \
+      || { grep -E '^error|✖' "$log" | head -20 >&2; pipeline_die "an import does not build (above): FILE cannot be checked against it"; }
+    pipeline_log "rebuilt $(grep -c '\] Built ' "$log") module(s)"
+  fi
+fi
+rc=0
+for f in "$@"; do LEAN_NUM_THREADS=${LEAN_NUM_THREADS:-4} lake env lean "$f" || rc=$?; done
+exit $rc

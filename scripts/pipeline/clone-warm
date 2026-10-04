@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# scripts/pipeline/clone-warm -- a PRIVATE warm copy of any warm Mini tree, in seconds.
+#
+#   scripts/pipeline/clone-warm SRC DEST
+#
+# SRC is a built clone (its `lake build Minidregg +Host.Main:leanArts ObjectiveProofs` replays);
+# DEST/ must not exist. The recipe of the burst boxes' mk-lane.sh (itself from the persvati and
+# hbox bases), with the base path as an argument, so the artifact publisher can copy a gated
+# clone, the warm base or the `next` base alike:
+#   - source tree + .git: real copies (rsync); editors and git write in place.
+#   - .lake/build: cp -al, then every file UNSHARED except *.olean and *.o (lean and leanc write
+#     a temporary and rename(2) it; everything else lake writes in place with O_TRUNC).
+#   - .lake/packages: cp -al; unshared are the small files lake may rewrite without recompiling
+#     (*.trace, *.hash, *.json, lakefile.olean*, manifests, lean-toolchain) and each package's
+#     .git except objects/. Package build products stay shared: never change lake-manifest.json
+#     or lean-toolchain in DEST.
+# Refuses a dirty tracked SRC, an existing DEST, and any shared inode outside that allow-list.
+# Never writes into SRC.
+set -euo pipefail
+PIPELINE_PROG=clone-warm
+. "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/lib.sh"
+SRC=${1:?SRC}; DEST=${2:?DEST}
+SRC=$(CDPATH='' cd -- "$SRC" && pwd -P)
+[ -d "$SRC/.git" ] && [ -d "$SRC/.lake/build" ] || pipeline_die "$SRC is not a built clone"
+[ ! -e "$DEST" ] || pipeline_die "destination $DEST exists"
+[ -z "$(git -C "$SRC" status --porcelain --untracked-files=no)" ] || pipeline_die "$SRC tracked tree is dirty"
+mkdir -p "$DEST"
+DEST=$(CDPATH='' cd -- "$DEST" && pwd -P)
+rsync -a --exclude=/.lake --exclude=/target-gates --exclude=/build-logs "$SRC/" "$DEST/"
+cp -al "$SRC/.lake" "$DEST/.lake"
+unshare() { cp -p -- "$1" "$1.cw.tmp" && mv -f -- "$1.cw.tmp" "$1"; }
+export -f unshare
+cd "$DEST/.lake"
+find . -mindepth 1 -maxdepth 1 ! -name build ! -name packages -print0 |
+  xargs -0 -r -I{} find {} -type f -links +1 -print0 |
+  xargs -0 -r -n 256 bash -c 'for f; do unshare "$f"; done' _
+find build -type f -links +1 ! -name '*.olean' ! -name '*.o' -print0 |
+  xargs -0 -r -P 8 -n 256 bash -c 'for f; do unshare "$f"; done' _
+find packages \( -path '*/.git/objects' -prune \) -o -type f -links +1 \( \
+    -path 'packages/*/.git/*' -o -name '*.trace' -o -name '*.hash' -o -name '*.json' \
+    -o -name 'lakefile.olean*' -o -name 'lake-manifest.json' -o -name 'lean-toolchain' \) -print0 |
+  xargs -0 -r -P 8 -n 256 bash -c 'for f; do unshare "$f"; done' _
+cd "$DEST"
+bad=$( { find .lake -path .lake/packages -prune -o -type f -links +1 ! -path '.lake/build/*' -print
+         find .lake/build -type f -links +1 ! -name '*.olean' ! -name '*.o' -print
+         find .lake/packages \( -path '*/.git/objects' -prune \) -o -type f -links +1 \( \
+           -path '*/.git/*' -o -name '*.trace' -o -name '*.hash' -o -name '*.json' \
+           -o -name 'lakefile.olean*' -o -name 'lean-toolchain' \) -print
+         find . -path ./.lake -prune -o -type f -links +1 -print; } | head -20)
+[ -z "$bad" ] || { echo "$bad" >&2; pipeline_die "shared inodes outside the allow-list remain in $DEST"; }
+touch .minidregg-native-snapshot
+echo "clone-warm: $DEST from $SRC at $(git rev-parse HEAD)"

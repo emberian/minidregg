@@ -75,3 +75,33 @@ candidate_state() {
   [ "$(jq -r '.signatureBinary' "$CONFIG")" = "$VERIFIER" ] \
     || candidate_die "pinned config names a different signature verifier than the manifest"
 }
+
+# candidate_build_root SRC
+# Cargo hashes the absolute path of every path dependency that lies outside the building package's
+# own directory (native/grain-runtime builds ../signed-api-path, ...; resource-client's `mini` has
+# the same shape) into `-C metadata`, hence into every symbol hash and the binary's layout, and
+# --remap-path-prefix does not reach it: one source built in two directories gives two binaries
+# (cv 01a0f830-42e7: grain-runtime 7b8f929c vs e75bccf1 on 7961b345). So every cargo command of a
+# candidate build runs through ONE fixed path: a symlink to SRC, which cargo follows lexically,
+# in a 0700 directory owned by this account (MINI_CANDIDATE_BUILD_ROOT, default
+# /tmp/minidregg-candidate-build), held under flock on fd 9 so two builds on one host take turns.
+# Builds compared for reproducibility must share the build root; it is recorded in provenance.
+# Sets CANDIDATE_BUILD_ROOT and CANDIDATE_BUILD_SRC (the path to hand cargo, and to remap).
+# The same fixed path is what lets a shared sccache (scripts/pipeline/install-sccache) hit across
+# lanes and tips. Release with candidate_build_root_release.
+candidate_build_root() {
+  CANDIDATE_BUILD_ROOT=${MINI_CANDIDATE_BUILD_ROOT:-/tmp/minidregg-candidate-build}
+  mkdir -p -m 0700 "$CANDIDATE_BUILD_ROOT" 2>/dev/null || true
+  [ -d "$CANDIDATE_BUILD_ROOT" ] && [ ! -L "$CANDIDATE_BUILD_ROOT" ] && [ -O "$CANDIDATE_BUILD_ROOT" ] \
+    || candidate_die "build root $CANDIDATE_BUILD_ROOT is not a directory owned by this account (set MINI_CANDIDATE_BUILD_ROOT)"
+  exec 9>"$CANDIDATE_BUILD_ROOT/lock"
+  flock 9
+  CANDIDATE_BUILD_SRC=$CANDIDATE_BUILD_ROOT/src
+  rm -f "$CANDIDATE_BUILD_SRC"
+  ln -s "$1" "$CANDIDATE_BUILD_SRC"
+}
+
+candidate_build_root_release() {
+  [ -z "${CANDIDATE_BUILD_SRC:-}" ] || rm -f "$CANDIDATE_BUILD_SRC"
+  exec 9>&-
+}

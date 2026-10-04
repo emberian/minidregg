@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# scripts/pipeline/journey-runner -- continuous journeys on the journey box (PIPELINE item 4).
+#
+#   scripts/pipeline/journey-runner [--once] [--tip TIP]
+#
+# Every PIPELINE_WATCH_S (60) seconds: for the READY artifact set each label points at (next first,
+# then green, then main; mirrored here by the gate box), not yet run, run every row of
+# journey-rows (the TIP's own copy when its tree has one) and write $JOURNEY_ROOT/TIP/:
+#   results.tsv   ROW<TAB>STATUS<TAB>WALL_S<TAB>OWNER<TAB>DETAIL  (one line per row or sub-row)
+#   table.txt     the same, aligned, with the tip, labels and total wall time
+#   red.txt       one MERGE-QUEUE line per red row (journey-relay appends them to MERGE-QUEUE.md)
+#   rows/<row>/   each row's evidence (stdout/stderr, result json, a red step's logs)
+#   DONE          when complete
+# The tree a row runs from: the tip's lean env ($ARTIFACT_ROOT/.leanenv/TIP, mirrored with its
+# oleans) when present, else source.tar from the set, extracted. Every row gets a fresh SHORT
+# scratch directory that is deleted after it (worlds, Stores, sockets, test keys). Owners: the row's
+# own hint, else the commit (commits.tsv of the set: commits since the previous green) that
+# touched the row's driver files, else unknown.
+set -uo pipefail
+PIPELINE_PROG=journey-runner
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+. "$here/lib.sh"
+once=0; only=""
+while [ $# -gt 0 ]; do
+  case "$1" in --once) once=1; shift ;; --tip) only=$2; once=1; shift 2 ;; *) pipeline_die "unknown $1" ;; esac
+done
+mkdir -p "$JOURNEY_ROOT"
+exec 7>"$JOURNEY_ROOT/.runner.lock"; flock -n 7 || pipeline_die "another journey-runner holds $JOURNEY_ROOT/.runner.lock"
+scratch_base=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}; [ -d "$scratch_base" ] && [ -w "$scratch_base" ] || scratch_base=/tmp
+
+owner_for() {  # SET ROW SRC -> a lane or commit naming who last changed the row's driver
+  local set=$1 row=$2 src=$3 pat
+  case "$row" in
+    journey|J*|K*|M*) pat='native/resource-client/journey|native/resource-client/journey.d/' ;;
+    objective) pat='objective-native|Host/Objective|tests/objective-native' ;;
+    rooms|JPRIV*) pat='rooms-e2e|jpriv' ;;
+    activity) pat='activity' ;;
+    seats|*SEAT*) pat='[Ss]eat' ;;
+    *) pat="$row" ;;
+  esac
+  [ -f "$set/commits.tsv" ] || { echo unknown; return; }
+  awk -F'\t' -v p="$pat" '$3 ~ p {print substr($1,1,12)" "$2; exit}' "$set/commits.tsv" | grep . || echo "unknown (no commit since the previous green touched $pat)"
+}
+
+run_tip() {
+  local tip=$1 set=$ARTIFACT_ROOT/$1 J=$JOURNEY_ROOT/$1 src leanenv=0 rowsfile t0 tmp
+  pipeline_verify_set "$set"
+  rm -rf "$J"; mkdir -p "$J/rows"; t0=$(date +%s)
+  labels=$(for l in next green main; do [ "$(readlink "$ARTIFACT_ROOT/$l" 2>/dev/null)" = "$tip" ] && printf '%s ' "$l"; done)
+  if [ -f "$ARTIFACT_ROOT/.leanenv/$tip/.pipeline-leanenv-complete" ]; then src=$ARTIFACT_ROOT/.leanenv/$tip; leanenv=1
+  else tmp=$(mktemp -d "$scratch_base/pjs.XXXXXX"); tar -xf "$set/source.tar" -C "$tmp"; src=$tmp; fi
+  rowsfile=$src/scripts/pipeline/journey-rows; [ -f "$rowsfile" ] || rowsfile=$here/journey-rows
+  unset JOURNEY_ROWS; . "$rowsfile"
+  pipeline_log "tip $tip (${labels% }) from $src (lean env: $leanenv); rows: ${JOURNEY_ROWS[*]}"
+  : >"$J/results.tsv"
+  for row in "${JOURNEY_ROWS[@]}"; do
+    local O=$J/rows/$row R s rc st detail owner
+    mkdir -p "$O"; R=$(mktemp -d "$scratch_base/pj.XXXXXX"); s=$(date +%s)
+    # Each row runs in its own transient scope: when it ends, everything it started (servers a
+    # hook forgot, setsid'd children) is stopped with it, by cgroup, not by matching command lines.
+    local unit=pj-$row-$(basename "$R" | tr -cd 'A-Za-z0-9')
+    SRC=$src SET=$set BIN=$set/bin MANIFEST=$set/manifest.json RUN=$R OUT=$O LEANENV=$leanenv ROWSFILE=$rowsfile ROW=$row \
+      systemd-run --user --scope --quiet --unit="$unit" -p MemoryMax="${PIPELINE_ROW_MEM_MAX:-24G}" -p MemorySwapMax=0 \
+        --setenv=SRC --setenv=SET --setenv=BIN --setenv=MANIFEST --setenv=RUN --setenv=OUT --setenv=LEANENV \
+        -- timeout "${PIPELINE_ROW_TIMEOUT_S:-5400}" bash -c '. "$ROWSFILE"; cd "$RUN" && "row_$ROW"' 2>"$O/row.err" >"$O/row.out"
+    rc=$?
+    systemctl --user stop "$unit.scope" 2>/dev/null
+    case $rc in 0) st=PASS ;; 99) st=ABSENT ;; 98) st=UNCONFIGURED ;; 124) st=FAIL; echo "timed out after ${PIPELINE_ROW_TIMEOUT_S:-5400} s" >>"$O/row.err" ;; *) st=FAIL ;; esac
+    detail=$(tail -1 "$O/row.err" | tr '\t' ' ' | cut -c1-300)
+    rm -rf "$R"                                   # the scratch world: Stores, sockets, test keys
+    owner=$( [ -s "$O/owner" ] && cat "$O/owner" || owner_for "$set" "$row" "$src")
+    if [ -s "$O/subrows.tsv" ]; then
+      while IFS=$'\t' read -r id sst wall sdet; do
+        local so=$owner
+        [[ $sdet =~ \(lane\ ([A-Za-z0-9_-]+)\) ]] && so="lane ${BASH_REMATCH[1]}"
+        [ "$sst" = PASS ] || so=$( [[ $so == lane* ]] && echo "$so" || owner_for "$set" "$id" "$src")
+        printf '%s/%s\t%s\t%s\t%s\t%s\n' "$row" "$id" "$sst" "$wall" "$so" "${sdet:0:300}" >>"$J/results.tsv"
+      done <"$O/subrows.tsv"
+      [ $rc = 0 ] || [ -n "$(awk -F'\t' '$2!="PASS"' "$O/subrows.tsv")" ] || printf '%s\t%s\t%s\t%s\t%s\n' "$row" FAIL $(( $(date +%s) - s )) "$owner" "exit $rc with every step PASS: $detail" >>"$J/results.tsv"
+    else
+      printf '%s\t%s\t%s\t%s\t%s\n' "$row" "$st" $(( $(date +%s) - s )) "$owner" "$detail" >>"$J/results.tsv"
+    fi
+    pipeline_log "  $row $st $(( $(date +%s) - s ))s"
+  done
+  [ "$leanenv" = 1 ] || rm -rf "$src"
+  local wall=$(( $(date +%s) - t0 ))
+  { printf 'tip %s  labels: %s  set: %s\njourney wall %s s on %s (%s CPUs), finished %s\n\n' "$tip" "${labels% }" "$(cat "$set/PROVENANCE" 2>/dev/null | cut -c1-120)" \
+      "$wall" "$(hostname)" "$(nproc)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'ROW\tSTATUS\tWALL_S\tOWNER\tDETAIL\n'; cat "$J/results.tsv"; } | column -t -s $'\t' >"$J/table.txt"
+  awk -F'\t' -v tip="${tip:0:12}" -v l="${labels% }" '$2=="FAIL"||$2=="UNBUILT"||$2=="SKIPPED"||$2=="NOT-RUN" {
+      printf "- [RED] %s %s | tip %s (%s) | owner: %s | %s\n", $1, $2, tip, l, $4, $5 }' "$J/results.tsv" >"$J/red.txt"
+  echo "$wall" >"$J/WALL_S"; date -u +%Y-%m-%dT%H:%M:%SZ >"$J/DONE"
+  pipeline_log "DONE $tip in ${wall}s: $(awk -F'\t' '{c[$2]++} END {for (k in c) printf "%s=%d ", k, c[k]}' "$J/results.tsv")"
+  # lean envs: drop those already run and no longer labelled, but keep the newest run one (the
+  # gate links the next copy against it). This box owns its copy of the store.
+  local keep=" $(for l in next green main; do readlink "$ARTIFACT_ROOT/$l" 2>/dev/null; done | paste -sd' ') " e n=0
+  for e in $(ls -1dt "$ARTIFACT_ROOT"/.leanenv/*/ 2>/dev/null); do
+    e=$(basename "$e"); [ -f "$JOURNEY_ROOT/$e/DONE" ] || continue
+    n=$((n + 1)); [ $n = 1 ] && continue
+    [[ $keep == *" $e "* ]] || rm -rf "$ARTIFACT_ROOT/.leanenv/$e"
+  done
+}
+
+while :; do
+  if [ -n "$only" ]; then run_tip "$(pipeline_full_sha "$only")"
+  else
+    for l in next green main; do
+      tip=$(readlink "$ARTIFACT_ROOT/$l" 2>/dev/null) || continue
+      [ -f "$ARTIFACT_ROOT/$tip/READY" ] && [ ! -f "$JOURNEY_ROOT/$tip/DONE" ] || continue
+      # the gate mirrors the lean env right after the set; give it PIPELINE_LEANENV_WAIT_S (1800)
+      if [ ! -f "$ARTIFACT_ROOT/.leanenv/$tip/.pipeline-leanenv-complete" ] &&
+         [ $(( $(date +%s) - $(stat -c %Y "$ARTIFACT_ROOT/$tip/READY") )) -lt "${PIPELINE_LEANENV_WAIT_S:-1800}" ]; then
+        continue
+      fi
+      run_tip "$tip"
+      break   # re-read labels: next may have moved while this ran
+    done
+  fi
+  [ "$once" = 1 ] && break
+  sleep "${PIPELINE_WATCH_S:-60}"
+done

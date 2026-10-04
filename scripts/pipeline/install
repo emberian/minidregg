@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# scripts/pipeline/install -- put this checkout's pipeline scripts and candidate builder on a box.
+#
+#   scripts/pipeline/install USER@HOST...      (from any checkout; rsync over ssh)
+#
+# Copies scripts/pipeline/ to $PIPELINE_ROOT/scripts and deploy/candidate/{lane-build.sh,lib.sh} to
+# $PIPELINE_ROOT/candidate on each box (the publisher's builder, see publish-artifacts), creating
+# $PIPELINE_ROOT, $ARTIFACT_ROOT and $JOURNEY_ROOT owned by the login user (sudo if needed).
+set -euo pipefail
+PIPELINE_PROG=install
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+. "$here/lib.sh"
+repo=$(CDPATH='' cd -- "$here/../.." && pwd)
+for h in "$@"; do
+  ssh "$h" "for d in $PIPELINE_ROOT/scripts $PIPELINE_ROOT/candidate $ARTIFACT_ROOT $JOURNEY_ROOT; do
+      mkdir -p \$d 2>/dev/null || sudo -n install -d -o \$(id -un) -g \$(id -gn) \$d; done"
+  rsync -a --delete "$here/" "$h:$PIPELINE_ROOT/scripts/"
+  rsync -a "$repo/deploy/candidate/lane-build.sh" "$repo/deploy/candidate/lib.sh" "$h:$PIPELINE_ROOT/candidate/"
+  echo "install: $h"
+done

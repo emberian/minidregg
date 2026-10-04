@@ -1,0 +1,90 @@
+# scripts/pipeline/journey-rows -- THE journey set the continuous runner runs on every new artifact
+# set (PIPELINE regime item 4). Sourced by scripts/pipeline/journey-runner from the TIP's own tree
+# (so a lane that adds a journey adds its row here in the same commit), falling back to the
+# runner's copy for a tip that predates this file.
+#
+# A row is a function row_<NAME> listed in JOURNEY_ROWS. It runs in a fresh scratch directory and
+# sees: SRC (the tip's tree), SET (the READY artifact set), BIN (= SET/bin), MANIFEST (the set's
+# journey-format manifest), RUN (a fresh SHORT scratch dir, deleted after the row: sockets fit
+# sun_path), OUT (kept: the row's evidence), LEANENV (1 when SRC has the tip's built oleans).
+# Exit 0 PASS; 99 ABSENT (the driver is not in this tree: reported, not red); 98 UNCONFIGURED (an
+# input the runner lacks, e.g. no lean env: reported, not red); anything else FAIL. A row may write
+# OUT/subrows.tsv (ID<TAB>STATUS<TAB>WALL_S<TAB>DETAIL) to report one table row per step; the
+# last stderr line is the row's detail. Rows generate their own test keys inside RUN; no secret
+# ever reaches the box. OWNER hints: OUT/owner (a lane name) when the row can tell.
+JOURNEY_ROWS=(journey objective rooms activity seats)
+
+# J0-J8 + the rotation rows (JROT, JROTL, and JRLANE and any *SEAT* step when the tip's journey.sh
+# has them), one fresh Store, through native/resource-client/journey.sh.
+row_journey() {
+  local js=$SRC/native/resource-client/journey.sh steps extra
+  [ -f "$js" ] || return 99
+  extra=$(sed -n 's/^STEPS=(\(.*\))$/\1/p' "$js" | tr ' ' '\n' | grep -E '^(JRLANE|.*SEAT.*)$' | paste -sd' ')
+  steps="J0 J1 J2 J3 J4 J5 J6 J7 J8 JROT JROTL${extra:+ $extra}"
+  JOURNEY_STEPS="$steps" JOURNEY_GROWTH_LEVELS=10 bash "$js" "$MANIFEST" "$RUN/j" >"$OUT/journey.out" 2>"$OUT/journey.err"
+  local rc=$?
+  [ -s "$RUN/j/journey-result.json" ] || { tail -1 "$OUT/journey.err" >&2; return 1; }
+  cp "$RUN/j/journey-result.json" "$OUT/"
+  jq -r --arg want " $steps " '.steps[] | select($want | contains(" " + .id + " ")) |
+    [.id, .status, (.wallSeconds|tostring), (.detail // "" | gsub("[\t\n]"; " "))] | @tsv' \
+    "$RUN/j/journey-result.json" >"$OUT/subrows.tsv"
+  # keep each red step's own logs (the world itself goes with RUN)
+  jq -r '.steps[] | select(.status != "PASS") | .id' "$RUN/j/journey-result.json" | while read -r id; do
+    [ -d "$RUN/j/steps/$id" ] && cp -r "$RUN/j/steps/$id" "$OUT/step-$id" 2>/dev/null
+  done
+  echo "frontier $(jq -r .frontier "$RUN/j/journey-result.json")" >&2
+  return $rc
+}
+
+# The native Objective acceptance (Accepted receipt + every refusal) on its own two scratch worlds.
+row_objective() {
+  local d=$SRC/native/resource-client/objective-native-acceptance.py
+  [ -f "$d" ] || return 99
+  [ "$LEANENV" = 1 ] || { echo "no lean env for this tip (its mutations run lake env lean)" >&2; return 98; }
+  (cd "$SRC" && python3 "$d" all --bin "$BIN" --root "$RUN/o") >"$OUT/objective.out" 2>"$OUT/objective.err"
+  local rc=$?
+  cp "$RUN/o/results/summary.json" "$OUT/" 2>/dev/null
+  tail -1 "$OUT/objective.out" >&2
+  return $rc
+}
+
+# Private rooms end to end on a real Host (J0..J5 + JPRIV1 against the expected row table).
+row_rooms() {
+  local d=$SRC/native/resource-client/rooms-e2e.sh
+  [ -f "$d" ] || return 99
+  MINI_HOST_BIN=$BIN/minidregg-host MINI_BIN=$BIN/mini MINI_STORE_BIN=$BIN/minidregg-link-sqlite-store \
+    MINI_VERIFIER_BIN=$BIN/minidregg-credential-signature-verifier \
+    bash "$d" "$RUN/r" >"$OUT/rooms.out" 2>"$OUT/rooms.err"
+  local rc=$?
+  tail -1 "$OUT/rooms.out" >&2
+  return $rc
+}
+
+# The activity acceptance (activity-native's driver) once it is in the tree.
+row_activity() {
+  local d
+  d=$(ls "$SRC"/native/resource-client/*activity*accept* "$SRC"/native/resource-client/*activity*e2e* 2>/dev/null | head -1)
+  [ -n "$d" ] || return 99
+  case "$d" in
+    *.py) (cd "$SRC" && python3 "$d" all --bin "$BIN" --root "$RUN/a") ;;
+    *)    (cd "$SRC" && MINI_HOST_BIN=$BIN/minidregg-host MINI_BIN=$BIN/mini bash "$d" "$MANIFEST" "$RUN/a") ;;
+  esac >"$OUT/activity.out" 2>"$OUT/activity.err"
+  local rc=$?
+  echo "$(basename "$d"): $(tail -1 "$OUT/activity.out")" >&2
+  return $rc
+}
+
+# Seats: a stand-alone seats driver when one exists (seat steps of journey.sh run in row_journey).
+row_seats() {
+  local d
+  d=$(ls "$SRC"/native/resource-client/*seat*journey* "$SRC"/native/resource-client/*seat*accept* \
+         "$SRC"/native/resource-client/*seat*e2e* 2>/dev/null | head -1)
+  [ -n "$d" ] || return 99
+  case "$d" in
+    *.py) (cd "$SRC" && python3 "$d" all --bin "$BIN" --root "$RUN/s") ;;
+    *)    (cd "$SRC" && bash "$d" "$MANIFEST" "$RUN/s") ;;
+  esac >"$OUT/seats.out" 2>"$OUT/seats.err"
+  local rc=$?
+  echo "$(basename "$d"): $(tail -1 "$OUT/seats.out")" >&2
+  return $rc
+}

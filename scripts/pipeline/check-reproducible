@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# scripts/pipeline/check-reproducible -- does one tip's `mini` come out byte-identical twice?
+#
+#   scripts/pipeline/check-reproducible TIP WORK_DIR [BINARY_CRATE BINARY]   (default resource-client mini)
+#
+# Extracts `git archive TIP` (from $PIPELINE_REPO_URL, or the repo this script is in) into two
+# different directories A and B and builds the binary four times from cold target directories,
+# sccache OFF (a cache hit would make any two builds agree):
+#   fixed-A, fixed-B   through the fixed candidate build root (deploy/candidate/lib.sh
+#                      candidate_build_root), the path deploy/candidate/build.sh uses
+#   direct-A, direct-B cargo run in each real directory with --remap-path-prefix only
+# and prints the four SHA-256s. The verdict line is REPRODUCIBLE when fixed-A == fixed-B (the
+# claim the candidate builders make), and reports separately whether the direct pair agrees.
+# Writes WORK_DIR/repro.tsv. Run inside a build slot (cargo of four cold builds).
+set -euo pipefail
+PIPELINE_PROG=check-reproducible
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+. "$here/lib.sh"
+tip=${1:?TIP}; work=${2:?WORK_DIR}; crate=${3:-resource-client}; bin=${4:-mini}
+[ ! -e "$work" ] || pipeline_die "refusing existing $work"
+mkdir -p "$work"; work=$(CDPATH='' cd -- "$work" && pwd -P)
+repo=$(git -C "$here" rev-parse --show-toplevel)
+git -C "$repo" cat-file -e "$tip^{commit}" 2>/dev/null || git -C "$repo" fetch -q "$PIPELINE_REPO_URL" "$tip"
+git -C "$repo" archive --format=tar "$tip" >"$work/source.tar"
+for d in A B; do mkdir -p "$work/$d/src"; tar -xf "$work/source.tar" -C "$work/$d/src"; done
+unset RUSTC_WRAPPER
+rust=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' "$work/A/src/rust-toolchain.toml")
+cargo_home=$(CDPATH='' cd -- "${CARGO_HOME:-$HOME/.cargo}" && pwd -P)
+export CARGO_INCREMENTAL=0
+# The build-root helper of THIS checkout (an older tip may predate it); the build root is a
+# property of the builder, not of the source under test.
+. "$repo/deploy/candidate/lib.sh"
+build() {  # NAME SRC_FOR_CARGO REMAP_FROM TARGET
+  local name=$1 s=$2 from=$3 t=$4 t0=$(date +%s)
+  (cd "$s" && RUSTFLAGS="--remap-path-prefix=$from=/minidregg --remap-path-prefix=$cargo_home=/cargo" \
+    cargo "+$rust" build --release --locked -j "${PIPELINE_CARGO_JOBS:-8}" --manifest-path "$s/native/$crate/Cargo.toml" \
+      --target-dir "$t" --bin "$bin") >"$work/$name.log" 2>&1 || { tail -20 "$work/$name.log"; pipeline_die "$name build failed"; }
+  printf '%s\t%s\t%ss\n' "$name" "$(sha256sum "$t/release/$bin" | cut -d' ' -f1)" "$(( $(date +%s) - t0 ))" | tee -a "$work/repro.tsv"
+}
+for d in A B; do
+  candidate_build_root "$work/$d/src"
+  build "fixed-$d" "$CANDIDATE_BUILD_SRC" "$CANDIDATE_BUILD_SRC" "$work/$d/target-fixed"
+  candidate_build_root_release
+done
+for d in A B; do build "direct-$d" "$work/$d/src" "$work/$d/src" "$work/$d/target-direct"; done
+h() { awk -v n="$1" '$1==n{print $2}' "$work/repro.tsv"; }
+direct=$([ "$(h direct-A)" = "$(h direct-B)" ] && echo agree || echo DIFFER)
+if [ "$(h fixed-A)" = "$(h fixed-B)" ]; then
+  echo "check-reproducible: REPRODUCIBLE $crate/$bin at $tip through the fixed build root ($(h fixed-A)); direct builds in two directories: $direct"
+else
+  echo "check-reproducible: NOT REPRODUCIBLE $crate/$bin at $tip: fixed-A $(h fixed-A) fixed-B $(h fixed-B); direct: $direct"; exit 1
+fi

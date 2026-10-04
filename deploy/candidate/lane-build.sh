@@ -17,6 +17,10 @@
 # its binaries were not built at. package.py then REFUSES a role set without the consent pair or the key broker, or missing any role
 # of `package.py --rust-roles` (the one Rust role list this script and build.sh both read).
 set -euo pipefail
+CANDIDATE_PROG=lane-build.sh
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
+# shellcheck source=deploy/candidate/lib.sh
+. "$here/lib.sh"
 LANE_DIR=${LANE_DIR:?LANE_DIR=/abs/path/of/the/lane}
 [[ $LANE_DIR = /* ]] || { echo "lane-build: LANE_DIR must be absolute" >&2; exit 64; }
 step=${1:?host|consent|rust|pack}; shift
@@ -58,13 +62,19 @@ case $step in
     rust=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
     [ -n "$rust" ] || { echo "lane-build: no Rust channel in rust-toolchain.toml" >&2; exit 1; }
     export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$LANE_DIR/rust-target} CARGO_INCREMENTAL=0
-    export RUSTFLAGS="--remap-path-prefix=$src=/minidregg --remap-path-prefix=$HOME/.cargo=/cargo"
+    # The same bytes build.sh would make: cargo runs through the fixed build root (lib.sh), so the
+    # lane directory's path does not reach -C metadata. Held (flock) for the whole Rust step.
+    candidate_build_root "$src"
+    trap candidate_build_root_release EXIT
+    cargo_home=$(CDPATH='' cd -- "${CARGO_HOME:-$HOME/.cargo}" && pwd -P)
+    export RUSTFLAGS="--remap-path-prefix=$CANDIDATE_BUILD_SRC=/minidregg --remap-path-prefix=$cargo_home=/cargo"
+    echo "$CANDIDATE_BUILD_SRC" >"$LANE_DIR/logs/rust-build.root"
     git rev-parse HEAD >"$LANE_DIR/logs/rust-build.commit"
     python3 deploy/candidate/package.py --rust-roles >"$LANE_DIR/logs/rust-roles.txt"
     while read -r _ crate bin; do
       echo "== $crate/$bin $(date -u +%H:%M:%S)"
-      cargo "+$rust" build --release --offline --locked -j "${MINI_CANDIDATE_CARGO_JOBS:-4}" \
-        --manifest-path "native/$crate/Cargo.toml" --bin "$bin" </dev/null >"$LANE_DIR/logs/cargo-$crate-$bin.log" 2>&1 \
+      (cd "$CANDIDATE_BUILD_SRC" && cargo "+$rust" build --release --offline --locked -j "${MINI_CANDIDATE_CARGO_JOBS:-4}" \
+        --manifest-path "$CANDIDATE_BUILD_SRC/native/$crate/Cargo.toml" --bin "$bin") </dev/null >"$LANE_DIR/logs/cargo-$crate-$bin.log" 2>&1 \
         || { echo "FAIL $crate/$bin"; tail -30 "$LANE_DIR/logs/cargo-$crate-$bin.log"; exit 1; }
       install -m 0555 "$CARGO_TARGET_DIR/release/$bin" "$LANE_DIR/artifacts/$bin"
     done <"$LANE_DIR/logs/rust-roles.txt"
@@ -89,9 +99,10 @@ case $step in
     jq -n --arg lean "$(lean --version)" --arg lake "$(lake --version)" --arg leanPin "$(cat lean-toolchain)" \
       --arg rustPin "$rust" --arg rustc "$(rustc "+$rust" -vV | tr '\n' ';')" --arg cargo "$(cargo "+$rust" -V)" \
       --arg cc "$(cc --version | head -1)" --arg host "$(hostname)" \
+      --arg root "$(cat "$LANE_DIR/logs/rust-build.root" 2>/dev/null || echo "the lane directory (no build root recorded)")" \
       '{recorded: "lane-build", builtOn: $host, leanToolchain: $leanPin, lean: $lean, lake: $lake,
         rustToolchain: $rustPin, rustc: $rustc, cargo: $cargo, cc: $cc,
-        rustflags: "remap source=/minidregg, CARGO_HOME=/cargo",
+        rustflags: ("remap source=/minidregg, CARGO_HOME=/cargo, cargo ran through " + $root),
         nativeHost: "scripts/build-native-host.sh via lane-build.sh (incremental or full), consent as its companion"}' \
       >"$LANE_DIR/logs/toolchains-$head.json"
     python3 deploy/candidate/package.py --roles "$LANE_DIR/logs/roles-$head.json" --source-archive "$LANE_DIR/logs/source-$head.tar" \

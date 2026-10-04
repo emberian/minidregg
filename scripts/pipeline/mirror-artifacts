@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# scripts/pipeline/mirror-artifacts -- copy one READY artifact set to the other boxes (VERIFY-ONCE 3:
+# boxes receive build products by copy, never by rebuilding the same tip).
+#
+#   scripts/pipeline/mirror-artifacts TIP [LABEL] [LEAN_TREE]
+#
+# To each of $PIPELINE_MIRRORS: rsync $ARTIFACT_ROOT/TIP/ to the same path (manifest.json's absolute
+# paths stay true), READY last, then the LABEL symlink. With LEAN_TREE (a built clone at TIP), also
+# to each of $PIPELINE_LEANENV_MIRRORS (default: the journey box): the tree's sources, .git and
+# Lean libraries (no C, no objects, no binaries) at $ARTIFACT_ROOT/.leanenv/TIP, hard-linked
+# against the newest earlier copy there, so the native acceptances' `lake env lean --run` has
+# the tip's oleans without a build. .pipeline-leanenv-complete is written last; readers wait for it.
+# Box-to-box ssh uses $PIPELINE_MIRROR_KEY (scripts/pipeline/setup-mirror-key): a key the mirrors
+# accept only as `rrsync $ARTIFACT_ROOT` (write into the artifact store, nothing else).
+set -euo pipefail
+PIPELINE_PROG=mirror-artifacts
+. "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/lib.sh"
+tip=$(pipeline_full_sha "${1:?TIP}"); label=${2:-}; lean=${3:-}
+key=${PIPELINE_MIRROR_KEY:-$HOME/.ssh/pipeline_mirror}
+leanmirrors=${PIPELINE_LEANENV_MIRRORS:-ember@152.236.4.24}
+[ -f "$ARTIFACT_ROOT/$tip/READY" ] || pipeline_die "$tip is not READY here"
+[ -f "$key" ] || pipeline_die "no mirror key $key (scripts/pipeline/setup-mirror-key)"
+R=(rsync -a -e "ssh -i $key -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20")
+rc=0
+for m in $PIPELINE_MIRRORS; do
+  t=$(date +%s)
+  if "${R[@]}" --delete --exclude=/READY "$ARTIFACT_ROOT/$tip/" "$m:$tip/" \
+     && "${R[@]}" "$ARTIFACT_ROOT/$tip/READY" "$m:$tip/READY" \
+     && { [ -z "$label" ] || "${R[@]}" -l "$ARTIFACT_ROOT/$label" "$m:"; }; then
+    pipeline_log "mirrored $tip${label:+ ($label)} to $m in $(( $(date +%s) - t )) s"
+  else pipeline_log "mirror to $m FAILED"; rc=1; fi
+done
+if [ -n "$lean" ]; then
+  [ "$(git -C "$lean" rev-parse HEAD)" = "$tip" ] || pipeline_die "LEAN_TREE $lean is not at $tip"
+  empty=$(mktemp -d); trap 'rmdir "$empty" 2>/dev/null; rm -f "$empty.done"' EXIT
+  for m in $leanmirrors; do
+    t=$(date +%s)
+    "${R[@]}" --dirs "$empty/" "$m:.leanenv/" || true    # rrsync cannot mkdir -p: create the parent
+    prev=$("${R[@]}" --list-only "$m:.leanenv/" 2>/dev/null | awk '$5 ~ /^[0-9a-f]{40}$/ {print $3" "$4" "$5}' | sort | tail -1 | awk '{print $3}' || true)
+    link=(); [ -n "$prev" ] && [ "$prev" != "$tip" ] && link=(--link-dest="../$prev/")
+    if "${R[@]}" --delete "${link[@]}" \
+        --exclude=/target-gates --exclude=/build-logs --exclude=/rust-target --exclude='/native/*/target' \
+        --exclude=/.lake/build/ir --exclude=/.lake/build/bin --exclude='/.lake/packages/*/.lake/build/ir' \
+        --exclude='/.lake/packages/*/.lake/build/bin' --exclude='*.o' --exclude='*.c' \
+        "$lean/" "$m:.leanenv/$tip/" \
+       && date -u +%Y-%m-%dT%H:%M:%SZ >"$empty.done" && "${R[@]}" "$empty.done" "$m:.leanenv/$tip/.pipeline-leanenv-complete"; then
+      pipeline_log "lean env $tip to $m in $(( $(date +%s) - t )) s${prev:+ (linked against ${prev:0:12})}"
+    else pipeline_log "lean env to $m FAILED"; rc=1; fi
+  done
+fi
+exit $rc

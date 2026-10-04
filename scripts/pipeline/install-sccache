@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# scripts/pipeline/install-sccache -- one shared sccache per build box (PIPELINE regime, item 3).
+#
+#   scripts/pipeline/install-sccache [--cache-dir DIR] [--size SIZE]
+#
+# Installs the pinned sccache release (sha256-checked) to $PIPELINE_ROOT/bin/sccache and writes
+# $PIPELINE_ROOT/sccache.env, the profile snippet every lane on the box sources:
+#
+#   . /srv/pipeline/sccache.env        # RUSTC_WRAPPER=sccache, one local disk cache per box
+#
+# One cache directory per box, shared by every lane (all lanes run as the same user). sccache
+# caches only non-incremental rustc invocations: registry dependencies always, a lane's own path
+# crates only under CARGO_INCREMENTAL=0 (release / candidate builds). Hits need equal absolute
+# paths, so the fixed candidate build root (deploy/candidate/build.sh, lib.sh) is what makes the
+# artifact builds of successive tips share entries.
+# Idempotent: re-running with the same pin rewrites nothing but the snippet.
+set -euo pipefail
+. "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/lib.sh"
+VERSION=v0.18.0
+SHA256=45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89
+cache_dir=${PIPELINE_SCCACHE_DIR:-/srv/sccache}
+size=${PIPELINE_SCCACHE_SIZE:-120G}
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --cache-dir) cache_dir=$2; shift 2 ;;
+    --size) size=$2; shift 2 ;;
+    *) pipeline_die "unknown argument $1" ;;
+  esac
+done
+case "$(uname -s):$(uname -m)" in Linux:x86_64) ;; *) pipeline_die "Linux x86_64 only" ;; esac
+mkdir -p "$PIPELINE_ROOT/bin" "$cache_dir"
+bin=$PIPELINE_ROOT/bin/sccache
+if [ ! -x "$bin" ] || ! "$bin" --version | grep -qx "sccache ${VERSION#v}"; then
+  tmp=$(mktemp -d "$PIPELINE_ROOT/.sccache-dl.XXXXXX")
+  trap 'rm -rf "$tmp"' EXIT
+  f=sccache-$VERSION-x86_64-unknown-linux-musl
+  curl -fsSL -o "$tmp/$f.tar.gz" "https://github.com/mozilla/sccache/releases/download/$VERSION/$f.tar.gz"
+  got=$(sha256sum "$tmp/$f.tar.gz" | cut -d' ' -f1)
+  [ "$got" = "$SHA256" ] || pipeline_die "sccache tarball sha256 $got != pinned $SHA256"
+  tar -xzf "$tmp/$f.tar.gz" -C "$tmp" "$f/sccache"
+  install -m 0755 "$tmp/$f/sccache" "$bin.new" && mv -f "$bin.new" "$bin"
+fi
+cat > "$PIPELINE_ROOT/sccache.env.new" <<SNIP
+# Written by scripts/pipeline/install-sccache ($VERSION). Source it; it only exports.
+export RUSTC_WRAPPER=$bin
+export SCCACHE_DIR=$cache_dir
+export SCCACHE_CACHE_SIZE=$size
+export SCCACHE_IDLE_TIMEOUT=0
+# One server per box: every lane talks to the same port, so the cache and its size bound are shared.
+export SCCACHE_SERVER_PORT=4226
+SNIP
+mv -f "$PIPELINE_ROOT/sccache.env.new" "$PIPELINE_ROOT/sccache.env"
+. "$PIPELINE_ROOT/sccache.env"
+# The SERVER runs the compilers, so it must live where the memory cap is: a user service in
+# swarm.slice (the slice every swarm-build shares), restarted if it dies. A server a client
+# auto-started outside the slice would run rustc uncapped; stop any such server first.
+if ! systemctl --user is-active -q pipeline-sccache.service; then
+  "$bin" --stop-server >/dev/null 2>&1 || true
+  systemd-run --user --unit=pipeline-sccache --slice=swarm.slice --quiet \
+    -p MemoryMax="${PIPELINE_SCCACHE_MEM_MAX:-32G}" -p MemorySwapMax=0 -p Restart=always -p Nice=10 \
+    --setenv=SCCACHE_DIR="$cache_dir" --setenv=SCCACHE_CACHE_SIZE="$size" --setenv=SCCACHE_IDLE_TIMEOUT=0 \
+    --setenv=SCCACHE_SERVER_PORT=4226 --setenv=SCCACHE_NO_DAEMON=1 --setenv=SCCACHE_START_SERVER=1 \
+    --setenv=PATH="$PATH" -- "$bin"
+  for _ in 1 2 3 4 5 6 7 8 9 10; do "$bin" --show-stats >/dev/null 2>&1 && break; sleep 0.5; done
+fi
+systemctl --user is-active -q pipeline-sccache.service || pipeline_die "pipeline-sccache.service is not active"
+"$bin" --show-stats | sed -n '1,4p'
+echo "install-sccache: $("$bin" --version) at $bin; cache $cache_dir ($size); snippet $PIPELINE_ROOT/sccache.env"

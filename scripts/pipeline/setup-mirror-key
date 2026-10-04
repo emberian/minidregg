@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# scripts/pipeline/setup-mirror-key -- the gate box's key for writing artifact sets to the mirrors.
+#
+#   scripts/pipeline/setup-mirror-key            (on the gate box: create the key, print the line)
+#   scripts/pipeline/setup-mirror-key --authorize 'ssh-ed25519 AAAA... comment'   (on each mirror)
+#
+# The key is box-local test infrastructure for disposable boxes: no passphrase, and a mirror
+# accepts it ONLY as `rrsync $ARTIFACT_ROOT` with every other ssh feature off (`restrict`), so its
+# holder can write into the artifact store and nothing else. Never copy it off the gate box.
+set -euo pipefail
+PIPELINE_PROG=setup-mirror-key
+. "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/lib.sh"
+key=${PIPELINE_MIRROR_KEY:-$HOME/.ssh/pipeline_mirror}
+if [ "${1:-}" = --authorize ]; then
+  pub=${2:?public key line}
+  case "$pub" in ssh-ed25519\ *) ;; *) pipeline_die "expected an ssh-ed25519 public key line" ;; esac
+  command -v rrsync >/dev/null || pipeline_die "rrsync is not installed"
+  mkdir -p "$ARTIFACT_ROOT" ~/.ssh; chmod 700 ~/.ssh
+  line="command=\"$(command -v rrsync) $ARTIFACT_ROOT\",restrict $pub"
+  grep -qxF "$line" ~/.ssh/authorized_keys 2>/dev/null || echo "$line" >>~/.ssh/authorized_keys
+  echo "setup-mirror-key: authorized for rrsync $ARTIFACT_ROOT"
+  exit 0
+fi
+[ -f "$key" ] || ssh-keygen -q -t ed25519 -N '' -C "pipeline-mirror@$(hostname)" -f "$key"
+cat "$key.pub"

@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# scripts/pipeline/artifact-watch -- the gate box's publisher loop (run it in tmux).
+#
+#   scripts/pipeline/artifact-watch [--once]
+#
+# The merge keeper appends one line per gated tip to $ARTIFACT_ROOT/TIPS:
+#   <40-hex sha> <main|green|next> <path of the gated tree when written> [notes...]
+# Every PIPELINE_WATCH_S (60) seconds this loop publishes the NEWEST unpublished line of each
+# label (an older line of the same label superseded while queued is skipped, never built), with
+# scripts/pipeline/publish-artifacts. It also follows GitHub's refs (main, tag green, branch next)
+# and RELABELS a READY set the ref points at; a ref alone never triggers a build (VERIFY-ONCE: the
+# keeper's gate decides what is a tip). A failed publication leaves $ARTIFACT_ROOT/.work/TIP.failed
+# (the log) and is not retried until that file is removed.
+set -uo pipefail
+PIPELINE_PROG=artifact-watch
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+. "$here/lib.sh"
+once=0; [ "${1:-}" = --once ] && once=1
+mkdir -p "$ARTIFACT_ROOT/.work"; touch "$ARTIFACT_ROOT/TIPS"
+while :; do
+  # newest line per label, in file order
+  awk 'NF>=3 && $1 ~ /^[0-9a-f]{40}$/ {last[$2]=$1" "$2" "$3} END {for (l in last) print last[l]}' "$ARTIFACT_ROOT/TIPS" |
+  sort -k2,2r |   # next before main/green: the journey box wants next first
+  while read -r sha label path; do
+    [ -f "$ARTIFACT_ROOT/$sha/READY" ] && { [ "$(readlink "$ARTIFACT_ROOT/$label" 2>/dev/null)" = "$sha" ] || pipeline_label "$label" "$sha"; continue; }
+    [ -f "$ARTIFACT_ROOT/.work/$sha.failed" ] && continue
+    pipeline_log "publishing $sha ($label) hint $path"
+    if ! "$here/publish-artifacts" "$sha" "$label" "$path" >"$ARTIFACT_ROOT/.work/$sha.out" 2>&1; then
+      mv "$ARTIFACT_ROOT/.work/$sha.out" "$ARTIFACT_ROOT/.work/$sha.failed"
+      pipeline_log "FAILED $sha: $ARTIFACT_ROOT/.work/$sha.failed"; tail -5 "$ARTIFACT_ROOT/.work/$sha.failed"
+    else tail -3 "$ARTIFACT_ROOT/.work/$sha.out"; fi
+  done
+  # relabel from GitHub refs (never build)
+  git ls-remote "$PIPELINE_REPO_URL" refs/heads/main refs/heads/next refs/tags/green 2>/dev/null |
+  while read -r sha ref; do
+    label=${ref##*/}
+    if [ -f "$ARTIFACT_ROOT/$sha/READY" ] && [ "$(readlink "$ARTIFACT_ROOT/$label" 2>/dev/null)" != "$sha" ]; then
+      pipeline_label "$label" "$sha" && pipeline_log "relabelled $label -> $sha (GitHub $ref)"
+      "$here/mirror-artifacts" "$sha" "$label" >/dev/null 2>&1 || pipeline_log "label mirror failed"
+    fi
+  done
+  [ "$once" = 1 ] && break
+  sleep "${PIPELINE_WATCH_S:-60}"
+done

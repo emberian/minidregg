@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# scripts/pipeline/publish-artifacts -- build one tip's native binaries ONCE and publish them.
+#
+#   scripts/pipeline/publish-artifacts TIP LABEL [WARM_TREE]
+#
+# PIPELINE regime item 3 (artifacts once per tip), on the gate box. TIP is a 40-hex commit,
+# LABEL one of main|green|next. WARM_TREE is a built clone at TIP (the merge keeper's gated tree,
+# the warm base, the `next` base); default: found by pipeline_find_tree. Without one at TIP, the
+# newest warm base is copied and moved to TIP, and the Lean delta compiles here, once.
+#
+# Steps, all in a private copy (scripts/pipeline/clone-warm) so the keeper's tree is never written:
+#   host     deploy/candidate/lane-build.sh host --umbrella   (links minidregg-host; the umbrella
+#            replays on a gated tree: compiled_source_modules=0)
+#   consent  lane-build.sh consent                            (minidregg-client-consent)
+#   rust     lane-build.sh rust: every role of `package.py --rust-roles` (mini, mini-keys, the spk
+#            pieces, ...) through the fixed build root, with the box's shared sccache
+#   pack     lane-build.sh pack $ARTIFACT_ROOT/TIP: the candidate format (bin/, SHA256SUMS,
+#            provenance.json, manifest.json with absolute paths under $ARTIFACT_ROOT/TIP)
+# host+consent+rust run under swarm-build: 16G and no build slot on a gated tree (nothing Lean
+# compiles), one slot and 32G when the Lean delta compiles here.
+# Then: PROVENANCE (one line: tip, label, toolchains, build command, wall seconds), timings.tsv,
+# commits.tsv (commits since the previous green set: sha, subject, files; the journey runner
+# names owners from it), logs/pipeline/, READY, the LABEL symlink, and the mirrors
+# (scripts/pipeline/mirror-artifacts). A READY set is never rebuilt; only relabelled.
+set -euo pipefail
+PIPELINE_PROG=publish-artifacts
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+. "$here/lib.sh"
+tip=$(pipeline_full_sha "${1:?TIP}"); label=${2:?LABEL}; tree=${3:-}
+case "$label" in main|green|next) ;; *) pipeline_die "LABEL must be main|green|next" ;; esac
+out=$ARTIFACT_ROOT/$tip
+# The BUILDER (lane-build.sh + lib.sh) is the pipeline's own, not the tip's: the fixed build root
+# and sccache are properties of how this box builds, and an older tip's copy predates them. The
+# tip supplies everything compiled and the role list (deploy/candidate/package.py, from the tree).
+builder=""
+for d in "$here/../../deploy/candidate" "$here/../candidate"; do
+  [ -x "$d/lane-build.sh" ] && grep -q candidate_build_root "$d/lib.sh" 2>/dev/null && { builder=$(CDPATH='' cd -- "$d" && pwd -P); break; }
+done
+[ -n "$builder" ] || pipeline_die "no builder with the fixed build root next to $here"
+mkdir -p "$ARTIFACT_ROOT/.work"
+exec 8>"$ARTIFACT_ROOT/.work/$tip.lock"
+flock -n 8 || { pipeline_log "$tip is being published by another run"; exit 0; }
+if [ -f "$out/READY" ]; then
+  pipeline_label "$label" "$tip"; pipeline_log "$tip already READY; labelled $label"; exit 0
+fi
+t0=$(date +%s)
+from=$(pipeline_find_tree "$tip" "$tree")
+moved=""
+if [ -z "$from" ]; then
+  from=$(CDPATH='' cd -- /srv/warm-base/src && pwd -P)
+  moved=" (warm base $(git -C "$from" rev-parse --short=12 HEAD) moved to the tip; Lean delta compiled here)"
+fi
+W=$ARTIFACT_ROOT/.work/$tip
+rm -rf "$W" "$out"                      # this script's own partial output of an earlier attempt
+mkdir -p "$W/logs"
+"$here/clone-warm" "$from" "$W/src" >"$W/logs/clone.log" 2>&1 || { cat "$W/logs/clone.log" >&2; exit 1; }
+cd "$W/src"
+if [ "$(git rev-parse HEAD)" != "$tip" ]; then
+  git cat-file -e "$tip^{commit}" 2>/dev/null || git fetch -q "$PIPELINE_REPO_URL" "$tip" "+refs/heads/*:refs/remotes/github/*" "+refs/tags/*:refs/tags/*"
+  git checkout -q -B main "$tip"
+fi
+t_clone=$(date +%s)
+pipeline_log "building $tip ($label) from $from$moved"
+
+# --- the build chain, one slot, one memory cap ------------------------------------------------
+cat >"$W/chain.sh" <<CHAIN
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$W/src"
+export LANE_DIR="$W" MINI_CANDIDATE_CARGO_JOBS=\${MINI_CANDIDATE_CARGO_JOBS:-8}
+if [ -n "$moved" ]; then   # not a gated tree: compile the delta in parallel first (the native builder serializes Lean)
+  s=\$(date +%s)
+  LEAN_NUM_THREADS=\${PIPELINE_LEAN_THREADS:-8} lake build Minidregg +Host.Main:leanArts ObjectiveProofs >"$W/logs/umbrella.log" 2>&1
+  printf 'umbrella\t%s\n' \$(( \$(date +%s) - s )) >>"$W/logs/timings.tsv"
+fi
+for step in host consent rust; do
+  s=\$(date +%s); args=(); [ \$step = host ] && args=(--umbrella)
+  if [ \$step = rust ] && [ -f "$PIPELINE_ROOT/sccache.env" ]; then . "$PIPELINE_ROOT/sccache.env"; fi
+  "$builder/lane-build.sh" \$step "\${args[@]}" >"$W/logs/\$step.log" 2>&1
+  printf '%s\t%s\n' \$step \$(( \$(date +%s) - s )) >>"$W/logs/timings.tsv"
+done
+CHAIN
+chmod +x "$W/chain.sh"
+: >"$W/logs/timings.tsv"
+# A gated tree compiles no Lean here (the umbrella replays; the native builder links and compiles C
+# at 2 jobs): no build slot, 16G, so the keeper's gate never waits on a publication (2x32G + 16G
+# < the 84G slice). Moving a base to the tip compiles Lean: then a slot and 32G, like any build.
+# (slot 2 only, waiting for it: slot 1 stays free for the merge keeper's gate umbrella)
+if [ -n "$moved" ]; then run=(flock "${PIPELINE_SLOT_2:-/srv/build-slot-2}" env SWARM_MEM_MAX="${SWARM_MEM_MAX:-32G}" swarm-build)
+else run=(env SWARM_MEM_MAX="${PIPELINE_PUBLISH_MEM_MAX:-16G}" swarm-build); fi
+"${run[@]}" "$W/chain.sh" \
+  || { pipeline_log "build chain FAILED for $tip; logs in $W/logs"; tail -30 "$W/logs/$(tail -1 "$W/logs/timings.tsv" 2>/dev/null | cut -f1 || echo host).log" >&2 || true; exit 1; }
+t_build=$(date +%s)
+LANE_DIR=$W "$builder/lane-build.sh" pack "$out" >"$W/logs/pack.log" 2>&1 || { cat "$W/logs/pack.log" >&2; exit 1; }
+
+# --- provenance, owners, timings ------------------------------------------------------------
+prev=""
+[ -L "$ARTIFACT_ROOT/green" ] && prev=$(readlink "$ARTIFACT_ROOT/green")
+[ -n "$prev" ] && git cat-file -e "$prev^{commit}" 2>/dev/null && git merge-base --is-ancestor "$prev" "$tip" || prev=$(git rev-parse "$tip~1")
+git log --no-merges --format='%x01%H%x09%s' --name-only "$prev..$tip" | python3 -c '
+import sys
+for rec in sys.stdin.read().split("\x01")[1:]:
+    lines=[l for l in rec.splitlines() if l.strip()]
+    sha,subj=lines[0].split("\t",1)
+    print(sha+"\t"+subj+"\t"+",".join(lines[1:]))' >"$out/commits.tsv"
+mkdir -p "$out/logs/pipeline"
+cp "$W"/logs/*.log "$W/logs/timings.tsv" "$out/logs/pipeline/"
+cp "$W/native-out/manifest.txt" "$out/logs/pipeline/host-build-manifest.txt"
+t_end=$(date +%s)
+{ cat "$W/logs/timings.tsv"; printf 'clone\t%s\nbuild\t%s\npack\t%s\ntotal\t%s\n' $((t_clone - t0)) $((t_build - t_clone)) $((t_end - t_build)) $((t_end - t0)); } >"$out/timings.tsv"
+rust=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
+printf 'tip=%s label=%s lean=%s rust=%s built_on=%s from=%s%s command="clone-warm + lane-build.sh host --umbrella, consent, rust (fixed build root, sccache), pack" compiled_source_modules=%s wall_s=%s finished=%s\n' \
+  "$tip" "$label" "$(cat lean-toolchain)" "$rust" "$(hostname)" "$from" "$moved" \
+  "$(sed -n 's/^compiled_source_modules=//p' "$W/native-out/manifest.txt" "$W/logs/host.log" 2>/dev/null | head -1)" \
+  $((t_end - t0)) "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$out/PROVENANCE"
+(cd "$out" && sha256sum --quiet -c SHA256SUMS) || pipeline_die "fresh set fails its own SHA256SUMS"
+date -u +%Y-%m-%dT%H:%M:%SZ >"$out/READY"
+pipeline_label "$label" "$tip"
+pipeline_log "READY $out ($((t_end - t0)) s)"
+"$here/mirror-artifacts" "$tip" "$label" "$W/src" || pipeline_log "mirror of $tip incomplete (see above); the set is READY here"
+cd "$ARTIFACT_ROOT" && rm -rf "$W"

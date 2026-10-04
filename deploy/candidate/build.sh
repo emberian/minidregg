@@ -176,33 +176,14 @@ t_host=$t_consent
 fi
 
 # 5. Rust binaries. Paths are remapped so the bytes do not depend on where the
-# operator unpacked the source or keeps the cargo registry.
-#
-# Remapping is not enough. Cargo hashes the absolute path of every path
-# dependency that lies outside the building package's own directory
-# (native/grain-runtime builds ../signed-api-path, ../inference-scheduler, ...)
-# into `-C metadata`, hence into the crate's disambiguator, every symbol hash and
-# the layout of the binary, and --remap-path-prefix does not reach it. Built
-# under two different --out directories the same source gave two different
-# grain-runtime binaries (cv 01a0f830-42e7: 7b8f929c vs e75bccf1 on 7961b345),
-# and every crate with such a dependency, resource-client's `mini` now included,
-# has the same shape. So every cargo command here runs through ONE fixed path: a
-# symlink to the extracted source, which cargo follows lexically (two builds of
-# grain-runtime from different real directories through it are byte-identical).
-# The symlink lives in a 0700 directory owned by this account and is held under
-# flock, so two builds on one host take turns instead of racing for it. The
-# path is part of the build's identity, so it is recorded in provenance.json,
-# and builds compared for reproducibility must share MINI_CANDIDATE_BUILD_ROOT.
-build_root=${MINI_CANDIDATE_BUILD_ROOT:-/tmp/minidregg-candidate-build}
-mkdir -p -m 0700 "$build_root" 2>/dev/null || true
-[ -d "$build_root" ] && [ ! -L "$build_root" ] && [ -O "$build_root" ] \
-  || candidate_die "build root $build_root is not a directory owned by this account (set MINI_CANDIDATE_BUILD_ROOT)"
-exec 9>"$build_root/lock"
-flock 9
-bsrc=$build_root/src
-rm -f "$bsrc"
-ln -s "$src" "$bsrc"
-trap 'rm -f "$bsrc"' EXIT
+# operator unpacked the source or keeps the cargo registry. Remapping is not
+# enough: every cargo command runs through the fixed build root (lib.sh
+# candidate_build_root says why). The path is part of the build's identity, so
+# it is recorded in provenance.json, and builds compared for reproducibility
+# must share MINI_CANDIDATE_BUILD_ROOT.
+candidate_build_root "$src"
+bsrc=$CANDIDATE_BUILD_SRC
+trap candidate_build_root_release EXIT
 cargo_home=${CARGO_HOME:-$HOME/.cargo}
 cargo_home=$(CDPATH='' cd -- "$cargo_home" && pwd -P)
 export RUSTFLAGS="--remap-path-prefix=$bsrc=/minidregg --remap-path-prefix=$cargo_home=/cargo"
