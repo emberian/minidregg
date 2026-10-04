@@ -1,0 +1,102 @@
+edition ObjectiveBend 1
+# The existing Mini single-seller rule as Objective Bend source: descending price,
+# then original admitted-book order; capacity prefix; one last-filled price. Every
+# order keeps its exact principal and reservation and its original position.
+#
+# Port of examples/objective-bend-collective/SingleSellerAllocation.bend.
+# Representation changes: the Gen-1 byte lists (subject, reservation) are opaque
+# String labels (compared only by equality, never taken apart); Core4 sums are
+# monomorphic, so each list type is its own Nil/Cons sum.
+# Omitted (Objective laws are retained, never checked; kept as named properties):
+#   empty_preserves_supply: allocate(supply, nil) == {price 0, fills nil, remaining supply}
+#   take_balance:     take(p, q, s) + sub(s, take(p, q, s)) == s
+#   prepend_accounted, fill_conserves: accounted(fill(orders, supply, last)) == supply
+#   allocation_conserves: accounted(allocate(supply, orders)) == supply  (for every input)
+# `accounted` is kept so the conservation statement stays executable on samples.
+import ./MarketMath.obend as Math
+
+record Order:
+  subject: String
+  reservation: String
+  price: Nat
+  quantity: Nat
+
+record Ranked:
+  position: Nat
+  order: Order
+
+record Fill:
+  position: Nat
+  subject: String
+  reservation: String
+  units: Nat
+
+record Allocation:
+  price: Nat
+  fills: FillList
+  remaining: Nat
+
+sum OrderList:
+  nil: {}
+  cons: {head: Order, tail: OrderList}
+
+sum RankedList:
+  nil: {}
+  cons: {head: Ranked, tail: RankedList}
+
+sum FillList:
+  nil: {}
+  cons: {head: Fill, tail: FillList}
+
+def index(orders: OrderList, position: Nat) -> RankedList:
+  match orders:
+    case nil(_): RankedList.nil()
+    case cons(c): RankedList.cons({head: {position: position, order: c.head}, tail: index(c.tail, position + 1n)})
+
+# a precedes b: strictly higher price first, equal prices by original position.
+def precedes(a: Ranked, b: Ranked) -> Bool:
+  if a.order.price == b.order.price then Math.le(a.position, b.position) else Math.lt(b.order.price, a.order.price)
+
+def insert(item: Ranked, items: RankedList) -> RankedList:
+  match items:
+    case nil(_): RankedList.cons({head: item, tail: RankedList.nil()})
+    case cons(c): if precedes(item, c.head) then RankedList.cons({head: item, tail: items}) else RankedList.cons({head: c.head, tail: insert(item, c.tail)})
+
+def sort(items: RankedList) -> RankedList:
+  match items:
+    case nil(_): RankedList.nil()
+    case cons(c): insert(c.head, sort(c.tail))
+
+# A zero-priced order takes nothing.
+def take(price: Nat, quantity: Nat, supply: Nat) -> Nat:
+  match price:
+    case 0n: 0n
+    case 1n+p: Math.min(quantity, supply)
+
+def lastPrice(taken: Nat, old: Nat, price: Nat) -> Nat:
+  match taken:
+    case 0n: old
+    case 1n+p: price
+
+def prepend(position: Nat, subject: String, reservation: String, taken: Nat, result: Allocation) -> Allocation:
+  {price: result.price, fills: FillList.cons({head: {position: position, subject: subject, reservation: reservation, units: taken}, tail: result.fills}), remaining: result.remaining}
+
+def fill(orders: RankedList, supply: Nat, last: Nat) -> Allocation:
+  match orders:
+    case nil(_): {price: last, fills: FillList.nil(), remaining: supply}
+    case cons(c): fillTaken(c.head, c.tail, supply, last, take(c.head.order.price, c.head.order.quantity, supply))
+
+def fillTaken(head: Ranked, rest: RankedList, supply: Nat, last: Nat, taken: Nat) -> Allocation:
+  prepend(head.position, head.order.subject, head.order.reservation, taken, fill(rest, Math.sub(supply, taken), lastPrice(taken, last, head.order.price)))
+
+def allocate(supply: Nat, orders: OrderList) -> Allocation:
+  fill(sort(index(orders, 0n)), supply, 0n)
+
+def sumWithRemaining(fills: FillList, remaining: Nat) -> Nat:
+  match fills:
+    case nil(_): remaining
+    case cons(c): c.head.units + sumWithRemaining(c.tail, remaining)
+
+# Filled units plus the remainder: equals the original supply (allocation_conserves).
+def accounted(result: Allocation) -> Nat:
+  sumWithRemaining(result.fills, result.remaining)

@@ -2,6 +2,7 @@ edition ObjectiveBend 1
 # Named scenarios for the market programs, evaluated by the preview (runBounded).
 # Each entry returns a Nat or Bool so the preview cohort can pin the value.
 import ./MarketMath.obend as Math
+import ./SingleSellerAllocation.obend as Seller
 
 # ---- MarketMath: arithmetic spot checks ----
 def divideQuotient(n: Nat, divisor: Nat) -> Nat:
@@ -25,3 +26,65 @@ def ltHolds(a: Nat, b: Nat) -> Bool:
 # The min_balance property instantiated at one (quantity, supply).
 def minBalanceHolds(quantity: Nat, supply: Nat) -> Bool:
   Math.add(Math.min(quantity, supply), Math.sub(supply, Math.min(quantity, supply))) == supply
+
+# ---- SingleSellerAllocation ----
+def unitsAt(fills: Seller.FillList, position: Nat) -> Nat:
+  match fills:
+    case nil(_): 0n
+    case cons(c): if c.head.position == position then c.head.units else unitsAt(c.tail, position)
+
+def fillCount(fills: Seller.FillList) -> Nat:
+  match fills:
+    case nil(_): 0n
+    case cons(c): 1n + fillCount(c.tail)
+
+# Reads one number out of an allocation: 0 price, 1 remaining, 2 accounted
+# (filled + remaining), 3 number of fills, 4 + p the units filled at original position p.
+def readout(a: Seller.Allocation, which: Nat) -> Nat:
+  match which:
+    case 0n: a.price
+    case 1n+w1:
+      match w1:
+        case 0n: a.remaining
+        case 1n+w2:
+          match w2:
+            case 0n: Seller.accounted(a)
+            case 1n+w3:
+              match w3:
+                case 0n: fillCount(a.fills)
+                case 1n+position: unitsAt(a.fills, position)
+
+def order(subject: String, reservation: String, price: Nat, quantity: Nat) -> Seller.Order:
+  {subject: subject, reservation: reservation, price: price, quantity: quantity}
+
+def one(first: Seller.Order) -> Seller.OrderList:
+  Seller.OrderList.cons({head: first, tail: Seller.OrderList.nil()})
+
+def two(first: Seller.Order, second: Seller.Order) -> Seller.OrderList:
+  Seller.OrderList.cons({head: first, tail: one(second)})
+
+# The named two-bid scenario (STATUS.txt): supply 7, A limit 5 qty 4, B limit 3 qty 5.
+# Clears at price 3 filling 4 then 3 with nothing left over.
+def twoBidOrders() -> Seller.OrderList:
+  two(order("A", "21", 5n, 4n), order("B", "31", 3n, 5n))
+
+def allocTwoBid(which: Nat) -> Nat:
+  readout(Seller.allocate(7n, twoBidOrders()), which)
+
+# Equal prices fill in original admitted-book order: A gets 5, B the remaining 2.
+def allocTie(which: Nat) -> Nat:
+  readout(Seller.allocate(7n, two(order("A", "21", 4n, 5n), order("B", "31", 4n, 5n))), which)
+
+# A later, higher-priced order outranks an earlier one: B (position 1) fills first.
+def allocRank(which: Nat) -> Nat:
+  readout(Seller.allocate(4n, two(order("A", "21", 2n, 3n), order("B", "31", 6n, 3n))), which)
+
+# A zero-priced order takes nothing and does not move the last-filled price.
+def allocZeroPrice(which: Nat) -> Nat:
+  readout(Seller.allocate(4n, two(order("A", "21", 0n, 5n), order("B", "31", 3n, 2n))), which)
+
+def allocEmpty(which: Nat) -> Nat:
+  readout(Seller.allocate(9n, Seller.OrderList.nil()), which)
+
+def allocDry(which: Nat) -> Nat:
+  readout(Seller.allocate(0n, one(order("A", "21", 5n, 4n))), which)
