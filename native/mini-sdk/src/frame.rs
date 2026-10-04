@@ -117,17 +117,19 @@ impl Process {
 #[cfg(test)]
 pub(crate) mod fake {
     //! A scripted stand-in process for unit tests: `/bin/sh` that replays fixed frames.
+    //! Scripts keep the request pipe open with `exec 3<&0; cat <&3 >/dev/null &`: dash gives a
+    //! background job /dev/null as stdin BEFORE applying its explicit redirections (so `<&0` would
+    //! duplicate /dev/null), which closes the pipe before the client writes (EPIPE).
     use std::path::PathBuf;
+    /// Returns `(/bin/sh, script)`: the frame client runs `EXECUTABLE SETTINGS stdio`, so the
+    /// script travels as the "settings" path and nothing freshly written is ever executed
+    /// (executing a just-written file races a sibling test's fork on Linux: ETXTBSY).
     pub fn script(tag: &str, body: &str) -> (PathBuf, PathBuf) {
-        use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("mini-sdk-{tag}-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
-        let exe = dir.join("proc");
-        std::fs::write(&exe, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let settings = dir.join("settings.json");
-        std::fs::write(&settings, b"{}").unwrap();
-        (exe, settings)
+        let script = dir.join("proc.sh");
+        std::fs::write(&script, format!("{body}\n")).unwrap();
+        (PathBuf::from("/bin/sh"), script)
     }
 }
 
@@ -145,7 +147,7 @@ mod tests {
     #[test]
     fn a_refusal_frame_is_an_error_carrying_the_reason() {
         // 13-byte frame: op 255 + "changed-plan" — the client_consent.rs refusal test, as a process.
-        let (exe, settings) = fake::script("refuse", "cat >/dev/null & printf '\\015\\000\\000\\000\\377changed-plan'");
+        let (exe, settings) = fake::script("refuse", "exec 3<&0; cat <&3 >/dev/null & printf '\\015\\000\\000\\000\\377changed-plan'");
         let mut p = Process::start(&exe, &settings).unwrap();
         let err = p.call(222, b"retained").unwrap_err();
         assert!(err.0.contains("changed-plan"), "{err}");

@@ -85,15 +85,16 @@ mod tests {
     #[test]
     fn a_consent_that_echoes_other_intent_bytes_refuses() {
         // Answers op 220 with the 3 bytes "abd" whatever was asked.
-        let (exe, settings) = fake::script("echo", "cat >/dev/null & printf '\\004\\000\\000\\000\\334abd'");
+        let (exe, settings) = fake::script("echo", "exec 3<&0; cat <&3 >/dev/null & printf '\\004\\000\\000\\000\\334abd'");
         let mut c = Consent::start(&exe, &settings).unwrap();
         let key = ed25519_dalek::SigningKey::from_bytes(&[1; 32]).verifying_key();
-        assert!(c.intent(b"abc", &key).unwrap_err().0.contains("different retained intent"));
+        let err = c.intent(b"abc", &key).unwrap_err();
+        assert!(err.0.contains("different retained intent"), "{err}");
     }
 
     #[test]
     fn unchecked_operator_opcodes_refuse_before_any_frame() {
-        let (exe, settings) = fake::script("noop", "cat >/dev/null");
+        let (exe, settings) = fake::script("noop", "exec 3<&0; cat <&3 >/dev/null");
         let mut c = Consent::start(&exe, &settings).unwrap();
         assert!(c.operator_plan(1, b"", b"").is_err());
         assert_eq!(OPERATOR_PLAN_OPS.len(), 29);
