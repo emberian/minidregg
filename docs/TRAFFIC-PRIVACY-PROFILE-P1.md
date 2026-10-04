@@ -132,8 +132,10 @@ roster. The roster is public by design (P1 makes membership public).
   carrying real work, 16/16 exact outcomes for a **replayed read-only lookup**.
   Every role ran on one machine; that shows schedule shape and exactly-once
   delivery, not anonymity against anyone who can see the co-located processes.
-- Later runs (two hosts, a new effect) are recorded in the traffic lane's
-  STATUS and evidence directories.
+- None yet: no run on two hosts and no run carrying a new effect is recorded in
+  this repository (`docs/evidence/` has no traffic directory). The traffic lane was wound down
+  on 2026-10-04 before its two-host run (swarm ledger, 03:55); the single-host v12 run
+  above is all the evidence this card has.
 
 Sources: `WHY-TRAFFIC-PRIVACY-20261003.txt` lines 18–39 and its cost section;
 `PRIVACY-COMPOSITION-REVIEW-20261003.txt` profile P1; `PQ-MAILBOX.md`.
