@@ -177,7 +177,7 @@ if [ "$#" -eq 12 ] && [ "$1" = prepare ]; then
     fail "accepted session birth receipt absent or changed"
   jq -e '
     .type == "mini-spk-agent-ticket-policy-v1" and
-    ([.issuer,.appDelegateCapability,.payer,.issueNonce] |
+    ([.issuer,.appDelegateCapability,.payer,.issueNonce,.notAfter] |
       all(.[]; type == "string" and test("^(0|[1-9][0-9]*)$"))) and
     (.ceilingRoleId | type == "string" and test("^(0|[1-9][0-9]{0,2})$")) and
     (.expectedRolePermissions | type == "array" and length > 0) and
@@ -221,7 +221,7 @@ if [ "$#" -eq 12 ] && [ "$1" = prepare ]; then
          ticketObserveCapability:$a.plannedCaps.ticketObserve},
        ceiling:{basis:{type:"role",id:$p.ceilingRoleId},added:[],removed:[],
          roleSchemaRoot:$schema.root,roleVersion:$schema.version},
-       issueNonce:$p.issueNonce},issuer:$p.issuer,
+       issueNonce:$p.issueNonce,notAfter:$p.notAfter},issuer:$p.issuer,
        appDelegateCapability:$p.appDelegateCapability,
        ticketOwnerCapability:$a.plannedCaps.ticketOwner,
        ticketControlCapability:$a.plannedCaps.ticketControl},

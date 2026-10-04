@@ -2,6 +2,7 @@
 properties of the source predicate and canonical codec, not evidence that a
 physical SPK process ran or an HTTP request was authorized for dispatch. -/
 import Kernel.ApplicationGrain
+import Theory.AssertAxioms
 
 namespace Minidregg.Kernel.ApplicationGrain
 open Minidregg.Pred
@@ -31,6 +32,30 @@ theorem reconciliation_without_checked_slot_refused :
 
 theorem reconciliation_with_zero_slot_refused :
     eval reconciliationGate ⟨[]⟩ ⟨[(reconciliationSlot, 0)]⟩ = false := by decide
+
+/-- A wedged install (pending, or claimed with its report lost) retires:
+the ordinary transition law admits 1→7 and 8→7, generation + 1, versions
+unchanged, with no gate. -/
+theorem wedged_install_claim_retires :
+    eval (transitionPolicy 11 12) ⟨[]⟩
+      ⟨slots ⟨3, 8, 0, 0⟩ (Operation.after .retire ⟨3, 8, 0, 0⟩)⟩ = true := by
+  decide
+
+theorem wedged_install_pending_retires :
+    eval (transitionPolicy 11 12) ⟨[]⟩
+      ⟨slots ⟨3, 1, 0, 0⟩ (Operation.after .retire ⟨3, 1, 0, 0⟩)⟩ = true := by
+  decide
+
+/-- Retired stays retired: nothing leaves phase 7, so a retired install
+cannot be completed by a late report. -/
+theorem retired_completion_refused :
+    eval (transitionPolicy 11 12) ⟨[]⟩
+      ⟨slots ⟨4, 7, 0, 0⟩ ⟨4, 2, 1, 0⟩ ++ [(completionSlot, 1)]⟩ = false := by
+  decide
+
+#assert_axioms wedged_install_claim_retires
+#assert_axioms wedged_install_pending_retires
+#assert_axioms retired_completion_refused
 
 theorem serving_witness_exact (before : State) :
     Operation.after .servingWitness before = before := by

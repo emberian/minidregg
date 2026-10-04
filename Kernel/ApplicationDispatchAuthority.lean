@@ -103,6 +103,10 @@ structure Ticket where
   participant : Participant
   ceiling : RoleAssignment
   issueNonce : Nat
+  /-- The last block height at which a dispatch may use this ticket. Past it
+  the ticket is dead without any further write; the issuer can end it sooner
+  by tombstoning its atom (`ApplicationShareIssueSource.ticketPolicy`). -/
+  notAfter : Nat
   deriving DecidableEq, Repr
 
 def ticketStream : StreamCodec Ticket :=
@@ -110,14 +114,15 @@ def ticketStream : StreamCodec Ticket :=
     (StreamCodec.product StreamCodec.nat
       (StreamCodec.product scopeStream
         (StreamCodec.product participantStream
-          (StreamCodec.product roleAssignmentStream StreamCodec.nat))))
-    (fun t => (t.resource, t.scope, t.participant, t.ceiling, t.issueNonce))
-    (fun (resource, scope, participant, ceiling, issueNonce) =>
-      ⟨resource, scope, participant, ceiling, issueNonce⟩)
+          (StreamCodec.product roleAssignmentStream
+            (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))
+    (fun t => (t.resource, t.scope, t.participant, t.ceiling, t.issueNonce, t.notAfter))
+    (fun (resource, scope, participant, ceiling, issueNonce, notAfter) =>
+      ⟨resource, scope, participant, ceiling, issueNonce, notAfter⟩)
     (by intro t; cases t; rfl)
 
 private def ticketFrame : List UInt8 :=
-  "DREGG/APPLICATION/SHARE-TICKET/v2".toUTF8.toList
+  "DREGG/APPLICATION/SHARE-TICKET/v3".toUTF8.toList
 
 private def rawTicketCodec : LawfulCodec Ticket where
   encode ticket := ticketFrame ++ ticketStream.encode ticket
@@ -155,6 +160,22 @@ def decodeInstalled (domain : Digest) (resource : Nat)
       record.tombstonedAt.isSome then none else
   let ticket ← ticketCodec.decode record.payload
   if ticket.resource == resource && ticket.ceiling.valid then some ticket else none
+
+/-- A ticket's own window: dispatch at `height` uses it only up to `notAfter`. -/
+def Ticket.liveAt (ticket : Ticket) (height : Nat) : Bool := decide (height ≤ ticket.notAfter)
+
+theorem Ticket.liveAt_iff (ticket : Ticket) (height : Nat) :
+    ticket.liveAt height = true ↔ height ≤ ticket.notAfter := by
+  simp [Ticket.liveAt]
+
+/-- A tombstoned ticket atom installs no ticket: revocation needs no new
+record, only the issuer's tombstone of the one it wrote. -/
+theorem decodeInstalled_refuses_tombstoned (domain : Digest) (resource : Nat)
+    (page : ContentResource.ContentStore) (record : AtomRecord)
+    (found : Hyperdocument.lookup page .atoms (ticketAtom domain resource) = some record)
+    (retired : record.tombstonedAt.isSome = true) :
+    decodeInstalled domain resource page = none := by
+  simp [decodeInstalled, found, retired]
 
 def initialAction (domain : Digest) (ticket : Ticket) : ContentResource.Action :=
   .createAtom (ticketAtom domain ticket.resource) (.inlineObject ⟨15⟩)

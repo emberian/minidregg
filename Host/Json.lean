@@ -1617,7 +1617,7 @@ private def shareIssueRole (path : String) (json : Lean.Json) :
 private def shareIssueTicket (path : String) (json : Lean.Json) :
     Result ApplicationDispatchAuthority.Ticket := do
   let obj ← exactObject path
-    ["resource", "scope", "participant", "ceiling", "issueNonce"] json
+    ["resource", "scope", "participant", "ceiling", "issueNonce", "notAfter"] json
   let scopePath := path ++ ".scope"
   let scopeObj ← exactObject scopePath
     ["app", "packageVersion", "packageRoot", "interfaceId", "interfaceVersion",
@@ -1660,7 +1660,8 @@ private def shareIssueTicket (path : String) (json : Lean.Json) :
   pure ⟨← nat (path ++ ".resource") (← field path "resource" obj),
     scope, participant,
     ← shareIssueRole (path ++ ".ceiling") (← field path "ceiling" obj),
-    ← nat (path ++ ".issueNonce") (← field path "issueNonce" obj)⟩
+    ← nat (path ++ ".issueNonce") (← field path "issueNonce" obj),
+    ← nat (path ++ ".notAfter") (← field path "notAfter" obj)⟩
 
 /-- Operator-only JSON authoring of a canonical share-issue signing request.
 This does not authorize a plan or sign any header. -/
@@ -4266,6 +4267,7 @@ private def shareIssuePlanJson
           [("canonical", hexJson (ApplicationDispatchAuthority.ticketCodec.encode ticket)),
            ("resource", decimal ticket.resource),
            ("issueNonce", decimal ticket.issueNonce),
+           ("notAfter", decimal ticket.notAfter),
            ("scope", .mkObj
              [("app", decimal scope.app), ("packageVersion", signedDecimal scope.packageVersion),
               ("packageRoot", decimal scope.packageRoot.value),

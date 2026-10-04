@@ -180,7 +180,12 @@ def transitionPolicy (packageTarget snapshotTarget : Nat) : Pred :=
       edge 4 4 0 [unchanged 2, unchanged 3],
       edge 3 2 1 [unchanged 2, unchanged 3, reconciliationGate],
       edge 9 2 1 [unchanged 2, unchanged 3, reconciliationGate],
-      edge 2 7 1 [unchanged 2, unchanged 3]]]
+      edge 2 7 1 [unchanged 2, unchanged 3],
+      -- An install whose completion report never arrives would otherwise
+      -- hold phase 1 or 8 forever: retiring it is always possible. Phase 7
+      -- admits no further edge, so a late physical install serves nothing.
+      edge 1 7 1 [unchanged 2, unchanged 3],
+      edge 8 7 1 [unchanged 2, unchanged 3]]]
 
 /-- The one-shot reservation leg is separate from ordinary lifecycle
 transitions. Its caller must also satisfy the installed management predicate;

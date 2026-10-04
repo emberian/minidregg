@@ -375,7 +375,7 @@ share() (
             subject:"8",origin:{type:"human"},sessionCapability:$scap,
             appObserveCapability:$appcap,ticketObserveCapability:(($tcap|tonumber)+2|tostring)},
           ceiling:{basis:$basis,added:[],removed:[],
-            roleSchemaRoot:$schema,roleVersion:$version},issueNonce:$nonce},
+            roleSchemaRoot:$schema,roleVersion:$version},issueNonce:$nonce,notAfter:"1000000000"},
         issuer:"8",appDelegateCapability:$appcap,ticketOwnerCapability:$tcap,
         ticketControlCapability:(($tcap|tonumber)+1|tostring)},
        payer:"8",funding:[],sourceCapabilities:["42"],

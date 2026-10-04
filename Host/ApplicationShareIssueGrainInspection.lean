@@ -45,6 +45,7 @@ private def ticketJson (ticket : ApplicationDispatchAuthority.Ticket) : Json :=
      ("ticketDigest", decimal (ApplicationAgentLifetimeGrant.ticketDigest ticket).value),
      ("resource", decimal ticket.resource),
      ("issueNonce", decimal ticket.issueNonce),
+     ("notAfter", decimal ticket.notAfter),
      ("scope", .mkObj
        [("app", decimal scope.app),
         ("packageVersion", signed scope.packageVersion),

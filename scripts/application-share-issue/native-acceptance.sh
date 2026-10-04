@@ -84,7 +84,7 @@ jq -n --arg package "$PACKAGE_ROOT" --arg interface "$INTERFACE_ROOT" \
         subject:"8",origin:{type:"human"},sessionCapability:"147",
         appObserveCapability:"141",ticketObserveCapability:"173"},
       ceiling:{basis:{type:"role",id:"0"},added:[],removed:[],
-        roleSchemaRoot:$schema,roleVersion:"10"},issueNonce:"85000"},
+        roleSchemaRoot:$schema,roleVersion:"10"},issueNonce:"85000",notAfter:"1000000000"},
       issuer:"8",appDelegateCapability:"141",ticketOwnerCapability:"171",
       ticketControlCapability:"172"},payer:"8",funding:[],
       sourceCapabilities:["42"]}' >"$EVIDENCE/request.json"

@@ -555,6 +555,7 @@ structure CheckedCurrentForSourceBytes {F : Type} [Field F] [DecidableEq F]
   ticket : ApplicationDispatchAuthority.Ticket
   ticketExact : installedTicket deployment.domain spec.ticket.resource
     ticketRead.selected.observed.before = some ticket
+  ticketLive : ticket.liveAt ambient.height = true
   bits : List Bool
   meaningExact : selectedMeaning ingress spec actualApp manifest enrollment ticket = some bits
   requestShape : dispatchRequestSafe ingress.dispatch.dispatch = true
@@ -863,27 +864,29 @@ def checkCurrentFromSourceBytes {F : Type} [Field F] [DecidableEq F]
                                   spec.ticket.resource ticketRead.selected.observed.before with
                               | none => return .error "current share ticket missing"
                               | some ticket =>
-                                match meaningExact : selectedMeaning ingress spec actualApp
-                                    manifest enrollment ticket with
-                                | none => return .error "dispatch identity or permission ceiling refused"
-                                | some bits =>
-                                  if requestShape : dispatchRequestSafe
-                                      ingress.dispatch.dispatch = true then
-                                    if issuerCurrent : issuerLineageCurrentFromSourceBytes deployment profile
-                                        ambient durable ingress spec selection originalSourceBytes prepared = true then
-                                      match ← DeclaredResourceController.admit native prepared
-                                          ingress.dispatch.signed with
-                                      | .error _ => return .error "current dispatch mutation authority refused"
-                                      | .ok invocation =>
-                                        return .ok ⟨profileExact, identityExact, selection,
-                                          selectedCommand, signedCommand, decodedCommand,
-                                          commandExact, prepared, shape, linked, appRead,
-                                          manifestRead, enrollmentRead, ticketRead, actualApp,
-                                          appExact, manifest, manifestExact, enrollment,
-                                          enrollmentExact, ticket, ticketExact, bits,
-                                          meaningExact, requestShape, issuerCurrent, invocation⟩
-                                    else return .error "current issuer delegation lineage refused"
-                                  else return .error "unsupported or unsafe HTTP request shape"
+                                if ticketLive : ticket.liveAt ambient.height = true then
+                                  match meaningExact : selectedMeaning ingress spec actualApp
+                                      manifest enrollment ticket with
+                                  | none => return .error "dispatch identity or permission ceiling refused"
+                                  | some bits =>
+                                    if requestShape : dispatchRequestSafe
+                                        ingress.dispatch.dispatch = true then
+                                      if issuerCurrent : issuerLineageCurrentFromSourceBytes deployment profile
+                                          ambient durable ingress spec selection originalSourceBytes prepared = true then
+                                        match ← DeclaredResourceController.admit native prepared
+                                            ingress.dispatch.signed with
+                                        | .error _ => return .error "current dispatch mutation authority refused"
+                                        | .ok invocation =>
+                                          return .ok ⟨profileExact, identityExact, selection,
+                                            selectedCommand, signedCommand, decodedCommand,
+                                            commandExact, prepared, shape, linked, appRead,
+                                            manifestRead, enrollmentRead, ticketRead, actualApp,
+                                            appExact, manifest, manifestExact, enrollment,
+                                            enrollmentExact, ticket, ticketExact, ticketLive, bits,
+                                            meaningExact, requestShape, issuerCurrent, invocation⟩
+                                      else return .error "current issuer delegation lineage refused"
+                                    else return .error "unsupported or unsafe HTTP request shape"
+                                else return .error "share ticket expired"
                       else return .error "current app/session/ticket policy linkage refused"
                     else return .error "dispatch physical mutation shape refused"
               else return .error "signed dispatch command differs from selected session/agent"

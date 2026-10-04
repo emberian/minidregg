@@ -420,7 +420,7 @@ class Fixture:
                 "participant": {"session": d["session"], "descriptorResource": d.get("descriptor",str(int(d["session"])+1)),
                     "kind": kind, "subject": d["subject"], "origin": {"type": "human"},
                     "sessionCapability": d["cap"], "appObserveCapability": d["appObserve"],
-                    "ticketObserveCapability": d["ticketObserve"]}, "ceiling": ceiling, "issueNonce": self.n()},
+                    "ticketObserveCapability": d["ticketObserve"]}, "ceiling": ceiling, "issueNonce": self.n(), "notAfter": "1000000000"},
                 "issuer": self.owner, "appDelegateCapability": self.appcap,
                 "ticketOwnerCapability": d["ticketOwner"], "ticketControlCapability": d["ticketControl"]}
         req = {"spec": spec, "payer": self.creator, "funding": [], "sourceCapabilities": [self.accountcap],

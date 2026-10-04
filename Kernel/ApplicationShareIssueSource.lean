@@ -10,6 +10,7 @@ import Kernel.ApplicationDispatchAuthority
 import Kernel.ApplicationGrain
 import Kernel.NativeHostContext
 import Kernel.ResourceBirthController
+import Theory.AssertAxioms
 
 namespace Minidregg.Kernel.ApplicationShareIssueSource
 open Minidregg.Compiler
@@ -285,15 +286,44 @@ theorem Ready.two_grants {F : Type} [Field F]
     (authority : AuthState) (height : Nat) :
     (ready.grants profile authority height).length = 2 := rfl
 
-/-- A v2 share ticket is immutable as content. Even if a factory caller names
+/-- A share ticket is immutable as content. Even if a factory caller names
 its own subject as the born resource owner, a later ordinary content edit
 cannot broaden this accepted grant under this law. The dispatch receiver must
 also require this exact current policy source and compare the current ticket
 bytes with the special issue event; changing the law or ticket refuses. A
-native current capability still governs observation and revocation. -/
+native current capability still governs observation and revocation.
+
+The one content write it admits is the issuer's revocation: a command of
+exactly one action, a tombstone (`editAtom` with `tombstone`, which keeps the
+payload and only sets `tombstonedAt`). A tombstoned ticket installs nothing
+(`ApplicationDispatchAuthority.decodeInstalled_refuses_tombstoned`). -/
 def ticketPolicy (owner : SubjectId) : Pred := .any [
   .memberOf "request/verb" [1,3],
+  .all [.eq "request/verb" 2, .eq "request/subject" owner.value,
+    .eq "content/operations" 1, .eq "content/tombstones" 1],
   .all [.memberOf "request/verb" [4,5], .eq "request/subject" owner.value]]
+
+private def tombstoneSlots (subject : Int) (operations tombstones : Int) :
+    List (String × Int) :=
+  [("request/verb", 2), ("request/subject", subject),
+    ("content/operations", operations), ("content/tombstones", tombstones)]
+
+theorem ticketPolicy_issuer_tombstone_admitted :
+    Minidregg.Pred.eval (ticketPolicy ⟨7⟩) ⟨[]⟩ ⟨tombstoneSlots 7 1 1⟩ = true := by decide
+
+theorem ticketPolicy_other_subject_tombstone_refused :
+    Minidregg.Pred.eval (ticketPolicy ⟨7⟩) ⟨[]⟩ ⟨tombstoneSlots 8 1 1⟩ = false := by decide
+
+theorem ticketPolicy_issuer_payload_edit_refused :
+    Minidregg.Pred.eval (ticketPolicy ⟨7⟩) ⟨[]⟩ ⟨tombstoneSlots 7 1 0⟩ = false := by decide
+
+theorem ticketPolicy_tombstone_with_second_action_refused :
+    Minidregg.Pred.eval (ticketPolicy ⟨7⟩) ⟨[]⟩ ⟨tombstoneSlots 7 2 1⟩ = false := by decide
+
+#assert_axioms ticketPolicy_issuer_tombstone_admitted
+#assert_axioms ticketPolicy_other_subject_tombstone_refused
+#assert_axioms ticketPolicy_issuer_payload_edit_refused
+#assert_axioms ticketPolicy_tombstone_with_second_action_refused
 
 def Ready.policyRecord {F : Type} [Field F]
     (_ready : Ready domain spec operation) (profile : CanonicalRuntimeProfile.Profile F)
