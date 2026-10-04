@@ -1,313 +1,389 @@
 # Objective Bend
 
-Objective Bend is Mini's authored language for a shared, governed computing
-world. People and agents should be able to define tools, documents, services and
-worlds, extend one another's behavior, inspect the resulting programs, and retain
-instances and activities across sessions. Its language model is **lazy open
-recursion with first-class reusable extensions**. Mini supplies durable identity,
-current authority, effect admission and controlled disclosure around execution.
+Objective Bend is Mini's authored language and its only Bend language. Its model
+is François-René Rideau's ("Faré") account of object orientation as modularity and
+incrementality made available as ordinary in-language computation: **lazy open
+recursion over first-class, partial, composable specifications**. Mini supplies
+what the language does not: durable identity, current authority, effect admission,
+funding and controlled disclosure.
 
-Objective Bend is the project's sole Bend language target. It has its own source
-syntax, reference semantics, shared thunk machine and annotated type checker.
-Captured source runs through that checker and machine, including in Studio. The
-machine now has general soundness theorems connecting successful executions to
-the independent lazy reference semantics. Native source storage and pinned
-instances exist; complete authored dispatch and effect admission are being
-connected to this language. Older strict-backend code is migration work, not an
-alternative language developers should target.
+This page has five parts: the language in Faré's terms (what the core has, and what
+it lacks, ranked), its formal status, its execution paths and trust boundary, how
+surface syntax becomes core terms, and a note on the deleted first generation.
+Evidence classes used below: *authored* (source exists), *compiled* (Lean checked
+it), *executed* (it ran), *integrated* (a native Host admitted it), *deployed*.
 
-## Extensions before objects
+## The language in Faré's terms
 
-An extension receives a context and an inherited value and returns a new value.
-The inherited and resulting types may differ. In object use, the context contains
-**final self**, and the inherited value is **whole super**. An extension can add
-fields, wrap behavior, replace a value, or construct a function; it is not limited
-to overriding a method selector.
+### Extensions, self and super
 
-For extensions `lower` and `upper`, composition means:
+A **specification** is a first-class partial extension `C → V → W`: given the
+eventual context `C` (the **final self**) and an inherited value `V` (the **whole
+super**), it produces `W`. It can add fields, wrap behaviour, replace a value or
+build a function; it is not limited to overriding a method selector, and it is a
+value before any target exists (Faré, ltuo §2.1, §5.4.1–4; EOOMI §3.3.5).
 
-```text
-compose(lower, upper)(self, super) = upper(self, lower(self, super))
-```
-
-Both layers see the same final self. The upper layer receives the whole result of
-the lower layer as its super. Composition is associative and generally not
-commutative. An extension remains meaningful before its eventual self exists.
-[The extension algebra](../Theory/ObjectiveBendExtensions.lean) states this with
-independent context, inherited and resulting types. Its homogeneous `mix` operation
-is one useful specialization, not the limit of the language model.
-
-`fix(extension, inherited)` ties the recursive knot: it computes a target whose
-self reference denotes that target. The [operational semantics](../Theory/ObjectiveBendOpenRecursion.lean)
-define how this computation proceeds; the equation `self = extension(self, inherited)`
-alone would not do so. Fixed points may diverge. They may also produce a useful
-function or a record without evaluating every recursive component.
-
-A **specification** retains an extension and inspectable requirements and laws.
-Partial specifications are values: inspection need not complete their requirements
-or instantiate a target. A **prototype** pairs a specification with its target.
-Generic `fix` returns the target directly; explicit prototype construction places
-the wrapper inside the knot when reflection through self is required.
-
-### A reusable captured extension
-
-This is the working part of
-[GenericExtension.obend](../tests/objective-bend-source/GenericExtension.obend):
+Composition passes the same final self to every layer and feeds each layer the
+whole result of the layers below it (Faré, poof §1.2.3, §1.3.2):
 
 ```text
-edition ObjectiveBend 1
-
-def addCaptured(delta: Nat) -> Extension<Nat>:
-  extension(self: Nat, super: Nat) -> Nat: super + delta
-
-def reuseCaptured(seed: Nat) -> Nat:
-  fix(compose(addCaptured(2n), addCaptured(3n)), seed)
+mix(lower, upper) = λself. λsuper. upper self (lower self super)
 ```
 
-`addCaptured` returns a first-class extension closing over `delta`. Applied to
-seed `7`, the composition returns `12`. Neither layer needs to force self. The
-same source file also contains a self-demanding composition; retaining that
-unused definition does not force it. The
-[heterogeneous example](../tests/objective-bend-source/Heterogeneous.obend)
-adds `y = 2 * self.x` and then `z = self.y` to an inherited record. Starting from
-`{x: 5}`, observing `z` returns `10`, through the shared final self.
+`fix(spec, inherited)` closes the knot: it is a computation, not an equation
+(ltuo §5.3.2). Every value satisfies `x = identity(x)`, yet `fix(identity)`
+produces no result; the operational rule is what gives `fix` meaning. Laziness is
+part of the meaning, not an optimisation: `{good = 7, bad = self.bad}.good` is `7`,
+and an unused divergent argument is never forced (EOOMI §5.1; ltuo §10.3.2).
+A **prototype** pairs a specification with its target so that reflection can reach
+the specification without forcing the target (ltuo §2.3.3, §6.1.2–4).
 
-With the repository's Lean toolchain and matching compiled imports prepared
-under the [bounded build policy](DEVELOPING.md#build-and-verify-without-disturbing-another-run), run:
+### What Core4 has
 
-```sh
-lake env lean --run examples/objective-bend-world/reference/GenericExtension.lean
+The core calculus ("Core4") is `Term` in
+[ObjectiveBendOpenRecursion](../Theory/ObjectiveBendOpenRecursion.lean). Each
+constructor, with its one-line semantics:
+
+| Constructor | Semantics | Faré concept |
+| --- | --- | --- |
+| `bound i` | de Bruijn variable; the machine enters the heap cell at that environment address | — |
+| `lam body` | weak-head value; the machine builds a closure | — |
+| `app f a` | call-by-name β in the reference semantics; the machine makes `a` a shared heap thunk (call-by-need) | laziness, shared suspensions |
+| `mix lower upper` | steps to `λself.λsuper. upper self (lower self super)` | mixin composition, one final self, whole super |
+| `fix spec inherited` | steps to `spec (fix spec inherited) inherited`; the machine ties one heap address to itself | fixpoint as computation |
+| `specification metadata extension` | value; applying it applies `extension`; `metadata` is reachable without forcing the extension | first-class partial specification |
+| `prototype spec target` | value pairing a specification with its target | conflation of spec and target |
+| `reflect` / `metadata` / `project` | eliminators: spec of a prototype, metadata of a spec, target of a prototype, each without forcing the other part | reflection (partial) |
+| `nat n`, `boolean b`, `label s` | scalars; labels are opaque strings | — |
+| `binary p l r` | strict, left to right; `p` ∈ {add, multiply, equal (Nat → Bool), conjunction (Bool)} | — |
+| `record fields` | fields are separate suspensions; lookup takes the first match | records of suspensions (slots and methods are not distinguished) |
+| `extend inherited fields` | defined only when `inherited` is a record; new fields shadow | method override |
+| `get t name` | field selection by a static name | — |
+| `ifZero v z s` | case on a Nat; the successor branch binds the predecessor | the only branch |
+
+**Types and quantities** ([Types](../Theory/ObjectiveBendTypes.lean),
+[Typing](../Theory/ObjectiveBendTyping.lean)). `check` is proof-producing: it returns
+a typing derivation for the actual term. Rows are compared canonically; there is
+no subtyping, and type equality is exact up to one bounded head unfolding. Rigid
+type variables carry explicit bounds and keep row tails, so a method can be typed
+against a future self it has not seen (ltuo §8.2.1–4). `fix` is typed
+homogeneously (`target → inherited → target`); heterogeneity lives only in `mix`.
+Quantities are erased, affine, linear and unrestricted; the checker enforces
+at-most-once for both affine and linear (not exactly-once), and a reusable closure
+may capture only unrestricted, shareable bindings. Nothing creates a custody value,
+so `Ty.custody` is unused by any closed program.
+
+The whole package is one lazy fixpoint: every global declaration is a field of one
+record knot, so mutually recursive definitions (the `EvenOdd` example) work through
+it. That is Faré's "global fixed point of the namespace" (ltuo §9.3.7), except that
+the root ignores `super` and is not itself a specification, so another package
+cannot extend it.
+
+### An example
+
+[ReviewBase](../tests/objective-bend-source/ReviewBase.obend) declares a `Review`
+record and a `Base` spec. [ReviewMember](../tests/objective-bend-source/ReviewMember.obend),
+written separately, imports it and adds `Twice` (which uses `self.review`) and
+`Augmented` (which wraps `super.review`):
+
+```text
+def review(inherited: Prior.Review) -> Prior.Review:
+  fix(compose(Prior.Base, Twice, Augmented), inherited)
 ```
 
-This [driver](../examples/objective-bend-world/reference/GenericExtension.lean)
-runs the retained core term for `reuseCaptured(7)` on the actual demand machine
-and prints a completed natural `12` plus heap/stack observations. It is a core
-reproduction, not a compiler invocation: editing the `.obend` file requires a new
-capture and elaboration.
+`twice` sees the final, augmented `review` through self, so `twice(3)` reads as
+`7`. That is the expected value read from the source (authored); the generated driver
+[reference/Review.lean](../examples/objective-bend-world/reference/Review.lean)
+prints the machine's final state with no assertion, and because the package declares
+specs it cannot reach the typed preview today (see the front-end defects below).
+Smaller probes in
+`tests/objective-bend-source/` separate the lazy cases (`LazyUnusedArgument`,
+`LazyUnusedField`, `LazySharedField`), heterogeneous extension (`Heterogeneous`),
+captured reusable extensions (`GenericExtension`) and reflection of an incomplete
+prototype (`ReflectLazyPrototype`).
 
-For that source-to-execution route, the actual tools are:
+### What Core4 lacks: the roadmap
+
+Ranked by how much later work each one unblocks. *Elaboration* means expressible
+by compiling into existing constructors; *core* means new constructors, new machine
+frames and new preservation and adequacy cases.
+
+1. **Sums with case** (core). Booleans have no eliminator today: `a == b` cannot
+   drive control flow, and there are no lists or variants. Cost: an injection, a
+   `case` over labels (`if` is a two-arm case), one machine frame, one new value
+   form, a variant row type with exhaustive-case typing. Unblocks a Plan that is a
+   sum of actions, lists for linearization, and method-combination lists.
+2. **An activity: effects as yield, plus a checkpoint codec** (core; FCI §5.2;
+   Faré's persistence model). One `perform plan` constructor and a yielded control
+   state with a resume rule. The machine `State` is already first-order data, so the
+   codec needs no constructors. Open design question: whether partiality is a type
+   or a judgment, and how effects interact with shared thunks (an effect must never
+   execute inside a forced shared thunk).
+3. **Declared ancestry with C4 linearization and method combination**
+   (elaboration; poof §4.3; ltuo §7.3–7.4, §9.2). Today `compose(a, b, c)` is a left
+   fold of `mix`: mixin inheritance, which ltuo §11.1.8 ranks below the two
+   multiple-inheritance forms. No dependency DAG, no generative identity, so a
+   diamond cannot count once. A static DAG can be linearized at elaboration with no
+   new constructors; it needs its own theorem (invariance under renaming of the
+   ordered presentation, and suffix soundness).
+4. **Checked `requires` and closed final-self assumptions** (typing rules only;
+   ltuo §8.2). `requires` survives only as a JSON string inside the metadata label.
+   Checking the required row against the composed provided row at `fix` turns
+   partial specifications into checked collaborations.
+5. **An extensible package root, label equality and dynamic `get`** (ltuo §9.3.7,
+   §9.2.9; Houyhnhnm ch.7). Root as a specification is elaboration; label equality is
+   a primitive; dynamic `get` is one constructor. Makes "extend what you do not own"
+   true.
+
+Further gaps, unranked: sealing, `final` and suffix declarations (ltuo §9.4.4.1,
+§10.4.2), which are what let a backend reduce dynamic dispatch to static; reflection
+beyond `reflect`/`metadata`/`project` (field enumeration, has-field), which must wait
+for a decision on what reflection may observe, because every observer forbids an
+optimisation (ltuo §10.7); a consumed mark for linear values in the heap; fresh
+persistent instances (poof §1.3.1), which are Mini's identity rather than a core
+construct; governed live upgrade (Houyhnhnm ch.5; ltuo §6.3.2); and a canonical cost
+law on the machine.
+
+### Relation to Preoscript
+
+Preoscript (in the separate `lean-uwueave` library) is a contract language about
+promises over replicated state: invariants, future-indexed certificates, status,
+coordination obligations. It has nothing about self, super or open recursion, and
+Core4 has nothing about futures or merge; the two do not overlap at the constructor
+level. They meet at Core4's weak spots: laws kept separate from authority, `requires`
+checked at compose and fix, and a Plan as data. Preoscript is a contract language
+Core4 specifications should carry and check, not a projection target to emit. An
+ordered override can delete an obligation, so the obligation profile of a `mix` is
+not simply a sum; that needs a theorem.
+
+## Formal status
+
+The proofs are in `Theory/ObjectiveBend*.lean` (compiled). Every theorem below has
+`#print axioms` pinned to `propext`, `Classical.choice` and `Quot.sound`; there is
+no `sorry`, `axiom`, `native_decide`, `partial` or `extern` in those files.
+
+### What is proven
+
+| Theorem | In plain words | Hypotheses |
+| --- | --- | --- |
+| `sourceStep_deterministic` | The reference step relation is deterministic. | none |
+| `runBounded_natural_sound`, `_boolean_sound`, `_label_sound` | If the bounded machine finishes a source term with a scalar, the reference semantics evaluates that term to the same scalar. | the term is closed (`Scoped 0`, met by every elaborated program); the run finished. Holds for every heap/stack limit and tick count. |
+| `runBounded_value_sound` | A finished run of any value (closure, record, spec, prototype) has a meaning for every heap address, the final heap realizes it, and the source evaluates to the returned value's meaning. Weak-head only. | closed; finished |
+| `runBounded_observes_sound`, `runBounded_observation_sound`, `runBounded_resource_independent` | Ground observations of finished runs agree with the reference semantics, and two finished runs under different limits observe the same result. | closed; finished |
+| `typed_stepRaw_preserved` | Every raw machine step preserves heap, control and stack typing, over an address typing that only grows. | a typed state (`checked_initial_state` builds one from any `Checked` term) |
+| `checked_reachable_no_refusal`, `check_runBounded_no_refusal` | A closed term the checker accepts never reaches any refusal (wrong operand, missing field, unbound reference), for every limit and tick count. Divergence, blackholes and resource suspension remain possible. | `Checked source []` |
+| `reachable_no_internalRefusal` | Closed scoped executions never refuse for an unbound variable, a missing cell or an invalid update. | closed |
+| `mix_append`, `composition_associative` | Folding a list of homogeneous extensions distributes over append, and specification composition is associative, on the list model in `ObjectiveBendExtensions`. | none; but it is a separate model, and no theorem ties it to `Term.mix` |
+
+The no-refusal theorems are about the same function the preview runs: the preview
+calls `check` on the empty context and then `runBounded` on the same decoded term.
+
+### What is open
+
+- **Completeness.** That a source term which evaluates makes the machine finish,
+  given enough resources. `adequate_trace_completion` sounds like it and is not: its
+  premise is that the unbounded run already finished, and it concludes only that
+  bounded limits suffice. `Representation`, the structure that would package
+  soundness, completeness and observation, has no instance; nothing in its type
+  stops a degenerate `Supported := fun _ => False` instance, only its docstring.
+- **`forceWith`/`executeWith` ≡ `runBounded`.** The Plan path does not run
+  `runBounded`. It runs `executeWith` under a capacity policy, which repeatedly calls
+  `forceWith` and then `materializeWith` to extract deep Data. No theorem mentions
+  `forceWith`, `materializeWith`, `executeWith` or `allows`.
+- **Deep Data soundness.** The extracted first-order Data that becomes a Plan has no
+  theorem relating it to the source meaning.
+- **Front-end adequacy.** No theorem relates `.obend` source to the core term (see
+  [the trust boundary](#the-trusted-front-end-boundary)).
+- **Quantities at run time.** Use counts are static only; no theorem says a value is
+  used at most once at run time.
+
+Some facts read like semantics and are not: `TotalProof law := law`; the prepared
+output's `native_matches` and `no_returns`, and `checked_erasure`, are field
+projections; `ExecutionWith.runExact` records that a value is the output of the very
+call that produced it. Spec `law`s are callable closures stored in metadata; nothing
+discharges them.
+
+### What the default build checks
+
+At c8fdd000 the `Theory/ObjectiveBend*` modules are imported only by the opt-in
+`ResearchWip` library. `Theory.lean`, the default `Minidregg` target and
+`BendQualification` do not import them, and `Host/ObjectiveBendPreview` imports only
+`Typing` and `DemandMachine`. A green default build therefore re-checks none of the
+proofs above. Bringing them into a default gate is configuration, not proof work.
+
+### The honest label for executed results
+
+Until `forceWith ≡ runBounded` and deep Data soundness are proved, a Plan or result
+produced on the native path is **"Core4 `executeWith` output"**: what the evaluator
+computed, re-executed deterministically at admission and on every replay. It is not
+"the meaning of the source".
+
+## Execution paths
+
+### Preview: `runBounded`
+
+Studio's preview runs: Rust `native/resource-client/src/workspace/studio_preview.rs`
+spawns bun; `objective-frontend.ts` captures the package and `objective-parser.ts`
+parses it; `objective-preview.ts` runs `objective-elaborate.ts`, writes the core and
+typed packets and checks that the typed term equals the core term; then
+`lean --run Host/ObjectiveBendPreview.lean` decodes the packet, runs `check`, then
+`runBounded`. This is the function the soundness and no-refusal theorems describe.
+On main the route is wire-broken: the Rust side writes `preview-input.v1` and accepts
+only `preview-result.v1`, while the in-tree TypeScript requires `preview-input.v2`
+and emits `preview-result.v2`. The fix (Rust speaking v2, v1 deleted) exists in a
+lane and has not landed. To drive the tools directly from the repository root:
 
 ```sh
 bun native/bend-source/objective-frontend.ts \
-  tests/objective-bend-source/GenericExtension-package.json EMPTY_CAPTURE_DIR
+  tests/objective-bend-source/GenericExtension-package.json NEW_CAPTURE_DIR
 bun native/bend-source/objective-preview-request.ts \
-  EMPTY_CAPTURE_DIR/objective.json NEW_REQUEST_JSON '["7"]' '[]'
+  NEW_CAPTURE_DIR/objective.json NEW_REQUEST_JSON '["7"]' '[]'
 bun native/bend-source/objective-preview.ts \
-  NEW_REQUEST_JSON EMPTY_RESULT_DIR PINNED_TOOLING_CONFIG
+  NEW_REQUEST_JSON NEW_RESULT_DIR PINNED_TOOLING_CONFIG
 ```
 
-Run from the source root, using new owned paths for the uppercase placeholders.
-Use the [capture schema](OBJECTIVE-BEND-FRONTEND.md) and
-[preview schema](OBJECTIVE-BEND-PREVIEW.md) to construct those inputs. The preview
-needs a server-owned configuration pinning matching compiled tools and semantic
-modules; a fresh checkout does not contain an installed preview service. It
-reparses the captured source, elaborates it, checks the proposed typed term, and
-executes that same decoded term. The captured-extension and heterogeneous
-examples have passed the current explicit-Boolean wire-v2 route, as well as the
-older wire-v1 cohort. Wire-v2 keeps Boolean `true` distinct from String `"true"`
-and refuses String conjunction. Match the configuration to the request's wire
-version. Unsupported annotations produce diagnostics;
-parsing a construct alone does not establish that the typed preview supports it.
+The tooling config pins compiled tools and semantic modules; a fresh checkout does
+not contain one. Schemas: [capture](OBJECTIVE-BEND-FRONTEND.md),
+[preview](OBJECTIVE-BEND-PREVIEW.md). The preview carries `authority: none`.
 
-## Demand, sharing and reflection
+### Native admission
 
-The reference semantics are weak-head and lazy: applying a lambda does not first
-evaluate its argument; constructing a record does not force its fields. The
-[demand machine](../Theory/ObjectiveBendDemandMachine.lean) gives delayed work
-identity in a heap. Entering a suspended cell marks it as evaluating; returning
-caches its value at the same address, preserving its origin. Repeated demand then
-uses that cached value. A recursive fixed point allocates a shared cell referring
-to itself, rather than repeatedly copying an unfolding term.
+A member invocation of an Objective method is designed to reach an accepted
+receipt through the ordinary native path; Objective needs no new receipt type. The
+path, most of it assembled in lanes and not yet one coherent build: Studio
+publishes the source package and its elaborated core as two content atoms in one
+ordinary invocation; the caller builds a claim naming the artifact atom, arguments,
+input references and a capacity envelope, and the client signs it as an invocation
+with family `objectiveMethod` (that Rust half is on main). The Host pins the operator
+policy for Objective into its runtime parameters. `ResourceTransaction.prepareFrom`
+decodes the claim and prepares compute funding; `DeclaredResourceController.admit`
+dispatches to Objective admission, which checks every signature and capability
+first, then the policy, the selected artifact and package pins, the inputs against
+the claim's commitment, the typed check of the applied term, and runs `executeWith`,
+lowers the result to a Plan and requires the Plan's effects to equal the command's
+effects exactly. Commit and receipt are the existing durable path; on reopen the
+Host re-executes the program during replay. **On main, no Objective Bend source has
+produced a native accepted receipt.** The admission modules
+(`Kernel/ObjectiveBendNativeAdmission`, the claim, the published-package lookup, the
+family-aware controller) compiled in lanes against a mixed file set and are being
+integrated into one coherent build. Known design holes on that path: the claim's
+`proofWork` is chosen by the caller and nothing relates it to measured work (zero
+work means free execution up to the policy maximum); the policy's elaborator pin is
+checked for hex format only; the route's guard list is empty for every route.
 
-The machine distinguishes a finished value, resource suspension, a refused
-operation and re-entry into an evaluating cell (a blackhole). Tick exhaustion
-retains the current state; a capacity refusal retains the state before the
-transition that would exceed capacity. A blackhole is a non-result, not a
-catchable source exception. Other nonterminating programs can continue until
-suspended; this is not a decision procedure for termination.
+### The trusted front-end boundary
 
-Reflection of a prototype returns its retained specification without forcing the
-target. Specification metadata can likewise be observed without evaluating its
-extension. These are operational properties with named source reduction lemmas,
-not permissions to inspect private execution state. Shared evaluation changes
-work and storage behavior relative to the reference reduction. Successful machine
-results have a proved reference meaning; the reverse direction—completeness—and
-a general account of divergent execution remain open.
+Trusted (no theorem; checked only by replay):
 
-## Types, captures and laws
+- the TypeScript parser, capture and elaborator (`objective-parser.ts`,
+  `objective-frontend.ts`, `objective-elaborate.ts`) and `literalAnnotations`;
+- the package capture and fingerprint tooling; `ObjectiveSourcePackage.wellFormed`
+  is structural only;
+- source-to-core correspondence: native loading establishes a live, immutable,
+  canonical package and a typed core term, not that the core is what the source
+  says. A third party who publishes benign source with a different core is caught
+  only by a signer who replays the elaboration (publication compares the offered
+  core with an independent replay);
+- the elaborator pin, which binds nothing until the package carries a lowerer hash
+  that admission compares;
+- spec laws (closures, never checked); affine and linear quantities, which the front
+  end cannot produce;
+- the meaning of a Plan extracted from deep Data, until the two open theorems above
+  exist.
 
-[Types](../Theory/ObjectiveBendTypes.lean) and
-[typing](../Theory/ObjectiveBendTyping.lean) distinguish erased, affine, linear and
-unrestricted use, and one-shot from reusable functions. A reusable extension may
-capture only values admitted as unrestricted and shareable. Wrapping custody or a
-one-shot value in an immutable record, specification or prototype does not make
-it duplicable. The repaired composition rule enforces this capture restriction.
-
-The current checker handles an annotated fragment with finite records and
-canonical row comparison. It is not a complete dependent type inference or
-subtyping implementation. Its future-self/super examples quantify over future
-shareable types under explicit row premises; they do not prove arbitrary future
-extensions type-correct. Linear syntax currently has an at-most-once use bound:
-partial computation may retain a resource indefinitely. A world protocol's
-terminal discharge obligation is a separate contract.
-
-A successful `Checked` value contains an actual typing derivation for the erased
-term and its use conditions. The
-[typed transition proofs](../Theory/ObjectiveBendDemandPreservation.lean) establish
-`typed_stepRaw_preserved` for every demand-machine constructor. Allocation
-extends the address assignment while preserving each existing address's type;
-lexical origins and continuation frames retain their quantity and shareability
-evidence, including captured closures, composition and cyclic `Fix`.
-
-For closed checked source, `checked_reachable_no_refusal` excludes wrong operands,
-missing fields and internal-reference refusals throughout raw-machine execution.
-`check_runBounded_no_refusal` connects actual checker success to the same erased
-term and bounded executor, for arbitrary tick, heap and stack limits. Evaluation
-may still diverge, encounter a blackhole or suspend for resources. These safety
-results do not establish runtime custody conservation or terminal discharge.
-
-Laws are propositions about behavior, including partial behavior. A total Lean
-proof can establish a relational law about a partial program's syntax without
-making that program total. `LawProvider` carries such evidence. Retained source
-`law` bodies are currently callable declarations, not automatically discharged
-proofs. An extension may deliberately change behavior; preserving an earlier law
-is an explicit compatibility requirement when the chosen contract demands it.
-The extension algebra's retained-law theorem assumes a closed composition that
-already satisfies its laws. It does not prove every override preserves them.
-
-## What execution proves
-
-The [demand-machine soundness theorems](../Theory/ObjectiveBendDemandAdequacy.lean)
-cover **every closed source term that the actual bounded executor finishes**.
-For any heap/stack limits and tick budget, if `runBounded` from `initial source`
-returns a natural, Boolean or String, the independent reference semantics
-`Evaluates` returns that same scalar. These results require source scope and the
-actual finished execution. They do not require a caller-supplied graph simulation
-witness, a typing token or a special supported-program subset.
-
-`runBounded_value_sound` also covers functions and structured results: it
-constructs closed meanings for heap addresses, proves the final heap realizes
-them, and derives reference evaluation to the returned value's meaning. It does
-not establish external contextual equivalence. The main source entry points are:
-
-| Result | Actual scope |
-| --- | --- |
-| `mix_append`, `composition_associative` | Extension composition with the stated common context and type relationships. |
-| `safe_use_bound`, `reusable_capture_member`, `checked_erasure` | Checked syntactic use/capture conditions and an actual erased-term typing derivation. |
-| `ignores_any_partial_argument` | The reference constant function returns its natural result for any argument term, including a divergent one. |
-| `stepRaw_lexicalInvariant`, `stepRaw_busyInvariant` | Raw transitions preserve the respective pre-invariants. Origins and existing cached values are also preserved. |
-| `reachable_no_internalRefusal` | Closed scoped executions cannot refuse for an unbound variable, missing cell or invalid update. Missing fields and wrong operands are different cases. |
-| `runBounded_natural_sound`, `runBounded_boolean_sound`, `runBounded_label_sound` | Any actual finished scalar run of closed source agrees with independent reference evaluation. |
-| `runBounded_value_sound`, `runBounded_observes_sound` | Finished values have a realized reference meaning; finished ground results have the corresponding reference observation. |
-| `typed_stepRaw_preserved` | Every raw-machine constructor preserves typed heap, control and continuation frames under its state-typing premises, with a monotonically extended address assignment. |
-| `checked_reachable_no_refusal`, `check_runBounded_no_refusal` | Closed checked erasures cannot reach raw refusals or return bounded-executor refusals, including wrong operands and missing fields. Divergence, blackholes and resource suspension remain possible. |
-| `adequate_trace_completion` | An existing terminating raw-machine trace supplies sufficient executor bounds. It does not establish termination of an arbitrary source program. |
-
-The [invariant proofs](../Theory/ObjectiveBendDemandInvariant.lean) support the
-soundness result; [typed transition proofs](../Theory/ObjectiveBendDemandPreservation.lean)
-address a separate safety obligation. Source-elaboration adequacy, completeness
-of the shared machine relative to reference evaluation, administrative progress,
-and blackhole/divergence correspondence remain open.
-In particular, reference termination has not yet been shown to guarantee machine
-termination with sufficient resources. The `Representation` structure in the
-reference semantics records the larger implementation contract; the completed
-soundness direction alone does not inhabit that whole contract.
-
-## From authored source to a live world
-
-Source capture retains exact module bytes, locked imports, source spans and AST
-identities. The preview binds its source, core, typed packet, tools and limits to
-its result. The current core and typed wire format has distinct Boolean and
-String constructors; source edition and runtime wire version are separate
-identities. Earlier captured artifacts keep their interpretation rather than
-silently adopting a changed representation.
-
-Studio captures editable modules and imports with history, forks and pinned
-source. Its served preview runs a selected capture through server-pinned tools,
-the actual type checker and the same-term demand executor. Editing a module and
-capturing it again produces a new checked preview while retaining earlier preview
-history. Results, types and diagnostics retain their source and tooling bindings;
-reading a stored preview rechecks current document grants. Studio now accepts
-explicit wire-v1 or wire-v2 preview selection within Objective source edition 1,
-using separate server-pinned configurations. Wire-v2 carries tagged arguments:
-Boolean `true` and String `"true"` retain their distinct types and results, and
-incompatible source or arguments are refused by the actual checker. Earlier
-captures and preview history keep their original tooling interpretation.
-Native storage has received governed source, pinned instance births and kind
-evolution with old instances retaining their old pin and state.
-
-The [prepared-output path](../Kernel/ObjectiveBendPreparedOutput.lean) now checks
-closed annotated source, executes that same term, and fully demands its returned
-data under a shared root-and-field budget. The
-[scalar Plan adapter](../Compiler/ObjectiveBendPlanAdapter.lean) decodes the exact
-record schema and binds it against the actual loaded native directory and
-command. This has run on a real loaded directory, including refusal of a stale
-command, mismatched resource root and wrong prior scalar value. `native_matches`
-proves that the bound Plan matches the command; `no_returns` states that this
-slice has no return slots. Previewing a lazy record's field names alone would not
-establish any of these properties.
-
-The common [Plan](../Compiler/BendWorldPlan.lean) supports ordered typed effects,
-read guards and independent returns, but the current Objective adapter implements
-the narrower scalar-write slice. A `BoundPlan` is a checked proposal, not an
-accepted effect or receipt. The complete receiving path must additionally bind
-source and invocation identity and check current grants, governing laws, funding,
-profile/capacity and release policy before admission. General authored method
-dispatch, private returns and the full effect family remain to be joined. Source
-identity, a typing proof and a cached executable confer no authority; speculative
-evaluation has no ambient host I/O. Money requires the conserving account
-operation, not a raw scalar balance write.
-
-Persistent instances retain identity, state and behavior pins. Persistent
-**activities** additionally retain control, environment, heap, pending arguments,
-cost position and execution context. The
-[persistence contract](BEND-PERSISTENT-COMPUTATION-20261003.txt) covers suspension,
-uncertain replies, generation fencing and governed evolution. New lazy-machine
-continuations need their own admitted representation and restoration connection;
-the existing activity machinery is not automatically a native runner for them.
-Restoration must recheck current authority and cannot replay an uncertain external
-effect under a new operation identity.
+Not trusted, because native admission re-executes it: argument JSON to `Term`
+(bounded, canonical), the typed check, `executeWith`, the exact effect match,
+authority and funding.
 
 ## Execution and privacy
 
-Objective Bend's lazy semantics is the target for native compilation, bounded
-oblivious execution, proof systems and homomorphic execution. Each implementation
-must relate its actual input, result, resource behavior and disclosure to this
-language. The reference semantics and shared demand machine are the starting
-point for that work.
+The lazy semantics is the target for native, oblivious, proof-producing and
+homomorphic execution; on main none of those routes runs Objective Bend. The
+oblivious-execution and circuit families (`BendOblivious*`, `BendLogic*`,
+`BendNatural*`) target the retiring BendTT machine. The zk statements for Objective
+(`Assurance/ObjectiveBendCommittedSource`) are conditional on a `PackedRefinement`
+hypothesis that nothing inhabits for a real program. The FHE route that runs today
+evaluates a public natural-number expression, not an Objective method. Laziness
+leaks through access pattern and timing: forcing order and cache state are
+data-dependent. So a private backend needs a both-arms (mux) lowering of `case`, an
+explicit public resource bound, and no effect inside a forced shared thunk.
+Source `Nat` is unbounded; a native or circuit backend needs a bounded domain that
+fails stop, never wraps. A private profile names observers and permitted leakage
+(code, branches, memory access, timing, output shape, failure); encryption alone
+hides none of these.
 
-Older BendTT and call-by-value backend machinery is being removed or migrated
-into this sole target. Its proofs—even general decoded-output soundness—and
-strict-machine circuit/BFV experiments do not qualify lazy Objective execution.
-Useful representations and proof infrastructure need an explicit Objective
-refinement before they can support that claim.
+## Surface → core elaboration
 
-Natural scalars, native identifiers and private arithmetic need explicit
-representations. Canonical byte codecs can transport identities without unary
-expansion; they do not themselves implement arithmetic. Word bounds, overflow,
-equality, charging and backend numeric domains cannot silently change the source
-promise.
+`objective-elaborate.ts`, as it is:
 
-A private execution profile names observers and permitted leakage from code,
-branches, memory access, timing, output shape and failure. Encryption alone does
-not hide those observations. A zkVM or reusable circuit must verify the exact
-program/result relation; homomorphic execution also needs a qualified arithmetic
-and key/noise model. Private result custody, release authority and outcome agreement remain separate.
-Distributed effects also require real delivery, reservation and recovery.
+| Surface | Core |
+| --- | --- |
+| global declarations | fields of one record knot: `fix (λglobals λseed. record{Module.name: …}) (record [])`; a global reference is `get globals "Module.name"` through the tied address |
+| `def f(x…) -> T: body` | nested `lam`s with binder hints and annotations |
+| `extension(self, super) -> T: e` | `lam lam e`, typed `T → T → T` (homogeneous) |
+| `spec S for T: …` | `specification (record{name, interface: <signatures as a JSON label>, laws: record of law closures}) (λself λsuper. extend super {methods})` |
+| `compose(a, b, c…)` | left fold to `specification (record{operator, inherited: v, wrapping: r}) (mix v r)` |
+| `fix(s, i)`, `extend(x, {…})` | `fix`, `extend` |
+| `prototype`, `reflect`, `metadata`, `targetOf` | `prototype`, `reflect`, `metadata`, `project` |
+| `x.f`, `f(a, b)`, `()` | `get`, curried `app`, `record []` |
+| `+ * == &&` | `add`, `multiply`, `equal`, `conjunction` |
+| `match n: case 0n / case 1n+p` | `ifZero`; exactly those two branches |
+| `true`/`false`, strings, `7n` | `boolean`, `label`, `nat` |
 
-Use the [system map](README.md) and [developer guide](DEVELOPING.md) for surrounding
-contracts, and the [dated evidence index](evidence/2026-10-03-objective-bend.md) for
-receiving checkpoints. Update this guide with changes to its contracts and examples; keep individual
-receiving runs in the evidence index.
+Arguments and fields stay thunks; laziness is preserved.
 
-## Design sources
+Known front-end defects:
 
-Rideau, Knauth and Amin's
-[The Land of the Ultimate Object](https://fare.tunes.org/files/cs/poof/ltuo.html)
-develops incremental definitions, heterogeneous extension, final self, whole super
-and lazy prototype construction. Rideau's
-[orthogonal persistence model](https://github.com/mighty-gerbils/gerbil-persist/blob/master/persist.md)
-and [First-Class Implementations](https://fare.tunes.org/files/fci2017/fci.html)
-connect live computation, bounded observation and implementation change. These
-are design sources; the repository's semantics, theorem premises and actual
-receiving paths determine Objective Bend's implemented guarantees.
+- `compose` copies `v` and `r` syntactically into both the metadata and the `mix`,
+  so term size grows as 2^k in the number of composed specs, and the inherited
+  composite is not shared between the copies.
+- `literalAnnotations` throws for any `spec` declaration anywhere in the package, so
+  a package that declares a spec (EvenOdd, Review, the lazy-specification probes)
+  cannot produce a typed packet, even when the entry never uses the spec. Spec method
+  lambdas get no binder hints.
+- `!= < > <= >= || - /` parse but are refused at elaboration.
+- `match` refuses wildcards.
+- Quantities map `default`/`copy` to unrestricted and `dead` to erased; the surface
+  cannot express affine or linear.
+- `requires` is carried as a string and never checked; the parser's `record`
+  declaration is skipped by the elaborator.
+- The parser still accepts `./NAME.bend` imports.
+
+The generated drivers in `examples/objective-bend-world/reference/` are untyped,
+print state without assertions, and some are stale against the current elaborator
+(EvenOdd encodes Booleans as labels).
+
+## What was Gen-1, and why it is gone
+
+The first generation elaborated this OO surface into checked BendTT Books
+(`Compiler/ObjectiveBendLinker`, `ObjectiveBendElaboration`, the Workshop and its
+instance loaders), which bound the language to the restrictions of that embedding:
+data-only reusable captures, acyclic linking and total strict calls. On 2026-10-03
+Objective Bend became its own lazy language with Core4 as its only core, and Gen-1
+was deleted on 2026-10-04 so that its claims (pinned instance births, kind
+evolution, a persistence contract over the strict closure machine) stop being read
+as claims about Core4.
+
+## Sources
+
+Faré's work cited above, by short name:
+
+- **ltuo**: Rideau, Knauth and Amin, *The Land of the Ultimate Object*
+  (<https://fare.tunes.org/files/cs/poof/ltuo.html>).
+- **poof**: *Prototypes: Object-Orientation, Functionally*
+  (<https://fare.tunes.org/files/cs/poof.pdf>).
+- **EOOMI**: *The Essence of Object-Orientation: Modularity and Incrementality*,
+  2024 draft (<https://fare.tunes.org/files/cs/poof/eoomi2024.pdf>).
+- **Houyhnhnm**: *Houyhnhnm Computing*, chapters 1–11
+  (<https://ngnghm.github.io/>).
+- **FCI**: *First-Class Implementations* (<https://fare.tunes.org/files/fci2017/fci.html>)
+  and *Climbing* (<https://fare.tunes.org/files/climbing/climbing.html>).
+- **Persistence model**: gerbil-persist
+  (<https://github.com/mighty-gerbils/gerbil-persist/blob/master/persist.md>).
+
+The original Bend calculus remains pinned in `vendor/bend` and
+`Theory/BendTTSource.lean` as a reference only; strict-machine proofs say nothing
+about the demand machine.
+
+These are design sources. The repository's semantics, theorem premises and admitted
+receiving paths determine what Objective Bend guarantees.
