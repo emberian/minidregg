@@ -20,6 +20,7 @@
 # updated 2026-10-04: registry kind objectiveActivity: its cell layout module enters the Host closure  [counts: Minidregg 0 1, Theory 68 151, Kernel 339 491, Pred 7 11, Effects 0 3, Compiler 132 297, Selvage 12 153, Assurance 0 151, Host 72 107, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 10, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-04: schema-v2 (merge-keeper rebase onto activity-native): Kernel.SessionIndex enters (the loaded image session indexes CellIds/TxIndex, consumed by Kernel.NativeHostContext)  [counts: Minidregg 0 1, Theory 68 151, Kernel 340 495, Pred 7 11, Effects 0 3, Compiler 132 298, Selvage 12 153, Assurance 0 151, Host 72 107, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 11, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-04: the Lean Objective Bend front end (parser, elaborator, C4, front-end driver, identity, SHA-256, publication replay) enters: Host.Main runs objective-front and objective-publication, and admission recomputes the published core (merge-keeper rebase onto activity-native, seats, agreement, schema-v2)  [counts: Minidregg 0 1, Theory 69 151, Kernel 340 495, Pred 7 11, Effects 0 3, Compiler 139 306, Selvage 12 153, Assurance 0 151, Host 74 108, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 11, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-04: fn boundary: Host.FnOutcome (fn exit classes) and Kernel.Base64 (the one base64) enter via Host.Main / FnPortableSource  [counts: Minidregg 0 1, Theory 69 151, Kernel 341 496, Pred 7 11, Effects 0 3, Compiler 139 306, Selvage 12 153, Assurance 0 151, Host 75 109, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 11, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -202,6 +203,7 @@ Host.DryRun
 Host.FnConsumerFrontierPlan
 Host.FnConsumerNamespacePlan
 Host.FnInboxView
+Host.FnOutcome
 Host.FnSelectiveReleaseAuthoring
 Host.FnSelectiveReleaseFnAck
 Host.FnSelectiveReleaseFnReceiving
@@ -358,6 +360,7 @@ Kernel.ApplicationSpkPackageIdentity
 Kernel.ApplicationStreamContinuity
 Kernel.AudienceRosterBinding
 Kernel.AuditTiming
+Kernel.Base64
 Kernel.BirthCandidateAdmission
 Kernel.BirthExportAdmission
 Kernel.CanonicalPolicyRegistry

@@ -3680,6 +3680,13 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Host.FnOutcome",
+      "path": "Host/FnOutcome.lean",
+      "sha256": "39a0cc86b312dff10b34f13ff5ab0e29309797a2158a7fba2c56de6297ee49d8",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
       "module": "Host.FnSelectiveReleaseAuthoring",
       "path": "Host/FnSelectiveReleaseAuthoring.lean",
       "sha256": "90aa1c4990afd9091a13dd2635b1f87bcd786ec62adb490f8ece0e9cb563815c",
@@ -3724,9 +3731,9 @@
     {
       "module": "Host.GrainOriginSource",
       "path": "Host/GrainOriginSource.lean",
-      "sha256": "9819ae9295d2ed80ad21ffcb5ef7ec003476a04facf58e0c8ef5ed2fa550f931",
+      "sha256": "893592a7ec77dd73adc2622c0ef3c12466dd5af6621764caf7813f7465a7e607",
       "surface": "default",
-      "ownerReportedStatus": "WIP shared admission/charging composition; pure NativeRun6 and money foundation2 separately PASS; merged receiver/currentlaw/native receiving pending"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Host.InspectRender",
@@ -3794,7 +3801,7 @@
     {
       "module": "Host.Main",
       "path": "Host/Main.lean",
-      "sha256": "692c1981723c3d84a3642f5b02e34d9e5907962fb4b73b0f0d685219344f1a72",
+      "sha256": "27ac0fc4763e7836f800ebde5137eccc070f5ca0d65d229f135198d10ab0f681",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -5017,6 +5024,13 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Kernel.Base64",
+      "path": "Kernel/Base64.lean",
+      "sha256": "596fb1b57fd3a88e8007a167105224615d4a7cd99b66b78e1e777dc553fe3b72",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
       "module": "Kernel.BirthCandidateAdmission",
       "path": "Kernel/BirthCandidateAdmission.lean",
       "sha256": "46370084c69810f85f3adc04d56f46949958fd66b75479b950dea71f50eb6a9a",
@@ -5586,7 +5600,7 @@
     {
       "module": "Kernel.FnPortableSource",
       "path": "Kernel/FnPortableSource.lean",
-      "sha256": "fac40c1e86b24cfc3239fd5407d72e3540de0154be40a23b630a1fc0294c2dc2",
+      "sha256": "ae9973eed47c0bfae405c93b41aa53d16bf613616c0f423a402a6fae58874ce4",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -5677,7 +5691,7 @@
     {
       "module": "Kernel.FnSelectiveReleaseArticle",
       "path": "Kernel/FnSelectiveReleaseArticle.lean",
-      "sha256": "6d6ed4e9449f300d2f5d7a471393c706e910dc8915fed31b3f88e9685cd1dde4",
+      "sha256": "a30e3fc66b569b05cc6b56cdfd72407a7e84e958a02a705436da0de5c9c46ef9",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6762,14 +6776,14 @@
     {
       "module": "Kernel.PayEnrolMemo",
       "path": "Kernel/PayEnrolMemo.lean",
-      "sha256": "f4b3202e2a6ef84cea4891859d61159cda5709492343756d1ef54a47e571cf05",
+      "sha256": "69c08ae66e3e4069a3c6c09d1e24b9b1120fa373daf192c72d28ab5d893223b1",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.PayEnrolMemoV2",
       "path": "Kernel/PayEnrolMemoV2.lean",
-      "sha256": "9d05d5a6414a380433a6fd66045558a7f47f91dcb8d55d56de470b873a6a0616",
+      "sha256": "a37b38887eedd7cf124b3cbe832a1544a16825532bfcdc25fb748e188d334754",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
