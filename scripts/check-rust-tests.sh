@@ -210,7 +210,48 @@ exact rc-roomkey-lineage     resource-client --bin mini -- \
   workspace::roomkey::tests::a_refused_rotation_draft_is_dead_forever_and_its_epoch_is_never_selected \
   workspace::roomkey::tests::first_invite_signed_descriptor_pins_its_key_but_needs_no_prior_wrap_or_record \
   workspace::roomkey::tests::forgotten_epochs_are_not_relearned_and_the_cache_keeps_them_forgotten \
+  workspace::roomkey::tests::a_sealed_entry_is_bound_to_its_stream_and_position \
+  workspace::private::tests::legacy_private_content_never_seals_and_only_strikes_retaining_ciphertext \
   workspace::protected_document::tests::protected_atom_edit_rollback_to_an_earlier_ciphertext_does_not_open
+# Private-room hybrid wraps (record/wrap v3, X25519 + ML-KEM-768): round trip, wrong
+# recipient, tampering of EITHER component, both halves required, the combiner's
+# known-answer vector (computed by an independent cSHAKE256) and the seeded ML-KEM key
+# checked against an independent FIPS 203 implementation. DEVNET QUALITY; PRIVACY NOT AUDITED.
+exact rc-roomkey-hybrid-wrap resource-client --bin mini -- \
+  workspace::private::tests::wrap_opens_for_its_member_and_not_another \
+  workspace::private::tests::a_hybrid_wrap_has_the_v3_shape_and_a_fresh_ciphertext_every_time \
+  workspace::private::tests::tampering_either_ciphertext_component_refuses_the_wrap \
+  workspace::private::tests::a_wrap_needs_both_halves_of_the_recipient_identity \
+  workspace::private::tests::a_recipient_with_another_kem_key_is_not_the_recipient \
+  workspace::private::tests::the_combiner_matches_an_independent_known_answer \
+  workspace::private::tests::the_seeded_ml_kem_key_matches_an_independent_fips_203_implementation \
+  workspace::private::tests::ml_kem_keys_come_from_the_seed_and_round_trip_across_a_reload \
+  workspace::private::tests::low_order_member_key_refused \
+  workspace::private::tests::escrow_is_off_by_default_and_opens_only_for_the_sponsor \
+  workspace::private::tests::the_encryption_keyring_keeps_every_past_secret_across_seed_rotations \
+  workspace::roomkey::tests::wrap_atoms_round_trip_through_a_view_and_open_only_for_their_member \
+  workspace::roomkey::tests::a_member_who_rotated_is_rewrapped_to_its_record_and_opens_with_its_keyring \
+  workspace::roomkey::tests::kicked_member_cannot_open_post_rotation_content_and_keeps_the_past
+# The pre-hybrid shapes REFUSE by name (no dual path): v1/v2 records, a v2 wrap in a keys
+# cell, a v1 encryption keyring; a wrap addressed to another key id; the 64-delivery bound.
+exact rc-roomkey-v3-refusals resource-client --bin mini -- \
+  workspace::private::tests::a_v1_encryption_keyring_refuses_by_name_and_is_not_read_as_empty \
+  workspace::roomkey::tests::a_pre_hybrid_v2_wrap_in_a_keys_cell_refuses_the_whole_cell_by_name \
+  workspace::roomkey::tests::a_wrap_to_another_key_id_never_opens_even_for_the_right_room_and_member \
+  workspace::roomkey::tests::a_malformed_wrap_or_release_atom_in_the_keys_cell_is_an_error_not_skipped \
+  workspace::roomkey::tests::wrap_and_release_atom_ids_name_one_address_in_disjoint_regions \
+  workspace::roomkey::tests::a_full_64_delivery_release_still_fits_the_retained_draft_bound
+# ONE private-invite path: the shell's room invite and chat invite (and summon) run the
+# same room-key invocation; a hosted member is refused without --i-know by the operator's
+# list AND by its own signed custody declaration; chat invite checks before granting.
+exact rc-roomkey-invite-path resource-client --bin mini -- \
+  workspace::roomkey::tests::every_private_invite_path_spells_one_room_key_invocation \
+  workspace::roomkey::tests::a_member_that_declares_hosted_custody_is_refused_without_i_know_and_cannot_be_altered_into_own_machine \
+  workspace::roomkey::tests::a_hosted_invitee_into_a_private_room_needs_i_know \
+  workspace::private::tests::keygen_hosted_leaves_a_marker_the_record_signer_reads \
+  shell::tests::private_room_verbs_spell_the_room_key_operations \
+  shell::tests::a_hosted_subject_joins_a_private_room_only_with_i_know \
+  chat::tests::chat_verbs_take_the_rest_of_the_line_as_text
 # R2-1 #10 / C4: the cohort link admits only roster members (d7b2f19b replaced the
 # pre-shared-key adapter and its re-accept test from 76757030)
 exact rc-cohort-roster       resource-client --bin mini -- \
