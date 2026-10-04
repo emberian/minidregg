@@ -4,16 +4,15 @@
 //! for a durable native reserve and an exact parent witness, then for a
 //! durable send-boundary acknowledgement. The controller owns signing and
 //! reconciliation; this edge owns only a revocable prompt lease and HTTP I/O.
-use crate::credentials::{self, Secret};
+use crate::credentials;
+use mini_keys::client::Broker;
 use serde_json::{json, Value};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
@@ -72,11 +71,17 @@ pub struct ProviderRequest {
 /// resolves it from the provider table and the credential store at reserve
 /// time; the gateway never chooses an endpoint or a key itself.
 pub struct Route {
-    /// Exact Chat Completions endpoint of that row.
+    /// Exact Chat Completions endpoint of that row (the placement this request
+    /// names; the broker sends to the endpoint its own copy of the table gives).
     pub endpoint: String,
-    /// `None` for a `credential: none` row: no Authorization header at all.
-    /// Never pass this to a worker process, its environment, or an HTTP reply.
-    pub bearer: Option<Secret>,
+    /// The provider-table row the broker sends through.
+    pub provider: String,
+    /// The key broker (native/mini-keys): the only process holding any bearer.
+    /// It performs the send; this controller never sees a provider key.
+    pub broker: Broker,
+    /// A credentialed row's single-use ticket from `provider-authorize`, minted
+    /// for exactly this request body. `None`: a homelab row, sent without a bearer.
+    pub ticket: Option<String>,
 }
 
 pub enum ForwardPermit {
@@ -155,7 +160,8 @@ struct Shared {
     active_request: AtomicBool,
     busy_responders: AtomicUsize,
     last_permit_id: AtomicU64,
-    curl: Mutex<Option<Child>>,
+    /// The in-flight key-broker connection; shutting it down stops the send.
+    upstream: Mutex<Option<UnixStream>>,
     client: Mutex<Option<GatewayStream>>,
     stop: AtomicBool,
 }
@@ -292,9 +298,9 @@ impl GatewayControl {
 
     /// Call synchronously from the hard-EOF callback, before native Mini I/O.
     /// The lease lock is the revoke/send linearization point: once this method
-    /// acquires it, no later curl spawn can pass the send gate. A spawn that
-    /// acquired it first remains an uncertain in-flight external send and is
-    /// killed below. This never waits for a provider reply or Mini command.
+    /// acquires it, no later broker send can pass the send gate. A send that
+    /// acquired it first remains an uncertain in-flight external send; its
+    /// broker connection is shut down below, and the broker stops the call. This never waits for a provider reply or Mini command.
     pub fn revoke(&self) {
         if let Ok(mut state) = self.shared.lease.lock() {
             self.shared.revoked.store(true, Ordering::SeqCst);
@@ -303,9 +309,9 @@ impl GatewayControl {
         } else {
             self.shared.revoked.store(true, Ordering::SeqCst);
         }
-        if let Ok(mut child) = self.shared.curl.lock() {
-            if let Some(child) = child.as_mut() {
-                let _ = child.kill();
+        if let Ok(upstream) = self.shared.upstream.lock() {
+            if let Some(upstream) = upstream.as_ref() {
+                let _ = upstream.shutdown(Shutdown::Both);
             }
         }
         if let Ok(client) = self.shared.client.lock() {
@@ -359,7 +365,7 @@ impl GatewayControl {
             .unwrap_or(false)
     }
 
-    /// Keep curl spawn and child registration inside the same short critical
+    /// Keep the broker send and its registration inside the same short critical
     /// section as revoke. The callback signals the physical worker before it
     /// waits here; no provider or native response wait holds this lock.
     fn with_send_gate<T>(
@@ -454,7 +460,7 @@ impl GatewayEndpoint {
             active_request: AtomicBool::new(false),
             busy_responders: AtomicUsize::new(0),
             last_permit_id: AtomicU64::new(0),
-            curl: Mutex::new(None),
+            upstream: Mutex::new(None),
             client: Mutex::new(None),
             stop: AtomicBool::new(false),
         });
@@ -1386,12 +1392,49 @@ pub(crate) fn response_headers(bytes: &[u8]) -> Result<(u16, String), String> {
     final_response.ok_or("provider final response absent".into())
 }
 
-fn curl_header_config(key: &Secret) -> String {
-    let escaped = key
-        .expose()
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"");
-    format!("header = \"Authorization: Bearer {escaped}\"\n")
+fn hex(bytes: &[u8]) -> String {
+    mini_keys::wire::hex(bytes)
+}
+
+/// The broker's one reply frame, read in short slices so a revoked lease
+/// stops waiting (and shuts the connection, which stops the broker's send).
+fn broker_reply(
+    stream: &mut UnixStream,
+    control: &GatewayControl,
+    lease: &LeaseId,
+    deadline: Instant,
+) -> Result<Value, String> {
+    stream
+        .set_read_timeout(Some(Duration::from_millis(50)))
+        .map_err(|_| "key broker socket unavailable".to_owned())?;
+    let mut buffer = Vec::new();
+    let mut chunk = vec![0u8; 65_536];
+    loop {
+        if !control.still_active(lease) {
+            let _ = stream.shutdown(Shutdown::Both);
+            return Err("prompt lease revoked during provider send".into());
+        }
+        if Instant::now() >= deadline {
+            let _ = stream.shutdown(Shutdown::Both);
+            return Err("provider transport outcome uncertain: the key broker did not answer in time".into());
+        }
+        match stream.read(&mut chunk) {
+            Ok(0) => return Err("provider transport outcome uncertain: the key broker closed".into()),
+            Ok(n) => buffer.extend_from_slice(&chunk[..n]),
+            Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut | io::ErrorKind::Interrupted) => continue,
+            Err(_) => return Err("provider transport outcome uncertain: key broker read failed".into()),
+        }
+        if buffer.len() >= 4 {
+            let size = u32::from_le_bytes(buffer[..4].try_into().unwrap()) as usize;
+            if size == 0 || size > mini_keys::wire::MAX_FRAME {
+                return Err("provider transport outcome uncertain: key broker frame exceeds bound".into());
+            }
+            if buffer.len() >= 4 + size {
+                return serde_json::from_slice(&buffer[4..4 + size])
+                    .map_err(|_| "provider transport outcome uncertain: key broker reply is not JSON".into());
+            }
+        }
+    }
 }
 
 fn forward(
@@ -1423,133 +1466,112 @@ fn forward(
     {
         return ProviderOutcome::NotSent { reason };
     }
-    let protocol = if route.endpoint.starts_with("https://") {
-        "=https"
-    } else {
-        "=http"
-    };
-    let mut command = Command::new("/usr/bin/curl");
-    command
-        .env_clear()
-        .current_dir(&config.private_dir)
-        .arg("--disable")
-        .args(["--silent", "--http1.1", "--request", "POST"])
-        .args(["--proto", protocol, "--noproxy", "*", "--proxy", ""])
-        .args(["--max-redirs", "0", "--connect-timeout", "10"])
-        .args(["--max-time", &config.timeout.as_secs().max(1).to_string()])
-        .args(["--max-filesize", &config.max_response_bytes.to_string()])
-        .args(["--header", "Content-Type: application/json"])
-        .args(["--header", "Accept-Encoding: identity"])
-        .arg("--data-binary")
-        .arg(format!("@{}", request_path.display()))
-        .arg("--dump-header")
-        .arg(&header_path)
-        .arg("--output")
-        .arg(&body_path)
-        .arg("--url")
-        .arg(&route.endpoint)
-        .args(["--config", "-"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    // Kernel backstop: even an older curl build or a peer that omits
-    // Content-Length cannot grow either output file beyond this bound.
-    let file_limit = config.max_response_bytes.max(MAX_HEADER * 2) as libc::rlim_t;
-    unsafe {
-        command.pre_exec(move || {
-            let limit = libc::rlimit {
-                rlim_cur: file_limit,
-                rlim_max: file_limit,
-            };
-            let no_core = libc::rlimit {
-                rlim_cur: 0,
-                rlim_max: 0,
-            };
-            if libc::setrlimit(libc::RLIMIT_FSIZE, &limit) == 0
-                && libc::setrlimit(libc::RLIMIT_CORE, &no_core) == 0
-            {
-                Ok(())
-            } else {
-                Err(io::Error::last_os_error())
-            }
-        });
+    // The key broker performs the send: it holds any bearer, checks that the
+    // ticket names exactly these bytes, and returns the provider's headers and
+    // body. A complete request frame handed to it is the external-send
+    // boundary; a frame it never received in full is never sent.
+    let mut request = json!({"op":"provider-forward","body":hex(exact_body),
+        "timeoutMs":config.timeout.as_millis().min(u64::MAX as u128) as u64,
+        "maxResponseBytes":config.max_response_bytes});
+    match &route.ticket {
+        Some(ticket) => request["ticket"] = json!(ticket),
+        None => request["homelab"] = json!(route.provider),
     }
-    // If revoke wins the lease lock, curl is never spawned. If this critical
+    let deadline = Instant::now() + config.timeout + Duration::from_secs(30);
+    // If revoke wins the lease lock, nothing reaches the broker. If this critical
     // section wins, the request crossed the external-send boundary and revoke
-    // kills the registered child while retaining outcome uncertainty.
-    let mut child_stdin = match control.with_send_gate(lease, || {
-        let mut child = command.spawn().map_err(|error| ProviderOutcome::NotSent {
-            reason: format!("provider transport spawn: {error}"),
+    // shuts the registered connection while retaining outcome uncertainty.
+    let mut stream = match control.with_send_gate(lease, || {
+        let mut stream = route.broker.connect(deadline).map_err(|e| ProviderOutcome::NotSent {
+            reason: format!("key broker: {e}"),
         })?;
-        let stdin = child.stdin.take();
-        if let Ok(mut slot) = shared.curl.lock() {
-            *slot = Some(child);
-        } else {
-            let _ = child.kill();
-            return Err(ProviderOutcome::Uncertain {
-                partial_body: Vec::new(),
-                reason: "transport custody lock poisoned".into(),
-            });
+        let registered = stream.try_clone().map_err(|_| ProviderOutcome::NotSent {
+            reason: "key broker socket unavailable".into(),
+        })?;
+        match shared.upstream.lock() {
+            Ok(mut slot) => *slot = Some(registered),
+            Err(_) => {
+                return Err(ProviderOutcome::NotSent {
+                    reason: "transport custody lock poisoned".into(),
+                })
+            }
         }
-        Ok(stdin)
+        mini_keys::wire::send(&mut stream, &request, deadline).map_err(|e| ProviderOutcome::NotSent {
+            reason: format!("the key broker did not receive the request: {e}"),
+        })?;
+        Ok(stream)
     }) {
-        Ok(Ok(stdin)) => stdin,
-        Ok(Err(outcome)) => return outcome,
+        Ok(Ok(stream)) => stream,
+        Ok(Err(outcome)) => {
+            if let Ok(mut slot) = shared.upstream.lock() {
+                *slot = None;
+            }
+            return outcome;
+        }
         Err(reason) => {
             return ProviderOutcome::NotSent {
                 reason: reason.into(),
             }
         }
     };
-    // A `credential: none` route writes an empty config: curl sends no
-    // Authorization header. Closing stdin either way ends curl's config read.
-    let credential_written = child_stdin.take().is_some_and(|mut stdin| match &route.bearer {
-        Some(bearer) => stdin.write_all(curl_header_config(bearer).as_bytes()).is_ok(),
-        None => true,
-    });
-    if !credential_written {
-        if let Ok(mut slot) = shared.curl.lock() {
-            if let Some(child) = slot.as_mut() {
-                let _ = child.kill();
-            }
-        }
+    let reply = broker_reply(&mut stream, control, lease, deadline);
+    if let Ok(mut slot) = shared.upstream.lock() {
+        *slot = None;
     }
-    let started = Instant::now();
-    let exit = loop {
-        let status = {
-            let mut slot = match shared.curl.lock() {
-                Ok(slot) => slot,
-                Err(_) => break None,
-            };
-            match slot.as_mut().map(Child::try_wait) {
-                Some(Ok(Some(status))) => {
-                    *slot = None;
-                    Some(status)
-                }
-                Some(Ok(None)) => None,
-                Some(Err(_)) | None => {
-                    *slot = None;
-                    break None;
-                }
+    let reply = match reply {
+        Ok(reply) => reply,
+        Err(reason) => {
+            return ProviderOutcome::Uncertain {
+                partial_body: Vec::new(),
+                reason,
             }
+        }
+    };
+    let reply = match mini_keys::client::answer(reply) {
+        Ok(reply) => reply,
+        // The broker refuses only before it sends (ticket, row, body, spawn).
+        Err(refused) => {
+            return ProviderOutcome::NotSent {
+                reason: refused.to_string(),
+            }
+        }
+    };
+    if reply["withheld"] == true {
+        return ProviderOutcome::Uncertain {
+            partial_body: Vec::new(),
+            reason: "upstream response contained a custody secret and was withheld".into(),
         };
-        if status.is_some() {
-            break status;
+    }
+    let spooled = (|| -> Result<bool, String> {
+        let decode = |key: &str| {
+            reply[key]
+                .as_str()
+                .ok_or_else(|| format!("key broker reply lacks {key}"))
+                .and_then(|text| mini_keys::wire::unhex(text))
+        };
+        let (headers, body) = (decode("headers")?, decode("body")?);
+        if headers.len() > MAX_HEADER * 2 || body.len() > config.max_response_bytes {
+            return Err("key broker reply exceeds the response bounds".into());
         }
-        let oversized = [
-            (&body_path, config.max_response_bytes),
-            (&header_path, MAX_HEADER * 2),
-        ]
-        .iter()
-        .any(|(path, bound)| fs::metadata(path).is_ok_and(|meta| meta.len() > *bound as u64));
-        if oversized || started.elapsed() > config.timeout || !control.still_active(lease) {
-            if let Ok(mut slot) = shared.curl.lock() {
-                if let Some(child) = slot.as_mut() {
-                    let _ = child.kill();
-                }
+        for (path, bytes) in [(&header_path, &headers), (&body_path, &body)] {
+            OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(path)
+                .and_then(|mut f| f.write_all(bytes))
+                .map_err(|e| format!("provider response spool: {e}"))?;
+        }
+        Ok(reply["complete"] == true)
+    })();
+    let complete = match spooled {
+        Ok(complete) => complete,
+        Err(reason) => {
+            return ProviderOutcome::Uncertain {
+                partial_body: Vec::new(),
+                reason,
             }
         }
-        thread::sleep(Duration::from_millis(20));
     };
     let partial_body = match read_bounded(&body_path, config.max_response_bytes) {
         Ok(body) => body,
@@ -1574,7 +1596,7 @@ fn forward(
             reason: "prompt lease revoked during provider send".into(),
         };
     }
-    if !credential_written || !exit.is_some_and(|status| status.success()) {
+    if !complete {
         return ProviderOutcome::Uncertain {
             partial_body,
             reason: "provider transport outcome uncertain".into(),
@@ -1598,22 +1620,83 @@ fn forward(
             }
         }
     };
-    if route.bearer.as_ref().is_some_and(|bearer| {
-        let secret = bearer.expose().as_bytes();
-        headers.windows(secret.len()).any(|part| part == secret)
-            || partial_body.windows(secret.len()).any(|part| part == secret)
-            || content_type.contains(bearer.expose())
-    }) {
-        return ProviderOutcome::Uncertain {
-            partial_body,
-            reason: "upstream response contained a custody secret and was withheld".into(),
-        };
-    }
     ProviderOutcome::Received {
         status,
         content_type,
         exact_headers: headers,
         exact_body: partial_body,
+    }
+}
+
+/// A real key broker for the gateway tests, one per upstream endpoint and pool
+/// key, as this test's own uid (the broker config says singleAccount). One pool
+/// row and one homelab row at the endpoint; the pool key is the test's bearer.
+#[cfg(test)]
+pub(crate) mod test_broker {
+    use super::*;
+    use std::collections::HashMap;
+    use std::sync::OnceLock;
+
+    static N: AtomicU64 = AtomicU64::new(1);
+
+    fn broker_for(endpoint: &str, bearer: &str) -> Broker {
+        static BROKERS: OnceLock<Mutex<HashMap<String, Broker>>> = OnceLock::new();
+        let mut map = BROKERS.get_or_init(Default::default).lock().unwrap();
+        let key = format!("{endpoint} {bearer}");
+        if let Some(b) = map.get(&key) {
+            return b.clone();
+        }
+        let dir = std::env::temp_dir().join(format!("mpb-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+        let mk = |p: &Path| {
+            fs::create_dir_all(p).unwrap();
+            fs::set_permissions(p, fs::Permissions::from_mode(0o700)).unwrap();
+        };
+        mk(&dir);
+        let dir = dir.canonicalize().unwrap();
+        for sub in ["etc", "keys", "run", "state", "credentials"] {
+            mk(&dir.join(sub));
+        }
+        let put = |p: &Path, b: &[u8], mode: u32| {
+            fs::write(p, b).unwrap();
+            fs::set_permissions(p, fs::Permissions::from_mode(mode)).unwrap();
+        };
+        put(&dir.join("keys/credentials.key"), &[5u8; 32], 0o600);
+        put(&dir.join("etc/providers.json"), json!({"type":"mini-provider-table-v2","providers":[
+            {"name":"fixturepool","endpoint":endpoint,"kind":"openai-compatible","models":["operator-model"],"credential":"pool","caps":{"perCall":"1000000","perDay":"100000"}},
+            {"name":"fixturehome","endpoint":endpoint,"kind":"openai-compatible","models":["operator-model"],"credential":"homelab"}]}).to_string().as_bytes(), 0o644);
+        let me = unsafe { libc::geteuid() };
+        let config = json!({"type":"mini-keys-broker-v1","socket":dir.join("run/broker.sock"),"audit":dir.join("state/audit.jsonl"),
+            "spool":dir.join("state/spool"),"singleAccount":true,
+            "peers":[{"role":"provider","uids":[me]},{"role":"operator","uids":[me]}],
+            "credentials":{"host":dir.join("etc/host"),"hostConfig":dir.join("etc/config.json"),"publicSocket":dir.join("run/public.sock"),
+                "providers":dir.join("etc/providers.json"),"root":dir.join("credentials"),"key":dir.join("keys/credentials.key")}});
+        put(&dir.join("etc/broker.json"), config.to_string().as_bytes(), 0o644);
+        let (server, listener) =
+            mini_keys::server::Broker::start(mini_keys::server::Config::load(&dir.join("etc/broker.json"), me).unwrap()).unwrap();
+        thread::spawn(move || server.serve(listener));
+        let broker = Broker::new(dir.join("run/broker.sock"), me);
+        broker
+            .call(&json!({"op":"pool","action":"set","provider":"fixturepool","secret":bearer}), Duration::from_secs(10))
+            .unwrap();
+        map.insert(key, broker.clone());
+        broker
+    }
+
+    /// A route for exactly `body`: a pool ticket carrying `bearer`, or (None) the
+    /// homelab row, which sends no Authorization at all.
+    pub(crate) fn route(endpoint: &str, body: &[u8], bearer: Option<&str>) -> Route {
+        let broker = broker_for(endpoint, bearer.unwrap_or("unused-pool-key"));
+        match bearer {
+            None => Route { endpoint: endpoint.into(), provider: "fixturehome".into(), broker, ticket: None },
+            Some(_) => {
+                use sha2::Digest;
+                let t = broker
+                    .call(&json!({"op":"provider-authorize","kind":"pool","provider":"fixturepool","runner":"9",
+                        "maxTokens":1,"bodySha256":hex(&sha2::Sha256::digest(body))}), Duration::from_secs(10))
+                    .unwrap();
+                Route { endpoint: endpoint.into(), provider: "fixturepool".into(), broker, ticket: t["ticket"].as_str().map(str::to_owned) }
+            }
+        }
     }
 }
 
@@ -1635,11 +1718,8 @@ mod tests {
         path
     }
 
-    fn test_route(endpoint: &str) -> Route {
-        Route {
-            endpoint: endpoint.to_owned(),
-            bearer: Some(Secret::new("private-provider-key".into()).unwrap()),
-        }
+    fn test_route(endpoint: &str, body: &[u8]) -> Route {
+        super::test_broker::route(endpoint, body, Some("private-provider-key"))
     }
 
     fn config(dir: PathBuf, _upstream: SocketAddr) -> GatewayConfig {
@@ -1886,8 +1966,8 @@ mod tests {
                 .send(Ok(ForwardPermit::Fresh {
                     attempt_id: 7,
                     lease: request.lease,
+                    route: test_route(&endpoint, &request.exact_body),
                     exact_body: request.exact_body,
-                    route: test_route(&endpoint),
                 }))
                 .unwrap();
             let ProviderCommand::BeforeSend { reply, .. } =
@@ -2090,11 +2170,8 @@ mod tests {
                         .send(Ok(ForwardPermit::Fresh {
                             attempt_id: 7,
                             lease: request.lease,
+                            route: super::test_broker::route(&endpoint, &request.exact_body, bearer),
                             exact_body: request.exact_body,
-                            route: Route {
-                                endpoint: endpoint.clone(),
-                                bearer: bearer.map(|b| Secret::new(b.into()).unwrap()),
-                            },
                         }))
                         .unwrap(),
                     ProviderCommand::BeforeSend { reply, .. }
@@ -2271,8 +2348,8 @@ mod tests {
                 .send(Ok(ForwardPermit::Fresh {
                     attempt_id: 7,
                     lease: request.lease,
+                    route: test_route(&endpoint, &request.exact_body),
                     exact_body: request.exact_body,
-                    route: test_route(&endpoint),
                 }))
                 .unwrap();
             let ProviderCommand::BeforeSend { reply, .. } =
@@ -2345,8 +2422,8 @@ mod tests {
                         .send(Ok(ForwardPermit::Fresh {
                             attempt_id: 7,
                             lease: request.lease,
+                            route: test_route(&endpoint, &request.exact_body),
                             exact_body: request.exact_body,
-                            route: test_route(&endpoint),
                         }))
                         .unwrap();
                 }
@@ -2513,8 +2590,8 @@ mod tests {
                 .send(Ok(ForwardPermit::Fresh {
                     attempt_id: 21,
                     lease: request.lease,
+                    route: test_route(&endpoint, &request.exact_body),
                     exact_body: request.exact_body,
-                    route: test_route(&endpoint),
                 }))
                 .unwrap();
             match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
@@ -2637,8 +2714,8 @@ mod tests {
                 .send(Ok(ForwardPermit::Fresh {
                     attempt_id: 22,
                     lease: request.lease,
+                    route: test_route(&endpoint, &request.exact_body),
                     exact_body: request.exact_body,
-                    route: test_route(&endpoint),
                 }))
                 .unwrap();
             match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
@@ -2747,8 +2824,8 @@ mod tests {
             let _ = reply.send(Ok(ForwardPermit::Fresh {
                 attempt_id: 31,
                 lease: request.lease,
+                route: test_route(&endpoint, &request.exact_body),
                 exact_body: request.exact_body,
-                route: test_route(&endpoint),
             }));
             assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
         });
@@ -2791,8 +2868,8 @@ mod tests {
                 .send(Ok(ForwardPermit::Fresh {
                     attempt_id: 32,
                     lease: request.lease,
+                    route: test_route(&endpoint, &request.exact_body),
                     exact_body: request.exact_body,
-                    route: test_route(&endpoint),
                 }))
                 .unwrap();
             let boundary = match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
@@ -2859,8 +2936,8 @@ mod tests {
                 .send(Ok(ForwardPermit::Fresh {
                     attempt_id: 41,
                     lease: request.lease,
+                    route: test_route(&endpoint, &request.exact_body),
                     exact_body: request.exact_body,
-                    route: test_route(&endpoint),
                 }))
                 .unwrap();
             let ProviderCommand::BeforeSend { reply, .. } =
@@ -2932,8 +3009,8 @@ mod tests {
                 .send(Ok(ForwardPermit::Fresh {
                     attempt_id: 9,
                     lease: request.lease,
+                    route: test_route(&endpoint, &request.exact_body),
                     exact_body: request.exact_body,
-                    route: test_route(&endpoint),
                 }))
                 .unwrap();
             match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
@@ -2987,8 +3064,8 @@ mod tests {
                 .send(Ok(ForwardPermit::Fresh {
                     attempt_id: 10,
                     lease: request.lease,
+                    route: test_route(&endpoint, &request.exact_body),
                     exact_body: request.exact_body,
-                    route: test_route(&endpoint),
                 }))
                 .unwrap();
             match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
@@ -3053,8 +3130,8 @@ mod tests {
                 .send(Ok(ForwardPermit::Fresh {
                     attempt_id: 11,
                     lease: request.lease,
+                    route: test_route(&endpoint, &request.exact_body),
                     exact_body: request.exact_body,
-                    route: test_route(&endpoint),
                 }))
                 .unwrap();
             match rx.recv_timeout(Duration::from_secs(5)).unwrap() {

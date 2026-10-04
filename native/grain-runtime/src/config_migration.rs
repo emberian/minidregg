@@ -1437,8 +1437,8 @@ mod tests {
             "stateDir":"/private/state","cwd":"/private/work","task":"7001","subject":"7","capability":"75","queryCapability":"75","commands":[],
             "providerTask":{"task":"7004","subject":"9","capability":"101","queryCapability":"101","custodyKey":"/private/provider.key",
                 "parentCapability":"75","parentObserveCapability":"75","reserve":"7000","maxInputTokens":16384,"maxOutputTokens":2048,
-                "contextWindowTokens":262144,"model":"pinned-model","providers":"/etc/mini/providers.json","credentialsRoot":"/private/credentials",
-                "credentialsKey":"/etc/mini/credentials.key","gatewayBind":"127.0.0.1:18762","maxRequestBytes":12000,"maxResponseBytes":524288,
+                "contextWindowTokens":262144,"model":"pinned-model","providers":"/etc/mini/providers.json","credentialBroker":"/etc/mini/keys-client.json",
+                "gatewayBind":"127.0.0.1:18762","maxRequestBytes":12000,"maxResponseBytes":524288,
                 "timeoutSeconds":180,"maxIterations":1}})).unwrap()
     }
     fn fields(old: &Config, new: &Config) -> Result<Vec<String>> {
@@ -2007,8 +2007,8 @@ mod tests {
             value_digest(&json!({"config":cfg,"configPath":path})).unwrap()
         );
         assert_eq!(scope["configSha256"], digest(&raw).unwrap());
-        assert_eq!(scope["credentialWriteDirectories"], json!([]));
-        assert!(scope["credentialsRoot"].is_null());
+        assert_eq!(scope["type"], "mini-controller-write-scopes-v2");
+        assert!(scope.get("credentialWriteDirectories").is_none() && scope["credentialBroker"].is_null());
     }
     #[test]
     fn scope_request_hash_and_validation_share_one_snapshot() {

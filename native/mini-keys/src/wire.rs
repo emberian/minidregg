@@ -11,13 +11,13 @@ use std::os::unix::net::UnixStream;
 use std::time::Instant;
 
 /// The largest frame either side sends: a provider response body (at most
-/// [`MAX_PROVIDER_RESPONSE`] bytes) travels hex-encoded inside one.
-pub const MAX_FRAME: usize = 4 << 20;
+/// [`MAX_PROVIDER_RESPONSE`] bytes) and its headers travel hex-encoded inside one.
+pub const MAX_FRAME: usize = 20 << 20;
 /// The ssh key-service exchange's bound, which the remote `mini key` client
 /// enforces on every frame it reads; member frames stay inside it.
 pub const MEMBER_FRAME: usize = 32_768;
-/// The largest provider response body the broker returns.
-pub const MAX_PROVIDER_RESPONSE: usize = 1 << 20;
+/// The largest provider response body the broker returns (grain-runtime's gateway bound).
+pub const MAX_PROVIDER_RESPONSE: usize = 8 << 20;
 /// The largest provider request body the broker forwards.
 pub const MAX_PROVIDER_REQUEST: usize = 1 << 20;
 

@@ -1,12 +1,14 @@
 # /etc/systemd/system/mini-hermes.service — the hosted Hermes grain controller.
 # Source of truth for DEPLOY-3 (dregg-infra edge/mini/ installs this file).
 #
-# There is no provider key in this unit and no EnvironmentFile. Keys live in
-# the sealed credential store (/var/lib/mini/credentials, key
-# /etc/mini/credentials.key); the controller resolves the row and the bearer
-# per request at reserve time (deploy/hermes/README.md). Workers are bwrap
-# units with --network none and never see the store: the launcher refuses a
-# mount that contains MINI_GRAIN_CREDENTIALS_ROOT or MINI_GRAIN_CREDENTIALS_KEY.
+# There is no provider key in this unit, no EnvironmentFile, and no path to
+# one. Keys live in the key broker's custody (mini-keys.service, account
+# mini-keys: /var/lib/mini/credentials sealed under /etc/mini/credentials.key).
+# The controller asks the broker for a ticket at reserve time (the grant or
+# pool caps and the day's count are the broker's) and sends the request
+# through it; the broker attaches the bearer (deploy/hermes/README.md). Workers
+# are bwrap units with --network none: the launcher refuses a mount that
+# contains MINI_GRAIN_CREDENTIAL_BROKER (the broker's socket).
 #
 # Supervision is M5's, verbatim: Restart=on-failure, RestartSec=2s,
 # KillMode=control-group (m5-hermes.md §Design 3).
@@ -16,7 +18,7 @@ Documentation=file:///usr/local/lib/mini/HERMES.md
 After=mini-store.service
 Requires=mini-store.service
 ConditionPathExists=/etc/mini/providers.json
-ConditionPathExists=/etc/mini/credentials.key
+ConditionPathExists=/etc/mini/keys-client.json
 ConditionPathExists=/var/lib/mini/candidate/current/bin/grain-runtime
 ConditionPathExists=/var/lib/mini/hermes/controller.json
 
@@ -35,8 +37,8 @@ TimeoutStopSec=60
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-# credentials: the per-runner day counters are written at reserve time.
-ReadWritePaths=/var/lib/mini/hermes /var/lib/mini/store/node/public /var/lib/mini/credentials
+# The per-runner day counters are the key broker's; the controller writes no credential path.
+ReadWritePaths=/var/lib/mini/hermes /var/lib/mini/store/node/public
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 RestrictSUIDSGID=yes

@@ -311,7 +311,7 @@ pub fn forward(broker: &Broker, peer: &Peer, request: &Value, stream: &mut UnixS
     exact(request, &["op", "ticket", "homelab", "body", "timeoutMs", "maxResponseBytes"])?;
     let body = wire::unhex(text(request, "body")?).map_err(|e| refuse("bad-request", e))?;
     if body.is_empty() || body.len() > wire::MAX_PROVIDER_REQUEST {
-        return Err(refuse("bad-request", "body must be 1..1 MiB"));
+        return Err(refuse("bad-request", "body must be 1 byte to MAX_PROVIDER_REQUEST"));
     }
     let timeout = Duration::from_millis(number(request, "timeoutMs")?).min(MAX_TIMEOUT).max(Duration::from_secs(1));
     let max_response = (number(request, "maxResponseBytes")? as usize).min(wire::MAX_PROVIDER_RESPONSE);

@@ -101,15 +101,18 @@ pub(crate) fn grant_evidence(config: &Config, proof: &CurrentOwnerProof) -> Resu
     if row.credential != credentials::CredentialSource::User {
         return Err("owner key migration requires a member credential route".into());
     }
-    let store = credentials::CredentialStore::open(&task.credentials_root, &task.credentials_key)?;
-    let grant = store.verify_grant(
-        &credentials::Owner::new(&proof.subject, &proof.public_key)?,
-        &row.name,
-        &task.subject,
-        &task.model,
-        &proof.epoch,
-        height,
-    )?;
+    // The key broker holds the grants; it checks this epoch against its own
+    // Store observation and counts nothing.
+    let broker = mini_keys::client::Broker::load(&task.credential_broker, unsafe { libc::geteuid() })
+        .map_err(|e| format!("provider credential broker: {e}"))?;
+    let answer = broker
+        .call(
+            &json!({"op":"provider-verify-grant","owner":{"subject":proof.subject,"publicKey":proof.public_key},
+                "provider":row.name,"runner":task.subject,"model":task.model,"epoch":proof.epoch,"height":height}),
+            std::time::Duration::from_secs(30),
+        )
+        .map_err(|r| if r.code.starts_with(credentials::REFUSED) { r.code } else { r.to_string() })?;
+    let grant = credentials::Grant::from_json(&answer["grant"])?;
     if grant.per_call < u64::from(task.max_output_tokens) {
         return Err(credentials::refused("per-call-cap"));
     }

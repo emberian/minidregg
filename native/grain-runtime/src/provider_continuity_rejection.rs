@@ -345,7 +345,7 @@ mod tests {
         ));
         fs::create_dir(&root).unwrap();
         let config:Config=serde_json::from_value(json!({"mini":root.join("mini"),"host":root.join("host"),"hostConfig":root.join("host.json"),"hostSocket":root.join("host.sock"),"controlSocket":root.join("control.sock"),"custodyKey":root.join("unused.key"),"stateDir":root,"cwd":root,"task":"10","subject":"7","capability":"71","queryCapability":"72","commands":[],
-        "providerTask":{"task":"14","subject":"9","capability":"91","queryCapability":"92","custodyKey":root.join("provider-unused.key"),"parentCapability":"71","parentObserveCapability":"72","reserve":"30","maxInputTokens":10,"maxOutputTokens":10,"model":"fixture","providers":root.join("providers.json"),"credentialsRoot":root.join("credentials"),"credentialsKey":root.join("credentials.key"),"gatewayBind":"127.0.0.1:0","maxRequestBytes":4096,"maxResponseBytes":4096,"timeoutSeconds":10}})).unwrap();
+        "providerTask":{"task":"14","subject":"9","capability":"91","queryCapability":"92","custodyKey":root.join("provider-unused.key"),"parentCapability":"71","parentObserveCapability":"72","reserve":"30","maxInputTokens":10,"maxOutputTokens":10,"model":"fixture","providers":root.join("providers.json"),"credentialBroker":root.join("keys-client.json"),"gatewayBind":"127.0.0.1:0","maxRequestBytes":4096,"maxResponseBytes":4096,"timeoutSeconds":10}})).unwrap();
         fs::write(&config.host_config, b"exact pinned config").unwrap();
         let pending = Pending {
             operation_id: 17,

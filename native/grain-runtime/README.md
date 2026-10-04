@@ -122,8 +122,7 @@ upstream `hermes-acp` executable. For example, alongside the tool task above:
   "reserve":"3", "charge":"1",
   "model":"pinned-model", "providers":"/etc/mini/providers.json",
   "onBehalfOf":{"subject":"11","publicKey":"<64 hex: the friend's workspace key>"},
-  "credentialsRoot":"/var/lib/mini/credentials",
-  "credentialsKey":"/etc/mini/credentials.key",
+  "credentialBroker":"/etc/mini/keys-client.json",
   "gatewayBind":"127.0.0.1:18762",
   "maxRequestBytes":1048576, "maxResponseBytes":8388608,
   "timeoutSeconds":30, "maxIterations":2

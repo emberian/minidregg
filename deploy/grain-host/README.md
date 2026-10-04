@@ -10,8 +10,8 @@ inside a bubblewrap mount, user, PID, IPC and cgroup namespace. The name is
 marker as `MINI_GRAIN_UNIT`. The runtime also supplies
 `MINI_GRAIN_STATE_DIR`, `MINI_GRAIN_CUSTODY_KEY`, and, when configured,
 `MINI_GRAIN_TOOL_CUSTODY_KEY`, `MINI_GRAIN_PROVIDER_CUSTODY_KEY`, and the
-provider credential store `MINI_GRAIN_CREDENTIALS_ROOT` and
-`MINI_GRAIN_CREDENTIALS_KEY`, plus `MINI_GRAIN_TASK_CONFIG` and
+key broker's socket `MINI_GRAIN_CREDENTIAL_BROKER` (native/mini-keys: the
+controller holds no provider key; the broker does), plus `MINI_GRAIN_TASK_CONFIG` and
 `MINI_GRAIN_HOST_CONFIG`. The launcher refuses any mount (including `/usr`
 and the optional network certificate mounts) that contains these paths, and
 refuses a unit name that already exists. If the controller sets

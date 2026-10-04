@@ -503,14 +503,20 @@ def install_table(*routes):
         fail("the provider table must be root-owned; sudo -n install failed: "
              + installed.stderr.decode("utf-8", "replace")[-200:])
 install_table("user", "pool")
+# Credential custody is the key broker's (native/mini-keys): same account in this
+# journey, production binary and checks. `mini key` and the controller ask it.
+sys.path.insert(0, os.path.join(REPO, "native/mini-keys"))
+import atexit, journey_broker
+KEYS_PROC, KEYS_CLIENT = journey_broker.start(DIR, MINI, providers=TABLE, host=HOST, host_config=CONFIG,
+                                              public_socket=SOCKET, seal_key=CKEY, credentials=CRED)
+atexit.register(KEYS_PROC.kill)
 def mini_key(label, *words, secret=None):
     words = list(words)
     if secret is not None:
         secret_path = path(f"{label}.secret")
         open(secret_path, "w").write(secret + "\n"); os.chmod(secret_path, 0o600)
         words += ["--secret", secret_path]
-    done = subprocess.run([MINI, "key", *words, "--providers", TABLE, "--credentials", CRED,
-                           "--credentials-key", CKEY], capture_output=True)
+    done = subprocess.run([MINI, "key", *words, "--broker", KEYS_CLIENT], capture_output=True)
     if secret is not None: os.unlink(secret_path)
     open(path(f"key-{label}.out"), "wb").write(done.stdout + done.stderr)
     if done.returncode != 0:
@@ -566,8 +572,7 @@ runtime = {"mini": MINI, "host": HOST, "hostConfig": CONFIG_B, "hostSocket": SOC
                             "maxInputTokens": MAX_IN, "maxOutputTokens": MAX_OUT,
                             "onBehalfOf": {"subject": str(FRIEND),
                                            "publicKey": keys[FRIEND].verify_key.encode().hex()},
-                            "model": MODEL, "providers": TABLE, "credentialsRoot": CRED,
-                            "credentialsKey": CKEY,
+                            "model": MODEL, "providers": TABLE, "credentialBroker": str(KEYS_CLIENT),
                             "gatewayBind": f"127.0.0.1:{GPORT}", "maxRequestBytes": 1048576,
                             "maxResponseBytes": 8388608, "timeoutSeconds": 600, "localFixtureHostNetwork": True},
            "commands": [{"name": "hermes-acp", "program": LAUNCHER,
@@ -577,6 +582,12 @@ runtime = {"mini": MINI, "host": HOST, "hostConfig": CONFIG_B, "hostSocket": SOC
 json.dump(runtime, open(path("runtime-config.json"), "w"), indent=1)
 
 ACTIVE[0] = CONFIG_B
+if CONFIG_B != CONFIG:
+    # The broker asks the Store (op 144) under the config the Host now serves.
+    KEYS_PROC.kill(); KEYS_PROC.wait()
+    KEYS_PROC, KEYS_CLIENT = journey_broker.start(DIR, MINI, providers=TABLE, host=HOST, host_config=CONFIG_B,
+                                                  public_socket=SOCKET, seal_key=CKEY, credentials=CRED)
+    atexit.register(KEYS_PROC.kill)
 upstream = subprocess.Popen([TEST_PROVIDER, f"127.0.0.1:{UPORT}", path("upstream.log"), "--metered-usage"],
                             stdout=open(path("upstream.stdout"), "wb"), stderr=open(path("upstream.stderr"), "wb"))
 LIVE.append(upstream)

@@ -71,7 +71,7 @@ fi
 rg -q 'exposed by worker mount' "$scratch/work-refusal.out"
 echo 'PASS workspace containing controller state refused before launch'
 printf 'probe-only' > "$scratch/work/provider.key"
-for provider_var in MINI_GRAIN_PROVIDER_CUSTODY_KEY MINI_GRAIN_CREDENTIALS_ROOT MINI_GRAIN_CREDENTIALS_KEY; do
+for provider_var in MINI_GRAIN_PROVIDER_CUSTODY_KEY MINI_GRAIN_CREDENTIAL_BROKER; do
   if env "$provider_var=$scratch/work/provider.key" MINI_GRAIN_UNIT="mini-grain-t${task}-o6" \
     "$launcher" --workspace "$scratch/work" --runtime-root "$scratch/runtime" \
     --network none -- /agent/probe-socket client /run/mini-grain.sock \
@@ -80,7 +80,7 @@ for provider_var in MINI_GRAIN_PROVIDER_CUSTODY_KEY MINI_GRAIN_CREDENTIALS_ROOT 
   fi
   rg -q 'exposed by worker mount' "$scratch/provider-refusal.out"
 done
-echo 'PASS provider custody and key file exposure refused before launch'
+echo 'PASS provider custody key and key-broker socket exposure refused before launch'
 for invalid_max in 0 1801 99999999999999999999 12x; do
   if MINI_GRAIN_RUNTIME_MAX_SEC=$invalid_max MINI_GRAIN_UNIT="mini-grain-t${task}-o6" \
     "$launcher" --workspace "$scratch/work" --runtime-root "$scratch/runtime" \

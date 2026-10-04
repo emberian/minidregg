@@ -24,3 +24,9 @@ ring = "=0.17.14"
 minidregg-signed-api-path = { path = "../signed-api-path" }
 minidregg-inference-scheduler = { path = "../inference-scheduler" }
 minidregg-compatible-upgrade-custody = { path = "../compatible-upgrade-custody" }
+# The key broker client: the controller asks it for tickets and sends through it; it holds no key.
+minidregg-mini-keys = { path = "../mini-keys", default-features = false }
+
+[dev-dependencies]
+# The broker itself, so the gateway tests send through a real one.
+minidregg-mini-keys = { path = "../mini-keys" }

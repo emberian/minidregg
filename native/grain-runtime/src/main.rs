@@ -291,8 +291,11 @@ struct ProviderTask {
     /// refused `no-credential`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     on_behalf_of: Option<OnBehalfOf>,
-    credentials_root: PathBuf,
-    credentials_key: PathBuf,
+    /// The key broker's client config (`/etc/mini/keys-client.json`): the
+    /// socket and the uid that must answer on it. The controller holds no
+    /// provider key and opens no credential store; the broker authorizes each
+    /// call (grant or pool caps, the day's count) and performs the send.
+    credential_broker: PathBuf,
     gateway_bind: String,
     max_request_bytes: usize,
     max_response_bytes: usize,
@@ -3169,18 +3172,11 @@ fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> 
             || c.tool_task
                 .as_ref()
                 .is_some_and(|t| t.custody_key == p.custody_key)
-            || !p.credentials_key.is_absolute()
-            || !p.credentials_root.is_absolute()
+            || !p.credential_broker.is_absolute()
             || !p.providers.is_absolute()
-            || p.credentials_key.starts_with(&p.credentials_root)
-            || [&p.custody_key, &c.custody_key]
-                .into_iter()
-                .chain(c.tool_task.as_ref().map(|t| &t.custody_key))
-                .any(|key| key == &p.credentials_key || key.starts_with(&p.credentials_root))
-            || c.state_dir.starts_with(&p.credentials_root)
-            || p.credentials_root.starts_with(&c.state_dir)
+            || p.credential_broker.starts_with(&c.state_dir)
         {
-            return Err("providerTask needs distinct absolute key and credential paths".into());
+            return Err("providerTask needs distinct absolute key paths and an absolute credentialBroker outside the state directory".into());
         }
         if let Some(name) = &p.provider {
             credentials::provider_name(name)?;
@@ -3475,8 +3471,10 @@ impl Runtime {
             }
             if let Some(provider) = &self.config.provider_task {
                 command.env("MINI_GRAIN_PROVIDER_CUSTODY_KEY", &provider.custody_key);
-                command.env("MINI_GRAIN_CREDENTIALS_ROOT", &provider.credentials_root);
-                command.env("MINI_GRAIN_CREDENTIALS_KEY", &provider.credentials_key);
+                // The launcher refuses a worker mount that exposes the broker's socket.
+                if let Ok(broker) = mini_keys::client::Broker::load(&provider.credential_broker, unsafe { libc::geteuid() }) {
+                    command.env("MINI_GRAIN_CREDENTIAL_BROKER", &broker.socket);
+                }
                 if spec.name == "hermes-acp" && !provider.local_fixture_host_network {
                     let port = provider
                         .gateway_bind
@@ -9435,6 +9433,7 @@ impl Runtime {
                     && row.credential == credentials::CredentialSource::Homelab)
                     .ok_or("placement endpoint is not an allowed homelab provider row")?;
                 route.endpoint = selected.endpoint.clone();
+                route.provider = selected.name.clone();
                 route_record.endpoint = selected.endpoint.clone();
                 route_record.provider = selected.name.clone();
             }
@@ -9567,30 +9566,29 @@ impl Runtime {
     ) -> Result<(provider::Route, ProviderRouteRecord, credentials::CredentialSource)> {
         let table = credentials::ProviderTable::load(&task.providers, 0)?;
         let row = provider_task_row(task, &table)?;
-        let store = || {
-            credentials::CredentialStore::open(&task.credentials_root, &task.credentials_key)
-        };
+        let broker = mini_keys::client::Broker::load(&task.credential_broker, unsafe { libc::geteuid() })
+            .map_err(|e| format!("provider credential broker: {e}"))?;
         let max_tokens = serde_json::from_slice::<Value>(exact_body)
             .ok()
             .and_then(|body| body.get("max_tokens").and_then(Value::as_u64));
-        let (bearer, credential) = match row.credential {
+        // A broker refusal keeps its name: `provider-refused:CODE` is what the
+        // gateway turns into a named HTTP refusal.
+        let authorize = |request: Value| -> Result<Value> {
+            broker
+                .call(&request, std::time::Duration::from_secs(30))
+                .map_err(|r| if r.code.starts_with(credentials::REFUSED) { r.code } else { r.to_string() })
+        };
+        let body_sha256 = sha256_bytes(exact_body)?;
+        let (ticket, credential) = match row.credential {
             credentials::CredentialSource::Homelab => (None, "homelab".to_owned()),
             credentials::CredentialSource::Pool => {
-                let caps = row.caps.ok_or("pool row has no caps")?;
                 // The hold covers at most maxOutputTokens of output.
                 if max_tokens.is_none_or(|tokens| tokens > u64::from(task.max_output_tokens)) {
                     return Err(credentials::refused("per-call-cap"));
                 }
-                (
-                    Some(store()?.pool(
-                        &row.name,
-                        &task.subject,
-                        max_tokens,
-                        caps,
-                        credentials::utc_day(),
-                    )?),
-                    "pool".to_owned(),
-                )
+                let t = authorize(json!({"op":"provider-authorize","kind":"pool","provider":row.name,
+                    "runner":task.subject,"maxTokens":max_tokens,"bodySha256":body_sha256}))?;
+                (t["ticket"].as_str().map(str::to_owned), "pool".to_owned())
             }
             credentials::CredentialSource::User => {
                 let pinned = task
@@ -9598,20 +9596,18 @@ impl Runtime {
                     .as_ref()
                     .ok_or_else(|| credentials::refused("no-credential"))?;
                 let owner = credentials::Owner::new(&pinned.subject, &pinned.public_key)?;
-                let proof = provider_owner::observe(&self.config, &owner.subject, &owner.public_key)?;
-                let bearer = store()?.authorize_model_epoch(
-                    &owner,
-                    &row.name,
-                    &task.subject,
-                    Some(&task.model),
-                    Some(proof.epoch()),
-                    height,
-                    max_tokens,
-                    credentials::utc_day(),
-                )?;
-                (Some(bearer), format!("user:{}", owner.subject))
+                // The broker asks the Store for the owner's current key epoch
+                // itself; this controller's observation is not authority there.
+                let t = authorize(json!({"op":"provider-authorize","kind":"user","provider":row.name,
+                    "runner":task.subject,"maxTokens":max_tokens,"bodySha256":body_sha256,
+                    "owner":{"subject":owner.subject,"publicKey":owner.public_key},
+                    "model":task.model,"height":height}))?;
+                (t["ticket"].as_str().map(str::to_owned), format!("user:{}", owner.subject))
             }
         };
+        if row.credential != credentials::CredentialSource::Homelab && ticket.is_none() {
+            return Err("the key broker authorized without a ticket".into());
+        }
         let record = ProviderRouteRecord {
             provider: row.name.clone(),
             endpoint: row.endpoint.clone(),
@@ -9620,7 +9616,9 @@ impl Runtime {
         Ok((
             provider::Route {
                 endpoint: row.endpoint.clone(),
-                bearer,
+                provider: row.name.clone(),
+                broker,
+                ticket,
             },
             record,
             row.credential,
@@ -19594,7 +19592,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             "task":"7004","subject":"9","capability":"1","queryCapability":"2",
             "custodyKey":"/k","parentCapability":"3","parentObserveCapability":"4",
             "reserve":"50","maxInputTokens":10,"maxOutputTokens":10,"model":"fixture",
-            "providers":"/p","credentialsRoot":"/c","credentialsKey":"/ck",
+            "providers":"/p","credentialBroker":"/etc/mini/keys-client.json",
             "gatewayBind":"127.0.0.1:0","maxRequestBytes":10,"maxResponseBytes":10,
             "timeoutSeconds":1
         }))
@@ -19677,8 +19675,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             "parentCapability":"75", "parentObserveCapability":"75",
             "reserve":"3", "maxInputTokens":1000, "maxOutputTokens":100,
             "model":"pinned-model", "providers":"/etc/mini/providers.json",
-            "credentialsRoot":"/var/lib/mini/credentials",
-            "credentialsKey":"/etc/mini/credentials.key", "gatewayBind":"127.0.0.1:18762",
+            "credentialBroker":"/etc/mini/keys-client.json", "gatewayBind":"127.0.0.1:18762",
             "maxRequestBytes":1048576, "maxResponseBytes":8388608,
             "timeoutSeconds":30
         });

@@ -184,8 +184,12 @@ def broker(command):
     if value.get('type') == 'refused': raise RuntimeError(value)
     return value
 broker_proc = start_broker()
-key = root/'etc/credentials.key'
-if not key.exists(): key.write_bytes(os.urandom(32)); key.chmod(0o600)
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]/'mini-keys'))
+import atexit, journey_broker
+# The provider task's key broker: same account, production binary (native/mini-keys).
+keys_proc, keys_client = journey_broker.start(root, a.mini, providers=root/'etc/providers.json',
+    host=manifest['host'], host_config=ns['CONFIG'], public_socket=ns['SOCKET'])
+atexit.register(keys_proc.kill)
 with socket.socket() as probe:
     probe.bind(('127.0.0.1',0)); gateway_port=probe.getsockname()[1]
 config = {'mini':a.mini,'host':manifest['host'],'hostConfig':ns['CONFIG'],'hostSocket':ns['SOCKET'],
@@ -203,7 +207,7 @@ config = {'mini':a.mini,'host':manifest['host'],'hostConfig':ns['CONFIG'],'hostS
         'reserve':'30000','maxInputTokens':1000,'maxOutputTokens':100,'maxIterations':1,
         'onBehalfOf':{'subject':'20','publicKey':ns['keys'][20].verify_key.encode().hex()},
         'model':ns['MODEL'],'provider':'native-homelab','providers':str(root/'etc/providers.json'),
-        'credentialsRoot':str(root/'credentials'),'credentialsKey':str(key),
+        'credentialBroker':str(keys_client),
         'gatewayBind':f'127.0.0.1:{gateway_port}','maxRequestBytes':12000,
         'maxResponseBytes':1048576,'timeoutSeconds':600,'localFixtureHostNetwork':True,
         'homelab':{'socket':str(broker_socket),'controller':'native',

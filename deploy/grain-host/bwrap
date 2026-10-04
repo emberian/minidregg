@@ -58,8 +58,7 @@ for secret in "${MINI_GRAIN_STATE_DIR:?controller state path required}" \
               "${MINI_GRAIN_HOST_CONFIG:?Mini host config path required}" \
               "${MINI_GRAIN_TOOL_CUSTODY_KEY:-}" \
               "${MINI_GRAIN_PROVIDER_CUSTODY_KEY:-}" \
-              "${MINI_GRAIN_CREDENTIALS_ROOT:-}" \
-              "${MINI_GRAIN_CREDENTIALS_KEY:-}"; do
+              "${MINI_GRAIN_CREDENTIAL_BROKER:-}"; do
   [[ -n $secret ]] || continue
   [[ $secret == /* ]] || usage
   secret=$(realpath -e -- "$secret")

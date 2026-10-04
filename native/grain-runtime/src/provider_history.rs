@@ -567,7 +567,7 @@ mod reserve_origin_tests {
             "custodyKey":root.join("provider.key"),"parentCapability":"105",
             "parentObserveCapability":"105","reserve":"3","maxInputTokens":1000,
             "maxOutputTokens":100,"model":"fixture-model","providers":root.join("providers.json"),
-            "credentialsRoot":root.join("credentials"),"credentialsKey":root.join("credential.key"),
+            "credentialBroker":root.join("keys-client.json"),
             "gatewayBind":"127.0.0.1:0","maxRequestBytes":65536,"maxResponseBytes":65536,
             "timeoutSeconds":60
         })).unwrap());

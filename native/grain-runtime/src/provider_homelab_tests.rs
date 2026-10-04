@@ -4,6 +4,7 @@
 use super::*;
 use minidregg_inference_scheduler::{self as scheduler, core as sc, service::Service};
 use std::collections::BTreeMap;
+use std::process::{Child, Command};
 
 const TOKEN: &str = "homelab_test_worker_token_0123456789abcdef";
 const BODY: &[u8] = br#"{"model":"operator-model","messages":[{"role":"user","content":"hello"}]}"#;
@@ -266,11 +267,8 @@ fn controller(
                         .send(Ok(ForwardPermit::Fresh {
                             attempt_id: 7,
                             lease: request.lease,
+                            route: super::test_broker::route(&endpoint, &request.exact_body, None),
                             exact_body: request.exact_body,
-                            route: Route {
-                                endpoint,
-                                bearer: None,
-                            },
                         }))
                         .unwrap();
                 }

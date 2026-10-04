@@ -1,18 +1,17 @@
-# Credential write scopes and owner-key migration
+# Controller scopes and owner-key migration
 
-`grain-runtime controller-write-scopes CONFIG` describes public credential paths
-using the runtime's strict Config, provider-table selection and credential Owner
-parser. It does not open the credential store, read a key, lock a namespace, make
-a native request or increment usage. The provider table remains root-owned.
+`grain-runtime controller-write-scopes CONFIG` describes a controller's provider
+selection using the runtime's strict Config and provider-table selection. A
+controller writes no credential path: the key broker (`native/mini-keys`) owns
+the sealed store, its grants and its day counters, and the controller only asks
+it (`providerTask.credentialBroker`).
 
-The JSON response has type `mini-controller-write-scopes-v1`, `configPath`, raw
-`configSha256`, `bindingSha256`, `task`, `credentialsRoot`,
-`providerTableSha256`, `provider`, `route`, and `credentialWriteDirectories`.
-Only the selected member or pool leaf is writable. No provider means null
-selection fields and no directories; a homelab row needs no credential writes.
-The shared `credentials::namespace_path` is also used by CredentialStore itself.
-No root renderer should reconstruct namespace paths from public keys or route
-names independently.
+The JSON response has type `mini-controller-write-scopes-v2`, `configPath`, raw
+`configSha256`, `bindingSha256`, `task`, `credentialBroker`,
+`providerTableSha256`, `provider` and `route`. No provider means null selection
+fields. (v1's `credentialsRoot` and `credentialWriteDirectories` are gone; a root
+helper that still asks for them must stop mounting credential directories into
+controllers.)
 
 For an existing same-subject owner-key migration, the root orchestrator stops the
 resident and controller, retains desired service state, then runs:
@@ -25,8 +24,8 @@ Run this as the registered service UID outside the old controller mount namespac
 It holds the existing private controller flock, validates the exact migration
 request/config/journal binding and permits only the existing owner-key transition.
 It queries current native owner authority and the signed provider resource height,
-then verifies the existing exact key-epoch/model/runner grant and sealed credential.
-That verification may create/acquire the selected provider lock and retain signed
+then asks the key broker to verify the existing exact key-epoch/model/runner grant
+and sealed credential (the broker re-observes the epoch). It retains signed
 query evidence. It makes no provider request and consumes no usage allowance.
 It does not publish a config or journal, and it is **not a closed checkpoint**.
 
@@ -38,8 +37,8 @@ use the eventual live CONFIG path for `configPath` and `bindingSha256`; the
 request's target file is only staging input. Source/config/request/journal/table
 bytes are rechecked after native observation. Unsupported or mixed changes refuse.
 
-The root helper binds its retained plan to this exact request and result, stages
-only the union of old and target selected directories, then starts the existing
+The root helper binds its retained plan to this exact request and result, then
+starts the existing
 canonical SYSTEM unit as a stopped migration oneshot. That receiver again checks
 current authority and fresh signed/process/resident quiescence before publication.
 Root unit edits stay outside the unprivileged runtime. A failed attempt retains
@@ -61,7 +60,7 @@ migration first. A fully received published or activated migration yields type
 a supplied success label is not accepted as a receipt.
 
 The root helper compares this target and request against its retained preflight,
-then narrows the drop-in to the target directories, restores the normal entrypoint,
+then restores the normal entrypoint,
 and restarts to apply the mounts. Retry uses the identical private request and
 retained stage. Neither a config-only parser nor a generic controller registration
 may silently authorize an existing controller's owner drift.

@@ -12,21 +12,21 @@
 #   mini --remote friend@host key --action set ...          signed exchange, relayed to mini-keys
 #   ssh friend@host 'anything'                               refused, exit 64
 set -euo pipefail
-if [[ $# -ne 2 ]]; then
-  echo 'usage: mini-socket-proxy ABS_MINI ABS_PUBLIC_SOCKET' >&2
+if [[ $# -ne 2 && $# -ne 3 ]]; then
+  echo 'usage: mini-socket-proxy ABS_MINI ABS_PUBLIC_SOCKET [ABS_KEYS_CLIENT_CONFIG]' >&2
   exit 64
 fi
 for path in "$@"; do
   [[ $path == /* ]] || { echo 'mini-socket-proxy paths must be absolute' >&2; exit 64; }
 done
-mini=$1 socket=$2
+mini=$1 socket=$2 keys_client=${3:-/etc/mini/keys-client.json}
 [[ -x $mini ]] || { echo 'mini client is not executable' >&2; exit 66; }
 umask 077
 # One fixed, signed service protocol, relayed byte for byte to the broker the
-# root-owned /etc/mini/keys-client.json names (mini-keys sits beside the pinned
-# mini). The connecting member chooses no path, broker or command.
+# root-owned client config names (default /etc/mini/keys-client.json; mini-keys
+# sits beside the pinned mini). The member chooses no path, broker or command.
 if [[ ${SSH_ORIGINAL_COMMAND-} == mini-provider-credentials-v1 ]]; then
-  exec "${mini%/*}/mini-keys" relay
+  exec "${mini%/*}/mini-keys" relay --client-config "$keys_client"
 fi
 if [[ -n ${SSH_ORIGINAL_COMMAND-} ]]; then
   echo 'this key is a byte proxy for a local mini client (mini --remote); it runs no commands' >&2

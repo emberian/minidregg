@@ -101,8 +101,22 @@ pub(crate) fn run(template: &Path, operator_policy: &Path, output: &Path) -> Res
         .ok_or("template needs pinned member onBehalfOf")?;
     let owner = credentials::Owner::new(&pinned.subject, &pinned.public_key)?;
     let table = credentials::ProviderTable::load(&task.providers, 0)?;
-    let store = credentials::CredentialStore::open(&task.credentials_root, &task.credentials_key)?;
-    let choice = store.selected(&owner, &task.subject, &task.task, &table)?;
+    // The member's signed choice is in the key broker's custody; the signature
+    // and the route are checked again here against this controller's own table.
+    let broker = mini_keys::client::Broker::load(&task.credential_broker, unsafe { libc::geteuid() })
+        .map_err(|e| format!("provider credential broker: {e}"))?;
+    let answer = broker
+        .call(
+            &json!({"op":"provider-selected-choice","owner":{"subject":owner.subject,"publicKey":owner.public_key},
+                "runner":task.subject,"task":task.task}),
+            std::time::Duration::from_secs(30),
+        )
+        .map_err(|r| r.to_string())?;
+    let choice = credentials::choice::Choice::from_json(&answer["choice"])?;
+    if choice.owner != owner || choice.runner != task.subject || choice.task != task.task {
+        return Err("the key broker returned a choice for another member or task".into());
+    }
+    choice.validate_route(&table)?;
     let policy = policy(operator_policy, &bytes, &choice)?;
     task.provider = Some(choice.provider.clone());
     task.model = choice.model.clone();

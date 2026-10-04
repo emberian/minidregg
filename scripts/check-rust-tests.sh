@@ -149,6 +149,18 @@ exact mini-keys-broker       mini-keys --test broker -- \
   an_upstream_that_echoes_the_bearer_is_withheld_and_a_kind_mismatch_refuses \
   a_caller_that_hangs_up_stops_the_provider_call \
   the_mirror_posts_and_reads_its_one_channel_without_holding_the_token
+# TENANCY-B: no client process opens the seal key. The hosted `mini key` runs its
+# real exchange against the real broker; the Hermes gateway sends only through
+# the broker (a ticket's bearer reaches upstream, an echo is withheld, a revoke
+# stops the send).
+exact rc-key-broker          resource-client --bin mini -- \
+  keys::service::tests::hosted_key_set_reaches_the_broker_and_the_secret_stays_there \
+  keys::service::tests::a_broker_refusal_in_place_of_the_challenge_is_named
+exact grain-key-broker       grain-runtime --bin grain-runtime -- \
+  provider::tests::each_permit_carries_its_own_bearer_and_a_none_row_sends_none \
+  provider::tests::upstream_echo_of_custody_key_is_never_returned_to_worker \
+  provider::tests::hard_revoke_kills_inflight_transport_without_waiting_for_controller \
+  provider::homelab_tests::homelab_gateways_share_capacity_and_exact_replay_bypasses_queue
 # D9-D11: Discord durable custody, mirror cursor after custody, paged backfill (bce707b7);
 # the custody lease itself moved into mini-sdk (4b2f299d): row sdk-custody
 exact discord-custody        discord-entrance --bin mini-discord-mirror --test endpoint -- \

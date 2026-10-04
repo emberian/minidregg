@@ -23,12 +23,14 @@ is an untrusted worker, cannot choose the row either.
 
 ## Custody: what "hosted custody" means here
 
-> **A provider key you give Mini is held by the box.** It is sealed at rest
-> (ChaCha20-Poly1305 under `/etc/mini/credentials.key`, bound to your subject,
-> your workspace's public key and the provider name). A copy of
-> `/var/lib/mini` (a backup, a tarball) therefore does not contain a usable
-> key. But root on the box, and the `mini` service user that runs Hermes, can
-> unseal it, because Hermes has to use it. This holds for every friend,
+> **A provider key you give Mini is held by the box's key broker.** It is
+> sealed at rest (ChaCha20-Poly1305 under `/etc/mini/credentials.key`, bound to
+> your subject, your workspace's public key and the provider name), and only
+> the broker's own account (`mini-keys`) can read the seal key. A copy of
+> `/var/lib/mini` (a backup, a tarball) does not contain a usable key; no
+> session account and not the Hermes controller can unseal it: Hermes asks the
+> broker, which checks your grant and makes the provider call with your key
+> itself. Root on the box can still use it. This holds for every friend,
 > including tier-B friends whose Mini signing key never leaves their laptop:
 > *that* key is not on the box, but a provider key you `key set` is, by your
 > choice. Give Mini a key you can revoke at the provider, with a spend limit
@@ -46,9 +48,12 @@ only under the subject and public key that ember pinned for your Hermes
 As root on the box:
 
 ```sh
-install -d -m 0700 -o mini -g mini /var/lib/mini/credentials
-head -c 32 /dev/urandom | install -m 0600 -o mini -g mini /dev/stdin /etc/mini/credentials.key
+# dregg-infra install.sh does this, and runs the broker (mini-keys.service):
+install -d -m 0711 -o root -g root /var/lib/mini/credentials
+head -c 32 /dev/urandom | install -m 0600 -o mini-keys -g mini-keys /dev/stdin /etc/mini/credentials.key
 install -m 0644 -o root -g root providers.json /etc/mini/providers.json
+# the pool key, sealed by the broker (root holds the operator role):
+mini-keys pool --action set --provider openrouter-pool --secret - < POOL_KEY_FILE
 ```
 
 - **Back up `/etc/mini/credentials.key` separately from `/var/lib/mini`, or
@@ -56,8 +61,8 @@ install -m 0644 -o root -g root providers.json /etc/mini/providers.json
   that every friend runs `key set` again. Nothing else is affected.
 - **`/etc/mini/providers.json` must be owned by root and not writable by group
   or world.** The controller refuses any other table. The table decides where
-  friends' keys and the operator's money are sent, so the `mini` user must not
-  be able to rewrite it.
+  friends' keys and the operator's money are sent, so no service account may
+  rewrite it.
 
 Example table (`type` and every field are required; `caps` exactly on a
 `pool` row):
@@ -107,8 +112,7 @@ fields in its `providerTask`:
 
 ```json
 "providers":"/etc/mini/providers.json",
-"credentialsRoot":"/var/lib/mini/credentials",
-"credentialsKey":"/etc/mini/credentials.key",
+"credentialBroker":"/etc/mini/keys-client.json",
 "onBehalfOf":{"subject":"21","publicKey":"<the friend's owner.publicKey from key set>"},
 "provider":"openrouter"
 ```

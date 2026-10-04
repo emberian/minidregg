@@ -2,7 +2,7 @@
 
 Members use one credential interface for OpenRouter, Chutes, and other operator-listed OpenAI-compatible routes. The provider table remains the operator's endpoint/model allowlist. A member key does not grant Mini purse authority: the provider actor still needs its native resource/purse capabilities and credit.
 
-For a member workspace whose socket is `ssh:DEST`, these commands reach sealed custody on the service host through the fixed SSH forced-proxy command. A local-socket workspace uses the local credential store. The remote client can pin the Host by digest without installing a Host executable.
+For a member workspace whose socket is `ssh:DEST`, these commands reach sealed custody on the service host through the fixed SSH forced-proxy command. A local-socket workspace reaches the box's key broker on its socket (`--broker CLIENT_CONFIG` names another). The remote client can pin the Host by digest without installing a Host executable.
 
 ```sh
 mini key --action providers --dir MEMBER_WORKSPACE
@@ -19,21 +19,27 @@ Mini's hosted shell also exposes `key providers`, `key grant`, `key choose`, `ke
 
 ## Operator connection
 
-The forced SSH wrapper accepts an optional trusted third argument, defaulting to `/etc/mini/provider-service.json`. Only the exact command `mini-provider-credentials-v1` selects credential service; arbitrary SSH commands remain refused. The service config is a canonical absolute root-owned regular file with root-owned, non-group/world-writable ancestors, readable by the service UID:
+Custody is the key broker's (`native/mini-keys`, account `mini-keys` under split
+tenancy). The forced SSH wrapper `mini-socket-proxy MINI SOCKET [KEYS_CLIENT]`
+answers exactly `mini-provider-credentials-v1` with `mini-keys relay`, a byte
+splice to the broker that the root-owned client config names (default
+`/etc/mini/keys-client.json`: `{"type":"mini-keys-client-v1","socket":...,"uid":N}`);
+arbitrary SSH commands remain refused. A hosted session's `mini key` connects to
+the same broker socket directly. Either way the client refuses an answer from any
+uid but the broker's.
 
-```json
-{
-  "type": "mini-member-provider-service-v1",
-  "host": "/PINNED/bin/minidregg-host",
-  "hostConfig": "/PINNED/deployment/config.json",
-  "socket": "/SERVICE/public/mini.sock",
-  "providers": "/etc/mini/providers.json",
-  "credentials": "/var/lib/mini/credentials",
-  "credentialsKey": "/var/lib/mini/custody/credentials.key"
-}
-```
-
-The credential root is mode0700 and master key mode0600, both owned by the same internal service UID used by the controller. The selected native socket must support current-key status op144. The service sends a bounded single-use random challenge; the member signs the exact action and deployment pins. The server sends captured config/Host pins to native status, then rechecks current service/table/key bindings under its custody lock. Frames use nonblocking descriptors and one deadline. Errors and returned authentication metadata contain no bearer. Current-key status is a source observation, not an atomic native custody mutation; actual controller use independently rechecks current identity and stored grant epoch.
+The broker config (`/etc/mini/keys/broker.json`, `mini-keys-broker-v1`, root-owned)
+names the pinned Host and config, the public socket, the provider table, the
+credential root and the seal key, and which uids and gids hold which role
+(member, provider, discord, operator). The seal key is the broker account's 0600
+file; the broker refuses to start if it, or any other secret it holds, is readable
+by another account, or if a peer rule names its own uid. The broker sends a
+bounded single-use random challenge; the member signs the exact action and
+deployment pins. The broker asks the Store (op 144) whether the key is current
+before and after namespace provisioning, under its custody lock, and acts only if
+the epoch is the same both times. Errors, results and the audit log carry no
+bearer. The Hermes controller never holds one: it gets a single-use ticket at
+reserve time and the broker makes the provider call.
 
 ## Fresh controller activation
 

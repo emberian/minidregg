@@ -135,8 +135,13 @@ def install_inventory(name, value):
                     str(root/(name+'-source.json')),str(root/'etc'/name)],check=True)
 install_inventory('providers.json', {'type':'mini-provider-table-v2','providers':[
     {'name':name,'endpoint':endpoint,'kind':'openai-compatible','models':[ns['MODEL'],'not-selected'],'credential':'user'} for name in ['openrouter','chutes']]})
-key = root/'etc/credentials.key'
-if not key.exists(): key.write_bytes(os.urandom(32)); key.chmod(0o600)
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]/'mini-keys'))
+import atexit, journey_broker
+# Credential custody is the key broker's (native/mini-keys): same account here,
+# production binary and checks; neither the member client nor the controller opens a seal key.
+keys_proc, keys_client = journey_broker.start(root, a.mini, providers=root/'etc/providers.json',
+    host=manifest['host'], host_config=ns['CONFIG'], public_socket=ns['SOCKET'])
+atexit.register(keys_proc.kill)
 with socket.socket() as probe:
     probe.bind(('127.0.0.1',0)); gateway_port=probe.getsockname()[1]
 config = {'mini':a.mini,'host':manifest['host'],'hostConfig':ns['CONFIG'],'hostSocket':ns['SOCKET'],
@@ -154,7 +159,7 @@ config = {'mini':a.mini,'host':manifest['host'],'hostConfig':ns['CONFIG'],'hostS
         'reserve':'30000','maxInputTokens':1000,'maxOutputTokens':100,'maxIterations':1,
         'onBehalfOf':{'subject':'20','publicKey':ns['keys'][20].verify_key.encode().hex()},
         'model':'not-selected','provider':'openrouter','providers':str(root/'etc/providers.json'),
-        'credentialsRoot':str(root/'credentials'),'credentialsKey':str(key),
+        'credentialBroker':str(keys_client),
         'gatewayBind':f'127.0.0.1:{gateway_port}','maxRequestBytes':12000,
         'maxResponseBytes':1048576,'timeoutSeconds':600,'localFixtureHostNetwork':True,
         },
@@ -172,12 +177,10 @@ if a.ssh:
     sshroot=root/'ssh';sshroot.mkdir(mode=0o700)
     subprocess.run(['ssh-keygen','-q','-t','ed25519','-N','','-f',str(sshroot/'host')],check=True)
     subprocess.run(['ssh-keygen','-q','-t','ed25519','-N','','-f',str(sshroot/'login')],check=True)
-    install_inventory('provider-service.json',{'type':'mini-member-provider-service-v1','host':manifest['host'],
-        'hostConfig':ns['CONFIG'],'socket':ns['SOCKET'],'providers':str(root/'etc/providers.json'),
-        'credentials':str(root/'credentials'),'credentialsKey':str(key)})
+    # The forced command relays to the broker this root-owned client config names.
     service_path=pathlib.Path("/etc/mini-byok-fixtures")/(root.name+".json")
     subprocess.run(["sudo","-n","install","-d","-o","root","-g","root","-m","0755",str(service_path.parent)],check=True)
-    subprocess.run(["sudo","-n","install","-o","root","-g","root","-m","0644",str(root/"etc/provider-service.json"),str(service_path)],check=True)
+    subprocess.run(["sudo","-n","install","-o","root","-g","root","-m","0644",str(keys_client),str(service_path)],check=True)
     wrapper=pathlib.Path(__file__).parents[3]/'deploy/shell/mini-socket-proxy'
     command=' '.join([str(wrapper),a.mini,ns['SOCKET'],str(service_path)])
     (sshroot/'authorized_keys').write_text('restrict,command="'+command+'" '+(sshroot/'login.pub').read_text())
@@ -204,7 +207,7 @@ if a.ssh:
     check('forced SSH proxy rejects arbitrary Unix commands',rogue.returncode!=0,{})
 def key_action(action,*flags,secret=None,ok=True):
     cmd=[a.mini,'key','--action',action,'--dir',str(member),*flags]
-    if not a.ssh:cmd.extend(['--providers',str(root/'etc/providers.json'),'--credentials',str(root/'credentials'),'--credentials-key',str(key)])
+    if not a.ssh:cmd.extend(['--broker',str(keys_client)])
     result=subprocess.run(cmd,input=secret,capture_output=True)
     if (result.returncode==0)!=ok: raise RuntimeError('key action '+action+': '+result.stderr.decode())
     if secret and secret.strip() in result.stdout+result.stderr: raise RuntimeError('secret leaked in client output')

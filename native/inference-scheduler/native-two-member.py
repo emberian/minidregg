@@ -285,8 +285,12 @@ def broker(command):
     if value.get('type')=='refused': raise RuntimeError(value)
     return value
 broker_process=start_broker()
-key=root/'etc/credentials.key'
-if not a.continue_funded: key.write_bytes(os.urandom(32)); key.chmod(0o600)
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]/'mini-keys'))
+import atexit, journey_broker
+# The provider tasks' key broker: same account, production binary (native/mini-keys).
+keys_proc,keys_client=journey_broker.start(root,a.mini,providers=root/'etc/providers.json',
+    host=manifest['host'],host_config=ns['CONFIG'],public_socket=ns['SOCKET'])
+atexit.register(keys_proc.kill)
 members={}
 for index,(name,task,owner,actor,pc,tc,pubc,cap,owner_cap,control_cap) in enumerate([
     ('a',a.task,20,9,71,81,91,103,101,102),('b',a.task2,21,19,171,181,191,113,111,112)]):
@@ -303,7 +307,7 @@ for index,(name,task,owner,actor,pc,tc,pubc,cap,owner_cap,control_cap) in enumer
             'parentCapability':str(pc+4),'parentObserveCapability':str(pc+4),'reserve':'3','maxInputTokens':1000,'maxOutputTokens':100,'maxIterations':1,
             'onBehalfOf':{'subject':str(owner),'publicKey':ns['keys'][owner].verify_key.encode().hex()},
             'model':ns['MODEL'],'provider':'member-'+name,'providers':str(root/'etc/providers.json'),
-            'credentialsRoot':str(root/'credentials'),'credentialsKey':str(key),'gatewayBind':f'127.0.0.1:{port}',
+            'credentialBroker':str(keys_client),'gatewayBind':f'127.0.0.1:{port}',
             'maxRequestBytes':12000,'maxResponseBytes':1048576,'timeoutSeconds':600,'localFixtureHostNetwork':True,
             'homelab':{'socket':str(broker_socket),'controller':name,'domain':'8501:'+str(json.loads(pathlib.Path(ns['CONFIG']).read_text())['expectedSeed']),
                 'principal':str(owner),'pool':'members','backends':['member-'+name],'queueTimeoutMs':300000}},
