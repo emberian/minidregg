@@ -8,3 +8,4 @@ import Theory.ObjectiveBendDemandPreservation
 import Theory.ObjectiveBendDemandAdequacy
 import Theory.ObjectiveBendDemandCompleteness
 import Theory.ObjectiveBendDemandDataSoundness
+import Theory.ObjectiveBendCheckpointRoundTrip

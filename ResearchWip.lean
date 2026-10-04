@@ -255,8 +255,6 @@ import Theory.BfvRing
 import Theory.BfvSmudging
 import Theory.BoundedNockMachine
 import Theory.Disputation
-import Theory.ObjectiveBendCheckpoint
-import Theory.ObjectiveBendCheckpointRoundTrip
 import Theory.ObjectiveTermEquality
 import Theory.OptimisticAdjudication
 import Theory.ResearchRegime
