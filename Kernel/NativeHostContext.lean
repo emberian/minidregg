@@ -267,8 +267,35 @@ theorem Config.sourceGate_refuses_protected (config : Config) {own : Option Cont
   refine ⟨cell, ?_, protectedCell⟩
   simp [Config.sourceGate, layout, foreign, refused, bind, Except.bind, pure, Except.pure]
 
+/-- **The widened physical-post law reaches only the kernel activity.** Every
+write a source transition of any other facet admits that obeys
+`PhysicalPostLaw` is a live cell under its registry law: the retired image
+`PhysicalPostLaw` admits at protected coordinates is not available to them
+(`ObjectiveActivityGate.ordinary_physicalPostLaw_live`). -/
+theorem Config.sourceGate_physicalPostLaw_live (config : Config) {own : Option ControlFacet}
+    {rootBytes : List UInt8 → Digest}
+    {snapshot : DurableDataIntent.DataSnapshot rootBytes} {intent : DurableDataIntent.DataIntent rootBytes}
+    (foreign : own ≠ some .objectiveActivity)
+    (admitted : config.sourceGate own snapshot intent = .ok ())
+    {deployment : Minidregg.Compiler.CanonicalCellRegistry.Deployment}
+    {write : DurableDataIntent.DataWrite} (member : write ∈ intent.writes)
+    (law : Minidregg.Kernel.ResourceBirthController.Concrete.PhysicalPostLaw deployment write) :
+    ∃ cell, (Minidregg.Compiler.ResourceBirthCodec.LifecycleImage.codec
+          Minidregg.Kernel.ResourceBirthController.Concrete.Registry).decode
+        write.canonicalPostBytes = some (.live cell) ∧
+      Minidregg.Compiler.CanonicalCellRegistry.CellLaw deployment write.cellId.value cell :=
+  ObjectiveActivityGate.ordinary_physicalPostLaw_live (config.sourceGate_ordinary foreign admitted) member law
+
+/-- The deployment's ordinary transport judges through `sourceGate none`, a
+facet that is not the kernel activity's: only `activityTransport` is exempt. -/
+theorem Config.transport_sourceGate (config : Config) : config.transport.sourceGate = config.sourceGate none := by
+  unfold Config.transport Config.physicalTransport
+  split <;> rfl
+
 #assert_axioms Config.sourceGate_ordinary
 #assert_axioms Config.sourceGate_refuses_protected
+#assert_axioms Config.sourceGate_physicalPostLaw_live
+#assert_axioms Config.transport_sourceGate
 
 /-- The Store transport keeps the actual system-cell tail law and checks every
 protected facet before physical append. -/

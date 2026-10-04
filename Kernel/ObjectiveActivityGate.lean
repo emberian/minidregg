@@ -22,6 +22,7 @@ proves the replay walk's judge admits only these two kinds of record.
 -/
 import Kernel.DurableDataIntent
 import Kernel.ObjectiveActivityCell
+import Kernel.ResourceBirthController
 
 namespace Minidregg.Kernel.ObjectiveActivityGate
 
@@ -137,6 +138,46 @@ theorem ordinary_execute_protected {rootBytes : List UInt8 → Digest} (schedule
   · rw [same]
   · rw [installed]; exact ordinary_install_protected before admitted isProtected
 
+/-! ## The widened physical-post law is the kernel activity's alone
+
+`ResourceBirthController.Concrete.PhysicalPostLaw` (the law every receiver's
+prepared writes obey) admits the registry's retired image, but only at a
+protected coordinate: that is how the kernel activity retires an ended record or a
+settled slot. The two theorems below tie that widening to this gate. The
+retired image is admitted only at protected coordinates, and an intent the
+ordinary gate admits writes none, so for every intent from outside the kernel
+activity the law is exactly the live-cell law it was before the widening. -/
+
+open Minidregg.Compiler.ResourceBirthCodec (LifecycleImage)
+open Minidregg.Kernel.ResourceBirthController.Concrete (PhysicalPostLaw Registry)
+
+/-- **The retired image is admitted only at a protected coordinate.** -/
+theorem physicalPostLaw_retired_protected {deployment : Minidregg.Compiler.CanonicalCellRegistry.Deployment}
+    {write : DataWrite} (law : PhysicalPostLaw deployment write)
+    (retired : (LifecycleImage.codec Registry).decode write.canonicalPostBytes = some .retired) :
+    Protected write.cellId := by
+  unfold PhysicalPostLaw at law
+  rw [retired] at law
+  exact law
+
+/-- **Outside the kernel activity the law is the live-cell law.** A write of an
+intent the ordinary gate admitted that obeys `PhysicalPostLaw` decodes to a live
+cell obeying its registry kind's law at its id; the retired image is not
+admitted to anything but the kernel activity. -/
+theorem ordinary_physicalPostLaw_live {rootBytes : List UInt8 → Digest} {intent : DataIntent rootBytes}
+    (admitted : ordinaryGate intent = .ok ())
+    {deployment : Minidregg.Compiler.CanonicalCellRegistry.Deployment} {write : DataWrite}
+    (member : write ∈ intent.writes) (law : PhysicalPostLaw deployment write) :
+    ∃ cell, (LifecycleImage.codec Registry).decode write.canonicalPostBytes = some (.live cell) ∧
+      Minidregg.Compiler.CanonicalCellRegistry.CellLaw deployment write.cellId.value cell := by
+  have clear := (ordinaryGate_ok_iff intent).mp admitted write member
+  unfold PhysicalPostLaw at law
+  split at law
+  · rename_i cell decoded
+    exact ⟨cell, decoded, law⟩
+  · exact absurd law clear
+  · exact law.elim
+
 /-! ## Tooth
 
 A forged ordinary intent that writes the first protected coordinate (the
@@ -185,6 +226,8 @@ theorem ordinary_write_admitted : ordinaryGate ordinaryIntent = .ok () := by dec
 #assert_axioms coordinate_refused
 #assert_axioms ordinary_install_protected
 #assert_axioms ordinary_execute_protected
+#assert_axioms physicalPostLaw_retired_protected
+#assert_axioms ordinary_physicalPostLaw_live
 #assert_axioms forged_protected_write_refused
 #assert_axioms ordinary_write_admitted
 end Minidregg.Kernel.ObjectiveActivityGate
