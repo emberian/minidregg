@@ -32,11 +32,19 @@ structure Schedule where
   candidateSent : List (Nat × Nat × Nat) := []
   /-- Earliest monotonic ms for the next certificate repair slice. -/
   certificateDue : Nat := 0
+  /-- Earliest monotonic ms for the next retry slice. -/
+  retryDue : Nat := 0
 
 /-- Resend interval for the same unvalidated candidate to the same peer, and the
 pace of certificate repair. A changed candidate height is relayed at once. -/
 def candidateResendMs : Nat := 5000
 def certificateEveryMs : Nat := 1000
+/-- Pace of the retry round over the retained outbox. Retry is availability
+repair for a connection that dropped frames, not first delivery (fresh sends
+go out at once); unpaced, every peer resent its whole retained outbox
+continuously and each replica spent most of its time authenticating and
+discarding duplicates. -/
+def retryEveryMs : Nat := 1000
 
 structure Participant (config : SourceConfig) where
   runtime : Runtime
@@ -101,12 +109,18 @@ def receive {config : SourceConfig} (p : Participant config) (bytes : Bytes) :
       return ({p with pending :=
         Minidregg.Compiler.GenericSimplexPending.discover state pending},result)
     | _,_ => return (p,result)
+  let before := (← p.runtime.current).map (·.length)
   let result ← match tag with
     | 0 => GenericSimplexNative.receive p.runtime payload
     | 1 => GenericSimplexNative.receiveFinality p.runtime payload
     | _ => pure .invalid
   match result with
   | .durable state =>
+    -- A retransmission already represented in the durable image appends
+    -- nothing (the journal length is unchanged) and leaves the engine state as
+    -- it was, so there is nothing new to discover. Peers resend their retained
+    -- outboxes continuously, so this is most packets.
+    if (← p.runtime.current).map (·.length) == before then return (p,result)
     return ({p with pending :=
       Minidregg.Compiler.GenericSimplexPending.discover state p.pending},result)
   | _ => return (p,result)
@@ -225,8 +239,9 @@ def packetAt {config : SourceConfig} (p : Participant config) (state : State)
   return some (recipient,protocolFrame packet)
 
 /-- Fresh and retry work have independent positive service budgets. A retry
-round finishes its old snapshot before including later messages. No send removes
-a durable obligation or treats a lost reply as semantic failure. -/
+round finishes its old snapshot before including later messages; one retry slice
+runs at most once per `retryEveryMs`. No send removes a durable obligation or
+treats a lost reply as semantic failure. -/
 def outgoing {config : SourceConfig} (p : Participant config) (freshBudget retryBudget : Nat) :
     IO (Participant config × List (Nat × Bytes)) := do
   let some prior ← p.runtime.current | return (p,[])
@@ -239,6 +254,9 @@ def outgoing {config : SourceConfig} (p : Participant config) (freshBudget retry
       if let some packet ← packetAt p state schedule.fresh then
         packets := packets ++ [packet]
       schedule := {schedule with fresh := schedule.fresh + 1}
+  let now ← IO.monoMsNow
+  if now < schedule.retryDue then return ({p with schedule := schedule},packets)
+  schedule := {schedule with retryDue := now + retryEveryMs}
   if schedule.retry ≥ schedule.retryEnd then
     schedule := {schedule with retry := 0,retryEnd := total}
   for _ in List.range retryBudget do
