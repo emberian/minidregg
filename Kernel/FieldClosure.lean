@@ -293,6 +293,105 @@ def FieldSet.entries (cellId : Nat) : FieldSet → List (StateKey × Int)
 def declare (cellId : Nat) (set : FieldSet) (store : Store effectLayout) : Store effectLayout :=
   (set.entries cellId).foldl (fun acc entry => acc.set entry.1.address (some entry.2)) store
 
+private def setAll (entries : List (StateKey × Int)) (store : Store effectLayout) : Store effectLayout :=
+  entries.foldl (fun acc entry => acc.set entry.1.address (some entry.2)) store
+
+private theorem setAll_apply_not_mem (entries : List (StateKey × Int)) (store : Store effectLayout)
+    (key : StateKey) (absent : ∀ entry ∈ entries, entry.1 ≠ key) :
+    setAll entries store key.address = store key.address := by
+  induction entries generalizing store with
+  | nil => rfl
+  | cons entry rest ih =>
+    show setAll rest (store.set entry.1.address (some entry.2)) key.address = _
+    rw [ih _ (fun other mem => absent other (List.mem_cons_of_mem _ mem))]
+    exact Store.set_ne _ _ _ _ fun same =>
+      absent entry List.mem_cons_self (StateKey.address_injective same).symm
+
+private theorem setAll_apply_mem (entries : List (StateKey × Int)) (store : Store effectLayout)
+    (key : StateKey) (present : ∃ entry ∈ entries, entry.1 = key) :
+    (setAll entries store key.address).isSome := by
+  induction entries generalizing store with
+  | nil => simp at present
+  | cons entry rest ih =>
+    show (setAll rest (store.set entry.1.address (some entry.2)) key.address).isSome
+    by_cases later : ∃ other ∈ rest, other.1 = key
+    · exact ih _ later
+    · have head : entry.1 = key := by
+        obtain ⟨other, mem, same⟩ := present
+        rcases List.mem_cons.mp mem with rfl | mem
+        · exact same
+        · exact absurd ⟨other, mem, same⟩ later
+      push Not at later
+      rw [setAll_apply_not_mem rest _ key later, head]
+      simp
+
+/-- **Birth writes exactly the declared set**: on a store holding none of the
+cell's declaration keys, `declare` makes `declaredIn` the field set's `covers`,
+for every field: the listed fields, every field at or above the tail, and no
+other.  (`room_birth_declared_boundary` is five instances of this.) -/
+theorem declaredIn_declare (cellId : Nat) (set : FieldSet) (store : Store effectLayout)
+    (noOpen : store (openKey cellId).address = none)
+    (noFrom : store (fromKey cellId).address = none)
+    (noField : ∀ m, store (declaredKey cellId m).address = none) (n : Nat) :
+    declaredIn cellId (declare cellId set store) n = set.covers n := by
+  cases set with
+  | «open» =>
+    have opened : (declare cellId .open store (openKey cellId).address).isSome :=
+      setAll_apply_mem _ _ _ ⟨(openKey cellId, 0), by simp [FieldSet.entries], rfl⟩
+    simp [declaredIn, FieldSet.covers, opened]
+  | closed fields tail =>
+    have openAbsent : declare cellId (.closed fields tail) store (openKey cellId).address = none := by
+      rw [show declare cellId (.closed fields tail) store = setAll _ store from rfl,
+        setAll_apply_not_mem _ _ _ (by
+          intro entry mem
+          simp only [FieldSet.entries, List.mem_append, List.mem_map, Option.mem_toList,
+            Option.map_eq_some_iff] at mem
+          rcases mem with ⟨m, _, rfl⟩ | ⟨first, _, rfl⟩ <;> simp [declaredKey, fromKey, openKey]),
+        noOpen]
+    have fieldLookup : (declare cellId (.closed fields tail) store (declaredKey cellId n).address).isSome =
+        decide (n ∈ fields) := by
+      by_cases listed : n ∈ fields
+      · rw [decide_eq_true listed]
+        exact setAll_apply_mem _ _ _ ⟨(declaredKey cellId n, 0), by
+          simp only [FieldSet.entries, List.mem_append, List.mem_map]
+          exact .inl ⟨n, listed, rfl⟩, rfl⟩
+      · rw [decide_eq_false listed]
+        rw [show declare cellId (.closed fields tail) store = setAll _ store from rfl,
+          setAll_apply_not_mem _ _ _ (by
+            intro entry mem
+            simp only [FieldSet.entries, List.mem_append, List.mem_map, Option.mem_toList,
+              Option.map_eq_some_iff] at mem
+            rcases mem with ⟨m, mem, rfl⟩ | ⟨first, _, rfl⟩
+            · intro same
+              simp only [declaredKey, StateKey.fieldDeclared.injEq] at same
+              exact listed (by cases same.2; exact mem)
+            · simp [declaredKey, fromKey]),
+          noField]
+        rfl
+    have tailLookup : declare cellId (.closed fields tail) store (fromKey cellId).address =
+        tail.map (fun first => (first : Int)) := by
+      cases tail with
+      | none =>
+        rw [show declare cellId (.closed fields none) store = setAll _ store from rfl,
+          setAll_apply_not_mem _ _ _ (by
+            intro entry mem
+            simp [FieldSet.entries] at mem
+            obtain ⟨m, _, rfl⟩ := mem
+            simp [declaredKey, fromKey]),
+          noFrom]
+        rfl
+      | some first =>
+        show setAll _ store _ = _
+        simp [setAll, FieldSet.entries, List.foldl_append]
+    simp only [declaredIn, openAbsent, Option.isSome_none, Bool.false_or, fieldLookup, tailLookup,
+      FieldSet.covers]
+    cases tail <;> simp [tailCovers]
+
+/-- `declaredIn_declare` at a birth from the empty store (the premises hold by `rfl`). -/
+theorem declaredIn_declare_empty (cellId : Nat) (set : FieldSet) (n : Nat) :
+    declaredIn cellId (declare cellId set 0) n = set.covers n :=
+  declaredIn_declare cellId set 0 rfl rfl (fun _ => rfl) n
+
 /-! ## §4. No action writes a declaration -/
 
 theorem writableKeyCheck_not_declaration {kind : ResourceKind} (target : ResourceId kind)
@@ -431,3 +530,5 @@ end Minidregg.Kernel.FieldClosure
 #assert_axioms Minidregg.Kernel.FieldClosure.tail_names_field_below
 #assert_axioms Minidregg.Kernel.FieldClosure.room_birth_declared_boundary
 #assert_axioms Minidregg.Kernel.FieldClosure.declaration_one_tail_entry
+#assert_axioms Minidregg.Kernel.FieldClosure.declaredIn_declare
+#assert_axioms Minidregg.Kernel.FieldClosure.declaredIn_declare_empty
