@@ -1,0 +1,30 @@
+[package]
+name = "minidregg-mini-keys"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+description = "The Mini key broker: the one process that holds the credential seal key, provider keys and Discord secrets, and acts for peers it names by SO_PEERCRED"
+
+# Clients (the hosted `mini key`, the ssh relay, grain-runtime, the Discord mirror)
+# take this crate with `default-features = false`: the wire, the peer check and the
+# client, with no crypto. The broker itself is the `server` feature.
+[lib]
+name = "mini_keys"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mini-keys"
+path = "src/main.rs"
+required-features = ["server"]
+
+[features]
+default = ["server"]
+server = ["dep:ring", "dep:sha2", "dep:ed25519-dalek"]
+
+[dependencies]
+libc = "=0.2.189"
+serde_json = { version = "=1.0.151", features = ["arbitrary_precision"] }
+ring = { version = "=0.17.14", optional = true }
+sha2 = { version = "=0.10.9", optional = true }
+ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "fast", "zeroize"], optional = true }
