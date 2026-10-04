@@ -158,22 +158,38 @@ theorem first_accepted : firstRun.isSome = true := by native_decide
 
 @[irreducible] def first := firstRun.get first_accepted
 
+/-- `first` is the run's value. Every compiled evaluation below goes through
+`firstRun` (an `Option`) and never through `first`: were the run to stop accepting
+(a wire or semantics change), `first_accepted` refuses by name and nothing else
+evaluates `Option.get` of `none` (which the compiled evaluator turns into a crash). -/
+theorem firstRun_eq : firstRun = some first := by
+  unfold first; exact (Option.some_get first_accepted).symm
+
 /-- The accepted object and its shape witness: a named point of `AcceptedInvocation`. -/
 def firstAccepted := first.2.accepted
 def firstShape := first.2.shape
 
-/-- The sources that answered the accepted invocation's signature checks: one per
+/-- The sources that answered an accepted invocation's signature checks: one per
 incidence (the authority leg, then each target leg). -/
-def firstSources : List CredentialSignatureIO.Source :=
-  (firstAccepted.checked none).receipt.source ::
-    (List.finRange first.2.command.targets.length).map fun i =>
-      (firstAccepted.checked (some i)).receipt.source
+def sourcesOf {signed : SignedCommand} {record : List UInt8} {root : Nat}
+    (accepted : Accepted signed record root) : List CredentialSignatureIO.Source :=
+  (accepted.accepted.checked none).receipt.source ::
+    (List.finRange accepted.command.targets.length).map fun i =>
+      (accepted.accepted.checked (some i)).receipt.source
 
-/-- **Every receipt records the recorded run as its source** -- never the process:
-the accepted object says which oracle answered it. -/
-theorem first_receipts_recorded :
-    firstSources.all (· == .transcript transcript) = true ∧ firstSources.length ≥ 2 := by
+def recordedOnly (sources : List CredentialSignatureIO.Source) : Bool :=
+  sources.all (· == .transcript transcript) && decide (sources.length ≥ 2)
+
+theorem first_receipts_recorded_run :
+    firstRun.map (fun run => recordedOnly (sourcesOf run.2)) = some true := by
   native_decide
+
+/-- **Every receipt of the accepted object records the recorded run as its source**
+-- never the process: the accepted object says which oracle answered it. -/
+theorem first_receipts_recorded : recordedOnly (sourcesOf first.2) = true := by
+  have run := first_receipts_recorded_run
+  rw [firstRun_eq, Option.map_some] at run
+  exact Option.some.inj run
 
 /-- The custody descriptor `ofAccepted` builds over it (no holders: the binding does
 not depend on the holder configuration). -/
@@ -192,7 +208,8 @@ def refusedSigned : Option SignedCommand := invoked refusedCallHex
 refused it there). `some reason` = refused with `reason`. -/
 def refusedRun : Option Reject := do
   let signed ← refusedSigned
-  let durable ← loadAt (first.2.durable.image.append (firstAccepted.dataIntent firstShape))
+  let ⟨_, accepted⟩ ← firstRun
+  let durable ← loadAt (accepted.durable.image.append (accepted.accepted.dataIntent accepted.shape))
   let command ← commandCodec.decode signed.commandBytes
   let .ok prepared := prepareFrom config.deployment config.profile (ambientOf durable) durable
     (CredentialAuthorityDomainReceiver.loadDirectory durable) command | none
@@ -213,7 +230,18 @@ theorem refused_decodes : refusedSigned.isSome = true := by native_decide
 
 @[irreducible] def refused := refusedSigned.get refused_decodes
 
-theorem refused_command_differs : refused.commandBytes ≠ first.1.commandBytes := by native_decide
+theorem refusedSigned_eq : refusedSigned = some refused := by
+  unfold refused; exact (Option.some_get refused_decodes).symm
+
+theorem refused_command_differs_run :
+    (do let run ← firstRun; let call ← refusedSigned
+        pure (decide (call.commandBytes ≠ run.1.commandBytes))) = some true := by
+  native_decide
+
+theorem refused_command_differs : refused.commandBytes ≠ first.1.commandBytes := by
+  have run := refused_command_differs_run
+  rw [firstRun_eq, refusedSigned_eq] at run
+  exact of_decide_eq_true (Option.some.inj run)
 
 /-- `descriptor` keyed to another call: its transaction and its command bytes. -/
 def rekeyed (descriptor : Descriptor) (invocation : TransactionId) (commandBytes : List UInt8) :
