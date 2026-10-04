@@ -29,7 +29,10 @@ name: Build and gates
 # Limits: both jobs timeout-minutes 350 (GitHub's hosted maximum is 360).
 
 on:
+  # main only: `next` is force-pushed speculation and `green` is a tag moved after the merge
+  # keeper's full gate (scripts/pipeline/); building them again here was duplicate work.
   push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
