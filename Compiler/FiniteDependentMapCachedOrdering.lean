@@ -205,9 +205,9 @@ def fromEntriesCached [LinearOrder O] (keyExact : Function.Injective keyOf)
 
 end Minidregg.Compiler.FiniteDependentMapCachedOrdering
 
-/-- info: +full+ depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.FiniteDependentMapCachedOrdering.fromEntriesCached_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.FiniteDependentMapCachedOrdering.fromEntriesCached_eq
-/-- info: +full+ depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.FiniteDependentMapCachedOrdering.sortedFinsetCached_eq' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.FiniteDependentMapCachedOrdering.sortedFinsetCached_eq
-/-- info: +full+ depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.FiniteDependentMapCachedOrdering.supportCached_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.FiniteDependentMapCachedOrdering.supportCached_eq
