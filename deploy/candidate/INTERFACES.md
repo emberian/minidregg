@@ -7,7 +7,11 @@ controllers, app broker and their configuration. The manifest records shipped
 executables; their presence does not establish that those services are configured
 or that a combined deployment has passed its receiving journeys.
 
-Updated October 2, 2026. Protocol allocations and socket exposure are owned by
+Updated October 4, 2026. Three routes produce a candidate directory, and all of them
+go through one packager, `package.py` (section "One packaging format, one packager"
+below): `build.sh` (the procedure here), `lane-build.sh` (an incremental build on a
+build box) and a sealed hbox capsule (`package.py --capsule`). Every candidate carries
+the signing-consent pair. Protocol allocations and socket exposure are owned by
 [`protocol/host-operations.json`](../../protocol/host-operations.json), checked
 against the actual receivers. Use that registry from the selected source archive
 when examining a deployed image.
