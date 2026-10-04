@@ -1,0 +1,57 @@
+ROOM-SCHEMA v2 + SESSION INDEXES — AFTER, main vs lane tip, persvati, 2026-10-04/05
+Evidence class: EXECUTED on scratch worlds (persvati, never a live world). Box load 15-32 throughout
+(other lanes building); every comparison ran main and tip interleaved or concurrently under the same load.
+
+Binaries (sha256; lane dir /home/ember/workbox/claude-lanes/schema-v2):
+  main = 796d7d7a: minidregg-host 2a5e2992… (byte-identical to the native-accepted lane's dd0eb392
+         build: reproducible), mini 478c918f…, client-consent fa66b370… (native-accepted dd0eb392 build;
+         dd0eb392..796d7d7a touches one python file)
+  tip  = lane tip before the 10-05 rebase (Lean identical to the rebased range's Lean except main's
+         own 48 commits): minidregg-host 6a9eef18…, mini df289cd5…, client-consent 3d8273e4…
+  store a2d15922…, verifier 7a88fcab… (same for both)
+
+1. ROOM SCENARIO (rooms-run.sh / rooms-all.sh, 3 interleaved reps; median of 3, seconds)
+   Same steps as before.txt: fresh world, room-shaped declared cell born, 3-row roster write, one read.
+                          main + v1 decl   tip + v1-shaped decl   tip + v2 decl
+   declaration entries        1011              1011                 12 (+1 tail)
+   create (birth)             9.80             12.35                 3.35
+   propose roster write       8.16             10.73                 3.39
+   submit roster write       13.75             16.51                 3.37
+   read (wall)               13.88             11.79                 2.85
+   Host op5 signed query  1130-1686 ms      854-1754 ms           33-75 ms
+   op5 request bytes         65,614            65,614               1,252-1,284
+   view JSON bytes          165,008           165,008               3,969-4,001
+   opening items              1,015             1,015                   17
+   The middle column is the control: the lane's code with the old declaration width costs what main
+   costs, so the gain is the schema (width), not the code. Wall times include the client's consent
+   provider (see 3), constant here (2-3 records).
+   Closure probes on the v2 room (evidence/rooms-tip-v2-1/closure.txt), Host refusal decoded:
+     1999, 1013, 1000 -> refused `DeclaredResourceScalar.Reject.undeclaredField <n>` at preparation
+     2999, 1000000    -> confirmed
+   A tip Host opening a main-born Store refuses: "durable head anchor refused: genesis or retained
+   head conflicts" (rc 1); it does not reinterpret. (The refusal is the generic anchor gate, not the
+   epoch-naming messages the commits describe: the anchor check runs first.)
+
+2. GROWTH (growth-run.sh then growth-levels.sh; one declared field 2005, scalar writes, levels 50 and 150)
+   Host store-bench at 50 records (single sample each, load ~25):
+                                                     main      tip
+     load (DurableReceiverIO.load)                   176 ms    319 ms   (noise: unchanged lines are 1.5x too)
+     server start to serving                         0.26 s    0.28 s
+     middle receipt root, kept (tip) vs spec            —      0 ms vs 104 ms per lookup below the head
+     middle transaction index x1000 cached/findIdx?     —      0 / 1 ms
+     kept roots vs prefix specification root            —      50 checked, 0 differ (worldRoot control)
+   20 writes at 50: mean propose 17.2 / 17.8 s, mean submit 18.9 / 18.7 s (main / tip).
+   Receipt lookups (mini retry --mode lookup) of g34 and g69: 0.42/0.40 s main, 0.26/0.26 s tip; every
+   lookup returns the original receipt's acceptedCount and worldRoot (checked by jq equality).
+   Level 150: running at checkpoint time; results land in evidence/grow-{main,tip}/bench-150.txt etc.
+
+3. WHY NOT 300 -> 3000: the client's consent provider re-verifies the world's history at every
+   `mini` process start (minidregg-client-consent ... stdio). strace of one read, the gap between the
+   consent's verifier start and its first Host request: 5.3 s at 12 records, 8.4 s at 39, 24.7 s at 90
+   (tip) and 24.75 s at 92 (main): identical on both, superlinear, and two of them per write. A write
+   costs ~55 s at 120 records; 3000 records through the product client would take days. The before
+   numbers of W1.11 (submit 0.5-0.8 s at 3000) were taken with c8fdd000's client, which had no consent
+   provider, and are not reproducible on today's main.
+
+Scripts: rooms-run.sh, rooms-all.sh, growth-run.sh, growth-levels.sh, grow.sh, stop-between-writes.sh
+(this directory); measure-room.sh takes MEASURE_SRC for the resource-client tree.

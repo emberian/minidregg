@@ -6,7 +6,7 @@
 set -euo pipefail
 HOST=$1 MINI=$2 STORE=$3 VERIFIER=$4 W=$5 FIELDS=$6 BASE=$7 OUT=$8 PERF=${9:-0}
 HERE=$(dirname "$(readlink -f "$0")")
-SRC=$HERE/src/native/resource-client
+SRC=${MEASURE_SRC:-$HERE/src}/native/resource-client
 mkdir -p "$OUT"
 SOCK=$W.sock
 t0=$(date +%s.%N)
