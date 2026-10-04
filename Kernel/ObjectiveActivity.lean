@@ -1265,6 +1265,27 @@ theorem resumedSegment_yielded {rootBytes : Bytes → Digest} {config : Config}
       cases ran
       exact ⟨runs, commits⟩
 
+/-- A resumed segment's yield commit is the commit of the segment it carries:
+the segment's own commit when it yielded, none when it faulted. -/
+theorem resumedSegment_commit {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {transaction : TransactionId} {cell object : CellId}
+    {generation envelope : Nat} {view : ObjectState} {start : State} {segment : Segment}
+    {yielded : Option YieldCommit}
+    (ran : resumedSegment config snapshot height transaction cell object generation envelope view start =
+      .ok (segment, yielded)) :
+    segmentCommit config snapshot height transaction cell object generation (some view) true segment =
+      .ok yielded := by
+  unfold resumedSegment at ran
+  split at ran
+  · obtain ⟨reason, rfl, rfl⟩ := faultOr_ok ran
+    rfl
+  · split at ran
+    · obtain ⟨reason, rfl, rfl⟩ := faultOr_ok ran
+      rfl
+    · rename_i commits
+      cases ran
+      exact commits
+
 /-- An exhaustion below the turn cap is refused, never committed as a fault. -/
 theorem resumedSegment_exhausted_below_cap {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {transaction : TransactionId} {cell object : CellId}
@@ -2936,6 +2957,13 @@ theorem Birth.yield_reserves_deposit {rootBytes : Bytes → Digest} {config : Co
   simp only [yields, true_and, Nat.not_lt] at checked
   exact checked
 
+/-- The deposit is a function of the record the yield commits: re-priced at
+every yield from that record's encoded size. -/
+theorem storageDeposit_awaiting (config : Config) (record : Record) (await : Await)
+    (awaiting : record.phase = .awaiting await) :
+    storageDeposit config record = config.storageRate * (encodeRecord record).length := by
+  simp [storageDeposit, awaiting]
+
 /-- **The deposit tracks the record's size**: at a positive rate, an awaiting
 record whose encoding is longer reserves strictly more. -/
 theorem storageDeposit_tracks_size (config : Config) (rate : 0 < config.storageRate)
@@ -2956,12 +2984,6 @@ theorem storageDeposit_ended (config : Config) (record : Record) (ended : ∀ aw
   | done _ => rfl
   | faulted _ => rfl
 
-/-- The deposit is a function of the record the yield commits: re-priced at
-every yield from that record's encoded size. -/
-theorem storageDeposit_awaiting (config : Config) (record : Record) (await : Await)
-    (awaiting : record.phase = .awaiting await) :
-    storageDeposit config record = config.storageRate * (encodeRecord record).length := by
-  simp [storageDeposit, awaiting]
 
 
 /-! ## Metering and disposal (ACTIVITY-METERING-DISPOSAL) -/
@@ -3923,7 +3945,7 @@ theorem Delivery.retention_cells_have_payer {rootBytes : Bytes → Digest} {conf
     (delivery : Delivery config snapshot height request)
     (objectUnwritten : ∀ post ∈ delivery.posts, post.cell ≠ objectCell config.domain delivery.record.object) :
     CellsPaid config (afterPosts snapshot delivery.posts) (delivery.posts.map Post.cell) := by
-  have commits := segmentCommit_census delivery.yieldedExact
+  have commits := segmentCommit_census (resumedSegment_commit delivery.endExact)
   have retired := settle_posts_retired delivery.settled
   rw [delivery.postsExact] at objectUnwritten ⊢
   apply recordFirst_cells_paid config snapshot request.record delivery.record.object delivery.next delivery.object
@@ -3942,7 +3964,7 @@ theorem Delivery.retention_cells_have_payer {rootBytes : Bytes → Digest} {conf
     · rcases List.mem_append.mp inFront with inSettle | inYield
       · rw [retired post inSettle, payloadOf_retired] at live; cases live
       · rw [delivery.nextExact]
-        exact segmentCommit_awaiting delivery.yieldedExact _ _ ⟨post, inYield, live⟩
+        exact segmentCommit_awaiting (resumedSegment_commit delivery.endExact) _ _ ⟨post, inYield, live⟩
     · simp only [List.mem_singleton] at isBook
       subst isBook
       rw [Postings.write_payload] at live
