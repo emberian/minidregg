@@ -29,15 +29,16 @@ against the published `SHA256SUMS`). Put `Host mini-box` with your ssh key in
 
 ```
 mini join --key ~/.mini/me.key
-    # prints your Mini public key and your next key's public half (two lines of
-    # 64 hex; K-PREROTATE); send both to your sponsor
+    # prints three lines: your Mini public key, your next key's public half and its
+    # co-signature (K-PREROTATE); send all three to your sponsor
 mini --remote mini-box join --key ~/.mini/me.key --sponsor-plan offer.json --dir ~/.mini/box
     # offer.json is what your sponsor's `enroll offer NAME` printed. The Host
     # re-decodes it over the proxy and checks it commits to YOUR next key
-    # (a plan committing another key is refused); you sign possession. Prints a signature:
-    # send it to your sponsor
-mini --remote mini-box join --key ~/.mini/me.key --welcome welcome.json --dir ~/.mini/box
-    # welcome.json is your sponsor's `enroll welcome NAME`; makes your workspace
+    # (a plan committing another key is refused); you sign possession. Prints a JSON object
+    # whose `possessionSignature` is the signature: send it to your sponsor
+mini --remote mini-box join --key ~/.mini/me.key --welcome welcome.json --dir ~/.mini/box --verifier /ABS/PATH/minidregg-host
+    # welcome.json is your sponsor's `enroll welcome NAME`; makes your workspace.
+    # --verifier is the pinned native Host on your machine; without it the command errors
 ```
 
 and from then on
