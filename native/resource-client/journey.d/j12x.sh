@@ -2,8 +2,9 @@
 # Journey hook j12x: malformed requests do not stop the shared service.
 #
 # On this journey's live Store (after J3, before J4), every row sends one
-# request the grammar refuses — through the client (`mini author --socket`, the
-# path a friend's draft takes) or as raw socket frames — and asserts:
+# request the grammar refuses — through the client (`mini author`, the path a
+# friend's draft takes: the client's own pure native Host, which refuses with exit 2
+# and the encoded outcome) or as raw socket frames — and asserts:
 #   * the answer is the named refusal: a Host frame `refused malformed`, phase
 #     `op N`, with the decoder's position; or the socket's own 254 refusal for an
 #     envelope the Host never sees;
@@ -144,8 +145,12 @@ check("raw op 10 pair width past the payload",
       lambda: host_refused(raw(bytes([10]) + struct.pack("<I", 1 << 20) + b"xx"), 10, "invalid native host pair length"))
 check("raw op 11 noncanonical plan",
       lambda: host_refused(raw(bytes([11]) + struct.pack("<I", 3) + b"abc" + b"\x00"), 11, "noncanonical signing plan"))
-check("raw op 0 describe with a payload",
-      lambda: host_refused(raw(bytes([0, 1])), 0, "describe does not accept a payload"))
+# Ops 0 and 6 take no body: the service refuses one (254, never forwarded; 8ac769d7) before the
+# Host would answer 255 `describe does not accept a payload`. Both are definite and named.
+check("raw op 0 describe with a payload (service refusal, never forwarded)",
+      lambda: socket_refused(raw(bytes([0, 1])), "operation takes no request body"))
+check("raw op 6 profile with a payload (service refusal, never forwarded)",
+      lambda: socket_refused(raw(bytes([6, 1])), "operation takes no request body"))
 def blind_submission():
     reply = raw(bytes([2]) + b"garbage")
     if reply is None: return False, "no reply (connection closed)"

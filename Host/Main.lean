@@ -3573,8 +3573,11 @@ def exportConsumerPoll (config : NativeHost.Config) (transactionId : Nat) :
 def writeBytes (path : String) (bytes : List UInt8) : IO Unit :=
   IO.FS.writeBinFile path bytes.toByteArray
 
-def readJson (path : String) : IO Lean.Json :=
-  return ← IO.ofExcept (Minidregg.Host.Json.parse (← IO.FS.readFile path))
+def readJson (path : String) : IO Lean.Json := do
+  let bytes ← IO.FS.readBinFile path
+  let some text := String.fromUTF8? bytes
+    | throw (IO.userError "native host author source is not UTF-8")
+  IO.ofExcept (Minidregg.Host.Json.parse text)
 
 /-- Carry administration has bounded local inputs and independent configured
 operator authority. The request or target capsule cannot introduce that key. -/
@@ -8577,5 +8580,20 @@ end Minidregg.Host
 def main (arguments : List String) : IO UInt32 := do
   try Minidregg.Host.run arguments
   catch error =>
-    (← IO.getStderr).putStrLn s!"minidregg-host: {error}"
-    pure 1
+    -- A pure codec verb reads no Store: its failure is a definite refusal, written
+    -- as the same encoded outcome the session answers under 255 (stdout) with the
+    -- Host's own decoding of it (stderr), exit 2. Any other verb stays exit 1,
+    -- where the client cannot tell whether the request took effect.
+    match Minidregg.Host.RequestRefusal.oneShotOperation arguments with
+    | some operation =>
+        let frame := Minidregg.Host.RequestRefusal.oneShotFrame operation error
+        let stdout ← IO.getStdout
+        stdout.write frame.toByteArray
+        stdout.flush
+        match Minidregg.Host.Json.inspect "outcome" frame with
+        | .ok decoded => (← IO.getStderr).putStrLn decoded.compress
+        | .error detail => (← IO.getStderr).putStrLn s!"minidregg-host: refused: {detail}"
+        pure 2
+    | none =>
+        (← IO.getStderr).putStrLn s!"minidregg-host: {error}"
+        pure 1

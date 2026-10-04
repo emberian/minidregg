@@ -85,8 +85,53 @@ theorem frame_decodes (operation : UInt8) (error : IO.Error) :
     outcomeCodec.decode (frame operation error) = some (answer operation error) :=
   outcomeCodec.decode_encode _
 
+/-- The session operation a one-shot pure codec verb (`HOST CONFIG author KIND IN OUT`
+and its siblings) is the argv form of. These read no Store and commit nothing: their
+only effect is the named output file. -/
+def oneShotOperation : List String → Option UInt8
+  | _ :: "author" :: _ => some 7
+  | _ :: "inspect" :: _ => some 8
+  | _ :: "signatures" :: _ => some 9
+  | _ :: "observe-assemble" :: _ => some 10
+  | _ :: "assemble" :: _ => some 11
+  | _ => none
+
+/-- The answer to a one-shot pure verb that ended in an exception. A verb that reads no
+Store cannot have been accepted by anything, so its end is always a definite refusal,
+never an uncertain status. A grammar verdict on the client bytes (`IO.userError`, the
+decoders' `Except String`) is `malformed`, as in the session; any other exception is
+answered by `answer`, the session's own mapping. -/
+def oneShotAnswer (operation : UInt8) (error : IO.Error) : Outcome :=
+  match error with
+  | .userError message => .refused .malformed (phase operation) (clip message)
+  | other => answer operation other
+
+/-- The encoded outcome a one-shot pure verb writes to stdout when it refuses. -/
+def oneShotFrame (operation : UInt8) (error : IO.Error) : List UInt8 :=
+  outcomeCodec.encode (oneShotAnswer operation error)
+
+theorem oneShotAnswer_userError (operation : UInt8) (message : String) :
+    oneShotAnswer operation (.userError message) =
+      .refused .malformed (phase operation) (clip message) := rfl
+
+/-- A one-shot pure verb's end is a refusal for that operation: never a confirmation,
+contention, unavailable or uncertain. -/
+theorem oneShotAnswer_refused (operation : UInt8) (error : IO.Error) :
+    ∃ reason detail, oneShotAnswer operation error = .refused reason (phase operation) detail := by
+  unfold oneShotAnswer
+  split
+  · exact ⟨_, _, rfl⟩
+  · exact answer_refused operation _
+
+theorem oneShotFrame_decodes (operation : UInt8) (error : IO.Error) :
+    outcomeCodec.decode (oneShotFrame operation error) = some (oneShotAnswer operation error) :=
+  outcomeCodec.decode_encode _
+
 #assert_axioms answer_malformed
 #assert_axioms answer_refused
 #assert_axioms frame_decodes
+#assert_axioms oneShotAnswer_userError
+#assert_axioms oneShotAnswer_refused
+#assert_axioms oneShotFrame_decodes
 
 end Minidregg.Host.RequestRefusal

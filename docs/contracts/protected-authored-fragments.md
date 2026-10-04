@@ -8,7 +8,8 @@ Shared `AuthoredFragment`, used by `AnnotationBody.sealed` and
 `AtomKind.sealedObject`, separates immutable signed ciphertext from encrypted
 fragment-key wrapping. The original annotation author, operation, document,
 anchor and ciphertext stay unchanged. `rewrapAnnotation` accepts the exact
-canonical complete prior record, refuses retired/nonsealed records, and changes
+canonical complete prior store entry (address and record, the `canonical` of a signed
+view's entry, which must name the rewrapped annotation), refuses retired/nonsealed records, and changes
 only wrapping plus its source-authored `wrappedBy` and `wrappedAt` provenance.
 The enclosing resource controller still checks the actual entire post against
 all current keyholders; a local key or roster hint establishes no authority.

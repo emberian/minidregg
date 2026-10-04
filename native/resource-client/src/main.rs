@@ -1159,6 +1159,14 @@ fn local_process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Out
         .output()
         .map_err(|error| format!("cannot run {}: {error}", host.display()))?;
     if !output.status.success() {
+        // Exit 2 is the Host's definite refusal of a pure codec verb (it reads no Store,
+        // so nothing could have been accepted): stdout is the encoded outcome, stderr
+        // the Host's own decoding of it. Any other failing exit leaves the status uncertain.
+        if output.status.code() == Some(2) {
+            if let Some(refusal) = one_shot_refusal(arguments, &output) {
+                return Err(refusal);
+            }
+        }
         return Err(format!(
             "{} exited {}; request status uncertain: {}",
             host.display(),
@@ -1167,6 +1175,30 @@ fn local_process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Out
         ));
     }
     Ok(output)
+}
+
+/// The refusal a one-shot pure codec verb ended in (`Host.RequestRefusal.oneShotFrame`):
+/// the same decision and the same message the session path records for a 255 frame. `None`
+/// when the Host's stderr is not an outcome of type `refused`; the caller then reports the
+/// exit as it would any other.
+fn one_shot_refusal(arguments: &[&OsStr], output: &Output) -> Option<String> {
+    let command = arguments.first()?.to_str()?;
+    let decoded: Value = serde_json::from_slice(&output.stderr).ok()?;
+    let line = refusal_line(&decoded)?;
+    note_host_decision(HostDecision::RefusedFrame {
+        command: command.to_owned(),
+        byte: 255,
+        encoded: output.stdout.clone(),
+        decoded: Some(decoded),
+    });
+    Some(refused_frame_message(command, &output.stdout, Some(line)))
+}
+
+fn refused_frame_message(command: &str, encoded: &[u8], line: Option<String>) -> String {
+    match line {
+        Some(line) => format!("host refused {command}: {line}; encoded refusal: {}", hex(encoded)),
+        None => format!("host refused {command}; encoded refusal: {}", hex(encoded)),
+    }
 }
 
 #[cfg(unix)]
@@ -1262,16 +1294,7 @@ fn socket_process(
         if command == "query" || command == "query-batch" {
             query_refusal::retain(Path::new(arguments[2]), &payload, config, &reply)?;
         }
-        return Err(match line {
-            Some(line) => format!(
-                "host refused {command}: {line}; encoded refusal: {}",
-                hex(&reply[1..])
-            ),
-            None => format!(
-                "host refused {command}; encoded refusal: {}",
-                hex(&reply[1..])
-            ),
-        });
+        return Err(refused_frame_message(command, &reply[1..], line));
     }
     if let Some(destination) = destination {
         write_new(Path::new(destination), &reply[1..])?;
@@ -4438,6 +4461,64 @@ mod tests {
         let path = env::temp_dir().join(format!("mini-{name}-{}-{unique}", std::process::id()));
         fs::create_dir(&path).unwrap();
         path
+    }
+
+    /// A stand-in Host image that exits `code` with the given stdout bytes and stderr text.
+    #[cfg(unix)]
+    fn fake_host(name: &str, code: i32, stdout: &str, stderr: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch(name);
+        let path = dir.join("host");
+        fs::write(&path, format!("#!/bin/sh\nprintf '%s' '{stdout}'\nprintf '%s' '{stderr}' >&2\nexit {code}\n")).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    /// `local_process` on a freshly written script: another test thread's fork may still hold
+    /// the write descriptor until it execs, which makes the exec fail ETXTBSY. Retry only that.
+    #[cfg(unix)]
+    fn run_fake(host: &Path, args: &[&OsStr]) -> Result<Output> {
+        for _ in 0..50 {
+            match local_process(host, Path::new("config"), args) {
+                Err(error) if error.contains("Text file busy") => {
+                    std::thread::sleep(std::time::Duration::from_millis(20))
+                }
+                other => return other,
+            }
+        }
+        local_process(host, Path::new("config"), args)
+    }
+
+    /// A one-shot pure verb the Host refuses (exit 2) surfaces under the Host's name, as the
+    /// session path does for a 255 frame, never as "request status uncertain".
+    #[cfg(unix)]
+    #[test]
+    fn one_shot_pure_refusal_is_named_not_uncertain() {
+        let host = fake_host(
+            "one-shot-refused",
+            2,
+            "ff00",
+            r#"{"type":"refused","reason":"malformed","phase":"6f702037","detail":"243a206d697373696e67206669656c64206e6f6e6365"}"#,
+        );
+        let args = [OsStr::new("author"), OsStr::new("intent"), OsStr::new("in"), OsStr::new("out")];
+        let error = run_fake(&host, &args).unwrap_err();
+        assert!(error.starts_with("host refused author: refused: malformed: $: missing field nonce (phase op 7)"), "{error}");
+        assert!(!error.contains("uncertain"), "{error}");
+        assert!(matches!(take_host_decision(), Some(HostDecision::RefusedFrame { byte: 255, .. })));
+    }
+
+    /// Any other failing exit of the same verb is not a decision: the status stays uncertain.
+    #[cfg(unix)]
+    #[test]
+    fn one_shot_other_exit_stays_uncertain() {
+        let args = [OsStr::new("author"), OsStr::new("intent"), OsStr::new("in"), OsStr::new("out")];
+        let crashed = fake_host("one-shot-crashed", 1, "", "minidregg-host: boom");
+        let error = run_fake(&crashed, &args).unwrap_err();
+        assert!(error.contains("request status uncertain: minidregg-host: boom"), "{error}");
+        // Exit 2 whose stderr is not a refused outcome is not taken for one.
+        let odd = fake_host("one-shot-odd", 2, "", "not json");
+        let error = run_fake(&odd, &args).unwrap_err();
+        assert!(error.contains("request status uncertain"), "{error}");
     }
 
     #[cfg(unix)]

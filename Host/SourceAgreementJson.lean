@@ -765,12 +765,26 @@ private def annotationBody (path : String) (json : Lean.Json) : Result Hyperdocu
         failAt path "expected sealed annotation body"
       else pure (.sealed (← authoredFragment (path ++ ".fragment") (← field path "fragment" obj)))
 
-private def annotationBefore (path : String) (json : Lean.Json) : Result Hyperdocument.AnnotationRecord := do
+/-- The guard of `rewrapAnnotation` is the annotation's exact canonical store entry: the
+bytes a signed view carries as the entry's `canonical`, address then record. It must be
+canonical and must name the annotation being rewrapped; the record it carries is the
+prior state the action is guarded on. -/
+private def annotationBefore (path : String) (annotation : Hyperdocument.AnnotationId)
+    (json : Lean.Json) : Result Hyperdocument.AnnotationRecord := do
   let bytes ← decodeHex path json
-  match HyperdocumentCell.annotationRecordStream.toLawful.decode bytes with
-  | some value =>
-      if HyperdocumentCell.annotationRecordStream.encode value = bytes then pure value
-      else failAt path "annotation guard is not canonical"
+  let codec := StoreCodec.entryStream HyperdocumentCell.contentWire
+  match codec.toLawful.decode bytes with
+  | some entry =>
+      if codec.encode entry != bytes then failAt path "annotation guard is not canonical"
+      else
+        match entry with
+        | ⟨⟨.annotations, identifier⟩, record⟩ =>
+            let identifier : Hyperdocument.AnnotationId := identifier
+            let record : Hyperdocument.AnnotationRecord := record
+            if identifier.digest.value != annotation.digest.value then
+              failAt path "annotation guard names another annotation"
+            else pure record
+        | _ => failAt path "annotation guard is not an annotation entry"
   | none => failAt path "invalid exact annotation guard"
 
 private def contentAction (path : String) (json : Lean.Json) : Result ContentResource.Action := do
@@ -823,8 +837,9 @@ private def contentAction (path : String) (json : Lean.Json) : Result ContentRes
         (← decodeHex (path ++ ".wrapping") (← field path "wrapping" obj)))
   | "rewrapAnnotation" =>
       let obj ← exactObject path ["type", "annotation", "before", "wrapping"] json
-      pure (.rewrapAnnotation (← identifier (path ++ ".annotation") (← field path "annotation" obj))
-        (← annotationBefore (path ++ ".before") (← field path "before" obj))
+      let annotation ← identifier (path ++ ".annotation") (← field path "annotation" obj)
+      pure (.rewrapAnnotation annotation
+        (← annotationBefore (path ++ ".before") annotation (← field path "before" obj))
         (← decodeHex (path ++ ".wrapping") (← field path "wrapping" obj)))
   | "unlink" =>
       let obj ← exactObject path ["type", "link"] json
