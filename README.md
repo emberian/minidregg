@@ -66,22 +66,25 @@ in a joined world), *deployed* (running on the public node for real users).
 
 | Component | Evidence | Boundary |
 | --- | --- | --- |
-| Native Host, shell, documents, journey J0–J8 | deployed | public node runs the 2026-10-01 candidate; no outside member enrolled yet |
-| Rooms, invitations, workroom template, chat | integrated | on development worlds only; room-scoped actions take seconds to minutes |
-| Studio (edit, import, fork, history, preview) | executed | loopback development servers; no member-reachable route; publication carries no authority |
+| Native Host, shell, documents, journey J0–J8 | deployed | the public node runs the 2026-10-01 candidate (source `5688775a`): the shell, documents (`new`, `show`, `append`, `edit`, `link`, `backlinks`) and boards; it has no rooms, chat, key rotation or proxy mode, and no outside member is enrolled (what it has and lacks: [FRIENDS.md](deploy/shell/FRIENDS.md)). Evidence: [shell journey, J0–J8 89/89](docs/evidence/2026-09-30-shell-journey/README.md); node state read on 2026-10-03 (swarm Scout G, outside this repository) |
+| Rooms, invitations, workroom template | integrated | on development worlds only, from lane builds: J15 and J17 pass in [p-story](docs/evidence/2026-10-01-p-story/journey-result.json) and [p-credit](docs/evidence/2026-10-01-p-credit/journey-result.json); not on the public node; room-scoped actions take seconds to minutes (Scout G: workroom template 224–270 s on a development world) |
+| Chat (`say`, `tail`, `topic`, `pin`, `react`) | compiled | Rust code and tests in `native/resource-client/src/chat.rs`, and the `JCHAT` journey hook; no journey result in `docs/evidence/` records `JCHAT` as PASS (the three 10-01 results mark it SKIPPED), so no recorded run has joined chat to a native Host |
+| Studio (edit, import, fork, history, preview) | authored; executed on lane builds only | client routes in `native/resource-client/src/web/studio.rs` and `native/resource-client/src/workspace/studio.rs` (2 focused tests); the loopback development servers that ran were built from lane branches, not from this commit; no member-reachable route; publication carries no authority; the prototype declarations still use the deleted Gen-1 shape and feed nothing ([STUDIO-SOURCE-WORKSPACE.md](docs/STUDIO-SOURCE-WORKSPACE.md)) |
 | Objective Bend Core4 semantics, machine, checker | compiled | soundness, preservation and completeness proved; proofs not in the default gate ([details](docs/OBJECTIVE-BEND.md#formal-status)) |
 | Objective Bend native admission | compiled (in lanes) | no native accepted receipt from Objective source on main |
-| SPK hosted apps | integrated (install, recovery) | no application has yet served a browser session |
-| Hermes in a room | executed | scripted provider on a private Store; off on the public node |
-| Discord entrance | executed | against a simulated Discord |
+| SPK hosted apps | compiled (physical layer and Lean lifecycle); install, start, supervised restart and export integrated on development worlds | [44 of 44 rows](docs/evidence/2026-10-01-spk-apps/jspk1/rows.tsv) of the 10-01 lane run (birth, install, share, start, a SIGKILLed generation replaced by the supervisor's STOP and continue-START, backup, stop, export). The Lean failed-START recovery receiver and Host endpoint are on main (`Kernel/ApplicationFailedStartRecoveryReceiver.lean`, `Host/ApplicationFailedStartEndpoint.lean`), but `spk-host`'s call into it is a stub that refuses with "receiver is absent" (`native/spk-host/src/grain_export.rs`), and `scripts/spk-platform/jspk1.sh` fails on that string; no recovery from main's `spk-host` has run; no application has yet served a browser session (closest: EtherCalc co-editing over TLS with older binaries, [2026-10-02-spk-browser-tls](docs/evidence/2026-10-02-spk-browser-tls/README.md)) |
+| Hermes in a room | executed | scripted provider on a private Store ([J14, 2026-10-01](docs/evidence/2026-10-01-p-hermes-room/journey-result.json)); off on the public node |
+| Discord entrance | executed | against a simulated Discord ([2026-10-03-discord-world](docs/evidence/2026-10-03-discord-world/README.md)); no Discord application exists and the entrance is inactive on the public node |
 | Agreement mesh | compiled safety theorem; executed | safety over the Lean engine model; four replicas on one host, one failure domain; liveness not established |
 | Traffic privacy | executed | one host, honest registrar, endpoint sees the plaintext call; no anonymity proof |
-| MPC / FHE | executed (research) | MPC on public fixture inputs; FHE on a public two-input expression with one owner |
-| Oblivious and zk execution of Objective Bend | authored, conditional | zk theorems assume an uninhabited refinement; oblivious machinery targets the retiring BendTT core |
-| Payments | executed (fixtures) | no live payment address |
+| MPC / FHE | executed (research) | MPC: a width-8 adder over private inputs with per-dealer OS entropy, and a curious-holder transcript check over 8,067 frames, in `native/private-backend` tests (`cf6a4c1d`); FHE on a public two-input expression with one owner |
+| Oblivious and zk execution of Objective Bend | authored, conditional | zk theorems are conditional on a `PackedRefinement` hypothesis that nothing inhabits for a real program ([OBJECTIVE-BEND.md](docs/OBJECTIVE-BEND.md#execution-and-privacy)); oblivious machinery targets the retiring BendTT core |
+| Payments | executed (fixtures) | the pay journeys ran on private Stores with recorded Solana answers ([deploy/pay/README.md](deploy/pay/README.md#current-composed-rehearsal-2026-10-02)); the enrolment address and rate (50 DREGG per week) are decided in [enrol-terms.json](deploy/pay/enrol-terms.json) but nothing is deployed: the pay watcher and roster sync are inactive on the public node, and no mainnet transaction has been made |
 
-Dated, per-artifact evidence lives in [docs/evidence/](docs/evidence/); update it
-there rather than copying counts into introductions.
+Evidence rows cite runs of lane builds. Unless a row says otherwise, the run was not
+repeated at the commit this README describes. Dated, per-artifact evidence lives in
+[docs/evidence/](docs/evidence/); update it there rather than copying counts into
+introductions.
 
 ## Objective Bend
 
