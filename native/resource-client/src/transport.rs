@@ -1217,19 +1217,50 @@ pub(crate) fn exchange_stdio<W: Write + AsRawFd, R: Read + AsRawFd>(
 /// The socket directory must be owned by this account and inaccessible to
 /// others. This closes the interval between bind and chmod on the socket.
 pub fn serve(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
-    serve_with_mode(socket, host, config, false)
+    serve_with_mode(socket, host, config, None)
 }
 
-pub fn serve_operator(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
-    serve_with_mode(socket, host, config, true)
+/// `extra_peers` are the uids admitted to the operator socket besides this
+/// service's own (`--peer-uid`). Empty is the owner-only rule.
+pub fn serve_operator(socket: &Path, host: &Path, config: &Path, extra_peers: &[u32]) -> Result<(), String> {
+    let peers = OperatorPeers::with(extra_peers);
+    serve_with_mode(socket, host, config, Some(&peers))
+}
+
+/// The peers an operator socket admits: this service's effective uid, always,
+/// plus an explicit configured set. A session (tenant) uid is never configured;
+/// sessions reach the Host through the public relay, whose opcode filter is the
+/// public surface. Absence of a peer credential refuses.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OperatorPeers(Vec<u32>);
+
+impl OperatorPeers {
+    pub fn with(extra: &[u32]) -> Self {
+        Self::for_owner(effective_uid(), extra)
+    }
+
+    fn for_owner(owner: u32, extra: &[u32]) -> Self {
+        let mut uids = vec![owner];
+        for uid in extra {
+            if !uids.contains(uid) {
+                uids.push(*uid);
+            }
+        }
+        Self(uids)
+    }
+
+    pub fn admits(&self, uid: u32) -> bool {
+        self.0.contains(&uid)
+    }
 }
 
 fn serve_with_mode(
     socket: &Path,
     host: &Path,
     config: &Path,
-    operator: bool,
+    operator_peers: Option<&OperatorPeers>,
 ) -> Result<(), String> {
+    let operator = operator_peers.is_some();
     if is_remote(socket) {
         return Err("serve binds a unix socket; an ssh: address names a remote proxy".into());
     }
@@ -1277,12 +1308,12 @@ fn serve_with_mode(
         .map_err(|e| format!("cannot protect socket {}: {e}", socket.display()))?;
     let mut start = || HostProcess::start_pinned(host, &pinned_config, &host_sha256, &config_bytes);
     eprintln!("mini: serving {}", socket.display());
-    if operator {
-        return supervise_operator(listener, socket, &config_bytes, &host_sha256, catalog_enabled, &mut start);
+    if let Some(peers) = operator_peers {
+        return supervise_operator(listener, socket, &config_bytes, &host_sha256, catalog_enabled, peers, &mut start);
     }
     supervise(
         &listener,
-        operator,
+        None,
         &config_bytes,
         &host_sha256,
         catalog_enabled,
@@ -1556,7 +1587,8 @@ struct HostJob {
 
 /// What a connection thread needs to judge an envelope before the Host sees it.
 struct EnvelopeRules<'a> {
-    operator: bool,
+    /// `Some` on the owner-private operator socket: the admitted peer uids.
+    operator: Option<&'a OperatorPeers>,
     config_bytes: &'a [u8],
     host_sha256: &'a [u8; 32],
     catalog_enabled: bool,
@@ -1576,7 +1608,7 @@ fn refuse(stream: &mut UnixStream, reason: &str) {
 /// the service.
 fn supervise(
     listener: &UnixListener,
-    operator: bool,
+    operator: Option<&OperatorPeers>,
     config_bytes: &[u8],
     host_sha256: &[u8; 32],
     catalog_enabled: bool,
@@ -1632,13 +1664,14 @@ fn supervise_operator(
     config: &[u8],
     host_sha256: &[u8; 32],
     catalog: bool,
+    peers: &OperatorPeers,
     start: &mut dyn FnMut() -> Result<HostProcess, String>,
 ) -> Result<(), String> {
     let mut process = start()?;
     let mut control = crate::operator_drain::Control::start(socket, config, host_sha256, process.child.id())?;
     let state = control.state.clone();
     let (jobs, queue) = mpsc::sync_channel::<HostJob>(SERVE_BOUNDS.host_queue);
-    let rules = EnvelopeRules { operator: true, config_bytes: config, host_sha256, catalog_enabled: catalog, read_deadline: SERVE_BOUNDS.read_deadline };
+    let rules = EnvelopeRules { operator: Some(peers), config_bytes: config, host_sha256, catalog_enabled: catalog, read_deadline: SERVE_BOUNDS.read_deadline };
     std::thread::scope(|scope| {
         let (state, rules) = (&state, &rules);
         let accept = scope.spawn(move || {
@@ -1776,9 +1809,9 @@ fn serve_connection(
         eprintln!("mini: cannot set client write deadline: {e}");
         return;
     }
-    if rules.operator {
+    if let Some(peers) = rules.operator {
         match peer_uid(&stream) {
-            Ok(uid) if uid == effective_uid() => {}
+            Ok(uid) if peers.admits(uid) => {}
             Ok(_) => return refuse(&mut stream, "operator peer UID mismatch"),
             Err(e) => {
                 eprintln!("mini: {e}");
@@ -1806,7 +1839,7 @@ fn serve_connection(
     if !request_within_bound(&request) {
         return refuse(&mut stream, "host frame exceeds bound");
     }
-    if !(if rules.operator {
+    if !(if rules.operator.is_some() {
         // The owner-private listener is the single Host endpoint for both
         // lifecycle clients and the separately filtered public ingress relay.
         allowed_operator_operation(&request) || allowed_operation(&request, rules.catalog_enabled)
@@ -1921,6 +1954,108 @@ mod tests {
 
     use super::*;
     use std::thread;
+
+    fn refusal_for_peer(peers: &OperatorPeers) -> Vec<u8> {
+        let (mut client, server) = UnixStream::pair().unwrap();
+        let (jobs, _queue) = mpsc::sync_channel::<HostJob>(1);
+        let worker = thread::spawn({
+            let peers = peers.clone();
+            move || {
+                let rules = EnvelopeRules {
+                    operator: Some(&peers),
+                    config_bytes: b"config",
+                    host_sha256: &[0; 32],
+                    catalog_enabled: false,
+                    read_deadline: Duration::from_millis(200),
+                };
+                serve_connection(server, &rules, &jobs);
+            }
+        });
+        // One frame that no envelope rule accepts: an admitted peer is refused
+        // for the frame, a foreign peer before any byte is read.
+        write_frame(&mut client, b"x").unwrap();
+        let reply = read_frame(&mut client).unwrap().unwrap();
+        worker.join().unwrap();
+        reply
+    }
+
+    #[test]
+    fn transport_operator_peers_default_to_owner_and_add_only_configured_uids() {
+        let owner = OperatorPeers::for_owner(1000, &[]);
+        assert!(owner.admits(1000));
+        assert!(!owner.admits(1001) && !owner.admits(0));
+        let relay = OperatorPeers::for_owner(1000, &[1002, 1000, 1002]);
+        assert_eq!(relay, OperatorPeers(vec![1000, 1002]));
+        assert!(relay.admits(1002) && !relay.admits(1001));
+        assert!(OperatorPeers::with(&[]).admits(effective_uid()));
+    }
+
+    #[test]
+    fn transport_operator_socket_refuses_a_peer_outside_the_allowlist() {
+        let me = effective_uid();
+        let foreign = OperatorPeers(vec![me.wrapping_add(1)]);
+        let reply = refusal_for_peer(&foreign);
+        assert_eq!(reply, [&[254u8][..], b"operator peer UID mismatch"].concat());
+        let admitted = refusal_for_peer(&OperatorPeers::with(&[]));
+        assert_eq!(admitted[0], 254);
+        assert_ne!(&admitted[1..], b"operator peer UID mismatch");
+    }
+
+    /// Two real uids. Run on a Linux box where `sudo -n setpriv` works:
+    /// MINI_TEST_FOREIGN_UID=65534 cargo nextest run --run-ignored all -E 'test(transport_operator_socket_two_uid)'
+    /// A foreign process is refused by the filesystem on the owner-private
+    /// layout (EACCES), and by the peer allowlist when the layout is opened.
+    #[test]
+    #[ignore]
+    fn transport_operator_socket_two_uid_foreign_process_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let foreign: u32 = std::env::var("MINI_TEST_FOREIGN_UID").expect("MINI_TEST_FOREIGN_UID").parse().unwrap();
+        assert_ne!(foreign, effective_uid());
+        let directory = std::env::temp_dir().join(format!("mini-two-uid-{}", std::process::id()));
+        fs::create_dir(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let socket = directory.join("operator.sock");
+        let key = directory.join("credentials.key");
+        fs::write(&key, [7u8; 32]).unwrap();
+        fs::set_permissions(&key, fs::Permissions::from_mode(0o600)).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).unwrap();
+        let probe = |path: &Path, verb: &str| -> String {
+            let script = format!(
+                "import socket,sys\ntry:\n  {verb}\nexcept PermissionError:\n  print('EACCES'); sys.exit(0)\nprint('OPENED')",
+            );
+            let output = Command::new("sudo")
+                .args(["-n", "setpriv", &format!("--reuid={foreign}"), &format!("--regid={foreign}"), "--clear-groups", "--", "python3", "-c", &script, path.to_str().unwrap()])
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "probe failed: {}", String::from_utf8_lossy(&output.stderr));
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        let connect = "s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1])";
+        let open = "open(sys.argv[1],'rb').read()";
+        assert_eq!(probe(&socket, connect), "EACCES");
+        assert_eq!(probe(&key, open), "EACCES");
+        // Open the layout (as a misdeployment would): the peer check still refuses.
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o711)).unwrap();
+        fs::set_permissions(&socket, fs::Permissions::from_mode(0o666)).unwrap();
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let peers = OperatorPeers::with(&[]);
+            let (jobs, _queue) = mpsc::sync_channel::<HostJob>(1);
+            let rules = EnvelopeRules {
+                operator: Some(&peers),
+                config_bytes: b"config",
+                host_sha256: &[0; 32],
+                catalog_enabled: false,
+                read_deadline: Duration::from_millis(500),
+            };
+            serve_connection(stream, &rules, &jobs);
+        });
+        let refused = "s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); h=s.recv(4); n=int.from_bytes(h,'little'); b=s.recv(n); print(b[1:].decode()); sys.exit(0)";
+        assert_eq!(probe(&socket, refused), "operator peer UID mismatch");
+        server.join().unwrap();
+        fs::remove_dir_all(&directory).unwrap();
+    }
 
     #[test]
     fn socket_restart_refuses_replaced_host_under_original_pin() {
@@ -2291,7 +2426,7 @@ done"#;
                 counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 HostProcess::start(Command::new("/bin/sh").arg("-c").arg(script), "fake")
             };
-            let _ = supervise(&listener, false, b"config", &[0; 32], false, &mut start);
+            let _ = supervise(&listener, None, b"config", &[0; 32], false, &mut start);
         });
         assert_eq!(invoke(&socket, &config, 3, &[1, 2]).unwrap(), vec![3]);
         assert!(invoke(&socket, &config, 9, &[])
@@ -2343,7 +2478,7 @@ done"#;
             let mut start =
                 || HostProcess::start(Command::new("/bin/sh").arg("-c").arg(FAKE_HOST), "fake");
             let rules = EnvelopeRules {
-                operator: false,
+                operator: None,
                 config_bytes: b"config",
                 host_sha256: &[0; 32],
                 catalog_enabled: false,
@@ -3266,7 +3401,7 @@ done"#;
             };
             // This is the current connection/queue gate used by
             // supervise_operator, without starting a real drain/admin service.
-            supervise(&listener, true, b"config", &[0;32], false, &mut start)
+            supervise(&listener, Some(&OperatorPeers::with(&[])), b"config", &[0;32], false, &mut start)
         });
         let envelope = |request: &[u8]| {
             let mut bytes = vec![1,6,0,0,0];

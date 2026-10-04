@@ -940,8 +940,7 @@ pub(crate) fn hosted_subjects() -> Result<(PathBuf, BTreeSet<String>)> {
 // ---------------------------------------------------------------- the cache
 
 fn passphrase() -> Result<Zeroizing<Vec<u8>>> {
-    std::env::var_os(KEYCACHE_PASSPHRASE_ENV)
-        .map(|value| Zeroizing::new(value.into_encoded_bytes()))
+    crate::workspace::private::keycache_passphrase()
         .ok_or_else(|| {
             format!("a private room's keys live in this workspace's encrypted key cache: set {KEYCACHE_PASSPHRASE_ENV}")
         })
@@ -1146,7 +1145,7 @@ fn select_current_key(ring: &Keyring, room: &str, head: &EpochHead, certificate:
 
 /// The keys this reader may open with: synced when a passphrase is set, none otherwise.
 pub(crate) fn reader_keys(root: &Path, workspace: &Value, room_name: &str) -> Result<(String, Option<Keyring>)> {
-    if std::env::var_os(KEYCACHE_PASSPHRASE_ENV).is_none() {
+    if crate::workspace::private::keycache_passphrase().is_none() {
         let (_, room, _) = private_room(root, room_name)?;
         return Ok((room, None));
     }

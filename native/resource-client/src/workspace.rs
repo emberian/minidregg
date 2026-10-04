@@ -4854,7 +4854,7 @@ fn create_with_template(
     // A private room's key goes into the encrypted cache: refuse before the
     // birth, not after it.
     if room_template == Some("private") {
-        if std::env::var_os(private::KEYCACHE_PASSPHRASE_ENV).is_none() {
+        if private::keycache_passphrase().is_none() {
             return Err(format!(
                 "a private room's keys live in this workspace's encrypted key cache: set {}",
                 private::KEYCACHE_PASSPHRASE_ENV

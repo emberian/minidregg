@@ -616,8 +616,11 @@ usage:
   mini serve --host HOST --config CONFIG.json --socket PRIVATE-DIR/mini.sock
   mini operator-status --socket PRIVATE --host HOST --config CONFIG.json
   mini drain-operator --socket PRIVATE --host HOST --config CONFIG.json --instance ID --pid PID --timeout-seconds 600
-  mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json
-  mini serve-operator --host HOST --config CONFIG.json --socket OPERATOR-PRIVATE-DIR/mini.sock
+  mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json [--socket-gid GID]
+                         --socket-gid: the public socket's directory may be group GID, mode 0710/0750
+                         (never group-writable, never other-accessible); the socket becomes 0660 GID
+  mini serve-operator --host HOST --config CONFIG.json --socket OPERATOR-PRIVATE-DIR/mini.sock [--peer-uid UID]...
+                         admitted peers: this service's uid plus each --peer-uid (never a session uid)
   mini share-issue-prepare --host HOST --config CONFIG.json --socket OPERATOR-SOCKET --request REQUEST.json --approval OPERATOR-PRIVATE-APPROVAL.json --dir NEW-PRIVATE-DIR
   mini share-issue-submit --socket OPERATOR-SOCKET --attempt PREPARED-DIR
   mini share-issue-lookup --socket OPERATOR-OR-PUBLIC-SOCKET --attempt PREPARED-DIR
@@ -856,16 +859,51 @@ pub(crate) fn create_public(path: &Path, bytes: &[u8]) -> Result<()> {
         .map_err(|error| format!("cannot write {}: {error}", path.display()))
 }
 
+/// A signing seed: a regular file of exactly 32 bytes, owned by this process's
+/// user and inaccessible to group and others (checked on the opened file, so a
+/// rename between check and read cannot substitute another). The bytes are
+/// wiped when dropped; `SigningKey` zeroizes its own copy.
 fn read_secret(path: &Path) -> Result<SigningKey> {
-    let bytes = fs::read(path)
+    use zeroize::Zeroizing;
+    let mut file = fs::File::open(path)
         .map_err(|error| format!("cannot read signing key {}: {error}", path.display()))?;
-    let seed: [u8; 32] = bytes.try_into().map_err(|_| {
+    #[cfg(unix)]
+    {
+        let metadata = file
+            .metadata()
+            .map_err(|error| format!("cannot inspect signing key {}: {error}", path.display()))?;
+        secret_custody(&metadata, transport::effective_uid())
+            .map_err(|why| format!("signing key {} {why}", path.display()))?;
+    }
+    let mut bytes = Zeroizing::new(Vec::with_capacity(33));
+    Read::by_ref(&mut file)
+        .take(33)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("cannot read signing key {}: {error}", path.display()))?;
+    let seed: Zeroizing<[u8; 32]> = Zeroizing::new(bytes.as_slice().try_into().map_err(|_| {
         format!(
             "signing key {} must contain exactly 32 raw bytes",
             path.display()
         )
-    })?;
+    })?);
     Ok(SigningKey::from_bytes(&seed))
+}
+
+/// The custody a secret file must have: a regular file of this user, mode
+/// without any group or other bit.
+#[cfg(unix)]
+fn secret_custody(metadata: &fs::Metadata, owner: u32) -> std::result::Result<(), &'static str> {
+    use std::os::unix::fs::MetadataExt;
+    if !metadata.is_file() {
+        return Err("is not a regular file");
+    }
+    if metadata.uid() != owner {
+        return Err("is not owned by this user");
+    }
+    if metadata.mode() & 0o077 != 0 {
+        return Err("is readable or writable by group or others (owner-private 0600 required)");
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -3293,17 +3331,26 @@ fn run(mut args: Args) -> Result<()> {
         "serve-operator" => {
             let host = path(args.required("host")?);
             let config = path(args.required("config")?);
+            let peers = args
+                .repeated("peer-uid")
+                .into_iter()
+                .map(|uid| uid.to_str().and_then(|uid| uid.parse::<u32>().ok()).ok_or("--peer-uid is a decimal uid"))
+                .collect::<std::result::Result<Vec<u32>, _>>()?;
             args.finish()?;
             let socket = SOCKET.get().ok_or("serve-operator requires --socket")?;
-            transport::serve_operator(socket, &host, &config)
+            transport::serve_operator(socket, &host, &config, &peers)
         }
         #[cfg(unix)]
         "serve-public-proxy" => {
             let upstream = path(args.required("upstream")?);
             let config = path(args.required("config")?);
+            let group = args
+                .optional("socket-gid")
+                .map(|gid| gid.to_str().and_then(|gid| gid.parse::<u32>().ok()).ok_or("--socket-gid is a decimal gid"))
+                .transpose()?;
             args.finish()?;
             let socket = SOCKET.get().ok_or("serve-public-proxy requires --socket")?;
-            public_proxy::serve(socket, &upstream, &config)
+            public_proxy::serve(socket, &upstream, &config, group)
         }
         #[cfg(unix)]
         "operator-status" | "drain-operator" => {
@@ -4428,6 +4475,8 @@ fn run(mut args: Args) -> Result<()> {
 }
 
 fn main() -> ExitCode {
+    // Before any thread or child: no child inherits the key-cache passphrase.
+    workspace::private::adopt_keycache_passphrase();
     #[cfg(unix)]
     let parsed = match env::args_os().nth(1) {
         Some(command) if command == OsStr::new("bend-session-sign") => {
@@ -4869,6 +4918,36 @@ mod tests {
         fs::write(&source, b"replacement").unwrap();
         assert!(copy_new(&source, &public).is_err());
         assert_eq!(fs::read(&public).unwrap(), b"existing-public");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_secret_requires_owner_private_regular_32_byte_file() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let directory = scratch("read-secret-custody");
+        let key = directory.join("mini.key");
+        create_private(&key, &[5u8; 32]).unwrap();
+        assert_eq!(read_secret(&key).unwrap().to_bytes(), [5u8; 32]);
+        for mode in [0o640, 0o604, 0o620, 0o644] {
+            fs::set_permissions(&key, fs::Permissions::from_mode(mode)).unwrap();
+            assert!(read_secret(&key).unwrap_err().contains("owner-private"), "mode {mode:o}");
+        }
+        fs::set_permissions(&key, fs::Permissions::from_mode(0o600)).unwrap();
+        // A link is judged by what it opens: the target's custody.
+        let link = directory.join("link.key");
+        symlink(&key, &link).unwrap();
+        assert!(read_secret(&link).is_ok());
+        assert!(read_secret(&directory).unwrap_err().contains("regular file"));
+        let long = directory.join("long.key");
+        create_private(&long, &[5u8; 33]).unwrap();
+        assert!(read_secret(&long).unwrap_err().contains("exactly 32"));
+        let metadata = fs::metadata(&key).unwrap();
+        assert!(secret_custody(&metadata, transport::effective_uid()).is_ok());
+        assert_eq!(
+            secret_custody(&metadata, transport::effective_uid().wrapping_add(1)),
+            Err("is not owned by this user")
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 

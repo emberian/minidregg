@@ -230,6 +230,35 @@ pub(crate) fn connect(path: &Path, stop: &AtomicBool, deadline: Instant) -> io::
     }
 }
 
+/// The public socket's directory. Owner-private (0700) by default. With a
+/// tenant group, the directory may grant that one group search (and list)
+/// access — 0710 or 0750, never group-write, never anything to others — so
+/// session accounts reach the filtered public relay and nothing else here.
+fn public_directory(path: &Path, group: Option<u32>) -> Result<(), String> {
+    let Some(group) = group else { return private_directory(path) };
+    if !path.is_absolute() {
+        return Err("public proxy socket paths must be absolute".into());
+    }
+    let parent = path.parent().ok_or("socket requires a parent directory")?;
+    let metadata =
+        fs::symlink_metadata(parent).map_err(|e| format!("cannot inspect {}: {e}", parent.display()))?;
+    if !group_directory_custody(&metadata, transport::effective_uid(), group) {
+        return Err(format!(
+            "socket directory {} must be owned by this user, group {group}, mode 0710 or 0750",
+            parent.display()
+        ));
+    }
+    Ok(())
+}
+
+fn group_directory_custody(metadata: &fs::Metadata, owner: u32, group: u32) -> bool {
+    metadata.is_dir()
+        && metadata.uid() == owner
+        && metadata.gid() == group
+        && metadata.mode() & 0o7777 & !0o750 == 0
+        && metadata.mode() & 0o700 == 0o700
+}
+
 fn private_directory(path: &Path) -> Result<(), String> {
     if !path.is_absolute() {
         return Err("public proxy socket paths must be absolute".into());
@@ -468,8 +497,8 @@ impl Drop for SocketGuard<'_> {
         }
     }
 }
-pub(crate) fn serve(socket: &Path, upstream: &Path, config: &Path) -> Result<(), String> {
-    private_directory(socket)?;
+pub(crate) fn serve(socket: &Path, upstream: &Path, config: &Path, group: Option<u32>) -> Result<(), String> {
+    public_directory(socket, group)?;
     private_directory(upstream)?;
     let resolved = |path: &Path| -> Result<PathBuf, String> {
         Ok(
@@ -503,7 +532,14 @@ pub(crate) fn serve(socket: &Path, upstream: &Path, config: &Path) -> Result<(),
         UnixListener::bind(socket).map_err(|e| format!("cannot bind public socket: {e}"))?;
     let metadata = fs::symlink_metadata(socket).map_err(|e| e.to_string())?;
     let _socket_guard = SocketGuard(socket, metadata.dev(), metadata.ino());
-    fs::set_permissions(socket, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
+    match group {
+        None => fs::set_permissions(socket, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?,
+        Some(group) => {
+            std::os::unix::fs::lchown(socket, None, Some(group))
+                .map_err(|e| format!("cannot give the public socket to group {group}: {e}"))?;
+            fs::set_permissions(socket, fs::Permissions::from_mode(0o660)).map_err(|e| e.to_string())?;
+        }
+    }
     let _signals = Signals::install()?;
     eprintln!(
         "mini: serving public proxy {} -> {}",
@@ -525,6 +561,29 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
     const CONFIG: &[u8] = br#"{"domain":"7"}"#;
+
+    #[test]
+    fn transport_public_socket_group_directory_admits_only_group_search() {
+        let root = std::env::temp_dir().join(format!("mini-public-group-{}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        let me = transport::effective_uid();
+        let gid = fs::metadata(&root).unwrap().gid();
+        let socket = root.join("mini.sock");
+        for (mode, admitted) in [(0o710, true), (0o750, true), (0o700, true), (0o770, false), (0o711, false), (0o755, false), (0o730, false), (0o2750, false), (0o610, false)] {
+            fs::set_permissions(&root, fs::Permissions::from_mode(mode)).unwrap();
+            let metadata = fs::symlink_metadata(&root).unwrap();
+            assert_eq!(group_directory_custody(&metadata, me, gid), admitted, "mode {mode:o}");
+            assert_eq!(public_directory(&socket, Some(gid)).is_ok(), admitted, "mode {mode:o}");
+            assert!(!group_directory_custody(&metadata, me, gid.wrapping_add(1)));
+            assert!(!group_directory_custody(&metadata, me.wrapping_add(1), gid));
+        }
+        // Without a tenant group the rule is exactly the owner-private one.
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o710)).unwrap();
+        assert!(public_directory(&socket, None).is_err());
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(public_directory(&socket, None).is_ok());
+        fs::remove_dir_all(&root).unwrap();
+    }
     fn envelope(config: &[u8], request: &[u8]) -> Vec<u8> {
         let mut frame = vec![2];
         frame.extend_from_slice(&(config.len() as u32).to_le_bytes());

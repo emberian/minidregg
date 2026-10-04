@@ -63,6 +63,33 @@ const MAX_CACHE: u64 = 4 * 1024 * 1024;
 
 pub(crate) const KEYCACHE_PASSPHRASE_ENV: &str = "MINI_KEYCACHE_PASSPHRASE";
 
+/// The key-cache passphrase, held by this process and never by its children.
+/// `adopt_keycache_passphrase` (first thing in `main`, before any thread or
+/// child exists) moves it out of the environment; nothing this process spawns
+/// (the Host, consent executables, `sh`, `stty`, ...) inherits it. The one
+/// child that needs it, the shell's own `mini` subprocess, is handed it
+/// explicitly (`chat::client`).
+static KEYCACHE_PASSPHRASE: std::sync::OnceLock<Option<zeroize::Zeroizing<Vec<u8>>>> =
+    std::sync::OnceLock::new();
+
+pub(crate) fn adopt_keycache_passphrase() {
+    let value = std::env::var_os(KEYCACHE_PASSPHRASE_ENV)
+        .map(|value| zeroize::Zeroizing::new(value.into_encoded_bytes()));
+    std::env::remove_var(KEYCACHE_PASSPHRASE_ENV);
+    let _ = KEYCACHE_PASSPHRASE.set(value);
+}
+
+/// The passphrase, if one was given. Without `adopt` (unit tests), read once
+/// from the environment.
+pub(crate) fn keycache_passphrase() -> Option<zeroize::Zeroizing<Vec<u8>>> {
+    KEYCACHE_PASSPHRASE
+        .get_or_init(|| {
+            std::env::var_os(KEYCACHE_PASSPHRASE_ENV)
+                .map(|value| zeroize::Zeroizing::new(value.into_encoded_bytes()))
+        })
+        .clone()
+}
+
 /// D3: printed by `keygen`. Escrow is opt-in; the default is no recovery.
 pub(crate) const KEYGEN_NOTICE: &str = "\
 This key is the only copy. It signs as you and opens your private rooms.
@@ -982,6 +1009,18 @@ fn private_note(
 mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
+
+    /// nextest runs each test in its own process, so this owns the OnceLock.
+    #[test]
+    fn keycache_passphrase_leaves_the_environment_before_any_child() {
+        std::env::set_var(KEYCACHE_PASSPHRASE_ENV, "correct horse");
+        adopt_keycache_passphrase();
+        assert!(std::env::var_os(KEYCACHE_PASSPHRASE_ENV).is_none());
+        assert_eq!(keycache_passphrase().as_deref().map(Vec::as_slice), Some(&b"correct horse"[..]));
+        let child = std::process::Command::new("/usr/bin/env").output().unwrap();
+        assert!(child.status.success());
+        assert!(!String::from_utf8_lossy(&child.stdout).contains(KEYCACHE_PASSPHRASE_ENV));
+    }
 
     const PLACE: Place<'static> = Place {
         room: "71",

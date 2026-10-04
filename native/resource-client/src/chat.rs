@@ -662,6 +662,12 @@ pub(crate) fn client(command: &str, flags: &[(&str, OsString)]) -> Result<String
     if let Some(socket) = crate::SOCKET.get() {
         cmd.arg("--socket").arg(socket);
     }
+    // The passphrase left this process's environment at start; the same
+    // binary, run as this child, is the one recipient that needs it back.
+    if let Some(passphrase) = crate::workspace::private::keycache_passphrase() {
+        use std::os::unix::ffi::OsStrExt;
+        cmd.env(crate::workspace::private::KEYCACHE_PASSPHRASE_ENV, OsStr::from_bytes(&passphrase));
+    }
     let started = std::time::Instant::now();
     let out = cmd
         .stdin(Stdio::null())
