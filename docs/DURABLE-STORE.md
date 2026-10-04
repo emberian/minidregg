@@ -12,18 +12,23 @@ write and refuse there. Anything not listed is not part of the contract.
 | `DEPLOYMENT/pinned-config.json` | the Host's `genesis` | `0600` (umask) | Operator configuration plus `expectedSeed` and `checkpointKey` (the key's absolute path). Optional `checkpointEvery` (default 64). |
 | `STORE.head-anchor` | the store helper | `0600` | Independently retained exact genesis/deployment and head commitments; outside the Store directory. |
 | `STORE.head-anchor.lock` | the store helper | `0600` | Serializes SQLite publication and anchor persistence; no history is stored here. |
-| `STORE/forward-link.sqlite3` | the store helper | `0600` | SQLite, schema version 3. Tables: `durable_seed` (the genesis, once), `durable_log(height, record, tag)`, `durable_checkpoint(height, bytes)` (the latest two are kept). |
+| `STORE/forward-link.sqlite3` | the store helper | `0600` | SQLite, schema version 4. Tables: `durable_seed` (the genesis, once), `durable_log(height, record, tag)`, `durable_checkpoint(height, bytes)` (the latest two are kept), `archive_journal(seq, record, tag)` (the fn archive journal, `Kernel/FnArchiveJournal.lean`: signed articles before their first send, fn's acknowledgements and definite refusals, archive funding). |
 
 `DEPLOYMENT` is the directory given to `mini bootstrap --dir`, and `STORE` is
 the operator configuration's `storageRoot`.
 
 ## What the key means, and what it does not
 
-The key authenticates exactly two things, both only for this Store.
+The key authenticates exactly three things, all only for this Store.
 
 - **Log tags.** Entry *h* carries `KMAC256(key, (keyId, h, chain_h))`, where
   `chain_h` is the log root. `chain_0 = logRoot0(domain, semantics, seed)`, and
   `chain_h = H(chain_{h-1} ‖ H(record_h))`.
+- **Archive journal tags.** Journal entry *j* carries
+  `KMAC256(key, (keyId, j, journal_j))` under its own customization
+  (`DREGG/NATIVE-HOST/ARCHIVE-JOURNAL-TAG/v1`), where `journal_0` is derived
+  from the deployment's domain and semantics and
+  `journal_j = H(journal_{j-1} ‖ H(record_j))`.
 - **Checkpoints.** A checkpoint carries
   `KMAC256(key, (keyId, height, worldRoot, H(body)))`. The body is the
   materialized state at that height together with the log root.
@@ -107,6 +112,8 @@ minidregg-link-sqlite-store durable-init ROOT SEED                 # Installed |
 minidregg-link-sqlite-store durable-read ROOT FROM 0|1 OUTPUT      # exit 3: not initialized
 minidregg-link-sqlite-store durable-append ROOT HEIGHT RECORD TAG  # Installed | AlreadyPresent | exit 4
 minidregg-link-sqlite-store durable-checkpoint ROOT HEIGHT INPUT
+minidregg-link-sqlite-store journal-read ROOT FROM OUTPUT          # exit 3: not initialized
+minidregg-link-sqlite-store journal-append ROOT SEQ RECORD TAG     # Installed | AlreadyPresent | exit 4
 ```
 
 `durable-append-crash … after-begin|after-insert|after-commit` is a lifecycle
@@ -124,10 +131,16 @@ probes use the empty identity; this is not an alternate production identity.
 Changing domain, semantics or genesis requires explicit lineage/re-enrollment,
 not silently deleting the previous anchor.
 
-The fixed 80-byte anchor contains `MINIANC1`, SHA256 of length-delimited opaque
+The fixed 120-byte anchor contains `MINIANC2`, SHA256 of length-delimited opaque
 identity and seed bytes with a domain separator, the big-endian u64 height, and
 SHA256 of the exact height/length-delimited record/tag with a separate domain
-separator. At height zero the entry commitment names the empty entry. Rust does
+separator, then the same pair for the head of the archive journal (u64 seq and
+SHA256 of the seq/length-delimited record/tag under its own separator). At
+height or seq zero the commitment names the empty entry. One anchor binds both
+logs: a Store whose journal is behind its retained journal head, or holds a
+different entry at that seq, refuses every read and write, the durable log's
+included. A `MINIANC1` (80-byte, durable-log-only) anchor refuses by name:
+`retired MINIANC1 anchor (durable log only); re-genesis (no migration)`. Rust does
 not parse or re-admit these bytes. Lean's existing domain/genesis-rooted chain,
 KMAC tags, checkpoint and replay checks continue to establish their meaning.
 No extra full replay occurs on the normal path: only the retained and current

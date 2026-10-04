@@ -1,5 +1,5 @@
 use minidregg_hyperdocument_link_sqlite_store::{
-    encode_durable_read, PublishPhase, SqliteLinkStore, StoreError, MAX_RECORD_BYTES,
+    encode_durable_read, encode_journal_read, PublishPhase, SqliteLinkStore, StoreError, MAX_RECORD_BYTES,
 };
 use std::env;
 use std::fs::{self, File};
@@ -23,7 +23,7 @@ fn read_input(path: &Path) -> Result<Vec<u8>, StoreError> {
     Ok(bytes)
 }
 
-const USAGE: &str = "usage:\n  minidregg-link-sqlite-store read ROOT\n  minidregg-link-sqlite-store read-to ROOT OUTPUT\n  minidregg-link-sqlite-store publish ROOT INPUT\n  minidregg-link-sqlite-store cas ROOT EXPECTED|- INPUT\n  minidregg-link-sqlite-store cas-crash ROOT EXPECTED|- INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-crash ROOT INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-hold ROOT INPUT READY RELEASE\n  minidregg-link-sqlite-store database-path ROOT\n  minidregg-link-sqlite-store durable-anchor-enroll ROOT\n  minidregg-link-sqlite-store durable-init ROOT SEED\n  minidregg-link-sqlite-store durable-read ROOT FROM 0|1 OUTPUT\n  minidregg-link-sqlite-store durable-append ROOT HEIGHT RECORD TAG\n  minidregg-link-sqlite-store durable-append-crash ROOT HEIGHT RECORD TAG after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store durable-checkpoint ROOT HEIGHT INPUT\n  minidregg-link-sqlite-store serve";
+const USAGE: &str = "usage:\n  minidregg-link-sqlite-store read ROOT\n  minidregg-link-sqlite-store read-to ROOT OUTPUT\n  minidregg-link-sqlite-store publish ROOT INPUT\n  minidregg-link-sqlite-store cas ROOT EXPECTED|- INPUT\n  minidregg-link-sqlite-store cas-crash ROOT EXPECTED|- INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-crash ROOT INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-hold ROOT INPUT READY RELEASE\n  minidregg-link-sqlite-store database-path ROOT\n  minidregg-link-sqlite-store durable-anchor-enroll ROOT\n  minidregg-link-sqlite-store durable-init ROOT SEED\n  minidregg-link-sqlite-store durable-read ROOT FROM 0|1 OUTPUT\n  minidregg-link-sqlite-store durable-append ROOT HEIGHT RECORD TAG\n  minidregg-link-sqlite-store durable-append-crash ROOT HEIGHT RECORD TAG after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store durable-checkpoint ROOT HEIGHT INPUT\n  minidregg-link-sqlite-store journal-read ROOT FROM OUTPUT\n  minidregg-link-sqlite-store journal-append ROOT SEQ RECORD TAG\n  minidregg-link-sqlite-store journal-append-crash ROOT SEQ RECORD TAG after-begin|after-insert|after-commit|after-anchor-prepare|after-anchor-rename|after-anchor\n  minidregg-link-sqlite-store serve";
 
 /// The CLI could not run: usage (exit 2) or a store error.
 enum Failure {
@@ -205,6 +205,38 @@ fn run(mut arguments: Vec<std::ffi::OsString>, out: &mut Vec<u8>) -> Result<(), 
                 }
             })?;
         }
+        ("journal-read", [root, from, output]) => {
+            let from = parse_height(from)?;
+            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            fs::write(output, encode_journal_read(&store.journal_read(from)?))?;
+        }
+        ("journal-append", [root, seq, record, tag]) => {
+            let seq = parse_height(seq)?;
+            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            writeln!(
+                out,
+                "{:?}",
+                store.journal_append(
+                    seq,
+                    &read_input(Path::new(record))?,
+                    &read_input(Path::new(tag))?
+                )?
+            )?;
+        }
+        ("journal-append-crash", [root, seq, record, tag, phase]) => {
+            let Some((target, exit_code)) = phase.to_str().and_then(crash_phase) else {
+                return Err(Failure::Usage);
+            };
+            let seq = parse_height(seq)?;
+            let store = SqliteLinkStore::open_with_identity(root, &identity)?;
+            let record = read_input(Path::new(record))?;
+            let tag = read_input(Path::new(tag))?;
+            let _ = store.journal_append_with_hook(seq, &record, &tag, |observed| {
+                if observed == target {
+                    std::process::exit(exit_code);
+                }
+            })?;
+        }
         ("durable-checkpoint", [root, height, input]) => {
             let height = parse_height(height)?;
             let store = SqliteLinkStore::open_with_identity(root, &identity)?;
@@ -242,7 +274,7 @@ fn invoke(arguments: Vec<std::ffi::OsString>) -> (u32, Vec<u8>, Vec<u8>) {
 /// hold it for another process; they keep their own child under `serve`.
 fn needs_own_process(arguments: &[std::ffi::OsString]) -> bool {
     let command = if arguments.first().is_some_and(|a| a == "--anchor-identity") { arguments.get(2) } else { arguments.first() };
-    command.is_some_and(|c| matches!(c.to_str(), Some("cas-crash" | "publish-crash" | "durable-append-crash" | "publish-hold")))
+    command.is_some_and(|c| matches!(c.to_str(), Some("cas-crash" | "publish-crash" | "durable-append-crash" | "journal-append-crash" | "publish-hold")))
 }
 
 fn main() -> ExitCode {

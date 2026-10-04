@@ -493,13 +493,13 @@ impl SqliteByteStore {
                 self.database
                     .exec(b"ALTER TABLE opaque_record_v2 RENAME TO opaque_record\0")?;
                 Self::create_durable_tables(&self.database)?;
-                self.database.exec(b"PRAGMA user_version=3\0")?;
+                self.database.exec(b"PRAGMA user_version=4\0")?;
             }
-            2 => {
+            2 | 3 => {
                 Self::create_durable_tables(&self.database)?;
-                self.database.exec(b"PRAGMA user_version=3\0")?;
+                self.database.exec(b"PRAGMA user_version=4\0")?;
             }
-            3 => {}
+            4 => {}
             _ => {
                 return Err(StoreError::Sqlite {
                     code: version,
@@ -513,7 +513,10 @@ impl SqliteByteStore {
     fn create_durable_tables(database: &Database) -> Result<(), StoreError> {
         database.exec(b"CREATE TABLE IF NOT EXISTS durable_seed (slot INTEGER PRIMARY KEY CHECK(slot=1), bytes BLOB NOT NULL CHECK(length(bytes)<=67108864)) WITHOUT ROWID\0")?;
         database.exec(b"CREATE TABLE IF NOT EXISTS durable_log (height INTEGER PRIMARY KEY CHECK(height>=1), record BLOB NOT NULL CHECK(length(record)<=67108864), tag BLOB NOT NULL CHECK(length(tag)<=4096))\0")?;
-        database.exec(b"CREATE TABLE IF NOT EXISTS durable_checkpoint (height INTEGER PRIMARY KEY CHECK(height>=1), bytes BLOB NOT NULL CHECK(length(bytes)<=67108864))\0")
+        database.exec(b"CREATE TABLE IF NOT EXISTS durable_checkpoint (height INTEGER PRIMARY KEY CHECK(height>=1), bytes BLOB NOT NULL CHECK(length(bytes)<=67108864))\0")?;
+        // The fn archive journal (Lean `Kernel.FnArchiveJournal`): append-only,
+        // anchored with the durable log by the same MINIANC2 head.
+        database.exec(b"CREATE TABLE IF NOT EXISTS archive_journal (seq INTEGER PRIMARY KEY CHECK(seq>=1), record BLOB NOT NULL CHECK(length(record)<=67108864), tag BLOB NOT NULL CHECK(length(tag)<=4096))\0")
     }
 
     fn validate_bound(bytes: &[u8]) -> Result<(), StoreError> {
@@ -621,6 +624,20 @@ pub struct DurableEntry {
     pub tag: Vec<u8>,
 }
 
+/// One fn archive journal entry: Lean-owned record and tag bytes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JournalEntry {
+    pub seq: u64,
+    pub record: Vec<u8>,
+    pub tag: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JournalRead {
+    pub head: u64,
+    pub entries: Vec<JournalEntry>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DurableRead {
     pub head: u64,
@@ -674,6 +691,31 @@ impl SqliteByteStore {
         }
     }
 
+    fn journal_head(&self) -> Result<u64, StoreError> {
+        let statement = self
+            .database
+            .prepare(b"SELECT COALESCE(MAX(seq),0) FROM archive_journal\0")?;
+        if statement.step()? != SQLITE_ROW {
+            return Err(self.database.error(SQLITE_DONE));
+        }
+        Ok(statement.column_int64(0) as u64)
+    }
+
+    fn journal_entry(&self, seq: u64) -> Result<Option<JournalEntry>, StoreError> {
+        let statement = self
+            .database
+            .prepare(b"SELECT record, tag FROM archive_journal WHERE seq=?1\0")?;
+        statement.bind_int64(1, seq as i64)?;
+        match statement.step()? {
+            SQLITE_ROW => Ok(Some(JournalEntry {
+                seq,
+                record: statement.column_blob_at(0)?,
+                tag: statement.column_blob_at(1)?,
+            })),
+            _ => Ok(None),
+        }
+    }
+
     /// Explicit first enrollment of an existing, separately audited Store.
     /// Never called by ordinary reads: loss of an established anchor must refuse.
     pub fn durable_anchor_enroll(&self) -> Result<(), StoreError> {
@@ -701,10 +743,17 @@ impl SqliteByteStore {
         } else {
             self.durable_entry(height)?
         };
+        let journal_height = self.journal_head()?;
+        let journal = if journal_height == 0 {
+            None
+        } else {
+            self.journal_entry(journal_height)?
+        };
         Ok(anchor::Head::new(
             &self.anchor_identity,
             seed,
             entry.as_ref(),
+            journal.as_ref(),
         ))
     }
 
@@ -715,6 +764,17 @@ impl SqliteByteStore {
         if self.durable_head()? < retained.height {
             return Err(StoreError::Anchor("Store is behind retained head"));
         }
+        if self.journal_head()? < retained.journal_height {
+            return Err(StoreError::Anchor("archive journal is behind retained head"));
+        }
+        let journal = if retained.journal_height == 0 {
+            None
+        } else {
+            Some(
+                self.journal_entry(retained.journal_height)?
+                    .ok_or(StoreError::Anchor("retained journal entry is missing"))?,
+            )
+        };
         let entry = if retained.height == 0 {
             None
         } else {
@@ -723,7 +783,9 @@ impl SqliteByteStore {
                     .ok_or(StoreError::Anchor("retained entry is missing"))?,
             )
         };
-        if retained != anchor::Head::new(&self.anchor_identity, seed, entry.as_ref()) {
+        if retained
+            != anchor::Head::new(&self.anchor_identity, seed, entry.as_ref(), journal.as_ref())
+        {
             return Err(StoreError::Anchor("genesis or retained head conflicts"));
         }
         self.current_anchor_head(seed)
@@ -753,7 +815,7 @@ impl SqliteByteStore {
         if self.durable_head()? != 0 {
             return Err(StoreError::Conflict);
         }
-        let initial = anchor::Head::new(&self.anchor_identity, seed, None);
+        let initial = anchor::Head::new(&self.anchor_identity, seed, None, None);
         if guard.read()?.is_some_and(|retained| retained != initial) {
             return Err(StoreError::Anchor(
                 "new seed conflicts with retained genesis",
@@ -886,6 +948,12 @@ impl SqliteByteStore {
         hook(PublishPhase::Inserted);
         transaction.commit()?;
         hook(PublishPhase::Committed);
+        let journal_height = self.journal_head()?;
+        let journal = if journal_height == 0 {
+            None
+        } else {
+            self.journal_entry(journal_height)?
+        };
         let head = anchor::Head::new(
             &self.anchor_identity,
             &seed,
@@ -894,10 +962,123 @@ impl SqliteByteStore {
                 record: record.to_vec(),
                 tag: tag.to_vec(),
             }),
+            journal.as_ref(),
         );
         guard.publish_with_hook(&head, &mut hook)?;
         hook(PublishPhase::Anchored);
         Ok(PublishStatus::Installed)
+    }
+
+    /// Append archive journal entry `seq` iff the journal head is `seq - 1`,
+    /// under the same anchor lock as the durable log; the new anchor commits
+    /// to both heads. The identical entry already at `seq` is `AlreadyPresent`;
+    /// anything else is a conflict. A seeded Store is required.
+    pub fn journal_append(
+        &self,
+        seq: u64,
+        record: &[u8],
+        tag: &[u8],
+    ) -> Result<PublishStatus, StoreError> {
+        self.journal_append_with_hook(seq, record, tag, |_| {})
+    }
+
+    pub fn journal_append_with_hook<F>(
+        &self,
+        seq: u64,
+        record: &[u8],
+        tag: &[u8],
+        mut hook: F,
+    ) -> Result<PublishStatus, StoreError>
+    where
+        F: FnMut(PublishPhase),
+    {
+        Self::validate_bound(record)?;
+        if seq == 0 || tag.len() > 4096 {
+            return Err(StoreError::Conflict);
+        }
+        let guard = anchor::Guard::lock(&self.root)?;
+        self.database.exec(b"BEGIN IMMEDIATE\0")?;
+        let transaction = Transaction {
+            store: self,
+            active: true,
+        };
+        hook(PublishPhase::Begun);
+        self.refuse_retired_image()?;
+        let seed = self.durable_seed()?.ok_or(StoreError::Missing)?;
+        let current_head = self.anchor_head(&guard, &seed)?;
+        if let Some(existing) = self.journal_entry(seq)? {
+            if existing.record == record && existing.tag == tag {
+                transaction.commit()?;
+                hook(PublishPhase::Committed);
+                guard.publish_with_hook(&current_head, &mut hook)?;
+                hook(PublishPhase::Anchored);
+                return Ok(PublishStatus::AlreadyPresent);
+            }
+            return Err(StoreError::Conflict);
+        }
+        if self.journal_head()? != seq - 1 {
+            return Err(StoreError::Conflict);
+        }
+        let statement = self
+            .database
+            .prepare(b"INSERT INTO archive_journal(seq,record,tag) VALUES(?1,?2,?3)\0")?;
+        statement.bind_int64(1, seq as i64)?;
+        statement.bind_blob_at(2, record)?;
+        statement.bind_blob_at(3, tag)?;
+        if statement.step()? != SQLITE_DONE {
+            return Err(self.database.error(SQLITE_DONE));
+        }
+        drop(statement);
+        hook(PublishPhase::Inserted);
+        transaction.commit()?;
+        hook(PublishPhase::Committed);
+        let height = self.durable_head()?;
+        let entry = if height == 0 { None } else { self.durable_entry(height)? };
+        let head = anchor::Head::new(
+            &self.anchor_identity,
+            &seed,
+            entry.as_ref(),
+            Some(&JournalEntry {
+                seq,
+                record: record.to_vec(),
+                tag: tag.to_vec(),
+            }),
+        );
+        guard.publish_with_hook(&head, &mut hook)?;
+        hook(PublishPhase::Anchored);
+        Ok(PublishStatus::Installed)
+    }
+
+    /// One consistent read of the archive journal from `from`, after the same
+    /// anchor check as `durable_read`.
+    pub fn journal_read(&self, from: u64) -> Result<JournalRead, StoreError> {
+        let guard = anchor::Guard::lock(&self.root)?;
+        self.database.exec(b"BEGIN DEFERRED\0")?;
+        let transaction = Transaction {
+            store: self,
+            active: true,
+        };
+        self.refuse_retired_image()?;
+        let seed = self.durable_seed()?.ok_or(StoreError::Missing)?;
+        let anchor_head = self.anchor_head(&guard, &seed)?;
+        let head = self.journal_head()?;
+        let mut entries = Vec::new();
+        {
+            let statement = self.database.prepare(
+                b"SELECT seq, record, tag FROM archive_journal WHERE seq>=?1 ORDER BY seq\0",
+            )?;
+            statement.bind_int64(1, from.max(1) as i64)?;
+            while statement.step()? == SQLITE_ROW {
+                entries.push(JournalEntry {
+                    seq: statement.column_int64(0) as u64,
+                    record: statement.column_blob_at(1)?,
+                    tag: statement.column_blob_at(2)?,
+                });
+            }
+        }
+        transaction.commit()?;
+        guard.publish(&anchor_head)?;
+        Ok(JournalRead { head, entries })
     }
 
     /// Store a checkpoint at `height` (at most the head), replacing one at the
@@ -973,6 +1154,22 @@ pub fn encode_durable_read(read: &DurableRead) -> Vec<u8> {
     out
 }
 
+/// The journal read file Lean parses: big-endian u64 head; u64 entry count;
+/// per entry u64 seq, record blob, tag blob (u64 length and bytes).
+pub fn encode_journal_read(read: &JournalRead) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&read.head.to_be_bytes());
+    out.extend_from_slice(&(read.entries.len() as u64).to_be_bytes());
+    for entry in &read.entries {
+        out.extend_from_slice(&entry.seq.to_be_bytes());
+        out.extend_from_slice(&(entry.record.len() as u64).to_be_bytes());
+        out.extend_from_slice(&entry.record);
+        out.extend_from_slice(&(entry.tag.len() as u64).to_be_bytes());
+        out.extend_from_slice(&entry.tag);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1018,6 +1215,69 @@ mod tests {
             "dregg-durable-{label}-{}-{nonce}",
             std::process::id()
         ))
+    }
+
+    #[test]
+    fn archive_journal_appends_at_its_head_under_the_shared_anchor() {
+        let root = fresh_root("journal");
+        let store = SqliteByteStore::open(&root).unwrap();
+        assert!(matches!(store.journal_append(1, b"j", b"t"), Err(StoreError::Missing)));
+        store.durable_init(b"seed").unwrap();
+        assert!(matches!(store.journal_append(2, b"j", b"t"), Err(StoreError::Conflict)));
+        assert_eq!(store.journal_append(1, b"j1", b"t1").unwrap(), PublishStatus::Installed);
+        assert_eq!(store.journal_append(1, b"j1", b"t1").unwrap(), PublishStatus::AlreadyPresent);
+        assert!(matches!(store.journal_append(1, b"jX", b"t1"), Err(StoreError::Conflict)));
+        // The two logs advance independently; each append re-anchors both heads.
+        store.durable_append(1, b"r1", b"t1").unwrap();
+        assert_eq!(store.journal_append(2, b"j2", b"t2").unwrap(), PublishStatus::Installed);
+        let read = store.journal_read(1).unwrap();
+        assert_eq!(read.head, 2);
+        assert_eq!(
+            read.entries.iter().map(|e| (e.seq, e.record.clone())).collect::<Vec<_>>(),
+            vec![(1, b"j1".to_vec()), (2, b"j2".to_vec())]
+        );
+        assert_eq!(store.durable_read(1, false).unwrap().head, 1);
+        // Truncating the journal below the anchored head refuses every read,
+        // the durable log's included: one anchor binds both.
+        store.database.exec(b"DELETE FROM archive_journal WHERE seq=2\0").unwrap();
+        assert!(matches!(
+            store.journal_read(1),
+            Err(StoreError::Anchor("archive journal is behind retained head"))
+        ));
+        assert!(matches!(
+            store.durable_read(1, false),
+            Err(StoreError::Anchor("archive journal is behind retained head"))
+        ));
+    }
+
+    #[test]
+    fn archive_journal_entry_rewrite_under_the_anchor_refuses() {
+        let root = fresh_root("journal-rewrite");
+        let store = SqliteByteStore::open(&root).unwrap();
+        store.durable_init(b"seed").unwrap();
+        store.journal_append(1, b"j1", b"t1").unwrap();
+        store.database.exec(b"UPDATE archive_journal SET record=x'00' WHERE seq=1\0").unwrap();
+        assert!(matches!(
+            store.journal_read(1),
+            Err(StoreError::Anchor("genesis or retained head conflicts"))
+        ));
+    }
+
+    #[test]
+    fn retired_minianc1_anchor_is_refused_by_name() {
+        let root = fresh_root("anc1");
+        let store = SqliteByteStore::open(&root).unwrap();
+        store.durable_init(b"seed").unwrap();
+        let path = anchor::path(store.root());
+        let mut old = b"MINIANC1".to_vec();
+        old.resize(80, 7);
+        fs::write(&path, &old).unwrap();
+        assert!(matches!(
+            store.durable_read(1, false),
+            Err(StoreError::Anchor(
+                "retired MINIANC1 anchor (durable log only); re-genesis (no migration)"
+            ))
+        ));
     }
 
     #[test]

@@ -1,5 +1,11 @@
 //! Physical exact-byte continuity. Lean alone interprets seed/record/tag bytes.
-use crate::{DurableEntry, PublishPhase, StoreError};
+//!
+//! The anchor commits to the head of both append-only logs of one Store: the
+//! durable log and the fn archive journal (`MINIANC2`). A Store behind either
+//! retained head, or holding a different entry at either retained height,
+//! refuses. `MINIANC1` (durable log only) anchors are refused by name: such a
+//! Store re-genesises.
+use crate::{DurableEntry, JournalEntry, PublishPhase, StoreError};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -8,7 +14,9 @@ use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-const MAGIC: &[u8; 8] = b"MINIANC1";
+const MAGIC: &[u8; 8] = b"MINIANC2";
+const RETIRED_MAGIC: &[u8; 8] = b"MINIANC1";
+const ANCHOR_BYTES: usize = 120;
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -16,10 +24,17 @@ pub(crate) struct Head {
     seed: [u8; 32],
     pub height: u64,
     entry: [u8; 32],
+    pub journal_height: u64,
+    journal_entry: [u8; 32],
 }
 
 impl Head {
-    pub fn new(identity: &[u8], seed: &[u8], entry: Option<&DurableEntry>) -> Self {
+    pub fn new(
+        identity: &[u8],
+        seed: &[u8],
+        entry: Option<&DurableEntry>,
+        journal: Option<&JournalEntry>,
+    ) -> Self {
         let mut genesis = Sha256::new();
         genesis.update(b"mini-opaque-anchor-genesis-v1");
         genesis.update((identity.len() as u64).to_be_bytes());
@@ -35,10 +50,21 @@ impl Head {
             digest.update((e.tag.len() as u64).to_be_bytes());
             digest.update(&e.tag);
         }
+        let mut journal_digest = Sha256::new();
+        journal_digest.update(b"mini-opaque-anchor-journal-v1");
+        if let Some(j) = journal {
+            journal_digest.update(j.seq.to_be_bytes());
+            journal_digest.update((j.record.len() as u64).to_be_bytes());
+            journal_digest.update(&j.record);
+            journal_digest.update((j.tag.len() as u64).to_be_bytes());
+            journal_digest.update(&j.tag);
+        }
         Self {
             seed: genesis.finalize().into(),
             height: entry.map_or(0, |e| e.height),
             entry: digest.finalize().into(),
+            journal_height: journal.map_or(0, |j| j.seq),
+            journal_entry: journal_digest.finalize().into(),
         }
     }
 
@@ -48,18 +74,27 @@ impl Head {
             &self.seed,
             &self.height.to_be_bytes(),
             &self.entry,
+            &self.journal_height.to_be_bytes(),
+            &self.journal_entry,
         ]
         .concat()
     }
 
     fn decode(bytes: &[u8]) -> Result<Self, StoreError> {
-        if bytes.len() != 80 || &bytes[..8] != MAGIC {
+        if bytes.len() == 80 && &bytes[..8] == RETIRED_MAGIC {
+            return Err(StoreError::Anchor(
+                "retired MINIANC1 anchor (durable log only); re-genesis (no migration)",
+            ));
+        }
+        if bytes.len() != ANCHOR_BYTES || &bytes[..8] != MAGIC {
             return Err(StoreError::Anchor("invalid anchor bytes"));
         }
         Ok(Self {
             seed: bytes[8..40].try_into().unwrap(),
             height: u64::from_be_bytes(bytes[40..48].try_into().unwrap()),
             entry: bytes[48..80].try_into().unwrap(),
+            journal_height: u64::from_be_bytes(bytes[80..88].try_into().unwrap()),
+            journal_entry: bytes[88..120].try_into().unwrap(),
         })
     }
 }
@@ -168,7 +203,7 @@ impl Guard {
         let metadata = file.metadata()?;
         custody(Some(&metadata), &directory_of(&self.path)?, store_uid())?;
         let mut bytes = Vec::new();
-        file.take(81).read_to_end(&mut bytes)?;
+        file.take(ANCHOR_BYTES as u64 + 1).read_to_end(&mut bytes)?;
         Ok(Some(Head::decode(&bytes)?))
     }
 
