@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
-use crate::custody::Record;
+use mini_sdk::store::Record;
 
 use crate::curl::Poster;
 use crate::http::{read_request, write_response, Request};
@@ -209,7 +209,7 @@ impl App {
             };
             let key = format!("{}-{id}", self.cfg.application_id);
             // Reading an atomic retained record is safe while its worker owns the lease.
-            match crate::custody::read_json(&custody.join(format!("{key}.json"))) {
+            match mini_sdk::store::read_json(&custody.join(format!("{key}.json"))) {
                 Ok(Some(v)) if v["binding"]["user"] == cmd.user_id && v["binding"]["session"] == session.name => {
                     return (Reply::json(&interaction::message(&record_content(&v, id))), None);
                 }

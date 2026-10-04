@@ -29,7 +29,8 @@
 //! `MINI_CLIENT` `MINI_HOST` `MINI_CONFIG` `MINI_SOCKET`). One argument is accepted: `--once`.
 
 use std::path::{Path, PathBuf};
-use minidregg_discord_entrance::custody::{self, Record};
+use mini_sdk::custody::{Delivery, DeliveryState};
+use mini_sdk::store::{self as custody, Record};
 use std::time::Duration;
 
 use minidregg_discord_entrance::curl::Poster;
@@ -62,7 +63,7 @@ fn load_state(p:&Path)->Result<State,String>{
     Ok(State{height:v["height"].as_u64(),message:v["message"].as_str().map(str::to_owned),
         cursors:v["cursors"].as_object().cloned().unwrap_or_default(),scan:v["scan"].clone()})
 }
-fn save_state(p:&Path,s:&State)->Result<(),String>{custody::atomic_json(p,&json!({"version":2,"height":s.height,"message":s.message,"cursors":s.cursors,"scan":s.scan}))}
+fn save_state(p:&Path,s:&State)->Result<(),String>{Ok(custody::atomic_json(p,&json!({"version":2,"height":s.height,"message":s.message,"cursors":s.cursors,"scan":s.scan}))?)}
 
 /// The room's feed from `tail --json`: (bridge-relevant state line, entries).
 pub fn feed_of(stdout: &str) -> (Value, Vec<Value>) {
@@ -191,16 +192,18 @@ impl Mirror {
                 let key=format!("up-{cell}-{seq}");
                 let mut record=Record::lock(&self.custody_root(),&key)?.ok_or("publication record busy")?;
                 let binding=json!({"bridge":self.binding(),"source":{"cell":cell,"sequence":seq,"author":e["author"],"kind":e["kind"],"text":e["text"],"via":e["via"]}});
-                if let Some(v)=&record.value {
-                    if v["binding"]!=binding{return Err("publication source binding changed".into())}
-                    if v["phase"]!="completed" {return Err(format!("publication {cell}:{seq} UNKNOWN; inspect Discord and resolve before continuing"))}
-                } else {
-                    record.save(json!({"binding":binding,"phase":"started","at":now_s()}))?;
-                    let url=if self.webhook.contains('?'){format!("{}&wait=true",self.webhook)}else{format!("{}?wait=true",self.webhook)};
-                    let code=self.poster.send("POST",&url,followup(text).to_string().as_bytes())?;
-                    if !(200..300).contains(&code){return Err(format!("publication {cell}:{seq} UNKNOWN (HTTP {code}); no automatic repost"))}
-                    record.save(json!({"binding":binding,"phase":"completed","http":code,"at":now_s()}))?;
-                    posted+=1;
+                let delivery=Delivery::open(binding,record.value.clone()).map_err(|e|format!("publication {cell}:{seq}: {e}"))?;
+                match delivery.state() {
+                    DeliveryState::Completed(_)=>{}
+                    DeliveryState::Unknown=>return Err(format!("publication {cell}:{seq} UNKNOWN; inspect Discord and resolve before continuing")),
+                    DeliveryState::Fresh=>{
+                        record.save(delivery.start(now_s())?)?;
+                        let url=if self.webhook.contains('?'){format!("{}&wait=true",self.webhook)}else{format!("{}?wait=true",self.webhook)};
+                        let code=self.poster.send("POST",&url,followup(text).to_string().as_bytes())?;
+                        if !(200..300).contains(&code){return Err(format!("publication {cell}:{seq} UNKNOWN (HTTP {code}); no automatic repost"))}
+                        record.save(Delivery::open(delivery.binding,record.value.clone())?.complete(json!({"http":code}),now_s())?)?;
+                        posted+=1;
+                    }
                 }
             }
             state.cursors.insert(cell.into(),json!(seq));save_state(&self.state,state)?;
@@ -327,10 +330,11 @@ fn main() {
     if let Some(v)=&lease.value {if v!=&binding{fail("bridge identity/destination changed; use separate custody")}}else{lease.save(binding).unwrap_or_else(|e|fail(e));}
     if let Some((cell,seq,message))=resolution {
         let mut record=Record::lock(&mirror.custody_root(),&format!("up-{cell}-{seq}")).unwrap_or_else(|e|fail(e)).unwrap_or_else(||fail("publication record busy"));
-        let mut v=record.value.clone().unwrap_or_else(||fail("no retained publication to resolve"));
+        let v=record.value.clone().unwrap_or_else(||fail("no retained publication to resolve"));
         if v["binding"]["bridge"]!=mirror.binding(){fail("publication bridge binding differs")}
-        v["phase"]=json!("completed");v["operatorConfirmedDiscordMessage"]=json!(message);v["resolvedAt"]=json!(now_s());
-        record.save(v).unwrap_or_else(|e|fail(e));
+        let resolved=Delivery::open(v["binding"].clone(),Some(v)).and_then(|d|d.complete(json!({"operatorConfirmedDiscordMessage":message}),now_s()))
+            .unwrap_or_else(|e|fail(e));
+        record.save(resolved).unwrap_or_else(|e|fail(e));
         eprintln!("retained publication resolved from operator-supplied destination evidence; no message sent");return;
     }
     loop {

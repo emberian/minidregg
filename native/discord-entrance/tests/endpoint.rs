@@ -233,7 +233,7 @@ fn durable_restart_exact_binding_unknown_and_roster_revocation(){
     let (resp,job)=restarted.handle(&signed(&w,&command("70",FRIEND,"mini",Some("submit foreign"))),now_s());assert_eq!(resp.status,409);assert!(job.is_none());
     // Persisted start is a transport unknown even when this test's worker never ran.
     let path=w.sessions.join(".discord-custody/4242-70.json");let mut rec:Value=serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();rec["phase"]=json!("started");
-    minidregg_discord_entrance::custody::atomic_json(&path,&rec).unwrap();
+    mini_sdk::store::atomic_json(&path,&rec).unwrap();
     let (resp,job)=restarted.handle(&signed(&w,&cmd),now_s());assert!(job.is_none());assert!(content(&String::from_utf8(resp.body).unwrap()).contains("UNKNOWN"));
     std::fs::write(&w.cfg.roster,json!({"version":1,"users":{}}).to_string()).unwrap();
     let (resp,job)=restarted.handle(&signed(&w,&cmd),now_s());assert!(job.is_none());assert!(content(&String::from_utf8(resp.body).unwrap()).contains("not on this Mini's roster"));
