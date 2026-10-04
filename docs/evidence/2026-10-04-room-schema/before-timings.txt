@@ -1,0 +1,8 @@
+bootstrap 4.095779329 s
+create 19.85 s 7764 KB
+propose 5.12 s
+submit 15.08 s
+server 3936119 host-child 3936133
+read 4.95 s 7896 KB
+read.out bytes 165008
+{"decl":1011,"from":null,"entries":3,"items":1015,"hiding":{"entriesChecked":true,"opened":1014,"root":"30477533643211648513719850403119866540554207436810666134048805322734534763120","sealed":1,"verified":true}}

@@ -1054,6 +1054,23 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
         if (NativeHost.historicalReceipt config durable r.transactionId r.event.eventId).isSome then
           n := n + 1
     pure n
+  -- History lookups (deos efficiency B): a transaction's index by the log's
+  -- `findIdx?`, and a receipt for the record in the middle of the log (a
+  -- non-head receipt: `receiptRoot` of its prefix).
+  let middle := durable.image.accepted[durable.image.accepted.length / 2]?
+  discard <| timed "middle transaction index (findIdx?) x1000" do
+    let mut n := 0
+    if let some r := middle then
+      for i in [0:1000] do
+        n := n + (durable.image.accepted.findIdx?
+          (fun record => record.transactionId == r.transactionId || i == 1000000)).getD 0
+    pure n
+  discard <| timed "middle receipt x1" do
+    let mut n := 0
+    if let some r := middle then
+      if let some receipt := NativeHost.historicalReceipt config durable r.transactionId r.event.eventId then
+        n := n + receipt.worldRoot.value % 7
+    pure n
 
 /-- The whole presence index, log heights (operator output only). -/
 def presenceIndexJson (index : PresenceIndex.Index) : Lean.Json :=

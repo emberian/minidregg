@@ -1,0 +1,54 @@
+STEP 1 — MEASURE FIRST, ONCE (room query on a v1-shaped room), 2026-10-03 23:41 EDT, hbox
+Evidence class: EXECUTED (one run). Load average during the run: ~17 (fn certify swarm on the box).
+
+Binaries (the warm tree's: mini = c8fdd000 resource-client; Host = c8fdd000 + the warm WIP,
+whose Lean diff is Bend/invocation-profile config only, nothing on the read path):
+740545eee8f59199e953c4053d8df24054bb6b54db4a9ee6c8da1873f1a42f50  /home/hbox/workbox/codex-unified-integration-20261003/artifacts/minidregg-host
+1ad2ebe3688bcc602be8350a5877a0bc2f951cc1b75dc26253941d0ccefbbb24  /home/hbox/workbox/codex-unified-integration-20261003/rust-target/release/mini
+176c4cfe236e73854d68b0c965e61e3fcc5a46f0e42d3c5a1d1d9838da682aca  /home/hbox/workbox/codex-unified-integration-20261003/rust-target/release/minidregg-link-sqlite-store
+a1e604a4576aab2b2f1422e9a14f9171472235fcf1b5910d3f545bfa1b5b2fd7  /home/hbox/workbox/codex-unified-integration-20261003/rust-target/release/minidregg-credential-signature-verifier
+
+Command (one run, perf attached to the Host child):
+  /home/hbox/workbox/claude-rooms-schema-20261004/measure-room.sh HOST MINI STORE VERIFIER /home/hbox/workbox/claude-rooms-schema-20261004/w/before \
+    "2-1000,1001,1002,1003,1004,1005,1006,1007,1008,1009,1011,1012,1010" 2 /home/hbox/workbox/claude-rooms-schema-20261004/evidence/before 1
+  = fresh world (newparticipant-acceptance.sh); workspace create lab --storage declared
+    --fields <the v1 room declaration>; founder rows at fields 2,3,4; then ONE
+    MINI_TRACE=read.trace 'workspace --action read --name lab' with
+    'sudo -n perf record -F 999 -g -p <host pid>'.
+
+Timings (/home/hbox/workbox/claude-rooms-schema-20261004/evidence/before/timings.txt):
+  bootstrap 4.095779329 s
+  create 19.85 s 7764 KB
+  propose 5.12 s
+  submit 15.08 s
+  server 3936119 host-child 3936133
+  read 4.95 s 7896 KB
+  read.out bytes 165008
+  {"decl":1011,"from":null,"entries":3,"items":1015,"hiding":{"entriesChecked":true,"opened":1014,"root":"30477533643211648513719850403119866540554207436810666134048805322734534763120","sealed":1,"verified":true}}
+
+Trace of the read (op, ms, bytes in/out; /home/hbox/workbox/claude-rooms-schema-20261004/evidence/before/read.trace):
+   host op144 9.1 ms  in 160 out 1506
+   host op7 0.7 ms  in 91 out 1757
+   host op4 322.2 ms  in 599 out 1570
+   host op8 1.0 ms  in 2999 out 2021
+   host op9 0.4 ms  in 69 out 1549
+   host op10 0.5 ms  in 664 out 2082
+   host op5 4035.1 ms  in 65614 out 2075
+   host op8 383.7 ms  in 122710 out 67040
+
+WHERE THE TIME GOES: op5 (the signed resource query) = 4,035 ms of the 4.95 s wall (the
+2026-10-02 r1 trace: 2,004 ms of 2,799 ms, at lower load). Its request carries 65,614 B and
+the follow-up op8 returns 67,040 B: the view plus an opening of 1,015 items (1,011
+declaration entries, 3 values, the blinding sealed). The view as JSON is 165,008 B.
+
+perf (4,769 samples on the Host, evidence/before/perf.data; Lean frames carry no frame
+pointers, so attribution is by leaf symbol, cumulative %):
+  List.dedup over the cell's address support (Mathlib dedup + Sigma DecidableEq)  ~21%
+  List.Lex compare (sorting entries by address bytes)                             ~12%
+  DeclaredEffectCell.stateKeyStream + StoreCodec.addressKey (key encoding)        ~16%
+  decimal -> Nat (gmp set_str / lean_cstr_to_nat)                                 ~ 9%
+  allocation / free / page faults                                                 ~15%
+  cSHAKE/KMAC (the salts and leaves themselves)                                   ~ 3%
+VERDICT: confirmed. The cost is the 1,016-entry store, superlinear in it (quadratic dedup
+of the support, lex sort of addresses), not the hashing. Every operation on the room cell
+pays it: the birth ('create' 19.9 s) and the 3-row roster write ('submit' 15.1 s) too.
