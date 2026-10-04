@@ -61,7 +61,7 @@ def fresh (base : Journal) : IO (Restored context) := do
   return r
 
 def main : IO Unit := do
-  let empty : Journal := ⟨context,0,0,[],[]⟩
+  let empty : Journal := ⟨context,0,0,[],[],none⟩
   -- 1. 100 000 appended delta frames, one input each.
   IO.println s!"{entries} appended delta frames"
   let mut r ← fresh empty
@@ -93,6 +93,20 @@ def main : IO Unit := do
   let some (one,_) := appendRestored start big []
     | throw (IO.userError "large delta does not replay")
   reopenMatches one.log.encode one "delta-events"
+  -- 4. A checkpoint of the 100 000-delta image: one base frame holding the
+  -- replayed state and every witness. It reopens to the same state without
+  -- replaying, and later appends continue from it.
+  let (cp,cpBytes) := checkpointRestored r
+  require (cp.log.recent.isEmpty && cp.log.base.events.isEmpty && cp.log.base.snapshot == some r.state)
+    "checkpoint is not one snapshot base frame"
+  require (cp.witnesses == r.witnesses && cp.witnesses.length == entries / 100)
+    "checkpoint lost retained witnesses"
+  reopenMatches cpBytes cp "checkpoint"
+  let some (after,frame) := appendRestored cp [event entries] []
+    | throw (IO.userError "append after checkpoint refused")
+  reopenMatches (cpBytes ++ frame) after "checkpoint-then-append"
+  require (after.state == (step context.config r.state ((decodeInput (event entries)).getD .poll)))
+    "append after checkpoint diverged from appending to the full log"
 
 end Minidregg.Verify.GenericSimplexLogReopen
 

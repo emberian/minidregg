@@ -147,14 +147,36 @@ def serviceRequests {config : SourceConfig} (p : Participant config)
     entries := entries.filter (·.id != id) ++ [updated]
   return (p,entries)
 
-/-- The standing per-replica loop. Never returns; supervision restarts it. -/
+/-- One minute of serve-loop accounting, printed and reset per window. -/
+structure ServeStats where
+  since : Nat := 0
+  packets : Nat := 0
+  busyMs : Nat := 0
+  iterations : Nat := 0
+  deriving Inhabited
+
+def statsWindowMs : Nat := 60000
+
+/-- The standing per-replica loop. Never returns; supervision restarts it.
+Once a minute it prints a `stats:` line (packets received, receive+service
+milliseconds, retained views, deltas since the last checkpoint, journal bytes)
+so per-input cost can be followed over uptime. Every `checkpointEvery` deltas
+it checkpoints the journal. -/
 partial def serveLoop {config : SourceConfig} (p : Participant config) (spool : System.FilePath)
-    (budget : Budget) (tickMs retryMs : Nat) (entries : List SpoolEntry) : IO Unit := do
+    (budget : Budget) (tickMs retryMs : Nat) (entries : List SpoolEntry) (stats : ServeStats := {}) :
+    IO Unit := do
   let helper := p.runtime.native.helper
   let t0 ← IO.monoMsNow
+  let stats := if stats.since == 0 then {stats with since := t0} else stats
   let inbound ← helper.receive budget.inbound
   let (p,packets,report) ← iteration p inbound budget
   let t1 ← IO.monoMsNow
+  if let some prior ← p.runtime.current then
+    if prior.log.recent.length ≥ checkpointEvery then
+      match ← checkpoint (storage p.runtime.native) p.runtime.context with
+      | .durable =>
+        IO.eprintln s!"serve: {← IO.monoMsNow} ms checkpoint after {prior.log.recent.length} deltas ({prior.length} B replaced)"
+      | _ => throw (IO.userError "agreement journal checkpoint refused: reopen the replica")
   for (recipient,packet) in packets do
     helper.send recipient packet
   let t2 ← IO.monoMsNow
@@ -166,8 +188,17 @@ partial def serveLoop {config : SourceConfig} (p : Participant config) (spool : 
     IO.eprintln s!"serve: dropped {report.refused} unauthenticated packets"
   if report.status == "applied" then
     IO.eprintln s!"serve: {← IO.monoMsNow} ms applied certified source record; height {p.source.verified.opened.durable.image.accepted.length}"
+  let stats : ServeStats := { stats with
+    packets := stats.packets + inbound.length
+    busyMs := stats.busyMs + (t1 - t0)
+    iterations := stats.iterations + 1 }
+  let stats ← if t3 - stats.since < statsWindowMs then pure stats else do
+    if let some prior ← p.runtime.current then
+      let perPacket := if stats.packets == 0 then 0 else stats.busyMs * 1000 / stats.packets
+      IO.eprintln s!"stats: {t3} ms window {(t3 - stats.since) / 1000} s: {stats.packets} packets in {stats.iterations} iterations, receive+service {stats.busyMs} ms ({perPacket} us/packet); view {prior.state.current}, views {prior.state.views.length}, deltas since checkpoint {prior.log.recent.length}, journal {prior.length} B"
+    pure ({since := t3} : ServeStats)
   if inbound.isEmpty then IO.sleep tickMs.toUInt32
-  serveLoop p spool budget tickMs retryMs entries
+  serveLoop p spool budget tickMs retryMs entries stats
 
 /-! ## Client: propose and await -/
 

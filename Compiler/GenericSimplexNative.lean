@@ -28,6 +28,7 @@ def opAppend : UInt8 := 6
 def opSend : UInt8 := 7
 def opRecv : UInt8 := 8
 def opCreate : UInt8 := 9
+def opReplace : UInt8 := 10
 
 def beBytes (width value : Nat) : ByteArray :=
   ⟨((List.range width).reverse.map fun i => ((value >>> (8 * i)) % 256).toUInt8).toArray⟩
@@ -147,6 +148,12 @@ def journalStorage (helper : Helper) (writable : Bool) (initial : Sigma Restored
       try
         let (status,_) ← helper.call opAppend (u64 expected ++ blob frame)
         return if status == 0 then .durable else .conflict
+      catch _ => return .uncertain
+    replace := fun expected image => do
+      if !writable then return .conflict
+      try
+        let (status,_) ← helper.call opReplace (u64 expected ++ image.toByteArray)
+        return if status == 0 then .durable else .conflict
       catch _ => return .uncertain }
 
 /-- Create a fresh journal (exclusive, fsynced) holding only its base frame. -/
@@ -251,6 +258,12 @@ def openRuntime (spec : HelperSpec) (journal : System.FilePath) (context : Conte
   let n ← openNative spec journal context writable
   let some prior ← current (storage n) context
     | throw (IO.userError "invalid agreement journal")
+  -- A writer that had to replay many deltas checkpoints at once, so the next
+  -- reopen decodes the state instead of replaying them again.
+  if writable && prior.log.recent.length ≥ checkpointEvery then
+    match ← checkpoint (storage n) context with
+    | .durable => pure ()
+    | _ => throw (IO.userError "agreement journal checkpoint at open refused")
   return ⟨n,context,prior.state.now,(← IO.monoMsNow)⟩
 def Runtime.now (r : Runtime) : IO Nat := do
   return r.logicalBase + ((← IO.monoMsNow) - r.monotonicBase)

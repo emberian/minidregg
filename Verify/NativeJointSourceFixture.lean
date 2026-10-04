@@ -51,8 +51,8 @@ def replicaDirectory (root : System.FilePath) (index : Nat) : System.FilePath :=
 def pairPath (root : System.FilePath) (left right : Nat) : System.FilePath :=
   root / s!"pair-{min left right}-{max left right}.key"
 
-/-- Append-only engine journal. The legacy whole-image `agreement.bin` is not
-read by this fixture; `convert-journal` re-encodes it explicitly. -/
+/-- Append-only engine journal. A legacy whole-image `agreement.bin` is not read
+by this fixture: older meshes are re-genesised, never converted. -/
 def journalPath (root : System.FilePath) (index : Nat) : System.FilePath :=
   replicaDirectory root index / "agreement.log"
 
@@ -158,7 +158,7 @@ def initializeStores (root : System.FilePath) (helpers : Helpers)
     require (config.runtimeParameters == (baseConfig root helpers context 0).runtimeParameters)
       "binding exact source anchor changed the normalized runtime semantics"
     IO.ofExcept (← bootstrapFresh config (DurableReceiverCodec.encode built.image))
-    createJournal helpers.agreement (journalPath root index) ⟨bound,index,0,[],[]⟩
+    createJournal helpers.agreement (journalPath root index) ⟨bound,index,0,[],[],none⟩
   IO.FS.writeFile (root / "manifest.json") (Json.mkObj
     [("state", .str "initialized-source-genesis-no-accepted-history"),
      ("participants", toJson (4 : Nat)), ("faults", toJson (1 : Nat)),
@@ -274,24 +274,27 @@ def awaitCall (root : System.FilePath) (callFile outputFile : System.FilePath)
     | .uncertain => pure (.uncertain "agreement completion unavailable; use exact original-call lookup".toUTF8.toList)
   writePrivate outputFile (NativeHostCodec.outcomeCodec.encode outcome).toByteArray
 
-/-- `convert-journal`: explicit one-time re-encoding of a legacy whole-image
-`agreement.bin` into the append-only log. The new log is created exclusively and
-must replay to the identical engine state; the legacy file is left untouched. -/
-def convertJournal (root : System.FilePath) (helpers : Helpers) (index : Nat) : IO Unit := do
+/-- `audit-journal`: replay one replica's whole retained input history, every
+checkpoint segment `agreement.log.upto-N` in increasing N and then the live
+journal, through `auditSegments`. Read-only; safe beside a running replica. -/
+def auditJournal (root : System.FilePath) (index : Nat) : IO Unit := do
   let encoded := (← IO.FS.readBinFile (root / "context.bin")).toList
   let some context := contextStream.toLawful.decode encoded
     | throw (IO.userError "invalid source fixture context: context.bin does not decode as a five-field Config context (a pre-timeout-backoff four-field context.bin refuses here; re-genesis with init)")
-  let legacy := (← IO.FS.readBinFile (replicaDirectory root index / "agreement.bin")).toList
-  let some (journal,state) := restore context legacy
-    | throw (IO.userError "legacy journal does not replay under this exact context")
-  require (journal.self == index) "legacy journal belongs to another replica"
-  createJournal helpers.agreement (journalPath root index) journal
-  let converted := (← IO.FS.readBinFile (journalPath root index)).toList
-  let some reopened := openRestored context converted
-    | throw (IO.userError "converted log does not replay")
-  require (reopened.state == state && reopened.log.merged == journal)
-    "converted log replays to a different engine state"
-  IO.println s!"CONVERTED replica {index}: {journal.events.length} events, {journal.commitWitnesses.length} witnesses, view {state.current}, identical replayed state"
+  let directory := replicaDirectory root index
+  let segmentPrefix := "agreement.log.upto-"
+  let mut segments : List (Nat × System.FilePath) := []
+  for entry in ← directory.readDir do
+    if entry.fileName.startsWith segmentPrefix then
+      let some n := (entry.fileName.drop segmentPrefix.length).toNat?
+        | throw (IO.userError s!"unexpected segment name {entry.fileName}")
+      segments := segments ++ [(n,entry.path)]
+  let ordered := (segments.mergeSort (fun a b => a.1 ≤ b.1)).map Prod.snd ++ [journalPath root index]
+  let mut images := []
+  for path in ordered do images := images ++ [(← IO.FS.readBinFile path).toList]
+  match auditSegments context images with
+  | .ok s => IO.println s!"AUDITED replica {index}: {ordered.length} segments from genesis, view {s.current}, committed tip of {s.committedTip.length} blocks"
+  | .error detail => throw (IO.userError s!"audit of replica {index} failed: {detail}")
 
 end Minidregg.Verify.NativeJointSourceFixture
 
@@ -313,7 +316,7 @@ def main (args : List String) : IO Unit := do
       runCall root ⟨store,signature,agreement⟩ callFile fuel
   | ["lookup-all-call", root, store, signature, agreement, callFile, outputFile] =>
       lookupAllCall root ⟨store,signature,agreement⟩ callFile outputFile
-  | ["convert-journal", root, store, signature, agreement, index] =>
+  | ["audit-journal", root, index] =>
       let some index := index.toNat? | throw (IO.userError "invalid replica index")
-      convertJournal root ⟨store,signature,agreement⟩ index
-  | _ => throw (IO.userError "usage: NativeJointSourceFixture init ROOT STORE SIGNATURE AGREEMENT ALICE_PUB BOB_PUB | serve-replica REPLICA_DIR PEERS STORE SIGNATURE AGREEMENT TICK_MS | await-call ROOT CALL OUTCOME SECONDS ID PROPOSER | run ROOT STORE SIGNATURE AGREEMENT CALL FUEL | lookup-all-call ROOT STORE SIGNATURE AGREEMENT CALL OUTCOME | convert-journal ROOT STORE SIGNATURE AGREEMENT INDEX")
+      auditJournal root index
+  | _ => throw (IO.userError "usage: NativeJointSourceFixture audit-journal ROOT INDEX | init ROOT STORE SIGNATURE AGREEMENT ALICE_PUB BOB_PUB | serve-replica REPLICA_DIR PEERS STORE SIGNATURE AGREEMENT TICK_MS | await-call ROOT CALL OUTCOME SECONDS ID PROPOSER | run ROOT STORE SIGNATURE AGREEMENT CALL FUEL | lookup-all-call ROOT STORE SIGNATURE AGREEMENT CALL OUTCOME")

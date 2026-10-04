@@ -98,7 +98,7 @@ def selectiveCommitRecovery (k : Keys) (base : Context) : IO Unit := do
   let c := {base with instanceBytes := base.instanceBytes ++ [83,69,76,69,67,84]}
   let journal := fun (i : Nat) => k.dir / s!"journal-{i}-selective"
   for i in List.range 4 do
-    createJournal k.binary (journal i) ⟨c,i,0,[],[]⟩
+    createJournal k.binary (journal i) ⟨c,i,0,[],[],none⟩
   let nodes ← (List.range 4).toArray.mapM fun i => openRuntime (spec k i) (journal i) c
   match ← persist (storage nodes[2]!.native) c (.tick 70) with
   | .durable _ => pure ()
@@ -154,13 +154,60 @@ def selectiveCommitRecovery (k : Keys) (base : Context) : IO Unit := do
   IO.println "PASS duplicate certificate: cold restart retains exact journal, late first witness still catches up"
   IO.println "PASS selective COMMIT: exactly one local output, durable q-send certificate, restart and two-replica catchup"
 
+def persistTick (r : Runtime) (time : Nat) : IO Unit := do
+  match ← persist (storage r.native) r.context (.tick time) with
+  | .durable _ => pure ()
+  | _ => throw (IO.userError "tick did not persist")
+
+/-- Checkpoint through the real writer: the image becomes one snapshot frame
+with the same state, the replaced image stays as the previous segment, appends
+continue, a reopen replays only the later deltas, a stale replace conflicts. -/
+def checkpointJournal (k : Keys) (c : Context) : IO Unit := do
+  let path := k.dir / "journal-checkpoint"
+  createJournal k.binary path ⟨c,0,0,[],[],none⟩
+  let r ← openRuntime (spec k 0) path c
+  for t in List.range 5 do persistTick r (1000 * (t + 1))
+  let before ← image r
+  let oldBytes := (← IO.FS.readBinFile path).toList
+  match ← checkpoint (storage r.native) c with
+  | .durable => pure ()
+  | _ => throw (IO.userError "checkpoint refused")
+  let after ← image r
+  ensure (after.state == before.state && after.log.recent.isEmpty &&
+      after.log.base.snapshot == some before.state) "checkpoint changed the engine state"
+  ensure ((← IO.FS.readBinFile (System.FilePath.mk (path.toString ++ s!".upto-{before.length}"))).toList == oldBytes)
+    "replaced image not kept as the previous segment"
+  ensure ((← IO.FS.readBinFile path).toList == after.log.encode) "checkpoint image differs on disk"
+  persistTick r 9000
+  let continued ← state r
+  r.close
+  let reopened ← openRuntime (spec k 0) path c
+  ensure ((← state reopened) == continued) "reopen after checkpoint changed the state"
+  ensure ((← image reopened).log.recent.length == 1) "reopen replayed more than the post-checkpoint delta"
+  match ← (storage reopened.native).replace before.length [1,2,3] with
+  | .conflict => pure ()
+  | _ => throw (IO.userError "stale checkpoint accepted")
+  reopened.close
+  -- The retained history audits as a chain; the live image alone does not.
+  let live := (← IO.FS.readBinFile path).toList
+  match auditSegments c [oldBytes,live] with
+  | .ok audited => ensure (audited == continued) "audited history ends at a different state"
+  | .error detail => throw (IO.userError s!"retained history did not audit: {detail}")
+  match auditSegments c [live] with
+  | .error _ => pure ()
+  | .ok _ => throw (IO.userError "a checkpoint alone audited as a whole history")
+  match auditSegments c [oldBytes,oldBytes] with
+  | .error _ => pure ()
+  | .ok _ => throw (IO.userError "a broken segment chain audited")
+  IO.println "PASS checkpoint: one snapshot frame with the same state, previous segment kept, appends continue, reopen replays only later deltas, stale replace conflicts"
+
 /-- Append-only journal faults: an acknowledged append whose reply was lost is
 replayed on reopen; a torn unacknowledged tail is removed only on a writable
 open; a stale expected length conflicts; a complete corrupt frame, a legacy
 whole image, or a different context never opens. -/
 def journalFaults (k : Keys) (c : Context) : IO Unit := do
   let path := k.dir / "journal-faults"
-  createJournal k.binary path ⟨c,0,0,[],[]⟩
+  createJournal k.binary path ⟨c,0,0,[],[],none⟩
   let r ← openRuntime (spec k 0) path c
   let prior ← image r
   let some (next,frame) := appendRestored prior [encodeInput (.tick 1000)] []
@@ -201,14 +248,14 @@ def journalFaults (k : Keys) (c : Context) : IO Unit := do
   ensure refused "complete corrupt frame opened"
   -- A legacy whole-image journal and a crossed context never open.
   let legacy := k.dir / "journal-legacy"
-  writePrivate legacy (journalStream.encode (⟨c,0,0,[],[]⟩ : Journal)).toByteArray
+  writePrivate legacy (journalStream.encode (⟨c,0,0,[],[],none⟩ : Journal)).toByteArray
   let legacyRefused ← try
       let _ ← openRuntime (spec k 0) legacy c
       pure false
     catch _ => pure true
   ensure legacyRefused "legacy whole-image journal opened as a log"
   let fresh := k.dir / "journal-context"
-  createJournal k.binary fresh ⟨c,0,0,[],[]⟩
+  createJournal k.binary fresh ⟨c,0,0,[],[],none⟩
   let crossed ← try
       let _ ← openRuntime (spec k 0) fresh {c with epoch := c.epoch + 1}
       pure false
@@ -240,7 +287,7 @@ def main (args : List String) : IO Unit := do
     let base := 20000 + (← IO.monoMsNow) % 30000
     let address := fun (i : Nat) => s!"127.0.0.1:{base + i}"
     for i in List.range 4 do
-      createJournal binary (dir / s!"journal-{i}") ⟨c,i,0,[],[]⟩
+      createJournal binary (dir / s!"journal-{i}") ⟨c,i,0,[],[],none⟩
     let nodes ← (List.range 4).toArray.mapM fun i =>
       openRuntime (spec k i (some (address i))
         (((List.range 4).filter (· != i)).map fun j => (j,address j))) (dir / s!"journal-{i}") c
@@ -323,6 +370,7 @@ def main (args : List String) : IO Unit := do
     resumed.close
     for i in [1,2,3] do nodes[i]!.close
     journalFaults k c
+    checkpointJournal k c
     selectiveCommitRecovery k c
     IO.println "PASS GenericSimplex native harness: four nodes, persistent authenticated TCP, append-only durable replay, real MLDSA65 quorum, tamper/duplicate rejection"
 end Minidregg.Verify.GenericSimplexNativeHarness

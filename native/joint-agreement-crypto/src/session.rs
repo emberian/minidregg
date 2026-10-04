@@ -43,6 +43,9 @@ pub const OP_APPEND: u8 = 6;
 pub const OP_SEND: u8 = 7;
 pub const OP_RECV: u8 = 8;
 pub const OP_CREATE: u8 = 9;
+pub const OP_REPLACE: u8 = 10;
+/// Bound on one session request: a checkpoint image travels in one request.
+const MAX_REQUEST: usize = 1 << 30;
 
 struct Config {
     signing: Option<PathBuf>,
@@ -110,6 +113,9 @@ impl<'a> Cursor<'a> {
             return Err("oversize blob".into());
         }
         self.take(n)
+    }
+    fn rest(&mut self) -> &'a [u8] {
+        std::mem::take(&mut self.bytes)
     }
     fn end(&self) -> Result<(), Error> {
         if self.bytes.is_empty() {
@@ -186,6 +192,50 @@ impl Journal {
         file.sync_all()?;
         sync_parent(path)?;
         Ok(Journal { path: path.to_path_buf(), file, _lock: lock, length: bytes.len() as u64, poisoned: false })
+    }
+
+    /// Checkpoint: atomically replace the whole image if its length is still
+    /// `expected`. The new image is written and fsynced beside the journal,
+    /// the replaced image is kept as `<journal>.upto-<length>` (a hard link:
+    /// the previous segment of the input history), then the new image is
+    /// renamed over the journal and the directory fsynced. The writer lock is
+    /// held throughout. Any failure after the link poisons the session.
+    fn replace(&mut self, expected: u64, image: &[u8]) -> Result<bool, Error> {
+        if self.poisoned {
+            return Err("journal session poisoned; reopen".into());
+        }
+        let actual = self.file.metadata()?.len();
+        if expected != self.length || actual != self.length {
+            return Ok(false);
+        }
+        let staged = self.path.with_extension("checkpoint");
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&staged)?;
+        file.write_all(image)?;
+        file.sync_all()?;
+        let mut segment = self.path.clone().into_os_string();
+        segment.push(format!(".upto-{}", self.length));
+        let segment = PathBuf::from(segment);
+        if !segment.exists() {
+            fs::hard_link(&self.path, &segment)?;
+        }
+        let result = (|| -> io::Result<()> {
+            fs::rename(&staged, &self.path)?;
+            let dir = self.path.parent().ok_or_else(|| io::Error::other("journal without parent"))?;
+            File::open(dir)?.sync_all()
+        })();
+        if let Err(e) = result {
+            self.poisoned = true;
+            return Err(format!("journal checkpoint uncertain at {}: {e}", self.path.display()).into());
+        }
+        self.file = file;
+        self.length = image.len() as u64;
+        Ok(true)
     }
 
     /// Compare-length-and-append. A failed or partial write poisons the
@@ -362,6 +412,12 @@ impl Session {
                 self.journal = Some(journal);
                 Ok((0, out))
             }
+            OP_REPLACE => {
+                let expected = c.u64()?;
+                let image = c.rest();
+                let journal = self.journal.as_mut().ok_or("journal not open")?;
+                Ok((if journal.replace(expected, image)? { 0 } else { 1 }, out))
+            }
             OP_APPEND => {
                 let expected = c.u64()?;
                 let frame = c.blob()?;
@@ -441,7 +497,7 @@ pub fn run(args: &[String]) -> Result<(), Error> {
             Err(e) => return Err(e.into()),
         }
         let n = u32::from_be_bytes(header[1..5].try_into()?) as usize;
-        if n > MAX_FRAME * 2 {
+        if n > MAX_REQUEST {
             return Err("oversize session request".into());
         }
         let mut body = vec![0; n];
@@ -479,6 +535,26 @@ mod tests {
         drop(reopened);
         assert_eq!(fs::read(&path).unwrap(), b"head-one-two");
         assert!(Journal::open(&path, 11, 11).is_err(), "moved journal accepted");
+    }
+
+    #[test]
+    fn replace_is_length_checked_atomic_and_keeps_the_segment() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agreement.log");
+        let mut journal = Journal::create(&path, b"head").unwrap();
+        assert!(journal.append(4, b"-one").unwrap());
+        assert!(!journal.replace(4, b"stale").unwrap(), "stale expected length accepted");
+        assert!(journal.replace(8, b"snap").unwrap());
+        assert_eq!(fs::read(&path).unwrap(), b"snap");
+        assert_eq!(fs::read(dir.path().join("agreement.log.upto-8")).unwrap(), b"head-one");
+        // The session keeps writing to the new image, at its new length.
+        assert!(!journal.append(8, b"-x").unwrap(), "old length accepted after replace");
+        assert!(journal.append(4, b"-two").unwrap());
+        drop(journal);
+        assert_eq!(fs::read(&path).unwrap(), b"snap-two");
+        assert!(!dir.path().join("agreement.checkpoint").exists(), "staged image left behind");
+        let reopened = Journal::open(&path, 8, 8).unwrap();
+        assert_eq!(reopened.length, 8);
     }
 
     #[test]

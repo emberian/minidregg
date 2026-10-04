@@ -117,4 +117,51 @@ def commitWitnessStream : StreamCodec CommitWitness :=
     (fun (v,b,a) => ⟨v,b,a⟩) (by intro w; cases w; rfl)
 def CommitWitness.message (w : CommitWitness) : Message :=
   ⟨w.attestation.signer,w.view,.commit,some w.block⟩
+
+/-! ## Engine state image (journal checkpoints)
+
+A checkpoint stores the replayed `State` itself, field by field, so a reopen
+decodes it instead of replaying every input since genesis. -/
+
+def viewStream : StreamCodec View :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product argumentStream
+      (StreamCodec.product StreamCodec.bool (StreamCodec.product StreamCodec.bool
+      (StreamCodec.product argumentStream (StreamCodec.product (StreamCodec.list argumentStream)
+      (StreamCodec.product (StreamCodec.list argumentStream) (StreamCodec.product (StreamCodec.list argumentStream)
+      (StreamCodec.product (StreamCodec.list blockStream) (StreamCodec.product StreamCodec.bool
+      (StreamCodec.product argumentStream (StreamCodec.list messageStream))))))))))))
+    (fun v => (v.number,v.proposal,v.voted,v.disableRequested,v.sentCommit,v.sentCandidates,
+      v.sentReadyCore,v.sentReadyRelay,v.prepared,v.disabled,v.committed,v.received))
+    (fun (a,b,c,d,e,f,g,h,i,j,k,l) => ⟨a,b,c,d,e,f,g,h,i,j,k,l⟩) (by intro v; cases v; rfl)
+
+def auditEventStream : StreamCodec AuditEvent :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat (StreamCodec.product (StreamCodec.option messageStream) blockStream))))
+    (fun
+      | .send m => (0,0,0,some m,[])
+      | .prepare party view block => (1,party,view,none,block)
+      | .disable party view => (2,party,view,none,[])
+      | .commit party view block => (3,party,view,none,block)
+      | .idle => (4,0,0,none,[]))
+    (fun (tag,party,view,m,block) => match tag with
+      | 0 => .send (m.getD default)
+      | 1 => .prepare party view block
+      | 2 => .disable party view
+      | 3 => .commit party view block
+      | _ => .idle)
+    (by intro e; cases e <;> rfl)
+
+def stateStream : StreamCodec State :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product (StreamCodec.list viewStream) (StreamCodec.product (StreamCodec.list blockStream)
+      (StreamCodec.product (StreamCodec.list bytesStream) (StreamCodec.product (StreamCodec.list messageStream)
+      (StreamCodec.product (StreamCodec.list auditEventStream) (StreamCodec.product (StreamCodec.list blockStream)
+      (StreamCodec.product blockStream (StreamCodec.product StreamCodec.bool StreamCodec.bool))))))))))))
+    (fun s => (s.self,s.current,s.deadline,s.now,s.views,s.checked,s.offers,s.outbox,s.audit,
+      s.delivered,s.committedTip,s.needsPoll,s.failed))
+    (fun (a,b,c,d,e,f,g,h,i,j,k,l,m) => ⟨a,b,c,d,e,f,g,h,i,j,k,l,m⟩) (by intro s; cases s; rfl)
 end Minidregg.Compiler.GenericSimplexCodec

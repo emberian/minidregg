@@ -1,4 +1,5 @@
 import Compiler.GenericSimplexCodec
+import Kernel.GenericSimplexStructure
 import Theory.AssertAxioms
 namespace Minidregg.Compiler.GenericSimplexIO
 open Minidregg.Compiler.Tower256ConcreteBackend
@@ -7,33 +8,30 @@ open Minidregg.Kernel.GenericSimplex
 set_option autoImplicit false
 /-- Persisted inputs include source-validation grants, so replay never rechecks
 them against a different present snapshot. This log is private trusted storage.
-A source check can be appended only by the native controller, not peer ingress. -/
+A source check can be appended only by the native controller, not peer ingress.
+Replay starts at `snapshot` when present (a checkpoint), else at `start`. -/
 structure Journal where
   context : Context
   self : Nat
   initialTime : Nat
   events : List Event := []
   commitWitnesses : List CommitWitness := []
+  snapshot : Option State := none
   deriving DecidableEq, BEq, Repr
 def journalStream : StreamCodec Journal :=
   StreamCodec.xmap
     (StreamCodec.product contextStream (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat
-        (StreamCodec.product (StreamCodec.list eventStream) (StreamCodec.list commitWitnessStream)))))
-    (fun j => (j.context,j.self,j.initialTime,j.events,j.commitWitnesses))
-    (fun (c,s,t,e,w) => ⟨c,s,t,e,w⟩) (by intro j; cases j; rfl)
+        (StreamCodec.product (StreamCodec.list eventStream)
+          (StreamCodec.product (StreamCodec.list commitWitnessStream) (StreamCodec.option stateStream))))))
+    (fun j => (j.context,j.self,j.initialTime,j.events,j.commitWitnesses,j.snapshot))
+    (fun (c,s,t,e,w,n) => ⟨c,s,t,e,w,n⟩) (by intro j; cases j; rfl)
 def replayEvents (c : Config) : State → List Event → Option State
   | s, [] => some s
   | s, e :: es => do
       let input ← decodeInput e
       let next := step c s input
       if next.failed then none else replayEvents c next es
-def restore (expected : Context) (bytes : Bytes) : Option (Journal × State) := do
-  let j ← journalStream.toLawful.decode bytes
-  if journalStream.encode j != bytes || j.context != expected ||
-      !expected.wellFormed || j.self ≥ expected.config.parties then none else
-  let s ← replayEvents expected.config (start expected.config j.self j.initialTime) j.events
-  if s.failed then none else some (j,s)
 theorem replay_append (config : Config) (state : State) (events more : List Event) :
     replayEvents config state (events ++ more) =
       (replayEvents config state events).bind (fun next => replayEvents config next more) := by
@@ -49,20 +47,40 @@ theorem replay_append (config : Config) (state : State) (events more : List Even
 
 #assert_axioms replay_append
 
+/-- Replay never changes whose state it is. -/
+theorem replayEvents_self (c : Config) (s t : State) (events : List Event)
+    (h : replayEvents c s events = some t) : t.self = s.self := by
+  induction events generalizing s with
+  | nil => simp only [replayEvents, Option.some.injEq] at h; rw [h]
+  | cons e es ih =>
+    simp only [replayEvents] at h
+    cases decoded : decodeInput e with
+    | none => simp [decoded] at h
+    | some input =>
+      rw [decoded] at h
+      change (if (step c s input).failed = true then none else replayEvents c (step c s input) es) = some t at h
+      split at h
+      · simp at h
+      · exact (ih _ h).trans ((Minidregg.Kernel.GenericSimplexStructure.structuralAuditLaws c).stepExtension s input).sameSelf
+
+#assert_axioms replayEvents_self
+
 /-! ## Append-only physical journal
 
 The durable image is `logMagic`, one length-prefixed canonical base `Journal`
 frame, then length-prefixed `Delta` frames. Each acknowledged input is exactly
-one appended delta. Nothing is rewritten: a legacy whole-image `agreement.bin`
-is not this shape and does not decode (`convert-journal` re-encodes it
-explicitly and checks the replayed state is identical). -/
+one appended delta. The only rewrite is a checkpoint, an atomic replacement by
+one base frame carrying the replayed state (`checkpoint`); the writer keeps
+the replaced image as the previous segment. A legacy whole-image
+`agreement.bin` is not this shape and does not decode. -/
 
 /-- ASCII "MINI-SIMPLEX-LOG" and a format version. The version also names the
 `step` the inputs were recorded under, since a journal is replayed, not read:
 version 2 = the timeout-backoff epoch (five-field `Config`); version 3 = the
-quiescent-leader epoch (a leader proposes only with work). An older log
+quiescent-leader epoch (a leader proposes only with work); version 4 = the
+base frame may carry a checkpoint snapshot (`Journal.snapshot`). An older log
 refuses at this magic rather than being replayed under a different `step`. -/
-def logMagic : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,3]
+def logMagic : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,4]
 
 /-- The format version byte of an image that carries the "MINI-SIMPLEX-LOG"
 magic, whatever its version; `none` for anything else. Lets an open refuse an
@@ -177,14 +195,16 @@ def decodeLog (bytes : Bytes) : Option Log := do
   let deltas ← decodeDeltas rest.length rest
   some ⟨base,deltas.reverse⟩
 
-/-- Replay of a decoded log: the same guards and whole replay as `restore`,
-over the merged journal. -/
+/-- Replay of a decoded log over the merged journal: from its checkpoint
+snapshot if it has one (which must be this replica's, and not failed), else
+from `start`. -/
 def replayLog (expected : Context) (l : Log) : Option State :=
   let j := l.merged
-  if (j.context != expected || !expected.wellFormed || decide (j.self ≥ expected.config.parties)) = true
+  if (j.context != expected || !expected.wellFormed || decide (j.self ≥ expected.config.parties) ||
+      !(j.snapshot.map fun n => n.self == j.self && !n.failed).getD true) = true
   then none
   else do
-    let s ← replayEvents expected.config (start expected.config j.self j.initialTime) j.events
+    let s ← replayEvents expected.config (j.snapshot.getD (start expected.config j.self j.initialTime)) j.events
     if s.failed then none else pure s
 
 /-- Whole canonical replay of the physical log bytes. -/
@@ -298,11 +318,13 @@ theorem replayLog_push (context : Context) (l : Log) (state next : State) (d : D
   rw [Log.merged_push]
   dsimp only
   by_cases guard : (l.merged.context != context || !context.wellFormed ||
-      decide (l.merged.self ≥ context.config.parties)) = true
+      decide (l.merged.self ≥ context.config.parties) ||
+      !(l.merged.snapshot.map fun n => n.self == l.merged.self && !n.failed).getD true) = true
   · simp [guard] at old
   · simp only [guard, Bool.false_eq_true, ↓reduceIte] at old ⊢
     cases replayed : replayEvents context.config
-        (start context.config l.merged.self l.merged.initialTime) l.merged.events with
+        (l.merged.snapshot.getD (start context.config l.merged.self l.merged.initialTime))
+        l.merged.events with
     | none => simp [replayed] at old
     | some s =>
       rw [replayed] at old
@@ -319,6 +341,63 @@ theorem restoreLog_push (context : Context) (l : Log) (state next : State) (d : 
   rw [restoreLog_encode, replayLog_push context l state next d
     (replayLog_of_restoreLog old) continued notFailed]
   rfl
+
+/-! ## Checkpoints
+
+A checkpoint replaces a log by one base frame whose snapshot is the log's
+replayed state, carrying every retained COMMIT witness, with no events and no
+deltas. Reopening it decodes the state instead of replaying the history. The
+replaced image is kept by the writer as the previous segment (`*.log.upto-N`),
+so the whole input history stays auditable as a chain of segments. -/
+
+def Log.checkpoint (l : Log) (s : State) : Log :=
+  ⟨{ l.merged with events := [], snapshot := some s }, []⟩
+
+theorem Log.checkpoint_merged (l : Log) (s : State) :
+    (l.checkpoint s).merged = { l.merged with events := [], snapshot := some s } := by
+  simp [Log.checkpoint, Log.merged, Log.deltas]
+
+/-- A checkpoint of a log replays to the same state. -/
+theorem replayLog_checkpoint {context : Context} {l : Log} {s : State}
+    (h : replayLog context l = some s) : replayLog context (l.checkpoint s) = some s := by
+  unfold replayLog at h ⊢
+  dsimp only at h ⊢
+  split at h
+  · simp at h
+  · rename_i guardFalse
+    cases replayed : replayEvents context.config
+        (l.merged.snapshot.getD (start context.config l.merged.self l.merged.initialTime))
+        l.merged.events with
+    | none => simp [replayed] at h
+    | some t =>
+      rw [replayed] at h
+      change (if t.failed = true then none else pure t) = some s at h
+      split at h
+      · simp at h
+      · rename_i notFailed
+        have ts : t = s := by simpa [pure] using h
+        subst ts
+        have sameSelf := replayEvents_self _ _ _ _ replayed
+        have originSelf : (l.merged.snapshot.getD
+            (start context.config l.merged.self l.merged.initialTime)).self = l.merged.self := by
+          cases snap : l.merged.snapshot with
+          | none =>
+            simpa using (Minidregg.Kernel.GenericSimplexStructure.structuralAuditLaws context.config).startSelf l.merged.self l.merged.initialTime
+          | some n =>
+            simp only [snap] at guardFalse
+            simp only [Option.getD_some]
+            simp_all
+        rw [Log.checkpoint_merged]
+        simp_all [replayEvents]
+
+theorem restoreLog_checkpoint (context : Context) (l : Log) (s : State)
+    (h : restoreLog context l.encode = some (l,s)) :
+    restoreLog context (l.checkpoint s).encode = some (l.checkpoint s,s) := by
+  rw [restoreLog_encode, replayLog_checkpoint (replayLog_of_restoreLog h)]
+  rfl
+
+#assert_axioms replayLog_checkpoint
+#assert_axioms restoreLog_checkpoint
 
 /-- In-process authoritative image of this replica's journal. `length` is the
 exact physical byte length the single writer compares before appending. -/
@@ -500,6 +579,9 @@ structure Storage where
   current : IO (Option (Sigma Restored))
   install : Option (Sigma Restored) → IO Unit
   append : Nat → Bytes → IO PersistResult
+  /-- Atomically replace the whole image if its length is still the given one
+  (a checkpoint); the writer keeps the replaced image as the previous segment. -/
+  replace : Nat → Bytes → IO PersistResult
   deriving Inhabited
 
 def current (storage : Storage) (context : Context) : IO (Option (Restored context)) := do
@@ -510,6 +592,7 @@ def Storage.readOnly (snapshot : Sigma Restored) : Storage where
   current := return some snapshot
   install _ := throw (IO.userError "read-only agreement journal")
   append _ _ := return .conflict
+  replace _ _ := return .conflict
 
 /-- A new image is installed only after the exact frame was durably appended at
 the expected length. Conflict or uncertainty drops the image: the owner must
@@ -522,6 +605,51 @@ def commitRestored {context : Context} (storage : Storage) (prior next : Restore
   | .durable =>
     storage.install (some ⟨context,next⟩)
     return .durable next.state
+
+/-- The checkpoint of a restored image: the same state from one base frame,
+with every retained witness. Its replay equation is `restoreLog_checkpoint`;
+nothing is replayed to build it. -/
+def checkpointRestored {context : Context} (prior : Restored context) : Restored context × Bytes :=
+  let l := prior.log.checkpoint prior.state
+  (⟨l,prior.state,l.encode.length,prior.witnesses,
+    restoreLog_checkpoint context prior.log prior.state prior.exact,rfl,
+    by rw [Log.checkpoint_merged]; exact prior.witnessed⟩,l.encode)
+
+/-- Deltas after which a standing replica checkpoints its journal, bounding the
+replay a reopen performs. -/
+def checkpointEvery : Nat := 1024
+
+/-- Replace the durable image by its checkpoint. Conflict or uncertainty drops
+the in-memory image, exactly as for an append: the owner reopens from disk. -/
+def checkpoint (storage : Storage) (context : Context) : IO PersistResult := do
+  let some prior ← current storage context | return .conflict
+  let (next,bytes) := checkpointRestored prior
+  match ← storage.replace prior.length bytes with
+  | .durable => storage.install (some ⟨context,next⟩); return .durable
+  | .conflict => storage.install none; return .conflict
+  | .uncertain => storage.install none; return .uncertain
+
+/-- Audit of a replica's whole retained input history: its checkpoint segments
+in order, then the live image. The first must be a genesis journal (no
+snapshot), replayed from `start`; every later one must open with exactly the
+state the previous one replays to. Returns the final replayed state. -/
+def auditSegments (context : Context) (images : List Bytes) : Except String State := do
+  let mut origin : Option State := none
+  let mut index := 0
+  for bytes in images do
+    let some valid := scanLog bytes | throw s!"segment {index}: not a journal image"
+    if valid != bytes.length then throw s!"segment {index}: torn tail inside the retained history"
+    let some (l,s) := restoreLog context bytes | throw s!"segment {index}: does not replay under this context"
+    match origin with
+    | none => if l.base.snapshot.isSome then throw s!"segment {index}: the history does not begin at genesis"
+    | some previous =>
+      if l.base.snapshot != some previous then
+        throw s!"segment {index}: its snapshot is not the state the previous segment replays to"
+    origin := some s
+    index := index + 1
+  match origin with
+  | none => throw "no journal segments"
+  | some s => return s
 
 /-- A peer retransmission can be acknowledged without another protocol input
 only when its exact message is already represented by canonical durable replay.

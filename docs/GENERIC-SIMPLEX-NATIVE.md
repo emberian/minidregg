@@ -103,7 +103,8 @@ committed").
 extended by a checked offer, or by an empty block when it had none. An idle
 domain therefore committed an empty block every view, so the number of views
 and the length of every block (exact ancestry) grew without bound, and each
-replica's per-input cost grew with them (measured below, Q2).
+replica's per-input cost grew with them (measured on a copy of the 00f711
+evidence: CPU per appended input 0.57 s rising to 1.68 s over 45 minutes idle).
 
 **Now, exactly** (Kernel/GenericSimplex.lean, `hasWork`, `propose`,
 `progressOuter`):
@@ -139,6 +140,34 @@ replica's per-input cost grew with them (measured below, Q2).
   offer committed within 50 time units of being checked. With `hasWork`
   forced true (the old behaviour) the harness does not finish its recovery run
   in 900 s (logs/p2-mutant-alwayswork.log).
+
+## Journal checkpoints (log format 4)
+
+A replica's journal is its input log, and reopening used to replay every input
+since genesis (97 s per replica on the 00f711 evidence copy). Now:
+
+- A base frame may carry `snapshot : Option State`. Replay starts from it when
+  present (which must be this replica's own, non-failed state), else from
+  `start` (GenericSimplexIO.replayLog).
+- `checkpointRestored` builds the checkpoint of an in-memory image: one base
+  frame whose snapshot is the replayed state, with every retained COMMIT
+  witness, no events and no deltas. `restoreLog_checkpoint` proves the new
+  image restores to the same state, so the in-memory image is installed without
+  replaying anything (pinned axioms).
+- The writer helper's OP_REPLACE swaps the file atomically, length-checked
+  under the writer lock (staged file, fsync, rename, directory fsync), and keeps
+  the replaced image as `agreement.log.upto-<length>` (a hard link). A standing
+  replica checkpoints every 1024 deltas (`checkpointEvery`), and a writable open
+  that had to replay at least as many checkpoints at once.
+- What reopen no longer does: re-derive the state from genesis. It decodes the
+  snapshot the same replica wrote, under the same trust as the input log it
+  replaced (private, single-writer storage). The whole input history is kept as
+  the segment chain, and `minidregg-four-source-fixture audit-journal ROOT N`
+  (`auditSegments`) replays it from genesis, requiring every segment to open
+  with exactly the state the previous one replays to.
+- BREAKS: log magic version 4; version-3 logs refuse by name. The legacy
+  whole-image `agreement.bin` path (`restore`, `convert-journal`) is deleted:
+  since fix C no pre-epoch mesh can be converted, only re-genesised.
 
 ## Native source consumer
 
