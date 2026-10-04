@@ -4,8 +4,8 @@ edition ObjectiveBend 1
 # Plan admission must bind every input root/source and check current rights.
 # Each property has one authoritative owner, never one copy per player's bag.
 #
-# Port of examples/objective-bend-station/SharedConsequences.bend (Gen-1, which
-# was checked only through the retired BendTT path). The refusal is a sum
+# Port of examples/objective-bend-station/SharedConsequences.bend (upstream
+# Bend; that path was deleted 2026-10-04, Git history keeps it). The refusal is a sum
 # (`refused(code)`), never an empty Plan; lists are recursive sums; byte lists are
 # Strings.
 import ./NatOrder.obend as Order

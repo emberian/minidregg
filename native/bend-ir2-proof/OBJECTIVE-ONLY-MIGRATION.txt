@@ -4,8 +4,9 @@ Objective Bend is the only supported language. Frozen source meaning for this
 cohort is Core4/r7 ObjectiveBendOpenRecursion + DemandMachine/Invariant/Adequacy,
 packet SHA1f3ce7404be2196ef4fd8defba1ce74dbba5266202b7d1e74eccd72056382316.
 Actual new ObjectiveBendZkClaims imports 89 local modules; the transitive source
-inventory contains no BendTT, BendLiveMachine, BendClosure, BendInvocation,
-BendWorld, BendProofProjection or BendCommitmentReduction module.
+inventory contains no module of the upstream-Bend kernel stack (deleted
+2026-10-04), BendInvocation, BendWorld, BendProofProjection or
+BendCommitmentReduction.
 
 Qualified actual new chain:
 arbitrary field row -> generic shared execution/commitment graph -> AcceptedRun

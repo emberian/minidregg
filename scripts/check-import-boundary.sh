@@ -39,7 +39,7 @@
 # Std:N) are where a new such import shows; narrowing these rows again is a
 # table edit here, recorded in docs/LEAN-QUALIFICATION.md (import tiers).
 #
-# NARROWED (bendtt-delete, 2026-10-04): the Theory row loses Std and Init. Their
+# NARROWED (2026-10-04): the Theory row loses Std and Init. Their
 # only Theory importers were the deleted upstream-Bend kernel and its machine;
 # Theory -> Lean remains (the Objective Bend Core4 definitions import Lean).
 # A new edge between libraries is a red until this table is changed on purpose.

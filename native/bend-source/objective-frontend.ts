@@ -64,7 +64,7 @@ export function captureObjective(specPath:string,outputDirectory:string,options:
  writeFileSync(packageInputPath,JSON.stringify(packageInput,null,2)+"\n",{flag:"wx"});
  const result={parserSourceSha256:digest(readFileSync(join(import.meta.dirname,"objective-parser.ts"))),producerSourceSha256:digest(readFileSync(import.meta.path)),schema:"dregg.objective-bend.captured-package.v1",edition:"objective-bend-1",parserSchema:"dregg.objective-bend.module.v1",requestSha256:digest(requestBytes),requestSchema:request.schema,editionSelection:adopted?"explicit-caller-adoption":"declared-request",modules:records,entryModule:String(entryModule),entryDefinition,
   sourceEntry:records[entryModule].name+"."+entryDefinition,packageInputPath,
-  sourceStatus:"exact locked source and parsed AST",semanticStatus:"requires Objective elaboration and execution receipt",theoremScope:"no embedded BendTT typing or totality theorem asserted"};
+  sourceStatus:"exact locked source and parsed AST",semanticStatus:"requires Objective elaboration and execution receipt",theoremScope:"no typing or totality theorem asserted"};
  writeFileSync(join(outputDirectory,"objective.json"),JSON.stringify(result,null,2)+"\n",{flag:"wx"});return result;
 }
 if(import.meta.main){

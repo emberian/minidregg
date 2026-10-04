@@ -1,5 +1,5 @@
-// Objective Bend edition 1 source AST. This parser preserves the new language
-// rather than forcing open recursion/fixpoints through embedded BendTT Book.check.
+// Objective Bend edition 1 source AST. This parser preserves the new language,
+// including open recursion and fixpoints, as written.
 export type Span={start:number,end:number,line:number};
 export type Expr={span:Span}&(
  {kind:"var",name:string}|{kind:"nat",value:string}|{kind:"bool",value:boolean}|
@@ -200,5 +200,5 @@ export function parseObjective(source:string){
   fail(line,"unsupported Objective Bend declaration");
  }
  return {schema:"dregg.objective-bend.module.v1",edition:"objective-bend-1",imports,declarations,
-  theoremScope:"new source AST; elaboration/reference semantics distinct from embedded BendTT"};
+  theoremScope:"new source AST; elaboration and reference semantics are Objective Core4"};
 }
