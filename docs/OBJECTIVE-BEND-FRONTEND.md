@@ -75,7 +75,7 @@ fingerprints, not Mini package identities.
 | `match n:` `case 0n:` / `case 1n+p:` | `ifZero` (exactly those two branches) |
 | `match b:` `case true:` / `case false:` | `ifBool` |
 | `sum S:` `l: T`; `S.l(e)`; `match s:` `case l(x):` | variant type; `inject l e`; `case` (exhaustive, no wildcard) |
-| `-`, `/`, `<`, `<=`, `>`, `>=` | a call of one prelude definition (`$prelude.sub / divide / lt / le`; `>` and `>=` swap the operands of `<` and `<=`): see below |
+| `-`, `/`, `<`, `<=`, `>`, `>=` | `binary subtract / divide / less / lessEqual`; `>` and `>=` are `!(a <= b)` and `!(a < b)`: see below |
 | `let x = v` + rest of the body, `let x: T = v in e` | `(λx. body) v`, one lazy cell for `v`: see below |
 
 The `==` dispatch needs both operand types; an unannotated operand is refused.
@@ -125,27 +125,28 @@ The spec interface label (canonical JSON) records target type, suffix mark,
 parents, precedence list, requirements and method signatures; reflection reads
 it with `metadata(S).interface`.
 
-## Operators without a core primitive, and `let`
+## Subtraction, order, division, and `let`
 
-Core4 has no `subtract`, `less` or `divide` primitive, so the elaborator adds a
-module `$prelude` (not a legal source module name) to the package knot, holding
-exactly the definitions the program's operators need, after the user's modules:
+Each of these operators is one Core4 primitive (`Theory/ObjectiveBendOpenRecursion`,
+`primitiveResult`), so it is one machine transition on unbounded naturals whatever
+their size:
 
-| Operator | Prelude definition | Meaning |
+| Operator | Core4 | Meaning |
 | --- | --- | --- |
-| `a - b` | `sub` | truncated: `0n` when `b` exceeds `a` |
-| `a < b`, `a > b` | `lt` (`>` swaps the operands) | Bool |
-| `a <= b`, `a >= b` | `le` (`>=` swaps the operands) | Bool |
-| `a / b` | `divide`, via `quotient`, `lt`, `sub` | floor division, and `a / 0n = 0n` |
+| `a - b` | `binary subtract` | truncated: `0n` when `b` exceeds `a` (`subtract_truncated_exact`) |
+| `a / b` | `binary divide` | floor division, and `a / 0n = 0n` (`divide_floor_exact`) |
+| `a < b` | `binary less` | Bool (`order_exact`) |
+| `a <= b` | `binary lessEqual` | Bool |
+| `a > b` | `!(a <= b)`, i.e. `ifBool (lessEqual a b) false true` | Bool |
+| `a >= b` | `!(a < b)` | Bool |
 
-Each is a recursion over `ifZero`, so it is exact on every Nat and costs about
-one machine step per unit of the smaller operand (`/`: of the dividend). A zero
-divisor must mean something because the machine has no catchable exception; `0n`
-is the `Nat.div` convention, and a program whose zero divisor is a real case must
-test it first. A package using none of these operators is unchanged. The prelude is
-Objective Bend source (`preludeSource` in `Compiler/ObjectiveBendElaborate.lean`) read
-by the same parser as any module (`prelude_parses`). Replacing this by machine primitives (O(1)) is a core change and is
-not done: the lowering is the one place to swap.
+`>` and `>=` are negations rather than swapped operands so the left operand is still
+evaluated first. A zero divisor must mean something because the machine has no
+catchable exception; `0n` is the `Nat.div` convention, and a program whose zero
+divisor is a real case must test it first. The machine primitives take naturals
+only: a label or Boolean operand is a typing refusal (`nat_primitive_label_operand_refused`)
+and, untyped, a `wrongValue` refusal. The C backend computes them on its 32-bit-limb
+naturals (`native/objective-emit/runtime.c`: `nat_sub`, `nat_div`, `nat_cmp`).
 
 `let x = v` (statement form: the rest of the body follows at the same indent) and
 `let x: T = v in e` (expression form) lower to `app (lam body) v`. An application

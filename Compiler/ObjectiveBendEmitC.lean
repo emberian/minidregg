@@ -325,6 +325,7 @@ def putTerm (rom : Rom) (out : ByteArray) (t : Term) : Except String ByteArray :
 
 def primitiveCode : Primitive → Nat
   | .add => 0 | .multiply => 1 | .equal => 2 | .conjunction => 3 | .labelEqual => 4
+  | .subtract => 5 | .divide => 6 | .less => 7 | .lessEqual => 8
 
 def refusalCode : Refusal → Nat
   | .unbound => 0 | .missingCell => 1 | .missingField => 2 | .wrongValue => 3

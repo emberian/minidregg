@@ -1,8 +1,8 @@
 edition ObjectiveBend 1
-# The surface operators with no Core4 primitive: - < <= > >= / . They lower to
-# recursion over the successor structure (the package prelude), so every result
-# here is exact on the naturals. `-` is truncated at 0n; `/` is floor division
-# and a zero divisor gives 0n.
+# The surface operators - / < <= > >= . Each is one Core4 machine step on unbounded
+# naturals (Primitive subtract / divide / less / lessEqual; `a > b` is `!(a <= b)` and
+# `a >= b` is `!(a < b)`), so money-sized values cost the same as small ones.
+# `-` is truncated at 0n; `/` is floor division and a zero divisor gives 0n.
 
 def subExact() -> Nat:
   9n - 4n
@@ -92,10 +92,24 @@ def comparisonMatched(a: Nat, b: Nat) -> Nat:
     case true: 1n
     case false: 0n
 
-# Operands are lazy: the unused side is never forced, so a diverging operand is harmless
-# where the other side already decides the result (`<` of 0n and a successor needs only
-# the successor's head).
+# A comparison forces both operands (left first); the branch it does not select is
+# never forced, so a diverging expression there is harmless.
 def forever(n: Nat) -> Nat:
   forever(n + 1n)
 def lazyUnused() -> Nat:
   if 1n < 2n then 5n else forever(0n)
+
+def divOfArguments(a: Nat, b: Nat) -> Nat:
+  a / b
+
+def greaterOfArguments(a: Nat, b: Nat) -> Bool:
+  a > b
+
+def atLeastOfArguments(a: Nat, b: Nat) -> Bool:
+  a >= b
+
+def atMostOfArguments(a: Nat, b: Nat) -> Bool:
+  a <= b
+
+def lessOfArguments(a: Nat, b: Nat) -> Bool:
+  a < b

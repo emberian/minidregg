@@ -510,12 +510,10 @@ Arguments and fields stay thunks; laziness is preserved.
 
 Known front-end defects:
 
-- `< > <= >= - /` have no Core4 primitive: they lower to recursion over the successor
-  structure (a package prelude, see [front end](OBJECTIVE-BEND-FRONTEND.md#operators-without-a-core-primitive-and-let)),
-  so each costs O(value) machine steps, not O(1). A Primitive.less/subtract/divide in the
-  machine would make them constant-time; it is a core change (new frames, new proof cases)
-  and is not built (in flight: W17-MACHINE-OPS). (`!=` and `||` elaborate through
-  `labelEqual` and `ifBool`.)
+- `- / < <=` are the Core4 primitives `subtract / divide / less / lessEqual` (one machine
+  step each on unbounded naturals; see [front end](OBJECTIVE-BEND-FRONTEND.md#subtraction-order-division-and-let));
+  `>` and `>=` are their negations through `ifBool`, as `!=` is `equal`/`labelEqual`
+  and `||` is `ifBool`.
 - A `match` on a sum takes only `label(binder)` cases; wildcards are refused because
   there is no default arm.
 - Quantities: `default`/`copy` map to unrestricted and `dead` to erased; `affine x`

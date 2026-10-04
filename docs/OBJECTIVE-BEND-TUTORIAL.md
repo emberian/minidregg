@@ -372,11 +372,8 @@ checked every call against those types before anything runs.
 
 ### Subtraction, order, division and `let`
 
-Core4 has no primitive for these, so the front end turns each into a call of a
-small recursive definition it adds to the package (`$prelude.sub`, `lt`, `le`,
-`divide`). That has two consequences. They are exact on any Nat. And each costs
-about one machine step per unit of the numbers involved, so `a - b` on two
-million-sized Nats is not cheap.
+Each of these is one step of the machine, exact on any Nat however large: `a - b`
+on two billion-sized Nats costs what `3n - 1n` costs.
 
 `a - b` stops at zero. `a / b` is whole-number division, rounding down, and
 `a / 0n` is `0n`: the language has no catchable exception, so a zero divisor has

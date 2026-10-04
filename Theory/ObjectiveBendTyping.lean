@@ -108,8 +108,8 @@ def overlay : Ty → Ty → Ty
   | _, inherited => inherited
 
 def primitiveTypes : Primitive → Ty × Ty
-  | .add | .multiply => (.natural, .natural)
-  | .equal => (.natural, .boolean)
+  | .add | .multiply | .subtract | .divide => (.natural, .natural)
+  | .equal | .less | .lessEqual => (.natural, .boolean)
   | .conjunction => (.boolean, .boolean)
   | .labelEqual => (.label, .boolean)
 
@@ -840,6 +840,24 @@ theorem label_equality_accepted :
 theorem boolean_label_equality_refused :
     (check ⟨.binary .labelEqual (.boolean true) (.boolean true), fun _ => none, {}⟩ [] 8).isNone = true := by decide
 
+/-- Truncated subtraction and floor division are Nat-to-Nat; the order primitives are
+Nat-to-Bool and drive a Boolean branch; none takes a label or a Boolean operand. -/
+theorem nat_primitive_types :
+    ∀ primitive, primitive = .subtract ∨ primitive = .divide →
+      (check ⟨.binary primitive (.nat 9) (.nat 4), fun _ => none, {}⟩ [] 8).map
+        (fun checked => checked.type) = some .natural := by
+  intro primitive choice; rcases choice with rfl | rfl <;> decide
+theorem order_primitive_branch_accepted :
+    ∀ primitive, primitive = .less ∨ primitive = .lessEqual →
+      (check ⟨.ifBool (.binary primitive (.nat 3) (.nat 4)) (.label "below") (.label "above"),
+        fun _ => none, {}⟩ [] 16).map (fun checked => checked.type) = some .label := by
+  intro primitive choice; rcases choice with rfl | rfl <;> decide
+theorem nat_primitive_label_operand_refused :
+    ∀ primitive, primitive = .subtract ∨ primitive = .divide ∨ primitive = .less ∨ primitive = .lessEqual →
+      (check ⟨.binary primitive (.label "9") (.nat 4), fun _ => none, {}⟩ [] 8).isNone = true ∧
+      (check ⟨.binary primitive (.nat 9) (.boolean true), fun _ => none, {}⟩ [] 8).isNone = true := by
+  intro primitive choice; rcases choice with rfl | rfl | rfl | rfl <;> decide
+
 /-- An affine binding used in two arms counts twice: arms are additive. -/
 theorem affine_in_two_arms_refused :
     (check ⟨.case (.inject "circle" (.nat 4)) [("circle",.bound 1),("square",.bound 1)],
@@ -1032,6 +1050,8 @@ def decodePrimitive (value : Json) : Except String Primitive := do
   | "add" => pure .add | "multiply" => pure .multiply
   | "equal" => pure .equal | "conjunction" => pure .conjunction
   | "labelEqual" => pure .labelEqual
+  | "subtract" => pure .subtract | "divide" => pure .divide
+  | "less" => pure .less | "lessEqual" => pure .lessEqual
   | _ => .error "unknown Objective primitive"
 
 /-- Decodes exactly the existing world lowerer's runtime core wire; no second
@@ -1344,7 +1364,8 @@ theorem computation_not_shareable (plan response result : Ty) (variables : List 
 #assert_axioms exhaustive_case_accepted reordered_arms_accepted missing_arm_refused
   extra_arm_refused undeclared_injection_refused unannotated_injection_refused
   arm_results_must_agree equality_branch_accepted label_condition_refused label_equality_accepted
-  boolean_label_equality_refused affine_in_two_arms_refused affine_in_one_arm_accepted
+  boolean_label_equality_refused nat_primitive_types order_primitive_branch_accepted
+  nat_primitive_label_operand_refused affine_in_two_arms_refused affine_in_one_arm_accepted
   effect_case_accepted pure_arm_without_done_refused effect_as_argument_refused
   pure_affine_argument_accepted effect_in_record_field_refused effect_in_payload_refused
   effect_in_specification_refused scalar_plan_refused closure_response_refused

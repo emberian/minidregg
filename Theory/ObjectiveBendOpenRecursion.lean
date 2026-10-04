@@ -9,8 +9,12 @@ import Theory.AxiomPin
 namespace Minidregg.Theory.ObjectiveBendOpenRecursion
 set_option autoImplicit false
 
+/-- The scalar primitives, each one machine transition on unbounded naturals.
+`subtract` is truncated at zero, `divide` is floor division with `a / 0 = 0`,
+`less`/`lessEqual` are the order on Nat; the surface `>`/`>=` are their negations. -/
 inductive Primitive where
   | add | multiply | equal | conjunction | labelEqual
+  | subtract | divide | less | lessEqual
   deriving Repr, DecidableEq
 
 inductive Term where
@@ -167,6 +171,10 @@ def primitiveResult : Primitive → Term → Term → Option Term
   | .equal, .nat a, .nat b => some (.boolean (a == b))
   | .conjunction, .boolean a, .boolean b => some (.boolean (a && b))
   | .labelEqual, .label a, .label b => some (.boolean (a == b))
+  | .subtract, .nat a, .nat b => some (.nat (a - b))
+  | .divide, .nat a, .nat b => some (.nat (a / b))
+  | .less, .nat a, .nat b => some (.boolean (decide (a < b)))
+  | .lessEqual, .nat a, .nat b => some (.boolean (decide (a ≤ b)))
   | _, _, _ => none
 
 /-- All String labels, including true/false, are excluded from Boolean operations. -/
@@ -186,6 +194,38 @@ theorem label_equality_boolean_exact (left right : String) :
 /-- Labels compare only with labels: a Boolean is never a reserved label. -/
 theorem label_equality_booleans_refused (left right : Bool) :
     primitiveResult .labelEqual (.boolean left) (.boolean right) = none := rfl
+
+/-- Subtraction is truncated: `left - right` is `0` whenever `right ≥ left`. -/
+theorem subtract_truncated_exact (left right : Nat) :
+    primitiveResult .subtract (.nat left) (.nat right) = some (.nat (left - right)) ∧
+      (left ≤ right → primitiveResult .subtract (.nat left) (.nat right) = some (.nat 0)) :=
+  ⟨rfl, fun below => by simp [primitiveResult, Nat.sub_eq_zero_of_le below]⟩
+
+/-- Division is floor division, total: a zero divisor gives `0`, never a refusal. -/
+theorem divide_floor_exact (left right : Nat) :
+    primitiveResult .divide (.nat left) (.nat right) = some (.nat (left / right)) ∧
+      primitiveResult .divide (.nat left) (.nat 0) = some (.nat 0) ∧
+      (0 < right → ∀ quotient, primitiveResult .divide (.nat left) (.nat right) = some (.nat quotient) →
+        quotient * right ≤ left ∧ left < (quotient + 1) * right) := by
+  refine ⟨rfl, by simp [primitiveResult], fun positive quotient found => ?_⟩
+  simp only [primitiveResult, Option.some.injEq, Term.nat.injEq] at found
+  subst found
+  refine ⟨Nat.div_mul_le_self left right, ?_⟩
+  rw [Nat.add_mul, Nat.one_mul]
+  exact Nat.lt_div_mul_add positive
+
+/-- The order primitives decide `<` and `≤` on Nat exactly. -/
+theorem order_exact (left right : Nat) :
+    primitiveResult .less (.nat left) (.nat right) = some (.boolean (decide (left < right))) ∧
+      primitiveResult .lessEqual (.nat left) (.nat right) = some (.boolean (decide (left ≤ right))) :=
+  ⟨rfl, rfl⟩
+
+/-- The arithmetic and order primitives take naturals only: a label or Boolean operand refuses. -/
+theorem nat_primitives_refuse_labels (primitive : Primitive) (left right : String)
+    (natural : primitive = .subtract ∨ primitive = .divide ∨ primitive = .less ∨ primitive = .lessEqual) :
+    primitiveResult primitive (.label left) (.label right) = none ∧
+      primitiveResult primitive (.boolean (decide (left = right))) (.nat 0) = none := by
+  rcases natural with rfl | rfl | rfl | rfl <;> exact ⟨rfl, rfl⟩
 
 inductive Step : Term → Term → Prop where
   | beta (body argument : Term) : Step (.app (.lam body) argument) (instantiate body argument)
@@ -545,6 +585,6 @@ theorem one_turn_interaction (plan : Term) :
 
 #assert_axioms label_equality_boolean_exact label_equality_booleans_refused
   case_selects_injected_arm equality_drives_branch yields_no_step yields_deterministic yields_plug
-  one_turn_interaction
+  one_turn_interaction subtract_truncated_exact divide_floor_exact order_exact nat_primitives_refuse_labels
 
 end Minidregg.Theory.ObjectiveBendOpenRecursion

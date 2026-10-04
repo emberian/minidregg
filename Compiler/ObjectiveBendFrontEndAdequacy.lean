@@ -98,9 +98,6 @@ theorem replay_inhabited :
   native_decide
 #assert_compiled replay_inhabited
 
-/-- The operator prelude is Objective Bend source the front end's own parser reads. -/
-theorem prelude_parses : ObjectiveBendElaborate.preludeModule.toBool = true := by native_decide
-#assert_compiled prelude_parses
 
 #assert_axioms accepted_typed
 #assert_axioms accepted_never_refused

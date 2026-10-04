@@ -79,6 +79,22 @@ theorem primitive_result_typed {assumptions : Assumptions} {types : AddressTypes
       obtain ⟨first,rfl⟩ := label_value_form leftTyped
       obtain ⟨second,rfl⟩ := label_value_form rightTyped
       exact ⟨.boolean (first==second),.boolean (first==second),rfl,rfl,.boolean _⟩
+  | subtract =>
+      obtain ⟨first,rfl⟩ := natural_value_form leftTyped
+      obtain ⟨second,rfl⟩ := natural_value_form rightTyped
+      exact ⟨.nat (first-second),.natural (first-second),rfl,rfl,.natural _⟩
+  | divide =>
+      obtain ⟨first,rfl⟩ := natural_value_form leftTyped
+      obtain ⟨second,rfl⟩ := natural_value_form rightTyped
+      exact ⟨.nat (first/second),.natural (first/second),rfl,rfl,.natural _⟩
+  | less =>
+      obtain ⟨first,rfl⟩ := natural_value_form leftTyped
+      obtain ⟨second,rfl⟩ := natural_value_form rightTyped
+      exact ⟨.boolean (decide (first<second)),.boolean (decide (first<second)),rfl,rfl,.boolean _⟩
+  | lessEqual =>
+      obtain ⟨first,rfl⟩ := natural_value_form leftTyped
+      obtain ⟨second,rfl⟩ := natural_value_form rightTyped
+      exact ⟨.boolean (decide (first≤second)),.boolean (decide (first≤second)),rfl,rfl,.boolean _⟩
 
 theorem stack_binary_right_values {assumptions : Assumptions} {types : AddressTypes}
     {stack : List Frame} {input result : Ty} {right : RuntimeValue}

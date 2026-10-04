@@ -38,7 +38,7 @@ extern const uint32_t ob_a[], ob_b[], ob_c[], ob_d[], ob_pair_off[], ob_pair_len
 enum { T_BOUND, T_LAM, T_APP, T_MIX, T_FIX, T_SPEC, T_PROTO, T_REFLECT, T_METADATA, T_PROJECT,
        T_NAT, T_BOOL, T_LABEL, T_BINARY, T_EXTEND, T_RECORD, T_GET, T_IFZERO, T_INJECT, T_CASE,
        T_IFBOOL, T_PERFORM, T_DONE };
-enum { P_ADD, P_MUL, P_EQUAL, P_CONJ, P_LABELEQ };
+enum { P_ADD, P_MUL, P_EQUAL, P_CONJ, P_LABELEQ, P_SUB, P_DIV, P_LESS, P_LESSEQ };
 enum { R_UNBOUND, R_MISSINGCELL, R_MISSINGFIELD, R_WRONGVALUE, R_INVALIDUPDATE, R_CAPACITY,
        R_MISSINGARM, R_SHAREDEFFECT };
 static const char *refusal_name[] = {"unbound", "missingCell", "missingField", "wrongValue",
@@ -87,6 +87,50 @@ static const ONat *nat_mul(const ONat *a, const ONat *b) {
     for (uint32_t k = i + b->len; carry; k++) { uint64_t t = (uint64_t)r->limb[k] + carry; r->limb[k] = (uint32_t)t; carry = t >> 32; }
   }
   return nat_norm(r);
+}
+/* -1, 0, 1 as a <, =, > b (both normalized) */
+static int nat_cmp(const ONat *a, const ONat *b) {
+  if (a->len != b->len) return a->len < b->len ? -1 : 1;
+  for (uint32_t i = a->len; i-- > 0;) if (a->limb[i] != b->limb[i]) return a->limb[i] < b->limb[i] ? -1 : 1;
+  return 0;
+}
+/* Lean Nat `a - b`: truncated at 0 */
+static const ONat *nat_sub(const ONat *a, const ONat *b) {
+  if (nat_cmp(a, b) <= 0) return nat_alloc(0);
+  ONat *r = nat_alloc(a->len); int64_t borrow = 0;
+  for (uint32_t i = 0; i < a->len; i++) {
+    int64_t d = (int64_t)a->limb[i] - (i < b->len ? b->limb[i] : 0) - borrow;
+    borrow = d < 0; r->limb[i] = (uint32_t)(d + (borrow ? ((int64_t)1 << 32) : 0));
+  }
+  return nat_norm(r);
+}
+/* Lean Nat `a / b`: floor, and `a / 0 = 0` */
+static const ONat *nat_div(const ONat *a, const ONat *b) {
+  if (!b->len || nat_cmp(a, b) < 0) return nat_alloc(0);
+  ONat *q = nat_alloc(a->len);
+  if (b->len == 1) {                                         /* short division */
+    uint64_t rem = 0, d = b->limb[0];
+    for (uint32_t i = a->len; i-- > 0;) { uint64_t cur = (rem << 32) | a->limb[i]; q->limb[i] = (uint32_t)(cur / d); rem = cur % d; }
+    return nat_norm(q);
+  }
+  /* binary long division: r = r*2 + bit; r >= b => r -= b, set the quotient bit */
+  memset(q->limb, 0, 4 * (size_t)q->len);
+  ONat *r = nat_alloc(b->len + 1); r->len = 0;
+  for (uint64_t bit = (uint64_t)a->len * 32; bit-- > 0;) {
+    uint32_t carry = (a->limb[bit / 32] >> (bit % 32)) & 1;
+    for (uint32_t i = 0; i < r->len; i++) { uint32_t top = r->limb[i] >> 31; r->limb[i] = (r->limb[i] << 1) | carry; carry = top; }
+    if (carry) r->limb[r->len++] = carry;
+    if (nat_cmp(r, b) >= 0) {
+      int64_t borrow = 0;
+      for (uint32_t i = 0; i < r->len; i++) {
+        int64_t d = (int64_t)r->limb[i] - (i < b->len ? b->limb[i] : 0) - borrow;
+        borrow = d < 0; r->limb[i] = (uint32_t)(d + (borrow ? ((int64_t)1 << 32) : 0));
+      }
+      nat_norm(r);
+      q->limb[bit / 32] |= (uint32_t)1 << (bit % 32);
+    }
+  }
+  return nat_norm(q);
 }
 static const ONat *nat_pred(const ONat *a) { /* a > 0 */
   ONat *r = nat_alloc(a->len); memcpy(r->limb, a->limb, 4 * (size_t)a->len);
@@ -345,6 +389,10 @@ static void step_raw(void) {
       else if (f.prim == P_EQUAL && l.tag == V_NATURAL && v.tag == V_NATURAL) { out = v_simple(V_BOOLEAN); out.b = (uint8_t)nat_eq(l.nat, v.nat); }
       else if (f.prim == P_CONJ && l.tag == V_BOOLEAN && v.tag == V_BOOLEAN) { out = v_simple(V_BOOLEAN); out.b = l.b && v.b; }
       else if (f.prim == P_LABELEQ && l.tag == V_LABEL && v.tag == V_LABEL) { out = v_simple(V_BOOLEAN); out.b = l.code_or_label == v.code_or_label; }
+      else if (f.prim == P_SUB && l.tag == V_NATURAL && v.tag == V_NATURAL) { out = v_simple(V_NATURAL); out.nat = nat_sub(l.nat, v.nat); }
+      else if (f.prim == P_DIV && l.tag == V_NATURAL && v.tag == V_NATURAL) { out = v_simple(V_NATURAL); out.nat = nat_div(l.nat, v.nat); }
+      else if (f.prim == P_LESS && l.tag == V_NATURAL && v.tag == V_NATURAL) { out = v_simple(V_BOOLEAN); out.b = (uint8_t)(nat_cmp(l.nat, v.nat) < 0); }
+      else if (f.prim == P_LESSEQ && l.tag == V_NATURAL && v.tag == V_NATURAL) { out = v_simple(V_BOOLEAN); out.b = (uint8_t)(nat_cmp(l.nat, v.nat) <= 0); }
       else { refuse(R_WRONGVALUE); POP(); return; }
       returned(out); POP(); return;
     }

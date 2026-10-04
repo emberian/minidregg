@@ -369,6 +369,7 @@ end
 def primitiveOf : String → Except String CorePrimitive
   | "add" => .ok .add | "multiply" => .ok .multiply | "equal" => .ok .equal | "conjunction" => .ok .conjunction
   | "labelEqual" => .ok .labelEqual
+  | "subtract" => .ok .subtract | "divide" => .ok .divide | "less" => .ok .less | "lessEqual" => .ok .lessEqual
   | other => .error ("primitive " ++ other ++ " is not a Core4 constructor yet")
 
 mutual
@@ -412,10 +413,8 @@ structure Binding where
   deriving Inhabited
 
 structure Ctx where
-  /-- The user's modules, then the package prelude (`$prelude`, see `preludeModule`):
-  the prelude is always resolvable here but only emitted when an operator used it. -/
+  /-- The user's modules. -/
   modules : List Module
-  userCount : Nat
   decls : List (String × Decl × Module)
   records : List (String × Decl)
   sums : List (String × Decl)
@@ -431,8 +430,6 @@ structure St where
   hidden : Array (String × ATerm × Option PTy) := #[]
   /-- The Plan/Response of the activity being lowered (none outside one). -/
   effect : Option (PTy × PTy) := none
-  /-- Prelude definitions an operator lowered to so far. -/
-  preludeUsed : List String := []
 
 abbrev M := StateT St (Except String)
 
@@ -498,23 +495,21 @@ def primitiveSignature : String → Option (String × PTy × PTy)
   | "*" => some ("multiply", .natural, .natural)
   | "==" => some ("equal", .natural, .boolean)
   | "&&" => some ("conjunction", .boolean, .boolean)
+  | "-" => some ("subtract", .natural, .natural)
+  | "/" => some ("divide", .natural, .natural)
+  | "<" => some ("less", .natural, .boolean)
+  | "<=" => some ("lessEqual", .natural, .boolean)
   | _ => none
-/-- The module the operators without a Core4 primitive lower into (not a legal source module name). -/
-def preludeModuleName : String := "$prelude"
-
-/-- Operators with no Core4 primitive: (prelude definition, input, output, swap operands). -/
-def preludeOperator : String → Option (String × PTy × PTy × Bool)
-  | "-" => some ("sub", .natural, .natural, false)
-  | "/" => some ("divide", .natural, .natural, false)
-  | "<" => some ("lt", .natural, .boolean, false)
-  | ">" => some ("lt", .natural, .boolean, true)
-  | "<=" => some ("le", .natural, .boolean, false)
-  | ">=" => some ("le", .natural, .boolean, true)
+/-- `a > b` is `!(a <= b)` and `a >= b` is `!(a < b)`: the operands stay in source
+order (left evaluated first), unlike a swap to `b < a`. -/
+def negatedOrder : String → Option String
+  | ">" => some "lessEqual"
+  | ">=" => some "less"
   | _ => none
 def operatorTypes (op : String) : Option (PTy × PTy) :=
   match primitiveSignature op with
   | some (_, input, output) => some (input, output)
-  | none => (preludeOperator op).map fun (_, input, output, _) => (input, output)
+  | none => (negatedOrder op).map fun _ => (.natural, .boolean)
 def composeTy (left right : Option PTy) : Option PTy :=
   match left, right, callable left, callable right with
   | some l, some r, some (.arrow _ _ ld (.arrow _ _ li _)), some (.arrow _ _ _ (.arrow _ _ _ rp)) =>
@@ -947,12 +942,10 @@ def expression (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
         let lt ← expression c fuel left env m
         let rt ← expression c fuel right env m
         return .ifBool lt (.boolean true) rt
-      if let some (definition, _, _, swap) := preludeOperator op then
+      if let some primitive := negatedOrder op then
         let lt ← expression c fuel left env m
         let rt ← expression c fuel right env m
-        modify fun s => { s with preludeUsed := s.preludeUsed ++ [definition] }
-        let fn ← globalRef env (preludeModuleName ++ "." ++ definition)
-        return .app (.app fn (if swap then rt else lt)) (if swap then lt else rt)
+        return notTerm (.binary primitive lt rt)
       match primitiveSignature op with
       | some (primitive, _, _) =>
         let lt ← expression c fuel left env m
@@ -1242,42 +1235,6 @@ def specification (c : Ctx) (fuel : Nat) (s : Spec) (m : Module) : M ATerm := do
       (fun inner => expression c fuel law.body inner m) law.name (.source "Bool") m.name)]
   return .specification (.record [("name", .label key), ("interface", .label (interfaceLabel s list)), ("laws", .record laws)]) extension
 
-/-! ## The package prelude
-
-`preludeSource` is Objective Bend source, read by the same parser as any module.
-Truncated subtraction `sub`; `le`, `lt`
-(order, by recursion on the successor structure); floor `divide` that is TOTAL: a zero
-divisor gives 0n (Core4 has no catchable exception). Cost: each is O(value) machine
-steps. Only the definitions an operator needs are emitted. -/
-
-def preludeSource : String :=
-  "edition ObjectiveBend 1\n" ++
-  "def sub(a: Nat, b: Nat) -> Nat:\n  match b:\n    case 0n: a\n    case 1n+q:\n      match a:\n" ++
-  "        case 0n: 0n\n        case 1n+p: sub(p, q)\n\n" ++
-  "def le(a: Nat, b: Nat) -> Bool:\n  match a:\n    case 0n: true\n    case 1n+p:\n      match b:\n" ++
-  "        case 0n: false\n        case 1n+q: le(p, q)\n\n" ++
-  "def lt(a: Nat, b: Nat) -> Bool:\n  match b:\n    case 0n: false\n    case 1n+q:\n      match a:\n" ++
-  "        case 0n: true\n        case 1n+p: lt(p, q)\n\n" ++
-  "def quotient(a: Nat, b: Nat) -> Nat:\n  if lt(a, b) then 0n else 1n + quotient(sub(a, b), b)\n\n" ++
-  "def divide(a: Nat, b: Nat) -> Nat:\n  match b:\n    case 0n: 0n\n    case 1n+q: quotient(a, b)\n"
-
-/-- The prelude module: `preludeSource` through the parser and the AST decoder. -/
-def preludeModule : Except String Module := do
-  let ast ← match ObjectiveBendParse.parseObjective preludeSource with
-    | .ok ast => pure ast
-    | .error d => throw ("prelude: " ++ d.message)
-  decodeModule (Json.mkObj [("name", toJson preludeModuleName), ("imports", Json.arr #[]), ("ast", ast)])
-
-/-- What a prelude definition calls (transitively closed by `preludeClosure`). -/
-def preludeNeeds : String → List String
-  | "quotient" => ["lt", "sub"]
-  | "divide" => ["quotient"]
-  | _ => []
-
-def preludeClosure (used : List String) : List String :=
-  let step := fun (names : List String) => (names ++ names.flatMap preludeNeeds).eraseDups
-  (step (step (step (step used)))).eraseDups
-
 /-! ## The package knot, entry selection, arguments -/
 
 def resultOf : Option PTy → Nat → Option PTy
@@ -1353,16 +1310,11 @@ def emitDecl (c : Ctx) (fuel : Nat) (m : Module) (d : Decl) (fields : List (Stri
 
 def elaborateM (c : Ctx) (entryModule : Nat) (entryDefinition : String) (args : Json) (mode : String) : M Output := do
   let fuel := 100000
-  let userModules := c.modules.take c.userCount
+  let userModules := c.modules
   let mut fields : List (String × ATerm) := []
   for m in userModules do
     for d in m.decls do
       fields ← emitDecl c fuel m d fields
-  -- The prelude definitions an operator lowered to (closed under what they call), after the user's.
-  let needed := preludeClosure (← get).preludeUsed
-  let some prelude := c.modules[c.userCount]? | fail "internal: the prelude module is missing"
-  for d in prelude.decls do
-    if needed.contains d.name then fields ← emitDecl c fuel prelude d fields
   let mut rowFields : List (String × PTy) := []
   let mut unresolved : List String := []
   for (name, _) in fields do
@@ -1373,7 +1325,7 @@ def elaborateM (c : Ctx) (entryModule : Nat) (entryDefinition : String) (args : 
   let reason := if unresolved.isEmpty then none else some ("declaration types unresolved: " ++ String.intercalate ", " unresolved)
   let rootExtension := ATerm.lam ⟨some (.variable 0), some (arrowTy .emptyRow (.variable 0)), "unrestricted", "reusable", reason⟩
     (.lam ⟨some .emptyRow, some (.variable 0), "unrestricted", "reusable", reason⟩ (.extend (.bound 0) fields))
-  let packageLabel := (toJson ((userModules ++ (if needed.isEmpty then [] else [prelude])).map (·.name))).compress
+  let packageLabel := (toJson (userModules.map (·.name))).compress
   let root := ATerm.fix (.specification (.record [("package", .label packageLabel)]) rootExtension) (.record [])
   let some entry := userModules[entryModule]? | fail "missing selected entry"
   let entryKey := entry.name ++ "." ++ entryDefinition
@@ -1401,9 +1353,7 @@ def elaborateM (c : Ctx) (entryModule : Nat) (entryDefinition : String) (args : 
   return ⟨selected, globalRow, st.sumBounds, st.typeErrors⟩
 
 /-- Build the context; duplicate declarations / types refuse as in the TS. -/
-def context (userModules : List Module) : Except String Ctx := do
-  let modules := userModules ++ [← preludeModule]
-  let userCount := userModules.length
+def context (modules : List Module) : Except String Ctx := do
   let mut decls : List (String × Decl × Module) := []
   let mut records : List (String × Decl) := []
   let mut sums : List (String × Decl) := []
@@ -1425,7 +1375,7 @@ def context (userModules : List Module) : Except String Ctx := do
         | .record .. => records := records ++ [(key, d)]
         | _ => sums := sums ++ [(key, d)]
       | _ => pure ()
-  return ⟨modules, userCount, decls, records, sums⟩
+  return ⟨modules, decls, records, sums⟩
 
 def elaborate (modules : List Module) (entryModule : Nat) (entryDefinition : String) (args : Json) (mode : String) :
     Except String Output := do

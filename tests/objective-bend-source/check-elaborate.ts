@@ -38,10 +38,10 @@ const depth=18;let deep=E+"record R0:\n  a: Nat\n  b: Nat\n";
 for(let i=1;i<=depth;i++)deep+=`record R${i}:\n  l: R${i-1}\n  r: R${i-1}\n`;
 deep+=`def pass(x: R${depth}) -> R${depth}:\n  x\n`;job("deep",deep,"pass",[],"definition");
 job("small-table",E+"record A:\n  a: Nat\nrecord B:\n  l: A\n  r: A\ndef pass(x: B) -> B:\n    x\n","pass",[],"definition");
-const ops:[string,string,string[]][]=[["<","Bool",["lt"]],[">","Bool",["lt"]],["<=","Bool",["le"]],[">=","Bool",["le"]],["-","Nat",["sub"]],["/","Nat",["sub","lt","quotient","divide"]]];
+// [operator, result type, Core4 primitive, lowered as the negation of that primitive]
+const ops:[string,string,string,boolean][]=[["<","Bool","less",false],[">","Bool","lessEqual",true],["<=","Bool","lessEqual",false],[">=","Bool","less",true],["-","Nat","subtract",false],["/","Nat","divide",false]];
 ops.forEach(([op,type],i)=>run("op-"+i,"7n "+op+" 2n",type));
-run("lt32","3n < 2n","Bool");run("gt32","3n > 2n","Bool");run("plus","1n + 2n","Nat");run("eq","1n == 2n","Bool");
-run("minus","4n - 1n","Nat");run("plus41","4n + 1n","Nat");
+run("minus","4n - 1n","Nat");
 job("let",E+"def f(x: Nat) -> Nat:\n  let y = x + 1n\n  let x: Nat = y * y\n  x + x\n","f",[],"definition");
 job("let-unresolved",E+"def g(p: Nat) -> Nat:\n  let y = metadata(p)\n  1n\n","g",[],"definition");
 job("let-inline",E+"def h(x: Nat) -> Nat:\n  let a: Nat = x in a + a\n","h",[],"definition");
@@ -135,22 +135,20 @@ console.log("QUANTITY SURFACE PASS: affine/linear/dead/copy reach annotations; l
  if(!dom||dom.name!=="l"||dom.member.tag!=="field"||dom.member.name!=="a"||dom.tail.name!=="r"||dom.tail.member.name!=="a")throw Error("table expansion lost structure");
  console.log("TYPE TABLE PASS: depth-"+depth+" nested records: proposal "+JSON.stringify(big).length+" bytes, "+big.types.length+" table entries, expansion would be "+expanded+" type nodes");
 }
-const preludeKeys=(core:any)=>findTag(core.term,"fix").spec.extension.body.body.fields.map((f:any)=>f.name).filter((n:string)=>n.startsWith("$prelude."));
-ops.forEach(([op,,definitions],i)=>{
- const keys=preludeKeys(out("op-"+i)).map((n:string)=>n.slice("$prelude.".length)).sort().join();
- if(keys!==[...definitions].sort().join())throw Error("operator "+op+" pulled prelude definitions "+keys+" wanted "+definitions);
+ops.forEach(([op,,primitive,negated],i)=>{
+ const fields=findTag(out("op-"+i).term,"fix").spec.extension.body.body.fields;
+ if(fields.map((f:any)=>f.name).join()!=="Probe.value")throw Error("operator "+op+" added package fields: "+fields.map((f:any)=>f.name));
+ const value=fields[0].value;
+ const bin=negated?value.condition:value;
+ if(negated&&(value.tag!=="ifBool"||value.whenTrue.tag!=="boolean"||value.whenTrue.value!==false||value.whenFalse.tag!=="boolean"||value.whenFalse.value!==true))throw Error("operator "+op+" is not the negation of "+primitive);
+ if(bin?.tag!=="binary"||bin.primitive!==primitive||bin.left.value!=="7"||bin.right.value!=="2")throw Error("operator "+op+" did not lower to binary "+primitive+" with the operands in source order: "+JSON.stringify(value));
  const typedOp=literal("op-"+i);if(typedOp.schema!=="dregg.objective-bend.typed-core.v3")throw Error("operator "+op+" lost its typing proposal");
  const row:string[]=[];for(let r=typedOp.bounds[0].type;r.tag==="field";r=r.tail)row.push(r.name);
- if(!definitions.every(d=>row.includes("$prelude."+d))||!row.includes("Probe.value"))throw Error("prelude definitions missing from the global row for "+op);
+ if(row.join()!=="Probe.value")throw Error("global row for "+op+" is not exactly the package's own: "+row);
 });
-const lt32=findAll(out("lt32").term,(x:any)=>x.tag==="app"&&x.fn.tag==="app"&&x.fn.fn.name==="$prelude.lt")[0];
-const gt32=findAll(out("gt32").term,(x:any)=>x.tag==="app"&&x.fn.tag==="app"&&x.fn.fn.name==="$prelude.lt")[0];
-if(lt32.fn.arg.value!=="3"||lt32.arg.value!=="2"||gt32.fn.arg.value!=="2"||gt32.arg.value!=="3")throw Error("> did not lower to < with swapped operands");
-if(preludeKeys(out("plus")).length||preludeKeys(out("eq")).length)throw Error("a package without these operators gained prelude definitions");
-if(JSON.parse(findTag(out("minus").term,"fix").spec.metadata.fields[0].value.value).join()!=="Probe,$prelude")throw Error("package label does not name the prelude module");
-if(JSON.parse(findTag(out("plus41").term,"fix").spec.metadata.fields[0].value.value).join()!=="Probe")throw Error("package label of an operator-free package changed");
-if(out("minus").sourceModules.length!==1)throw Error("prelude leaked into the captured source modules");
-console.log("OPERATOR LOWERING PASS: - / < <= > >= call $prelude.sub/divide/lt/le; only needed definitions added; > >= swap; operator-free packages unchanged");
+if(JSON.parse(findTag(out("minus").term,"fix").spec.metadata.fields[0].value.value).join()!=="Probe")throw Error("package label names a module the source does not have");
+if(out("minus").sourceModules.length!==1)throw Error("captured source modules changed");
+console.log("OPERATOR LOWERING PASS: - / < <= are Core4 binary subtract/divide/less/lessEqual; > >= are their negations, operands in source order; no package fields added");
 const fBody=findTag(out("let").term,"fix").spec.extension.body.body.fields.find((f:any)=>f.name==="Probe.f").value.body;
 if(fBody.tag!=="app"||fBody.fn.tag!=="lam"||fBody.arg.tag!=="binary"||fBody.arg.primitive!=="add"||fBody.arg.left.tag!=="bound"||fBody.arg.left.index!==0)
  throw Error("let did not lower to an application of a lambda whose argument is the value, elaborated outside the binder");

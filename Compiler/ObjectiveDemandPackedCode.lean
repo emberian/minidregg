@@ -25,15 +25,16 @@ structure Table where
 
 def primitiveTag : Primitive → Nat
   | .add => 0 | .multiply => 1 | .equal => 2 | .conjunction => 3 | .labelEqual => 4
+  | .subtract => 5 | .divide => 6 | .less => 7 | .lessEqual => 8
 
 def primitiveOf : Nat → Option Primitive
   | 0 => some .add | 1 => some .multiply | 2 => some .equal | 3 => some .conjunction
-  | 4 => some .labelEqual
-  | _ => none
+  | 4 => some .labelEqual | 5 => some .subtract | 6 => some .divide | 7 => some .less
+  | 8 => some .lessEqual | _ => none
 
 /-- Row layout widths: a 5-bit opcode, a 3-bit primitive, then three words. -/
 def tagBits : Nat := 5
-def primitiveBits : Nat := 3
+def primitiveBits : Nat := 4
 
 def lowerRow (base : Nat) : Code → Row × List (Nat × Nat)
   | .bound a => (⟨0,a,0,0,0⟩,[])

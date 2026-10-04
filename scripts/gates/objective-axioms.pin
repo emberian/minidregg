@@ -1298,11 +1298,15 @@ A Minidregg.Theory.ObjectiveBendOpenRecursion.Observation.label.elim : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.Observation.natural.elim : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.Primitive.add.elim : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.Primitive.conjunction.elim : -
+A Minidregg.Theory.ObjectiveBendOpenRecursion.Primitive.divide.elim : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.Primitive.equal.elim : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.Primitive.labelEqual.elim : -
+A Minidregg.Theory.ObjectiveBendOpenRecursion.Primitive.less.elim : -
+A Minidregg.Theory.ObjectiveBendOpenRecursion.Primitive.lessEqual.elim : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.Primitive.multiply.elim : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.Primitive.ofNat : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.Primitive.ofNat_ctorIdx : -
+A Minidregg.Theory.ObjectiveBendOpenRecursion.Primitive.subtract.elim : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.Representation.administrativeRank : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.Representation.evaluationComplete : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.Representation.initialized : Quot.sound, propext
@@ -1366,6 +1370,7 @@ A Minidregg.Theory.ObjectiveBendOpenRecursion.Transition.yielded.elim : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.case_selects_injected_arm : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.conjunction_boolean_exact : propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.conjunction_labels_refused : propext
+A Minidregg.Theory.ObjectiveBendOpenRecursion.divide_floor_exact : propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.equality_boolean_exact : propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.equality_drives_branch : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.extendFields : -
@@ -1377,11 +1382,14 @@ A Minidregg.Theory.ObjectiveBendOpenRecursion.lazy_fixed_function : Quot.sound, 
 A Minidregg.Theory.ObjectiveBendOpenRecursion.liftRename : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.liftSubstitution : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.mixBody : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendOpenRecursion.nat_primitives_refuse_labels : propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.one_turn_interaction : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendOpenRecursion.order_exact : propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.plug : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.primitiveResult : propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.prototype_metadata_unforced : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.specification_metadata_unforced : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendOpenRecursion.subtract_truncated_exact : propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.value_no_step : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.yields_deterministic : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.yields_no_step : Quot.sound, propext
@@ -1578,6 +1586,9 @@ A Minidregg.Theory.ObjectiveBendTyping.listCons : -
 A Minidregg.Theory.ObjectiveBendTyping.listRow : -
 A Minidregg.Theory.ObjectiveBendTyping.literalType : -
 A Minidregg.Theory.ObjectiveBendTyping.missing_arm_refused : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTyping.nat_primitive_label_operand_refused : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTyping.nat_primitive_types : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTyping.order_primitive_branch_accepted : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.overlay : propext
 A Minidregg.Theory.ObjectiveBendTyping.packetReceipt : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.partial_beta_law : Quot.sound, propext
