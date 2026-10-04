@@ -92,16 +92,12 @@ import Compiler.QualificationReport
 import Compiler.RoomKeyReleaseCodec
 import Host.BendProofWitness
 import Host.CurrentRecipientVerifier
-import Host.JointBackendPartyWire
 import Host.NativeReserveBirthConsent
 import Host.PortableContinuationInspection
 import Host.RoomKeyReleaseAuthor
 import Host.SourceAgreementBirth
 import Kernel.AgreementEvidenceRegime
 import Kernel.GenericSimplexReconfig
-import Kernel.JointBackendPartyAdmission
-import Kernel.JointBackendPartyReceiver
-import Kernel.JointBackendPartyRecovery
 import Kernel.JointProtectedGateProofs
 import Kernel.JointReservationFunding
 import Kernel.JointSimplexBinding
@@ -109,7 +105,6 @@ import Kernel.NativeCurrentMemberKey
 import Kernel.NativeCurrentMemberKeyIO
 import Kernel.NativeCurrentSigningKey
 import Kernel.PortableContinuationManifest
-import Kernel.PortableHomeCurrentGuard
 import Kernel.PortableHomeTransfer
 import Kernel.PortableHomeTransferAdmission
 import Kernel.PortableHomeTransferReceiver

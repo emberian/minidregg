@@ -3756,13 +3756,6 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
-      "module": "Host.JointBackendPartyWire",
-      "path": "Host/JointBackendPartyWire.lean",
-      "sha256": "5e867ff3d992a2cc968a9b232b75be5713577347d474f8ec543f68c1421f6055",
-      "surface": "authored-research",
-      "ownerReportedStatus": "AUTHORED_UNCOMPILED"
-    },
-    {
       "module": "Host.Json",
       "path": "Host/Json.lean",
       "sha256": "4c0df44b0c0b29ecc71784a61af32152cc03f60f511a645d8a38ca542f948ae4",
@@ -6157,27 +6150,6 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
-      "module": "Kernel.JointBackendPartyAdmission",
-      "path": "Kernel/JointBackendPartyAdmission.lean",
-      "sha256": "750702ba278f7e3a8a99e5d062005a1ab302e492a3ec79ccf20dd3c076caba40",
-      "surface": "authored-research",
-      "ownerReportedStatus": "AUTHORED_UNCOMPILED"
-    },
-    {
-      "module": "Kernel.JointBackendPartyReceiver",
-      "path": "Kernel/JointBackendPartyReceiver.lean",
-      "sha256": "068acabdb86db45e3c7d3e0554bfb9e63b2c98bf00754da24e1ee6415d584f8d",
-      "surface": "authored-research",
-      "ownerReportedStatus": "AUTHORED_UNCOMPILED"
-    },
-    {
-      "module": "Kernel.JointBackendPartyRecovery",
-      "path": "Kernel/JointBackendPartyRecovery.lean",
-      "sha256": "e302ccba2ed9e430e6b4ff99d458cdd73ad90cf03717fff37427b05f8762ef5a",
-      "surface": "authored-research",
-      "ownerReportedStatus": "AUTHORED_UNCOMPILED"
-    },
-    {
       "module": "Kernel.JointControlBootstrap",
       "path": "Kernel/JointControlBootstrap.lean",
       "sha256": "e67ac85a5d23336063b9310c5bc9e0b8165130cc173d1aff4ec802be3ee2b305",
@@ -6934,13 +6906,6 @@
       "ownerReportedStatus": "PASS scoped Lean/applicable axiom gates against supplied warm cohort; runtime current-cohort use not implied"
     },
     {
-      "module": "Kernel.PortableHomeCurrentGuard",
-      "path": "Kernel/PortableHomeCurrentGuard.lean",
-      "sha256": "e01838a2b644b5198f8ad89e30fad9c9381f7daf89dca53fd7a2a6fddaee3e43",
-      "surface": "authored-research",
-      "ownerReportedStatus": "WIP Config portableHomeControl source seam absent; consumed by graded signed Activity v2 r37; no live worker activation"
-    },
-    {
       "module": "Kernel.PortableHomeTransfer",
       "path": "Kernel/PortableHomeTransfer.lean",
       "sha256": "8ccc90e84fcbd37d78d78775bf8af9c8a70b33cc1d877e720d86ce544e71d518",
@@ -7622,7 +7587,7 @@
     {
       "module": "ResearchWip",
       "path": "ResearchWip.lean",
-      "sha256": "630466e239c79c6738c735053fafb4eef0403302289b500cf2ee5d66a1fce3aa",
+      "sha256": "c11425d8e0c0a3d9e840fac9014ad420e0f223c477ab60fabfc88e0fccbd3de3",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },

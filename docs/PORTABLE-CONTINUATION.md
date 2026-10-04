@@ -250,16 +250,9 @@ cell/atom/schema, home, current host, full credential envelope, private generati
 and descriptor, epoch and phase. Both codecs passed scoped Lean and named
 roundtrip axiom checks.
 
-`Kernel/PortableHomeCurrentGuard.admit` is a high guard after ordinary actual
-AcceptedInvocation. It selects only `Config.portableHomeControl`, re-reads the
-entire current source control wrapper, matches the exact projection and admitted
-controller subject/key, and permits initial serving or reconciled destination
-active/released phases. It returns a whole-control physical ReadGuard. The new
-signed Activity context edition binds this projection, and its dispatch consumer
-retains this guard alongside the Activity guard in the same final Fits and
-DataIntent, forbidding writes to guarded cells. A home-governed profile cannot
-omit its projection; nonportable Activity remains a separate profile with no
-portable source pin.
+A current-home guard after ordinary controller acceptance (a whole-control ReadGuard selected by
+a `Config.portableHomeControl` source seam) was drafted as `Kernel/PortableHomeCurrentGuard` and
+removed: the seam was never added to `NativeHost.Config`, so the draft never compiled.
 
 Config source-pinned portable facet/runtime parameter/live+replay registration
 is not yet supplied; the high guard source explicitly requires that field and
