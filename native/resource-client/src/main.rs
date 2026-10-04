@@ -243,6 +243,97 @@ pub(crate) fn take_host_decision() -> Option<HostDecision> {
     HOST_DECISION.with(|slot| slot.borrow_mut().take())
 }
 
+/// Who signed the latest observation this process made: what a `bad-signature`
+/// refusal needs to ask the Host whether that key is still the subject's
+/// current one (`not_current_key_note`). Recorded where the observation is signed.
+#[derive(Clone, Debug)]
+struct SignerContext {
+    host: PathBuf,
+    config: PathBuf,
+    subject: String,
+    public: [u8; 32],
+}
+
+thread_local! {
+    static SIGNER: std::cell::RefCell<Option<SignerContext>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Record the signer of an observation about to be made. Only an intent that
+/// names its `subject` in JSON is recorded; a binary intent clears the record,
+/// so an older observation's signer is never blamed for a newer refusal.
+fn note_signer(host: &Path, config: &Path, intent: &Path, intent_kind: &OsStr, signing: &SigningKey) {
+    let subject = (intent_kind != OsStr::new("binary"))
+        .then(|| fs::read(intent).ok())
+        .flatten()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .and_then(|intent| intent.get("subject").and_then(Value::as_str).map(str::to_owned));
+    SIGNER.with(|slot| {
+        *slot.borrow_mut() = subject.map(|subject| SignerContext {
+            host: host.to_path_buf(),
+            config: config.to_path_buf(),
+            subject,
+            public: signing.verifying_key().to_bytes(),
+        });
+    });
+}
+
+/// The friend-facing name of the refusal a request signed by a key that is not
+/// the subject's current one gets. The Host verifies against the subject's
+/// CURRENT key, so after a rotation the old key's signature simply does not
+/// verify and the Host can only say `bad-signature`. Its key status for the key
+/// the client signed with says why: `keyEpoch` is the CURRENT key's epoch
+/// (`Kernel.SubjectKeyRotation.status`), `isCurrent` whether the presented key
+/// is that key, `isCommittedNext` whether it is the next key not yet adopted.
+/// The old key is proved revoked and not current by
+/// `Theory.KeyPreRotation.old_key_refused_after_rotation`. A key the Host never
+/// enrolled looks the same as a rotated-away one, so the note says what the
+/// status shows and does not claim the key was once ours.
+fn not_current_key_note(status: &Value) -> Option<String> {
+    if status.get("isCurrent").and_then(Value::as_bool) != Some(false) {
+        return None;
+    }
+    let epoch = status.get("keyEpoch").and_then(Value::as_str)?;
+    if status.get("isCommittedNext").and_then(Value::as_bool) == Some(true) {
+        return Some(format!(
+            "\n  this key is the committed NEXT key, not yet adopted (epoch {epoch} is current): \
+             rotate to it before signing with it"
+        ));
+    }
+    Some(format!(
+        "\n  this key is not the subject's current key (epoch {epoch} is current); if you rotated keys, \
+         this one was rotated away: sign with the key you rotated to"
+    ))
+}
+
+/// For a `bad-signature` refusal of a request this process signed, ask the Host
+/// (key status, op 144) whether the signing key is still current, and say so by
+/// name if it is not. Best effort: any failure to ask adds nothing.
+fn bad_signature_explanation(outcome: &Value) -> String {
+    let context = SIGNER.with(|slot| slot.borrow().clone());
+    explain_bad_signature(outcome, context.as_ref(), |context| {
+        let socket = SOCKET.get()?;
+        key_rotation::status_if_enrolled(&context.host, socket, &context.config, &context.subject, &context.public)
+            .ok()
+            .flatten()
+    })
+}
+
+/// `bad_signature_explanation` with the Host's key status supplied by the
+/// caller: asked only for a `bad-signature` refusal, and only of a recorded signer.
+fn explain_bad_signature(
+    outcome: &Value,
+    signer: Option<&SignerContext>,
+    status: impl FnOnce(&SignerContext) -> Option<Value>,
+) -> String {
+    if outcome.get("reason").and_then(Value::as_str) != Some("bad-signature") {
+        return String::new();
+    }
+    signer
+        .and_then(status)
+        .and_then(|status| not_current_key_note(&status))
+        .unwrap_or_default()
+}
+
 /// A refused `doc push`'s diagnosis: which pulled lines changed since the
 /// pull (`workspace::stale_lines`). The shell prints it as the refusal's first
 /// line, above the Host's own decoding of the same refusal.
@@ -331,12 +422,18 @@ fn host_refusal_ending(decision: &HostDecision) -> Option<String> {
             byte,
             decoded: Some(outcome),
             ..
-        } => refusal_line(outcome)
-            .map(|line| format!("{line}\n  Host refused {command}, reply byte {byte}")),
+        } => refusal_line(outcome).map(|line| {
+            format!(
+                "{line}{}\n  Host refused {command}, reply byte {byte}",
+                bad_signature_explanation(outcome)
+            )
+        }),
         HostDecision::RefusedFrame { command, byte, .. } => Some(format!(
             "refused: Host refused {command}, reply byte {byte}; the frame was not decoded"
         )),
-        HostDecision::Outcome(outcome) => refusal_line(outcome),
+        HostDecision::Outcome(outcome) => {
+            refusal_line(outcome).map(|line| format!("{line}{}", bad_signature_explanation(outcome)))
+        }
     }
 }
 
@@ -1782,6 +1879,7 @@ fn authorize_observation(
     signing: &SigningKey,
     directory: &Path,
 ) -> Result<Observed> {
+    note_signer(host, config, intent, intent_kind, signing);
     let intent_bin = directory.join("intent.bin");
     let intent_signature = directory.join("intent-signature.bin");
     let challenge_bin = directory.join("challenge.bin");
@@ -4914,6 +5012,51 @@ mod tests {
         keygen(&directory.join("p.key"), &directory.join("p.pub"), None, NextKey::Without, false).unwrap();
         assert!(!directory.join("p.key.next").exists() && !directory.join("p.key.next.pub").exists());
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_key_that_is_not_current_is_named_from_the_host_key_status() {
+        // After a rotation the old key's status reports the CURRENT epoch.
+        let rotated = json!({"type":"subject-key-status-v1","subject":"7","keyEpoch":"2","keyId":"11",
+            "isCurrent":false,"isCommittedNext":false,"currentRevoked":false,"prerotated":false});
+        let note = not_current_key_note(&rotated).unwrap();
+        assert!(note.contains("rotated away") && note.contains("epoch 2 is current"), "{note}");
+        let next = json!({"keyEpoch":"2","isCurrent":false,"isCommittedNext":true});
+        let note = not_current_key_note(&next).unwrap();
+        assert!(note.contains("committed NEXT key") && note.contains("epoch 2 is current"), "{note}");
+        let current = json!({"keyEpoch":"3","isCurrent":true});
+        assert_eq!(not_current_key_note(&current), None);
+        // A status that does not say is not guessed at.
+        assert_eq!(not_current_key_note(&json!({"keyEpoch":"3"})), None);
+        assert_eq!(not_current_key_note(&json!({"isCurrent":false})), None);
+    }
+
+    #[test]
+    fn only_a_bad_signature_refusal_asks_about_the_signing_key() {
+        let signer = SignerContext {
+            host: PathBuf::from("/nonexistent/host"),
+            config: PathBuf::from("/nonexistent/config"),
+            subject: "7".into(),
+            public: [1; 32],
+        };
+        let rotated = || Some(json!({"keyEpoch":"2","isCurrent":false,"isCommittedNext":false}));
+        let bad = json!({"type":"refused","reason":"bad-signature"});
+        // A bad signature by a key the Host reports as no longer current is named.
+        let named = explain_bad_signature(&bad, Some(&signer), |context| {
+            assert_eq!((context.subject.as_str(), context.public), ("7", [1; 32]));
+            rotated()
+        });
+        assert!(named.contains("rotated away") && named.contains("epoch 2 is current"), "{named}");
+        // A current key (a genuinely bad signature) is left as the Host said it.
+        let current = explain_bad_signature(&bad, Some(&signer), |_| Some(json!({"keyEpoch":"3","isCurrent":true})));
+        assert_eq!(current, "");
+        // A status that could not be fetched adds nothing.
+        assert_eq!(explain_bad_signature(&bad, Some(&signer), |_| None), "");
+        // No recorded signer: nothing to ask.
+        assert_eq!(explain_bad_signature(&bad, None, |_| panic!("asked without a signer")), "");
+        // Any other reason never asks.
+        let stale = json!({"type":"refused","reason":"stale-root"});
+        assert_eq!(explain_bad_signature(&stale, Some(&signer), |_| panic!("asked for stale-root")), "");
     }
 
     #[test]
