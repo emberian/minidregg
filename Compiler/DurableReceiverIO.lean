@@ -1088,7 +1088,7 @@ theorem Loaded.judge_tail {rootBytes : List UInt8 → Digest} (transport : Trans
     Kernel.TailBound.gate systemId (loaded.height + 1) loaded.chain loaded.snapshot intent = .ok () := by
   simp only [Loaded.judge, pinned] at accepted
   cases checked : transport.sourceGate loaded.snapshot intent with
-  | error reason => simp [checked, Except.bind] at accepted
+  | error reason => simp [checked, bind, Except.bind] at accepted
   | ok value => cases value; simpa [checked, Except.bind] using accepted
 
 /-- Publish against the exact image on which the controller admitted the
