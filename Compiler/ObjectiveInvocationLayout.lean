@@ -96,7 +96,8 @@ theorem scalarSource_exact
     | some plan =>
       simp only [decoded, bound, Option.bind_eq_bind, Option.bind_some, Option.pure_def,
         Option.some.injEq, Sigma.mk.injEq] at lowered
-      simp only [lowered.1]
+      rw [← lowered.1]
+      exact decoded
 
 theorem resultSource_exact
     (prepared : ObjectiveBendResultAdapter.PreparedResult profile command source limits budget capacity) :
@@ -125,12 +126,11 @@ end
 def step (index : Nat) (target : Target) : Option BendWorldPlan.Effect :=
   match target.payload with
   | .read | .kindRead | .computeFunding _ => none
-  | .moneyConsent consent => BendWorldPlan.moneyEffect index consent
   | payload => some ⟨index,payload⟩
 
 /-- Payloads `effectsOf` reports verbatim. -/
 def verbatim : Payload → Bool
-  | .read | .kindRead | .computeFunding _ | .moneyConsent _ => false
+  | .read | .kindRead | .computeFunding _ => false
   | _ => true
 
 /-- Payloads `effectsOf` never reports. -/
@@ -145,10 +145,20 @@ theorem finRange_pairs {α : Type} (l : List α) :
   · intro n h₁ h₂
     simp [List.getElem_zipIdx]
 
-theorem effectsOf_zipIdx (command : Command) :
-    BendWorldPlan.effectsOf command = command.targets.zipIdx.filterMap (fun p => step p.2 p.1) := by
+theorem filterMap_finRange {α β : Type} (l : List α) (f : Nat → α → Option β) :
+    (List.finRange l.length).filterMap (fun i => f i.val l[i]) = l.zipIdx.filterMap (fun p => f p.2 p.1) := by
   rw [← finRange_pairs, List.filterMap_map]
   rfl
+
+theorem effectsOf_finRange (command : Command) :
+    BendWorldPlan.effectsOf command =
+      (List.finRange command.targets.length).filterMap (fun i => step i.val command.targets[i]) := by
+  unfold BendWorldPlan.effectsOf
+  congr 1
+
+theorem effectsOf_zipIdx (command : Command) :
+    BendWorldPlan.effectsOf command = command.targets.zipIdx.filterMap (fun p => step p.2 p.1) := by
+  rw [effectsOf_finRange, filterMap_finRange command.targets step]
 
 theorem step_inert {index : Nat} {target : Target} (h : inert target.payload = true) :
     step index target = none := by
@@ -179,7 +189,7 @@ theorem filterMap_inert (targets : List Target) (k : Nat)
     (targets.zipIdx k).filterMap (fun p => step p.2 p.1) = [] := by
   rw [List.filterMap_eq_nil_iff]
   intro p member
-  exact step_inert (h p.1 (List.mem_zipIdx' member |>.1))
+  exact step_inert (h p.1 (List.fst_mem_of_mem_zipIdx member))
 
 /-! ## The producer's layout -/
 
@@ -189,11 +199,11 @@ def layout (effects : List Target) (inertTargets : List Target) : List Target :=
   effects ++ inertTargets
 
 theorem effectsOf_layout (subject : TypedAuthorization.SubjectId) (nonce : Nat)
-    (effects inertTargets : List Target) (run : Option Run.RunClaim)
-    (bend : Option BendExecutionClaim.Claim) (family : Option NativeInvocationStatement.Family)
+    (effects inertTargets : List Target) (run : Option Kernel.Run.RunClaim)
+    (family : Option NativeInvocationStatement.Family)
     (effectsVerbatim : ∀ t ∈ effects, verbatim t.payload = true)
     (restInert : ∀ t ∈ inertTargets, inert t.payload = true) :
-    BendWorldPlan.effectsOf ⟨subject,nonce,layout effects inertTargets,run,bend,family⟩ =
+    BendWorldPlan.effectsOf ⟨subject,nonce,layout effects inertTargets,run,family⟩ =
       effects.zipIdx.map (fun p => (⟨p.2,p.1.payload⟩ : BendWorldPlan.Effect)) := by
   rw [effectsOf_zipIdx]
   simp only [layout, List.zipIdx_append, List.filterMap_append]
