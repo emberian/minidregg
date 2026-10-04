@@ -147,8 +147,16 @@ including an actual child timeout with no redispatch. The Lean operator bridge, 
 call-family guard compile against the passing source consumer and frozen receiver
 cohort. The matched standalone reader and operator have run against the actual four
 source stores: profile/seed agreement, wrong-pin rejection, refusal of direct
-reader submission and both enrolled current signing keys passed. The first
-actual signed source action remains pending.
+reader submission and both enrolled current signing keys passed.
+
+A development mesh of four replicas in one process on one host has since committed two
+application records and then stalled on the third (scout R2-3, 2026-10-03; recorded
+outside this repository, and not reproduced here). Its diagnosis: two replicas reached
+their view timeout before collecting a quorum of VOTEs, because one drive iteration took
+15-27 s against a timeout that needs Delta below timeout/7, and the engine ran only while
+a client request was open. That is lawful behaviour of the engine, not a safety fault.
+The liveness fixes (standing replicas, a cheaper iteration, an adaptive timeout) are not
+on main, so liveness is not established; the safety theorems are over the Lean engine model.
 This local four-participant driver does not claim four independent processes or
 failure domains. Operator service fuel is not a source-funded recovery grant.
 
