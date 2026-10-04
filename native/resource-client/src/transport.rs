@@ -12,6 +12,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use crate::serve_queue::{self, fair_queue, TrySendError};
+
 // Mirrors FnEvidenceCodec.maxHostFrameBytes; the host's length includes op byte.
 pub(crate) const HOST_MAX_FRAME: usize = 12_102_760;
 pub(crate) const MAX_CONFIG: usize = 65_536;
@@ -24,6 +26,60 @@ fn request_within_bound(request: &[u8]) -> bool {
     match request {
         [153, payload @ ..] => carried_lookup_request(payload),
         _ => request.len() <= HOST_MAX_FRAME,
+    }
+}
+
+/// The largest JSON source an author request (op 7) may carry. Measured
+/// against the clients: the biggest legitimate sources are 4 MiB
+/// (`current_birth::MAX_SOURCE` and `MAX_INTENT`, `workspace::studio::MAX_SOURCE`,
+/// `hermes_handoff::LIMIT`); a 12 MB array of 5M elements cost the Host ~11 s and
+/// 775 MB, so the 12 MB frame bound was the wrong bound for this operation.
+pub(crate) const AUTHOR_JSON_MAX: usize = 4 * 1024 * 1024;
+/// An author request is `u16 kind length ++ kind ++ JSON`; kinds are registry
+/// names (the longest is under 64 bytes), so 256 bytes of kind is generous.
+pub(crate) const AUTHOR_KIND_FRAME_MAX: usize = 2 + 256;
+/// The whole op 7 body.
+pub(crate) const AUTHOR_BODY_MAX: usize = AUTHOR_KIND_FRAME_MAX + AUTHOR_JSON_MAX;
+/// An op 9 body is a JSON list of one to four Ed25519 signatures
+/// (`Host.Json.signatures` refuses any other length): well under 1 KiB.
+pub(crate) const SIGNATURES_BODY_MAX: usize = 16 * 1024;
+/// Ops 0 (describe) and 6 (profile) take no payload; the Host refuses one.
+pub(crate) const NO_BODY_OPS: [u8; 2] = [0, 6];
+
+/// How long the Host may take to answer a state-touching request before the
+/// service gives up on it, kills the Host and reports the status uncertain.
+pub(crate) const HOST_STATE_OP_BUDGET: Duration = Duration::from_secs(600);
+/// The pure, source-owned operations (describe, profile, author, inspect,
+/// signatures, observe-assemble, assemble) read no Store and commit nothing.
+/// The slowest measured, a 12 MB op 7 array, took ~11 s; with op 7 now bounded
+/// at 4 MiB this is more than ten times the worst case. A pure request that
+/// outlives it costs the service one Host restart and the caller an uncertain
+/// status about a request that could not have changed anything.
+pub(crate) const HOST_PURE_OP_BUDGET: Duration = Duration::from_secs(120);
+
+/// The Host-time budget for one request, by its operation byte.
+pub(crate) fn host_budget(request: &[u8]) -> Duration {
+    match request.first() {
+        Some(0 | 6..=11) => HOST_PURE_OP_BUDGET,
+        _ => HOST_STATE_OP_BUDGET,
+    }
+}
+
+/// The named refusal for a request whose body exceeds its own operation's
+/// bound, judged before the Host sees a byte of it. `None` is not an
+/// approval: `request_within_bound` and `allowed_operation` still judge it.
+pub(crate) fn operation_body_refusal(request: &[u8]) -> Option<&'static str> {
+    match request {
+        [operation, _, ..] if NO_BODY_OPS.contains(operation) => {
+            Some("operation takes no request body")
+        }
+        [7, body @ ..] if body.len() > AUTHOR_BODY_MAX => {
+            Some("author request body exceeds its bound")
+        }
+        [9, body @ ..] if body.len() > SIGNATURES_BODY_MAX => {
+            Some("signatures request body exceeds its bound")
+        }
+        _ => None,
     }
 }
 
@@ -186,6 +242,9 @@ pub(crate) fn public_envelope(
     let (_, request) = split_envelope(envelope, config)?;
     if !request_within_bound(request) {
         return Err("host frame exceeds bound");
+    }
+    if let Some(reason) = operation_body_refusal(request) {
+        return Err(reason);
     }
     if !allowed_operation(request, catalog_enabled) {
         return Err("operation unavailable on selected socket");
@@ -1528,6 +1587,11 @@ impl HostProcess {
     /// One request and its reply. Any error leaves the request's status
     /// uncertain: it may have been admitted before the Host stopped answering.
     fn exchange(&mut self, request: &[u8]) -> Result<Vec<u8>, String> {
+        self.exchange_within(request, host_budget(request))
+    }
+
+    /// `exchange` with the Host-time budget named by the caller.
+    fn exchange_within(&mut self, request: &[u8], budget: Duration) -> Result<Vec<u8>, String> {
         write_frame(
             &mut DeadlinePipeWrite {
                 writer: &mut self.input,
@@ -1538,7 +1602,7 @@ impl HostProcess {
         .map_err(|e| format!("host request write: {e}"))?;
         let reply = read_frame(&mut DeadlinePipe {
             reader: &mut self.output,
-            deadline: Instant::now() + Duration::from_secs(600),
+            deadline: Instant::now() + budget,
         })
         .map_err(|e| format!("host response read: {e}"))?
         .ok_or("host closed during request")?;
@@ -1642,6 +1706,25 @@ fn caller_hung_up(stream: &UnixStream) -> bool {
     peeked == 0
 }
 
+/// Why a queued job was answered without reaching the Host because the queue
+/// was full and its peer held more than its share (`serve_queue`).
+const DISPLACED_REFUSAL: &str = "busy: host queue share displaced";
+
+/// Queue `job` for the Host thread under `peer`'s share. When the queue is full
+/// and a fuller peer holds a slot, that peer's newest job is dropped from the
+/// queue and answered here with the certain refusal: it was never written to
+/// the Host, so the 254 describes a request that never ran.
+fn queue_job(
+    jobs: &serve_queue::Sender<HostJob>,
+    peer: u32,
+    job: HostJob,
+) -> Result<(), TrySendError<HostJob>> {
+    if let Some(displaced) = jobs.try_send(peer, job)? {
+        let _ = displaced.reply.send(refusal_frame(DISPLACED_REFUSAL));
+    }
+    Ok(())
+}
+
 /// The refusal frame a connection thread writes for an unforwarded job.
 fn refusal_frame(reason: &str) -> Vec<u8> {
     let mut refusal = vec![254];
@@ -1703,7 +1786,7 @@ fn supervise_bounded(
     start: &mut dyn FnMut() -> Result<HostProcess, String>,
 ) -> Result<(), String> {
     let mut process = start()?;
-    let (jobs, queue) = mpsc::sync_channel::<HostJob>(bounds.host_queue);
+    let (jobs, queue) = fair_queue::<HostJob>(bounds.host_queue);
     let stopping = AtomicBool::new(false);
     let live = AtomicUsize::new(0);
     std::thread::scope(|scope| {
@@ -1732,7 +1815,7 @@ fn supervise_operator(
     let mut process = start()?;
     let mut control = crate::operator_drain::Control::start(socket, config, host_sha256, process.child.id())?;
     let state = control.state.clone();
-    let (jobs, queue) = mpsc::sync_channel::<HostJob>(SERVE_BOUNDS.host_queue);
+    let (jobs, queue) = fair_queue::<HostJob>(SERVE_BOUNDS.host_queue);
     let rules = EnvelopeRules { operator: Some(peers), config_bytes: config, host_sha256, catalog_enabled: catalog, read_deadline: SERVE_BOUNDS.read_deadline };
     std::thread::scope(|scope| {
         let (state, rules) = (&state, &rules);
@@ -1769,7 +1852,7 @@ fn supervise_operator(
 /// Returns only when a Host cannot be started (or every sender is gone).
 fn serve_host(
     process: &mut HostProcess,
-    queue: mpsc::Receiver<HostJob>,
+    queue: serve_queue::Receiver<HostJob>,
     start: &mut dyn FnMut() -> Result<HostProcess, String>,
     residence: Duration,
 ) -> Result<(), String> {
@@ -1778,7 +1861,7 @@ fn serve_host(
 
 fn serve_host_observed(
     process: &mut HostProcess,
-    queue: mpsc::Receiver<HostJob>,
+    queue: serve_queue::Receiver<HostJob>,
     start: &mut dyn FnMut() -> Result<HostProcess, String>,
     residence: Duration,
     state: Option<&crate::operator_drain::State>,
@@ -1820,7 +1903,7 @@ fn accept_connections<'scope, 'env>(
     listener: &UnixListener,
     rules: &'env EnvelopeRules<'env>,
     bounds: ServeBounds,
-    jobs: mpsc::SyncSender<HostJob>,
+    jobs: serve_queue::Sender<HostJob>,
     stopping: &'scope AtomicBool,
     live: &'scope AtomicUsize,
 ) {
@@ -1879,7 +1962,7 @@ fn accept_connections<'scope, 'env>(
 fn serve_connection(
     mut stream: UnixStream,
     rules: &EnvelopeRules<'_>,
-    jobs: &mpsc::SyncSender<HostJob>,
+    jobs: &serve_queue::Sender<HostJob>,
 ) {
     if let Err(e) = stream.set_write_timeout(Some(Duration::from_secs(10))) {
         eprintln!("mini: cannot set client write deadline: {e}");
@@ -1915,6 +1998,9 @@ fn serve_connection(
     if !request_within_bound(&request) {
         return refuse(&mut stream, "host frame exceeds bound");
     }
+    if let Some(reason) = operation_body_refusal(&request) {
+        return refuse(&mut stream, reason);
+    }
     if !(if rules.operator.is_some() {
         // The owner-private listener is the single Host endpoint for both
         // lifecycle clients and the separately filtered public ingress relay.
@@ -1928,15 +2014,16 @@ fn serve_connection(
     // Without a duplicate the job cannot be observed for hangup; it is still
     // bounded by the residence deadline.
     let caller = stream.try_clone().ok();
-    match jobs.try_send(HostJob {
+    let peer = peer_uid(&stream).unwrap_or(serve_queue::UNKNOWN_PEER);
+    match queue_job(jobs, peer, HostJob {
         request,
         reply,
         queued: Instant::now(),
         caller,
     }) {
         Ok(()) => {}
-        Err(mpsc::TrySendError::Full(_)) => return refuse(&mut stream, "busy: host queue full"),
-        Err(mpsc::TrySendError::Disconnected(_)) => return,
+        Err(TrySendError::Full(_)) => return refuse(&mut stream, "busy: host queue full"),
+        Err(TrySendError::Disconnected(_)) => return,
     }
     // No reply means the Host stopped during this request (or the service is
     // ending): closing without a frame is what `invoke` reports as uncertain.
@@ -2041,7 +2128,7 @@ mod tests {
 
     fn refusal_for_peer(peers: &OperatorPeers) -> Vec<u8> {
         let (mut client, server) = UnixStream::pair().unwrap();
-        let (jobs, _queue) = mpsc::sync_channel::<HostJob>(1);
+        let (jobs, _queue) = fair_queue::<HostJob>(1);
         let worker = thread::spawn({
             let peers = peers.clone();
             move || {
@@ -2125,7 +2212,7 @@ mod tests {
         let server = thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
             let peers = OperatorPeers::with(&[]);
-            let (jobs, _queue) = mpsc::sync_channel::<HostJob>(1);
+            let (jobs, _queue) = fair_queue::<HostJob>(1);
             let rules = EnvelopeRules {
                 operator: Some(&peers),
                 config_bytes: b"config",
@@ -2833,6 +2920,145 @@ done"#;
         }
         // These four waited behind a one-second exchange with a 500 ms bound.
         assert_eq!(forwarded, vec![8, 10]);
+    }
+
+    fn envelope_for(request: &[u8]) -> Vec<u8> {
+        let mut envelope = vec![1];
+        envelope.extend_from_slice(&6u32.to_le_bytes());
+        envelope.extend_from_slice(b"config");
+        envelope.extend_from_slice(request);
+        envelope
+    }
+
+    fn author_request(body_length: usize) -> Vec<u8> {
+        let mut request = vec![7];
+        request.resize(1 + body_length, b' ');
+        request
+    }
+
+    /// Every operation's body has its own bound, named, and judged before the
+    /// Host sees a byte: the byte proxy and the serving socket share it.
+    #[test]
+    fn operation_bodies_have_named_bounds_on_the_public_envelope() {
+        let judge = |request: &[u8]| public_envelope(&envelope_for(request), b"config", false);
+        // Op 7: the bound is the largest legitimate source plus its kind frame.
+        assert_eq!(judge(&author_request(AUTHOR_BODY_MAX)), Ok(()));
+        assert_eq!(
+            judge(&author_request(AUTHOR_BODY_MAX + 1)),
+            Err("author request body exceeds its bound")
+        );
+        // The measured worst case: a 12 MB op 7 body.
+        assert_eq!(
+            judge(&author_request(HOST_MAX_FRAME - 1)),
+            Err("author request body exceeds its bound")
+        );
+        // Op 9: a list of at most four signatures.
+        let mut signatures = vec![9];
+        signatures.resize(1 + SIGNATURES_BODY_MAX, b' ');
+        assert_eq!(judge(&signatures), Ok(()));
+        signatures.push(b' ');
+        assert_eq!(judge(&signatures), Err("signatures request body exceeds its bound"));
+        // Ops 0 and 6 take no payload.
+        assert_eq!(judge(&[0]), Ok(()));
+        assert_eq!(judge(&[6]), Ok(()));
+        assert_eq!(judge(&[0, 1]), Err("operation takes no request body"));
+        assert_eq!(judge(&[6, 0]), Err("operation takes no request body"));
+        // Op 8 (inspect) and the state-touching operations keep the frame bound.
+        assert_eq!(judge(&[8, 1, 2, 3]), Ok(()));
+    }
+
+    /// An oversized author body is refused by name at the serving socket, never
+    /// reaches the Host, and the service answers the next request.
+    #[test]
+    fn serve_refuses_an_oversized_author_body_by_name_and_serves_on() {
+        let service = fake_service(
+            "author-bound",
+            ServeBounds {
+                read_deadline: Duration::from_secs(10),
+                max_connections: 8,
+                host_queue: 4,
+                queue_residence: Duration::from_secs(60),
+            },
+        );
+        let oversized = vec![b' '; AUTHOR_BODY_MAX + 1];
+        let refused = invoke(&service.socket, &service.config, 7, &oversized).unwrap_err();
+        assert_eq!(
+            refused,
+            "socket rejected request: author request body exceeds its bound"
+        );
+        assert_eq!(timed_invoke(&service, 5).0.unwrap(), vec![5]);
+        assert_eq!(
+            invoke(&service.socket, &service.config, 7, &vec![b' '; 1024]).unwrap(),
+            vec![7]
+        );
+        assert_eq!(service.forwarded(), vec![5, 7]);
+    }
+
+    /// The Host-time budget is by operation: the pure source-owned operations
+    /// get far less than a state-touching one, and a request that outlives its
+    /// budget is cut off with the Host's reply deadline, not left for 600 s.
+    #[test]
+    fn host_time_budget_is_per_operation_and_cuts_off_a_slow_host() {
+        for pure in [0u8, 6, 7, 8, 9, 10, 11] {
+            assert_eq!(host_budget(&[pure]), HOST_PURE_OP_BUDGET, "op {pure}");
+        }
+        for state in [1u8, 2, 3, 4, 5, 20, 130, 153] {
+            assert_eq!(host_budget(&[state]), HOST_STATE_OP_BUDGET, "op {state}");
+        }
+        assert!(HOST_PURE_OP_BUDGET < HOST_STATE_OP_BUDGET);
+        let mut host = HostProcess::start(
+            Command::new("/bin/sh")
+                .arg("-c")
+                .arg("dd bs=1 count=5 of=/dev/null 2>/dev/null; sleep 10"),
+            "fake",
+        )
+        .unwrap();
+        let started = Instant::now();
+        let error = host
+            .exchange_within(&[7], Duration::from_millis(400))
+            .unwrap_err();
+        assert!(error.contains("deadline"), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(5), "waited {:?}", started.elapsed());
+    }
+
+    fn queued_job(marker: u8) -> (HostJob, mpsc::Receiver<Vec<u8>>) {
+        let (reply, answer) = mpsc::sync_channel(1);
+        let job = HostJob {
+            request: vec![marker],
+            reply,
+            queued: Instant::now(),
+            caller: None,
+        };
+        (job, answer)
+    }
+
+    /// With the queue full of one peer's jobs, another peer is not refused
+    /// `busy: host queue full`: it takes a slot, and the fuller peer's newest
+    /// job is answered with the certain 254 refusal, unforwarded.
+    #[test]
+    fn a_full_queue_displaces_the_fullest_peer_with_a_certain_refusal() {
+        let (jobs, mut queue) = fair_queue::<HostJob>(3);
+        let mut answers = Vec::new();
+        for marker in [1u8, 2, 3] {
+            let (job, answer) = queued_job(marker);
+            assert!(queue_job(&jobs, 1000, job).is_ok());
+            answers.push(answer);
+        }
+        // The same peer cannot grow past the bound.
+        let (job, _) = queued_job(9);
+        assert!(matches!(queue_job(&jobs, 1000, job), Err(TrySendError::Full(_))));
+        // Another peer is admitted; peer 1000's newest job (3) is refused.
+        let (job, _answer) = queued_job(4);
+        assert!(queue_job(&jobs, 2000, job).is_ok());
+        assert_eq!(
+            answers[2].try_recv().unwrap(),
+            refusal_frame("busy: host queue share displaced")
+        );
+        assert!(answers[0].try_recv().is_err() && answers[1].try_recv().is_err());
+        // The Host thread serves the two peers in turn; 3 never reaches it.
+        drop(jobs);
+        let order: Vec<u8> = queue.by_ref().map(|job| job.request[0]).collect();
+        assert_eq!(order, vec![1, 4, 2]);
     }
 
     #[test]

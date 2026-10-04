@@ -138,6 +138,7 @@ mod shell;
 #[cfg(unix)]
 mod member;
 #[cfg(unix)]
+mod serve_queue;
 mod transport;
 #[cfg(unix)]
 mod worker;

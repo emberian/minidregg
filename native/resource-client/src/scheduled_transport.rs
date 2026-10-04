@@ -1203,7 +1203,8 @@ mod tests {
                 let mut body = vec![2, 2, 0, 0, 0];
                 body.extend_from_slice(b"{}");
                 body.extend_from_slice(&[7; 32]);
-                body.push(0);
+                // Op 3 (lookup) carries an opaque body; op 0 (describe) takes none.
+                body.push(3);
                 body.extend((0..2500 + class).map(|i| (i % 251) as u8));
                 body
             })
