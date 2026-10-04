@@ -16,6 +16,7 @@
 # updated 2026-10-04: proof-eng: Theory.AssertAxioms imports Theory.AxiomPin (the multi-name #assert_axioms), so the pin command module enters with it  [counts: Minidregg 0 1, Theory 67 147, Kernel 335 477, Pred 7 11, Effects 0 3, Compiler 128 294, Selvage 12 153, Assurance 0 146, Host 66 103, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 10, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-04: RECEIVER-COLLAPSE: Kernel.SubjectKeyRotation becomes Kernel.Receivers.SubjectKeyRotation, the first family on the one receiving pipeline (Theory.Receiving, Kernel.Receiving)  [counts: Minidregg 0 1, Theory 68 148, Kernel 336 481, Pred 7 11, Effects 0 3, Compiler 128 294, Selvage 12 153, Assurance 0 146, Host 66 103, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 10, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-04: shipfix item 4: DeclaredResourceController imports Kernel.RefusalLane (per-signer refusal lane, Host-process state)  [counts: Minidregg 0 1, Theory 68 148, Kernel 337 482, Pred 7 11, Effects 0 3, Compiler 128 294, Selvage 12 153, Assurance 0 146, Host 66 103, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 10, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-04: main 31a9072e..796d7d7a: the objective quotation path and native admission (quote request, invocation layout/settings, package author, authenticated inputs, source-agreement legacy view) are reached from Host.Main  [counts: Minidregg 0 1, Theory 68 149, Kernel 338 486, Pred 7 11, Effects 0 3, Compiler 132 295, Selvage 12 153, Assurance 0 146, Host 72 107, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 10, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -94,12 +95,15 @@ Compiler.NoteSpend
 Compiler.ObjectAudienceCodec
 Compiler.ObjectAudienceRoster
 Compiler.ObjectiveBendCombinedResult
+Compiler.ObjectiveBendDataWire
 Compiler.ObjectiveBendGenericResult
 Compiler.ObjectiveBendNativePlanData
 Compiler.ObjectiveBendPlanAdapter
+Compiler.ObjectiveBendQuoteRequest
 Compiler.ObjectiveBendResultAdapter
 Compiler.ObjectiveBendSourceArtifact
 Compiler.ObjectiveInvocationClaim
+Compiler.ObjectiveInvocationLayout
 Compiler.ObjectiveNativeScalarBinding
 Compiler.ObjectiveSourcePackage
 Compiler.PayEnrolSignatureIO
@@ -127,6 +131,7 @@ Compiler.SemanticArtifactBundle
 Compiler.SemanticManifest
 Compiler.Signature
 Compiler.SigningKeyCommitment
+Compiler.SourceAgreementLegacyCodec
 Compiler.Sp800185Cshake256
 Compiler.Sp800185Cshake256Core
 Compiler.Sp800185Cshake256Fast
@@ -204,12 +209,18 @@ Host.LegacyContentView
 Host.Main
 Host.NativeReserveBirthAuthoring
 Host.NeutralCarryReceiving
+Host.ObjectiveInvocationQuote
+Host.ObjectiveInvocationSettings
+Host.ObjectivePackageAuthor
 Host.PayClaims
 Host.ProviderUsage
 Host.ReceiptContinuity
 Host.RequestRefusal
 Host.ResidentContextInspection
 Host.RetainedSegmentInspection
+Host.SourceAgreementContextInspection
+Host.SourceAgreementJson
+Host.SourceAgreementLegacyView
 Kernel.AgentGrain
 Kernel.ApplicationAgentLifetimeDispatchCore
 Kernel.ApplicationAgentLifetimeDispatchCurrent
@@ -462,6 +473,7 @@ Kernel.ObjectAudience
 Kernel.ObjectAudienceController
 Kernel.ObjectAudienceInstall
 Kernel.ObjectiveBendArtifactSource
+Kernel.ObjectiveBendAuthenticatedInputs
 Kernel.ObjectiveBendNativeAdmission
 Kernel.ObjectiveBendNativeInput
 Kernel.ObjectiveBendPreparedOutput
