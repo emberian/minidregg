@@ -148,7 +148,7 @@ fn submit(mut args: Args) -> Result<()> {
         .pointer("/header/canonical")
         .and_then(Value::as_str)
         .ok_or("refill plan lacks a canonical header")?;
-    let header = unhex(header)?;
+    let header = crate::decode_hex(header)?;
     let signature = signing.sign(&header).to_bytes();
     let ingress = invoke(&ctx, "ingress", 114, &pair(&plan, &signature)?)?;
     retain(&ctx.dir, "ingress.bin", &ingress)?;
@@ -167,16 +167,6 @@ fn lookup(mut args: Args) -> Result<()> {
     let ctx = Context { host, config, socket, dir };
     let result = invoke(&ctx, &stem, 116, &ingress)?;
     outcome(&ctx, &stem, &result)
-}
-
-fn unhex(text: &str) -> Result<Vec<u8>> {
-    if text.len() % 2 != 0 {
-        return Err("odd hex".into());
-    }
-    (0..text.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&text[i..i + 2], 16).map_err(|_| "invalid hex".to_string()))
-        .collect()
 }
 
 /// `mini pay refill --mode submit|lookup ...`, reached from `pay::run`.

@@ -1588,6 +1588,8 @@ fn inspect_public(
     result
 }
 
+/// The crate's one hex decoder: ASCII digits only, even length, never a
+/// panic on non-ASCII input and never `from_str_radix`'s leading `+`.
 fn decode_hex(value: &str) -> Result<Vec<u8>> {
     if !value.len().is_multiple_of(2) { return Err("hex must have even length".into()); }
     fn nibble(byte: u8) -> Result<u8> {
@@ -5075,5 +5077,18 @@ mod ascii_hex_regression {
         }
         assert_eq!(super::decode_hex("00AaFF").unwrap(), [0, 170, 255]);
         assert!(super::decode_hex("").unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod decode_hex_tests {
+    #[test]
+    fn decode_hex_refuses_non_ascii_sign_and_odd_input_without_panic() {
+        assert_eq!(super::decode_hex("00aBff").unwrap(), vec![0, 0xab, 0xff]);
+        // A Host plan header (pay refill reads one) with multi-byte text: the
+        // old slicing decoder panicked on the char boundary.
+        for bad in ["\u{e9}\u{e9}", "a\u{e9}a", "a\u{e9}", "+f", "-1", "0x", "abc", "zz", " 1"] {
+            assert!(super::decode_hex(bad).is_err(), "{bad:?}");
+        }
     }
 }

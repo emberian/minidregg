@@ -114,16 +114,6 @@ fn pair(first: &[u8], second: &[u8]) -> Vec<u8> {
     bytes
 }
 
-fn unhex(text: &str) -> Option<Vec<u8>> {
-    if text.len() % 2 != 0 {
-        return None;
-    }
-    (0..text.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(text.get(i..i + 2)?, 16).ok())
-        .collect()
-}
-
 fn nonce() -> Result<String> {
     let mut bytes = [0u8; 16];
     File::open("/dev/urandom")
@@ -287,7 +277,7 @@ fn tick(
         .and_then(|h| h.get("canonical"))
         .and_then(Value::as_str)
         .ok_or("clock plan lacks a canonical header")?;
-    let header_bytes = unhex(canonical).ok_or("clock plan header is not hex")?;
+    let header_bytes = decode_hex(canonical).map_err(|_| "clock plan header is not hex")?;
     let seed: [u8; 32] = private_bytes(&ws.key, 32)?
         .try_into()
         .map_err(|_| "workspace key must contain exactly 32 raw bytes")?;

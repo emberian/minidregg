@@ -2394,10 +2394,7 @@ fn hex_text(value: Option<&Value>) -> String {
     let Some(hex) = value.and_then(Value::as_str) else {
         return "(absent)".into();
     };
-    let bytes: Option<Vec<u8>> = (0..hex.len())
-        .step_by(2)
-        .map(|i| hex.get(i..i + 2).and_then(|b| u8::from_str_radix(b, 16).ok()))
-        .collect();
+    let bytes: Option<Vec<u8>> = crate::decode_hex(hex).ok();
     match bytes.and_then(|b| String::from_utf8(b).ok()) {
         Some(text) if !text.chars().any(char::is_control) => format!("{text:?}"),
         _ => format!("hex {hex}"),
