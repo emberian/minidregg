@@ -10,16 +10,15 @@
 #             scripts/gates/objective-axioms.pin byte for byte. Self-tested every run:
 #             (a) a theorem planted in a scratch copy must appear and turn the diff red;
 #             (b) a copy whose scan loop is deleted must fail its instrument floor.
-#   frontend  the preview cohort (tests/objective-bend-source/check-preview.ts) and
-#             translation validation (native/bend-source/objective-elaborate-tv.ts):
-#             the TypeScript elaborator against Compiler/ObjectiveBendElaborate.lean.
+#   (the front end -- preview cohort, translation validation, examples, tutorial -- is
+#   scripts/check-objective-frontend.sh, gate objective-frontend)
 #   c         the C differential (native/objective-emit/differential.py) over the
 #             packets of the preview cohort and native/objective-emit/extra-cohort.json:
 #             runtime.c against runBounded, per case, State bytes included.
 #
-# usage: scripts/check-objective-proofs.sh [proofs|frontend|c|all] [--update]
+# usage: scripts/check-objective-proofs.sh [proofs|c|all] [--update]
 #   --update rewrites the two snapshot files (proofs only); commit them with the change
-#   they announce. Requires `bun` for frontend and c (BUN=/path/to/bun or on PATH):
+#   they announce. Requires `bun` for c (BUN=/path/to/bun or on PATH):
 #   absent, those gates are RED, never skipped. Logs: build-logs/objective/<gate>/.
 set -euo pipefail
 root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
@@ -119,21 +118,6 @@ EOF
   [ "$failed" = 0 ]
 }
 
-gate_frontend() {
-  local bun; bun=$(bun_bin)
-  # the modules the two harnesses load (`lean --run` needs every import built)
-  "$lake" build Host.ObjectiveBendPreview Host.ObjectiveBendElaborateRun
-  local lean_bin; lean_bin=$("$lake" env which lean)
-  local failed=0
-  echo "== preview cohort"
-  "$bun" tests/objective-bend-source/check-preview.ts tests/objective-bend-source/preview-cohort.json \
-    "$tmp/preview" "$lean_bin" "$root/.lake/build/lib/lean" "$bun" || failed=1
-  echo "== translation validation"
-  "$bun" native/bend-source/objective-elaborate-tv.ts "$tmp/tv" \
-    "$lake" env lean --run Host/ObjectiveBendElaborateRun.lean || failed=1
-  [ "$failed" = 0 ]
-}
-
 gate_c() {
   local bun; bun=$(bun_bin)
   # `lean --run Compiler/ObjectiveBendEmitCRun.lean` needs every import built
@@ -155,13 +139,12 @@ gate_c() {
 
 case "$what" in
   proofs) gate_proofs 2>&1 | tee "$logs/proofs.log"; exit "${PIPESTATUS[0]}" ;;
-  frontend) gate_frontend 2>&1 | tee "$logs/frontend.log"; exit "${PIPESTATUS[0]}" ;;
   c) gate_c 2>&1 | tee "$logs/c.log"; exit "${PIPESTATUS[0]}" ;;
   all)
     red=0
-    for g in proofs frontend c; do
+    for g in proofs c; do
       if "$0" "$g"; then echo "objective $g: PASS"; else echo "objective $g: RED"; red=$((red+1)); fi
     done
     exit "$red" ;;
-  *) echo "usage: $0 [proofs|frontend|c|all] [--update]" >&2; exit 64 ;;
+  *) echo "usage: $0 [proofs|c|all] [--update]" >&2; exit 64 ;;
 esac
