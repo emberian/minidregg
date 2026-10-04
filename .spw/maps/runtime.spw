@@ -2,6 +2,7 @@
 #:map
 ^"scope"{
  source_revision: "96a4165f81ceee32452b381780970e54b9dce886"
+ later_receiving: "694c84a8; exact changed source hashes and qualification limits recorded in entries/publication receipt"
  kind: "source-read topology, partial coverage"
  destination: "Objective Bend public language; private computation; traffic privacy/agreement; multiuser SPK/Hermes/docuverse worldhost"
  authority: "Lean decides semantic admission; Rust holds keys, files, sockets, workers and physical effects"
@@ -42,8 +43,8 @@
  @signer: ~"../../native/resource-client/src/bend_session.rs"
  @world_codec: ~"../../Compiler/BendWorldProgramCodec.lean"
  edges: ["source/key/result current signed observation -> exact source/compiler binding", "checked current signing plan -> local Ed25519 custody", "physical BFV binary -> opaque output -> current native storage -> independent current release", "retained cursor/attempt -> resume exact identity"]
- state: "Historical TT-backed source route remains present at96a4165; user disabled new TT activation. Host/run explicitly dispatches bend-session/signing-check; signer main special-cases bend-session-sign"
- migration: "Objective native receiving Artifact/profile remains missing per World owner. Current FheArtifact.produce hardcodes TT semantics/arithmetic/evaluator; Binding.verifySource checks BendTT.Book.get. Composition/compiler/World/FHE own replacement actual activation, not renaming labels"
+ state: "At96a4165 TT-backed Host dispatched bend-session/signing-check. Actual694c84a8 Host removes those imports/arms; Rust bend-session-sign remains dangling and new Host refuses its removed source check. FHE owns removal/migration"
+ migration: "Objective native receiving Artifact/profile remains missing. Historical FheArtifact.produce hardcoded TT semantics/arithmetic/evaluator and Binding.verifySource checked BendTT.Book.get; that historical chain is not current Host activation. Edges above describe the intended Objective boundary, not a receiving route already qualified"
  qualification: "Objective typed preview and scenario BoundPlan exist; BoundPlan is not Accepted. Composition exact execution/code artifacts checked against actual Objective DemandMachine.runBounded, while World current receiving Artifact/profile still absent. No Objective native deployment/receiving Artifact claim"
 }
 ^"agreement_and_private"{

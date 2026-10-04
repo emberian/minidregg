@@ -3,6 +3,7 @@
 ^"provenance"{
  revision: "96a4165f81ceee32452b381780970e54b9dce886"
  @receipt: ~"./provenance.json"
+ @publication: ~"./publication.json"
  @topology: ~"../../maps/runtime.spw"
  kind: "source facts and mentally executed scenarios; no deployed-service claim"
 }
@@ -92,6 +93,8 @@
  @codec: ~"../../../Compiler/BendWorldProgramCodec.lean"
  spans_read: ["BendFheArtifact whole", "BendWorldProgramCodec whole", "BendSessionDriver 1-170", "Bend client signer whole"]
  source_present_legacy: ["FheArtifact.produce semantics bendtt-eval-walk-947db722-v1", "arithmetic bendtt-structural-nat-exact-v1", "Kernel.BendNativeRun evaluator/charge", "Binding.verifySource BendTT.Book.get", "BendWorldSource upstream947db722/toolchain4.34"]
+ later_receiving: "Actual694c84a8 Host/Main SHA b53efd56d063558db555153bee098fdafae63767ae94a05b74278eb25986e9d0 removes old TT imports and bend-session/signing arms; historical96a chain above is not current Main activation"
+ dangling_client: "Actual694c client SHA a4366a646640aa92f3f6759ec5b5d24958763c9bc07fafe57abbd4abeca0ed02 retains bend-session-sign4437 and helper invokes removed bend-session-signing-check54. New Host refuses before signing. FHE owner notified to remove/migrate this entrance"
  user_authority: "Objective Bend only; TT historical/disabled for new activation"
  missing_current_route: "Objective receiving Artifact/profile/central current-source/input/output/current-authority/funding acceptance"
  owner_evidence: "World sourceCore4 r6+lowerer r7 typed preview and native BoundPlan exist; not Accepted. Composition ObjectiveDemandCode canonicalTerm/ROM; compiler typed numeric binding; FHE driver migration; World central statement/profile"
@@ -117,12 +120,36 @@
  physical_premise: "Unchanged externally anchored Head checks seed+retained last entry; insert-only Store API preserves earlier prefix. Equal-head cached refresh is justified under honest SQLite/OS immutable-prefix contract. Altering earlier SQL entries or replacing both Store+anchor is outside it; generic Transport type itself does not carry physical proof"
 }
 ^"repair_and_owner_receipts"{
- board: "Isolated sparse-board.patch sent captain; exact-body Rust harness2PASS; actual crate regression queued consent Rust07; common receiving pending"
+ board: "Sparse-board repair published in consumer694c84a8 and actual source inspected; exact-body Rust harness2PASS. Rust07 blocked before tests by Studio closure; corrected Rust09 actual crate regression pending"
  discord: "Owner confirms serialization-only correction/durable accepted+started journals; RAII connection permit follow-up accepted"
- objective: "FHE owner will remove/disable old TT session/signing activation pending real Objective Artifact/profile; compiler new typed numeric binding; source remains separate until received"
+ objective: "Actual694c Host removes old TT session/signing activation; dangling Rust signer remains, FHE notified. Real Objective Artifact/profile/current-authority receiving still missing; compiler typed numeric source separate until received"
  @exits: ~"../horse-exits/exits.spw"
  @consistency: ~"../horse-consistency/consistency.spw"
  @bounds: ~"../horse-bounds/bounds.spw"
+}
+
+^"private_custody_preflight_followup"{
+ @source: ~"../../../native/private-backend/src/native_worker.rs"
+ classification: "Source-read counterexample; backend owner authored repair; common receiving and actual regression pending"
+ trigger: "Absolute output_initial_base=state.output and receiver_wal=state.receiver in one parent derive identical state.initial and state.lock through with_extension. Different names can also alias existing hardlink inodes"
+ before: "Config checks absolute paths but does not reject cross-role custody alias before recipient key/capsule/native work. Same-stem example refuses when bootstrap holds the shared lock; it does not establish a post-WAL output leak"
+ owner_repair: "Config.validate_paths at Config.load and before capsule/key/native work checks actual originals/locks/pending paths, canonical parents, existing symlink and hardlink inode collisions"
+ owner: "private_backend_construction"
+ qualification: "Same-stem and different-name hardlink regression authored; publication and results not yet received"
+ source_scope: "Follow-up to frozen r1, not evidence that reviewed source96a4165 already contained repair"
+}
+^"socket_envelope_and_response_cut"{
+ @source: ~"../../../native/resource-client/src/transport.rs"
+ @bounds: ~"../horse-bounds/bounds.spw"
+ source_revision: "694c84a8"
+ source_sha256: "83afdca96eba73e748813703e0978f2ef767a099b0c2ba9648726548158f7a4e"
+ spans_read: ["Envelope/bounds/public and private allowlists1-615", "DeadlinePipe/Write785-879", "invoke/connect/deadline/response cut879-1195", "serve_connection1676-1745"]
+ ingress: "Bounded nonempty frame grows as bytes arrive; exact config bytes checked. Envelope2 adds exact serving Host SHA; legacy envelope1 is deliberately unpinned. Public proxy checks config and public operation framing; Host owns signed canonical meaning"
+ operator: "Owner-private socket first checks peer UID, then accepts private or public allowlisted operations. Private continuity, lifecycle dispatch and fn frontier cannot enter public-only socket"
+ operation_cut: "153 carries bounded header plus full formerly valid SignedCall. 164 route-bound dispatch may receive34; reverse34 accepts164 only for exact no-record refusal bytes. 255 source response remains distinguishable from254 socket refusal"
+ acknowledgment: "254 only before queue acceptance/Host forwarding. Client write failure may consume already waiting254; otherwise failed write/read, unexpected op, lost queued reply remain uncertain and require retained original lookup"
+ deadline: "Dedicated pinned public reads use one absolute local connect/write/read deadline; ordinary socket invoke uses10s write and600s read. Queue residence and disconnected client cancellation remain separate bounds-owner issue"
+ contract: "Framing admission is not source authority. A syntactically allowed operation still requires current signed law in Host; historical lookup cannot substitute for fresh physical dispatch permit"
 }
 
 ^"attempt_families"{

@@ -24,11 +24,11 @@
   @classification: ~"../../../native/resource-client/src/workspace.rs"
   @publication: ~"../../../native/resource-client/src/publisher.rs"
   state: "One retained semantic call; each physical retry retains independent binary, decoded outcome and optional transport metadata."
-  fact: "Allocator searches 1..9999; publisher scans outcomes only 0..999; workspace sorts filenames lexically and treats every retry-*.json, including transport metadata, as an outcome."
+  fact: "Inspected preimage: allocator searches 1..9999; publisher scans outcomes only 0..999; workspace sorts filenames lexically and treats every retry-*.json, including transport metadata, as an outcome."
   counterexample: "Retry 10000 uncertain must outrank retry 9999 refused. Transport metadata from the same retry must not shadow its decoded refusal. A confirmation at retry 10000 must recover without executing Host again."
   distinction: "Filename width is local custody bookkeeping, not native fuel, a signed expiration or a public DoS bound. Exclusive file creation and original semantic call remain mandatory."
   repair: "Shared numeric filename parser, one-pass next sequence allocation, numeric retained outcome ordering, metadata exclusion; connect all three receiving consumers."
-  execution: "Four filesystem tests passed. Three receiving consumer regressions authored; coherent Rust check pending."
+  execution: "All seven actual resource-client checks passed: four filename/allocation filesystem tests and three receiving workspace/publisher regressions. Publisher recovered retry 10000 with nonexistent Host/config/key/intent and no resubmit. Nextest run 5fa92677-4e7f-434b-88a1-18fb025ac440; tests 0.023 seconds after 28.49-second compile."
   packet: "777262addc4b28bb3d59f7be88449f59716366de9d3d76c016579d92b18b1d41"
   owner: "horse-bounds, captain scoped integration"
 }
@@ -47,10 +47,10 @@
   fact: "Plan.assignments scans every gate on every public tick. Accepted dimensions allow 65536 gates and 4096 ticks even if there are no ANDs and no correlation rows."
   counterexample: "A public XOR-only circuit has no correlation assignments but performs up to 268435456 gate checks in material allocation."
   repair: "Enumerate AND gate positions once, then emit existing rows using quotient/remainder tick coordinates; preserve canonical ordering, malformed partial-prefix behavior and all capacity checks."
-  execution: "Frozen scoped source packet received by captain and private backend. Reference equivalence across 3840 partial/malformed shapes plus valid maximum XOR profile tests authored; narrow Rust qualification pending."
-  packet: "3d6e1f91375add7b9498e82b2cb0d8d436909c1bb6193f711df8e30c99b9737c"
+  execution: "Exact frozen source 880b0988 qualified by private backend: all seven circuit_batch checks passed. They include 3840 partial/malformed reference shapes, maximum accepted XOR-only profile, native codec fixture, lost batch reply with durable replay and retry refusal, changed-generation rejection before snapshot, empty plan, and shape failure burning all rows."
+  packet: "b8a43be48aa1426ccdbe76b043c49aac88a277bee5db894c016abecc6c0fd9cb"
   source_preimage: "1d53dc3124fee1d05ca0df8453d17412a382ef8a0786241e5795963c38852e4b"
-  source_postimage: "adc04738e63b082808ae6b9d61444b2082589026d779fd6a38a0ba3480862475"
+  source_postimage: "880b09884a876a31d0f1bae085d0c817282af813712110fbc0293476cb74634a"
   distinction: "Correlation allocation cost is distinct from circuit evaluation work; this repair cannot advertise the whole execution as free."
 }
 
@@ -66,7 +66,14 @@
   @source: ~"../../../native/private-backend/src/circuit_batch.rs"
   @batch_primitive: ~"../../../native/private-backend/src/codec.rs"
   @anchor: ~"../../../native/private-backend/src/custody.rs"
-  fact: "reserve_plan_release still reconstructs prospective Journal per row and invokes durable anchor RPC once per row, although Journal.reserve_batch and anchor opcode 2 are available. Allocation retention uses nested contains scans."
+  fact: "Inspected preimage: reserve_plan_release reconstructed prospective Journal per row and invoked durable anchor RPC once per row, although Journal.reserve_batch and anchor opcode 2 were available. Allocation retention used nested contains scans."
   distinction: "Fixed public rows must all be durably burned before releasing first secret. Batch must preserve exact manifest order, partial-crash nonreuse and uncertain IO poison; empty-row XOR plans need a separate no-reservation branch."
-  disposition: "Concrete neighboring consumer sent to private backend owner; assignments patch does not change custody."
+  disposition: "Private backend delegated exact consumer repair. Frozen v2 connects one complete reserve_batch/opcode2 request, checks exact prospective manifest and prior bindings with indexed retention, retains empty-plan readbacks. All seven circuit checks actually passed with matching codec/custody source pins; captain scoped integration owns final publication."
+}
+
+^"qualification_and_remaining"{
+  fact: "Fourteen receiving checks passed on frozen source. Client check ran under terminal target handoff and exact existing target lock, 8 GiB, two jobs, offline 180-second bound. Private backend qualified seven circuit tests on its own warm Persvati target."
+  limits: "No modern Host binary deployment or live performance claim. Session v6 is already source-published; captain owns coherent modern Host receiving callback. Bounds coverage remains selected definitions, not a full Mini audit."
+  friction: "Copying 2.1 GiB of warm Rust artifacts was metadata-slow. Replaced it with explicit terminal target ownership handoff under existing lock; only the owned copy process was stopped, partial artifacts preserved."
+  remaining: "Queue pretransmission residence and abandoned caller work need captain/traffic owner. Frontier owns generic agreement engine exact-byte restore cache. Old BendTT active-path migration belongs Objective Bend owners."
 }

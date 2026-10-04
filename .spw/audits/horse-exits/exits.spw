@@ -7,7 +7,7 @@
  @evidence: ~"./provenance.json"
  @coverage: ~"./review.md"
  exclude: ".spw/_workbench/**"
- status: "bounded source audit; one Linux helper test; composition pending"
+ status: "bounded source audit; image, config and rotation source integrated; reusable local invocation four Linux helper tests PASS; new composition pending"
 }
 ^"durable_receipt_cut"{
  @receiver: ~"../../../Compiler/DurableReceiverIO.lean"
@@ -86,16 +86,48 @@
  tier: "counterexample"
  before: "Socket advertises initial Host SHA; crash restart reopened executable pathname without comparing the new image."
  repair: "Every launch copies to executable memfd, seals WRITE/GROW/SHRINK/SEAL, hashes sealed bytes against original pin, and Linux executes the same held proc fd snapshot."
- status: "Initial checked-fd source patch integrated; sealed immutable successor delivered to captain, two extracted exact production helper tests PASS."
+ status: "Sealed immutable successor83afd source published; metadata fallback fenceed1f integrated; two extracted exact production helper tests PASS. Actual Rust09 image-scope batch58PASS and production build succeeded; config/local invocation successors remain separately scoped."
  remaining: ["sealed successor full resource-client composition and native ELF startup", "non-Linux pathname hash/exec race"]
 }
 ^"finding_rotation_integration"{
  @source: ~"../../../native/resource-client/src/key_rotation.rs"
  tier: "counterexample"
- observed: "Common source still old sequential post-admission daily/next secret installs; published helper alone did not wire recovery."
+ observed: "Old common sequential post-admission daily/next installs were initially unwired while helper alone was published."
  owner: "traffic resume_private_construction"
- repair_status: "Owner has actual wired consumer and seven receiving checks passing; captain importing full consumer packet."
+ repair_status: "Actual common wired consumer now matches owner b6a4bcd91e654d26706b782fc509990c95891c9e958a3a36ac31f737d60272b2; source integration catch closed. Seven receiving checks passed on owner build; common binary qualification remains captain scope."
  rule: "Repair evidence belongs to tested owner source until common source byte-match is observed."
+}
+^"finding_restart_config"{
+ @source: ~"../../../native/resource-client/src/transport.rs"
+ tier: "counterexample"
+ before: "Supervisor advertises original config bytes, while crashed Host restart reopened mutable retained config pathname."
+ repair: "Compare retained path to original settings before launch; Linux copies original advertised bytes into read-only sealed memfd and passes retained parent proc fd path to child. Shared snapshot helper serves image and config."
+ status: "Config successor3e1d is actual common source integrated; three extracted exact production helper tests PASS; actual native receiving pending."
+ qualification: "Config in-place rewrite and pathname replacement after check still execute original settings; next start refuses changed settings. Seals deny write and truncate."
+ limit: "Non-Linux comparison remains a checked pathname boundary; no immutable guarantee."
+}
+^"recovered_receipt_consumers"{
+ @provider: ~"../../../native/resource-client/src/provider_continuity.rs"
+ @session: ~"../../../native/resource-client/src/session_enrollment.rs"
+ @participant: ~"../../../native/resource-client/src/participant_enrollment.rs"
+ tier: "inference"
+ finding: "Participant and session submit confirmed classifiers omit reachable recoveredAfterUncertainResponse; exact native recovery never implies freshCasWinner."
+ participant: "Stable result is admitted-key-only; accepting recovered exact receipt does not grant a fresh physical permit."
+ session: "Submit receipt can accept recovered; exact historical lookup separately demands replayed and should preserve that guard."
+ provider: "Resolution lookup is read-only and its actual NativeHost.lookupLoaded producer ALWAYS returns replayed; recovered omission is unreachable here, so no provider change needed."
+ status: "Semantic review sent consistency for owner coordination; no blanket enum mutation."
+}
+^"finding_local_pinned_execution"{
+ @helper: ~"../../../native/resource-client/src/transport.rs"
+ @consumer: ~"../../../native/resource-client/src/current_source.rs"
+ @parent: ~"../../../native/resource-client/src/receipt_continuity.rs"
+ tier: "counterexample"
+ before: "Approved image digest and before/after pathname hashes do not stop a transient replace/restore from executing unapproved image or config bytes."
+ repair: "PinnedLocalInvocation privately retains checked sealed Linux image and original config; only synchronous status/output APIs execute, no Command or child escape. Shared pinned command builder also serves socket restart."
+ qualification: "Four exact-production-helper tests PASS; multiple status hops and captured stdout/stderr still use original image/settings despite path replacement and restoration."
+ ownership: "Exits additive transport helper; traffic current_source consumer; root parent receipt/profile/key/continuity consumers. No duplicate common source edit or build."
+ status: "Helper9f17779e source packet delivered; consumer integration and shared production receiving pending."
+ limit: "Non-Linux remains checked pathname. Captured output preserves standard Command::output semantics; source-specific consumers bound interpretation, no new process resource-bound guarantee."
 }
 ^"remaining_review"{
  status: "not yet read end to end"

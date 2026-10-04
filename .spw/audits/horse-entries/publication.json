@@ -1,0 +1,24 @@
+{
+  "r1": {
+    "upstream_commit": "1bf101de",
+    "consumer_revision": "694c84a8",
+    "captain_receipt": "25 consumer Spw paths published, merged and pushed; actual tracked files inspected",
+    "workbench_revision": "651b535b5171",
+    "mount_policy": "external pinned mount; no gitlink or vendored checkout required; no unrelated hooks installed"
+  },
+  "r2": {
+    "status": "source-only r2 snapshot frozen; captain publication pending",
+    "source_facts": {
+      "native/resource-client/src/transport.rs": "83afdca96eba73e748813703e0978f2ef767a099b0c2ba9648726548158f7a4e",
+      "native/resource-client/src/web.rs": "715a8cfc8a8eea160889f148636d2b92aef3583ef3bdf4d07c1285c9d434d17d",
+      "Host/Main.lean": "b53efd56d063558db555153bee098fdafae63767ae94a05b74278eb25986e9d0",
+      "native/resource-client/src/main.rs": "a4366a646640aa92f3f6759ec5b5d24958763c9bc07fafe57abbd4abeca0ed02"
+    },
+    "pending_receipts": [
+      "Sparse board actual crate regression Rust09",
+      "Private worker Config.validate_paths source receiving and same-stem/hardlink regression",
+      "Job, protected/readback/selected pending receiving recorded in consistency map",
+      "Bounds circuit and client source publication pending after actual scoped tests"
+    ]
+  }
+}

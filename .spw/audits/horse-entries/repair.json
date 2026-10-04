@@ -14,12 +14,14 @@
   },
   "common_receiving": {
     "owner": "captain",
-    "status": "packet delivered; exact common import ACK pending"
+    "status": "captain ACK; actual published consumer source inspected",
+    "consumer_revision": "694c84a8",
+    "source_check": "render_fields iterates present even state fields; actual regression present"
   },
   "integration_validation": {
     "owner": "consent",
-    "batch": "Rust07",
+    "batch": "Rust09",
     "test": "web::tests::board_rendering_visits_sparse_state_fields_without_address_scan",
-    "status": "queued in warm combined client batch"
+    "status": "pending actual test receipt; Rust07 was blocked before tests by unrelated Studio closure"
   }
 }

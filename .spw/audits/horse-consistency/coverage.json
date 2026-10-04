@@ -1,5 +1,5 @@
 {
-  "source_revision": "96a4165",
+  "source_revision": "initial96a4165; current captain intake per-file pins",
   "source_authority": "captain integration",
   "workbench_revision": "651b535b5171",
   "scope": "cross-machine consistency; partial first pass",
@@ -18,7 +18,11 @@
     "doctor": "observed ok, clean mounted infrastructure",
     "roots": "observed correct consumer/infrastructure separation",
     "semantic_review": "actual source read, mixed trace mentally executed",
-    "replan_checks": "authored, integrated run pending"
+    "replan_checks": "client owner actual Rust08 confirms four new retry checks PASS on common c554 source",
+    "job_checks": "Corrected canonical decimal-u128 parser ddc9594: actual retained unknown-gap/legacy-upgrade/identity/path checks pass in Rust11; corrected production client19152795. Actual native legacy refund recovery twice preserves exact original receipt and ingress, no second refund, closed job/bookHeld0; modern new-send, provider payout, real socket fault remain OPEN.",
+    "readback_consumers": "actual Rust10 controls PASS: recovered old-history mode and no anchor downgrade; ProofSource refusal fences acknowledgment (test supplier, not new native crypto proof); exact selected receipt identity/lost Unix lookup no redispatch; native whole exchange OPEN",
+    "worker_upgrade": "actual Rust10 whole physical activation checks PASS freshv2/legacyv1, unchanged call/Sending, tampered sidecar refused; receipt stub does not establish native receipt semantics",
+    "job_native_receiving": "Actual immutable Host740545/setupClient1ad2 performs fresh native funded order/caller-authorized void/refund1000. Corrected client19152795 recovers genuine legacy ingress via163 twice after simulated missing local confirmation; transaction/event/count/root identical, no resubmit/new ingress, balance unchanged. Native final bookHeld0/audit success. Source fixturec8618c95. No Objective or current signing160 claim."
   },
   "coverage": {
     "native/resource-client/src/replan.rs": {
@@ -35,11 +39,11 @@
       "read": "full executable definitions"
     },
     "native/resource-client/src/job.rs": {
-      "sha256": "622b6058d7a85f8eeeb86de1eef38fff8520e6ef34fcdeca7c786ab35c578d09",
+      "sha256": "ddc9594c683353b772c1091355d21515f6a27f800969c317abe20b7ca0f10c09",
       "read": "full executable definitions, canonical native receiving/lookup and inspection spans"
     },
     "native/resource-client/src/selected_exchange.rs": {
-      "sha256": "682eb790e87444159ae84a9e3f7e4478b82e4f258f74ca8b7ba601641e09cbb6",
+      "sha256": "d1ba58eb5cc059226d2556514462389878cb650ce4d4e7f9a81eaefb19b6d351",
       "read": "full executable definitions"
     },
     "native/resource-client/src/main.rs": {
@@ -53,8 +57,68 @@
         "1850-1955",
         "1990-2250"
       ]
+    },
+    "native/resource-client/src/receipt_continuity.rs": {
+      "sha256": "ef0fa2877d1a7060c0d0e2e838854a2996259d73d9bf3e8d4d910f5ba131eef1",
+      "read": "full executable definitions through check_retained; selected tests and relevant mode/anchor invariants"
+    },
+    "native/resource-client/src/selected_release.rs": {
+      "sha256": "1313b3619c6b5a5dc1951f6e1d8e117697dbe5b91850bab209e066b3b64f2273",
+      "read": "full executable definitions and tests"
+    },
+    "native/resource-client/src/provider_continuity.rs": {
+      "sha256": "2c1673bb732bb1d2558595afa8d1f1a6175716c3052b75f56a6c0a929b97869d",
+      "read": "guard/resolve executable spans and native lookup producer",
+      "spans": [
+        "375-820",
+        "965-1005"
+      ]
+    },
+    "native/resource-client/src/drain.rs": {
+      "sha256": "dc8454cf14db8ba8e13fe027d184d0fdc2db6a81a2ca66c1dd3b53a04f00ecdb",
+      "baseline_sha256": "311cc44219082381af083a950556a50b595e79274fb21d7e6a80bfc3a259375e",
+      "read": "full executable definitions, relevant recovery invariants and selected tests"
+    },
+    "Compiler/BendCoreAdmission.lean": {
+      "read": "full executable definitions and relevant invariant statements; proof bodies skipped"
+    },
+    "Compiler/ObjectiveBendElaboration.lean": {
+      "read": "listed executable source spans only",
+      "spans": [
+        "1-45"
+      ]
+    },
+    "native/resource-client/journey.d/job-refund-legacy-recovery.py": {
+      "sha256": "21b3439297b76c376b1b52538816b5a61b8477648de7d6cbc5a57190b15c3c8a",
+      "read": "authored full executable fixture; actual native receiving on c861, subsequent OWN_ROOT cleanup guard separately checked: preexisting-root refusal never invokes retained PID kill; successful native path unchanged",
+      "native_tested_sha256": "c8618c95687acdce0913e4d4215fc8a17ad9c0cfb9834a690e6e829440a4eb4c"
+    },
+    "Kernel/Job.lean": {
+      "read": "executable law clauses0-26; job order/program/void/truth distinction, not full later law"
+    },
+    "Kernel/JobMoney.lean": {
+      "read": "executable payouts/Book fund/claim/settle/decideMoney and no_double_settle theorem statement; proof bodies skipped",
+      "spans": [
+        "127-169",
+        "250-350",
+        "755-783"
+      ]
+    },
+    "Kernel/JobMoneyReceiver.lean": {
+      "read": "actual prepare/state/canonicalBook admission path; proof bodies skipped",
+      "spans": [
+        "240-520"
+      ]
     }
   },
-  "consumer_revision": "fe60a569b3e1863f08159a66c7c53736fe6295b6",
-  "physical_sink_evidence": "peer horse_exits full anchored SQLite source read; conditional physical custody premise"
+  "consumer_revision": "694c84a8",
+  "physical_sink_evidence": "peer horse_exits full anchored SQLite source read; conditional physical custody premise",
+  "native_open_boundaries": [
+    "adversarial operator receipt substitution: exact163 original-ingress receipt binding repair owned consent; honest legacy lookup does not establish this resistance; modern fixture callback paired to repaired client + actual native/consent cohort",
+    "current-client new signed job160 submission requires historical breadth local-consent provider; matched historical206-only helper cannot supply it",
+    "provider payout native recovery; no qualified program runner fixture",
+    "actual socket dropped reply; local missing-confirmation crash boundary simulated after genuine native commit",
+    "selected-exchange whole native receiving",
+    "Objective-only full running path belongs current compiler/world pipeline"
+  ]
 }

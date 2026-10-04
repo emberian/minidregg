@@ -90,14 +90,14 @@
       "basis": "executable definitions read; proof bodies skipped"
     },
     "native/resource-client/src/current_source.rs": {
-      "sha256": "a5d385686808c66b71bb616d0244beae9f18bee392961f0989f8eb7069f5f0a9",
+      "sha256": "5abe45104de335fac2a7797d49bc099fc0c4d451b8622aae5fed03be511d1dad",
       "read_spans": [
         [
           1,
-          186
+          477
         ]
       ],
-      "basis": "executable definitions read; proof bodies skipped"
+      "basis": "whole traffic-owned executable source read; current-source consumer successor owned traffic"
     },
     "native/resource-client/src/protected_object/object_keys.rs": {
       "sha256": "b6978933c787cd40c551c8bfc428807819662cb2022b7cc59f3b820a178487b3",
@@ -254,6 +254,40 @@
         ]
       ],
       "basis": "complete executable definitions at selected sink cuts; surrounding caller chain partial"
+    },
+    "native/resource-client/src/provider_continuity.rs": {
+      "sha256": "2c1673bb732bb1d2558595afa8d1f1a6175716c3052b75f56a6c0a929b97869d",
+      "read_spans": [
+        [
+          1,
+          250
+        ],
+        [
+          410,
+          917
+        ]
+      ],
+      "basis": "selected complete downstream receipt consumers and callers; whole file not read"
+    },
+    "native/resource-client/src/session_enrollment.rs": {
+      "sha256": "f1cd05540629550388cce6c5b35085d00bdaea343588ed00420033fa2491b84b",
+      "read_spans": [
+        [
+          285,
+          535
+        ]
+      ],
+      "basis": "selected complete downstream receipt consumers and callers; whole file not read"
+    },
+    "native/resource-client/src/participant_enrollment.rs": {
+      "sha256": "bfb2b2b6b2024e7c6e51903b9e8691a3a302a7d801bb8fc64652a773bf0e48cf",
+      "read_spans": [
+        [
+          1580,
+          1803
+        ]
+      ],
+      "basis": "selected complete downstream receipt consumers and callers; whole file not read"
     }
   },
   "commands": [
@@ -261,13 +295,18 @@
     "npm --prefix .spw/_workbench run spw -- select .spw/audits/horse-exits/exits.spw --selector navigable --limit 80 --summary",
     "cargo nextest run --offline -E test(socket_restart_refuses_replaced_host_under_original_pin)",
     "npm --prefix .spw/_workbench run spw -- lint --from .spw/audits/horse-exits --json",
-    "npm --prefix .spw/_workbench run spw -- resolve --from .spw/audits/horse-exits --json"
+    "npm --prefix .spw/_workbench run spw -- resolve --from .spw/audits/horse-exits --json",
+    "cargo nextest run --offline (isolated native-config-test exact helper extraction; CARGO_BUILD_JOBS=2)",
+    "cargo nextest run --offline (isolated native-local-invoke-test exact helper extraction; CARGO_BUILD_JOBS=2)"
   ],
   "qualification": {
     "restart_helper": "Linux sealed successor exact production definitions: two passed, zero skipped, 0.004s; replacement-between-restarts and in-place+rename in check/exec window; seals deny write/truncate",
-    "full_client": "pending captain composition",
+    "full_client": "Consent reports actual Rust09 image-only scope58PASS+productionc83; config and local invocation parent/traffic receiving pending",
     "mounted_tools": "invoked and observed doctor/select/lint; initial missing tsx resolved by entries owner",
-    "native_elf_loader": "readelf existing unified Host only system NEEDED, no RPATH/RUNPATH; actual sealed native startup still pending"
+    "native_elf_loader": "readelf existing unified Host only system NEEDED, no RPATH/RUNPATH; actual sealed native startup still pending",
+    "config_helper": "Three extracted exact production helper tests Linux PASS0.005s, including config rewrite/rename after check, sealed write/truncate refusal, changed-settings restart refusal",
+    "local_invocation_helper": "Four exact production helper tests Linux PASS0.009s, including repeated status and captured output calls across image/config replacement+restoration",
+    "approved_helper_loader": "Traffic owner inspected actual approved95928 ELF: system NEEDED only libc/ld-linux/pthread/dl/rt/m, no RPATH/RUNPATH/$ORIGIN; receiving still depends on original373 continuity and source151"
   },
   "remote_only": {
     "Compiler/DurableReceiverIO.lean": {
@@ -313,6 +352,14 @@
     "initial_transport_output": "c7ec7991a46b5528224f95593349139cf2c6d4de0f13c7dda869b7f553a4e24f",
     "successor_output": "83afdca96eba73e748813703e0978f2ef767a099b0c2ba9648726548158f7a4e",
     "successor_patch_sha256": "869738d2c797965e2a7171b628d71ffb0dd6080cd4d6e15e311d31374472fd30",
-    "status": "source packet delivered; root applying; no deployment claim"
-  }
+    "status": "sealed image source published; metadata fallback source integrated; config successor source packet delivered; no deployment claim",
+    "metadata_output": "ed1f054d61cedf04408d3482a992214327a1696d229887d4e9da1a8363719da3",
+    "config_output": "3e1d4b53c0a5a4fdb9f6e0725c7c1ac46b9c2cde013e1635477547f9cf22c375",
+    "config_patch_sha256": "9f79180fbcce6f2395e117eb3f596636a6d8e55729687f5abf6f5fa786b1cc63",
+    "config_status": "actual common source3e1d byte-confirmed",
+    "local_invocation_preimage": "3e1d4b53c0a5a4fdb9f6e0725c7c1ac46b9c2cde013e1635477547f9cf22c375",
+    "local_invocation_output": "9f17779ee07e55e842f2764c0440a424fd24755e052679a910dca34a11e35e40",
+    "local_invocation_patch_sha256": "4560db81678a6c967198a6c787eeedee5fec294e70b284eddaccfc1169c747e5"
+  },
+  "rotation_current_common_sha256": "b6a4bcd91e654d26706b782fc509990c95891c9e958a3a36ac31f737d60272b2"
 }

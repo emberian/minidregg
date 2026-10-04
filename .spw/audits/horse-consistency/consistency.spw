@@ -3,8 +3,8 @@
 #:audit
 
 ^"provenance"{
-  consumer_revision: "fe60a569b3e1863f08159a66c7c53736fe6295b6"
-  semantic_source_revision: "96a4165"
+  consumer_revision: "694c84a8 (r1 map published; this status overlay pending)"
+  semantic_source_revision: "initial common96a4165; current repairs use exact per-file hashes and captain intake, no uniform revision claim"
   semantic_source: "captain authoritative integration source, with per-file hashes in coverage.json"
   workbench_revision: "651b535b5171"
   exclusions: [".spw/_workbench/**", "proof-only bodies", "runtime journals", "keys", "private configurations"]
@@ -20,7 +20,7 @@
   fact: "Thread-local HostDecision survives after race classification; old code begins the next attempt without clearing it."
   counterexample: ["attempt A emits decoded stale-root", "A evidence retires", "attempt B sends its exact call then loses its reply", "B records no HostDecision", "A stale-root is reused", "B evidence retires despite unknown effect"]
   repair: "Clear previous decision at entry of every attempt. Retain current terminal refusal for diagnostics; clear superseded refusal on success."
-  source_status: "isolated patch c554d54f from base e97ea3; captain intake r1; integrated test pending"
+  source_status: "main bce707 includes c554d54f; client owner actual Rust08 confirms four new retry checks PASS; broader native lost-response receiving remains distinct."
 }
 
 ^"accepted_readback"{
@@ -32,7 +32,7 @@
   distinct_authority: "Confirmed history does not imply a fresh CAS winner or permission for new physical dispatch."
   contradiction: "replan holds_accepted omitted this confirmed variant and could retire its evidence."
   repair: "Recognize the source enum's recovered confirmed variant in evidence-retirement fence."
-  open: "Protected receipt continuity mode and selected exchange confirmation consumers still under review; do not broaden fresh physical dispatch authority."
+  repair_consumers: "Source packet9b39aa02 applied common adds protected recovered receipt -> ReceiptReplay mode, requiring verified lineage without anchor downgrade; selected exchange binds all original receipt coordinates across later lookups. Actual Rust10 checks verified recovered history mode, unchanged anchor and proof-supplier refusal; no fresh physical dispatch authority."
 }
 
 ^"fn_wake"{
@@ -54,8 +54,13 @@
   identity: "Exact ingress transaction and nullifier bind historical replay; fresh nonce is a different request."
   fact: "Client settle reuses only earlier attempts containing confirmed JSON, ignoring an ingress whose submit reply was lost."
   counterexample: ["settle accepted and closes job", "op162 reply lost", "no confirmed JSON retained", "next settle creates fresh nonce", "closed job refuses fresh settlement", "original accepted receipt remains unreachable through normal settle"]
-  repair: "Isolated client recovery first performs native receipt-only op163 on exact retained canonical ingress; only native absent permits exact original resubmission. Fresh planning requires exclusively definitive refusals."
-  source_status: "authored, source packet and joined receiving pending; no second payout inferred because native closed-state and nullifier guards remain."
+  repair: "r3 records a fresh-only exact-ingress custody origin and persists distinct exact-ingress-bound send marker BEFORE each op162, pairs native outcome by send ID, and retains every unknown gap through later refusals. Recovery op163 first; absent permits only original bytes. Fresh planning needs definitive native refusal for every recorded send; legacy incomplete custody remains recover-only."
+  source_status: "r1 refuted: unrecorded first lost reply erased by later refusal. r2 refuted: legacy missing original send upgraded by first modern resend. r3 missing origin never upgraded. Rust10 refuted parser: actual nonce decimal-u128 versus assumed hex32. Root repaired canonical decimal roundtrip, source ddc9594; actual unknown-gap/legacy-upgrade/identity/path checks and corrected production client19152795 pass."
+  fixture: ~"../../../native/resource-client/journey.d/job-refund-legacy-recovery.py"
+  native_receiving: "Actual fresh native Book refund1000 and closed job under immutable old Host740545/setupClient1ad2. Corrected client19152795 twice recovers genuine legacy retained ingress via163 after fixture-owned confirmation moved away: same transaction/event/count/root; no resubmit/new ingress, unchanged balance, final native bookHeld0 and audit success. Native-tested fixture c8618c95, published source21b34392 adds separately checked own-root cleanup guard; local missing confirmation is simulated after native commit, no real dropped socket claim."
+  general_native_constraint: "Kernel.JobMoney.no_double_settle constrains the real accepted money decision: after accepted settlement, no further money command can accept on that closed job. This fixture exercises refund and historical receipt recovery, not the theorem for all native storage states."
+  operator_boundary: "Legacy receiving used honest actual native lookup; equality against original captured receipt is observed, not malicious-operator resistance. Exact163 original-ingress binding repair belongs consent; modern fixture must receive after that repair and coherent native/consent callback."
+  still_open: "Modern new-send custody under native160, provider payout and actual socket-loss receiving; current-client signing requires a matched historical breadth consent provider. No Objective execution inferred."
 }
 
 ^"selected_exchange"{
@@ -64,7 +69,10 @@
   states: ["signed exact current source", "prepared immutable owner packet", "native source acceptance", "fn POST custody", "exact poll packet", "recipient submit or lookup", "receipt", "cursor frontier"]
   custody: "Packet/article bytes and contract are pinned; recovery uses retained recipient ingress and lookup."
   semantic_boundary: "fn accepted or already-stored is transport evidence; only native recipient confirmed outcome permits frontier advancement."
-  open: "checked_receipt omits native recovered confirmed variant; full receiving and frontier definitions still being read."
+  repair: "checked_receipt accepts native recovered confirmed history while every later lookup binds exact transactionId/eventId/acceptedCount/worldRoot. Source packet9b39aa02 applied common by captain, actual Rust10 receipt/lost-lookup checks PASS; broader native receiving remains OPEN."
+  counterexample: ["retained recipient attempt exists after failed submit", "op21 lookup returns native absent", "old exchange calls only lookup on every retry", "standalone exact retry_submit exists but exchange has no consumer", "whole exchange remains stuck"]
+  recovery: "Both actual exchange paths now consume checked native lookup: absent alone resubmits the SAME retained ingress via op20; confirmed returns; lost/uncertain lookup stops before dispatch. Native decoder result reused immediately, cached JSON never authorizes retry."
+  receiving: "Extended actual Unix-socket lost/mismatched response check asserts recovery lost lookup creates only op21 marker and no further op20; native whole exchange receiving remains OPEN."
 }
 
 ^"neighbor_ownership"{
@@ -86,4 +94,31 @@
   premise: "Earlier-prefix immutability requires honest protected SQLite/storage and the native API. Replacing both Store and anchor or editing earlier entries outside the API violates this premise."
   disposition: "Conditional deployment contract, not a demonstrated native bug. GenericTransport alone does not prove physical immutable prefix."
   evidence_owner: "horse_exits read publication lib e95487cc and anchor 2766a108; consistency read session/extendFrom executable definitions."
+}
+
+^"producer_range"{
+  consumer: ~"../../../native/resource-client/src/provider_continuity.rs"
+  producer: ~"../../../Kernel/NativeHost.lean"
+  scope: "Read-only resolve_attempt -> host_files lookup -> NativeHost.lookupLoaded."
+  fact: "Current lookupLoaded confirmed result is exclusively replayed after historicalReceipt; recovered variant cannot arrive from this producer."
+  disposition: "Generic enum omission is not a demonstrated provider bug. No blanket variant patch applied. Submit-facing consumers have a broader actual producer range."
+}
+
+^"worker_pin_upgrade"{
+  source: ~"../../../native/resource-client/src/drain.rs"
+  neighbor: ~"../../../native/resource-client/src/worker.rs"
+  phases: ["Polling", "Preparing", "Ready", "Sending", "Acking", "Held", "completed archive"]
+  custody: "Sending is persisted before submit. Recovery native lookup confirms exact original receipt or proves absence before same-call submit; unknown holds. Exact ACK and cursor-prefix coverage remain distinct, with bounded explicit ACK recovery."
+  contradiction: "pin creates v2 for all fresh workers, while upgrade_host final recheck used v1-only pin_identity against retained old_pin. Every fresh v2 worker upgrade therefore refused even with matching receipt and images."
+  repair: "Factor original version-aware physical pin checker into expected_pin, shared by startup and final upgrade recheck; preserve original evidence/manifest/image/config/key/call checks and locks."
+  status: "source dc8454cf packetbd1457c9 applied common by captain; actual Rust10 physical activation/unchanged-call/sidecar checks PASS; not native receipt semantics."
+  check: "New whole physical upgrade fixture covers freshv2 and legacyv1, unchanged original call/Sending phase, tampered predecessor sidecar refusal. Stub receipt bytes exercise physical activation only; they do not establish native receipt semantics."
+}
+
+^"objective_only_migration"{
+  admission: ~"../../../Compiler/BendCoreAdmission.lean"
+  elaboration: ~"../../../Compiler/ObjectiveBendElaboration.lean"
+  fact: "Current admit executable still parses/checks Theory.BendTTSource Book; Objective elaboration currently lowers references/rewriteRefs to BendTT.Term. Actual artifact-admission dependency, not only stale naming."
+  owner: "Existing compiler/world/composition migration owners notified; no deletion of live WIP."
+  boundary: "Objective Bend is sole requested language. These old gate dependencies do not establish Objective-only runtime activation; common Host/Main public Bend route was not found in current scan."
 }

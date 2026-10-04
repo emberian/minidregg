@@ -7,7 +7,7 @@
     "version": "0.3.0"
   },
   "command": "graph",
-  "timestamp": "2026-10-03T16:58:44.066Z",
+  "timestamp": "2026-10-03T17:11:15.503Z",
   "ok": true,
   "data": {
     "controls": {
@@ -16,7 +16,7 @@
     },
     "primary": {
       "files": 9,
-      "links": 122,
+      "links": 140,
       "cyclic": true,
       "cycleWitness": [
         ".spw/audits/horse-entries/entrances.spw",
@@ -34,32 +34,32 @@
         {
           "id": ".spw/audits/horse-entries/entrances.spw",
           "inDegree": 4,
-          "outDegree": 24,
-          "total": 28
+          "outDegree": 31,
+          "total": 35
         },
         {
           "id": ".spw/audits/horse-exits/exits.spw",
           "inDegree": 5,
-          "outDegree": 18,
-          "total": 23
+          "outDegree": 21,
+          "total": 26
         },
         {
           "id": ".spw/audits/horse-consistency/consistency.spw",
           "inDegree": 5,
-          "outDegree": 13,
-          "total": 18
-        },
-        {
-          "id": ".spw/index.spw",
-          "inDegree": 2,
-          "outDegree": 12,
-          "total": 14
+          "outDegree": 17,
+          "total": 22
         },
         {
           "id": ".spw/audits/horse-bounds/bounds.spw",
           "inDegree": 4,
-          "outDegree": 8,
-          "total": 12
+          "outDegree": 11,
+          "total": 15
+        },
+        {
+          "id": ".spw/index.spw",
+          "inDegree": 2,
+          "outDegree": 13,
+          "total": 15
         },
         {
           "id": ".spw/workspace.spw",
@@ -74,13 +74,19 @@
           "total": 5
         },
         {
-          "id": "Host/Main.lean",
-          "inDegree": 4,
+          "id": "Compiler/DurableReceiverIO.lean",
+          "inDegree": 5,
           "outDegree": 0,
-          "total": 4
+          "total": 5
         },
         {
           "id": "native/resource-client/src/main.rs",
+          "inDegree": 5,
+          "outDegree": 0,
+          "total": 5
+        },
+        {
+          "id": "Host/Main.lean",
           "inDegree": 4,
           "outDegree": 0,
           "total": 4
@@ -98,7 +104,7 @@
           "total": 3
         },
         {
-          "id": "Compiler/DurableReceiverIO.lean",
+          "id": "Kernel/NativeHostSession.lean",
           "inDegree": 3,
           "outDegree": 0,
           "total": 3
@@ -116,19 +122,37 @@
           "total": 2
         },
         {
-          "id": "Kernel/NativeHostSession.lean",
-          "inDegree": 2,
-          "outDegree": 0,
-          "total": 2
-        },
-        {
           "id": "native/discord-entrance/src/server.rs",
           "inDegree": 2,
           "outDegree": 0,
           "total": 2
         },
         {
+          "id": "native/hyperdocument-link-sqlite-store/src/anchor.rs",
+          "inDegree": 2,
+          "outDegree": 0,
+          "total": 2
+        },
+        {
+          "id": "native/hyperdocument-link-sqlite-store/src/lib.rs",
+          "inDegree": 2,
+          "outDegree": 0,
+          "total": 2
+        },
+        {
           "id": "native/joint-agreement-crypto/src/main.rs",
+          "inDegree": 2,
+          "outDegree": 0,
+          "total": 2
+        },
+        {
+          "id": "native/private-backend/src/circuit_batch.rs",
+          "inDegree": 2,
+          "outDegree": 0,
+          "total": 2
+        },
+        {
+          "id": "native/private-backend/src/custody.rs",
           "inDegree": 2,
           "outDegree": 0,
           "total": 2
@@ -180,30 +204,6 @@
           "inDegree": 2,
           "outDegree": 0,
           "total": 2
-        },
-        {
-          "id": ".spw/_workbench",
-          "inDegree": 1,
-          "outDegree": 0,
-          "total": 1
-        },
-        {
-          "id": ".spw/_workbench/lib/spw-v0.3.0",
-          "inDegree": 1,
-          "outDegree": 0,
-          "total": 1
-        },
-        {
-          "id": ".spw/_workbench/packages/spw-cli",
-          "inDegree": 1,
-          "outDegree": 0,
-          "total": 1
-        },
-        {
-          "id": ".spw/audits/horse-consistency/coverage.json",
-          "inDegree": 1,
-          "outDegree": 0,
-          "total": 1
         }
       ],
       "orphans": [],
@@ -211,35 +211,35 @@
       "strands": [
         {
           "id": "shared_path_basenames",
-          "score": 0.09836065573770492,
-          "detail": "main.rs\u00d712, exits.spw\u00d75, consistency.spw\u00d75, transport.rs\u00d74, Main.lean\u00d74, runtime.spw\u00d74, bounds.spw\u00d74, DurableReceiverIO.lean\u00d73"
+          "score": 0.09285714285714286,
+          "detail": "main.rs\u00d713, DurableReceiverIO.lean\u00d75, exits.spw\u00d75, consistency.spw\u00d75, transport.rs\u00d74, Main.lean\u00d74, runtime.spw\u00d74, bounds.spw\u00d74"
         },
         {
           "id": "sigil_rhythm",
-          "score": 0.39869281045751637,
-          "detail": "~:122 @:106 ^:54 #:23 .:1 &:0 %:0 $:0"
+          "score": 0.40816326530612246,
+          "detail": "~:140 @:120 ^:59 #:23 .:1 &:0 %:0 $:0"
         },
         {
           "id": "frame_density",
-          "score": 0.10386965376782077,
-          "detail": "51 frames / 491 lines"
+          "score": 0.10071942446043165,
+          "detail": "56 frames / 556 lines"
         },
         {
           "id": "path_ref_density",
-          "score": 0.24236252545824846,
-          "detail": "119 path refs across 9 files"
+          "score": 0.24640287769784172,
+          "detail": "137 path refs across 9 files"
         },
         {
           "id": "root_shelves",
-          "score": 0.00819672131147541,
+          "score": 0.007142857142857143,
           "detail": "@runtime\u00d71, @entrances\u00d71, @coverage\u00d71"
         }
       ],
       "sigilHistogram": {
-        "~": 122,
+        "~": 140,
         "#": 23,
-        "@": 106,
-        "^": 54,
+        "@": 120,
+        "^": 59,
         "&": 0,
         "%": 0,
         "$": 0,
@@ -249,20 +249,20 @@
         "=": 0,
         ".": 1
       },
-      "edgeCount": 122,
-      "nodeCount": 76
+      "edgeCount": 140,
+      "nodeCount": 85
     },
     "product": {
       "version": "spw.corpus/2",
       "schema": "spw.corpus/1",
-      "fingerprint": "247f651656f417dd1db67a10",
+      "fingerprint": "caebd09a3a70b69394c8653e",
       "roots": [
         ".spw"
       ],
       "hubTop": 30,
       "resolvePaths": true,
       "indexDepth": "standard",
-      "scannedAt": "2026-10-03T16:58:44.063Z",
+      "scannedAt": "2026-10-03T17:11:15.501Z",
       "links": [
         {
           "from": ".spw/audits/horse-bounds/bounds.spw",
@@ -303,113 +303,162 @@
           "from": ".spw/audits/horse-bounds/bounds.spw",
           "to": "Kernel/TailBound.lean",
           "kind": "path",
-          "line": 55,
+          "line": 58,
           "label": "../../../Kernel/TailBound.lean"
         },
         {
           "from": ".spw/audits/horse-bounds/bounds.spw",
           "to": "Compiler/FnEvidenceCodec.lean",
           "kind": "path",
-          "line": 56,
+          "line": 59,
           "label": "../../../Compiler/FnEvidenceCodec.lean"
         },
         {
           "from": ".spw/audits/horse-bounds/bounds.spw",
           "to": "Kernel/BendActivityPendingAdmission.lean",
           "kind": "path",
-          "line": 57,
+          "line": 60,
           "label": "../../../Kernel/BendActivityPendingAdmission.lean"
+        },
+        {
+          "from": ".spw/audits/horse-bounds/bounds.spw",
+          "to": "native/private-backend/src/circuit_batch.rs",
+          "kind": "path",
+          "line": 66,
+          "label": "../../../native/private-backend/src/circuit_batch.rs"
+        },
+        {
+          "from": ".spw/audits/horse-bounds/bounds.spw",
+          "to": "native/private-backend/src/codec.rs",
+          "kind": "path",
+          "line": 67,
+          "label": "../../../native/private-backend/src/codec.rs"
+        },
+        {
+          "from": ".spw/audits/horse-bounds/bounds.spw",
+          "to": "native/private-backend/src/custody.rs",
+          "kind": "path",
+          "line": 68,
+          "label": "../../../native/private-backend/src/custody.rs"
         },
         {
           "from": ".spw/audits/horse-consistency/consistency.spw",
           "to": ".spw/audits/horse-consistency/coverage.json",
           "kind": "path",
-          "line": 10,
+          "line": 11,
           "label": "./coverage.json"
         },
         {
           "from": ".spw/audits/horse-consistency/consistency.spw",
           "to": "native/resource-client/src/replan.rs",
           "kind": "path",
-          "line": 15,
+          "line": 16,
           "label": "../../../native/resource-client/src/replan.rs"
         },
         {
           "from": ".spw/audits/horse-consistency/consistency.spw",
           "to": "native/resource-client/src/main.rs",
           "kind": "path",
-          "line": 16,
+          "line": 17,
           "label": "../../../native/resource-client/src/main.rs"
         },
         {
           "from": ".spw/audits/horse-consistency/consistency.spw",
           "to": "Compiler/DurableReceiverIO.lean",
           "kind": "path",
-          "line": 26,
+          "line": 27,
           "label": "../../../Compiler/DurableReceiverIO.lean"
         },
         {
           "from": ".spw/audits/horse-consistency/consistency.spw",
           "to": "native/resource-client/src/replan.rs",
           "kind": "path",
-          "line": 27,
+          "line": 28,
           "label": "../../../native/resource-client/src/replan.rs"
         },
         {
           "from": ".spw/audits/horse-consistency/consistency.spw",
           "to": "native/resource-client/src/receipt_continuity.rs",
           "kind": "path",
-          "line": 28,
+          "line": 29,
           "label": "../../../native/resource-client/src/receipt_continuity.rs"
         },
         {
           "from": ".spw/audits/horse-consistency/consistency.spw",
           "to": "native/resource-client/src/worker.rs",
           "kind": "path",
-          "line": 38,
+          "line": 39,
           "label": "../../../native/resource-client/src/worker.rs"
         },
         {
           "from": ".spw/audits/horse-consistency/consistency.spw",
           "to": "native/resource-client/src/drain.rs",
           "kind": "path",
-          "line": 39,
+          "line": 40,
           "label": "../../../native/resource-client/src/drain.rs"
         },
         {
           "from": ".spw/audits/horse-consistency/consistency.spw",
           "to": "native/resource-client/src/job.rs",
           "kind": "path",
-          "line": 48,
+          "line": 49,
           "label": "../../../native/resource-client/src/job.rs"
         },
         {
           "from": ".spw/audits/horse-consistency/consistency.spw",
           "to": "Kernel/JobMoneyReceiver.lean",
           "kind": "path",
-          "line": 49,
+          "line": 50,
           "label": "../../../Kernel/JobMoneyReceiver.lean"
         },
         {
           "from": ".spw/audits/horse-consistency/consistency.spw",
           "to": "Host/Main.lean",
           "kind": "path",
-          "line": 50,
+          "line": 51,
           "label": "../../../Host/Main.lean"
         },
         {
           "from": ".spw/audits/horse-consistency/consistency.spw",
           "to": "native/resource-client/src/selected_exchange.rs",
           "kind": "path",
-          "line": 60,
+          "line": 62,
           "label": "../../../native/resource-client/src/selected_exchange.rs"
         },
         {
           "from": ".spw/audits/horse-consistency/consistency.spw",
           "to": "native/resource-client/src/selected_release.rs",
           "kind": "path",
-          "line": 61,
+          "line": 63,
           "label": "../../../native/resource-client/src/selected_release.rs"
+        },
+        {
+          "from": ".spw/audits/horse-consistency/consistency.spw",
+          "to": "Kernel/NativeHostSession.lean",
+          "kind": "path",
+          "line": 80,
+          "label": "../../../Kernel/NativeHostSession.lean"
+        },
+        {
+          "from": ".spw/audits/horse-consistency/consistency.spw",
+          "to": "Compiler/DurableReceiverIO.lean",
+          "kind": "path",
+          "line": 81,
+          "label": "../../../Compiler/DurableReceiverIO.lean"
+        },
+        {
+          "from": ".spw/audits/horse-consistency/consistency.spw",
+          "to": "native/hyperdocument-link-sqlite-store/src/lib.rs",
+          "kind": "path",
+          "line": 82,
+          "label": "../../../native/hyperdocument-link-sqlite-store/src/lib.rs"
+        },
+        {
+          "from": ".spw/audits/horse-consistency/consistency.spw",
+          "to": "native/hyperdocument-link-sqlite-store/src/anchor.rs",
+          "kind": "path",
+          "line": 83,
+          "label": "../../../native/hyperdocument-link-sqlite-store/src/anchor.rs"
         },
         {
           "from": ".spw/audits/horse-entries/entrances.spw",
@@ -580,6 +629,55 @@
           "label": "../horse-bounds/bounds.spw"
         },
         {
+          "from": ".spw/audits/horse-entries/entrances.spw",
+          "to": "native/resource-client/src/main.rs",
+          "kind": "path",
+          "line": 129,
+          "label": "../../../native/resource-client/src/main.rs"
+        },
+        {
+          "from": ".spw/audits/horse-entries/entrances.spw",
+          "to": "native/resource-client/src/agent_reserve.rs",
+          "kind": "path",
+          "line": 130,
+          "label": "../../../native/resource-client/src/agent_reserve.rs"
+        },
+        {
+          "from": ".spw/audits/horse-entries/entrances.spw",
+          "to": "native/resource-client/src/session_enrollment.rs",
+          "kind": "path",
+          "line": 131,
+          "label": "../../../native/resource-client/src/session_enrollment.rs"
+        },
+        {
+          "from": ".spw/audits/horse-entries/entrances.spw",
+          "to": "native/resource-client/src/share_issue.rs",
+          "kind": "path",
+          "line": 132,
+          "label": "../../../native/resource-client/src/share_issue.rs"
+        },
+        {
+          "from": ".spw/audits/horse-entries/entrances.spw",
+          "to": "native/resource-client/src/fn_frontier.rs",
+          "kind": "path",
+          "line": 133,
+          "label": "../../../native/resource-client/src/fn_frontier.rs"
+        },
+        {
+          "from": ".spw/audits/horse-entries/entrances.spw",
+          "to": "native/resource-client/src/fn_namespace.rs",
+          "kind": "path",
+          "line": 134,
+          "label": "../../../native/resource-client/src/fn_namespace.rs"
+        },
+        {
+          "from": ".spw/audits/horse-entries/entrances.spw",
+          "to": "Verify/GenericSimplexSourceHarness.lean",
+          "kind": "path",
+          "line": 143,
+          "label": "../../../Verify/GenericSimplexSourceHarness.lean"
+        },
+        {
           "from": ".spw/audits/horse-exits/exits.spw",
           "to": ".spw/audits/horse-exits/provenance.json",
           "kind": "path",
@@ -609,100 +707,121 @@
         },
         {
           "from": ".spw/audits/horse-exits/exits.spw",
+          "to": "native/hyperdocument-link-sqlite-store/src/lib.rs",
+          "kind": "path",
+          "line": 21,
+          "label": "../../../native/hyperdocument-link-sqlite-store/src/lib.rs"
+        },
+        {
+          "from": ".spw/audits/horse-exits/exits.spw",
+          "to": "native/hyperdocument-link-sqlite-store/src/anchor.rs",
+          "kind": "path",
+          "line": 22,
+          "label": "../../../native/hyperdocument-link-sqlite-store/src/anchor.rs"
+        },
+        {
+          "from": ".spw/audits/horse-exits/exits.spw",
+          "to": "Compiler/DurableReceiverIO.lean",
+          "kind": "path",
+          "line": 23,
+          "label": "../../../Compiler/DurableReceiverIO.lean"
+        },
+        {
+          "from": ".spw/audits/horse-exits/exits.spw",
           "to": "native/resource-client/src/selected_publisher.rs",
           "kind": "path",
-          "line": 29,
+          "line": 40,
           "label": "../../../native/resource-client/src/selected_publisher.rs"
         },
         {
           "from": ".spw/audits/horse-exits/exits.spw",
           "to": "native/resource-client/src/protected_object/object_keys.rs",
           "kind": "path",
-          "line": 36,
+          "line": 47,
           "label": "../../../native/resource-client/src/protected_object/object_keys.rs"
         },
         {
           "from": ".spw/audits/horse-exits/exits.spw",
           "to": "native/resource-client/src/protected_object/object_epoch_cli.rs",
           "kind": "path",
-          "line": 37,
+          "line": 48,
           "label": "../../../native/resource-client/src/protected_object/object_epoch_cli.rs"
         },
         {
           "from": ".spw/audits/horse-exits/exits.spw",
           "to": "native/private-backend/src/private_output_store.rs",
           "kind": "path",
-          "line": 44,
+          "line": 55,
           "label": "../../../native/private-backend/src/private_output_store.rs"
         },
         {
           "from": ".spw/audits/horse-exits/exits.spw",
           "to": "native/private-backend/src/transition_journal.rs",
           "kind": "path",
-          "line": 45,
+          "line": 56,
           "label": "../../../native/private-backend/src/transition_journal.rs"
         },
         {
           "from": ".spw/audits/horse-exits/exits.spw",
           "to": "native/private-backend/src/custody.rs",
           "kind": "path",
-          "line": 46,
+          "line": 57,
           "label": "../../../native/private-backend/src/custody.rs"
         },
         {
           "from": ".spw/audits/horse-exits/exits.spw",
           "to": "native/grain-runtime/src/provider.rs",
           "kind": "path",
-          "line": 54,
+          "line": 65,
           "label": "../../../native/grain-runtime/src/provider.rs"
         },
         {
           "from": ".spw/audits/horse-exits/exits.spw",
           "to": "native/grain-runtime/src/main.rs",
           "kind": "path",
-          "line": 55,
+          "line": 66,
           "label": "../../../native/grain-runtime/src/main.rs"
         },
         {
           "from": ".spw/audits/horse-exits/exits.spw",
           "to": "native/grain-runtime/src/custody_gate.rs",
           "kind": "path",
-          "line": 62,
+          "line": 73,
           "label": "../../../native/grain-runtime/src/custody_gate.rs"
         },
         {
           "from": ".spw/audits/horse-exits/exits.spw",
           "to": "native/grain-runtime/src/dispatch_custody.rs",
           "kind": "path",
-          "line": 63,
+          "line": 74,
           "label": "../../../native/grain-runtime/src/dispatch_custody.rs"
         },
         {
           "from": ".spw/audits/horse-exits/exits.spw",
           "to": "native/spk-host/src/agent_api_lifetime_reverse_v3.rs",
           "kind": "path",
-          "line": 64,
+          "line": 75,
           "label": "../../../native/spk-host/src/agent_api_lifetime_reverse_v3.rs"
         },
         {
           "from": ".spw/audits/horse-exits/exits.spw",
           "to": "native/grain-runtime/src/terminal.rs",
           "kind": "path",
-          "line": 65,
+          "line": 76,
           "label": "../../../native/grain-runtime/src/terminal.rs"
         },
         {
           "from": ".spw/audits/horse-exits/exits.spw",
           "to": "native/resource-client/src/transport.rs",
           "kind": "path",
-          "line": 74,
+          "line": 85,
           "label": "../../../native/resource-client/src/transport.rs"
         },
         {
           "from": ".spw/audits/horse-exits/exits.spw",
           "to": "native/resource-client/src/key_rotation.rs",
           "kind": "path",
-          "line": 82,
+          "line": 93,
           "label": "../../../native/resource-client/src/key_rotation.rs"
         },
         {
@@ -742,51 +861,58 @@
         },
         {
           "from": ".spw/index.spw",
-          "to": ".spw/audits/horse-entries/coverage.spw",
+          "to": ".spw/tools/check-source.py",
           "kind": "path",
           "line": 9,
+          "label": "./tools/check-source.py"
+        },
+        {
+          "from": ".spw/index.spw",
+          "to": ".spw/audits/horse-entries/coverage.spw",
+          "kind": "path",
+          "line": 10,
           "label": "./audits/horse-entries/coverage.spw"
         },
         {
           "from": ".spw/index.spw",
           "to": ".spw/audits/horse-exits/exits.spw",
           "kind": "path",
-          "line": 10,
+          "line": 11,
           "label": "./audits/horse-exits/exits.spw"
         },
         {
           "from": ".spw/index.spw",
           "to": ".spw/audits/horse-consistency/consistency.spw",
           "kind": "path",
-          "line": 11,
+          "line": 12,
           "label": "./audits/horse-consistency/consistency.spw"
         },
         {
           "from": ".spw/index.spw",
           "to": ".spw/audits/horse-bounds/bounds.spw",
           "kind": "path",
-          "line": 12,
+          "line": 13,
           "label": "./audits/horse-bounds/bounds.spw"
         },
         {
           "from": ".spw/index.spw",
           "to": ".spw/maps/runtime.spw",
           "kind": "root",
-          "line": 14,
+          "line": 15,
           "label": "@runtime"
         },
         {
           "from": ".spw/index.spw",
           "to": ".spw/audits/horse-entries/entrances.spw",
           "kind": "root",
-          "line": 14,
+          "line": 15,
           "label": "@entrances"
         },
         {
           "from": ".spw/index.spw",
           "to": ".spw/audits/horse-entries/coverage.spw",
           "kind": "root",
-          "line": 14,
+          "line": 15,
           "label": "@coverage"
         },
         {
@@ -1123,10 +1249,10 @@
         {
           "file": ".spw/audits/horse-bounds/bounds.spw",
           "sigils": {
-            "~": 8,
+            "~": 11,
             "#": 3,
-            "@": 8,
-            "^": 6,
+            "@": 11,
+            "^": 7,
             "&": 0,
             "%": 0,
             "$": 0,
@@ -1136,19 +1262,19 @@
             "=": 0,
             ".": 1
           },
-          "pathRefCount": 8,
-          "rootRefCount": 8,
-          "frameCount": 6,
+          "pathRefCount": 11,
+          "rootRefCount": 11,
+          "frameCount": 7,
           "annotationHints": 2,
-          "lineCount": 61
+          "lineCount": 73
         },
         {
           "file": ".spw/audits/horse-consistency/consistency.spw",
           "sigils": {
-            "~": 13,
+            "~": 17,
             "#": 3,
             "@": 0,
-            "^": 7,
+            "^": 8,
             "&": 0,
             "%": 0,
             "$": 0,
@@ -1158,11 +1284,11 @@
             "=": 0,
             ".": 0
           },
-          "pathRefCount": 13,
+          "pathRefCount": 17,
           "rootRefCount": 0,
-          "frameCount": 7,
+          "frameCount": 8,
           "annotationHints": 2,
-          "lineCount": 76
+          "lineCount": 90
         },
         {
           "file": ".spw/audits/horse-entries/coverage.spw",
@@ -1189,9 +1315,31 @@
         {
           "file": ".spw/audits/horse-entries/entrances.spw",
           "sigils": {
-            "~": 24,
+            "~": 31,
             "#": 2,
-            "@": 24,
+            "@": 31,
+            "^": 14,
+            "&": 0,
+            "%": 0,
+            "$": 0,
+            "?": 0,
+            "!": 0,
+            "*": 0,
+            "=": 0,
+            ".": 0
+          },
+          "pathRefCount": 31,
+          "rootRefCount": 31,
+          "frameCount": 14,
+          "annotationHints": 2,
+          "lineCount": 154
+        },
+        {
+          "file": ".spw/audits/horse-exits/exits.spw",
+          "sigils": {
+            "~": 21,
+            "#": 2,
+            "@": 21,
             "^": 12,
             "&": 0,
             "%": 0,
@@ -1202,40 +1350,18 @@
             "=": 0,
             ".": 0
           },
-          "pathRefCount": 24,
-          "rootRefCount": 24,
+          "pathRefCount": 21,
+          "rootRefCount": 21,
           "frameCount": 12,
           "annotationHints": 2,
-          "lineCount": 127
-        },
-        {
-          "file": ".spw/audits/horse-exits/exits.spw",
-          "sigils": {
-            "~": 18,
-            "#": 2,
-            "@": 18,
-            "^": 11,
-            "&": 0,
-            "%": 0,
-            "$": 0,
-            "?": 0,
-            "!": 0,
-            "*": 0,
-            "=": 0,
-            ".": 0
-          },
-          "pathRefCount": 18,
-          "rootRefCount": 18,
-          "frameCount": 11,
-          "annotationHints": 2,
-          "lineCount": 93
+          "lineCount": 104
         },
         {
           "file": ".spw/index.spw",
           "sigils": {
-            "~": 9,
+            "~": 10,
             "#": 2,
-            "@": 12,
+            "@": 13,
             "^": 2,
             "&": 0,
             "%": 0,
@@ -1246,11 +1372,11 @@
             "=": 0,
             ".": 0
           },
-          "pathRefCount": 9,
-          "rootRefCount": 12,
+          "pathRefCount": 10,
+          "rootRefCount": 13,
           "frameCount": 2,
           "annotationHints": 2,
-          "lineCount": 15
+          "lineCount": 16
         },
         {
           "file": ".spw/maps/runtime.spw",
@@ -1321,7 +1447,7 @@
       ],
       "topography": {
         "files": 9,
-        "links": 122,
+        "links": 140,
         "graph": {
           "nodes": [
             ".spw",
@@ -1342,6 +1468,7 @@
             ".spw/index.spw",
             ".spw/maps/runtime.spw",
             ".spw/mount.spw",
+            ".spw/tools/check-source.py",
             ".spw/workspace.spw",
             "Compiler/BendArtifactBinding.lean",
             "Compiler/BendWorldProgramCodec.lean",
@@ -1364,16 +1491,22 @@
             "native/grain-runtime/src/main.rs",
             "native/grain-runtime/src/provider.rs",
             "native/grain-runtime/src/terminal.rs",
+            "native/hyperdocument-link-sqlite-store/src/anchor.rs",
+            "native/hyperdocument-link-sqlite-store/src/lib.rs",
             "native/joint-agreement-crypto/src/main.rs",
             "native/private-backend/src/circuit_batch.rs",
+            "native/private-backend/src/codec.rs",
             "native/private-backend/src/custody.rs",
             "native/private-backend/src/main.rs",
             "native/private-backend/src/native_worker.rs",
             "native/private-backend/src/private_output_store.rs",
             "native/private-backend/src/transition_journal.rs",
+            "native/resource-client/src/agent_reserve.rs",
             "native/resource-client/src/bend_session.rs",
             "native/resource-client/src/cohort_tcp.rs",
             "native/resource-client/src/drain.rs",
+            "native/resource-client/src/fn_frontier.rs",
+            "native/resource-client/src/fn_namespace.rs",
             "native/resource-client/src/job.rs",
             "native/resource-client/src/key_rotation.rs",
             "native/resource-client/src/main.rs",
@@ -1388,6 +1521,8 @@
             "native/resource-client/src/selected_exchange.rs",
             "native/resource-client/src/selected_publisher.rs",
             "native/resource-client/src/selected_release.rs",
+            "native/resource-client/src/session_enrollment.rs",
+            "native/resource-client/src/share_issue.rs",
             "native/resource-client/src/shell.rs",
             "native/resource-client/src/transport.rs",
             "native/resource-client/src/web.rs",
@@ -1447,6 +1582,24 @@
             {
               "from": ".spw/audits/horse-bounds/bounds.spw",
               "to": "Kernel/BendActivityPendingAdmission.lean",
+              "label": "path",
+              "weight": 1
+            },
+            {
+              "from": ".spw/audits/horse-bounds/bounds.spw",
+              "to": "native/private-backend/src/circuit_batch.rs",
+              "label": "path",
+              "weight": 1
+            },
+            {
+              "from": ".spw/audits/horse-bounds/bounds.spw",
+              "to": "native/private-backend/src/codec.rs",
+              "label": "path",
+              "weight": 1
+            },
+            {
+              "from": ".spw/audits/horse-bounds/bounds.spw",
+              "to": "native/private-backend/src/custody.rs",
               "label": "path",
               "weight": 1
             },
@@ -1525,6 +1678,30 @@
             {
               "from": ".spw/audits/horse-consistency/consistency.spw",
               "to": "native/resource-client/src/selected_release.rs",
+              "label": "path",
+              "weight": 1
+            },
+            {
+              "from": ".spw/audits/horse-consistency/consistency.spw",
+              "to": "Kernel/NativeHostSession.lean",
+              "label": "path",
+              "weight": 1
+            },
+            {
+              "from": ".spw/audits/horse-consistency/consistency.spw",
+              "to": "Compiler/DurableReceiverIO.lean",
+              "label": "path",
+              "weight": 1
+            },
+            {
+              "from": ".spw/audits/horse-consistency/consistency.spw",
+              "to": "native/hyperdocument-link-sqlite-store/src/lib.rs",
+              "label": "path",
+              "weight": 1
+            },
+            {
+              "from": ".spw/audits/horse-consistency/consistency.spw",
+              "to": "native/hyperdocument-link-sqlite-store/src/anchor.rs",
               "label": "path",
               "weight": 1
             },
@@ -1673,6 +1850,48 @@
               "weight": 1
             },
             {
+              "from": ".spw/audits/horse-entries/entrances.spw",
+              "to": "native/resource-client/src/main.rs",
+              "label": "path",
+              "weight": 1
+            },
+            {
+              "from": ".spw/audits/horse-entries/entrances.spw",
+              "to": "native/resource-client/src/agent_reserve.rs",
+              "label": "path",
+              "weight": 1
+            },
+            {
+              "from": ".spw/audits/horse-entries/entrances.spw",
+              "to": "native/resource-client/src/session_enrollment.rs",
+              "label": "path",
+              "weight": 1
+            },
+            {
+              "from": ".spw/audits/horse-entries/entrances.spw",
+              "to": "native/resource-client/src/share_issue.rs",
+              "label": "path",
+              "weight": 1
+            },
+            {
+              "from": ".spw/audits/horse-entries/entrances.spw",
+              "to": "native/resource-client/src/fn_frontier.rs",
+              "label": "path",
+              "weight": 1
+            },
+            {
+              "from": ".spw/audits/horse-entries/entrances.spw",
+              "to": "native/resource-client/src/fn_namespace.rs",
+              "label": "path",
+              "weight": 1
+            },
+            {
+              "from": ".spw/audits/horse-entries/entrances.spw",
+              "to": "Verify/GenericSimplexSourceHarness.lean",
+              "label": "path",
+              "weight": 1
+            },
+            {
               "from": ".spw/audits/horse-exits/exits.spw",
               "to": ".spw/audits/horse-exits/provenance.json",
               "label": "path",
@@ -1693,6 +1912,24 @@
             {
               "from": ".spw/audits/horse-exits/exits.spw",
               "to": "Host/Main.lean",
+              "label": "path",
+              "weight": 1
+            },
+            {
+              "from": ".spw/audits/horse-exits/exits.spw",
+              "to": "native/hyperdocument-link-sqlite-store/src/lib.rs",
+              "label": "path",
+              "weight": 1
+            },
+            {
+              "from": ".spw/audits/horse-exits/exits.spw",
+              "to": "native/hyperdocument-link-sqlite-store/src/anchor.rs",
+              "label": "path",
+              "weight": 1
+            },
+            {
+              "from": ".spw/audits/horse-exits/exits.spw",
+              "to": "Compiler/DurableReceiverIO.lean",
               "label": "path",
               "weight": 1
             },
@@ -1807,6 +2044,12 @@
             {
               "from": ".spw/index.spw",
               "to": ".spw/audits/horse-entries/entrances.spw",
+              "label": "path",
+              "weight": 1
+            },
+            {
+              "from": ".spw/index.spw",
+              "to": ".spw/tools/check-source.py",
               "label": "path",
               "weight": 1
             },
@@ -2153,32 +2396,32 @@
           {
             "id": ".spw/audits/horse-entries/entrances.spw",
             "inDegree": 4,
-            "outDegree": 24,
-            "total": 28
+            "outDegree": 31,
+            "total": 35
           },
           {
             "id": ".spw/audits/horse-exits/exits.spw",
             "inDegree": 5,
-            "outDegree": 18,
-            "total": 23
+            "outDegree": 21,
+            "total": 26
           },
           {
             "id": ".spw/audits/horse-consistency/consistency.spw",
             "inDegree": 5,
-            "outDegree": 13,
-            "total": 18
-          },
-          {
-            "id": ".spw/index.spw",
-            "inDegree": 2,
-            "outDegree": 12,
-            "total": 14
+            "outDegree": 17,
+            "total": 22
           },
           {
             "id": ".spw/audits/horse-bounds/bounds.spw",
             "inDegree": 4,
-            "outDegree": 8,
-            "total": 12
+            "outDegree": 11,
+            "total": 15
+          },
+          {
+            "id": ".spw/index.spw",
+            "inDegree": 2,
+            "outDegree": 13,
+            "total": 15
           },
           {
             "id": ".spw/workspace.spw",
@@ -2193,13 +2436,19 @@
             "total": 5
           },
           {
-            "id": "Host/Main.lean",
-            "inDegree": 4,
+            "id": "Compiler/DurableReceiverIO.lean",
+            "inDegree": 5,
             "outDegree": 0,
-            "total": 4
+            "total": 5
           },
           {
             "id": "native/resource-client/src/main.rs",
+            "inDegree": 5,
+            "outDegree": 0,
+            "total": 5
+          },
+          {
+            "id": "Host/Main.lean",
             "inDegree": 4,
             "outDegree": 0,
             "total": 4
@@ -2217,7 +2466,7 @@
             "total": 3
           },
           {
-            "id": "Compiler/DurableReceiverIO.lean",
+            "id": "Kernel/NativeHostSession.lean",
             "inDegree": 3,
             "outDegree": 0,
             "total": 3
@@ -2235,19 +2484,37 @@
             "total": 2
           },
           {
-            "id": "Kernel/NativeHostSession.lean",
-            "inDegree": 2,
-            "outDegree": 0,
-            "total": 2
-          },
-          {
             "id": "native/discord-entrance/src/server.rs",
             "inDegree": 2,
             "outDegree": 0,
             "total": 2
           },
           {
+            "id": "native/hyperdocument-link-sqlite-store/src/anchor.rs",
+            "inDegree": 2,
+            "outDegree": 0,
+            "total": 2
+          },
+          {
+            "id": "native/hyperdocument-link-sqlite-store/src/lib.rs",
+            "inDegree": 2,
+            "outDegree": 0,
+            "total": 2
+          },
+          {
             "id": "native/joint-agreement-crypto/src/main.rs",
+            "inDegree": 2,
+            "outDegree": 0,
+            "total": 2
+          },
+          {
+            "id": "native/private-backend/src/circuit_batch.rs",
+            "inDegree": 2,
+            "outDegree": 0,
+            "total": 2
+          },
+          {
+            "id": "native/private-backend/src/custody.rs",
             "inDegree": 2,
             "outDegree": 0,
             "total": 2
@@ -2299,30 +2566,6 @@
             "inDegree": 2,
             "outDegree": 0,
             "total": 2
-          },
-          {
-            "id": ".spw/_workbench",
-            "inDegree": 1,
-            "outDegree": 0,
-            "total": 1
-          },
-          {
-            "id": ".spw/_workbench/lib/spw-v0.3.0",
-            "inDegree": 1,
-            "outDegree": 0,
-            "total": 1
-          },
-          {
-            "id": ".spw/_workbench/packages/spw-cli",
-            "inDegree": 1,
-            "outDegree": 0,
-            "total": 1
-          },
-          {
-            "id": ".spw/audits/horse-consistency/coverage.json",
-            "inDegree": 1,
-            "outDegree": 0,
-            "total": 1
           }
         ],
         "orphans": [],
@@ -2330,35 +2573,35 @@
         "strands": [
           {
             "id": "shared_path_basenames",
-            "score": 0.09836065573770492,
-            "detail": "main.rs\u00d712, exits.spw\u00d75, consistency.spw\u00d75, transport.rs\u00d74, Main.lean\u00d74, runtime.spw\u00d74, bounds.spw\u00d74, DurableReceiverIO.lean\u00d73"
+            "score": 0.09285714285714286,
+            "detail": "main.rs\u00d713, DurableReceiverIO.lean\u00d75, exits.spw\u00d75, consistency.spw\u00d75, transport.rs\u00d74, Main.lean\u00d74, runtime.spw\u00d74, bounds.spw\u00d74"
           },
           {
             "id": "sigil_rhythm",
-            "score": 0.39869281045751637,
-            "detail": "~:122 @:106 ^:54 #:23 .:1 &:0 %:0 $:0"
+            "score": 0.40816326530612246,
+            "detail": "~:140 @:120 ^:59 #:23 .:1 &:0 %:0 $:0"
           },
           {
             "id": "frame_density",
-            "score": 0.10386965376782077,
-            "detail": "51 frames / 491 lines"
+            "score": 0.10071942446043165,
+            "detail": "56 frames / 556 lines"
           },
           {
             "id": "path_ref_density",
-            "score": 0.24236252545824846,
-            "detail": "119 path refs across 9 files"
+            "score": 0.24640287769784172,
+            "detail": "137 path refs across 9 files"
           },
           {
             "id": "root_shelves",
-            "score": 0.00819672131147541,
+            "score": 0.007142857142857143,
             "detail": "@runtime\u00d71, @entrances\u00d71, @coverage\u00d71"
           }
         ],
         "sigilHistogram": {
-          "~": 122,
+          "~": 140,
           "#": 23,
-          "@": 106,
-          "^": 54,
+          "@": 120,
+          "^": 59,
           "&": 0,
           "%": 0,
           "$": 0,
@@ -2372,27 +2615,27 @@
       "population": [
         {
           "file": ".spw/audits/horse-bounds/bounds.spw",
-          "lines": 61,
-          "pathRefs": 8,
-          "rootRefs": 8,
-          "frames": 6,
+          "lines": 73,
+          "pathRefs": 11,
+          "rootRefs": 11,
+          "frames": 7,
           "annotations": 2,
-          "sigilTop": "@8 ~8 ^6",
+          "sigilTop": "@11 ~11 ^7",
           "role": "hub",
           "inDegree": 4,
-          "outDegree": 8
+          "outDegree": 11
         },
         {
           "file": ".spw/audits/horse-consistency/consistency.spw",
-          "lines": 76,
-          "pathRefs": 13,
+          "lines": 90,
+          "pathRefs": 17,
           "rootRefs": 0,
-          "frames": 7,
+          "frames": 8,
           "annotations": 2,
-          "sigilTop": "~13 ^7 #3",
+          "sigilTop": "~17 ^8 #3",
           "role": "hub",
           "inDegree": 5,
-          "outDegree": 13
+          "outDegree": 17
         },
         {
           "file": ".spw/audits/horse-entries/coverage.spw",
@@ -2408,39 +2651,39 @@
         },
         {
           "file": ".spw/audits/horse-entries/entrances.spw",
-          "lines": 127,
-          "pathRefs": 24,
-          "rootRefs": 24,
-          "frames": 12,
+          "lines": 154,
+          "pathRefs": 31,
+          "rootRefs": 31,
+          "frames": 14,
           "annotations": 2,
-          "sigilTop": "@24 ~24 ^12",
+          "sigilTop": "@31 ~31 ^14",
           "role": "hub",
           "inDegree": 4,
-          "outDegree": 24
+          "outDegree": 31
         },
         {
           "file": ".spw/audits/horse-exits/exits.spw",
-          "lines": 93,
-          "pathRefs": 18,
-          "rootRefs": 18,
-          "frames": 11,
+          "lines": 104,
+          "pathRefs": 21,
+          "rootRefs": 21,
+          "frames": 12,
           "annotations": 2,
-          "sigilTop": "@18 ~18 ^11",
+          "sigilTop": "@21 ~21 ^12",
           "role": "hub",
           "inDegree": 5,
-          "outDegree": 18
+          "outDegree": 21
         },
         {
           "file": ".spw/index.spw",
-          "lines": 15,
-          "pathRefs": 9,
-          "rootRefs": 12,
+          "lines": 16,
+          "pathRefs": 10,
+          "rootRefs": 13,
           "frames": 2,
           "annotations": 2,
-          "sigilTop": "@12 ~9 #2",
+          "sigilTop": "@13 ~10 #2",
           "role": "hub",
           "inDegree": 2,
-          "outDegree": 12
+          "outDegree": 13
         },
         {
           "file": ".spw/maps/runtime.spw",
@@ -2481,10 +2724,10 @@
       ],
       "stats": {
         "files": 9,
-        "lines": 491,
-        "pathRefs": 119,
-        "rootRefs": 106,
-        "frames": 51,
+        "lines": 556,
+        "pathRefs": 137,
+        "rootRefs": 120,
+        "frames": 56,
         "byRole": {
           "hub": 9
         }

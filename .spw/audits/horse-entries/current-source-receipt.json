@@ -3,8 +3,8 @@
   "workbench_revision": "651b535b5171e9ed419570f4cd64b53914094433",
   "scope": "exact file bytes, not qualification",
   "states": {
-    "match": 17,
-    "drift": 0,
+    "match": 13,
+    "drift": 5,
     "missing": 0
   },
   "files": [
@@ -34,15 +34,21 @@
     },
     {
       "source": "Host/Main.lean",
-      "state": "match",
+      "state": "drift",
       "expected_sha256": "918566fcfa9df2ff5619218bfddad69300631aa50e60cf018f38ea61189e4224",
-      "observed_sha256": "918566fcfa9df2ff5619218bfddad69300631aa50e60cf018f38ea61189e4224"
+      "observed_sha256": "b53efd56d063558db555153bee098fdafae63767ae94a05b74278eb25986e9d0"
     },
     {
       "source": "Kernel/NativeHostSession.lean",
       "state": "match",
       "expected_sha256": "a6671cf734fe1d63ad447361869f5eaf500f3819f7038446f92a85d8262395a7",
       "observed_sha256": "a6671cf734fe1d63ad447361869f5eaf500f3819f7038446f92a85d8262395a7"
+    },
+    {
+      "source": "Verify/GenericSimplexSourceHarness.lean",
+      "state": "match",
+      "expected_sha256": "8cf67b8380474a71d41940d0e50e878ba51ab8c411d3f407d043a3ce8a638313",
+      "observed_sha256": "8cf67b8380474a71d41940d0e50e878ba51ab8c411d3f407d043a3ce8a638313"
     },
     {
       "source": "native/discord-entrance/src/main.rs",
@@ -52,9 +58,9 @@
     },
     {
       "source": "native/discord-entrance/src/server.rs",
-      "state": "match",
+      "state": "drift",
       "expected_sha256": "c7aff061a687ec35f0be4dc623b4d2bc56329188bcce126d3243f70be4861671",
-      "observed_sha256": "c7aff061a687ec35f0be4dc623b4d2bc56329188bcce126d3243f70be4861671"
+      "observed_sha256": "4bcfbe93fc30c8ffae53059a699817861d47ce3fe4099617f0b67c8f28eecf05"
     },
     {
       "source": "native/private-backend/src/main.rs",
@@ -76,9 +82,9 @@
     },
     {
       "source": "native/resource-client/src/main.rs",
-      "state": "match",
+      "state": "drift",
       "expected_sha256": "0edb653e3489ed1993e04f1f75833d8d765606953eb835292066755535efc89f",
-      "observed_sha256": "0edb653e3489ed1993e04f1f75833d8d765606953eb835292066755535efc89f"
+      "observed_sha256": "a4366a646640aa92f3f6759ec5b5d24958763c9bc07fafe57abbd4abeca0ed02"
     },
     {
       "source": "native/resource-client/src/public_proxy.rs",
@@ -88,15 +94,15 @@
     },
     {
       "source": "native/resource-client/src/transport.rs",
-      "state": "match",
+      "state": "drift",
       "expected_sha256": "372f85066d49c42b6633a2429d5d25283f87cfc4dfa84452b19bb0f113c6a4f8",
-      "observed_sha256": "372f85066d49c42b6633a2429d5d25283f87cfc4dfa84452b19bb0f113c6a4f8"
+      "observed_sha256": "83afdca96eba73e748813703e0978f2ef767a099b0c2ba9648726548158f7a4e"
     },
     {
       "source": "native/resource-client/src/web.rs",
-      "state": "match",
+      "state": "drift",
       "expected_sha256": "6e89c2ec135c15a1f238326f5b3f50ab6e1740bb7afceefc360b5693901d488a",
-      "observed_sha256": "6e89c2ec135c15a1f238326f5b3f50ab6e1740bb7afceefc360b5693901d488a"
+      "observed_sha256": "715a8cfc8a8eea160889f148636d2b92aef3583ef3bdf4d07c1285c9d434d17d"
     },
     {
       "source": "native/resource-client/src/web_admission.rs",

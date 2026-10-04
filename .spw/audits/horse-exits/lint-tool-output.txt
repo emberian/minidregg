@@ -2,8 +2,6 @@
 > spw-workbench@0.3.0 spw
 > node --import tsx packages/spw-cli/src/main.ts lint --from .spw/audits/horse-exits --json
 
-(node:31833) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
-(Use `node --trace-deprecation ...` to show where the warning was created)
 {
   "$schema": "https://raw.githubusercontent.com/spwashi/spw-workbench/main/schemas/spw-cli-envelope.v1.schema.json",
   "surface": "spw.cli.envelope",
@@ -13,7 +11,7 @@
     "version": "0.3.0"
   },
   "command": "lint",
-  "timestamp": "2026-10-03T17:06:14.186Z",
+  "timestamp": "2026-10-03T18:12:33.619Z",
   "ok": true,
   "summary": {
     "files": 1,

@@ -2,9 +2,6 @@
 > spw-workbench@0.3.0 spw
 > node --import tsx packages/spw-cli/src/main.ts select .spw/audits/horse-exits/exits.spw --selector navigable --limit 80 --summary
 
-(node:31796) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
-(Use `node --trace-deprecation ...` to show where the warning was created)
-# spw select  file=.spw/audits/horse-exits/exits.spw  selector=navigable  hits=42  show=42
 ref evidence	7:2	"@evidence"
 pathRef ./provenance.json	7:13	"~\"./provenance.json\""
 ref coverage	8:2	"@coverage"
@@ -47,10 +44,17 @@ ref source	85:2	"@source"
 pathRef ../../../native/resource-client/src/transport.rs	85:11	"~\"../../../native/resource-client/src/transport.rs\""
 ref source	93:2	"@source"
 pathRef ../../../native/resource-client/src/key_rotation.rs	93:11	"~\"../../../native/resource-client/src/key_rotation.rs\""
-^["summary"]{
-  ~#selector: "navigable"
-  ~#matches: "42"
-  ~#max depth: "9"
-  ~#types: "PathRef:21  Reference:21"
-  ~#depth: "8:21  9:21"
-}
+ref source	101:2	"@source"
+pathRef ../../../native/resource-client/src/transport.rs	101:11	"~\"../../../native/resource-client/src/transport.rs\""
+ref provider	110:2	"@provider"
+pathRef ../../../native/resource-client/src/provider_continuity.rs	110:13	"~\"../../../native/resource-client/src/provider_continuity.rs\""
+ref session	111:2	"@session"
+pathRef ../../../native/resource-client/src/session_enrollment.rs	111:12	"~\"../../../native/resource-client/src/session_enrollment.rs\""
+ref participant	112:2	"@participant"
+pathRef ../../../native/resource-client/src/participant_enrollment.rs	112:16	"~\"../../../native/resource-client/src/participant_enrollment.rs\""
+ref helper	121:2	"@helper"
+pathRef ../../../native/resource-client/src/transport.rs	121:11	"~\"../../../native/resource-client/src/transport.rs\""
+ref consumer	122:2	"@consumer"
+pathRef ../../../native/resource-client/src/current_source.rs	122:13	"~\"../../../native/resource-client/src/current_source.rs\""
+ref parent	123:2	"@parent"
+pathRef ../../../native/resource-client/src/receipt_continuity.rs	123:11	"~\"../../../native/resource-client/src/receipt_continuity.rs\""

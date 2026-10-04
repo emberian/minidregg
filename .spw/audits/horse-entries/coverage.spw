@@ -7,7 +7,7 @@
  not_claimed: ["Whole-system audit complete", "All major machines fully covered", "Deployments match source", "Old BendTT dependencies gone", "Private/traffic/agreement compose fully"]
 }
 ^"priority_debt"{
- first: ["Receive sparse board fix and narrow regression", "Review owner map contributions and join acknowledged cut semantics", "Read Objective Bend migration dependencies at new cohort revision"]
+ first: ["Sparse board fix received694c84a8; obtain Rust09 narrow regression receipt", "Receive private custody preflight fix and regression", "Join acknowledged cut semantics in r2", "Read Objective Bend migration dependencies at new cohort revision"]
  remaining: ["Host5926-7154 remaining stdio routes/receiver internals", "Workspace/shell and other dedicated CLI implementations", "SPK HTTP/agent/resident physical reconciliation", "Private worker/MPC backend", "Traffic/mix/cohort", "Agreement controller/scheduler/source adapter", "Web document/edit/create, protected object/atom/fragment pipelines", "Paid joins/payment/well/job/Hermes supervision", "Key custody/enrollment/rotation/carry"]
  classifications: "Each source route means connected source, not deployed service qualification; ResearchWip roots alone do not prove route connectivity"
 }
