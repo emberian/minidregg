@@ -10,6 +10,8 @@ given and the shipping format, none of which needs a real ELF. Cases:
     names consentHost with its pin;
   * the same set without the consent role is REFUSED by name (control: a candidate that
     cannot sign is not shippable);
+  * the same set without keys (the split-tenancy key broker), or without any role the builders
+    build (`package.py --rust-roles`), is REFUSED by name;
   * a roles manifest claiming another commit is REFUSED (control: the refusal is not only
     about consent);
   * a pin that does not match the bytes is REFUSED.
@@ -26,9 +28,10 @@ import tempfile
 
 HERE = Path(__file__).resolve().parent
 PACKAGE = HERE / "package.py"
-ROLE_FILES = {"host": "minidregg-host", "consent": "minidregg-client-consent", "mini": "mini",
-              "store": "minidregg-link-sqlite-store",
-              "verifier": "minidregg-credential-signature-verifier"}
+ROLE_FILES = {"host": "minidregg-host", "consent": "minidregg-client-consent"}
+ROLE_FILES.update({role: name for role, _, name in (
+    line.split() for line in subprocess.run([sys.executable, str(PACKAGE), "--rust-roles"], check=True,
+                                            capture_output=True, text=True).stdout.splitlines())})
 SCRIPTS = ["deploy/candidate/run.sh", "deploy/candidate/lib.sh", "native/resource-client/genesis.sh",
            "native/resource-client/genesis-params.example.json", "deploy/candidate/INTERFACES.md"]
 failures = []
@@ -131,6 +134,18 @@ with tempfile.TemporaryDirectory(prefix="package-test-") as tmp:
     check("a role set without consent is refused, naming consent",
           refused.returncode != 0 and "consent" in refused.stderr and not (tmp / "cand-no-consent").exists(),
           refused.stderr)
+
+    # 2b. no key broker: refused by name (split tenancy cannot install without it)
+    nokeys = package(roles_manifest(binaries, commit, drop=("keys",)), "cand-no-keys")
+    check("a role set without keys is refused, naming keys",
+          nokeys.returncode != 0 and "keys" in nokeys.stderr and not (tmp / "cand-no-keys").exists(),
+          nokeys.stderr)
+
+    # 2c. a builder that dropped an optional role (spkBroker) is refused: the role list drifted
+    drift = package(roles_manifest(binaries, commit, drop=("spkBroker",)), "cand-drift")
+    check("a builder role set missing spkBroker is refused, naming it",
+          drift.returncode != 0 and "spkBroker" in drift.stderr and not (tmp / "cand-drift").exists(),
+          drift.stderr)
 
     # 3. wrong commit: refused (control)
     wrong = package(roles_manifest(binaries, "1" * 40), "cand-wrong-commit")

@@ -4,6 +4,7 @@
   package.py --roles ROLES.json --source-archive SOURCE.tar --out NEW_DIR [--toolchains T.json]
              [--host-build-manifest MANIFEST.txt] [--into-existing]
   package.py --capsule FAMILY_DIR --out NEW_DIR
+  package.py --rust-roles        one line per Rust role: ROLE CRATE BINARY (the builders' list)
 
 A candidate directory (deploy/candidate/INTERFACES.md) is what every consumer
 reads: edge/mini/ship.sh, verify.sh, service-upgrade.sh, run.sh, the journey's
@@ -70,9 +71,20 @@ ROLES = {
     "payWatcher": "pay-watcher",
     "keys": "mini-keys",
 }
+# The Rust roles, role -> crate (the binary is ROLES[role]). The ONE list both builders read
+# (`package.py --rust-roles`): build.sh and lane-build.sh each kept their own copy, and the lane
+# copy silently lacked mini-keys, mini-spk-broker and spk-hostd. host and consent are Lean roles.
+RUST_ROLES = (("mini", "resource-client"), ("store", "hyperdocument-link-sqlite-store"),
+              ("verifier", "credential-signature-verifier"), ("grainRuntime", "grain-runtime"),
+              ("grainProviderBridge", "grain-runtime"), ("inferenceScheduler", "inference-scheduler"),
+              ("spkHost", "spk-host"), ("spkBrowserProxy", "spk-host"), ("spkBroker", "spk-host"),
+              ("spkHostd", "spk-host"), ("discord", "discord-entrance"), ("payWatcher", "pay-watcher"),
+              ("keys", "mini-keys"))
 # consent is required: a candidate whose friends cannot sign (the client refuses to sign without a
 # locally selected consent pair) is not shippable, so a roles manifest or sealed family without it is refused.
-REQUIRED = ("host", "consent", "mini", "store", "verifier")
+# keys is required: split tenancy (step B) is the box's shape, and install.sh under split has no
+# broker without bin/mini-keys, so a candidate without it cannot be installed there.
+REQUIRED = ("host", "consent", "mini", "store", "verifier", "keys")
 ALIASES = {"shell": "mini", "hermes": "grainRuntime", "browserProxy": "spkBrowserProxy", "consentHost": "consent"}
 # The Linux friend bundle (W1.9 consent shipping): one directory a friend copies
 # whole, hard links to bin/ (every candidate carries the consent pair).
@@ -360,6 +372,10 @@ def main():
     parser.add_argument("--toolchains")
     parser.add_argument("--host-build-manifest")
     parser.add_argument("--into-existing", action="store_true")
+    if sys.argv[1:] == ["--rust-roles"]:
+        for role, crate in RUST_ROLES:
+            print(role, crate, ROLES[role])
+        return
     a = parser.parse_args()
     if shutil.which("readelf") is None or shutil.which("git") is None:
         die("readelf (binutils) and git are required")
@@ -378,6 +394,11 @@ def main():
     if not (isinstance(commit, str) and HEX40.fullmatch(commit)):
         die("roles manifest .sourceCommit must be a 40-hex commit")
     chosen = roles_from_manifest(manifest, a.roles)
+    # A builder ships every role it builds; a roles manifest missing one is a builder whose list drifted.
+    absent = [r for r in ("host", "consent", *(r for r, _ in RUST_ROLES)) if r not in chosen]
+    if absent:
+        die(f"{a.roles}: the builders build every role; absent: {', '.join(absent)} "
+            "(deploy/candidate/package.py --rust-roles is the list)")
     toolchains = read(a.toolchains) if a.toolchains else {"recorded": "none"}
     origin = {"type": manifest.get("origin", "roles-manifest"), "roles": str(Path(a.roles).resolve()),
               "rolesSha256": sha(a.roles)}

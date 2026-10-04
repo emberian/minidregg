@@ -9,6 +9,7 @@
 #   bin/grain-provider-bridge                   sandbox inference bridge
 #   bin/spk-host                                application custody and broker
 #   bin/spk-browser-proxy                       TLS browser entrance
+#   bin/mini-spk-broker, bin/spk-hostd          SPK broker and grain host daemon (shipped, not installed by default)
 #   bin/mini-discord                            Discord entrance
 #   bin/mini-keys                               key broker (seal key, provider and Discord secrets)
 #   bin/pay-watcher                             Solana pay watcher
@@ -218,20 +219,14 @@ build_rust() {
     || candidate_die "$bin was not built by $rustc_line"
   install -m 0555 "$out/work/target/$crate/release/$bin" "$out/bin/$bin"
 }
+# The Rust roles are package.py's one list (`--rust-roles`: ROLE CRATE BINARY), read from the archive.
+python3 "$src/deploy/candidate/package.py" --rust-roles >"$out/work/rust-roles.txt" \
+  || candidate_die "package.py --rust-roles failed"
 build_rust resource-client mini
 if [ "$client_only" = 0 ]; then
-  build_rust hyperdocument-link-sqlite-store minidregg-link-sqlite-store
-  build_rust credential-signature-verifier minidregg-credential-signature-verifier
-  # The deployed box runs these too (DEPLOY-3-PREP): each is entered in
-  # provenance.json .binaries and SHA256SUMS like the four above.
-  build_rust grain-runtime grain-runtime
-  build_rust grain-runtime grain-provider-bridge
-  build_rust inference-scheduler mini-inference-scheduler
-  build_rust spk-host spk-host
-  build_rust spk-host spk-browser-proxy
-  build_rust discord-entrance mini-discord
-  build_rust mini-keys mini-keys
-  build_rust pay-watcher pay-watcher
+  while read -r role crate bin; do
+    [ "$role" = mini ] || build_rust "$crate" "$bin" </dev/null
+  done <"$out/work/rust-roles.txt"
 fi
 
 # 5b. Friend clients. The C parts (ring) and the link go through zig for the
@@ -342,11 +337,7 @@ file "$out"/bin/minidregg-host "$out"/bin/minidregg-client-consent "$out"/bin/mi
 # provenance.json, SHA256SUMS and manifest.json.
 roles_json="$out/work/roles.json"
 roles='{}'
-for pair in host:minidregg-host mini:mini store:minidregg-link-sqlite-store \
-    verifier:minidregg-credential-signature-verifier grainRuntime:grain-runtime \
-    grainProviderBridge:grain-provider-bridge inferenceScheduler:mini-inference-scheduler \
-    spkHost:spk-host spkBrowserProxy:spk-browser-proxy discord:mini-discord payWatcher:pay-watcher \
-    keys:mini-keys; do
+for pair in host:minidregg-host $(awk '{print $1 ":" $3}' "$out/work/rust-roles.txt"); do
   role=${pair%%:*} file=$out/bin/${pair#*:}
   roles=$(printf '%s' "$roles" | jq --arg r "$role" --arg p "$file" --arg h "$(candidate_sha256 "$file")" \
     '.[$r] = $p | .sha256[$r] = $h')

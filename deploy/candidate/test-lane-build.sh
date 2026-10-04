@@ -27,8 +27,7 @@ G=(git -c user.name=t -c user.email=t@t -c commit.gpgsign=false)
 for t in lean lake cargo cc; do printf '#!/bin/sh\necho "stub-%s 0.0"\n' "$t" >"$S/shim/$t"; chmod +x "$S/shim/$t"; done
 printf '#!/bin/sh\necho "rustc stub 0.0;host: x86_64-unknown-linux-gnu"\n' >"$S/shim/rustc"; chmod +x "$S/shim/rustc"
 export PATH="$S/shim:$PATH" LANE_DIR="$S/lane"
-for n in minidregg-host minidregg-client-consent mini minidregg-link-sqlite-store minidregg-credential-signature-verifier \
-    grain-runtime grain-provider-bridge mini-inference-scheduler spk-host spk-browser-proxy mini-discord pay-watcher; do
+for n in minidregg-host minidregg-client-consent $(python3 "$HERE/package.py" --rust-roles | awk '{print $3}'); do
   echo "stub binary $n" >"$S/lane/artifacts/$n"
 done
 echo "stub manifest" >"$S/lane/native-out/manifest.txt"

@@ -14,7 +14,8 @@
 #
 # pack REFUSES unless the tree is clean and no compiled input differs between each build commit
 # (logs/host-build.commit, logs/rust-build.commit) and HEAD, so a candidate never claims a commit that
-# its binaries were not built at. package.py then REFUSES a role set without the consent pair.
+# its binaries were not built at. package.py then REFUSES a role set without the consent pair or the key broker, or missing any role
+# of `package.py --rust-roles` (the one Rust role list this script and build.sh both read).
 set -euo pipefail
 LANE_DIR=${LANE_DIR:?LANE_DIR=/abs/path/of/the/lane}
 [[ $LANE_DIR = /* ]] || { echo "lane-build: LANE_DIR must be absolute" >&2; exit 64; }
@@ -46,17 +47,14 @@ case $step in
     export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$LANE_DIR/rust-target} CARGO_INCREMENTAL=0
     export RUSTFLAGS="--remap-path-prefix=$src=/minidregg --remap-path-prefix=$HOME/.cargo=/cargo"
     git rev-parse HEAD >"$LANE_DIR/logs/rust-build.commit"
-    for pair in resource-client:mini hyperdocument-link-sqlite-store:minidregg-link-sqlite-store \
-        credential-signature-verifier:minidregg-credential-signature-verifier grain-runtime:grain-runtime \
-        grain-runtime:grain-provider-bridge inference-scheduler:mini-inference-scheduler spk-host:spk-host \
-        spk-host:spk-browser-proxy discord-entrance:mini-discord pay-watcher:pay-watcher; do
-      crate=${pair%%:*} bin=${pair#*:}
+    python3 deploy/candidate/package.py --rust-roles >"$LANE_DIR/logs/rust-roles.txt"
+    while read -r _ crate bin; do
       echo "== $crate/$bin $(date -u +%H:%M:%S)"
       cargo "+$rust" build --release --offline --locked -j "${MINI_CANDIDATE_CARGO_JOBS:-4}" \
-        --manifest-path "native/$crate/Cargo.toml" --bin "$bin" >"$LANE_DIR/logs/cargo-$crate-$bin.log" 2>&1 \
+        --manifest-path "native/$crate/Cargo.toml" --bin "$bin" </dev/null >"$LANE_DIR/logs/cargo-$crate-$bin.log" 2>&1 \
         || { echo "FAIL $crate/$bin"; tail -30 "$LANE_DIR/logs/cargo-$crate-$bin.log"; exit 1; }
       install -m 0555 "$CARGO_TARGET_DIR/release/$bin" "$LANE_DIR/artifacts/$bin"
-    done
+    done <"$LANE_DIR/logs/rust-roles.txt"
     echo "rust done $(date -u +%H:%M:%S)" ;;
   pack)
     OUT=${1:?OUT_DIR}
@@ -76,10 +74,8 @@ case $step in
     A=$LANE_DIR/artifacts
     roles=$(jq -n --arg c "$head" --arg hb "$(cat "$LANE_DIR/logs/host-build.commit")" --arg rb "$(cat "$LANE_DIR/logs/rust-build.commit")" \
       '{sourceCommit: $c, origin: "lane-build", builtAt: {host: $hb, rust: $rb}, compiledInputsEqualAt: $c}')
-    for pair in host:minidregg-host consent:minidregg-client-consent mini:mini store:minidregg-link-sqlite-store \
-        verifier:minidregg-credential-signature-verifier grainRuntime:grain-runtime \
-        grainProviderBridge:grain-provider-bridge inferenceScheduler:mini-inference-scheduler \
-        spkHost:spk-host spkBrowserProxy:spk-browser-proxy discord:mini-discord payWatcher:pay-watcher; do
+    for pair in host:minidregg-host consent:minidregg-client-consent \
+        $(python3 deploy/candidate/package.py --rust-roles | awk '{print $1 ":" $3}'); do
       r=${pair%%:*} f=$A/${pair#*:}
       [ -f "$f" ] || { echo "lane-build: missing $f (role $r)" >&2; exit 1; }
       roles=$(jq --arg r "$r" --arg p "$f" --arg h "$(sha256sum "$f" | cut -d' ' -f1)" '.[$r] = $p | .sha256[$r] = $h' <<<"$roles")
