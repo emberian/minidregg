@@ -15,7 +15,7 @@ open Lean (Json toJson)
 open Minidregg.Theory.ObjectiveBendTyping
 open Minidregg.Theory.ObjectiveBendDemandMachine
 open Minidregg.Theory.ObjectiveBendTypes (Ty)
-open Minidregg.Theory.ObjectiveBendDemandData (Data)
+open Minidregg.Theory.ObjectiveBendDemandData (Data Failure)
 open Minidregg.Compiler.ObjectiveBendDataWire
 set_option autoImplicit false
 
@@ -24,6 +24,8 @@ def natural (json : Json) (key : String) : Except String Nat := do
   if value = 0 || value > 100000 then throw ("preview capacity refused: " ++ key)
   pure value
 
+/-- The weak-head view of a result: a record shows its field NAMES, a sum only its label,
+a closure nothing. `resultData` (below) is the deep view. -/
 def valueJson : RuntimeValue → Json
   | .boolean value => Json.mkObj [("tag",toJson "boolean"),("value",toJson value)]
   | .natural value => Json.mkObj [("tag",toJson "natural"),("value",toJson (toString value))]
@@ -33,6 +35,26 @@ def valueJson : RuntimeValue → Json
   | .specification _ _ => Json.mkObj [("tag",toJson "specification"),("status",toJson "unforced extension")]
   | .prototype _ _ => Json.mkObj [("tag",toJson "prototype"),("status",toJson "unforced target")]
   | .variant label _ => Json.mkObj [("tag",toJson "variant"),("label",toJson label),("status",toJson "unforced payload")]
+
+def failureName : Failure → String
+  | .budget => "budget" | .duplicateField => "duplicateField" | .executableValue => "executableValue"
+  | .suspended => "suspended" | .divergent => "divergent" | .refused => "refused" | .yielded => "yielded"
+
+/-- The deep view of a finished result: the machine's own budgeted materialization
+(`ObjectiveBendDemandData.complete`, the path native extraction uses) forces every field
+and payload of the finished value in turn, with a fresh allowance of `ticks` machine
+steps, at most `heap` nodes and 1 MiB of canonical encoding. Typed data wire: the same as
+a yielded Plan. A result that is not first-order data (a closure, a specification, a
+prototype anywhere inside), or that exhausts the allowance, has no deep view: `null` and
+the failure's name, never a partial value. -/
+def resultData (limits : Limits) (budget : Minidregg.Theory.ObjectiveBendDemandData.Budget)
+    (outcome : Outcome) : Json × Json :=
+  match outcome with
+  | .finished _ state =>
+    match Minidregg.Theory.ObjectiveBendDemandData.complete limits budget state with
+    | .ok result => (dataJson result.value, toJson "materialized")
+    | .error (failure,_) => (Json.null, toJson (failureName failure))
+  | _ => (Json.null, toJson "not finished")
 
 /-- Run one turn: to a finish, a yield, or a refusal/suspension/divergence. -/
 def runTurn (limits : Limits) (ticks : Nat) (state : State) : Outcome := runBounded limits ticks state
@@ -83,6 +105,7 @@ def preview (typed limits : Json) (responsesJson : Json := Json.arr #[]) : Excep
     | _ => none
   let (outcome,turns) ← runTurns ⟨heap,stack⟩ ticks ⟨heap,ticks,1048576⟩ response? responses
     (initial packet.source.term) #[]
+  let (data,dataStatus) := resultData ⟨heap,stack⟩ ⟨heap,ticks,1048576⟩ outcome
   let state := match outcome with
     | .finished _ state | .suspended _ state | .divergent _ state | .refused _ state | .yielded _ state => state
   let (status,value,diagnostic) := match outcome with
@@ -95,7 +118,8 @@ def preview (typed limits : Json) (responsesJson : Json := Json.arr #[]) : Excep
     ("edition",toJson "objective-bend-1"),("status",toJson status),
     ("type",typeJson checked.type),("uses",toJson checked.uses),
     ("typing",toJson "accepted by actual annotated checker"),
-    ("sameDecodedTerm",toJson true),("result",value),("diagnostic",diagnostic),
+    ("sameDecodedTerm",toJson true),("result",value),("resultData",data),("resultDataStatus",dataStatus),
+    ("diagnostic",diagnostic),
     ("turns",Json.arr turns),
     ("heap",toJson (toString state.heap.size)),("stack",toJson (toString state.stack.length)),
     ("limits",limits),("laws",toJson "undischarged unless independent law providers are supplied"),

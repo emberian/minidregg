@@ -1,0 +1,56 @@
+edition ObjectiveBend 1
+# Structured results. The preview's `result` is weak-head (a record shows its field
+# names, a sum its label); `resultData` forces everything, so a cohort can pin the
+# whole value.
+record Pair:
+  left: Nat
+  right: Nat
+sum Shape:
+  circle: Nat
+  square: {side: Nat}
+  empty: {}
+sum List:
+  nil: {}
+  cons: {head: Nat, tail: List}
+record Account:
+  owner: String
+  open: Bool
+  balance: Nat
+  history: List
+
+def pair() -> Pair:
+  {left: 1n + 2n, right: 3n * 4n}
+
+def circle() -> Shape:
+  Shape.circle(2n * 3n)
+
+def square() -> Shape:
+  Shape.square({side: 8n / 2n})
+
+def empty() -> Shape:
+  Shape.empty({})
+
+def three() -> List:
+  List.cons({head: 1n, tail: List.cons({head: 2n, tail: List.cons({head: 3n, tail: List.nil({})})})})
+
+def account() -> Account:
+  {owner: "ada", open: 3n > 2n, balance: 10n - 4n, history: List.cons({head: 6n, tail: List.nil({})})}
+
+def nestedRow() -> {a: {b: Nat, c: Bool}, d: String}:
+  {a: {b: 5n - 2n, c: 1n <= 0n}, d: "x"}
+
+# The same value reached through let: each cell is forced once.
+def viaLet() -> Pair:
+  let base = 2n * 5n
+  {left: base, right: base + base}
+
+# A field that never finishes: the deep view exhausts its allowance and shows NO value,
+# never the finished fields alone.
+def forever(n: Nat) -> Nat:
+  forever(n + 1n)
+def neverFinishing() -> Pair:
+  {left: 1n, right: forever(0n)}
+
+# A result that is not data has no deep view.
+def closureInside() -> {f: Nat -> Nat}:
+  {f: fn(x: Nat) -> Nat: x}

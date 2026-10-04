@@ -73,5 +73,6 @@ console.log("status: "+result.status);
 console.log("type: "+ty(p.type));
 for(const [i,t] of (p.turns??[]).entries())
  console.log("turn "+(i+1)+": yield "+data(t.plan)+(t.response?"  <- "+data(t.response):"  (waiting)"));
-if(p.result!==null&&p.result!==undefined)console.log("result: "+data(p.result));
+// The deep view (every field and payload forced) when the result is data; else the weak-head view.
+if(p.result!==null&&p.result!==undefined)console.log("result: "+data(p.resultData??p.result));
 if(p.diagnostic)console.log("diagnostic: "+p.diagnostic);

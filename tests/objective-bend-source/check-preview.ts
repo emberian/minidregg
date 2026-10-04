@@ -57,7 +57,15 @@ for(const item of cohort){
  // An activity's checked type is Activity<Plan, Response, Result>; its finished value has type Result.
  const resultType=out.preview.type.tag==="computation"?out.preview.type.result:out.preview.type;
  require(resultType.tag===(item.expectedType??"natural"),"actual typed source result type differs: "+item.name+" "+resultType.tag);
- require(item.expectedRecord?out.preview.result.tag==="record":out.preview.result.value===item.expected,"actual typed source result differs: "+item.name+" "+JSON.stringify(out.preview.result));
+ // `result` is the weak-head view; `resultData` is the deep view (every field and payload forced). expectedData pins a structured result.
+ if(item.expectedData!==undefined){
+  require(out.preview.resultDataStatus==="materialized"&&canonical(norm(out.preview.resultData))===canonical(norm(item.expectedData)),"deep result differs: "+item.name+" "+out.preview.resultDataStatus+" "+JSON.stringify(out.preview.resultData));
+  require(out.preview.result.tag===out.preview.resultData?.tag,"weak-head and deep result disagree on the constructor: "+item.name);
+ }
+ else if(item.expectedDataStatus!==undefined)require(out.preview.resultDataStatus===item.expectedDataStatus&&out.preview.resultData===null&&out.preview.result.tag==="record","deep view status differs: "+item.name+" "+out.preview.resultDataStatus+" "+JSON.stringify(out.preview.resultData));
+ else require(item.expectedRecord?out.preview.result.tag==="record":out.preview.result.value===item.expected,"actual typed source result differs: "+item.name+" "+JSON.stringify(out.preview.result));
+ // A scalar result is its own deep view.
+ if(out.preview.result.value!==undefined)require(canonical(out.preview.resultData)===canonical(out.preview.result),"deep view of a scalar differs from its weak-head view: "+item.name+" "+JSON.stringify(out.preview.resultData));
  require(out.preview.sameDecodedTerm===true&&out.preview.uses.length===0,"checked/executed join differs: "+item.name);
 }
 const firstFinished=cohort.findIndex((c:any)=>c.expectedStatus!=="refused");

@@ -97,11 +97,12 @@ result: 5
 $ bun docs/tutorial/run.ts docs/tutorial/ch1-values.obend origin
 status: finished
 type: {x: Nat, y: Nat}
-result: {x, y}
+result: {x: 0, y: 0}
 ```
 
-`origin` returns a record, and the preview prints only the field names. A record
-holds its fields as suspended computations. Nothing computes a field until
+`origin` returns a record. The preview prints a result in full: to print the
+record it forces every field, with a tick budget of its own. A record holds its
+fields as suspended computations, and nothing else computes a field until
 something reads it. In `shiftedX`, the `.x` reads one field of the shifted
 record, and that read is what runs.
 
@@ -149,8 +150,11 @@ type: Nat
 diagnostic: Minidregg.Theory.ObjectiveBendDemandMachine.Suspension.ticks
 ```
 
-`pair` and `good` finish. `bad` reads the field, so it runs `spin`. It never
-finishes, and the preview stops it when the tick budget is used up. The status
+`pair` and `good` finish. Printing `pair` in full would force `bad`, which runs
+`spin`; the preview spends its budget on that, gives up, and prints only the
+field names `{good, bad}`. Nothing returned a value for `bad`. `bad` reads the
+field, so it runs `spin`. It never finishes, and the preview stops it when the
+tick budget is used up. The status
 is `suspended` and the diagnostic names `Suspension.ticks`. That is the preview
 stopping, not an error in the program.
 
@@ -543,12 +547,12 @@ result: 14
 $ bun docs/tutorial/run.ts docs/tutorial/ch3-sums.obend numbers
 status: finished
 type: variable 1
-result: cons(...)
+result: cons({head: 2, tail: cons({head: 7, tail: cons({head: 5, tail: nil({})})})})
 ```
 
-`numbers` returns the list itself. The preview prints the label `cons` and does
-not compute the payload, because a payload is lazy like a record field. The
-type is printed as `variable 1`, the preview's name for the recursive `List`.
+`numbers` returns the list itself. The preview forces every payload to print the
+whole list. The type is printed as `variable 1`, the preview's name for the
+recursive `List`.
 
 ## 4. Specifications and `extension(self, super)`
 
