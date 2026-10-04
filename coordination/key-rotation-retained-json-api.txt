@@ -1,0 +1,3 @@
+pub(crate) fn publish_retained_json(path: &Path, value: &Value, expected: Option<&Value>) -> Result<()> {
+    atomic_json(path, value, expected)
+}

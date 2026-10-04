@@ -1,0 +1,188 @@
+BEND AS MINI'S WORLD PROGRAMMING LANGUAGE
+2026-10-03. Owner: Codex / bend_world_language. Construction and proposal are distinguished below.
+
+Decision and destination
+------------------------
+Objective Bend is its own language. Bend supplies a starting calculus and a useful
+historical admitted execution profile; its existing type system, quantities,
+termination checker and call-by-value evaluator are not the ceiling. Ember has
+explicitly authorized new syntax, typing, recursion and core representations with
+stated semantics, metatheory and versioned interpretation.
+
+The destination is members authoring reusable, manipulable modular specifications,
+heterogeneous target extensions, final-self open recursion and whole inherited
+super computations, laws, reflection and governed evolution on persistent objects.
+Specifications remain usable before closure and when their target diverges. A
+backend method dictionary, callback trampoline or rightmost signature resolver is
+not the reference definition of these semantics. Native current authorization,
+funding, effect admission and release remain separate from behavioral correctness.
+
+The new draft reference is Theory/ObjectiveBendOpenRecursion.lean: independent
+weak-head call-by-name Steps, lazy mix and computational Fix. Generic Fix returns
+its target; reflective prototype conflation is explicit specification × lazy target
+construction. Theory/ObjectiveBendDemandMachine.lean is an executable sharing
+candidate with suspended/evaluating/cached thunks and exact-state resumption.
+These new modules are currently UNCOMPILED and their sharing adequacy, capture
+ownership, type safety and effectful extension remain construction obligations.
+No BendTT termination or consistency theorem is inherited by the new Fix.
+
+Historical admitted profile and source evidence
+----------------------------------------------
+The pinned upstream snapshot at /Users/ember/dev/bend is retained for historical profile reproducibility. New Objective language implementation lives in separate versioned source; the historical upstream file policy is not a restriction on Objective syntax/core changes. bend.ts owns parsing/checking; safe.ts elaborates checked definitions to BendTT; comp.ts emits C/Metal/CUDA/JS; main.ts loads imports and supplies the CLI. Native Bend modules already export source definitions into JavaScript via its loader. This is useful authoring/compiler infrastructure, not a Mini authority boundary.
+
+Upstream BendTT requests Lean 4.34.0; Mini currently pins 4.30.0. No common checkpoint's toolchain or runtime profile is changed by this lane. Consensus/composition owns an exact namespace-adapted BendTT import and the explicit compatibility check, rather than pretending source text has been checked on Mini just because upstream built it.
+
+Mini common source snapshot: ba9f7b12c68a3f84bf9f81b1489116c7d7b5d304, e851920e-based isolated main, hbox:/home/hbox/workbox/codex-unified-integration-20261003/src. Own additive lane copied from that source: hbox:/home/hbox/workbox/codex-bend-world-20261003/src. Captain's source-release-map.json retains exact per-file hashes. Current native convergence continues independently.
+
+Mini already has a genuine evaluator-generic Machine/Evaluator in Compiler/Evaluator.lean. Registration requires soundness, completeness, determinism, crash honesty, stable metering, fuel monotonicity, canonical code/input/output/params and exact exported-oracle behavior. The compiled registry currently contains Nock only. Generic types are not evidence that a Bend evaluator has been registered.
+
+Compiler/NockProgramCodec.lean's name is historical: Program already stores evaluator, code bytes, kernel ABI and evaluator params; programId commits all four. ABI v5 carries sample slots, output slots, immutable library IDs, fuel, optional door and live/pinned context. Kernel/Run.lean reexecutes exact sample bytes and checks fuel, exact canonical count, output and every declared write. ResourceTransaction chooses the input from actual authenticated participants. Existing library closure is ordered, immutable and forbids nested libraries.
+
+OO tranche frame transaction10/world execution v2 adds canonical definition/content/append byte-list nouns against existing noun ABI coordinates; it does not imply general erase/dynamic-world-field effects. WorldKindMethods binds signed source-owned method names/program IDs/output semantic addresses. WorldPrototypeConstruction authenticates ordered source kindRead participants and requires current management law and revision exactly +1. These source participants are not a persisted structural-parent list in the resulting kind; copied immutable method refs live in the canonical descriptor/defaults, while self/super ancestry is explicit immutable program/library bundle metadata. Source roots/order survive in the signed accepted call and client construction-origin custody; dedicated resulting-kind ROM origin/parent fields remain an active join. Immutable self/super method library closure is not the governance policy DAG. WorldMethodTrace.ofAccepted retains actual command bytes, subject, complete participant canonical preimages/projections, root read guards and expected-pre writes, and exact CheckedRun. Independent private return ABI is still absent: current RunClaim.outputJam is the complete checked native output.
+
+Language contract
+-----------------
+1. Source packages are immutable artifacts. Retain exact author bytes, named modules and an ordered sealed import graph. Imports resolve by exact artifact/source digest; aliases are scoped and unambiguous. A mutable name such as community/math@latest is resolved before publication into an immutable lock entry; invoking a published method never fetches today's code. Author/repository labels and signatures are provenance separate from computational identity. Comments/source formatting may change the source artifact identity while the existing executable identity stays unchanged.
+
+2. Objective source uses its own parser and elaborator, preserving authored extension bodies, independent self/super/output annotations, requirements, laws and immutable imports. The historical embedded-Bend profile continues using pinned upstream parsing/checking. The source adapter must load only the sealed local package and explicitly pinned trusted library bytes. Arbitrary filesystem traversal, URL/hub import, implicit Base effects, FFI and @unsafe are unavailable during method execution. Compilation and source resolution are separate from invocation. Merely validating a declared import manifest is not proof that the parser used it: retain the actual parser dependency transcript and bind it to exact parsed/elaborated Book bytes.
+
+3. The historical embedded profile admits Book.check-checked closed live entries with BendTT Eval/Walk call-by-value semantics. The new Objective core has independent partial/lazy semantics and must establish its own typing, ownership, sharing and backend refinement; the following Q0/Q1/Q2 description applies only to that historical embedding. Do not substitute Term.wnf checker conversion for runtime semantics. Q0 terms are dead; Q1 live values are affine; Q2 copies only immutable Data. An underapplied case-tree call retains its original reference and normalized argument spine; it is not a partially unfolded function. Rwt evidence is live until a separate erasure/refinement theorem applies. The source check proves facts about the accepted elaborated Book, not source-to-Book or Book-to-native-compiler equivalence.
+
+4. A world method is a pure computation over a kernel-created typed invocation sample and produces a typed Plan. Plan is data: exact read dependencies, typed proposed effects, message envelopes, private return slots, status and canonical charge evidence. No effect handler runs while speculative/private computation explores a branch. The receiving kernel constructs actual effects and checks current grants, revocation, laws, descriptor constraints, target roots, structural source/kind revisions, budget/clock/payer consent, message audience and release authorization. A well-typed program cannot grant itself authority.
+
+5. World references are Data identifying object+kind/schema revision+audience and optional opaque capability references. Copying a reference copies an address, not a right to mutate. Current authorization is resolved on every invocation. Typed quantities cannot express expiry, revocation, fresh law edits or audience transitions alone. Read-only-looking queries must still authenticate complete dependency roots, including current authority and release rules. Missing sample values refuse; they are never silently replaced by zero.
+
+6. Persistent prototypes retain immutable specification identity and a lazy target, with qualified reusable closures and transitively reusable captures. Affine handles and continuations require explicit ownership and cannot become copyable because an environment is serialized. The historical embedded profile restricts reusable captures to its own admitted Data; that restriction does not define all Objective values. Instances retain persistent application state in governed typed world fields. A resident service stores continuations/checkpoints and mailbox cursor as governed state, then resumes through bounded invocations; it is not an ambient native process with inherited host rights. Doors can provide a useful lifecycle adapter, but Nock's special door record is not the conceptual definition of Bend objects.
+
+7. Dynamic method selection, reflective lookup and self/super must resolve exact versions before execution or record the authenticated resolution reads. Prototype method evolution is a governed change of immutable method references plus declared migration. Old method invocations cannot cross a changed kind/source/revocation/audience root without revalidation. Parent ordering and definition revisions belong to type/object evolution; governance composition and authorization are distinct.
+
+ABI and backend identity
+------------------------
+Keep the existing immutable executable Program record and its ID. Add a source/artifact record pointing to that ID. Never recalculate a historical Nock program ID, receipts, RunClaims or source provenance to make them look language-neutral. A future cosmetic namespace rename must be a byte-preserving API alias, not a wire migration. Existing Nock accepted-history remains re-executable on its exact evaluator semantics profile.
+
+Bend source artifact identity binds complete source modules/imports/entry; elaborated Book bytes; hashes of exact checker, safe elaborator, BendTT kernel, compiler and prelude/library closure; evaluator semantic version; typed input and output codecs; effect ABI; disclosure/release schema; arithmetic; canonical charging; public resource bounds; backend specialization/version. Store actual hash values, not a flag saying checked. Artifact IDs and backend cache keys differ when any such interpretation changes.
+
+Use one method-level Plan ABI independent of execution profile. Expected result equivalence includes exact canonical effect/message/private-return bytes, dependency sets, final status, and canonical charge; matching one displayed scalar is insufficient. Execution modes:
+
+* Native C/JS: normal author iteration and efficient runtime proposal. Use upstream fast compiler where domain-refinement is proved or independently checked. The kernel still admits the exact intent at current world state. Native compilation is not automatically proved by BendTT.
+* Checked kernel: exact reference/verified machine run and canonical codec validation. This supplies referee semantics and metering.
+* Oblivious: same typed Plan semantics on concealed bounded working set; keep all authenticated dependencies and hide private branch access/step/output shapes according to disclosure profile. A private branch must not emit host IO, a public address trace or a public branch-dependent refund.
+* zkVM: proof statement binds exact program/profile/sample/preimage commitments, private generation/revision, bounds and canonical Plan/charge. Proving a different convenient runtime does not establish this contract.
+* Specialized circuit: a compilation/refinement from the same exact method entry and input domain; AIR/proof verifier must bind actual outputs and canonical cost. A generic backend descriptor theorem is not a proof verification path.
+
+Canonical gas cannot be the number of backend physical instructions. Upstream comp.ts drops unused live let values and erases Rwt evidence, so exact optimized-native/BendTT microstep equality is false. Choose a source machine charging law, and prove native/circuit blocks preserve result plus canonical cost or approved canonical upper bound. Existing Nock exact signed steps and fees remain its own semantic profile. Exhaustion, native arithmetic overflow, semantic stuck/crash, malformed input/output, stale state and denied authority are separate outcomes; exhaustion is not evidence of semantic failure.
+
+Bend's native Nat is capped at 2^48-1 while structural BendTT Nat is unbounded. A native Nat48 profile needs a proven bounded domain/fail-stop behavior, not silent saturation. F32 needs explicit bit encoding/NaN policy and deterministic operations; host libm/GPU fast math is not a portable proof of equality. First world methods can use structural labels/bytes and bounded integers while full backend arithmetic refinement is developed; this does not shrink the source language ambition.
+
+Typed world effects and private return
+-------------------------------------
+The long-term Plan ABI is a sum of typed actions: create/change/erase field value, create/evolve definition, publish/instantiate prototype, send ordered durable message, authorize requested release and return typed value. Addresses include target index, field meaning+codec and key; byte payloads retain their canonical lengths. No scalar cast hides a byte or erase action. Outputs must correspond one-to-one to actual proposed actions; no duplicated aliases exploit set-like equality checks.
+
+Read dependencies include explicit reads and every authority/source/schema/budget/audience read used by actual admission. A guard consumed by a write survives through expectedPre. Private computation may keep the full dependency footprint inside committed private custody while publishing only the approved scope envelope; absent a complete-footprint certificate, do not optimize it to the visible reads.
+
+Messages are part of the atomic admitted successor, with exact sender/recipient capability references, payload schema, sequence/idempotence, delivery/read authorization and durable outbox custody. Sending a message does not synchronously run arbitrary recipient code inside the sender's grant. Replies are fresh governed invocations or private returns. Async orchestration can compose them explicitly without inventing ambient reentrancy.
+
+Private returns need their own declared slots independent of effects. Commit their schema/value/audience into the exact admitted result; release only through current release admission. No conversion of an accepted private result into a public debug log, speculative browser promise or receipt preimage. Authorized inspector view can open a return; other participants get only the contracted commitment/envelope. The current RunClaim.outputJam/effect adapter lacks this independent receiving path, so it is a remaining integration obligation.
+
+Ordinary authored behavior: Notebook.remember
+---------------------------------------------
+Illustrative Bend source using the proposed sealed Mini.World library, not a claim that this library already exists:
+
+    import ./Mini.World.bend as World
+
+    def remember(view: World.NotebookView, note: World.Note) -> World.Plan:
+      World.Plan{
+        dependencies: view.dependencies,
+        changes: World.append_content(view.notebook, note.text),
+        messages: World.notify(view.editors, note.title),
+        result: World.return_to_caller(note.title),
+        next: Nat.Succ{pred: view.revision}
+      }
+
+The World helpers construct typed data only. NotebookView is created from the authenticated notebook+editor audience+caller grant+current law+definition revision; Note is the typed signed argument. Member opens a notebook's source, edits the method, gets Bend type/source errors at the original span, previews the exact dependent object reads/proposed content append/message/result and maximum canonical charge, then publishes a governed immutable method version. The method's effective authority is the invocation's current grants and law, not whatever the source editor could do.
+
+For a notebook at revision 7 and note title 'Lamp test', body 'Three readings agree', the same sample under every qualified backend yields the exact content append, editor-message envelope carrying 'Lamp test', caller-private title return and revision 8, with identical dependency roots and canonical charge contract. Concurrent revision/law/editor-audience/revocation changes refuse or revalidate; they never create a subtly different backend result. Duplicate admitted replay returns the historical receipt before new charging. A denied message audience refuses the whole proposed joint effect unless the source explicitly authored a separately governed alternative.
+
+Interactive authoring/inspection/runtime
+---------------------------------------
+Build on the released source-owned world UI projections, not a second unrelated evaluator UI. Signed WorldKind/worldInstance views already expose descriptor, sample slots, canonical definition bytes, pinned kindRoot, methods{name,program,outputs}. Add sourceArtifact/profile/backend qualification references next to these exact method IDs. Source inspector shows original module and import lock, compiler diagnostics, elaborated Book correspondence, semantic/runtime profile and authorized dependency/result views. It must never label source-link metadata as a compiler proof.
+
+The editor is for arbitrary authored programs and object behavior: completion from pinned imported modules and authenticated descriptor meanings; original source spans; reproducible typecheck/safe verdict; preview against exact current view; author-controlled migration plan; local branch experiment that does not mutate live object until admitted. Runtime errors show structured phase/status and authorized source location, with exact trace/receipt replay. Private debugging is an authorized operation with a declared disclosure budget; recording every private intermediate into logs would break the execution contract.
+
+Bound source bytes/import count, Book/labels/data sizes, environment/stack frames, heap, canonical steps, output bytes/message count and private envelope padding. Static termination is not a promise of acceptable cost. Publication can carry reusable checked shape/cost summaries; invocation uses kernel-selected sample and bounds. Maintain backend cache identity and provenance to reuse compilation safely. Subscription/resident work uses explicit scheduling/resource grants, checkpoint/custody and bounded resumption; neither types nor termination provide hosting capacity.
+
+Migration and receiving joins
+-----------------------------
+A publication creates immutable source artifact and executable program, then a current-law-governed method binding/update. Instance schema migration is an explicit exact-preimage atomic transition, not reinterpretation of old bytes in place. Methods pin libraries/source versions. Active invocations pin source+kind revisions and current grants; replay preserves admitted history. Do not silently route an old Nock program ID to a Bend program. A backend replacement may retain the semantic program identity only under an explicit versioned format defining semantic vs implementation identity and a proved refinement; current IDs include code, so today's replacement necessarily gets a new executable ID.
+
+Source author identity and publisher authority belong to governed publication and signed projections. Mere source hash authorship cannot confer method-install rights. Revocation changes future admission and release while old accepted receipts remain immutable. Retired executable records remain available for reexecution and provenance, with separate administrative disablement/migration controls as currently modeled.
+
+First additive construction in this lane
+---------------------------------------
+Compiler/BendWorldSource.lean: canonical sealed module/package wire codec; exact source/package cSHAKE identities; ordered earlier-module import checks with exact source digest and unique aliases; pinned upstream/toolchain facts; general codec roundtrip/canonicality laws. This validates a manifest, not a parser transcript.
+
+Compiler/BendWorldProgramCodec.lean: canonical source+exact elaborated Book+semantic profile+execution-plan DAG+backend provenance+existing executable record artifact codec; five explicit source component hashes; input/output/effect/disclosure/charge profiles; nine resource bounds; program/evaluator binding; exact artifact/profile identities; implementation-independent semantic identity and plan-update law; structural validation and general roundtrip/canonicality laws; byte-preserving legacy program ID and source-update laws. This is artifact/provenance construction, not evaluator registration/compiler correctness.
+
+Kernel/BendWorldMethod.lean: fail-closed source provenance link to exact existing WorldMethodTrace/CheckedRun/program/evaluator, retaining the complete actual native trace. No mutation of registry, ABI, CanonicalRuntimeProfile, common receiver or native build occurs. Link validation does not confer authority or prove source compilation. Publication authentication and actual source-to-executable refinement are separate next joins.
+
+Source staged locally at /Users/ember/workbox/bend-world-additive-20261003 and copied to own isolated hbox lane. Captain owns common convergence/Git. Narrow compile is requested but not yet performed; no deployment, external model call, payment or upstream modification. This additive checkpoint is reviewable source construction; the full requested authoring/runtime/private/OO integration remains active work.
+
+Concrete continuation, with owners
+----------------------------------
+Consensus/composition: exact BendTT source/toolchain adaptation and checked live machine/oracle laws, evaluator registration and canonical charge model.
+Semantics audit: compiler mismatch/refinement cases, Base/FFI closure, native arithmetic and evidence erasure boundaries.
+Logic compilation: source-guided AIR/specialized circuit and exact statement/refinement, without treating a descriptor as an implemented proof verifier.
+World language: actual sealed parser/elaboration transcript, publication/source lookup, program artifact receiving/publication authorization and primary editor integration.
+OO: typed generalized effect/erase/dynamic method outputs, source-owned constructor/evolution migration and exact accepted trace.
+Private/authority/agreement: complete private footprint, independent return custody/release, durable messages and atomic current-authority admission.
+Docuverse/deos: ordinary authored notebook/content/message workflows consuming signed source projection; source inspection plus preview, not a disconnected demo.
+
+Evidence locations
+------------------
+Upstream files: bend2/bend.ts (type Book/Def/Span, imports and parser/checker), bend2/safe.ts (elaboration and opaque models), bend2/bendtt.lean (1458 Walk;1477 Value;1502 Eval;1532 onward Claim), bend2/comp.ts (native arithmetic and compiler erasure), bend2/main.ts (loaders;715 verdict;737 transitive promises;801 book_read), bend2/base.bend (IO is foreign effect closure, not Mini ambient rights).
+Mini files: Compiler/Evaluator.lean; Compiler/NockProgramCodec.lean; Kernel/Run.lean; Kernel/ResourceTransaction.lean; Kernel/WorldKindMethods.lean; Kernel/WorldPrototypeConstruction.lean; Kernel/WorldMethodTrace.lean; Compiler/PrivateWorldIR.lean; Compiler/WorldExecutionContract.lean; native/resource-client/src/web/world.rs. Captured common file hashes in captain source-release-map.json. No fabricated runtime evidence is recorded here.
+
+Steering: generalized graded execution and FHE
+--------------------------------------------
+Ember's latest destination is Mini growing into the new Dregg, with Bend central and a new Starbridge; a later repository rename is cosmetic. Execution qualifications form a composable graded plan, not an enum extended with fashionable labels. Existing PrivateComputationKind remains an artifact discriminator. The source/typed ABI/arithmetic/charge meaning gets semanticId; a separate exact execution-plan DAG commitment binds operations, specialization, proof joins, observer-indexed leakage policy, per-property threat profiles, ciphertext/key generations and authorized decryption/release custody. Backend names are provenance labels, never grants or proofs.
+
+FHE, homomorphic computation, oblivious access, proofs and native execution can compose on one operation graph only when the same declared numeric/result semantics are refined. Exact integer/bit FHE versus approximate CKKS-style arithmetic cannot silently share the same equality promise; approximate result/error meaning is an explicit separate typed numeric contract. No native fallback from a private/FHE failure may bypass the selected privacy/key/release plan. FHE key holders, proof verifiers and effect/reveal authorities are separate roles.
+
+Semantic program IDs derived from small known program spaces can reveal which hidden program ran; hidden source/execution identity needs a hiding commitment and a public approved envelope, not merely an ordinary digest. Observer-indexed leakage policy must name code identity, dependency addresses, branch shape, run length, output dimensions and failure behavior. Canonical gas remains independent of physical accelerator operations. If exact semantic count is private, public tariffs/refunds need a declared fixed schedule or padding; a faster backend cannot expose private branch length via a refund. Profiles and IDs describe claims; they do not establish the cryptographic enforcement.
+
+The code artifact now includes separate plan digest and semanticId. Changing backend/plan metadata leaves semanticId unchanged by a named general law; artifactId still commits the changed plan. This is identity discipline only, not permission to execute a plan or proof of backend equivalence. Graded/FHE owners supply the actual plan law and key/release/arithmetic refinement.
+
+Registry/referee construction detail
+-----------------------------------
+Upstream BendTT has Value/Eval/progress, not a native Crash relation analogous to Nock. Quantity/notData/stuck diagnostics from the machine are not evidence that a source term has no value. Keep Mini's Evaluator obligations intact: the Bend machine Term domain should retain accepted Book/closed typed live entry/input evidence, or perform explicit pre-admission refusal before executing. Prove non-timeout stuck impossible on this domain; do not register diagnostics as semantic crashes by fiat. The artifact includes exact elaborated AST/Book bytes and codec, since a surface source digest alone does not certify parsing.
+
+Local upstream exact-byte SHA256 component pin ledger (algorithm stated separately from Mini cSHAKE artifact IDs): /Users/ember/workbox/bend-world-additive-20261003/upstream-source-pins.json. No digest collision-resistance theorem is asserted by the artifact roundtrip laws.
+
+Further receiving/cost clarification from joined owners
+------------------------------------------------------
+Current typed content output coordinate zero binds the complete canonical ContentResource.commandStream with ordered inner actions; append binds appendStream and definition binds definitionStream. The future Plan must refine these actual typed target payloads and action order, not assume each target is one scalar write. WorldMethodTrace retains every actual successor write, including authority/accounting consequences beyond the ABI writes.
+
+Canonical Bend charge should be defined on an admitted shared typed block/VM IR, with a versioned cost law and matching native/circuit usage evidence. Structural source Eval count remains a useful refinement diagnostic; unary Nat source expansion makes it unsuitable as the sole practical pricing rule after numeric refinement. This strengthens the already stated distinction between canonical charge and physical backend steps; Nock metering must not be inherited blindly.
+
+Community market modules must explicitly name their allocation semantics. Mini's existing single-seller descending-price/slot rule and DrEX's two-sided uniform/pro-rata rule are distinct programs. The first authoritative Bend market method can preserve the existing rule while deriving sum<=supply, exact price/allocation and actual native transfer; a separately named exact-integer DrEX module can add the broader exchange. A source-side display computation is not an authoritative settlement effect.
+
+
+Construction update: Objective Bend and native source/return joins (2026-10-03)
+
+The human destination is now explicitly Objective Bend. This is a source language with persistent first-class partial specs, demanded/provided methods, protocol/view extension, final-self/super composition, fresh heterogeneous instances and governed evolution. The workshop is its demanding first consumer, not its only product. Method IDs and parent metadata are insufficient: generated source must encode the object call semantics in the exact checked core, with source attribution and body/type correspondence retained. The intended reusable representation is immutable Spec/method-definition Data plus admitted Data captures, an invariant finalSelf graph handle, and a prior-provider super cursor. Each demand instantiates an affine closure. Behavior inheritance is separate from authority restriction.
+
+The actual upstream Term.called rule admits earlier definitions or syntactically descending self calls. It does not admit arbitrary mutual method/dispatcher cycles. One coherent implementation is a single checked tagged dispatcher with explicit descending fuel and immutable method graph Data; another is a checked bounded code interpreter. A prose claim that a host dispatcher decreases fuel is not source admission. The linker owner now checks dependency order and exact complete core Book/Def lookup, and the closure owner supplies bounded arena/decode/reification certificates. No unchecked fixpoint or host laziness substitutes for these semantics. Source-level memo states remain unforced/evaluating/value and governed state transitions remain Mini history semantics.
+
+First additive tranche is now compiled PASS for all seven modules under Mini Lean4.30, two threads and40G enforced shared build cap. Evidence hbox:/home/hbox/workbox/codex-bend-world-20261003/check-08.log. Checked frozen bundle source-seven-passing.tar.gz SHA25666ef117d775726d58d55d80a40c314459dc7f03afdb713326cc192f46955ec4a and adjacent source-seven-passing-manifest.json retain exact file hashes and claim limits. Files are Compiler/BendWorldSource, BendWorldProgramCodec, BendCoreAdmission, BendWorldPlan, BendPrivateCapacity; Kernel/BendWorldMethod, BendSourcePublication. The proof/source overlay includes exact pinned BendTT4.30 bridge with two equivalent stdlib rewrites and common66042a8c+its checked scoped WorldMethodTrace. No full host rebuild or registry/profile modification occurred.
+
+CoreAdmission actually parses UTF8 core bytes, reparses canonical full Book text, checks exact canonical bytes, requires Book.check=.ok() and transparent definitions, and selects actual Book.get entry. It does not prove that a surface parser/elaborator emitted the right Book. The injected sealed.ts adapter uses exact upstream parse_book/safe_emit without ambient book_load/safe_check, retains exact module/import/emission transcript and refuses foreign/unsafe/bodyless source. The workshop owner actually exercised this adapter and exposed a Base empty-alias collision: an explicit pure Prelude may be globally scoped, but the empty alias must not be installed into upstream parser alias map. Lean Import fields are importAlias/moduleIndex after keyword collision repairs; a globally scoped empty importAlias is only permitted for explicit earlier module named Base. Full upstream foreign Base remains refused.
+
+BendSourcePublication emits a genuine existing ResourceTransaction content createAtom command with exact artifact bytes and current expected source root. receiveLoaded requires exact signed command and actual core check, then uses the unchanged native current capability/law/physical-preimage/funding/durable admission. lookupAccepted resolves the content-addressed source from an actually admitted .read participant. Altered/tombstoned content fails exact lookup. This is real source storage and observation authority; it is not a computation receipt. The native Host/CLI route and actual publication bootstrap remain integration work.
+
+Next isolated source tranche is authored but not yet checked: Compiler/BendInvocation is one framed complete statement for semantic/artifact/program/method/plan, invocation/predecessor/current authority/input identities, tariff/capacity10/crypto parameter/transformer, complete ordered native payload effects and independent ReturnSlot. Its proof statement must use injective bytes (or a proved base2^29 codec), never eight32-bit BabyBear limbs. Compiler/BendMethodAttribution retains exact source module digest/span/transcript and selected checked core Def body/type. It deliberately does not certify arbitrary transcript correctness. Kernel/BendOpaqueResultReceiver observes the actual current source artifact as the first native participant and writes full canonical opaque candidate as the second, passing the original accepted DataIntent unchanged to the ordinary durable receiver. It requires effects=[] and an explicit opaque value schema; artifact output byte bound must admit the whole payload. Kernel/BendReturnRelease checks the exact current result atom/key/audience/generation/recipient/purpose, current delegateObject capability/native signature/current installed law and structural dependencies, then journals an event-only CAS with an explicit physical source readGuard and current authority guards. The physical key holder must verify that authentic journal record before decoding the exact retained ciphertext; free-form JSON success is insufficient. These are authored APIs pending source/native qualification, not current integrated features.
+
+The actual first BFV completion is224125 JSON bytes and roughly111KB ciphertext; its signed publication and ordinary canonical successor storage need the public whole-result bound, not a hash-only substitute. The initial encrypted Bool ingress is explicitly honest-owner-generated: encryption/signature does not prove that plaintext is Bool. Therefore opaque custody/replay may be governed now, while typed Bool consequences, third-party effects and reusable authenticated noise-depth lineage require their actual proof/semantic bridges. CKKS approximate values require a different relation.
+
+Fixed private charging remains an active native contract join, not complete merely because BendPrivateCapacity compiled. Its theorem says public ten-lane fixed capacity charge is independent of secret canonical IR usage, which must fit privately; no actual source count is padded or renamed. The current oldNock sourceCharge uses checked RunClaim.steps and compute credits; it must remain unchanged. A new signed Bend source admission/charge rule must create the actual selected DataIntent with its fixed public capacity before joint reservation/candidate custody, include funded current compute authority and padding/control/repair, and preserve exact physical writes/guards/events. Backend physical instruction counts and diagnostic source counts remain separate. The joint receiver already consumes exact selected intent charge; after-the-fact metadata cannot alter it.
+
+The largest remaining semantic joins are generic checked core result to the canonical native Plan, source-data representation for exact U8/list/Word/Sigma types, source body/callback/capture/linker correspondence, complete execution refinement, and new fixed-capacity source admission. Content atom create/delete, ordered messages/append, definitions and ordinary multi-target payload effects fit existing typed streams; fresh world-resource creation/retirement currently use separate native lifecycle receivers and cannot be claimed atomically unified merely by putting an enum in Plan. General resource lifecycle+effects atomic lowering needs an actual shared prepared transaction contract. First-class views/protocols consume only admitted observations and prepared intents, not source-annotated arbitrary values. These interfaces replace repeated per-feature Rust handlers and method sidecars, but their consumers must be connected to actual decoded execution results before UI registration.

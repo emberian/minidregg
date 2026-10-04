@@ -1,4 +1,4 @@
-import Compiler.BendCommitmentReduction
+import Compiler.ObjectiveProofContext
 import Compiler.BendProofCshakeBounded
 import Compiler.ObliviousUnroll
 
@@ -8,7 +8,7 @@ The payload wires can be shared with the execution/codec producer; no host hash
 or claimed digest is introduced as a witness oracle. General framer/cSHAKE
 refinement is still open; the exact byte equation below is unconditional. -/
 namespace Minidregg.Compiler.BendCommitmentFrame
-open Minidregg.Theory Tower256ConcreteBackend BendProofProjection
+open Minidregg.Theory Tower256ConcreteBackend ObjectiveProofContext
 open ObliviousNetwork BendProofKeccak BendProofCshake BendProofCshakeBounded
 set_option autoImplicit false
 
@@ -17,8 +17,8 @@ def frameBytes (context : Context) (coins payload : List UInt8) : List UInt8 :=
     StreamCodec.nat.encode payload.length ++ payload
 
 theorem frameBytes_exact (context : Context) (coins payload : List UInt8) :
-    frameBytes context coins payload = BendCommitmentReduction.preimage context coins payload := by
-  simp [frameBytes, BendCommitmentReduction.preimage, BendCommitmentReduction.preimageCodec,
+    frameBytes context coins payload = ObjectiveProofContext.preimage context coins payload := by
+  simp [frameBytes, ObjectiveProofContext.preimage, ObjectiveProofContext.preimageCodec,
     StreamCodec.product, bytesStream, List.append_assoc]
 
 /-- Public maximum, accounting for the exact base-255 length codec. -/

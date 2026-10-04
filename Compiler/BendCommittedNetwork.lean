@@ -10,7 +10,7 @@ The payload-wire producer must still denote the actual admitted canonical
 input/output codec; this module does not equate raw machine bits with bytes. -/
 namespace Minidregg.Compiler.BendCommittedNetwork
 open ObliviousNetwork ObliviousUnroll
-open BendProofProjection
+open ObjectiveProofContext
 set_option autoImplicit false
 
 structure Candidate where

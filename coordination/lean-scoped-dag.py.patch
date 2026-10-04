@@ -1,0 +1,286 @@
+--- coordination/lean-scoped-dag.py
++++ coordination/lean-scoped-dag.py
+@@ -18,9 +18,28 @@
+ import subprocess
+ import time
+ 
++_HASH_CACHE = {}
++
+ 
+ def sha(path):
+-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
++    path = Path(path)
++    before = path.stat()
++    signature = (before.st_dev, before.st_ino, before.st_size,
++                 before.st_mtime_ns, before.st_ctime_ns)
++    cached = _HASH_CACHE.get(str(path))
++    if cached and cached[0] == signature:
++        return cached[1]
++    digest = hashlib.sha256()
++    with path.open('rb') as stream:
++        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
++            digest.update(chunk)
++    after = path.stat()
++    if signature != (after.st_dev, after.st_ino, after.st_size,
++                     after.st_mtime_ns, after.st_ctime_ns):
++        raise ValueError('Artifact changed while hashing: ' + str(path))
++    value = digest.hexdigest()
++    _HASH_CACHE[str(path)] = (signature, value)
++    return value
+ 
+ 
+ def encoded_sha(value):
+@@ -62,6 +81,53 @@
+     return [p for p in (path, Path(str(path) + '.private'), Path(str(path) + '.server'),
+                         path.with_suffix('.ir'), path.with_suffix('.ilean'))
+             if p.is_file()]
++
++
++def project_immutable_namespace(args):
++    """Project individually pinned warm files before writable namespaces exist.
++
++    Lean chooses the first namespace directory, so an empty-root preflight is
++    not evidence that imports will survive the first node publication. Only a
++    completed, independently hash-pinned immutable cohort is eligible here.
++    """
++    cohort = getattr(args, 'immutable_cohort', None)
++    if cohort is None:
++        return
++    catalogue = cohort / 'COHORT.json'
++    if not args.immutable_cohort_sha256 or sha(catalogue) != args.immutable_cohort_sha256:
++        raise ValueError('Immutable namespace catalogue pin mismatch')
++    data = json.loads(catalogue.read_text())
++    if data.get('state') != 'COMPLETE' or data.get('toolchainSha256') != sha(args.lean):
++        raise ValueError('Namespace projection requires complete matching-toolchain cohort')
++    selected = set(json.loads(args.manifest.read_text())['affected_topological'])
++    projected = []
++    for entry in data['artifacts']:
++        relative = Path(entry['path'])
++        if relative.is_absolute() or '..' in relative.parts:
++            raise ValueError('Unsafe immutable artifact name')
++        original = cohort / relative
++        if sha(original) != entry['sha256']:
++            raise ValueError('Immutable artifact drift: ' + str(relative))
++        if relative.parts[0] != 'olean':
++            continue
++        leaf = relative.name
++        ending = next((x for x in ('.olean.private', '.olean.server', '.olean', '.ilean', '.ir') if leaf.endswith(x)), None)
++        if ending is None:
++            raise ValueError('Unknown immutable companion: ' + str(relative))
++        module = '.'.join(relative.parts[1:-1] + (leaf[:-len(ending)],))
++        if module in selected:
++            continue
++        dest = args.output / Path(*relative.parts[1:])
++        dest.parent.mkdir(parents=True, exist_ok=True)
++        if dest.exists() or dest.is_symlink():
++            if not dest.is_symlink() or dest.resolve() != original.resolve():
++                raise ValueError('Refusing namespace projection overwrite: ' + str(dest))
++        else:
++            dest.symlink_to(original)
++        if sha(dest) != entry['sha256']:
++            raise ValueError('Projected artifact pin mismatch')
++        projected.append({'module': module, 'path': str(dest), 'source': str(original), 'sha256': entry['sha256']})
++    save(args.output / '.immutable-namespace.json', {'catalogueSha256': args.immutable_cohort_sha256, 'artifacts': projected})
+ 
+ 
+ class Runner:
+@@ -235,26 +301,151 @@
+             elif status['dependencyArtifacts'] != self.dependency_artifacts(module):
+                 status.update(state='ENVFAULT', reason='Imported artifact changed during compilation')
+             else:
+-                destinations = {p: self.output / p.relative_to(stage) for p in artifact_set(olean)}
+-                destinations[c_file] = self.c_output / c_file.relative_to(stage)
+-                # Preserve old owned files outside import lookup; never delete
+-                # caches. Consumers start only after ALL publications complete.
+-                old_dir = leaf / 'previous'
+-                for old in artifact_set(self.output / module_path(module, '.olean')) + [self.c_output / module_path(module, '.c')]:
+-                    if old.exists():
+-                        if old.is_symlink():
+-                            raise ValueError('Refusing to replace dependency symlink: ' + str(old))
+-                        old_dir.mkdir(exist_ok=True)
+-                        os.replace(old, old_dir / old.name)
+-                for new, dest in destinations.items():
+-                    dest.parent.mkdir(parents=True, exist_ok=True)
+-                    os.replace(new, dest)
+-                status.update(state='PASS', artifacts={str(p): sha(p) for p in destinations.values()})
++                status.update(state='PASS', artifacts=self.publish(module, stage, olean, c_file, leaf))
+         except Exception as exc:
+             status.update(state='ENVFAULT', reason=str(exc))
+         status['finishedUTC'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+         save(leaf / 'status.json', status)
+         return status
++
++    def publish(self, module, stage, olean, c_file, leaf):
++        destinations = {p: self.output / p.relative_to(stage) for p in artifact_set(olean)}
++        destinations[c_file] = self.c_output / c_file.relative_to(stage)
++        # Preserve old files. Stage and output may be on different
++        # filesystems (/tank versus /home), so copy into a same-directory
++        # temporary file before each atomic replacement. Consumers start
++        # only after ALL artifact publications complete.
++        old_dir = leaf / 'previous'
++        old_files = artifact_set(self.output / module_path(module, '.olean')) + [self.c_output / module_path(module, '.c')]
++        for old in old_files:
++            if old.exists():
++                if old.is_symlink():
++                    raise ValueError('Refusing to replace dependency symlink: ' + str(old))
++                old_dir.mkdir(exist_ok=True)
++                shutil.copy2(old, old_dir / old.name)
++        for new, dest in destinations.items():
++            dest.parent.mkdir(parents=True, exist_ok=True)
++            temporary = dest.with_name('.' + dest.name + '.dag-' + self.run.name)
++            with new.open('rb') as source, temporary.open('xb') as target:
++                shutil.copyfileobj(source, target, 1024 * 1024)
++            os.replace(temporary, dest)
++        for old in old_files:
++            if old.exists() and old not in destinations.values():
++                retired = old.parent / '.dag-retired' / self.run.name
++                retired.mkdir(parents=True, exist_ok=True)
++                os.replace(old, retired / old.name)
++        return {str(p): sha(p) for p in destinations.values()}
++
++    def hold_unchanged_failures(self, prior):
++        """Explicitly retain exact prior source failures while independent work runs."""
++        held = {}
++        for module in self.order:
++            path = prior / 'modules' / module / 'status.json'
++            if self.states[module] != 'PENDING' or not path.is_file():
++                continue
++            result = json.loads(path.read_text())
++            if (result.get('state') == 'FAIL' and (result.get('producerExit') or 0) > 0
++                    and result.get('inputFingerprint') == self.fingerprints[module]
++                    and result.get('sourceSha256') == self.source_pins[module]
++                    and result.get('dependencyArtifacts') == self.dependency_artifacts(module)):
++                self.states[module] = 'FAIL'
++                held[module] = str(path)
++        save(self.run / 'held-unchanged-failures.json', held)
++        print('LEAN DAG RETAINED SOURCE FAILURES ' + str(len(held)), flush=True)
++
++    def recover(self, prior):
++        """Adopt only known successful compiles whose publication failed with EXDEV."""
++        recovered = []
++        for module in self.order:
++            leaf = prior / 'modules' / module
++            status_path = leaf / 'status.json'
++            if self.states[module] != 'PENDING' or not status_path.is_file():
++                continue
++            status = json.loads(status_path.read_text())
++            if (status.get('producerExit') != 0 or status.get('state') != 'ENVFAULT'
++                    or 'Invalid cross-device link' not in status.get('reason', '')
++                    or status.get('inputFingerprint') != self.fingerprints[module]
++                    or status.get('sourceSha256') != self.source_pins[module]
++                    or status.get('dependencyArtifacts') != self.dependency_artifacts(module)):
++                continue
++            if any(self.states[d] not in ('PASS', 'REUSED') for d in self.imports[module] if d in self.affected):
++                continue
++            stage = leaf / 'staging'
++            olean = stage / module_path(module, '.olean')
++            c_file = stage / module_path(module, '.c')
++            if not olean.is_file() or not c_file.is_file():
++                continue
++            frozen = {str(p): sha(p) for p in artifact_set(olean) + [c_file]}
++            save(self.run / ('recover-' + module + '.json'), {'priorStatus': status, 'stagedArtifacts': frozen})
++            artifacts = self.publish(module, stage, olean, c_file, leaf)
++            if any(sha(p) != digest for p, digest in frozen.items()):
++                raise ValueError('Recovered staging changed: ' + module)
++            result = dict(status, state='PASS', artifacts=artifacts,
++                          recoveredFrom=str(status_path), recoveredBy=str(self.run))
++            result.pop('reason', None)
++            self.entries[module] = result
++            self.states[module] = 'REUSED'
++            recovered.append(module)
++            self.checkpoint()
++        print('LEAN DAG RECOVERED ' + str(len(recovered)), flush=True)
++
++    def recover_namespace_equivalent(self, prior):
++        """Preserve producerExit0 across an exact immutable root relocation.
++
++        Dependency module identities and every companion content digest must
++        match. Only filesystem root names may differ, and the immutable overlay
++        has already verified the completed catalogue before this runs.
++        """
++        if getattr(self.args, 'immutable_cohort', None) is None:
++            raise ValueError('Namespace salvage requires pinned complete overlay')
++        prior_preflight = json.loads((prior / 'preflight.json').read_text())
++        if (prior_preflight['toolchainSha256'] != self.tool_pin or
++                prior_preflight['manifestSha256'] != sha(self.args.manifest)):
++            raise ValueError('Namespace salvage source/toolchain manifest mismatch')
++        def normalized(bundles):
++            return {module: {Path(path).name: digest for path, digest in bundle.items()}
++                    for module, bundle in bundles.items()}
++        adopted = []
++        for module in self.order:
++            leaf = prior / 'modules' / module
++            status_path = leaf / 'status.json'
++            if self.states[module] != 'PENDING' or not status_path.is_file():
++                continue
++            status = json.loads(status_path.read_text())
++            if (status.get('producerExit') != 0 or status.get('state') not in ('PASS', 'ENVFAULT') or
++                    (status.get('state') == 'ENVFAULT' and
++                     status.get('reason') != 'Imported artifact changed during compilation') or
++                    status.get('sourceSha256') != self.source_pins[module]):
++                continue
++            actual = self.dependency_artifacts(module)
++            if normalized(status.get('dependencyArtifacts', {})) != normalized(actual):
++                continue
++            if any(self.states[d] not in ('PASS', 'REUSED') for d in self.imports[module] if d in self.affected):
++                continue
++            stage = leaf / 'staging'
++            olean = stage / module_path(module, '.olean')
++            c_file = stage / module_path(module, '.c')
++            if not olean.is_file() or not c_file.is_file():
++                continue
++            frozen = {str(p): sha(p) for p in artifact_set(olean) + [c_file]}
++            evidence = {'priorStatus': status, 'stagedArtifacts': frozen,
++                        'actualDependencyArtifacts': actual,
++                        'exactModuleCompanionContentEquality': normalized(actual),
++                        'manifestSha256': sha(self.args.manifest), 'toolchainSha256': self.tool_pin}
++            save(self.run / ('namespace-recover-' + module + '.json'), evidence)
++            artifacts = self.publish(module, stage, olean, c_file, leaf)
++            if any(sha(p) != digest for p, digest in frozen.items()):
++                raise ValueError('Namespace recovered staging changed: ' + module)
++            result = dict(status, state='PASS', inputFingerprint=self.fingerprints[module],
++                          dependencyArtifacts=actual, artifacts=artifacts,
++                          recoveredFrom=str(status_path), recoveredBy=str(self.run),
++                          namespaceEquivalenceEvidence=str(self.run / ('namespace-recover-' + module + '.json')))
++            result.pop('reason', None)
++            self.entries[module] = result
++            self.states[module] = 'REUSED'
++            self.checkpoint()
++            adopted.append(module)
++        print('LEAN DAG NAMESPACE RECOVERED ' + str(len(adopted)), flush=True)
+ 
+     def export_complete(self):
+         target = getattr(self.args, 'export_complete', None)
+@@ -291,6 +482,12 @@
+ 
+     def execute(self):
+         self.preflight()
++        if getattr(self.args, 'recover_namespace_run', None):
++            self.recover_namespace_equivalent(self.args.recover_namespace_run)
++        if getattr(self.args, 'recover_run', None):
++            self.recover(self.args.recover_run)
++        if getattr(self.args, 'hold_failures_from', None):
++            self.hold_unchanged_failures(self.args.hold_failures_from)
+         if self.args.plan_only:
+             print(json.dumps({'verdict': 'PLAN', 'states': self.states, 'run': str(self.run)}))
+             return 0
+@@ -337,6 +534,11 @@
+     p.add_argument('--threads', type=int, required=True)
+     p.add_argument('--module-timeout', type=int, default=300)
+     p.add_argument('--plan-only', action='store_true')
++    p.add_argument('--recover-run', type=Path)
++    p.add_argument('--recover-namespace-run', type=Path)
++    p.add_argument('--hold-failures-from', type=Path, help='Retain exact unchanged source failures; does not hold ENVFAULT or TIMEOUT')
++    p.add_argument('--immutable-cohort', type=Path)
++    p.add_argument('--immutable-cohort-sha256')
+     p.add_argument('--export-complete', type=Path,
+                    help='New immutable copy cohort, emitted only after every scheduled module passes')
+     args = p.parse_args()
+@@ -351,6 +553,7 @@
+             return 2
+         try:
+             args.lock_fd = lock.fileno()
++            project_immutable_namespace(args)
+             return Runner(args).execute()
+         except Exception as exc:
+             print('ENVFAULT: ' + str(exc), flush=True)

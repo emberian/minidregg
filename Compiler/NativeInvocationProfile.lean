@@ -4,6 +4,7 @@ Route bindings are source policy bytes, not an invocation-supplied allow list.
 This registration is necessary but not sufficient: each nonordinary route still
 requires its closed current native admission producer.
 -/
+import Theory.AssertAxioms
 import Compiler.NativeInvocationStatement
 import Compiler.ContentControlFrame
 namespace Minidregg.Compiler.NativeInvocationProfile
@@ -72,10 +73,9 @@ theorem select_encoded (p : Policy) (unique : (p.bindings.map Prod.fst).Nodup) :
 theorem activityPin_encoded (p : Policy) (unique : (p.bindings.map Prod.fst).Nodup)
     (route : (p.bindings.lookup .activityDispatch).isSome = true) :
     activityPin (encode p) = p.activityControl := by
-  simp only [activityPin,select_encoded p unique,Option.bind_some]
   cases found : p.bindings.lookup .activityDispatch with
   | none => simp [found] at route
-  | some bytes => rfl
+  | some bytes => simp [activityPin, select_encoded p unique, found]
 
 #assert_axioms decode_encode
 #assert_axioms encode_injective

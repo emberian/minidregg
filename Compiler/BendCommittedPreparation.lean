@@ -4,7 +4,7 @@ import Compiler.BendCommittedNetwork
 consumers from confusing an arbitrary structural certificate with the concrete
 execution/payload aliasing that prepare constructed. -/
 namespace Minidregg.Compiler.BendCommittedPreparation
-open ObliviousNetwork BendCommittedNetwork BendProofProjection
+open ObliviousNetwork BendCommittedNetwork ObjectiveProofContext
 set_option autoImplicit false
 
 theorem prepare_exact (execution : Network) (domain : String) (context : Context)

@@ -4,6 +4,7 @@ unsigned invocation body, excluding this framing and its signatures; signatures
 must bind these statement bytes through the actual authorization request.
 This codec does not itself change a legacy profile or grant any admission.
 -/
+import Theory.AssertAxioms
 import Compiler.Tower256ConcreteBackend
 import Compiler.ResourceBirthCodec
 

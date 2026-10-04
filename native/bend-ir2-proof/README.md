@@ -1,77 +1,36 @@
-# Experimental Mini IR2 proof harness
+# Experimental Objective Bend proof backend
 
-This is an offline conformance and privacy-regression harness, not a world proof-admission endpoint. It consumes actual Lean-emitted local-row IR2 through Bread's existing parser, prover and verifier. Whole-controller/source correspondence and full proof-system soundness/zero knowledge remain open.
+Objective Bend is the sole language targeted by the active route. This offline harness consumes Lean-emitted local-row IR2 using the pinned Bread parser, prover and verifier. It is not a world proof-admission endpoint, and neither native cryptographic soundness nor full-transcript zero knowledge is established.
 
-Provision with `python3 provision.py /absolute/path/to/isolated/breadstuffs`. The isolated source retains exact Bread metadata and pinned `vendor/plonky3-fri-82cfad73` and `vendor/plonky3-challenger-82cfad73` patches. Provisioning neither edits nor builds Bread. Use a leased capped remote lane and the resolved lock; no whole workspace build.
+The active semantic entry is `Assurance/ObjectiveBendZkClaims.lean`. `ObjectiveBendCommittedSource.arithmetic_observes_source` connects an arbitrary satisfying field assignment to both shared execution/commitment graphs, the unrolled physical run, actual lazy-machine macrosteps, and independent Objective source evaluation. Physical ticks may be administrative; they are not falsely counted as source reductions. The concrete packed controller and result codec must instantiate its refinement and readback premises, and current native admission must independently derive the source and input identities. Those producers are substantive outstanding work.
 
-The sibling `bend-proof-entropy` crate supplies OS-seeded cryptographic streams with shared clone state and post-fork refusal. Its three scoped tests passed. This fixes RNG suitability and duplicate clone streams, not STARK masking.
+`Compiler/ObjectiveProofContext.lean` supplies the canonical commitment context and a collision reduction without importing the removed language's invocation types. `BendCommitmentFrame`, `BendCommittedNetwork`, the Boolean DAG, unroller, arithmetic lowering, cSHAKE circuit and PCS harness remain reusable; their historical `Bend` names do not select another language. The successful prepare constructor is proved to return its actual generated graph, whose payload inputs alias the selected execution wires. This prevents unrelated result labels or an independently assignable payload copy from substituting for the constrained computation.
 
-`Host/BendTraceIR2Emit.lean` emits one descriptor and two witnesses with identical public inputs but different private bits. Named kernel checks establish each witness satisfies the actual emitted relation. The typed wire printer preserves the nested field order required by Bread's current parser; generic `Lean.Json.compress` sorts keys and is not this ABI.
+## Native protocol and privacy boundary
 
-Actual raw-backend privacy refutation passed on 2026-10-03: both one-row witnesses produce verified proofs, but the public extension opening permits exact trace recovery. The retained `legacy_config` and raw regression preserve that failure without weakening a live verifier. Set `BEND_IR2_FIXTURE` to the emitted directory and run only the named release nextest targets in a bounded lane. Generated proofs, witnesses and detailed transcript logs remain outside published source.
+The CLI is `prove descriptor.json public.csv trace.csv proof.bin`, or `verify descriptor.json public.csv proof.bin`. It accepts only the checked local-row grammar. The current explicit V5 transcript profile binds independently supplied descriptor bytes through a domain-separated cSHAKE256 digest and exact length, absorbing every digest byte without lossy field folding. This binding relies on computational collision resistance; no globally injective compressing hash is assumed. Source authenticity, authority and disclosure are not conferred by an artifact digest.
 
-The current capacity constructor derives a trace-opening budget: the actual default main AIR requests two extension openings, each with four base coordinates, plus nineteen base-row FRI queries. The 27-coordinate budget rounds up to 32 independently randomized trace rows. It rejects unsafe capacities and shifted LDE overflow. Actual minimum32 and normal256 proofs for both witnesses, public-input tamper rejection, and finite observation-map rank/coupling regressions passed. This count alone is not a proof of hiding: full evaluation-map coverage, quotient masking and FRI transcript decoupling remain obligations.
+V5 preserves bounded paired degree-four challenge conditioning, exact public parameters and capacity binding. The actual changed-artifact test rejects recomputed transcript binding even when altered whitespace parses into the same AIR. Historical V4/raw constructors are retained only for protocol and privacy regressions. They are not a second supported source language.
 
-Experimental v3 adds a profile-owned challenger wrapper. It samples the actual degree-four extension until powers 1,a,a²,a³ have full rank, using paired deterministic rejection and a bounded fail-closed limit. Base-field and PoW operations delegate unchanged. The profile/version, exact parameters and public capacity are absorbed before proof messages. This changes the protocol; it must not reinterpret old proofs. The old profile remains test-only. The paired draw-order, capacity, cross-profile and actual proof regressions passed. Conditioned-challenge soundness bounds and full zero knowledge are not claimed.
+The entropy crate provides OS-seeded cryptographic streams with shared clone state and post-fork refusal. This does not itself prove hiding. The retained raw one-row regression produces two same-public verified proofs and demonstrates recovery of the private trace from a public extension opening. The capacity constructor refuses unsafe trace shapes using the actual two degree-four extension openings plus nineteen base-row queries, requiring at least 27 masking coordinates and rounding to 32 rows. This trace budget alone is not a complete hiding theorem.
 
-CLI: `prove descriptor.json public.csv trace.csv proof.bin`, or `verify descriptor.json public.csv proof.bin`. It accepts only the declared local-row grammar. Existing reexecution admission remains in force. Public proof inputs must eventually come from the independently authorized projection and real constrained commitments; neither source metadata nor an opaque proof buffer establishes computation.
+General Lean results now establish fixed-observation polynomial coupling, actual dependent quotient-mask cancellation, the verifier's selector normalization, and descent to bounded prime-field mask polynomials. A native regression calls the actual quotient PCS/DFT and verifier recomposition. Full adaptive quotient/FRI/Merkle transcript hiding, native algebra correspondence, Fiat–Shamir/QROM soundness and instantiated composition bounds remain open. No 128-bit/PQ claim is supported.
 
-The experimental v4 profile seals raw challenge sampling to BabyBear and the exact registered degree-four extension. Direct extension sampling uses the same bounded conditioner as `sample_algebra_element`; other raw algebra samplers are absent. The version remains part of the transcript prefix. The new direct-draw parity test and paired minimum/normal-capacity proof regression pass; this is not a full-transcript ZK qualification.
+## Reproduction
 
-### Reproducing the experimental backend
+Provision with `python3 provision.py /path/to/exact/tested/breadstuffs`. `dependencies.lock.json` pins the external three-crate source slice and two vendor patches. Provisioning checks every pin, refuses replacement of unrelated paths, and neither edits nor builds Bread. That exact external source distribution is still required; an arbitrary current Bread checkout is not interchangeable.
 
-`Cargo.toml` is now portable and `Cargo.lock` is the exact tested lock (SHA256
-43c1a9e1484ddd9645a5215a85aaad10cc5d651efe97532a2aa7245c2dd9d926).
-The external Bread source slice is still an explicit prerequisite. It is NOT
-interchangeable with an arbitrary current Bread checkout: `dependencies.lock.json`
-pins every Rust/manifest source file in the tested three-crate slice and the two
-vendor patches. Its root manifest narrows only workspace membership; package,
-dependency, lint and profile declarations remain the tested ones.
-
-Run `python3 provision.py /path/to/exact/source` to verify all pins and create the
-owned `../bend-proof-deps/bread` symlink used by the portable manifest. Existing
-unrelated files/symlinks are never replaced. The script neither rewrites the
-manifest nor launches a build. Run Cargo with `--locked` on an allocated build
-host. A source distribution for this exact external slice is still required for
-a fresh user who has only this repository; the manifest/lock repair does not
-claim that missing distribution already exists.
-
-The v4 conditioned extension challenge distribution remains experimental. The
-finite rank, draw-order and same-public/different-private tests do not prove the
-whole Fiat–Shamir protocol sound or its full transcript zero knowledge.
-
-### Actual admitted controller proof
-
-`Verify/BendUnrolledDirectEmit.lean` constructs an admitted `Lab "yes"` through
-`Assurance.BendObliviousMinimal.prepare`, unrolls the complete twelve-control
-machine graph for two raw ticks, and checks that the decoded result is the
-independently expected label with zero source reductions. Its descriptor uses
-`BendTraceDirect.lower`, the proven interpretation of the existing AIR syntax.
-`BendUnrolledDirect.accepted_run` proves arbitrary satisfying field rows force
-every actual raw graph step; it does not assume an honest witness generator.
-The initial 44 bits and final handled/state 45 bits are all public in this fixture.
-
-On an allocated host with the qualified Lean closure, generate a fresh directory:
+Use a leased, capped, warm build host. `Cargo.lock` SHA256 is `d79fd70dd24c13098c191dccb5b3d61f1e0c339c1d485f271e0fa5d601edd364`; Plonky3 is pinned to `82cfad73cd734d37a0d51953094f970c531817ec`. Avoid whole-workspace builds. Useful focused targets are:
 
 ```
-lean --run Verify/BendUnrolledDirectEmit.lean /path/to/public-fixture
-BEND_UNROLLED_FIXTURE=/path/to/public-fixture \
-BEND_UNROLLED_PROOF_OUTPUT=/path/to/private-proof-output \
-cargo nextest run --release --locked --offline \
-  -E 'test(source_admitted_full_controller_proof_binds_input_handled_and_output)'
+cargo nextest run --release --locked --offline --test quotient_masking \
+  -E 'test(native_quotient_masks_preserve_verifier_recomposition)'
+
+BEND_IR2_FIXTURE=/path/to/checked-generic-fixture \
+cargo nextest run --release --locked --offline --test artifact_binding \
+  -E 'test(exact_artifact_profile_rejects_semantically_equal_changed_bytes)'
 ```
 
-The actual test passed on 2026-10-03: prove/verify, then rejection of changed input,
-handled status and final state. The direct AIR used 26,521 columns and took 7.182s,
-versus 202,289 columns and 52.008s for the equivalent generic flattened descriptor
-on the same bounded host. The latter first exposed a real recursive emitter stack
-overflow; `EmitSystemFast` repairs it with proved exact descriptor equality.
-These are measured instances, not performance bounds or cryptographic theorems.
+`Host/BendTraceIR2Emit.lean` produces the generic arithmetic/privacy fixture. Its typed printer preserves the nested field order required by the actual parser. `Verify/BendCommittedIR2Emit.lean` exercises shared execution-output/canonical-frame/hash wires without asserting a language source execution. Generated salt, witnesses and proof transcripts remain private.
 
-The public fixture establishes executable source/controller/prover conformance.
-General source coverage, raw controller simulation, actual parser/PCS soundness,
-full Fiat–Shamir soundness, full-transcript hiding and native world proof admission
-remain separate obligations. No claimed `BindingCommitment` injectivity or deployed
-2^-55 composition bound is imported. `BendCommitmentReduction` instead constructs
-an actual domain-separated cSHAKE collision from different canonical input openings
-with the same public commitment; a concrete collision-resistance bound is still needed.
+The old source-controller fixtures and their test drivers are retired from the active route. Their V5 results remain historical evidence in Git and the dated R32/R33 qualification records; they must not be presented as Objective Bend execution. A new native Objective controller proof awaits the concrete lazy ROM/controller refinement. Existing reexecution admission remains in force.

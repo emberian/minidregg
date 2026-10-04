@@ -19,7 +19,6 @@ import Kernel.AuditTiming
 import Kernel.GrainResourceBirthReceiver
 import Kernel.FnSelectiveReleaseAdmission
 import Kernel.FnSelectiveReleaseSourceReceiver
-import Kernel.BendReturnRelease
 import Kernel.ApplicationLifecycleBeginReceiver
 import Kernel.ApplicationLifecycleClaimCore
 import Kernel.ApplicationLifecycleClaimV2Core
@@ -855,9 +854,6 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       {ingress : ApplicationAgentLifetimeDispatchIngress.Ingress}
       (admitted : LifetimeDispatchAt config opened ingress) :
       NativeAdmission config opened admitted.intent
-  | bendReturnRelease {ingress : BendReturnRelease.Ingress}
-      (accepted : BendReturnRelease.Accepted config opened ingress) :
-      NativeAdmission config opened (accepted.intent config opened ingress)
   | selectedSourcePublication {ingress : FnSelectiveReleaseSourcePublication.Ingress}
       (accepted : FnSelectiveReleaseSourceReceiver.Accepted config opened ingress) :
       NativeAdmission config opened (accepted.intent config opened ingress)
@@ -1937,11 +1933,6 @@ private def derive (config : Config) (opened : Opened config)
     | .error detail => return .error detail
     | .ok admitted =>
         return .ok ⟨admitted.intent, .applicationDispatch admitted, none, none, none, none, none, none, none, none, none⟩
-  if let some ingress := BendReturnRelease.ingressCodec.decode bytes then
-    match ← BendReturnRelease.admitLoaded config opened ingress with
-    | none => return .error "historical Bend return release admission refused"
-    | some accepted =>
-        return .ok ⟨accepted.intent config opened ingress, .bendReturnRelease accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := FnSelectiveReleaseSourcePublication.ingressCodec.decode bytes then
     match ← FnSelectiveReleaseSourceReceiver.admitLoaded config opened ingress with
     | .error _ => return .error "historical selected source publication admission refused"

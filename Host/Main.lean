@@ -176,6 +176,7 @@ import Host.FnSelectiveReleaseSourceAuthoring
 import Host.FnSelectiveReleaseFnReceiving
 import Host.FnSelectiveReleaseFnAck
 import Host.Json
+import Kernel.ObjectiveBendNativeAdmission
 import Host.PayClaims
 import Host.ApplicationCurrentBirthAuthoring
 import Host.CurrentResourceBirthAuthoring
@@ -337,6 +338,32 @@ instance : FromJson JointConsensusSettings where
 instance : ToJson JointConsensusSettings where
   toJson pin := .str (Minidregg.Host.Json.encodeHex
     (Minidregg.Compiler.GenericSimplexCodec.contextStream.encode pin.context))
+
+/-- Canonical deployment policy for the Objective invocation family. Its
+edition and full capacities enter the native runtime semantics. A network
+request cannot choose or replace this operator pin. -/
+structure ObjectiveInvocationSettings where
+  policy : Minidregg.Kernel.ObjectiveBendNativeAdmission.Policy
+
+instance : FromJson ObjectiveInvocationSettings where
+  fromJson? json := do
+    let value ← json.getStr?
+    unless value.utf8ByteSize ≤ 8192 do
+      throw "objectiveInvocation exceeds the 4096-byte policy envelope"
+    let bytes ← Minidregg.Host.Json.decodeHex "objectiveInvocation" json
+    unless Minidregg.Host.Json.encodeHex bytes == value do
+      throw "objectiveInvocation must use canonical lowercase hex"
+    let some policy := Minidregg.Kernel.ObjectiveBendNativeAdmission.decodePolicy bytes
+      | throw "objectiveInvocation is not a canonical Objective policy"
+    unless policy.edition == Minidregg.Kernel.ObjectiveBendNativeAdmission.semanticsId do
+      throw "objectiveInvocation has an unsupported Objective edition"
+    unless decide policy.outputs.Nodup do
+      throw "objectiveInvocation contains duplicate output schemas"
+    pure ⟨policy⟩
+
+instance : ToJson ObjectiveInvocationSettings where
+  toJson pin := .str (Minidregg.Host.Json.encodeHex
+    (Minidregg.Kernel.ObjectiveBendNativeAdmission.encodePolicy pin.policy))
 
 /-- Operator configuration pins the physical completion custodian's exact
 Ed25519 public key. It is never selected by an incoming request. -/
@@ -597,6 +624,7 @@ structure Settings where
   grainBirthTariff : Option GrainBirthTariffSettings := none
   completionCustodianKey : Option CompletionCustodianKeySettings := none
   jointConsensus : Option JointConsensusSettings := none
+  objectiveInvocation : Option ObjectiveInvocationSettings := none
   lifecycleManagement : Option LifecycleManagementSettings := none
   agentDispatchFixed : Option AgentDispatchFixedSettings := none
   agentLifetimeDispatchFixed : Option AgentLifetimeDispatchFixedSettings := none
@@ -649,6 +677,9 @@ def Settings.config (settings : Settings) : NativeHost.Config where
     CompletionCustodianKeySettings.bytes
   nockFSync := settings.nockFSync.getD NativeHost.defaultNockFSync
   jointConsensus := settings.jointConsensus.map JointConsensusSettings.context
+  invocationBindings := settings.objectiveInvocation.map fun pin =>
+    [(Minidregg.Compiler.NativeInvocationStatement.Route.objectiveMethod,
+      Minidregg.Kernel.ObjectiveBendNativeAdmission.encodePolicy pin.policy)]
 
 /-- Check the complete declared source genesis before opening or authoring
 under this profile. Membership enters runtime semantics with only the anchor

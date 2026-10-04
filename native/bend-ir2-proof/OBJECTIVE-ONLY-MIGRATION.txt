@@ -1,0 +1,56 @@
+Active source route, 2026-10-03
+
+Objective Bend is the only supported language. Frozen source meaning for this
+cohort is Core4/r7 ObjectiveBendOpenRecursion + DemandMachine/Invariant/Adequacy,
+packet SHA1f3ce7404be2196ef4fd8defba1ce74dbba5266202b7d1e74eccd72056382316.
+Actual new ObjectiveBendZkClaims imports 89 local modules; the transitive source
+inventory contains no BendTT, BendLiveMachine, BendClosure, BendInvocation,
+BendWorld, BendProofProjection or BendCommitmentReduction module.
+
+Qualified actual new chain:
+arbitrary field row -> generic shared execution/commitment graph -> AcceptedRun
+-> zero-or-one real lazy macrostep per physical tick -> Objective Evaluates.
+No typed CBV Eval/Walk/termination theorem is used or relabelled. The source may
+be partial, cyclic and lazy. Capacity refusal and blackhole/divergence are not
+successful results. The same proof circuit/PCS and actual hash implementation
+are retained.
+
+Concrete receiving requirements, jointly owned:
+- Composition owns Core4 Term/ROM encoding, packed state and bounded microstep
+  controller. Instantiate PackedRefinement.acceptedStep for its actual emitted
+  graph; pending allocation/rename must preserve represented pre-transition
+  state until a real lazy macrostep commits.
+- Composition/World supply initial packed state representation of the actual
+  admitted source and canonical output codec's readSound. Source/input identity
+  is independently admitted and pinned, never copied from proof labels.
+- World owns current authority, authorized projection and canonical actual
+  input/Result/effects/charge producer. ObjectiveProofContext is only a codec
+  and randomized commitment boundary, not an authority token.
+- Demand proof owner supplies current independent source semantics and adequacy.
+  New converse proof work is not required for the qualified soundness consumer.
+
+Captain retirement paths owned by this lane (retain Git history/evidence):
+Theory/BendExecutionTrace.lean
+Assurance/BendUnrolledSource.lean
+Assurance/BendDirectUnrolledSource.lean
+Compiler/BendProofProjection.lean
+Compiler/BendCommitmentReduction.lean
+Verify/BendUnrolledIR2Emit.lean
+Verify/BendUnrolledDirectEmit.lean
+Verify/BendUnrolledCensus.lean
+Verify/BendControllerCommitmentEmit.lean
+native/bend-ir2-proof/tests/unrolled_controller.rs
+native/bend-ir2-proof/tests/controller_commitment.rs
+
+Any still-importing old semantic consumers require their owners' migration or
+retirement; do not reintroduce old modules to make the compiler green. The new
+Objective claims root and generic backend do not need these retired paths.
+Generic BendUnrolledDirect/IR2, all arithmetic/masking machinery, actual generic
+commitment regressions and raw privacy refuter remain useful and active.
+
+Historical qualification reports R32/R33 describe former source fixtures;
+those are not parallel supported-language claims. Native generic V5 protocol
+continues, while a real Objective native execution proof awaits the actual
+packed controller producer. No claim that a conditional refinement interface
+is already instantiated. No full transcript ZK/FS/QROM security claim and no
+change to world proof admission.

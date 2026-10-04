@@ -1319,17 +1319,41 @@ def runClaim (path : String) (json : Lean.Json) : Result Kernel.Run.RunClaim := 
     ← decodeHex (path ++ ".output") (← field path "output" obj),
     ← nat (path ++ ".steps") (← field path "steps" obj)⟩
 
+/-- Generic family authoring preserves the complete route/context in the actual
+canonical command. Admission, source registration and route permits remain native. -/
+private def invocationFamily (path : String) (json : Lean.Json) :
+    Result Compiler.NativeInvocationStatement.Family := do
+  let obj ← exactObject path ["route", "contextBytes"] json
+  let routeName ← string (path ++ ".route") (← field path "route" obj)
+  let route ← match routeName with
+    | "ordinary" => pure Compiler.NativeInvocationStatement.Route.ordinary
+    | "objectiveMethod" => pure .objectiveMethod
+    | "activityDispatch" => pure .activityDispatch
+    | "roomRelease" => pure .roomRelease
+    | "roomPublish" => pure .roomPublish
+    | _ => failAt (path ++ ".route") "unknown invocation family route"
+  pure ⟨route, ← decodeHex (path ++ ".contextBytes") (← field path "contextBytes" obj)⟩
+
 private def command (path : String) (json : Lean.Json) : Result DeclaredResourceController.Command := do
-  let claimed := ((← object path json).get? "run").isSome
-  let obj ← exactObject path
-    (if claimed then ["subject", "nonce", "targets", "run"] else ["subject", "nonce", "targets"]) json
-  let run ← if claimed then do pure (some (← runClaim (path ++ ".run") (← field path "run" obj)))
-    else pure none
-  pure {
-    subject := ⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩
-    nonce := ← nat (path ++ ".nonce") (← field path "nonce" obj)
-    targets := ← list (path ++ ".targets") commandTarget (← field path "targets" obj)
-    run := run }
+  let raw ← object path json
+  let extras := ["run", "bend", "family"].filter (fun key => (raw.get? key).isSome)
+  let obj ← exactObject path (["subject", "nonce", "targets"] ++ extras) json
+  if (raw.get? "bend").isSome then
+    failAt path "retired Bend claim; use the registered Objective invocation family"
+  else
+    let run ← match obj.get? "run" with
+      | none => pure none
+      | some value => some <$> runClaim (path ++ ".run") value
+    let family ← match obj.get? "family" with
+      | none => pure none
+      | some value => some <$> invocationFamily (path ++ ".family") value
+    pure {
+      subject := ⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩
+      nonce := ← nat (path ++ ".nonce") (← field path "nonce" obj)
+      targets := ← list (path ++ ".targets") commandTarget (← field path "targets" obj)
+      run := run
+      bend := none
+      family := family }
 
 private def canonicalSource {α : Type} (path : String) (codec : IndexedProgram.LawfulCodec α)
     (json : Lean.Json) : Result (List UInt8) := do

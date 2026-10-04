@@ -7,7 +7,7 @@ real Context/salt/length framer and cSHAKE circuit. This is a composition test,
 not an assertion that this byte operation is a world-admitted Bend method. -/
 namespace Minidregg.Compiler.BendCommittedNetworkChecks
 open Minidregg.Theory TypedAuthorization
-open BendProofProjection ObliviousNetwork BendCommittedNetwork
+open ObjectiveProofContext ObliviousNetwork BendCommittedNetwork
 
 def context : Context :=
   ⟨.privateEffects, ⟨⟨1⟩, ⟨2⟩, ⟨3⟩, ⟨4⟩, ⟨5⟩⟩, ⟨6⟩, ⟨7⟩, 8,

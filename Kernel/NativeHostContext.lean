@@ -8,7 +8,8 @@ import Compiler.GenericSimplexSourceAnchor
 import Compiler.GrainResourceBirthController
 
 import Compiler.JointControlFrame
-import Kernel.BendActivityControl
+import Kernel.ProtectedContentGate
+import Compiler.NativeInvocationProfile
 import Compiler.GenericSimplexCodec
 namespace Minidregg.Kernel.NativeHost
 
@@ -78,6 +79,9 @@ structure Config where
   /-- Common source-log epoch/roster/keys/base, pinned by deployment semantics.
   A certificate never supplies its own verification context. -/
   jointConsensus : Option GenericSimplexCodec.Context := none
+  /-- Explicit deployment-selected invocation families. Appended to the Config
+  layout; absence retains the complete historical parameter preimage. -/
+  invocationBindings : Option (List (NativeInvocationStatement.Route × List UInt8)) := none
 
 def Config.grainBirthTariffValue (config : Config) :
     Except String GrainResourceBirthController.Tariff := do
@@ -134,8 +138,23 @@ theorem Config.runtimeParameters_withoutOptionalModes (config : Config) :
            config.tariff.perInitialPayloadByte, config.tariff.collector,
            config.tariff.asset] := by simp [Config.runtimeParameters]
 
+/-- Registration wraps the ENTIRE legacy manifest. Submitted commands never
+select this policy, and registration grants no current source authority. -/
+def Config.invocationParameters (config : Config) : List UInt8 :=
+  match config.invocationBindings with
+  | none => config.runtimeParameters
+  | some bindings => NativeInvocationProfile.encode
+      ⟨config.runtimeParameters, config.activityControl, bindings⟩
+
+@[simp] theorem Config.invocationParameters_legacy (config : Config)
+    (legacy : config.invocationBindings = none) :
+    config.invocationParameters = config.runtimeParameters := by
+  simp [Config.invocationParameters, legacy]
+
+#assert_axioms Config.invocationParameters_legacy
+
 def Config.profile (config : Config) :=
-  NativeHostProfile.profile config.template config.runtimeParameters config.disabledEvaluators
+  NativeHostProfile.profile config.template config.invocationParameters config.disabledEvaluators
 
 attribute [local irreducible] Config.profile CanonicalRuntimeProfile.Profile.compilerProfile
 
@@ -189,7 +208,7 @@ def Config.sourceGate (config : Config) (own : Option ControlFacet)
   | none => pure ()
   | some pin =>
       if own = some .activity then pure () else
-        BendActivityControl.ordinaryGate pin snapshot intent
+        ProtectedContentGate.ordinaryGate pin snapshot intent
 
 def Config.otherFacetGate (config : Config) (own : ControlFacet)
     {rootBytes : List UInt8 → Digest} (snapshot : DurableDataIntent.DataSnapshot rootBytes)
