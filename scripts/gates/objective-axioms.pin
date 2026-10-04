@@ -1498,6 +1498,10 @@ A Minidregg.Theory.ObjectiveBendTyping.absent_future_requirement_refused : Class
 A Minidregg.Theory.ObjectiveBendTyping.affine_in_one_arm_accepted : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.affine_in_two_arms_refused : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.affine_mix_capture_refused : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTyping.agree : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTyping.agree_never_manufactures_shareability : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTyping.agree_sameType : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTyping.agree_shareable : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.ampleFuel : -
 A Minidregg.Theory.ObjectiveBendTyping.arbitrary_labels_are_not_booleans : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.argumentAllowed : propext
@@ -1505,6 +1509,7 @@ A Minidregg.Theory.ObjectiveBendTyping.arm_results_must_agree : Classical.choice
 A Minidregg.Theory.ObjectiveBendTyping.armsDone : -
 A Minidregg.Theory.ObjectiveBendTyping.boolean_label_equality_refused : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.callable : propext
+A Minidregg.Theory.ObjectiveBendTyping.canonical_agreement_loses_shareability : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.capturedMixSource : -
 A Minidregg.Theory.ObjectiveBendTyping.check : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.checkExtension : Classical.choice, Quot.sound, propext
@@ -1561,6 +1566,10 @@ A Minidregg.Theory.ObjectiveBendTyping.inferFields : Classical.choice, Quot.soun
 A Minidregg.Theory.ObjectiveBendTyping.jsonNat : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.label_condition_refused : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.label_equality_accepted : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTyping.listAnnotations : -
+A Minidregg.Theory.ObjectiveBendTyping.listAssumptions : -
+A Minidregg.Theory.ObjectiveBendTyping.listCons : -
+A Minidregg.Theory.ObjectiveBendTyping.listRow : -
 A Minidregg.Theory.ObjectiveBendTyping.literalType : -
 A Minidregg.Theory.ObjectiveBendTyping.missing_arm_refused : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.overlay : propext
@@ -1577,6 +1586,8 @@ A Minidregg.Theory.ObjectiveBendTyping.record_wrapper_does_not_hide_custody : Cl
 A Minidregg.Theory.ObjectiveBendTyping.recursiveGlobalKnot : -
 A Minidregg.Theory.ObjectiveBendTyping.recursive_alias_does_not_hide_custody : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.recursive_global_knot_accepted : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTyping.recursive_sum_ill_typed_tail_refused : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTyping.recursive_sum_list_accepted : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.refusalKind : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.refusalReason : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.refusal_kind_custody_in_reusable_closure : Classical.choice, Quot.sound, propext
@@ -1601,6 +1612,13 @@ A Minidregg.Theory.ObjectiveBendTyping.sameType_isComputation : Classical.choice
 A Minidregg.Theory.ObjectiveBendTyping.scalarExtend : -
 A Minidregg.Theory.ObjectiveBendTyping.scalar_plan_refused : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.scalar_record_extend_refused : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTyping.shadowProgram : -
+A Minidregg.Theory.ObjectiveBendTyping.shadowRow : -
+A Minidregg.Theory.ObjectiveBendTyping.shadowSum : -
+A Minidregg.Theory.ObjectiveBendTyping.shadowed_custody_laundering_refused : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTyping.shadowed_once_closure_laundering_refused : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTyping.shadowed_override_accepted : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTyping.shadowed_shareable_member_accepted : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.shapeArms : -
 A Minidregg.Theory.ObjectiveBendTyping.shapeCase : -
 A Minidregg.Theory.ObjectiveBendTyping.shapeInjection : -

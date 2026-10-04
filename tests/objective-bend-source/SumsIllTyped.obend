@@ -1,0 +1,11 @@
+edition ObjectiveBend 1
+# Planted ill-typed control for Sums.obend: the recursive tail is a Nat, not a List.
+sum List:
+  nil: {}
+  cons: {head: Nat, tail: List}
+def sum(xs: List) -> Nat:
+  match xs:
+    case nil(_): 0n
+    case cons(c): c.head + sum(c.tail)
+def total() -> Nat:
+  sum(List.cons({head: 1n, tail: 2n}))

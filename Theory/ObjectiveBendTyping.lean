@@ -49,6 +49,32 @@ theorem sameType_isComputation {assumptions : Assumptions} {actual expected : Ty
   · cases expected <;> simp at aliasExpected
     simp_all [Ty.isComputation]
 
+/-- The checker converts an inferred type to a declared one only when the two
+agree AND the conversion does not manufacture shareability. `Ty.canonical`
+forgets a shadowed member (first-field shadowing), so a row hiding a custody or
+a once closure behind a later field of the same name is canonically equal to a
+row that is shareable; `sameType` alone would let such a value be bound
+unrestricted and duplicated. Every conversion the checker inserts goes through
+this; the relation `PartialTyping.conversion` keeps plain `sameType` because the
+machine proofs rebuild conversions from canonical equality alone. -/
+def agree (assumptions : Assumptions) (actual expected : Ty) : Bool :=
+  sameType assumptions actual expected &&
+    (!expected.shareableUnder assumptions.shareableVariables ||
+      actual.shareableUnder assumptions.shareableVariables)
+
+theorem agree_sameType {assumptions : Assumptions} {actual expected : Ty}
+    (agreement : agree assumptions actual expected = true) :
+    sameType assumptions actual expected = true :=
+  (Bool.and_eq_true_iff.mp agreement).1
+
+/-- A checked conversion never turns a non-shareable type into a shareable one. -/
+theorem agree_shareable {assumptions : Assumptions} {actual expected : Ty}
+    (agreement : agree assumptions actual expected = true)
+    (expectedShareable : expected.shareableUnder assumptions.shareableVariables = true) :
+    actual.shareableUnder assumptions.shareableVariables = true := by
+  have second := (Bool.and_eq_true_iff.mp agreement).2
+  simpa [expectedShareable] using second
+
 /-- Source positions address the annotation of each actual lambda. Missing
 annotations are refused, not guessed or silently replaced by Data types. An
 injection's position carries the type of its constructor function: domain is
@@ -270,12 +296,12 @@ def infer (assumptions : Assumptions) (annotations : Annotations) (context : Con
   | fuel + 1, .lam body => do
       let annotation ← annotations position
       let result ← infer assumptions annotations (⟨annotation.domain, annotation.parameter⟩ :: context) (position ++ [0]) fuel body
-      if ht : sameType assumptions result.type annotation.codomain = true then
+      if ht : agree assumptions result.type annotation.codomain = true then
         if hs : safeUses (⟨annotation.domain, annotation.parameter⟩ :: context) result.uses = true then
           if hv : validContext assumptions.shareableVariables (⟨annotation.domain, annotation.parameter⟩ :: context) = true then
             if hc : reusableAllowed assumptions annotation.reuse context result.uses.tail = true then
               some ⟨.arrow annotation.reuse annotation.parameter annotation.domain annotation.codomain, result.uses.tail,
-                .lambda (.conversion result.derivation ht) hs hv hc⟩
+                .lambda (.conversion result.derivation (agree_sameType ht)) hs hv hc⟩
             else none
           else none
         else none
@@ -285,9 +311,9 @@ def infer (assumptions : Assumptions) (annotations : Annotations) (context : Con
       let arg ← infer assumptions annotations context (position ++ [1]) fuel argument
       match hft : callable fn.type with
       | .arrow reuse quantity domain codomain =>
-          if hat : sameType assumptions arg.type domain = true then
+          if hat : agree assumptions arg.type domain = true then
             if hc : argumentAllowed assumptions quantity context domain arg.uses = true then
-              some ⟨codomain, addUses fn.uses arg.uses, .application fn.derivation (.conversion arg.derivation hat) hft rfl hc⟩
+              some ⟨codomain, addUses fn.uses arg.uses, .application fn.derivation (.conversion arg.derivation (agree_sameType hat)) hft rfl hc⟩
             else none
           else none
       | _ => none
@@ -370,12 +396,12 @@ def infer (assumptions : Assumptions) (annotations : Annotations) (context : Con
       match ht : callable code.type with
       | .arrow .reusable .unrestricted target (.arrow .reusable .unrestricted inherited output) =>
           if ho : output = target then
-            if hb : sameType assumptions base.type inherited = true then
+            if hb : agree assumptions base.type inherited = true then
               if hs : target.shareableUnder assumptions.shareableVariables = true then
                 if ha : argumentAllowed assumptions .unrestricted context inherited base.uses = true then
                   if hc : reusableCaptures assumptions.shareableVariables context code.uses = true then
                     some ⟨target, addUses code.uses base.uses,
-                      .fix code.derivation (by simpa [ho] using ht) (.conversion base.derivation hb) hs ha hc⟩
+                      .fix code.derivation (by simpa [ho] using ht) (.conversion base.derivation (agree_sameType hb)) hs ha hc⟩
                   else none
                 else none
               else none
@@ -410,9 +436,9 @@ def infer (assumptions : Assumptions) (annotations : Annotations) (context : Con
         match annotation.codomain with
         | .variant row =>
             if hm : row.lookup assumptions.bounds (fuel + 1) tag = some annotation.domain then
-              if hs : sameType assumptions value.type annotation.domain = true then
+              if hs : agree assumptions value.type annotation.domain = true then
                 if hp : annotation.domain.isComputation = false then
-                  some ⟨.variant row, value.uses, .inject (.conversion value.derivation hs) hm hp⟩
+                  some ⟨.variant row, value.uses, .inject (.conversion value.derivation (agree_sameType hs)) hm hp⟩
                 else none
               else none
             else none
@@ -423,11 +449,11 @@ def infer (assumptions : Assumptions) (annotations : Annotations) (context : Con
           match assumptions.bounds.lookup index with
           | some (.variant row) =>
             if hm : row.lookup assumptions.bounds (fuel + 1) tag = some annotation.domain then
-              if hs : sameType assumptions value.type annotation.domain = true then
+              if hs : agree assumptions value.type annotation.domain = true then
                 if hp : annotation.domain.isComputation = false then
                   if hc : sameType assumptions (.variant row) (.variable index) = true then
                     some ⟨.variable index, value.uses,
-                      .conversion (.inject (.conversion value.derivation hs) hm hp) hc⟩
+                      .conversion (.inject (.conversion value.derivation (agree_sameType hs)) hm hp) hc⟩
                   else none
                 else none
               else none
@@ -443,18 +469,18 @@ def infer (assumptions : Assumptions) (annotations : Annotations) (context : Con
         let typed ← inferArms assumptions annotations context (position ++ [1]) 0 row none fuel arms
         match hr : typed.result with
         | .computation planType response result =>
-          if hc : sameType assumptions value.type (.computation planType response (.variant typed.row)) = true then
+          if hc : agree assumptions value.type (.computation planType response (.variant typed.row)) = true then
             if hn : result.isComputation = false then
               some ⟨.computation planType response result, addUses value.uses typed.uses,
-                .effectCase (.conversion value.derivation hc) (hr ▸ typed.derivation) hn⟩
+                .effectCase (.conversion value.derivation (agree_sameType hc)) (hr ▸ typed.derivation) hn⟩
             else none
           else none
         | _ => none
       | _ =>
       let row ← variantRow assumptions value.type
       let typed ← inferArms assumptions annotations context (position ++ [1]) 0 row none fuel arms
-      if hc : sameType assumptions value.type (.variant typed.row) = true then
-        some ⟨typed.result, addUses value.uses typed.uses, .case (.conversion value.derivation hc) typed.derivation⟩
+      if hc : agree assumptions value.type (.variant typed.row) = true then
+        some ⟨typed.result, addUses value.uses typed.uses, .case (.conversion value.derivation (agree_sameType hc)) typed.derivation⟩
       else none
   | fuel + 1, .ifBool condition whenTrue whenFalse => do
       let c ← infer assumptions annotations context (position ++ [0]) fuel condition
@@ -471,11 +497,11 @@ def infer (assumptions : Assumptions) (annotations : Annotations) (context : Con
       -- domain = the Plan sum, codomain = the response data type.
       let annotation ← annotations position
       let value ← infer assumptions annotations context (position ++ [0]) fuel plan
-      if hs : sameType assumptions value.type annotation.domain = true then
+      if hs : agree assumptions value.type annotation.domain = true then
         if hp : annotation.domain.isPlan = true then
           if hr : annotation.codomain.isData = true then
             some ⟨.computation annotation.domain annotation.codomain annotation.codomain, value.uses,
-              .perform (.conversion value.derivation hs) hp hr⟩
+              .perform (.conversion value.derivation (agree_sameType hs)) hp hr⟩
           else none
         else none
       else none
@@ -659,7 +685,7 @@ theorem future_row_instantiation_accepted (self super : Ty)
     (selfShareable : self.shareable = true) (superShareable : super.shareable = true)
     (superRow : super.isRow [] 64 = true) :
     (check (futureRowInstantiation self super) [] 16).isSome = true := by
-  simp [check, infer, inferFields, futureRowInstantiation, futureRowSource,
+  simp [check, infer, inferFields, futureRowInstantiation, futureRowSource, agree,
     sameType, Assumptions.valid, overlay, zeroUses, variableUses, addUses, safeUses, safeQuantity,
     validContext, reusableAllowed, reusableCaptures,
     List.range_succ, List.zipWith, selfShareable, superShareable, superRow, Ty.isComputation]
@@ -711,7 +737,7 @@ theorem future_binary_instantiation_accepted (self super : Ty)
     (selfShareable : self.shareable = true) (superShareable : super.shareable = true)
     (superRow : super.isRow [] 64 = true) :
     (check (futureBinaryInstantiation self super) [] 20).isSome = true := by
-  simp [check, infer, inferFields, futureBinaryInstantiation, sameType, Assumptions.valid, overlay,
+  simp [check, infer, inferFields, futureBinaryInstantiation, agree, sameType, Assumptions.valid, overlay,
     zeroUses, variableUses, addUses, safeUses, safeQuantity,
     validContext, reusableAllowed, reusableCaptures,
     List.range_succ, List.zipWith, selfShareable, superShareable, superRow, Ty.isComputation]
@@ -823,6 +849,97 @@ theorem affine_in_one_arm_accepted :
     (check ⟨.case (.inject "circle" (.nat 4)) [("circle",.bound 1),("square",.nat 0)],
       fun position => if position = [0] then some shapeInjection else none, {}⟩
       [⟨.natural,.affine⟩] 16).isSome = true := by decide
+
+/-! ## A recursive sum is injected at its declared bounded variable
+
+`Sums.obend`'s `total` builds `List.cons({head, tail: List.cons(..)})`. The
+recursive sum `List` is the bounded variable 0 (bound: the variant row, whose
+`tail` member is variable 0); an injection's codomain is that variable, so the
+nested payload `tail` agrees with its declared member (cv 01a10564-84a1: the
+checker refused this before the injection rule carried the variable codomain,
+W3.EVENTS 6b2616db; refused/accepted logs in the W25 evidence). -/
+
+def listRow : Ty :=
+  .field "nil" .emptyRow (.field "cons" (.field "head" .natural (.field "tail" (.variable 0) .emptyRow)) .emptyRow)
+def listAssumptions : Assumptions := ⟨[(0, .variant listRow)], [0]⟩
+def listAnnotations : Annotations := fun position =>
+  if position = [] then
+    some ⟨.field "head" .natural (.field "tail" (.variable 0) .emptyRow), .variable 0, .unrestricted, .reusable⟩
+  else if position = [0,1] then some ⟨.emptyRow, .variable 0, .unrestricted, .reusable⟩
+  else none
+def listCons (tail : Term) : AnnotatedTerm :=
+  ⟨.inject "cons" (.record [("head", .nat 1), ("tail", tail)]), listAnnotations, listAssumptions⟩
+
+theorem recursive_sum_list_accepted :
+    (check (listCons (.inject "nil" (.record []))) [] 32).map (fun checked => checked.type) = some (.variable 0) := by
+  decide
+
+/-- Planted ill-typed control: a Nat where the recursive tail belongs. -/
+theorem recursive_sum_ill_typed_tail_refused :
+    (check (listCons (.nat 3)) [] 32).isNone = true := by decide
+
+/-! ## Canonical shadowing must not manufacture shareability
+
+AUDIT (W25, cv 01a10505-46cf). `Ty.canonical` forgets a shadowed member, so
+`{a: Nat, a: custody}` agrees with `{a: Nat}` although only the second is
+shareable. Before this change the checker ACCEPTED `shadowProgram (.bound 0)` in
+a context holding a linear custody: the custody is built into the second `a` of
+a record that is injected at the declared shareable row `{a: Nat}`, and the
+arm binds that payload unrestricted. So the judgement labelled a value that
+carries a custody (or a once closure) shareable: hole = YES at the type level.
+What it did not do: the machine's field lookup is first-match, so the hidden
+member is unreachable by `get`/`case`; no program could duplicate the custody
+itself. The defect was a mislabelled type that every shareability rule trusts.
+Conversions the checker inserts now go through `agree`, which refuses to
+manufacture shareability (`shadowed_*_refused` below). -/
+
+def shadowRow : Ty := .field "a" .natural .emptyRow
+def shadowSum : Ty := .variant (.field "l" shadowRow .emptyRow)
+
+/-- `case (inject l {a = 1, a = <hidden>}) of l(p) => p.a + p.a`, the payload
+declared at the shareable row `{a: Nat}`. -/
+def shadowProgram (hidden : Term) (hiddenAnnotation : Annotations) : AnnotatedTerm :=
+  ⟨.case (.inject "l" (.record [("a", .nat 1), ("a", hidden)]))
+      [("l", .binary .add (.get (.bound 0) "a") (.get (.bound 0) "a"))],
+   fun position => if position = [0] then some ⟨shadowRow, shadowSum, .unrestricted, .reusable⟩
+     else hiddenAnnotation position, {}⟩
+
+/-- Agreement holds, shareability differs: the exact gap `agree` closes. -/
+theorem canonical_agreement_loses_shareability :
+    sameType {} (.field "a" .natural (.field "a" (.custody 17) .emptyRow)) shadowRow = true ∧
+    (Ty.field "a" .natural (.field "a" (.custody 17) .emptyRow)).shareable = false ∧
+    shadowRow.shareable = true ∧
+    agree {} (.field "a" .natural (.field "a" (.custody 17) .emptyRow)) shadowRow = false := by decide
+
+/-- REFUSED (was accepted): a linear custody hidden behind a shadowing field. -/
+theorem shadowed_custody_laundering_refused :
+    (check (shadowProgram (.bound 0) (fun _ => none)) [⟨.custody 17,.linear⟩] 32).isNone = true := by decide
+
+/-- REFUSED (was accepted): a once closure hidden behind a shadowing field. -/
+theorem shadowed_once_closure_laundering_refused :
+    (check (shadowProgram (.lam (.bound 0))
+      (fun position => if position = [0,0,1] then some ⟨.natural,.natural,.unrestricted,.once⟩ else none))
+      [] 32).isNone = true := by decide
+
+/-- Control: the same program with a shareable hidden member is accepted. -/
+theorem shadowed_shareable_member_accepted :
+    (check (shadowProgram (.bound 0) (fun _ => none)) [⟨.natural,.linear⟩] 32).map
+      (fun checked => checked.type) = some .natural := by decide
+
+/-- Control: overriding a field through `extend` (the shadowing's purpose) still
+agrees at the shareable row. -/
+theorem shadowed_override_accepted :
+    (check ⟨.case (.inject "l" (.extend (.record [("a", .nat 0)]) [("a", .nat 1)]))
+      [("l", .binary .add (.get (.bound 0) "a") (.get (.bound 0) "a"))],
+      fun position => if position = [0] then some ⟨shadowRow, shadowSum, .unrestricted, .reusable⟩ else none, {}⟩
+      [] 32).map (fun checked => checked.type) = some .natural := by decide
+
+/-- A conversion never turns a non-shareable type shareable, whatever the rows. -/
+theorem agree_never_manufactures_shareability (assumptions : Assumptions) (actual expected : Ty)
+    (agreement : agree assumptions actual expected = true)
+    (expectedShareable : expected.shareableUnder assumptions.shareableVariables = true) :
+    actual.shareableUnder assumptions.shareableVariables = true :=
+  agree_shareable agreement expectedShareable
 
 open Lean (Json toJson)
 
@@ -1231,5 +1348,9 @@ theorem computation_not_shareable (plan response result : Ty) (variables : List 
   effect_case_accepted pure_arm_without_done_refused effect_as_argument_refused
   pure_affine_argument_accepted effect_in_record_field_refused effect_in_payload_refused
   effect_in_specification_refused scalar_plan_refused closure_response_refused
+#assert_axioms recursive_sum_list_accepted recursive_sum_ill_typed_tail_refused
+#assert_axioms canonical_agreement_loses_shareability shadowed_custody_laundering_refused
+  shadowed_once_closure_laundering_refused shadowed_shareable_member_accepted
+  shadowed_override_accepted agree_never_manufactures_shareability
 
 end Minidregg.Theory.ObjectiveBendTyping
