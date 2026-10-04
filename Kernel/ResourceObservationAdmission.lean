@@ -678,12 +678,16 @@ releases and record share the member's subject number), so one grant of
 `atomsOf m` reads exactly member `m`'s atoms. -/
 def atomField (id : Nat) : CellField := .atomsOf (ContentResource.atomLow id)
 
+/-- The identifier digest of a content atom's key, as a number. -/
+def atomDigest (key : Hyperdocument.Key .atoms) : Nat :=
+  (show Hyperdocument.AtomId from key).digest.value
+
 /-- The field of one address of a content cell: an atom is named by its low
 half (and so also by `body`, which covers every `atomsOf`); every other
 namespace is as `contentField` says. -/
 def contentFieldAt (address : Address Hyperdocument.layout) : CellField :=
   match address with
-  | ⟨.atoms, id⟩ => atomField (show Hyperdocument.AtomId from id).digest.value
+  | ⟨.atoms, key⟩ => atomField (atomDigest key)
   | ⟨space, _⟩ => contentField space
 
 /-- The field of one address of a registry cell, when the kind has fields. -/
@@ -760,7 +764,7 @@ theorem reviewer_reads_annotations_not_body
       (show CellField.NamedBy (some {.annotations}) .annotations by decide),
     DFinsupp.filter_apply_neg store
       (show ¬ CellField.NamedBy (some {.annotations})
-          (atomField (show Hyperdocument.AtomId from atom).digest.value) from by
+          (atomField (atomDigest atom)) from by
         rintro ⟨outer, member, covers⟩
         simp only [Finset.mem_singleton] at member
         subst member
@@ -769,36 +773,36 @@ theorem reviewer_reads_annotations_not_body
 /-- **J-PRIV-1, the reader side.** A reader whose scope names `atomsOf low`
 receives an atom of a content cell exactly when the atom's identifier has low
 64 bits `low`; it receives no link, mark or annotation, and it is not shown
-the body wholesale. (Authored, not yet compiled: see the lane STATUS.) -/
+the body wholesale. -/
 theorem atoms_reader_sees_only_its_own_atoms (low : Nat) (atom : Hyperdocument.Key .atoms)
     (store : Store (CanonicalCellRegistry.layout .content)) :
-    ((show Hyperdocument.AtomId from atom).digest.value % 2 ^ 64 = low →
+    (atomDigest atom % 2 ^ 64 = low →
         narrowStore (some {CellField.atomsOf low}) (fieldOf .content) store ⟨.atoms, atom⟩ =
           store ⟨.atoms, atom⟩) ∧
-      ((show Hyperdocument.AtomId from atom).digest.value % 2 ^ 64 ≠ low →
+      (atomDigest atom % 2 ^ 64 ≠ low →
         narrowStore (some {CellField.atomsOf low}) (fieldOf .content) store ⟨.atoms, atom⟩ = none) := by
   constructor
   · intro same
     exact observe_returns_named_fields store
       (show CellField.NamedBy (some {CellField.atomsOf low})
-          (atomField (show Hyperdocument.AtomId from atom).digest.value) from
-        CellField.namedBy_of_mem (by simp [atomField, ContentResource.atomLow, same]))
+          (atomField (atomDigest atom)) from
+        CellField.namedBy_of_mem (by simp only [atomField, ContentResource.atomLow, same, Finset.mem_singleton]))
   · intro other
     exact DFinsupp.filter_apply_neg store
       (show ¬ CellField.NamedBy (some {CellField.atomsOf low})
-          (atomField (show Hyperdocument.AtomId from atom).digest.value) from by
+          (atomField (atomDigest atom)) from by
         rintro ⟨outer, member, covers⟩
         simp only [Finset.mem_singleton] at member
         subst member
         simp [atomField, ContentResource.atomLow, CellField.covers, CellField.isAtoms] at covers
-        exact other (by omega))
+        exact other covers.symm)
 
 /-- And no link: a per-member reader gets none of the annotations namespaces. -/
 theorem atoms_reader_sees_no_link (low : Nat) (link : Hyperdocument.Key .links)
     (store : Store (CanonicalCellRegistry.layout .content)) :
     narrowStore (some {CellField.atomsOf low}) (fieldOf .content) store ⟨.links, link⟩ = none :=
   DFinsupp.filter_apply_neg store
-    (show ¬ CellField.NamedBy (some {CellField.atomsOf low}) .annotations by decide)
+    (CellField.atomsOf_names_only_itself low (low + 1) (by omega)).2.2.2
 
 /-- Pole: a reader naming field 1 of a declared object keeps field 1 and not
 field 2. -/
@@ -889,6 +893,7 @@ end Minidregg.Kernel.ResourceObservationAdmission
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.reviewer_reads_annotations_not_body
 /-- info: 'Minidregg.Kernel.ResourceObservationAdmission.reader_reads_field_one_not_two' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.reader_reads_field_one_not_two
+#assert_axioms Minidregg.Kernel.ResourceObservationAdmission.atoms_reader_sees_only_its_own_atoms Minidregg.Kernel.ResourceObservationAdmission.atoms_reader_sees_no_link
 /-- info: 'Minidregg.Theory.StoreFootprint.mem_changed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.mem_changed
 /-- info: 'Minidregg.Kernel.ResourceObservationAdmission.narrowBalances_only_named' depends on axioms: [propext, Quot.sound] -/

@@ -1653,9 +1653,9 @@
     {
       "module": "Compiler.CredentialAuthorityEntryCodec",
       "path": "Compiler/CredentialAuthorityEntryCodec.lean",
-      "sha256": "28b1f93aea08044534db0e06ea525e3c7ca92899ee8128244f55fc4b3f861707",
+      "sha256": "6b5a174569b95089ef7627280ee9cdbe958d132a66cdf7725e969ef72c161810",
       "surface": "default",
-      "ownerReportedStatus": "AUTHORED_UNCOMPILED_WIP"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.CredentialAuthorityPolicyRegistry",
@@ -3158,7 +3158,7 @@
     {
       "module": "Compiler.WorldKindDescriptor",
       "path": "Compiler/WorldKindDescriptor.lean",
-      "sha256": "28f3408ba0aeff0170ea0f4f37047a1a1be985cd27f634b79178c45e4ddde36f",
+      "sha256": "072ca2ee341d6aba8272180872169b6c50960a250181f05a3c22d338cc9a780e",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -3977,7 +3977,7 @@
     {
       "module": "Kernel",
       "path": "Kernel.lean",
-      "sha256": "928d44fd3a26577eedc092b71ed2c102324e4fa792085392c70ec8d0e86f192b",
+      "sha256": "e52b7c3e26cce588f182b98556b9068b282cfe3aef833a8ca950c5c0790e2195",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -5188,7 +5188,7 @@
     {
       "module": "Kernel.DeclaredResourceController",
       "path": "Kernel/DeclaredResourceController.lean",
-      "sha256": "9522a0b434a12c272ea2a117ca428496009d4c02c21a10f449d3dbff1c292571",
+      "sha256": "b3f1de6e716cb723d0a8afaf2b0fb8f26b648549ca6751c9eae5d7d9c490b02a",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6845,6 +6845,13 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Kernel.PrivateRoomWrapGrant",
+      "path": "Kernel/PrivateRoomWrapGrant.lean",
+      "sha256": "5ee86cc5556328954accc7e66a413e53727f40dafd9fdf25fbcb562d4c3ac6b3",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
       "module": "Kernel.PrivateSuccessorCustody",
       "path": "Kernel/PrivateSuccessorCustody.lean",
       "sha256": "30d403ba71c88378e1845fe6eda96579c6ca907bba6dc627365b93a22db8efb0",
@@ -7036,7 +7043,7 @@
     {
       "module": "Kernel.ResourceObservationAdmission",
       "path": "Kernel/ResourceObservationAdmission.lean",
-      "sha256": "a2be181f8e44a8b89a787aa655b06245f5ae393279a27d6a1ebe0dddd7b7b687",
+      "sha256": "d3e9e614b9f7c89884fc8a3c329aef8847aa166509ec70650d68f30f68ee077d",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -9521,9 +9528,9 @@
     {
       "module": "Theory.TypedAuthorization",
       "path": "Theory/TypedAuthorization.lean",
-      "sha256": "5b3a7d7326aab8734c2493a5f2223e05ab5905b2b4fa70c5270ddfcc496edaab",
+      "sha256": "520ee7dd4ae0463528980161f3ce9fb870422a7d1b23ea23fbb708fd663c2bdd",
       "surface": "default",
-      "ownerReportedStatus": "AUTHORED_UNCOMPILED_WIP"
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Theory.TypedAuthorizationWitness",
