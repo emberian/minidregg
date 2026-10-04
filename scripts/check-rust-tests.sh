@@ -319,6 +319,19 @@ exact rc-roomkey-v3-refusals resource-client --bin mini -- \
   workspace::roomkey::tests::a_malformed_wrap_or_release_atom_in_the_keys_cell_is_an_error_not_skipped \
   workspace::roomkey::tests::wrap_and_release_atom_ids_name_one_address_in_disjoint_regions \
   workspace::roomkey::tests::a_full_64_delivery_release_still_fits_the_retained_draft_bound
+# Protected-object device keys ride the SHARED hybrid combiner (hybrid_kem, suite
+# DREGG.OBJECT-KEYS.KEK/x25519+ml-kem-768/v2; no third combiner): wrap round trip and binding,
+# the wrap IS the shared combiner, commitment over the whole 1216-byte key (MINI/OBJECT-DEVICE/v2),
+# and the pre-hybrid kem/dh device record, custody row, request and v1 epoch manifest each REFUSE by name.
+exact rc-object-device-hybrid resource-client --bin mini -- \
+  object_keys_hybrid::tests::roundtrip_and_generation_binding \
+  object_keys_hybrid::tests::the_wrap_goes_through_the_shared_combiner \
+  object_keys_hybrid::tests::the_commitment_is_over_the_whole_hybrid_key_and_names_v2 \
+  object_keys_hybrid::tests::pre_hybrid_device_shapes_are_refused_by_name \
+  object_epoch_packages::tests::manifest_authenticated_catchup \
+  object_epoch_packages::tests::a_pre_hybrid_manifest_is_refused_by_name_even_when_correctly_signed \
+  object_cli::tests::receive_epoch_recovers_package_law_through_durable_device_custody \
+  workspace::protected_document::members::tests::device_preflight_rejects_a_forged_commitment_before_any_phase
 # ONE private-invite path: the shell's room invite and chat invite (and summon) run the
 # same room-key invocation; a hosted member is refused without --i-know by the operator's
 # list AND by its own signed custody declaration; chat invite checks before granting.

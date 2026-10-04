@@ -3,7 +3,6 @@
 //! durably stages cryptographic material before signed submission.
 use crate::{
     object_keys::{AdmittedAnchor, Store},
-    object_keys_hybrid::DevicePublic,
     object_messages::Context,
     object_epoch_packages::{self, Recipient},
     Result,
@@ -309,10 +308,7 @@ pub(crate) fn run(
                 device_source: natural(row, "deviceSource")?,
                 generation: hex32(row, "generation")?,
                 key_commitment: fixed(row, "keyCommitment")?,
-                public: DevicePublic {
-                    kem: crate::decode_hex(text(row, "kemPublic")?)?,
-                    dh: hex32(row, "dhPublic")?,
-                },
+                public: crate::object_keys_hybrid::public_from_record(row)?,
             });
         }
         let dealer_generation = hex32(&r, "dealerGeneration")?;
@@ -322,7 +318,7 @@ pub(crate) fn run(
             .iter()
             .find(|entry| entry.subject == dealer_subject && entry.generation == dealer_generation)
             .ok_or("retaining dealer must be included in the entitled device roster")?;
-        if dealer.public.kem != dealer_public.kem || dealer.public.dh != dealer_public.dh {
+        if dealer.public != dealer_public {
             return Err("dealer recipient keys differ from retained local device".into());
         }
         let p = object_epoch_packages::prepare(
@@ -419,12 +415,12 @@ pub(crate) fn retry(
 /// Store custody; the returned file contains only public publication material.
 pub(crate) fn device(state: &Path, storage: &Path, output: &Path) -> Result<()> {
     let (secret, public) = crate::object_keys_hybrid::generate()?;
-    let generation = crate::object_keys_hybrid::key_commitment(&public)?;
+    let generation = crate::object_keys_hybrid::key_commitment(&public);
     let mut store = Store::open(state, crate::read_secret(storage)?.to_bytes())?;
     store.retain_device(&generation, &secret, &public)?;
     crate::write_json_new(
         output,
-        &json!({"codec":"MINI/OBJECT-DEVICE/v1","generation":crate::hex(&generation),"deviceGeneration":decimal(&generation),"keyCommitment":decimal(&generation),"kemPublic":crate::hex(&public.kem),"dhPublic":crate::hex(&public.dh)}),
+        &json!({"codec":"MINI/OBJECT-DEVICE/v2","generation":crate::hex(&generation),"deviceGeneration":decimal(&generation),"keyCommitment":decimal(&generation),"hybridPublic":crate::hex(&public.to_bytes())}),
     )
 }
 

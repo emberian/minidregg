@@ -440,7 +440,7 @@ fn continue_enrollment(root:&std::path::Path,workspace:&Value,name:&str,stage:&V
     let generation: [u8;32]=crate::decode_hex(text(public,"generation")?)?.try_into().map_err(|_|"invalid retained device generation")?;
     let store=custody(root)?;
     let (_,retained_public)=store.load_device(&generation)?;
-    if public["kemPublic"]!=crate::hex(&retained_public.kem) || public["dhPublic"]!=crate::hex(&retained_public.dh) {
+    if crate::object_keys_hybrid::public_from_record(public)?!=retained_public {
         return Err("retained enrollment device differs from durable custody".into());
     }
     drop(store);
@@ -492,7 +492,7 @@ fn continue_enrollment(root:&std::path::Path,workspace:&Value,name:&str,stage:&V
         "dealerGeneration":public["generation"],"rosterBytes":crate::hex(&std::fs::read(&roster_bin).map_err(|e|e.to_string())?),
         "catalogIntent":catalog_intent,"recipients":[{"subject":me,"capability":super::member(&reference,"observeCapability")?,
         "deviceSource":catalog_id,"generation":public["generation"],"keyCommitment":public["keyCommitment"],
-        "kemPublic":public["kemPublic"],"dhPublic":public["dhPublic"]}],
+        "hybridPublic":public["hybridPublic"]}],
         "grants":[{"kind":"object","target":target,"capability":super::member(&reference,"observeCapability")?}]});
     let request_path=home.join("enrollment-request.json");retain_json(&request_path,&request)?;
     let (_,_,signed)=super::signed_view(root,workspace,&reference,"resource")?;

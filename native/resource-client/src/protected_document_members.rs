@@ -53,21 +53,16 @@ fn check_identity(stage:&Value,workspace:&Value,reference:&Value,name:&str)->Res
 }
 fn validate_device(device:&Value)->Result<()> {
     for field in ["deviceGeneration","keyCommitment"] {nat32(text(device,field)?)?;}
-    for field in ["generation","dhPublic"] {
-        let bytes=crate::decode_hex(text(device,field)?)?;
-        if bytes.len()!=32 {return Err(format!("device {field} must contain 32 bytes"));}
-    }
+    let bytes=crate::decode_hex(text(device,"generation")?)?;
+    if bytes.len()!=32 {return Err("device generation must contain 32 bytes".into());}
     if decimal(&crate::decode_hex(text(device,"generation")?)?)!=device["deviceGeneration"] {
         return Err("device generation decimal and bytes disagree".into());
     }
-    let public=crate::object_keys_hybrid::DevicePublic {
-        kem:crate::decode_hex(text(device,"kemPublic")?)?,
-        dh:crate::decode_hex(text(device,"dhPublic")?)?.try_into().map_err(|_|"invalid device DH key")?,
-    };
-    if decimal(&crate::object_keys_hybrid::key_commitment(&public)?)!=device["keyCommitment"] {
+    let public=crate::object_keys_hybrid::public_from_record(device)?;
+    if decimal(&crate::object_keys_hybrid::key_commitment(&public))!=device["keyCommitment"] {
         return Err("device key commitment differs from the actual public keys".into());
     }
-    // Validate KEM modulus and contributory DH before freezing or granting.
+    // Validate KEM modulus and contributory X25519 before freezing or granting.
     let context=Context{object:[0;32],epoch:0,transition:[0;32],operation:[0;32],law:[0;32]};
     crate::object_keys_hybrid::wrap(&context,&[0;32],&public,&[0;32])?;
     Ok(())
@@ -324,7 +319,7 @@ fn recover_locked(root:&Path,workspace:&Value,name:&str,change:&str)->Result<()>
             members.push(json!({"subject":stage["subject"],"capability":doc["capability"],
                 "catalogCapability":catalog_hint["capability"],"deviceSource":catalog_ref["target"],
                 "generation":device["generation"],"keyCommitment":device["keyCommitment"],
-                "kemPublic":device["kemPublic"],"dhPublic":device["dhPublic"]}));
+                "hybridPublic":device["hybridPublic"]}));
         }else{
             // Revoke every currently standing grant governed by these two
             // local resources, including grants from interrupted invitations.
@@ -551,15 +546,20 @@ mod tests {
         let (_,public)=crate::object_keys_hybrid::generate().unwrap();
         let generation=[9u8;32];
         let device=json!({"generation":crate::hex(&generation),"deviceGeneration":decimal(&generation),
-            "kemPublic":crate::hex(&public.kem),"dhPublic":crate::hex(&public.dh),
-            "keyCommitment":decimal(&crate::object_keys_hybrid::key_commitment(&public).unwrap())});
+            "hybridPublic":crate::hex(&public.to_bytes()),
+            "keyCommitment":decimal(&crate::object_keys_hybrid::key_commitment(&public))});
         validate_device(&device).unwrap();
         let mut wrong=device.clone();wrong["keyCommitment"]=json!("1");
         assert!(validate_device(&wrong).unwrap_err().contains("commitment"));
-        let mut wrong=device;wrong["dhPublic"]=json!(crate::hex(&[0;32]));
-        let zero=crate::object_keys_hybrid::DevicePublic{kem:public.kem,dh:[0;32]};
-        wrong["keyCommitment"]=json!(decimal(&crate::object_keys_hybrid::key_commitment(&zero).unwrap()));
-        assert!(validate_device(&wrong).unwrap_err().contains("noncontributory"));
+        let mut wrong=device.clone();
+        let zero=crate::hybrid_kem::HybridPublic::from_bytes(&[&[0u8;32][..],&public.to_bytes()[32..]].concat()).unwrap();
+        wrong["hybridPublic"]=json!(crate::hex(&zero.to_bytes()));
+        wrong["keyCommitment"]=json!(decimal(&crate::object_keys_hybrid::key_commitment(&zero)));
+        assert!(validate_device(&wrong).unwrap_err().contains("low-order"));
+        // The pre-hybrid kemPublic/dhPublic shape is refused by name, not read.
+        let mut old=device;old.as_object_mut().unwrap().remove("hybridPublic");
+        old["kemPublic"]=json!(crate::hex(&public.to_bytes()[32..]));old["dhPublic"]=json!(crate::hex(&public.to_bytes()[..32]));
+        assert!(validate_device(&old).unwrap_err().contains("pre-hybrid"));
     }
 
     #[test] fn sharing_selects_current_placed_text_not_struck_or_detached_history(){

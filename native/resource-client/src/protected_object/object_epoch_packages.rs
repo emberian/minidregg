@@ -3,7 +3,8 @@
 //! must use the exact authenticated post-revocation audience/device snapshot.
 use crate::{
     hex,
-    object_keys_hybrid::{self, DevicePublic},
+    hybrid_kem::{HybridPublic, HybridSecret},
+    object_keys_hybrid,
     object_messages::Context,
     Result,
 };
@@ -17,7 +18,7 @@ pub(crate) struct Recipient {
     pub generation: [u8; 32],
     pub capability: String,
     pub device_source: String,
-    pub public: DevicePublic,
+    pub public: HybridPublic,
     pub key_commitment: [u8; 32],
 }
 pub(crate) struct PreparedEpoch {
@@ -61,7 +62,7 @@ pub(crate) fn prepare(
         }
     }
     for recipient in recipients {
-        if object_keys_hybrid::key_commitment(&recipient.public)? != recipient.key_commitment {
+        if object_keys_hybrid::key_commitment(&recipient.public) != recipient.key_commitment {
             return Err("actual recipient public key differs from roster key commitment".into());
         }
     }
@@ -76,7 +77,7 @@ pub(crate) fn prepare(
         }
         packages.push(json!({"subject":r.subject,"capability":r.capability,"deviceSource":r.device_source,"generation":hex(&r.generation),"keyCommitment":hex(&r.key_commitment),"wrap":hex(&object_keys_hybrid::wrap(context,&r.generation,&r.public,&key)?)}));
     }
-    let unsigned=serde_json::to_vec(&json!({"codec":"MINI/OBJECT-EPOCH/v1","context":hex(&context.bytes()),"audience":hex(audience),"devices":hex(devices),"history":hex(history),"authoritySnapshot":hex(authority_snapshot),"deviceSnapshot":hex(device_snapshot),"dealer":dealer_subject,"dealerGeneration":hex(dealer_generation),"writer":hex(&writer.verifying_key().to_bytes()),"packages":packages,"rosterBytes":hex(roster_bytes)})).map_err(|e|e.to_string())?;
+    let unsigned=serde_json::to_vec(&json!({"codec":"MINI/OBJECT-EPOCH/v2","context":hex(&context.bytes()),"audience":hex(audience),"devices":hex(devices),"history":hex(history),"authoritySnapshot":hex(authority_snapshot),"deviceSnapshot":hex(device_snapshot),"dealer":dealer_subject,"dealerGeneration":hex(dealer_generation),"writer":hex(&writer.verifying_key().to_bytes()),"packages":packages,"rosterBytes":hex(roster_bytes)})).map_err(|e|e.to_string())?;
     let signature = writer.sign(&unsigned).to_bytes();
     // Length framing leaves no alternate unsigned/signature interpretation.
     let manifest = [
@@ -107,8 +108,8 @@ pub(crate) fn receive(
     writer: &[u8; 32],
     subject: &str,
     generation: &[u8; 32],
-    secret: &object_keys_hybrid::DeviceSecret,
-    public: &DevicePublic,
+    secret: &HybridSecret,
+    public: &HybridPublic,
     manifest: &[u8],
 ) -> Result<Zeroizing<[u8; 32]>> {
     use ed25519_dalek::{Signature, VerifyingKey};
@@ -151,8 +152,11 @@ pub(crate) fn receive(
         .law
         .copy_from_slice(&encoded[encoded.len() - 32..]);
     let context = &package_context;
+    if value["codec"] == json!("MINI/OBJECT-EPOCH/v1") {
+        return Err("epoch manifest MINI/OBJECT-EPOCH/v1 predates the hybrid device wrap and is refused; the epoch must be re-dealt as MINI/OBJECT-EPOCH/v2".into());
+    }
     if value.as_object().map(|o| o.len()) != Some(12)
-        || value["codec"] != json!("MINI/OBJECT-EPOCH/v1")
+        || value["codec"] != json!("MINI/OBJECT-EPOCH/v2")
         || value["context"] != json!(hex(&context.bytes()))
         || value["audience"] != json!(hex(audience))
         || value["devices"] != json!(hex(devices))
@@ -203,7 +207,7 @@ pub(crate) fn receive(
             dealer_present = true;
         }
         if name == subject && gen == hex(generation) {
-            if r["keyCommitment"] != json!(hex(&object_keys_hybrid::key_commitment(public)?)) {
+            if r["keyCommitment"] != json!(hex(&object_keys_hybrid::key_commitment(public))) {
                 return Err(
                     "received package destination differs from committed actual key".into(),
                 );
@@ -243,7 +247,7 @@ mod tests {
             law: [5; 32],
         };
         let writer = SigningKey::from_bytes(&[6; 32]);
-        let key_commitment = object_keys_hybrid::key_commitment(&public).unwrap();
+        let key_commitment = object_keys_hybrid::key_commitment(&public);
         let recipients = [Recipient {
             subject: "alice".into(),
             capability: "1".into(),
@@ -252,17 +256,14 @@ mod tests {
             public,
             key_commitment,
         }];
-        let mut substituted = recipients[0].public.kem.clone();
-        substituted[0] ^= 1;
+        let mut substituted = recipients[0].public.to_bytes();
+        substituted[40] ^= 1;
         let wrong_destination = [Recipient {
             subject: "alice".into(),
             capability: "1".into(),
             device_source: "2".into(),
             generation: [7; 32],
-            public: DevicePublic {
-                kem: substituted,
-                dh: recipients[0].public.dh,
-            },
+            public: HybridPublic::from_bytes(&substituted).unwrap(),
             key_commitment,
         }];
         assert!(prepare(
@@ -378,5 +379,38 @@ mod tests {
             &p.manifest
         )
         .is_err());
+    }
+
+    #[test]
+    fn a_pre_hybrid_manifest_is_refused_by_name_even_when_correctly_signed() {
+        let (secret, public) = object_keys_hybrid::generate().unwrap();
+        let c = Context { object: [1; 32], epoch: 2, transition: [3; 32], operation: [4; 32], law: [5; 32] };
+        let writer = SigningKey::from_bytes(&[6; 32]);
+        let key_commitment = object_keys_hybrid::key_commitment(&public);
+        let recipients = [Recipient {
+            subject: "alice".into(),
+            capability: "1".into(),
+            device_source: "2".into(),
+            generation: [7; 32],
+            public,
+            key_commitment,
+        }];
+        let args = ([8; 32], [9; 32], [10; 32], [11; 32], [12; 32]);
+        let p = prepare(&c, &args.0, &args.1, &args.2, &args.3, &args.4, &recipients, &[1], "alice", &[7; 32], &writer).unwrap();
+        // The same manifest, re-labelled v1 and re-signed: authentic, admitted, and old-shaped.
+        let unsigned = &p.manifest[8..p.manifest.len() - 64];
+        let at = unsigned.windows(20).position(|w| w == b"MINI/OBJECT-EPOCH/v2").unwrap();
+        let mut old = unsigned.to_vec();
+        old[at + 19] = b'1';
+        let mut manifest = (old.len() as u64).to_be_bytes().to_vec();
+        manifest.extend_from_slice(&old);
+        manifest.extend_from_slice(&writer.sign(&old).to_bytes());
+        let commitment: [u8; 32] = Sha256::digest(&manifest).into();
+        let received = receive(&c, &args.0, &args.1, &args.2, &args.3, &args.4, &commitment,
+            &writer.verifying_key().to_bytes(), "alice", &[7; 32], &secret, &recipients[0].public, &manifest);
+        assert!(received.err().unwrap().contains("predates the hybrid device wrap"));
+        // Control: the v2 original opens.
+        assert!(receive(&c, &args.0, &args.1, &args.2, &args.3, &args.4, &p.commitment,
+            &writer.verifying_key().to_bytes(), "alice", &[7; 32], &secret, &recipients[0].public, &p.manifest).is_ok());
     }
 }

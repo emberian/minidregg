@@ -158,8 +158,8 @@ impl Store {
     pub(crate) fn retain_device(
         &mut self,
         generation: &[u8; 32],
-        secret: &crate::object_keys_hybrid::DeviceSecret,
-        public: &crate::object_keys_hybrid::DevicePublic,
+        secret: &crate::hybrid_kem::HybridSecret,
+        public: &crate::hybrid_kem::HybridPublic,
     ) -> Result<()> {
         if !self.healthy {
             return Err("state persistence failed; reopen and reconcile".into());
@@ -171,36 +171,24 @@ impl Store {
         if self.state["devices"].get(&id).is_some() {
             return Err("device generation already retained".into());
         }
-        self.state["devices"][&id] = json!({"kemSecret":hex(&secret.kem),"dhSecret":hex(&*secret.dh),"kemPublic":hex(&public.kem),"dhPublic":hex(&public.dh)});
+        self.state["devices"][&id] = json!({"hybridSecret":hex(&secret.to_bytes()),"hybridPublic":hex(&public.to_bytes())});
         self.save()
     }
     pub(crate) fn load_device(
         &self,
         generation: &[u8; 32],
     ) -> Result<(
-        crate::object_keys_hybrid::DeviceSecret,
-        crate::object_keys_hybrid::DevicePublic,
+        crate::hybrid_kem::HybridSecret,
+        crate::hybrid_kem::HybridPublic,
     )> {
         let row = self.state["devices"]
             .get(hex(generation))
             .ok_or("device generation not retained")?;
-        let field = |name: &str| -> Result<Vec<u8>> {
-            crate::decode_hex(row[name].as_str().ok_or("invalid retained device")?)
-        };
-        let secret = crate::object_keys_hybrid::DeviceSecret {
-            kem: Zeroizing::new(field("kemSecret")?),
-            dh: Zeroizing::new(
-                field("dhSecret")?
-                    .try_into()
-                    .map_err(|_| "invalid DH secret")?,
-            ),
-        };
-        let public = crate::object_keys_hybrid::DevicePublic {
-            kem: field("kemPublic")?,
-            dh: field("dhPublic")?
-                .try_into()
-                .map_err(|_| "invalid DH public")?,
-        };
+        let secret = crate::object_keys_hybrid::secret_from_record(row)?;
+        let public = crate::object_keys_hybrid::public_from_record(row)?;
+        if !secret.matches(&public) {
+            return Err("retained device public key differs from its secret".into());
+        }
         Ok((secret, public))
     }
     /// Import only delegated epochs. Joining does not automatically import history.

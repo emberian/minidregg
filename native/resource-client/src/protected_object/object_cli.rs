@@ -70,29 +70,19 @@ pub(crate) fn receive_epoch(v: &Value, request: &Path, state: &Path, storage: &P
         .map_err(|e| e.to_string())?;
     let storage_key = crate::read_secret(storage)?.to_bytes();
     let mut store = Store::open(state, storage_key)?;
+    crate::object_keys_hybrid::refuse_pre_hybrid(&r)?;
     let generation = bytes(&r, "generation")?;
-    let (secret, public) = if r.get("kemSecret").is_some() {
+    let (secret, public) = if r.get("hybridSecret").is_some() {
         (
-            crate::object_keys_hybrid::DeviceSecret {
-                kem: zeroize::Zeroizing::new(crate::decode_hex(
-                    r["kemSecret"].as_str().ok_or("missing kemSecret")?,
-                )?),
-                dh: zeroize::Zeroizing::new(bytes(&r, "dhSecret")?),
-            },
-            crate::object_keys_hybrid::DevicePublic {
-                kem: crate::decode_hex(r["kemPublic"].as_str().ok_or("missing kemPublic")?)?,
-                dh: bytes(&r, "dhPublic")?,
-            },
+            crate::object_keys_hybrid::secret_from_record(&r)?,
+            crate::object_keys_hybrid::public_from_record(&r)?,
         )
     } else {
         let pair = store.load_device(&generation)?;
-        if let Some(pk) = r.get("kemPublic") {
-            if crate::decode_hex(pk.as_str().ok_or("invalid kemPublic")?)? != pair.1.kem {
-                return Err("package public key differs from retained device".into());
-            }
-        }
-        if r.get("dhPublic").is_some() && bytes(&r, "dhPublic")? != pair.1.dh {
-            return Err("package DH key differs from retained device".into());
+        if r.get("hybridPublic").is_some()
+            && crate::object_keys_hybrid::public_from_record(&r)? != pair.1
+        {
+            return Err("package public key differs from retained device".into());
         }
         pair
     };
@@ -169,7 +159,7 @@ mod tests {
         key_file.write_all(&storage_bytes).unwrap();key_file.sync_all().unwrap();drop(key_file);
 
         let (secret,public)=object_keys_hybrid::generate().unwrap();
-        let generation=object_keys_hybrid::key_commitment(&public).unwrap();
+        let generation=object_keys_hybrid::key_commitment(&public);
         let mut retained=Store::open(&state,storage_bytes).unwrap();
         retained.retain_device(&generation,&secret,&public).unwrap();
         drop(retained);
@@ -224,9 +214,16 @@ mod tests {
         let mut altered=request.clone();altered["manifest"]=json!(crate::hex(&damaged_manifest));
         fs::write(&request_path,serde_json::to_vec(&altered).unwrap()).unwrap();
         assert!(receive_epoch(&view,&request_path,&state,&storage).is_err());
-        let mut altered=request.clone();altered["dhPublic"]=json!(crate::hex(&[99;32]));
+        let (_,stranger)=object_keys_hybrid::generate().unwrap();
+        let mut altered=request.clone();altered["hybridPublic"]=json!(crate::hex(&stranger.to_bytes()));
         fs::write(&request_path,serde_json::to_vec(&altered).unwrap()).unwrap();
-        assert!(receive_epoch(&view,&request_path,&state,&storage).is_err());
+        assert!(receive_epoch(&view,&request_path,&state,&storage).unwrap_err().contains("differs from retained device"));
+        // A request in the pre-hybrid shape is refused by name, before custody is consulted.
+        for field in ["kemPublic","dhPublic","kemSecret"] {
+            let mut old=request.clone();old[field]=json!("00");
+            fs::write(&request_path,serde_json::to_vec(&old).unwrap()).unwrap();
+            assert!(receive_epoch(&view,&request_path,&state,&storage).unwrap_err().contains("pre-hybrid"),"{field}");
+        }
         assert_eq!(fs::read(&state).unwrap(),journal);
         fs::remove_dir_all(root).unwrap();
     }
