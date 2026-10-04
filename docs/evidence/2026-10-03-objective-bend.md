@@ -95,8 +95,6 @@ The emitted Book SHA-256 is
 `b7bc7c8e5445c2a810ba2e51f930e732cb6a84d42bac536a956296046e3e91bb`.
 Its source-only publication packet has SHA-256
 `229e920581658b4c1e621893fdae551eab3912d368e524a47b3d1dfb67af7782`.
-The [linker contract](../OBJECTIVE-BEND-LINKER.md) distinguishes the checked
-core from newer authored general refinement/construction work.
 
 The incomplete composition must fail for `finalSelf.audit` at owner 3. Completion
 and alternate presentation must check exact 91/92-definition Books. This is an

@@ -17,7 +17,7 @@ proof of a computation.
 EXACT SEMANTIC ANCHOR
 Pinned Bend revision: 947db722640c86247849343657bf2f7ef01cb7f1.
 Source SHA256 e15042434e73aab07ab05cea4b77b5619082c00a6d4924ea2d4a2cdec05facce.
-See BEND-SEMANTICS-AUDIT-20261003.txt for the full source audit and premises.
+The separate BendTT semantics audit was deleted on 2026-10-04 (Git history keeps it).
 Execution anchor is live Eval/Walk, NOT checker WNF or generated JS/C behavior.
 Astra's namespace-only Lean4.30 port uses two explicit ite lemma adaptations;
 definitions/theorem statements remain pinned. Its source theorem/axiom probe

@@ -58,8 +58,7 @@ is available independently; it does not promise an end-to-end source-edit workfl
 What this command does **not** do: install a method, create an instance, spend
 credits, emit a world effect, verify a private backend, or prove the optimized
 native compiler equivalent. The separate [source exporter](../examples/objective-bend-workshop/Export.lean)
-exercises actual whole-Card method outputs. Its recipe and the declaration-order
-contract are in [source linking](OBJECTIVE-BEND-LINKER.md).
+exercises actual whole-Card method outputs.
 
 ## Use existing native methods
 
