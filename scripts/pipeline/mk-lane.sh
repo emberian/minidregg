@@ -139,6 +139,7 @@ shared_inodes=root .lake/build *.olean *.o (tmp+rename); .lake/packages sources 
 rule=never change lake-manifest.json or lean-toolchain in this lane (package build products are shared inodes)
 build: cd $DEST/src && LEAN_NUM_THREADS=4 SWARM_MEM_MAX=16G swarm-build lake build <targets>
 rust: export CARGO_TARGET_DIR=$DEST/rust-target
+check: /srv/pipeline/scripts/lane-check <File.lean> (never bare lake env lean after a rebase: it reads stale import oleans)
 first: git fetch github && git rebase github/main
 ORIGIN
 echo "mk-lane: OK $DEST at $TIP"
