@@ -1,0 +1,184 @@
+edition ObjectiveBend 1
+# OrderedCapacity: contributed capacity, allocated by frozen request order.
+# This is an ordinary program, not a kernel or a market mechanism.
+# Authenticated samples supply exact canonical subject/resource/root bytes.
+# A copied token reference confers no authority. Plan admission must still
+# check the actual right, expected root, recipient, audience and current policy.
+#
+# Port of world/Workshop/OrderedCapacity.bend (+ Demonstration.bend). Lists are
+# recursive sums; byte lists are Strings (see CatalogReview).
+
+record Capacity:
+  target: Nat
+  token: String
+  root: String
+
+sum Stock:
+  empty: {}
+  item: {capacity: Capacity, rest: Stock}
+
+sum Requests:
+  none: {}
+  request: {subject: String, units: Nat, rest: Requests}
+
+sum Grants:
+  none: {}
+  grant: {subject: String, stock: Stock, rest: Grants}
+
+def join(xs: Stock, ys: Stock) -> Stock:
+  match xs:
+    case empty(_): ys
+    case item(i): Stock.item({capacity: i.capacity, rest: join(i.rest, ys)})
+
+def prefix(n: Nat, xs: Stock) -> Stock:
+  match n:
+    case 0n: Stock.empty()
+    case 1n+p: prefixStep(p, xs)
+
+def prefixStep(p: Nat, xs: Stock) -> Stock:
+  match xs:
+    case empty(_): Stock.empty()
+    case item(i): Stock.item({capacity: i.capacity, rest: prefix(p, i.rest)})
+
+def suffix(n: Nat, xs: Stock) -> Stock:
+  match n:
+    case 0n: xs
+    case 1n+p: suffixStep(p, xs)
+
+def suffixStep(p: Nat, xs: Stock) -> Stock:
+  match xs:
+    case empty(_): Stock.empty()
+    case item(i): suffix(p, i.rest)
+
+# A zero/exhausted request still has its own empty grant, in the same position.
+# No member, demand or request is silently dropped; ties use this frozen order.
+def allocate(requests: Requests, stock: Stock) -> Grants:
+  match requests:
+    case none(_): Grants.none()
+    case request(r): Grants.grant({subject: r.subject, stock: prefix(r.units, stock), rest: allocate(r.rest, suffix(r.units, stock))})
+
+def remaining(requests: Requests, stock: Stock) -> Stock:
+  match requests:
+    case none(_): stock
+    case request(r): remaining(r.rest, suffix(r.units, stock))
+
+def assigned(grants: Grants) -> Stock:
+  match grants:
+    case none(_): Stock.empty()
+    case grant(g): join(g.stock, assigned(g.rest))
+
+# ---- decidable equality, so a law instance is a Boolean -----------------------
+
+def capacityEq(a: Capacity, b: Capacity) -> Bool:
+  a.target == b.target && a.token == b.token && a.root == b.root
+
+def stockEq(xs: Stock, ys: Stock) -> Bool:
+  match xs:
+    case empty(_): stockIsEmpty(ys)
+    case item(i): stockItemEq(i.capacity, i.rest, ys)
+
+def stockItemEq(capacity: Capacity, rest: Stock, ys: Stock) -> Bool:
+  match ys:
+    case empty(_): false
+    case item(j): capacityEq(capacity, j.capacity) && stockEq(rest, j.rest)
+
+def stockIsEmpty(xs: Stock) -> Bool:
+  match xs:
+    case empty(_): true
+    case item(_): false
+
+def grantsEq(xs: Grants, ys: Grants) -> Bool:
+  match xs:
+    case none(_): grantsIsEmpty(ys)
+    case grant(g): grantEq(g.subject, g.stock, g.rest, ys)
+
+def grantEq(subject: String, stock: Stock, rest: Grants, ys: Grants) -> Bool:
+  match ys:
+    case none(_): false
+    case grant(h): subject == h.subject && stockEq(stock, h.stock) && grantsEq(rest, h.rest)
+
+def grantsIsEmpty(xs: Grants) -> Bool:
+  match xs:
+    case none(_): true
+    case grant(_): false
+
+def stockCount(xs: Stock) -> Nat:
+  match xs:
+    case empty(_): 0n
+    case item(i): 1n + stockCount(i.rest)
+
+# LAW split_conserves (general over every n and stock; not checkable yet).
+# Decidable instance form:
+def splitConserves(n: Nat, stock: Stock) -> Bool:
+  stockEq(join(prefix(n, stock), suffix(n, stock)), stock)
+
+# LAW allocation_conserves (general; not checkable yet): exact token
+# conservation includes every reference byte and token order, not only a
+# quantity sum. It implies no loss/duplication for unique input tokens.
+# Decidable instance form:
+def allocationConserves(requests: Requests, stock: Stock) -> Bool:
+  stockEq(join(assigned(allocate(requests, stock)), remaining(requests, stock)), stock)
+
+# ---- the workshop's synthetic scenario (Demonstration.bend) -----------------
+# Three contributed capacity tokens; member A requests two places, member B
+# requests two. Frozen order is A, B. A receives the first two tokens, B the
+# last token, nothing remains.
+
+def first() -> Capacity:
+  {target: 1n, token: "token-1", root: "root-11"}
+
+def second() -> Capacity:
+  {target: 2n, token: "token-2", root: "root-12"}
+
+def third() -> Capacity:
+  {target: 3n, token: "token-3", root: "root-13"}
+
+def contributedStock() -> Stock:
+  Stock.item({capacity: first(), rest: Stock.item({capacity: second(), rest: Stock.item({capacity: third(), rest: Stock.empty()})})})
+
+def memberRequests() -> Requests:
+  Requests.request({subject: "member-A", units: 2n, rest: Requests.request({subject: "member-B", units: 2n, rest: Requests.none()})})
+
+def demonstration() -> Grants:
+  allocate(memberRequests(), contributedStock())
+
+def expectedGrants() -> Grants:
+  Grants.grant({subject: "member-A", stock: Stock.item({capacity: first(), rest: Stock.item({capacity: second(), rest: Stock.empty()})}), rest: Grants.grant({subject: "member-B", stock: Stock.item({capacity: third(), rest: Stock.empty()}), rest: Grants.none()})})
+
+# demonstration_result: the allocation equals the stated grants exactly.
+def demonstrationResult() -> Bool:
+  grantsEq(demonstration(), expectedGrants())
+
+# demonstration_remaining: nothing remains.
+def demonstrationRemaining() -> Bool:
+  stockIsEmpty(remaining(memberRequests(), contributedStock()))
+
+def assignedCount() -> Nat:
+  stockCount(assigned(demonstration()))
+
+def remainingCount() -> Nat:
+  stockCount(remaining(memberRequests(), contributedStock()))
+
+def demonstrationConserves() -> Bool:
+  allocationConserves(memberRequests(), contributedStock()) && splitConserves(2n, contributedStock()) && splitConserves(5n, contributedStock()) && splitConserves(0n, contributedStock())
+
+# An under-subscribed run: one place requested of three leaves two behind.
+def undersubscribedRemaining() -> Nat:
+  stockCount(remaining(Requests.request({subject: "member-A", units: 1n, rest: Requests.none()}), contributedStock()))
+
+# A zero request keeps its own empty grant in position (nothing is dropped).
+def zeroRequestKeepsPosition() -> Bool:
+  grantsEq(allocate(Requests.request({subject: "member-Z", units: 0n, rest: Requests.none()}), contributedStock()), Grants.grant({subject: "member-Z", stock: Stock.empty(), rest: Grants.none()}))
+
+# ---- negative controls: the equality the laws rest on is discriminating -------
+# Each of these must evaluate to false. A different request order hands the
+# first two tokens to B, and token order matters inside one grant.
+
+def swappedRequests() -> Requests:
+  Requests.request({subject: "member-B", units: 2n, rest: Requests.request({subject: "member-A", units: 2n, rest: Requests.none()})})
+
+def frozenOrderMatters() -> Bool:
+  grantsEq(allocate(swappedRequests(), contributedStock()), expectedGrants())
+
+def tokenOrderMatters() -> Bool:
+  stockEq(Stock.item({capacity: first(), rest: Stock.item({capacity: second(), rest: Stock.empty()})}), Stock.item({capacity: second(), rest: Stock.item({capacity: first(), rest: Stock.empty()})}))

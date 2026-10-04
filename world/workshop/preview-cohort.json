@@ -1,0 +1,125 @@
+[
+ {
+  "name": "CapacityDemonstrationResult",
+  "modules": [
+   {
+    "name": "OrderedCapacity",
+    "source": "OrderedCapacity.obend",
+    "imports": []
+   }
+  ],
+  "entry": "demonstrationResult",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CapacityDemonstrationRemaining",
+  "modules": [
+   {
+    "name": "OrderedCapacity",
+    "source": "OrderedCapacity.obend",
+    "imports": []
+   }
+  ],
+  "entry": "demonstrationRemaining",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CapacityAssignedCount",
+  "modules": [
+   {
+    "name": "OrderedCapacity",
+    "source": "OrderedCapacity.obend",
+    "imports": []
+   }
+  ],
+  "entry": "assignedCount",
+  "arguments": [],
+  "expected": "3"
+ },
+ {
+  "name": "CapacityRemainingCount",
+  "modules": [
+   {
+    "name": "OrderedCapacity",
+    "source": "OrderedCapacity.obend",
+    "imports": []
+   }
+  ],
+  "entry": "remainingCount",
+  "arguments": [],
+  "expected": "0"
+ },
+ {
+  "name": "CapacityDemonstrationConserves",
+  "modules": [
+   {
+    "name": "OrderedCapacity",
+    "source": "OrderedCapacity.obend",
+    "imports": []
+   }
+  ],
+  "entry": "demonstrationConserves",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CapacityUndersubscribedRemaining",
+  "modules": [
+   {
+    "name": "OrderedCapacity",
+    "source": "OrderedCapacity.obend",
+    "imports": []
+   }
+  ],
+  "entry": "undersubscribedRemaining",
+  "arguments": [],
+  "expected": "2"
+ },
+ {
+  "name": "CapacityZeroRequestKeepsPosition",
+  "modules": [
+   {
+    "name": "OrderedCapacity",
+    "source": "OrderedCapacity.obend",
+    "imports": []
+   }
+  ],
+  "entry": "zeroRequestKeepsPosition",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CapacityFrozenOrderMattersControl",
+  "modules": [
+   {
+    "name": "OrderedCapacity",
+    "source": "OrderedCapacity.obend",
+    "imports": []
+   }
+  ],
+  "entry": "frozenOrderMatters",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ },
+ {
+  "name": "CapacityTokenOrderMattersControl",
+  "modules": [
+   {
+    "name": "OrderedCapacity",
+    "source": "OrderedCapacity.obend",
+    "imports": []
+   }
+  ],
+  "entry": "tokenOrderMatters",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": false
+ }
+]
