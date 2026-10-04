@@ -45,6 +45,7 @@ def require (condition : Bool) (detail : String) : IO Unit :=
 
 /-- Reopen `bytes` the way `openNative` does and compare with the writer's image. -/
 def reopenMatches (bytes : Bytes) (expected : Restored context) (shape : String) : IO Unit := do
+  let t0 ← IO.monoMsNow
   let some valid := scanLog bytes
     | throw (IO.userError s!"{shape}: scanLog refused the image")
   require (valid == bytes.length) s!"{shape}: scanLog reported a torn tail"
@@ -53,7 +54,8 @@ def reopenMatches (bytes : Bytes) (expected : Restored context) (shape : String)
   require (reopened.length == expected.length) s!"{shape}: reopened length differs"
   require (reopened.log == expected.log) s!"{shape}: reopened log differs"
   require (reopened.state == expected.state) s!"{shape}: reopened state differs"
-  IO.println s!"PASS {shape}: {bytes.length} bytes, {reopened.log.recent.length} delta frames, {reopened.log.merged.events.length} events"
+  let t1 ← IO.monoMsNow
+  IO.println s!"PASS {shape}: {bytes.length} bytes, {reopened.log.recent.length} delta frames, {reopened.log.merged.events.length} events; scan+restore+compare {t1 - t0} ms"
 
 def fresh (base : Journal) : IO (Restored context) := do
   let some r := openRestored context (Log.encode ⟨base,[]⟩)
