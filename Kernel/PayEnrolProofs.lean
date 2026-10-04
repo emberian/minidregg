@@ -467,7 +467,8 @@ theorem enrol_float_net_zero {F : Type} [Field F] {deployment : CanonicalCellReg
     exact fee
   simp only [enrolBatch, CanonicalResourceKernel.Batch.apply, Descriptor.resourceBatch,
     fundingExact, feeExact, List.map_cons, List.map_nil, List.cons_append, List.nil_append,
-    CanonicalResourceKernel.applyOperations, InitialFunding.operation, CreationFee.operation]
+    CanonicalResourceKernel.applyOperations, CanonicalResourceKernel.deregisterAccounts,
+    InitialFunding.operation, CreationFee.operation]
   rw [apply_balance, apply_balance, apply_balance, apply_balance, registerAccounts_balance]
   simp only [CanonicalResourceKernel.Operation.posting, sameAsset, Ne.symm notWell,
     Ne.symm notAccount, Ne.symm notCollector, and_true, if_true, if_false]

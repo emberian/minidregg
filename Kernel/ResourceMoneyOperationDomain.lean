@@ -30,7 +30,7 @@ abbrev BookCell := RunComputeBudget.BookCell
 /-- No registrations, shadow balances or constructor tags supplied by a host. -/
 def combinedBatch {pre : BookCell} (funding : RunComputeBudget.PreparedBook pre)
     (operations : List Operation) : Batch :=
-  ⟨[], (RunComputeBudget.burnBatch funding.funding).operations ++ operations⟩
+  ⟨[], (RunComputeBudget.burnBatch funding.funding).operations ++ operations, []⟩
 
 theorem applyOperations_append (book : Book) (front suffix : List Operation) :
     applyOperations book (front ++ suffix) =
@@ -43,7 +43,7 @@ theorem combined_admitted {pre : BookCell}
     (funding : RunComputeBudget.PreparedBook pre) (operations : List Operation)
     (admitted : OperationsAdmitted (logicalBook funding.post.logical) operations) :
     (combinedBatch funding operations).Admission (logicalBook pre.logical) := by
-  have front := funding.accepted.admission.2
+  have front := funding.accepted.admission.2.1
   have post : logicalBook funding.post.logical =
       applyOperations (logicalBook pre.logical)
         (RunComputeBudget.burnBatch funding.funding).operations := by
@@ -52,7 +52,7 @@ theorem combined_admitted {pre : BookCell}
       funding.accepted.post_logicalBook
   have suffix := admitted
   rw [post] at suffix
-  exact ⟨trivial, (operationsAdmitted_append _ _ _).mpr ⟨front, suffix⟩⟩
+  exact ⟨trivial, (operationsAdmitted_append _ _ _).mpr ⟨front, suffix⟩, trivial⟩
 
 inductive Reject where
   | staleBookRoot

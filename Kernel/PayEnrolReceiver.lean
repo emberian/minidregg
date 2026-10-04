@@ -351,13 +351,13 @@ def enrolBatch (tariff : Tariff) (collector : Nat) (plan : EnrolPlan)
   ⟨descriptor.resourceBatch.registrations,
     .mint tariff.asset plan.float plan.credit ::
       .fee plan.float collector tariff.asset (leaseCost tariff plan.weeks) ::
-        descriptor.resourceBatch.operations⟩
+        descriptor.resourceBatch.operations, []⟩
 
 def renewBatch (tariff : Tariff) (collector : Nat) (plan : RenewPlan) :
     CanonicalResourceKernel.Batch :=
   ⟨[], [.mint tariff.asset plan.float plan.credit,
     .fee plan.float collector tariff.asset (leaseCost tariff plan.weeks),
-    .transfer plan.float plan.account tariff.asset (renewRemainder tariff plan)]⟩
+    .transfer plan.float plan.account tariff.asset (renewRemainder tariff plan)], []⟩
 
 /-! ## The authority delta of an enrollment -/
 

@@ -75,7 +75,7 @@ structure Plan where
   deriving DecidableEq, Repr
 
 /-- The Book leg: one burn, no registrations. -/
-def Plan.batch (plan : Plan) : Batch := ⟨[], [.burn plan.account plan.asset plan.amount]⟩
+def Plan.batch (plan : Plan) : Batch := ⟨[], [.burn plan.account plan.asset plan.amount], []⟩
 
 /-- The purse leg: the refill edge applied to the loaded purse. -/
 def Plan.after (plan : Plan) : AgentGrain.State :=
@@ -300,7 +300,7 @@ theorem refill_requires_balance {tariff : Option Tariff}
     Int.ofNat amount ≤ book.balance account plan.asset := by
   obtain ⟨_, _, _, _, _, acct, amt, _, admitted, _⟩ := decideRefill_ok accepted
   subst acct amt
-  have solvent := admitted.2.1.sourceSolvent
+  have solvent := admitted.2.1.1.sourceSolvent
   simpa [Plan.batch, registerAccounts, Operation.isIssuerMint, Operation.posting] using solvent
 
 /-! ## The audit statements -/

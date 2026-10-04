@@ -448,6 +448,7 @@ def Descriptor.resourceBatch {registry : TypeRegistry Digest}
   registrations := descriptor.registeredAccounts
   operations := descriptor.funding.map InitialFunding.operation ++
     [descriptor.fee.operation]
+  deregistrations := []
 
 def Descriptor.quotedFee {registry : TypeRegistry Digest}
     (descriptor : Descriptor registry) (tariff : CreationTariff) : Nat :=

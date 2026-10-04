@@ -296,6 +296,7 @@ def batch (tariff : CreationTariff) (command : Command) : CanonicalResourceKerne
     match command.transfer with
     | none => []
     | some transfer => [.transfer command.payer transfer.destination transfer.asset transfer.amount]
+  deregistrations := []
 
 inductive Reject where
   | malformedIngress | malformedCommand | feeMismatch

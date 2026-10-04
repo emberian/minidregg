@@ -1249,7 +1249,7 @@ def settlePurse (config : Config) (book : Book) (held : AccountId) (escrow : Esc
     else .error (.awaitsFunding after escrow.pair)
   else if after = 0 then .ok before
   else .ok ⟨before.registrations,
-    before.operations ++ [.transfer held escrow.account config.asset after]⟩
+    before.operations ++ [.transfer held escrow.account config.asset after], before.deregistrations⟩
 
 /-! ### publish -/
 
@@ -1331,10 +1331,10 @@ to the collector, move the deposit into the purse; then the purse settles
 (`settlePurse`). -/
 def birthBatch (config : Config) (book : Book) (held : AccountId) (request : BirthRequest)
     (escrow : Escrow) (segment : Segment) : Except Refusal Batch :=
-  settlePurse config (Batch.apply ⟨[held], []⟩ book) held escrow
+  settlePurse config (Batch.apply ⟨[held], [], []⟩ book) held escrow
     ⟨[], [.fee request.account config.collector config.asset (config.tariff.workOf request.envelope)] ++
-      (if request.deposit = 0 then [] else [.transfer request.account held config.asset request.deposit])⟩ segment
-  |>.map fun settled => ⟨held :: settled.registrations, settled.operations⟩
+      (if request.deposit = 0 then [] else [.transfer request.account held config.asset request.deposit]), []⟩ segment
+  |>.map fun settled => ⟨held :: settled.registrations, settled.operations, settled.deregistrations⟩
 
 /-- An admitted birth: the program, its first segment from its initial state,
 and the posts that commit the record, the yield and the Book postings. -/
@@ -1583,7 +1583,7 @@ def deliveryCharges (config : Config) (record : Record) (cell : CellId) (path : 
     (request : DeliverRequest) : Batch :=
   ⟨[], [.fee (heldAccount cell) config.collector config.asset (record.escrow.used path)] ++
     (if request.extra = zeroCapacity then []
-     else [.fee request.account config.collector config.asset (config.tariff.workOf request.extra)])⟩
+     else [.fee request.account config.collector config.asset (config.tariff.workOf request.extra)]), []⟩
 
 structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : DeliverRequest) where
@@ -1771,7 +1771,7 @@ def exhaustCharges (config : Config) (record : Record) (cell : CellId) (path : P
   ⟨[], (if record.tried = 0 then [.fee (heldAccount cell) config.collector config.asset (record.escrow.used path)]
         else []) ++
     (if request.extra = zeroCapacity then []
-     else [.fee request.account config.collector config.asset (config.tariff.workOf request.extra)])⟩
+     else [.fee request.account config.collector config.asset (config.tariff.workOf request.extra)]), []⟩
 
 /-- Guard every cell a settlement would write, at the root the attempt read:
 an exhaustion is decided against exactly the slot state its run saw. -/
@@ -1939,7 +1939,7 @@ def abandonCharges (config : Config) (book : Book) (cell : CellId) (escrow : Esc
   let balance := purse book config.asset (heldAccount cell)
   let fee := abandonFee config book cell escrow
   ⟨[], (if fee = 0 then [] else [.fee (heldAccount cell) config.collector config.asset fee]) ++
-       (if balance - fee = 0 then [] else [.transfer (heldAccount cell) escrow.account config.asset (balance - fee)])⟩
+       (if balance - fee = 0 then [] else [.transfer (heldAccount cell) escrow.account config.asset (balance - fee)]), []⟩
 
 structure Abandonment {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : AbandonRequest) where
@@ -2026,7 +2026,7 @@ structure TopUp {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
   book : BookCell
   bookExact : loadBook config snapshot = .ok book
   posted : Postings book
-  postedBatch : posted.batch = ⟨[], [.transfer request.account (heldAccount request.record) config.asset request.amount]⟩
+  postedBatch : posted.batch = ⟨[], [.transfer request.account (heldAccount request.record) config.asset request.amount], []⟩
 
 def topUp {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (request : TopUpRequest) : Except Refusal (TopUp config snapshot request) :=
@@ -2041,10 +2041,10 @@ def topUp {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
     match bookExact : loadBook config snapshot with
     | .error reason => .error reason
     | .ok book =>
-      match postings book ⟨[], [.transfer request.account (heldAccount request.record) config.asset request.amount]⟩ with
+      match postings book ⟨[], [.transfer request.account (heldAccount request.record) config.asset request.amount], []⟩ with
       | .error reason => .error reason
       | .ok posted =>
-        if postedBatch : posted.batch = ⟨[], [.transfer request.account (heldAccount request.record) config.asset request.amount]⟩ then
+        if postedBatch : posted.batch = ⟨[], [.transfer request.account (heldAccount request.record) config.asset request.amount], []⟩ then
           .ok ⟨record, recordExact, book, bookExact, posted, postedBatch⟩
         else .error .bookRefused
 

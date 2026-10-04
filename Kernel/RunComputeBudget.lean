@@ -162,7 +162,7 @@ abbrev BookCell := Materialized CanonicalResourcePageMaterializer.materializer
 No account registrations and no alternate monetary carrier. -/
 def burnBatch (funding : Option Funding) : CanonicalResourceKernel.Batch :=
   ⟨[], funding.toList.map fun supplied =>
-    .burn supplied.payer supplied.asset supplied.credits⟩
+    .burn supplied.payer supplied.asset supplied.credits, []⟩
 
 structure PreparedBook (pre : BookCell) where
   private mk ::

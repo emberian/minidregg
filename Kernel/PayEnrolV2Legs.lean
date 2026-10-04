@@ -182,14 +182,14 @@ def enrolBatch (tariff : Tariff) (collector : Nat) (input : EnrolInput)
   ⟨descriptor.resourceBatch.registrations,
     .mint tariff.asset input.economic.float input.economic.consumption.mintedCredit ::
       .fee input.economic.float collector tariff.asset input.economic.consumption.membershipCredit ::
-        descriptor.resourceBatch.operations⟩
+        descriptor.resourceBatch.operations, []⟩
 
 def renewBatch (tariff : Tariff) (collector : Nat) (input : RenewInput) :
     CanonicalResourceKernel.Batch :=
   ⟨[], [.mint tariff.asset input.economic.float input.economic.consumption.mintedCredit,
     .fee input.economic.float collector tariff.asset input.economic.consumption.membershipCredit,
     .transfer input.economic.float input.before.account tariff.asset
-      input.economic.consumption.creditedRemainder]⟩
+      input.economic.consumption.creditedRemainder], []⟩
 
 section Legs
 

@@ -150,11 +150,28 @@ theorem applyOperations_accountSupported (book : Book) (operations : List Operat
   | cons operation rest ih =>
     exact ih _ (operation.apply_accountSupported book supported admitted.1) admitted.2
 
+/-- Closing an account keeps the law: the closure needs every coordinate of
+the account to be zero, so no balance is left outside the accounts. -/
+theorem Book.deregisterAccount_accountSupported (book : Book) (account : AccountId)
+    (supported : book.AccountSupported) (admitted : DeregistrationAdmission book account) :
+    (book.deregisterAccount account).AccountSupported := by
+  intro coordinate member
+  exact Finset.mem_erase.mpr ⟨admitted.2.2.1 coordinate member, supported coordinate member⟩
+
+theorem deregisterAccounts_accountSupported (book : Book) (accounts : List AccountId)
+    (supported : book.AccountSupported) (admitted : DeregistrationsAdmitted book accounts) :
+    (deregisterAccounts book accounts).AccountSupported := by
+  induction accounts generalizing book with
+  | nil => exact supported
+  | cons account rest ih =>
+    exact ih _ (book.deregisterAccount_accountSupported account supported admitted.1) admitted.2
+
 theorem Batch.apply_accountSupported (batch : Batch) (book : Book)
     (supported : book.AccountSupported) (admitted : batch.Admission book) :
     (batch.apply book).AccountSupported :=
-  applyOperations_accountSupported _ _
-    (registerAccounts_accountSupported _ _ supported) admitted.2
+  deregisterAccounts_accountSupported _ _
+    (applyOperations_accountSupported _ _
+      (registerAccounts_accountSupported _ _ supported) admitted.2.1) admitted.2.2
 
 theorem Batch.run_accountSupported (batch : Batch) (book post : Book)
     (supported : book.AccountSupported) (accepted : batch.run book = some post) :

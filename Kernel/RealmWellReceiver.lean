@@ -83,7 +83,7 @@ def Plan.operation (plan : Plan) : Operation :=
   | .mint => .mint plan.asset plan.account plan.amount
   | .burn => .burn plan.account plan.asset plan.amount
 
-def Plan.batch (plan : Plan) : Batch := ⟨[], [plan.operation]⟩
+def Plan.batch (plan : Plan) : Batch := ⟨[], [plan.operation], []⟩
 
 @[simp] theorem Plan.operation_asset (plan : Plan) : plan.operation.posting.asset = plan.asset := by
   cases plan with

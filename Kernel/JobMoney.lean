@@ -190,9 +190,9 @@ def Plan.after (plan : Plan) : Job :=
 payouts out of it. -/
 def Plan.batch (plan : Plan) : Batch :=
   match plan.move with
-  | .fund account amount => ⟨[plan.job], [.transfer account plan.job plan.asset amount]⟩
-  | .claim _ account amount => ⟨[], [.transfer account plan.job plan.asset amount]⟩
-  | .settle p => ⟨[], p.ops plan.asset plan.job plan.before⟩
+  | .fund account amount => ⟨[plan.job], [.transfer account plan.job plan.asset amount], []⟩
+  | .claim _ account amount => ⟨[], [.transfer account plan.job plan.asset amount], []⟩
+  | .settle p => ⟨[], p.ops plan.asset plan.job plan.before, []⟩
 
 /-- Credit moved from an account into the job. -/
 def Plan.deposited (plan : Plan) : Nat :=
@@ -555,15 +555,15 @@ theorem plan_balance (plan : Plan) (book : Book) (a : AccountId) (asset : AssetI
   obtain ⟨asset₀, job, before, move⟩ := plan
   cases move with
   | fund account amount =>
-      simp only [Plan.batch, Batch.apply]
+      simp only [Plan.batch, Batch.apply, deregisterAccounts]
       rw [applyOperations_balance _ _ (by simp [plainOp]), registerAccounts_balance]
       simp
   | claim provider account amount =>
-      simp only [Plan.batch, Batch.apply, registerAccounts]
+      simp only [Plan.batch, Batch.apply, registerAccounts, deregisterAccounts]
       rw [applyOperations_balance _ _ (by simp [plainOp])]
       simp
   | settle p =>
-      simp only [Plan.batch, Batch.apply, registerAccounts]
+      simp only [Plan.batch, Batch.apply, registerAccounts, deregisterAccounts]
       rw [applyOperations_balance _ _ (ops_plain _ _ _ _), ops_flow]
 
 /-! ## Conservation -/
@@ -781,7 +781,7 @@ theorem no_double_settle {tariff : Option Tariff} {stored : Option (StoredCapabi
 /-- The Book leg of a `truth` turn: its submitter pays the re-execution fee.
 C4 NOCK-FEE supplies the fee (`run/steps × perStep`, the oracle's count);
 this branch has no fee term, so it is a parameter here. -/
-def truthFee (submitter asset fee : Nat) : Batch := ⟨[], [.burn submitter asset fee]⟩
+def truthFee (submitter asset fee : Nat) : Batch := ⟨[], [.burn submitter asset fee], []⟩
 
 /-- **A false challenge costs its submitter the fee and the provider nothing.**
 A `truth` that equals the output leaves the job upheld (C1's `decide → 3`):

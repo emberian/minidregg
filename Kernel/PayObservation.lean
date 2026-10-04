@@ -269,7 +269,7 @@ def Plan.nextClock (plan : Plan) : ClockCell.Clock := advanceClock plan.clock pl
 
 /-- The Book batch: one issuer mint per credit, from the tariff asset's well. -/
 def Plan.batch (plan : Plan) : Batch :=
-  ⟨[], plan.credits.map fun credit => .mint plan.tariff.asset credit.payer credit.credit⟩
+  ⟨[], plan.credits.map fun credit => .mint plan.tariff.asset credit.payer credit.credit, []⟩
 
 /-- The clock-cell patch: one guarded write of the whole clock, from the exact
 current value to `nextClock` (`ClockCell.tickPatch`). -/

@@ -123,6 +123,11 @@ theorem bookValue_registerAccounts (book : Book) (accounts : List AccountId) :
   | nil => rfl
   | cons account rest ih => exact ih (book.registerAccount account)
 
+theorem bookValue_deregisterAccounts (book : Book) (accounts : List AccountId) :
+    bookValue (deregisterAccounts book accounts) = bookValue book := by
+  unfold bookValue
+  rw [deregisterAccounts_balances]
+
 theorem bookValue_applyOperations (book : Book) (operations : List Operation) :
     bookValue (applyOperations book operations) =
       bookValue book + (operations.map operationVector).sum := by
@@ -144,7 +149,8 @@ theorem applyOperations_accounts (book : Book) (operations : List Operation) :
 theorem batch_delta (book : Book) (batch : Batch) :
     delta bookValue book (batch.apply book) = (batch.operations.map operationVector).sum := by
   apply delta_of_value_eq
-  rw [Batch.apply, bookValue_applyOperations, bookValue_registerAccounts]
+  rw [Batch.apply, bookValue_deregisterAccounts, bookValue_applyOperations,
+    bookValue_registerAccounts]
 
 /-- **§4.1, the general theorem, Book form.** The delta of every batch in the
 closed operation language lies in `ker assetSum`.  No admission premise is
@@ -207,8 +213,8 @@ theorem operations_supported (book : Book) (operations : List Operation)
 theorem; the registration half is the existing hidden-balance check. -/
 theorem batch_conservation : Batch.ConservationStatement := by
   intro book batch admitted asset
-  have ops : (batch.apply book).totalAsset asset =
-      (registerAccounts book batch.registrations).totalAsset asset := by
+  have ops : (applyOperations (registerAccounts book batch.registrations) batch.operations).totalAsset
+      asset = (registerAccounts book batch.registrations).totalAsset asset := by
     have d : delta bookValue (registerAccounts book batch.registrations)
         (applyOperations (registerAccounts book batch.registrations) batch.operations) =
         (batch.operations.map operationVector).sum :=
@@ -217,11 +223,12 @@ theorem batch_conservation : Batch.ConservationStatement := by
       (applyOperations (registerAccounts book batch.registrations) batch.operations)
       (applyOperations_accounts _ _) ?_ ?_ asset
     · rw [d]
-      exact operations_supported _ _ admitted.2
+      exact operations_supported _ _ admitted.2.1
     · unfold ConservesBetween
       rw [d]
       exact (conserves_iff_mem_ker _).mpr (moves_sum_mem_ker_ops batch.operations)
-  exact ops.trans (registerAccounts_conserves _ _ admitted.1 asset)
+  exact (deregisterAccounts_conserves _ _ admitted.2.2 asset).trans
+    (ops.trans (registerAccounts_conserves _ _ admitted.1 asset))
 where
   moves_sum_mem_ker_ops (operations : List Operation) :
       (operations.map operationVector).sum ∈

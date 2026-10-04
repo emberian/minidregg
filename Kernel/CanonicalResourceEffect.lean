@@ -47,7 +47,7 @@ abbrev batchCodec := Compiler.CanonicalResourcePageMaterializer.batchCodec
 def argsCustomization : List UInt8 := "DREGG.RESOURCE.ARGUMENT/v2".toUTF8.toList
 def postingCustomization : List UInt8 := "DREGG.RESOURCE.POSTING/v2".toUTF8.toList
 def effectCustomization : List UInt8 := "DREGG.RESOURCE.EFFECT/v2".toUTF8.toList
-def batchCustomization : List UInt8 := "DREGG.RESOURCE.BATCH/v2".toUTF8.toList
+def batchCustomization : List UInt8 := "DREGG.RESOURCE.BATCH/v3".toUTF8.toList
 
 def argsDigest (operation : Operation) : Digest :=
   (Compiler.Sp800185Cshake256.hash argsCustomization (operationCodec.encode operation)).digest
@@ -286,7 +286,7 @@ substitute for a payer's authorization, and a payer cannot invent namespace
 authority for newly registered accounts.
 -/
 
-def sourceCustomization : List UInt8 := "DREGG.RESOURCE.BATCH.SOURCE/v2".toUTF8.toList
+def sourceCustomization : List UInt8 := "DREGG.RESOURCE.BATCH.SOURCE/v3".toUTF8.toList
 
 /-- Full birth bytes, the exact derived batch, and the operation position are
 all committed. Thus identical-looking debits at different positions still

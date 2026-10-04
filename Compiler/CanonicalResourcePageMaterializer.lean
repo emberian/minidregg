@@ -222,12 +222,15 @@ separation and complete consumption follow the common product law. -/
 def effectSourceCodec : LawfulCodec (Operation × Posting) :=
   canonicalCodec (framedCodec 4 (StreamCodec.product operationStream postingStream).toLawful)
 
+/-- A batch on the wire: registrations, operations, then deregistrations. The
+deregistration list is part of every batch's bytes (an empty list is still
+encoded), so a two-list batch from before deregistration fails to decode. -/
 def batchStream : StreamCodec Batch :=
   StreamCodec.xmap
     (StreamCodec.product (StreamCodec.list StreamCodec.nat)
-      (StreamCodec.list operationStream))
-    (fun batch => (batch.registrations, batch.operations))
-    (fun wire => ⟨wire.1, wire.2⟩)
+      (StreamCodec.product (StreamCodec.list operationStream) (StreamCodec.list StreamCodec.nat)))
+    (fun batch => (batch.registrations, batch.operations, batch.deregistrations))
+    (fun wire => ⟨wire.1, wire.2.1, wire.2.2⟩)
     (by intro batch; rfl)
 
 def batchCodec : LawfulCodec Batch :=
