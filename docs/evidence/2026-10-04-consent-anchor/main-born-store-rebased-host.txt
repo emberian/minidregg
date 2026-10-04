@@ -1,0 +1,2 @@
+minidregg-host: durable store refused: this Store's seed frame is version 1, which carries no epoch label (it was born before Store epochs were labelled, so its state-key codec, schema references and log tags are unknown); this Host reads state-key/tagged-v4;schema-refs/v5;DREGG/NATIVE-HOST/LOG-TAG/v2; re-genesis the world
+exit 1

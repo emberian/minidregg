@@ -1,0 +1,19 @@
+== 1. grow to 5
+w2 accepted count=2
+w3 accepted count=3
+w4 accepted count=4
+w5 accepted count=5
+== 2. A6 A7
+a6 accepted count=6
+a7 accepted count=7
+== 3. ROLLBACK: the height-5 Store under anchor A (height 7)
+grep: /srv/lanes/schema-v2-2/evidence/fork/r6.submit.err: No such file or directory
+r6 REFUSED: minidregg-client-consent: consent refused: the Store's head 5 is below the retained consent anchor at 6: the accepted history was rolled back mini: local consent provider ended before consent: failed to fill whole buffer 
+== 4. FORK: B6 B7 on the height-5 Store with no retained anchor
+b6 accepted count=6
+b7 accepted count=7
+== 5. anchor A offered against the forked Store
+grep: /srv/lanes/schema-v2-2/evidence/fork/x8.submit.err: No such file or directory
+x8 REFUSED: minidregg-client-consent: consent refused: the Store's accepted history up to height 6 differs from the retained consent anchor: the prefix this client admitted was rewritten mini: local consent provider ended before consent: failed to fill whole buffer 
+== 6. control: anchor B accepts
+c8 accepted count=8

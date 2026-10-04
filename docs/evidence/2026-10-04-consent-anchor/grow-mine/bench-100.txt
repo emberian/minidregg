@@ -1,0 +1,76 @@
+load: 172 ms
+records 100 base 64 cells 17
+allowance incidences: available 9999797 last-record charge 2
+allowance turnBytes: available 9898540 last-record charge 997
+allowance memoryTouches: available 9999395 last-record charge 6
+allowance witnessBytes: available 9998084 last-record charge 0
+allowance proofWork: available 9999995 last-record charge 0
+allowance storageBytes: available 9983530 last-record charge 118
+allowance networkBytes: available 10000000 last-record charge 0
+allowance sideEffectCount: available 9999999 last-record charge 0
+allowance feeDebit: available 9999993 last-record charge 0
+allowance leaseByteBlocks: available 10000000 last-record charge 0
+cellIds x10: 0 ms
+loadDirectory x10: 13 ms
+loadDeployment x10: 20 ms
+validateLoaded x10: 63 ms
+loadDirectoryFrom (held, same image) x10: 0 ms
+validateLoadedFrom (held, same image) x10: 50 ms
+root rebuild x3: 141 ms
+authority cell bytes 1842
+authState x10: 0 ms
+authority rootBytes x10: 0 ms
+authority decode+load x10: 23 ms
+open: read the Store: 4 ms
+open: decode every record: 20 ms
+  decoded 100 records
+open: the log chain over every record: 9 ms
+  stored checkpoint at 64, 11287 bytes
+open: openSealed (decode + full world root + MAC): 52 ms
+open: resume (materialize + replay the suffix): 1 ms
+open: root cache build (full evaluation): 45 ms
+open: cache injectivity check: 0 ms
+open: presence index: 1 ms
+checkpoint: state (ofSnapshot): 0 ms
+  state cells 17 nullifiers 100
+checkpoint: body encode: 0 ms
+checkpoint: seal from the cached root (encode + MAC): 1 ms
+checkpoint: seal with the root in full: 47 ms
+checkpoint: every cell's rootBytes: 0 ms
+checkpoint: rebase at the head: 0 ms
+checkpoint: image.cellIds: 0 ms
+checkpoint: State.snapshot at the head: 0 ms
+checkpoint: resume at the head: 1 ms
+checkpoint: the Admissible parts (nodup, membership): 0 ms
+checkpoint: decide State.Admissible: 0 ms
+head receipt x10: 0 ms
+cellIds (cached) x10: 0 ms
+middle transaction index (cached) x1000: 0 ms
+middle transaction index (findIdx?) x1000: 0 ms
+middle receipt x1: 0 ms
+middle receipt x1000: 0 ms
+image.append list snoc x1000: 1 ms
+middle receipt root, specification (prefix evaluated) x1: 52 ms
+root height 1 17490550670029953117800358571607716678888979634790607550359262212371876965708
+root height 6 59995790905780223234890431018413697017827495555152863473622958426660156317724
+root height 11 66113194974774046687460728523067417257230465948297620891930335339652057457093
+root height 16 29355460407567152315623689350711037913646386403334267031425255438678644799304
+root height 21 94320653986526120764652078777803305664842266777965939369216814518155104747661
+root height 26 32268890584025582847063571702717643046447815330711346595688234115780978231029
+root height 31 68027539209281093390571606330600227015818680541381887794730013168945680166094
+root height 36 39338246689590191137807156623326511866973068984271112897472005664544657562545
+root height 41 37583301700290627335720907624287803343671735322673265884954321469477485222212
+root height 46 7630485552792306978170513935014716270282833923279797433438899285864971369097
+root height 51 5421651379276455588983200699924847767363088028445416984426891927247595086195
+root height 56 5213894929435273551976149549428758966869015181596841870559740856963477771447
+root height 61 102091954260405851432553661482489365316854352654011425064618496101027097501482
+root height 66 29726971297777657956795639601622321168389166827006512663965336233872813940576
+root height 71 91682155108451248805927776443145818633327424214297402991918940248465770073797
+root height 76 7731732200000213886943655968597576735242762464962516440819826711390679226886
+root height 81 100806081428612852677562776826733711109286856740354208210100148167912801576897
+root height 86 101474347274426981111784117795453016506256755666343344398680360903791347106838
+root height 91 69293253522631900547806329905538718531760672240820087029036682581508863748235
+root height 96 73856949909508417087843317864220847696710636099918293091724187099270282457314
+kept roots checked 20, differing 0
+store-bench 1.71 s 102952 KB
+load 9.80

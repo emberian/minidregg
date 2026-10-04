@@ -1,0 +1,16 @@
+== control (LOG-TAG/v2 -> LOG-TAG/v2)
+opened log height 8 from the checkpoint at 0 plus 8 replayed records
+index {"lastSeen":[["12063942608205061241","7","8"],["83066197371395983517026875300953900323329971855420564503387532460706985332366","7","1"],["10","7","1"],["11","7","1"],["12","7","1"]],"touched":[["12063942608205061241","8"],["83066197371395983517026875300953900323329971855420564503387532460706985332366","1"],["10","1"],["11","1"],["12","1"]]}
+exit 0
+== state-key (state-key/tagged-v4 -> state-key/tagged-v3)
+minidregg-host: durable store refused: this Store was born in another epoch (state-key codec: Store state-key/tagged-v3, this Host state-key/tagged-v4); re-genesis the world
+exit 1
+== schema-refs (schema-refs/v5 -> schema-refs/v4)
+minidregg-host: durable store refused: this Store was born in another epoch (cell schema references: Store schema-refs/v4, this Host schema-refs/v5); re-genesis the world
+exit 1
+== log-tags (LOG-TAG/v2 -> LOG-TAG/v1)
+minidregg-host: durable store refused: this Store was born in another epoch (log tags: Store DREGG/NATIVE-HOST/LOG-TAG/v1, this Host DREGG/NATIVE-HOST/LOG-TAG/v2); re-genesis the world
+exit 1
+== main-born Store (seed frame v1, from persvati rooms-main-v1-1 at main 36fca3ac binaries)
+minidregg-host: durable store refused: this Store's seed frame is version 1, which predates labelled Store epochs: it was born under state-key/tagged-v3 or older, schema-refs/v4 or older and DREGG/NATIVE-HOST/LOG-TAG/v1 or older; this Host reads state-key/tagged-v4;schema-refs/v5;DREGG/NATIVE-HOST/LOG-TAG/v2; re-genesis the world
+exit 1
