@@ -3,7 +3,7 @@ open Minidregg.Theory.ObjectiveBendOpenRecursion
 open Minidregg.Theory.ObjectiveBendDemandMachine
 open Minidregg.Theory.ObjectiveBendDemandData
 open Minidregg.Compiler.ObjectiveBendPlanAdapter
-open Minidregg.Compiler.BendScalarPlanAdapter
+open Minidregg.Compiler.ObjectiveNativeScalarBinding
 private def hex (bytes : List UInt8) : String := String.ofList (bytes.flatMap fun byte =>
   let chars := "0123456789abcdef".toList
   [chars[byte.toNat/16]!,chars[byte.toNat%16]!])

@@ -10,7 +10,8 @@
 # updated 2026-10-03: Host.ApplicationDispatchReady enters the Host closure: app readiness ops 193/194 (host-next merge) dispatch through it  [counts: Minidregg 0 1, Theory 60 102, Kernel 300 376, Pred 6 10, Effects 0 3, Compiler 108 190, Selvage 12 151, Assurance 0 132, Host 60 74, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1]
 # updated 2026-10-03: Declare source-first Bend, Simplex and governed recovery closure with lower import boundaries; native activation remains separately qualified  [counts: Minidregg 0 1, Theory 67 138, Kernel 337 478, Pred 7 11, Effects 0 3, Compiler 138 346, Selvage 12 151, Assurance 0 156, Host 66 112, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 10, BendQualification 0 1, SimplexQualification 0 1, ResearchWip 0 1]
 # updated 2026-10-03: Source-only signature-first authentication before unchanged preparation; full native family pending  [counts: Minidregg 0 1, Theory 67 147, Kernel 338 483, Pred 7 11, Effects 0 3, Compiler 138 360, Selvage 12 151, Assurance 0 157, Host 66 124, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 11, BendQualification 0 1, SimplexQualification 0 1, ResearchWip 0 1]
-# updated 2026-10-03: 3f81c7db cached Store ordering: Compiler.StoreCodec (in the Host closure) imports Compiler.FiniteDependentMapCachedOrdering for sortedSupport/fromEntries; the import landed without a pin update and reds host-closure in CI run 37145793326  [counts: Minidregg 0 1, Theory 67 196, Kernel 338 493, Pred 7 11, Effects 0 3, Compiler 139 377, Selvage 12 151, Assurance 0 158, Host 66 131, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 17, BendQualification 0 1, SimplexQualification 0 1, ResearchWip 0 1]
+# updated 2026-10-04: L0.1 cut: Objective native chain enters (NativeAdmission, SourceArtifact, PublishedPackage, NativeInput, PreparedOutput, PlanAdapter, ResultAdapter, Combined/GenericResult, NativePlanData, NativeScalarBinding, InvocationClaim v3, SourcePackage, NativeInvocation{Statement,Profile}, ProtectedContentGate, Objective Core4 theory defs); BendTT leaves the Host (Command.bend removed: BendTTSource, BendLiveMachine, BendCoreAdmission and 36 Bend* modules no longer reached)  [counts: Minidregg 0 1, Theory 65 212, Kernel 335 494, Pred 7 11, Effects 0 3, Compiler 128 383, Selvage 12 153, Assurance 0 160, Host 66 129, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, BendQualification 0 1, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-04: cut rebased onto github/main: the Objective native chain enters the Host closure; BendTT leaves it (only Bend* left: Compiler.BendWorldPlan)  [counts: Minidregg 0 1, Theory 65 214, Kernel 335 496, Pred 7 11, Effects 0 3, Compiler 128 386, Selvage 12 153, Assurance 0 160, Host 66 129, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, BendQualification 0 1, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -21,29 +22,7 @@ Compiler.AirRange
 Compiler.ApplicationReceivingDomain
 Compiler.AuthenticatedColumnPlan
 Compiler.BabyBear
-Compiler.BendClosureContinuationCodec
-Compiler.BendCoreAdmission
-Compiler.BendExecutionClaim
-Compiler.BendInvocation
-Compiler.BendInvocationAdmission
-Compiler.BendLogicCase
-Compiler.BendLogicSpecialization
-Compiler.BendNativeInput
-Compiler.BendPlanLowering
-Compiler.BendPrivateCapacity
-Compiler.BendRunCore
-Compiler.BendScalarPlanAdapter
-Compiler.BendScalarPlanBytesAdapter
-Compiler.BendScalarPlanCanonical
-Compiler.BendSourceByteCodec
-Compiler.BendSourceCanonicalCodec
-Compiler.BendSourceListTyped
-Compiler.BendSourceNatTyped
-Compiler.BendSourceRepresentation
-Compiler.BendSourceTypedRepresentation
 Compiler.BendWorldPlan
-Compiler.BendWorldProgramCodec
-Compiler.BendWorldSource
 Compiler.BignumKernelABI
 Compiler.BinaryTower256Profile
 Compiler.CandidateLawResolution
@@ -99,6 +78,8 @@ Compiler.NatDigits255Fast
 Compiler.NativeCoprocess
 Compiler.NativeHostCodec
 Compiler.NativeHostProfile
+Compiler.NativeInvocationProfile
+Compiler.NativeInvocationStatement
 Compiler.NativeKernelPlan
 Compiler.NativeObservationCodec
 Compiler.NativeProtocolFrames
@@ -108,6 +89,15 @@ Compiler.NockProgramCodec
 Compiler.NoteSpend
 Compiler.ObjectAudienceCodec
 Compiler.ObjectAudienceRoster
+Compiler.ObjectiveBendCombinedResult
+Compiler.ObjectiveBendGenericResult
+Compiler.ObjectiveBendNativePlanData
+Compiler.ObjectiveBendPlanAdapter
+Compiler.ObjectiveBendResultAdapter
+Compiler.ObjectiveBendSourceArtifact
+Compiler.ObjectiveInvocationClaim
+Compiler.ObjectiveNativeScalarBinding
+Compiler.ObjectiveSourcePackage
 Compiler.PayEnrolSignatureIO
 Compiler.PayEnrolSignatureV2IO
 Compiler.PhysicalLawResolution
@@ -341,14 +331,6 @@ Kernel.ApplicationSpkPackageIdentity
 Kernel.ApplicationStreamContinuity
 Kernel.AudienceRosterBinding
 Kernel.AuditTiming
-Kernel.BendActivity
-Kernel.BendActivityControl
-Kernel.BendArtifactSource
-Kernel.BendNativeRun
-Kernel.BendOpaqueResultReceiver
-Kernel.BendPreparedOutput
-Kernel.BendReturnRelease
-Kernel.BendSourcePublication
 Kernel.BirthCandidateAdmission
 Kernel.BirthExportAdmission
 Kernel.CanonicalPolicyRegistry
@@ -475,6 +457,11 @@ Kernel.NockProgramCell.Sample
 Kernel.ObjectAudience
 Kernel.ObjectAudienceController
 Kernel.ObjectAudienceInstall
+Kernel.ObjectiveBendArtifactSource
+Kernel.ObjectiveBendNativeAdmission
+Kernel.ObjectiveBendNativeInput
+Kernel.ObjectiveBendPreparedOutput
+Kernel.ObjectiveBendPublishedPackage
 Kernel.ParticipantFactoryProvisioning
 Kernel.ParticipantFactoryProvisioningReceiver
 Kernel.ParticipantKeyEnrollment
@@ -515,6 +502,7 @@ Kernel.PolicyInstallReceiver
 Kernel.PreparedInvocationDiagnostics
 Kernel.PresenceIndex
 Kernel.PrivateSuccessorCustody
+Kernel.ProtectedContentGate
 Kernel.ProviderMetering
 Kernel.ProviderRoute
 Kernel.PurseRefill
@@ -550,7 +538,6 @@ Kernel.World
 Kernel.WorldKindInstance
 Kernel.WorldKindMethods
 Kernel.WorldKindProjection
-Kernel.WorldMethodTrace
 Kernel.WorldPrototypeConstruction
 Kernel.WorldRoot
 Kernel.WorldRootCache
@@ -577,14 +564,6 @@ Theory.AcceptedCellEffect
 Theory.AssertAxioms
 Theory.AuthMap
 Theory.AuthorizationDeclaration
-Theory.BendClosureArena
-Theory.BendClosureDecode
-Theory.BendClosureMachine
-Theory.BendClosureReification
-Theory.BendClosureResponse
-Theory.BendExecutionTrace
-Theory.BendLiveMachine
-Theory.BendTTSource
 Theory.Bignum
 Theory.BinaryTower
 Theory.BinaryTowerCodec
@@ -624,6 +603,12 @@ Theory.NockCost.Shape
 Theory.Noun
 Theory.ObjectAudience
 Theory.ObjectAudienceRoster
+Theory.ObjectiveBendDemandCapacity
+Theory.ObjectiveBendDemandData
+Theory.ObjectiveBendDemandMachine
+Theory.ObjectiveBendOpenRecursion
+Theory.ObjectiveBendTypes
+Theory.ObjectiveBendTyping
 Theory.PlanBinding
 Theory.PolicyInstall
 Theory.PrivacyProfile
