@@ -477,7 +477,8 @@ def tallyConfig : Config where
   maxPatience := 16
   typeFuel := 16384
   maxArtifactBytes := 4194304
-  tariff := ⟨10, 1⟩
+  tariff := ⟨Minidregg.Kernel.ObjectiveTariff.tariffVersion, 10, 0, 1, 0, 0, 0, 0, 0⟩
+  abandonGrace := 16
 
 /-- Tally's first yield (it awaits a reply with its total 0). -/
 def tallyYield : State :=
