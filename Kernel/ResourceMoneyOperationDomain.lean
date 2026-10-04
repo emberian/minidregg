@@ -32,10 +32,10 @@ def combinedBatch {pre : BookCell} (funding : RunComputeBudget.PreparedBook pre)
     (operations : List Operation) : Batch :=
   ⟨[], (RunComputeBudget.burnBatch funding.funding).operations ++ operations⟩
 
-theorem applyOperations_append (book : Book) (prefix suffix : List Operation) :
-    applyOperations book (prefix ++ suffix) =
-      applyOperations (applyOperations book prefix) suffix := by
-  induction prefix generalizing book with
+theorem applyOperations_append (book : Book) (front suffix : List Operation) :
+    applyOperations book (front ++ suffix) =
+      applyOperations (applyOperations book front) suffix := by
+  induction front generalizing book with
   | nil => rfl
   | cons operation rest ih => exact ih (operation.apply book)
 
@@ -43,7 +43,7 @@ theorem combined_admitted {pre : BookCell}
     (funding : RunComputeBudget.PreparedBook pre) (operations : List Operation)
     (admitted : OperationsAdmitted (logicalBook funding.post.logical) operations) :
     (combinedBatch funding operations).Admission (logicalBook pre.logical) := by
-  have prefix := funding.accepted.admission.2
+  have front := funding.accepted.admission.2
   have post : logicalBook funding.post.logical =
       applyOperations (logicalBook pre.logical)
         (RunComputeBudget.burnBatch funding.funding).operations := by
@@ -52,7 +52,7 @@ theorem combined_admitted {pre : BookCell}
       funding.accepted.post_logicalBook
   have suffix := admitted
   rw [post] at suffix
-  exact ⟨trivial, (operationsAdmitted_append _ _ _).mpr ⟨prefix, suffix⟩⟩
+  exact ⟨trivial, (operationsAdmitted_append _ _ _).mpr ⟨front, suffix⟩⟩
 
 inductive Reject where
   | staleBookRoot
@@ -66,7 +66,7 @@ inductive Reject where
 structure Prepared {deployment : Deployment} {physical : Physical}
     (book : LoadedBook deployment physical) (expectedOriginalRoot : Digest)
     (funding : RunComputeBudget.PreparedBook book.cell)
-    (operations : List Operation) where
+    (operations : List Operation) : Type where
   private mk ::
   rootExact : expectedOriginalRoot =
     physical.model.roots (RunComputeBudgetDomain.bookId deployment)
@@ -150,7 +150,7 @@ theorem Prepared.at_most_one_book_write
     (prepared : Prepared book expectedOriginalRoot funding operations) :
     prepared.writes.length ≤ 1 := by
   unfold Prepared.writes
-  split <;> decide
+  split <;> simp
 
 theorem Prepared.writes_pre_exact
     (prepared : Prepared book expectedOriginalRoot funding operations) :
@@ -192,7 +192,7 @@ instance (pre : Book) (samples : List Sample) : Decidable (SamplesExact pre samp
   infer_instance
 
 structure CheckedSamples (prepared : Prepared book expectedOriginalRoot funding operations)
-    (samples : List Sample) where
+    (samples : List Sample) : Type where
   private mk ::
   distinct : (samples.map fun sample => (sample.account, sample.asset)).Nodup
   exact : SamplesExact prepared.applicationPre samples
@@ -208,7 +208,7 @@ def Prepared.checkSamples (prepared : Prepared book expectedOriginalRoot funding
 validated funding prefix without requiring application operations first. -/
 structure SampledFunding {deployment : Deployment} {physical : Physical}
     (book : LoadedBook deployment physical) (expectedRoot : Digest)
-    (funding : RunComputeBudget.PreparedBook book.cell) (samples : List Sample) where
+    (funding : RunComputeBudget.PreparedBook book.cell) (samples : List Sample) : Type where
   private mk ::
   rootExact : expectedRoot = physical.model.roots (RunComputeBudgetDomain.bookId deployment)
   originalLaw : CanonicalCellRegistry.CellLaw deployment deployment.resourceBookId
@@ -234,7 +234,7 @@ def sampleFunding {deployment : Deployment} {physical : Physical}
 theorem stale_root_refused (suppliedRoot : Digest)
     (stale : suppliedRoot ≠ physical.model.roots (RunComputeBudgetDomain.bookId deployment)) :
     prepareFrom book suppliedRoot funding operations = .error .staleBookRoot := by
-  simp [prepareFrom, stale]
+  simp [prepareFrom, stale] <;> rfl
 
 /-- A prepared token cannot certify a missing account or caller-spoofed balance.
 This follows from the same post-funding sample used by source execution. -/
