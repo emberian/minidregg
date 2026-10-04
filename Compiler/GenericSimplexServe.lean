@@ -158,6 +158,8 @@ partial def serveLoop {config : SourceConfig} (p : Participant config) (spool : 
   let (p,entries) ← serviceRequests p spool entries retryMs
   if report.refused > 0 then
     IO.eprintln s!"serve: dropped {report.refused} unauthenticated packets"
+  if report.status == "applied" then
+    IO.eprintln s!"serve: {← IO.monoMsNow} ms applied certified source record; height {p.source.verified.opened.durable.image.accepted.length}"
   if inbound.isEmpty then IO.sleep tickMs.toUInt32
   serveLoop p spool budget tickMs retryMs entries
 
