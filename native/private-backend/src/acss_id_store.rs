@@ -15,7 +15,7 @@ use std::{
     io::{Read, Result},
     path::Path,
 };
-fn count(c: &mut Cursor<'_>) -> Result<usize> {
+pub(crate) fn count(c: &mut Cursor<'_>) -> Result<usize> {
     let mut b = vec![];
     loop {
         let v = c.byte()?;
@@ -156,7 +156,7 @@ fn outbox(ps: &[Send]) -> Vec<u8> {
     }
     b
 }
-fn parse_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
+pub(crate) fn parse_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
     let mut c = Cursor::new(b)?;
     let len = count(&mut c)?;
     if len > crate::codec::MAX / 40 {
@@ -178,6 +178,18 @@ fn parse_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
         return Err(bad("ACSS outbox canonical"));
     }
     Ok(out)
+}
+/// The journaled dealer event: tag 0, the dealing seed, and every input polynomial.
+pub(crate) fn dealer_event(seed: [u8; 32], polys: &[Vec<Field>]) -> Vec<u8> {
+    let mut e = vec![0];
+    e.extend(seed);
+    Nat::new(polys.len() as u64).put(&mut e);
+    for p in polys {
+        for v in p {
+            e.extend(v.0.to_le_bytes());
+        }
+    }
+    e
 }
 #[derive(Clone)]
 pub struct AcssMachine {
@@ -260,14 +272,7 @@ impl Store {
         }
         let mut seed = [0; 32];
         File::open("/dev/urandom")?.read_exact(&mut seed)?;
-        let mut e = vec![0];
-        e.extend(seed);
-        Nat::new(polys.len() as u64).put(&mut e);
-        for p in polys {
-            for v in p {
-                e.extend(v.0.to_le_bytes());
-            }
-        }
+        let e = dealer_event(seed, polys);
         self.apply(&e)
     }
     pub fn request_open(&mut self, holder: u16) -> Result<Vec<Send>> {

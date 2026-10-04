@@ -368,3 +368,10 @@ A fresh preprocessing instance7200 preserves failed-run consumed material.
 The two shared sealed-image/config execution checks actually PASS in r41.
 The repaired full Objective computation is pending execution; no native source
 release, Qualified successor, GOD or PQ claim follows from this fixture.
+
+King composite store (king_store.rs): one transition_journal per holder over the three ACSS-Id
+and three Sh2t-Id instances, the preparation burn receipt and the TripleKing. PreparedBasis::from_burned
+rebuilds a basis from a retained receipt verified against the exact manifest and consumer generation and
+allocates nothing; reserve_new is manifest + burn_preparation + extract. Executed: a kill -9 mid-King recovers
+with one dealer event per instance, no new anchor allocation, complete exact checked triples. Cost and what
+leaks: docs/MPC-PROFILE-P2.md. The component limits above are unchanged.

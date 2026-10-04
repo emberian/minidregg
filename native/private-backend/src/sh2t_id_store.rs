@@ -15,7 +15,7 @@ use std::{
     io::{Read, Result},
     path::Path,
 };
-fn count(c: &mut Cursor) -> Result<usize> {
+pub(crate) fn count(c: &mut Cursor) -> Result<usize> {
     let mut b = vec![];
     loop {
         let v = c.byte()?;
@@ -29,7 +29,7 @@ fn count(c: &mut Cursor) -> Result<usize> {
     r.finish()?;
     Ok(n)
 }
-fn put_phase(p: &PhaseMessage, b: &mut Vec<u8>) {
+pub(crate) fn put_phase(p: &PhaseMessage, b: &mut Vec<u8>) {
     let (t, v) = match p {
         PhaseMessage::Init(v) => (0, v),
         PhaseMessage::Echo(v) => (1, v),
@@ -38,7 +38,7 @@ fn put_phase(p: &PhaseMessage, b: &mut Vec<u8>) {
     b.push(t);
     bytes(v, b);
 }
-fn phase(c: &mut Cursor) -> Result<PhaseMessage> {
+pub(crate) fn phase(c: &mut Cursor) -> Result<PhaseMessage> {
     let tag = c.byte()?;
     let b = c.bytes()?;
     match tag {
@@ -48,13 +48,13 @@ fn phase(c: &mut Cursor) -> Result<PhaseMessage> {
         _ => Err(bad("Sh2t phase")),
     }
 }
-fn put_fields(v: &[Field], b: &mut Vec<u8>) {
+pub(crate) fn put_fields(v: &[Field], b: &mut Vec<u8>) {
     Nat::new(v.len() as u64).put(b);
     for x in v {
         b.extend(x.0.to_le_bytes());
     }
 }
-fn fields(c: &mut Cursor) -> Result<Vec<Field>> {
+pub(crate) fn fields(c: &mut Cursor) -> Result<Vec<Field>> {
     let n = count(c)?;
     if n > 128 {
         return Err(bad("Sh2t point vector capacity"));
@@ -184,7 +184,7 @@ fn outbox(ps: &[Send]) -> Vec<u8> {
     }
     b
 }
-fn parse_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
+pub(crate) fn parse_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
     let mut c = Cursor::new(b)?;
     let len = count(&mut c)?;
     if len > crate::codec::MAX / 40 {
@@ -206,6 +206,18 @@ fn parse_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
         return Err(bad("Sh2t outbox canonical"));
     }
     Ok(ps)
+}
+/// The journaled dealer event: tag 0, the dealing seed, and every zero-sharing polynomial.
+pub(crate) fn dealer_event(seed: [u8; 32], polys: &[Vec<Field>]) -> Vec<u8> {
+    let mut e = vec![0];
+    e.extend(seed);
+    Nat::new(polys.len() as u64).put(&mut e);
+    for p in polys {
+        for x in p {
+            e.extend(x.0.to_le_bytes());
+        }
+    }
+    e
 }
 #[derive(Clone)]
 pub struct Sh2tMachine {
@@ -304,14 +316,7 @@ impl Store {
         }
         let mut seed = [0; 32];
         File::open("/dev/urandom")?.read_exact(&mut seed)?;
-        let mut e = vec![0];
-        e.extend(seed);
-        Nat::new(polys.len() as u64).put(&mut e);
-        for p in polys {
-            for x in p {
-                e.extend(x.0.to_le_bytes());
-            }
-        }
+        let e = dealer_event(seed, polys);
         self.apply(&e)
     }
     pub fn receive(&mut self, sender: u16, m: &Message) -> Result<Vec<Send>> {
@@ -420,7 +425,14 @@ mod tests {
             .unwrap()
             .set_len(len - 1)
             .unwrap();
-        assert!(Store::open(&p, 0, 0, 4, 1, &generation(), 1).is_err());
+        // The final record lost its last byte: it was never fsynced and never
+        // published, so recovery truncates it (transition_journal, fa84160e)
+        // and the dealer has dealt nothing yet.
+        let mut s = Store::open(&p, 0, 0, 4, 1, &generation(), 1).unwrap();
+        assert!(s.replay_outboxes().unwrap().is_empty());
+        assert!(s.state().dealer_inputs().is_none());
+        assert!(fs::metadata(&p).unwrap().len() < len - 1, "torn record truncated away");
+        assert!(!s.dealer(&polys()).unwrap().is_empty());
     }
     #[test]
     fn actual_recipient_reconstruction_survives_store_reopen_and_canonical_refusers() {

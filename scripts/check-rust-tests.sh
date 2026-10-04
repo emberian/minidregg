@@ -445,6 +445,16 @@ exact grain-journal-digest   grain-runtime --bin grain-runtime -- \
 exact private-transition-wal private-backend --lib -- \
   transition_journal::tests::zeroed_final_record_body_truncates_to_one_less_record \
   transition_journal::tests::invalid_event_has_no_effect_or_outbox
+# W16 MPC: the King composite store recovers a kill -9 mid-King with one dealer event per
+# instance and no new anchor allocation; the curious-holder transcript check and its falsifier
+exact private-king-store private-backend --lib -- \
+  king_store::tests::king_wire_codec_roundtrips_every_body_and_refuses_noncanonical \
+  king_store::tests::identical_receive_event_is_dropped_before_the_journal \
+  king_store::tests::burn_is_repaired_from_the_local_receipt_without_a_second_allocation \
+  king_store::tests::a_receipt_for_another_consumer_generation_or_a_flipped_byte_is_refused \
+  king_store::tests::kill9_mid_king_recovers_with_one_dealer_event_per_instance_no_new_allocations_and_complete_triples \
+  private_view::curious_holder_view_is_consistent_with_three_input_pairs_and_recipient_gets_256 \
+  private_view::retired_public_coefficient_dealing_is_decoded_by_the_curious_holder
 # One hex decoder (c158f9ba); rate budgets per IPv6 /64 with eviction (664ee3c4)
 exact rc-hex-rate-limit      resource-client --bin mini -- \
   decode_hex_tests::decode_hex_refuses_non_ascii_sign_and_odd_input_without_panic \

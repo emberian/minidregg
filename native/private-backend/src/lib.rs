@@ -34,6 +34,8 @@ pub mod sh2t_id_store;
 
 pub mod triple_king;
 
+pub mod king_store;
+
 pub mod source_endpoint;
 
 #[path = "../../hybrid_kem.rs"]

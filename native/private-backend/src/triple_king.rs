@@ -8,6 +8,7 @@ use crate::{
     acss_id::{self, AcssId},
     asks::{Bracha, PhaseMessage},
     codec::{bad, bytes, Correlation, Generation, Journal, Nat, Purpose},
+    consensus_wire::Cursor,
     custody::{self, hash},
     reconstruction::Field,
     sh2t_id::{self, Sh2tId},
@@ -89,6 +90,13 @@ struct RandomShares {
     o: Vec<Field>,
     check_r: Field,
 }
+/// A completed preparation burn: the manifest rows, their binding bytes, and the
+/// receipt that proves the whole allocation was anchored.
+struct Burned {
+    ids: Vec<Correlation>,
+    binding: Vec<u8>,
+    receipt: Vec<u8>,
+}
 #[derive(Clone)]
 pub struct PreparedBasis {
     me: u16,
@@ -102,20 +110,71 @@ pub struct PreparedBasis {
     bytes: Vec<u8>,
     consumer_generation: Generation,
     preparation_rows: Vec<Correlation>,
+    burn_binding: Vec<u8>,
+    burn_receipt: Vec<u8>,
 }
 impl PreparedBasis {
     /// Local coherent degree-f / committed degree-2f inputs. Neither zero
     /// correctness nor uniform entropy follows from a malicious dealer label.
     /// Honest dealer randomness and later full zero/triple checks are premises.
+    /// Burns the whole fixed preparation manifest, then extracts.
     pub fn reserve_new(
         consumer: &Generation,
         king: u16,
         count: usize,
         group: usize,
-        mut sources: Vec<PreparedSource>,
+        sources: Vec<PreparedSource>,
         anchor: &Path,
         local: &Path,
     ) -> Result<Self> {
+        let (sources, ids, binding) = Self::manifest(king, count, group, sources)?;
+        let receipt = burn_preparation(&ids, consumer, &binding, anchor, local)?;
+        Self::extract(consumer, king, count, group, sources, Burned { ids, binding, receipt })
+    }
+    /// Rebuild the basis from an ALREADY burned preparation: the receipt must
+    /// bind exactly this manifest, consumer generation and every row, and
+    /// nothing is allocated. This is the replay/recovery path; it never burns.
+    /// Whether the anchor still stands behind the receipt is a separate live
+    /// check, `verify_burn_standing`.
+    pub fn from_burned(
+        consumer: &Generation,
+        king: u16,
+        count: usize,
+        group: usize,
+        sources: Vec<PreparedSource>,
+        receipt: Vec<u8>,
+    ) -> Result<Self> {
+        let (sources, ids, binding) = Self::manifest(king, count, group, sources)?;
+        open_burn_receipt(&ids, consumer, &binding, &receipt)?;
+        Self::extract(consumer, king, count, group, sources, Burned { ids, binding, receipt })
+    }
+    /// The anchor must still retain every allocation of the receipt: it extends
+    /// the receipt's journal and preserves its allocations.
+    pub fn verify_burn_standing(&self, anchor: &Path) -> Result<()> {
+        let confirmed = open_burn_receipt(
+            &self.preparation_rows,
+            &self.consumer_generation,
+            &self.burn_binding,
+            &self.burn_receipt,
+        )?;
+        let latest = Journal::decode(&custody::rpc(anchor, &[0])?)?;
+        if !latest.extends(&confirmed) || !latest.preserves_allocations(&confirmed) {
+            return Err(bad("preparation burn no longer stands at the anchor"));
+        }
+        Ok(())
+    }
+    /// The exact burn receipt this basis was built behind.
+    pub fn burn_receipt(&self) -> &[u8] {
+        &self.burn_receipt
+    }
+    /// Public manifest preflight: sorted sources, the burned row identities and
+    /// the binding bytes. No accepted share is read here.
+    fn manifest(
+        king: u16,
+        count: usize,
+        group: usize,
+        mut sources: Vec<PreparedSource>,
+    ) -> Result<(Vec<PreparedSource>, Vec<Correlation>, Vec<u8>)> {
         if sources.is_empty() {
             return Err(bad("empty preparation basis"));
         }
@@ -182,7 +241,28 @@ impl PreparedBasis {
             binding.extend((v as u64).to_le_bytes());
         }
         binding.extend(king.to_le_bytes());
-        burn_preparation(&ids, consumer, &binding, anchor, local)?;
+        Ok((sources, ids, binding))
+    }
+    /// Read the accepted shares and run the King extraction. Only reachable
+    /// behind a burn receipt.
+    fn extract(
+        consumer: &Generation,
+        king: u16,
+        count: usize,
+        group: usize,
+        sources: Vec<PreparedSource>,
+        burned: Burned,
+    ) -> Result<Self> {
+        let Burned {
+            ids,
+            binding: burn_binding,
+            receipt: burn_receipt,
+        } = burned;
+        let n = sources[0].acss.n;
+        let f = sources[0].acss.f;
+        let me = sources[0].acss.me;
+        let batch = per_group(count, f)?;
+        let seed_count = acss_seed_count(count, f)?;
         let mut degree_f = vec![];
         let mut degree_2f = vec![];
         let mut bytes = b"DREGG.TRIPLE.KING.PREPARED.V2".to_vec();
@@ -268,6 +348,8 @@ impl PreparedBasis {
             bytes,
             consumer_generation: consumer.clone(),
             preparation_rows: ids,
+            burn_binding,
+            burn_receipt,
         })
     }
     pub fn bytes(&self) -> &[u8] {
@@ -288,7 +370,7 @@ pub(crate) fn burn_preparation(
     binding: &[u8],
     anchor: &Path,
     local: &Path,
-) -> Result<()> {
+) -> Result<Vec<u8>> {
     let _guard = custody::lock(&local.with_extension("preparation.lock"))?;
     let before = Journal::decode(&custody::rpc(anchor, &[0])?)?;
     before.reserve_batch(ids, g.clone(), Purpose::Triple)?;
@@ -311,9 +393,7 @@ pub(crate) fn burn_preparation(
         return Err(bad("preparation batch allocation binding/retention"));
     }
     // Persist exact original manifest with the whole completed reservation.
-    let mut receipt = b"DREGG.PREPARATION.BURN.V1".to_vec();
-    bytes(binding, &mut receipt);
-    g.put(&mut receipt);
+    let mut receipt = burn_receipt_prefix(binding, g);
     bytes(&confirmed.encode(), &mut receipt);
     custody::snapshot(local, &receipt)?;
     if std::fs::read(local)? != receipt {
@@ -323,7 +403,44 @@ pub(crate) fn burn_preparation(
     if !latest.extends(&confirmed) || !latest.preserves_allocations(&confirmed) {
         return Err(bad("preparation anchor regression"));
     }
-    Ok(())
+    Ok(receipt)
+}
+fn burn_receipt_prefix(binding: &[u8], g: &Generation) -> Vec<u8> {
+    let mut receipt = b"DREGG.PREPARATION.BURN.V1".to_vec();
+    bytes(binding, &mut receipt);
+    g.put(&mut receipt);
+    receipt
+}
+/// Pure check of a burn receipt against the manifest it must bind: exact
+/// binding and consumer generation, a decodable allocation journal, and every
+/// manifest row allocated to that generation for triples, unconsumed. Returns
+/// the allocation journal the burn confirmed.
+fn open_burn_receipt(
+    ids: &[Correlation],
+    g: &Generation,
+    binding: &[u8],
+    receipt: &[u8],
+) -> Result<Journal> {
+    let prefix = burn_receipt_prefix(binding, g);
+    let mut c = Cursor::new(receipt)?;
+    if c.take(prefix.len())? != prefix {
+        return Err(bad("burn receipt manifest/generation binding"));
+    }
+    let confirmed = Journal::decode(&c.bytes()?)?;
+    c.finish()?;
+    let indexed = confirmed
+        .allocations
+        .iter()
+        .map(|a| (&a.id, a))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    if ids.iter().any(|id| {
+        indexed
+            .get(id)
+            .is_none_or(|a| a.generation != *g || a.purpose != Purpose::Triple || a.consumed)
+    }) {
+        return Err(bad("burn receipt allocation rows"));
+    }
+    Ok(confirmed)
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Body {
@@ -1117,8 +1234,11 @@ pub(crate) mod tests {
         task: Option<thread::JoinHandle<Journal>>,
     }
     impl AnchorFixture {
-        fn new(root: &Path) -> Self {
+        /// Serve the anchor authority kept under `root`. A socket file left by a
+        /// killed predecessor is removed first; the authority log is what persists.
+        pub(crate) fn new(root: &Path) -> Self {
             let sock = root.join("anchor.sock");
+            let _ = fs::remove_file(&sock);
             let listener = UnixListener::bind(&sock).unwrap();
             listener.set_nonblocking(true).unwrap();
             let stop = Arc::new(AtomicBool::new(false));
