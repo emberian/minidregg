@@ -276,26 +276,31 @@ and `room status` says ENDED. `pay lab week` again renews. a founder runs a room
 week 100`, renews by hand with `room renew lab SUBJECT`, and funds the concierge with
 `topup lab N`. a room whose week is 0 is free: `pay` files a request instead.
 
-private rooms are **not available on this box yet**. the design: `room new lab --private`
-makes a room whose words are sealed on *your* machine under a room key before they leave, and
-the node holds that key only wrapped to each member. what stands today: a current client refuses to sync or seal any private room (the check that the served key wraps were
-signed by the room's founder is not built yet, so it refuses rather than trust the box), and an
-older client trusts whatever wraps the box serves, so the box's operator could hand you a key it
-holds and read the room. a sealed line can also still be swapped for an earlier version of
-itself at the same place. the commands below are what it will look like; do not rely on a
-private room for anything until this paragraph changes.
+private rooms (devnet quality; privacy not audited; founder-key pin is trust-on-first-use via the operator unless verified out of band.) they need a client built at or after the founder-pin change; an older client trusts whatever key wraps the box serves, so do not use one for a private room. `room new lab --private` makes a room whose words the node
+stores and, while it follows the protocol, cannot read: what you say in it is sealed on *your* machine
+under the room key before it leaves, and the node only ever holds that key wrapped to each member.
+so run `mini` on your own machine for it (in the hosted shell your key is a file on this box, and so
+is the room key). joining takes one exchange with the founder, directly (in person, or a channel
+the node does not carry):
 ```
-sam> whoami                                # "encryptionKey": give it to whoever invites you
-mini> room invite i1 lab SAMS-SUBJECT SAMS-ENCRYPTION-KEY   # the grant, and the key wrapped to sam
-mini> room kick k1 lab SAMS-SUBJECT        # revoke + a fresh room key for everyone else, in one line:
-                                           #   sam keeps what he could already read, gets nothing new
-mini> room keys lab                        # the key epochs you hold;  `forget lab` deletes yours
+founder> room new lab --private        # prints the room id, keys cell, founder key and its FINGERPRINT
+sam$ mini workspace --action room-key --op recipient-record --room-id ROOM --keys-cell KEYS \
+       --key-epoch N --founder-key FOUNDER-KEY --dir WS    # pins the founder key, prints its fingerprint
+                                       # and sam's signed declaration: give that to the founder
+mini> room invite i1 lab SAMS-SUBJECT @sam-declaration.json   # the grant, then the key released to sam
+mini> room kick k1 lab SAMS-SUBJECT    # revoke + a fresh room key for everyone else:
+                                       #   sam keeps what he could already read, gets nothing new
+mini> room keys lab                    # the key epochs you hold;  `forget lab` deletes yours
 ```
-your keys live in an encrypted file in your workspace: set `MINI_KEYCACHE_PASSPHRASE`. without it
-you see `[sealed under epoch N — you do not hold that key]`. inviting a hosted subject (a friend who
-only uses this shell, or hosted Hermes) into a private room needs `--i-know`: it puts the room key on
-the box. the node still sees who is in the room, who wrote when, and how big each line is (in 64-byte
-steps). details: `deploy/shell/templates/room/private/README.md`.
+compare the fingerprint sam's client prints with the one the founder's printed. if the founder key
+reached sam through this node and nobody compared, the node could have handed sam its own key: the
+pin is trust on first use. your keys live in an encrypted file in your workspace: set
+`MINI_KEYCACHE_PASSPHRASE`; without it you see `[sealed under epoch N — you do not hold that key]`.
+inviting a hosted subject (a friend who only uses this shell, or hosted Hermes) needs `--i-know`: it
+puts the room key on the box. the node still sees who is in the room, who wrote when, and how big each
+line is (in 64-byte steps). a misbehaving node can hide a key change from you until you have seen it
+once (after that your client refuses to go back), so a member who has not synced since a kick can be
+kept on the old key. not post-quantum. details: `deploy/shell/templates/room/private/README.md`.
 
 what can you do here? ask before you try:
 ```

@@ -1,0 +1,140 @@
+PRIVATE ROOMS — devnet design (lane W1.9b, 2026-10-04). Code: native/resource-client/src/{roomkey,private}.rs.
+Tags: READ = re-read at source in this clone (c8fdd000); DECIDED = this note's design choice.
+
+0. WHAT HEAD IS (READ)
+Private rooms are dead three ways at c8fdd000, not one: (a) authenticate_current_wraps always
+refuses (roomkey.rs:371); (b) authorize_wrap_publication always refuses (:1349), so no wrap can be
+written; (c) every write path (found/invite/rotate/rewrap) builds UNSIGNED wraps and write_wraps
+refuses unsigned wraps (:1210) — even with (a),(b) fixed nothing could be founded. Recipient
+authority goes through current_recipient_source -> with_current_source(CurrentRecipient), whose
+Lean entry Host/CurrentRecipientVerifier.lean is imported only by ResearchWip.lean (no Host verb
+dispatches it) and whose image approval is a hard-coded sha256 no build produces.
+The member-oo r18 intake (roomkey-source-consumer-r18.tar, sha256 2614af8b…, roomkey.rs sha256
+58b69e43…) replaces (a) with with_current_source(RoomHead) and adds verified_applied(RoomApplied).
+Neither variant exists in ANY tree (grep of the lane, the warm base and /tank lanes): r18 does not
+compile against its own lane, and with the variants added it can never succeed — there is no Lean
+RoomHead/RoomApplied producer, no Host verb, no approved image. Landing r18 verbatim would replace
+an honest always-refuse with a dishonest one. r18 also DELETES the ring-epoch monotonicity
+refusals, which the brief requires kept.
+
+1. THREAT MODEL (DECIDED)
+Assets: room keys k_R^e; plaintext of sealed entries/atoms; membership integrity (who can read
+epoch e). Parties:
+ - OPERATOR / HOST: stores the keys cell, signs views, relays every intent. Primary model:
+   honest-but-curious (runs the protocol, reads everything it stores). Secondary, named: ACTIVE
+   (serves stale/forged views, withholds, reorders). It is also the only validator on devnet, so
+   "rooted in chain state" == "the operator's word": chain-sourced authority adds nothing against
+   it today. Authority therefore comes from KEYS PINNED OUT OF BAND, not from served state.
+ - OTHER MEMBERS: honest about their own key; may be kicked; a kicked member keeps the past.
+ - STALE RECIPIENT: whoever holds a member's superseded X25519 secret (old device, leaked
+   KEY.enc-ring, a member about to be kicked). A wrap of an already-used key addressed to it is a
+   disclosure the moment the ciphertext leaves the founder's custody — CAS refusal later does not
+   un-send it.
+Goals: G1 the operator never learns a room key or plaintext (passive). G2 the operator cannot
+make a writer seal under a key it chose (no forged epoch). G3 no client seals under an epoch older
+than one it has authenticated (monotone). G4 no ciphertext of an already-used key goes to a
+recipient whose currency was not re-confirmed after the release was durably bound. G5 an atom
+edit cannot be silently rolled back to an earlier ciphertext at the same address.
+Non-goals / residuals (said out loud): (R1) FREEZE: an active operator can keep a member that has
+NOT yet seen epoch e+1 on epoch e by withholding (incl. the pre-kick view) — single-server fork
+consistency at best; needs out-of-band or multi-host gossip. (R2) First sight of an atom: a reader
+with no history accepts any internally consistent ciphertext the operator chooses to show at the
+current revision (G5 holds for readers with history, and for the create->edit edge for all
+readers). (R3) Metadata: cell ids, writers, heights, epochs, members' public keys, sizes in 64-byte
+buckets. (R4) Founder signing-key rotation requires every member to re-pin (no cross-signed
+transition yet). (R5) Not PQ (sec 6).
+
+2. KEY LINEAGE (DECIDED)
+ - FOUNDER PIN. The founder is the only writer of wraps (keys law, Kernel/PrivateRoomKeys.lean
+   keysLaw_refuses_nonfounder_wrap). Each client pins (room id, keys cell, founder Ed25519 key)
+   in ROOT/private/room-founder-ROOM.json: the founder at `found`; an invitee when it runs
+   `room-key --op recipient-record --founder-key HEX` (the same exchange that carries its signed
+   148-byte declaration back to the founder). No pin => sync refuses. Re-pinning is explicit
+   (`--op pin-founder --replace true`).
+   FIRST-CONTACT TRUST, said plainly: the pin is TRUST ON FIRST USE through whatever channel carried
+   the key. On a single-validator devnet, if that channel is the node (a chat line, a served view),
+   it is TOFU-through-the-operator: an active operator could hand the newcomer its own key and run
+   the room for it. The out-of-band option is the FINGERPRINT (fingerprint() = first 10 bytes of
+   cSHAKE over the key, grouped): `found` prints the founder's; every pin prints the pinned one; the
+   member compares them with the founder directly (in person, a channel the node does not carry).
+ - MEMBER PIN. The founder pins each member's signing key from the out-of-band 148-byte signed
+   declaration (`invite`, or `--op pin-member`). A record in the keys cell authorizes a wrap only if
+   it verifies under that pin (operator-substituted records refused). A member whose signing key
+   changed must re-declare out of band.
+ - EPOCH CERTIFICATES (192 bytes, existing format): signed by the pinned founder key; parent =
+   identity of the previous certificate. Every wrap carries its epoch's certificate and a founder
+   delivery signature over (epoch, gen, member, X25519 key, wrap, grant, certificate identity).
+   The founder signs each delivery individually: the wrap set of an epoch grows by invites, so a
+   per-delivery signature is the right granularity (withholding one member's wrap = DoS on that
+   member, which it sees).
+ - CHAIN RULE: certificates form one chain from genesis (epoch 0, zero parent); each certificate's
+   epoch is STRICTLY GREATER than its parent's (not necessarily +1: an epoch burned by a dead draft
+   is skipped). Conflicting certificates for one epoch refuse.
+ - CLIENT MONOTONICITY: ROOT/private/epoch-head-ROOM.json retains (epoch, identity). A served chain
+   whose head is lower, or equal with a different identity, refuses; so does a ring key above the
+   head (kept from HEAD). Forgetting keys never lowers the head.
+ - DEAD DRAFTS: at most one live release draft per room. Starting a new release operation marks
+   every older undisclosed draft of the room DEAD (dead.json, terminal): its key is never installed
+   in the sealing ring and its ciphertexts are never sent. A rotation always draws a fresh key at
+   max(head, every epoch named by any release record) + 1, so a burned epoch is never reused, and
+   once a later epoch lands the chain itself excludes the dead one for every reader.
+
+3. ENVELOPE BINDING (READ + DECIDED)
+READ: at HEAD a room-key envelope is never re-sealed at an existing address. Fresh private text in
+documents is refused unless it goes through protected-document audiences
+(protected_document::reject_fresh_legacy runs before private::seal_content, workspace.rs:2840), so
+seal_content's create/edit sealing branches are unreachable; its only live case is a tombstone that
+retains the old ciphertext. The one live room-key seal is a stream append at the signed view's
+nextSeq (workspace.rs:3209), and a stream position holds exactly one entry forever. So the
+"same-address rollback" of R2-1 #3 has no live producer in private.rs.
+DECIDED: (a) the envelope's address IS its revision (a stream position is written once), already
+bound in commit and AAD; no new field (a field that binds nothing new is a no-op); (b) delete the unreachable document create/edit sealing in seal_content
+(a second sealing shape that agrees today is one that disagrees later); legacy room-key document
+atoms are read-only + tombstone. (c) The SAME defect lives on in the successor format:
+protected_atoms.rs binding(atom) = [1 ‖ atom id] only, so an edited protected document atom can be
+re-served with its earlier fragment and opens. Fix shape: binding = atom ‖ seq ‖ prev revision
+carried in the fragment header, reader checks seq=0 iff revision=createdAt plus a retained per-atom
+(seq, revision, digest) high-water. That is protected-document territory (object audiences) —
+reported to the root, not silently widened into this lane.
+
+4. PRE-DISCLOSURE ORDERING (DECIDED) — per release operation, persistent under
+ROOT/private/room-releases/OPERATION/:
+  DRAFTED  draft.json: exact signed deliveries (ciphertexts), certificate, key encrypted apart
+           from the sealing ring. Nothing has left custody. Older drafts of the room -> DEAD.
+  BOUND    turn 1 (proposal ID-bind) creates one RELEASE atom per delivery in the keys cell, id =
+           ((2^30 + 1 + e) << 96) | gen << 64 | member, payload = founder-signed statement
+           (room, keys, epoch, certificate identity, member, gen, digest of the recipient's signed
+           record, grant, delivery commitment = cSHAKE of the complete signed wrap). No ciphertext.
+  APPLIED  turn 1 source-confirmed (accepted_outcome), THEN a fresh signed view of the keys cell is
+           read back and must show every release atom byte-exact, every recipient record still
+           equal to the bound digest and verifying under its member pin, the head unchanged
+           (invite: head = bound epoch; rotation: head = parent), and each recipient still in the
+           Host's `who`. Any difference -> DEAD (terminal), nothing disclosed.
+  DISCLOSED turn 2 (proposal ID-wraps) creates the wraps whose commitments equal the bound ones;
+           on confirmation the rotation key enters the sealing ring. UNKNOWN outcomes recover the
+           same attempt (same bytes); they never re-author.
+Readers accept a wrap only if a founder-signed release atom at its release address commits to its
+exact bytes. A burned address (dead draft whose release atom applied) is never reused: re-invite
+needs a new member record generation or a rotation.
+
+5. WHAT "PRIVACY NOT AUDITED" MUST SAY (now in FRIENDS.md, docs/PRIVATE-CELL.md, the template README)
+Label: "devnet quality; privacy not audited; founder-key pin is trust-on-first-use via the operator
+unless verified out of band." Then, in words: the node stores the room's messages encrypted and
+cannot read them while it follows the protocol; it CAN see who is in the room, who wrote when, and
+sizes to 64 bytes; a misbehaving node can hide a key change from a member until that member has seen
+it once (after that the client refuses to go back), so a member who has not synced since a kick can
+be kept on the old key; compare the founder fingerprint directly; a hosted member puts the room key
+on the box; not post-quantum.
+
+6. PQ (READ + DECIDED)
+Today: wraps are ECIES = ephemeral X25519 + cSHAKE256 KEK bound to (frame, room, epoch, member,
+both public keys) + XChaCha20-Poly1305 (private.rs seal_to/kek_and_aad); member X25519 derived from
+the signing seed; signatures Ed25519. A recorded wrap is harvest-now-decrypt-later exposed.
+Minimal hybrid (X25519 + ML-KEM-768, as pq_mailbox.rs already uses via aws_lc_rs::kem::ML_KEM_768):
+ (1) the 148-byte member record grows an ML-KEM-768 encapsulation key (1184 B) under the same member
+     signature (record v3); (2) wrap v3 = X25519 ephemeral ‖ ML-KEM ciphertext (1088 B) ‖ nonce ‖ ct,
+     KEK = cSHAKE256(KEK_LABEL, ss_x25519 ‖ ss_mlkem ‖ AAD incl. both ciphertexts and both public
+     keys) — secure if EITHER holds; (3) the decapsulation key derives from the seed like the X25519
+     key; (4) epoch certificate / delivery statements bind the new record digest. Signatures stay
+     Ed25519 (authentication is not harvestable). Not MLS: one founder, small rooms, explicit
+     rotation; MLS adds tree state without a threat this room has. Not done in this lane (DEFERRED).

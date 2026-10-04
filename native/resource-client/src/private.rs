@@ -839,58 +839,41 @@ pub(crate) fn load_cache(path: &Path, passphrase: &[u8]) -> Result<Keyring> {
 
 // ---------------------------------------------------------------- workspace hook
 
-/// `workspace propose --private ROOM`: every `createAtom` in a lowered content
-/// payload must be a `text` atom; its payload becomes an envelope under the room's
-/// latest key, its kind the private schema. Element bodies carrying bytes refuse:
-/// only atoms are sealed, and a plaintext beside a private room is a leak.
-pub(crate) fn seal_content(lowered: Value, room: &str, cell: &str, key: &RoomKey) -> Result<Value> {
+/// Legacy room-key document atoms are read-only. Fresh private document text
+/// goes through protected-document audiences, and a room-key envelope is
+/// sealed only at a stream position (`roomkey::seal_for_room`), which is
+/// written once -- so no room-key envelope is ever re-sealed at an existing
+/// address and none can be rolled back to an earlier ciphertext there. What
+/// remains: structural actions, and striking a legacy private line while
+/// retaining its exact ciphertext.
+pub(crate) fn legacy_content(lowered: Value) -> Result<Value> {
     use crate::workspace::content_privacy::{actions as validate, classify, Exposure};
     let mut lowered = validate(&lowered["actions"], true)?;
+    let private_kind = json!({"type":"inlineObject","schema":schema_decimal()});
     for action in lowered["actions"].as_array_mut().expect("validated actions") {
         match classify(action)? {
             Exposure::Structure => {}
-            Exposure::CreateText | Exposure::EditText => {
-                let editing = action["type"] == "editAtom";
-                let private_kind = json!({"type":"inlineObject","schema":schema_decimal()});
-                if editing {
-                    let before = &action["before"];
-                    let fields = ["document", "kind", "payload", "createdBy", "createdAt", "revision", "tombstonedAt"];
-                    let record = before.as_object().ok_or("private edit lacks exact before record")?;
-                    if record.len() != fields.len() || fields.iter().any(|f| !record.contains_key(*f)) {
-                        return Err("private edit before has unexpected fields".into());
-                    }
-                    if before["kind"] != private_kind {
-                        return Err("private edit requires a ciphertext before record".into());
-                    }
-                    PrivateEnvelope::from_bytes(&decode_hex(before["payload"].as_str()
-                        .ok_or("private edit before lacks payload")?)?)?;
-                    if action["kind"] != private_kind && action["kind"] != json!({"type":"text"}) {
-                        return Err("private edit seals text atoms only".into());
-                    }
-                    match action["tombstone"].as_bool() {
-                        Some(true) => {
-                            // Striking a line retains its existing encrypted body. It
-                            // must neither publish a supplied plaintext nor encrypt the
-                            // old envelope as if that ciphertext were new user text.
-                            if action["payload"] != before["payload"] {
-                                return Err("private tombstone must retain its ciphertext payload".into());
-                            }
-                            action["kind"] = private_kind;
-                            continue;
-                        }
-                        Some(false) => {}
-                        None => return Err("private edit tombstone must be a boolean".into()),
-                    }
-                } else if action["kind"] != json!({"type":"text"}) {
-                    return Err("--private seals text atoms only".into());
+            Exposure::EditText if action["tombstone"] == json!(true) => {
+                let before = &action["before"];
+                let fields = ["document", "kind", "payload", "createdBy", "createdAt", "revision", "tombstonedAt"];
+                let record = before.as_object().ok_or("private edit lacks exact before record")?;
+                if record.len() != fields.len() || fields.iter().any(|f| !record.contains_key(*f)) {
+                    return Err("private edit before has unexpected fields".into());
                 }
-                let atom = action["atom"].as_str().ok_or("private atom lacks id")?.to_owned();
-                let plain = Zeroizing::new(decode_hex(action["payload"].as_str()
-                    .ok_or("private atom lacks payload")?)?);
-                let envelope = seal(key, &Place { room, cell, address: &atom }, &plain)?;
-                action["kind"] = private_kind;
-                action["payload"] = Value::String(hex(&envelope.to_bytes()));
+                if before["kind"] != private_kind {
+                    return Err("private strike requires a ciphertext before record".into());
+                }
+                PrivateEnvelope::from_bytes(&decode_hex(before["payload"].as_str()
+                    .ok_or("private edit before lacks payload")?)?)?;
+                // Striking a line retains its existing encrypted body: it neither
+                // publishes a supplied plaintext nor re-seals the old envelope.
+                if action["payload"] != before["payload"] {
+                    return Err("private tombstone must retain its ciphertext payload".into());
+                }
+                action["kind"] = private_kind.clone();
             }
+            Exposure::CreateText | Exposure::EditText => return Err(
+                "fresh private text requires protected-document audience enrollment; a room-key envelope is never re-sealed at an existing address".into()),
             Exposure::Unsupported | Exposure::Annotation | Exposure::RewrapAnnotation | Exposure::RewrapAtom => return Err("private content action requires protected-document audience enrollment".into()),
         }
     }
@@ -1264,48 +1247,30 @@ mod tests {
     }
 
     #[test]
-    fn workspace_hook_seals_text_atoms_and_reads_back() {
+    fn a_sealed_atom_reads_back_only_at_its_address() {
         let key = RoomKey::generate(2).unwrap();
-        let lowered = json!({"type":"content","actions":[
-            {"type":"createAtom","atom":"9","kind":{"type":"text"},"payload":hex(b"meet at noon")}]});
-        let sealed = seal_content(lowered, "71", "72", &key).unwrap();
-        let action = &sealed["actions"][0];
-        let payload = action["payload"].as_str().unwrap();
+        let envelope = seal(&key, &Place { room: "71", cell: "72", address: "9" }, b"meet at noon").unwrap();
+        let kind = json!({"type":"inlineObject","schema":schema_decimal()});
+        let payload = hex(&envelope.to_bytes());
         assert!(!payload.contains(&hex(b"meet at noon")));
-        assert_eq!(action["kind"]["schema"].as_str().unwrap(), schema_decimal());
-
         let view = json!({"cell":{"entries":[{"type":"atom","id":"9","document":"1",
-            "kind":action["kind"].clone(),"payload":payload}]}});
+            "kind":kind,"payload":payload}]}});
         let mut without = view.clone();
         assert_eq!(open_view(&mut without, "71", "72", None), 1);
         let label = without["cell"]["entries"][0]["private"].as_str().unwrap();
         assert_eq!(label, "[sealed under epoch 2 — you do not hold that key]");
         let mut with = view.clone();
         open_view(&mut with, "71", "72", Some(&ring(&key)));
-        assert_eq!(
-            with["cell"]["entries"][0]["private"]["text"],
-            "meet at noon"
-        );
+        assert_eq!(with["cell"]["entries"][0]["private"]["text"], "meet at noon");
         let mut moved = view;
         moved["cell"]["entries"][0]["id"] = json!("10");
         open_view(&mut moved, "71", "72", Some(&ring(&key)));
-        assert!(moved["cell"]["entries"][0]["private"]["refused"]
-            .as_str()
-            .unwrap()
-            .contains("integrity"));
-
-        let opaque = json!({"type":"content","actions":[{"type":"createDocument","rootElement":"1",
-            "schema":"1","body":{"type":"opaque","schema":"1","payload":"00"}}]});
-        assert!(seal_content(opaque, "71", "72", &key).is_err());
-        let inline = json!({"type":"content","actions":[{"type":"createAtom","atom":"9",
-            "kind":{"type":"inlineObject","schema":"1"},"payload":"00"}]});
-        assert!(seal_content(inline, "71", "72", &key).is_err());
+        assert!(moved["cell"]["entries"][0]["private"]["refused"].as_str().unwrap().contains("integrity"));
     }
 
     #[test]
-    fn private_edit_preserves_exact_guard_and_reseals_for_current_epoch() {
+    fn legacy_private_content_never_seals_and_only_strikes_retaining_ciphertext() {
         let old_key = RoomKey::generate(0).unwrap();
-        let new_key = RoomKey::generate(1).unwrap();
         let old = seal(&old_key, &PLACE, b"before secret").unwrap();
         let kind = json!({"type":"inlineObject","schema":schema_decimal()});
         let before = json!({"document":"72","kind":kind,"payload":hex(&old.to_bytes()),
@@ -1315,30 +1280,27 @@ mod tests {
             "before":before,"kind":kind,"payload":hex(b"after secret"),"tombstone":false},
             {"type":"editElement","element":"1","revision":"4",
                 "op":{"type":"move","child":"9","index":"0"}}]});
-        let sealed = seal_content(edit.clone(), "71", "72", &new_key).unwrap();
-        assert_eq!(sealed["actions"][0]["before"], before);
-        assert_eq!(sealed["actions"][1], edit["actions"][1]);
-        let envelope = PrivateEnvelope::from_bytes(&decode_hex(sealed["actions"][0]["payload"].as_str().unwrap()).unwrap()).unwrap();
-        assert_eq!(envelope.epoch, 1);
-        assert_eq!(open(&ring(&new_key), &PLACE, &envelope).unwrap().value, b"after secret");
-        assert!(open(&ring(&old_key), &PLACE, &envelope).is_err());
-        for place in [Place { room:"99", ..PLACE }, Place { cell:"99", ..PLACE }, Place { address:"99", ..PLACE }] {
-            let mut keys = ring(&new_key);
-            keys.insert(place.room, &new_key);
-            assert!(open(&keys, &place, &envelope).err().unwrap().contains("integrity"));
-        }
-        let encoded = serde_json::to_string(&sealed).unwrap();
-        assert!(!encoded.contains(&hex(b"before secret")));
-        assert!(!encoded.contains(&hex(b"after secret")));
+        assert!(legacy_content(edit.clone()).unwrap_err().contains("never re-sealed"),
+            "re-sealing at an existing address is the rollback surface; it is gone");
+        let create = json!({"type":"content","actions":[
+            {"type":"createAtom","atom":"9","kind":{"type":"text"},"payload":hex(b"meet at noon")}]});
+        assert!(legacy_content(create).is_err());
         let mut strike = edit.clone();
         strike["actions"][0]["tombstone"] = json!(true);
-        assert!(seal_content(strike.clone(), "71", "72", &new_key).is_err());
+        assert!(legacy_content(strike.clone()).is_err(), "a strike may not carry new bytes");
         strike["actions"][0]["payload"] = before["payload"].clone();
-        assert_eq!(seal_content(strike, "71", "72", &new_key).unwrap()["actions"][0]["payload"], before["payload"]);
+        let struck = legacy_content(strike).unwrap();
+        assert_eq!(struck["actions"][0]["payload"], before["payload"]);
+        assert_eq!(struck["actions"][0]["before"], before);
         let mut plaintext_guard = edit;
+        plaintext_guard["actions"][0]["tombstone"] = json!(true);
         plaintext_guard["actions"][0]["before"]["kind"] = json!({"type":"text"});
         plaintext_guard["actions"][0]["before"]["payload"] = json!(hex(b"before secret"));
-        assert!(seal_content(plaintext_guard, "71", "72", &new_key).is_err());
+        plaintext_guard["actions"][0]["payload"] = json!(hex(b"before secret"));
+        assert!(legacy_content(plaintext_guard).is_err());
+        let opaque = json!({"type":"content","actions":[{"type":"createDocument","rootElement":"1",
+            "schema":"1","body":{"type":"opaque","schema":"1","payload":"00"}}]});
+        assert!(legacy_content(opaque).is_err());
     }
 
     #[test]

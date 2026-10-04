@@ -5,9 +5,6 @@ pub(crate) mod carry;
 mod current_source;
 pub(crate) use current_source::{with_current_source, CurrentSourceOperation, CurrentSourceReadback};
 pub(crate) use current_source::run as pin_current_source_helper;
-#[path = "current_recipient_source.rs"]
-mod current_recipient;
-pub(crate) use current_recipient::{current_recipient_source, VerifiedCurrentRecipient};
 use crate::{workspace, Result, SOCKET};
 use serde_json::{json, Value};
 use std::cmp::Ordering;

@@ -2837,9 +2837,9 @@ fn content_actions(actions: &Value, sealed: bool) -> Result<Value> {
     crate::workspace::content_privacy::actions(actions, sealed)
 }
 
-fn legacy_private_content(lowered: Value, room: &str, target: &str, key: &private::RoomKey) -> Result<Value> {
+fn legacy_private_content(lowered: Value) -> Result<Value> {
     protected_document::reject_fresh_legacy(&lowered["actions"])?;
-    private::seal_content(lowered, room, target, key)
+    private::legacy_content(lowered)
 }
 
 fn unhex(text: &str) -> Result<Vec<u8>> {
@@ -3240,20 +3240,17 @@ fn propose_summary_once(
                         ("carryFormatting", None) if protected && entry.get("expectedTargetRoot").is_some() =>
                             protected_format::lower(&view,target,&payload["actions"])?,
                         ("content", None) => content_actions(&payload["actions"], false)?,
-                        ("content", Some((room, key))) => legacy_private_content(
+                        ("content", Some(_)) => legacy_private_content(
                             content_actions(&payload["actions"], true)?,
-                            room,
-                            target,
-                            key,
                         )?,
                         ("document", None) => content_actions(
                             &document_actions(root, workspace, local_name, &view, fresh,
                                 &payload["actions"])?,
                             false,
                         )?,
-                        ("document", Some((room, key))) => legacy_private_content(
+                        ("document", Some(_)) => legacy_private_content(
                             content_actions(&document_actions(root, workspace, local_name, &view,
-                                fresh, &payload["actions"])?, true)?, room, target, key)?,
+                                fresh, &payload["actions"])?, true)?)?,
                         ("scalar", Some(_)) => {
                             return Err("--private seals content and stream payloads only".into())
                         }
@@ -6361,11 +6358,22 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         // The room-key protocol of a private room (`roomkey.rs`).
         "room-key" => {
             let op = os_string(args.required("op")?, "room-key op")?;
-            if op == "recipient-record" {
+            if op == "recipient-record" || op == "pin-founder" {
                 let room = os_string(args.required("room-id")?, "room id")?;
                 let keys = os_string(args.required("keys-cell")?, "keys cell id")?;
+                // The member pins the founder key it was given; see the
+                // fingerprint it prints. Trust on first use through that channel.
+                let founder = os_string(args.required("founder-key")?, "founder key")?;
+                if op == "pin-founder" {
+                    let replace = args.optional("replace").as_deref() == Some(OsStr::new("true"));
+                    args.finish()?;
+                    let pin = roomkey::pin_founder(&root, &room, &keys, &founder, replace)?;
+                    println!("{}", serde_json::to_string_pretty(&pin).map_err(|error| error.to_string())?);
+                    return Ok(());
+                }
                 let epoch = os_string(args.required("key-epoch")?, "member key epoch")?;
                 args.finish()?;
+                roomkey::pin_founder(&root, &room, &keys, &founder, false)?;
                 let declaration = roomkey::signed_recipient_descriptor(&workspace, &room, &keys, &epoch)?;
                 println!("{}", serde_json::to_string_pretty(&declaration).map_err(|error| error.to_string())?);
                 return Ok(());
@@ -6476,7 +6484,16 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                     args.finish()?;
                     roomkey::rewrap(&root, &workspace, &name, &subject, &proposal_id)
                 }
-                _ => Err("room-key --op is recipient-record, found, sync, invite, rotate, kick, register, rewrap, list, open or forget".into()),
+                "pin-member" => {
+                    let subject = os_string(args.required("member")?, "member")?;
+                    let declaration = os_string(args.required("enc-pub")?, "signed declaration")?;
+                    let replace = flag(&mut args, "replace")?;
+                    args.finish()?;
+                    let pinned = roomkey::pin_member_declaration(&root, &name, &subject, &declaration, replace)?;
+                    println!("{}", serde_json::to_string_pretty(&pinned).map_err(|e| e.to_string())?);
+                    Ok(())
+                }
+                _ => Err("room-key --op is recipient-record, pin-founder, pin-member, found, sync, invite, rotate, kick, register, rewrap, list, open or forget".into()),
             }
         }
         "submit" => {
@@ -7331,9 +7348,10 @@ mod tests {
     #[test]
     fn doc_push_private_diff_uses_opened_text_but_preserves_ciphertext_guard() {
         let key = private::RoomKey::generate(0).unwrap();
-        let sealed = private::seal_content(json!({"type":"content","actions":[
-            {"type":"createAtom","atom":"10","kind":{"type":"text"},"payload":hex(b"private old")}
-        ]}), "71", "72", &key).unwrap();
+        let envelope = private::seal(&key, &private::Place { room: "71", cell: "72", address: "10" },
+            b"private old").unwrap();
+        let sealed = json!({"actions":[{"kind":{"type":"inlineObject","schema":private::schema_decimal()},
+            "payload":hex(&envelope.to_bytes())}]});
         let mut seen = seen_doc(&[("10", "private old", false)], &[], false);
         seen["view"]["cell"]["entries"][0]["kind"] = sealed["actions"][0]["kind"].clone();
         seen["view"]["cell"]["entries"][0]["payload"] = sealed["actions"][0]["payload"].clone();
@@ -7358,12 +7376,11 @@ mod tests {
         assert_eq!(plan.actions[0]["before"], atom_record(&seen["view"]["cell"]["entries"][0]).unwrap());
         assert_eq!(plan.actions[0]["payload"], hex(b"private new"));
         assert_eq!(plan.actions[0]["before"]["payload"], sealed["actions"][0]["payload"]);
-        let new = private::seal_content(json!({"type":"content","actions":plan.actions}), "71", "72", &key).unwrap();
-        assert_eq!(new["actions"][0]["before"]["revision"], "56");
-        assert_ne!(new["actions"][0]["payload"], plan.actions[0]["payload"]);
+        // A legacy room-key line is read-only: pushing new text refuses rather
+        // than re-sealing at the same address.
+        assert!(private::legacy_content(json!({"type":"content","actions":plan.actions})).is_err());
         let inserted = push_actions(&seen, b"first\nprivate old\n").unwrap();
         assert!(inserted.actions.iter().any(|a| a["type"] == "editElement"));
-        assert!(private::seal_content(json!({"type":"content","actions":inserted.actions}), "71", "72", &key).is_ok());
     }
 
     #[test]
@@ -7657,8 +7674,7 @@ mod tests {
             "payload":"61","tombstone":false}]);
         assert!(content_actions(&edit, false).is_ok());
         let validated = content_actions(&edit, true).unwrap();
-        let key = private::RoomKey::generate(0).unwrap();
-        assert!(private::seal_content(validated, "71", "72", &key).is_err());
+        assert!(private::legacy_content(validated).is_err());
         assert!(content_actions(&json!([{"type":"createAtom","atom":"1","kind":{"type":"text"},
             "payload":"61"}]), true).is_ok());
         assert!(content_actions(&json!([{"type":"transclude","id":"1"}]), false).is_err());
