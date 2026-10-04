@@ -81,6 +81,12 @@ impl From<String> for Error {
     }
 }
 pub type Result<T> = std::result::Result<T, Error>;
+/// Callers whose own errors are `String` (most Mini binaries) use `?` directly.
+impl From<Error> for String {
+    fn from(e: Error) -> String {
+        e.0
+    }
+}
 
 /// SHA-256 of `bytes`.
 pub fn sha256(bytes: &[u8]) -> [u8; 32] {
