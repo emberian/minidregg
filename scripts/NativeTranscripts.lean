@@ -26,8 +26,18 @@ namespace Minidregg.NativeTranscripts
 
 def hex (bytes : List UInt8) : String :=
   String.join (bytes.map fun b =>
-    let s := (Nat.toDigits 16 b.toNat).asString
+    let s := String.ofList (Nat.toDigits 16 b.toNat)
     if s.length = 1 then "0" ++ s else s)
+
+/-- Does `e` BUILD a transcript: `Transcript.mk` applied to a closed argument (a
+recorded list), or `Transcript.mk` used as a value?  Its application to bound
+variables -- the pattern in a `casesOn`, `noConfusion` or derived `DecidableEq` --
+takes a transcript apart and builds none. -/
+def builds (mk : Name) (e : Expr) : Bool :=
+  -- both passes are cached traversals (`find?`, `replace`): environment terms are DAGs
+  (e.find? fun x => x.isAppOfArity mk 1 && !x.appArg!.hasLooseBVars).isSome ||
+    ((e.replace fun x => if x.isAppOfArity mk 1 then some (mkConst ``Unit) else none).find?
+      (·.isConstOf mk)).isSome
 
 def ours (n : Name) : Bool :=
   (`Minidregg).isPrefixOf n && !n.isInternalDetail
@@ -44,7 +54,7 @@ def run : MetaM Unit := do
     let isTranscript ← try isDefEq info.type ty catch _ => pure false
     if isTranscript && info.levelParams.isEmpty then
       named := named.push n
-    else if value.find? (fun e => e.isConstOf mk) |>.isSome then
+    else if builds mk value then
       escaped := escaped.push n
   let mut triples := 0
   for n in named.qsort (·.toString < ·.toString) do
