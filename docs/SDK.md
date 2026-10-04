@@ -96,10 +96,10 @@ exists, a browser surface must not sign Mini plans.
 
 - `cargo test --offline --locked --features native` in `native/mini-sdk`: unit tests (custody
   machine, explain totality, confirmation binding, consent/operator framing against scripted
-  processes and a real Unix socket) and `tests/golden.rs`.
-- `golden/vectors.json`: hand-written inputs, the core's outputs under `expect`. Two external
+  processes and a real Unix socket) and `native/mini-sdk/tests/golden.rs`.
+- `native/mini-sdk/golden/vectors.json`: hand-written inputs, the core's outputs under `expect`. Two external
   pins: Bread's `dregg/0` vector `335840a9…8b9a`, and lowering that reproduces a real
-  admitted `intent.json` (`tests/fixtures/`, outcome `installed`). Regenerate only for an
+  admitted `intent.json` (`native/mini-sdk/tests/fixtures/`, outcome `installed`). Regenerate only for an
   announced format change: `MINI_SDK_REGEN=1 cargo test --test golden`.
 - `npm test` in `native/mini-sdk-ts`: rebuilds the wasm oracle (`--features wasm`,
   `wasm-bindgen --target nodejs`) every run, recomputes every golden value in pure TS, and runs

@@ -18,7 +18,7 @@ Objective Bend source language itself see
   Gen-1 Bend file. No Objective Bend (`.obend`) program declares or returns a
   Surface, and the Objective elaborator has no Surface output lowering. An
   Objective producer needs the Surface types written as `.obend` records and
-  sums (sum support: the W1.3 constructors) and a decoder from the checked
+  sums (sums are available: `sum` declarations, `S.l(e)` and `match`) and a decoder from the checked
   Core4 result to the canonical `Surface`.
 - The public Surface route is not registered.
 

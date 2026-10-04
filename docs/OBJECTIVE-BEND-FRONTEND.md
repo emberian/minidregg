@@ -53,9 +53,9 @@ fingerprints, not Mini package identities.
 | `<`, `>`, `<=`, `>=`, `-`, `/` | refused: no `Primitive.less / subtract / divide` exists |
 
 The `==` dispatch needs both operand types; an unannotated operand is refused.
-`inject`, `case`, `ifBool` and `labelEqual` are the W1.3 constructors
-(SUMS-DESIGN §9, §11); until they land in `Theory`, the Lean decoder refuses
-packets that contain them and the Lean elaborator does not erase them.
+`inject`, `case`, `ifBool` and `Primitive.labelEqual` are Core4 constructors
+(SUMS-DESIGN §9, §11): the Lean decoder in `Theory/ObjectiveBendTyping.lean` reads
+them and the Lean elaborator erases them.
 
 The package is one lazy knot whose root is a specification:
 `fix(specification({package: [modules]}, λ$globals λ$seed. extend $seed {M.decl: ...}), {})`.
@@ -90,8 +90,9 @@ globals `M.S#primary` and `M.S#around`; its extension is the mix chain,
 least specific lowest: combination identities, every ancestor's primary layer,
 every ancestor's around layer. So an around method wraps every primary,
 including primaries of specs more specific than itself. `before` and `after`
-are refused: they run for effects and the core has no effect constructor, so
-a pure one would be silently discarded. A method may not be primary in one
+are refused: they run for effects and discard their result. Core4 has `perform`
+now, so they are buildable ([activities and events](OBJECTIVE-BEND-EVENTS.md)) and
+are not built; a pure one would be silently discarded. A method may not be primary in one
 ancestor and combined in another.
 
 The spec interface label (canonical JSON) records target type, suffix mark,
@@ -112,7 +113,7 @@ row, or an affine parameter used twice).
 
 `Compiler/ObjectiveBendElaborate.lean` is a port of the TS elaborator over the
 same AST: same term, same proposal, fuel-bounded total functions. It erases to
-the Core4 `Term` (sum constructors once W1.3 lands). There is no adequacy
+the Core4 `Term`, sums and `perform` included. There is no adequacy
 theorem: "surface meaning preserved" needs a surface semantics, which does
 not exist. The evidence is translation validation:
 

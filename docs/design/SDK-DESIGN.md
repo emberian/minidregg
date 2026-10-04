@@ -9,7 +9,7 @@ github/main 44b2446a); INFERRED = my reasoning.
 ## 1. The surface: two nouns, one authorized shape
 
 Bread's shape is `Identity → turn() → typed verbs → .sign() → .submit() → Receipt`. Mini's
-signing flow is already split across processes (READ `resource-client/src/main.rs`
+signing flow is already split across processes (READ `native/resource-client/src/main.rs`
 `submit_once`, `client_consent.rs`, `Host/ClientConsentCore.lean`): a local Lean Host authors
 and decodes canonical bytes (ops 7–11), the remote operator socket proposes a challenge and a
 plan (ops 4, 1), an independently selected local consent process (`minidregg-client-consent`,

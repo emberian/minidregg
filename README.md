@@ -69,7 +69,7 @@ in a joined world), *deployed* (running on the public node for real users).
 | Native Host, shell, documents, journey J0–J8 | deployed | public node runs the 2026-10-01 candidate; no outside member enrolled yet |
 | Rooms, invitations, workroom template, chat | integrated | on development worlds only; room-scoped actions take seconds to minutes |
 | Studio (edit, import, fork, history, preview) | executed | loopback development servers; no member-reachable route; publication carries no authority |
-| Objective Bend Core4 semantics, machine, checker | compiled | soundness and preservation proved; completeness open; proofs not in the default gate ([details](docs/OBJECTIVE-BEND.md#formal-status)) |
+| Objective Bend Core4 semantics, machine, checker | compiled | soundness, preservation and completeness proved; proofs not in the default gate ([details](docs/OBJECTIVE-BEND.md#formal-status)) |
 | Objective Bend native admission | compiled (in lanes) | no native accepted receipt from Objective source on main |
 | SPK hosted apps | integrated (install, recovery) | no application has yet served a browser session |
 | Hermes in a room | executed | scripted provider on a private Store; off on the public node |

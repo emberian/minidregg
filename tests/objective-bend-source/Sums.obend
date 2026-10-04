@@ -1,5 +1,5 @@
 edition ObjectiveBend 1
-# Sums, case and Boolean branching (SUMS-DESIGN §9). Needs the W1.3 core.
+# Sums, case and Boolean branching (SUMS-DESIGN §9).
 sum Shape:
   circle: Nat
   square: {side: Nat}

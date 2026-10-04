@@ -1117,16 +1117,17 @@ Roadmap, in the guide's order:
    checkpoint, and resumes with a typed response. Not built.
 2. A guardedness check, so that a well-typed resident never diverges inside a
    turn.
-3. Declared ancestry with C4 linearization and method combination. The guide
-   lists this as open. Chapter 5 ran it in the preview, and
-   [OBJECTIVE-BEND-FRONTEND.md](OBJECTIVE-BEND-FRONTEND.md) documents it. The
-   paragraph in the roadmap has not been updated. The guide also says the
-   linearization invariance theorem (`OrderedPresentationInvariant`) is stated
-   and not proved.
+3. The theorem for declared ancestry. Declared ancestry with C4 linearization
+   and method combination has landed: chapter 5 ran it in the preview, and
+   [OBJECTIVE-BEND-FRONTEND.md](OBJECTIVE-BEND-FRONTEND.md) documents it. What
+   the guide lists as missing is the linearization invariance theorem
+   (`OrderedPresentationInvariant`), which is stated and not proved. `before`
+   and `after` methods are still refused.
 4. Checked `requires` and closed final-self assumptions. Today `requires` is
    recorded as a string and not checked.
-5. An extensible package root and dynamic `get`. (The guide lists label
-   equality here too, and also records it as landed with sums.)
+5. Dynamic `get`, and a surface form that names another package's root. (The
+   package root is a specification and label equality is a primitive; both
+   have landed.)
 
 Further gaps the guide names, unranked: sealing, `final` and suffix
 declarations; reflection beyond `reflect`, `metadata` and `project` (listing

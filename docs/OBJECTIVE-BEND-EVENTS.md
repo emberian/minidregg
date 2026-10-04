@@ -166,7 +166,7 @@ firing is a turn, history is the receipt chain.
 | manifest JSON in the cell heap | an immutable source package and its elaborated core |
 | `deos.cell(...).reflect()` | `reflect` / `metadata` on specifications; world observation is the `Observe` cut |
 
-Bread's counter applet (`deos-js/tests/js_drives_substance.rs`: `inc`/`dec`/`reset` on
+Bread's counter applet (`deos-js/tests/js_drives_substance.rs` in Bread's repository, not this one: `inc`/`dec`/`reset` on
 slot 0, `reset` needing a Proof credential) is
 [DeosCounter.obend](../tests/objective-bend-source/DeosCounter.obend). Each affordance
 yields one write and returns the new count if it was written, the old one if refused.
