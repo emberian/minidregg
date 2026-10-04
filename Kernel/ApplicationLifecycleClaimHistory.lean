@@ -37,7 +37,7 @@ theorem Conditional.original_record_exact {config : Config} {opened : Opened con
 
 def admit (config : Config) (opened : Opened config) (source : Source) :
     IO (Except String (Conditional config opened source)) := do
-  let selected ← match NativeHistorySelection.select config opened source.originalIndex with
+  let selected ← match ← NativeHistorySelection.selectIO config opened source.originalIndex with
     | .error detail => return .error detail
     | .ok selected => pure selected
   let ambient : DeclaredResourceController.Ambient :=

@@ -2606,6 +2606,18 @@ private def walk (config : Config) (opened : Opened config)
               let .ok nextFrontier := frontierAfter config frontier record receipt
                 | return .error ⟨index, "fn consumer frontier transition refused"⟩
               let nextReleases := selectedReleaseAfter config after releases record receipt
+              -- A record that enters a chronological context can be named by a
+              -- later lifecycle admission, which needs the exact prefixes just
+              -- before and after it: retain this walk's own genesis-replayed
+              -- openings instead of having that admission replay them from
+              -- genesis again (`NativeHistorySelection.loadPrefix`).
+              if nextIssues.length != issues.length || nextReserves.length != reserves.length ||
+                  nextBegins.length != begins.length || nextBeginsV2.length != beginsV2.length ||
+                  nextClaimsV2.length != claimsV2.length || nextBeginsV3.length != beginsV3.length ||
+                  nextClaimsV3.length != claimsV3.length || nextCreatedV3.length != createdV3.length ||
+                  nextRunningV3.length != runningV3.length || nextGrants.length != grants.length then
+                NativeHistorySelection.retainPrefix opened.durable
+                NativeHistorySelection.retainPrefix next
               match ← walk config after nextIssues nextReserves nextBegins nextBeginsV2 nextClaimsV2
                   nextBeginsV3 nextClaimsV3 nextCreatedV3 nextRunningV3 nextGrants
                   nextFrontier nextReleases selectIndex timing rest with

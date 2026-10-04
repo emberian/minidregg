@@ -69,7 +69,7 @@ def select (config : Config) (opened : Opened config)
   let count := source.physical.report.claim.core.claimReceipt.acceptedCount
   if 0 < count then
     let index := count - 1
-    let selected ← match NativeHistorySelection.select config opened index with
+    let selected ← match ← NativeHistorySelection.selectIO config opened index with
       | .error detail => return .error detail
       | .ok selected => pure selected
     if claimBytes : selected.record.event.canonicalBytes =
@@ -83,9 +83,9 @@ def select (config : Config) (opened : Opened config)
             DurableReceiver.IntentRecord.ofIntent accepted.intent :=
           (NativeHistorySelection.recordMatches_iff _ _).mp matched
         let prefixAfter := NativeHistorySelection.prefixImage opened (index + 1)
-        let loaded ← match DurableReceiverIO.loadImage rootBytes opened.durable.logStart prefixAfter with
+        let loaded ← match ← NativeHistorySelection.loadPrefix opened.durable.logStart prefixAfter with
           | .error _ => return .error "selected claim post-prefix unavailable"
-          | .ok loaded => pure loaded
+          | .ok loaded => pure loaded.val
         let after ← match validateLoaded config loaded with
           | .error _ => return .error "selected claim post-prefix invalid"
           | .ok after => pure after

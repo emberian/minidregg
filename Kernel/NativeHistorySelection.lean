@@ -70,4 +70,73 @@ def matchIntent {config : Config} {opened : Opened config} {index : Nat}
     .ok ⟨candidate.record, rfl, (recordMatches_iff candidate.record intent).mp same⟩
   else .error "historical record differs from source-admitted intent"
 
+/-! ## Prefixes the replay walk already holds
+
+A lifecycle admission (claim, completion, failed START recovery, created) names
+an earlier record and needs the exact opened prefix before it, and often the
+one after it. `select` rebuilds such a prefix from genesis: the whole executor
+replay, a full world-root tree and a full validation, once per selection and
+several times per record. During a replay walk those prefixes were just
+constructed, record by record. The walk retains the ones a later lifecycle
+record can name (`NativeHostReplay.walk`), and `selectIO`/`loadPrefix` reuse
+them.
+
+This is a memo, never an authority: an entry is used only when its height,
+log start and complete canonical image equal the requested prefix exactly
+(the image comparison encodes both images) and it is a genesis replay
+(`baseHeight = 0`, as every walk opening is); otherwise the genesis
+reconstruction runs. A reused prefix is validated by the same `validateLoaded`.
+Only the replay walk retains entries; the memo is bounded. -/
+
+initialize retainedPrefixes : IO.Ref (List (DurableReceiverIO.Loaded rootBytes)) ←
+  IO.mkRef []
+
+/-- Bound on retained prefixes (each is a persistent opening sharing structure
+with its neighbours). -/
+def retainedPrefixBound : Nat := 512
+
+/-- Retain one genesis-replayed prefix produced by the replay walk. -/
+def retainPrefix (loaded : DurableReceiverIO.Loaded rootBytes) : IO Unit :=
+  if loaded.baseHeight == 0 then
+    retainedPrefixes.modify fun held => (loaded :: held).take retainedPrefixBound
+  else pure ()
+
+/-- The genesis-replayed Loaded of exactly `image`: a retained walk prefix
+when one matches byte for byte, else `DurableReceiverIO.loadImage`. -/
+def loadPrefix (logStart : Digest) (image : DurableReceiver.Image) :
+    IO (Except String {loaded : DurableReceiverIO.Loaded rootBytes // loaded.image = image}) := do
+  -- Operator measurement control (like MINI_AUDIT_TIMING): =1 forces the
+  -- genesis reconstruction so one binary can time and diff both paths.
+  let held ← if (← IO.getEnv "MINI_AUDIT_RECONSTRUCT_PREFIXES") == some "1" then pure []
+    else retainedPrefixes.get
+  let height := image.accepted.length
+  let hit := held.find? fun loaded =>
+    loaded.baseHeight == 0 && loaded.image.accepted.length == height &&
+      loaded.logStart == logStart && decide (loaded.image = image)
+  match hit with
+  | some loaded =>
+      if exact : loaded.image = image then return .ok ⟨loaded, exact⟩
+      else return .error "retained prefix image differs"
+  | none =>
+      match built : DurableReceiverIO.loadImage rootBytes logStart image with
+      | .error detail => return .error detail
+      | .ok loaded => return .ok ⟨loaded, DurableReceiverIO.loadImage_image built⟩
+
+/-- `select` through `loadPrefix`: the same candidate, the same validation and
+refusals, without a genesis replay when the walk already holds the prefix. -/
+def selectIO (config : Config) (opened : Opened config) (index : Nat) :
+    IO (Except String (Candidate config opened index)) := do
+  match found : opened.durable.image.accepted[index]? with
+  | none => return .error "historical record index unavailable"
+  | some record =>
+      match ← loadPrefix opened.durable.logStart (prefixImage opened index) with
+      | .error detail => return .error detail
+      | .ok ⟨loaded, imageExact⟩ =>
+          match validated : validateLoaded config loaded with
+          | .error detail => return .error detail
+          | .ok prior =>
+              return .ok ⟨prior, record, found,
+                (congrArg DurableReceiverIO.Loaded.image (validateLoaded_durable validated)).trans
+                  imageExact⟩
+
 end Minidregg.Kernel.NativeHistorySelection

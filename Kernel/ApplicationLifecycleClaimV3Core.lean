@@ -74,7 +74,7 @@ theorem Conditional.original_record_exact {config : Config} {opened : Opened con
 def prepare (config : Config) (opened : Opened config) (ingress : Ingress) :
     IO (Except String (Conditional config opened ingress)) := do
   if sourceExact : ingress.originalExact = true then
-    let original ← match NativeHistorySelection.select config opened
+    let original ← match ← NativeHistorySelection.selectIO config opened
         ingress.base.source.originalIndex with
       | .error detail => return .error detail
       | .ok original => pure original

@@ -90,13 +90,13 @@ def select (config : Config) (opened : Opened config)
     if count : 0 < receipt.acceptedCount then
       let index := receipt.acceptedCount - 1
       have indexExact : index + 1 = receipt.acceptedCount := by omega
-      let selected ← match NativeHistorySelection.select config opened index with
+      let selected ← match ← NativeHistorySelection.selectIO config opened index with
         | .error detail => return .error detail
         | .ok selected => pure selected
       let prefixAfter := NativeHistorySelection.prefixImage opened (index + 1)
-      let loaded ← match DurableReceiverIO.loadImage rootBytes opened.durable.logStart prefixAfter with
+      let loaded ← match ← NativeHistorySelection.loadPrefix opened.durable.logStart prefixAfter with
         | .error _ => return .error "selected completed-create post-prefix unavailable"
-        | .ok loaded => pure loaded
+        | .ok loaded => pure loaded.val
       let after ← match validateLoaded config loaded with
         | .error _ => return .error "selected completed-create post-prefix invalid"
         | .ok after => pure after
