@@ -66,7 +66,7 @@ for(const [name,change,expect] of [
  const request=join(outputRoot,name+"-request.json");writeFileSync(request,JSON.stringify({...original,...change})+"\n",{flag:"wx"});
  let result:any;try{result=preview(request,join(outputRoot,name),toolingPath);}catch(error){result=error;}
  require(result.status===expect,"preview refusal/exhaustion differs: "+name+" "+result.status);
- require(expect!=="suspended"||result.preview.result===null,"exhaustion falsely returned a source result");
+ require(expect!=="suspended"||result.preview?.result===null,"exhaustion falsely returned a source result");
 }
 writeFileSync(join(outputRoot,"results.json"),JSON.stringify(results,null,2)+"\n");
 if(failures.length){console.error(JSON.stringify({schema:"dregg.objective-bend.preview-cohort-check.v1",status:"failed",failures}));process.exit(1);}
