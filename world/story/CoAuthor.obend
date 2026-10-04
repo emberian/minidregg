@@ -1,0 +1,486 @@
+edition ObjectiveBend 1
+# A co-authored story: a crowd writes it one chapter at a time. In each round any
+# author may propose a passage (one each) and edit their own proposal while the
+# round is open; the electors vote for a proposal (one vote each); when the
+# window closes anyone may seal the round, and the proposal with the most votes
+# becomes the next chapter, forever. A sealed chapter is never edited again, the
+# losing proposals are dropped, and the next round opens. The story is complete
+# after `total` chapters.
+#
+# Port of Bread's spween-dregg collective mode ("the killer mode": at each choice
+# a poll opens, the audience votes, the winner's turn fires and the world
+# advances, "no operator can pick a different branch than the crowd chose";
+# spween-dregg/src/collective.rs, vote.rs). What Bread had and this does not
+# yet: the passages there were nodes of a compiled spween script, each branch
+# checked against the script's availability rules; here a passage is an opaque
+# text (natively: a hyperdocument link). What this adds: the proposals are
+# authored by the crowd, authorship is enforced (only the author edits), and a
+# sealed chapter is immutable by construction.
+#
+# Rules, all total and checked by the preview:
+#   - propose: before the window closes; one proposal per author per round.
+#   - edit: only the proposal's own author, only while the round is open, only a
+#     proposal of THIS round (an id that is in a sealed chapter is refused as
+#     "sealed", an unknown id as "unknown").
+#   - vote: electors only, once per round, for a proposal that exists, while open.
+#   - seal: only after the window has closed. The winner is the proposal with the
+#     most votes; a tie goes to the EARLIEST proposal (so a lone, unvoted proposal
+#     wins). A round with no proposal at all is extended by one window.
+#
+# Layers, as in BountyBoard: (1) pure transitions; (2) the same story as an
+# Activity that yields one Plan per step. Preview evidence only. The Plans are
+# proposals: `publish` asks the kernel to append the winning passage to the
+# story's hyperdocument; this program never appends anything itself.
+
+record Meta:
+  title: String
+  window: Nat
+  total: Nat
+  electorate: Electorate
+
+# The electors are the contiguous ids first .. first + count - 1. (A list of ids
+# would be the natural shape, but a sum-typed value cannot be passed to an entry
+# point: typed-values-v1 has no variant, so the elector set is a record.)
+record Electorate:
+  first: Nat
+  count: Nat
+
+record Proposal:
+  id: Nat
+  author: Nat
+  text: String
+
+sum Proposals:
+  empty: {}
+  more: {head: Proposal, tail: Proposals}
+
+record Ballot:
+  voter: Nat
+  pick: Nat
+
+sum Ballots:
+  empty: {}
+  more: {head: Ballot, tail: Ballots}
+
+record Chapter:
+  number: Nat
+  id: Nat
+  author: Nat
+  text: String
+  votes: Nat
+
+sum Chapters:
+  empty: {}
+  more: {head: Chapter, tail: Chapters}
+
+record Round:
+  closes: Nat
+  proposals: Proposals
+  ballots: Ballots
+
+record Story:
+  meta: Meta
+  chapters: Chapters
+  round: Round
+  nextId: Nat
+  done: Bool
+
+record Propose:
+  author: Nat
+  text: String
+  now: Nat
+
+record Edit:
+  author: Nat
+  id: Nat
+  text: String
+  now: Nat
+
+record Vote:
+  voter: Nat
+  pick: Nat
+  now: Nat
+
+record Tick:
+  now: Nat
+
+sum Event:
+  propose: Propose
+  edit: Edit
+  vote: Vote
+  seal: Tick
+
+record Refusal:
+  reason: String
+  story: Story
+
+record Appended:
+  story: Story
+  chapter: Chapter
+
+sum Transition:
+  refused: Refusal
+  moved: Story
+  appended: Appended
+
+sum Lookup:
+  missing: {}
+  found: Proposal
+
+record Pick:
+  proposal: Proposal
+  votes: Nat
+
+sum Winner:
+  none: {}
+  some: Pick
+
+# ---- (1) the pure story -------------------------------------------------------
+
+def not(b: Bool) -> Bool:
+  if b then false else true
+
+def isElector(v: Nat, e: Electorate) -> Bool:
+  e.first <= v && v < e.first + e.count
+
+def find(id: Nat, ps: Proposals) -> Lookup:
+  match ps:
+    case empty(_): Lookup.missing({})
+    case more(m): if m.head.id == id then Lookup.found(m.head) else find(id, m.tail)
+
+def authored(author: Nat, ps: Proposals) -> Bool:
+  match ps:
+    case empty(_): false
+    case more(m): m.head.author == author || authored(author, m.tail)
+
+def append(ps: Proposals, p: Proposal) -> Proposals:
+  match ps:
+    case empty(_): Proposals.more({head: p, tail: Proposals.empty({})})
+    case more(m): Proposals.more({head: m.head, tail: append(m.tail, p)})
+
+def retext(ps: Proposals, id: Nat, text: String) -> Proposals:
+  match ps:
+    case empty(_): ps
+    case more(m): Proposals.more({head: if m.head.id == id then {id: id, author: m.head.author, text: text} else m.head, tail: retext(m.tail, id, text)})
+
+def voted(voter: Nat, bs: Ballots) -> Bool:
+  match bs:
+    case empty(_): false
+    case more(m): m.head.voter == voter || voted(voter, m.tail)
+
+def votesFor(id: Nat, bs: Ballots) -> Nat:
+  match bs:
+    case empty(_): 0n
+    case more(m): if m.head.pick == id then 1n + votesFor(id, m.tail) else votesFor(id, m.tail)
+
+def sealedId(id: Nat, cs: Chapters) -> Bool:
+  match cs:
+    case empty(_): false
+    case more(m): m.head.id == id || sealedId(id, m.tail)
+
+def chapterCount(cs: Chapters) -> Nat:
+  match cs:
+    case empty(_): 0n
+    case more(m): 1n + chapterCount(m.tail)
+
+def appendChapter(cs: Chapters, c: Chapter) -> Chapters:
+  match cs:
+    case empty(_): Chapters.more({head: c, tail: Chapters.empty({})})
+    case more(m): Chapters.more({head: m.head, tail: appendChapter(m.tail, c)})
+
+# The leader among the proposals after `cur`: only a STRICTLY greater count
+# replaces it, so a tie keeps the earlier proposal.
+def lead(ps: Proposals, bs: Ballots, cur: Pick) -> Pick:
+  match ps:
+    case empty(_): cur
+    case more(m): leadWith(m.head, votesFor(m.head.id, bs), m.tail, bs, cur)
+
+def leadWith(p: Proposal, n: Nat, rest: Proposals, bs: Ballots, cur: Pick) -> Pick:
+  if cur.votes < n then lead(rest, bs, {proposal: p, votes: n}) else lead(rest, bs, cur)
+
+def winner(ps: Proposals, bs: Ballots) -> Winner:
+  match ps:
+    case empty(_): Winner.none({})
+    case more(m): Winner.some(lead(m.tail, bs, {proposal: m.head, votes: votesFor(m.head.id, bs)}))
+
+def refuse(s: Story, reason: String) -> Transition:
+  Transition.refused({reason: reason, story: s})
+
+def open(s: Story, now: Nat) -> Bool:
+  now <= s.round.closes
+
+def withRound(s: Story, r: Round) -> Story:
+  {meta: s.meta, chapters: s.chapters, round: r, nextId: s.nextId, done: s.done}
+
+def start(title: String, window: Nat, total: Nat, electorate: Electorate, now: Nat) -> Story:
+  {meta: {title: title, window: window, total: total, electorate: electorate}, chapters: Chapters.empty({}), round: {closes: now + window, proposals: Proposals.empty({}), ballots: Ballots.empty({})}, nextId: 1n, done: false}
+
+def proposeOn(s: Story, e: Propose) -> Transition:
+  if s.done then refuse(s, "complete") else if not(open(s, e.now)) then refuse(s, "late") else if authored(e.author, s.round.proposals) then refuse(s, "alreadyProposed") else Transition.moved({meta: s.meta, chapters: s.chapters, round: {closes: s.round.closes, proposals: append(s.round.proposals, {id: s.nextId, author: e.author, text: e.text}), ballots: s.round.ballots}, nextId: s.nextId + 1n, done: s.done})
+
+def editOn(s: Story, e: Edit) -> Transition:
+  if s.done then refuse(s, "complete") else if sealedId(e.id, s.chapters) then refuse(s, "sealed") else editProposal(s, e, find(e.id, s.round.proposals))
+
+def editProposal(s: Story, e: Edit, found: Lookup) -> Transition:
+  match found:
+    case missing(_): refuse(s, "unknown")
+    case found(p): if not(open(s, e.now)) then refuse(s, "late") else if p.author == e.author then Transition.moved(withRound(s, {closes: s.round.closes, proposals: retext(s.round.proposals, e.id, e.text), ballots: s.round.ballots})) else refuse(s, "notAuthor")
+
+def voteOn(s: Story, e: Vote) -> Transition:
+  if s.done then refuse(s, "complete") else if not(open(s, e.now)) then refuse(s, "late") else if not(isElector(e.voter, s.meta.electorate)) then refuse(s, "notElector") else if voted(e.voter, s.round.ballots) then refuse(s, "alreadyVoted") else voteFor(s, e, find(e.pick, s.round.proposals))
+
+def voteFor(s: Story, e: Vote, found: Lookup) -> Transition:
+  match found:
+    case missing(_): refuse(s, "unknown")
+    case found(_): Transition.moved(withRound(s, {closes: s.round.closes, proposals: s.round.proposals, ballots: Ballots.more({head: {voter: e.voter, pick: e.pick}, tail: s.round.ballots})}))
+
+# The chapter a winning proposal becomes, and the story after it: the round is
+# cleared and the next one opens a window from now; the last chapter ends it.
+def sealWith(s: Story, k: Tick, w: Pick) -> Transition:
+  let c = {number: chapterCount(s.chapters) + 1n, id: w.proposal.id, author: w.proposal.author, text: w.proposal.text, votes: w.votes}
+  Transition.appended({story: {meta: s.meta, chapters: appendChapter(s.chapters, c), round: {closes: k.now + s.meta.window, proposals: Proposals.empty({}), ballots: Ballots.empty({})}, nextId: s.nextId, done: c.number == s.meta.total}, chapter: c})
+
+def sealOn(s: Story, k: Tick) -> Transition:
+  if s.done then refuse(s, "complete") else if open(s, k.now) then refuse(s, "early") else sealRound(s, k, winner(s.round.proposals, s.round.ballots))
+
+def sealRound(s: Story, k: Tick, w: Winner) -> Transition:
+  match w:
+    case none(_): Transition.moved(withRound(s, {closes: k.now + s.meta.window, proposals: s.round.proposals, ballots: s.round.ballots}))
+    case some(p): sealWith(s, k, p)
+
+def react(s: Story, e: Event) -> Transition:
+  match e:
+    case propose(p): proposeOn(s, p)
+    case edit(d): editOn(s, d)
+    case vote(v): voteOn(s, v)
+    case seal(k): sealOn(s, k)
+
+def storyOf(t: Transition) -> Story:
+  match t:
+    case refused(r): r.story
+    case moved(s): s
+    case appended(a): a.story
+
+def reasonOf(t: Transition) -> String:
+  match t:
+    case refused(r): r.reason
+    case moved(_): "ok"
+    case appended(_): "ok"
+
+def wasRefused(t: Transition) -> Bool:
+  match t:
+    case refused(_): true
+    case moved(_): false
+    case appended(_): false
+
+# Chapter number n's text ("" when there is none), and who wrote it.
+def textOf(cs: Chapters, n: Nat) -> String:
+  match cs:
+    case empty(_): ""
+    case more(m): if m.head.number == n then m.head.text else textOf(m.tail, n)
+
+def authorOfChapter(cs: Chapters, n: Nat) -> Nat:
+  match cs:
+    case empty(_): 0n
+    case more(m): if m.head.number == n then m.head.author else authorOfChapter(m.tail, n)
+
+def votesOfChapter(cs: Chapters, n: Nat) -> Nat:
+  match cs:
+    case empty(_): 0n
+    case more(m): if m.head.number == n then m.head.votes else votesOfChapter(m.tail, n)
+
+def proposalCount(ps: Proposals) -> Nat:
+  match ps:
+    case empty(_): 0n
+    case more(m): 1n + proposalCount(m.tail)
+
+# ---- (2) the story as an Activity ----------------------------------------------
+
+record Await:
+  chapter: Nat
+  closes: Nat
+
+record Publish:
+  chapter: Nat
+  author: Nat
+  text: String
+
+sum Plan:
+  await: Await
+  publish: Publish
+
+sum Response:
+  event: Event
+  settled: {}
+  refused: {}
+
+def awaiting(s: Story) -> Await:
+  {chapter: chapterCount(s.chapters) + 1n, closes: s.round.closes}
+
+# The result is "complete" once the last chapter is sealed and published. Every
+# unfolding of `serve` past a yield costs one admitted turn.
+def serve(s: Story) -> Activity<Plan, Response, String>:
+  match perform(Plan.await(awaiting(s))):
+    case event(e): step(s, react(s, e))
+    case settled(_): serve(s)
+    case refused(_): serve(s)
+
+def step(s: Story, t: Transition) -> Activity<Plan, Response, String>:
+  match t:
+    case refused(r): serve(r.story)
+    case moved(next): serve(next)
+    case appended(a): publish(s, a)
+
+# The chapter is the Plan; a refused publication leaves the round where it was
+# (it stays open for a seal to be retried).
+def publish(s: Story, a: Appended) -> Activity<Plan, Response, String>:
+  match perform(Plan.publish({chapter: a.chapter.number, author: a.chapter.author, text: a.chapter.text})):
+    case settled(_): finish(a.story)
+    case refused(_): serve(s)
+    case event(_): serve(s)
+
+def finish(s: Story) -> Activity<Plan, Response, String>:
+  if s.done then "complete" else serve(s)
+
+def tell(title: String, window: Nat, total: Nat, electorate: Electorate, now: Nat) -> Activity<Plan, Response, String>:
+  serve(start(title, window, total, electorate, now))
+
+# ---- the named scenario ----------------------------------------------------------
+# "The lighthouse": three chapters, windows of 10 heights, started at height 0.
+# Electors 10, 11, 12 (first 10, count 3). Authors 1, 2, 3 (authors need not be electors).
+
+def crowd() -> Electorate:
+  {first: 10n, count: 3n}
+
+def demo() -> Story:
+  start("the lighthouse", 10n, 3n, crowd(), 0n)
+
+def prop(s: Story, author: Nat, text: String, now: Nat) -> Story:
+  storyOf(react(s, Event.propose({author: author, text: text, now: now})))
+
+def ballot(s: Story, voter: Nat, pick: Nat, now: Nat) -> Story:
+  storyOf(react(s, Event.vote({voter: voter, pick: pick, now: now})))
+
+def sealAt(s: Story, now: Nat) -> Story:
+  storyOf(react(s, Event.seal({now: now})))
+
+def edited(s: Story, author: Nat, id: Nat, text: String, now: Nat) -> Story:
+  storyOf(react(s, Event.edit({author: author, id: id, text: text, now: now})))
+
+# Round one open with two proposals: 1 -> "a light on the rock" (id 1),
+# 2 -> "a ship in the fog" (id 2).
+def twoProposed() -> Story:
+  prop(prop(demo(), 1n, "a light on the rock", 1n), 2n, "a ship in the fog", 2n)
+
+# ... and votes 10 and 11 for id 2, 12 for id 1.
+def voted3() -> Story:
+  ballot(ballot(ballot(twoProposed(), 10n, 2n, 3n), 11n, 2n, 4n), 12n, 1n, 5n)
+
+# Chapter one sealed at 11: the majority proposal (id 2).
+def chapterOne() -> Story:
+  sealAt(voted3(), 11n)
+
+# A full three-round story. Round two (closes 21): id 3 by author 3 wins with 1
+# vote; round three (closes 31): authors 1 and 2 tie on one vote each.
+def finished() -> Story:
+  let r2 = ballot(prop(chapterOne(), 3n, "the keeper wakes", 12n), 10n, 3n, 13n)
+  let r3 = ballot(ballot(prop(prop(sealAt(r2, 22n), 1n, "the lamp goes out", 23n), 2n, "the fog lifts", 24n), 11n, 4n, 25n), 12n, 5n, 26n)
+  sealAt(r3, 33n)
+
+def reasonOfEdit(s: Story, author: Nat, id: Nat, now: Nat) -> String:
+  reasonOf(react(s, Event.edit({author: author, id: id, text: "rewritten", now: now})))
+
+# ---- happy path: the votes decide ---------------------------------------------
+def firstChapterText() -> String:
+  textOf(chapterOne().chapters, 1n)
+
+def firstChapterVotes() -> Nat:
+  votesOfChapter(chapterOne().chapters, 1n)
+
+def firstChapterAuthor() -> Nat:
+  authorOfChapter(chapterOne().chapters, 1n)
+
+# The sealed round is cleared (the loser is dropped) and the next window opens
+# from the height it was sealed at.
+def sealOpensNextRound() -> Bool:
+  proposalCount(chapterOne().round.proposals) == 0n && chapterOne().round.closes == 21n && chapterCount(chapterOne().chapters) == 1n && not(chapterOne().done)
+
+def threeRoundsComplete() -> Bool:
+  finished().done && chapterCount(finished().chapters) == 3n
+
+# Round three is a tie (one vote each): the earlier proposal wins.
+def tieGoesToEarliest() -> String:
+  textOf(finished().chapters, 3n)
+
+def secondChapterText() -> String:
+  textOf(finished().chapters, 2n)
+
+# A sealed chapter is the same chapter after every later round.
+def sealedChapterStays() -> Bool:
+  textOf(finished().chapters, 1n) == "a ship in the fog" && authorOfChapter(finished().chapters, 1n) == 2n && votesOfChapter(finished().chapters, 1n) == 2n
+
+# A lone proposal with no votes wins on the tie rule; a round with no proposal is
+# extended by a window and no chapter is made.
+def lonePropositionWins() -> String:
+  textOf(sealAt(prop(demo(), 1n, "a light on the rock", 1n), 11n).chapters, 1n)
+
+def emptyRoundExtends() -> Bool:
+  chapterCount(sealAt(demo(), 11n).chapters) == 0n && sealAt(demo(), 11n).round.closes == 21n
+
+# The author may rewrite their proposal while the round is open, and the rewrite
+# is what wins.
+def editedProposalWins() -> String:
+  textOf(sealAt(ballot(edited(twoProposed(), 2n, 2n, "a ship in the mist", 3n), 10n, 2n, 4n), 11n).chapters, 1n)
+
+# ---- refusals, each by its reason ---------------------------------------------
+def editByNonAuthor() -> String:
+  reasonOfEdit(twoProposed(), 1n, 2n, 3n)
+
+def editBySealedChapter() -> String:
+  reasonOfEdit(chapterOne(), 2n, 2n, 13n)
+
+def editOfLoserAfterSeal() -> String:
+  reasonOfEdit(chapterOne(), 1n, 1n, 13n)
+
+def editOfUnknown() -> String:
+  reasonOfEdit(twoProposed(), 1n, 99n, 3n)
+
+def lateEdit() -> String:
+  reasonOfEdit(twoProposed(), 2n, 2n, 11n)
+
+def lateProposal() -> String:
+  reasonOf(react(demo(), Event.propose({author: 1n, text: "too late", now: 11n})))
+
+def lastMomentProposalAllowed() -> String:
+  reasonOf(react(demo(), Event.propose({author: 1n, text: "just in time", now: 10n})))
+
+def doubleProposal() -> String:
+  reasonOf(react(twoProposed(), Event.propose({author: 1n, text: "another", now: 3n})))
+
+def doubleVote() -> String:
+  reasonOf(react(voted3(), Event.vote({voter: 10n, pick: 1n, now: 6n})))
+
+def strangerVote() -> String:
+  reasonOf(react(twoProposed(), Event.vote({voter: 77n, pick: 1n, now: 3n})))
+
+def voteForUnknown() -> String:
+  reasonOf(react(twoProposed(), Event.vote({voter: 10n, pick: 99n, now: 3n})))
+
+def lateVote() -> String:
+  reasonOf(react(twoProposed(), Event.vote({voter: 10n, pick: 1n, now: 11n})))
+
+def earlySeal() -> String:
+  reasonOf(react(voted3(), Event.seal({now: 10n})))
+
+def sealAtCloseHeightPlusOne() -> String:
+  reasonOf(react(voted3(), Event.seal({now: 11n})))
+
+# A complete story takes nothing more.
+def completeRefusesAll() -> Bool:
+  reasonOf(react(finished(), Event.propose({author: 1n, text: "more", now: 50n}))) == "complete" && reasonOf(react(finished(), Event.vote({voter: 10n, pick: 1n, now: 50n}))) == "complete" && reasonOf(react(finished(), Event.edit({author: 1n, id: 4n, text: "x", now: 50n}))) == "complete" && reasonOf(react(finished(), Event.seal({now: 99n}))) == "complete"
+
+# A refused event changes nothing: the story is the one it was.
+def refusalChangesNothing() -> Bool:
+  let before = voted3()
+  let after = storyOf(react(before, Event.vote({voter: 10n, pick: 1n, now: 6n})))
+  proposalCount(after.round.proposals) == proposalCount(before.round.proposals) && votesFor(1n, after.round.ballots) == votesFor(1n, before.round.ballots) && votesFor(2n, after.round.ballots) == votesFor(2n, before.round.ballots) && after.round.closes == before.round.closes && after.nextId == before.nextId

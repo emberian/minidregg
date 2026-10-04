@@ -1,0 +1,2032 @@
+[
+ {
+  "name": "StoryFirstChapterText",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "firstChapterText",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "a ship in the fog"
+ },
+ {
+  "name": "StoryFirstChapterVotes",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "firstChapterVotes",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "2"
+ },
+ {
+  "name": "StoryFirstChapterAuthor",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "firstChapterAuthor",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "2"
+ },
+ {
+  "name": "StorySealOpensNextRound",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "sealOpensNextRound",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "StoryThreeRoundsComplete",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "threeRoundsComplete",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "StoryTieGoesToEarliest",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "tieGoesToEarliest",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "the lamp goes out"
+ },
+ {
+  "name": "StorySecondChapterText",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "secondChapterText",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "the keeper wakes"
+ },
+ {
+  "name": "StorySealedChapterStays",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "sealedChapterStays",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "StoryLonePropositionWins",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lonePropositionWins",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "a light on the rock"
+ },
+ {
+  "name": "StoryEmptyRoundExtends",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "emptyRoundExtends",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "StoryEditedProposalWins",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "editedProposalWins",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "a ship in the mist"
+ },
+ {
+  "name": "StoryEditByNonAuthor",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "editByNonAuthor",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "notAuthor"
+ },
+ {
+  "name": "StoryEditBySealedChapter",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "editBySealedChapter",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "sealed"
+ },
+ {
+  "name": "StoryEditOfLoserAfterSeal",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "editOfLoserAfterSeal",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "unknown"
+ },
+ {
+  "name": "StoryEditOfUnknown",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "editOfUnknown",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "unknown"
+ },
+ {
+  "name": "StoryLateEdit",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lateEdit",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "late"
+ },
+ {
+  "name": "StoryLateProposal",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lateProposal",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "late"
+ },
+ {
+  "name": "StoryLastMomentProposalAllowed",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lastMomentProposalAllowed",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "ok"
+ },
+ {
+  "name": "StoryDoubleProposal",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "doubleProposal",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "alreadyProposed"
+ },
+ {
+  "name": "StoryDoubleVote",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "doubleVote",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "alreadyVoted"
+ },
+ {
+  "name": "StoryStrangerVote",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "strangerVote",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "notElector"
+ },
+ {
+  "name": "StoryVoteForUnknown",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "voteForUnknown",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "unknown"
+ },
+ {
+  "name": "StoryLateVote",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lateVote",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "late"
+ },
+ {
+  "name": "StoryEarlySeal",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "earlySeal",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "early"
+ },
+ {
+  "name": "StorySealAtCloseHeightPlusOne",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "sealAtCloseHeightPlusOne",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "ok"
+ },
+ {
+  "name": "StoryCompleteRefusesAll",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "completeRefusesAll",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "StoryRefusalChangesNothing",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "refusalChangesNothing",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "StoryActivityOneChapter",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "tell",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "label",
+    "value": "the lighthouse"
+   },
+   {
+    "tag": "natural",
+    "value": "10"
+   },
+   {
+    "tag": "natural",
+    "value": "1"
+   },
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "first",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "count",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     }
+    ]
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "propose",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "author",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "text",
+        "value": {
+         "tag": "label",
+         "value": "a light on the rock"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "propose",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "author",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "text",
+        "value": {
+         "tag": "label",
+         "value": "a ship in the fog"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "vote",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "10"
+        }
+       },
+       {
+        "name": "pick",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "3"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "vote",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "11"
+        }
+       },
+       {
+        "name": "pick",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "4"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "vote",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "12"
+        }
+       },
+       {
+        "name": "pick",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "5"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "seal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "11"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "label",
+  "expected": "complete",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "publish",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "chapter",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "author",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "text",
+      "value": {
+       "tag": "label",
+       "value": "a ship in the fog"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 7
+ },
+ {
+  "name": "StoryActivityTwoChapters",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "tell",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "label",
+    "value": "the lighthouse"
+   },
+   {
+    "tag": "natural",
+    "value": "10"
+   },
+   {
+    "tag": "natural",
+    "value": "2"
+   },
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "first",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "count",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     }
+    ]
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "propose",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "author",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "text",
+        "value": {
+         "tag": "label",
+         "value": "a light on the rock"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "propose",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "author",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "text",
+        "value": {
+         "tag": "label",
+         "value": "a ship in the fog"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "vote",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "10"
+        }
+       },
+       {
+        "name": "pick",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "3"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "vote",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "11"
+        }
+       },
+       {
+        "name": "pick",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "4"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "vote",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "12"
+        }
+       },
+       {
+        "name": "pick",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "5"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "seal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "11"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "propose",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "author",
+        "value": {
+         "tag": "natural",
+         "value": "3"
+        }
+       },
+       {
+        "name": "text",
+        "value": {
+         "tag": "label",
+         "value": "the keeper wakes"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "12"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "vote",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "10"
+        }
+       },
+       {
+        "name": "pick",
+        "value": {
+         "tag": "natural",
+         "value": "3"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "13"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "seal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "22"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "label",
+  "expected": "complete",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "publish",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "chapter",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "author",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "text",
+      "value": {
+       "tag": "label",
+       "value": "the keeper wakes"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 11
+ },
+ {
+  "name": "StoryActivityRefusedEditIgnored",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "tell",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "label",
+    "value": "the lighthouse"
+   },
+   {
+    "tag": "natural",
+    "value": "10"
+   },
+   {
+    "tag": "natural",
+    "value": "1"
+   },
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "first",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "count",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     }
+    ]
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "propose",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "author",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "text",
+        "value": {
+         "tag": "label",
+         "value": "a light on the rock"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "edit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "author",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "id",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "text",
+        "value": {
+         "tag": "label",
+         "value": "stolen"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "vote",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "10"
+        }
+       },
+       {
+        "name": "pick",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "3"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "seal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "11"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "label",
+  "expected": "complete",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "publish",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "chapter",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "author",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "text",
+      "value": {
+       "tag": "label",
+       "value": "a light on the rock"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 5
+ },
+ {
+  "name": "StoryActivityRefusedPublishWaits",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "tell",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "label",
+    "value": "the lighthouse"
+   },
+   {
+    "tag": "natural",
+    "value": "10"
+   },
+   {
+    "tag": "natural",
+    "value": "1"
+   },
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "first",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "count",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     }
+    ]
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "propose",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "author",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "text",
+        "value": {
+         "tag": "label",
+         "value": "a light on the rock"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "propose",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "author",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "text",
+        "value": {
+         "tag": "label",
+         "value": "a ship in the fog"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "vote",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "10"
+        }
+       },
+       {
+        "name": "pick",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "3"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "seal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "11"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "refused",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "seal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "12"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "label",
+  "expected": "complete",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "publish",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "chapter",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "author",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "text",
+      "value": {
+       "tag": "label",
+       "value": "a ship in the fog"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 7
+ },
+ {
+  "name": "StoryActivitySealedEditIgnored",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "tell",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "label",
+    "value": "the lighthouse"
+   },
+   {
+    "tag": "natural",
+    "value": "10"
+   },
+   {
+    "tag": "natural",
+    "value": "2"
+   },
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "first",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "count",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     }
+    ]
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "propose",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "author",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "text",
+        "value": {
+         "tag": "label",
+         "value": "a light on the rock"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "propose",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "author",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "text",
+        "value": {
+         "tag": "label",
+         "value": "a ship in the fog"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "vote",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "10"
+        }
+       },
+       {
+        "name": "pick",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "3"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "vote",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "11"
+        }
+       },
+       {
+        "name": "pick",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "4"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "vote",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "12"
+        }
+       },
+       {
+        "name": "pick",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "5"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "seal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "11"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "edit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "author",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "id",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "text",
+        "value": {
+         "tag": "label",
+         "value": "stolen"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "13"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "propose",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "author",
+        "value": {
+         "tag": "natural",
+         "value": "3"
+        }
+       },
+       {
+        "name": "text",
+        "value": {
+         "tag": "label",
+         "value": "the keeper wakes"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "14"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "seal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "22"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "label",
+  "expected": "complete",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "publish",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "chapter",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "author",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "text",
+      "value": {
+       "tag": "label",
+       "value": "the keeper wakes"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 11
+ },
+ {
+  "name": "StoryActivityAwaitsVotes",
+  "modules": [
+   {
+    "name": "CoAuthor",
+    "source": "CoAuthor.obend",
+    "imports": []
+   }
+  ],
+  "entry": "tell",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "label",
+    "value": "the lighthouse"
+   },
+   {
+    "tag": "natural",
+    "value": "10"
+   },
+   {
+    "tag": "natural",
+    "value": "3"
+   },
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "first",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "count",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     }
+    ]
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "propose",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "author",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "text",
+        "value": {
+         "tag": "label",
+         "value": "a light on the rock"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "propose",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "author",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "text",
+        "value": {
+         "tag": "label",
+         "value": "a ship in the fog"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       }
+      ]
+     }
+    }
+   }
+  ],
+  "expectedStatus": "yielded",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "await",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "chapter",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "closes",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 3
+ }
+]
