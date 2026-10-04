@@ -30,6 +30,19 @@ native() {  # OUTPUT_DIR BINARY [builder args...]
     MINIDREGG_CYCLE_DIR="$LANE_DIR/cycle" LEAN_NUM_THREADS=2 \
     scripts/build-native-host.sh "$@" --output "$out" --binary "$bin"
 }
+# The inputs a binary is compiled from. A commit that changes none of them (a script, a doc) does not
+# move what a build at an earlier commit produced; one that changes any of them does.
+compiled=(':(glob)**/*.lean' lakefile.toml lake-manifest.json lean-toolchain rust-toolchain.toml
+          ':(glob)native/*/Cargo.toml' ':(glob)native/*/Cargo.lock' ':(glob)native/*/build.rs'
+          ':(glob)native/*/src/**' ':(glob)protocol/**' scripts/build-native-host.sh)
+unchanged_since() {  # BUILD (host|rust): refuse unless HEAD's compiled inputs equal that build's commit
+  local b=$1 at changed
+  [ -f "$LANE_DIR/logs/$b-build.commit" ] || { echo "lane-build: no $b build recorded; run $b" >&2; exit 1; }
+  at=$(cat "$LANE_DIR/logs/$b-build.commit")
+  changed=$(git diff --name-only "$at" HEAD -- "${compiled[@]}")
+  [ -z "$changed" ] || { echo "lane-build: compiled inputs changed since the $b build at $at:" >&2; echo "$changed" >&2; exit 1; }
+  echo "lane-build: $b roles built at ${at:0:12}; compiled inputs identical at $(git rev-parse --short=12 HEAD)"
+}
 case $step in
   host)
     git rev-parse HEAD >"$LANE_DIR/logs/host-build.commit"
@@ -38,7 +51,7 @@ case $step in
     native "$LANE_DIR/native-out" "$LANE_DIR/artifacts/minidregg-host" "$@" ;;
   consent)
     [ -f "$LANE_DIR/native-out/manifest.txt" ] || { echo "lane-build: run host first (the consent build is its companion)" >&2; exit 1; }
-    [ "$(git rev-parse HEAD)" = "$(cat "$LANE_DIR/logs/host-build.commit")" ] || { echo "lane-build: HEAD moved since the host build" >&2; exit 1; }
+    unchanged_since host
     native "$LANE_DIR/consent-out" "$LANE_DIR/artifacts/minidregg-client-consent" \
       --root Host.ClientConsentSession --usage-prefix 'minidregg-client-consent:' --companion-of "$LANE_DIR/native-out" ;;
   rust)
@@ -60,16 +73,7 @@ case $step in
     OUT=${1:?OUT_DIR}
     head=$(git rev-parse HEAD)
     [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "lane-build: tracked changes uncommitted" >&2; exit 1; }
-    compiled=(':(glob)**/*.lean' lakefile.toml lake-manifest.json lean-toolchain rust-toolchain.toml
-              ':(glob)native/*/Cargo.toml' ':(glob)native/*/Cargo.lock' ':(glob)native/*/build.rs'
-              ':(glob)native/*/src/**' ':(glob)protocol/**' scripts/build-native-host.sh)
-    for b in host rust; do
-      [ -f "$LANE_DIR/logs/$b-build.commit" ] || { echo "lane-build: no $b build recorded; run $b" >&2; exit 1; }
-      at=$(cat "$LANE_DIR/logs/$b-build.commit")
-      changed=$(git diff --name-only "$at" "$head" -- "${compiled[@]}")
-      [ -z "$changed" ] || { echo "lane-build: compiled inputs changed since the $b build at $at:" >&2; echo "$changed" >&2; exit 1; }
-      echo "lane-build: $b roles built at ${at:0:12}; compiled inputs identical at ${head:0:12}"
-    done
+    for b in host rust; do unchanged_since $b; done
     git archive --format=tar "$head" >"$LANE_DIR/logs/source-$head.tar"
     A=$LANE_DIR/artifacts
     roles=$(jq -n --arg c "$head" --arg hb "$(cat "$LANE_DIR/logs/host-build.commit")" --arg rb "$(cat "$LANE_DIR/logs/rust-build.commit")" \
