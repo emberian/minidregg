@@ -260,18 +260,32 @@ r_install_import() {
 }
 
 # r_supervise_uncertain PROFILE APP: a START whose BEGIN reply was lost is
-# never retried; the supervisor calls reconcileFailedStart (K-SPK's receiver)
-# and refuses with exit 3, which the template does not restart.
+# never retried; the supervisor reconciles it through Mini's
+# reconcileFailedStart (kernel edge 9 -> 2, ApplicationGrain.lean) and the row
+# passes only on the receiver's own record: protocol
+# mini-spk-failed-start-recovered-v1 naming this app, with reconciledGeneration
+# = generation + 1. Until 2026-10-04 this row PASSED on the refusal "receiver
+# is absent" (scout R2-1 O6): a missing receiver read as a qualified recovery.
+# An absent receiver is now a FAIL that names it; the receiver lives only in
+# the spk-recovery lane (codex-runtime-spk-recovery-20261003, not on main).
 r_supervise_uncertain() {
   set +e
   "$SPK_HOST" grain supervise "$1" "$2" >"$OUT/supervise-$2.json" 2>"$OUT/supervise-$2.err"
   rc=$?
   set -e
   cat "$OUT/supervise-$2.err"
-  [ "$rc" = 3 ]
-  grep -q "reconcileFailedStart receiver is absent" "$OUT/supervise-$2.err"
+  if grep -q "reconcileFailedStart receiver is absent" "$OUT/supervise-$2.err"; then
+    echo "FAIL: reconcileFailedStart receiver is absent: the uncertain START of $2 was not reconciled" >&2
+    return 1
+  fi
+  [ "$rc" = 0 ] || { echo "FAIL: supervisor exit $rc on the uncertain START of $2" >&2; return 1; }
+  jq -e --arg app "$2" '.protocol == "mini-spk-failed-start-recovered-v1" and .app == $app
+    and (.generation | test("^[0-9]+$")) and (.reconciledGeneration | test("^[0-9]+$"))
+    and ((.reconciledGeneration | tonumber) == (.generation | tonumber) + 1)
+    and (.ingressSha256 | test("^[0-9a-f]{64}$"))' "$OUT/supervise-$2.json" >/dev/null \
+    || { echo "FAIL: supervisor output is not a failed-start recovery record for $2" >&2; return 1; }
   status "$1" "$2" | jq -c '[.runs[] | {generation, state, unitActiveState}]'
-  echo "uncertain START of $2 not retried: supervisor exit 3 naming the absent reconcileFailedStart receiver"
+  echo "uncertain START of $2 not retried: reconciled through Mini's receiver, generation $(jq -r .generation "$OUT/supervise-$2.json") -> $(jq -r .reconciledGeneration "$OUT/supervise-$2.json")"
 }
 
 r_collision() {

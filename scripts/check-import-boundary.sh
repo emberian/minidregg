@@ -28,6 +28,16 @@
 # not change the sink boundary: no core library imports Host.
 # Lean/Std/Init are the language and standard library, not candidate code.
 # Candidate-dependent restriction algebra is in Pred/LawComposition.lean.
+#
+# DELIBERATE RELAXATION (76757030, 2026-10-03): the Theory and Kernel rows were
+# widened from {Mathlib, Theory[, Pred, Compiler, Kernel]} to also admit Lean,
+# Std and Init. It is a weaker check than the 2026-10-01 table, kept on purpose:
+# `import Lean` brings the elaborator and the compiler's own data structures
+# into the candidate-independent metatheory, and the closure claim above
+# ("Theory is closed under its row") now holds only modulo the toolchain. The
+# edge counts printed on every run (Theory -> Lean:N Std:N, Kernel -> Init:N
+# Std:N) are where a new such import shows; narrowing these rows again is a
+# table edit here, recorded in docs/LEAN-QUALIFICATION.md (import tiers).
 # A new edge between libraries is a red until this table is changed on purpose.
 # Exits 1 listing every offending import line, with the edge it would add.
 set -u

@@ -17,6 +17,8 @@ Use the pinned toolchain and dependencies in `lean-toolchain` and `lake-manifest
 
 The four formerly orphaned carry/recovery gate modules are imported by `Minidregg`. `Verify.JointDecisionRecovery` now uses `#assert_axioms`, so nonstandard axioms fail elaboration; bare printing was diagnostic only. Axiom checks constrain trust, not theorem strength. The controller fixture assertions use explicit compiled checks. General statements and their assumptions must still be reviewed.
 
+Import tiers are checked by `scripts/check-import-boundary.sh` (the `import-tiers` gate) over every tracked `.lean` file. Its table carries one deliberate relaxation: commit `76757030` (2026-10-03) let `Theory` and `Kernel` import `Lean`, `Std` and `Init` in addition to Mathlib and the tree's own libraries. The toolchain is not candidate code, but the check is weaker than the 2026-10-01 table it replaced (the metatheory may now import the elaborator), and the script header names it as such. Narrowing it is an edit to that table.
+
 The current evaluator registry remains Nock-only. Bend registration requires the independent specification, soundness, completeness, deterministic/crash/exhaustion laws, stable metering and byte-entry relations in `Compiler/Evaluator.lean`; a reference adapter does not discharge them merely by returning a proof-carrying trace. Native Bend source/Plan admission work remains a separate, unfinished integration.
 
 The dated intake ledger records published source status. Aggregate targets added by this change have not yet received an aggregate compiler PASS. Qualified component snapshots and native receipts remain separate evidence. The modern source tree is not the historical service executable.
