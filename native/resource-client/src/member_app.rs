@@ -279,7 +279,7 @@ pub(super) fn status(root: &Path, pin: &Value, name: &str) -> Result<Value> {
         pin,
         &challenge,
     )?;
-    let signatures = crate::sign_headers(&key, &headers);
+    let signatures = crate::sign_headers(&key, &headers)?;
     crate::create_private(
         &attempt.join("app-signatures.json"),
         &serde_json::to_vec(&signatures).map_err(|e| e.to_string())?,

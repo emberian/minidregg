@@ -190,7 +190,7 @@ mod tests {
     /// One frame in (exact-length reads: dd bs=1), one canned frame out, until EOF.
     fn frame_stub(path: &Path, reply: &Path) {
         use std::os::unix::fs::PermissionsExt;
-        fs::write(path, format!("#!/bin/sh\nwhile :; do\n  n=$(dd bs=1 count=4 2>/dev/null | od -An -tu4 | tr -d ' \\n')\n  [ -n \"$n\" ] || exit 0\n  dd bs=1 count=\"$n\" of=/dev/null 2>/dev/null\n  cat '{}'\ndone\n", reply.display())).unwrap();
+        fs::write(path, format!("#!/bin/sh\necho 'debug1: Entering interactive session.' >&2\nwhile :; do\n  n=$(dd bs=1 count=4 2>/dev/null | od -An -tu4 | tr -d ' \\n')\n  [ -n \"$n\" ] || exit 0\n  dd bs=1 count=\"$n\" of=/dev/null 2>/dev/null\n  cat '{}'\ndone\n", reply.display())).unwrap();
         fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
     }
     fn remote_plan_run(served_plan: &[u8]) -> std::process::Output {

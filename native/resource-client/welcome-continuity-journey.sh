@@ -113,7 +113,7 @@ except EOFError: pass
 finally:
  p.stdin.close();p.wait(timeout=10)
 PROXY
-printf '#!/bin/sh\nexec /usr/bin/python3 "%s/proxy.py"\n' "$RUN" >"$RUN/ssh-shim"
+printf '#!/bin/sh\necho "debug1: Entering interactive session." >&2\nexec /usr/bin/python3 "%s/proxy.py"\n' "$RUN" >"$RUN/ssh-shim"
 printf '#!/bin/sh\nexit 23\n' >"$RUN/ssh-disconnected"
 chmod 700 "$RUN/ssh-shim" "$RUN/ssh-disconnected"
 export MINI_SSH=$RUN/ssh-shim JOIN_MINI=$MINI JOIN_SOCKET=$SOCKET

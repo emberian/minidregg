@@ -29,13 +29,18 @@
 //! [`Failure::Uncertain`], the session is closed, and the exact request is NEVER resent: a lost
 //! reply is answered by `lookup` of the same call bytes, as with the unix socket.
 //!
-//! `MINI_SSH` names another OpenSSH-compatible ssh program (as `GIT_SSH` does); ports and
-//! jump hosts belong in ssh config.
+//! `MINI_SSH` names another OpenSSH-compatible ssh program (as `GIT_SSH` does): it is run with `-v`
+//! and must print `Entering interactive session` once its channel is open. Ports and jump hosts
+//! belong in ssh config.
+//!
+//! Other clients reuse the route rather than copy it: [`SshChannel`] / [`SshPool`] carry whole frames
+//! (the resource-client's `mini --remote`), [`open_stream`] hands over the raw pipes of an established
+//! session for another protocol (the credential relay, via [`Ssh::remote_command`]).
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -94,6 +99,10 @@ pub struct Ssh {
     pub connect_timeout: Duration,
     /// How long writing one request into the session may take.
     pub write_deadline: Duration,
+    /// A command for the box to run instead of the account's forced command's default (the
+    /// credential relay `mini-provider-credentials-v1`); `None` for the operator-socket proxy, whose
+    /// forced command is `mini socket-proxy`. Passed after `--` and the destination, as ssh takes it.
+    pub remote_command: Option<String>,
 }
 
 /// An ssh destination as `ssh` itself takes it: `user@host` or a Host alias from ssh config.
@@ -113,7 +122,7 @@ impl Ssh {
         check_destination(destination)?;
         let program = std::env::var_os("MINI_SSH").filter(|p| !p.is_empty()).unwrap_or_else(|| "ssh".into());
         Ok(Ssh { destination: destination.to_owned(), command: vec![program], identity: None, config: None,
-            connect_timeout: Duration::from_secs(30), write_deadline: Duration::from_secs(60) })
+            connect_timeout: Duration::from_secs(30), write_deadline: Duration::from_secs(60), remote_command: None })
     }
 
     /// The argument list after the program (and its fixed leading arguments).
@@ -131,6 +140,9 @@ impl Ssh {
         }
         a.push("--".into());
         a.push(self.destination.clone().into());
+        if let Some(command) = &self.remote_command {
+            a.push(command.into());
+        }
         a
     }
 }
@@ -207,7 +219,27 @@ impl Session {
     }
 }
 
-fn open_ssh(ssh: &Ssh) -> std::result::Result<Session, Failure> {
+/// A started ssh whose channel is open: the connection, host-key check and authentication have all
+/// succeeded (ssh said `Entering interactive session`), and nothing has been written.
+struct Launched {
+    child: Child,
+    stdin: ChildStdin,
+    stdout: ChildStdout,
+    notes: Arc<Mutex<Notes>>,
+}
+
+impl Launched {
+    fn said(&self) -> Vec<String> {
+        self.notes.lock().map(|n| n.lines.clone()).unwrap_or_default()
+    }
+    fn kill(mut self) {
+        drop(self.stdin);
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn launch(ssh: &Ssh) -> std::result::Result<Launched, Failure> {
     let (program, leading) = ssh.command.split_first().ok_or_else(|| Failure::Unsent("ssh command is empty".into()))?;
     let mut child = Command::new(program)
         .args(leading)
@@ -242,6 +274,32 @@ fn open_ssh(ssh: &Ssh) -> std::result::Result<Session, Failure> {
             }
         }
     });
+    let launched = Launched { child, stdin, stdout, notes };
+    match ready_rx.recv_timeout(ssh.connect_timeout) {
+        Ok(()) => Ok(launched),
+        Err(RecvTimeoutError::Disconnected) => {
+            // ssh exited before the channel opened; give the stderr reader a moment to finish.
+            std::thread::sleep(Duration::from_millis(100));
+            let refusal = name_refusal(&launched.said());
+            launched.kill();
+            Err(Failure::Unsent(refusal.to_string()))
+        }
+        Err(RecvTimeoutError::Timeout) => {
+            // Still no channel after the deadline: whatever ssh has said so far names it, else
+            // the timeout itself is the named refusal. Nothing was written.
+            let said = launched.said();
+            launched.kill();
+            Err(Failure::Unsent(match name_refusal(&said) {
+                SshRefusal::NotEstablished(d) => SshRefusal::NotEstablished(
+                    format!("not within {}s{}", ssh.connect_timeout.as_secs(), if said.is_empty() { String::new() } else { format!(": {d}") })),
+                named => named,
+            }.to_string()))
+        }
+    }
+}
+
+fn open_ssh(ssh: &Ssh) -> std::result::Result<Session, Failure> {
+    let Launched { child, stdin, stdout, notes } = launch(ssh)?;
     // stdout: one frame per reply.
     let (frames_tx, frames) = mpsc::channel();
     std::thread::spawn(move || {
@@ -260,28 +318,30 @@ fn open_ssh(ssh: &Ssh) -> std::result::Result<Session, Failure> {
             }
         }
     });
-    let session = Session { child, stdin: Some(stdin), frames, notes };
-    match ready_rx.recv_timeout(ssh.connect_timeout) {
-        Ok(()) => Ok(session),
-        Err(RecvTimeoutError::Disconnected) => {
-            // ssh exited before the channel opened; give the stderr reader a moment to finish.
-            std::thread::sleep(Duration::from_millis(100));
-            let refusal = name_refusal(&session.said());
-            session.close();
-            Err(Failure::Unsent(refusal.to_string()))
-        }
-        Err(RecvTimeoutError::Timeout) => {
-            // Still no channel after the deadline: whatever ssh has said so far names it, else
-            // the timeout itself is the named refusal. Nothing was written.
-            let said = session.said();
-            session.close();
-            Err(Failure::Unsent(match name_refusal(&said) {
-                SshRefusal::NotEstablished(d) => SshRefusal::NotEstablished(
-                    format!("not within {}s{}", ssh.connect_timeout.as_secs(), if said.is_empty() { String::new() } else { format!(": {d}") })),
-                named => named,
-            }.to_string()))
-        }
+    Ok(Session { child, stdin: Some(stdin), frames, notes })
+}
+
+/// The raw byte pipe of an established ssh session, for a protocol that is not operator frames (the
+/// credential relay `mini-provider-credentials-v1`): the same hardened command, the same named
+/// certainly-unsent refusals before the channel opens, and then the caller owns the two pipes.
+/// Dropping it ends the session.
+pub struct SshStream {
+    child: Child,
+    pub stdin: ChildStdin,
+    pub stdout: ChildStdout,
+}
+
+impl Drop for SshStream {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
+}
+
+/// Start `ssh` and wait for its channel: [`Failure::Unsent`] (named) if it does not open.
+pub fn open_stream(ssh: &Ssh) -> std::result::Result<SshStream, Failure> {
+    let Launched { child, stdin, stdout, .. } = launch(ssh)?;
+    Ok(SshStream { child, stdin, stdout })
 }
 
 pub struct Operator {
@@ -289,7 +349,7 @@ pub struct Operator {
     config: Vec<u8>,
     host_sha256: Option<[u8; 32]>,
     pub read_deadline: Duration,
-    session: Mutex<Option<Session>>,
+    channel: Option<SshChannel>,
 }
 
 /// Build the request frame body (without the outer length prefix).
@@ -327,22 +387,16 @@ fn read_frame<R: Read>(stream: &mut R) -> std::io::Result<Vec<u8>> {
     Ok(frame)
 }
 
-impl Drop for Operator {
-    fn drop(&mut self) {
-        if let Ok(mut s) = self.session.lock() {
-            if let Some(session) = s.take() {
-                session.close();
-            }
-        }
-    }
-}
-
 impl Operator {
     /// `config` is the deployment config file the socket pins; `host_sha256`, when given,
     /// requires the image serving the socket to be exactly that Host (version 2).
     pub fn new(route: Route, config: &Path, host_sha256: Option<[u8; 32]>) -> Result<Self> {
         let config = std::fs::read(config).map_err(|e| format!("host config {}: {e}", config.display()))?;
-        Ok(Operator { route, config, host_sha256, read_deadline: Duration::from_secs(600), session: Mutex::new(None) })
+        let channel = match &route {
+            Route::Ssh(ssh) => Some(SshChannel::new(ssh.clone())),
+            Route::Unix(_) => None,
+        };
+        Ok(Operator { route, config, host_sha256, read_deadline: Duration::from_secs(600), channel })
     }
 
     pub fn call(&self, operation: u8, payload: &[u8]) -> std::result::Result<Reply, Failure> {
@@ -350,7 +404,7 @@ impl Operator {
             .map_err(|e| Failure::Unsent(e.0))?;
         let reply = match &self.route {
             Route::Unix(socket) => self.call_unix(socket, &frame)?,
-            Route::Ssh(ssh) => self.call_ssh(ssh, &frame)?,
+            Route::Ssh(_) => self.channel.as_ref().expect("an ssh route has its channel").exchange(&frame, self.read_deadline)?,
         };
         classify_reply(operation, reply)
     }
@@ -376,8 +430,32 @@ impl Operator {
         let _ = stream.set_read_timeout(Some(self.read_deadline));
         read_frame(&mut stream).map_err(|e| Failure::Uncertain(format!("uncertain host response read: {e}")))
     }
+}
 
-    fn call_ssh(&self, ssh: &Ssh, frame: &[u8]) -> std::result::Result<Vec<u8>, Failure> {
+/// One ssh session to one destination, opened on first use and reused by every later request: the
+/// byte pipe to the box's `mini socket-proxy`, carrying whole request frames and returning whole reply
+/// frames. [`Operator`] holds one for its [`Route::Ssh`]; a client that builds its own frames (and
+/// keeps sessions per destination for a whole process) holds them in an [`SshPool`]. A failed exchange
+/// closes the session and the exact request is never resent.
+pub struct SshChannel {
+    ssh: Ssh,
+    session: Mutex<Option<Session>>,
+}
+
+impl SshChannel {
+    pub fn new(ssh: Ssh) -> Self {
+        SshChannel { ssh, session: Mutex::new(None) }
+    }
+
+    /// Whether a session is currently open (it opens on the first exchange).
+    pub fn is_open(&self) -> bool {
+        self.session.lock().map(|s| s.is_some()).unwrap_or(false)
+    }
+
+    /// One request frame (the body, without the outer length prefix) and its reply frame. Everything
+    /// that fails before the request is written is [`Failure::Unsent`] and named; everything after is
+    /// [`Failure::Uncertain`].
+    pub fn exchange(&self, frame: &[u8], read_deadline: Duration) -> std::result::Result<Vec<u8>, Failure> {
         let mut guard = self.session.lock().map_err(|_| Failure::Unsent("ssh session table poisoned".into()))?;
         // A session that has said anything unasked, or has ended, is not reused: nothing has been
         // written yet, so opening a fresh one is certainly-unsent territory.
@@ -388,7 +466,7 @@ impl Operator {
             }
         }
         if guard.is_none() {
-            *guard = Some(open_ssh(ssh)?);
+            *guard = Some(open_ssh(&self.ssh)?);
         }
         let session = guard.as_mut().expect("opened");
         let mut wire = (frame.len() as u32).to_le_bytes().to_vec();
@@ -401,7 +479,7 @@ impl Operator {
             let r = stdin.write_all(&wire).and_then(|_| stdin.flush());
             let _ = done_tx.send((r, stdin));
         });
-        match done_rx.recv_timeout(ssh.write_deadline) {
+        match done_rx.recv_timeout(self.ssh.write_deadline) {
             Ok((Ok(()), stdin)) => session.stdin = Some(stdin),
             Ok((Err(e), _)) => {
                 let said = session.said().join(" | ");
@@ -410,10 +488,10 @@ impl Operator {
             }
             Err(_) => {
                 guard.take().expect("opened").close();
-                return Err(Failure::Uncertain(format!("uncertain host request write: not complete within {}s", ssh.write_deadline.as_secs())));
+                return Err(Failure::Uncertain(format!("uncertain host request write: not complete within {}s", self.ssh.write_deadline.as_secs())));
             }
         }
-        match session.frames.recv_timeout(self.read_deadline) {
+        match session.frames.recv_timeout(read_deadline) {
             Ok(Ok(reply)) => Ok(reply),
             Ok(Err(e)) => {
                 let said = session.said().join(" | ");
@@ -422,9 +500,56 @@ impl Operator {
             }
             Err(_) => {
                 guard.take().expect("opened").close();
-                Err(Failure::Uncertain(format!("uncertain host response: none within {}s", self.read_deadline.as_secs())))
+                Err(Failure::Uncertain(format!("uncertain host response: none within {}s", read_deadline.as_secs())))
             }
         }
+    }
+}
+
+impl Drop for SshChannel {
+    fn drop(&mut self) {
+        if let Ok(mut s) = self.session.lock() {
+            if let Some(session) = s.take() {
+                session.close();
+            }
+        }
+    }
+}
+
+/// The most distinct (destination, identity, config) sessions one [`SshPool`] keeps.
+pub const POOL_MAX: usize = 32;
+
+/// Sessions per destination for a whole process. The registry lock covers discovery only: holding it
+/// across a 600-second Host wait would serialise independent worlds, applications and residents, so
+/// each channel has its own lock and distinct destinations or credentials progress independently,
+/// while one destination and credential stays serial.
+pub struct SshPool(Mutex<Vec<(Ssh, Arc<SshChannel>)>>);
+
+impl SshPool {
+    pub const fn new() -> Self {
+        SshPool(Mutex::new(Vec::new()))
+    }
+
+    /// The channel for `ssh`'s destination, credential and config; opened (lazily) on its first exchange.
+    pub fn channel(&self, ssh: &Ssh) -> std::result::Result<Arc<SshChannel>, Failure> {
+        check_destination(&ssh.destination).map_err(|e| Failure::Unsent(e.0))?;
+        let mut channels = self.0.lock().map_err(|_| Failure::Unsent("ssh session table poisoned".into()))?;
+        let same = |have: &Ssh| have.destination == ssh.destination && have.identity == ssh.identity && have.config == ssh.config;
+        if let Some((_, channel)) = channels.iter().find(|(have, _)| same(have)) {
+            return Ok(channel.clone());
+        }
+        if channels.len() >= POOL_MAX {
+            return Err(Failure::Unsent(format!("busy: remote destination limit ({POOL_MAX} per client process)")));
+        }
+        let channel = Arc::new(SshChannel::new(ssh.clone()));
+        channels.push((ssh.clone(), channel.clone()));
+        Ok(channel)
+    }
+}
+
+impl Default for SshPool {
+    fn default() -> Self {
+        SshPool::new()
     }
 }
 
@@ -570,7 +695,7 @@ mod tests {
         let seen = std::fs::read(&req).unwrap();
         let expect = [request(b"{}", None, 2, b"first").unwrap(), request(b"{}", None, 2, b"second").unwrap()].concat();
         assert_eq!(seen, expect);
-        assert!(op.session.lock().unwrap().is_some(), "the session is kept for the next request");
+        assert!(op.channel.as_ref().unwrap().is_open(), "the session is kept for the next request");
     }
 
     #[test]
@@ -585,7 +710,7 @@ mod tests {
     fn a_hangup_after_the_write_is_uncertain_closes_the_session_and_is_never_resent() {
         let (op, req) = standin("serve-hangup");
         assert!(matches!(op.call(2, b"call"), Err(Failure::Uncertain(_))));
-        assert!(op.session.lock().unwrap().is_none(), "the dead session is closed");
+        assert!(!op.channel.as_ref().unwrap().is_open(), "the dead session is closed");
         // The stand-in saw the request exactly once: the SDK did not resend it on a new session.
         assert_eq!(std::fs::read(&req).unwrap(), request(b"{}", None, 2, b"call").unwrap());
         // A later, explicit call opens a NEW session (and is itself a new request).
@@ -600,6 +725,77 @@ mod tests {
         let started = std::time::Instant::now();
         assert!(matches!(op.call(2, b"c"), Err(Failure::Uncertain(d)) if d.contains("none within 2s")));
         assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    fn standin_ssh(dest: &str, remote_command: Option<&str>) -> Ssh {
+        let (sh, script) = crate::frame::fake::script("ssh", crate::frame::fake::SSH_STANDIN);
+        let mut ssh = Ssh::new(dest).unwrap();
+        ssh.command = vec![sh.into(), script.into()];
+        ssh.connect_timeout = Duration::from_secs(2);
+        ssh.remote_command = remote_command.map(str::to_owned);
+        ssh
+    }
+
+    #[test]
+    fn a_remote_command_follows_the_destination_and_the_raw_stream_opens_only_after_the_channel() {
+        let mut ssh = Ssh::new("member@box").unwrap();
+        ssh.remote_command = Some("mini-provider-credentials-v1".into());
+        let args: Vec<String> = ssh.arguments().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(&args[args.len() - 3..], ["--", "member@box", "mini-provider-credentials-v1"]);
+        // Before the channel opens: the same named, certainly-unsent refusals as the frame route
+        // (the stand-in takes its mode from the last argument, here the remote command).
+        for (mode, named) in [("hostkey", "host key verification failed"), ("denied", "authentication refused")] {
+            match open_stream(&standin_ssh("box", Some(mode))) {
+                Err(Failure::Unsent(said)) => assert!(said.contains(named), "{mode}: {said}"),
+                other => panic!("{mode}: expected certainly-unsent, got {:?}", other.map(|_| ())),
+            }
+        }
+        // After it: the caller owns the pipes, and the bytes are exactly its own (here framed by hand).
+        let mut stream = open_stream(&standin_ssh("box", Some("serve-answer"))).unwrap();
+        stream.stdin.write_all(&[2, 0, 0, 0, 9, 9]).unwrap();
+        assert_eq!(read_frame(&mut stream.stdout).unwrap(), vec![2, b'o', b'k']);
+    }
+
+    fn pooled(dest: &str, identity: Option<&str>) -> Ssh {
+        let mut ssh = Ssh::new(dest).unwrap();
+        ssh.identity = identity.map(PathBuf::from);
+        ssh
+    }
+
+    #[test]
+    fn distinct_destinations_progress_while_one_is_blocked_and_a_credential_pins_its_own_stream() {
+        let pool = Arc::new(SshPool::new());
+        let slow = pool.channel(&pooled("slow-world", Some("alice.key"))).unwrap();
+        let slow_lock = slow.session.lock().unwrap();
+        let (done, completed) = mpsc::channel();
+        let independent = pool.clone();
+        let worker = std::thread::spawn(move || {
+            for member in 0..8 {
+                let channel = independent.channel(&pooled(&format!("world-{member}"), Some("alice.key"))).unwrap();
+                let _turn = channel.session.lock().unwrap();
+            }
+            done.send(()).unwrap();
+        });
+        completed.recv_timeout(Duration::from_secs(1)).unwrap();
+        let same = pool.channel(&pooled("slow-world", Some("alice.key"))).unwrap();
+        assert!(Arc::ptr_eq(&slow, &same));
+        assert!(same.session.try_lock().is_err(), "the same stream stays serial");
+        let other_key = pool.channel(&pooled("slow-world", Some("bob.key"))).unwrap();
+        assert!(!Arc::ptr_eq(&slow, &other_key), "a credential pins its own stream");
+        drop(slow_lock);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn the_pool_is_bounded_before_anything_is_opened_or_sent_and_refuses_option_shaped_destinations() {
+        let pool = SshPool::new();
+        let bad = Ssh { destination: "-bad".into(), ..pooled("ok", None) };
+        assert!(matches!(pool.channel(&bad), Err(Failure::Unsent(_))));
+        for member in 0..POOL_MAX {
+            pool.channel(&pooled(&format!("member-{member}"), None)).unwrap();
+        }
+        assert!(matches!(pool.channel(&pooled("overflow", None)), Err(Failure::Unsent(d)) if d.contains("destination limit")));
+        assert!(pool.channel(&pooled("member-0", None)).is_ok(), "an existing member still progresses at capacity");
     }
 
     #[test]

@@ -123,16 +123,8 @@ pub(crate) const REMOTE_PREFIX: &str = "ssh:";
 /// from the caller's ssh config). It is passed after `--`, so it can never be
 /// read as an ssh option; ports and identities belong in the ssh config.
 pub(crate) fn remote_destination(destination: &str) -> Result<(), String> {
-    if destination.is_empty()
-        || destination.len() > 255
-        || destination.starts_with('-')
-        || !destination
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'@' | b'%' | b'+'))
-    {
-        return Err("--remote takes one ssh destination: user@host or an ssh config Host alias".into());
-    }
-    Ok(())
+    mini_sdk::operator::check_destination(destination)
+        .map_err(|_| "--remote takes one ssh destination: user@host or an ssh config Host alias".to_owned())
 }
 
 pub(crate) fn remote_address(destination: &str) -> Result<std::path::PathBuf, String> {
@@ -1188,31 +1180,6 @@ pub(crate) fn exchange_unix(socket: &Path, frame: &[u8]) -> Result<Vec<u8>, Stri
     })
     .map_err(|e| format!("uncertain host response read: {e}"))?
     .ok_or_else(|| "uncertain host response: connection closed".to_owned())
-}
-
-/// The stdio transport: one framed request written to a byte pipe that ends at
-/// the proxy, and its framed reply read back. The first exchange on a new ssh
-/// session also waits out the ssh handshake, hence the longer write deadline.
-/// `writer` must be non-blocking.
-pub(crate) fn exchange_stdio<W: Write + AsRawFd, R: Read + AsRawFd>(
-    writer: &mut W,
-    reader: &mut R,
-    frame: &[u8],
-) -> Result<Vec<u8>, String> {
-    write_frame(
-        &mut DeadlinePipeWrite {
-            writer,
-            deadline: Instant::now() + Duration::from_secs(60),
-        },
-        frame,
-    )
-    .map_err(|e| format!("uncertain host request write: {e}"))?;
-    read_frame(&mut DeadlinePipe {
-        reader,
-        deadline: Instant::now() + Duration::from_secs(600),
-    })
-    .map_err(|e| format!("uncertain host response read: {e}"))?
-    .ok_or_else(|| "uncertain host response: proxy closed".to_owned())
 }
 
 /// The socket directory must be owned by this account and inaccessible to

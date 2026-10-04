@@ -24,7 +24,7 @@
 //!
 //! `fips204` is a pure-Rust implementation of FIPS 204; it is NOT the Lean-verified ML-DSA core
 //! Bread's `dregg_turn::pq` uses. That is a stated difference, not a hidden one.
-use ed25519_dalek::{Signer as _, SigningKey, VerifyingKey};
+use ed25519_dalek::{SigningKey, VerifyingKey};
 use fips204::ml_dsa_65 as dsa;
 use fips204::traits::{KeyGen, SerDes, Signer as _, Verifier as _};
 use zeroize::Zeroizing;
@@ -83,6 +83,20 @@ pub trait Signer {
     fn sign(&self, message: &[u8]) -> Result<Vec<u8>>;
 }
 
+/// A bare Ed25519 key is an Ed25519 signer, so a caller that holds a `&SigningKey` passes it as a
+/// `&dyn Signer` without copying key material.
+impl Signer for SigningKey {
+    fn scheme(&self) -> Scheme {
+        Scheme::Ed25519
+    }
+    fn public_key(&self) -> Vec<u8> {
+        self.verifying_key().as_bytes().to_vec()
+    }
+    fn sign(&self, message: &[u8]) -> Result<Vec<u8>> {
+        Ok(ed25519_dalek::Signer::sign(self, message).to_bytes().to_vec())
+    }
+}
+
 pub struct Ed25519Signer(pub SigningKey);
 
 impl Signer for Ed25519Signer {
@@ -93,7 +107,7 @@ impl Signer for Ed25519Signer {
         self.0.verifying_key().as_bytes().to_vec()
     }
     fn sign(&self, message: &[u8]) -> Result<Vec<u8>> {
-        Ok(self.0.sign(message).to_bytes().to_vec())
+        Ok(ed25519_dalek::Signer::sign(&self.0, message).to_bytes().to_vec())
     }
 }
 
@@ -123,7 +137,7 @@ impl Signer for HybridSigner {
         out
     }
     fn sign(&self, message: &[u8]) -> Result<Vec<u8>> {
-        let mut out = self.ed.sign(message).to_bytes().to_vec();
+        let mut out = ed25519_dalek::Signer::sign(&self.ed, message).to_bytes().to_vec();
         let ml = self.ml.try_sign_with_seed(&Zeroizing::new([0u8; 32]), message, ML_DSA_CONTEXT)
             .map_err(|e| Error(format!("ML-DSA-65 signing: {e}")))?;
         out.extend_from_slice(&ml);

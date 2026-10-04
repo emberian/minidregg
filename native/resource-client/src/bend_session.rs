@@ -81,7 +81,7 @@ pub(crate) fn run(arguments: &[String]) -> Result<()> {
     if bounded(&retained_intent)? != intended || bounded(&retained_plan)? != candidate {
         return Err("retained Objective intent/plan changed".into());
     }
-    let signatures = sign_headers(&signing, &headers);
+    let signatures = sign_headers(&signing, &headers)?;
     write_json_new(&directory.join("signatures.json"), &signatures)?;
     if kind == "native" {
         encode_signatures(host, config, &signing, headers,

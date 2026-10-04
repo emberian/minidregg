@@ -226,7 +226,10 @@ exact sdk-ssh                mini-sdk --lib --features native -- \
   operator::tests::an_ssh_refusal_and_a_socket_rejection_classify_like_the_unix_socket \
   operator::tests::a_hangup_after_the_write_is_uncertain_closes_the_session_and_is_never_resent \
   operator::tests::a_garbled_or_missing_reply_is_uncertain_not_unsent \
-  operator::tests::a_session_that_ended_between_requests_is_replaced_before_anything_is_written
+  operator::tests::a_session_that_ended_between_requests_is_replaced_before_anything_is_written \
+  operator::tests::distinct_destinations_progress_while_one_is_blocked_and_a_credential_pins_its_own_stream \
+  operator::tests::the_pool_is_bounded_before_anything_is_opened_or_sent_and_refuses_option_shaped_destinations \
+  operator::tests::a_remote_command_follows_the_destination_and_the_raw_stream_opens_only_after_the_channel
 # Hybrid Ed25519 + ML-DSA-65 signers (cv 01a0f6bb-c108, 01a0f52e-774e): both halves or refusal.
 exact sdk-pq                 mini-sdk --lib --features native -- \
   signer::tests::both_schemes_sign_and_verify_and_widths_are_fixed \

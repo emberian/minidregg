@@ -13,14 +13,16 @@
 //!
 //! Client side, a socket address `ssh:DEST` (`mini --remote DEST ...`) makes
 //! every request that would have gone to a unix socket go to one `ssh -T DEST`
-//! session per process instead. `MINI_SSH` names another ssh program, as
-//! `GIT_SSH` does; ports belong in ssh config; --ssh-identity pins a workspace credential.
+//! session per process instead. That client half is `mini_sdk::operator`'s ssh
+//! route (host-key checking forced on, named certainly-unsent refusals, a failed
+//! exchange never resent); this file keeps only the box side and the one call
+//! into it. `MINI_SSH` names another ssh program, as `GIT_SSH` does; ports belong
+//! in ssh config; --ssh-identity pins a workspace credential.
 use crate::transport;
-use std::ffi::OsString;
+use mini_sdk::operator::{Failure, Ssh, SshPool};
 use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::path::Path;
+use std::time::Duration;
 
 /// Relays frames until the client closes its side. `check` decides whether a
 /// frame may reach the socket; `forward` is one socket exchange. Returns the
@@ -70,95 +72,29 @@ pub(crate) fn serve(socket: &Path) -> Result<(), String> {
     .map(|_| ())
 }
 
-struct Session {
-    child: Child,
-    stdin: ChildStdin,
-    stdout: ChildStdout,
-}
+/// This process's ssh sessions, one per (destination, credential).
+static SESSIONS: SshPool = SshPool::new();
 
-impl Session {
-    fn close(mut self) {
-        drop(self.stdin);
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-// The registry lock covers discovery only. Holding it during a 600-second
-// host wait would serialize independent worlds, applications and residents.
-struct SessionSlot {
-    destination: String,
-    identity: Option<PathBuf>,
-    session: Mutex<Option<Session>>,
-}
-struct SessionTable(Mutex<Vec<Arc<SessionSlot>>>);
-static SESSIONS: SessionTable = SessionTable(Mutex::new(Vec::new()));
-const MAX_SESSIONS: usize = 32;
-
-impl SessionTable {
-fn slot(&self, destination: &str, identity: Option<&Path>) -> Result<Arc<SessionSlot>, String> {
-    transport::remote_destination(destination)?;
-    let mut sessions = self.0.lock().map_err(|_| "remote session table poisoned")?;
-    if let Some(slot) = sessions.iter().find(|slot| slot.destination == destination && slot.identity.as_deref() == identity) {
-        return Ok(slot.clone());
-    }
-    if sessions.len() >= MAX_SESSIONS {
-        return Err("busy: remote destination limit (32 per client process)".into());
-    }
-    let slot = Arc::new(SessionSlot { destination: destination.into(), identity: identity.map(Path::to_path_buf), session: Mutex::new(None) });
-    sessions.push(slot.clone());
-    Ok(slot)
-}
-}
-
-fn ssh_program() -> OsString {
-    std::env::var_os("MINI_SSH")
-        .filter(|program| !program.is_empty())
-        .unwrap_or_else(|| "ssh".into())
-}
-
-fn open(destination: &str, identity: Option<&Path>) -> Result<Session, String> {
-    transport::remote_destination(destination)?;
-    let program = ssh_program();
-    let mut command = Command::new(&program);
-    command.args(["-T", "-o", "BatchMode=yes"]);
-    if let Some(identity) = identity { command.arg("-i").arg(identity).args(["-o", "IdentitiesOnly=yes"]); }
-    let mut child = command.args(["--", destination])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|error| format!("cannot start {}: {error}", program.to_string_lossy()))?;
-    let stdin = child.stdin.take().ok_or("ssh stdin unavailable")?;
-    let stdout = child.stdout.take().ok_or("ssh stdout unavailable")?;
-    transport::set_nonblocking(&stdin).map_err(|error| format!("cannot bound ssh input: {error}"))?;
-    Ok(Session {
-        child,
-        stdin,
-        stdout,
-    })
-}
+/// How long a Host may take to answer one request (`transport::exchange_unix`'s 600 s).
+const READ_DEADLINE: Duration = Duration::from_secs(600);
 
 /// One request over this process's ssh session to `destination`, opened on
 /// first use. A failed exchange closes the session; the next request opens a
 /// new one. As with the unix socket, a failure after the write leaves the
-/// request's status uncertain.
+/// request's status uncertain, and the exact request is NEVER resent.
 pub(crate) fn exchange(destination: &str, frame: &[u8]) -> Result<Vec<u8>, String> {
-    let slot = SESSIONS.slot(destination, crate::ssh_identity())?;
-    let mut session = slot.session.lock().map_err(|_| "remote session poisoned")?;
-    if session.is_none() {
-        *session = Some(open(&slot.destination, slot.identity.as_deref())?);
-    }
-    let running = session.as_mut().expect("opened session");
-    match transport::exchange_stdio(&mut running.stdin, &mut running.stdout, frame) {
-        Ok(reply) => Ok(reply),
-        Err(error) => {
-            // Close only this stream. This exact request is NEVER resent; a
-            // later explicit request may reopen after custody recovery.
-            session.take().expect("opened session").close();
-            Err(error)
-        }
-    }
+    let mut ssh = Ssh::new(destination)?;
+    ssh.identity = crate::ssh_identity().map(Path::to_path_buf);
+    exchange_with(&ssh, frame)
+}
+
+fn exchange_with(ssh: &Ssh, frame: &[u8]) -> Result<Vec<u8>, String> {
+    SESSIONS
+        .channel(ssh)
+        .and_then(|channel| channel.exchange(frame, READ_DEADLINE))
+        .map_err(|failure| match failure {
+            Failure::Unsent(why) | Failure::Uncertain(why) => why,
+        })
 }
 
 #[cfg(test)]
@@ -197,41 +133,6 @@ mod tests {
             out.push(frame);
         }
         out
-    }
-
-    #[test]
-    fn distinct_world_sessions_progress_while_one_is_blocked() {
-        let sessions = Arc::new(SessionTable(Mutex::new(Vec::new())));
-        let slow = sessions.slot("slow-world", Some(Path::new("alice.key"))).unwrap();
-        let slow_lock = slow.session.lock().unwrap();
-        let (done, completed) = std::sync::mpsc::channel();
-        let independent = sessions.clone();
-        let worker = std::thread::spawn(move || {
-            for member in 0..8 {
-                let slot = independent.slot(&format!("world-{member}"), Some(Path::new("alice.key"))).unwrap();
-                let _turn = slot.session.lock().unwrap();
-            }
-            done.send(()).unwrap();
-        });
-        completed.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
-        let same = sessions.slot("slow-world", Some(Path::new("alice.key"))).unwrap();
-        assert!(Arc::ptr_eq(&slow, &same));
-        assert!(same.session.try_lock().is_err(), "same stream stays serial");
-        let other_key = sessions.slot("slow-world", Some(Path::new("bob.key"))).unwrap();
-        assert!(!Arc::ptr_eq(&slow, &other_key), "credential pins separate streams");
-        drop(slow_lock);
-        worker.join().unwrap();
-    }
-
-    #[test]
-    fn destination_capacity_is_bounded_before_opening_or_transmission() {
-        let sessions = SessionTable(Mutex::new(Vec::new()));
-        assert!(sessions.slot("-bad", None).is_err());
-        for member in 0..MAX_SESSIONS {
-            sessions.slot(&format!("member-{member}"), None).unwrap();
-        }
-        assert!(sessions.slot("overflow", None).err().unwrap().contains("destination limit"));
-        assert!(sessions.slot("member-0", None).is_ok(), "existing member still progresses at capacity");
     }
 
     #[test]
@@ -337,17 +238,15 @@ mod tests {
                 transport::exchange_unix(&proxy_socket, frame)
             })
         });
-        transport::set_nonblocking(&client_out).unwrap();
         let first = envelope(CONFIG, &[5, 1, 2, 3]);
         let second = envelope(CONFIG, &[3, 9, 8]);
-        assert_eq!(
-            transport::exchange_stdio(&mut client_out, &mut client_in, &first).unwrap(),
-            vec![5, 3, 2, 1]
-        );
-        assert_eq!(
-            transport::exchange_stdio(&mut client_out, &mut client_in, &second).unwrap(),
-            vec![3, 8, 9]
-        );
+        let mut exchange = |frame: &[u8]| {
+            transport::write_frame(&mut client_out, frame).unwrap();
+            transport::read_frame(&mut client_in).unwrap().unwrap()
+        };
+        assert_eq!(exchange(&first), vec![5, 3, 2, 1]);
+        assert_eq!(exchange(&second), vec![3, 8, 9]);
+        drop(exchange);
         drop(client_out);
         assert_eq!(proxy.join().unwrap().unwrap(), 2);
         assert_eq!(host.join().unwrap(), vec![first, second], "the socket saw the exact bytes");
@@ -367,5 +266,35 @@ mod tests {
         assert!(transport::endpoint(Path::new("ssh:-oProxyCommand=x")).is_err());
         assert!(serve(Path::new("ssh:mini@host")).is_err());
         assert!(serve(Path::new("relative.sock")).is_err());
+    }
+
+    /// Driven by `native/mini-sdk/tests/ssh-e2e.sh` (an unprivileged sshd forced to `mini socket-proxy`
+    /// in front of a real Host): the client half is `mini_sdk`'s route, so this client's request
+    /// reaches the Host over ssh and answers as the unix socket does, and a planted host key is refused
+    /// by name before anything is sent.
+    #[test]
+    #[ignore = "driven by native/mini-sdk/tests/ssh-e2e.sh"]
+    fn real_ssh_reaches_the_host_like_the_unix_socket_and_refuses_a_planted_host_key() {
+        let env = |name: &str| std::env::var(name).unwrap_or_else(|_| panic!("{name} must be set (run native/mini-sdk/tests/ssh-e2e.sh)"));
+        let ssh = |config_var: &str| {
+            let mut ssh = Ssh::new(&env("MINI_SDK_E2E_ALIAS")).unwrap();
+            ssh.command = vec!["ssh".into()];
+            ssh.config = Some(env(config_var).into());
+            ssh
+        };
+        let config = std::fs::read(env("MINI_SDK_E2E_CONFIG")).unwrap();
+        // DESCRIBE (operation 0): envelope version 1, config, operation, no payload.
+        let mut frame = vec![1];
+        frame.extend_from_slice(&(config.len() as u32).to_le_bytes());
+        frame.extend_from_slice(&config);
+        frame.push(0);
+        let over_ssh = exchange_with(&ssh("MINI_SDK_E2E_SSH_CONFIG_GOOD"), &frame).unwrap();
+        assert_eq!(over_ssh[0], 0, "the Host answered DESCRIBE");
+        assert!(over_ssh.len() > 1);
+        let over_unix = transport::exchange_unix(Path::new(&env("MINI_SDK_E2E_SOCKET")), &frame).unwrap();
+        assert_eq!(over_ssh, over_unix, "the ssh reply is the unix socket's, byte for byte");
+        let refused = exchange_with(&ssh("MINI_SDK_E2E_SSH_CONFIG_WRONG"), &frame).unwrap_err();
+        assert!(refused.contains("host key verification failed"), "{refused}");
+        assert!(!refused.contains("uncertain"), "a host-key refusal is certainly unsent: {refused}");
     }
 }

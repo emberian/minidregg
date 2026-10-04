@@ -95,9 +95,13 @@ Also, and easy to miss:
   NEXT key's scheme. Decision needed (one line, not taste-neutral): the next key inherits the
   enrolled key's algorithm (recommended: a rotation never silently downgrades), carried by the key
   record, not inferred from length.
-* **The Rust clients.** `native/resource-client` still generates and signs Ed25519 only
-  (`mini keygen`, `sign_headers`). It should use `mini_sdk::signer` (the SDK is now its dependency
-  for attempt custody); until then a hybrid key cannot be enrolled from the CLI.
+* **The Rust clients.** `native/resource-client`'s `sign_headers` (the one function that turns
+  consented headers into the Host's `signatures` list) now signs through `mini_sdk::signer::Signer`,
+  so its output width is the scheme's. `mini keygen` still generates an Ed25519 seed and key files
+  are still one 32-byte seed: a hybrid key file (Ed25519 seed + ML-DSA `xi`) and `mini keygen
+  --scheme hybrid` wait for the Host to admit algorithm 2, because a key the Host refuses to
+  enrol is not a feature. The other per-protocol Ed25519 signatures in the crate (sshsig, relay
+  hello, cohort frames, room keys) are Ed25519 by their own protocols and are not this list.
 * **Fleet.** `FleetTurn` needs no change of its own: it admits through `verifyNative`. "FleetTurn
   admission requires both when the key record is hybrid" is exactly rule 3.
 

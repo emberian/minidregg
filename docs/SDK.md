@@ -128,7 +128,11 @@ config. The request is written only after ssh reports `Entering interactive sess
 before that is certainly-unsent with a NAMED refusal (host key verification failed, authentication
 refused, destination unreachable, session not established within Ns); everything after the write is
 uncertain, the session is closed, and the exact request is never resent (a lost reply is a `lookup`
-of the same call bytes). `MINI_SSH` names another OpenSSH-compatible program.
+of the same call bytes). `MINI_SSH` names another OpenSSH-compatible program: it is run with `-v` and must print
+`Entering interactive session` on stderr once its channel is open (real OpenSSH does), which is how the
+route knows nothing has been sent yet. `mini --remote` and the credential relay
+(`mini-provider-credentials-v1`, `operator::open_stream`) use this same route; `native/resource-client`
+has no ssh client of its own.
 
 The route is held end to end by `native/mini-sdk/tests/ssh-e2e.sh ART_DIR` (ART_DIR from
 `scripts/pipeline/fetch-artifacts`): it starts a scratch Store behind the candidate Host, an
@@ -151,5 +155,5 @@ nothing sent, and the proxy refuses an unpinned config and an operator-only oper
 
 Each consumer that moves deletes its copy: Discord `custody.rs` (done); next
 `app_document.rs`'s status machine, `job.rs`, `selected_exchange.rs`, `publisher.rs`, the
-Hermes step ledger, the provider spool; then `submit_once`/`retry`, then the client halves of
-`client_consent.rs` and `transport.rs` once their owning lanes land.
+Hermes step ledger, the provider spool; then `submit_once`/`retry`, then the client half of
+`client_consent.rs` (the ssh client half of `proxy.rs`/`key_service.rs` is done: `operator::SshPool`).

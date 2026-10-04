@@ -572,7 +572,7 @@ pub(crate) fn signed_factory_observation(
     if headers.is_empty() {
         return Err("factory observation has no signing header".into());
     }
-    let signatures = sign_headers(signing, &headers);
+    let signatures = sign_headers(signing, &headers)?;
     save_json_staged(&observation.join("signatures.json"), &signatures)?;
     transform(
         input.host,

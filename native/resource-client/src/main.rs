@@ -1603,13 +1603,14 @@ fn plan_headers(value: &Value) -> Result<Vec<Vec<u8>>> {
         .collect()
 }
 
-fn sign_headers(signing: &SigningKey, headers: &[Vec<u8>]) -> Value {
-    Value::Array(
-        headers
-            .iter()
-            .map(|header| Value::String(hex(&signing.sign(header).to_bytes())))
-            .collect(),
-    )
+/// The Host's `signatures` list: each header signed by `signer` under its own scheme
+/// (`mini_sdk::signer`), hex, in order. A scheme's signature width is the scheme's, not this file's.
+fn sign_headers(signer: &dyn mini_sdk::signer::Signer, headers: &[Vec<u8>]) -> Result<Value> {
+    headers
+        .iter()
+        .map(|header| Ok(Value::String(hex(&signer.sign(header)?))))
+        .collect::<Result<Vec<_>>>()
+        .map(Value::Array)
 }
 
 fn write_json_new(path: &Path, value: &Value) -> Result<()> {
@@ -1655,7 +1656,7 @@ fn encode_signatures(
     json_path: &Path,
     bin_path: &Path,
 ) -> Result<()> {
-    write_json_new(json_path, &sign_headers(signing, &headers))?;
+    write_json_new(json_path, &sign_headers(signing, &headers)?)?;
     process(
         host,
         config,
@@ -4766,7 +4767,7 @@ mod tests {
         assert_eq!(headers, [vec![0, 255, 16], b"mini".to_vec()]);
 
         let signing = SigningKey::from_bytes(&[27; 32]);
-        let rendered = sign_headers(&signing, &headers);
+        let rendered = sign_headers(&signing, &headers).unwrap();
         let signatures = rendered.as_array().unwrap();
         let verifying = VerifyingKey::from_bytes(&signing.verifying_key().to_bytes()).unwrap();
         for (header, signature) in headers.iter().zip(signatures) {

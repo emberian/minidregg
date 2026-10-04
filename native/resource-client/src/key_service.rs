@@ -16,7 +16,6 @@ use ed25519_dalek::Signer;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
-use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 const LIMIT: usize = mini_keys::wire::MEMBER_FRAME;
 const COMMAND: &str = "mini-provider-credentials-v1";
@@ -256,25 +255,13 @@ pub(super) fn client(
     action: &mut Value,
 ) -> Result<Value> {
     transport::remote_destination(destination)?;
-    let program = std::env::var_os("MINI_SSH")
-        .filter(|p| !p.is_empty())
-        .unwrap_or_else(|| "ssh".into());
-    let mut child = Command::new(program)
-        .args(["-T", "-o", "BatchMode=yes", "--", destination, COMMAND])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|_| "cannot start authenticated credential transport")?;
-    let result = (|| {
-        let end = Instant::now() + Duration::from_secs(30);
-        let mut input = child.stdout.take().ok_or("credential ssh stdout absent")?;
-        let mut output = child.stdin.take().ok_or("credential ssh stdin absent")?;
-        exchange(&mut input, &mut output, workspace, ws, owner, action, end)
-    })();
-    let _ = child.kill();
-    let _ = child.wait();
-    result
+    let mut ssh = mini_sdk::operator::Ssh::new(destination)?;
+    ssh.remote_command = Some(COMMAND.to_owned());
+    let mut stream = mini_sdk::operator::open_stream(&ssh).map_err(|failure| match failure {
+        mini_sdk::operator::Failure::Unsent(why) | mini_sdk::operator::Failure::Uncertain(why) => why,
+    })?;
+    let end = Instant::now() + Duration::from_secs(30);
+    exchange(&mut stream.stdout, &mut stream.stdin, workspace, ws, owner, action, end)
 }
 #[cfg(test)]
 mod tests {

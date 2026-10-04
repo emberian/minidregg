@@ -113,4 +113,9 @@ cd "$REPO/native/mini-sdk"
 cargo test --offline --features native --test ssh_e2e -- --ignored --test-threads=1 --nocapture 2>&1 | tee "$LOG/ssh-e2e.log"
 [[ ${PIPESTATUS[0]} == 0 ]] || die "ssh_e2e tests failed (see $LOG/ssh-e2e.log)"
 grep -q '^test result: ok. [1-9][0-9]* passed; 0 failed' "$LOG/ssh-e2e.log" || die "no passing result in $LOG/ssh-e2e.log"
+# The resource-client's `mini --remote` half is the SDK's route too: the same box, through its proxy module.
+cd "$REPO/native/resource-client"
+cargo test --offline --bin mini -- --ignored --test-threads=1 --nocapture proxy::tests::real_ssh 2>&1 | tee "$LOG/rc-ssh-e2e.log"
+[[ ${PIPESTATUS[0]} == 0 ]] || die "resource-client ssh test failed (see $LOG/rc-ssh-e2e.log)"
+grep -q '^test result: ok. 1 passed; 0 failed' "$LOG/rc-ssh-e2e.log" || die "no passing result in $LOG/rc-ssh-e2e.log"
 echo "ssh-e2e: PASS ($(grep -c 'Accepted publickey' "$LOG/sshd.log") publickey logins accepted by sshd; evidence in $LOG)" >&2
