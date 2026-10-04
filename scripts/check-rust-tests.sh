@@ -218,6 +218,10 @@ exact rc-cohort-roster       resource-client --bin mini -- \
   cohort_tcp::tests::cohort_sender_refuses_receiver_without_roster_link_secret \
   cohort_tcp::tests::cohort_roster_digest_profile_and_shape_bind_every_link \
   cohort_tcp::tests::registrar_worker_refuses_input_directory_of_another_enrolled_slot
+# R2-1 #10 / C4: a stalled stranger cannot tie up the cohort listener (restores the
+# property d7b2f19b's re-accept test carried)
+exact rc-cohort-stall        resource-client --bin mini -- \
+  cohort_tcp::tests::a_stalled_stranger_cannot_tie_up_the_cohort_listener
 # R2-1 R4/R5: credit reference stranding and renewal overflow (76757030)
 exact rc-credit              resource-client --bin mini -- \
   credit::tests::renewal_overflow_refuses \

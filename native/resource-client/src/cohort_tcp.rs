@@ -1504,6 +1504,61 @@ mod tests {
             .unwrap();
         assert!(t.windows(32).any(|w| w == roster.digest));
     }
+    /// R2-1 #10 / C4: a stranger cannot tie up the cohort listener. One stranger
+    /// takes the challenge and goes silent; another sends half a response and
+    /// stalls. Each is dropped at the handshake bound (no ack, the socket is
+    /// closed) and the roster member for the slot still enrolls well before the
+    /// public start deadline. (The pre-roster version of this property was
+    /// unauthenticated_garbage_and_replayed_startup_cannot_consume_enrolled_link,
+    /// deleted with the PSK adapter in d7b2f19b.)
+    #[test]
+    fn a_stalled_stranger_cannot_tie_up_the_cohort_listener() {
+        let c = cohort([8; 16], 4);
+        let roster = parse_roster(&c.bytes).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut p = profile();
+        p.slot = 2;
+        p.origin = now_ms().unwrap() + 30000;
+        let registrar = decap(&c.operator_kems[0]);
+        let (server_p, server_roster) = (p.clone(), parse_roster(&c.bytes).unwrap());
+        let server = thread::spawn(move || {
+            let mut e = accept_enrolled(&listener, &server_p, &server_roster, &registrar, 0).unwrap();
+            let mut marker = [0];
+            e.stream.read_exact(&mut marker).unwrap();
+            assert_eq!(marker, [91]);
+            e.key
+        });
+        let started = std::time::Instant::now();
+        // 1. A silent stranger holds the first challenge and never answers.
+        let mut silent = TcpStream::connect(address).unwrap();
+        let mut challenge = [0; CHALLENGE];
+        silent.read_exact(&mut challenge).unwrap();
+        // 2. A second stranger queues behind it, then sends half a response and stalls.
+        let mut partial = TcpStream::connect(address).unwrap();
+        partial.read_exact(&mut challenge).unwrap();
+        partial.write_all(&[7; RESPONSE / 2]).unwrap();
+        // 3. The roster member retries until the listener reaches it.
+        let key = loop {
+            let mut valid = TcpStream::connect(address).unwrap();
+            match enroll_sender(&mut valid, &p, &roster, &c.members[2], 0) {
+                Ok(key) => {
+                    valid.write_all(&[91]).unwrap();
+                    break key;
+                }
+                Err(_) => assert!(now_ms().unwrap() < p.origin, "the member never reached the listener"),
+            }
+        };
+        assert_eq!(server.join().unwrap(), key);
+        // Both strangers were dropped without an ack: the receiver closed them.
+        for stranger in [&mut silent, &mut partial] {
+            stranger.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+            let mut rest = [0; ACK];
+            assert!(matches!(stranger.read(&mut rest), Ok(0) | Err(_)), "a stranger received bytes");
+        }
+        // Each stall cost at most one handshake bound, not the link.
+        assert!(started.elapsed() < Duration::from_millis(3 * HANDSHAKE_MS + 2000));
+    }
     #[test]
     fn cohort_sender_refuses_receiver_without_roster_link_secret() {
         let c = cohort([8; 16], 4);
