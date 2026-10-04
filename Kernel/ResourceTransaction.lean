@@ -510,6 +510,17 @@ inductive Reject where
   /-- An Objective claim's signed `proofWork` is not the operator tariff's
   price of its own declared envelope (`ObjectiveBendNativeAdmission.Tariff.workOf`). -/
   | objectiveTariff
+  /-- The claim's source query does not select a live artifact and package
+  whose declaration, parser/frontend/elaborator pins and codecs the policy admits. -/
+  | objectiveSource
+  /-- The authenticated input is not the one the claim signed (`expectedInput`),
+  or the applied source does not decode or type-check. -/
+  | objectiveInput
+  /-- Execution failed within the envelope, or its plan, returns or result
+  profile are not exactly the command's. -/
+  | objectiveOutput
+  /-- Measured usage exceeds the signed envelope's charge. -/
+  | objectiveUsage
   | observationRequired | observationRejected | clockUnavailable
   | streamTopic | streamPayload
   | worldKind | kindDefinition

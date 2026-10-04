@@ -602,18 +602,18 @@ def prepareCore {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {
     match guardsExact : (authenticated.source :: authenticated.inputs).mapM readGuardsOf with
     | none => return .error .observationRejected
     | some guardLists =>
-      let some source := selectSource claim authenticated.source policy | return .error .bendExecution
+      let some source := selectSource claim authenticated.source policy | return .error .objectiveSource
       let input := inputOf authenticated
       if inputCommitted : ObjectiveInvocationClaim.inputCommitment (ObjectiveBendNativeInput.encode input) = claim.expectedInput then
         match inputTermExact : ObjectiveBendNativeInput.sourceTerm input claim.capacity.inputBytes claim.capacity.scalarBits with
-        | .error _ => return .error .bendExecution
+        | .error _ => return .error .objectiveInput
         | .ok inputTerm =>
           let some typed := check (ObjectiveBendNativeInput.instantiate source.loaded.checked.packet.source inputTerm)
-            [] claim.capacity.typeFuel | return .error .bendExecution
+            [] claim.capacity.typeFuel | return .error .objectiveInput
           return .ok ⟨semantics,policy,policyExact,policyEdition,capacities,tariffExact,tariffValid,
             ⟨funding.1,funding.2⟩,authenticated,guardLists,guardsExact,source,input,rfl,inputCommitted,
             inputTerm,inputTermExact,typed⟩
-      else return .error .bendExecution
+      else return .error .objectiveInput
 
 /-- This evidence is indexed by the SAME prepared native command/image and
 final full ingress/write/guard lists. It contains no signature/law permission. -/
@@ -663,21 +663,21 @@ private def checkOutput {durable : Durable} (deployment : Deployment)
     (claim.outputCodec = ObjectiveBendGenericResult.codecId ∧ ∃ p, output = .generic p)}) := do
   if codec : claim.outputCodec = ObjectiveBendPlanAdapter.codecId then
     let prepared ← (ObjectiveBendPreparedOutput.prepare deployment loaded command source claim.capacity.typeFuel
-      (limits claim.capacity) (budget claim.capacity) (scalarProfile claim.capacity)).mapError (fun _ => Reject.bendExecution)
+      (limits claim.capacity) (budget claim.capacity) (scalarProfile claim.capacity)).mapError (fun _ => Reject.objectiveOutput)
     pure ⟨.scalar prepared,Or.inl ⟨codec,prepared,rfl⟩⟩
   else if codec : claim.outputCodec = ObjectiveBendResultAdapter.codecId then
     let prepared ← (ObjectiveBendResultAdapter.prepare result command source claim.capacity.typeFuel
-      (limits claim.capacity) (budget claim.capacity) (scalarProfile claim.capacity)).mapError (fun _ => Reject.bendExecution)
+      (limits claim.capacity) (budget claim.capacity) (scalarProfile claim.capacity)).mapError (fun _ => Reject.objectiveOutput)
     pure ⟨.result prepared,Or.inr (Or.inl ⟨codec,prepared,rfl⟩)⟩
   else if codec : claim.outputCodec = combinedCodec then
     let prepared ← (ObjectiveBendCombinedResult.prepare deployment loaded result command source claim.capacity.typeFuel
-      (limits claim.capacity) (budget claim.capacity) (scalarProfile claim.capacity)).mapError (fun _ => Reject.bendExecution)
+      (limits claim.capacity) (budget claim.capacity) (scalarProfile claim.capacity)).mapError (fun _ => Reject.objectiveOutput)
     pure ⟨.combined prepared,Or.inr (Or.inr (Or.inl ⟨codec,prepared,rfl⟩))⟩
   else if codec : claim.outputCodec = ObjectiveBendGenericResult.codecId then
     let prepared ← (ObjectiveBendGenericResult.prepareChecked deployment loaded result command source checked
-      (limits claim.capacity) (budget claim.capacity) (scalarProfile claim.capacity)).mapError (fun _ => Reject.bendExecution)
+      (limits claim.capacity) (budget claim.capacity) (scalarProfile claim.capacity)).mapError (fun _ => Reject.objectiveOutput)
     pure ⟨.generic prepared,Or.inr (Or.inr (Or.inr ⟨codec,prepared,rfl⟩))⟩
-  else throw .bendExecution
+  else throw .objectiveOutput
 
 
 /-- The command's signed claim and its command-free core on the admission image.
@@ -725,7 +725,7 @@ def admit {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
   if inputsCurrent : ∀ guard ∈ core.guards, guard ∈ guards ∨
       ∃ write ∈ writes, guard.cellId = write.cellId ∧ guard.expectedRoot = write.expectedPre then
     let some result := selectResult core.policy core.source.loaded.artifact command claim.outputCodec
-      | throw .bendExecution
+      | throw .objectiveOutput
     if resultExact : result.sourceArtifact = ObjectiveBendSourceArtifact.identity core.source.loaded.artifact ∧
         result.selectedDeclaration = declarationId core.source.loaded.artifact.declaration ∧
         result.sourceEntry = core.source.loaded.artifact.declaration ∧ result.recipient = command.subject ∧
@@ -737,9 +737,9 @@ def admit {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
             (core.source.loaded.record.payload ++ core.source.package.record.payload) ingress writes guards ≤ charge claim.capacity then
           pure ⟨claim,selection.selected,selection.genesisHeight,selection.heightExact,core,inputsCurrent,
             result,resultExact,output.1,output.2,readsCurrent,fits⟩
-        else throw .bendExecution
-      else throw .bendExecution
-    else throw .bendExecution
+        else throw .objectiveUsage
+      else throw .staleTarget
+    else throw .objectiveOutput
   else throw .staleTarget
 
 #assert_axioms Output.exact
