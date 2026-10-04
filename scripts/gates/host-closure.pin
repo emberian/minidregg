@@ -12,6 +12,7 @@
 # updated 2026-10-03: Source-only signature-first authentication before unchanged preparation; full native family pending  [counts: Minidregg 0 1, Theory 67 147, Kernel 338 483, Pred 7 11, Effects 0 3, Compiler 138 360, Selvage 12 151, Assurance 0 157, Host 66 124, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 11, BendQualification 0 1, SimplexQualification 0 1, ResearchWip 0 1]
 # updated 2026-10-04: L0.1 cut: Objective native chain enters (NativeAdmission, SourceArtifact, PublishedPackage, NativeInput, PreparedOutput, PlanAdapter, ResultAdapter, Combined/GenericResult, NativePlanData, NativeScalarBinding, InvocationClaim v3, SourcePackage, NativeInvocation{Statement,Profile}, ProtectedContentGate, Objective Core4 theory defs); BendTT leaves the Host (Command.bend removed: BendTTSource, BendLiveMachine, BendCoreAdmission and 36 Bend* modules no longer reached)  [counts: Minidregg 0 1, Theory 65 212, Kernel 335 494, Pred 7 11, Effects 0 3, Compiler 128 383, Selvage 12 153, Assurance 0 160, Host 66 129, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, BendQualification 0 1, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-04: cut rebased onto github/main: the Objective native chain enters the Host closure; BendTT leaves it (only Bend* left: Compiler.BendWorldPlan)  [counts: Minidregg 0 1, Theory 65 214, Kernel 335 496, Pred 7 11, Effects 0 3, Compiler 128 386, Selvage 12 153, Assurance 0 160, Host 66 129, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, BendQualification 0 1, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-04: FASTMACHINE 09adc743: Theory.ObjectiveBendDemandMachineFast carries the @[csimp] fast stepRaw/step/runBounded/forceWith, so the Host now compiles through it  [counts: Minidregg 0 1, Theory 66 215, Kernel 335 496, Pred 7 11, Effects 0 3, Compiler 128 386, Selvage 12 153, Assurance 0 160, Host 66 129, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, BendQualification 0 1, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -606,6 +607,7 @@ Theory.ObjectAudienceRoster
 Theory.ObjectiveBendDemandCapacity
 Theory.ObjectiveBendDemandData
 Theory.ObjectiveBendDemandMachine
+Theory.ObjectiveBendDemandMachineFast
 Theory.ObjectiveBendOpenRecursion
 Theory.ObjectiveBendTypes
 Theory.ObjectiveBendTyping
