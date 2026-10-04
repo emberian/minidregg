@@ -24,11 +24,11 @@ variable {deployment : Deployment} {durable : Durable}
 
 inductive Failure where
   | malformed | selection | capacity
-  | authorization (reason : NativeObservationController.Refusal)
+  | authorization
   deriving Repr
 
 /-- Exactly one resourceScope query by this subject and nonce for this ref. -/
-def matches (environment : Environment deployment durable)
+def matchesRef (environment : Environment deployment durable)
     (ref : ObjectiveInvocationClaim.InputRef) (signed : Signed) : Bool :=
   decide (signed.challenge.intent.subject = environment.subject ∧
     signed.challenge.intent.nonce = environment.nonce ∧
@@ -42,7 +42,7 @@ def readOf (environment : Environment deployment durable)
     (authorized : NativeObservationController.AuthorizedIntent environment.context profile
       environment.federation environment.genesisHeight signed.challenge.intent) :
     Option (ObjectiveBendNativeAdmission.Read environment profile) := do
-  if shape : matches environment ref signed = true then
+  if shape : matchesRef environment ref signed = true then
     have components := (of_decide_eq_true shape : signed.challenge.intent.subject = environment.subject ∧
       signed.challenge.intent.nonce = environment.nonce ∧
       signed.challenge.intent.purpose = .query ⟨ref.kind,ref.resource,.resourceScope⟩ ∧
@@ -64,10 +64,10 @@ def authorizeQuery (native : CredentialSignatureIO.NativeConfig)
   match signedCodec.decode bytes with
   | none => return .error .malformed
   | some signed =>
-    if matches environment ref signed != true then return .error .selection
+    if matchesRef environment ref signed != true then return .error .selection
     match ← NativeObservationController.authorize native environment.context profile
         environment.federation environment.genesisHeight signed with
-    | .error reason => return .error (.authorization reason)
+    | .error _ => return .error .authorization
     | .ok authorized =>
       match readOf environment profile ref signed authorized with
       | none => return .error .selection
@@ -108,7 +108,7 @@ def authorize (native : CredentialSignatureIO.NativeConfig)
 def Failure.reject : Failure → DeclaredResourceController.Reject
   | .malformed => .malformedCommand
   | .capacity => .bendExecution
-  | .selection | .authorization _ => .observationRejected
+  | .selection | .authorization => .observationRejected
 
 /-- The production oracle. Every host entry that admits Objective commands
 (`NativeHost.submitLoadedVia .invoke`, `NativeHostReplay.derive`) installs it. -/

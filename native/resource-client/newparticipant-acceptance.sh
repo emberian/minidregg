@@ -116,9 +116,11 @@ EOF
 # MINI_TAIL_BOUND (the tail bound L, default the example's 256 = 4 x 64).
 jq --argjson domain "$DOMAIN" --argjson subject "$SUBJECT" --argjson budget "$OWNER_BUDGET" \
   --arg disabled "$DISABLED_EVALUATORS" --argjson tail "${MINI_TAIL_BOUND:-256}" \
+  --arg objective "${OBJECTIVE_INVOCATION_POLICY:-}" \
   '.domain = $domain | .sponsor.subject = $subject | .ownerBudget = $budget | .tailBound = $tail
    | ($disabled | split(" ") | map(select(length > 0))) as $off
-   | if ($off | length) > 0 then .disabledEvaluators = $off else . end' \
+   | if ($off | length) > 0 then .disabledEvaluators = $off else . end
+   | if $objective != "" then .objectiveInvocation = $objective else . end' \
   "$HERE/genesis-params.example.json" >"$ROOT/genesis-params.json"
 EXTRA_GENESIS_ENROLLMENTS="$ROOT/pay/genesis-enrollments-all.json" \
 GENESIS_PAY_OBSERVER="$ROOT/pay/genesis-observer.json" \

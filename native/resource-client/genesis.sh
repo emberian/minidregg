@@ -101,7 +101,8 @@ jq -n --slurpfile p "$params" --arg store "$store" --arg root "$dir/store" --arg
    tariffPerInitialPayloadByte: $p.tariffPerInitialPayloadByte, collector: $p.collector,
    asset: $p.asset, genesisHeight: $p.genesisHeight, expectedSeed: 0,
    storageBinary: $store, storageRoot: $root, signatureBinary: $verifier}
-  + (if $p.disabledEvaluators then {disabledEvaluators: $p.disabledEvaluators} else {} end)' >"$dir/operator.json"
+  + (if $p.disabledEvaluators then {disabledEvaluators: $p.disabledEvaluators} else {} end)
+  + (if $p.objectiveInvocation then {objectiveInvocation: $p.objectiveInvocation} else {} end)' >"$dir/operator.json"
 
 "$host" "$dir/operator.json" profile >"$dir/profile.json"
 semantics=$(jq -er '.semantics | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \

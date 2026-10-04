@@ -9,3 +9,4 @@ import Theory.ObjectiveBendDemandAdequacy
 import Theory.ObjectiveBendDemandCompleteness
 import Theory.ObjectiveBendDemandDataSoundness
 import Theory.ObjectiveBendCheckpointRoundTrip
+import Kernel.ObjectiveBendAdmissionSemantics
