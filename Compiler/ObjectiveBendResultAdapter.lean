@@ -48,6 +48,12 @@ def dataMatches : Nat → Ty → Data → Bool
   | _+1,.emptyRow,.record [] => true
   | fuel+1,.field name member tail,.record ((key,value)::rest) =>
       name == key && dataMatches fuel member value && dataMatches fuel tail (.record rest)
+  -- A sum value matches a CLOSED, ground sum row: its label selects the first
+  -- row entry of that name and the payload must match that entry's type.
+  -- An open row (variable tail) is not ground and refuses, like `.variable`.
+  | fuel+1,.variant (.field name member tail),.variant label payload =>
+      if name == label then dataMatches fuel member payload
+      else dataMatches fuel (.variant tail) (.variant label payload)
   | _,_,_ => false
 
 def dataFrame : List UInt8 := "DREGG/OBJECTIVE-BEND/CLEAR-DATA/v1".toUTF8.toList
@@ -81,6 +87,12 @@ mutual
         let (count,rest) ← readNatural capacity bytes
         let (fields,tail) ← readFields capacity fuel count rest
         pure (.record fields,tail)
+    | fuel+1,4::bytes => do
+        let (size,rest) ← readNatural capacity bytes
+        if size > rest.length then none else do
+          let label ← String.fromUTF8? ⟨(rest.take size).toArray⟩
+          let (payload,tail) ← readData capacity fuel (rest.drop size)
+          pure (.variant label payload,tail)
     | _,_ => none
   termination_by fuel _ => (fuel,0,0)
   def readFields (capacity : ObjectiveBendDemandCapacity.Profile) :
@@ -103,6 +115,9 @@ def dataNodes : Nat → Data → Option Nat
   | fuel+1,.record fields => do
       let nodes ← fields.mapM (fun field => dataNodes fuel field.2)
       pure (1 + nodes.foldl (·+·) 0)
+  | fuel+1,.variant _ payload => do
+      let nodes ← dataNodes fuel payload
+      pure (1 + nodes)
 
 def decodeData (capacity : ObjectiveBendDemandCapacity.Profile) (budget : Budget)
     (bytes : List UInt8) : Option Data := do

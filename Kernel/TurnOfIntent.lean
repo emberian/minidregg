@@ -451,7 +451,7 @@ def ofWires (decode : List UInt8 → Option (Option (Cell R)))
   support k s := Minidregg.Compiler.StoreCodec.sortedSupport (wire k) s
   mem_support k s a := Minidregg.Compiler.StoreCodec.mem_sortedSupport (wire k) s a
   support_nodup k s := by
-    unfold Minidregg.Compiler.StoreCodec.sortedSupport
+    rw [Minidregg.Compiler.StoreCodec.sortedSupport_eq]
     exact Finset.sort_nodup _ _
 
 end Codec

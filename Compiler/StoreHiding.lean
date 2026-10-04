@@ -332,12 +332,10 @@ theorem sortedSupport_congr {left right : Store L}
     ext address
     have l := mem_sortedSupport W left address
     have r := mem_sortedSupport W right address
-    unfold sortedSupport at l r
-    rw [Finset.mem_sort] at l r
+    rw [sortedSupport_eq, Finset.mem_sort] at l r
     rw [l, r]
     exact not_congr (same address)
-  unfold sortedSupport
-  rw [supports]
+  rw [sortedSupport_eq, sortedSupport_eq, supports]
 
 theorem openedEntries_eq_filterMap (store : Store L) :
     openedEntries W visible store = (sortedSupport W store).filterMap fun address =>

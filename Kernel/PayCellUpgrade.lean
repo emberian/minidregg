@@ -64,7 +64,7 @@ theorem addressMap_injective : Function.Injective addressMap := by
 
 private theorem old_entries_distinct (store : OldStore) :
     ((entries PayCellLegacyV4.wire store).map Sigma.fst).Nodup := by
-  rw [entries_keys]
+  rw [entries_keys, Minidregg.Compiler.StoreCodec.sortedSupport_eq]
   exact Finset.sort_nodup _ _
 
 private theorem mapped_entries_distinct (store : OldStore) :
