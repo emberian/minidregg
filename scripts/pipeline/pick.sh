@@ -12,6 +12,7 @@ for c in "$@"; do
   if git -c commit.gpgsign=false cherry-pick "$c" >/dev/null 2>&1; then echo "picked $c -> $(git rev-parse --short HEAD)"; continue; fi
   for f in $(git diff --name-only --diff-filter=U); do
     if [[ "$f" =~ $gen ]]; then git checkout --ours -- "$f" && git add "$f"
+    elif [ "$f" = scripts/local-gates.sh ] && python3 "$H/gates-union.py" "$f" >/dev/null 2>&1; then git add "$f"
     elif [[ "$f" =~ ^[A-Za-z]+\.lean$ ]] && python3 "$H/union-imports.py" "$f" >/dev/null 2>&1; then git add "$f"
     fi
   done
