@@ -2456,7 +2456,7 @@
     {
       "module": "Compiler.ObjectiveBendTermWire",
       "path": "Compiler/ObjectiveBendTermWire.lean",
-      "sha256": "940beea43111bcc2e40d80994673e10e98422e4f37ef130bc925a465a6974a30",
+      "sha256": "6778e47ca4993aec68cb8ff791860fe44eed43b91a42d13d63dbe3b137a48f94",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -3331,7 +3331,7 @@
     {
       "module": "Host",
       "path": "Host.lean",
-      "sha256": "0e98ff1ed8f15b6e08f3bb730a932b54b38b930cb4caa37abb7dc7af536a10fb",
+      "sha256": "ece2ef8344af246c9cafbdf78d6e2ea140be030f5b22a51cfcfd5e065015b63d",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -3807,7 +3807,7 @@
     {
       "module": "Host.Json",
       "path": "Host/Json.lean",
-      "sha256": "4c0df44b0c0b29ecc71784a61af32152cc03f60f511a645d8a38ca542f948ae4",
+      "sha256": "b22cc0b30bdc13df0dc47cbf133d373cdfa3583e37d0d1f79d0757fc207b99b6",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -3849,7 +3849,7 @@
     {
       "module": "Host.Main",
       "path": "Host/Main.lean",
-      "sha256": "8d9a4e6179716db75f36b656a265786c19ace7c4dcc51a399bfa60a48416b233",
+      "sha256": "1fe1bd3d5db97936270b8323c0c4db41b0610b0a4337fa010e38fd6509ddf51f",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -3885,6 +3885,13 @@
       "module": "Host.NockEval",
       "path": "Host/NockEval.lean",
       "sha256": "d8fb7415e6ae583a11946187274a0e82fc63ea52b392ca9b7fe4c3e346a23f3d",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Host.ObjectiveActivityJson",
+      "path": "Host/ObjectiveActivityJson.lean",
+      "sha256": "bf4a77981e855e42e84ef1553e3faff5f091f6aec2459ead3b6693e54cf9a269",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -3933,7 +3940,7 @@
     {
       "module": "Host.ObjectivePackageAuthor",
       "path": "Host/ObjectivePackageAuthor.lean",
-      "sha256": "d6d4a22836395cf31808858808c8f8ed424ee1e569c0b63deadaad36a0bf9711",
+      "sha256": "e24e31e41395bda91686cd542a2c66b627500d858384b7cd83a0848f405ec2ca",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4087,7 +4094,7 @@
     {
       "module": "Kernel",
       "path": "Kernel.lean",
-      "sha256": "df3bfae9cb881c611bcca4330cf39a7c9ab86a5067defcb7adeca6f3d46756d2",
+      "sha256": "22eb1cd30da342d9722f1981a8894732f1c9e33db621da62751f0a59a03c243b",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6390,7 +6397,7 @@
     {
       "module": "Kernel.NativeHost",
       "path": "Kernel/NativeHost.lean",
-      "sha256": "be2fdd48e1f617232048ba03d1cbd29ed51248ed6c4bb418cf003ce6151559c0",
+      "sha256": "227b510e7d5e91cfa314e279ad0645e8f16e76fda9db63b5e654405d3482c223",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6446,7 +6453,7 @@
     {
       "module": "Kernel.NativeHostReplay",
       "path": "Kernel/NativeHostReplay.lean",
-      "sha256": "b2fb811943d4263f542061ff81f1f2c99e17ad555af5bc15c7fdca02b72c330d",
+      "sha256": "2e4535e5cf179f384bab22a5699327594719e4b79e3657482549230af14bb2e7",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6509,7 +6516,7 @@
     {
       "module": "Kernel.NativeSpecializedConsent",
       "path": "Kernel/NativeSpecializedConsent.lean",
-      "sha256": "54ec0434081aa5b25b10e06e9eae561abac07d5f49d2e18592a9491a91726e00",
+      "sha256": "5ab3327ced59900c155d7a8a5928fbf29b4c7ba079b012c4f6e49585e15f9181",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6586,7 +6593,7 @@
     {
       "module": "Kernel.ObjectiveActivity",
       "path": "Kernel/ObjectiveActivity.lean",
-      "sha256": "fa9385dc26003d14fd8c75cc6dad59b4bde9b3542c5d0b7272c658b06715b13c",
+      "sha256": "c7298d432cc51b9e85b9184f176d83789114502bf93e38bb1a0840e085df969f",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6594,6 +6601,13 @@
       "module": "Kernel.ObjectiveActivityCell",
       "path": "Kernel/ObjectiveActivityCell.lean",
       "sha256": "7448a28e287e47f0b6a9d765118159346dd11526cad46150fdb2f8559d79a3a5",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Kernel.ObjectiveActivityReceiver",
+      "path": "Kernel/ObjectiveActivityReceiver.lean",
+      "sha256": "9ab3bf4a079acc2426d69178a31eee1fa060576ebf0a43db1d2e565755f263bd",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6654,9 +6668,16 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Kernel.ObjectiveKernelConfig",
+      "path": "Kernel/ObjectiveKernelConfig.lean",
+      "sha256": "c910b4a59a015303bd01ea34d8a6bd4d20248ba612344c875ccfa14ad0913d7b",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
       "module": "Kernel.ObjectiveResumeContract",
       "path": "Kernel/ObjectiveResumeContract.lean",
-      "sha256": "829c3e869fa223d0baf83d8c1f083cde34e4fc1ad056ef0f59c4693b5316b9e9",
+      "sha256": "82dd6698e7308a8103d876694a7b8a56e89efe8fe809cdb3aa3bde2c62648271",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7433,7 +7454,7 @@
     {
       "module": "Kernel.TurnCensus",
       "path": "Kernel/TurnCensus.lean",
-      "sha256": "2348eea03b98d7032adf10bdb5cac48cb1733670e27c000dafeb566f845c0b12",
+      "sha256": "33a0fc0271935b8ebee19f3e737ae7594587837599703199011ab4c7a185a065",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
