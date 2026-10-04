@@ -5,6 +5,14 @@
   composed-scenario.py run SPEC             run, or resume, the scenario's retained ledger
   composed-scenario.py status SPEC          retained ledger and phase report; no native call
   composed-scenario.py settle SPEC STEP absent|confirmed EVIDENCE REASON
+  composed-scenario.py spec WORLD.json STATE N OP [--residents-binding B]
+                            [--app-world-inputs PLATFORM SELECTION]
+                                            print a spec over the first N inventory members:
+                                            one shared room of all N, churn on the last,
+                                            documents in the room, every phase declared
+  composed-scenario.py gate SPEC RESULT.json  run (or resume), then the DEPLOY verdict:
+                                            PASS only when every one of the seven phases
+                                            is declared and reports exactly "pass"
 
 The population comes from the world's inventory file (WORLD-IDENTITY.json):
 rooms name their owner and members by inventory name or by an inventory
@@ -15,7 +23,16 @@ checked native workspaces; outside entrance authorization is qualified separatel
 Phases run in order: rooms, churn, documents, apps, connector, residents,
 restart. A phase whose adapter is absent from source is reported UNBUILT; one
 whose input or prerequisite phase is absent is BLOCKED with the reason. No
-phase is faked.
+phase is faked. `run` exits 0 with blocked or unbuilt phases (a development
+report); `gate` does not: for the deploy gate an undeclared, blocked, unbuilt
+or partly blocked phase is a FAIL, named.
+
+Restart has two forms. {"binding": B} retains the typed resident's own
+crash/restart (residents' binding). {"world": "restart"} restarts the world's
+Store through the inventory's own "restart": {"argv": [...]} and then requires
+that every member resolves every room's notes to the SAME cell as before, reads
+every documents-phase marker exactly once, and sees an owner write admitted
+after the restart.
 
 Connector binding: {"input": "/provision-input.json", "journeyInput": "/journey-input.json"}.
 An app can instead bind {"worldInputs":{"platformInputs":"/platform-inputs.json",
@@ -53,6 +70,9 @@ _spec.loader.exec_module(step_ledger)
 PHASES = ("rooms", "churn", "documents", "apps", "connector", "residents", "restart")
 REQUIRES = {"rooms": (), "churn": ("rooms",), "documents": ("rooms",), "apps": ("rooms",),
             "connector": ("apps",), "residents": ("rooms",), "restart": ()}
+# The deploy gate's definition of "reaches the end" (G-product-journey §1 rows
+# 6-13): every phase, each exactly "pass". Changing this set weakens the gate.
+GATE_PHASES = PHASES
 SPK = HERE.parent.parent / "scripts" / "spk-platform"
 SCRIPTS = HERE.parent.parent / "scripts"
 # In-source adapters each phase composes with. The typed resident adapter
@@ -196,6 +216,12 @@ def plan(spec):
         require(spec["connector"]["app"] in spec.get("apps", {})
                 and "worldInputs" in spec["apps"][spec["connector"]["app"]],
                 "derived connector requires an app with worldInputs")
+    restart = spec.get("restart", {})
+    if "world" in restart:
+        require(restart == {"world": "restart"}, "world restart is spelled {\"world\": \"restart\"}")
+        argv = world.get("restart", {}).get("argv")
+        require(isinstance(argv, list) and argv and all(isinstance(a, str) for a in argv)
+                and Path(argv[0]).is_absolute(), "world restart needs the inventory's absolute restart argv")
     for phase in ("residents", "restart"):
         value = spec.get(phase, {})
         if "binding" in value:
@@ -215,6 +241,7 @@ def plan(spec):
             "destination": f"{user}@{ssh['host']}",
             "population": population, "op": op, "phases": phases, "rooms": rooms,
             "churn": churn, "documents": docs, "concurrency": concurrency,
+            "restartArgv": world.get("restart", {}).get("argv"),
             "timeout": spec.get("timeoutSeconds", 3600)}
 
 
@@ -247,6 +274,8 @@ def readiness(spec, p):
                 report[phase] = "unbuilt: connector capture/publication journey absent"
             else:
                 report[phase] = "ready"
+        elif phase == "restart" and "world" in spec.get(phase, {}):
+            report[phase] = "ready" if p["rooms"] else "blocked: world restart verifies rooms; none declared"
         elif "binding" in spec.get(phase, {}):
             report[phase] = "ready" if ADAPTERS["resident"].is_file() else "unbuilt: typed resident adapter absent"
         else:
@@ -598,6 +627,40 @@ class Scenario:
                                                 "--binding", binding["binding"], "--output", binding["output"]],
                          reentrant=False)
 
+    def world_restart(self):
+        """Restart the world's Store; every member's view must survive it."""
+        before = {}
+        for key, room in self.p["rooms"].items():
+            for who in room["members"]:
+                label = f"room:{key}:resolve:{who}"
+                if self.ledger.done(label):
+                    before[(key, who)] = json.loads(self.ledger.result(label))["target"]
+        require(before, "world restart needs the rooms phase's resolved targets")
+        self.adapter("restart:world", list(self.p["restartArgv"]), reentrant=False)
+        for (key, who), target in sorted(before.items()):
+            room = self.p["rooms"][key]
+            name = self.alias(key, who)
+            self.read(self.ledger, f"restart:{key}:resolve:{who}", who, f"room resolve {name}/notes",
+                      check=lambda out, t=target: (json.loads(out)["target"] == t,
+                                                   "the same notes cell as before the restart"))
+        for key in self.p["documents"].get("rooms", []):
+            room = self.p["rooms"][key]
+            markers = [f"{self.p['op']}-{key}-{who} composed member text" for who in room["members"]
+                       if self.lane(f"documents:{key}:{who}").done(f"documents:{key}:{who}:submit")]
+            for who in room["members"]:
+                self.read(self.ledger, f"restart:{key}:read:{who}", who, f"doc show {self.alias(key, who)}/notes",
+                          check=lambda out, ms=markers: (all(out.count(m) == 1 for m in ms),
+                                                         f"each of {len(ms)} pre-restart writes exactly once"))
+        for key, room in self.p["rooms"].items():
+            owner, op = room["owner"], f"{self.p['op']}-{key}-after-restart"
+            marker = f"{op} owner text after restart"
+            self.local(self.ledger, f"restart:{key}:append", owner,
+                       f"doc append {op} {room['name']}/notes {json.dumps(marker)}", operation=op)
+            self.effect(self.ledger, f"restart:{key}:submit", owner, "submit " + op)
+            for who in room["members"]:
+                self.read(self.ledger, f"restart:{key}:after:{who}", who, f"doc show {self.alias(key, who)}/notes",
+                          check=lambda out, m=marker: (out.count(m) == 1, "the post-restart write, once"))
+
     def adapter(self, label, argv, reentrant, check=None):
         if self.ledger.done(label):
             return
@@ -762,6 +825,8 @@ class Scenario:
             required = REQUIRES[phase]
             if "binding" in self.spec.get(phase, {}):
                 required = (*required, "connector" if phase == "residents" else "residents")
+            if phase == "restart" and "world" in self.spec.get(phase, {}):
+                required = (*required, "rooms", *(("documents",) if self.p["documents"].get("rooms") else ()))
             missing = [r for r in required
                        if r in self.p["phases"] and not str(statuses.get(r, "")).startswith("pass")]
             if str(statuses.get(phase, "")).startswith(("pass", "fail (probes)")) and (
@@ -780,6 +845,8 @@ class Scenario:
                 try:
                     if phase in ("rooms", "churn", "documents"):
                         getattr(self, phase)()
+                    elif phase == "restart" and "world" in self.spec.get(phase, {}):
+                        self.world_restart()
                     else:
                         self.generic(phase)
                 except (step_ledger.LedgerFenced, Undecided, ValueError, RuntimeError, KeyError, OSError,
@@ -839,14 +906,72 @@ def status(spec):
             "lanesPending": {k: v["pending"] for k, v in state.items() if k.startswith("lane:") and v.get("pending")}}
 
 
+def generate(world_path, state, count, op, residents=None, app_inputs=None):
+    """A spec over the first COUNT inventory members, every phase declared."""
+    world = read(world_path)
+    members, _ = inventory(world)
+    names = list(members)
+    require(2 <= count <= len(names), f"N must be 2..{len(names)} (the inventory's member count)")
+    population = names[:count]
+    spec = {"type": "mini-composed-scenario-v1", "world": str(Path(world_path).resolve()),
+            "inventorySha256": inventory_sha(world), "state": str(Path(state).resolve()),
+            "operationPrefix": op, "population": population, "phases": list(PHASES),
+            "concurrency": min(count, 4),
+            "rooms": {"shared": {"name": f"{op}-room", "owner": population[0], "members": "population"}},
+            "churn": {"rooms": {"shared": {"member": population[-1]}}},
+            "documents": {"rooms": ["shared"]},
+            "restart": {"world": "restart"} if residents is None else {"binding": residents}}
+    if residents is not None:
+        spec["residents"] = {"binding": residents}
+    if app_inputs is not None:
+        spec["apps"] = {"sheet": {"worldInputs": {"platformInputs": app_inputs[0], "selection": app_inputs[1]}}}
+        spec["connector"] = {"app": "sheet"}
+    plan(spec)
+    return spec
+
+
+def gate(spec, spec_path, result_path):
+    report = Scenario(spec, spec_path).run()
+    phases, reasons = report["phases"], []
+    for phase in GATE_PHASES:
+        status = phases.get(phase)
+        if phase not in spec.get("phases", PHASES):
+            reasons.append(f"{phase}: not declared in the spec")
+        elif status != "pass":
+            reasons.append(f"{phase}: {status or 'never ran'}")
+    population = plan(spec)["population"]
+    result = {"type": "mini-composed-gate-v1", "verdict": "FAIL" if reasons else "PASS",
+              "members": len(population), "population": population, "phases": phases,
+              "reasons": reasons, "failedRows": report["failed"], "pending": report["pending"],
+              "spec": str(Path(spec_path).resolve()), "specSha256": sha(spec_path),
+              "world": spec["world"], "worldSha256": sha(spec["world"]), "state": report["state"]}
+    save(result_path, result)
+    return result
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("words", nargs="+")
-    words = parser.parse_args(argv).words
+    parser.add_argument("--residents-binding")
+    parser.add_argument("--app-world-inputs", nargs=2)
+    parsed = parser.parse_args(argv)
+    words = parsed.words
     os.umask(0o077)
     if len(words) < 2:
         parser.error("command and SPEC required")
+    if words[0] == "spec":
+        if len(words) != 5 or not re.fullmatch(r"[0-9]+", words[3]):
+            parser.error("spec WORLD.json STATE N OP")
+        print(json.dumps(generate(words[1], words[2], int(words[3]), words[4], parsed.residents_binding,
+                                  parsed.app_world_inputs), indent=2))
+        return 0
     spec = read(words[1])
+    if words[0] == "gate":
+        if len(words) != 3:
+            parser.error("gate SPEC RESULT.json")
+        result = gate(spec, words[1], words[2])
+        print(json.dumps(result, indent=2))
+        return 0 if result["verdict"] == "PASS" else 1
     if words[0] == "check" and len(words) == 2:
         p = plan(spec)
         result = {"type": "mini-composed-scenario-check-v1", "effects": False,
