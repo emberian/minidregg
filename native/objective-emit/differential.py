@@ -128,6 +128,10 @@ def process(item, worker):
     if rc != 0:
         return [f"FAIL {name} lean-suite: {err.strip()[:400]!r}"], 0, 1
     summary = json.loads(out[-1])
+    # A cohort row may pin the whole run's tick count (O(1) operators: a regression to
+    # recursion changes the count, so it is a FAIL, not merely a slower PASS).
+    if item.get("expectedTicks") is not None and summary["fullTicks"] != int(item["expectedTicks"]):
+        fails += 1; lines.append(f"FAIL {name} ticks-pin: runBounded took {summary['fullTicks']} ticks; the cohort pins {item['expectedTicks']}")
     lines.append(f"# {name} typing={typing} rom-nodes={summary['nodes']} labels={summary['labels']} full-ticks={summary['fullTicks']} responses={summary.get('responses',0)} yields={summary.get('yields',0)} lean-suite-s={time.time()-started:.1f}")
     prog = os.path.join(work, "prog")
     cc = subprocess.run(["cc", "-O2", "-std=c11", "-Wall", "-Werror"] + a.cflags.split() +

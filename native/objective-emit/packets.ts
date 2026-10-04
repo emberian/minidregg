@@ -30,7 +30,7 @@ for(const cohortPath of cohorts){
   }catch(error:any){status="refused";message=String(error?.message??JSON.stringify(error)).trim().slice(0,400);}
   index.push({name:item.name,cohort:cohortPath,status,message,core:existsSync(join(dir,"source.core.json"))?join(dir,"source.core.json"):null,
    typed:existsSync(join(dir,"source.typed.json"))?join(dir,"source.typed.json"):null,
-   responses:join(dir,"responses.json")});
+   responses:join(dir,"responses.json"),expectedTicks:item.expectedTicks??null});
  }
 }
 writeFileSync(join(outRoot,"index.json"),JSON.stringify(index,null,2)+"\n");

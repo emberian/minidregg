@@ -108,7 +108,7 @@ def overlay : Ty → Ty → Ty
   | _, inherited => inherited
 
 def primitiveTypes : Primitive → Ty × Ty
-  | .add | .multiply | .subtract | .divide => (.natural, .natural)
+  | .add | .multiply | .subtract | .divide | .modulo => (.natural, .natural)
   | .equal | .less | .lessEqual => (.natural, .boolean)
   | .conjunction => (.boolean, .boolean)
   | .labelEqual => (.label, .boolean)
@@ -840,23 +840,24 @@ theorem label_equality_accepted :
 theorem boolean_label_equality_refused :
     (check ⟨.binary .labelEqual (.boolean true) (.boolean true), fun _ => none, {}⟩ [] 8).isNone = true := by decide
 
-/-- Truncated subtraction and floor division are Nat-to-Nat; the order primitives are
+/-- Truncated subtraction, floor division and remainder are Nat-to-Nat; the order primitives are
 Nat-to-Bool and drive a Boolean branch; none takes a label or a Boolean operand. -/
 theorem nat_primitive_types :
-    ∀ primitive, primitive = .subtract ∨ primitive = .divide →
+    ∀ primitive, primitive = .subtract ∨ primitive = .divide ∨ primitive = .modulo →
       (check ⟨.binary primitive (.nat 9) (.nat 4), fun _ => none, {}⟩ [] 8).map
         (fun checked => checked.type) = some .natural := by
-  intro primitive choice; rcases choice with rfl | rfl <;> decide
+  intro primitive choice; rcases choice with rfl | rfl | rfl <;> decide
 theorem order_primitive_branch_accepted :
     ∀ primitive, primitive = .less ∨ primitive = .lessEqual →
       (check ⟨.ifBool (.binary primitive (.nat 3) (.nat 4)) (.label "below") (.label "above"),
         fun _ => none, {}⟩ [] 16).map (fun checked => checked.type) = some .label := by
   intro primitive choice; rcases choice with rfl | rfl <;> decide
 theorem nat_primitive_label_operand_refused :
-    ∀ primitive, primitive = .subtract ∨ primitive = .divide ∨ primitive = .less ∨ primitive = .lessEqual →
+    ∀ primitive, primitive = .subtract ∨ primitive = .divide ∨ primitive = .less ∨ primitive = .lessEqual ∨
+      primitive = .modulo →
       (check ⟨.binary primitive (.label "9") (.nat 4), fun _ => none, {}⟩ [] 8).isNone = true ∧
       (check ⟨.binary primitive (.nat 9) (.boolean true), fun _ => none, {}⟩ [] 8).isNone = true := by
-  intro primitive choice; rcases choice with rfl | rfl | rfl | rfl <;> decide
+  intro primitive choice; rcases choice with rfl | rfl | rfl | rfl | rfl <;> decide
 
 /-- An affine binding used in two arms counts twice: arms are additive. -/
 theorem affine_in_two_arms_refused :
@@ -1051,7 +1052,7 @@ def decodePrimitive (value : Json) : Except String Primitive := do
   | "equal" => pure .equal | "conjunction" => pure .conjunction
   | "labelEqual" => pure .labelEqual
   | "subtract" => pure .subtract | "divide" => pure .divide
-  | "less" => pure .less | "lessEqual" => pure .lessEqual
+  | "less" => pure .less | "lessEqual" => pure .lessEqual | "modulo" => pure .modulo
   | _ => .error "unknown Objective primitive"
 
 /-- Decodes exactly the existing world lowerer's runtime core wire; no second

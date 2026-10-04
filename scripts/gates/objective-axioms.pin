@@ -1303,6 +1303,7 @@ A Minidregg.Theory.ObjectiveBendOpenRecursion.Primitive.equal.elim : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.Primitive.labelEqual.elim : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.Primitive.less.elim : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.Primitive.lessEqual.elim : -
+A Minidregg.Theory.ObjectiveBendOpenRecursion.Primitive.modulo.elim : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.Primitive.multiply.elim : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.Primitive.ofNat : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.Primitive.ofNat_ctorIdx : -
@@ -1371,6 +1372,7 @@ A Minidregg.Theory.ObjectiveBendOpenRecursion.case_selects_injected_arm : Quot.s
 A Minidregg.Theory.ObjectiveBendOpenRecursion.conjunction_boolean_exact : propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.conjunction_labels_refused : propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.divide_floor_exact : propext
+A Minidregg.Theory.ObjectiveBendOpenRecursion.divide_modulo_reconstruct : propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.equality_boolean_exact : propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.equality_drives_branch : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.extendFields : -

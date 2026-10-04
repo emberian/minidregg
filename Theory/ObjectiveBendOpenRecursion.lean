@@ -11,10 +11,11 @@ set_option autoImplicit false
 
 /-- The scalar primitives, each one machine transition on unbounded naturals.
 `subtract` is truncated at zero, `divide` is floor division with `a / 0 = 0`,
+`modulo` is Lean's `%` (`a % 0 = a`, so `(a / b) * b + a % b = a` for every `b`),
 `less`/`lessEqual` are the order on Nat; the surface `>`/`>=` are their negations. -/
 inductive Primitive where
   | add | multiply | equal | conjunction | labelEqual
-  | subtract | divide | less | lessEqual
+  | subtract | divide | less | lessEqual | modulo
   deriving Repr, DecidableEq
 
 inductive Term where
@@ -175,6 +176,7 @@ def primitiveResult : Primitive → Term → Term → Option Term
   | .divide, .nat a, .nat b => some (.nat (a / b))
   | .less, .nat a, .nat b => some (.boolean (decide (a < b)))
   | .lessEqual, .nat a, .nat b => some (.boolean (decide (a ≤ b)))
+  | .modulo, .nat a, .nat b => some (.nat (a % b))
   | _, _, _ => none
 
 /-- All String labels, including true/false, are excluded from Boolean operations. -/
@@ -214,6 +216,19 @@ theorem divide_floor_exact (left right : Nat) :
   rw [Nat.add_mul, Nat.one_mul]
   exact Nat.lt_div_mul_add positive
 
+/-- `modulo` is the remainder of `divide`: the two reconstruct the dividend for every
+divisor, zero included (`a / 0 = 0`, `a % 0 = a`), and the remainder is below a
+positive divisor. -/
+theorem divide_modulo_reconstruct (left right quotient remainder : Nat)
+    (divided : primitiveResult .divide (.nat left) (.nat right) = some (.nat quotient))
+    (reduced : primitiveResult .modulo (.nat left) (.nat right) = some (.nat remainder)) :
+    quotient * right + remainder = left ∧ (0 < right → remainder < right) ∧
+      (right = 0 → remainder = left) := by
+  simp only [primitiveResult, Option.some.injEq, Term.nat.injEq] at divided reduced
+  subst divided; subst reduced
+  refine ⟨?_, Nat.mod_lt left, fun zero => by simp [zero]⟩
+  rw [Nat.mul_comm]; exact Nat.div_add_mod left right
+
 /-- The order primitives decide `<` and `≤` on Nat exactly. -/
 theorem order_exact (left right : Nat) :
     primitiveResult .less (.nat left) (.nat right) = some (.boolean (decide (left < right))) ∧
@@ -222,10 +237,11 @@ theorem order_exact (left right : Nat) :
 
 /-- The arithmetic and order primitives take naturals only: a label or Boolean operand refuses. -/
 theorem nat_primitives_refuse_labels (primitive : Primitive) (left right : String)
-    (natural : primitive = .subtract ∨ primitive = .divide ∨ primitive = .less ∨ primitive = .lessEqual) :
+    (natural : primitive = .subtract ∨ primitive = .divide ∨ primitive = .less ∨ primitive = .lessEqual ∨
+      primitive = .modulo) :
     primitiveResult primitive (.label left) (.label right) = none ∧
       primitiveResult primitive (.boolean (decide (left = right))) (.nat 0) = none := by
-  rcases natural with rfl | rfl | rfl | rfl <;> exact ⟨rfl, rfl⟩
+  rcases natural with rfl | rfl | rfl | rfl | rfl <;> exact ⟨rfl, rfl⟩
 
 inductive Step : Term → Term → Prop where
   | beta (body argument : Term) : Step (.app (.lam body) argument) (instantiate body argument)
@@ -586,5 +602,6 @@ theorem one_turn_interaction (plan : Term) :
 #assert_axioms label_equality_boolean_exact label_equality_booleans_refused
   case_selects_injected_arm equality_drives_branch yields_no_step yields_deterministic yields_plug
   one_turn_interaction subtract_truncated_exact divide_floor_exact order_exact nat_primitives_refuse_labels
+  divide_modulo_reconstruct
 
 end Minidregg.Theory.ObjectiveBendOpenRecursion

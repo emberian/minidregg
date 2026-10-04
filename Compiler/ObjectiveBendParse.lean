@@ -286,10 +286,10 @@ structure Token where
   stop : Nat
   deriving Inhabited
 
-/-- `^(?:[A-Za-z_]\w*|[0-9]+n?|"(?:[^"\\]|\\.)*"|->|==|!=|<=|>=|&&|\|\||[{}:=().,+*/<>-])` -/
+/-- `^(?:[A-Za-z_]\w*|[0-9]+n?|"(?:[^"\\]|\\.)*"|->|==|!=|<=|>=|&&|\|\||[{}:=().,+*/%<>-])` -/
 def tokenRe : Re := alts [ident, seqs [many1 (.char asciiDigit), opt (chr 'n')], quoted,
   str "->", str "==", str "!=", str "<=", str ">=", str "&&", str "||",
-  .char (fun c => "{}:=().,+*/<>-".toList.contains c)]
+  .char (fun c => "{}:=().,+*/%<>-".toList.contains c)]
 
 def tokenize (text : List Char) : Except String (Array Token) := do
   let mut tokens : Array Token := #[]
@@ -312,7 +312,7 @@ def precedence (op : String) : Option Nat :=
   match op with
   | "||" => some 1 | "&&" => some 2 | "==" => some 3 | "!=" => some 3
   | "<" => some 4 | ">" => some 4 | "<=" => some 4 | ">=" => some 4
-  | "+" => some 5 | "-" => some 5 | "*" => some 6 | "/" => some 6
+  | "+" => some 5 | "-" => some 5 | "*" => some 6 | "/" => some 6 | "%" => some 6
   | _ => none
 
 structure ExprEnv where

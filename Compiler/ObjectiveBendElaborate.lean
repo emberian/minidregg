@@ -370,6 +370,7 @@ def primitiveOf : String → Except String CorePrimitive
   | "add" => .ok .add | "multiply" => .ok .multiply | "equal" => .ok .equal | "conjunction" => .ok .conjunction
   | "labelEqual" => .ok .labelEqual
   | "subtract" => .ok .subtract | "divide" => .ok .divide | "less" => .ok .less | "lessEqual" => .ok .lessEqual
+  | "modulo" => .ok .modulo
   | other => .error ("primitive " ++ other ++ " is not a Core4 constructor yet")
 
 mutual
@@ -497,6 +498,7 @@ def primitiveSignature : String → Option (String × PTy × PTy)
   | "&&" => some ("conjunction", .boolean, .boolean)
   | "-" => some ("subtract", .natural, .natural)
   | "/" => some ("divide", .natural, .natural)
+  | "%" => some ("modulo", .natural, .natural)
   | "<" => some ("less", .natural, .boolean)
   | "<=" => some ("lessEqual", .natural, .boolean)
   | _ => none

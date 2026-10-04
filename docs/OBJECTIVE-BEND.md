@@ -510,7 +510,7 @@ Arguments and fields stay thunks; laziness is preserved.
 
 Known front-end defects:
 
-- `- / < <=` are the Core4 primitives `subtract / divide / less / lessEqual` (one machine
+- `- / % < <=` are the Core4 primitives `subtract / divide / modulo / less / lessEqual` (one machine
   step each on unbounded naturals; see [front end](OBJECTIVE-BEND-FRONTEND.md#subtraction-order-division-and-let));
   `>` and `>=` are their negations through `ifBool`, as `!=` is `equal`/`labelEqual`
   and `||` is `ifBool`.

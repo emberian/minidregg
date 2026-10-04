@@ -39,7 +39,7 @@ for(let i=1;i<=depth;i++)deep+=`record R${i}:\n  l: R${i-1}\n  r: R${i-1}\n`;
 deep+=`def pass(x: R${depth}) -> R${depth}:\n  x\n`;job("deep",deep,"pass",[],"definition");
 job("small-table",E+"record A:\n  a: Nat\nrecord B:\n  l: A\n  r: A\ndef pass(x: B) -> B:\n    x\n","pass",[],"definition");
 // [operator, result type, Core4 primitive, lowered as the negation of that primitive]
-const ops:[string,string,string,boolean][]=[["<","Bool","less",false],[">","Bool","lessEqual",true],["<=","Bool","lessEqual",false],[">=","Bool","less",true],["-","Nat","subtract",false],["/","Nat","divide",false]];
+const ops:[string,string,string,boolean][]=[["<","Bool","less",false],[">","Bool","lessEqual",true],["<=","Bool","lessEqual",false],[">=","Bool","less",true],["-","Nat","subtract",false],["/","Nat","divide",false],["%","Nat","modulo",false]];
 ops.forEach(([op,type],i)=>run("op-"+i,"7n "+op+" 2n",type));
 run("minus","4n - 1n","Nat");
 job("let",E+"def f(x: Nat) -> Nat:\n  let y = x + 1n\n  let x: Nat = y * y\n  x + x\n","f",[],"definition");
@@ -148,7 +148,7 @@ ops.forEach(([op,,primitive,negated],i)=>{
 });
 if(JSON.parse(findTag(out("minus").term,"fix").spec.metadata.fields[0].value.value).join()!=="Probe")throw Error("package label names a module the source does not have");
 if(out("minus").sourceModules.length!==1)throw Error("captured source modules changed");
-console.log("OPERATOR LOWERING PASS: - / < <= are Core4 binary subtract/divide/less/lessEqual; > >= are their negations, operands in source order; no package fields added");
+console.log("OPERATOR LOWERING PASS: - / % < <= are Core4 binary subtract/divide/modulo/less/lessEqual; > >= are their negations, operands in source order; no package fields added");
 const fBody=findTag(out("let").term,"fix").spec.extension.body.body.fields.find((f:any)=>f.name==="Probe.f").value.body;
 if(fBody.tag!=="app"||fBody.fn.tag!=="lam"||fBody.arg.tag!=="binary"||fBody.arg.primitive!=="add"||fBody.arg.left.tag!=="bound"||fBody.arg.left.index!==0)
  throw Error("let did not lower to an application of a lambda whose argument is the value, elaborated outside the binder");

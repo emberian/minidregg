@@ -378,7 +378,8 @@ on two billion-sized Nats costs what `3n - 1n` costs.
 `a - b` stops at zero. `a / b` is whole-number division, rounding down, and
 `a / 0n` is `0n`: the language has no catchable exception, so a zero divisor has
 to mean something, and a program whose zero divisor is a real case tests it
-first. `a < b`, `a <= b`, `a > b` and `a >= b` give a Bool.
+first. `a % b` is what `/` leaves over, so `a % 0n` is `a`, and
+`(a / b) * b + a % b` is always `a`. `a < b`, `a <= b`, `a > b` and `a >= b` give a Bool.
 
 `let name = value` followed by the rest of the body at the same indent, or
 `let name = value in expression`, names a value. It is a suspended computation

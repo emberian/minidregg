@@ -1,8 +1,11 @@
 edition ObjectiveBend 1
-# The surface operators - / < <= > >= . Each is one Core4 machine step on unbounded
-# naturals (Primitive subtract / divide / less / lessEqual; `a > b` is `!(a <= b)` and
-# `a >= b` is `!(a < b)`), so money-sized values cost the same as small ones.
-# `-` is truncated at 0n; `/` is floor division and a zero divisor gives 0n.
+# The surface operators - / % < <= > >= . Each is one Core4 machine step on unbounded
+# naturals (Primitive subtract / divide / modulo / less / lessEqual; `a > b` is `!(a <= b)`
+# and `a >= b` is `!(a < b)`), so money-sized values cost the same as small ones.
+# `-` is truncated at 0n; `/` is floor division and a zero divisor gives 0n; `%` is the
+# remainder of `/`, so a zero divisor gives the dividend: (a / b) * b + a % b == a always.
+# The cohort pins the machine tick count of the money-sized rows (expectedTicks): a
+# lowering back to recursion is red there, not merely slower.
 
 def subExact() -> Nat:
   9n - 4n
@@ -113,3 +116,15 @@ def atMostOfArguments(a: Nat, b: Nat) -> Bool:
 
 def lessOfArguments(a: Nat, b: Nat) -> Bool:
   a < b
+
+def modExact() -> Nat:
+  17n % 5n
+
+def modByZero() -> Nat:
+  17n % 0n
+
+def modOfArguments(a: Nat, b: Nat) -> Nat:
+  a % b
+
+def divModIdentity(a: Nat, b: Nat) -> Bool:
+  (a / b) * b + a % b == a

@@ -95,6 +95,10 @@ theorem primitive_result_typed {assumptions : Assumptions} {types : AddressTypes
       obtain ⟨first,rfl⟩ := natural_value_form leftTyped
       obtain ⟨second,rfl⟩ := natural_value_form rightTyped
       exact ⟨.boolean (decide (first≤second)),.boolean (decide (first≤second)),rfl,rfl,.boolean _⟩
+  | modulo =>
+      obtain ⟨first,rfl⟩ := natural_value_form leftTyped
+      obtain ⟨second,rfl⟩ := natural_value_form rightTyped
+      exact ⟨.nat (first%second),.natural (first%second),rfl,rfl,.natural _⟩
 
 theorem stack_binary_right_values {assumptions : Assumptions} {types : AddressTypes}
     {stack : List Frame} {input result : Ty} {right : RuntimeValue}

@@ -75,7 +75,7 @@ fingerprints, not Mini package identities.
 | `match n:` `case 0n:` / `case 1n+p:` | `ifZero` (exactly those two branches) |
 | `match b:` `case true:` / `case false:` | `ifBool` |
 | `sum S:` `l: T`; `S.l(e)`; `match s:` `case l(x):` | variant type; `inject l e`; `case` (exhaustive, no wildcard) |
-| `-`, `/`, `<`, `<=`, `>`, `>=` | `binary subtract / divide / less / lessEqual`; `>` and `>=` are `!(a <= b)` and `!(a < b)`: see below |
+| `-`, `/`, `%`, `<`, `<=`, `>`, `>=` | `binary subtract / divide / modulo / less / lessEqual`; `>` and `>=` are `!(a <= b)` and `!(a < b)`: see below |
 | `let x = v` + rest of the body, `let x: T = v in e` | `(λx. body) v`, one lazy cell for `v`: see below |
 
 The `==` dispatch needs both operand types; an unannotated operand is refused.
@@ -135,6 +135,7 @@ their size:
 | --- | --- | --- |
 | `a - b` | `binary subtract` | truncated: `0n` when `b` exceeds `a` (`subtract_truncated_exact`) |
 | `a / b` | `binary divide` | floor division, and `a / 0n = 0n` (`divide_floor_exact`) |
+| `a % b` | `binary modulo` | the remainder of `/`, so `a % 0n = a` and `(a / b) * b + a % b = a` for every `b` (`divide_modulo_reconstruct`) |
 | `a < b` | `binary less` | Bool (`order_exact`) |
 | `a <= b` | `binary lessEqual` | Bool |
 | `a > b` | `!(a <= b)`, i.e. `ifBool (lessEqual a b) false true` | Bool |
@@ -146,7 +147,9 @@ catchable exception; `0n` is the `Nat.div` convention, and a program whose zero
 divisor is a real case must test it first. The machine primitives take naturals
 only: a label or Boolean operand is a typing refusal (`nat_primitive_label_operand_refused`)
 and, untyped, a `wrongValue` refusal. The C backend computes them on its 32-bit-limb
-naturals (`native/objective-emit/runtime.c`: `nat_sub`, `nat_div`, `nat_cmp`).
+naturals (`native/objective-emit/runtime.c`: `nat_sub`, `nat_divmod`, `nat_cmp`). The preview
+cohort pins the whole-run tick count of its money-sized operator rows (`expectedTicks`,
+checked by the C differential against `runBounded`), so a lowering back to recursion is red.
 
 `let x = v` (statement form: the rest of the body follows at the same indent) and
 `let x: T = v in e` (expression form) lower to `app (lam body) v`. An application
