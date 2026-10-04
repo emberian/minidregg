@@ -25,6 +25,7 @@
 # updated 2026-10-04: Compiler.ObjectiveBendTermWire: the proved decode link the front end accept uses (elaborator-2, rebased by merge-keeper onto c5)  [counts: Minidregg 0 1, Theory 69 151, Kernel 342 498, Pred 7 11, Effects 0 3, Compiler 140 307, Selvage 12 153, Assurance 0 151, Host 75 109, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 11, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-04: fn-wire: Host reads the fncu cursor with Mini's grammar interpreter (Compiler.FnWireFncu) instead of the fn consumer-inspect subprocess  [counts: Minidregg 0 1, Theory 69 154, Kernel 342 494, Pred 7 11, Effects 0 3, Compiler 144 314, Selvage 12 153, Assurance 0 151, Host 75 108, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 11, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-04: batch c12: native-exercise-2 D4, ports-a, activity-route (native activity commands; wedge fix ported)  [counts: Minidregg 0 1, Theory 70 154, Kernel 349 497, Pred 7 11, Effects 0 3, Compiler 144 314, Selvage 12 153, Assurance 0 151, Host 76 109, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 11, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-04: batch c13: 17 queued ranges (W09 W11 W13 W14 W16 W19 W20 W23 W24 W25 W26 W27 w06 retention-payers ports-b agreement-2c fn-wire-2)  [counts: Minidregg 0 1, Theory 70 154, Kernel 355 498, Pred 7 11, Effects 0 3, Compiler 144 315, Selvage 12 153, Assurance 0 151, Host 76 109, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 11, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -450,7 +451,13 @@ Kernel.FnSelectiveReleaseSignature
 Kernel.FnSelectiveReleaseSourceAuthority
 Kernel.FnSelectiveReleaseSourcePublication
 Kernel.FnSelectiveReleaseSourceReceiver
+Kernel.GeneralSimplexReachability
 Kernel.GenericSimplex
+Kernel.GenericSimplexAuditProjection
+Kernel.GenericSimplexLocal
+Kernel.GenericSimplexQuorum
+Kernel.GenericSimplexStructure
+Kernel.GenericSimplexVAInvariant
 Kernel.GrainResourceBirthAdmission
 Kernel.GrainResourceBirthFamilies
 Kernel.GrainResourceBirthPolicyController
