@@ -1,0 +1,35 @@
+edition ObjectiveBend 1
+# Differential/timing workloads for the C backend (native/objective-emit).
+# Each discriminates something the machine must get exactly right at scale:
+# deep laziness, sharing, unbounded naturals, sums over long lists.
+sum List:
+  nil: {}
+  cons: {head: Nat, tail: List}
+def count(n: Nat) -> Nat:
+  match n:
+    case 0n: 0n
+    case 1n+p: count(p) + 1n
+def work(n: Nat) -> Nat:
+  match n:
+    case 0n: 1n
+    case 1n+p: work(p) + work(p)
+def double(x: Nat) -> Nat:
+  x + x
+def sharedWork(n: Nat) -> Nat:
+  match n:
+    case 0n: 1n
+    case 1n+p: double(sharedWork(p))
+def power(n: Nat) -> Nat:
+  match n:
+    case 0n: 1n
+    case 1n+p: power(p) * 3n
+def build(n: Nat) -> List:
+  match n:
+    case 0n: List.nil()
+    case 1n+p: List.cons({head: n, tail: build(p)})
+def total(xs: List) -> Nat:
+  match xs:
+    case nil(_): 0n
+    case cons(c): c.head + total(c.tail)
+def listSum(n: Nat) -> Nat:
+  total(build(n))
