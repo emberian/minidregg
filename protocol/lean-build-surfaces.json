@@ -3964,7 +3964,7 @@
     {
       "module": "Kernel",
       "path": "Kernel.lean",
-      "sha256": "2e4bb222a71ca65b8fcb56cc55cf966d2fdcf22ca8c1426f005b3cf074704e1b",
+      "sha256": "b9102ecef4b57a1a5929eabd8a202b8ea623d09083a6dcecfe5130c50ae04ebd",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6027,6 +6027,13 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Kernel.Invitation",
+      "path": "Kernel/Invitation.lean",
+      "sha256": "959e4cdd9047085396dfa455661184b42d875f0835e051580fc85e360f1d0662",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
       "module": "Kernel.IrreversibleEffectSettlement",
       "path": "Kernel/IrreversibleEffectSettlement.lean",
       "sha256": "bc6d9d2e8ee2efe4d419d6c6247248f9193dd10b2e71e85d11b5fbc678b77819",
@@ -7213,6 +7220,13 @@
       "module": "Kernel.SealedMarket",
       "path": "Kernel/SealedMarket.lean",
       "sha256": "dc60e8ebb790fe066f216740ddee342458cca7a9a43943069eac5891a491ae2b",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Kernel.Seat",
+      "path": "Kernel/Seat.lean",
+      "sha256": "b3e47a4f7a1c181af042765a4fbe0e52d6d435bada32d70f5644c83c304381a4",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
