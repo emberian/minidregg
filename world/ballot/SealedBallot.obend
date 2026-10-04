@@ -1,0 +1,431 @@
+edition ObjectiveBend 1
+# A sealed-ballot vote for a room. Three phases by height: COMMIT (now < commitEnd):
+# each elector commits a digest of (voter, vote, salt) and nothing else; REVEAL
+# (commitEnd <= now < revealEnd): each committer opens its digest with (vote, salt),
+# and only an opening that reproduces the committed digest counts; TALLY (revealEnd
+# <= now): anyone closes the poll, once, and the tally is derived from the retained
+# openings. A committed ballot that is never opened counts as an abstention. The
+# result is published with the regime label "ballot": a political verdict, never a
+# witness (Theory/ResearchRegime: a ballot does not imply truth).
+#
+# Port of Bread's starbridge-apps/privacy-voting (one vote per ballot, monotone
+# tallies, close once) with the property Bread's own README says it lacks
+# ("unlinkability ... is a separate, stronger property"): while the poll is open no
+# ballot is in the clear. Shape from world/collective/CollectiveAdoption.obend (unique
+# ballot per elector, absolute YES quorum) and Kernel/SealedMarket (commit/reveal).
+#
+# NOT YET NATIVE, and said plainly: Core4 has no hash primitive, so `seal` below is a
+# stand-in arithmetic commitment that is BINDING for voter ids below 1000 and votes 0/1
+# but NOT HIDING (the vote is the digest's low bit). It exists so the commit/reveal
+# state machine, its refusals and its tally run in the effect-free preview. The native
+# route is the kernel's digest (cSHAKE256 `Pred.hashEq` over the whole tuple, as
+# Kernel/SealedMarket does for bids); until a native digest atom exists in the language
+# this package proves nothing about hiding. Preview evidence only.
+
+def not(b: Bool) -> Bool:
+  if b then false else true
+
+sum Voters:
+  empty: {}
+  more: {head: Nat, tail: Voters}
+
+record Commit:
+  voter: Nat
+  digest: Nat
+
+sum Commits:
+  empty: {}
+  more: {head: Commit, tail: Commits}
+
+record Opening:
+  voter: Nat
+  vote: Nat
+
+sum Openings:
+  empty: {}
+  more: {head: Opening, tail: Openings}
+
+record Terms:
+  electorate: Voters
+  quorum: Nat
+  commitEnd: Nat
+  revealEnd: Nat
+
+record Poll:
+  terms: Terms
+  valid: Bool
+  commits: Commits
+  openings: Openings
+  closed: Bool
+
+record Cast:
+  voter: Nat
+  digest: Nat
+  now: Nat
+
+record Reveal:
+  voter: Nat
+  vote: Nat
+  salt: Nat
+  now: Nat
+
+record Tick:
+  now: Nat
+
+sum Event:
+  commit: Cast
+  reveal: Reveal
+  tally: Tick
+
+sum Transition:
+  refused: Poll
+  moved: Poll
+
+# ---- the commitment (STAND-IN: binding, not hiding; see the header) ------------
+
+# Ids below 1000, votes 0 (no) or 1 (yes): `seal` is injective on that domain, and the
+# voter is inside the digest so a copied commitment opens only for its own voter.
+def seal(voter: Nat, vote: Nat, salt: Nat) -> Nat:
+  2n * (salt * 1000n + voter) + vote
+
+# ---- lists --------------------------------------------------------------------
+
+def member(v: Nat, xs: Voters) -> Bool:
+  match xs:
+    case empty(_): false
+    case more(m): v == m.head || member(v, m.tail)
+
+def size(xs: Voters) -> Nat:
+  match xs:
+    case empty(_): 0n
+    case more(m): 1n + size(m.tail)
+
+def distinct(xs: Voters) -> Bool:
+  match xs:
+    case empty(_): true
+    case more(m): not(member(m.head, m.tail)) && distinct(m.tail)
+
+def small(xs: Voters) -> Bool:
+  match xs:
+    case empty(_): true
+    case more(m): 0n < m.head && m.head < 1000n && small(m.tail)
+
+def committed(v: Nat, cs: Commits) -> Bool:
+  match cs:
+    case empty(_): false
+    case more(m): v == m.head.voter || committed(v, m.tail)
+
+def digestOf(v: Nat, cs: Commits) -> Nat:
+  match cs:
+    case empty(_): 0n
+    case more(m): if v == m.head.voter then m.head.digest else digestOf(v, m.tail)
+
+def commitCount(cs: Commits) -> Nat:
+  match cs:
+    case empty(_): 0n
+    case more(m): 1n + commitCount(m.tail)
+
+def opened(v: Nat, os: Openings) -> Bool:
+  match os:
+    case empty(_): false
+    case more(m): v == m.head.voter || opened(v, m.tail)
+
+def openCount(os: Openings) -> Nat:
+  match os:
+    case empty(_): 0n
+    case more(m): 1n + openCount(m.tail)
+
+def yesCount(os: Openings) -> Nat:
+  match os:
+    case empty(_): 0n
+    case more(m): if m.head.vote == 1n then 1n + yesCount(m.tail) else yesCount(m.tail)
+
+def noCount(os: Openings) -> Nat:
+  match os:
+    case empty(_): 0n
+    case more(m): if m.head.vote == 0n then 1n + noCount(m.tail) else noCount(m.tail)
+
+# ---- the lifecycle ------------------------------------------------------------
+
+def validTerms(t: Terms) -> Bool:
+  distinct(t.electorate) && small(t.electorate) && 0n < t.quorum && t.quorum <= size(t.electorate) && t.commitEnd < t.revealEnd
+
+def open(t: Terms) -> Poll:
+  {terms: t, valid: validTerms(t), commits: Commits.empty(), openings: Openings.empty(), closed: false}
+
+def live(p: Poll) -> Bool:
+  p.valid && not(p.closed)
+
+def commitOn(p: Poll, c: Cast) -> Transition:
+  if live(p) && c.now < p.terms.commitEnd && member(c.voter, p.terms.electorate) && not(committed(c.voter, p.commits)) && 0n < c.digest then Transition.moved({terms: p.terms, valid: p.valid, commits: Commits.more({head: {voter: c.voter, digest: c.digest}, tail: p.commits}), openings: p.openings, closed: false}) else Transition.refused(p)
+
+# An opening counts only inside the reveal window, once per committer, as a vote of 0
+# or 1, and only if it reproduces the committed digest.
+def revealOn(p: Poll, r: Reveal) -> Transition:
+  if live(p) && p.terms.commitEnd <= r.now && r.now < p.terms.revealEnd && committed(r.voter, p.commits) && not(opened(r.voter, p.openings)) && r.vote < 2n && seal(r.voter, r.vote, r.salt) == digestOf(r.voter, p.commits) then Transition.moved({terms: p.terms, valid: p.valid, commits: p.commits, openings: Openings.more({head: {voter: r.voter, vote: r.vote}, tail: p.openings}), closed: false}) else Transition.refused(p)
+
+# The tally closes the poll, once, only after the reveal window has ended.
+def tallyOn(p: Poll, k: Tick) -> Transition:
+  if live(p) && p.terms.revealEnd <= k.now then Transition.moved({terms: p.terms, valid: p.valid, commits: p.commits, openings: p.openings, closed: true}) else Transition.refused(p)
+
+def react(p: Poll, e: Event) -> Transition:
+  match e:
+    case commit(c): commitOn(p, c)
+    case reveal(r): revealOn(p, r)
+    case tally(k): tallyOn(p, k)
+
+def pollOf(t: Transition) -> Poll:
+  match t:
+    case refused(p): p
+    case moved(p): p
+
+def wasRefused(t: Transition) -> Bool:
+  match t:
+    case refused(_): true
+    case moved(_): false
+
+# The published result: derived from the retained openings, never supplied.
+record Result:
+  regime: String
+  yes: Nat
+  no: Nat
+  abstain: Nat
+  passed: Bool
+
+def resultOf(p: Poll) -> Result:
+  {regime: "ballot", yes: yesCount(p.openings), no: noCount(p.openings), abstain: commitCount(p.commits) - openCount(p.openings), passed: p.valid && p.terms.quorum <= yesCount(p.openings)}
+
+# The ballot law, read from a poll: yes + no = openings <= commits <= electorate (an
+# opening exists only for a committed voter, and each voter commits and opens once).
+def lawHolds(p: Poll) -> Bool:
+  yesCount(p.openings) + noCount(p.openings) == openCount(p.openings) && openCount(p.openings) <= commitCount(p.commits) && commitCount(p.commits) <= size(p.terms.electorate)
+
+# ---- (2) the poll as an Activity ----------------------------------------------
+
+record Waiting:
+  commitEnd: Nat
+  revealEnd: Nat
+  commits: Nat
+  openings: Nat
+
+sum Plan:
+  await: Waiting
+  publish: Result
+
+sum Response:
+  event: Event
+  settled: {}
+  refused: {}
+
+def waitingOf(p: Poll) -> Waiting:
+  {commitEnd: p.terms.commitEnd, revealEnd: p.terms.revealEnd, commits: commitCount(p.commits), openings: openCount(p.openings)}
+
+def serve(p: Poll) -> Activity<Plan, Response, Result>:
+  if live(p) then await(p) else resultOf(p)
+
+def await(p: Poll) -> Activity<Plan, Response, Result>:
+  match perform(Plan.await(waitingOf(p))):
+    case event(e): step(p, react(p, e))
+    case settled(_): serve(p)
+    case refused(_): serve(p)
+
+def step(p: Poll, t: Transition) -> Activity<Plan, Response, Result>:
+  match t:
+    case refused(unchanged): serve(unchanged)
+    case moved(next): if next.closed then publish(p, next) else serve(next)
+
+# The result is a Plan: the kernel publishes it (labelled "ballot") or refuses, and a
+# refused publication leaves the poll open for the tally to be tried again.
+def publish(before: Poll, closed: Poll) -> Activity<Plan, Response, Result>:
+  match perform(Plan.publish(resultOf(closed))):
+    case settled(_): resultOf(closed)
+    case refused(_): serve(before)
+    case event(_): serve(before)
+
+# The entry takes first-order scalars: the typed-argument encoding has no sum values, so
+# the electorate (a recursive sum) cannot be passed in. The entry takes a count of
+# electors with consecutive ids from `first`.
+record Spec:
+  first: Nat
+  count: Nat
+  quorum: Nat
+  commitEnd: Nat
+  revealEnd: Nat
+
+def range(first: Nat, count: Nat) -> Voters:
+  match count:
+    case 0n: Voters.empty()
+    case 1n+rest: Voters.more({head: first, tail: range(first + 1n, rest)})
+
+def ballot(s: Spec) -> Activity<Plan, Response, Result>:
+  serve(open({electorate: range(s.first, s.count), quorum: s.quorum, commitEnd: s.commitEnd, revealEnd: s.revealEnd}))
+
+# ---- the named scenario --------------------------------------------------------
+# Electors 1..4, absolute YES quorum 2, commit while height < 50, reveal while
+# 50 <= height < 100, tally from 100. Salts are the voters' own.
+
+def electorate() -> Voters:
+  Voters.more({head: 1n, tail: Voters.more({head: 2n, tail: Voters.more({head: 3n, tail: Voters.more({head: 4n, tail: Voters.empty()})})})})
+
+def terms() -> Terms:
+  {electorate: electorate(), quorum: 2n, commitEnd: 50n, revealEnd: 100n}
+
+def fresh() -> Poll:
+  open(terms())
+
+def commits(p: Poll, voter: Nat, vote: Nat, salt: Nat, now: Nat) -> Poll:
+  pollOf(react(p, Event.commit({voter: voter, digest: seal(voter, vote, salt), now: now})))
+
+def reveals(p: Poll, voter: Nat, vote: Nat, salt: Nat, now: Nat) -> Poll:
+  pollOf(react(p, Event.reveal({voter: voter, vote: vote, salt: salt, now: now})))
+
+def tryReveal(p: Poll, voter: Nat, vote: Nat, salt: Nat, now: Nat) -> Transition:
+  react(p, Event.reveal({voter: voter, vote: vote, salt: salt, now: now}))
+
+def tryCommit(p: Poll, voter: Nat, vote: Nat, salt: Nat, now: Nat) -> Transition:
+  react(p, Event.commit({voter: voter, digest: seal(voter, vote, salt), now: now}))
+
+def tryTally(p: Poll, now: Nat) -> Transition:
+  react(p, Event.tally({now: now}))
+
+# Voters 1, 2 vote yes (salts 111, 222), voter 3 votes no (333), voter 4 never commits.
+def sealed3() -> Poll:
+  commits(commits(commits(fresh(), 1n, 1n, 111n, 10n), 2n, 1n, 222n, 11n), 3n, 0n, 333n, 12n)
+
+def revealed3() -> Poll:
+  reveals(reveals(reveals(sealed3(), 1n, 1n, 111n, 60n), 2n, 1n, 222n, 61n), 3n, 0n, 333n, 62n)
+
+def closed3() -> Poll:
+  pollOf(tryTally(revealed3(), 100n))
+
+def resultYes(p: Poll) -> Nat:
+  resultOf(p).yes
+
+def resultNo(p: Poll) -> Nat:
+  resultOf(p).no
+
+def resultAbstain(p: Poll) -> Nat:
+  resultOf(p).abstain
+
+def commitsAfterThree() -> Nat:
+  commitCount(sealed3().commits)
+
+def openingsBeforeReveal() -> Nat:
+  openCount(sealed3().openings)
+
+# Honest path: three commits, three openings, a tally at the close.
+def honestTally() -> Bool:
+  resultYes(closed3()) == 2n && resultNo(closed3()) == 1n && resultAbstain(closed3()) == 0n && resultOf(closed3()).passed && closed3().closed
+
+def yesTally() -> Nat:
+  resultYes(closed3())
+
+def noTally() -> Nat:
+  resultNo(closed3())
+
+def publishedRegime() -> String:
+  resultOf(closed3()).regime
+
+# Reveal mismatch: a wrong vote, a wrong salt, or someone else's opening is refused,
+# and the refused reveal changes nothing.
+def mismatchedVoteRefused() -> Bool:
+  wasRefused(tryReveal(sealed3(), 1n, 0n, 111n, 60n)) && openCount(reveals(sealed3(), 1n, 0n, 111n, 60n).openings) == 0n
+
+def mismatchedSaltRefused() -> Bool:
+  wasRefused(tryReveal(sealed3(), 1n, 1n, 112n, 60n)) && wasRefused(tryReveal(sealed3(), 3n, 0n, 111n, 60n))
+
+# A copied commitment: voter 4 commits voter 1's digest verbatim, then cannot open it
+# (the voter is inside the digest), so the copy counts as an abstention.
+def copiedCommitmentCannotOpen() -> Bool:
+  let copied = pollOf(react(sealed3(), Event.commit({voter: 4n, digest: seal(1n, 1n, 111n), now: 20n})))
+  commitCount(copied.commits) == 4n && wasRefused(tryReveal(copied, 4n, 1n, 111n, 60n)) && wasRefused(tryReveal(copied, 4n, 0n, 111n, 60n))
+
+# Double commit: a second commit by the same voter, even identical, is refused.
+def doubleCommitRefused() -> Bool:
+  wasRefused(tryCommit(sealed3(), 1n, 0n, 999n, 20n)) && wasRefused(tryCommit(sealed3(), 1n, 1n, 111n, 20n))
+
+# Double vote: a second opening by the same voter is refused.
+def doubleRevealRefused() -> Bool:
+  let once = reveals(sealed3(), 1n, 1n, 111n, 60n)
+  wasRefused(tryReveal(once, 1n, 1n, 111n, 70n)) && openCount(once.openings) == 1n
+
+# Phases: no commit once the commit phase ended; no reveal before it, none after the
+# reveal window; no tally before the reveal window ends.
+def lateCommitRefused() -> Bool:
+  wasRefused(tryCommit(fresh(), 1n, 1n, 111n, 50n)) && not(wasRefused(tryCommit(fresh(), 1n, 1n, 111n, 49n)))
+
+def earlyRevealRefused() -> Bool:
+  wasRefused(tryReveal(sealed3(), 1n, 1n, 111n, 49n)) && not(wasRefused(tryReveal(sealed3(), 1n, 1n, 111n, 50n)))
+
+def lateRevealRefused() -> Bool:
+  wasRefused(tryReveal(sealed3(), 1n, 1n, 111n, 100n)) && not(wasRefused(tryReveal(sealed3(), 1n, 1n, 111n, 99n)))
+
+def tallyBeforeCloseRefused() -> Bool:
+  wasRefused(tryTally(revealed3(), 99n)) && wasRefused(tryTally(fresh(), 10n)) && not(wasRefused(tryTally(revealed3(), 100n)))
+
+def doubleTallyRefused() -> Bool:
+  wasRefused(tryTally(closed3(), 200n)) && wasRefused(tryReveal(closed3(), 4n, 1n, 1n, 70n))
+
+# Electorate: a stranger cannot commit; an uncommitted elector cannot reveal.
+def strangerCommitRefused() -> Bool:
+  wasRefused(tryCommit(fresh(), 9n, 1n, 5n, 10n)) && wasRefused(tryCommit(fresh(), 0n, 1n, 5n, 10n))
+
+def revealWithoutCommitRefused() -> Bool:
+  wasRefused(tryReveal(sealed3(), 4n, 1n, 444n, 60n)) && wasRefused(tryReveal(sealed3(), 9n, 1n, 444n, 60n))
+
+# A vote must be 0 or 1: a digest sealed over vote 5 cannot be opened.
+def outOfRangeVoteRefused() -> Bool:
+  let odd = commits(fresh(), 1n, 5n, 111n, 10n)
+  commitCount(odd.commits) == 1n && wasRefused(tryReveal(odd, 1n, 5n, 111n, 60n))
+
+# Unrevealed commits abstain; quorum not met (one YES of two required) does not pass.
+def partialReveal() -> Poll:
+  pollOf(tryTally(reveals(sealed3(), 1n, 1n, 111n, 60n), 100n))
+
+def unrevealedAbstain() -> Nat:
+  resultAbstain(partialReveal())
+
+def partialYes() -> Nat:
+  resultYes(partialReveal())
+
+def quorumNotMet() -> Bool:
+  not(resultOf(partialReveal()).passed) && resultOf(partialReveal()).yes == 1n
+
+def nobodyRevealed() -> Bool:
+  let p = pollOf(tryTally(sealed3(), 100n))
+  resultOf(p).yes == 0n && resultOf(p).no == 0n && resultOf(p).abstain == 3n && not(resultOf(p).passed)
+
+# Dissent does not block a quorum; a NO is not an abstention.
+def dissentDoesNotBlock() -> Bool:
+  resultOf(closed3()).passed && resultNo(closed3()) == 1n && resultAbstain(closed3()) == 0n
+
+# Invalid terms never run: zero quorum, quorum above the electorate, repeated electors,
+# an id outside the binding domain, a reveal window that ends with the commit phase.
+def zeroQuorum() -> Terms:
+  {electorate: electorate(), quorum: 0n, commitEnd: 50n, revealEnd: 100n}
+
+def unattainableQuorum() -> Terms:
+  {electorate: electorate(), quorum: 5n, commitEnd: 50n, revealEnd: 100n}
+
+def repeatedElector() -> Terms:
+  {electorate: Voters.more({head: 1n, tail: Voters.more({head: 1n, tail: Voters.empty()})}), quorum: 1n, commitEnd: 50n, revealEnd: 100n}
+
+def unsealableElector() -> Terms:
+  {electorate: Voters.more({head: 1000n, tail: Voters.empty()}), quorum: 1n, commitEnd: 50n, revealEnd: 100n}
+
+def noRevealWindow() -> Terms:
+  {electorate: electorate(), quorum: 2n, commitEnd: 100n, revealEnd: 100n}
+
+def voidTerms() -> Bool:
+  not(validTerms(zeroQuorum())) && not(validTerms(unattainableQuorum())) && not(validTerms(repeatedElector())) && not(validTerms(unsealableElector())) && not(validTerms(noRevealWindow())) && validTerms(terms())
+
+def voidTermsRefuseCommit() -> Bool:
+  wasRefused(tryCommit(open(zeroQuorum()), 1n, 1n, 111n, 10n))
+
+def lawHoldsSealed() -> Bool:
+  lawHolds(sealed3()) && lawHolds(revealed3()) && lawHolds(closed3()) && lawHolds(partialReveal())
+
+# The seal binds voter, vote and salt separately (the digest check is what tallies):
+# any single change moves the digest.
+def sealBinds() -> Bool:
+  seal(1n, 1n, 111n) != seal(2n, 1n, 111n) && seal(1n, 1n, 111n) != seal(1n, 0n, 111n) && seal(1n, 1n, 111n) != seal(1n, 1n, 112n) && seal(1n, 1n, 111n) == seal(1n, 1n, 111n)

@@ -1,0 +1,2362 @@
+[
+ {
+  "name": "BallotHonestTally",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "honestTally",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotMismatchedVoteRefused",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "mismatchedVoteRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotMismatchedSaltRefused",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "mismatchedSaltRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotCopiedCommitmentCannotOpen",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "copiedCommitmentCannotOpen",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotDoubleCommitRefused",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "doubleCommitRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotDoubleRevealRefused",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "doubleRevealRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotLateCommitRefused",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lateCommitRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotEarlyRevealRefused",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "earlyRevealRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotLateRevealRefused",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lateRevealRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotTallyBeforeCloseRefused",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "tallyBeforeCloseRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotDoubleTallyRefused",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "doubleTallyRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotStrangerCommitRefused",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "strangerCommitRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotRevealWithoutCommitRefused",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "revealWithoutCommitRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotOutOfRangeVoteRefused",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "outOfRangeVoteRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotQuorumNotMet",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "quorumNotMet",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotNobodyRevealed",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "nobodyRevealed",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotDissentDoesNotBlock",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "dissentDoesNotBlock",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotVoidTerms",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "voidTerms",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotVoidTermsRefuseCommit",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "voidTermsRefuseCommit",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotLawHolds",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lawHoldsSealed",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotSealBinds",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "sealBinds",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "BallotCommitsAfterThree",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "commitsAfterThree",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "3"
+ },
+ {
+  "name": "BallotNothingOpenBeforeReveal",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "openingsBeforeReveal",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "0"
+ },
+ {
+  "name": "BallotYesTally",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "yesTally",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "2"
+ },
+ {
+  "name": "BallotNoTally",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "noTally",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "1"
+ },
+ {
+  "name": "BallotUnrevealedAbstain",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "unrevealedAbstain",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "2"
+ },
+ {
+  "name": "BallotPartialYes",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "partialYes",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "1"
+ },
+ {
+  "name": "BallotPublishedRegime",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "publishedRegime",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "ballot"
+ },
+ {
+  "name": "BallotActivityHonestRound",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "ballot",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "first",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "count",
+      "value": {
+       "tag": "natural",
+       "value": "4"
+      }
+     },
+     {
+      "name": "quorum",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "commitEnd",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "revealEnd",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     }
+    ]
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "digest",
+        "value": {
+         "tag": "natural",
+         "value": "222003"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "10"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "digest",
+        "value": {
+         "tag": "natural",
+         "value": "444005"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "11"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "3"
+        }
+       },
+       {
+        "name": "digest",
+        "value": {
+         "tag": "natural",
+         "value": "666006"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "12"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reveal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "vote",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "salt",
+        "value": {
+         "tag": "natural",
+         "value": "111"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "60"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reveal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "vote",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "salt",
+        "value": {
+         "tag": "natural",
+         "value": "222"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "61"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reveal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "3"
+        }
+       },
+       {
+        "name": "vote",
+        "value": {
+         "tag": "natural",
+         "value": "0"
+        }
+       },
+       {
+        "name": "salt",
+        "value": {
+         "tag": "natural",
+         "value": "333"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "62"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "tally",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "100"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "field",
+  "expectedData": {
+   "tag": "record",
+   "fields": [
+    {
+     "name": "regime",
+     "value": {
+      "tag": "label",
+      "value": "ballot"
+     }
+    },
+    {
+     "name": "yes",
+     "value": {
+      "tag": "natural",
+      "value": "2"
+     }
+    },
+    {
+     "name": "no",
+     "value": {
+      "tag": "natural",
+      "value": "1"
+     }
+    },
+    {
+     "name": "abstain",
+     "value": {
+      "tag": "natural",
+      "value": "0"
+     }
+    },
+    {
+     "name": "passed",
+     "value": {
+      "tag": "boolean",
+      "value": true
+     }
+    }
+   ]
+  },
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "publish",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "regime",
+      "value": {
+       "tag": "label",
+       "value": "ballot"
+      }
+     },
+     {
+      "name": "yes",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "no",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "abstain",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "passed",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 14
+ },
+ {
+  "name": "BallotActivityUnrevealedAbstains",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "ballot",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "first",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "count",
+      "value": {
+       "tag": "natural",
+       "value": "4"
+      }
+     },
+     {
+      "name": "quorum",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "commitEnd",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "revealEnd",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     }
+    ]
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "digest",
+        "value": {
+         "tag": "natural",
+         "value": "222003"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "10"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "digest",
+        "value": {
+         "tag": "natural",
+         "value": "444005"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "11"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reveal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "vote",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "salt",
+        "value": {
+         "tag": "natural",
+         "value": "111"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "60"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "tally",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "100"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "field",
+  "expectedData": {
+   "tag": "record",
+   "fields": [
+    {
+     "name": "regime",
+     "value": {
+      "tag": "label",
+      "value": "ballot"
+     }
+    },
+    {
+     "name": "yes",
+     "value": {
+      "tag": "natural",
+      "value": "1"
+     }
+    },
+    {
+     "name": "no",
+     "value": {
+      "tag": "natural",
+      "value": "0"
+     }
+    },
+    {
+     "name": "abstain",
+     "value": {
+      "tag": "natural",
+      "value": "1"
+     }
+    },
+    {
+     "name": "passed",
+     "value": {
+      "tag": "boolean",
+      "value": false
+     }
+    }
+   ]
+  },
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "publish",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "regime",
+      "value": {
+       "tag": "label",
+       "value": "ballot"
+      }
+     },
+     {
+      "name": "yes",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "no",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "abstain",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "passed",
+      "value": {
+       "tag": "boolean",
+       "value": false
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 8
+ },
+ {
+  "name": "BallotActivityMismatchedRevealStaysSealed",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "ballot",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "first",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "count",
+      "value": {
+       "tag": "natural",
+       "value": "4"
+      }
+     },
+     {
+      "name": "quorum",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "commitEnd",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "revealEnd",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     }
+    ]
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "digest",
+        "value": {
+         "tag": "natural",
+         "value": "222003"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "10"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reveal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "vote",
+        "value": {
+         "tag": "natural",
+         "value": "0"
+        }
+       },
+       {
+        "name": "salt",
+        "value": {
+         "tag": "natural",
+         "value": "111"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "60"
+        }
+       }
+      ]
+     }
+    }
+   }
+  ],
+  "expectedStatus": "yielded",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "await",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "commitEnd",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "revealEnd",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "commits",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "openings",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 4
+ },
+ {
+  "name": "BallotActivityDoubleCommitIgnored",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "ballot",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "first",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "count",
+      "value": {
+       "tag": "natural",
+       "value": "4"
+      }
+     },
+     {
+      "name": "quorum",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "commitEnd",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "revealEnd",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     }
+    ]
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "digest",
+        "value": {
+         "tag": "natural",
+         "value": "222003"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "10"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "digest",
+        "value": {
+         "tag": "natural",
+         "value": "10002"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "11"
+        }
+       }
+      ]
+     }
+    }
+   }
+  ],
+  "expectedStatus": "yielded",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "await",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "commitEnd",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "revealEnd",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "commits",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "openings",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 4
+ },
+ {
+  "name": "BallotActivityDoubleVoteIgnored",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "ballot",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "first",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "count",
+      "value": {
+       "tag": "natural",
+       "value": "4"
+      }
+     },
+     {
+      "name": "quorum",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "commitEnd",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "revealEnd",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     }
+    ]
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "digest",
+        "value": {
+         "tag": "natural",
+         "value": "222003"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "10"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reveal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "vote",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "salt",
+        "value": {
+         "tag": "natural",
+         "value": "111"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "60"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reveal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "vote",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "salt",
+        "value": {
+         "tag": "natural",
+         "value": "111"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "61"
+        }
+       }
+      ]
+     }
+    }
+   }
+  ],
+  "expectedStatus": "yielded",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "await",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "commitEnd",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "revealEnd",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "commits",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "openings",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 6
+ },
+ {
+  "name": "BallotActivityLateRevealIgnored",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "ballot",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "first",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "count",
+      "value": {
+       "tag": "natural",
+       "value": "4"
+      }
+     },
+     {
+      "name": "quorum",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "commitEnd",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "revealEnd",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     }
+    ]
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "digest",
+        "value": {
+         "tag": "natural",
+         "value": "222003"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "10"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reveal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "vote",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "salt",
+        "value": {
+         "tag": "natural",
+         "value": "111"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "100"
+        }
+       }
+      ]
+     }
+    }
+   }
+  ],
+  "expectedStatus": "yielded",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "await",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "commitEnd",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "revealEnd",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "commits",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "openings",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 4
+ },
+ {
+  "name": "BallotActivityTallyBeforeCloseIgnored",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "ballot",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "first",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "count",
+      "value": {
+       "tag": "natural",
+       "value": "4"
+      }
+     },
+     {
+      "name": "quorum",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "commitEnd",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "revealEnd",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     }
+    ]
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "digest",
+        "value": {
+         "tag": "natural",
+         "value": "222003"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "10"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reveal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "vote",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "salt",
+        "value": {
+         "tag": "natural",
+         "value": "111"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "60"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "tally",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "99"
+        }
+       }
+      ]
+     }
+    }
+   }
+  ],
+  "expectedStatus": "yielded",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "await",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "commitEnd",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "revealEnd",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "commits",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "openings",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 6
+ },
+ {
+  "name": "BallotActivityRefusedPublicationWaits",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "ballot",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "first",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "count",
+      "value": {
+       "tag": "natural",
+       "value": "4"
+      }
+     },
+     {
+      "name": "quorum",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "commitEnd",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "revealEnd",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     }
+    ]
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "voter",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "digest",
+        "value": {
+         "tag": "natural",
+         "value": "222003"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "10"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "tally",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "100"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "refused",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedStatus": "yielded",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "await",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "commitEnd",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "revealEnd",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "commits",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "openings",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 5
+ },
+ {
+  "name": "BallotActivityVoidTermsNeverRun",
+  "modules": [
+   {
+    "name": "SealedBallot",
+    "source": "SealedBallot.obend",
+    "imports": []
+   }
+  ],
+  "entry": "ballot",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "first",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "count",
+      "value": {
+       "tag": "natural",
+       "value": "4"
+      }
+     },
+     {
+      "name": "quorum",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "commitEnd",
+      "value": {
+       "tag": "natural",
+       "value": "50"
+      }
+     },
+     {
+      "name": "revealEnd",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     }
+    ]
+   }
+  ],
+  "responses": [],
+  "expectedType": "field",
+  "expectedData": {
+   "tag": "record",
+   "fields": [
+    {
+     "name": "regime",
+     "value": {
+      "tag": "label",
+      "value": "ballot"
+     }
+    },
+    {
+     "name": "yes",
+     "value": {
+      "tag": "natural",
+      "value": "0"
+     }
+    },
+    {
+     "name": "no",
+     "value": {
+      "tag": "natural",
+      "value": "0"
+     }
+    },
+    {
+     "name": "abstain",
+     "value": {
+      "tag": "natural",
+      "value": "0"
+     }
+    },
+    {
+     "name": "passed",
+     "value": {
+      "tag": "boolean",
+      "value": false
+     }
+    }
+   ]
+  },
+  "expectedTurns": 0
+ }
+]

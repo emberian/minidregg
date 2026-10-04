@@ -1,0 +1,2490 @@
+[
+ {
+  "name": "DuesOnTimePays",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "onTimePays",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesFullTermCompletes",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "fullTermCompletes",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesEarlyRefused",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "earlyRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesDoubleTriggerRefused",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "doubleTriggerRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesSkipRefused",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "skipRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesCatchUpStopsAtDue",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "catchUpStopsAtDue",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesAfterTermRefused",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "afterTermRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesCancelAtBoundary",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "cancelAtBoundary",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesCancelMidPeriodRefused",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "cancelMidPeriodRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesCancelByStrangerRefused",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "cancelByStrangerRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesCancelPastWindowRefused",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "cancelPastWindowRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesCancelWhileBehindRefused",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "cancelWhileBehindRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesCancelledTakesNoMore",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "cancelledTakesNoMore",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesLeaseDraws",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "leaseDraws",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesLeaseShortRefused",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "leaseShortRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesLapseWhenShort",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lapseWhenShort",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesLapseEarlyRefused",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lapseEarlyRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesSettledOnce",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "settledOnce",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesSettleWhileRunningRefused",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "settleWhileRunningRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesTopUpOnlyByPayer",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "topUpOnlyByPayer",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesTopUpThenDraw",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "topUpThenDraw",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesPayAsYouGoTakesNoTopUp",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "payAsYouGoTakesNoTopUp",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesVoidTerms",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "voidTerms",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesLawHoldsFresh",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lawHoldsFresh",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesLawHoldsAfterThree",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lawHoldsAfterThree",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesLawHoldsAfterFour",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lawHoldsAfterFour",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesLawHoldsLeased",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lawHoldsLeased",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesLawHoldsLeaseTwice",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lawHoldsLeaseTwice",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesLawHoldsLapsed",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lawHoldsLapsed",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesLawHoldsSettled",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lawHoldsSettled",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "DuesPaymentFromPayer",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "paymentFromPayer",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "1"
+ },
+ {
+  "name": "DuesPaymentToRoom",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "paymentToRoom",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "2"
+ },
+ {
+  "name": "DuesFullTermPaid",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "fullTermPaid",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "40"
+ },
+ {
+  "name": "DuesBehindAtCatchUp",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "behindAtCatchUp",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "3"
+ },
+ {
+  "name": "DuesCatchUpPaidAmount",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "catchUpPaidAmount",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "30"
+ },
+ {
+  "name": "DuesBehindAfterTerm",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "behindAfterTerm",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "0"
+ },
+ {
+  "name": "DuesCancelledPaidOnce",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "cancelledPaidOnce",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "10"
+ },
+ {
+  "name": "DuesSettleRefunds",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "settleRefunds",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "5"
+ },
+ {
+  "name": "DuesSettleRefundsPayer",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "settleRefundsPayer",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "1"
+ },
+ {
+  "name": "DuesActivityFullTerm",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "dues",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "payer",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "room",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "amount",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "period",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "start",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "periods",
+      "value": {
+       "tag": "natural",
+       "value": "4"
+      }
+     },
+     {
+      "name": "window",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "lease",
+      "value": {
+       "tag": "boolean",
+       "value": false
+      }
+     }
+    ]
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "discharge",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "period",
+        "value": {
+         "tag": "natural",
+         "value": "0"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "100"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "discharge",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "period",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "110"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "discharge",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "period",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "120"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "discharge",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "period",
+        "value": {
+         "tag": "natural",
+         "value": "3"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "130"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "field",
+  "expectedData": {
+   "tag": "record",
+   "fields": [
+    {
+     "name": "phase",
+     "value": {
+      "tag": "label",
+      "value": "complete"
+     }
+    },
+    {
+     "name": "k",
+     "value": {
+      "tag": "natural",
+      "value": "4"
+     }
+    },
+    {
+     "name": "paid",
+     "value": {
+      "tag": "natural",
+      "value": "40"
+     }
+    },
+    {
+     "name": "refunded",
+     "value": {
+      "tag": "natural",
+      "value": "0"
+     }
+    }
+   ]
+  },
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "pay",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "from",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "to",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "amount",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "escrow",
+      "value": {
+       "tag": "boolean",
+       "value": false
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 8
+ },
+ {
+  "name": "DuesActivityCatchUpPaysThreeNotFour",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "dues",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "payer",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "room",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "amount",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "period",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "start",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "periods",
+      "value": {
+       "tag": "natural",
+       "value": "4"
+      }
+     },
+     {
+      "name": "window",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "lease",
+      "value": {
+       "tag": "boolean",
+       "value": false
+      }
+     }
+    ]
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "discharge",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "period",
+        "value": {
+         "tag": "natural",
+         "value": "0"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "125"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "discharge",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "period",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "125"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "discharge",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "period",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "125"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "discharge",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "period",
+        "value": {
+         "tag": "natural",
+         "value": "3"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "125"
+        }
+       }
+      ]
+     }
+    }
+   }
+  ],
+  "expectedStatus": "yielded",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "await",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "phase",
+      "value": {
+       "tag": "label",
+       "value": "running"
+      }
+     },
+     {
+      "name": "period",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "due",
+      "value": {
+       "tag": "natural",
+       "value": "130"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 8
+ },
+ {
+  "name": "DuesActivityDoubleTriggerIgnored",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "dues",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "payer",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "room",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "amount",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "period",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "start",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "periods",
+      "value": {
+       "tag": "natural",
+       "value": "4"
+      }
+     },
+     {
+      "name": "window",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "lease",
+      "value": {
+       "tag": "boolean",
+       "value": false
+      }
+     }
+    ]
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "discharge",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "period",
+        "value": {
+         "tag": "natural",
+         "value": "0"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "100"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "discharge",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "period",
+        "value": {
+         "tag": "natural",
+         "value": "0"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "100"
+        }
+       }
+      ]
+     }
+    }
+   }
+  ],
+  "expectedStatus": "yielded",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "await",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "phase",
+      "value": {
+       "tag": "label",
+       "value": "running"
+      }
+     },
+     {
+      "name": "period",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "due",
+      "value": {
+       "tag": "natural",
+       "value": "110"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 4
+ },
+ {
+  "name": "DuesActivityKernelRefusedTransferStaysOwed",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "dues",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "payer",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "room",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "amount",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "period",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "start",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "periods",
+      "value": {
+       "tag": "natural",
+       "value": "4"
+      }
+     },
+     {
+      "name": "window",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "lease",
+      "value": {
+       "tag": "boolean",
+       "value": false
+      }
+     }
+    ]
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "discharge",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "period",
+        "value": {
+         "tag": "natural",
+         "value": "0"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "100"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "refused",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedStatus": "yielded",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "await",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "phase",
+      "value": {
+       "tag": "label",
+       "value": "running"
+      }
+     },
+     {
+      "name": "period",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "due",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 3
+ },
+ {
+  "name": "DuesActivityCancelAtBoundary",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "dues",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "payer",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "room",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "amount",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "period",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "start",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "periods",
+      "value": {
+       "tag": "natural",
+       "value": "4"
+      }
+     },
+     {
+      "name": "window",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "lease",
+      "value": {
+       "tag": "boolean",
+       "value": false
+      }
+     }
+    ]
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "discharge",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "period",
+        "value": {
+         "tag": "natural",
+         "value": "0"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "100"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "cancel",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "actor",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "110"
+        }
+       }
+      ]
+     }
+    }
+   }
+  ],
+  "expectedType": "field",
+  "expectedData": {
+   "tag": "record",
+   "fields": [
+    {
+     "name": "phase",
+     "value": {
+      "tag": "label",
+      "value": "cancelled"
+     }
+    },
+    {
+     "name": "k",
+     "value": {
+      "tag": "natural",
+      "value": "1"
+     }
+    },
+    {
+     "name": "paid",
+     "value": {
+      "tag": "natural",
+      "value": "10"
+     }
+    },
+    {
+     "name": "refunded",
+     "value": {
+      "tag": "natural",
+      "value": "0"
+     }
+    }
+   ]
+  },
+  "expectedTurns": 3
+ },
+ {
+  "name": "DuesActivityCancelMidPeriodRefused",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "dues",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "payer",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "room",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "amount",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "period",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "start",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "periods",
+      "value": {
+       "tag": "natural",
+       "value": "4"
+      }
+     },
+     {
+      "name": "window",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "lease",
+      "value": {
+       "tag": "boolean",
+       "value": false
+      }
+     }
+    ]
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "discharge",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "period",
+        "value": {
+         "tag": "natural",
+         "value": "0"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "100"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "cancel",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "actor",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "105"
+        }
+       }
+      ]
+     }
+    }
+   }
+  ],
+  "expectedStatus": "yielded",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "await",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "phase",
+      "value": {
+       "tag": "label",
+       "value": "running"
+      }
+     },
+     {
+      "name": "period",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "due",
+      "value": {
+       "tag": "natural",
+       "value": "110"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 4
+ },
+ {
+  "name": "DuesActivityCancelByStrangerRefused",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "dues",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "payer",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "room",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "amount",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "period",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "start",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "periods",
+      "value": {
+       "tag": "natural",
+       "value": "4"
+      }
+     },
+     {
+      "name": "window",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "lease",
+      "value": {
+       "tag": "boolean",
+       "value": false
+      }
+     }
+    ]
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "discharge",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "period",
+        "value": {
+         "tag": "natural",
+         "value": "0"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "100"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "cancel",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "actor",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "110"
+        }
+       }
+      ]
+     }
+    }
+   }
+  ],
+  "expectedStatus": "yielded",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "await",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "phase",
+      "value": {
+       "tag": "label",
+       "value": "running"
+      }
+     },
+     {
+      "name": "period",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "due",
+      "value": {
+       "tag": "natural",
+       "value": "110"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 4
+ },
+ {
+  "name": "DuesActivityLeaseLapsesAndRefunds",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "dues",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "payer",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "room",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "amount",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "period",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "start",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "periods",
+      "value": {
+       "tag": "natural",
+       "value": "4"
+      }
+     },
+     {
+      "name": "window",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "lease",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
+     }
+    ]
+   },
+   {
+    "tag": "natural",
+    "value": "25"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "discharge",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "period",
+        "value": {
+         "tag": "natural",
+         "value": "0"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "100"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "discharge",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "period",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "110"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "discharge",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "period",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "120"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "lapse",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "120"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "settle",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "121"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "field",
+  "expectedData": {
+   "tag": "record",
+   "fields": [
+    {
+     "name": "phase",
+     "value": {
+      "tag": "label",
+      "value": "lapsed"
+     }
+    },
+    {
+     "name": "k",
+     "value": {
+      "tag": "natural",
+      "value": "2"
+     }
+    },
+    {
+     "name": "paid",
+     "value": {
+      "tag": "natural",
+      "value": "20"
+     }
+    },
+    {
+     "name": "refunded",
+     "value": {
+      "tag": "natural",
+      "value": "5"
+     }
+    }
+   ]
+  },
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "pay",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "from",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "to",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "amount",
+      "value": {
+       "tag": "natural",
+       "value": "5"
+      }
+     },
+     {
+      "name": "escrow",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 8
+ },
+ {
+  "name": "DuesActivityLeaseTopUpByStrangerRefused",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "dues",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "payer",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "room",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "amount",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "period",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "start",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "periods",
+      "value": {
+       "tag": "natural",
+       "value": "4"
+      }
+     },
+     {
+      "name": "window",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "lease",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
+     }
+    ]
+   },
+   {
+    "tag": "natural",
+    "value": "25"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "topUp",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "actor",
+        "value": {
+         "tag": "natural",
+         "value": "9"
+        }
+       },
+       {
+        "name": "amount",
+        "value": {
+         "tag": "natural",
+         "value": "50"
+        }
+       }
+      ]
+     }
+    }
+   }
+  ],
+  "expectedStatus": "yielded",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "await",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "phase",
+      "value": {
+       "tag": "label",
+       "value": "running"
+      }
+     },
+     {
+      "name": "period",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "due",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 2
+ },
+ {
+  "name": "DuesActivityVoidTermsNeverRun",
+  "modules": [
+   {
+    "name": "StandingDues",
+    "source": "StandingDues.obend",
+    "imports": []
+   }
+  ],
+  "entry": "dues",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "payer",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "room",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "amount",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "period",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "start",
+      "value": {
+       "tag": "natural",
+       "value": "100"
+      }
+     },
+     {
+      "name": "periods",
+      "value": {
+       "tag": "natural",
+       "value": "4"
+      }
+     },
+     {
+      "name": "window",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "lease",
+      "value": {
+       "tag": "boolean",
+       "value": false
+      }
+     }
+    ]
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [],
+  "expectedType": "field",
+  "expectedData": {
+   "tag": "record",
+   "fields": [
+    {
+     "name": "phase",
+     "value": {
+      "tag": "label",
+      "value": "void"
+     }
+    },
+    {
+     "name": "k",
+     "value": {
+      "tag": "natural",
+      "value": "0"
+     }
+    },
+    {
+     "name": "paid",
+     "value": {
+      "tag": "natural",
+      "value": "0"
+     }
+    },
+    {
+     "name": "refunded",
+     "value": {
+      "tag": "natural",
+      "value": "0"
+     }
+    }
+   ]
+  },
+  "expectedTurns": 0
+ }
+]
