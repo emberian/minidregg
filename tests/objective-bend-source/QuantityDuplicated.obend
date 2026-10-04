@@ -1,0 +1,4 @@
+edition ObjectiveBend 1
+# An affine parameter used twice: the checker must refuse the whole package.
+def duplicated(affine x: Nat) -> Nat:
+  x + x

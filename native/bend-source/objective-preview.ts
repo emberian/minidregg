@@ -39,7 +39,7 @@ export function preview(requestPath:string,outputDirectory:string,toolingPath:st
   binding.toolingManifestSha256=sha(toolingBytes);binding.tooling=tooling.pins;binding.limits={...limits,typeFuel};
   mkdirSync(outputDirectory,{recursive:true});if(readdirSync(outputDirectory).length)throw new Error("preview output directory must be empty");
   const retainedCapture=resolve(join(outputDirectory,"capture.json"));writeFileSync(retainedCapture,captureBytes,{flag:"wx"});
-  const runner=resolve(join(outputDirectory,"source.lean"));stage="objective-core-elaboration";
+  const runner=resolve(join(outputDirectory,"source"));stage="objective-core-elaboration";
   const lowering=child(tooling.bunPath,[tooling.elaboratorPath,retainedCapture,runner,JSON.stringify(argumentsWire),JSON.stringify(request.projections),JSON.stringify(limits)]);
   writeFileSync(join(outputDirectory,"lowering.json"),lowering,{flag:"wx"});
   const corePath=runner+".core.json",typedPath=runner+".typed.json";const coreBytes=readFileSync(corePath),typedBytes=readFileSync(typedPath),core=JSON.parse(coreBytes.toString()),typed=JSON.parse(typedBytes.toString());

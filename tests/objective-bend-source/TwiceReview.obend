@@ -21,3 +21,6 @@ spec AugmentedReview for Review:
 
 def reviewTarget(inherited: Review) -> Review:
   fix(compose(BaseReview, TwiceReview, AugmentedReview), inherited)
+
+def twiceOfThree() -> Nat:
+  reviewTarget({review: fn(value: Nat) -> Nat: value, twice: fn(value: Nat) -> Nat: value}).twice(3n)

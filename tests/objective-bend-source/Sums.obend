@@ -1,0 +1,20 @@
+edition ObjectiveBend 1
+# Sums, case and Boolean branching (SUMS-DESIGN §9). Needs the W1.3 core.
+sum Shape:
+  circle: Nat
+  square: {side: Nat}
+sum List:
+  nil: {}
+  cons: {head: Nat, tail: List}
+def area(s: Shape) -> Nat:
+  match s:
+    case circle(r): r * 3n
+    case square(q): q.side * q.side
+def sum(xs: List) -> Nat:
+  match xs:
+    case nil(_): 0n
+    case cons(c): c.head + sum(c.tail)
+def label(s: String) -> Nat:
+  if s == "square" then area(Shape.square({side: 4n})) else area(Shape.circle(2n))
+def total() -> Nat:
+  sum(List.cons({head: label("square"), tail: List.cons({head: label("circle"), tail: List.nil()})}))

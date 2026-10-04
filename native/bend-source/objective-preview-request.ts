@@ -8,7 +8,7 @@ const bytes=readFileSync(capturePath),capture=JSON.parse(new TextDecoder("utf-8"
 if(capture.schema!=="dregg.objective-bend.captured-package.v1"||capture.edition!=="objective-bend-1")throw Error("Objective capture required");
 const arguments_=JSON.parse(argsJson),projections=JSON.parse(projectionJson);
 if(!Array.isArray(arguments_)||!Array.isArray(projections))throw Error("arguments and projections arrays required");
-const request={schema:"dregg.objective-bend.preview-input.v2",capturePath:resolve(capturePath),argumentEncoding,captureSha256("sha256").update(bytes).digest("hex"),arguments:arguments_,projections,
+const request={schema:"dregg.objective-bend.preview-input.v2",capturePath:resolve(capturePath),argumentEncoding,captureSha256:createHash("sha256").update(bytes).digest("hex"),arguments:arguments_,projections,
  limits:limitsJson?JSON.parse(limitsJson):{ticks:"4096",heap:"8192",stack:"1024",typeFuel:"4096"}};
 writeFileSync(requestPath,JSON.stringify(request,null,2)+"\n",{flag:"wx"});
 console.log(JSON.stringify({schema:request.schema,requestPath:resolve(requestPath),captureSha256:request.captureSha256,sourceEntry:capture.sourceEntry}));

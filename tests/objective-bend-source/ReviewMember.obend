@@ -10,3 +10,5 @@ spec Augmented for Prior.Review:
     super.review(value) + 1
 def review(inherited: Prior.Review) -> Prior.Review:
   fix(compose(Prior.Base, Twice, Augmented), inherited)
+def twiceOfThree() -> Nat:
+  review({review: fn(value: Nat) -> Nat: value, twice: fn(value: Nat) -> Nat: value}).twice(3n)

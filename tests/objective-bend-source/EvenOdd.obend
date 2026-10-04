@@ -20,3 +20,6 @@ spec Odd for Parity:
 
 def parity(inherited: Parity) -> Parity:
   fix(compose(Even, Odd), inherited)
+
+def evenTen() -> Bool:
+  parity({even: fn(n: Nat) -> Bool: false, odd: fn(n: Nat) -> Bool: false}).even(10n)

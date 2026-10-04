@@ -31,3 +31,70 @@ for(const bad of [{tag:'natural',value:'07'},{tag:'natural',value:'-1'},{tag:'la
 let extraRefused=false;try{elaborate([identityModule],0,'identity',{...typed([]),extra:true})}catch{extraRefused=true}
 if(!extraRefused)throw Error('ignored argument envelope field');
 console.log('TAGGED ARGUMENT VALUES PASS: exact Nat/Boolean/String/record and malformed-value refusals');
+
+// ---- W1.5 front-end repairs ----
+const expectThrow=(f:()=>unknown,pattern:RegExp,what:string)=>{
+ let message="";try{f();}catch(e:any){message=e?.message??String(e);}
+ if(!pattern.test(message))throw Error(what+": expected refusal matching "+pattern+", got "+JSON.stringify(message));
+};
+const size=(t:any)=>JSON.stringify(t).length;
+// (a) compose shares the inherited composite: linear growth, one binder for metadata and mix.
+const repeated=(k:number)=>elaborate([moduleFor(`edition ObjectiveBend 1\nextension AddOne(self: Nat, super: Nat) -> Nat:\n  super + 1n\ndef repeated(seed: Nat) -> Nat:\n  fix(compose(${Array(k).fill('AddOne').join(', ')}), seed)\n`)],0,'repeated',[]);
+const s8=size(repeated(8).term),s16=size(repeated(16).term),s32=size(repeated(32).term);
+if(s32-s16!==2*(s16-s8))throw Error('compose term growth is not linear: '+[s8,s16,s32]);
+const findTag=(t:any,tag:string):any=>{if(!t||typeof t!=='object')return null;if(t.tag===tag)return t;for(const v of Object.values(t)){const r=Array.isArray(v)?v.map(x=>findTag(x,tag)).find(Boolean):findTag(v,tag);if(r)return r;}return null;};
+const shared=findTag(repeated(2).term,'specification');
+if(shared.metadata.fields[1].value.tag!=='bound'||shared.metadata.fields[1].value.index!==1||shared.extension.lower.tag!=='bound'||shared.extension.lower.index!==1)
+ throw Error('metadata inherited and mix lower do not reference one shared binder');
+const typedCompose=literalAnnotations(repeated(3));
+if(typedCompose.schema!=='dregg.objective-bend.typed-core.v2')throw Error('shared composition lost its typing proposal: '+typedCompose.message);
+console.log('COMPOSE SHARING PASS: k=8/16/32 sizes '+[s8,s16,s32].join('/')+' (linear); metadata.inherited and mix.lower are bound 1 of one redex');
+// (b) a package that declares specifications yields a typed packet; spec method lambdas carry binder hints.
+const evenOdd=`edition ObjectiveBend 1\nrecord Parity:\n  even(n: Nat) -> Bool\n  odd(n: Nat) -> Bool\nspec Even for Parity:\n  requires odd(n: Nat) -> Bool\n  def even(n: Nat) -> Bool:\n    match n:\n      case 0n: true\n      case 1n+pred: self.odd(pred)\nspec Odd for Parity:\n  requires even(n: Nat) -> Bool\n  def odd(n: Nat) -> Bool:\n    match n:\n      case 0n: false\n      case 1n+pred: self.even(pred)\n  law total(n: Nat): self.odd(n) == self.odd(n)\ndef four() -> Nat:\n  4n\n`;
+const specTyped=literalAnnotations(elaborate([moduleFor(evenOdd)],0,'four',[]));
+if(specTyped.schema!=='dregg.objective-bend.typed-core.v2')throw Error('spec-declaring package refused: '+specTyped.message);
+const specRow=specTyped.bounds[0].type;if(specRow.member.tag!=='specification'||specRow.tail.member.metadata.tail.tail.member.member.codomain.codomain.codomain.tag!=='boolean')throw Error('spec global type or law type lost');
+if(specTyped.annotations.length<8)throw Error('spec method lambdas lack binder hints');
+console.log('SPEC TYPING PASS: spec-declaring package yields typed-core.v2; spec, law and method lambdas annotated');
+// (c) affine/linear are reachable from the surface and reach the checker proposal.
+const affine=literalAnnotations(elaborate([moduleFor('edition ObjectiveBend 1\ndef keep(affine x: Nat, linear y: Nat, -z: Nat, +w: Nat) -> Nat:\n  x + y\n')],0,'keep',[]));
+const quantities=affine.annotations.filter((a:any)=>a.path.length>3).slice(0,4).map((a:any)=>a.parameter+'/'+a.reuse).join(',');
+if(quantities!=='affine/reusable,linear/once,erased/once,unrestricted/once')throw Error('quantities lost: '+quantities);
+if(affine.bounds[0].type.member.codomain.reuse!=='once')throw Error('closure after an affine parameter not one-shot in the declared type');
+expectThrow(()=>moduleFor('edition ObjectiveBend 1\ndef bad(affine +x: Nat) -> Nat:\n  x\n'),/two quantity markers/,'double quantity');
+console.log('QUANTITY SURFACE PASS: affine/linear/dead/copy reach annotations; later closures one-shot');
+// (d) operators without a core constructor are refused with the constructor they wait for.
+for(const [op,wait] of [['<','Primitive.less'],['>=','Primitive.less'],['-','Primitive.subtract'],['/','Primitive.divide']]){
+ expectThrow(()=>run('1n '+op+' 2n','Nat'),new RegExp('operator '+op.replace(/[-/]/g,'\\$&')+' is not yet a core constructor.*'+wait.replace('.','\\.')),'operator '+op);
+}
+console.log('OPERATOR REFUSAL PASS: < >= - / name Primitive.less/subtract/divide');
+// Sums (SUMS-DESIGN §9): inject/case/ifBool/labelEqual, != and || via ifBool.
+const shapes=`edition ObjectiveBend 1\nsum Shape:\n  circle: Nat\n  square: {side: Nat}\n  none: {}\nsum List:\n  nil: {}\n  cons: {head: Nat, tail: List}\ndef area(s: Shape) -> Nat:\n  match s:\n    case circle(r): r * 3n\n    case square(q): q.side * q.side\n    case none(_): 0n\ndef pick(b: Bool) -> Nat:\n  if b then 1n else 2n\ndef same(a: String, b: String) -> Bool:\n  a == b\ndef differ(a: Nat, b: Nat) -> Bool:\n  a != b\ndef either(a: Bool, b: Bool) -> Bool:\n  a || b\ndef one() -> List:\n  List.cons({head: 1n, tail: List.nil()})\ndef main() -> Nat:\n  area(Shape.square({side: 4n}))\n`;
+const sumsOut=elaborate([moduleFor(shapes)],0,'main',[]);
+const g=(name:string)=>findTag(sumsOut.term,'fix').spec.body.body.fields.find((f:any)=>f.name==='Probe.'+name).value;
+if(findTag(g('area'),'case')?.arms.map((a:any)=>a.label).join()!=='circle,square,none')throw Error('sum match did not lower to case');
+if(findTag(g('pick'),'ifBool')===null||findTag(g('same'),'binary').primitive!=='labelEqual'||findTag(g('differ'),'ifBool').condition.primitive!=='equal'||findTag(g('either'),'ifBool').whenTrue.value!==true)throw Error('Bool/label lowering lost');
+const sumsTyped=literalAnnotations(sumsOut);
+if(sumsTyped.schema!=='dregg.objective-bend.typed-core.v2'||sumsTyped.injections.length!==3)throw Error('injection proposals lost: '+JSON.stringify(sumsTyped.message??sumsTyped.injections?.length));
+if(!sumsTyped.bounds.some((b:any)=>b.index==='1'&&b.type.tag==='variant')||!sumsTyped.shareableVariables.includes('1'))throw Error('recursive sum not a bounded shareable variable');
+if('injections' in literalAnnotations(run('7n','Nat')))throw Error('sum-free packet gained an injections field');
+expectThrow(()=>elaborate([moduleFor(shapes.replace('    case none(_): 0n\n',''))],0,'main',[]),/not exhaustive: missing \[none\]/,'non-exhaustive match');
+expectThrow(()=>elaborate([moduleFor(shapes.replace('Shape.square({side: 4n})','Shape.triangle(4n)'))],0,'main',[]),/has no case triangle/,'unknown sum case');
+expectThrow(()=>elaborate([moduleFor('edition ObjectiveBend 1\ndef eq(a, b) -> Bool:\n  a == b\n')],0,'eq',[]),/operands' types resolved/,'untyped ==');
+console.log('SUMS SURFACE PASS: inject/case/ifBool/labelEqual, != and || via ifBool, recursive sum bound, exhaustiveness, sum-free packets unchanged');
+// Gen-1 imports are refused by the parser.
+expectThrow(()=>parseObjective('edition ObjectiveBend 1\nimport Prior from "./Base.bend"\n'),/Gen-1 \.\/NAME\.bend imports are retired/,'Gen-1 import');
+console.log('GEN-1 IMPORT REFUSAL PASS');
+
+// Control: every in-repo .obend elaborates (definition mode, last declaration).
+import {readdirSync,readFileSync} from 'node:fs';
+const testDir=new URL('../../tests/objective-bend-source/',import.meta.url);
+const sources=readdirSync(testDir).filter(f=>f.endsWith('.obend')).sort();
+for(const f of sources){
+ const name=f.replace('.obend',''),ast=parseObjective(readFileSync(new URL(f,testDir),'utf8'));
+ const mods:any[]=ast.imports.map((i:any)=>{const base=i.path.slice(2).replace('.obend','');return {name:base,sha256:'t',astSha256:'t',imports:[],ast:parseObjective(readFileSync(new URL(base+'.obend',testDir),'utf8'))};});
+ mods.push({name,sha256:'t',astSha256:'t',imports:ast.imports.map((i:any,j:number)=>({...i,module:String(j),moduleName:mods[j].name})),ast});
+ const decls=ast.declarations.filter((d:any)=>d.kind!=='record'&&d.kind!=='sum'),last:any=decls[decls.length-1];
+ elaborate(mods,mods.length-1,last.name??last.signature.name,[],'definition');
+}
+console.log('EVERY OBEND ELABORATES: '+sources.length+' files');

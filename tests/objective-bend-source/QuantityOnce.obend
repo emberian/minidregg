@@ -1,0 +1,4 @@
+edition ObjectiveBend 1
+# Affine and linear parameters used at most once: accepted by the checker.
+def once(affine x: Nat, linear y: Nat) -> Nat:
+  x + y

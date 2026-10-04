@@ -17,3 +17,8 @@ const row=quoted.declarations.find((d:any)=>d.kind==="record") as any;
 const selected=quoted.declarations.find((d:any)=>d.kind==="function") as any;
 if(JSON.stringify(row.fields.map((f:any)=>f.name))!==JSON.stringify(["0","1"])||selected.body.expression.name!=="1")throw Error("quoted field identity differs");
 console.log("QUOTED FIELDS PASS: canonical ordinal keys, escaped string names, actual member selection");
+
+import {readdirSync} from "node:fs";
+const every=readdirSync(import.meta.dirname).filter(f=>f.endsWith(".obend")).sort();
+for(const f of every)parseObjective(readFileSync(join(import.meta.dirname,f),"utf8"));
+console.log("EVERY OBEND PARSES: "+every.length+" files");

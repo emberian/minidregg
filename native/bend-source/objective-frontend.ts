@@ -41,8 +41,8 @@ export function captureObjective(specPath:string,outputDirectory:string,options:
    const lock=m.imports[j],target=index(lock.module,"import module");
    if(target>=i)throw new Error("imports must reference an earlier sealed module");
    if(lock.alias!==edge.alias||(!adopted||lock.path!==undefined)&&lock.path!==edge.path)throw new Error("source import path/alias differs: "+m.name);
-   if(!/^\.\/[A-Za-z_]\w*\.(?:obend|bend)$/.test(edge.path))throw new Error("Objective edition 1 imports require sealed ./NAME.obend or ./NAME.bend paths");
-   if(edge.path!=="./"+modules[target].name+".obend"&&edge.path!=="./"+modules[target].name+".bend")throw new Error("source import target differs: "+m.name);
+   if(!/^\.\/[A-Za-z_]\w*\.obend$/.test(edge.path))throw new Error("Objective edition 1 imports require sealed ./NAME.obend paths (Gen-1 ./NAME.bend is retired)");
+   if(edge.path!=="./"+modules[target].name+".obend")throw new Error("source import target differs: "+m.name);
    if(lock.sha256!==undefined&&lock.sha256!==modules[target].sha256)throw new Error("changed imported bytes: "+m.name);
    return {...edge,module:String(target),moduleName:modules[target].name,sha256:modules[target].sha256};
   });
