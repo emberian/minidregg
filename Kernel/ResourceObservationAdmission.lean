@@ -414,9 +414,9 @@ structure Checked (prepared : Prepared context profile wanted marker capability 
 
 /-- Signature first: until it verifies, the requester is not authenticated
 and only `badSignature` (a fact about its own envelope) is named. -/
-def check (native : CredentialSignatureIO.NativeConfig)
+def check {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (prepared : Prepared context profile wanted marker capability contextBytes) (envelope : List UInt8) :
-    IO (Except Refusal (Checked prepared envelope)) := do
+    m (Except Refusal (Checked prepared envelope)) := do
   match ← CredentialSignatureAdmission.verifyNative native context.authority.snapshot marker wanted envelope with
   | .error reason => return .error (.of (RefusalReason.ofSignature reason))
   | .ok signature =>

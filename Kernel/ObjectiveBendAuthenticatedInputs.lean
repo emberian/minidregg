@@ -57,10 +57,10 @@ def readOf (environment : Environment deployment durable)
 
 /-- Pure request-shape checks precede crypto; every state-dependent check is the
 existing signature-first observation receiver. -/
-def authorizeQuery (native : CredentialSignatureIO.NativeConfig)
+def authorizeQuery {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (environment : Environment deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (ref : ObjectiveInvocationClaim.InputRef) (bytes : List UInt8) :
-    IO (Except Failure (ObjectiveBendNativeAdmission.Read environment profile)) := do
+    m (Except Failure (ObjectiveBendNativeAdmission.Read environment profile)) := do
   match signedCodec.decode bytes with
   | none => return .error .malformed
   | some signed =>
@@ -73,10 +73,10 @@ def authorizeQuery (native : CredentialSignatureIO.NativeConfig)
       | none => return .error .selection
       | some read => return .ok read
 
-private def authorizeList (native : CredentialSignatureIO.NativeConfig)
+private def authorizeList {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (environment : Environment deployment durable) (profile : CanonicalRuntimeProfile.Profile F) :
     List ObjectiveInvocationClaim.InputRef → List (List UInt8) →
-      IO (Except Failure (List (ObjectiveBendNativeAdmission.Read environment profile)))
+      m (Except Failure (List (ObjectiveBendNativeAdmission.Read environment profile)))
   | [],[] => pure (.ok [])
   | ref::refs,bytes::envelopes => do
       match ← authorizeQuery native environment profile ref bytes with
@@ -89,10 +89,10 @@ private def authorizeList (native : CredentialSignatureIO.NativeConfig)
 
 /-- Authenticate the claim's source envelope and every input envelope, bounded
 by the signed capacity before any signature work. -/
-def authorize (native : CredentialSignatureIO.NativeConfig)
+def authorize {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (environment : Environment deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (claim : ObjectiveInvocationClaim.Claim) :
-    IO (Except Failure (ObjectiveBendNativeAdmission.Authenticated environment profile claim)) := do
+    m (Except Failure (ObjectiveBendNativeAdmission.Authenticated environment profile claim)) := do
   if claim.sourceEnvelope.length + claim.inputEnvelopes.flatten.length > claim.capacity.turnBytes ||
       claim.inputRefs.length + 1 > claim.capacity.incidences then return .error .capacity
   match ← authorizeQuery native environment profile claim.source claim.sourceEnvelope with
@@ -112,7 +112,7 @@ def Failure.reject : Failure → DeclaredResourceController.Reject
 
 /-- The production oracle. Every host entry that admits Objective commands
 (`NativeHost.submitLoadedVia .invoke`, `NativeHostReplay.derive`) installs it. -/
-def oracle : ObjectiveBendNativeAdmission.ReadOracle :=
+def oracle {m : Type → Type} [Monad m] : ObjectiveBendNativeAdmission.ReadOracle m :=
   ⟨fun native environment profile claim => do
     match ← authorize native environment profile claim with
     | .error reason => return .error reason.reject

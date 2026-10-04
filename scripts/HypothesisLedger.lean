@@ -30,7 +30,10 @@ is `D args` with `D` fully applied.  It is
   instance or inner) -- it proves `∀ params, D params` (or its negation);
 * an **instance** when it carries no propositional hypothesis but is not
   general (a concrete argument, a repeated variable, or an `∃`-bound one) --
-  it exhibits a satisfying (or refuting) point;
+  it exhibits a satisfying (or refuting) point -- AND every binder its
+  arguments mention is shown inhabited (a type, an instance argument, a type
+  with a `Nonempty` instance); `∀ a : Accepted, D (f a)` over a carrier nobody
+  showed inhabited exhibits nothing and is conditional (D6, plant `Unshowable`);
 * **conditional** when it carries a propositional hypothesis.  Listed, never
   counted: a witness that holds under an unexamined premise is the scar again.
 
@@ -155,6 +158,20 @@ structure PackedRefinement (evaluate : Array Bool → Option (Array Bool)) where
     ∃ next, Macrostep state next ∧ represents (output.extract 1 output.size) next
 theorem packedRefinement_consumer (evaluate : Array Bool → Option (Array Bool))
     (refinement : PackedRefinement evaluate) : True := trivial
+
+/-- REGRESSION (2026-10-04, D6): a "satisfying instance" quantified over a carrier
+nobody has shown inhabited exhibits no point. `unshownSat` proves the floor at an
+argument computed FROM such a carrier value (`∀ c : Unshown, Unshowable (c.width - c.width)`);
+the old classifier never checked the binders an atom's arguments need, so it counted
+that as a satisfying instance and read this family GREEN. It must read TOOTHLESS. -/
+structure Unshown where
+  width : Nat
+  never : width ≠ width
+/-- A planted assumption whose only satisfying "instance" ranges over `Unshown`. -/
+def Unshowable (n : Nat) : Prop := n = 0
+theorem unshownSat (c : Unshown) : Unshowable (c.width - c.width) := Nat.sub_self _
+theorem unshowable_ref : ¬ Unshowable 1 := by simp [Unshowable]
+theorem unshowable_consumer (n : Nat) (h : Unshowable n) : n = 0 := h
 
 /-- A codec with a totality obligation: `decode := none` cannot discharge it, so
 the probe must NOT read it TRIVIAL. -/
@@ -295,10 +312,18 @@ def kindOf (ctx : Ctx) (args : Array Expr) : MetaM Kind := do
     if needed.contains u then continue
     unless ← harmlessBinder u do return .conditional
   let mut seen : Array Expr := #[]
+  let mut general := true
   for a in args do
-    if !(a.isFVar && ctx.universals.contains a) || seen.contains a then return .inst
+    if !(a.isFVar && ctx.universals.contains a) || seen.contains a then general := false
     seen := seen.push a
-  return .general
+  if general then return .general
+  -- An instance exhibits a point only if every binder its arguments need is shown
+  -- inhabited: `∀ a : Accepted, D (f a)` names no point while `Accepted` may be empty.
+  -- INHABITED-BEGIN
+  for u in needed do
+    unless ← harmlessBinder u do return .conditional
+  -- INHABITED-END
+  return .inst
 
 /-- Walk a conclusion into atoms. -/
 partial def conclusionAtoms (families : Std.HashMap Name Nat) (ctx : Ctx) (e : Expr)
@@ -534,7 +559,8 @@ def plantMustBe : List (Name × Verdict) :=
    (`Minidregg.HypothesisLedger.Plant.Proved, .stale),
    (`Minidregg.HypothesisLedger.Plant.Toothless, .toothless),
    (`Minidregg.HypothesisLedger.Plant.Teeth, .green),
-   (`Minidregg.HypothesisLedger.Plant.UnfixedPolishchukSpielman, .vacuous)]
+   (`Minidregg.HypothesisLedger.Plant.UnfixedPolishchukSpielman, .vacuous),
+   (`Minidregg.HypothesisLedger.Plant.Unshowable, .toothless)]
 
 /-- The minimum number of families with a consumer a working scan finds.
 Pinned below the 2026-10-01 count; a scan that silently stopped walking

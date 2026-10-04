@@ -271,10 +271,17 @@ def prepare (snapshot : Snapshot) (nullifier : Nat) (request : SomeRequest)
       else .error .sourceBinding
 
 /-- The constructor is module-private. There is no positive-result decoder,
-test receipt constructor, arbitrary verifier callback or pure mint function. -/
+test receipt constructor, arbitrary verifier callback or pure mint function. The
+verdict is the configured verifier's, and the receipt keeps that config
+(`verifier`): the pinned native process, or -- only in a Lean fixture that evaluates
+a real admission -- a recorded run of that process
+(`CredentialSignatureIO.Transcript`), which `scripts/check-native-transcripts.sh`
+re-submits to it. -/
 structure CheckedSignature (snapshot : Snapshot) where
   private mk ::
-  verifier : CredentialSignatureIO.NativeConfig
+  /-- The oracle that answered the signature check: the pinned process, or (only
+  in a pure evaluation) a recorded run of it (`CredentialSignatureIO.Oracle`). -/
+  source : CredentialSignatureIO.Source
   request : SomeRequest
   nullifier : Nat
   envelopeBytes : List UInt8
@@ -284,13 +291,13 @@ structure CheckedSignature (snapshot : Snapshot) where
   admitted : CredentialSignedEnvelopeController.finish prepared.controller (Except.ok true : Except CredentialSignatureIO.Error Bool) =
     .ok admission
 
-def verifyNative (config : CredentialSignatureIO.NativeConfig) (snapshot : Snapshot) (nullifier : Nat)
+def verifyNative {m : Type → Type} [Monad m] (config : CredentialSignatureIO.Oracle m) (snapshot : Snapshot) (nullifier : Nat)
     {kind : ResourceKind} (request : Request kind) (envelopeBytes : List UInt8) :
-    IO (Except Reject (CheckedSignature snapshot)) := do
+    m (Except Reject (CheckedSignature snapshot)) := do
   match preparation : prepare snapshot nullifier ⟨kind, request⟩ envelopeBytes with
   | .error reason => return .error reason
   | .ok prepared =>
-      match ← CredentialSignatureIO.verify config prepared.controller.key.publicKey prepared.controller.frame
+      match ← config.check prepared.controller.key.publicKey prepared.controller.frame
           prepared.controller.envelope.signature with
       | .error error => return .error (.envelope (.nativeVerify error))
       | .ok false => return .error (.envelope .invalidSignature)
@@ -299,7 +306,7 @@ def verifyNative (config : CredentialSignatureIO.NativeConfig) (snapshot : Snaps
               (Except.ok true : Except CredentialSignatureIO.Error Bool) with
           | .error reason => return .error (.envelope reason)
           | .ok admission =>
-              return .ok ⟨config, ⟨kind, request⟩, nullifier, envelopeBytes,
+              return .ok ⟨config.source, ⟨kind, request⟩, nullifier, envelopeBytes,
                 prepared, preparation, admission, admitted⟩
 
 /-- The pure portal can use a native receipt only for its exact complete

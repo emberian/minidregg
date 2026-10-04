@@ -25,7 +25,10 @@
 #   (d) a PackedRefinement-shaped structure planted OUTSIDE the plant namespace
 #       must turn the run RED as TRIVIAL;
 #   (e) the covered-consumer pass is deleted; the un-fixed Polishchuk-Spielman
-#       plant must stop reading VACUOUS and fail the instrument.
+#       plant must stop reading VACUOUS and fail the instrument;
+#   (f) the inhabitation check on an instance's binders is deleted (D6); the
+#       `Unshowable` plant, whose only satisfying "instance" ranges over an
+#       uninhabited carrier, must stop reading TOOTHLESS and fail the instrument.
 # The copies are written to a temporary directory; the tree is never edited.
 #
 # usage: scripts/check-hypothesis-ledger.sh [--no-self-test]
@@ -147,6 +150,23 @@ EOF
     echo "self-test (e) covered-consumer pass deleted: PASS (exit $status; $(grep -a -m1 'UnfixedPolishchukSpielman expected' "$tmp/nocover.log"))"
   else
     echo "self-test (e) covered-consumer pass deleted: FAIL (exit $status)"; cat "$tmp/nocover.log"; failed=1
+  fi
+
+  # (f) delete the inhabitation check: an instance quantified over an unshown carrier
+  #     (plant Unshowable) must then read GREEN, which the instrument refuses
+  python3 - "$ledger" "$tmp/noinhabit.lean" <<'EOF'
+import sys
+src = open(sys.argv[1]).read()
+begin, end = "  -- INHABITED-BEGIN\n", "  -- INHABITED-END\n"
+assert src.count(begin) == 1 and src.count(end) == 1, "self-test: inhabitation markers not found"
+i, j = src.index(begin), src.index(end) + len(end)
+open(sys.argv[2], "w").write(src[:i] + src[j:])
+EOF
+  status=$(run "$tmp/noinhabit.lean" "$tmp/noinhabit.log")
+  if [ "$status" != 0 ] && grep -aq "instrument: plant Minidregg.HypothesisLedger.Plant.Unshowable expected TOOTHLESS" "$tmp/noinhabit.log"; then
+    echo "self-test (f) instance inhabitation check deleted: PASS (exit $status; $(grep -a -m1 'Unshowable expected' "$tmp/noinhabit.log"))"
+  else
+    echo "self-test (f) instance inhabitation check deleted: FAIL (exit $status)"; cat "$tmp/noinhabit.log"; failed=1
   fi
 fi
 

@@ -50,6 +50,40 @@ def parseOutput (output : IO.Process.Output) : Except Error Bool :=
     | "invalid\n" => .ok false
     | _ => .error .malformedResponse
 
+/-- A recorded run of the pinned native verifier: the exact `(publicKey, frame,
+signature)` triples it answered `verified` on. Only `Oracle.recorded` consumes one,
+and that oracle exists only at `Id` (a pure evaluation); the Host's receivers run
+at `IO`, where the only oracle is the process (`Oracle.io_process`). Every transcript
+in the tree is re-submitted to the pinned verifier by
+`scripts/check-native-transcripts.sh` (each triple must read `verified`, the same
+triple with one flipped signature byte `invalid`). -/
+structure Transcript where
+  verified : List (List UInt8 × List UInt8 × List UInt8)
+  deriving DecidableEq, Repr
+
+/-- A transcript answers only what the verifier answered: a recorded triple is
+`verified`; any other triple has no verdict (`unavailable`), never `invalid` and
+never `verified`. -/
+def Transcript.answer (transcript : Transcript) (publicKey frame signature : List UInt8) :
+    Except Error Bool :=
+  if (publicKey, frame, signature) ∈ transcript.verified then .ok true
+  else .error (.unavailable "the transcript holds no verdict for this signature")
+
+theorem Transcript.answer_true_recorded {transcript : Transcript}
+    {publicKey frame signature : List UInt8}
+    (answered : transcript.answer publicKey frame signature = .ok true) :
+    (publicKey, frame, signature) ∈ transcript.verified := by
+  unfold Transcript.answer at answered
+  split at answered
+  · assumption
+  · cases answered
+
+theorem Transcript.answer_never_false (transcript : Transcript)
+    (publicKey frame signature : List UInt8) :
+    transcript.answer publicKey frame signature ≠ .ok false := by
+  unfold Transcript.answer
+  split <;> simp
+
 def verify (config : NativeConfig) (publicKey frame signature : List UInt8) :
     IO (Except Error Bool) :=
   if publicKey.length != 32 then pure (.error .publicKeyLength)
@@ -93,6 +127,79 @@ def verifySshsig (config : NativeConfig) (publicKey nameSpace message signature 
               messagePath.toString, signaturePath.toString] }
         pure (parseOutput output)
     catch error => pure (.error (.unavailable s!"{error}"))
+
+/-- The verdict of a recorded run: the same length checks as `verify`, then the
+transcript's answer. -/
+def recordedVerdict (transcript : Transcript) (publicKey frame signature : List UInt8) :
+    Except Error Bool :=
+  if publicKey.length != 32 then .error .publicKeyLength
+  else if signature.length != 64 then .error .signatureLength
+  else transcript.answer publicKey frame signature
+
+/-- **Who answers a signature check.** A closed family, indexed by the monad the
+admission runs in: `live` is the pinned native process and exists only at `IO`;
+`recorded` is a recorded run of it and exists only at `Id`. The Host's receivers
+run at `IO`, so the only oracle they can be handed is the process
+(`Oracle.io_process`); a transcript can answer only a pure evaluation, such as
+`Assurance.NativeAcceptedFixture`. Every receipt keeps `source` of the oracle that
+answered it (`CredentialSignatureAdmission.CheckedSignature.source`). -/
+inductive Oracle : (Type → Type) → Type where
+  | live (config : NativeConfig) : Oracle IO
+  | recorded (transcript : Transcript) : Oracle Id
+
+/-- A pinned config is the live oracle (at `IO`, and nowhere else). -/
+instance : Coe NativeConfig (Oracle IO) := ⟨Oracle.live⟩
+
+/-- What a receipt records about the oracle that answered its signature check. -/
+inductive Source where
+  | process (binary : System.FilePath)
+  | transcript (transcript : Transcript)
+  deriving DecidableEq, Repr
+
+def Oracle.source : {m : Type → Type} → Oracle m → Source
+  | _, .live config => .process config.binary
+  | _, .recorded transcript => .transcript transcript
+
+def Oracle.check : {m : Type → Type} → Oracle m → (publicKey frame signature : List UInt8) →
+    m (Except Error Bool)
+  | _, .live config, publicKey, frame, signature => verify config publicKey frame signature
+  | _, .recorded transcript, publicKey, frame, signature =>
+      (recordedVerdict transcript publicKey frame signature : Except Error Bool)
+
+/-- `IO` and `Id` are different monads: `IO Empty` has a value (a thrown error),
+`Id Empty` has none. -/
+theorem io_ne_id : (IO : Type → Type) ≠ Id := by
+  intro same
+  have thrown : Nonempty (IO Empty) := ⟨throw (IO.userError "")⟩
+  rw [same] at thrown
+  exact thrown.elim fun (value : Empty) => value.elim
+
+/-- **At `IO` the oracle is the process.** Every oracle the Host's `IO` receivers
+can be handed is `live`: its verdicts are the pinned binary's and its receipts
+record `.process`. A transcript-backed receipt cannot be constructed at `IO`. -/
+theorem Oracle.io_process (oracle : Oracle IO) :
+    ∃ config : NativeConfig, oracle.source = .process config.binary ∧
+      oracle.check = verify config := by
+  suffices general : ∀ {m : Type → Type} (oracle : Oracle m) (atIO : m = IO),
+      ∃ config : NativeConfig, oracle.source = .process config.binary ∧
+        HEq oracle.check (verify config) from
+    (general oracle rfl).elim fun config ⟨source, check⟩ => ⟨config, source, eq_of_heq check⟩
+  intro m oracle atIO
+  cases oracle with
+  | live config => exact ⟨config, rfl, HEq.rfl⟩
+  | recorded _ => exact absurd atIO.symm io_ne_id
+
+/-- **A transcript answers only what the process answered**: a recorded oracle's
+`true` is a triple in its transcript, and it never answers `false`. -/
+theorem Oracle.recorded_true {transcript : Transcript} {publicKey frame signature : List UInt8}
+    (answered : (Oracle.recorded transcript).check publicKey frame signature = .ok true) :
+    (publicKey, frame, signature) ∈ transcript.verified := by
+  simp only [Oracle.check, recordedVerdict] at answered
+  split at answered
+  · cases answered
+  · split at answered
+    · cases answered
+    · exact Transcript.answer_true_recorded answered
 
 theorem positive_response_exact (output : IO.Process.Output)
     (accepted : parseOutput output = .ok true) :

@@ -454,12 +454,12 @@ def intentKey (context : Context deployment durable) (subject : SubjectId) :
 /-- The native verdict on an intent signature: the subject's key over the intent's own
 framed bytes. It is given no target, no directory and no Book. A subject without a key
 is not verified at all. -/
-def intentVerdict (native : CredentialSignatureIO.NativeConfig)
+def intentVerdict {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (key : Except Refusal (List UInt8)) (intent : Intent) (signature : List UInt8) :
-    IO (Except CredentialSignatureIO.Error Bool) :=
+    m (Except CredentialSignatureIO.Error Bool) :=
   match key with
   | .error _ => pure (.ok false)
-  | .ok publicKey => CredentialSignatureIO.verify native publicKey (intentCodec.encode intent) signature
+  | .ok publicKey => native.check publicKey (intentCodec.encode intent) signature
 
 /-- The authentication decision: only the exact positive verdict under a selected key
 authenticates; every other verdict is `badSignature`. -/
@@ -541,11 +541,11 @@ def challenge (context : Context deployment durable) (profile : CanonicalRuntime
   let clock ← need .operationRejected (ClockCellDomain.load deployment durable.snapshot)
   challengeAt context profile federation genesisHeight intent clock.clock intentSignature
 
-def checkGrant (native : CredentialSignatureIO.NativeConfig)
+def checkGrant {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
     (grant : GrantRef) (signature : List UInt8) :
-    IO (Except Refusal (CheckedGrant context profile federation genesisHeight intent grant)) := do
+    m (Except Refusal (CheckedGrant context profile federation genesisHeight intent grant)) := do
   let some selected := select context grant | return .error (preAuthentication (.of .noGrant))
   let worldRoot := durable.worldRoot
   let wanted := requestAt context worldRoot profile.semantics federation genesisHeight
@@ -593,11 +593,11 @@ theorem AuthorizedIntent.query_footprint
   footprint_success_exact context intent [(query.kind, query.target)]
     (by simp only [requiredTargets, purpose]; rfl) accepted.footprint
 
-private def checkGrants (native : CredentialSignatureIO.NativeConfig)
+private def checkGrants {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
     (grants : List GrantRef) (signatures : List (List UInt8)) :
-    IO (Except Refusal ((index : Fin grants.length) →
+    m (Except Refusal ((index : Fin grants.length) →
       CheckedGrant context profile federation genesisHeight intent (grants.get index))) := do
   match grants, signatures with
   | [], [] => return .ok (fun index => Fin.elim0 index)
@@ -637,10 +637,10 @@ refused against the current world root; no grant means no successful footprint; 
 callback can mint a read token. Before the header signatures verify only
 `preAuthentication` reasons are named. Reached only through `authorize`, after the
 intent signature verified (`authenticated`). -/
-def authorizeAuthenticated (native : CredentialSignatureIO.NativeConfig)
+def authorizeAuthenticated {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (signed : Signed) :
-    IO (Except Refusal (AuthorizedIntent context profile federation genesisHeight signed.challenge.intent)) := do
+    m (Except Refusal (AuthorizedIntent context profile federation genesisHeight signed.challenge.intent)) := do
   let intent := signed.challenge.intent
   match derived : challenge context profile federation genesisHeight intent
       signed.challenge.intentSignature with
@@ -659,10 +659,10 @@ def authorizeAuthenticated (native : CredentialSignatureIO.NativeConfig)
 signature the challenge carries is checked against the subject's current key
 (`intentVerdict`, reading only the subject's key, the intent's bytes and the signature);
 only an authenticated request reaches the target-reading authorization. -/
-def authorize (native : CredentialSignatureIO.NativeConfig)
+def authorize {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (signed : Signed) :
-    IO (Except Refusal (AuthorizedIntent context profile federation genesisHeight signed.challenge.intent)) := do
+    m (Except Refusal (AuthorizedIntent context profile federation genesisHeight signed.challenge.intent)) := do
   let key := intentKey context signed.challenge.intent.subject
   let verdict ← intentVerdict native key signed.challenge.intent signed.challenge.intentSignature
   match authenticated key verdict with
@@ -670,14 +670,14 @@ def authorize (native : CredentialSignatureIO.NativeConfig)
   | .ok () => authorizeAuthenticated native context profile federation genesisHeight signed
 
 /-- The signed path is the authentication, then the target-reading authorization. -/
-theorem authorize_authenticates_first (native : CredentialSignatureIO.NativeConfig)
+theorem authorize_authenticates_first {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (signed : Signed) :
-    authorize native context profile federation genesisHeight signed = (do
-      let verdict ← intentVerdict native (intentKey context signed.challenge.intent.subject)
+    authorize (m := m) native context profile federation genesisHeight signed = (do
+      let verdict ← intentVerdict (m := m) native (intentKey context signed.challenge.intent.subject)
         signed.challenge.intent signed.challenge.intentSignature
       match authenticated (intentKey context signed.challenge.intent.subject) verdict with
-      | .error refusal => return .error refusal
+      | .error refusal => return Except.error refusal
       | .ok () => authorizeAuthenticated native context profile federation genesisHeight signed) :=
   rfl
 

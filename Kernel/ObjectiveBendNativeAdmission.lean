@@ -349,21 +349,21 @@ def authenticate {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} 
 real one (`ObjectiveBendAuthenticatedInputs.oracle`) authenticates each claimed
 envelope through NativeObservationController; it cannot construct a `Read`
 without a verified, authorized signature on this context. -/
-structure ReadOracle where
+structure ReadOracle (m : Type → Type) where
   authenticate : {F : Type} → [Field F] → [DecidableEq F] → {deployment : Deployment} →
-    {durable : Durable} → CredentialSignatureIO.NativeConfig →
+    {durable : Durable} → CredentialSignatureIO.Oracle m →
     (environment : Environment deployment durable) → (profile : CanonicalRuntimeProfile.Profile F) →
-    (claim : ObjectiveInvocationClaim.Claim) → IO (Except Reject (Authenticated environment profile claim))
+    (claim : ObjectiveInvocationClaim.Claim) → m (Except Reject (Authenticated environment profile claim))
 
 /-- A caller that did not install the signed-query oracle. Its refusal is
 `noReadOracle`, distinct from every policy or authority refusal. -/
-def ReadOracle.refuse : ReadOracle := ⟨fun _ _ _ _ => pure (.error .noReadOracle)⟩
+def ReadOracle.refuse {m : Type → Type} [Monad m] : ReadOracle m := ⟨fun _ _ _ _ => pure (.error .noReadOracle)⟩
 
-theorem ReadOracle.refuse_refuses {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
-    {durable : Durable} (native : CredentialSignatureIO.NativeConfig)
+theorem ReadOracle.refuse_refuses {m : Type → Type} [Monad m] {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
+    {durable : Durable} (native : CredentialSignatureIO.Oracle m)
     (environment : Environment deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (claim : ObjectiveInvocationClaim.Claim) :
-    ReadOracle.refuse.authenticate native environment profile claim = pure (.error .noReadOracle) := rfl
+    (ReadOracle.refuse : ReadOracle m).authenticate native environment profile claim = pure (.error .noReadOracle) := rfl
 
 /-- CAS dependencies of one consumed read: the read resource at its current
 physical root, the read's clock, and every governing law/kind cell. -/
@@ -510,9 +510,9 @@ def Core.contextBytes {F : Type} [Field F] [DecidableEq F] {deployment : Deploym
 /-- Shared by quotation and admission. Signature/policy work happens inside
 `authorize`, after cheap policy, capacity and funding refusals. -/
 def prepareCore {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {durable : Durable}
-    (native : CredentialSignatureIO.NativeConfig) (oracle : ReadOracle)
+    {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m) (oracle : ReadOracle m)
     (environment : Environment deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
-    (claim : ObjectiveInvocationClaim.Claim) : IO (Except Reject (Core environment profile claim)) := do
+    (claim : ObjectiveInvocationClaim.Claim) : m (Except Reject (Core environment profile claim)) := do
   let some ⟨semantics⟩ := ensure (NativeInvocationProfile.registered profile.receiverParameters .objectiveMethod = true) | return .error .bendExecution
   let some policyBytes := NativeInvocationProfile.binding profile.receiverParameters .objectiveMethod
     | return .error .bendExecution
@@ -629,9 +629,9 @@ structure Selection {F : Type} [Field F] [DecidableEq F] {deployment : Deploymen
 policy and source typing work; no source demand runs here. -/
 def select {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable} {command : Command}
-    (native : CredentialSignatureIO.NativeConfig) (oracle : ReadOracle)
+    {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m) (oracle : ReadOracle m)
     (prepared : PreparedInvocation deployment profile ambient durable command) :
-    IO (Except Reject (Selection prepared)) := do
+    m (Except Reject (Selection prepared)) := do
   match selected : command.objectiveClaim with
   | .error reason => return .error reason
   | .ok none => return .error .bendExecution

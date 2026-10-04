@@ -933,10 +933,10 @@ structure ReadLeg [DecidableEq F]
   checked : ResourceObservationAdmission.Checked selected envelope
   moneyCovered : moneyReadCovered prepared i
 
-def verifyRead [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
+def verifyRead [DecidableEq F] {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (i : TargetIndex command) (envelope : List UInt8) :
-    IO (Except Reject (ReadLeg prepared i envelope)) := do
+    m (Except Reject (ReadLeg prepared i envelope)) := do
   if present : command.targets[i].observeCapability.isSome = true then
     match selected : readPreparation prepared i with
     | .error _ => return .error .observationRejected
@@ -1179,10 +1179,10 @@ structure CheckedLeg [DecidableEq F]
   moneyVerbs : moneyVerbsCheck authorization.evidence.capabilityValue
     (monetaryVerbs? prepared incidence) = .ok ()
 
-def verifyAndAuthorizeLeg [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
+def verifyAndAuthorizeLeg [DecidableEq F] {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) (envelope : List UInt8) :
-    IO (Except Reject (CheckedLeg prepared tuple incidence envelope)) := do
+    m (Except Reject (CheckedLeg prepared tuple incidence envelope)) := do
   match ← CredentialSignatureAdmission.verifyNative native prepared.authority.snapshot
       (operationMarker prepared.authority.snapshot.domain profile.semantics command)
       (tuple.request incidence).2 envelope with
@@ -1251,12 +1251,13 @@ def admissionEvidence [DecidableEq F]
   disclosure := fun _ => .sealed
   disclosureAllowed incidence := by cases incidence <;> rfl
 
-/-- A dependent traversal of native verification. Every index must return a
-checked receipt before any accepted transaction value is constructed. -/
-def collectIO {n : Nat} {E : Type} {P : Fin n → Type}
-    (run : (i : Fin n) → IO (Except E (P i))) : IO (Except E ((i : Fin n) → P i)) := do
+/-- A dependent traversal of native verification, in the receiver's monad (`IO`
+on the Host, `Id` in a pure evaluation). Every index must return a checked receipt
+before any accepted transaction value is constructed. -/
+def collectIO {m : Type → Type} [Monad m] {n : Nat} {E : Type} {P : Fin n → Type}
+    (run : (i : Fin n) → m (Except E (P i))) : m (Except E ((i : Fin n) → P i)) := do
   let rec loop : (count : Nat) → (bound : count ≤ n) →
-      IO (Except E ((i : Fin count) → P ⟨i.val, Nat.lt_of_lt_of_le i.isLt bound⟩))
+      m (Except E ((i : Fin count) → P ⟨i.val, Nat.lt_of_lt_of_le i.isLt bound⟩))
     | 0, _ => pure (.ok (fun i => nomatch i))
     | count + 1, bound => do
       match ← loop count (Nat.le_trans (Nat.le_succ count) bound) with
@@ -1404,9 +1405,9 @@ structure AudienceChecks [DecidableEq F]
   writeDischarge : ∀ guard ∈ audienceGuards targets, ∀ write ∈ writes prepared,
     guard.cellId = write.cellId → guard.expectedRoot = write.expectedPre
 
-def checkAudiences [DecidableEq F]
+def checkAudiences [DecidableEq F] {m : Type → Type} [Monad m]
     (prepared : PreparedInvocation deployment profile ambient durable command) :
-    IO (Except Reject (AudienceChecks prepared)) := do
+    m (Except Reject (AudienceChecks prepared)) := do
   match ← collectIO (fun i : TargetIndex command => pure (checkTargetAudience prepared i)) with
   | .error reason => return .error reason
   | .ok targets =>
@@ -1717,9 +1718,9 @@ theorem AcceptedInvocation.native_ingress_exact [DecidableEq F]
     (accepted.checked incidence).receipt.envelopeBytes = signed.envelope command incidence :=
   (accepted.checked incidence).envelopeExact
 
-def verifyReads [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
+def verifyReads [DecidableEq F] {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand) :
-    IO (Except Reject (command.requiresObservation = true → (i : TargetIndex command) →
+    m (Except Reject (command.requiresObservation = true → (i : TargetIndex command) →
       ReadLeg prepared i (signed.observeEnvelopes[i.val]?.getD []))) := do
   if needed : command.requiresObservation = true then
     match ← collectIO (fun i : TargetIndex command =>
@@ -1728,9 +1729,9 @@ def verifyReads [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     | .ok checked => return .ok (fun _ => checked)
   else return .ok (fun contradiction => False.elim (needed contradiction))
 
-def admitAuthority [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
+def admitAuthority [DecidableEq F] {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand) :
-    IO (Except Reject (AuthorityInvocation prepared signed)) := do
+    m (Except Reject (AuthorityInvocation prepared signed)) := do
   if ingress : commandCodec.encode command = signed.commandBytes then
     if count : signed.targetEnvelopes.length = command.targets.length then
       if readCount : signed.observeEnvelopes.length =
@@ -1771,9 +1772,9 @@ private def finishAdmission [DecidableEq F]
 
 /-- Historical ordinary admission refuses every nonordinary statement family.
 Unwrapped profiles also refuse framed ordinary families. -/
-def admitOrdinary [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
+def admitOrdinary [DecidableEq F] {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand) :
-    IO (Except Reject (AcceptedInvocation prepared signed)) := do
+    m (Except Reject (AcceptedInvocation prepared signed)) := do
   match admitOrdinaryRoute prepared signed with
   | none => return .error .malformedCommand
   | some route =>
@@ -1786,10 +1787,10 @@ checks precede construction or execution of the source's authenticated input.
 Source and inputs arrive as signed queries inside the claim, authenticated by
 `objective` (the default refuses with `noReadOracle`), never as
 command-indexed observe tokens. Their CAS dependencies enter the route guards. -/
-def admitObjective [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
+def admitObjective [DecidableEq F] {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand)
-    (objective : ObjectiveBendNativeAdmission.ReadOracle) :
-    IO (Except Reject (AcceptedInvocation prepared signed)) := do
+    (objective : ObjectiveBendNativeAdmission.ReadOracle m) :
+    m (Except Reject (AcceptedInvocation prepared signed)) := do
   match selected : command.family with
   | none => return .error .malformedCommand
   | some family =>
@@ -1819,10 +1820,10 @@ def admitObjective [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
 
 /-- Shared running receiver dispatches the registered Objective family through
 its actual source gate. Every other special route remains explicitly typed. -/
-def admit [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
+def admit [DecidableEq F] {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand)
-    (objective : ObjectiveBendNativeAdmission.ReadOracle := .refuse) :
-    IO (Except Reject (AcceptedInvocation prepared signed)) :=
+    (objective : ObjectiveBendNativeAdmission.ReadOracle m := .refuse) :
+    m (Except Reject (AcceptedInvocation prepared signed)) :=
   if command.family.any (fun family => family.route == .objectiveMethod) then
     admitObjective native prepared signed objective
   else admitOrdinary native prepared signed
@@ -2090,7 +2091,7 @@ def withAcceptedLoadedFrom {F : Type} [Field F] [DecidableEq F] {R : Type}
       (shape : PhysicalShape prepared) →
       AcceptedInvocation prepared signed → IO R)
     (ordinaryResult : ReceiveResult → IO R)
-    (objective : ObjectiveBendNativeAdmission.ReadOracle := .refuse) : IO R := do
+    (objective : ObjectiveBendNativeAdmission.ReadOracle IO := .refuse) : IO R := do
   match commandCodec.decode signed.commandBytes with
   | none => ordinaryResult (.rejected .malformedCommand)
   | some command =>
@@ -2116,7 +2117,7 @@ def withAcceptedLoadedFrom {F : Type} [Field F] [DecidableEq F] {R : Type}
               | .error reason => refuse reason
               | .ok prepared =>
                   if shape : PhysicalShape prepared then
-                    match ← admit native prepared signed objective with
+                    match ← admit (.live native) prepared signed objective with
                     | .error reason => refuse reason
                     | .ok accepted => acceptedResult prepared shape accepted
                   else refuse .physicalPreparation)
@@ -2132,7 +2133,7 @@ def withAcceptedLoaded {F : Type} [Field F] [DecidableEq F] {R : Type}
       (shape : PhysicalShape prepared) →
       AcceptedInvocation prepared signed → IO R)
     (ordinaryResult : ReceiveResult → IO R)
-    (objective : ObjectiveBendNativeAdmission.ReadOracle := .refuse) : IO R :=
+    (objective : ObjectiveBendNativeAdmission.ReadOracle IO := .refuse) : IO R :=
   withAcceptedLoadedFrom deployment profile ambient native durable (loadDirectory durable) signed
     acceptedResult ordinaryResult objective
 

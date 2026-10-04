@@ -20,6 +20,11 @@
 #   hyp-ledger     scripts/check-hypothesis-ledger.sh over AxiomCensusResearch (built by
 #                  lake-build): no VACUOUS/INCONSISTENT row, no un-allowlisted TOOTHLESS
 #                  assumption, no stale allowlist entry; self-tests its instrument each run
+#   native-transcripts every recorded verifier transcript (CredentialSignatureIO.Transcript; the
+#                  one Assurance.NativeAcceptedFixture replays the first native Objective acceptance
+#                  with) is still the pinned verifier's answer: scripts/check-native-transcripts.sh
+#                  lists them all from AxiomCensusResearch and re-submits each triple (verified; a
+#                  flipped signature byte must read invalid)
 #   objective-proofs   ObjectiveProofs built; every Theory/ObjectiveBend* statement and
 #                  exact axiom set equals scripts/gates/objective-{statements.snapshot,axioms.pin}
 #                  (scripts/check-objective-proofs.sh proofs; self-tests its instrument each run)
@@ -73,7 +78,7 @@ mkdir -p "$logdir"
 lib_targets=$(sed -n '/^\[\[lean_lib\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | grep -v '^ResearchWip$' | tr '\n' ' ')
 exe_targets=$(sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 
-GATES=(host-operations hygiene lake-build cold-start fn-wire hyp-ledger objective-proofs objective-c objective-cgen drift prover-glue build-closure unit-tests host-closure import-tiers exports shell-paths objective-frontend world-cohorts website rust-tests deploy-scripts spk-shell journey)
+GATES=(host-operations hygiene lake-build cold-start fn-wire hyp-ledger native-transcripts objective-proofs objective-c objective-cgen drift prover-glue build-closure unit-tests host-closure import-tiers exports shell-paths objective-frontend world-cohorts website rust-tests deploy-scripts spk-shell journey)
 declare -A STATUS SECS LAST
 red=0
 only=${LOCAL_GATES_ONLY:-}
@@ -84,6 +89,7 @@ g_lake-build()    { echo "ResearchWip is opt-in; source classification is checke
 g_cold-start()    { bash scripts/check-host-cold-start.sh .lake/build/bin/minidregg-host; }
 g_fn-wire()       { bash scripts/check-fn-wire.sh; }
 g_hyp-ledger()    { bash scripts/check-hypothesis-ledger.sh; }
+g_native-transcripts() { bash scripts/check-native-transcripts.sh; }
 g_objective-proofs() { bash scripts/check-objective-proofs.sh proofs; }
 g_objective-c()      { bash scripts/check-objective-proofs.sh c; }
 g_objective-cgen()   { bash scripts/check-objective-proofs.sh cgen; }
