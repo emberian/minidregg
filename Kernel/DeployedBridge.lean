@@ -9,10 +9,11 @@ deployed one, so `Represents` is stated over the real codecs:
 * `decodeCell` -- the bytes a deployed `DataWrite.canonicalPostBytes` and a
   deployed snapshot's `canonicalBytes` hold: a `ResourceBirthCodec.LifecycleImage`
   under its strict codec.  `fresh` (`[]`) is the absent slot; `live cell` is
-  the cell at its registry kind with its logical store; `retired` and every
-  undecodable string are refused (`none`, which `ofIntent` names as
-  `Refusal.undecodable c`).  The present Host never retires (G-RETIRE), so a
-  retired image has no world reading.
+  the cell at its registry kind with its logical store; `retired` reads as the
+  absent slot AND is the codec's retirement (`retiresCell`): written over a
+  present cell it is the World's retire (`TurnOfIntent.Delta.retire`).  Every
+  undecodable string is refused (`none`, which `ofIntent` names as
+  `Refusal.undecodable c`).
 * `wireOf` -- one `StoreCodec.Wire` per kind.  Eight kinds have their deployed
   wire; the three single-address kinds (`resourceBook`, `policySource`,
   `nockProgram`) get a wire here, built from their deployed value streams.  The
@@ -22,10 +23,10 @@ deployed one, so `Represents` is stated over the real codecs:
 Proved: `bridge_decode_total_on_registry` (every cell of every registered kind,
 and the absent slot, decodes to itself from its canonical bytes),
 `decodeCell_canonical` (whatever decodes is the canonical encoding of what it
-decoded to), `decodeCell_retired` (a retired image is refused), and
-`deployed_cells_iff`: `Represents`' `cells` field over this bridge says exactly
-that every deployed cell's bytes ARE the canonical encoding of the world's
-cell.  ROM kinds: `policySource_romOnly`, `nockProgram_romOnly` (every store of
+decoded to, or the retired image), `decodeCell_retired` (a retired image reads
+absent and retires), and `deployed_cells_iff`: `Represents`' `cells` field over
+this bridge says exactly that every deployed cell's bytes ARE the canonical
+encoding of the world's cell, or the retired image over an absent one.  ROM kinds: `policySource_romOnly`, `nockProgram_romOnly` (every store of
 those kinds is a legal birth image).
 -/
 import Kernel.TurnOfIntent
@@ -148,7 +149,22 @@ def decodeCell (bytes : List UInt8) : Option (Option (Cell deployedR)) :=
   match (LifecycleImage.codec CanonicalCellRegistry.registry).decode bytes with
   | some .fresh => some none
   | some (.live cell) => some (some (unpack cell))
-  | _ => none
+  | some .retired => some none
+  | none => none
+
+/-- **The deployed retirement**: the registry's retired lifecycle image. -/
+def retiresCell (bytes : List UInt8) : Bool :=
+  match (LifecycleImage.codec CanonicalCellRegistry.registry).decode bytes with
+  | some .retired => true
+  | _ => false
+
+theorem retiresCell_decode (bytes : List UInt8) (retires : retiresCell bytes = true) :
+    decodeCell bytes = some none := by
+  unfold retiresCell at retires
+  unfold decodeCell
+  split at retires
+  · rename_i decoded; rw [decoded]
+  · cases retires
 
 /-- **`bridge_decode_total_on_registry`.**  Every cell of every registered
 kind, and the absent slot, decodes to itself from its canonical bytes. -/
@@ -169,7 +185,8 @@ theorem bridge_decode_total_on_registry (slot : Option (Cell deployedR)) :
 
 /-- **Canonicity**: whatever decodes is the canonical encoding of its reading. -/
 theorem decodeCell_canonical {bytes : List UInt8} {slot : Option (Cell deployedR)}
-    (h : decodeCell bytes = some slot) : encodeCell slot = bytes := by
+    (h : decodeCell bytes = some slot) :
+    encodeCell slot = bytes ∨ (slot = none ∧ retiresCell bytes = true) := by
   unfold decodeCell at h
   cases hd : (LifecycleImage.codec CanonicalCellRegistry.registry).decode bytes with
   | none => rw [hd] at h; cases h
@@ -179,26 +196,30 @@ theorem decodeCell_canonical {bytes : List UInt8} {slot : Option (Cell deployedR
       cases image with
       | fresh =>
           cases h
-          exact canonical
-      | retired => cases h
+          exact .inl canonical
+      | retired =>
+          cases h
+          exact .inr ⟨rfl, by simp [retiresCell, hd]⟩
       | live cell =>
           cases h
           simp only [encodeCell, packOf_unpack]
-          exact canonical
+          exact .inl canonical
 
-/-- A retired image is refused: the present Host never retires (G-RETIRE). -/
+/-- A retired image reads as the absent slot, and is the retirement. -/
 theorem decodeCell_retired :
-    decodeCell (LifecycleImage.bytes CanonicalCellRegistry.registry .retired) = none := by
-  unfold decodeCell
+    decodeCell (LifecycleImage.bytes CanonicalCellRegistry.registry .retired) = some none ∧
+      retiresCell (LifecycleImage.bytes CanonicalCellRegistry.registry .retired) = true := by
   rw [show LifecycleImage.bytes CanonicalCellRegistry.registry .retired =
-    (LifecycleImage.codec CanonicalCellRegistry.registry).encode .retired from rfl,
-    LifecycleImage.decode_encode]
+    (LifecycleImage.codec CanonicalCellRegistry.registry).encode .retired from rfl]
+  unfold decodeCell retiresCell
+  rw [LifecycleImage.decode_encode]
+  exact ⟨rfl, rfl⟩
 
 /-! ## The bridge -/
 
 /-- The deployed cell codec: the decoder and the canonical address order of
 each kind's wire. -/
-def codec : Codec deployedR := Codec.ofWires decodeCell wireOf
+def codec : Codec deployedR := Codec.ofWires decodeCell retiresCell retiresCell_decode wireOf
 
 /-- **The deployed `Bridge`**: the real cell codec and the injective nullifier
 key. -/
@@ -206,17 +227,23 @@ def bridge : Bridge deployedR Theory.TypedAuthorization.Digest :=
   ⟨codec, digestKey, digestKey_injective⟩
 
 /-- **`Represents`' cells field over the deployed bridge** is exactly: every
-deployed cell's bytes are the canonical encoding of the world's cell. -/
+deployed cell's bytes are the canonical encoding of the world's cell, or the
+retired image over an absent one. -/
 theorem deployed_cells_iff (bytes : Nat → List UInt8) (cells : Nat → Option (Cell deployedR)) :
     (∀ c, bridge.codec.decode (bytes c) = some (cells c)) ↔
-      ∀ c, bytes c = encodeCell (cells c) := by
+      ∀ c, bytes c = encodeCell (cells c) ∨ (cells c = none ∧ retiresCell (bytes c) = true) := by
   constructor
   · intro h c
-    exact (decodeCell_canonical (h c)).symm
+    rcases decodeCell_canonical (h c) with canonical | retired
+    · exact .inl canonical.symm
+    · exact .inr retired
   · intro h c
     show decodeCell (bytes c) = _
-    rw [h c]
-    exact bridge_decode_total_on_registry _
+    rcases h c with canonical | ⟨absent, retired⟩
+    · rw [canonical]
+      exact bridge_decode_total_on_registry _
+    · rw [absent]
+      exact retiresCell_decode _ retired
 
 /-! ## ROM kinds: every store is a legal birth image -/
 
@@ -248,6 +275,7 @@ theorem decodeCell_policySource (record : CanonicalPolicyAdmission.PolicyRecord)
 #assert_axioms bridge_decode_total_on_registry
 #assert_axioms decodeCell_canonical
 #assert_axioms decodeCell_retired
+#assert_axioms retiresCell_decode
 #assert_axioms deployed_cells_iff
 #assert_axioms policySource_romOnly
 #assert_axioms nockProgram_romOnly

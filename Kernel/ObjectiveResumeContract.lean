@@ -478,6 +478,7 @@ def tallyConfig : Config where
   maxArtifactBytes := 4194304
   tariff := ⟨Minidregg.Kernel.ObjectiveTariff.tariffVersion, 10, 0, 1, 0, 0, 0, 0, 0⟩
   abandonGrace := 16
+  storageRate := 1
 
 /-- Tally's first yield (it awaits a reply with its total 0). -/
 def tallyYield : State :=
@@ -519,20 +520,11 @@ collides across two generations of one cell
 one await is the spent claim (`resume_consumes_once`) together with this
 generation advance.
 
-A delivery that ENDS the activity is disposal: the record cell is reclaimed to the
-empty tombstone (`delivery_end_vacates`), so the installed cell holds no record
-(`Delivery.installed_record_ended`) and no second delivery of it exists. -/
-
-/-- The registry image of an activity cell reads back its own body. -/
-theorem bodyOf_image (role : ObjectiveActivityCell.Role) (key body : Bytes) :
-    bodyOf role (image role key body) = some body := by
-  unfold bodyOf payloadOf image
-  rw [show ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry
-        (.live ⟨.objectiveActivity, ObjectiveActivityCell.cellOf ⟨role, key, body⟩⟩) =
-      (ResourceBirthCodec.LifecycleImage.codec CanonicalCellRegistry.registry).encode
-        (.live ⟨.objectiveActivity, ObjectiveActivityCell.cellOf ⟨role, key, body⟩⟩) from rfl,
-    ResourceBirthCodec.LifecycleImage.decode_encode]
-  simp
+A delivery that ENDS the activity is disposal: the record cell is RETIRED
+(`delivery_end_vacates`: the registry's retired image), so the installed cell
+holds no record (`Delivery.installed_record_ended`), every later turn on it is
+refused `recordRetired`, and no second delivery of it exists. (The image lemma
+`bodyOf_image` is `ObjectiveActivity.bodyOf_image`.) -/
 
 /-- The record a segment ends carries exactly the generation it was given. -/
 theorem nextRecord_generation (base : Record) (generation : Nat)
@@ -547,7 +539,7 @@ theorem Delivery.next_generation {rootBytes : Bytes → Digest} {config : Config
     delivery.next.generation = delivery.record.generation + 1 := by
   rw [delivery.nextExact, nextRecord_generation]
 
-/-- A stored record is never the empty (reclaimed) body: the codec writes its frame first. -/
+/-- A stored record is never empty: the codec writes its frame first. -/
 theorem encodeRecord_ne_nil (record : Record) : encodeRecord record ≠ [] := by
   have frame : recordFrame ≠ [] := by decide +kernel
   obtain ⟨b, bs, h⟩ := List.exists_cons_of_ne_nil frame
@@ -567,26 +559,27 @@ theorem Delivery.installed_record {rootBytes : Bytes → Digest} {config : Confi
   unfold readRecord
   rw [execute_accepted_install installed, DataSnapshot.install_canonicalBytes]
   simp [Delivery.intent, intentOf, delivery.postsExact, DataSnapshot.lookupPostBytes, Post.write,
-    recordPost, postAt, bodyOf_image, recordBody, awaiting, recordOfBody, record_roundTrip,
-    encodeRecord_ne_nil]
+    recordPost, postAt, recordImage, awaiting, bodyOf_image, record_roundTrip]
 
 /-- **After a delivery that ENDS the activity installs, its record cell is
-reclaimed**: it holds no record (disposal, `delivery_end_vacates`). -/
+retired**: it holds the retired image and no record (disposal,
+`delivery_end_vacates`); every later turn on it is refused `recordRetired`. -/
 theorem Delivery.installed_record_ended {rootBytes : Bytes → Digest} {config : Config}
     {snapshot next : Snapshot rootBytes} {height : Nat} {request : DeliverRequest}
     (delivery : Delivery config snapshot height request) (sealing : Seal)
     (installed : DurableDataIntent.execute .complete snapshot (delivery.intent sealing) = .accepted next)
     (ended : ∀ await, delivery.next.phase ≠ .awaiting await) :
-    readRecord next request.record = none := by
-  unfold readRecord
-  rw [execute_accepted_install installed, DataSnapshot.install_canonicalBytes]
-  simp [Delivery.intent, intentOf, delivery.postsExact, DataSnapshot.lookupPostBytes, Post.write,
-    recordPost, postAt, bodyOf_image, recordBody_ended _ ended, recordOfBody_vacant]
+    isRetired (next.canonicalBytes request.record) = true ∧ readRecord next request.record = none := by
+  have retired : isRetired (next.canonicalBytes request.record) = true := by
+    rw [execute_accepted_install installed, DataSnapshot.install_canonicalBytes]
+    simp [Delivery.intent, intentOf, delivery.postsExact, DataSnapshot.lookupPostBytes, Post.write,
+      recordPost, postAt, recordImage_ended _ ended, isRetired_retiredImage]
+  exact ⟨retired, readRecord_of_retired retired⟩
 
 /-- **A second delivery of one record consumes the NEXT generation.** Any
 delivery admitted from the snapshot an installed delivery produced, on the same
 record cell, read exactly the record the first wrote, one generation on. (If the
-first delivery ended the activity its record is reclaimed and no second delivery
+first delivery ended the activity its record is retired and no second delivery
 exists, `Delivery.installed_record_ended`; so the statement needs no awaiting
 premise.) -/
 theorem delivery_advances_generation {rootBytes : Bytes → Digest} {config : Config}
@@ -600,7 +593,7 @@ theorem delivery_advances_generation {rootBytes : Bytes → Digest} {config : Co
   have awaiting : ∃ await, first.next.phase = .awaiting await := by
     by_contra none
     have ended : ∀ await, first.next.phase ≠ .awaiting await := fun await h => none ⟨await, h⟩
-    rw [Delivery.installed_record_ended first sealing installed ended] at read
+    rw [(Delivery.installed_record_ended first sealing installed ended).2] at read
     cases read
   obtain ⟨await, awaiting⟩ := awaiting
   rw [Delivery.installed_record first sealing installed awaiting] at read
@@ -693,7 +686,6 @@ theorem forcingTransparent_not_of_extraction :
 #assert_axioms not_forcingTransparent_of_refute
 #assert_compiled forcingTransparent_tally
 #assert_compiled not_forcingTransparent_lostStack
-#assert_axioms bodyOf_image
 #assert_axioms nextRecord_generation
 #assert_axioms Delivery.next_generation
 #assert_axioms encodeRecord_ne_nil

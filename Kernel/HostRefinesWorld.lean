@@ -58,8 +58,10 @@ Empty.  `TurnCensus.every_admission_is_turn` decides it for all 37 shapes and
   `intent.exactCharge .storageBytes = storageOf H t.creates t.legs` for every
   admitted intent and its derived `t` (the legs' bytes plus the born images'),
   after which the field is an equality.
-* `retired` -- none (G-RETIRE: the Host never retires; `decodeCell_retired`
-  refuses a retired image).
+* `retired` -- exact: a cell is retired in the world exactly when its deployed
+  bytes are the retirement (`Codec.retires`: the registry's retired lifecycle
+  image). A turn that writes the retired image over a present cell is the
+  World's retire (`TurnOfIntent.retires_iff`).
 * `parent` -- none (G-PARENT, T7): T7 must prove
   `∀ c, w.parent c = (CredentialAuthorityState.parentOf (authorityStore p)) c`, then delete plane 13.
 * capability / key epoch / window -- not in `DataIntent` (G-AUTH): T4 must
@@ -396,8 +398,8 @@ structure SnapRepresents (B : Bridge R D) (snap : DataSnapshot rootBytes) (heigh
   meter : ∀ l, l ≠ .storageBytes → w.meter l = snap.model.available l
   /-- Storage: the model charges the patch, the present Host the image (G-CHARGE). -/
   storage : snap.model.available .storageBytes ≤ w.meter .storageBytes
-  /-- No cell is retired: the present Host never retires (G-RETIRE). -/
-  retired : ∀ c, w.retired c = none
+  /-- A cell is retired exactly when its deployed bytes are the retirement. -/
+  retired : ∀ c, (w.retired c).isSome = B.codec.retires (snap.canonicalBytes ⟨c⟩)
   /-- No parent rows: the present Host keeps parentage in the authority
   cell's plane 13, inside a cell's bytes (G-PARENT, T7). -/
   parent : ∀ c, w.parent c = none
@@ -409,7 +411,7 @@ def Represents (B : Bridge R D) (p : Loaded rootBytes) (w : World R TransactionI
 /-- The derived turn against a loaded image's decoded cells. -/
 def Turn.ofLoaded (B : Bridge R D) (H : History R TransactionId StableEvent D)
     (p : Loaded rootBytes) (intent : DataIntent rootBytes) : Except Refusal (DTurn R D) :=
-  ofCells B H (cellsOf B p.snapshot) intent
+  ofCells B H (cellsOf B p.snapshot) (fun c => B.codec.retires (p.snapshot.canonicalBytes ⟨c⟩)) intent
 
 theorem cellsOf_eq {B : Bridge R D} {snap : DataSnapshot rootBytes} {height : Nat}
     {w : World R TransactionId D} (rep : SnapRepresents B snap height w) (c : CellId) :
@@ -423,8 +425,10 @@ theorem ofLoaded_eq (B : Bridge R D) (H : History R TransactionId StableEvent D)
     Turn.ofLoaded B H p intent = Turn.ofIntent B H w intent := by
   unfold Turn.ofLoaded Turn.ofIntent
   congr 1
-  funext c
-  exact (cellsOf_eq rep c).symm
+  · funext c
+    exact (cellsOf_eq rep c).symm
+  · funext c
+    exact (rep.retired c).symm
 
 /-! ### The executor's outcomes -/
 
@@ -509,6 +513,21 @@ theorem decodes_of_derived {B : Bridge R D} {H : History R TransactionId StableE
   | create => exact ⟨_, spec.2⟩
   | change => exact ⟨_, spec.2⟩
 
+theorem lookupPostBytes_none_unwritten {c : CellId} :
+    ∀ {ws : List DurableDataIntent.DataWrite}, DataSnapshot.lookupPostBytes ⟨c⟩ ws = none →
+      c ∉ writeIds ws
+  | [], _ => by simp [writeIds]
+  | w0 :: rest, h => by
+      unfold DataSnapshot.lookupPostBytes at h
+      split at h
+      · cases h
+      · rename_i ne
+        intro m
+        simp only [writeIds, List.map_cons, List.mem_cons] at m
+        rcases m with e | m
+        · exact ne (by rw [e])
+        · exact lookupPostBytes_none_unwritten h m
+
 /-- **`ofIntent_run`.**  `World.step H w (ofIntent w i)` is the deployed
 post-state: from a represented snapshot, an intent the executor would install
 (fresh id, passing preflight) and its derived turn, `World.step` accepts the
@@ -544,7 +563,7 @@ theorem ofIntent_run (B : Bridge R D) (H : History R TransactionId StableEvent D
   have fundedS : intent.exactCharge .storageBytes ≤ w.meter .storageBytes :=
     le_trans (funded _) rep.storage
   obtain ⟨w', hs, hcells, hsys⟩ := ofIntent_step B H derived hh jfresh nodup unspent fundedL fundedS
-    rep.retired
+  have derived' : ofCells B H (fun c => w.cells c) (fun c => (w.retired c).isSome) intent = .ok t := derived
   obtain ⟨htx, hret, hrows, hnull, hchg, hchgS⟩ := ofCells_fields derived
   have d := ofCells_ok derived
   refine ⟨w', hs, ⟨fun c => ?_, fun dd => ?_, fun x => ?_, ⟨H.chain r (H.turnDigest t), ?_⟩, fun l e => ?_, ?_,
@@ -622,16 +641,39 @@ theorem ofIntent_run (B : Bridge R D) (H : History R TransactionId StableEvent D
     · show _ ≤ w.meter .storageBytes
       omega
   · -- retired
-    show w'.system ⟨SysSpace.retired, c⟩ = none
-    rw [hsys, sysPost_retired, hret]
-    exact rep.retired c
+    show (w'.system ⟨SysSpace.retired, c⟩).isSome =
+      B.codec.retires ((DataSnapshot.install snap intent).canonicalBytes ⟨c⟩)
+    rw [hsys, sysPost_retired, DataSnapshot.install_canonicalBytes]
+    cases hl : DataSnapshot.lookupPostBytes ⟨c⟩ intent.writes with
+    | none =>
+        have nr : c ∉ t.retires := fun m => lookupPostBytes_none_unwritten hl (retires_written derived' m)
+        simp only [nr, if_false, Option.getD_none]
+        exact rep.retired c
+    | some b =>
+        obtain ⟨w0, hw, e, rfl⟩ := lookupPostBytes_some hl
+        have same : w0.cellId.value = c := by rw [e]
+        have iff := retires_iff derived' w0 hw
+        rw [same] at iff
+        simp only [Option.getD_some]
+        by_cases r : B.codec.retires w0.canonicalPostBytes = true
+        · rw [if_pos (iff.mpr r), r]; rfl
+        · rw [if_neg (fun m => r (iff.mp m))]
+          have unretired := written_unretired (ofCells_ok derived') hw
+          rw [same] at unretired
+          rw [unretired]
+          cases hb : B.codec.retires w0.canonicalPostBytes
+          · rfl
+          · exact absurd hb r
   · -- parent
     show w'.system ⟨SysSpace.parent, c⟩ = none
     rw [hsys, run_sysPatch_core H _ _ _ _ _ _ (fun e => SysSpace.noConfusion e)
       (fun e => SysSpace.noConfusion e)]
-    rw [sysCore_unroomed H hrows hret, Patch.run_append, run_createReads]
-    simp only [Patch.run_cons, Patch.run_nil, Op.apply]
+    unfold sysCore
+    rw [hrows]
+    simp only [List.map_nil, List.append_nil, Patch.run_append, run_createReads, Patch.run_cons, Patch.run_nil,
+      op_apply_write, op_apply_allocate]
     rw [Store.set_ne _ _ _ _ (sys_space_ne (fun e => SysSpace.noConfusion e)),
+      run_retireAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e),
       Store.set_ne _ _ _ _ (sys_space_ne (fun e => SysSpace.noConfusion e))]
     exact rep.parent c
 
@@ -895,13 +937,14 @@ theorem represents_rebaseD (B : Bridge R D) {p : Loaded rootBytes} {w : World R 
   | some p' =>
       obtain ⟨hbytes, hj, hc, ha, hh, -⟩ := rebase_agrees honest hr
       show SnapRepresents B p'.snapshot p'.height w
-      refine ⟨fun c => ?_, fun d => ?_, fun x => ?_, ?_, fun l e => ?_, ?_, rep.retired, rep.parent⟩
+      refine ⟨fun c => ?_, fun d => ?_, fun x => ?_, ?_, fun l e => ?_, ?_, fun c => ?_, rep.parent⟩
       · rw [hbytes]; exact rep.cells c
       · simp only [hc]; exact rep.spent d
       · rw [hj]; exact rep.journal x
       · rw [hh]; exact rep.head
       · rw [ha]; exact rep.meter l e
       · rw [ha]; exact rep.storage
+      · rw [hbytes]; exact rep.retired c
 
 /-- Honesty survives the rebase. -/
 theorem baseHonest_rebaseD {p : Loaded rootBytes} (honest : BaseHonest p) :
@@ -1173,6 +1216,8 @@ def toyDecode : List UInt8 → Option (Option (Cell toyR))
 
 def toyCodec : Codec toyR where
   decode := toyDecode
+  retires _ := false
+  retires_decode _ h := by cases h
   support _ s := ([logA, heapA] : List (Address toyLayout)).filter fun a => decide (s a ≠ none)
   mem_support _ s a := by
     constructor
@@ -1278,7 +1323,9 @@ theorem toy_represents : SnapRepresents toyB toySnap 0 w0 := by
     rw [genesis_sys_none _ (fun e => SysSpace.noConfusion e)]
     rfl
   · exact Nat.zero_le _
-  · exact genesis_sys_none _ (fun e => SysSpace.noConfusion e)
+  · show (genesisSystem toyH ⟨SysSpace.retired, c⟩).isSome = false
+    rw [genesis_sys_none _ (fun e => SysSpace.noConfusion e)]
+    rfl
   · exact genesis_sys_none _ (fun e => SysSpace.noConfusion e)
 
 /-- **The refinement is not vacuous**: on the represented seed, the deployed

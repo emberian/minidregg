@@ -312,9 +312,16 @@ def planWrites (deployment : Deployment) (descriptor : Descriptor Registry)
      packedWrite deployment.resourceBookId ⟨.resourceBook, bookBefore⟩
        ⟨.resourceBook, bookAfter⟩] ++ authorityWrites
 
+/-- The law every physical post image obeys: a live cell obeys its registry
+kind's law at its id; the retired image is admitted only in the kernel's
+protected coordinate space (`ObjectiveActivityCell.reservedBase`), where the
+activity kernel retires an ended record or a settled slot (the bridge derives the
+World's retire from it, so the id never returns); the absent slot and every
+undecodable string are refused. -/
 def PhysicalPostLaw (deployment : Deployment) (write : DataWrite) : Prop :=
   match (LifecycleImage.codec Registry).decode write.canonicalPostBytes with
   | some (.live cell) => CanonicalCellRegistry.CellLaw deployment write.cellId.value cell
+  | some .retired => Kernel.ObjectiveActivityCell.reservedBase ≤ write.cellId.value
   | _ => False
 
 instance physicalPostLawDecidable (deployment : Deployment) (write : DataWrite) :

@@ -73,9 +73,16 @@ by the birth. Every turn that runs Core4 pays the public price of its DECLARED
 envelope (`ObjectiveTariff.Tariff.workOf`, the native tariff) to the collector. A yield reserves, in the purse, the
 fee pair of the await (`resumeFee`, `timeoutFee`): exactly one of the pair pays
 the turn that ends the await, the other stays in the purse, and the purse is
-returned to the payer's account when the activity ends. A yield the purse cannot
+returned to the payer's account when the activity ends. A yield also reserves
+the record's STORAGE DEPOSIT (`storageDeposit`: the deployment's rate per byte of
+the record the yield retains, re-priced at every yield). A yield the purse cannot
 reserve is refused (the activity stays parked at its previous yield until a
-`topUp`). Every posting is one `CanonicalResourceKernel.Batch`, admitted on the
+`topUp`). The turn that ends an activity (an ending delivery or birth, an
+abandonment) RETIRES its record cell (`retiredImage`, the registry's retired
+lifecycle image: the World's `retires`, never reused), sweeps every asset the purse
+holds to the payer's account, and DEREGISTERS the purse on the Book in the same
+batch (`Batch.deregistrations`): after it, any posting naming the purse is refused
+by the Book by name, and the deposit has left only with the record. Every posting is one `CanonicalResourceKernel.Batch`, admitted on the
 loaded Book (`AcceptedBatch`), so every turn conserves every asset
 (`Birth.conserves`, `Delivery.conserves`). No amount depends on how much
 computation ran (`refund_measurement_free`). -/
@@ -100,7 +107,8 @@ open Minidregg.Theory.ObjectiveBendTyping
 open Minidregg.Theory.ObjectiveBendDemandMachine (State Limits initial runBounded resume)
 open Minidregg.Theory.ObjectiveBendDemandData (Data Budget)
 open Minidregg.Compiler.ResourceBirthCodec (LifecycleImage)
-open Minidregg.Theory.CanonicalResourceKernel (Book Batch Operation AccountId AssetId logicalBook AcceptedBatch)
+open Minidregg.Theory.CanonicalResourceKernel (Book Batch Operation AccountId AssetId logicalBook AcceptedBatch
+  deregisterAccounts applyOperations registerAccounts)
 open Minidregg.Kernel.ObjectState (encodeObjectState decodeObjectState)
 open Minidregg.Kernel.ObjectRecord (ObjectRecord Facts WriteRefusal admitWrite)
 open Minidregg.Kernel.ObjectiveTariff (Tariff zeroCapacity addCapacity)
@@ -337,6 +345,9 @@ structure Config where
   tariff : Tariff
   /-- Heights past an await's deadline after which anyone may abandon it. -/
   abandonGrace : Nat
+  /-- The storage deposit per byte of a retained activity record: every yield
+  reserves `storageRate * |encodeRecord record|` in the purse beside the fee pair. -/
+  storageRate : Nat
 
 /-- A declared envelope covers what the kernel spends on a turn: its source
 ticks are within the ceiling, and it declares at least the kernel's fixed heap,
@@ -388,6 +399,9 @@ inductive Refusal where
   | packageReplay (reason : String)
   | inputType | outcomeProtocol (label : String)
   | recordExists | recordMissing | recordMisplaced | notAwaiting | awaitMismatch | checkpointDigest | checkpointCodec
+  /-- The record cell is retired: its activity ended (or was abandoned) and the
+  coordinate holds the registry's retired image; it is never read or reborn. -/
+  | recordRetired
   | patience (patience maximum : Nat)
   /-- A declared envelope does not cover the turn (`Config.covers`). -/
   | uncovered (envelope : Capacity)
@@ -396,6 +410,8 @@ inductive Refusal where
   | exhausted
   | responseType (label : String)
   | slotMissing | slotFresh | slotMismatch | slot (reason : AnswerSlot.Refusal)
+  /-- The slot cell is retired: its await settled or was abandoned. -/
+  | slotRetired
   | notYetDecided (deadline height : Nat) | notYetDue (due height : Nat)
   /-- The Book is not a live Book cell at the deployment's Book id. -/
   | bookUnavailable
@@ -403,11 +419,11 @@ inductive Refusal where
   | purseTaken
   /-- The payer is the issuer well, the collector or the purse itself. -/
   | payerInvalid
-  /-- The deposit cannot reserve the first await's fee pair. -/
-  | underfunded (deposit pair : Nat)
-  /-- The purse cannot reserve the next await's fee pair: the activity stays
-  parked at its yield until a `topUp`. -/
-  | awaitsFunding (available pair : Nat)
+  /-- The deposit cannot reserve the first await's fee pair and storage deposit. -/
+  | underfunded (deposit reserve : Nat)
+  /-- The purse cannot reserve the next await's fee pair and its record's storage
+  deposit: the activity stays parked at its yield until a `topUp`. -/
+  | awaitsFunding (available reserve : Nat)
   /-- The Book refused the postings (an account absent or overdrawn). -/
   | bookRefused
   | zeroAmount
@@ -809,30 +825,54 @@ def guardAt {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (cell
 @[simp] theorem guardAt_expectedRoot {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (cell : CellId) :
     (guardAt snapshot cell).expectedRoot = snapshot.model.roots cell := rfl
 
-/-- The image of a reclaimed activity cell: the cell stays at its coordinate
-(so the coordinate is never reused and the registry law still holds) with an
-EMPTY kernel body, which every reader refuses by name before decoding
-(`recordOfBody_vacant`, `slotOfBody_vacant`: `recordMissing`, `slotMissing`). It is a fixed-size tombstone; the checkpoint, the input,
-the result and every other byte the cell held are gone. -/
-def vacant (role : Role) (key : Bytes) : Bytes := image role key []
+/-- **The image of a retired cell**: the registry's retired lifecycle image. A
+turn that writes it retires the cell (the bridge derives the World's `retires`
+from it: the cell is emptied by a guarded leg and its id enters the retired set,
+so no turn ever recreates it). It holds no role, key or body: the checkpoint,
+the input, the result and every other byte the cell held are gone, and no
+reader decodes it (`payloadOf_retired`). -/
+def retiredImage : Bytes := LifecycleImage.bytes CanonicalCellRegistry.registry .retired
 
-/-- What a record cell holds: the record while it awaits; nothing once it has
-ended (`done`/`faulted`). The end of an activity is its disposal: the turn
-that ends it reclaims its record (and `settlePurse` returns its purse); the
-result is the turn's own (re-derivable by replaying the retained ingress). -/
-def recordBody (record : Record) : Bytes :=
+/-- Whether bytes are the retired image. -/
+def isRetired (bytes : Bytes) : Bool :=
+  match (LifecycleImage.codec CanonicalCellRegistry.registry).decode bytes with
+  | some .retired => true
+  | _ => false
+
+theorem isRetired_retiredImage : isRetired retiredImage = true := by
+  unfold isRetired retiredImage
+  rw [show LifecycleImage.bytes CanonicalCellRegistry.registry .retired =
+    (LifecycleImage.codec CanonicalCellRegistry.registry).encode .retired from rfl,
+    LifecycleImage.decode_encode]
+
+/-- A retired cell holds no activity payload. -/
+theorem payloadOf_of_retired {bytes : Bytes} (retired : isRetired bytes = true) : payloadOf bytes = none := by
+  unfold isRetired at retired
+  unfold payloadOf
+  split at retired
+  · rename_i decoded; rw [decoded]
+  · cases retired
+
+theorem payloadOf_retired : payloadOf retiredImage = none := payloadOf_of_retired isRetired_retiredImage
+
+/-- What a record cell holds: the record while it awaits; the retired image once
+it has ended (`done`/`faulted`). The end of an activity is its disposal: the
+turn that ends it retires its record (and `settlePurse` sweeps and closes its
+purse); the result is the turn's own (re-derivable by replaying the retained
+ingress). -/
+def recordImage (record : Record) : Bytes :=
   match record.phase with
-  | .awaiting _ => encodeRecord record
-  | .done _ | .faulted _ => []
+  | .awaiting _ => image .record (recordKey record.object record.activity) (encodeRecord record)
+  | .done _ | .faulted _ => retiredImage
 
 def recordPost {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (cell : CellId) (record : Record) : Post :=
-  postAt snapshot cell (image .record (recordKey record.object record.activity) (recordBody record))
+  postAt snapshot cell (recordImage record)
 
-/-- Reclaim a slot cell. -/
-def slotVacate {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+/-- Retire a slot cell. -/
+def slotRetire {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (name : Digest) : Post :=
-  postAt snapshot (AnswerSlot.cell config.domain name) (vacant .slot (AnswerSlot.key name))
+  postAt snapshot (AnswerSlot.cell config.domain name) retiredImage
 
 def slotPost {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (slot : AnswerSlot.Slot) : Post :=
@@ -842,19 +882,30 @@ def slotPost {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsh
 def stateImage (object : CellId) (state : ObjectState) : Bytes :=
   image .state (stateKey object) (encodeObjectState state)
 
-/-- The record a record cell's kernel body holds. A reclaimed (empty) body
-holds none, refused by name before any decoding (`recordOfBody_vacant`). -/
-def recordOfBody (body : Bytes) : Option Record := if body.isEmpty then none else decodeRecord body
-
 def readRecord {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (cell : CellId) : Option Record :=
-  (bodyOf .record (snapshot.canonicalBytes cell)).bind recordOfBody
-
-/-- The slot a slot cell's kernel body holds; a reclaimed body holds none. -/
-def slotOfBody (body : Bytes) : Option AnswerSlot.Slot := if body.isEmpty then none else AnswerSlot.decode body
+  (bodyOf .record (snapshot.canonicalBytes cell)).bind decodeRecord
 
 def readSlot {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (name : Digest) :
     Option AnswerSlot.Slot :=
-  (bodyOf .slot (snapshot.canonicalBytes (AnswerSlot.cell config.domain name))).bind slotOfBody
+  (bodyOf .slot (snapshot.canonicalBytes (AnswerSlot.cell config.domain name))).bind AnswerSlot.decode
+
+/-- Why a record cell holds no record, by name: retired, or never there. -/
+def absentRecord {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (cell : CellId) : Refusal :=
+  if isRetired (snapshot.canonicalBytes cell) then .recordRetired else .recordMissing
+
+/-- Why a slot cell holds no slot, by name. -/
+def absentSlot {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (name : Digest) :
+    Refusal :=
+  if isRetired (snapshot.canonicalBytes (AnswerSlot.cell config.domain name)) then .slotRetired else .slotMissing
+
+theorem readRecord_of_retired {rootBytes : Bytes → Digest} {snapshot : Snapshot rootBytes} {cell : CellId}
+    (retired : isRetired (snapshot.canonicalBytes cell) = true) : readRecord snapshot cell = none := by
+  simp [readRecord, bodyOf, payloadOf_of_retired retired]
+
+theorem readSlot_of_retired {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {name : Digest} (retired : isRetired (snapshot.canonicalBytes (AnswerSlot.cell config.domain name)) = true) :
+    readSlot config snapshot name = none := by
+  simp [readSlot, bodyOf, payloadOf_of_retired retired]
 
 /-- The object's declared state as its state cell holds it: `none` when the
 object has no state yet, refused when the cell holds anything else. -/
@@ -1070,7 +1121,9 @@ def commitYield {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
   | .ok written =>
   match plan.source with
   | .reply decider =>
-    if (readSlot config snapshot (AnswerSlot.name transaction cell generation)).isSome then .error .slotFresh else
+    if (readSlot config snapshot (AnswerSlot.name transaction cell generation)).isSome ||
+        isRetired (snapshot.canonicalBytes (AnswerSlot.cell config.domain (AnswerSlot.name transaction cell generation)))
+      then .error .slotFresh else
     .ok ⟨⟨awaitId cell generation checkpoint, .reply (AnswerSlot.name transaction cell generation) decider,
         height + plan.patience, height⟩, written,
       (written.map StateWritten.post).toList ++ [slotPost config snapshot
@@ -1238,18 +1291,38 @@ theorem exhaustion_below_cap_is_not_a_fault (config : Config) (envelope : Nat)
     (below : envelope < config.maxTicks) : programFault config envelope .exhausted = none := by
   simp [programFault, Nat.not_le.mpr below]
 
+/-- **The storage deposit** a record reserves while it is retained: the
+deployment's rate per byte of the record's encoding. Only an awaiting record is
+retained; an ended one is retired and reserves nothing. A function of the record
+the yield commits, so it is re-priced at every yield. -/
+def storageDeposit (config : Config) (record : Record) : Nat :=
+  match record.phase with
+  | .awaiting _ => config.storageRate * (encodeRecord record).length
+  | .done _ | .faulted _ => 0
+
+/-- The assets a purse holds a nonzero balance of, in ascending order. -/
+def purseAssets (book : Book) (held : AccountId) : List AssetId :=
+  ((book.balances.support.filter (fun coordinate => coordinate.1 = held)).image Prod.snd).sort
+
+/-- Sweep a purse: every positive balance it holds, in every asset, to `account`.
+After it the purse holds no positive balance, so (holding no negative one either:
+a purse is no issuer well) it can be closed. -/
+def sweep (book : Book) (held account : AccountId) : List Operation :=
+  (purseAssets book held).filterMap fun asset =>
+    if 0 < book.balance held asset then some (.transfer held account asset (book.balance held asset).toNat) else none
+
 /-- After a segment: a yield must leave the purse able to pay the await's fee
-pair (it stays reserved there); an end returns the purse to the payer. The
-ending turn's own postings come first (`before`). -/
-def settlePurse (config : Config) (book : Book) (held : AccountId) (escrow : Escrow)
+pair AND the next record's storage deposit (both stay reserved there); an end
+sweeps the purse to the payer and closes it on the Book. The ending turn's own
+postings come first (`before`). -/
+def settlePurse (config : Config) (book : Book) (held : AccountId) (escrow : Escrow) (deposit : Nat)
     (before : Batch) (segment : Segment) : Except Refusal Batch :=
   let after := purse (before.apply book) config.asset held
   if segment.yields then
-    if escrow.pair ≤ after then .ok before
-    else .error (.awaitsFunding after escrow.pair)
-  else if after = 0 then .ok before
+    if escrow.pair + deposit ≤ after then .ok before
+    else .error (.awaitsFunding after (escrow.pair + deposit))
   else .ok ⟨before.registrations,
-    before.operations ++ [.transfer held escrow.account config.asset after], before.deregistrations⟩
+    before.operations ++ sweep (before.apply book) held escrow.account, before.deregistrations ++ [held]⟩
 
 /-! ### publish -/
 
@@ -1330,8 +1403,8 @@ def birthTransaction (request : BirthRequest) : TransactionId :=
 to the collector, move the deposit into the purse; then the purse settles
 (`settlePurse`). -/
 def birthBatch (config : Config) (book : Book) (held : AccountId) (request : BirthRequest)
-    (escrow : Escrow) (segment : Segment) : Except Refusal Batch :=
-  settlePurse config (Batch.apply ⟨[held], [], []⟩ book) held escrow
+    (escrow : Escrow) (deposit : Nat) (segment : Segment) : Except Refusal Batch :=
+  settlePurse config (Batch.apply ⟨[held], [], []⟩ book) held escrow deposit
     ⟨[], [.fee request.account config.collector config.asset (config.tariff.workOf request.envelope)] ++
       (if request.deposit = 0 then [] else [.transfer request.account held config.asset request.deposit]), []⟩ segment
   |>.map fun settled => ⟨held :: settled.registrations, settled.operations, settled.deregistrations⟩
@@ -1379,6 +1452,11 @@ structure Birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
   /-- The object's law admitted the first segment's write (if it wrote). -/
   judged : judgeWritten object (factsOf request.subject height request.object 1)
     (yielded.bind YieldCommit.written) = .ok ()
+  /-- A yielding birth's deposit reserves the first await's fee pair and its
+  record's storage deposit. -/
+  funded : ¬ (segment.yields ∧ request.deposit <
+    (escrowOf config.tariff request.subject request.account request.resume request.timeout).pair +
+      storageDeposit config record)
 
 def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : BirthRequest) : Except Refusal (Birth config snapshot height request) := do
@@ -1397,6 +1475,7 @@ def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
         let transaction := birthTransaction request
         let activity := activityId request.object transaction
         let cell := recordCell config.domain request.object activity
+        if isRetired (snapshot.canonicalBytes cell) then throw .recordRetired
         if (payloadOf (snapshot.canonicalBytes cell)).isSome then throw .recordExists
         let held := heldAccount cell
         if request.account = config.asset ∨ request.account = config.collector ∨ request.account = held then
@@ -1426,21 +1505,23 @@ def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
                   | none => throw .stateMissing
                 | none => pure ()
                 let escrow := escrowOf config.tariff request.subject request.account request.resume request.timeout
-                if segment.yields ∧ request.deposit < escrow.pair then
-                  throw (.underfunded request.deposit escrow.pair)
-                let batch ← birthBatch config (logicalBook book.logical) held request escrow segment
-                let posted ← postings book batch
                 let base : Record := ⟨request.object, activity, request.pin, dataBytes request.input, 0, [],
                   checkpointDigest [], escrow, 0, .faulted "unborn"⟩
                 let record := nextRecord base 0 segment yielded
-                let posts := recordPost config snapshot cell record ::
-                  ((yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
-                pure ⟨program, programExact, cell, rfl, current, currentExact, segment, segmentExact, yielded, yieldedExact,
-                  record, rfl, book, bookExact, posted, posts, rfl, rfl,
-                  [guardAt snapshot (objectCell config.domain request.object),
-                    guardAt snapshot (packageCell config.domain request.pin),
-                    guardAt snapshot (stateCell config.domain request.object)], rfl,
-                  object, objectExact, pinned, judged⟩
+                if short : segment.yields ∧ request.deposit < escrow.pair + storageDeposit config record then
+                  throw (.underfunded request.deposit (escrow.pair + storageDeposit config record))
+                else
+                  let batch ← birthBatch config (logicalBook book.logical) held request escrow
+                    (storageDeposit config record) segment
+                  let posted ← postings book batch
+                  let posts := recordPost config snapshot cell record ::
+                    ((yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
+                  pure ⟨program, programExact, cell, rfl, current, currentExact, segment, segmentExact, yielded,
+                    yieldedExact, record, rfl, book, bookExact, posted, posts, rfl, rfl,
+                    [guardAt snapshot (objectCell config.domain request.object),
+                      guardAt snapshot (packageCell config.domain request.pin),
+                      guardAt snapshot (stateCell config.domain request.object)], rfl,
+                    object, objectExact, pinned, judged, short⟩
     else throw (.pinMismatch object.pin request.pin)
 
 def Birth.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -1482,7 +1563,7 @@ def resolveTransaction (slot : Digest) : TransactionId :=
 def replyTyped {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (activity : CellId) (slot : Digest) : Answer → Except Refusal Unit
   | .reply value => do
-    let some record := readRecord snapshot activity | throw .recordMissing
+    let some record := readRecord snapshot activity | throw (absentRecord snapshot activity)
     let .awaiting await := record.phase | throw .notAwaiting
     let .reply named _ := await.source | throw .slotMismatch
     if named ≠ slot then throw .slotMismatch
@@ -1508,7 +1589,7 @@ structure Resolution {rootBytes : Bytes → Digest} (config : Config) (snapshot 
 def resolve {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : ResolveRequest) : Except Refusal (Resolution config snapshot height request) :=
   match slotExact : readSlot config snapshot request.slot with
-  | none => .error .slotMissing
+  | none => .error (absentSlot config snapshot request.slot)
   | some slot =>
     if named : slot.name = request.slot then
       match decidedExact : AnswerSlot.decide slot request.subject height request.answer.decision with
@@ -1550,17 +1631,17 @@ def settle {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
   match await.source with
   | .reply slotName _ =>
     match readSlot config snapshot slotName with
-    | none => .error .slotMissing
+    | none => .error (absentSlot config snapshot slotName)
     | some slot =>
       if slot.name ≠ slotName ∨ slot.activity ≠ cell then .error .slotMismatch else
       match slot.phase with
       | .decided decision _ => do
         let outcome ← outcomeOfDecision decision
         pure ⟨if decision = .expired then .timedOut else .resumed, outcome,
-          [slotVacate config snapshot slotName], [], []⟩
+          [slotRetire config snapshot slotName], [], []⟩
       | .opened =>
         match AnswerSlot.expire slot height with
-        | .ok _ => .ok ⟨.timedOut, .timedOut, [slotVacate config snapshot slotName], [],
+        | .ok _ => .ok ⟨.timedOut, .timedOut, [slotRetire config snapshot slotName], [],
             [AnswerSlot.decisionClaim slotName]⟩
         | .error _ => .error (.notYetDecided await.deadline height)
   | .height due =>
@@ -1622,7 +1703,8 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   bookExact : loadBook config snapshot = .ok book
   batch : Batch
   batchExact : settlePurse config (logicalBook book.logical) (heldAccount request.record) record.escrow
-    (deliveryCharges config record request.record settlement.path request) segment = .ok batch
+    (storageDeposit config next) (deliveryCharges config record request.record settlement.path request) segment =
+      .ok batch
   posted : Postings book
   postedBatch : posted.batch = batch
   posts : List Post
@@ -1646,7 +1728,7 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
 def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : DeliverRequest) : Except Refusal (Delivery config snapshot height request) :=
   match recordExact : readRecord snapshot request.record with
-  | none => .error .recordMissing
+  | none => .error (absentRecord snapshot request.record)
   | some record =>
   if located : request.record = recordCell config.domain record.object record.activity then
   match awaiting : record.phase with
@@ -1696,7 +1778,7 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   | .error reason => .error reason
   | .ok book =>
   match batchExact : settlePurse config (logicalBook book.logical) (heldAccount request.record) record.escrow
-      (deliveryCharges config record request.record settlement.path request) segment with
+      (storageDeposit config next) (deliveryCharges config record request.record settlement.path request) segment with
   | .error reason => .error reason
   | .ok batch =>
   match postings book batch with
@@ -1824,7 +1906,7 @@ structure Exhaustion {rootBytes : Bytes → Digest} (config : Config) (snapshot 
 def exhaust {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : ExhaustRequest) : Except Refusal (Exhaustion config snapshot height request) :=
   match recordExact : readRecord snapshot request.record with
-  | none => .error .recordMissing
+  | none => .error (absentRecord snapshot request.record)
   | some record =>
   if located : request.record = recordCell config.domain record.object record.activity then
   match awaiting : record.phase with
@@ -1925,21 +2007,25 @@ def abandonSlot {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
   | .height _ => .ok ([], [])
   | .reply name _ =>
     match readSlot config snapshot name with
-    | none => .error .slotMissing
+    | none => .error (absentSlot config snapshot name)
     | some slot => match slot.phase with
-      | .opened => .ok ([slotVacate config snapshot name], [AnswerSlot.decisionClaim name])
-      | .decided _ _ => .ok ([slotVacate config snapshot name], [])
+      | .opened => .ok ([slotRetire config snapshot name], [AnswerSlot.decisionClaim name])
+      | .decided _ _ => .ok ([slotRetire config snapshot name], [])
 
 /-- The abandonment's own fee: the timeout fee, or what the purse holds of it. -/
 def abandonFee (config : Config) (book : Book) (cell : CellId) (escrow : Escrow) : Nat :=
   min (purse book config.asset (heldAccount cell)) escrow.timeoutFee
 
-/-- Its postings: the fee to the collector, the rest of the purse to the payer. -/
-def abandonCharges (config : Config) (book : Book) (cell : CellId) (escrow : Escrow) : Batch :=
-  let balance := purse book config.asset (heldAccount cell)
+/-- The abandonment's own fee posting. -/
+def abandonFeeOps (config : Config) (book : Book) (cell : CellId) (escrow : Escrow) : List Operation :=
   let fee := abandonFee config book cell escrow
-  ⟨[], (if fee = 0 then [] else [.fee (heldAccount cell) config.collector config.asset fee]) ++
-       (if balance - fee = 0 then [] else [.transfer (heldAccount cell) escrow.account config.asset (balance - fee)]), []⟩
+  if fee = 0 then [] else [.fee (heldAccount cell) config.collector config.asset fee]
+
+/-- Its postings: the fee to the collector, then the whole rest of the purse
+(every asset) swept to the payer, and the purse closed. -/
+def abandonCharges (config : Config) (book : Book) (cell : CellId) (escrow : Escrow) : Batch :=
+  let feeOps := abandonFeeOps config book cell escrow
+  ⟨[], feeOps ++ sweep (applyOperations book feeOps) (heldAccount cell) escrow.account, [heldAccount cell]⟩
 
 structure Abandonment {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : AbandonRequest) where
@@ -1959,7 +2045,7 @@ structure Abandonment {rootBytes : Bytes → Digest} (config : Config) (snapshot
   posted : Postings book
   postedBatch : posted.batch = abandonCharges config (logicalBook book.logical) request.record record.escrow
   posts : List Post
-  postsExact : posts = postAt snapshot request.record (vacant .record (recordKey record.object record.activity)) ::
+  postsExact : posts = postAt snapshot request.record retiredImage ::
     (slotPosts ++ [posted.write config snapshot])
   claims : List StableNullifier
   claimsExact : claims = awaitClaim await.id :: slotClaims
@@ -1967,7 +2053,7 @@ structure Abandonment {rootBytes : Bytes → Digest} (config : Config) (snapshot
 def abandon {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : AbandonRequest) : Except Refusal (Abandonment config snapshot height request) :=
   match recordExact : readRecord snapshot request.record with
-  | none => .error .recordMissing
+  | none => .error (absentRecord snapshot request.record)
   | some record =>
   if located : request.record = recordCell config.domain record.object record.activity then
   match awaiting : record.phase with
@@ -2031,7 +2117,7 @@ structure TopUp {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
 def topUp {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (request : TopUpRequest) : Except Refusal (TopUp config snapshot request) :=
   match recordExact : readRecord snapshot request.record with
-  | none => .error .recordMissing
+  | none => .error (absentRecord snapshot request.record)
   | some record =>
     match record.phase with
     | .done _ | .faulted _ => .error .notAwaiting
@@ -2276,12 +2362,12 @@ theorem settle_posts_current {rootBytes : Bytes → Digest} {config : Config} {s
           subst settled
           intro post member
           simp only [List.mem_singleton] at member
-          subst member; simp only [slotVacate, postAt]
+          subst member; simp only [slotRetire, postAt]
         · split at settled
           · cases settled
             intro post member
             simp only [List.mem_singleton] at member
-            subst member; simp only [slotVacate, postAt]
+            subst member; simp only [slotRetire, postAt]
           · cases settled
   · split at settled
     · cases settled; intro post member; simp at member
@@ -2763,30 +2849,119 @@ theorem submitter_charge_declared (config : Config) (record : Record) (cell : Ce
   simp [deliveryCharges, extra]
 
 /-- A yield never leaves its purse short: the postings a yielding segment
-commits leave at least the await's fee pair in the purse. -/
+commits leave at least the await's fee pair AND the storage deposit of the
+record it commits in the purse, and add nothing to the turn's own postings. -/
 theorem yield_reserves_pair (config : Config) (book : Book) (held : AccountId) (escrow : Escrow)
-    (before batch : Batch) (state : State) (plan : PlanAwait)
-    (settled : settlePurse config book held escrow before (.yielded state plan) = .ok batch) :
-    batch = before ∧ escrow.pair ≤ purse (before.apply book) config.asset held := by
+    (deposit : Nat) (before batch : Batch) (state : State) (plan : PlanAwait)
+    (settled : settlePurse config book held escrow deposit before (.yielded state plan) = .ok batch) :
+    batch = before ∧ escrow.pair + deposit ≤ purse (before.apply book) config.asset held := by
   unfold settlePurse at settled
   simp only [Segment.yields] at settled
-  by_cases enough : escrow.pair ≤ purse (before.apply book) config.asset held
+  by_cases enough : escrow.pair + deposit ≤ purse (before.apply book) config.asset held
   · simp [enough] at settled
     exact ⟨settled.symm, enough⟩
   · simp [enough] at settled
 
-/-- An ending segment returns the whole purse to the payer's account. -/
+/-- **A yield the purse cannot reserve is parked, by name**: when the purse after
+the turn's own postings is short of the fee pair plus the deposit of the record
+the yield would commit, the yield is refused `awaitsFunding`. -/
+theorem yield_short_parks (config : Config) (book : Book) (held : AccountId) (escrow : Escrow)
+    (deposit : Nat) (before : Batch) (state : State) (plan : PlanAwait)
+    (short : purse (before.apply book) config.asset held < escrow.pair + deposit) :
+    ∃ available reserve, settlePurse config book held escrow deposit before (.yielded state plan) =
+      .error (.awaitsFunding available reserve) ∧ reserve = escrow.pair + deposit := by
+  refine ⟨purse (before.apply book) config.asset held, escrow.pair + deposit, ?_, rfl⟩
+  unfold settlePurse
+  simp only [Segment.yields, if_true]
+  rw [if_neg (Nat.not_le.mpr short)]
+
+/-- **An ending segment sweeps the purse and closes it**: every positive
+balance the purse holds after the turn's own postings goes to the payer's
+account, and the purse is deregistered in the same batch. -/
 theorem end_returns_purse (config : Config) (book : Book) (held : AccountId) (escrow : Escrow)
-    (before batch : Batch) (result : Data)
-    (settled : settlePurse config book held escrow before (.finished result) = .ok batch)
-    (nonempty : purse (before.apply book) config.asset held ≠ 0) :
-    batch.operations = before.operations ++
-      [Operation.transfer held escrow.account config.asset (purse (before.apply book) config.asset held)] := by
+    (deposit : Nat) (before batch : Batch) (segment : Segment) (ends : segment.yields = false)
+    (settled : settlePurse config book held escrow deposit before segment = .ok batch) :
+    batch.registrations = before.registrations ∧
+    batch.operations = before.operations ++ sweep (before.apply book) held escrow.account ∧
+    batch.deregistrations = before.deregistrations ++ [held] := by
   unfold settlePurse at settled
-  simp only [Segment.yields] at settled
-  simp [nonempty] at settled
+  simp only [ends, Bool.false_eq_true, if_false, Except.ok.injEq] at settled
   subst settled
-  rfl
+  exact ⟨rfl, rfl, rfl⟩
+
+/-- **The deposit leaves the purse only at the end.** A settlement that adds any
+posting to the turn's own (the only way purse funds reach the payer) is the
+settlement of an ending segment: a yield adds nothing and closes nothing. -/
+theorem purse_released_only_at_end (config : Config) (book : Book) (held : AccountId) (escrow : Escrow)
+    (deposit : Nat) (before batch : Batch) (segment : Segment)
+    (settled : settlePurse config book held escrow deposit before segment = .ok batch)
+    (released : batch ≠ before) : segment.yields = false := by
+  cases yields : segment.yields
+  · rfl
+  · unfold settlePurse at settled
+    simp only [yields, if_true] at settled
+    split at settled
+    · exact absurd (Except.ok.inj settled).symm released
+    · cases settled
+
+/-- A yielding settlement adds nothing and leaves the reserve in the purse. -/
+theorem settlePurse_yields (config : Config) (book : Book) (held : AccountId) (escrow : Escrow)
+    (deposit : Nat) (before batch : Batch) (segment : Segment) (yields : segment.yields = true)
+    (settled : settlePurse config book held escrow deposit before segment = .ok batch) :
+    batch = before ∧ escrow.pair + deposit ≤ purse (before.apply book) config.asset held := by
+  unfold settlePurse at settled
+  simp only [yields, if_true] at settled
+  split at settled
+  · exact ⟨(Except.ok.inj settled).symm, by assumption⟩
+  · cases settled
+
+/-- **A resume re-prices the deposit**: a delivery that yields again leaves, in
+the purse after its own postings, the fee pair plus the storage deposit of the
+record it commits (`next`, at its new size). -/
+theorem Delivery.yield_reserves_deposit {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : DeliverRequest}
+    (delivery : Delivery config snapshot height request) (yields : delivery.segment.yields = true) :
+    delivery.record.escrow.pair + storageDeposit config delivery.next ≤
+      purse ((deliveryCharges config delivery.record request.record delivery.settlement.path request).apply
+        (logicalBook delivery.book.logical)) config.asset (heldAccount request.record) :=
+  (settlePurse_yields _ _ _ _ _ _ _ _ yields delivery.batchExact).2
+
+/-- The same at birth: the first yield reserves the pair and its record's deposit. -/
+theorem Birth.yield_reserves_deposit {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : BirthRequest}
+    (born : Birth config snapshot height request) (yields : born.segment.yields = true) :
+    (escrowOf config.tariff request.subject request.account request.resume request.timeout).pair +
+        storageDeposit config born.record ≤ request.deposit := by
+  have checked := born.funded
+  simp only [yields, true_and, Nat.not_lt] at checked
+  exact checked
+
+/-- **The deposit tracks the record's size**: at a positive rate, an awaiting
+record whose encoding is longer reserves strictly more. -/
+theorem storageDeposit_tracks_size (config : Config) (rate : 0 < config.storageRate)
+    (smaller larger : Record) (one two : Await)
+    (awaitingSmaller : smaller.phase = .awaiting one) (awaitingLarger : larger.phase = .awaiting two)
+    (longer : (encodeRecord smaller).length < (encodeRecord larger).length) :
+    storageDeposit config smaller < storageDeposit config larger := by
+  rw [storageDeposit_awaiting config smaller one awaitingSmaller,
+    storageDeposit_awaiting config larger two awaitingLarger]
+  exact Nat.mul_lt_mul_of_pos_left longer rate
+
+/-- An ended record reserves nothing: it is retired. -/
+theorem storageDeposit_ended (config : Config) (record : Record) (ended : ∀ await, record.phase ≠ .awaiting await) :
+    storageDeposit config record = 0 := by
+  unfold storageDeposit
+  cases phase : record.phase with
+  | awaiting await => exact absurd phase (ended await)
+  | done _ => rfl
+  | faulted _ => rfl
+
+/-- The deposit is a function of the record the yield commits: re-priced at
+every yield from that record's encoded size. -/
+theorem storageDeposit_awaiting (config : Config) (record : Record) (await : Await)
+    (awaiting : record.phase = .awaiting await) :
+    storageDeposit config record = config.storageRate * (encodeRecord record).length := by
+  simp [storageDeposit, awaiting]
 
 
 /-! ## Metering and disposal (ACTIVITY-METERING-DISPOSAL) -/
@@ -2884,18 +3059,65 @@ theorem exhaustion_charge_measurement_free {rootBytes : Bytes → Digest} {confi
   · rw [one.nextExact, two.nextExact]; simp [envelopes]
   · simp [exhaustCharge, records, settlements, sameExtra]
 
-/-- **A reclaimed cell reads as nothing, by name.** The empty kernel body of a
-reclaimed record cell decodes to no record (a delivery, exhaustion or
-abandonment of it is refused `recordMissing`), and that of a reclaimed slot to
-no slot (a late decision is refused `slotMissing`). -/
-theorem recordOfBody_vacant : recordOfBody [] = none := rfl
+/-- **A retired record refuses every turn on it, by name.** At a record
+coordinate holding the retired image, a delivery, an exhaustion, an abandonment
+and a top-up are each refused `recordRetired`, and a birth that would land on
+it too. -/
+theorem absentRecord_retired {rootBytes : Bytes → Digest} {snapshot : Snapshot rootBytes} {cell : CellId}
+    (retired : isRetired (snapshot.canonicalBytes cell) = true) : absentRecord snapshot cell = .recordRetired := by
+  simp [absentRecord, retired]
 
-theorem slotOfBody_vacant : slotOfBody [] = none := rfl
+theorem deliver_retired_refused {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (retired : isRetired (snapshot.canonicalBytes request.record) = true) :
+    ∃ reason, deliver config snapshot height request = .error reason ∧ reason = .recordRetired := by
+  have none := readRecord_of_retired retired
+  unfold deliver
+  split
+  · exact ⟨_, rfl, absentRecord_retired retired⟩
+  · rename_i record found; rw [none] at found; cases found
 
-/-- A record that has ended holds nothing: its body is empty. -/
-theorem recordBody_ended (record : Record) (ended : ∀ await, record.phase ≠ .awaiting await) :
-    recordBody record = [] := by
-  unfold recordBody
+theorem exhaust_retired_refused {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : ExhaustRequest} (retired : isRetired (snapshot.canonicalBytes request.record) = true) :
+    ∃ reason, exhaust config snapshot height request = .error reason ∧ reason = .recordRetired := by
+  have none := readRecord_of_retired retired
+  unfold exhaust
+  split
+  · exact ⟨_, rfl, absentRecord_retired retired⟩
+  · rename_i record found; rw [none] at found; cases found
+
+theorem abandon_retired_refused {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : AbandonRequest} (retired : isRetired (snapshot.canonicalBytes request.record) = true) :
+    ∃ reason, abandon config snapshot height request = .error reason ∧ reason = .recordRetired := by
+  have none := readRecord_of_retired retired
+  unfold abandon
+  split
+  · exact ⟨_, rfl, absentRecord_retired retired⟩
+  · rename_i record found; rw [none] at found; cases found
+
+theorem topUp_retired_refused {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {request : TopUpRequest} (retired : isRetired (snapshot.canonicalBytes request.record) = true) :
+    ∃ reason, topUp config snapshot request = .error reason ∧ reason = .recordRetired := by
+  have none := readRecord_of_retired retired
+  unfold topUp
+  split
+  · exact ⟨_, rfl, absentRecord_retired retired⟩
+  · rename_i record found; rw [none] at found; cases found
+
+/-- A retired slot refuses a late decision by name. -/
+theorem resolve_retired_refused {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : ResolveRequest}
+    (retired : isRetired (snapshot.canonicalBytes (AnswerSlot.cell config.domain request.slot)) = true) :
+    ∃ reason, resolve config snapshot height request = .error reason ∧ reason = .slotRetired := by
+  have none := readSlot_of_retired retired
+  unfold resolve
+  split
+  · exact ⟨_, rfl, by simp [absentSlot, retired]⟩
+  · rename_i slot found; rw [none] at found; cases found
+
+/-- A record that has ended is retired: its image is the retired image. -/
+theorem recordImage_ended (record : Record) (ended : ∀ await, record.phase ≠ .awaiting await) :
+    recordImage record = retiredImage := by
+  unfold recordImage
   cases phase : record.phase with
   | awaiting await => exact absurd phase (ended await)
   | done _ => rfl
@@ -2915,35 +3137,51 @@ theorem nextRecord_names (base : Record) (generation : Nat) (segment : Segment) 
       (nextRecord base generation segment yielded).activity = base.activity := by
   cases segment <;> cases yielded <;> simp [nextRecord]
 
-/-- **Disposal frees the record.** A delivery whose segment ends (finished or
-faulted) writes its record cell to the empty tombstone: the checkpoint, the
-input and the result leave the store in the turn that ends the activity (and
-`settlePurse` returns the purse, `end_returns_purse`). -/
+/-- **Disposal retires the record.** A delivery whose segment ends (finished or
+faulted) writes its record cell to the retired image: the checkpoint, the input
+and the result leave the store in the turn that ends the activity, and the
+coordinate is never reused (and `settlePurse` sweeps and closes the purse,
+`end_returns_purse`). -/
 theorem delivery_end_vacates {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request)
     (ends : delivery.segment.yields = false) :
-    delivery.posts.head? = some (postAt snapshot request.record
-      (vacant .record (recordKey delivery.record.object delivery.record.activity))) := by
+    delivery.posts.head? = some (postAt snapshot request.record retiredImage) := by
   rw [delivery.recordFirst]
   have ended := nextRecord_ended delivery.record (delivery.record.generation + 1) delivery.segment
     delivery.yielded ends
-  have names := nextRecord_names delivery.record (delivery.record.generation + 1) delivery.segment delivery.yielded
-  rw [← delivery.nextExact] at ended names
-  simp [recordPost, vacant, recordBody_ended _ ended, names.1, names.2]
+  rw [← delivery.nextExact] at ended
+  simp [recordPost, recordImage_ended _ ended]
 
 /-- The same for a birth whose first segment already ends: no record is kept. -/
 theorem birth_end_vacates {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request)
     (ends : born.segment.yields = false) :
-    born.posts.head? = some (postAt snapshot born.cell
-      (vacant .record (recordKey request.object (activityId request.object (birthTransaction request))))) := by
+    born.posts.head? = some (postAt snapshot born.cell retiredImage) := by
   rw [born.recordFirst]
   have ended : ∀ await, born.record.phase ≠ .awaiting await := by
     rw [born.recordExact]; exact nextRecord_ended _ _ _ _ ends
-  have names : born.record.object = request.object ∧
-      born.record.activity = activityId request.object (birthTransaction request) := by
-    rw [born.recordExact]; exact nextRecord_names _ _ _ _
-  simp [recordPost, vacant, recordBody_ended _ ended, names.1, names.2]
+  simp [recordPost, recordImage_ended _ ended]
+
+/-- **An ending delivery closes the purse on the Book.** After the delivery's
+postings, the purse is no Book account: every later posting naming it (a top-up,
+a fee) is refused by the Book, which names it unregistered
+(`CanonicalResourceKernel.deregistered_refuses_posting`). -/
+theorem Delivery.end_closes_purse {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request)
+    (ends : delivery.segment.yields = false) :
+    heldAccount request.record ∉ (logicalBook delivery.posted.post.logical).accounts := by
+  have closed := (end_returns_purse _ _ _ _ _ _ _ _ ends delivery.batchExact).2.2
+  rw [Postings.post, delivery.posted.accepted.post_logicalBook, delivery.postedBatch]
+  exact CanonicalResourceKernel.Batch.apply_deregistered _ _ _ (by rw [closed]; simp)
+
+/-- **An abandonment closes the purse on the Book**, and retires the record. -/
+theorem Abandonment.closes_purse {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : AbandonRequest} (ab : Abandonment config snapshot height request) :
+    heldAccount request.record ∉ (logicalBook ab.posted.post.logical).accounts ∧
+      ab.posts.head? = some (postAt snapshot request.record retiredImage) := by
+  refine ⟨?_, by rw [ab.postsExact]; rfl⟩
+  rw [Postings.post, ab.posted.accepted.post_logicalBook, ab.postedBatch]
+  exact CanonicalResourceKernel.Batch.apply_deregistered _ _ _ (by simp [abandonCharges])
 
 /-- **Settled slots are reclaimed.** Whenever a reply await settles (decided,
 or expired at its deadline), the settlement reclaims its slot cell. -/
@@ -2951,7 +3189,7 @@ theorem settle_reclaims_slot {rootBytes : Bytes → Digest} {config : Config} {s
     {height : Nat} {cell : CellId} {await : Await} {settlement : Settlement} {name : Digest} {decider : SubjectId}
     (source : await.source = .reply name decider)
     (settled : settle config snapshot height cell await = .ok settlement) :
-    settlement.posts = [slotVacate config snapshot name] := by
+    settlement.posts = [slotRetire config snapshot name] := by
   unfold settle at settled
   rw [source] at settled
   simp only at settled
@@ -2984,7 +3222,7 @@ theorem settle_reclaims_slot {rootBytes : Bytes → Digest} {config : Config} {s
 theorem delivery_reclaims_slot {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request)
     {name : Digest} {decider : SubjectId} (source : delivery.await.source = .reply name decider) :
-    slotVacate config snapshot name ∈ delivery.posts := by
+    slotRetire config snapshot name ∈ delivery.posts := by
   rw [delivery.postsExact, settle_reclaims_slot source delivery.settled]
   simp
 
@@ -2996,7 +3234,7 @@ theorem abandon_returns_escrow {rootBytes : Bytes → Digest} {config : Config} 
     {height : Nat} {request : AbandonRequest} (ab : Abandonment config snapshot height request) :
     ab.await.deadline + config.abandonGrace < height ∧
     awaitClaim ab.await.id ∈ ab.claims ∧
-    ab.posts.head? = some (postAt snapshot request.record (vacant .record (recordKey ab.record.object ab.record.activity))) ∧
+    ab.posts.head? = some (postAt snapshot request.record retiredImage) ∧
     ab.posted.batch = abandonCharges config (logicalBook ab.book.logical) request.record ab.record.escrow ∧
     abandonFee config (logicalBook ab.book.logical) request.record ab.record.escrow ≤ ab.record.escrow.timeoutFee ∧
     abandonFee config (logicalBook ab.book.logical) request.record ab.record.escrow +
@@ -3014,7 +3252,7 @@ theorem abandon_closes_open_slot {rootBytes : Bytes → Digest} {config : Config
     {name : Digest} {decider : SubjectId} {slot : AnswerSlot.Slot}
     (source : ab.await.source = .reply name decider) (read : readSlot config snapshot name = some slot)
     (opened : slot.phase = .opened) :
-    slotVacate config snapshot name ∈ ab.posts ∧ AnswerSlot.decisionClaim name ∈ ab.claims := by
+    slotRetire config snapshot name ∈ ab.posts ∧ AnswerSlot.decisionClaim name ∈ ab.claims := by
   have exact := ab.slotExact
   unfold abandonSlot at exact
   rw [source] at exact
@@ -3192,9 +3430,27 @@ theorem create_refuses_existing {rootBytes : Bytes → Digest} {config : Config}
 #assert_axioms exhaustion_spends_nothing
 #assert_axioms exhaustion_excludes_delivery
 #assert_axioms exhaustion_charge_measurement_free
-#assert_axioms recordOfBody_vacant
-#assert_axioms slotOfBody_vacant
-#assert_axioms recordBody_ended
+#assert_axioms isRetired_retiredImage
+#assert_axioms payloadOf_retired
+#assert_axioms readRecord_of_retired
+#assert_axioms readSlot_of_retired
+#assert_axioms absentRecord_retired
+#assert_axioms deliver_retired_refused
+#assert_axioms exhaust_retired_refused
+#assert_axioms abandon_retired_refused
+#assert_axioms topUp_retired_refused
+#assert_axioms resolve_retired_refused
+#assert_axioms recordImage_ended
+#assert_axioms yield_short_parks
+#assert_axioms purse_released_only_at_end
+#assert_axioms storageDeposit_awaiting
+#assert_axioms settlePurse_yields
+#assert_axioms Delivery.yield_reserves_deposit
+#assert_axioms Birth.yield_reserves_deposit
+#assert_axioms storageDeposit_tracks_size
+#assert_axioms storageDeposit_ended
+#assert_axioms Delivery.end_closes_purse
+#assert_axioms Abandonment.closes_purse
 #assert_axioms nextRecord_ended
 #assert_axioms nextRecord_names
 #assert_axioms delivery_end_vacates
@@ -3214,4 +3470,608 @@ theorem create_refuses_existing {rootBytes : Bytes → Digest} {config : Config}
 #assert_axioms birth_refuses_other_pin
 #assert_axioms writeState_refuses_lawless
 #assert_axioms create_refuses_existing
+
+/-! ## Retention: every retained activity cell names its payer
+
+Retained storage is paid for. Every activity cell a turn leaves LIVE (an activity
+payload at its coordinate) names the Book account that pays for its retention,
+read from the cell's own bytes along its role's route (`payerOf`):
+
+| role      | route            | payer                                          |
+|-----------|------------------|------------------------------------------------|
+| `record`  | `escrow`         | the record's `escrow.account`                  |
+| `slot`    | `activityOfSlot` | the escrow of the awaiting record it answers   |
+| `state`   | `objectOfState`  | `ObjectRecord.payer` of the object its key names |
+| `package` | `stored`         | the package cell's `Stored.payer`              |
+| `object`  | `objectRecord`   | the record's own `ObjectRecord.payer`          |
+
+An ended record and a settled slot are RETIRED: they hold no payload and nobody
+retains them. The census (`activityCensus`) lists every role with its route and
+is checked complete and paid (`retention_census_paid`); a census with one more
+retained kind that names no payer fails the same check (`planted_census_unpaid`).
+`payerOf` matches on the role, so a new role cannot be added without naming its
+route. The semantic half is stated over the real post-state of each admitted
+turn (`afterPosts`, which is `DataSnapshot.install`'s bytes, `install_afterPosts`):
+every cell the turn writes that holds a payload afterwards resolves to a payer
+(`Birth.retention_cells_have_payer`, `Delivery.retention_cells_have_payer`,
+`Exhaustion.retention_cells_have_payer`, `Publication.retention_cells_have_payer`,
+`Creation.retention_cells_have_payer`, `StateWrite.retention_cells_have_payer`,
+`Resolution.retention_cells_have_payer`; an abandonment and a top-up leave no live
+activity cell). The Book side of the accounting is `Batch.deregistrations`: an
+ending turn closes the purse it emptied (`Delivery.end_closes_purse`,
+`Abandonment.closes_purse`). -/
+
+/-- Where a retained cell's payer is read from. -/
+inductive PayerRoute where
+  | escrow
+  | activityOfSlot
+  | objectOfState
+  | objectRecord
+  | stored
+  deriving DecidableEq, Repr
+
+def payerRoute : Role → Option PayerRoute
+  | .record => some .escrow
+  | .slot => some .activityOfSlot
+  | .state => some .objectOfState
+  | .package => some .stored
+  | .object => some .objectRecord
+
+/-- A census of retained cell kinds: every kind listed, each with its payer route. -/
+structure RetentionCensus (Kind : Type) where
+  kinds : List Kind
+  complete : ∀ kind, kind ∈ kinds
+  route : Kind → Option PayerRoute
+
+/-- Every listed kind names a payer route. -/
+def RetentionCensus.Paid {Kind : Type} (census : RetentionCensus Kind) : Prop :=
+  ∀ kind ∈ census.kinds, (census.route kind).isSome = true
+
+instance {Kind : Type} (census : RetentionCensus Kind) : Decidable census.Paid := by
+  unfold RetentionCensus.Paid; infer_instance
+
+/-- The activity registry's retained kinds: every activity role. -/
+def activityCensus : RetentionCensus Role where
+  kinds := [.record, .slot, .state, .package, .object]
+  complete := by intro kind; cases kind <;> simp
+  route := payerRoute
+
+/-- **`retention_cells_have_payer`, the census half**: every retained kind of the
+activity registry names its payer route. -/
+theorem retention_census_paid : activityCensus.Paid := by decide
+
+/-- The tooth: the same census with one more retained kind that names no payer. -/
+def plantedCensus : RetentionCensus (Option Role) where
+  kinds := none :: activityCensus.kinds.map some
+  complete := by
+    intro kind
+    cases kind with
+    | none => simp
+    | some role => cases role <;> simp [activityCensus]
+  route
+    | none => none
+    | some role => payerRoute role
+
+theorem planted_census_unpaid : ¬ plantedCensus.Paid := by decide
+
+/-- The record a record cell holds, over any byte map. -/
+def recordAt (bytesAt : CellId → Bytes) (cell : CellId) : Option Record :=
+  (bodyOf .record (bytesAt cell)).bind decodeRecord
+
+/-- The object record of an object, over any byte map. -/
+def objectAt (config : Config) (bytesAt : CellId → Bytes) (object : CellId) : Option ObjectRecord :=
+  (bodyOf .object (bytesAt (objectCell config.domain object))).bind ObjectRecord.decodeRecord
+
+/-- The payer a payload's route resolves to. -/
+def routePayer (config : Config) (bytesAt : CellId → Bytes) (payload : ObjectiveActivityCell.Payload) :
+    PayerRoute → Option AccountId
+  | .escrow => (decodeRecord payload.body).map fun record => record.escrow.account
+  | .activityOfSlot => (AnswerSlot.decode payload.body).bind fun slot =>
+      (recordAt bytesAt slot.activity).map fun record => record.escrow.account
+  | .objectOfState => (digestStream.toLawful.decode payload.key).bind fun object =>
+      (objectAt config bytesAt object).map ObjectRecord.payer
+  | .objectRecord => (ObjectRecord.decodeRecord payload.body).map ObjectRecord.payer
+  | .stored => (decodeStored payload.body).map Stored.payer
+
+/-- The payer of a cell's bytes: its payload's role's route. -/
+def payerOfBytes (config : Config) (bytesAt : CellId → Bytes) (bytes : Bytes) : Option AccountId := do
+  let payload ← payloadOf bytes
+  let route ← payerRoute payload.role
+  routePayer config bytesAt payload route
+
+/-- The payer of a cell. -/
+def payerOf (config : Config) (bytesAt : CellId → Bytes) (cell : CellId) : Option AccountId :=
+  payerOfBytes config bytesAt (bytesAt cell)
+
+/-- Every listed cell that holds an activity payload has a payer. -/
+def CellsPaid (config : Config) (bytesAt : CellId → Bytes) (cells : List CellId) : Prop :=
+  ∀ cell ∈ cells, (payloadOf (bytesAt cell)).isSome = true → (payerOf config bytesAt cell).isSome = true
+
+/-- The bytes after a turn's posts: the first post at a cell, else the snapshot's. -/
+def afterPosts {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (posts : List Post)
+    (cell : CellId) : Bytes :=
+  ((posts.find? fun post => post.cell = cell).map Post.bytes).getD (snapshot.canonicalBytes cell)
+
+theorem lookupPostBytes_posts (rootBytes : Bytes → Digest) (cell : CellId) :
+    ∀ posts : List Post, DataSnapshot.lookupPostBytes cell (posts.map (Post.write rootBytes)) =
+      (posts.find? fun post => post.cell = cell).map Post.bytes
+  | [] => rfl
+  | post :: rest => by
+    simp only [List.map_cons, DataSnapshot.lookupPostBytes, List.find?_cons]
+    by_cases same : post.cell = cell
+    · simp [same, Post.write]
+    · simp [same, Post.write, lookupPostBytes_posts rootBytes cell rest]
+
+/-- **`afterPosts` is the installed state**: the bytes `DataSnapshot.install`
+leaves for a kernel intent. -/
+theorem install_afterPosts {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes)
+    (transaction : TransactionId) (posts : List Post) (guards : List ReadGuard)
+    (nullifiers : List StableNullifier) (sealing : Seal) (cell : CellId) :
+    (DataSnapshot.install snapshot (intentOf rootBytes transaction posts guards nullifiers sealing)).canonicalBytes
+      cell = afterPosts snapshot posts cell := by
+  rw [DataSnapshot.install_canonicalBytes, intentOf_writes, lookupPostBytes_posts]
+  rfl
+
+theorem afterPosts_first {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (first : Post)
+    (rest : List Post) : afterPosts snapshot (first :: rest) first.cell = first.bytes := by
+  simp [afterPosts]
+
+theorem afterPosts_unwritten {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (posts : List Post)
+    (cell : CellId) (unwritten : ∀ post ∈ posts, post.cell ≠ cell) :
+    afterPosts snapshot posts cell = snapshot.canonicalBytes cell := by
+  unfold afterPosts
+  rw [List.find?_eq_none.mpr (fun post member => by simpa using unwritten post member)]
+  rfl
+
+theorem afterPosts_mem {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (posts : List Post)
+    (post : Post) (member : post ∈ posts) :
+    ∃ found ∈ posts, afterPosts snapshot posts post.cell = found.bytes := by
+  unfold afterPosts
+  cases found : posts.find? (fun candidate => candidate.cell = post.cell) with
+  | none =>
+    have := List.find?_eq_none.mp found post member
+    simp at this
+  | some first => exact ⟨first, List.mem_of_find?_eq_some found, rfl⟩
+
+/-- Reduce a turn's census to its posts: if every post holding a payload has a
+payer in the post-state, every written cell does. -/
+theorem cellsPaid_of_posts {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (posts : List Post)
+    (each : ∀ post ∈ posts, (payloadOf post.bytes).isSome = true →
+      (payerOfBytes config (afterPosts snapshot posts) post.bytes).isSome = true) :
+    CellsPaid config (afterPosts snapshot posts) (posts.map Post.cell) := by
+  intro cell member live
+  obtain ⟨post, inPosts, rfl⟩ := List.mem_map.mp member
+  obtain ⟨found, foundIn, exact⟩ := afterPosts_mem snapshot posts post inPosts
+  unfold payerOf
+  rw [exact] at live ⊢
+  exact each found foundIn live
+
+theorem payloadOf_image (role : Role) (key body : Bytes) :
+    payloadOf (image role key body) = some ⟨role, key, body⟩ := by
+  unfold payloadOf image
+  rw [show LifecycleImage.bytes CanonicalCellRegistry.registry
+      (.live ⟨.objectiveActivity, ObjectiveActivityCell.cellOf ⟨role, key, body⟩⟩) =
+    (LifecycleImage.codec CanonicalCellRegistry.registry).encode
+      (.live ⟨.objectiveActivity, ObjectiveActivityCell.cellOf ⟨role, key, body⟩⟩) from rfl,
+    LifecycleImage.decode_encode]
+  simp
+
+theorem bodyOf_image (role : Role) (key body : Bytes) : bodyOf role (image role key body) = some body := by
+  simp [bodyOf, payloadOf_image]
+
+/-- A live Book image is no activity cell. -/
+theorem payloadOf_book (book : BookCell) :
+    payloadOf (LifecycleImage.bytes CanonicalCellRegistry.registry (.live ⟨.resourceBook, book⟩)) = none := by
+  unfold payloadOf
+  rw [show LifecycleImage.bytes CanonicalCellRegistry.registry (.live ⟨.resourceBook, book⟩) =
+    (LifecycleImage.codec CanonicalCellRegistry.registry).encode (.live ⟨.resourceBook, book⟩) from rfl,
+    LifecycleImage.decode_encode]
+
+theorem objectAt_of_read {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {object : CellId} {record : ObjectRecord} (read : readObject config snapshot object = .ok (some record)) :
+    objectAt config snapshot.canonicalBytes object = some record := by
+  unfold readObject at read
+  unfold objectAt
+  revert read
+  cases hb : bodyOf .object (snapshot.canonicalBytes (objectCell config.domain object)) with
+  | none =>
+    intro read
+    simp only [hb] at read
+    split at read <;> cases read
+  | some body =>
+    intro read
+    simp only [hb] at read
+    cases hd : ObjectRecord.decodeRecord body with
+    | none => rw [hd] at read; cases read
+    | some found => rw [hd] at read; cases read; simp [hd]
+
+/-- The payer of a record image: its escrow's account. -/
+theorem payer_record_image (config : Config) (bytesAt : CellId → Bytes) (record : Record) (await : Await)
+    (awaiting : record.phase = .awaiting await) :
+    payerOfBytes config bytesAt (recordImage record) = some record.escrow.account := by
+  simp [recordImage, awaiting, payerOfBytes, payloadOf_image, payerRoute, routePayer, record_roundTrip]
+
+theorem payloadOf_recordImage_live (record : Record) (live : (payloadOf (recordImage record)).isSome = true) :
+    ∃ await, record.phase = .awaiting await := by
+  unfold recordImage at live
+  split at live
+  · exact ⟨_, by assumption⟩
+  · rw [payloadOf_retired] at live; cases live
+  · rw [payloadOf_retired] at live; cases live
+
+/-- The payer of a slot image whose activity is the record a byte map holds. -/
+theorem payer_slot_image (config : Config) (bytesAt : CellId → Bytes) (slot : AnswerSlot.Slot) (record : Record)
+    (held : recordAt bytesAt slot.activity = some record) :
+    payerOfBytes config bytesAt (image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot)) =
+      some record.escrow.account := by
+  simp [payerOfBytes, payloadOf_image, payerRoute, routePayer, AnswerSlot.roundTrip, held]
+
+/-- The payer of a state image whose object's record a byte map holds. -/
+theorem payer_state_image (config : Config) (bytesAt : CellId → Bytes) (object : CellId) (state : ObjectState)
+    (record : ObjectRecord) (held : objectAt config bytesAt object = some record) :
+    payerOfBytes config bytesAt (stateImage object state) = some record.payer := by
+  have key : digestStream.toLawful.decode (stateKey object) = some object :=
+    digestStream.toLawful.decode_encode object
+  simp [payerOfBytes, stateImage, payloadOf_image, payerRoute, routePayer, key, held]
+
+theorem recordAt_recordImage (bytesAt : CellId → Bytes) (cell : CellId) (record : Record) (await : Await)
+    (awaiting : record.phase = .awaiting await) (holds : bytesAt cell = recordImage record) :
+    recordAt bytesAt cell = some record := by
+  simp [recordAt, holds, recordImage, awaiting, bodyOf_image, record_roundTrip]
+
+/-- What a yield commit posts: the declared-state write (a state image of the
+object) and, for a reply await, the slot it opens for this record cell. -/
+theorem commitYield_posts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat} {checkpoint : Digest}
+    {current : Option ObjectState} {viewed : Bool} {plan : PlanAwait} {committed : YieldCommit}
+    (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan =
+      .ok committed) :
+    ∀ post ∈ committed.posts, (∃ state, post.bytes = stateImage object state) ∨
+      (∃ slot : AnswerSlot.Slot, slot.activity = cell ∧
+        post.bytes = image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot)) := by
+  have stateShape : ∀ written : Option StateWritten,
+      stateWrite config snapshot object current viewed plan.write = .ok written →
+      ∀ post ∈ (written.map StateWritten.post).toList, ∃ state, post.bytes = stateImage object state := by
+    intro written wrote post member
+    cases written with
+    | none => simp at member
+    | some one =>
+      simp only [Option.map_some, Option.toList_some, List.mem_singleton] at member
+      subst member
+      obtain ⟨_, _, _, _, exact⟩ := stateWrite_spec wrote
+      subst exact
+      exact ⟨_, rfl⟩
+  unfold commitYield at ok
+  split at ok
+  · cases ok
+  · split at ok
+    · cases ok
+    · rename_i written wrote
+      split at ok
+      · split at ok
+        · cases ok
+        · simp only [Except.ok.injEq] at ok
+          subst ok
+          intro post member
+          simp only [List.mem_append, List.mem_singleton] at member
+          rcases member with inState | isSlot
+          · exact .inl (stateShape _ wrote post inState)
+          · subst isSlot
+            exact .inr ⟨_, rfl, rfl⟩
+      · split at ok
+        · cases ok
+        · simp only [Except.ok.injEq] at ok
+          subst ok
+          intro post member
+          exact .inl (stateShape _ wrote post member)
+
+/-- The record a yielding segment commits is awaiting. -/
+theorem nextRecord_yielded_awaiting (base : Record) (generation : Nat) (segment : Segment)
+    (committed : YieldCommit) (yields : ∃ state plan, segment = .yielded state plan) :
+    ∃ await, (nextRecord base generation segment (some committed)).phase = .awaiting await := by
+  obtain ⟨state, plan, rfl⟩ := yields
+  exact ⟨committed.await, rfl⟩
+
+theorem Postings.write_payload {rootBytes : Bytes → Digest} {pre : BookCell} (config : Config)
+    (snapshot : Snapshot rootBytes) (posted : Postings pre) :
+    payloadOf (posted.write config snapshot).bytes = none :=
+  payloadOf_book posted.post
+
+theorem slotImage_live (slot : AnswerSlot.Slot) :
+    (payloadOf (image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot))).isSome = true := by
+  simp [payloadOf_image]
+
+/-- What a post of a turn is, for the census. -/
+def CensusPost (object cell : CellId) (post : Post) : Prop :=
+  (∃ state, post.bytes = stateImage object state) ∨
+    (∃ slot : AnswerSlot.Slot, slot.activity = cell ∧
+      post.bytes = image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot)) ∨
+    post.bytes = retiredImage ∨ payloadOf post.bytes = none
+
+/-- The census of a record-first turn: the record post heads the turn's posts;
+the rest are the yield's state images (of `object`) and slot images (for this
+record cell), retired images, or the Book; a slot is opened only beside an
+awaiting record; the object's record is read under a cell no post writes. -/
+theorem recordFirst_cells_paid {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (cell object : CellId) (record : Record) (objectRecord : ObjectRecord)
+    (objectRead : readObject config snapshot object = .ok (some objectRecord))
+    (rest : List Post) (shape : ∀ post ∈ rest, CensusPost object cell post)
+    (slotsNeedRecord : (∃ post ∈ rest, ∃ slot : AnswerSlot.Slot, slot.activity = cell ∧
+        post.bytes = image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot)) →
+      ∃ await, record.phase = .awaiting await)
+    (objectUnwritten : ∀ post ∈ recordPost config snapshot cell record :: rest,
+      post.cell ≠ objectCell config.domain object) :
+    CellsPaid config (afterPosts snapshot (recordPost config snapshot cell record :: rest))
+      ((recordPost config snapshot cell record :: rest).map Post.cell) := by
+  apply cellsPaid_of_posts
+  have objectHeld : objectAt config (afterPosts snapshot (recordPost config snapshot cell record :: rest)) object =
+      some objectRecord := by
+    have unwritten := afterPosts_unwritten snapshot _ _ objectUnwritten
+    unfold objectAt
+    rw [unwritten]
+    exact objectAt_of_read objectRead
+  have headBytes : afterPosts snapshot (recordPost config snapshot cell record :: rest) cell = recordImage record :=
+    afterPosts_first snapshot (recordPost config snapshot cell record) rest
+  intro post member live
+  rcases List.mem_cons.mp member with head | inRest
+  · subst head
+    obtain ⟨await, awaiting⟩ := payloadOf_recordImage_live record live
+    show (payerOfBytes config _ (recordImage record)).isSome = true
+    rw [payer_record_image config _ record await awaiting]
+    rfl
+  · rcases shape post inRest with ⟨state, isState⟩ | ⟨slot, activity, isSlot⟩ | retired | none
+    · rw [isState, payer_state_image config _ object state objectRecord objectHeld]
+      rfl
+    · obtain ⟨await, awaiting⟩ := slotsNeedRecord ⟨post, inRest, slot, activity, isSlot⟩
+      have held := recordAt_recordImage (afterPosts snapshot (recordPost config snapshot cell record :: rest))
+        slot.activity record await awaiting (by rw [activity]; exact headBytes)
+      rw [isSlot, payer_slot_image config _ slot record held]
+      rfl
+    · rw [retired, payloadOf_retired] at live; cases live
+    · rw [none] at live; cases live
+
+/-- A yield commit's posts are census posts of its object and record cell. -/
+theorem segmentCommit_census {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat}
+    {current : Option ObjectState} {viewed : Bool} {segment : Segment} {yielded : Option YieldCommit}
+    (ok : segmentCommit config snapshot height transaction cell object generation current viewed segment =
+      .ok yielded) :
+    ∀ post ∈ (yielded.map YieldCommit.posts).getD [], CensusPost object cell post := by
+  intro post member
+  cases yielded with
+  | none => simp at member
+  | some committed =>
+    obtain ⟨_, _, _, committedOk⟩ := segmentCommit_spec ok
+    exact (commitYield_posts committedOk post member).elim .inl (fun slot => .inr (.inl slot))
+
+/-- A turn that opens a slot commits an awaiting record. -/
+theorem segmentCommit_awaiting {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat}
+    {current : Option ObjectState} {viewed : Bool} {segment : Segment} {yielded : Option YieldCommit}
+    (ok : segmentCommit config snapshot height transaction cell object generation current viewed segment =
+      .ok yielded) (base : Record) (generation' : Nat)
+    (opens : ∃ post ∈ (yielded.map YieldCommit.posts).getD [], (payloadOf post.bytes).isSome = true) :
+    ∃ await, (nextRecord base generation' segment yielded).phase = .awaiting await := by
+  cases yielded with
+  | none => obtain ⟨post, member, _⟩ := opens; simp at member
+  | some committed =>
+    obtain ⟨state, plan, rfl, _⟩ := segmentCommit_spec ok
+    exact ⟨committed.await, rfl⟩
+
+theorem slotPosted_live {post : Post} {slot : AnswerSlot.Slot}
+    (isSlot : post.bytes = image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot)) :
+    (payloadOf post.bytes).isSome = true := by
+  rw [isSlot]; exact slotImage_live slot
+
+/-- **`retention_cells_have_payer`, birth.** Every cell an admitted birth leaves
+holding an activity payload names its payer in the installed state: the record
+its escrow account, the opened slot that record's, the state cell its object's
+`ObjectRecord.payer`. (Premise: no post of the birth lands on the object's
+record cell, which it only guards: a coordinate collision.) -/
+theorem Birth.retention_cells_have_payer {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request)
+    (objectUnwritten : ∀ post ∈ born.posts, post.cell ≠ objectCell config.domain request.object) :
+    CellsPaid config (afterPosts snapshot born.posts) (born.posts.map Post.cell) := by
+  have commits := segmentCommit_census born.yieldedExact
+  rw [born.postsExact] at objectUnwritten ⊢
+  apply recordFirst_cells_paid config snapshot born.cell request.object born.record born.object born.objectExact
+  · intro post member
+    rcases List.mem_append.mp member with inYield | isBook
+    · exact commits post inYield
+    · simp only [List.mem_singleton] at isBook
+      subst isBook
+      exact .inr (.inr (.inr (Postings.write_payload config snapshot born.posted)))
+  · rintro ⟨post, inRest, slot, _, isSlot⟩
+    rcases List.mem_append.mp inRest with inYield | isBook
+    · rw [born.recordExact]
+      exact segmentCommit_awaiting born.yieldedExact _ 0 ⟨post, inYield, slotPosted_live isSlot⟩
+    · simp only [List.mem_singleton] at isBook
+      subst isBook
+      have live := slotPosted_live isSlot
+      rw [Postings.write_payload] at live
+      cases live
+  · exact objectUnwritten
+
+/-- A settlement's posts retire the settled slot. -/
+theorem settle_posts_retired {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {cell : CellId} {await : Await} {settlement : Settlement}
+    (settled : settle config snapshot height cell await = .ok settlement) :
+    ∀ post ∈ settlement.posts, post.bytes = retiredImage := by
+  cases source : await.source with
+  | reply name decider =>
+    rw [settle_reclaims_slot source settled]
+    intro post member
+    simp only [List.mem_singleton] at member
+    subst member; rfl
+  | height due =>
+    unfold settle at settled
+    rw [source] at settled
+    simp only at settled
+    split at settled
+    · cases settled; intro post member; simp at member
+    · split at settled
+      · cases settled; intro post member; simp at member
+      · cases settled
+
+/-- **`retention_cells_have_payer`, delivery.** Every cell an admitted delivery
+leaves live names its payer: the record its escrow (it still awaits, or it is
+retired), the state cell its object's payer, the opened slot the record's; the
+settled slot is retired. -/
+theorem Delivery.retention_cells_have_payer {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : DeliverRequest}
+    (delivery : Delivery config snapshot height request)
+    (objectUnwritten : ∀ post ∈ delivery.posts, post.cell ≠ objectCell config.domain delivery.record.object) :
+    CellsPaid config (afterPosts snapshot delivery.posts) (delivery.posts.map Post.cell) := by
+  have commits := segmentCommit_census delivery.yieldedExact
+  have retired := settle_posts_retired delivery.settled
+  rw [delivery.postsExact] at objectUnwritten ⊢
+  apply recordFirst_cells_paid config snapshot request.record delivery.record.object delivery.next delivery.object
+    delivery.objectExact
+  · intro post member
+    rcases List.mem_append.mp member with inFront | isBook
+    · rcases List.mem_append.mp inFront with inSettle | inYield
+      · exact .inr (.inr (.inl (retired post inSettle)))
+      · exact commits post inYield
+    · simp only [List.mem_singleton] at isBook
+      subst isBook
+      exact .inr (.inr (.inr (Postings.write_payload config snapshot delivery.posted)))
+  · rintro ⟨post, inRest, slot, _, isSlot⟩
+    have live := slotPosted_live isSlot
+    rcases List.mem_append.mp inRest with inFront | isBook
+    · rcases List.mem_append.mp inFront with inSettle | inYield
+      · rw [retired post inSettle, payloadOf_retired] at live; cases live
+      · rw [delivery.nextExact]
+        exact segmentCommit_awaiting delivery.yieldedExact _ _ ⟨post, inYield, live⟩
+    · simp only [List.mem_singleton] at isBook
+      subst isBook
+      rw [Postings.write_payload] at live
+      cases live
+  · exact objectUnwritten
+
+/-- **`retention_cells_have_payer`, exhaustion**: it rewrites the awaiting
+record (its escrow pays) and the Book. -/
+theorem Exhaustion.retention_cells_have_payer {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : ExhaustRequest}
+    (ex : Exhaustion config snapshot height request) :
+    CellsPaid config (afterPosts snapshot ex.posts) (ex.posts.map Post.cell) := by
+  apply cellsPaid_of_posts
+  rw [ex.postsExact]
+  intro post member live
+  simp only [List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at member
+  rcases member with isRecord | isBook
+  · subst isRecord
+    have awaiting : ex.next.phase = .awaiting ex.await := by rw [ex.nextExact]; exact ex.awaiting
+    show (payerOfBytes config _ (recordImage ex.next)).isSome = true
+    rw [payer_record_image config _ ex.next ex.await awaiting]; rfl
+  · subst isBook
+    rw [Postings.write_payload] at live; cases live
+
+/-- **`retention_cells_have_payer`, publication**: the package cell names its
+`Stored.payer`, a registered Book account (`Publication.payerRegistered`). -/
+theorem Publication.retention_cells_have_payer {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {stored : Stored} (publication : Publication config snapshot stored) :
+    CellsPaid config (afterPosts snapshot publication.posts) (publication.posts.map Post.cell) ∧
+      ∀ post ∈ publication.posts,
+        payerOfBytes config (afterPosts snapshot publication.posts) post.bytes = some stored.payer := by
+  have each : ∀ post ∈ publication.posts,
+      payerOfBytes config (afterPosts snapshot publication.posts) post.bytes = some stored.payer := by
+    intro post member
+    rw [publication.postsExact] at member
+    simp only [List.mem_singleton] at member
+    subst member
+    simp [postAt, payerOfBytes, payloadOf_image, payerRoute, routePayer, stored_roundTrip]
+  refine ⟨cellsPaid_of_posts config snapshot _ (fun post member _ => ?_), each⟩
+  rw [each post member]; rfl
+
+/-- **`retention_cells_have_payer`, creation**: the object's record names its payer. -/
+theorem Creation.retention_cells_have_payer {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {request : CreateRequest} (created : Creation config snapshot request) :
+    ∀ post ∈ created.posts,
+      payerOfBytes config (afterPosts snapshot created.posts) post.bytes = some request.record.payer := by
+  intro post member
+  rw [created.postsExact] at member
+  simp only [List.mem_singleton] at member
+  subst member
+  simp [postAt, objectImage, payerOfBytes, payloadOf_image, payerRoute, routePayer, ObjectRecord.record_roundTrip]
+
+/-- **`retention_cells_have_payer`, a direct state write**: the state cell names
+its object's payer (premise: the state and object-record coordinates differ). -/
+theorem StateWrite.retention_cells_have_payer {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : StateWriteRequest}
+    (written : StateWrite config snapshot height request)
+    (distinct : stateCell config.domain request.object ≠ objectCell config.domain request.object) :
+    ∀ post ∈ written.posts,
+      payerOfBytes config (afterPosts snapshot written.posts) post.bytes = some written.object.payer := by
+  have unwritten : ∀ post ∈ written.posts, post.cell ≠ objectCell config.domain request.object := by
+    intro post member
+    rw [written.postsExact] at member
+    simp only [List.mem_singleton] at member
+    subst member
+    exact distinct
+  have held : objectAt config (afterPosts snapshot written.posts) request.object = some written.object := by
+    unfold objectAt
+    rw [afterPosts_unwritten snapshot _ _ unwritten]
+    exact objectAt_of_read written.objectExact
+  intro post member
+  have shape := member
+  rw [written.postsExact] at shape
+  simp only [List.mem_singleton] at shape
+  rw [shape]
+  exact payer_state_image config _ request.object _ written.object held
+
+theorem decide_activity {slot decided : AnswerSlot.Slot} {subject : SubjectId} {height : Nat}
+    {decision : AnswerSlot.Decision} (ok : AnswerSlot.decide slot subject height decision = .ok decided) :
+    decided.activity = slot.activity := by
+  unfold AnswerSlot.decide at ok
+  split at ok
+  · cases ok
+  · split_ifs at ok
+    all_goals cases ok
+    rfl
+
+/-- **`retention_cells_have_payer`, a resolution**: the decided slot names the
+escrow of the record it answers (premise: that record is the one the turn reads
+under its guard of `slot.activity`, at a coordinate other than the slot's). -/
+theorem Resolution.retention_cells_have_payer {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : ResolveRequest}
+    (resolution : Resolution config snapshot height request) {record : Record}
+    (answers : readRecord snapshot resolution.slot.activity = some record)
+    (distinct : AnswerSlot.cell config.domain resolution.decided.name ≠ resolution.slot.activity) :
+    ∀ post ∈ resolution.posts,
+      payerOfBytes config (afterPosts snapshot resolution.posts) post.bytes = some record.escrow.account := by
+  have activity := decide_activity resolution.decidedExact
+  have unwritten : ∀ post ∈ resolution.posts, post.cell ≠ resolution.slot.activity := by
+    intro post member
+    rw [resolution.postsExact] at member
+    simp only [List.mem_singleton] at member
+    subst member
+    exact distinct
+  have held : recordAt (afterPosts snapshot resolution.posts) resolution.decided.activity = some record := by
+    rw [activity]
+    unfold recordAt
+    rw [afterPosts_unwritten snapshot _ _ unwritten]
+    exact answers
+  intro post member
+  have shape := member
+  rw [resolution.postsExact] at shape
+  simp only [List.mem_singleton] at shape
+  rw [shape]
+  exact payer_slot_image config _ resolution.decided record held
+
+#assert_axioms retention_census_paid
+#assert_axioms planted_census_unpaid
+#assert_axioms install_afterPosts
+#assert_axioms cellsPaid_of_posts
+#assert_axioms payloadOf_image
+#assert_axioms payloadOf_book
+#assert_axioms recordFirst_cells_paid
+#assert_axioms Birth.retention_cells_have_payer
+#assert_axioms Delivery.retention_cells_have_payer
+#assert_axioms Exhaustion.retention_cells_have_payer
+#assert_axioms Publication.retention_cells_have_payer
+#assert_axioms Creation.retention_cells_have_payer
+#assert_axioms StateWrite.retention_cells_have_payer
+#assert_axioms Resolution.retention_cells_have_payer
+
 end Minidregg.Kernel.ObjectiveActivity

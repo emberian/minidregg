@@ -1085,6 +1085,25 @@ theorem witness_closed_purse_refuses_debit :
     (⟨[], [.transfer witnessPurse 1 0 0], []⟩ : Batch).refusal? (witnessCloseBatch.apply witnessBook) =
       some (.operation 0 (.sourceUnregistered witnessPurse)) := by decide
 
+theorem deregisterAccounts_not_mem (book : Book) (accounts : List AccountId) (account : AccountId)
+    (closed : account ∈ accounts ∨ account ∉ book.accounts) :
+    account ∉ (deregisterAccounts book accounts).accounts := by
+  induction accounts generalizing book with
+  | nil => simpa using closed
+  | cons first rest ih =>
+    apply ih
+    rcases closed with member | absent
+    · rcases List.mem_cons.mp member with same | later
+      · subst same; exact Or.inr (Finset.notMem_erase _ _)
+      · exact Or.inl later
+    · exact Or.inr (fun present => absent (Finset.mem_of_mem_erase present))
+
+/-- **A batch's closures hold after it**: an account the batch deregisters is no
+account of the book it leaves. -/
+theorem Batch.apply_deregistered (batch : Batch) (book : Book) (account : AccountId)
+    (closed : account ∈ batch.deregistrations) : account ∉ (batch.apply book).accounts :=
+  deregisterAccounts_not_mem _ _ _ (Or.inl closed)
+
 /-- In general: once closed, an account is no posting endpoint. -/
 theorem deregistered_refuses_posting (book : Book) (account : AccountId) (operation : Operation)
     (names : operation.posting.source = account ∨ operation.posting.destination = account) :
@@ -1163,6 +1182,8 @@ example :
 #guard_msgs (whitespace := lax) in #print axioms Batch.refusal?_eq_none_iff
 /-- info: 'Minidregg.Theory.CanonicalResourceKernel.deregistered_refuses_posting' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms deregistered_refuses_posting
+/-- info: 'Minidregg.Theory.CanonicalResourceKernel.Batch.apply_deregistered' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Batch.apply_deregistered
 /-- info: 'Minidregg.Theory.CanonicalResourceKernel.witness_closed_purse_refuses_posting' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms witness_closed_purse_refuses_posting
 
