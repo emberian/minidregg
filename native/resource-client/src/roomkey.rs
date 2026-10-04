@@ -76,6 +76,12 @@
 //! position the plan read -- so an envelope cannot be moved to another stream
 //! or position unnoticed.
 //!
+//! FOUNDER-KEY TRANSITION. The founder's signing key can move (`rotate-key`) without a
+//! re-pin by any member: `room-key --op transition` writes a record signed by the OLD
+//! and the NEW key into the keys cell BEFORE the Host rotation, `rotate-key` refuses a
+//! founder until it has, and every client verifies the chain from its pin
+//! (`FounderChain`). See docs/PRIVATE-ROOMS-DESIGN.txt section 7.
+//!
 //! AUTHORITY: out-of-band PINS (`pin_founder`, `pin_member`). On a one-validator
 //! devnet every served fact is the operator's word, so every epoch certificate,
 //! wrap and release must verify under the PINNED founder key, and every
@@ -322,16 +328,42 @@ fn read_epoch_head(root: &Path, room: &str, keys: &str) -> Result<Option<(Value,
     Ok(Some((value, EpochHead { epoch, identity })))
 }
 
+/// How many founder-key transitions this client has authenticated (0 for a head written
+/// before any), and the founder key it saw in effect then.
+fn retained_transitions(retained: Option<&Value>) -> usize {
+    retained.and_then(|value| value["transitions"].as_u64()).unwrap_or(0) as usize
+}
+
+fn retained_founder_tip(retained: Option<&Value>) -> Option<[u8; 32]> {
+    crate::decode_hex(retained?["founderTip"].as_str()?).ok()?.try_into().ok()
+}
+
+/// A served founder-key chain shorter than one this client already authenticated is a
+/// rollback (the operator hiding the hand-over); the same length with another tip is a fork.
+fn check_chain_not_rolled_back(retained: Option<&Value>, chain: &FounderChain) -> Result<()> {
+    let seen = retained_transitions(retained);
+    if chain.transitions() < seen {
+        return Err(format!("served founder-key chain has {} transition(s) but this client already authenticated {seen}: the hand-over was hidden or rolled back", chain.transitions()));
+    }
+    if chain.transitions() == seen && seen > 0 && retained_founder_tip(retained).is_some_and(|tip| tip != *chain.tip()) {
+        return Err("served founder-key chain forks from the one this client authenticated".into());
+    }
+    Ok(())
+}
+
 /// A local head preserves authority evidence across key-cache erasure. The
 /// source-authenticated batch is required before this durable CAS is reached.
 fn retain_epoch_head(root: &Path, room: &str, keys: &str, prior: Option<&Value>, head: &EpochHead,
-    source_evidence: &Value) -> Result<()> {
+    chain: &FounderChain, source_evidence: &Value) -> Result<()> {
     if prior.is_some_and(|value| value["epoch"] == head.epoch.to_string()
-        && value["identity"] == hex(&head.identity)) { return Ok(()); }
+        && value["identity"] == hex(&head.identity)
+        && retained_transitions(Some(value)) == chain.transitions()
+        && retained_founder_tip(Some(value)) == Some(*chain.tip())) { return Ok(()); }
     if !root.join("private").exists() { make_private_dir(&root.join("private"))?; }
     super::publish_retained_json(&epoch_head_path(root, room)?,
         &json!({"type":"minidregg-authenticated-room-head-v1", "room":room,
             "keys":keys,"epoch":head.epoch.to_string(),"identity":hex(&head.identity),
+            "transitions":chain.transitions(),"founderTip":hex(chain.tip()),
             "sourceEvidence":source_evidence}), prior)
 }
 
@@ -471,6 +503,203 @@ fn record_digest(record: &EncRecord) -> Result<[u8; 32]> {
     Ok(lineage_digest(&[b"DREGG/PRIVATE-ENC-KEY-DIGEST/v1", &record.canonical_signed_payload()?]))
 }
 
+// ---------------------------------------------------------------- founder-key transition
+
+/// A FOUNDER-KEY TRANSITION: the pinned founder key hands the room to its successor.
+///   atom id = (2^31 + 1 + index) << 96
+///   payload = room (8) ‖ keys (8) ‖ index (4) ‖ after epoch (4) ‖ after certificate
+///             identity (32) ‖ old key (32) ‖ new key (32) ‖ old signature (64) ‖ new signature (64).
+/// BOTH keys sign the same statement: the OLD key says "this key succeeds me, from the epoch
+/// after `after epoch`", the NEW key says "I hold the secret and accept". A transition is
+/// therefore unforgeable without the current founder secret (an operator, or a member, cannot
+/// extend the chain) and cannot name a key nobody holds (a typo or a hostile key cannot lock
+/// the room). Transitions form ONE chain: index 0, 1, 2 ... each old key is the previous new
+/// key. A member's pin may be ANY key on the chain: a later key authenticates the whole chain
+/// back to its first key (every link needs the later key's own signature), an earlier one
+/// authenticates it forward. The epoch certificate of epoch e is signed by the key in effect
+/// at e (the number of transitions with `after epoch < e` selects it); deliveries and releases
+/// of epoch e by that key or any later one, because a founder may invite after rotating.
+const TRANSITION_FRAME: &[u8] = b"DREGG/PRIVATE-ROOM-FOUNDER-TRANSITION/v1";
+const TRANSITION_BODY_LEN: usize = 8 + 8 + 4 + 4 + 32 + 32 + 32;
+const TRANSITION_HIGH_BASE: u128 = (1 << 31) + 1;
+/// Transition indices fill the id region `2^31+1 ..= 2^31+2^20`, above every release.
+pub(crate) const MAX_TRANSITIONS: u32 = 1 << 20;
+
+pub(crate) fn transition_schema() -> String {
+    private::schema_decimal_of(TRANSITION_FRAME)
+}
+
+pub(crate) fn transition_atom_id(index: u32) -> String {
+    ((TRANSITION_HIGH_BASE + u128::from(index)) << 96).to_string()
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FounderTransition {
+    room: u64,
+    keys: u64,
+    index: u32,
+    after_epoch: u32,
+    after_certificate: [u8; 32],
+    old_key: [u8; 32],
+    new_key: [u8; 32],
+    old_signature: [u8; 64],
+    new_signature: [u8; 64],
+}
+
+impl FounderTransition {
+    fn body(&self) -> Vec<u8> {
+        [&self.room.to_be_bytes()[..], &self.keys.to_be_bytes(), &self.index.to_be_bytes(),
+            &self.after_epoch.to_be_bytes(), &self.after_certificate, &self.old_key, &self.new_key].concat()
+    }
+    fn statement(&self) -> Vec<u8> { [TRANSITION_FRAME, &[1], &self.body()].concat() }
+    fn payload(&self) -> Vec<u8> { [&self.body()[..], &self.old_signature, &self.new_signature].concat() }
+    fn atom(&self) -> String { transition_atom_id(self.index) }
+
+    /// Sign the hand-over from `old` to `new`, both secrets in hand, after the certificate `after`.
+    fn sign(room: &str, keys: &str, index: u32, after: &EpochHead, old: &SigningKey, new: &SigningKey) -> Result<Self> {
+        if index >= MAX_TRANSITIONS { return Err("founder-key transitions exhausted".into()); }
+        let mut transition = Self { room: subject_number(room)?, keys: subject_number(keys)?, index,
+            after_epoch: after.epoch, after_certificate: after.identity,
+            old_key: old.verifying_key().to_bytes(), new_key: new.verifying_key().to_bytes(),
+            old_signature: [0; 64], new_signature: [0; 64] };
+        if transition.old_key == transition.new_key { return Err("a founder-key transition names a different key".into()); }
+        let statement = transition.statement();
+        transition.old_signature = old.sign(&statement).to_bytes();
+        transition.new_signature = new.sign(&statement).to_bytes();
+        Ok(transition)
+    }
+
+    fn from_atom(id: &str, payload: &[u8]) -> Result<Self> {
+        if payload.len() != TRANSITION_BODY_LEN + 128 {
+            return Err(format!("founder-key transition atom {id} has an invalid length"));
+        }
+        let u64_at = |at: usize| u64::from_be_bytes(payload[at..at + 8].try_into().expect("8 bytes"));
+        let u32_at = |at: usize| u32::from_be_bytes(payload[at..at + 4].try_into().expect("4 bytes"));
+        let b32 = |at: usize| -> [u8; 32] { payload[at..at + 32].try_into().expect("32 bytes") };
+        let transition = Self { room: u64_at(0), keys: u64_at(8), index: u32_at(16), after_epoch: u32_at(20),
+            after_certificate: b32(24), old_key: b32(56), new_key: b32(88),
+            old_signature: payload[120..184].try_into().expect("64 bytes"),
+            new_signature: payload[184..248].try_into().expect("64 bytes") };
+        if transition.index >= MAX_TRANSITIONS || transition.atom() != id {
+            return Err(format!("founder-key transition atom {id} is not at the address its statement names"));
+        }
+        Ok(transition)
+    }
+
+    fn action(&self) -> Value {
+        json!({"type":"createAtom","atom":self.atom(),
+            "kind":{"type":"inlineObject","schema":transition_schema()},"payload":hex(&self.payload())})
+    }
+
+    /// Both signatures verify over this exact statement, in this room and keys cell.
+    fn check(&self, room: &str, keys: &str) -> Result<()> {
+        if self.room != subject_number(room)? || self.keys != subject_number(keys)? {
+            return Err("founder-key transition differs from its room or keys cell".into());
+        }
+        if self.old_key == self.new_key { return Err("a founder-key transition names a different key".into()); }
+        let statement = self.statement();
+        verifying_key(&self.old_key)?.verify_strict(&statement, &Signature::from_bytes(&self.old_signature))
+            .map_err(|_| "founder-key transition: the old key's signature does not verify")?;
+        verifying_key(&self.new_key)?.verify_strict(&statement, &Signature::from_bytes(&self.new_signature))
+            .map_err(|_| "founder-key transition: the new key's possession signature does not verify")?;
+        Ok(())
+    }
+}
+
+/// Every transition in a signed view of a keys cell, by index (a malformed one is an error).
+fn transitions_in_view(view: &Value) -> Result<Vec<FounderTransition>> {
+    let mut atoms = Vec::new();
+    collect_atoms(view, &transition_schema(), &mut atoms);
+    let mut out = BTreeMap::new();
+    for atom in atoms {
+        let id = member(atom, "id")?;
+        let transition = FounderTransition::from_atom(id, &crate::decode_hex(member(atom, "payload")?)?)?;
+        if out.insert(transition.index, transition).is_some() { return Err("transition atom repeats an address".into()); }
+    }
+    Ok(out.into_values().collect())
+}
+
+fn collect_atoms<'a>(value: &'a Value, schema: &str, out: &mut Vec<&'a Value>) {
+    match value {
+        Value::Array(items) => items.iter().for_each(|item| collect_atoms(item, schema, out)),
+        Value::Object(object) => {
+            if object.get("type").and_then(Value::as_str) == Some("atom")
+                && object.get("kind").and_then(|k| k.get("schema")).and_then(Value::as_str) == Some(schema) {
+                out.push(value);
+            } else {
+                object.values().for_each(|item| collect_atoms(item, schema, out));
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The founder keys of a room in order, and where each one's authority begins.
+/// `keys[0]` is the first key on the chain; `after[i]` is the `after epoch` of the
+/// transition to `keys[i + 1]`: that key is in effect for epochs strictly above it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FounderChain {
+    keys: Vec<[u8; 32]>,
+    after: Vec<u32>,
+}
+
+impl FounderChain {
+    /// No transition: the pinned key alone.
+    fn single(pin: [u8; 32]) -> Self { Self { keys: vec![pin], after: Vec::new() } }
+
+    /// The key that signs new epochs, wraps and releases now.
+    pub(crate) fn tip(&self) -> &[u8; 32] { self.keys.last().expect("a chain has a key") }
+
+    pub(crate) fn transitions(&self) -> usize { self.after.len() }
+
+    fn contains(&self, key: &[u8; 32]) -> bool { self.keys.contains(key) }
+
+    fn index_for_epoch(&self, epoch: u32) -> usize { self.after.iter().filter(|after| **after < epoch).count() }
+
+    /// The key that must have signed the certificate of `epoch`.
+    fn epoch_key(&self, epoch: u32) -> &[u8; 32] { &self.keys[self.index_for_epoch(epoch)] }
+
+    /// The keys that may sign a delivery or release of `epoch`: its own key and every later one.
+    fn delivery_keys(&self, epoch: u32) -> &[[u8; 32]] { &self.keys[self.index_for_epoch(epoch)..] }
+
+    /// Verify the served transitions against the pinned key and the served certificates.
+    /// Every link: signed by both keys; the old key is the previous link's new key; its
+    /// `after` names the certificate the keys cell shows at that epoch; `after epoch` never
+    /// decreases. The pin must lie on the chain.
+    fn verify(room: &str, keys: &str, pin: &[u8; 32], transitions: &[FounderTransition],
+        certificates: &BTreeMap<u32, &EpochCertificate>) -> Result<Self> {
+        let Some(first) = transitions.first() else { return Ok(Self::single(*pin)) };
+        let mut chain = Self { keys: vec![first.old_key], after: Vec::new() };
+        for (position, transition) in transitions.iter().enumerate() {
+            if transition.index as usize != position {
+                return Err("founder-key transitions are not contiguous from index 0 (a link is missing)".into());
+            }
+            transition.check(room, keys)?;
+            if transition.old_key != *chain.tip() {
+                return Err("founder-key transition does not start where the previous one ended (a fork)".into());
+            }
+            if chain.after.last().is_some_and(|previous| transition.after_epoch < *previous) {
+                return Err("founder-key transitions go back in epochs".into());
+            }
+            let certificate = certificates.get(&transition.after_epoch).ok_or_else(|| format!(
+                "founder-key transition {} names epoch {}, which the keys cell does not show", transition.index, transition.after_epoch))?;
+            if certificate.identity() != transition.after_certificate {
+                return Err(format!("founder-key transition {} names another certificate than the one at epoch {}",
+                    transition.index, transition.after_epoch));
+            }
+            if chain.keys.contains(&transition.new_key) {
+                return Err("founder-key transition returns to a key already retired".into());
+            }
+            chain.keys.push(transition.new_key);
+            chain.after.push(transition.after_epoch);
+        }
+        if !chain.contains(pin) {
+            return Err("the pinned founder key is not on the founder-key chain this keys cell serves".into());
+        }
+        Ok(chain)
+    }
+}
+
 // ---------------------------------------------------------------- release records
 
 /// The RELEASE record of one delivery, written (turn 1) before its ciphertext
@@ -550,12 +779,14 @@ impl ReleaseStatement {
             "kind":{"type":"inlineObject","schema":release_schema()},"payload":hex(&self.payload())})
     }
 
-    fn check(&self, room: &str, keys: &str, founder: &[u8; 32]) -> Result<()> {
-        if self.room != subject_number(room)? || self.keys != subject_number(keys)? || self.signer_public != *founder {
-            return Err("release record differs from its room, keys cell or pinned founder".into());
+    /// The release is the room's: signed by a founder key allowed for its epoch (`chain`).
+    fn check(&self, room: &str, keys: &str, chain: &FounderChain) -> Result<()> {
+        if self.room != subject_number(room)? || self.keys != subject_number(keys)?
+            || !chain.delivery_keys(self.epoch).contains(&self.signer_public) {
+            return Err("release record differs from its room, keys cell or founder key chain".into());
         }
-        verifying_key(founder)?.verify_strict(&self.statement(), &Signature::from_bytes(&self.signature))
-            .map_err(|_| "release record signature does not verify under the pinned founder key".into())
+        verifying_key(&self.signer_public)?.verify_strict(&self.statement(), &Signature::from_bytes(&self.signature))
+            .map_err(|_| "release record signature does not verify under the founder key it names".into())
     }
 
     /// Does this release name exactly this delivery?
@@ -606,6 +837,8 @@ struct Lineage {
     releases: BTreeMap<String, ReleaseStatement>,
     certificates: BTreeMap<u32, EpochCertificate>,
     head: Option<EpochHead>,
+    /// The founder keys the keys cell serves, verified against the pin.
+    chain: FounderChain,
 }
 
 impl Lineage {
@@ -620,22 +853,36 @@ impl Lineage {
     }
 }
 
-fn verify_lineage(room: &str, keys: &str, founder: &[u8; 32], view: &Value,
+/// `pin` is the founder key this client pinned (out of band); it may be any key on the
+/// served founder-key chain (`FounderChain::verify`).
+fn verify_lineage(room: &str, keys: &str, pin: &[u8; 32], view: &Value,
     retained: Option<&EpochHead>) -> Result<Lineage> {
     let wraps = wraps_in_view(view)?;
     let releases = releases_in_view(view)?;
-    for release in releases.values() { release.check(room, keys, founder)?; }
+    let transitions = transitions_in_view(view)?;
+    let mut served = BTreeMap::<u32, &EpochCertificate>::new();
+    for wrap in &wraps {
+        let certificate = &wrap.attestation.as_ref().ok_or("unsigned room wrap is not authenticated lineage")?.certificate;
+        if let Some(other) = served.insert(certificate.epoch, certificate) {
+            if other != certificate { return Err("conflicting certificates for one room epoch".into()); }
+        }
+    }
+    let chain = FounderChain::verify(room, keys, pin, &transitions, &served)?;
+    for release in releases.values() { release.check(room, keys, &chain)?; }
     let mut certificates = BTreeMap::new();
     for wrap in &wraps {
-        wrap.check_signatures(room, keys, founder, founder)?;
+        let attestation = wrap.attestation.as_ref().expect("checked above");
+        if !chain.delivery_keys(wrap.epoch).contains(&attestation.signer_public) {
+            return Err("a wrap's delivery is signed by a key that is not a founder key for its epoch".into());
+        }
+        wrap.check_signatures(room, keys, chain.epoch_key(wrap.epoch), &attestation.signer_public)?;
         let release = releases.get(&release_atom_id(wrap.epoch, wrap.gen, wrap.member))
             .ok_or("a wrap was disclosed without a founder-signed release record")?;
         release.names(wrap)?;
-        let certificate = &wrap.attestation.as_ref().expect("checked signature").certificate;
-        certificates.insert(certificate.epoch, certificate.clone());
+        certificates.insert(attestation.certificate.epoch, attestation.certificate.clone());
     }
     let head = check_epoch_chain(&wraps, retained)?;
-    Ok(Lineage { wraps, releases, certificates, head })
+    Ok(Lineage { wraps, releases, certificates, head, chain })
 }
 
 /// A member's encryption-key record in the keys cell.
@@ -1332,6 +1579,7 @@ pub(crate) fn sync(root: &Path, workspace: &Value, room_name: &str) -> Result<Sy
     let (view, _, _) = signed_view(root, workspace, &keys_view_ref(&room_ref, &keys)?, "resource")?;
     let retained = read_epoch_head(root, &room, &keys)?;
     let lineage = verify_lineage(&room, &keys, &founder, &view, retained.as_ref().map(|(_, head)| head))?;
+    check_chain_not_rolled_back(retained.as_ref().map(|(value, _)| value), &lineage.chain)?;
     let records = records_in_view(&view);
     let mut ring = load_ring(root, &passphrase)?;
     check_ring_below_head(&ring, &room, lineage.head.as_ref())?;
@@ -1339,8 +1587,8 @@ pub(crate) fn sync(root: &Path, workspace: &Value, room_name: &str) -> Result<Sy
     // the client later forgets its decryption keys. Never fall back to an older
     // epoch on either condition.
     if let Some(head) = &lineage.head {
-        retain_epoch_head(root, &room, &keys, retained.as_ref().map(|(value, _)| value), head,
-            &json!({"authority":"founder-pin","founderKeyHex":hex(&founder)}))?;
+        retain_epoch_head(root, &room, &keys, retained.as_ref().map(|(value, _)| value), head, &lineage.chain,
+            &json!({"authority":"founder-pin","founderKeyHex":hex(&founder),"founderTipHex":hex(lineage.chain.tip())}))?;
     }
     let me = subject_number(member(workspace, "subject")?)?;
     let secrets = own_secrets(workspace)?;
@@ -1573,17 +1821,33 @@ struct Founder {
     signer: SigningKey,
     subject: u64,
     key_epoch: u32,
+    /// The key this client pinned: what `verify_lineage` anchors to (not the signer once keys moved).
+    pin: [u8; 32],
 }
 
-fn founder_signer(root: &Path, workspace: &Value, room: &str, keys: &str) -> Result<Founder> {
-    let pinned = founder_pin(root, room, keys)?;
-    let signer = crate::read_secret(&member_path(workspace, "key")?)?;
-    if signer.verifying_key().to_bytes() != pinned {
-        return Err("only the room's pinned founder key signs epochs, wraps and releases; this workspace's signing key is not it".into());
+/// Only the tip of the founder-key chain signs: a retired key (rotated away, possibly leaked)
+/// and a key not yet handed the room both refuse.
+fn require_tip(signer: &[u8; 32], chain: &FounderChain) -> Result<()> {
+    if signer != chain.tip() {
+        return Err("only the room's current founder key signs epochs, wraps and releases; this workspace's signing key is not the tip of its founder-key chain (`room-key --op transition` hands the room to a new key)".into());
     }
+    Ok(())
+}
+
+/// Does rotating from `mine` to `next` strand this founder? Only when `mine` is still the
+/// tip and `next` is not yet on the chain.
+fn rotation_strands(mine: &[u8; 32], next: &[u8; 32], chain: &FounderChain) -> bool {
+    chain.tip() == mine && chain.tip() != next
+}
+
+/// The founder's signing key, refused unless it is the TIP of the room's founder-key chain.
+fn founder_signer(root: &Path, workspace: &Value, room: &str, keys: &str, chain: &FounderChain) -> Result<Founder> {
+    let pin = founder_pin(root, room, keys)?;
+    let signer = crate::read_secret(&member_path(workspace, "key")?)?;
+    require_tip(&signer.verifying_key().to_bytes(), chain)?;
     let key_epoch = crate::key_rotation::current_key_epoch(root)?;
     Ok(Founder { signer, subject: subject_number(member(workspace, "subject")?)?,
-        key_epoch: key_epoch.parse().map_err(|_| "signing key epoch must fit 32 bits")? })
+        key_epoch: key_epoch.parse().map_err(|_| "signing key epoch must fit 32 bits")?, pin })
 }
 
 struct RetainedReleaseDraft {
@@ -1980,7 +2244,7 @@ pub(crate) fn found(root: &Path, workspace: &Value, room_name: &str) -> Result<(
             return Err(format!("{room_name} already has epoch {epoch} and this client does not hold it"));
         }
     } else {
-        let founder = founder_signer(root, workspace, &room, &keys)?;
+        let founder = founder_signer(root, workspace, &room, &keys, &synced.lineage.chain)?;
         let enc = own_secret(workspace)?.public().clone();
         let proposal = match live_release(root, &room, "found")? {
             Some(proposal) => proposal,
@@ -1991,7 +2255,7 @@ pub(crate) fn found(root: &Path, workspace: &Value, room_name: &str) -> Result<(
         };
         let lineage = &synced.lineage;
         let mut host = LiveHost { root, workspace, room_ref: room_ref.clone(), keys: keys.clone() };
-        let released = run_release(root, &mut host, &public, me, &room, &proposal, &passphrase, || {
+        let released = run_release(root, &mut host, &founder.pin, me, &room, &proposal, &passphrase, || {
             let key = RoomKey::generate(lineage.next_epoch()?)?;
             let certificate = EpochCertificate::sign(&room, &keys, &key, [0; 32], me, founder.key_epoch, &founder.signer)?;
             let wrap = WrapAtom::new(&room, &founder_subject, &enc, 0, 0, &key)?
@@ -2006,9 +2270,91 @@ pub(crate) fn found(root: &Path, workspace: &Value, room_name: &str) -> Result<(
     println!("{}", serde_json::to_string_pretty(&json!({"type":"minidregg-private-room-v1",
         "room":room_name,"target":room,"keys":keys,"epochs":ring.epochs(&room),
         "founderKeyHex":hex(&public),"founderFingerprint":fingerprint(&public),
-        "note":"give each member the room id, keys cell and founder key DIRECTLY (not through this node) so they can pin it: room-key --op recipient-record --room-id ROOM --keys-cell KEYS --founder-key HEX"}))
+        "disclaimer":private::PRIVACY_DISCLAIMER,
+        "note":"devnet quality; privacy not audited. Give each member the room id, keys cell and founder key DIRECTLY (not through this node) so they can pin it: room-key --op recipient-record --room-id ROOM --keys-cell KEYS --founder-key HEX"}))
         .map_err(|e| e.to_string())?);
     Ok(())
+}
+
+/// `room-key --op transition --next-key FILE`: hand the room to the founder's NEXT signing
+/// key BEFORE `rotate-key` makes it the daily key. The old key still signs here (it is still
+/// the Host-valid signer of this write); the next key signs too, proving it is held. Ordering
+/// is the two-phase rule of releases: the record is BOUND to the keys cell and read back
+/// verified first, and only then may the Host rotation happen (`founder_rotation_gate`
+/// refuses `rotate-key` until it has). Nothing secret is disclosed by a transition, so there
+/// is no draft/dead-draft machinery: the write is idempotent under its proposal id.
+pub(crate) fn transition(root: &Path, workspace: &Value, room_name: &str, next_key: &Path,
+    proposal_id: &str) -> Result<()> {
+    let (room_ref, room, keys) = private_room(root, room_name)?;
+    let synced = sync(root, workspace, room_name)?;
+    let head = synced.lineage.head.clone().ok_or("room has no authenticated epoch yet: nothing to hand over")?;
+    let chain = &synced.lineage.chain;
+    let next = crate::read_secret(next_key)?;
+    let next_public = next.verifying_key().to_bytes();
+    if *chain.tip() == next_public {
+        println!("{}", serde_json::to_string_pretty(&json!({"type":"minidregg-room-founder-transition-v1",
+            "room":room_name,"transition":"already published","founderKeyHex":hex(&next_public),
+            "fingerprint":fingerprint(&next_public)})).map_err(|e| e.to_string())?);
+        return Ok(());
+    }
+    let founder = founder_signer(root, workspace, &room, &keys, chain)?;
+    let index = u32::try_from(chain.transitions()).map_err(|_| "founder-key transitions exhausted")?;
+    let record = FounderTransition::sign(&room, &keys, index, &head, &founder.signer, &next)?;
+    let keys_ref = writable_keys_ref(root, room_name, &room_ref, &keys)?;
+    turn(root, workspace, proposal_id, &content_request(&keys_ref, vec![record.action()])?)?;
+    let (view, _, _) = signed_view(root, workspace, &keys_view_ref(&room_ref, &keys)?, "resource")?;
+    let lineage = verify_lineage(&room, &keys, &founder.pin, &view, Some(&head))?;
+    if *lineage.chain.tip() != next_public || lineage.chain.transitions() != chain.transitions() + 1 {
+        return Err("the founder-key transition was submitted but the readback does not show it as the tip of the chain; do not rotate the key".into());
+    }
+    eprintln!("room {room_name}: founder key handed from {} to {} (fingerprint {}). Members' clients accept it by itself: both keys signed. Now run `rotate-key`; until then this key still signs.",
+        fingerprint(&founder.signer.verifying_key().to_bytes()), hex(&next_public), fingerprint(&next_public));
+    println!("{}", serde_json::to_string_pretty(&json!({"type":"minidregg-room-founder-transition-v1",
+        "room":room_name,"transition":"published","index":index,"afterEpoch":head.epoch,
+        "oldKeyHex":hex(&founder.signer.verifying_key().to_bytes()),"founderKeyHex":hex(&next_public),
+        "fingerprint":fingerprint(&next_public)})).map_err(|e| e.to_string())?);
+    Ok(())
+}
+
+/// The gate `rotate-key` runs BEFORE it advances the Host: for every private room whose
+/// founder key this workspace holds now (the pin, or the tip it last authenticated), the
+/// next key must already be the tip of the room's published founder-key chain. Without
+/// this a founder that rotated would hold a signing key no member pins, and could neither
+/// invite nor rotate nor kick in its own room. Fails closed: a room it cannot read refuses.
+pub(crate) fn founder_rotation_gate(root: &Path, next_public: &[u8; 32]) -> Result<()> {
+    let workspace = super::load(root)?;
+    let mine = crate::read_secret(&member_path(&workspace, "key")?)?.verifying_key().to_bytes();
+    let mut owed = Vec::new();
+    for name in private_room_names(root) {
+        let (room_ref, room, keys) = private_room(root, &name)?;
+        let retained = read_epoch_head(root, &room, &keys)?;
+        let pin = match founder_pin(root, &room, &keys) { Ok(pin) => pin, Err(_) => continue };
+        let was_mine = pin == mine || retained_founder_tip(retained.as_ref().map(|(value, _)| value)) == Some(mine);
+        if !was_mine { continue; }
+        let (view, _, _) = signed_view(root, &workspace, &keys_view_ref(&room_ref, &keys)?, "resource")
+            .map_err(|error| format!("room {name}: cannot read the keys cell to check the founder-key chain ({error}); rotate-key refuses rather than strand the room"))?;
+        let lineage = verify_lineage(&room, &keys, &pin, &view, retained.as_ref().map(|(_, head)| head))?;
+        if rotation_strands(&mine, next_public, &lineage.chain) {
+            owed.push(name);
+        }
+    }
+    if owed.is_empty() { return Ok(()); }
+    Err(format!("this workspace is the founder of private room(s) {} and the key you are rotating to is not yet on their founder-key chain: run `room-key --op transition --name ROOM --next-key NEXT-KEY` for each first, or no member (and not you) could verify what the new key signs",
+        owed.join(", ")))
+}
+
+/// The private rooms this workspace references (sorted).
+fn private_room_names(root: &Path) -> Vec<String> {
+    let mut rooms: Vec<String> = fs::read_dir(root.join("refs"))
+        .map(|entries| entries.flatten()
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .filter_map(|name| name.strip_suffix(".json").map(str::to_owned))
+            .filter(|name| !name.starts_with('.'))
+            .filter(|name| reference(root, name).is_ok_and(|r| r.get("private").and_then(|p| p.get("keys")).is_some()))
+            .collect())
+        .unwrap_or_default();
+    rooms.sort();
+    rooms
 }
 
 /// B6, before anything is proposed: a hosted invitee needs `--i-know`. Two
@@ -2179,7 +2525,7 @@ pub(crate) fn invite(
     pin_member(root, &room, &keys, invitee_number, &signing, false)?;
     let (_, pins) = member_pins(root, &room, &keys)?;
     let recipient = Recipient::of(&authenticate_recipient(&pins, &room, &keys, &record)?)?;
-    let founder = founder_signer(root, workspace, &room, &keys)?;
+    let founder = founder_signer(root, workspace, &room, &keys, &synced.lineage.chain)?;
     let epochs: Vec<u32> = if past {
         synced.ring.epochs(&room).into_iter().filter(|e| *e <= head.epoch).collect()
     } else {
@@ -2221,9 +2567,8 @@ pub(crate) fn invite(
         return Err(format!("{invitee} already holds a wrap to this key at every epoch asked for"));
     }
     let me = founder.subject;
-    let founder_public = founder.signer.verifying_key().to_bytes();
     let mut host = LiveHost { root, workspace, room_ref, keys: keys.clone() };
-    let released = run_release(root, &mut host, &founder_public, me, &room, proposal_id, &passphrase, || {
+    let released = run_release(root, &mut host, &founder.pin, me, &room, proposal_id, &passphrase, || {
         Ok(ReleaseSpec { room: room.clone(), keys: keys.clone(), keys_ref, purpose: "invite",
             head_before: Some(head), key: None, deliveries })
     })?;
@@ -2272,7 +2617,7 @@ pub(crate) fn rotate(
             let dropped = dropped.map(subject_number).transpose()?;
             let head = synced.lineage.head.clone().ok_or("room has no keys")?;
             let recipients = kept_recipients(root, workspace, &synced, head.epoch, &current, dropped)?;
-            let founder = founder_signer(root, workspace, &room, &keys)?;
+            let founder = founder_signer(root, workspace, &room, &keys, &synced.lineage.chain)?;
             let next = synced.lineage.next_epoch()?;
             let (key, wraps, left) = rotation(&room, &synced.wraps, head.epoch, next, &recipients, &current, dropped)?;
             if !wraps.iter().any(|(w, _)| w.member == founder.subject) {
@@ -2287,9 +2632,8 @@ pub(crate) fn rotate(
                 Delivery::new(wrap.sign(&certificate, founder.subject, founder.key_epoch, &founder.signer)?, record, &founder)
             }).collect::<Result<Vec<_>>>()?;
             let keys_ref = writable_keys_ref(root, room_name, &room_ref, &keys)?;
-            let founder_public = founder.signer.verifying_key().to_bytes();
             let mut host = LiveHost { root, workspace, room_ref: room_ref.clone(), keys: keys.clone() };
-            let released = run_release(root, &mut host, &founder_public, founder.subject, &room, proposal_id, &passphrase, || {
+            let released = run_release(root, &mut host, &founder.pin, founder.subject, &room, proposal_id, &passphrase, || {
                 Ok(ReleaseSpec { room: room.clone(), keys: keys.clone(), keys_ref, purpose: "rotate",
                     head_before: Some(head), key: Some(key), deliveries })
             })?;
@@ -2353,23 +2697,9 @@ pub(crate) fn publish_rotation(root: &Path, key_epoch: &str) -> Value {
         Ok(workspace) => workspace,
         Err(error) => return json!([{"error": format!("cannot load the workspace to publish: {error}")}]),
     };
-    let mut rooms: Vec<String> = fs::read_dir(root.join("refs"))
-        .map(|entries| {
-            entries
-                .flatten()
-                .filter_map(|entry| entry.file_name().into_string().ok())
-                .filter_map(|name| name.strip_suffix(".json").map(str::to_owned))
-                .filter(|name| !name.starts_with('.'))
-                .collect()
-        })
-        .unwrap_or_default();
-    rooms.sort();
+    let rooms = private_room_names(root);
     let mut out = Vec::new();
     for name in rooms {
-        let Ok(reference) = reference(root, &name) else { continue };
-        if reference.get("private").and_then(|p| p.get("keys")).is_none() {
-            continue;
-        }
         let nonce = super::random_nonce().unwrap_or_default();
         let proposal = format!("rk-reg-{}", &nonce[nonce.len().saturating_sub(16)..]);
         match register(root, &workspace, &name, key_epoch, &proposal) {
@@ -2410,7 +2740,7 @@ pub(crate) fn rewrap(root: &Path, workspace: &Value, room_name: &str, subject: &
     })?;
     let (_, pins) = member_pins(root, &room, &keys)?;
     let recipient = Recipient::of(&authenticate_recipient(&pins, &room, &keys, record)?)?;
-    let founder = founder_signer(root, workspace, &room, &keys)?;
+    let founder = founder_signer(root, workspace, &room, &keys, &synced.lineage.chain)?;
     let mut deliveries = Vec::new();
     for epoch in synced.ring.epochs(&room) {
         let held: Vec<&WrapAtom> = synced.wraps.iter().filter(|w| w.member == number && w.epoch == epoch).collect();
@@ -2432,9 +2762,8 @@ pub(crate) fn rewrap(root: &Path, workspace: &Value, room_name: &str, subject: &
         return Err(format!("{subject} already holds a wrap to its recorded key at every epoch it was wrapped at"));
     }
     let keys_ref = writable_keys_ref(root, room_name, &room_ref, &keys)?;
-    let founder_public = founder.signer.verifying_key().to_bytes();
     let mut host = LiveHost { root, workspace, room_ref, keys: keys.clone() };
-    let released = run_release(root, &mut host, &founder_public, founder.subject, &room, proposal_id, &passphrase, || {
+    let released = run_release(root, &mut host, &founder.pin, founder.subject, &room, proposal_id, &passphrase, || {
         Ok(ReleaseSpec { room: room.clone(), keys: keys.clone(), keys_ref, purpose: "rewrap",
             head_before: Some(head), key: None, deliveries })
     })?;
@@ -2574,7 +2903,7 @@ mod tests {
 
     fn founder_key() -> SigningKey { SigningKey::from_bytes(&[1; 32]) }
 
-    fn founder() -> Founder { Founder { signer: founder_key(), subject: FOUNDER, key_epoch: 0 } }
+    fn founder() -> Founder { Founder { signer: founder_key(), subject: FOUNDER, key_epoch: 0, pin: pinned() } }
 
     fn pinned() -> [u8; 32] { founder_key().verifying_key().to_bytes() }
 
@@ -2835,6 +3164,223 @@ mod tests {
         assert!(rotation(ROOM, &wraps0, 1, 1, &records, &current, None).is_err());
     }
 
+    // ---- founder-key transition ----
+
+    fn key_n(n: u8) -> SigningKey { SigningKey::from_bytes(&[n; 32]) }
+
+    fn pub_of(key: &SigningKey) -> [u8; 32] { key.verifying_key().to_bytes() }
+
+    fn head_of(certificate: &EpochCertificate) -> EpochHead {
+        EpochHead { epoch: certificate.epoch, identity: certificate.identity() }
+    }
+
+    fn cell_with(extra: &[Value], deliveries: &[&Delivery]) -> Value {
+        let mut entries = cell(deliveries)["cell"]["entries"].as_array().unwrap().clone();
+        entries.extend(extra.iter().cloned());
+        json!({"cell":{"entries":entries}})
+    }
+
+    fn handed(index: u32, after: &EpochCertificate, old: &SigningKey, new: &SigningKey) -> FounderTransition {
+        FounderTransition::sign(ROOM, KEYS, index, &head_of(after), old, new).unwrap()
+    }
+
+    fn t_atom(t: &FounderTransition) -> Value { atom(&t.action()) }
+
+    #[test]
+    fn a_founder_key_transition_moves_the_room_to_the_next_key_without_a_re_pin() {
+        let (k0, k1) = (founder_key(), key_n(21));
+        let e0 = RoomKey::generate(0).unwrap();
+        let (c0, d0) = epoch(&e0, [0; 32], &[(13, 3)], &k0);
+        let t0 = handed(0, &c0, &k0, &k1);
+        let e1 = RoomKey::generate(1).unwrap();
+        let (c1, d1) = epoch(&e1, c0.identity(), &[(13, 3)], &k1);
+        let view = cell_with(&[t_atom(&t0)], &[&d0[0], &d1[0]]);
+        // The client pinned k0 and never re-pins: the chain carries it to k1.
+        let lineage = verify_lineage(ROOM, KEYS, &pub_of(&k0), &view, None).unwrap();
+        assert_eq!((lineage.chain.tip(), lineage.chain.transitions()), (&pub_of(&k1), 1));
+        assert_eq!(lineage.head, Some(head_of(&c1)));
+        // A late joiner that was handed the CURRENT key out of band verifies the same cell,
+        // history included (every link needs the later key's own signature).
+        assert_eq!(verify_lineage(ROOM, KEYS, &pub_of(&k1), &view, None).unwrap().chain, lineage.chain);
+        // A pin that is on no link of the chain refuses.
+        let stranger = verify_lineage(ROOM, KEYS, &pub_of(&key_n(99)), &view, None).unwrap_err();
+        assert!(stranger.contains("not on the founder-key chain"), "{stranger}");
+        // With no transition the chain is the pin, as before.
+        let plain = verify_lineage(ROOM, KEYS, &pub_of(&k0), &cell(&[&d0[0]]), None).unwrap();
+        assert_eq!((plain.chain.tip(), plain.chain.transitions()), (&pub_of(&k0), 0));
+        assert!(verify_lineage(ROOM, KEYS, &pub_of(&k1), &cell(&[&d0[0]]), None).is_err(),
+            "a pin the served cell never mentions authenticates nothing");
+    }
+
+    #[test]
+    fn a_retired_key_signs_nothing_after_the_hand_over_and_the_new_key_may_still_invite_into_old_epochs() {
+        let (k0, k1) = (founder_key(), key_n(21));
+        let e0 = RoomKey::generate(0).unwrap();
+        let (c0, d0) = epoch(&e0, [0; 32], &[(13, 3)], &k0);
+        let t0 = handed(0, &c0, &k0, &k1);
+        // The retired key mints epoch 1 after handing over: refused whole.
+        let e1 = RoomKey::generate(1).unwrap();
+        let (_, late_by_old) = epoch(&e1, c0.identity(), &[(13, 3)], &k0);
+        let refused = verify_lineage(ROOM, KEYS, &pub_of(&k0), &cell_with(&[t_atom(&t0)], &[&d0[0], &late_by_old[0]]), None);
+        assert!(refused.is_err(), "epoch 1 must be signed by the key in effect at epoch 1");
+        // A delivery of epoch 1 by the retired key: its certificate may be right, the delivery is not.
+        let (c1, by_new) = epoch(&e1, c0.identity(), &[(13, 3)], &k1);
+        let stale_delivery = {
+            let wrap = wrap_for(4, "14", &e1).sign(&c1, FOUNDER, 0, &k0).unwrap();
+            let release = ReleaseStatement::sign(&wrap, [0; 32], &k0).unwrap();
+            Delivery { wrap, release }
+        };
+        assert!(verify_lineage(ROOM, KEYS, &pub_of(&k0),
+            &cell_with(&[t_atom(&t0)], &[&d0[0], &by_new[0], &stale_delivery]), None).is_err());
+        // The new key invites into the OLD epoch 0 (its certificate stays k0's): allowed.
+        let invite_old = {
+            let wrap = wrap_for(4, "14", &e0).sign(&c0, FOUNDER, 0, &k1).unwrap();
+            let release = ReleaseStatement::sign(&wrap, [0; 32], &k1).unwrap();
+            Delivery { wrap, release }
+        };
+        let view = cell_with(&[t_atom(&t0)], &[&d0[0], &invite_old]);
+        assert!(verify_lineage(ROOM, KEYS, &pub_of(&k0), &view, None).is_ok());
+        // The limit, said plainly: the cell cannot say WHEN a delivery was signed, so a delivery
+        // of an epoch the retired key owned still verifies under it. What stops a retired key
+        // from signing is the Host (it revokes the old key at rotation) and the tip guard of
+        // the founder's own client (`require_tip`), not this verification.
+        let by_retired = {
+            let wrap = wrap_for(4, "14", &e0).sign(&c0, FOUNDER, 0, &k0).unwrap();
+            let release = ReleaseStatement::sign(&wrap, [0; 32], &k0).unwrap();
+            Delivery { wrap, release }
+        };
+        assert!(verify_lineage(ROOM, KEYS, &pub_of(&k0), &cell_with(&[t_atom(&t0)], &[&d0[0], &by_retired]), None).is_ok());
+        // ... but not before the hand-over exists: without t0, k1 is nobody.
+        assert!(verify_lineage(ROOM, KEYS, &pub_of(&k0), &cell(&[&d0[0], &invite_old]), None).is_err());
+        // The tip guard the founder's own client applies.
+        let chain = verify_lineage(ROOM, KEYS, &pub_of(&k0), &view, None).unwrap().chain;
+        assert!(require_tip(&pub_of(&k1), &chain).is_ok());
+        assert!(require_tip(&pub_of(&k0), &chain).unwrap_err().contains("not the tip"));
+    }
+
+    #[test]
+    fn a_forged_one_sided_or_misplaced_transition_is_refused() {
+        let (k0, k1, k2) = (founder_key(), key_n(21), key_n(22));
+        let operator = key_n(8);
+        let e0 = RoomKey::generate(0).unwrap();
+        let (c0, d0) = epoch(&e0, [0; 32], &[(13, 3)], &k0);
+        let check = |t: &FounderTransition| verify_lineage(ROOM, KEYS, &pub_of(&k0), &cell_with(&[t_atom(t)], &[&d0[0]]), None);
+        assert!(check(&handed(0, &c0, &k0, &k1)).is_ok());
+        // Signed by the OPERATOR as the old key: the pin is on no link.
+        assert!(check(&handed(0, &c0, &operator, &k1)).is_err());
+        // The old key named, its signature forged by the operator.
+        let mut forged_old = handed(0, &c0, &k0, &k1);
+        forged_old.old_signature = operator.sign(&forged_old.statement()).to_bytes();
+        assert!(check(&forged_old).unwrap_err().contains("old key's signature"));
+        // Possession not proven: the new key never signed (a hostile or mistyped key cannot take the room).
+        let mut unproven = handed(0, &c0, &k0, &k1);
+        unproven.new_signature = k0.sign(&unproven.statement()).to_bytes();
+        assert!(check(&unproven).unwrap_err().contains("possession"));
+        // Another room's or keys cell's transition.
+        let mut elsewhere = handed(0, &c0, &k0, &k1);
+        elsewhere.room += 1;
+        assert!(check(&elsewhere).is_err());
+        // Names a certificate the cell does not show, or another one than it shows.
+        let mut ghost = handed(0, &c0, &k0, &k1);
+        ghost.after_epoch = 5;
+        assert!(check(&ghost).is_err());
+        let mut wrong_cert = handed(0, &c0, &k0, &k1);
+        wrong_cert.after_certificate[0] ^= 1;
+        let error = check(&wrong_cert).unwrap_err();
+        assert!(error.contains("signature") || error.contains("another certificate"), "{error}");
+        // A link without its predecessor, a repeated address, a fork, a return to a retired key.
+        assert!(check(&handed(1, &c0, &k0, &k1)).unwrap_err().contains("contiguous"));
+        let t0 = handed(0, &c0, &k0, &k1);
+        let repeated = verify_lineage(ROOM, KEYS, &pub_of(&k0), &cell_with(&[t_atom(&t0), t_atom(&t0)], &[&d0[0]]), None);
+        assert!(repeated.unwrap_err().contains("repeats an address"));
+        let fork = handed(1, &c0, &k0, &k2);
+        assert!(verify_lineage(ROOM, KEYS, &pub_of(&k0), &cell_with(&[t_atom(&t0), t_atom(&fork)], &[&d0[0]]), None)
+            .unwrap_err().contains("fork"));
+        let back = handed(1, &c0, &k1, &k0);
+        assert!(verify_lineage(ROOM, KEYS, &pub_of(&k0), &cell_with(&[t_atom(&t0), t_atom(&back)], &[&d0[0]]), None)
+            .unwrap_err().contains("retired"));
+        // Two hand-overs in a row chain: k0 -> k1 -> k2, both after epoch 0.
+        let t1 = handed(1, &c0, &k1, &k2);
+        let two = verify_lineage(ROOM, KEYS, &pub_of(&k0), &cell_with(&[t_atom(&t0), t_atom(&t1)], &[&d0[0]]), None).unwrap();
+        assert_eq!((two.chain.tip(), two.chain.transitions()), (&pub_of(&k2), 2));
+        // Wire shape: exact length, an address that matches its statement.
+        let payload = t0.payload();
+        assert_eq!(payload.len(), TRANSITION_BODY_LEN + 128);
+        assert_eq!(FounderTransition::from_atom(&t0.atom(), &payload).unwrap(), t0);
+        assert!(FounderTransition::from_atom(&t0.atom(), &payload[..payload.len() - 1]).is_err());
+        assert!(FounderTransition::from_atom(&transition_atom_id(1), &payload).is_err());
+        assert!(parse_wrap_atom_id(&t0.atom()).is_err(), "the transition region is not a wrap");
+        let highest_release: u128 = release_atom_id(MAX_EPOCH, u32::MAX, u64::MAX).parse().unwrap();
+        assert!(transition_atom_id(0).parse::<u128>().unwrap() > highest_release);
+        assert!(transition_atom_id(MAX_TRANSITIONS - 1).parse::<u128>().unwrap() < (1u128 << 127) + (1u128 << 126));
+    }
+
+    #[test]
+    fn a_client_that_saw_the_hand_over_refuses_a_cell_that_hides_it() {
+        let (k0, k1) = (founder_key(), key_n(21));
+        let e0 = RoomKey::generate(0).unwrap();
+        let (c0, d0) = epoch(&e0, [0; 32], &[(13, 3)], &k0);
+        let with = verify_lineage(ROOM, KEYS, &pub_of(&k0), &cell_with(&[t_atom(&handed(0, &c0, &k0, &k1))], &[&d0[0]]), None).unwrap();
+        let without = verify_lineage(ROOM, KEYS, &pub_of(&k0), &cell(&[&d0[0]]), None).unwrap();
+        let root = scratch("chain-head");
+        let head = with.head.clone().unwrap();
+        retain_epoch_head(&root, ROOM, KEYS, None, &head, &with.chain, &json!({})).unwrap();
+        let (retained, _) = read_epoch_head(&root, ROOM, KEYS).unwrap().unwrap();
+        assert_eq!(retained_transitions(Some(&retained)), 1);
+        assert_eq!(retained_founder_tip(Some(&retained)), Some(pub_of(&k1)));
+        assert!(check_chain_not_rolled_back(Some(&retained), &with.chain).is_ok());
+        let hidden = check_chain_not_rolled_back(Some(&retained), &without.chain).unwrap_err();
+        assert!(hidden.contains("hidden or rolled back"), "{hidden}");
+        // A same-length chain that ends at another key is a fork.
+        let k2 = key_n(22);
+        let forked = verify_lineage(ROOM, KEYS, &pub_of(&k0), &cell_with(&[t_atom(&handed(0, &c0, &k0, &k2))], &[&d0[0]]), None).unwrap();
+        assert!(check_chain_not_rolled_back(Some(&retained), &forked.chain).unwrap_err().contains("forks"));
+        // A client that never saw one accepts the first sight (no history: residual R2).
+        assert!(check_chain_not_rolled_back(None, &with.chain).is_ok());
+        // Re-retaining the same chain is a no-op; a client's own sync is the only writer.
+        retain_epoch_head(&root, ROOM, KEYS, Some(&retained), &head, &with.chain, &json!({})).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rotating_to_a_key_the_room_does_not_know_strands_only_the_founder_who_has_not_handed_over() {
+        let (k0, k1) = (founder_key(), key_n(21));
+        let e0 = RoomKey::generate(0).unwrap();
+        let (c0, d0) = epoch(&e0, [0; 32], &[(13, 3)], &k0);
+        let before = verify_lineage(ROOM, KEYS, &pub_of(&k0), &cell(&[&d0[0]]), None).unwrap().chain;
+        let after = verify_lineage(ROOM, KEYS, &pub_of(&k0), &cell_with(&[t_atom(&handed(0, &c0, &k0, &k1))], &[&d0[0]]), None).unwrap().chain;
+        // The founder still at k0, about to rotate to k1: stranded until the hand-over is published.
+        assert!(rotation_strands(&pub_of(&k0), &pub_of(&k1), &before));
+        // After the hand-over the tip is the next key: the rotation is safe.
+        assert!(!rotation_strands(&pub_of(&k0), &pub_of(&k1), &after));
+        // A member (not the tip) is never gated, whatever it rotates to.
+        assert!(!rotation_strands(&pub_of(&key_n(77)), &pub_of(&k1), &before));
+    }
+
+    #[test]
+    fn the_release_machinery_runs_under_the_new_founder_key_after_a_hand_over() {
+        let (k0, k1) = (founder_key(), key_n(21));
+        let root = scratch("after-handover");
+        let (mut host, e0, c0, records) = genesis_host(&[FOUNDER, 13]);
+        let t0 = handed(0, &c0, &k0, &k1);
+        host.entries.push(t_atom(&t0));
+        // k1 invites member 13 into epoch 0: its delivery and release are k1's; the readback
+        // (check_readback, anchored at the PINNED k0) verifies them through the chain.
+        let spec = {
+            let record = &records[&13];
+            let wrap = WrapAtom::new(ROOM, "13", &record.enc, 0, 0, &e0).unwrap().sign(&c0, FOUNDER, 1, &k1).unwrap();
+            let founder = Founder { signer: k1.clone(), subject: FOUNDER, key_epoch: 1, pin: pub_of(&k0) };
+            ReleaseSpec { room: ROOM.into(), keys: KEYS.into(), keys_ref: "lab-keys".into(), purpose: "invite",
+                head_before: Some(head_of(&c0)), key: None,
+                deliveries: vec![Delivery::new(wrap, record_digest(record).unwrap(), &founder).unwrap()] }
+        };
+        let released = run_release(&root, &mut host, &pub_of(&k0), FOUNDER, ROOM, "inv-2", b"pass", || Ok(spec)).unwrap();
+        assert_eq!(released.wraps[0].attestation.as_ref().unwrap().signer_public, pub_of(&k1));
+        let lineage = verify_lineage(ROOM, KEYS, &pub_of(&k0), &host.keys_view().unwrap(), None).unwrap();
+        assert!(lineage.wraps.iter().any(|w| w.member == 13) && lineage.chain.tip() == &pub_of(&k1));
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn a_pre_hybrid_v2_wrap_in_a_keys_cell_refuses_the_whole_cell_by_name() {
         // A v2 (X25519-only) wrap atom: the room predates the hybrid format. It is
@@ -3086,7 +3632,7 @@ mod tests {
         assert_eq!(payload.len(), 1532);
         assert_eq!(signed.payload_commitment().unwrap(), lineage_digest(&[&payload]));
         assert_eq!(release.commitment, signed.payload_commitment().unwrap());
-        release.check(ROOM, KEYS, &pinned()).unwrap();
+        release.check(ROOM, KEYS, &FounderChain::single(pinned())).unwrap();
         release.names(signed).unwrap();
         assert!(wrap_for(9, "9", &key).payload_commitment().is_err(), "an unsigned wrap has no commitment");
         // The commitment covers the key id, BOTH ciphertext components, the box,
@@ -3099,7 +3645,7 @@ mod tests {
         let mut wrong_address = signed.clone(); wrong_address.gen = 2;
         assert!(release.names(&wrong_address).is_err());
         let mut forged = release.clone(); forged.grant ^= 1;
-        assert!(forged.check(ROOM, KEYS, &pinned()).is_err());
+        assert!(forged.check(ROOM, KEYS, &FounderChain::single(pinned())).is_err());
     }
 
     /// A node that applies content creates to one keys cell and records every request.

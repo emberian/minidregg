@@ -1,9 +1,13 @@
 # Private cells (`PrivateEnvelope/v2`) and private rooms
 
+> **Devnet quality; privacy not audited.** The protocol below is implemented and unit-tested against a fake node and
+> pinned by independent known-answer vectors; no third party has reviewed it, and the devnet node is one validator
+> that is also the operator. Read the residuals in "The operator still sees" before relying on it.
+
 A private room's content is sealed by the member's client before it reaches the socket. The codec is
 `native/resource-client/src/private.rs`; the room-key protocol (wraps, rotation, the cache sync, sealing
 stream entries) is `native/resource-client/src/roomkey.rs`; the verbs are `room new NAME --private`,
-`room invite … ENC-PUB`, `room kick`, `room rotate`, `room keys`, `forget` (`mini shell`) and
+`room invite … DECLARATION`, `room kick`, `room rotate`, `room transition`, `room keys`, `forget` (`mini shell`) and
 `mini workspace --action room-key|propose --private ROOM|read --private ROOM|tail --private ROOM`. The key
 cache is `DIR/private/keys.cache` (`DREGG/PRIVATE-KEYCACHE/v2`, Argon2id + XChaCha20-Poly1305 under
 `MINI_KEYCACHE_PASSPHRASE`). There is no kernel change for content: a sealed doc line is an atom
@@ -27,11 +31,24 @@ ciphertext); fresh private document text goes through protected-document audienc
 **Room keys.** Each epoch's key is drawn fresh by the founder's client (never derived). The node holds wraps only,
 in the room's `keys` cell (law `deploy/shell/templates/room/private/law.keys.json`, theorems
 `Kernel/PrivateRoomKeys.lean`): a WRAP of epoch `e` for member `m` at generation `g` is atom `(e+1)·2^96 + g·2^64 + m`,
-payload = X25519 key ‖ wrap (ephemeral X25519 → cSHAKE KEK bound to room, epoch, member and both public keys →
-XChaCha20-Poly1305) ‖ keys grant ‖ the epoch certificate (192 bytes) ‖ a delivery signature (108 bytes). Every
+payload = recipient key id (32) ‖ wrap v3 (1192 bytes, below) ‖ keys grant ‖ the epoch certificate (192 bytes) ‖ a
+delivery signature (108 bytes). Every
 wrap is preceded, in an earlier turn, by its RELEASE record at `((2^30+1+e)<<96) | g<<64 | m`: a founder-signed
 commitment to the wrap's exact bytes, its certificate, the digest of the recipient's signed record and its grant.
-A friend's X25519 key is `cSHAKE256("DREGG.CLIENT.ENC/v1"; seed)`.
+A friend's encryption identity is a hybrid pair derived from the one signing seed: X25519 =
+`cSHAKE256("DREGG.CLIENT.ENC/v1"; seed)` and ML-KEM-768 from the FIPS 203 seed
+`cSHAKE256-XOF("DREGG.CLIENT.KEM-SEED/v1"; seed)`. A wrap (v3) is ephemeral X25519 ‖ ML-KEM-768 ciphertext ‖ nonce ‖ box,
+under one cSHAKE256 key over BOTH shared secrets and the full transcript (room, epoch, member, both ciphertexts, both
+public keys), so it is secure if either primitive survives: a recorded wrap is not harvest-now-decrypt-later exposed.
+Older record/wrap/keyring versions refuse by name (re-found the room). A member's signed key record (v3, 1333 bytes)
+carries both public keys and a custody byte: whether the member's own signing key is a file on a shared (hosted) box.
+
+**The founder's key can move without a re-pin.** `room transition ID ROOM NEXTFILE` (before `rotate-key`) writes a
+record signed by the old AND the new founder key into the keys cell; `rotate-key` refuses a founder until it has;
+every client verifies the chain from the key it pinned (design §7).
+
+**A private room is never mirrored to Discord.** `tail --json` states `private` on every line and the mirror
+refuses a feed that says private or says nothing (design §8).
 
 **Authority: pins, not what the node serves.** Every certificate, wrap and release must verify under the room's
 PINNED founder key (`DIR/private/room-founder-ROOM.json`), and every recipient record under the founder's pin for
@@ -60,8 +77,9 @@ signed it, and membership, because every capability's lineage is in the authorit
 reads everything its keys open, including epochs from before it was kicked, and anyone who kept a past epoch's key
 can still read that epoch. **An active operator can still** withhold: keep a member that has not yet seen a newer
 epoch on the old one (the pre-kick view), since a single server offers fork consistency at best; and hand a
-newcomer a substituted founder key if the fingerprint is never compared. **Not post-quantum**: a recorded wrap is
-X25519 only (hybrid ML-KEM-768 path: design §6).
+newcomer a substituted founder key if the fingerprint is never compared. **Post-quantum for recorded wraps**: a recorded wrap is
+hybrid X25519 + ML-KEM-768 (design §6); the signatures that authenticate founder, certificates and releases are Ed25519,
+so only the confidentiality of recorded wraps is post-quantum, not the authority of future ones.
 
 **Key loss (the text printed at `keygen`, `private::KEYGEN_NOTICE`):**
 

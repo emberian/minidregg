@@ -16,7 +16,7 @@ shell your key is a file on the box, and so is the room key you unwrap with it.
 | cell | law | file |
 |---|---|---|
 | the room `R` (declared) | `all []`: every member (a holder of `place` under R) bears cells in; capabilities decide reads | `law.room.json` |
-| `R-keys` (content, born in R by the founder) | regions by atom id. WRAPS and RELEASE records (high half of the id nonzero): only the founder writes, only by creating atoms -- no edit, no tombstone, no other action. Each subject's ENCRYPTION-KEY RECORD (atom id = its subject number): only that subject writes it, one create or edit. Reads, grants, law installs and revocations are left to capabilities. `@FOUNDER` is replaced by the founder's subject | `law.keys.json` |
+| `R-keys` (content, born in R by the founder) | regions by atom id. WRAPS, RELEASE records and founder-key TRANSITIONS (high half of the id nonzero): only the founder writes, only by creating atoms -- no edit, no tombstone, no other action. Each subject's ENCRYPTION-KEY RECORD (atom id = its subject number): only that subject writes it, one create or edit. Reads, grants, law installs and revocations are left to capabilities. `@FOUNDER` is replaced by the founder's subject | `law.keys.json` |
 
 `law.keys.json` is the law `Kernel/PrivateRoomKeys.lean` names `keysLaw`;
 `keysLaw_refuses_nonfounder_wrap`, `keysLaw_refuses_foreign_record`, `keysLaw_refuses_wrap_edit`,
@@ -26,12 +26,13 @@ certificates checked under its pinned founder key, and it never accepts a lineag
 
 A wrap of epoch `e` for member `m`, addressed to `m`'s key of generation `g` (the key epoch of
 the record it went to; 0 for the key given at invite): atom id `(e + 1)·2^96 + g·2^64 + m`, kind
-`inlineObject(schema of DREGG/PRIVATE-AUTH-WRAP/v2)`, payload = the member's X25519 public key, the wrap
-(104 bytes), the member's keys-grant capability id (8 bytes, 0 for the founder), the founder-signed
-epoch certificate (192) and delivery signature (108). Its RELEASE record (written one turn earlier,
+`inlineObject(schema of DREGG/PRIVATE-AUTH-WRAP/v3)`, payload = the id of the member's hybrid key, the wrap
+(1192 bytes: ephemeral X25519, ML-KEM-768 ciphertext, nonce, box), the member's keys-grant capability id
+(8 bytes, 0 for the founder), the founder-signed epoch certificate (192) and delivery signature (108). Its RELEASE record (written one turn earlier,
 commitments only): atom id `((2^30 + 1 + e) << 96) | g << 64 | m`, schema `DREGG/PRIVATE-ROOM-RELEASE/v1`.
-A member's record: atom id `m`, kind `inlineObject(schema of DREGG/PRIVATE-ENC-KEY/v2)`, payload = key
-epoch, X25519 key, room, keys cell, the member's signing key and its signature (148 bytes); the
+A member's record: atom id `m`, kind `inlineObject(schema of DREGG/PRIVATE-ENC-KEY/v3)`, payload = key
+epoch, X25519 key, ML-KEM-768 key, room, keys cell, a custody byte (is my signing key a file on a shared box),
+the member's signing key and its signature (1333 bytes); the
 founder accepts it only under the signing key it pinned from the member's declaration. A second wrap to the same key is the same atom and refused; a re-wrap to a
 member's newer key is a new atom.
 
@@ -53,6 +54,8 @@ secret in `KEY.enc-ring`, so past epochs stay open; the founder's next rotation 
     room kick k1 lab SUBJECT            revoke + rotate to a fresh key + rewrap for everyone else, all submitted.
                                         They keep the past; they get nothing new.
     room rotate r1 lab                  rotate and rewrap without a kick (finishes a kick that stopped half-way)
+    room transition t1 lab KEY.next     (the founder) hand the room to your NEXT signing key BEFORE `rotate-key KEY.next`;
+                                        members verify it with no re-pin; `rotate-key` refuses a founder until it is done
     room register g1 lab                (a member) publish my current encryption key as my record
     room rewrap w1 lab SUBJECT          (the founder) wrap SUBJECT's past epochs again to its record
                                         (its record must verify under SUBJECT's pinned key; a member whose
@@ -71,10 +74,12 @@ founder wraps for them.
 ## The hosted-librarian flag (B6)
 
 A hosted subject — a friend whose key lives in a session home, hosted Hermes, a bot — has its
-encryption key on the box too. `room invite` refuses it into a private room unless you add
-`--i-know`, and says why: the room becomes readable on the box, and a hosted Hermes sends what
-it reads to its model provider. The operator lists hosted subjects in `/etc/mini/hosted-subjects`
-(one decimal per line; `MINI_HOSTED_SUBJECTS` names another file). Default: no hosted librarian.
+encryption key on the box too. `room invite` and `chat invite` refuse it into a private room unless you add
+`--i-know`, and say why: the room becomes readable on the box, and a hosted Hermes sends what
+it reads to its model provider. Two independent signals refuse: the operator's list of hosted subjects in
+`/etc/mini/hosted-subjects` (one decimal per line; `MINI_HOSTED_SUBJECTS` names another file), and the
+invitee's own signed key record, whose custody byte `keygen --hosted` sets. Default: no hosted librarian.
+The Discord mirror never publishes a private room, whatever it is configured with.
 
 ## What `forget` is and is not
 

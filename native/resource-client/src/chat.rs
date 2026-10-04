@@ -71,7 +71,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "pin", usage: "pin N | unpin", operation: "append {\"type\":\"pin\"} with ref = entry #N, or {\"type\":\"unpin\"} (the founder's count)" },
     Verb { name: "unpin", usage: "unpin", operation: "append {\"type\":\"unpin\"} in the current room (the founder's counts)" },
     Verb { name: "react", usage: "react N EMOJI", operation: "append {\"type\":\"react\",\"emoji\":EMOJI} with ref = entry #N" },
-    Verb { name: "chat", usage: "chat new ROOM [--private] | chat adopt ROOM | chat invite ROOM SUBJECT [NAME] [--enc ENC-PUB|@FILE] [--i-know] | chat join ROOM INVITE-JSON|@FILE | chat enter ROOM | chat rooms | chat name SUBJECT NAME", operation: "the room template: a founder-written roster cell, one stream per member born by the founder; `help chat`" },
+    Verb { name: "chat", usage: "chat new ROOM [--private: devnet quality; privacy not audited] | chat adopt ROOM | chat invite ROOM SUBJECT [NAME] [--enc ENC-PUB|@FILE] [--i-know] | chat join ROOM INVITE-JSON|@FILE | chat enter ROOM | chat rooms | chat name SUBJECT NAME", operation: "the room template: a founder-written roster cell, one stream per member born by the founder; `help chat`" },
 ];
 
 pub(crate) const HELP: &str = "\
@@ -97,7 +97,11 @@ A room's founder:
   chat invite commons SUBJECT bob grant bob the room, birth bob's stream (you pay), add bob
                                   to the roster; prints the invitation to give bob
   chat new den --private          a private room (K-ROOM's keys cell; needs MINI_KEYCACHE_PASSPHRASE):
-                                  every say is sealed under the room key; the Host stores ciphertext
+                                  every say is sealed under the room key; the Host stores ciphertext.
+                                  DEVNET QUALITY; PRIVACY NOT AUDITED: the node still sees who is in the
+                                  room, who wrote when, and sizes; post-quantum hybrid (X25519 + ML-KEM-768)
+                                  wraps; a member kept from a kick can be held on the old key by a node
+                                  that withholds; compare the founder fingerprint out of band (FRIENDS.md)
   chat invite den SUBJECT bob --enc @FILE wrap the room key for bob too: @FILE holds bob's signed declaration
                                   (`room-key --op recipient-record`), or the 32-byte key id `whoami` prints
                                   when bob has already published his key record (`room register`)
@@ -2043,6 +2047,7 @@ fn chat_new(session: &Session, name: &str, private: bool) -> Result<(), Done> {
         Some(&crate::credit::room_declared_fields()))?;
     if private {
         println!("room {name}: created private (only you write its roster; every say is sealed under the room key)");
+        eprintln!("private rooms: {}. The node stores your words encrypted and, while it follows the protocol, cannot read them; it still sees who is in the room, who wrote when, and sizes. A hosted member puts the room key on the box. `help chat` has the rest.", crate::workspace::private::PRIVACY_DISCLAIMER);
     } else {
         println!("room {name}: created (only you write its roster)");
     }

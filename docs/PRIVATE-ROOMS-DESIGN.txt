@@ -41,8 +41,11 @@ consistency at best; needs out-of-band or multi-host gossip. (R2) First sight of
 with no history accepts any internally consistent ciphertext the operator chooses to show at the
 current revision (G5 holds for readers with history, and for the create->edit edge for all
 readers). (R3) Metadata: cell ids, writers, heights, epochs, members' public keys, sizes in 64-byte
-buckets. (R4) Founder signing-key rotation requires every member to re-pin (no cross-signed
-transition yet). (R5) Not PQ (sec 6).
+buckets. (R4) Founder signing-key rotation: CLOSED by sec 7 (a cross-signed transition chain; no re-pin).
+(R5) PQ: CLOSED for wraps and escrow by sec 6 (hybrid X25519 + ML-KEM-768); signatures stay
+Ed25519 (authentication is not harvestable). A member's SIGNING key rotation still needs the founder
+to re-pin it out of band (sec 7, last paragraph). (R6) Every member reads every wrap (sec 9, J-PRIV-1).
+Everything here: DEVNET QUALITY; PRIVACY NOT AUDITED.
 
 2. KEY LINEAGE (DECIDED)
  - FOUNDER PIN. The founder is the only writer of wraps (keys law, Kernel/PrivateRoomKeys.lean
@@ -128,15 +131,112 @@ it once (after that the client refuses to go back), so a member who has not sync
 be kept on the old key; compare the founder fingerprint directly; a hosted member puts the room key
 on the box; not post-quantum.
 
-6. PQ (READ + DECIDED)
-Today: wraps are ECIES = ephemeral X25519 + cSHAKE256 KEK bound to (frame, room, epoch, member,
-both public keys) + XChaCha20-Poly1305 (private.rs seal_to/kek_and_aad); member X25519 derived from
-the signing seed; signatures Ed25519. A recorded wrap is harvest-now-decrypt-later exposed.
-Minimal hybrid (X25519 + ML-KEM-768, as pq_mailbox.rs already uses via aws_lc_rs::kem::ML_KEM_768):
- (1) the 148-byte member record grows an ML-KEM-768 encapsulation key (1184 B) under the same member
-     signature (record v3); (2) wrap v3 = X25519 ephemeral ‖ ML-KEM ciphertext (1088 B) ‖ nonce ‖ ct,
-     KEK = cSHAKE256(KEK_LABEL, ss_x25519 ‖ ss_mlkem ‖ AAD incl. both ciphertexts and both public
-     keys) — secure if EITHER holds; (3) the decapsulation key derives from the seed like the X25519
-     key; (4) epoch certificate / delivery statements bind the new record digest. Signatures stay
-     Ed25519 (authentication is not harvestable). Not MLS: one founder, small rooms, explicit
-     rotation; MLS adds tree state without a threat this room has. Not done in this lane (DEFERRED).
+6. PQ: HYBRID WRAPS (READ + DECIDED; BUILT, lane s9-rooms 2026-10-04)
+Before: wraps were ECIES = ephemeral X25519 + cSHAKE256 KEK + XChaCha20-Poly1305 (v1): a recorded
+wrap was harvest-now-decrypt-later exposed. Now (wrap v3, record v3, escrow v2, ring v2):
+ - A member's encryption identity is a PAIR derived from the one signing seed: X25519 =
+   cSHAKE256("DREGG.CLIENT.ENC/v1"; seed); ML-KEM-768 = FIPS 203 seed d||z (64 bytes) =
+   cSHAKE256-XOF("DREGG.CLIENT.KEM-SEED/v1"; seed), expanded by AWS-LC's seeded key generation. A
+   seed alone recovers every key, as before. The 32-byte KEY ID (cSHAKE256 over both public halves)
+   names a pair in wraps, releases and selectors.
+ - The signed member record v3 (1333 bytes) = key epoch ‖ X25519 (32) ‖ ML-KEM-768 encapsulation key
+   (1184) ‖ room ‖ keys cell ‖ CUSTODY byte (sec 8) ‖ signing key ‖ signature; the signature covers
+   both keys. A wrap atom carries the recipient's key id (not the 1216-byte key): payload 1532 bytes.
+ - A wrap = ephemeral X25519 (32) ‖ ML-KEM-768 ciphertext (1088) ‖ nonce (24) ‖ box (48).
+   KEK = cSHAKE256(customization "DREGG.PRIVATE-WRAP.KEK/x25519+ml-kem-768/v3";
+        ss_x25519 ‖ ss_ml-kem ‖ transcript), every input length-prefixed, transcript = frame ‖ room ‖
+   epoch ‖ member ‖ ephemeral key ‖ KEM ciphertext ‖ recipient X25519 key ‖ recipient ML-KEM key. It is
+   also the AEAD's associated data. One hash of BOTH secrets and every public value: secure if EITHER
+   primitive survives; a ciphertext or key substituted in either half changes the KEK.
+ - The ML-KEM implementation is aws-lc-rs 1.18.1 (ML_KEM_768), already in the lock and used by
+   pq_mailbox.rs; no new crate. The one new edge is a direct dependency on aws-lc-sys 0.45.0 (the same
+   locked version) for AWS-LC's seeded key generation, which aws-lc-rs does not expose and aws-lc-sys's
+   portable bindings omit: it is declared extern against the version-stamped symbol, so a bump fails
+   to LINK, loudly. Both the combiner (independent cSHAKE256) and the seeded key (independent pure-Python
+   FIPS 203) are pinned by known-answer tests.
+ - NO DUAL PATH. v1/v2 records, v2 wraps (the whole keys cell refuses), v1 keyrings, v2 declarations
+   refuse by name; the old wrap code is deleted. Every private room is re-founded.
+ - Not MLS: one founder, small rooms, explicit rotation; MLS adds tree state without a threat this room has.
+ - Residual (said out loud): signatures are Ed25519, so a quantum adversary can forge FUTURE founder
+   authority (certificates, releases, transitions) once it can break the pinned key; it cannot read
+   recorded wraps. Sizes: a member record is 1.3 KB and a wrap 1.5 KB of JSON-hex ~3 KB, so a full
+   64-delivery release draft is ~240 KB against the 256 KiB retained-record bound (tested).
+
+7. FOUNDER-KEY TRANSITION (DECIDED + BUILT; Rust only, no Lean change: the keys law sees ids, not payloads)
+Problem: the founder is a pinned Ed25519 key. `rotate-key` replaces the signing key, so after a
+rotation the founder's client refused to sign (its key was not the pin) and no member would verify
+what the new key signed: the founder was locked out of its own room until every member re-pinned.
+ - WHO MAY ROTATE: only the current tip of the room's founder-key chain. A TRANSITION record is signed
+   by the OLD key (this key succeeds me, for epochs strictly above E) and by the NEW key (I hold the
+   secret: possession proof; an unheld or hostile key cannot be installed) over the same statement
+   "DREGG/PRIVATE-ROOM-FOUNDER-TRANSITION/v1" ‖ room ‖ keys cell ‖ index ‖ E ‖ identity of the epoch
+   certificate at E ‖ old key ‖ new key. Atom id ((2^31 + 1 + index) << 96): the founder-only region
+   of the keys law, above every release; payload 248 bytes.
+ - WHAT MEMBERS VERIFY: the transitions form ONE chain (index 0,1,2.., each old key = the previous
+   new key, E never decreasing, each naming the certificate the cell shows at E, no key reused). The
+   client's pin may be ANY key on the chain: an earlier key authenticates it forward, a LATER key
+   authenticates it backward (every link needs that later key's own signature, so an operator without
+   the secret cannot extend or fork it). The certificate of epoch e must be signed by the key in effect
+   at e (the number of transitions with E < e selects it); deliveries and releases of epoch e by that
+   key or any later one (a founder may invite into an old epoch after rotating). The client retains the
+   number of transitions it authenticated and the tip (epoch-head-ROOM.json): a served cell with fewer,
+   or the same number ending elsewhere, REFUSES (a hidden or forked hand-over).
+ - WHAT REFUSES: a transition not signed by both keys, naming another room/keys cell, a certificate
+   the cell does not show or another than it shows, a gap in indices, a fork, a return to a retired
+   key, a pin on no link; an epoch certificate signed by a retired key for an epoch it no longer owns;
+   and the founder's own client signing with anything but the tip (`require_tip`).
+ - ORDER (the two-phase rule, applied): `room-key --op transition --next-key KEY.next` is run BEFORE
+   the Host rotation, while the old key is still the Host-valid signer of the write: it BINDS the
+   record, reads the keys cell back and requires the chain to end at the new key. `rotate-key` then
+   runs `founder_rotation_gate` and REFUSES a founder whose next key is not yet the tip of every
+   private room it founded (fail closed: an unreadable room refuses too). Nothing secret is disclosed
+   by a transition, so there is no draft/dead-draft state; the write is idempotent under its proposal id.
+ - LIMIT (said plainly): the cell cannot say WHEN a delivery was signed, so a delivery of an epoch the
+   retired key owned still verifies under it. What stops a retired key signing is the Host (it revokes
+   the old key at rotation) and the tip guard of the founder's own client. A COMPROMISED founder key
+   is a compromised room (the attacker can hand it over too); the answer is a new room.
+ - NOT COVERED: a MEMBER's signing-key rotation. The founder pins each member's signing key from its
+   signed declaration; a rotated member re-declares out of band (`room-key --op pin-member --replace true`).
+   The same chain could be applied per member; not built (no threat beyond convenience).
+ - Verbs: `room transition ID ROOM NEXTFILE` (shell), `mini workspace --action room-key --op transition`.
+
+8. HOSTED CUSTODY AND THE BRIDGE (BUILT)
+ - The member's SIGNED key record carries a custody byte (1 = my signing key is a file on a shared box;
+   `keygen --hosted`, what the hosted shell runs, leaves KEY.hosted and `room register` / the signed
+   declaration read it). An inviter refuses a hosted-declared member without --i-know, whether or not the
+   operator listed it in /etc/mini/hosted-subjects (either signal refuses). The byte is under the
+   member's signature: it cannot be laundered to "own machine".
+ - ONE invite path: the shell's `room invite`, `chat invite` and `summon` run the same room-key
+   invocation (roomkey::invite_flags). `chat invite` runs `invite-check` (every refusal, nothing
+   written) BEFORE it publishes the grant and births the stream, so a refused invitee never holds a grant.
+ - The Discord mirror: a private room's opened text is structurally unable to reach the channel.
+   `tail --json` stamps a boolean `private` on the header and every entry; the mirror's `PublicFeed`
+   refuses a feed that says private, says nothing, or mixes the two; `outbound` accepts only the entries it
+   yields. No setting lifts it. (A mirror that is a hosted MEMBER of a private room is the invite rule above.)
+
+9. J-PRIV-1: PER-WRAP GRANTS (DESIGNED; kernel work AUTHORED, NOT COMPILED; see the lane STATUS)
+Today every member's room grant reads the whole keys cell, so a member sees every wrap (ciphertext it
+cannot open: with hybrid wraps nothing is gained from copying them, but a leaked read capability shows
+the whole membership/epoch structure and every ciphertext to a harvester). Wanted: a member reads only
+its own wraps, releases and record. What it needs, and where each part stands:
+ (a) KERNEL: a field of a content cell that names atoms by their low 64 bits. `CellField` has `body`
+     and `annotations` for content; add `atomsOf (low : Nat)` covered by `body`
+     (`NamedBy fields (atomsOf m) := atomsOf m in fields or body in fields`; `SetNarrows` by covering,
+     not subset), `contentField` maps an atoms-namespace address to `atomsOf (atomLow id)`, the capability
+     codec/Host JSON name it `atoms:M`. Low-half granularity (not per (epoch, member) atom) is deliberate:
+     a member's future wraps carry new epochs and generations but the same low half, so ONE grant covers
+     every epoch without a re-delegation per rotation. AUTHORED (uncompiled) in commit "lean(J-PRIV-1)".
+ (b) CLIENT, once (a) lands: `room invite` delegates observe with fields=[atoms:M] (+ the certificate
+     region, below) instead of the whole cell. The existing flat hiding root already shows a narrowed
+     reader sealed leaves for uncovered atoms (count and positions, not values); the per-address tree view
+     of K-FIELDS-OBSERVE would hide those too and is NOT on main.
+ (c) FOUND, and the real cost: `verify_lineage` needs the WHOLE cell: the epoch-certificate chain is
+     checked from genesis over all wraps' embedded certificates, and every release is cross-checked. A
+     narrowed member sees only its own wraps, so it cannot check the chain. Fix (client, with (b)): give
+     each epoch certificate and each founder-key transition its own atom in a region every member's
+     field covers (low half 0), and let a narrowed reader check (1) the certificate/transition chain
+     from those, and (2) only ITS OWN wraps against ITS OWN releases. This changes the wire (certificates
+     leave the wrap payload) and the order of the release state machine; it is Rust-side but pointless to
+     land before (a). Filed with the next concrete step in cv.
+Until (a)-(c) land: every member reads every wrap; the label says so (R6).
+

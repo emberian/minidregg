@@ -561,6 +561,11 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
         .to_owned();
     let ingress_path = attempt.join("ingress.bin");
     let after_path = attempt.join("after-next.key");
+    if state["phase"] == "preparing" {
+        // BEFORE the Host advances: a founder of a private room must already have handed
+        // the room to the key it is rotating to, or the new key signs what no member pins.
+        workspace::roomkey::founder_rotation_gate(&root, &named_public)?;
+    }
     if state["phase"] == "preparing" && named.is_none() {
         workspace::private::keyring_remember(&ws.key, &epoch.to_string())?;
         custody::sync_parent(&workspace::private::enc_ring_path(&ws.key))?;

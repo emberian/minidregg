@@ -287,7 +287,7 @@ founder> room new lab --private        # prints the room id, keys cell, founder 
 sam$ mini workspace --action room-key --op recipient-record --room-id ROOM --keys-cell KEYS \
        --key-epoch N --founder-key FOUNDER-KEY --dir WS    # pins the founder key, prints its fingerprint
                                        # and sam's signed declaration: give that to the founder
-mini> room invite i1 lab SAMS-SUBJECT @sam-declaration.json   # the grant, then the key released to sam
+mini> room invite i1 lab SAMS-SUBJECT @sam-declaration.json   # the grant, then the key released to sam (hosted? add --i-know)
 mini> room kick k1 lab SAMS-SUBJECT    # revoke + a fresh room key for everyone else:
                                        #   sam keeps what he could already read, gets nothing new
 mini> room keys lab                    # the key epochs you hold;  `forget lab` deletes yours
@@ -300,7 +300,7 @@ inviting a hosted subject (a friend who only uses this shell, or hosted Hermes) 
 puts the room key on the box. the node still sees who is in the room, who wrote when, and how big each
 line is (in 64-byte steps). a misbehaving node can hide a key change from you until you have seen it
 once (after that your client refuses to go back), so a member who has not synced since a kick can be
-kept on the old key. not post-quantum. details: `deploy/shell/templates/room/private/README.md`.
+kept on the old key. what a recorded wrap protects is post-quantum (the room key is wrapped to an X25519 + ML-KEM-768 pair; the signatures that vouch for the founder are not). if you are the founder and rotate your signing key, run `room transition` first (it hands the room to your next key; members need no re-pin) -- `rotate-key` refuses until you do. a private room is never mirrored to Discord. again: devnet quality; privacy not audited. details: `deploy/shell/templates/room/private/README.md`.
 
 what can you do here? ask before you try:
 ```

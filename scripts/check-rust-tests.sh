@@ -255,6 +255,19 @@ exact rc-roomkey-invite-path resource-client --bin mini -- \
   shell::tests::private_room_verbs_spell_the_room_key_operations \
   shell::tests::a_hosted_subject_joins_a_private_room_only_with_i_know \
   chat::tests::chat_verbs_take_the_rest_of_the_line_as_text
+# Founder-key transition (R4): the pinned founder key hands the room to its next key with
+# NO member re-pin; a retired key owns no later epoch; forged, one-sided, forked, gapped,
+# misplaced and hidden transitions refuse; rotate-key is gated until the hand-over is published.
+exact rc-roomkey-founder-transition resource-client --bin mini -- \
+  workspace::roomkey::tests::a_founder_key_transition_moves_the_room_to_the_next_key_without_a_re_pin \
+  workspace::roomkey::tests::a_retired_key_signs_nothing_after_the_hand_over_and_the_new_key_may_still_invite_into_old_epochs \
+  workspace::roomkey::tests::a_forged_one_sided_or_misplaced_transition_is_refused \
+  workspace::roomkey::tests::a_client_that_saw_the_hand_over_refuses_a_cell_that_hides_it \
+  workspace::roomkey::tests::rotating_to_a_key_the_room_does_not_know_strands_only_the_founder_who_has_not_handed_over \
+  workspace::roomkey::tests::the_release_machinery_runs_under_the_new_founder_key_after_a_hand_over
+# Every user-facing entry point for private rooms says "devnet quality; privacy not audited".
+exact rc-private-disclaimer  resource-client --bin mini -- \
+  shell::tests::every_private_room_entry_point_carries_the_disclaimer
 # The native client states privacy on the `tail --json` header and every entry (what the
 # Discord mirror's PublicFeed refuses to guess); the mirror's side is in discord-custody.
 exact rc-chat-json-privacy   resource-client --bin mini -- \

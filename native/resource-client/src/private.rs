@@ -67,6 +67,12 @@ const ARGON_PASSES: u32 = 3;
 const ARGON_LANES: u32 = 1;
 const MAX_CACHE: u64 = 4 * 1024 * 1024;
 
+/// The sentence every user-facing entry point for private rooms carries. A private room's
+/// protocol (hybrid wraps, founder-pinned lineage, two-phase release) is implemented and
+/// tested; it has not been audited, and the devnet is one validator that is also the
+/// operator. Say so wherever a friend meets the feature.
+pub(crate) const PRIVACY_DISCLAIMER: &str = "devnet quality; privacy not audited";
+
 pub(crate) const KEYCACHE_PASSPHRASE_ENV: &str = "MINI_KEYCACHE_PASSPHRASE";
 
 /// The key-cache passphrase, held by this process and never by its children.

@@ -6444,6 +6444,14 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                     args.finish()?;
                     roomkey::invite_preflight(&root, &workspace, &name, &member_subject, &enc, i_know)
                 }
+                // Hand the room to the founder's NEXT signing key (see roomkey::transition);
+                // `rotate-key` refuses a founder until this has been done.
+                "transition" => {
+                    let proposal_id = os_string(args.required("proposal-id")?, "proposal ID")?;
+                    let next_key = path(args.required("next-key")?);
+                    args.finish()?;
+                    roomkey::transition(&root, &workspace, &name, &next_key, &proposal_id)
+                }
                 "rotate" => {
                     let proposal_id = os_string(args.required("proposal-id")?, "proposal ID")?;
                     let drop = args
@@ -6505,7 +6513,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                     println!("{}", serde_json::to_string_pretty(&pinned).map_err(|e| e.to_string())?);
                     Ok(())
                 }
-                _ => Err("room-key --op is recipient-record, pin-founder, pin-member, found, sync, invite, invite-check, rotate, kick, register, rewrap, list, open or forget".into()),
+                _ => Err("room-key --op is recipient-record, pin-founder, pin-member, found, sync, invite, invite-check, transition, rotate, kick, register, rewrap, list, open or forget".into()),
             }
         }
         "submit" => {
