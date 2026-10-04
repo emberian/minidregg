@@ -5674,6 +5674,23 @@ def run (arguments : List String) : IO UInt32 := do
       let settings ← loadSettings configPath
       let config := settings.config
       match command, rest with
+      | "objective-constants", [] =>
+          IO.println Minidregg.Host.ObjectiveInvocationQuote.constants.compress
+          pure 0
+      | "author", ["objective-policy", input, output] =>
+          let bytes ← readBoundedBytes input 65536
+          let some text := String.fromUTF8? bytes.toByteArray
+            | throw (IO.userError "Objective policy JSON is not UTF-8")
+          let json ← IO.ofExcept (Lean.Json.parse text)
+          IO.FS.writeFile output (← IO.ofExcept (Minidregg.Host.ObjectiveInvocationQuote.authorPolicy json))
+          pure 0
+      | "author", ["objective-request", input, output] =>
+          let bytes ← readBoundedBytes input FnEvidenceCodec.maxHostFrameBytes
+          let some text := String.fromUTF8? bytes.toByteArray
+            | throw (IO.userError "Objective request JSON is not UTF-8")
+          let json ← IO.ofExcept (Lean.Json.parse text)
+          writeBytes output (← IO.ofExcept (Minidregg.Host.ObjectiveInvocationQuote.authorRequest json))
+          pure 0
       | "objective-quote", [requestPath, outputPath] =>
           let bytes ← readBoundedBytes requestPath FnEvidenceCodec.maxHostFrameBytes
           let walked ← IO.ofExcept (← NativeHostSession.startWalked config)

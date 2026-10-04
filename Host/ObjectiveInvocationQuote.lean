@@ -196,6 +196,97 @@ def derive (config : Config) (opened : Opened config) (request : Request) :
       | .error reason => return .error s!"final output gate refused: {repr reason}"
       | .ok admitted => return .ok ⟨claim,command,admitted.output.plan⟩
 
+
+/-! ## Request authoring from JSON (all numbers canonical decimal strings,
+digests/bytes canonical lowercase hex) -/
+
+private def field (json : Json) (name : String) : Except String Json :=
+  (json.getObjVal? name).mapError fun _ => s!"missing {name}"
+
+private def natOf (json : Json) (name : String) : Except String Nat := do
+  let text ← ((← field json name).getStr?).mapError fun _ => s!"{name} must be a decimal string"
+  let some value := text.toNat? | throw s!"{name} must be canonical decimal"
+  if toString value != text then throw s!"{name} must be canonical decimal"
+  pure value
+
+private def intOf (json : Json) (name : String) : Except String Int := do
+  let text ← ((← field json name).getStr?).mapError fun _ => s!"{name} must be a decimal string"
+  let some value := text.toInt? | throw s!"{name} must be canonical decimal"
+  if toString value != text then throw s!"{name} must be canonical decimal"
+  pure value
+
+private def bytesOf (json : Json) (name : String) : Except String (List UInt8) := do
+  let text ← ((← field json name).getStr?).mapError fun _ => s!"{name} must be hex"
+  let some bytes := ObjectiveBendPlanAdapter.unhex text.toList | throw s!"{name} must be lowercase hex"
+  pure bytes
+
+private def digestOf (json : Json) (name : String) : Except String Digest := do
+  let some digest := ObjectiveNativeScalarBinding.rootCodec.decode (← bytesOf json name)
+    | throw s!"{name} must be a canonical digest encoding"
+  pure digest
+
+private def kindOf (json : Json) : Except String TypedAuthorization.ResourceKind := do
+  match ← ((← field json "kind").getStr?).mapError (fun _ => "kind must be a string") with
+  | "object" => pure .object
+  | "account" => pure .account
+  | "program" => pure .program
+  | _ => throw "kind must be object, account or program"
+
+private def refOf (json : Json) : Except String ObjectiveInvocationClaim.InputRef := do
+  pure ⟨← kindOf json,← natOf json "resource",← digestOf json "root",⟨← natOf json "capability"⟩⟩
+
+private def arrayOf (json : Json) (name : String) : Except String (List Json) := do
+  let array ← ((← field json name).getArr?).mapError fun _ => s!"{name} must be an array"
+  pure array.toList
+
+private def capacityOf (json : Json) : Except String ObjectiveInvocationClaim.Capacity := do
+  pure ⟨← natOf json "typeFuel",← natOf json "sourceTicks",← natOf json "heap",← natOf json "stack",
+    ← natOf json "outputNodes",← natOf json "outputBytes",← natOf json "inputBytes",← natOf json "scalarBits",
+    ← natOf json "memoryTouches",← natOf json "proofWork",← natOf json "feeDebit",← natOf json "turnBytes",
+    ← natOf json "witnessBytes",← natOf json "storageBytes",← natOf json "sideEffectCount",
+    ← natOf json "networkBytes",← natOf json "leaseByteBlocks",← natOf json "incidences"⟩
+
+private def roleOf (json : Json) : Except String ObjectiveBendQuoteRequest.Role := do
+  let observe := (json.getObjVal? "observeCapability").toOption
+  let observeCapability ← match observe with
+    | none => pure none
+    | some _ => pure (some ⟨← natOf json "observeCapability"⟩)
+  pure { kind := ← kindOf json, resource := ← natOf json "resource", capability := ⟨← natOf json "capability"⟩,
+    schemaVersion := ← natOf json "schemaVersion", root := ← digestOf json "root",
+    observeCapability := observeCapability }
+
+private def fundingOf (json : Json) : Except String ObjectiveBendQuoteRequest.Funding := do
+  pure ⟨← natOf json "payer",⟨← natOf json "capability"⟩,← natOf json "asset",← natOf json "credits",
+    ← intOf json "expectedPayerBalance",← digestOf json "expectedBookRoot"⟩
+
+/-- The retained request, authored from JSON. `arguments` is the exact typed
+argument packet text; its UTF-8 bytes are the claim's arguments. -/
+def requestOfJson (json : Json) : Except String Request := do
+  if (← field json "schema") != Json.str "dregg.objective-bend.request.v1" then
+    throw "schema must be dregg.objective-bend.request.v1"
+  let source ← field json "source"
+  let arguments ← ((← field json "arguments").getStr?).mapError fun _ => "arguments must be the argument packet text"
+  let funding := (json.getObjVal? "funding").toOption
+  let request : Request := {
+    subject := ⟨← natOf json "subject"⟩, nonce := ← natOf json "nonce",
+    source := ⟨← refOf (← field source "ref"),← digestOf source "atom",← bytesOf source "expectedArtifact",
+      ← bytesOf source "expectedPackage",← bytesOf source "envelope"⟩,
+    arguments := arguments.toUTF8.toList,
+    inputRefs := ← (← arrayOf json "inputRefs").mapM refOf,
+    inputEnvelopes := ← (← arrayOf json "inputEnvelopes").mapM fun value => do
+      let text ← (value.getStr?).mapError fun _ => "inputEnvelopes must be hex strings"
+      let some bytes := ObjectiveBendPlanAdapter.unhex text.toList | throw "inputEnvelopes must be lowercase hex"
+      pure bytes,
+    capacity := ← capacityOf (← field json "capacity"),
+    inputCodec := ← digestOf json "inputCodec", outputCodec := ← digestOf json "outputCodec",
+    roles := ← (← arrayOf json "roles").mapM roleOf,
+    resultResource := ← natOf json "resultResource",
+    funding := ← match funding with
+      | none => pure none
+      | some value => some <$> fundingOf value }
+  if !ObjectiveBendQuoteRequest.wellFormed request then throw "request is not well formed"
+  pure request
+
 def toJson (derived : Derived) : Json :=
   Json.mkObj [
     ("schema","dregg.objective-bend.quote.v1"),
@@ -208,6 +299,45 @@ def toJson (derived : Derived) : Json :=
 
 /-- Host operation: decode a retained request, derive on a freshly walked
 image, write the quote. -/
+
+private def hexDigest (digest : Digest) : Json :=
+  .str (ObjectiveBendNativeInput.hex (digestStream.encode digest))
+
+/-- Public constants an operator and a client need to author a policy and a
+request: the edition, the evaluator, and every registered codec identity. -/
+def constants : Json := Json.mkObj [
+  ("schema","dregg.objective-bend.native-constants.v1"),
+  ("semanticsId",hexDigest Admission.semanticsId),
+  ("evaluatorId",hexDigest Admission.evaluatorId),
+  ("inputCodec",hexDigest ObjectiveBendNativeInput.codecId),
+  ("scalarCodec",hexDigest ObjectiveBendPlanAdapter.codecId),
+  ("resultCodec",hexDigest ObjectiveBendResultAdapter.codecId),
+  ("combinedCodec",hexDigest Admission.combinedCodec),
+  ("genericCodec",hexDigest ObjectiveBendGenericResult.codecId),
+  ("resultStorageSchema",hexDigest ObjectiveBendResultAdapter.storageSchema)]
+
+/-- Operator policy authoring: JSON → canonical policy hex for the
+`objectiveInvocation` pin. The edition is always this build's semanticsId. -/
+def authorPolicy (json : Json) : Except String String := do
+  if (← field json "schema") != Json.str "dregg.objective-bend.policy.v1" then
+    throw "schema must be dregg.objective-bend.policy.v1"
+  let tooling ← field json "tooling"
+  let text (value : Json) (name : String) : Except String String := do
+    ((← field value name).getStr?).mapError fun _ => s!"{name} must be a string"
+  let outputs ← (← arrayOf json "outputs").mapM fun value => do
+    let hex ← (value.getStr?).mapError fun _ => "outputs must be hex digests"
+    let some bytes := ObjectiveBendPlanAdapter.unhex hex.toList | throw "outputs must be lowercase hex"
+    let some digest := ObjectiveNativeScalarBinding.rootCodec.decode bytes | throw "outputs must be digests"
+    pure digest
+  let policy : Admission.Policy := ⟨Admission.semanticsId,← natOf json "sourceBytes",
+    ← capacityOf (← field json "maximum"),outputs,← digestOf json "clearAudience",
+    ⟨← text tooling "parserSha256",← text tooling "frontendSha256",← text tooling "elaboratorSha256"⟩⟩
+  pure (ObjectiveBendNativeInput.hex (Admission.encodePolicy policy))
+
+/-- Host operation `author objective-request`: JSON → canonical request bytes. -/
+def authorRequest (json : Json) : Except String (List UInt8) :=
+  (ObjectiveBendQuoteRequest.codec.encode ·) <$> requestOfJson json
+
 def quoteBytes (config : Config) (opened : Opened config) (bytes : List UInt8) : IO (Except String Json) := do
   let some request := ObjectiveBendQuoteRequest.decode bytes | return .error "noncanonical Objective request"
   match ← derive config opened request with
