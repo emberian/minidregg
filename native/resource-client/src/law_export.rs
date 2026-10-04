@@ -161,16 +161,16 @@ mod tests {
         let dir = root.join("proposals/change");
         make_private_dir(&dir).unwrap();
         let request = json!({"action":"install-export","component":null});
-        private_file(
+        create_private(
             &dir.join("request.json"),
             &serde_json::to_vec(&request).unwrap(),
         )
         .unwrap();
         let intent = b"source with original expected revision/digest";
-        private_file(&dir.join("intent.json"), intent).unwrap();
-        private_file(&dir.join("intent.bin"), b"canonical").unwrap();
+        create_private(&dir.join("intent.json"), intent).unwrap();
+        create_private(&dir.join("intent.bin"), b"canonical").unwrap();
         let summary = json!({"intentSha256":format!("{:x}",Sha256::digest(intent))});
-        private_file(
+        create_private(
             &dir.join("proposal.json"),
             &serde_json::to_vec(&summary).unwrap(),
         )

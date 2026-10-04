@@ -368,14 +368,10 @@ fn save_payment(common: &Common, record: &Value, initial: bool) -> Result<()> {
     if initial {
         retain_json(&common.directory.join("join.json"), record)?;
     }
-    let staged = common
-        .directory
-        .join(format!("latest-{}.json", workspace::random_nonce()?));
-    retain_json(&staged, record)?;
-    fs::rename(staged, common.directory.join("latest-payment.json")).map_err(|e| e.to_string())?;
-    fs::File::open(&common.directory)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| e.to_string())
+    crate::fsio::replace_private(
+        &common.directory.join("latest-payment.json"),
+        &serde_json::to_vec_pretty(record).map_err(|e| e.to_string())?,
+    )
 }
 fn print_quote(pin: &Pin, quote: &ValidatedQuote) -> Result<()> {
     let split = quote.split();

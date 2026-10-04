@@ -196,12 +196,12 @@ pub(crate) fn ensure_custody(root: &std::path::Path) -> Result<(std::path::PathB
     if !key.exists() {
         let mut seed=Zeroizing::new([0u8;32]);
         SystemRandom::new().fill(&mut *seed).map_err(|_| "private document randomness unavailable")?;
-        super::private_file(&key,&*seed)?;
+        crate::create_private(&key,&*seed)?;
     }
     let storage=crate::read_secret(&key)?.to_bytes();
     drop(Store::initialize(&state,storage)?);
     if !metadata.exists() {
-        super::private_file(&metadata,&serde_json::to_vec_pretty(&json!({
+        crate::create_private(&metadata,&serde_json::to_vec_pretty(&json!({
             "type":"mini-protected-document-custody-v1","version":"1",
             "required":["keys.json","storage.key"],"includeTree":true,
             "scope":"participant-workspace","restore":"quiesce the owning writer and restore the entire WORKSPACE together",
@@ -257,7 +257,7 @@ pub(crate) fn observe(root:&std::path::Path, workspace:&Value, reference:&Value,
     let (_,_,catalog_signed)=super::signed_view(root,workspace,&catalog,"resource")?;
     let roster=members::active_home(&root.join("protected-documents").join(target))?.join("roster.bin");
     let state=dir.join("current-audience-state.json");
-    super::private_file(&state,&serde_json::to_vec(&source["audienceState"]).map_err(|e|e.to_string())?)?;
+    crate::create_private(&state,&serde_json::to_vec(&source["audienceState"]).map_err(|e|e.to_string())?)?;
     let checked_path=dir.join("checked-document-roster.json");
     crate::host_files(&host,&config,&[Path::new("object-audience-roster"),signed,&catalog_signed,
         &state,&roster,&checked_path])?;
@@ -336,29 +336,13 @@ pub(crate) fn device(root:&std::path::Path) -> Result<Value> {
 
 fn rewrite_reference(root:&std::path::Path,name:&str,value:&Value)->Result<()> {
     super::validate_ref_name(name)?;
-    let refs=root.join("refs");
-    let temporary=refs.join(format!(".{}.protected-{}",super::ref_file(name),super::random_nonce()?));
-    super::private_file(&temporary,&serde_json::to_vec_pretty(value).map_err(|e|e.to_string())?)?;
-    std::fs::rename(&temporary,refs.join(format!("{}.json",super::ref_file(name)))).map_err(|e|e.to_string())?;
-    std::fs::File::open(&refs).and_then(|f|f.sync_all()).map_err(|e|e.to_string())
+    crate::fsio::replace_private(&root.join("refs").join(format!("{}.json",super::ref_file(name))),&serde_json::to_vec_pretty(value).map_err(|e|e.to_string())?)
 }
 
 /// Publish an immutable complete record before performing any operation it names.
 /// Interrupted temporary files are never interpreted as committed enrollment state.
 fn retain_record(path:&std::path::Path,bytes:&[u8])->Result<()> {
-    use std::fs;
-    if path.exists() { return write_same(path,bytes); }
-    let parent=path.parent().ok_or("retained record lacks a parent")?;
-    let temporary=parent.join(format!(".enrollment-{}",super::random_nonce()?));
-    super::private_file(&temporary,bytes)?;
-    match fs::hard_link(&temporary,path) {
-        Ok(()) => {},
-        Err(error) if error.kind()==std::io::ErrorKind::AlreadyExists => write_same(path,bytes)?,
-        Err(error) => return Err(error.to_string()),
-    }
-    fs::File::open(parent).and_then(|f|f.sync_all()).map_err(|e|e.to_string())?;
-    fs::remove_file(&temporary).map_err(|e|e.to_string())?;
-    Ok(())
+    write_same(path,bytes)
 }
 fn retain_json(path:&std::path::Path,value:&Value)->Result<()> {
     retain_record(path,&serde_json::to_vec_pretty(value).map_err(|e|e.to_string())?)
@@ -683,7 +667,7 @@ fn finish_enrollment(root:&std::path::Path,workspace:&Value,name:&str,home:&std:
         let request=json!({"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{
             "name":name,"payload":{"type":"content","actions":[{
                 "type":"createContainer","element":super::random_nonce()?}]}}]});
-        super::private_file(&request_path,&serde_json::to_vec(&request).map_err(|e|e.to_string())?)?;
+        crate::create_private(&request_path,&serde_json::to_vec(&request).map_err(|e|e.to_string())?)?;
     }
     let legacy_attempt=root.join("attempts").join(&ready_id);
     if legacy_attempt.join("call.bin").exists() {crate::retry(&legacy_attempt,"submit",true)?;} else {
@@ -700,7 +684,7 @@ fn finish_enrollment(root:&std::path::Path,workspace:&Value,name:&str,home:&std:
         if std::fs::read(&public_manifest).map_err(|e|e.to_string())?!=manifest {
             return Err("retained published manifest differs".into());
         }
-    } else {super::private_file(&public_manifest,&manifest)?;}
+    } else {crate::create_private(&public_manifest,&manifest)?;}
     if converting {
         println!("{name}: current text protected; carried formatting received. Earlier public plaintext/history remains readable under its existing law. Original marks, annotations and links retain their history; future text edits use the admitted epoch");
     } else {println!("{name}: protected audience enrolled; document edits use its admitted object epoch");}
@@ -736,7 +720,7 @@ pub(crate) fn export_epoch(root:&std::path::Path,workspace:&Value,name:&str,outp
         "epoch":audience.anchor.epoch.to_string(),"manifest":crate::hex(&manifest),
         "operation":meta["operation"],"writer":writer,
         "rosterBytes":crate::hex(&std::fs::read(publication.join("roster.bin")).map_err(|e|e.to_string())?)});
-    super::private_file(output,&serde_json::to_vec_pretty(&bundle).map_err(|e|e.to_string())?)
+    crate::create_private(output,&serde_json::to_vec_pretty(&bundle).map_err(|e|e.to_string())?)
 }
 
 /// Import a source-committed package using this participant's durable device.
@@ -756,9 +740,9 @@ pub(crate) fn import_epoch(root:&std::path::Path,workspace:&Value,name:&str,cata
     let attempt=signed.parent().ok_or("missing import observation directory")?;
     let roster_bytes=crate::decode_hex(text(&bundle,"rosterBytes")?)?;
     let roster=attempt.join("import-roster.bin");
-    super::private_file(&roster,&roster_bytes)?;
+    crate::create_private(&roster,&roster_bytes)?;
     let state_path=attempt.join("import-audience.json");
-    super::private_file(&state_path,&serde_json::to_vec(&source["audienceState"]).map_err(|e|e.to_string())?)?;
+    crate::create_private(&state_path,&serde_json::to_vec(&source["audienceState"]).map_err(|e|e.to_string())?)?;
     let checked_path=attempt.join("import-roster-checked.json");
     crate::host_files(&super::workspace_host(workspace)?,&super::member_path(workspace,"config")?,
         &[std::path::Path::new("object-audience-roster"),&signed,&catalog_signed,&state_path,&roster,&checked_path])?;
@@ -769,7 +753,7 @@ pub(crate) fn import_epoch(root:&std::path::Path,workspace:&Value,name:&str,cata
     let request_path=attempt.join("receive-epoch.json");
     let request=json!({"generation":public["generation"],"manifest":bundle["manifest"],
         "operation":bundle["operation"],"writer":bundle["writer"]});
-    super::private_file(&request_path,&serde_json::to_vec(&request).map_err(|e|e.to_string())?)?;
+    crate::create_private(&request_path,&serde_json::to_vec(&request).map_err(|e|e.to_string())?)?;
     crate::object_cli::receive_epoch(&source,&request_path,&state,&storage)?;
     let home=root.join("protected-documents").join(&target);
     if !home.exists() {super::make_private_dir(&home)?;} else {super::private_dir(&home)?;}
@@ -777,20 +761,14 @@ pub(crate) fn import_epoch(root:&std::path::Path,workspace:&Value,name:&str,cata
     if !epoch_home.exists() {super::make_private_dir(&epoch_home)?;} else {super::private_dir(&epoch_home)?;}
     write_same(&epoch_home.join("roster.bin"),&roster_bytes)?;
     write_same(&epoch_home.join("received-epoch.json"),&serde_json::to_vec_pretty(&bundle).map_err(|e|e.to_string())?)?;
-    let next_roster=home.join(format!(".roster-{}",super::random_nonce()?));
-    super::private_file(&next_roster,&roster_bytes)?;
-    std::fs::rename(&next_roster,home.join("roster.bin")).map_err(|e|e.to_string())?;
-    std::fs::File::open(&home).and_then(|f|f.sync_all()).map_err(|e|e.to_string())?;
+    crate::fsio::replace_private(&home.join("roster.bin"),&roster_bytes)?;
     reference["protectedDocument"]=json!({"version":"1","catalog":catalog});
     rewrite_reference(root,name,&reference)?;
     println!("{name}: admitted epoch retained in this participant's document custody");
     Ok(())
 }
 fn write_same(path:&std::path::Path,bytes:&[u8])->Result<()> {
-    if path.exists() {
-        if std::fs::read(path).map_err(|e|e.to_string())?!=bytes {return Err(format!("{} already records different epoch material",path.display()));}
-        Ok(())
-    } else {super::private_file(path,bytes)}
+    crate::fsio::retain_exact(path,bytes,||format!("{} already records different epoch material",path.display())).map(|_|())
 }
 
 fn fixed<const N:usize>(bytes:&[u8]) -> Result<[u8;N]> {
@@ -1135,7 +1113,7 @@ mod tests {
         let path=stage_path(&root,"72").unwrap();
         let bytes=serde_json::to_vec_pretty(&stage).unwrap();
         // A crash before atomic publication leaves only an uninterpreted orphan.
-        super::super::private_file(&root.join("protected-documents/.enrollment-interrupted"),b"{partial").unwrap();
+        crate::create_private(&root.join("protected-documents/.enrollment-interrupted"),b"{partial").unwrap();
         assert!(!path.exists());
         retain_json(&path,&stage).unwrap();
         assert!(!root.join("protected-documents/72").exists());
@@ -1167,16 +1145,16 @@ mod tests {
         let (first,emitted)=retained_attempt(&root,&operation).unwrap();
         assert!(!emitted);
         super::super::make_private_dir(&first).unwrap();
-        super::super::private_file(&first.join("config.json"),b"retained preparation").unwrap();
+        crate::create_private(&first.join("config.json"),b"retained preparation").unwrap();
         // Crash during preparation cannot have emitted without call.bin.
         let (next,emitted)=retained_attempt(&root,&operation).unwrap();
         assert!(!emitted);assert_ne!(first,next);
         super::super::make_private_dir(&next).unwrap();
-        super::super::private_file(&next.join("call.bin"),b"exact signed catalog call").unwrap();
+        crate::create_private(&next.join("call.bin"),b"exact signed catalog call").unwrap();
         // Lost response after emission must select those exact call bytes,
         // regardless of whether an outcome file was ever written.
         assert_eq!(retained_attempt(&root,&operation).unwrap(),(next.clone(),true));
-        super::super::private_file(&next.join("outcome.json"),br#"{"type":"confirmed"}"#).unwrap();
+        crate::create_private(&next.join("outcome.json"),br#"{"type":"confirmed"}"#).unwrap();
         assert_eq!(retained_attempt(&root,&operation).unwrap(),(next.clone(),true));
         assert_eq!(std::fs::read(next.join("call.bin")).unwrap(),b"exact signed catalog call");
         assert_eq!(std::fs::read(&intent).unwrap(),bytes);
@@ -1223,7 +1201,7 @@ mod tests {
             let mut value=json!({"type":"minidregg-participant-reference-v1","name":name,"kind":"object",
                 "target":target,"observeCapability":"8","operationCapability":"9","controlCapability":null});
             if let Some(catalog)=hint {value["protectedDocument"]=json!({"version":"1","catalog":catalog});}
-            super::super::private_file(&root.join("refs").join(format!("{name}.json")),&serde_json::to_vec(&value).unwrap()).unwrap();
+            crate::create_private(&root.join("refs").join(format!("{name}.json")),&serde_json::to_vec(&value).unwrap()).unwrap();
         };
         put("catalog","99",None);put("local-paper","72",Some("catalog"));
         let selected=json!({"type":"minidregg-participant-reference-v1","name":"commons/paper","kind":"object",

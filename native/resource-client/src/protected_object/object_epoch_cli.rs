@@ -82,22 +82,7 @@ fn inspect_policy(host: &Path, config: &Path, source: &Value, dir: &Path) -> Res
     crate::inspect(host, config, "view-policy", &binary, &output)
 }
 fn publish_same(path:&Path,bytes:&[u8])->Result<()> {
-    if path.exists() {
-        if fs::read(path).map_err(|e|e.to_string())?!=bytes {return Err(format!("{} differs from staged phase",path.display()));}
-        return Ok(());
-    }
-    let parent=path.parent().ok_or("phase artifact lacks parent")?;
-    let temporary=parent.join(format!(".phase-{}",random_label()?));
-    crate::workspace::private_file(&temporary,bytes)?;
-    match fs::hard_link(&temporary,path) {
-        Ok(())=>{},
-        Err(error) if error.kind()==std::io::ErrorKind::AlreadyExists=>{
-            if fs::read(path).map_err(|e|e.to_string())?!=bytes {return Err("concurrent phase artifact differs".into());}
-        },
-        Err(error)=>return Err(error.to_string()),
-    }
-    fs::File::open(parent).and_then(|f|f.sync_all()).map_err(|e|e.to_string())?;
-    fs::remove_file(temporary).map_err(|e|e.to_string())
+    crate::fsio::retain_exact(path,bytes,||format!("{} differs from staged phase",path.display())).map(|_|())
 }
 fn random_label()->Result<String> {
     use ring::rand::{SecureRandom,SystemRandom};

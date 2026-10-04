@@ -54,7 +54,7 @@ fn direct(
     let (attempt, _) = new_attempt(root)?;
     make_private_dir(&attempt)?;
     let input = attempt.join("search-document-in.json");
-    private_file(
+    create_private(
         &input,
         &serde_json::to_vec(&json!({"host":hex(&bin),"sources":[]})).map_err(|e| e.to_string())?,
     )?;

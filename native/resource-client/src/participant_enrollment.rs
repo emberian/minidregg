@@ -152,16 +152,9 @@ pub(crate) fn save_json(path: &Path, value: &Value) -> Result<()> {
 }
 
 pub(crate) fn retain_exact(path: &Path, bytes: &[u8]) -> Result<()> {
-    if path.exists() {
-        if bounded(path, LIMIT)? != bytes {
-            return Err(format!(
-                "retained enrollment source changed: {}",
-                path.display()
-            ));
-        }
-        return Ok(());
-    }
-    create_private(path, bytes)?;
+    crate::fsio::retain_exact(path, bytes, || {
+        format!("retained enrollment source changed: {}", path.display())
+    })?;
     sync_directory_ancestors(path.parent().ok_or("enrollment file lacks parent")?)
 }
 

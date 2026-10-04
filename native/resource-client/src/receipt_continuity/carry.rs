@@ -378,7 +378,6 @@ pub(crate) fn migrate(
 }
 
 fn copy_executable(source: &Path, target: &Path) -> Result<String> {
-    use std::os::unix::fs::PermissionsExt;
     if !source.is_absolute() {
         return Err(fail(
             "capsule executables must have explicit absolute paths",
@@ -393,18 +392,9 @@ fn copy_executable(source: &Path, target: &Path) -> Result<String> {
     if !input.metadata().map_err(fail)?.is_file() {
         return Err(fail("capsule executable is not regular"));
     }
-    let mut output = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o700)
-        .custom_flags(NOFOLLOW)
-        .open(target)
+    let length = input.metadata().ok().and_then(|m| usize::try_from(m.len()).ok());
+    mini_sdk::durable::create_new_from(target, &mut input, length, Perm::PrivateExecutable, &mut |_| Ok(()))
         .map_err(fail)?;
-    std::io::copy(&mut input, &mut output).map_err(fail)?;
-    output
-        .set_permissions(fs::Permissions::from_mode(0o700))
-        .map_err(fail)?;
-    output.sync_all().map_err(fail)?;
     if crate::host_image_sha256(target)? != expected
         || crate::host_image_sha256(source)? != expected
     {

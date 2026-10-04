@@ -20,24 +20,9 @@ pub(super) fn read(path: &Path) -> Result<Value> {
 pub(super) fn bytes(path: &Path, limit: usize) -> Result<Vec<u8>> {
     agent_reserve::private_bytes(path, limit)
 }
-pub(super) fn sync_parent(path: &Path) -> Result<()> {
-    let parent = path.parent().ok_or("rotation custody path lacks parent")?;
-    File::open(parent)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| e.to_string())
-}
+pub(super) use crate::fsio::sync_parent;
 pub(super) fn immutable(path: &Path, value: &[u8]) -> Result<()> {
-    if path.exists() {
-        if bytes(path, value.len().max(1))? != value {
-            return Err("retained rotation bytes changed".into());
-        }
-        File::open(path)
-            .and_then(|f| f.sync_all())
-            .map_err(|e| e.to_string())?;
-        sync_parent(path)
-    } else {
-        workspace::private_file(path, value)
-    }
+    crate::fsio::retain_exact(path, value, || "retained rotation bytes changed".to_owned()).map(|_| ())
 }
 pub(super) fn stable_id(id: &str) -> Result<()> {
     if id.is_empty()

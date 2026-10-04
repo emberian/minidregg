@@ -27,9 +27,8 @@ use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
-use std::os::unix::fs::OpenOptionsExt;
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::Path;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -575,21 +574,7 @@ pub(crate) fn keyring_remember(key: &Path, key_epoch: &str) -> Result<()> {
     let bytes = Zeroizing::new(
         serde_json::to_vec_pretty(&json!({"type":ENC_RING_TYPE,"keys":keys})).map_err(|e| e.to_string())?,
     );
-    let path = enc_ring_path(key);
-    let mut staged = path.as_os_str().to_owned();
-    staged.push(".staged");
-    let staged = std::path::PathBuf::from(staged);
-    let _ = fs::remove_file(&staged);
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&staged)
-        .map_err(|error| format!("cannot create {}: {error}", staged.display()))?;
-    file.write_all(&bytes)
-        .and_then(|()| file.sync_all())
-        .map_err(|error| format!("cannot write {}: {error}", staged.display()))?;
-    fs::rename(&staged, &path).map_err(|error| format!("cannot install {}: {error}", path.display()))
+    crate::fsio::replace_private(&enc_ring_path(key), &bytes)
 }
 
 /// Every encryption identity this key file can open with: the current seed's
@@ -756,19 +741,7 @@ pub(crate) fn save_cache(path: &Path, passphrase: &[u8], keys: &Keyring) -> Resu
             },
         )
         .map_err(|_| "key cache encryption failed")?;
-    let temporary = path.with_extension("cache.tmp");
-    let _ = fs::remove_file(&temporary);
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&temporary)
-        .map_err(|error| format!("cannot create {}: {error}", temporary.display()))?;
-    file.write_all(&[header, ct].concat())
-        .and_then(|()| file.sync_all())
-        .map_err(|error| format!("cannot write {}: {error}", temporary.display()))?;
-    fs::rename(&temporary, path)
-        .map_err(|error| format!("cannot replace {}: {error}", path.display()))
+    crate::fsio::replace_private(path, &[header, ct].concat())
 }
 
 pub(crate) fn load_cache(path: &Path, passphrase: &[u8]) -> Result<Keyring> {

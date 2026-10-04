@@ -7,7 +7,7 @@
 use crate::agent_reserve::{bounded, private_bytes};
 use crate::*;
 use serde_json::{json, Value};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::os::unix::fs::DirBuilderExt;
 
 const LIMIT: usize = transport::HOST_MAX_FRAME - 1;
 
@@ -19,16 +19,7 @@ fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
 }
 
 fn retain(directory: &Path, name: &str, bytes: &[u8]) -> Result<()> {
-    let path = directory.join(name);
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&path)
-        .map_err(|error| format!("{}: {error}", path.display()))?;
-    file.write_all(bytes)
-        .and_then(|()| file.sync_all())
-        .map_err(|error| format!("{}: {error}", path.display()))
+    create_private(&directory.join(name), bytes)
 }
 
 fn invoke(ctx: &Context, stem: &str, operation: u8, payload: &[u8]) -> Result<Vec<u8>> {

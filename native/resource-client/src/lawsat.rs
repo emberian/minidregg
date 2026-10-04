@@ -53,7 +53,7 @@ fn ask(
     let nonce = random_nonce()?;
     let input = directory.join(format!("{tag}-{nonce}.request.json"));
     let output = directory.join(format!("{tag}-{nonce}.answer.json"));
-    private_file(
+    create_private(
         &input,
         &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
     )?;

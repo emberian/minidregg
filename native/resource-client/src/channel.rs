@@ -384,7 +384,7 @@ fn join(mut args: Args) -> Result<()> {
         .clone();
     let roster_text = fs::read_to_string(&roster_file).map_err(|e| format!("roster: {e}"))?;
     let roster = parse_roster(&roster_text)?;
-    fs::write(dir.join("roster"), &roster_text).map_err(|e| format!("roster copy: {e}"))?;
+    crate::fsio::replace_public(&dir.join("roster"), roster_text.as_bytes()).map_err(|e| format!("roster copy: {e}"))?;
     let me = roster.iter().find(|p| p.slot == lease.slot).ok_or("the roster names no member at this lease's slot")?.clone();
     if me.pk != me_pk {
         return Err(format!("the roster's key for {} is not this room's xkey", me.name));
@@ -648,9 +648,7 @@ fn write_status(dir: &Path, room: &str, me: &Peer, lease: &relay::LeaseRow, clas
         "realCells": cn.real_cells, "padCells": cn.pad_cells, "sealOverruns": cn.seal_overruns, "queued": queued,
         "trialDecrypt": {"cells": st.tried, "viewTagHits": st.view_tag_hits, "aeadFail": st.aead_fail, "opened": st.opened},
     });
-    let tmp = dir.join(".status.json.tmp");
-    fs::write(&tmp, format!("{v}\n")).map_err(|e| e.to_string())?;
-    fs::rename(&tmp, dir.join("status.json")).map_err(|e| e.to_string())
+    crate::fsio::replace_public(&dir.join("status.json"), format!("{v}\n").as_bytes())
 }
 
 /// Check every epoch whose last tick this member has passed against the relay's published record:
@@ -770,11 +768,8 @@ fn say(mut args: Args) -> Result<()> {
     relay::urandom(&mut r)?;
     let id = format!("{now:013}-{}-{}", std::process::id(), relay::hex(&r));
     let ob = dir.join("outbox");
-    let tmp = ob.join(format!(".{id}.tmp"));
-    let mut f = OpenOptions::new().create_new(true).write(true).mode(0o600).open(&tmp).map_err(|e| format!("outbox: {e}"))?;
-    writeln!(f, "{}", json!({"to": to, "text": text, "queued_unix_ms": now})).map_err(|e| e.to_string())?;
-    drop(f);
-    fs::rename(&tmp, ob.join(format!("{id}.json"))).map_err(|e| e.to_string())?;
+    crate::create_private(&ob.join(format!("{id}.json")), format!("{}\n", json!({"to": to, "text": text, "queued_unix_ms": now})).as_bytes())
+        .map_err(|e| format!("outbox: {e}"))?;
     println!("{}", json!({"queued": id, "to": to, "bytes": text.len(), "queued_unix_ms": now}));
     Ok(())
 }

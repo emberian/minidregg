@@ -646,17 +646,12 @@ fn wake_pin(state_dir: &Path, source: &Path, cfg: &WakeConfig, route: ConsumerRo
 }
 
 fn remember(state_dir: &Path, hint: &GroupHint) -> Result<()> {
-    let temp = state_dir.join("group-hint.tmp");
-    let final_path = state_dir.join("group-hint.json");
-    if temp.exists() {
-        fs::remove_file(&temp).map_err(|e| format!("cannot clear stale hint temp: {e}"))?;
-    }
-    write_json_new(
-        &temp,
-        &json!({"type":"fn-group-hint-v1", "count":hint.count,
-        "first":hint.first, "last":hint.last}),
-    )?;
-    fs::rename(temp, final_path).map_err(|e| format!("cannot save group hint: {e}"))?;
+    let mut bytes = serde_json::to_vec_pretty(&json!({"type":"fn-group-hint-v1", "count":hint.count,
+        "first":hint.first, "last":hint.last}))
+    .map_err(|error| format!("cannot render the group hint: {error}"))?;
+    bytes.push(b'\n');
+    crate::fsio::replace_public(&state_dir.join("group-hint.json"), &bytes)
+        .map_err(|e| format!("cannot save group hint: {e}"))?;
     sync_directory_ancestors(state_dir)
 }
 

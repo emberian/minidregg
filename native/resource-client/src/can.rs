@@ -97,7 +97,7 @@ impl Run<'_> {
         self.count += 1;
         let id = format!("can-{}-{}-{}", self.tag, verb, self.count);
         let source = self.root.join("sources").join(format!("{id}.json"));
-        private_file(
+        create_private(
             &source,
             &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
         )?;

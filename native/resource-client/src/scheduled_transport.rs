@@ -146,16 +146,9 @@ pub(crate) fn read_private(path: &Path, limit: usize) -> Result<Vec<u8>> {
     Ok(v)
 }
 pub(crate) fn persist(path: &Path, bytes: &[u8]) -> Result<()> {
-    let parent = path.parent().ok_or("traffic file has no parent")?;
-    let temp = parent.join(format!(".traffic-write-{}", id_text(&random()?)));
-    crate::create_private(&temp, bytes)?;
-    // Publish only a fully written/fsynced file, without replacing a prior
-    // immutable ticket/claim/reply. Crash-left temp files are never receipts.
-    fs::hard_link(&temp, path).map_err(|e| e.to_string())?;
-    fs::remove_file(&temp).map_err(|e| e.to_string())?;
-    File::open(parent)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| e.to_string())
+    // Published only complete and fsynced, never replacing a prior immutable
+    // ticket/claim/reply. Crash-left staging files are never receipts.
+    crate::create_private(path, bytes)
 }
 fn key(path: &Path) -> Result<[u8; 32]> {
     read_private(path, 32)?

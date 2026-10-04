@@ -53,7 +53,6 @@ use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -493,23 +492,24 @@ pub(crate) fn urandom(out: &mut [u8]) -> Result<()> {
 
 /// A 32-byte secret held in a private file, created on first use.
 pub(crate) fn secret_file(path: &Path) -> Result<[u8; 32]> {
-    match fs::read(path) {
-        Ok(b) if b.len() == 32 => Ok(b.try_into().unwrap()),
-        Ok(_) => Err(format!("{} is not 32 bytes", path.display())),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            let mut s = [0u8; 32];
-            urandom(&mut s)?;
-            let mut f = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(path)
-                .map_err(|e| format!("cannot create {}: {e}", path.display()))?;
-            f.write_all(&s).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
-            Ok(s)
+    use mini_sdk::secret::{read_seed, Custody, SecretErrorKind};
+    for _ in 0..2 {
+        match read_seed(path, Custody::File) {
+            Ok(seed) => return Ok(*seed),
+            Err(e) if matches!(&e.kind, SecretErrorKind::Unreadable(io) if io.kind() == io::ErrorKind::NotFound) => {
+                let mut s = zeroize::Zeroizing::new([0u8; 32]);
+                urandom(&mut *s)?;
+                // Absent or complete at its final name; a concurrent creator wins and is re-read.
+                match mini_sdk::durable::create_new(path, &*s, mini_sdk::durable::Perm::Private) {
+                    Ok(()) => return Ok(*s),
+                    Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                    Err(e) => return Err(format!("cannot create {}: {e}", path.display())),
+                }
+            }
+            Err(e) => return Err(e.to_string()),
         }
-        Err(e) => Err(format!("cannot read {}: {e}", path.display())),
     }
+    Err(format!("cannot create or read {}", path.display()))
 }
 
 // ------------------------------------------------------------------ connections
@@ -743,10 +743,7 @@ pub(crate) fn diff_us(a: Instant, b: Instant) -> i64 {
 /// Write a sealed record to the members' record directory as `<epoch>.rec` (write, then rename: a
 /// member never reads half a record).
 fn publish_record(dir: &Path, epoch: u64, record: &[u8]) {
-    let tmp = dir.join(format!(".{epoch}.rec.tmp"));
-    if fs::write(&tmp, record).is_ok() {
-        let _ = fs::rename(&tmp, dir.join(format!("{epoch}.rec")));
-    }
+    let _ = crate::fsio::replace_public(&dir.join(format!("{epoch}.rec")), record);
 }
 
 /// What the append thread is given once per epoch.
@@ -891,7 +888,7 @@ pub(crate) fn run_relay(mut args: Args) -> Result<()> {
     if let Some(addr) = &tcp {
         let tl = TcpListener::bind(addr).map_err(|e| format!("cannot bind {addr}: {e}"))?;
         let bound = tl.local_addr().map_err(|e| e.to_string())?;
-        fs::write(out.join("tcp-addr"), bound.to_string()).map_err(|e| format!("tcp-addr: {e}"))?;
+        crate::fsio::replace_public(&out.join("tcp-addr"), bound.to_string().as_bytes()).map_err(|e| format!("tcp-addr: {e}"))?;
         let (dom, shared, tx, log) = (dom.clone(), shared.clone(), tx.clone(), log.clone());
         thread::spawn(move || {
             for c in tl.incoming().flatten() {
@@ -1176,7 +1173,7 @@ pub(crate) fn run_relay(mut args: Args) -> Result<()> {
         "missed": missed, "sealed": sealed_count, "faultGapAtEpoch": fault_gap,
         "leanInitMs": lean_init_ms as u64, "connectedAtT0": connected_at_t0, "spinMs": spin.as_millis() as u64,
     });
-    fs::write(out.join("summary.json"), summary.to_string()).map_err(|e| e.to_string())?;
+    crate::fsio::replace_public(&out.join("summary.json"), summary.to_string().as_bytes())?;
     println!("{summary}");
     Ok(())
 }
@@ -1415,6 +1412,33 @@ mod tests {
         msg[0] = 2;
         assert_eq!(parse_frame_head(&msg), None, "a message of another type is refused");
         assert_eq!(parse_frame_head(&msg[..FRAME_LEN - 1]), None, "a short message is refused");
+    }
+
+    #[test]
+    fn secret_file_creation_is_atomic_across_concurrent_creators() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("mini-relay-secret-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("relay-frame-key");
+        let seeds: Vec<[u8; 32]> = (0..12)
+            .map(|_| {
+                let path = path.clone();
+                thread::spawn(move || secret_file(&path).unwrap())
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect();
+        assert!(seeds.iter().all(|seed| *seed == seeds[0]), "every creator agrees on the one seed");
+        assert_eq!(fs::read(&path).unwrap(), seeds[0]);
+        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        let names: Vec<_> = fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names.len(), 1, "no staging file survives: {names:?}");
+        fs::write(&path, [1u8; 31]).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(secret_file(&path).is_err(), "a truncated seed is refused, never regenerated over");
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

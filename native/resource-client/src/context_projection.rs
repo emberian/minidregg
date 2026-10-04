@@ -17,7 +17,7 @@ pub(crate) fn document(root:&Path, workspace:&Value, name:&str, max_rows:usize, 
     let (attempt,_)=new_attempt(root)?;
     make_private_dir(&attempt)?;
     let input=attempt.join("context-in.json");
-    private_file(&input,&serde_json::to_vec(&json!({
+    create_private(&input,&serde_json::to_vec(&json!({
         "target":member(&reference,"target")?,"view":hex(&bin),
         "maxRows":max_rows.to_string(),"maxBytes":max_bytes.to_string()
     })).map_err(|e|e.to_string())?)?;
@@ -210,7 +210,7 @@ fn summary_text(root:&Path,workspace:&Value,value:&Value)->Result<(Option<String
     }
     let (attempt,_)=new_attempt(root)?;make_private_dir(&attempt)?;
     let input=attempt.join("context-support-in.json");
-    private_file(&input,&serde_json::to_vec(&json!({"dependencies":dependencies,"current":current})).map_err(|e|e.to_string())?)?;
+    create_private(&input,&serde_json::to_vec(&json!({"dependencies":dependencies,"current":current})).map_err(|e|e.to_string())?)?;
     let verdict=inspect(&workspace_host(workspace)?,&member_path(workspace,"config")?,
         "context-support",&input,&attempt.join("context-support.json"))?;
     if verdict["type"]!="mini-context-support-v1"{return Err("summary support receiver differs".into());}

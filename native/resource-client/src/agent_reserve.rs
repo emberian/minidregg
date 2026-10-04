@@ -145,12 +145,7 @@ pub(super) fn source_inspect(
         .map_err(|error| format!("invalid Host inspection: {error}"))
 }
 
-pub(super) fn retain_json(path: &Path, value: &Value) -> Result<()> {
-    let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
-    bytes.push(b'\n');
-    create_private(path, &bytes)?;
-    sync_directory_ancestors(path.parent().ok_or("reserve evidence has no parent")?)
-}
+pub(super) use crate::fsio::retain_json;
 
 pub(super) fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
     value

@@ -382,7 +382,7 @@ fn verify(
     let (attempt, _) = workspace::new_attempt(root)?;
     workspace::make_private_dir(&attempt)?;
     let call = attempt.join("origin-call.bin");
-    workspace::private_file(&call, &unhex(text(&p["origin"], "callHex")?)?)?;
+    crate::create_private(&call, &unhex(text(&p["origin"], "callHex")?)?)?;
     let receipt = &p["origin"]["receipt"];
     crate::historical_call_receipt::lookup_verified(
         &host,
@@ -400,8 +400,8 @@ fn verify(
     let plan = attempt.join("origin-plan.bin");
     let signatures = attempt.join("origin-signatures.bin");
     let assembled = attempt.join("assembled.bin");
-    workspace::private_file(&plan, &unhex(text(&p["origin"], "planHex")?)?)?;
-    workspace::private_file(&signatures, &unhex(text(&p["origin"], "signaturesHex")?)?)?;
+    crate::create_private(&plan, &unhex(text(&p["origin"], "planHex")?)?)?;
+    crate::create_private(&signatures, &unhex(text(&p["origin"], "signaturesHex")?)?)?;
     crate::host_files(
         &host,
         &config,
@@ -430,7 +430,7 @@ fn verify(
     validate_origin_command(&p, command)?;
     let command_json = attempt.join("command.json");
     let command_bin = attempt.join("command.bin");
-    workspace::private_file(
+    crate::create_private(
         &command_json,
         &serde_json::to_vec(command).map_err(|e| e.to_string())?,
     )?;
@@ -667,15 +667,8 @@ fn publish_dismissal(inbox: &Path, bundle: &Value) -> Result<Value> {
             return Err("retained dismissal differs".into());
         }
     } else {
-        let stage = inbox.join(format!(".dismissal-{id}"));
-        let bytes = serde_json::to_vec(bundle).map_err(|e| e.to_string())?;
-        // This name is uncommitted until renamed to dismissal.json. Recover
-        // interrupted writes from the newly verified exact dismissal payload.
-        staged_file(&stage, &bytes)?;
-        fs::rename(&stage, &target).map_err(|e| e.to_string())?;
-        fs::File::open(inbox)
-            .and_then(|f| f.sync_all())
-            .map_err(|e| e.to_string())?;
+        // The name is absent or complete; an interrupted write leaves nothing at it.
+        crate::create_private(&target, &serde_json::to_vec(bundle).map_err(|e| e.to_string())?)?;
     }
     Ok(json!({"type":"mini-hermes-dismiss-dispatch-v1","id":id,"inbox":inbox}))
 }
@@ -1187,7 +1180,7 @@ mod tests {
         let reg = root.join("registration.json");
         let (_, b) = fixture("70", "1");
         let r = json!({"type":"mini-hermes-dispatch-registration-v1","task":"71","subject":"8","roomCell":"70","encryptionKey":"ab".repeat(32),"workspace":ws,"inbox":inbox});
-        workspace::private_file(&reg, &serde_json::to_vec(&r).unwrap()).unwrap();
+        crate::create_private(&reg, &serde_json::to_vec(&r).unwrap()).unwrap();
         assert!(registered(&reg, &b).is_ok());
         for (key, value) in [
             ("task", "72"),
@@ -1212,8 +1205,8 @@ mod tests {
         workspace::make_private_dir(&parent).unwrap();
         let stage = parent.join(format!(".staging-{id}"));
         workspace::make_private_dir(&stage).unwrap();
-        workspace::private_file(&stage.join("lab-invite.json"), b"partial").unwrap();
-        workspace::private_file(&stage.join("ready.json"), b"{").unwrap();
+        crate::create_private(&stage.join("lab-invite.json"), b"partial").unwrap();
+        crate::create_private(&stage.join("ready.json"), b"{").unwrap();
         publish(&inbox, &bundle).unwrap();
         assert_eq!(ready_bundle(&inbox).unwrap()["bundle"], bundle);
         assert_eq!(publish(&inbox, &bundle).unwrap()["replayed"], true);
@@ -1238,7 +1231,7 @@ mod tests {
         let key = SigningKey::from_bytes(&[7; 32]);
         let dismiss = json!({"type":"mini-hermes-handoff-v1","payloadHex":hex(&bytes),"publicKey":hex(key.verifying_key().as_bytes()),"signature":hex(&key.sign(&message(&bytes)).to_bytes())});
         let (_, id) = decode(&dismiss).unwrap();
-        workspace::private_file(&inbox.join(format!(".dismissal-{id}")), b"{").unwrap();
+        crate::create_private(&inbox.join(format!(".dismissal-{id}")), b"{").unwrap();
         publish_dismissal(&inbox, &dismiss).unwrap();
         assert_eq!(json_file(&inbox.join("dismissal.json")).unwrap(), dismiss);
         publish_dismissal(&inbox, &dismiss).unwrap();
@@ -1284,7 +1277,7 @@ mod tests {
         let root = scratch();
         let config = root.join("config.json");
         let seed = "22321621677379463296262690040024671810364854896513930816726568652528571384147";
-        workspace::private_file(
+        crate::create_private(
             &config,
             format!("{{\"domain\":8501,\"expectedSeed\":{seed}}}").as_bytes(),
         )

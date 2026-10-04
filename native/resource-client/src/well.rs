@@ -88,7 +88,7 @@ fn pair(first: &[u8], second: &[u8]) -> Result<Vec<u8>> {
 }
 
 fn retain(path: &Path, bytes: &[u8]) -> Result<()> {
-    fs::write(path, bytes).map_err(|error| format!("cannot retain {}: {error}", path.display()))
+    crate::create_public(path, bytes)
 }
 
 /// One host operation over the pinned session socket. A 255 reply is a

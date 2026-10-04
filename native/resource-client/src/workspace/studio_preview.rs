@@ -30,8 +30,8 @@ fn admitted_capture(root:&Path, workspace:&Value, id:&str, snapshot:&str)->Resul
     Ok(value)
 }
 fn child(bun:&Path, script:&Path, args:&[&Path], suffix:Option<&str>, dir:&Path, stage:&str)->Result<i32> {
-    private_file(&dir.join(format!("{stage}.out")),&[])?;
-    private_file(&dir.join(format!("{stage}.err")),&[])?;
+    create_private(&dir.join(format!("{stage}.out")),&[])?;
+    create_private(&dir.join(format!("{stage}.err")),&[])?;
     let out=fs::File::create(dir.join(format!("{stage}.out"))).map_err(|e|e.to_string())?;
     let err=fs::File::create(dir.join(format!("{stage}.err"))).map_err(|e|e.to_string())?;
     let mut command=Command::new("timeout");
@@ -95,7 +95,7 @@ pub(super) fn run(root:&Path, workspace:&Value, id:&str, snapshot:&str, edition:
         validate_capture(&input,&captured,&input_sha,&source_hashes)?;
         let capture_sha=sha(&capture_path)?;
         let request=json!({"schema":"dregg.objective-bend.preview-input.v1","capturePath":capture_path,"captureSha256":capture_sha,"arguments":[],"projections":[],"limits":serde_json::from_str::<Value>(LIMITS).map_err(|e|e.to_string())?});
-        let request_path=dir.join("request.json");private_file(&request_path,&serde_json::to_vec(&request).map_err(|e|e.to_string())?)?;
+        let request_path=dir.join("request.json");create_private(&request_path,&serde_json::to_vec(&request).map_err(|e|e.to_string())?)?;
         let output_dir=dir.join("output");let rc=child(&bun,&adapter,&[&request_path,&output_dir,&tooling],None,&dir,"preview")?;
         let path=output_dir.join(if rc==0 {"preview.json"} else {"diagnostic.json"});
         let output=bounded_json_limit(&path,4*1024*1024)?;

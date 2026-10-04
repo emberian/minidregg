@@ -125,9 +125,7 @@ use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use sha3::{digest::{core_api::CoreWrapper, ExtendableOutput, Update, XofReader}, CShake256Core};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
+use std::fs;
 use std::path::{Path, PathBuf};
 use zeroize::Zeroizing;
 
@@ -1523,21 +1521,9 @@ fn keys_view_ref(room_ref: &Value, keys: &str) -> Result<Value> {
 
 /// Replace a reference file in place (temporary file + rename, 0600).
 pub(crate) fn rewrite_reference(root: &Path, name: &str, value: &Value) -> Result<()> {
-    let path = root.join("refs").join(format!("{name}.json"));
-    let temporary = root.join("refs").join(format!(".{name}.json.tmp"));
-    let _ = fs::remove_file(&temporary);
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&temporary)
-        .map_err(|error| format!("cannot create {}: {error}", temporary.display()))?;
     let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
-    file.write_all(&bytes)
-        .and_then(|()| file.sync_all())
-        .map_err(|error| format!("cannot write {}: {error}", temporary.display()))?;
-    fs::rename(&temporary, &path).map_err(|error| format!("cannot replace {}: {error}", path.display()))
+    crate::fsio::replace_private(&root.join("refs").join(format!("{name}.json")), &bytes)
 }
 
 // ---------------------------------------------------------------- reading the room
@@ -2225,7 +2211,7 @@ pub(crate) fn found(root: &Path, workspace: &Value, room_name: &str) -> Result<(
     if !root.join("refs").join(format!("{keys_ref}.json")).exists() {
         let law = root.join("sources").join(format!("roomkey-law-{keys_ref}.json"));
         if !law.exists() {
-            super::private_file(&law, &serde_json::to_vec(&keys_law(&founder_subject)).map_err(|e| e.to_string())?)?;
+            crate::create_private(&law, &serde_json::to_vec(&keys_law(&founder_subject)).map_err(|e| e.to_string())?)?;
         }
         super::create(root, workspace, &keys_ref, "content", &law, Some(room_name), "object", None, None, None)?;
     }
@@ -2847,7 +2833,7 @@ fn signed_window(root: &Path, workspace: &Value, reference: &Value, start: &str,
         "grants":[{"kind":member(reference,"kind")?,"target":member(reference,"target")?,
             "capability":member(reference,"observeCapability")?}]});
     let source = root.join("sources").join(format!("q-{nonce}.json"));
-    super::private_file(&source, &serde_json::to_vec(&intent).map_err(|e| e.to_string())?)?;
+    crate::create_private(&source, &serde_json::to_vec(&intent).map_err(|e| e.to_string())?)?;
     query_retained(
         &member_path(workspace, "host")?,
         &member_path(workspace, "config")?,

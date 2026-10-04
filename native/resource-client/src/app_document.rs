@@ -829,7 +829,7 @@ mod tests {
             seal(&root, &ws, "export", &json!({"binding":binding(),"body":"616263","receipt":receipt(),"refs":{"document":{"target":"22"}}})).unwrap();
             let attempt = root.join("write");
             make_private_dir(&attempt).unwrap();
-            private_file(&attempt.join("call.bin"), b"exact retained call").unwrap();
+            create_private(&attempt.join("call.bin"), b"exact retained call").unwrap();
             save(&dir.join("submit-started.json"), &json!({"attempt":attempt,"proposal":"app-export"})).unwrap();
             save(&dir.join("result.json"), &json!({"status":if initial == "refused" {"refused"} else {"uncertain"},"message":"retained original result"})).unwrap();
             save(&attempt.join("outcome.json"), &json!({"type":initial})).unwrap();

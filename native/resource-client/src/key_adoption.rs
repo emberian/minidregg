@@ -586,8 +586,8 @@ mod tests {
             workspace::make_private_dir(&root).unwrap();
             let daily = root.join("daily.key");
             let next = root.join("next.key");
-            workspace::private_file(&daily, &[17; 32]).unwrap();
-            workspace::private_file(&next, &[29; 32]).unwrap();
+            crate::create_private(&daily, &[17; 32]).unwrap();
+            crate::create_private(&next, &[29; 32]).unwrap();
             let request = json!({"subject":"7","nonce":"9",
                 "currentPublicKey":hex(&key(&daily).unwrap().verifying_key().to_bytes()),
                 "nextPublicKey":hex(&key(&next).unwrap().verifying_key().to_bytes())});
@@ -762,7 +762,7 @@ mod tests {
         let attempt = f.attempt();
         let mut source = Fake::new(f.plan());
         seal(&mut source, &attempt, &f.pin, &f.daily, Some(&f.next)).unwrap();
-        workspace::private_file(&attempt.join("submit-marker.json"), b"{}").unwrap();
+        crate::create_private(&attempt.join("submit-marker.json"), b"{}").unwrap();
         fs::remove_file(attempt.join("current.sig")).unwrap();
         assert!(seal(&mut source, &attempt, &f.pin, &f.daily, Some(&f.next))
             .unwrap_err()
@@ -907,8 +907,8 @@ mod tests {
         let host = f.root.join("host");
         let config = f.root.join("config.json");
         let socket = f.root.join("socket");
-        workspace::private_file(&host, b"fixture host image, never executed").unwrap();
-        workspace::private_file(&config, b"{}").unwrap();
+        crate::create_private(&host, b"fixture host image, never executed").unwrap();
+        crate::create_private(&config, b"{}").unwrap();
         let host_digest =
             workspace::private::decode_hex(&host_image_sha256(&host).unwrap()).unwrap();
         let listener = UnixListener::bind(&socket).unwrap();
@@ -1009,7 +1009,7 @@ mod tests {
             workspace::make_private_dir(&f.root.join(name)).unwrap();
         }
         let config = f.root.join("config.json");
-        workspace::private_file(&config, b"{}").unwrap();
+        crate::create_private(&config, b"{}").unwrap();
         if mode == "remote" {
             let manifest = json!({"type":"minidregg-participant-workspace-v1","subject":"7","key":f.daily,
                 "config":config,"host":null,"hostSha256":"11".repeat(32),"socket":"ssh:member@example.test"});
@@ -1024,7 +1024,7 @@ mod tests {
         let host = f.root.join("fixture-verifier");
         // Injected pure local source codec, not a native semantic claim. The
         // endpoint is forbidden from supplying plan/ingress interpretation.
-        workspace::private_file(
+        crate::create_private(
             &host,
             br#"#!/usr/bin/env python3
 import json, sys
@@ -1056,7 +1056,7 @@ else:
         let host_digest = host_image_sha256(&host).unwrap();
         let socket = f.root.join("socket");
         let current_path = f.root.join("rotated-current.key");
-        workspace::private_file(&current_path, &[47; 32]).unwrap();
+        crate::create_private(&current_path, &[47; 32]).unwrap();
         let manifest = json!({"type":"minidregg-participant-workspace-v1","subject":"7","key":current_path,
             "config":config,"host":host,"hostSha256":host_digest,"socket":socket,
             "prerotation":true,"nextPublicKey":"ff".repeat(32),"receiptContinuity":"minidregg-continuity-v1"});

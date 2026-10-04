@@ -53,7 +53,8 @@
 //! (`payloadState`). Anything else prints `[payload unavailable]`.
 
 use crate::shell::{Session, Verb, EXIT_CLIENT, EXIT_OK, EXIT_REFUSED, EXIT_USAGE};
-use crate::workspace::{self, bounded_json, member, member_path, private_file, random_nonce};
+use crate::workspace::{self, bounded_json, member, member_path, random_nonce};
+use crate::create_private;
 use serde_json::{json, Value};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -630,11 +631,7 @@ pub(crate) fn current_room(session: &Session) -> Result<Room, String> {
 
 fn set_current(session: &Session, room: &str) -> Result<(), String> {
     private_dirs(&chat_dir(session))?;
-    let path = chat_dir(session).join("current");
-    let tmp = chat_dir(session).join(format!("current.tmp-{}", std::process::id()));
-    let _ = fs::remove_file(&tmp);
-    private_file(&tmp, format!("{room}\n").as_bytes())?;
-    fs::rename(&tmp, &path).map_err(|e| e.to_string())
+    crate::fsio::replace_private(&chat_dir(session).join("current"), format!("{room}\n").as_bytes())
 }
 
 fn petnames(session: &Session) -> BTreeMap<String, String> {
@@ -726,7 +723,7 @@ fn propose_submit_in(session: &Session, prefix: &str, request: &Value, sealed: O
         let path = session.home.join("requests").join(format!("{id}.json"));
         let mut bytes = serde_json::to_vec(request).expect("JSON values serialise");
         bytes.push(b'\n');
-        private_file(&path, &bytes).map_err(error)?;
+        create_private(&path, &bytes).map_err(error)?;
         let mut flags = vec![("action", os("propose")), ("dir", os(&ws)), ("request", os(&path)), ("proposal-id", os(&id))];
         if let Some(room) = sealed {
             flags.push(("private", os(room)));
@@ -799,7 +796,7 @@ pub(crate) fn signed_read(
         let nonce = if attempt == 0 { nonce.clone() } else { random_nonce().map_err(error)? };
         intent["nonce"] = json!(nonce);
         let source = folder.join(format!("q-{nonce}.json"));
-        private_file(&source, &serde_json::to_vec(&intent).expect("JSON")).map_err(error)?;
+        create_private(&source, &serde_json::to_vec(&intent).expect("JSON")).map_err(error)?;
         let dir = folder.join(format!("{label}.{nonce}"));
         let _ = crate::take_host_decision();
         let result = crate::query_retained(&host, &config, &source, OsStr::new("intent"), &key, &format!("view-{view}"), &dir);
@@ -1629,7 +1626,7 @@ fn append_operation(session: &Session, path: &Path, stream: &str, request: &Valu
     let id = format!("operation-{}", workspace::member(&record, "nonce").map_err(error)?);
     let request_path = session.home.join("requests").join(format!("{id}.json"));
     private_dirs(&session.home.join("requests")).map_err(error)?;
-    private_file(&request_path, &serde_json::to_vec(request).map_err(error)?).map_err(error)?;
+    create_private(&request_path, &serde_json::to_vec(request).map_err(error)?).map_err(error)?;
     let mut flags = vec![("action", os("propose")), ("dir", os(&session.workspace)),
         ("request", os(&request_path)), ("proposal-id", os(&id))];
     if let Some(room) = sealed { flags.push(("private", os(room))); }
@@ -1939,7 +1936,7 @@ pub(crate) fn write_request(session: &Session, name: &str, value: &Value) -> Res
     let mut bytes = serde_json::to_vec(value).expect("JSON");
     bytes.push(b'\n');
     let _ = fs::remove_file(&path);
-    private_file(&path, &bytes).map_err(error)?;
+    create_private(&path, &bytes).map_err(error)?;
     Ok(path)
 }
 
@@ -2000,7 +1997,7 @@ pub(crate) fn import_from(session: &Session, name: &str, reference_json: &Value)
     let path = session.home.join("inbox").join(format!("{name}.json"));
     private_dirs(&session.home.join("inbox")).map_err(error)?;
     let _ = fs::remove_file(&path);
-    private_file(&path, &serde_json::to_vec(reference_json).expect("JSON")).map_err(error)?;
+    create_private(&path, &serde_json::to_vec(reference_json).expect("JSON")).map_err(error)?;
     client("workspace", &[("action", os("import")), ("dir", os(&session.workspace)), ("name", os(name)), ("from-ref", os(&path))])?;
     Ok(())
 }

@@ -98,12 +98,6 @@ fn operator_socket_owned(socket: &Path) -> Result<()> {
     Ok(())
 }
 
-fn retain_json(path: &Path, value: &Value) -> Result<()> {
-    let mut bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
-    bytes.push(b'\n');
-    create_private(path, &bytes)?;
-    sync_directory_ancestors(path.parent().ok_or("fn frontier state has no parent")?)
-}
 
 fn source_inspect(
     host: &Path,

@@ -10,6 +10,8 @@ pub(crate) mod web_create;
 pub(crate) mod app_document;
 
 use crate::current_birth;
+use crate::create_private;
+use mini_sdk::lock::{Create, Lease, LockError, Wait};
 use crate::receipt_continuity::{self, Mode as ContinuityMode};
 use crate::participant_namespace::{self, IdKind, Role};
 use crate::{
@@ -201,41 +203,16 @@ pub(crate) fn make_private_dir(path: &Path) -> Result<()> {
     private_dir(path)
 }
 
-pub(crate) fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)
-        .map_err(|error| format!("cannot create {}: {error}", path.display()))?;
-    file.write_all(bytes)
-        .and_then(|()| file.sync_all())
-        .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
-    if let Some(parent) = path.parent() {
-        File::open(parent)
-            .and_then(|directory| directory.sync_all())
-            .map_err(|error| format!("cannot sync {}: {error}", parent.display()))?;
-    }
-    Ok(())
-}
-
-/// Publish complete JSON under a per-record custody lock. Immutable exact
-/// retries and expected-prior replacements both close the rename/fsync cut.
 fn atomic_json(path: &Path, value: &Value, expected: Option<&Value>) -> Result<()> {
-    use std::os::fd::AsRawFd;
     let parent=path.parent().ok_or("retained JSON lacks parent")?;
     private_dir(parent)?;
     let filename=path.file_name().and_then(OsStr::to_str).ok_or("record name is not UTF-8")?;
-    let guard=OpenOptions::new().read(true).write(true).create(true).mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC)
-        .open(parent.join(format!(".{filename}.lock"))).map_err(|e|e.to_string())?;
-    let meta=guard.metadata().map_err(|e|e.to_string())?;
-    if !meta.is_file() || meta.uid()!=unsafe{libc::geteuid()} || meta.mode() & 0o077 !=0 || meta.nlink()!=1 {
-        return Err("retained JSON lock has unsafe custody".into());
-    }
-    if unsafe{libc::flock(guard.as_raw_fd(),libc::LOCK_EX|libc::LOCK_NB)} !=0 {
-        return Err("retained JSON publication busy; retry exact request".into());
-    }
+    let _guard=match Lease::acquire(&parent.join(format!(".{filename}.lock")),Create::Yes,Wait::No) {
+        Ok(lease)=>lease,
+        Err(LockError::Busy)=>return Err("retained JSON publication busy; retry exact request".into()),
+        Err(LockError::Unsafe)=>return Err("retained JSON lock has unsafe custody".into()),
+        Err(LockError::Io(error))=>return Err(error.to_string()),
+    };
     if path.exists() {
         let prior=bounded_json(path)?;
         if prior == *value {
@@ -247,10 +224,7 @@ fn atomic_json(path: &Path, value: &Value, expected: Option<&Value>) -> Result<(
     } else if expected.is_some() {
         return Err("expected retained JSON is absent".into());
     }
-    let stage=parent.join(format!(".stage-{}",random_nonce()?));
-    private_file(&stage,&serde_json::to_vec_pretty(value).map_err(|e|e.to_string())?)?;
-    fs::rename(stage,path).map_err(|e|e.to_string())?;
-    File::open(parent).and_then(|f|f.sync_all()).map_err(|e|e.to_string())
+    crate::fsio::replace_private(path,&serde_json::to_vec_pretty(value).map_err(|e|e.to_string())?)
 }
 
 /// Immutable exact retries and expected-prior durable replacements. The
@@ -523,12 +497,8 @@ fn recheck_commitment(root: &Path, value: &Value) -> Result<()> {
 /// Publish complete owner-private bytes with durable atomic replacement.
 /// Callers own the destination and decide whether replacement is authorized.
 pub(crate) fn replace_private_file(path:&Path,bytes:&[u8])->Result<()> {
-    let parent=path.parent().ok_or("atomic publication parent absent")?;
-    private_dir(parent)?;
-    let staged=parent.join(format!(".write-{}",random_nonce()?));
-    private_file(&staged,bytes)?;
-    fs::rename(&staged,path).map_err(|e|format!("cannot publish {}: {e}",path.display()))?;
-    File::open(parent).and_then(|directory|directory.sync_all()).map_err(|e|format!("cannot sync atomic publication: {e}"))
+    private_dir(path.parent().ok_or("atomic publication parent absent")?)?;
+    crate::fsio::replace_private(path,bytes)
 }
 
 /// Publish the verified commitment after adoption or rotation.
@@ -714,7 +684,7 @@ fn init_impl(
     make_private_dir(&root.join("proposals"))?;
     let retained_enrollment = if let Some((_, _, bytes)) = &enrolled {
         let destination = root.join("enrollment.json");
-        private_file(&destination, bytes)?;
+        create_private(&destination, bytes)?;
         Some(destination)
     } else {
         None
@@ -723,7 +693,7 @@ fn init_impl(
         let bytes =
             fs::read(context).map_err(|error| format!("cannot retain birth context: {error}"))?;
         let destination = root.join("birth-context.json");
-        private_file(&destination, &bytes)?;
+        create_private(&destination, &bytes)?;
         Some(destination)
     } else {
         None
@@ -749,7 +719,7 @@ fn init_impl(
     }
     let mut bytes = serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
-    private_file(&root.join("workspace.json"), &bytes)?;
+    create_private(&root.join("workspace.json"), &bytes)?;
     if !receipt_baseline { println!("{}", root.display()); }
     Ok(())
 }
@@ -915,7 +885,7 @@ fn import_complete(root: &Path, input: ImportInput<'_>, sealed: Option<(&str, &s
     if let Some(private) = room_private { value["private"] = private.clone(); }
     let mut bytes = serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
-    private_file(
+    create_private(
         &root.join("refs").join(format!("{}.json", ref_file(name_value))),
         &bytes,
     )?;
@@ -1107,7 +1077,7 @@ pub(crate) fn read_reference(
     let mut bytes = serde_json::to_vec_pretty(&intent).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
     let source = root.join("sources").join(format!("q-{nonce}.json"));
-    private_file(&source, &bytes)?;
+    create_private(&source, &bytes)?;
     if !ephemeral {
         eprintln!("workspace read attempt: {}", attempt.display());
     }
@@ -1439,7 +1409,7 @@ fn signed_views_purposes(
             "grants":[{"kind":member(reference,"kind")?,"target":member(reference,"target")?,
                 "capability":member(reference,"observeCapability")?}]});
         let source = root.join("sources").join(format!("qb-{nonce}-{n}.json"));
-        private_file(&source, &serde_json::to_vec(&intent).map_err(|e| e.to_string())?)?;
+        create_private(&source, &serde_json::to_vec(&intent).map_err(|e| e.to_string())?)?;
         if let Some(custody) = custody.as_deref_mut() { custody.sources.push(source.clone()); }
         intents.push((source, inspection.clone()));
     }
@@ -1514,7 +1484,7 @@ fn signed_view_unchecked(
         "grants":[{"kind":member(reference,"kind")?,"target":member(reference,"target")?,
             "capability":member(reference,"observeCapability")?}]});
     let source = root.join("sources").join(format!("q-{nonce}.json"));
-    private_file(
+    create_private(
         &source,
         &serde_json::to_vec(&intent).map_err(|error| error.to_string())?,
     )?;
@@ -1567,7 +1537,7 @@ fn doc_query(
         "grants":[{"kind":member(reference,"kind")?,"target":member(reference,"target")?,
             "capability":member(reference,"observeCapability")?}]});
     let source = root.join("sources").join(format!("q-{nonce}.json"));
-    private_file(
+    create_private(
         &source,
         &serde_json::to_vec(&intent).map_err(|error| error.to_string())?,
     )?;
@@ -1769,7 +1739,7 @@ fn transclude(
         {"name":source,"payload":{"type":"read"}}]});
     let proposal_id = format!("transclude-{id}");
     let request_path = root.join("sources").join(format!("{proposal_id}.json"));
-    private_file(
+    create_private(
         &request_path,
         &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
     )?;
@@ -1986,7 +1956,7 @@ pub(crate) fn rendered_document(
         let (attempt, _) = new_attempt(root)?;
         make_private_dir(&attempt)?;
         let input = attempt.join("transclusions-in.json");
-        private_file(
+        create_private(
             &input,
             &serde_json::to_vec(&json!({"host":hex(host),"sources":sources}))
                 .map_err(|error| error.to_string())?,
@@ -2118,7 +2088,7 @@ fn host_document(root: &Path, workspace: &Value, host_ref: &Value) -> Result<Val
     let (attempt, _) = new_attempt(root)?;
     make_private_dir(&attempt)?;
     let input = attempt.join("document-in.json");
-    private_file(
+    create_private(
         &input,
         &serde_json::to_vec(&json!({"host":hex(&host_bin),"sources":[]}))
             .map_err(|error| error.to_string())?,
@@ -2241,7 +2211,7 @@ fn submit_content(root: &Path, workspace: &Value, name: &str, actions: Vec<Value
         {"name":name,"payload":{"type":"content","actions":actions}}]});
     let proposal_id = format!("{label}-{id}");
     let request_path = root.join("sources").join(format!("{proposal_id}.json"));
-    private_file(
+    create_private(
         &request_path,
         &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
     )?;
@@ -2597,7 +2567,7 @@ fn view_hex(attempt: &Path) -> Result<String> {
 /// Render `input` with the Host's `kind` inspection, retained beside `attempt`.
 fn doc_render(workspace: &Value, attempt: &Path, kind: &str, input: &Value) -> Result<Value> {
     let input_path = attempt.join(format!("{kind}-input.json"));
-    private_file(
+    create_private(
         &input_path,
         &serde_json::to_vec(input).map_err(|error| error.to_string())?,
     )?;
@@ -3638,15 +3608,15 @@ fn propose_summary_once(
     make_private_dir(&proposal_dir)?;
     // Close the derived alias before any authored intent becomes visible.
     if let Some(original) = append_origin {
-        private_file(&proposal_dir.join("append-origin.json"), &serde_json::to_vec(&json!({
+        create_private(&proposal_dir.join("append-origin.json"), &serde_json::to_vec(&json!({
             "type":"minidregg-workspace-derived-append-v1","originalProposal":original
         })).map_err(|error|error.to_string())?)?;
     }
-    private_file(
+    create_private(
         &proposal_dir.join("request.json"),
         &serde_json::to_vec_pretty(&request).map_err(|error| error.to_string())?,
     )?;
-    private_file(&proposal_dir.join("intent.json"), &intent_bytes)?;
+    create_private(&proposal_dir.join("intent.json"), &intent_bytes)?;
     author(
         &workspace_host(workspace)?,
         &member_path(workspace, "config")?,
@@ -3659,7 +3629,7 @@ fn propose_summary_once(
         "intentSha256":intent_sha,"effect":"none","authority":"requires-current-admission",
         "delegation":delegation,"renounce":renounce});
     let bytes = serde_json::to_vec_pretty(&summary).map_err(|error| error.to_string())?;
-    private_file(&proposal_dir.join("proposal.json"), &bytes)?;
+    create_private(&proposal_dir.join("proposal.json"), &bytes)?;
     Ok(summary)
 }
 
@@ -4226,7 +4196,7 @@ fn complete_birth(
     if let Some(template) = room_template {
         value["room"] = json!(template);
     }
-    private_file(
+    create_private(
         &reference_path,
         &serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?,
     )?;
@@ -4360,7 +4330,7 @@ fn release_unadmitted_attempt(
             if !authoring_released(generation) && !authoring_refused(generation)? {
                 let marker = json!({"type":"minidregg-birth-generation-released-v1",
                     "attempt":attempt});
-                private_file(
+                create_private(
                     &generation.join("released.json"),
                     &serde_json::to_vec(&marker).map_err(|error| error.to_string())?,
                 )?;
@@ -4576,7 +4546,7 @@ fn birth(
         let mut requested = requested_core;
         requested["nonce"] = json!(random_nonce()?);
         let requested_bytes = serde_json::to_vec(&requested).map_err(|error| error.to_string())?;
-        private_file(&request_path, &requested_bytes)?;
+        create_private(&request_path, &requested_bytes)?;
         requested
     };
     let stable_request = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
@@ -4703,7 +4673,7 @@ fn birth(
         }
         saved
     } else {
-        private_file(
+        create_private(
             &source_path,
             &serde_json::to_vec_pretty(&expected_source).map_err(|error| error.to_string())?,
         )?;
@@ -5008,7 +4978,7 @@ fn retain_or_compare(path: &Path, value: &Value) -> Result<()> {
         }
         return Ok(());
     }
-    private_file(path, &bytes)
+    create_private(path, &bytes)
 }
 
 struct Provision<'a> {
@@ -5281,12 +5251,10 @@ fn retain_seen_value(root: &Path, name: &str, value: &Value) -> Result<()> {
     }
     private_dir(&dir)?;
     let path = seen_path(root, name)?;
-    let staged = dir.join(format!(".{}.{}", ref_file(name), random_nonce()?));
-    private_file(
-        &staged,
+    crate::fsio::replace_private(
+        &path,
         &serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?,
-    )?;
-    fs::rename(&staged, &path).map_err(|error| format!("cannot retain {}: {error}", path.display()))
+    )
 }
 
 fn text_argument(action: &Value) -> Result<String> {
@@ -5930,6 +5898,7 @@ fn doc_push(root: &Path, workspace: &Value, name: &str, file: &Path, proposal_id
     } else {
         let retired = root.join("seen").join(format!(".{}.pushed.{}", ref_file(name), random_nonce()?));
         fs::rename(seen_path(root, name)?, &retired).map_err(|error| format!("cannot retire the seen record: {error}"))?;
+        crate::fsio::sync_parent(&retired)?;
         println!("doc push {name}: admitted; at height {height} {name} also holds others' changes: doc pull {name} before your next push");
     }
     Ok(())
@@ -6075,7 +6044,7 @@ pub(crate) fn room_kick(
         let source = root.join("sources").join(format!("kick-{id}.json"));
         let mut bytes = serde_json::to_vec_pretty(&request).map_err(|error| error.to_string())?;
         bytes.push(b'\n');
-        private_file(&source, &bytes)?;
+        create_private(&source, &bytes)?;
         let first = ids.is_empty();
         ids.push(id.clone());
         if !first && !submit_now {
@@ -6096,7 +6065,7 @@ pub(crate) fn room_kick(
     if !submit_now {
         let companions = json!({"type":"minidregg-proposal-companions-v1","room":name,"member":subject,
             "proposals":&ids[1..]});
-        private_file(
+        create_private(
             &root.join("proposals").join(proposal_id).join("companions.json"),
             &serde_json::to_vec_pretty(&companions).map_err(|error| error.to_string())?,
         )?;
@@ -7121,35 +7090,35 @@ mod tests {
         let request = serde_json::json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
             "targets":[{"name":"notes","payload":{"type":"document","actions":[{"type":"append","text":"once"}]}}]});
         let source = proposal.join("intent.json");
-        super::private_file(&source,b"original intent").unwrap();
-        super::private_file(&proposal.join("request.json"),&serde_json::to_vec(&request).unwrap()).unwrap();
+        crate::create_private(&source,b"original intent").unwrap();
+        crate::create_private(&proposal.join("request.json"),&serde_json::to_vec(&request).unwrap()).unwrap();
         let attempt = super::bind_append_attempt(&root,&proposal,&request,&source,None).unwrap();
         assert!(!attempt.exists(),"binding is durable before mkdir/assembly");
         assert_eq!(super::bind_append_attempt(&root,&proposal,&request,&source,None).unwrap(),attempt,
             "restart before mkdir must use same bound path");
         assert!(super::bind_append_attempt(&root,&proposal,&request,&source,Some(&root.join("attempts/other"))).is_err());
         super::make_private_dir(&attempt).unwrap();
-        super::private_file(&attempt.join("intent.json"),b"partial pre-call intent").unwrap();
+        crate::create_private(&attempt.join("intent.json"),b"partial pre-call intent").unwrap();
         assert_eq!(super::bind_append_attempt(&root,&proposal,&request,&source,None).unwrap(),attempt);
         crate::replan::retire_next(&attempt).unwrap();
         assert_eq!(std::fs::read(&source).unwrap(),b"original intent");
         assert_eq!(super::bounded_json(&proposal.join("request.json")).unwrap(),request);
         assert_eq!(std::fs::read(attempt.join("replanned/01/intent.json")).unwrap(),b"partial pre-call intent");
-        super::private_file(&attempt.join("call.bin"),b"child exact call, reply lost").unwrap();
+        crate::create_private(&attempt.join("call.bin"),b"child exact call, reply lost").unwrap();
         let error = super::bind_append_attempt(&root,&proposal,&request,&source,None).unwrap_err();
         assert!(error.contains("recover its retained call"),"{error}");
         assert_eq!(std::fs::read(attempt.join("call.bin")).unwrap(),b"child exact call, reply lost");
         let mut changed = request; changed["targets"][0]["payload"]["actions"][0]["text"] = serde_json::json!("changed");
         assert!(super::bind_append_attempt(&root,&proposal,&changed,&source,None).is_err());
         let other = root.join("proposals/other"); super::make_private_dir(&other).unwrap();
-        super::private_file(&other.join("intent.json"),b"other intent").unwrap();
+        crate::create_private(&other.join("intent.json"),b"other intent").unwrap();
         std::fs::remove_file(attempt.join("call.bin")).unwrap();
         assert!(super::bind_append_attempt(&root,&other,&changed,&other.join("intent.json"),Some(&attempt)).unwrap_err()
             .contains("unused attempt"),"unrelated proposal cannot steal an existing pre-call attempt");
         let child = root.join("proposals/child"); super::make_private_dir(&child).unwrap();
-        super::private_file(&child.join("append-origin.json"),br#"{"type":"minidregg-workspace-derived-append-v1","originalProposal":"op"}"#).unwrap();
+        crate::create_private(&child.join("append-origin.json"),br#"{"type":"minidregg-workspace-derived-append-v1","originalProposal":"op"}"#).unwrap();
         for (name,kind,prepare_only) in [("intent.json","intent",false),("intent.bin","binary",false),("intent.json","intent",true)] {
-            let source=child.join(name); if !source.exists() {super::private_file(&source,b"child source").unwrap();}
+            let source=child.join(name); if !source.exists() {crate::create_private(&source,b"child source").unwrap();}
             assert!(super::append_recovery_input(&root,&source,kind,prepare_only).unwrap_err().contains("belongs to proposal op"));
         }
         std::fs::remove_dir_all(root).unwrap();
@@ -7333,10 +7302,10 @@ mod tests {
         let hint = |name: &str, target: &str| json!({"type":"minidregg-participant-reference-v1",
             "name":name,"kind":"object","target":target,"observeCapability":"1"});
         for (name,target) in [("lab","71"),("alias-lab","71"),("other","99")] {
-            private_file(&root.join("refs").join(format!("{name}.json")), &serde_json::to_vec(&hint(name,target)).unwrap()).unwrap();
+            create_private(&root.join("refs").join(format!("{name}.json")), &serde_json::to_vec(&hint(name,target)).unwrap()).unwrap();
         }
         let mut marked = hint("original", "72"); marked["sealedIn"] = json!("lab");
-        private_file(&root.join("refs/original.json"), &serde_json::to_vec(&marked).unwrap()).unwrap();
+        create_private(&root.join("refs/original.json"), &serde_json::to_vec(&marked).unwrap()).unwrap();
         let alias = hint("second-name", "72");
         assert_eq!(sealing_room(None, &root, &alias).unwrap(), Some("lab".to_owned()));
         assert!(sealing_room(Some("alias-lab"), &root, &alias).unwrap().is_some());
@@ -7349,10 +7318,10 @@ mod tests {
         let root = std::env::temp_dir().join(format!("mini-private-import-{}", random_nonce().unwrap()));
         make_private_dir(&root).unwrap(); make_private_dir(&root.join("refs")).unwrap();
         let public = json!({"name":"wrong","kind":"object","target":"71"});
-        private_file(&root.join("refs/wrong.json"), &serde_json::to_vec(&public).unwrap()).unwrap();
+        create_private(&root.join("refs/wrong.json"), &serde_json::to_vec(&public).unwrap()).unwrap();
         assert!(private_room_name(&root, "71").is_err());
         let own_room = json!({"name":"my-local-room","kind":"object","target":"71","private":{"protocol":"room-key"}});
-        private_file(&root.join("refs/my-local-room.json"), &serde_json::to_vec(&own_room).unwrap()).unwrap();
+        create_private(&root.join("refs/my-local-room.json"), &serde_json::to_vec(&own_room).unwrap()).unwrap();
         assert_eq!(private_room_name(&root, "71").unwrap(), "my-local-room");
         assert!(private_room_name(&root, "99").is_err());
         import_with_private_context(&root, ImportInput {name:"paper", kind:"object", target:"72",
@@ -8337,7 +8306,7 @@ mod tests {
             random_nonce().unwrap()
         ));
         make_private_dir(&root).unwrap();
-        private_file(
+        create_private(
             &root.join("retry-0001.json"),
             br#"{"type":"confirmed","confirmation":"replayed","transactionId":"3"}"#,
         )
@@ -8377,7 +8346,7 @@ mod tests {
         make_private_dir(&root).unwrap();
         make_private_dir(&root.join("refs")).unwrap();
         let path = root.join("share.json");
-        private_file(
+        create_private(
             &path,
             br#"{"type":"minidregg-delegated-reference-v1",
             "recipient":"8","kind":"object","target":"600","capability":"63",
@@ -8424,7 +8393,7 @@ mod tests {
         make_private_dir(&proposal).unwrap();
         let request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
             "name":"shared","recipient":"8","verbs":["observe"],"maxCost":"10"});
-        private_file(
+        create_private(
             &proposal.join("request.json"),
             &serde_json::to_vec(&request).unwrap(),
         )
@@ -8446,13 +8415,13 @@ mod tests {
         )
         .unwrap();
         let source = proposal.join("intent.json");
-        private_file(&source, b"{\"proposal\":true}").unwrap();
+        create_private(&source, b"{\"proposal\":true}").unwrap();
         let sha = format!("{:x}", Sha256::digest(fs::read(&source).unwrap()));
         let summary = json!({"proposalId":"to-bob","intentSha256":sha,
             "delegation":{"name":"shared","domain":"8501",
                 "reservation":reservation.request_digest,
                 "childCapability":reservation.ids["childCapability"]}});
-        private_file(
+        create_private(
             &proposal.join("proposal.json"),
             &serde_json::to_vec(&summary).unwrap(),
         )
@@ -8552,7 +8521,7 @@ mod tests {
         let host = root.join("host"); let helper = root.join("signature"); let portable = root.join("portable");
         // Injected verifier for CLI/custody composition; native proof semantics
         // are separately qualified by the real receiving journey.
-        private_file(&host,br#"#!/usr/bin/env python3
+        create_private(&host,br#"#!/usr/bin/env python3
 import json, sys
 if sys.argv[2] == 'profile':
     print(json.dumps(json.load(open(sys.argv[1]))))
@@ -8563,9 +8532,9 @@ elif sys.argv[2] == 'continuity-verify':
 else:
     sys.exit(92)
 "#).unwrap();
-        private_file(&helper,b"#!/bin/sh\nexit 0\n").unwrap();
+        create_private(&helper,b"#!/bin/sh\nexit 0\n").unwrap();
         for file in [&host,&helper] { fs::set_permissions(file,fs::Permissions::from_mode(0o700)).unwrap(); }
-        private_file(&portable,br#"#!/usr/bin/env python3
+        create_private(&portable,br#"#!/usr/bin/env python3
 import json, sys
 if sys.argv[2] != 'carry-verifier-profile':
     sys.exit(91)
@@ -8579,7 +8548,7 @@ with open(sys.argv[4], 'w') as output:
         let identity = json!({"algorithm":"minidregg-continuity-v1","domain":"1","semantics":"2","expectedSeed":"3"});
         let mut profile = identity.clone(); profile["signatureBinary"] = json!(helper);
         participant_enrollment::save_json(&config,&profile).unwrap();
-        private_file(&key,&[19;32]).unwrap();
+        create_private(&key,&[19;32]).unwrap();
         let host_sha = crate::host_image_sha256(&host).unwrap();
         // Real old3b1 shape: no prerotation or nextPublicKey, but already anchored.
         let manifest = json!({"type":"minidregg-participant-workspace-v1","subject":"7","key":key,
@@ -8620,7 +8589,7 @@ with open(sys.argv[4], 'w') as output:
             ("sha256",crate::host_image_sha256(&portable).unwrap().into())]).unwrap();
         let authority=participant_enrollment::json_private(&custody.join("carry-authority.json")).unwrap();
         let capsule=PathBuf::from(authority["sourceCapsulePath"].as_str().unwrap());
-        let edge=root.join("edge.json"); private_file(&edge,b"{}").unwrap();
+        let edge=root.join("edge.json"); create_private(&edge,b"{}").unwrap();
         let carry_args=|| vec![("edge",edge.as_os_str().to_owned()),("source-capsule",capsule.as_os_str().to_owned()),
             ("new-config",config.as_os_str().to_owned()),("new-verifier",host.as_os_str().to_owned())];
         assert!(action("continuity-carry",carry_args()).unwrap_err().contains("trusted source verifier refused carry edge"));

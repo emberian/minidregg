@@ -2,10 +2,11 @@
 //! only bounds transport, serializes completions, and durably remembers verified points.
 pub(crate) mod carry;
 use crate::{workspace, Result, SOCKET};
+use mini_sdk::durable::{Perm, Stage};
 use serde_json::{json, Value};
 use std::cmp::Ordering;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::Read;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
@@ -171,16 +172,7 @@ fn read_json_mode(path: &Path, custody: bool) -> Result<Value> {
     serde_json::from_slice(&bytes).map_err(fail)
 }
 fn create_file(path: &Path, bytes: &[u8]) -> Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .custom_flags(NOFOLLOW)
-        .open(path)
-        .map_err(fail)?;
-    file.write_all(bytes)
-        .and_then(|()| file.sync_all())
-        .map_err(fail)
+    crate::create_private(path, bytes).map_err(fail)
 }
 fn lock(root: &Path) -> Result<File> {
     lock_named(root, "lock")
@@ -210,45 +202,28 @@ fn lock_named(root: &Path, name: &str) -> Result<File> {
     }
     Err(fail("another completion owns the anchor; retry this read"))
 }
-#[derive(Clone, Copy, PartialEq)]
-enum SaveStage {
-    BeforeFileSync,
-    BeforeRename,
-    AfterRename,
-    AfterDirectorySync,
-}
 fn save_with(
     root: &Path,
     name: &str,
     value: &Value,
-    mut stage: impl FnMut(SaveStage) -> Result<()>,
+    mut stage: impl FnMut(Stage) -> std::io::Result<()>,
 ) -> Result<()> {
     let parent = directory(root)?;
-    let temporary = root.join(format!(".pending-{}", workspace::random_nonce()?));
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .custom_flags(NOFOLLOW)
-        .open(&temporary)
-        .map_err(fail)?;
     let bytes = serde_json::to_vec(value).map_err(fail)?;
     if bytes.len() as u64 > MAX_JSON {
         return Err(fail("persisted JSON exceeds custody bound"));
     }
-    file.write_all(&bytes).map_err(fail)?;
-    stage(SaveStage::BeforeFileSync)?;
-    file.sync_all().map_err(fail)?;
-    stage(SaveStage::BeforeRename)?;
-    let named = fs::symlink_metadata(root).map_err(fail)?;
-    let opened = parent.metadata().map_err(fail)?;
-    if (named.dev(), named.ino()) != (opened.dev(), opened.ino()) {
-        return Err(fail("custody directory changed"));
-    }
-    fs::rename(&temporary, root.join(name)).map_err(fail)?;
-    stage(SaveStage::AfterRename)?;
-    parent.sync_all().map_err(fail)?;
-    stage(SaveStage::AfterDirectorySync)
+    mini_sdk::durable::replace_with(&root.join(name), &bytes, Perm::Private, &mut |at| {
+        if at == Stage::BeforeCommit {
+            let named = fs::symlink_metadata(root)?;
+            let opened = parent.metadata()?;
+            if (named.dev(), named.ino()) != (opened.dev(), opened.ino()) {
+                return Err(std::io::Error::other("custody directory changed"));
+            }
+        }
+        stage(at)
+    })
+    .map_err(fail)
 }
 fn save(root: &Path, name: &str, value: &Value) -> Result<()> {
     save_with(root, name, value, |_| Ok(()))
@@ -1383,10 +1358,10 @@ mod tests {
     #[test]
     fn process_crashes_preserve_old_or_complete_new_anchor() {
         for stage in [
-            SaveStage::BeforeFileSync,
-            SaveStage::BeforeRename,
-            SaveStage::AfterRename,
-            SaveStage::AfterDirectorySync,
+            Stage::BeforeFileSync,
+            Stage::BeforeCommit,
+            Stage::AfterCommit,
+            Stage::AfterDirectorySync,
         ] {
             let (root, ticket) = setup(1);
             let status = Command::new(std::env::current_exe().unwrap())
@@ -1397,7 +1372,7 @@ mod tests {
                 .unwrap()
                 .status;
             assert_eq!(status.code(), Some(73));
-            let expected = if matches!(stage, SaveStage::BeforeFileSync | SaveStage::BeforeRename) {
+            let expected = if matches!(stage, Stage::BeforeFileSync | Stage::BeforeCommit) {
                 1
             } else {
                 2

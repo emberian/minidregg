@@ -528,7 +528,7 @@ fn pin(root: &Path, reference: &Value) -> Result<String> {
         .as_object_mut()
         .ok_or("reference is not an object")?
         .remove("sharedName");
-    super::private_file(
+    crate::create_private(
         &root.join("refs").join(format!("{name}.json")),
         &serde_json::to_vec(&reference).map_err(|e| e.to_string())?,
     )?;
@@ -536,7 +536,7 @@ fn pin(root: &Path, reference: &Value) -> Result<String> {
 }
 
 fn json_file(path: &Path, value: &Value) -> Result<()> {
-    super::private_file(
+    crate::create_private(
         path,
         &serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?,
     )
@@ -1043,7 +1043,7 @@ mod tests {
         super::super::make_private_dir(&root).unwrap();
         super::super::make_private_dir(&root.join("refs")).unwrap();
         let write = |name: &str, target: &str, cap: &str| {
-            super::super::private_file(&root.join("refs").join(format!("{}.json", super::super::ref_file(name))),
+            crate::create_private(&root.join("refs").join(format!("{}.json", super::super::ref_file(name))),
                 &serde_json::to_vec(&json!({"type":"minidregg-participant-reference-v1","name":name,"kind":"object",
                     "target":target,"observeCapability":cap,"operationCapability":cap,"controlCapability":null,
                     "room":"member"})).unwrap()).unwrap();

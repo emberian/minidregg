@@ -308,12 +308,7 @@ pub(crate) fn reserve(
     });
     let mut bytes = serde_json::to_vec_pretty(&saved).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
-    let temp = root.join(format!(".pending-{}.json", hex(&random_bytes::<16>()?)));
-    create_private(&temp, &bytes)?;
-    fs::hard_link(&temp, &path)
-        .map_err(|error| format!("cannot publish namespace record: {error}"))?;
-    fs::remove_file(&temp)
-        .map_err(|error| format!("cannot retire namespace staging record: {error}"))?;
+    create_private(&path, &bytes).map_err(|error| format!("cannot publish namespace record: {error}"))?;
     sync_directory_ancestors(root)?;
     Ok(Reservation {
         request_digest,
@@ -409,15 +404,8 @@ pub(crate) fn bind_attempt(
     });
     let mut bytes = serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
-    let temp = root.join(format!(
-        ".pending-binding-{}.json",
-        hex(&random_bytes::<16>()?)
-    ));
-    create_private(&temp, &bytes)?;
-    fs::hard_link(&temp, &path)
+    create_private(&path, &bytes)
         .map_err(|error| format!("cannot publish namespace attempt binding: {error}"))?;
-    fs::remove_file(&temp)
-        .map_err(|error| format!("cannot retire namespace binding staging record: {error}"))?;
     sync_directory_ancestors(root)?;
     Ok(AttemptBinding {
         attempt_path,

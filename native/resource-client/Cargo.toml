@@ -12,6 +12,8 @@ path = "src/main.rs"
 
 [dependencies]
 libc = "=0.2.189"
+# Client-general custody primitives: durable writes, flock, secret-file loading, hex, decimals.
+mini-sdk = { package = "minidregg-mini-sdk", path = "../mini-sdk", features = ["native"] }
 bs58 = "=0.5.1"
 compatible-upgrade-custody = { package = "minidregg-compatible-upgrade-custody", path = "../compatible-upgrade-custody" }
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "fast", "zeroize"] }

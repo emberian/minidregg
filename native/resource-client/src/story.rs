@@ -624,7 +624,7 @@ fn set_current(session: &Session, name: &str) -> Result<(), Done> {
     private_dirs(&story_dir(session)).map_err(error)?;
     let path = story_dir(session).join("current");
     let _ = fs::remove_file(&path);
-    crate::workspace::private_file(&path, format!("{name}\n").as_bytes()).map_err(error)
+    crate::create_private(&path, format!("{name}\n").as_bytes()).map_err(error)
 }
 
 fn field<'a>(record: &'a Value, key: &str) -> Result<&'a str, Done> {

@@ -685,7 +685,7 @@ fn renew(common: &Common, pin: &Pin) -> Result<()> {
         return Err("the retained memo is not canonical".into());
     }
     host_reads_back(common, &memo, &text, &scratch)?;
-    workspace::private_file(&scratch.join("renewal-quote.json"),
+    crate::create_private(&scratch.join("renewal-quote.json"),
         &serde_json::to_vec_pretty(&json!({"type":"minidregg-renewal-payment-v1",
             "miniKey":record["miniKey"],"memo":text,"quote":terms.quote,
             "bootstrapUrl":common.bootstrap_url,"bootstrapMetadata":terms.bootstrap_metadata}))
@@ -815,7 +815,7 @@ fn admitted_workspace(common: &Common, record: &Value, entry: &Value, ids: &Valu
                 return Err("retained member birth context differs".into());
             }
         } else {
-            workspace::private_file(&context_path, &serde_json::to_vec_pretty(value).map_err(|e|e.to_string())?)?;
+            crate::create_private(&context_path, &serde_json::to_vec_pretty(value).map_err(|e|e.to_string())?)?;
         }
         let context_path_json = json!(context_path);
         if workspace_pin.get("birthContext") != Some(&context_path_json) {
@@ -830,7 +830,7 @@ fn admitted_workspace(common: &Common, record: &Value, entry: &Value, ids: &Valu
                     return Err("staged workspace context attachment differs".into());
                 }
             } else {
-                workspace::private_file(&staged, &serde_json::to_vec_pretty(&complete).map_err(|e|e.to_string())?)?;
+                crate::create_private(&staged, &serde_json::to_vec_pretty(&complete).map_err(|e|e.to_string())?)?;
             }
             fs::rename(&staged, root.join("workspace.json")).map_err(|e|e.to_string())?;
             fs::File::open(&root).and_then(|f| f.sync_all()).map_err(|e|e.to_string())?;
@@ -1106,10 +1106,10 @@ mod tests {
         let root = std::env::temp_dir().join(format!("paid-join-workspace-{}", workspace::random_nonce().unwrap()));
         workspace::make_private_dir(&root).unwrap();
         let common = Common {host:root.join("Host"),config:root.join("config.json"),view:None,quote:None,bootstrap_url:None,weeks:"1".into(),starter:None,directory:root.clone()};
-        workspace::private_file(&common.host, b"fixture host image").unwrap();
-        workspace::private_file(&common.config, br#"{"factoryId":10,"domain":8501}"#).unwrap();
+        crate::create_private(&common.host, b"fixture host image").unwrap();
+        crate::create_private(&common.config, br#"{"factoryId":10,"domain":8501}"#).unwrap();
         let key_path = root.join("mini.key");
-        workspace::private_file(&key_path, &[42u8;32]).unwrap();
+        crate::create_private(&key_path, &[42u8;32]).unwrap();
         let public = hex(&SigningKey::from_bytes(&[42u8;32]).verifying_key().to_bytes());
         let ssh = [43u8;32];
         let record = json!({"miniKey":public,"miniKeyFile":key_path,"sshKey":hex(&ssh)});
@@ -1121,7 +1121,7 @@ mod tests {
             "genesis":{"factoryId":"10","domain":"8501","untouchedOriginalSeedData":[1,2]},
             "template":{"issuer":"5","ownerBudget":"1000","lifetime":"100"},
             "feePayer":"999","sourceCapabilities":["998"],"funding":[{"sponsor":"999"}],"grants":[]});
-        workspace::private_file(&context_path, &serde_json::to_vec(&context).unwrap()).unwrap();
+        crate::create_private(&context_path, &serde_json::to_vec(&context).unwrap()).unwrap();
         (common,record,entry,ids,context_path)
     }
 
@@ -1245,7 +1245,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("mini-quote-{}-{}",std::process::id(),workspace::random_nonce().unwrap()));
         workspace::make_private_dir(&root).unwrap();
         let config = root.join("config.json");
-        workspace::private_file(&config,br#"{"domain":"7"}"#).unwrap();
+        crate::create_private(&config,br#"{"domain":"7"}"#).unwrap();
         let pin = Pin {address:[2;32],login:"mini@example.test".into()};
         let quote = json!({"type":"minidregg-pay-enrollment-quote-v1","miniKey":hex(&[1;32]),
             "mode":"enrol","requestedWeeks":"1","grantedWeeks":"1","priceReserved":false,

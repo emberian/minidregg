@@ -18,11 +18,7 @@ fn increment(value: &str) -> Result<String> {
     Err("document epoch exceeds supported natural range".into())
 }
 fn replace_json(path:&Path,value:&Value)->Result<()> {
-    let parent=path.parent().ok_or("publication lacks directory")?;
-    let temp=parent.join(format!(".publication-{}",ws::random_nonce()?));
-    ws::private_file(&temp,&serde_json::to_vec_pretty(value).map_err(|e|e.to_string())?)?;
-    fs::rename(&temp,path).map_err(|e|e.to_string())?;
-    fs::File::open(parent).and_then(|f|f.sync_all()).map_err(|e|e.to_string())
+    crate::fsio::replace_private(path,&serde_json::to_vec_pretty(value).map_err(|e|e.to_string())?)
 }
 pub(super) fn active_home(home:&Path)->Result<PathBuf> {
     let pointer=home.join("current-epoch.json");

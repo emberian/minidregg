@@ -95,7 +95,7 @@ fn write_json(path: &Path, value: &Value) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| format!("{}: {error}", parent.display()))?;
     }
-    workspace::private_file(path, &bytes)
+    crate::create_private(path, &bytes)
 }
 
 fn ref_exists(root: &Path, name: &str) -> bool {
@@ -226,6 +226,7 @@ fn propose_and_submit(root: &Path, ws: &Value, id: &str, request: &Value) -> Res
             // A previous run stopped before it signed: nothing was sent.
             fs::rename(&attempt, root.join("attempts").join(format!("{id}-unsent-{}", workspace::random_nonce()?)))
                 .map_err(|error| error.to_string())?;
+            crate::fsio::sync_parent(&attempt)?;
         }
         workspace::submit_intent(root, ws, &proposal.join("intent.json"), "intent", false, Some(&attempt))?;
     }
@@ -447,7 +448,7 @@ fn adopt_window(root: &Path, ws: &Value, name: &str, room: &Room, inbox: &Path) 
         value["name"] = json!(guest);
         let mut bytes = serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?;
         bytes.push(b'\n');
-        workspace::private_file(&file(&guest), &bytes)?;
+        crate::create_private(&file(&guest), &bytes)?;
     }
     let previous = workspace::reference(root, name)?;
     let value = workspace::bounded_json(&source)?;
@@ -480,7 +481,7 @@ fn switch_window(root: &Path, name: &str, previous: &Value, successor: &Value,
         workspace::private_dir(&directory)?;
     }
     let archive = replaced.join(format!("{}-{}.json", workspace::ref_file(name), workspace::random_nonce()?));
-    workspace::private_file(&archive, &serde_json::to_vec(previous).map_err(|e| e.to_string())?)?;
+    crate::create_private(&archive, &serde_json::to_vec(previous).map_err(|e| e.to_string())?)?;
     let current = root.join("refs").join(format!("{}.json", workspace::ref_file(name)));
     workspace::publish_retained_json(&current, successor, Some(previous))?;
     after_switch()?;
@@ -1028,7 +1029,7 @@ mod tests {
         successor["observeCapability"]=json!("92");successor["operationCapability"]=json!("92");
         successor["creditWindow"]=note.clone();
         let path = root.join("refs/lab.json");
-        workspace::private_file(&path,&serde_json::to_vec(&previous).unwrap()).unwrap();
+        crate::create_private(&path,&serde_json::to_vec(&previous).unwrap()).unwrap();
         assert!(switch_window(&root,"lab",&previous,&successor,&note,||Err("interrupted".into())).is_err());
         assert_eq!(workspace::reference(&root,"lab").unwrap(),successor);
         assert!(!window_note(&root,"lab").exists());

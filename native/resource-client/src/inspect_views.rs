@@ -35,7 +35,7 @@ fn render(root: &Path, workspace: &Value, view: &str, input: &Value, json_out: b
     let stem = format!("{}-{view}", random_nonce()?);
     let input_path = dir.join(format!("{stem}.json"));
     let output_path = dir.join(format!("{stem}.out.json"));
-    private_file(
+    create_private(
         &input_path,
         &serde_json::to_vec(input).map_err(|error| error.to_string())?,
     )?;
@@ -406,7 +406,7 @@ fn render_quiet(root: &Path, workspace: &Value, input: &Value) -> Result<Value> 
     }
     let stem = format!("{}-why-probe", random_nonce()?);
     let input_path = dir.join(format!("{stem}.json"));
-    private_file(&input_path, &serde_json::to_vec(input).map_err(|error| error.to_string())?)?;
+    create_private(&input_path, &serde_json::to_vec(input).map_err(|error| error.to_string())?)?;
     inspect(
         &member_path(workspace, "host")?,
         &member_path(workspace, "config")?,

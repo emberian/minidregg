@@ -9,7 +9,7 @@ fn dir(root: &Path, id: &str) -> Result<PathBuf> {
     Ok(root.join("web-creates").join(id))
 }
 fn save(path: &Path, value: &Value) -> Result<()> {
-    private_file(path, &serde_json::to_vec(value).map_err(|e| e.to_string())?)
+    create_private(path, &serde_json::to_vec(value).map_err(|e| e.to_string())?)
 }
 fn session(root: &Path, workspace: &Value, id: &str) -> Result<(PathBuf, Value)> {
     let d = dir(root, id)?;

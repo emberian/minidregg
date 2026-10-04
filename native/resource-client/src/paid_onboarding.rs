@@ -156,7 +156,7 @@ pub(crate) fn reconcile(directory:&Path,record:&Value,setup:&Value,account:&Valu
         "selectionName":name,"evidence":evidence,"files":files});
     let journal_name=format!("paid-custody-{}.json",workspace::random_nonce()?);
     let journal_path=directory.join(&journal_name);
-    workspace::private_file(&journal_path,&serde_json::to_vec_pretty(&journal).map_err(|e|e.to_string())?)?;
+    crate::create_private(&journal_path,&serde_json::to_vec_pretty(&journal).map_err(|e|e.to_string())?)?;
     publish(&directory.join(ACTIVE),&json!({"type":TYPE,"journal":journal_name,
         "journalSha256":host_image_sha256(&journal_path)?,"complete":false}))?;
     replay(directory,&origin)

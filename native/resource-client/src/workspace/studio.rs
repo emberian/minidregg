@@ -506,13 +506,13 @@ pub(crate) fn snapshot(root: &Path, workspace: &Value, id: &str) -> Result<Value
     let mut sources = Vec::new();
     for (index, (bytes, source)) in opened.into_iter().enumerate() {
         let path = dir.join(format!("module-{index}.bend"));
-        private_file(&path, &bytes)?;
+        create_private(&path, &bytes)?;
         let module = &manifest.modules[index];
         modules.push(json!({"name":module.name,"sourcePath":path,"imports":module.imports.iter().map(|i|json!({"alias":i.alias,"module":i.module.to_string()})).collect::<Vec<_>>() }));
         sources.push(source);
     }
     let input = json!({"schema":"dregg.bend.package-input.v1","entryModule":manifest.entry_module.to_string(),"entryDefinition":manifest.entry_definition,"modules":modules});
-    private_file(
+    create_private(
         &dir.join("package-input.json"),
         &serde_json::to_vec(&input).map_err(|e| e.to_string())?,
     )?;

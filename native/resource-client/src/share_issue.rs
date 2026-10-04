@@ -259,12 +259,7 @@ pub(super) fn expect_reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     }
 }
 
-pub(super) fn retain_json(path: &Path, value: &Value) -> Result<()> {
-    let mut bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
-    bytes.push(b'\n');
-    create_private(path, &bytes)?;
-    sync_directory_ancestors(path.parent().ok_or("share issue evidence has no parent")?)
-}
+pub(super) use crate::fsio::retain_json;
 
 struct Retained {
     host: PathBuf,

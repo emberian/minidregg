@@ -159,17 +159,7 @@ fn read_json(path: &Path) -> Result<Value> {
 fn save_state(pending: &Path, state: &Value) -> Result<()> {
     let mut bytes = serde_json::to_vec_pretty(state).map_err(|e| e.to_string())?;
     bytes.push(b'\n');
-    let mut temp = None;
-    for number in 0..1000 {
-        let path = pending.join(format!("state-{number:03}.tmp"));
-        if !path.exists() {
-            temp = Some(path);
-            break;
-        }
-    }
-    let temp = temp.ok_or("exhausted durable state temporary names")?;
-    create_private(&temp, &bytes)?;
-    fs::rename(&temp, pending.join("state.json"))
+    crate::fsio::replace_private(&pending.join("state.json"), &bytes)
         .map_err(|e| format!("cannot replace durable worker state: {e}"))?;
     sync_directory_ancestors(pending)
 }
@@ -667,16 +657,13 @@ pub(super) fn upgrade_host(request: UpgradeRequest<'_>) -> Result<()> {
         Some(utf8_path(&evidence_path)?),
         Some(&evidence_sha),
     )?;
-    let temp_pin = (1..=999)
-        .map(|index| state_dir.join(format!("pin-upgrade-{index:03}.tmp")))
-        .find(|path| !path.exists())
-        .ok_or("exhausted host upgrade temporary pin names")?;
-    write_json_new(&temp_pin, &next_pin)?;
-    sync_directory_ancestors(state_dir)?;
+    let mut next_pin_bytes = serde_json::to_vec_pretty(&next_pin)
+        .map_err(|error| format!("cannot render the upgraded host pin: {error}"))?;
+    next_pin_bytes.push(b'\n');
     if read_json(&pin_path)? != old_pin || file_digest(&pin_path)? != old_pin_sha {
         return Err("worker pin changed during host upgrade".into());
     }
-    fs::rename(&temp_pin, &pin_path)
+    crate::fsio::replace_private(&pin_path, &next_pin_bytes)
         .map_err(|e| format!("cannot activate upgraded host pin: {e}"))?;
     sync_directory_ancestors(state_dir)?;
     println!("host upgrade pinned; retained Sending call unchanged; no submit or ACK performed");

@@ -187,23 +187,18 @@ impl Session {
     }
 }
 
-fn retain_json(path: &Path, value: &Value) -> Result<()> {
-    let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
-    bytes.push(b'\n');
-    create_private(path, &bytes)
-}
 
 /// Publish complete decision evidence before a receipt can acknowledge it to the
-/// watcher. A crash leaves an unused stage or the complete immutable value.
+/// watcher. A crash leaves the name absent or the complete immutable value.
 fn publish_decision_json(path: &Path, value: &Value) -> Result<()> {
     if path.exists() {
         return if workspace::bounded_json(path)? == *value { Ok(()) }
             else { Err("retained payment decision differs; refusing to replace it".into()) };
     }
     let parent = path.parent().ok_or("payment decision has no parent")?;
-    let stage = parent.join(format!(".decision-stage-{}.json", workspace::random_nonce()?));
-    retain_json(&stage, value)?;
-    match fs::hard_link(&stage, path) {
+    let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
+    bytes.push(b'\n');
+    match mini_sdk::durable::create_new(path, &bytes, mini_sdk::durable::Perm::Private) {
         Ok(()) => {},
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
             if workspace::bounded_json(path)? != *value {
@@ -212,8 +207,6 @@ fn publish_decision_json(path: &Path, value: &Value) -> Result<()> {
         },
         Err(error) => return Err(format!("cannot publish payment decision: {error}")),
     }
-    sync_directory_ancestors(parent)?;
-    fs::remove_file(&stage).map_err(|error| format!("cannot remove own decision stage: {error}"))?;
     sync_directory_ancestors(parent)
 }
 
@@ -908,10 +901,7 @@ fn watch_config(session: &Session, out: &Path, options: WatchOptions) -> Result<
     }
     let mut bytes = serde_json::to_vec_pretty(&config).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
-    let temporary = out.with_extension("tmp");
-    let _ = fs::remove_file(&temporary);
-    create_private(&temporary, &bytes)?;
-    fs::rename(&temporary, out)
+    crate::fsio::replace_private(out, &bytes)
         .map_err(|error| format!("cannot install {}: {error}", out.display()))?;
     println!("{}", out.display());
     Ok(())

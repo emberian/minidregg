@@ -774,22 +774,8 @@ pub(crate) fn pin_config(path: &Path, bytes: &[u8]) -> Result<(), String> {
             }
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(path)
-                .map_err(|error| {
-                    format!("cannot create pinned config {}: {error}", path.display())
-                })?;
-            file.write_all(bytes)
-                .and_then(|()| file.sync_all())
-                .map_err(|error| {
-                    format!("cannot write pinned config {}: {error}", path.display())
-                })?;
-            fs::File::open(path.parent().ok_or("pinned config has no parent")?)
-                .and_then(|directory| directory.sync_all())
-                .map_err(|error| format!("cannot sync pinned config directory: {error}"))?;
+            crate::create_private(path, bytes)
+                .map_err(|error| format!("cannot pin config: {error}"))?;
         }
         Err(error) => {
             return Err(format!(

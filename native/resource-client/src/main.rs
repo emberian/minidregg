@@ -11,6 +11,8 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod fsio;
+pub(crate) use fsio::{copy_new, create_private, create_public, retain_json, sync_directory_ancestors};
 #[cfg(unix)]
 mod agent_lifetime_grant;
 mod trace;
@@ -936,33 +938,6 @@ fn utf8_path(path: &Path) -> Result<&str> {
         .ok_or_else(|| format!("path is not valid UTF-8: {}", path.display()))
 }
 
-pub(crate) fn create_private(path: &Path, bytes: &[u8]) -> Result<()> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options
-        .open(path)
-        .map_err(|error| format!("cannot create {}: {error}", path.display()))?;
-    file.write_all(bytes)
-        .and_then(|()| file.sync_all())
-        .map_err(|error| format!("cannot write {}: {error}", path.display()))
-}
-
-pub(crate) fn create_public(path: &Path, bytes: &[u8]) -> Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|error| format!("cannot create {}: {error}", path.display()))?;
-    file.write_all(bytes)
-        .and_then(|()| file.sync_all())
-        .map_err(|error| format!("cannot write {}: {error}", path.display()))
-}
-
 /// A signing seed: a regular file of exactly 32 bytes, owned by this process's
 /// user and inaccessible to group and others (checked on the opened file, so a
 /// rename between check and read cannot substitute another). The bytes are
@@ -1436,43 +1411,11 @@ fn create_dir(path: &Path) -> Result<()> {
 
 /// The native host may write call.bin without syncing it. A successful
 /// external submit must never precede a durable exact call and its pathname.
-fn sync_directory_ancestors(directory: &Path) -> Result<()> {
-    let mut ancestor = Some(absolute(directory)?);
-    while let Some(path) = ancestor {
-        File::open(&path)
-            .and_then(|file| file.sync_all())
-            .map_err(|error| {
-                format!("cannot sync attempt directory {}: {error}", path.display())
-            })?;
-        ancestor = path.parent().map(Path::to_path_buf);
-    }
-    Ok(())
-}
-
 fn sync_retained_call(directory: &Path, call: &Path) -> Result<()> {
     File::open(call)
         .and_then(|file| file.sync_all())
         .map_err(|error| format!("cannot sync exact call {}: {error}", call.display()))?;
     sync_directory_ancestors(directory)
-}
-
-fn copy_new(source: &Path, destination: &Path) -> Result<()> {
-    let mut input =
-        File::open(source).map_err(|error| format!("cannot open {}: {error}", source.display()))?;
-    let mut output = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(destination)
-        .map_err(|error| format!("cannot create {}: {error}", destination.display()))?;
-    io::copy(&mut input, &mut output)
-        .and_then(|_| output.sync_all())
-        .map_err(|error| {
-            format!(
-                "cannot copy {} to {}: {error}",
-                source.display(),
-                destination.display()
-            )
-        })
 }
 
 fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -2229,7 +2172,7 @@ pub(crate) fn observation_stale(host: &Path, config: &Path, generation: &Path) -
     let answered = host_files(host, config, &[Path::new("query"), &signed, &probe]);
     let decision = take_host_decision();
     if answered.is_err() {
-        let _ = fs::write(&probe, format!("{decision:?}\n"));
+        let _ = crate::fsio::replace_public(&probe, format!("{decision:?}\n").as_bytes());
     }
     if let Some(earlier) = earlier {
         note_host_decision(earlier);

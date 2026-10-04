@@ -145,12 +145,10 @@ pub(super) fn show(root: &Path, workspace: &Value, name: &str, role: &str) -> Re
         make_private_dir(&directory)?;
     }
     private_dir(&directory)?;
-    let staged = directory.join(format!(".world-{}-{}", ref_file(name), random_nonce()?));
-    private_file(
-        &staged,
+    crate::fsio::replace_private(
+        &seen_file(root, name)?,
         &serde_json::to_vec(&view).map_err(|e| e.to_string())?,
     )?;
-    fs::rename(staged, seen_file(root, name)?).map_err(|e| e.to_string())?;
     print_json(&json!({"name":name,"target":reference["target"],"judgedAt":challenge,"value":data}))
 }
 
@@ -549,8 +547,8 @@ pub(super) fn call(root: &Path, workspace: &Value, id: &str, name: &str, method_
         "run":{"programId":program,"sample":dry["sample"],"output":dry["output"],"steps":dry["steps"]}});
     let mut summary = propose_request(root,workspace,&proposal,id,None,true)?;
     summary["compute"]=consent.clone();
-    private_file(&directory.join("compute-consent.json"),&serde_json::to_vec(&consent).map_err(|e|e.to_string())?)?;
-    private_file(&directory.join("method-request.json"),&serde_json::to_vec(&selector).map_err(|e|e.to_string())?)?;
+    create_private(&directory.join("compute-consent.json"),&serde_json::to_vec(&consent).map_err(|e|e.to_string())?)?;
+    create_private(&directory.join("method-request.json"),&serde_json::to_vec(&selector).map_err(|e|e.to_string())?)?;
     print_json(&summary)
 }
 
@@ -628,7 +626,7 @@ pub(super) fn program_create(root: &Path, workspace: &Value, name: &str,
             return Err("program name already pins different immutable code/ABI".into());
         }
     } else {
-        private_file(&path,&serde_json::to_vec(&verdict).map_err(|e|e.to_string())?)?;
+        create_private(&path,&serde_json::to_vec(&verdict).map_err(|e|e.to_string())?)?;
     }
     super::create(root,workspace,name,"nock",predicate,room,"object",None,Some(&path),None)
 }

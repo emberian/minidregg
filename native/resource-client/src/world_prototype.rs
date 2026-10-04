@@ -98,8 +98,8 @@ pub(super) fn construct(root: &Path, workspace: &Value, id: &str, target_name: &
         "run":{"programId":program,"sample":dry["sample"],"output":dry["output"],"steps":dry["steps"]}});
     let construction=json!({"program":program,"origins":origins,"steps":dry["steps"],
         "definition":result["definition"],"definitionBytes":result["definitionBytes"]});
-    private_file(&selector_path,&serde_json::to_vec(&selector).map_err(|e|e.to_string())?)?;
-    private_file(&result_path,&serde_json::to_vec(&construction).map_err(|e|e.to_string())?)?;
+    create_private(&selector_path,&serde_json::to_vec(&selector).map_err(|e|e.to_string())?)?;
+    create_private(&result_path,&serde_json::to_vec(&construction).map_err(|e|e.to_string())?)?;
     let mut summary=propose_request(root,workspace,&proposal,id,None,true)?;
     summary["construction"]=construction;
     print_json(&summary)

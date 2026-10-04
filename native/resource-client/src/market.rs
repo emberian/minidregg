@@ -332,7 +332,7 @@ fn propose_writes(root: &Path, ws: &Value, name: &str, id: &str, actions: Vec<Va
     let request = json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
         "targets":[{"name":name,"payload":{"type":"scalar","actions":actions}}]});
     let path = root.join("sources").join(format!("market-{id}.json"));
-    workspace::private_file(&path, &serde_json::to_vec(&request).map_err(|e| e.to_string())?)?;
+    crate::create_private(&path, &serde_json::to_vec(&request).map_err(|e| e.to_string())?)?;
     workspace::propose(root, ws, &path, id, None)
 }
 
@@ -367,7 +367,7 @@ pub(crate) fn open(root: &Path, ws: &Value, name: &str, close: &str, reveal_end:
     let founder = member(ws, "subject")?.to_owned();
     let predicate = law(&founder, close, reveal_end, supply)?;
     let law_path = root.join("sources").join(format!("market-law-{name}-{}.json", workspace::random_nonce()?));
-    workspace::private_file(&law_path, &serde_json::to_vec(&predicate).map_err(|e| e.to_string())?)?;
+    crate::create_private(&law_path, &serde_json::to_vec(&predicate).map_err(|e| e.to_string())?)?;
     // K-FIELD-CLOSURE: the market cell declares exactly the fields its law and the
     // runner write (the parameters 1-5 and each slot's six), and is born holding none.
     workspace::create(root, ws, name, "declared", &law_path, None, "object", None, None, Some(&declared_fields()))?;
@@ -416,7 +416,7 @@ pub(crate) fn bid(root: &Path, ws: &Value, name: &str, price: &str, qty: &str, i
         "slot":k,"price":price.to_string(),"qty":qty.to_string(),"blinder":decimal(&blinder),
         "commit":commit,"proposal":id});
     let path = openings_dir(root, name)?.join(format!("{id}.json"));
-    workspace::private_file(&path, &serde_json::to_vec_pretty(&opening).map_err(|e| e.to_string())?)?;
+    crate::create_private(&path, &serde_json::to_vec_pretty(&opening).map_err(|e| e.to_string())?)?;
     let me = member(ws, "subject")?;
     let f = slot_fields(k);
     propose_writes(root, ws, name, id, vec![

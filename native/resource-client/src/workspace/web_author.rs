@@ -34,7 +34,7 @@ fn directory(root: &Path, id: &str) -> Result<PathBuf> {
 }
 
 fn save(path: &Path, value: &Value) -> Result<()> {
-    private_file(path, &serde_json::to_vec(value).map_err(|e| e.to_string())?)
+    create_private(path, &serde_json::to_vec(value).map_err(|e| e.to_string())?)
 }
 
 pub(crate) fn open(root: &Path, workspace: &Value, name: &str) -> Result<Edit> {

@@ -233,7 +233,7 @@ pub(super) fn status(root: &Path, pin: &Value, name: &str) -> Result<Value> {
     let host = workspace::workspace_host(pin)?;
     let config = workspace::member_path(pin, "config")?;
     let socket = workspace::member_path(pin, "socket")?;
-    workspace::private_file(
+    crate::create_private(
         &attempt.join("app-request.json"),
         &serde_json::to_vec(&request).map_err(|e| e.to_string())?,
     )?;
@@ -262,7 +262,7 @@ pub(super) fn status(root: &Path, pin: &Value, name: &str) -> Result<Value> {
     }
     let payload = pair(&request_bytes, &pair(&auth, &observed)?)?;
     let plan_bytes = crate::key_rotation::call(&host, &socket, &config, PLAN_OP, &payload)?;
-    workspace::private_file(&attempt.join("app-plan.bin"), &plan_bytes)?;
+    crate::create_private(&attempt.join("app-plan.bin"), &plan_bytes)?;
     let plan = crate::inspect(
         &host,
         &config,
@@ -280,7 +280,7 @@ pub(super) fn status(root: &Path, pin: &Value, name: &str) -> Result<Value> {
         &challenge,
     )?;
     let signatures = crate::sign_headers(&key, &headers);
-    workspace::private_file(
+    crate::create_private(
         &attempt.join("app-signatures.json"),
         &serde_json::to_vec(&signatures).map_err(|e| e.to_string())?,
     )?;

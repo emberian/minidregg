@@ -27,9 +27,9 @@
 use super::{Args, HostDecision, Result};
 use serde_json::{json, Value};
 use std::ffi::OsString;
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::{self, BufRead, IsTerminal, Read, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -2495,24 +2495,10 @@ fn write_once(path: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         private_dir(parent)?;
     }
-    match OpenOptions::new().write(true).create_new(true).mode(0o600).open(path) {
-        Ok(mut file) => file
-            .write_all(bytes)
-            .and_then(|()| file.sync_all())
-            .map_err(|e| format!("cannot write {}: {e}", path.display())),
-        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-            let existing = fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-            if existing == bytes {
-                Ok(())
-            } else {
-                Err(format!(
-                    "{} already holds a different request; choose a new ID",
-                    path.display()
-                ))
-            }
-        }
-        Err(e) => Err(format!("cannot create {}: {e}", path.display())),
-    }
+    crate::fsio::retain_exact(path, bytes, || {
+        format!("{} already holds a different request; choose a new ID", path.display())
+    })
+    .map(|_| ())
 }
 
 fn nonce() -> String {

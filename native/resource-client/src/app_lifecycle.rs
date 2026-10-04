@@ -506,7 +506,7 @@ mod tests {
         directory(&phase).unwrap();
         let attempt = root.join("attempts").join(format!("phase-{index}"));
         directory(&attempt).unwrap();
-        private_file(&attempt.join("call.bin"),b"exact").unwrap();
+        create_private(&attempt.join("call.bin"),b"exact").unwrap();
         retain(&phase.join("prepared.json"),&json!({"attempt":attempt,
             "summary":{"delegation":{"childCapability":(980000+index).to_string()}}})).unwrap();
         attempt
@@ -656,7 +656,7 @@ mod tests {
         let _guard = lock(&temp.join(".lock")).unwrap();
         let p = temp.join("record.json");
         let v = json!({"attempt":"exact"});
-        private_file(&temp.join(".stage-orphan"), b"torn").unwrap();
+        create_private(&temp.join(".stage-orphan"), b"torn").unwrap();
         retain(&p, &v).unwrap();
         retain(&p, &v).unwrap();
         assert!(retain(&p, &json!({"attempt":"other"})).is_err());

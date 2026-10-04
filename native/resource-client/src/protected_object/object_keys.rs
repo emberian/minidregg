@@ -12,9 +12,7 @@ use ring::rand::{SecureRandom, SystemRandom};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
-    fs::{self, File, OpenOptions},
-    io::Write,
-    os::unix::fs::OpenOptionsExt,
+    fs,
     path::{Path, PathBuf},
 };
 use zeroize::{Zeroize, Zeroizing};
@@ -120,31 +118,7 @@ impl Store {
                 },
             )
             .map_err(|_| "object state encryption failed")?;
-        let mut suffix = [0; 16];
-        SystemRandom::new()
-            .fill(&mut suffix)
-            .map_err(|_| "randomness unavailable")?;
-        let tmp = self
-            .path
-            .with_extension(format!("object-tmp-{}", hex(&suffix)));
-        let mut f = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&tmp)
-            .map_err(|e| e.to_string())?;
-        f.write_all(&[header, ct].concat())
-            .and_then(|_| f.sync_all())
-            .map_err(|e| e.to_string())?;
-        fs::rename(&tmp, &self.path).map_err(|e| e.to_string())?;
-        File::open(
-            self.path
-                .parent()
-                .filter(|p| !p.as_os_str().is_empty())
-                .unwrap_or(Path::new(".")),
-        )
-        .and_then(|d| d.sync_all())
-        .map_err(|e| e.to_string())?;
+        crate::fsio::replace_private(&self.path, &[header, ct].concat())?;
         self.healthy = true;
         Ok(())
     }

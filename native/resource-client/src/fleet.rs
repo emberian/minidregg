@@ -8,7 +8,7 @@
 
 use crate::workspace::{self, ImportInput, InitIdentity};
 use crate::{
-    absolute, create_private, decode_hex, hex, path, print_json, read_secret, session_invoke,
+    absolute, decode_hex, hex, path, print_json, read_secret, session_invoke,
     sync_directory_ancestors, transport, Args, Result, SOCKET,
 };
 use ed25519_dalek::Signer;
@@ -86,22 +86,17 @@ fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     }
 }
 
-fn retain(path: &Path, bytes: &[u8]) -> Result<()> {
-    if path.exists() {
-        if crate::agent_reserve::bounded(path, transport::HOST_MAX_FRAME)? != bytes {
-            return Err(format!("retained fleet artifact changed: {}", path.display()));
-        }
-        return Ok(());
-    }
-    create_private(path, bytes)?;
-    sync_directory_ancestors(path.parent().ok_or("fleet artifact lacks parent")?)
-}
-
 fn retain_json(path: &Path, value: &Value) -> Result<()> {
     let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
     retain(path, &bytes)
 }
+
+fn retain(path: &Path, bytes: &[u8]) -> Result<()> {
+    crate::fsio::retain_exact(path, bytes, || format!("retained fleet artifact changed: {}", path.display()))?;
+    sync_directory_ancestors(path.parent().ok_or("fleet artifact lacks parent")?)
+}
+
 
 pub(crate) fn read_json(path: &Path) -> Result<Value> {
     workspace::bounded_json(path)
@@ -369,7 +364,7 @@ pub(crate) fn operation_record(
     let value = json!({"type":"minidregg-exact-operation-v1","kind":kind,
         "identity":identity,"binding":binding,"attempt":attempt,"nonce":nonce});
     // create_new, file fsync and parent fsync: concurrent callers cannot both win.
-    workspace::private_file(&path, &serde_json::to_vec_pretty(&value).map_err(|e| e.to_string())?)?;
+    crate::create_private(&path, &serde_json::to_vec_pretty(&value).map_err(|e| e.to_string())?)?;
     sync_directory_ancestors(path.parent().ok_or("operation record has no parent")?)?;
     Ok((value, true))
 }
@@ -1297,8 +1292,8 @@ mod exact_operation_tests {
             for name in ["refs", "attempts", "sources", "proposals", "operations"] {
                 workspace::make_private_dir(&root.join(name)).unwrap();
             }
-            workspace::private_file(&root.join("config.json"), b"{}").unwrap();
-            workspace::private_file(&root.join("workspace.json"), &serde_json::to_vec(&json!({
+            crate::create_private(&root.join("config.json"), b"{}").unwrap();
+            crate::create_private(&root.join("workspace.json"), &serde_json::to_vec(&json!({
                 "type":"minidregg-participant-workspace-v1","subject":"7",
                 "host":root.join("host"),"config":root.join("config.json"),"key":root.join("key"),
                 "prerotation":false
@@ -1346,7 +1341,7 @@ mod exact_operation_tests {
         let (_, old) = f.record("old", "workspace", binding.clone());
         let old_attempt = PathBuf::from(field(&old, "attempt").unwrap());
         workspace::make_private_dir(&old_attempt).unwrap();
-        workspace::private_file(&old_attempt.join("call.bin"), b"old signed call").unwrap();
+        crate::create_private(&old_attempt.join("call.bin"), b"old signed call").unwrap();
         retain_json(&old_attempt.join("outcome.json"), &receipt()).unwrap();
         let (path, new) = f.record("new", "workspace", binding);
         let answer = recover_operation(&f.0, &path).unwrap();
@@ -1363,9 +1358,9 @@ mod exact_operation_tests {
         let payment_attempt = PathBuf::from(field(&p, "attempt").unwrap());
         workspace::make_private_dir(&payment_attempt).unwrap();
         // Even an unrelated workspace call file cannot mark a fleet submit.
-        workspace::private_file(&payment_attempt.join("call.bin"), b"not fleet ingress").unwrap();
+        crate::create_private(&payment_attempt.join("call.bin"), b"not fleet ingress").unwrap();
         assert_eq!(recover_operation(&f.0, &payment).unwrap()["status"], "not-submitted");
-        workspace::private_file(&payment_attempt.join("ingress.bin"), b"signed payment ingress").unwrap();
+        crate::create_private(&payment_attempt.join("ingress.bin"), b"signed payment ingress").unwrap();
         retain_json(&payment_attempt.join("submit-marker.json"), &json!({"status":"may-have-submitted","ingressSha256":digest(b"signed payment ingress")})).unwrap();
         retain_json(&payment_attempt.join("submit.json"), &receipt()).unwrap();
         assert_eq!(recover_operation(&f.0, &payment).unwrap()["status"], "confirmed");
@@ -1389,12 +1384,12 @@ case "$2" in
  *) exit 72 ;;
 esac
 "##;
-        workspace::private_file(&host, script.as_bytes()).unwrap();
+        crate::create_private(&host, script.as_bytes()).unwrap();
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
         let (path, record) = f.record("lost-reply", "workspace", json!({"text":"repeated text"}));
         let attempt = PathBuf::from(field(&record, "attempt").unwrap());
         workspace::make_private_dir(&attempt).unwrap();
-        workspace::private_file(&attempt.join("call.bin"), b"signed-call-for-g7").unwrap();
+        crate::create_private(&attempt.join("call.bin"), b"signed-call-for-g7").unwrap();
         retain_json(&attempt.join("attempt.json"), &json!({"format":"minidregg-resource-client-attempt-v1",
             "host":host,"config":f.0.join("config.json")})).unwrap();
         let answer = recover_operation(&f.0, &path).unwrap();
@@ -1413,7 +1408,7 @@ esac
         let (path, record) = f.record("lookup-refused", "workspace", json!({"text":"g8"}));
         let attempt = PathBuf::from(field(&record, "attempt").unwrap());
         workspace::make_private_dir(&attempt).unwrap();
-        workspace::private_file(&attempt.join("call.bin"), b"signed call").unwrap();
+        crate::create_private(&attempt.join("call.bin"), b"signed call").unwrap();
         let refused = json!({"type":"refused","reason":"lookup-not-authorized"});
         // A prior lookup failed, and the next lookup is unavailable (no
         // transport manifest). Neither says whether the original call landed.

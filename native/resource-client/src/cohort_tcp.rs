@@ -11,10 +11,9 @@ use chacha20poly1305::{
 };
 use sha2::{Digest, Sha256};
 use std::{
-    fs::{File, OpenOptions},
+    fs::File,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
-    os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -270,19 +269,13 @@ fn adopt(_root: &Path, output: &Path, _p: &Profile, epoch: u64, plain: &[u8]) ->
     } else {
         persist(&record, plain)?;
     }
-    // Published AFTER durable adoption. This token is deliberately not another
-    // synced journal/receipt; a lost token is fail-closed until exact re-adoption.
+    // Published AFTER durable adoption. This token is not another journal/receipt;
+    // a lost token is fail-closed until exact re-adoption.
     let ready = output.join(format!("epoch-{epoch}.adopted"));
     if ready.exists() {
         read_private(&ready, 0)?;
     } else {
-        OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW)
-            .open(ready)
-            .map_err(|e| e.to_string())?;
+        crate::create_private(&ready, b"")?;
     }
     Ok(())
 }

@@ -27,7 +27,8 @@
 //! `mini clock --action view --workspace DIR` prints the clock view.
 
 use crate::agent_reserve::{field, private_bytes};
-use crate::workspace::{make_private_dir, private_file};
+use crate::workspace::make_private_dir;
+use crate::create_private;
 use crate::*;
 use serde_json::{json, Value};
 use std::os::unix::fs::OpenOptionsExt;
@@ -165,6 +166,7 @@ fn journal(ws: &Workspace, outcome: &Value, now: &str, slot: &str) -> Result<()>
     if fs::metadata(&path).map(|meta| meta.len() >= JOURNAL_LIMIT).unwrap_or(false) {
         fs::rename(&path, ws.dir.join(format!("{JOURNAL}.1")))
             .map_err(|error| format!("cannot rotate {}: {error}", path.display()))?;
+        crate::fsio::sync_parent(&path)?;
     }
     let height = outcome.get("acceptedCount").and_then(Value::as_str).unwrap_or("-");
     let verdict = match outcome.get("type").and_then(Value::as_str) {
@@ -287,8 +289,8 @@ fn tick(
     let attempt = attempts(ws)?.join(format!("t-{}", nonce()?));
     make_private_dir(&attempt)?;
     let asserted = json!({"now": now, "slot": slot});
-    private_file(&attempt.join("tick.json"), asserted.to_string().as_bytes())?;
-    private_file(&attempt.join("ingress.bin"), &ingress)?;
+    create_private(&attempt.join("tick.json"), asserted.to_string().as_bytes())?;
+    create_private(&attempt.join("ingress.bin"), &ingress)?;
     if abandon {
         let _ = invoke(ws, 128, &ingress)?;
         return Ok(json!({"type": "abandoned", "attempt": attempt, "asserted": asserted}));
@@ -327,7 +329,7 @@ fn init(mut args: Args) -> Result<Value> {
         "config": config, "key": key, "subject": subject, "capability": capability});
     let mut bytes = serde_json::to_vec_pretty(&value).map_err(|e| e.to_string())?;
     bytes.push(b'\n');
-    private_file(&dir.join("workspace.json"), &bytes)?;
+    create_private(&dir.join("workspace.json"), &bytes)?;
     make_private_dir(&dir.join(ATTEMPTS))?;
     Ok(value)
 }

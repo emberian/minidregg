@@ -328,11 +328,6 @@ fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn retain_json(path: &Path, value: &Value) -> Result<()> {
-    let mut bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
-    bytes.push(b'\n');
-    create_private(path, &bytes)
-}
 
 fn text<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
     value
