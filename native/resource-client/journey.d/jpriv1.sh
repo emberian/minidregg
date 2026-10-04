@@ -4,11 +4,14 @@
 # the client contract for stream appends and tails (the `say`/`tail` verbs are
 # P-CHAT's; they call the same sealing this hook drives with `--private`).
 #
-#   setup     alice, bob, carl, dave enrolled, provisioned, initialized; each
-#             friend's encryption key is read from its own `whoami`.
+#   setup     alice, bob, carl, dave enrolled, provisioned, initialized; alice, bob and
+#             carl made their keys on their own machine, dave's came from the hosted
+#             shell (so his record declares hosted custody); each friend's hybrid
+#             key id is read from its own `whoami`.
 #   room      alice founds `lab --private` (k^0 in her cache, the keys cell, her
-#             own wrap) and a public control room `pub`; invites bob with his
-#             encryption key (the grant + the wrap in one keys write); bob imports.
+#             own wrap) and a public control room `pub`; bob pins the founder key and
+#             hands alice his signed declaration; alice invites him (the grant, then the
+#             release records, the readback, and the wrap); bob imports.
 #   say       alice and bob each append a sealed line to their own stream in lab;
 #             each reads the other's line. Every sealed payload, on the wire (the
 #             signed intent) and in the tail view, is whole 64-byte blocks.
@@ -36,6 +39,16 @@
 #             plaintext; carl and alice `tail` each other's lines (P-CHAT wired to
 #             seal_for_room / open_in_room); the final Store scan counts them too.
 #   restart   the Host restarts; `audit` re-admits the Store; alice still opens.
+#
+# W1.9b / s9-rooms revision (2026-10-04): the rows are the CURRENT protocol -- hybrid X25519 +
+# ML-KEM-768 wraps (wrap/record v3), the out-of-band signed declaration (a member pins the
+# founder key and hands the founder its signed declaration BEFORE it is invited), the two-turn
+# release (<id>-bind then <id>-wraps), the declared-custody byte (a friend whose key a hosted
+# shell made is refused without --i-know even when no operator list names it), the founder-key
+# transition (rotate-key refuses a founder until `room transition`; members verify with no
+# re-pin) and `tail --json` stating privacy for the Discord mirror. DEVNET QUALITY; PRIVACY
+# NOT AUDITED. AUTHORED, NOT YET RUN against a real Host: see rooms-e2e.sh (one command) and
+# journey.d/jpriv1.expected.tsv (what a green run must show). Expect first-run corrections.
 #
 # Hook contract: journey.sh (executed). Last stdout line: the row table. Last
 # stderr line: the detail. Exit 0 only when every row is ok.
@@ -162,7 +175,18 @@ printf '%s\n' '{"type":"all","predicates":[]}' >"$SD/permit-all.json"
 declare -A SUBJ ENC
 for f in alice bob carl dave; do
   mkdir -p -m 700 "$H/$f"
-  ok setup "$f" "keygen mini.key"
+  if [ "$f" = dave ]; then
+    # dave is a hosted-shell friend: the shell's keygen leaves mini.key.hosted beside his key, so his
+    # signed key record DECLARES hosted custody (the operator list stays empty until the hosted rows).
+    ok setup "$f" "keygen mini.key"
+    check setup "dave's hosted keygen left the custody marker" test -f "$H/$f/keys/mini.key.hosted"
+  else
+    # alice, bob, carl keep their key on their own machine: `mini keygen` outside the shell.
+    mkdir -p -m 700 "$H/$f/keys"
+    raw setup "$f" "keygen (own machine: mini keygen, no hosted marker)" ok "$MINI" keygen \
+      --secret "$H/$f/keys/mini.key" --public "$H/$f/keys/mini.key.pub"
+    check setup "$f's own-machine keygen left no custody marker" test ! -e "$H/$f/keys/mini.key.hosted"
+  fi
   operator setup "CUSTODY: copy $f's secret into the sponsor home (enroll plan+seal sign with both keys)" \
     install -D -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/jp-$f.key"
   ok setup sponsor "enroll plan jp-$f jp-$f.key $(xxd -p -c 256 "$H/$f/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$f/keys/mini.key.next.cosign")"
@@ -179,11 +203,26 @@ for f in alice bob carl dave; do
   ok setup "$f" "init mini.key ${SUBJ[$f]}"
   ok setup "$f" "whoami"
   ENC[$f]=$(jq -r '.encryptionKey // empty' "$OUT")
-  check setup "$f's whoami prints a 32-byte encryption key that is not its signing key" \
+  check setup "$f's whoami prints the 32-byte id of its hybrid encryption key, which is not its signing key" \
     sh -c "[ \${#1} = 64 ] && [ \"\$1\" != \"\$(od -An -tx1 -v '$H/$f/keys/mini.key.pub' | tr -d ' \n')\" ]" _ "${ENC[$f]}"
 done
 A=${SUBJ[alice]} B=${SUBJ[bob]} C=${SUBJ[carl]} D=${SUBJ[dave]}
-SPONSOR_ENC=$("$MINI" enc-public --secret "$(jq -r .key "$SPONSOR_WS/workspace.json")")
+
+# declare_for MEMBER ROOM [FOUNDER]: the out-of-band exchange. The member pins the founder key it
+# was handed DIRECTLY (not through the node) and prints its signed key declaration, which lands in
+# the founder's HOME/requests for `room invite ... @decl-ROOM-MEMBER.json`.
+declare_for() {
+  local who=$1 room=$2 founder=${3:-alice} rid kid fk ke
+  rid=$(jq -r .target "$WS/$founder/refs/$room.json"); kid=$(jq -r .private.keys "$WS/$founder/refs/$room.json")
+  fk=$(od -An -tx1 -v "$H/$founder/keys/mini.key.pub" | tr -d ' \n')
+  ke=$("$MINI" key-status --workspace "$WS/$who" | jq -r .keyEpoch)
+  raw room "$who" "room-key --op recipient-record for $room: pins the founder key, prints the signed declaration" ok \
+    "$MINI" workspace --action room-key --op recipient-record --dir "$WS/$who" \
+    --room-id "$rid" --keys-cell "$kid" --key-epoch "$ke" --founder-key "$fk"
+  install -D -m 0600 "$OUT" "$H/$founder/requests/decl-$room-$who.json"
+  check room "$who's declaration for $room is a signed v3 record (1333 bytes) naming this room and keys cell" \
+    sh -c "jq -e --arg r '$rid' --arg k '$kid' '.type == \"minidregg-signed-room-recipient-v3\" and .room == \$r and .keysCell == \$k and (.recordHex | length) == 2666' '$OUT'"
+}
 
 handoff() { # STEP WHO ID: submit, publish, export a delegation; the reference lands in REF.
   ok "$1" "$2" "submit $3"
@@ -192,8 +231,18 @@ handoff() { # STEP WHO ID: submit, publish, export a delegation; the reference l
   REF=$(cat "$OUT")
 }
 
+# A PRIVATE room invite already submitted and published its grant (admit_invitation_grant runs
+# before the key release: current membership must exist before a key is disclosed), so only the
+# export remains. A public invite is a plain proposal: handoff above does all three.
+exported() { # STEP WHO ID
+  ok "$1" "$2" "export $3"
+  REF=$(cat "$OUT")
+}
+
 # ------------------------------------------------ the room
 ok room alice "room new lab --private"
+check room "found printed the founder fingerprint and the devnet disclaimer" \
+  sh -c "grep -qE 'founderFingerprint\": \"[0-9a-f]{4}(-[0-9a-f]{4}){4}' '$OUT' && grep -q 'devnet quality; privacy not audited' '$OUT'"
 check room "lab's reference is private and names its keys cell" \
   jq -e '.room == "private" and (.private.keys | test("^[0-9]+$"))' "$WS/alice/refs/lab.json"
 LAB=$(jq -r .target "$WS/alice/refs/lab.json")
@@ -204,12 +253,15 @@ check room "the keys cell was born in lab under the keys law naming alice" \
 ok room alice "room keys lab"
 expectgot room "alice holds epoch 0" '[0]' "$(jq -c .held "$OUT")"
 ok room alice "room new pub"
-ok room alice "room invite i-bob lab $B ${ENC[bob]} --verbs observe,place,append,mutate"
+declare_for bob lab
+ok room alice "room invite i-bob lab $B @decl-lab-bob.json --verbs observe,place,append,mutate"
 check room "the grant is K-ROOM's delegation under lab (not yet submitted)" \
   jq -e --arg lab "$LAB" '.purpose.draft.command.child.room == $lab' "$WS/alice/proposals/i-bob/intent.json"
-check room "the wrap went into the keys cell in the same line (admitted)" \
-  jq -e '.type == "confirmed"' "$WS/alice/attempts/i-bob-keys/outcome.json"
-handoff room alice i-bob
+check room "the release records were bound first (turn 1), then the wrap disclosed (turn 2): both admitted" \
+  sh -c "jq -e '.type == \"confirmed\"' '$WS/alice/attempts/i-bob-keys-bind/outcome.json' && jq -e '.type == \"confirmed\"' '$WS/alice/attempts/i-bob-keys-wraps/outcome.json'"
+check room "turn 1 carried no ciphertext (commitments only); the wrap atom of turn 2 is 1532 bytes: key id, hybrid wrap, grant, certificate, delivery" \
+  sh -c "! grep -q 'DREGG' '$WS/alice/proposals/i-bob-keys-bind/intent.json' && jq -e '[.purpose.draft.command.targets[0].payload.actions[].payload | length / 2] == [1532]' '$WS/alice/proposals/i-bob-keys-wraps/intent.json'"
+exported room alice i-bob
 check room "bob's invitation names lab's keys cell" jq -e --arg k "$KEYS" '.private.keys == $k' <(printf '%s' "$REF")
 ok room bob "import lab $REF"
 ok room alice "room invite i-bob-pub pub $B --verbs observe,place,append"
@@ -364,11 +416,19 @@ operator outsider "carl imports sa with bob's capability number" "$MINI" workspa
 raw outsider carl "reads sa with bob's capability number" "no-grant" "$MINI" workspace --action tail --dir "$WS/carl" --name sa-bob --from 1 --count 16
 
 # ------------------------------------------------ the keys cell's law, on the live Host
-raw keyslaw bob "holds mutate under lab and writes a wrap for carl: refused (only the founder writes the keys cell)" "law-denied" \
-  "$MINI" workspace --action room-key --op invite --dir "$WS/bob" --name lab --member "$C" --enc-pub "${ENC[carl]}" \
-  --proposal-id i-carl-by-bob
-check keyslaw "bob's client did plan the wrap write (the Host refused it, not his client)" \
-  test -f "$WS/bob/proposals/i-carl-by-bob-keys/intent.json"
+declare_for carl lab
+raw keyslaw bob "invites carl himself (room-key --op invite): his CLIENT refuses, he is not the founder-key chain's tip" "current founder key" \
+  "$MINI" workspace --action room-key --op invite --dir "$WS/bob" --name lab --member "$C" \
+  --enc-pub "$(jq -r .recordHex "$H/alice/requests/decl-lab-carl.json")" --proposal-id i-carl-by-bob
+check keyslaw "nothing was proposed or written by bob's refused invite" \
+  sh -c "[ ! -e '$WS/bob/proposals/i-carl-by-bob-keys-bind' ] && [ ! -e '$WS/bob/proposals/i-carl-by-bob-keys-wraps' ]"
+jq -n --arg a "$(echo "2^96 + $C" | BC_LINE_LENGTH=0 bc)" '{type:"minidregg-workspace-proposal-v1",action:"invoke",targets:[{name:"lab-keys",
+  payload:{type:"content",actions:[{type:"createAtom",atom:$a,kind:{type:"text"},payload:"00"}]}}]}' >"$RQ/bob-wrap.json"
+raw keyslaw bob "plans a raw write at the wrap atom id of (epoch 0, carl) in the keys cell" ok "$MINI" workspace --action propose --dir "$WS/bob" \
+  --request "$RQ/bob-wrap.json" --proposal-id bob-wrap
+raw keyslaw bob "submits it, holding mutate under lab: refused by the keys LAW (only the founder writes wraps)" "law-denied" \
+  "$MINI" workspace --action submit --dir "$WS/bob" \
+  --intent "$WS/bob/proposals/bob-wrap/intent.json" --attempt "$WS/bob/attempts/bob-wrap"
 jq -n --arg k "$KEYS" '{type:"minidregg-workspace-proposal-v1",action:"invoke",targets:[{name:"lab-keys",
   payload:{type:"content",actions:[{type:"link",link:"77",source:null,target:{type:"document",id:$k},relation:"1"}]}}]}' \
   >"$RQ/keys-link.json"
@@ -376,7 +436,7 @@ raw keyslaw alice "plans a link into the keys cell" ok "$MINI" workspace --actio
   --request "$RQ/keys-link.json" --proposal-id keys-link
 raw keyslaw alice "submits it: refused (only atoms)" "law-denied" "$MINI" workspace --action submit --dir "$WS/alice" \
   --intent "$WS/alice/proposals/keys-link/intent.json" --attempt "$WS/alice/attempts/keys-link"
-BWRAP=$(jq -c '.purpose.draft.command.targets[0].payload.actions[0]' "$WS/alice/proposals/i-bob-keys/intent.json")
+BWRAP=$(jq -c '.purpose.draft.command.targets[0].payload.actions[0]' "$WS/alice/proposals/i-bob-keys-wraps/intent.json")
 jq -n --argjson a "$BWRAP" '{type:"minidregg-workspace-proposal-v1",action:"invoke",targets:[{name:"lab-keys",
   payload:{type:"content",actions:[$a]}}]}' >"$RQ/dup-wrap.json"
 raw keyslaw alice "plans a second wrap at bob's (epoch 0, bob) atom id" ok "$MINI" workspace --action propose --dir "$WS/alice" \
@@ -386,8 +446,8 @@ raw keyslaw alice "submits it: refused (one atom per pair)" "duplicateAddress" "
 
 # ------------------------------------------------ kick: revoke + rotate + rewrap
 ok kick alice "room kick k-bob lab $B"
-check kick "the rotation moved lab to epoch 1, wrapped for alice only, and left bob out" \
-  jq -e --arg a "$A" --arg b "$B" '.epoch == 1 and .wrappedFor == [$a] and (.leftOut | index($b))' "$OUT"
+check kick "the rotation moved lab to epoch 1 and wrapped for alice only; bob was named as left out" \
+  sh -c "jq -s -e --arg a '$A' 'map(select(.type == \"minidregg-room-rotation-v1\"))[0] | .epoch == 1 and .wrappedFor == [\$a]' '$OUT' && grep -q 'left out of epoch 1' '$ERR'"
 raw kick bob "reads sa after the kick" "revoked" "$MINI" workspace --action tail --dir "$WS/bob" --name sa --from 1 --count 16
 say alice sa "$T_A1"; SAY_A1=$SAID
 check kick "alice's epoch-1 line left sealed under epoch 1" \
@@ -407,8 +467,8 @@ ok kick bob "room keys lab"
 expectgot kick "bob holds epoch 0 only" '[0]' "$(jq -c .held "$OUT")"
 
 # ------------------------------------------------ carl: invited after the kick
-ok carl alice "room invite i-carl lab $C ${ENC[carl]} --verbs observe,place,append"
-handoff carl alice i-carl
+ok carl alice "room invite i-carl lab $C @decl-lab-carl.json --verbs observe,place,append"
+exported carl alice i-carl
 ok carl carl "import lab $REF"
 CCAP=$(jq -r .observeCapability "$WS/carl/refs/lab.json")
 operator carl "carl imports sa with his room grant" "$MINI" workspace --action import --dir "$WS/carl" \
@@ -417,11 +477,11 @@ tail_of carl sa-c --private lab
 expectgot carl "carl opens the epoch-1 line" "$T_A1" "$(jq -r '.entries[1].private.text' "$OUT")"
 expectgot carl "carl does not hold epoch 0: the marker (default: current epoch only)" \
   "[sealed under epoch 0 — you do not hold that key]" "$(jq -r '.entries[0].private' "$OUT")"
-ok carl alice "room invite i-carl-past lab $C ${ENC[carl]} --past --verbs observe"
+ok carl alice "room invite i-carl-past lab $C @decl-lab-carl.json --past --verbs observe"
 # The wrap of (epoch 0, generation 0, carl): (0 + 1) * 2^96 + carl (Kernel/PrivateRoomKeys.lean wrapAtomId).
 check carl "--past wrote only the epoch carl lacked (epoch 0)" \
   jq -e --arg c "$(echo "2^96 + $C" | BC_LINE_LENGTH=0 bc)" '[.purpose.draft.command.targets[0].payload.actions[].atom] == [$c]' \
-    "$WS/alice/proposals/i-carl-past-keys/intent.json"
+    "$WS/alice/proposals/i-carl-past-keys-wraps/intent.json"
 tail_of carl sa-c --private lab
 expectgot carl "with --past carl opens the epoch-0 line too" "$T_A0" "$(jq -r '.entries[0].private.text' "$OUT")"
 
@@ -447,7 +507,8 @@ T_CC="PRIVATE-FOXTROT carl answers in pc"
 ok chat alice "chat new pc --private"
 check chat "pc's reference is a private room naming its keys cell" \
   jq -e '.private.keys | test("^[0-9]+$")' "$WS/alice/refs/pc.json"
-ok chat alice "chat invite pc $C carl --enc ${ENC[carl]}"
+declare_for carl pc
+ok chat alice "chat invite pc $C carl --enc @decl-pc-carl.json"
 INV_PC=$(grep '^chat join pc ' "$OUT" | tail -1)
 ok chat carl "$INV_PC"
 ok chat alice "say $T_CA"
@@ -465,22 +526,24 @@ check chat "alice reads carl's private line" grep -q 'PRIVATE-FOXTROT' "$OUT"
 # rotate-key keeps the old encryption secret (KEY.enc-ring) and publishes the new
 # public key as carl's record in every private room he is in; the founder's next
 # rotation wraps to the record; the keys law lets only carl write his record.
-ENC_OLD=${ENC[carl]}
+ENC_OLD=${ENC[carl]}   # the 32-byte ID of carl's hybrid key (whoami's encryptionKey)
 ok rotkey carl "rotate-key mini.key.next"
 check rotkey "rotate-key published carl's new encryption key to lab and pc" \
   jq -s -e 'last | [.privateRooms[] | select(.record == "published") | .room] | sort == ["lab","pc"]' "$OUT"
-check rotkey "carl's keyring kept the old encryption secret (0600, one entry)" \
-  sh -c "[ \"\$(stat -c %a \"\$1\")\" = 600 ] && [ \"\$(jq '.keys | length' \"\$1\")\" = 1 ]" _ "$H/carl/keys/mini.key.enc-ring"
+check rotkey "carl's keyring (v2: X25519 secret + ML-KEM seed per entry) kept the old encryption secrets (0600, one entry)" \
+  sh -c "[ \"\$(stat -c %a \"\$1\")\" = 600 ] && [ \"\$(jq '.keys | length' \"\$1\")\" = 1 ] && jq -e '.type == \"minidregg-encryption-keyring-v2\" and (.keys[0] | has(\"kemSeed\") and has(\"x25519\"))' \"\$1\"" _ "$H/carl/keys/mini.key.enc-ring"
 ok rotkey carl "whoami"
 ENC_NEW=$(jq -r .encryptionKey "$OUT")
-check rotkey "carl's encryption key changed with the seed" test "$ENC_NEW" != "$ENC_OLD"
+check rotkey "carl's hybrid encryption key (its id) changed with the seed" test "$ENC_NEW" != "$ENC_OLD"
 T_RK="PRIVATE-GOLF alice says this after carl rotated"
+T_RK2="PRIVATE-HOTEL alice says this after she rotated her own signing key"
 ok rotkey alice "room rotate r-pc pc"
+# the rotation is two turns: r-pc-bind (release records) then r-pc-wraps (the wraps)
 # pc's epoch 1 for carl at generation 2 (his key epoch): (1 + 1) * 2^96 + 2 * 2^64 + carl.
 RK_ID=$(echo "2 * 2^96 + 2 * 2^64 + $C" | BC_LINE_LENGTH=0 bc)
 check rotkey "the rotation wrapped pc's new epoch to carl's RECORD (generation = his key epoch 2, his new key)" \
   jq -e --arg id "$RK_ID" --arg k "$ENC_NEW" '[.purpose.draft.command.targets[0].payload.actions[] | select(.atom == $id and (.payload | startswith($k)))] | length == 1' \
-    "$WS/alice/proposals/r-pc/intent.json"
+    "$WS/alice/proposals/r-pc-wraps/intent.json"
 ok rotkey alice "say $T_RK"
 ok rotkey carl "tail --json -n 100"
 check rotkey "carl opens the epoch sealed after his rotation, and still the line before it" \
@@ -499,12 +562,49 @@ raw rotkey alice "submits it: refused (the founder cannot write a member's recor
   --dir "$WS/alice" --intent "$WS/alice/proposals/squat-record/intent.json" --attempt "$WS/alice/attempts/squat-record"
 
 # ------------------------------------------------ a hosted subject (B6)
-echo "$D  # dave stands in for hosted Hermes: his key is a session-home file" >"$MINI_HOSTED_SUBJECTS"
-fails hosted alice "room invite i-dave lab $D ${ENC[dave]}" 1 "hosted subject"
+# Two independent signals refuse a hosted invitee into a private room: the operator's list, and
+# the invitee's OWN signed custody declaration. Each is shown alone.
+declare_for dave lab
+check hosted "dave's signed record declares hosted custody (the byte under his signature)" \
+  sh -c "[ \"\$(jq -r .recordHex '$H/alice/requests/decl-lab-dave.json' | cut -c$(( (4 + 1216 + 16) * 2 + 1 ))-$(( (4 + 1216 + 16) * 2 + 2 )))\" = 01 ]"
+: >"$MINI_HOSTED_SUBJECTS"
+fails hosted alice "room invite i-dave lab $D @decl-lab-dave.json" 1 "declared this itself"
 check hosted "the refusal says why: root could read the room key, and Hermes's provider" \
   grep -q "readable on the box" "$ERR"
-check hosted "nothing was proposed or written for dave" sh -c "[ ! -e '$WS/alice/proposals/i-dave' ] && [ ! -e '$WS/alice/proposals/i-dave-keys' ]"
-ok hosted alice "room invite i-dave2 lab $D ${ENC[dave]} --i-know --verbs observe"
+check hosted "nothing was proposed or written for dave" sh -c "[ ! -e '$WS/alice/proposals/i-dave' ] && [ ! -e '$WS/alice/proposals/i-dave-keys-bind' ]"
+# The list alone: carl (own-machine key, declares own-machine custody) is listed by the operator.
+echo "$C  # listed by the operator although his record declares own-machine custody" >"$MINI_HOSTED_SUBJECTS"
+fails hosted alice "room invite i-carl-listed lab $C @decl-lab-carl.json --verbs observe" 1 "is listed in"
+: >"$MINI_HOSTED_SUBJECTS"
+ok hosted alice "room invite i-dave2 lab $D @decl-lab-dave.json --i-know --verbs observe"
+
+# ------------------------------------------------ the chat feed states privacy (what the Discord mirror reads)
+ok mirror alice "tail --json -n 100 --in pc"
+check mirror "pc's header says private:true and every entry says it too (a mirror refuses this feed)" \
+  sh -c "jq -s -e '.[0].private == true and (.[1:] | length > 0) and (.[1:] | all(.private == true))' '$OUT'"
+
+# ------------------------------------------------ the founder's key moves without a re-pin (R4)
+# rotate-key refuses a founder until the room is handed to the next key; carl (pc and lab) pinned alice's
+# ORIGINAL key and never re-pins.
+fails transition alice "rotate-key mini.key.next" 1 "founder-key chain"
+check transition "the refusal names the rooms alice founded and the command that fixes it" \
+  sh -c "grep -q 'room-key --op transition' '$ERR' && grep -q 'lab' '$ERR' && grep -q 'pc' '$ERR'"
+ALICE_PUB0=$(od -An -tx1 -v "$H/alice/keys/mini.key.pub" | tr -d ' \n')
+ok transition alice "room transition t-lab lab mini.key.next"
+ok transition alice "room transition t-pc pc mini.key.next"
+check transition "the hand-over was bound and read back (printed published, index 0)" \
+  sh -c "jq -s -e 'map(select(.type == \"minidregg-room-founder-transition-v1\"))[0] | .transition == \"published\" and .index == 0' '$OUT'"
+NEWKEY=$(jq -sr 'map(select(.type == "minidregg-room-founder-transition-v1"))[0].founderKeyHex' "$OUT")
+check transition "the key handed the room is alice's NEXT key, not her daily one" test "$NEWKEY" != "$ALICE_PUB0" -a ${#NEWKEY} = 64
+ok transition alice "rotate-key mini.key.next"
+ok transition alice "room rotate r-pc2 pc"
+ok transition alice "say $T_RK2"
+ok transition carl "tail --json -n 100"
+check transition "carl, who never re-pinned, verifies the new founder key through the transition chain and opens a line sealed after it" \
+  grep -q 'PRIVATE-HOTEL' "$OUT"
+PCID=$(jq -r .target "$WS/alice/refs/pc.json")
+check transition "carl retained the hand-over: one transition, tip = alice's new key" \
+  jq -e --arg tip "$NEWKEY" '.transitions == 1 and .founderTip == $tip' "$WS/carl/private/epoch-head-$PCID.json"
 
 # ------------------------------------------------ restart; audit
 pidfile=$W/public/server.pid
@@ -527,9 +627,9 @@ check restart "audit re-admitted the Store (exit 0)" test "$(cat "$SD/audit-r1.r
 tail_of alice sa
 expectgot restart "alice still opens epoch 1 after the restart" "$T_A1" "$(jq -r '.entries[1].private.text' "$OUT")"
 raw restart bob "bob is still refused" "revoked" "$MINI" workspace --action tail --dir "$WS/bob" --name sa --from 1 --count 16
-SCAN=$(python3 "$SD/scan.py" "$W/store" "$T_A0" "$T_B0" "$T_A1" "$T_PUB" "$T_CA" "$T_CC")
+SCAN=$(python3 "$SD/scan.py" "$W/store" "$T_A0" "$T_B0" "$T_A1" "$T_PUB" "$T_CA" "$T_CC" "$T_RK" "$T_RK2")
 echo "$SCAN" >"$SD/store-scan-2.txt"
 expectgot restart "after everything, the Store holds no private line in any encoding" 0 \
-  "$(( $(total_hits PRIVATE-ALPHA) + $(total_hits PRIVATE-BRAVO) + $(total_hits PRIVATE-DELTA) + $(total_hits PRIVATE-ECHO) + $(total_hits PRIVATE-FOXTROT) ))"
+  "$(( $(total_hits PRIVATE-ALPHA) + $(total_hits PRIVATE-BRAVO) + $(total_hits PRIVATE-DELTA) + $(total_hits PRIVATE-ECHO) + $(total_hits PRIVATE-FOXTROT) + $(total_hits PRIVATE-GOLF) + $(total_hits PRIVATE-HOTEL) ))"
 
 finish

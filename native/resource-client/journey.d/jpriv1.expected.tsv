@@ -1,0 +1,97 @@
+# EXPECTED TRANSCRIPT of journey.d/jpriv1.sh (JPRIV1): what a GREEN run must show. NOT FROM A RUN.
+# Authored 2026-10-04 (lane s9-rooms) from the script and the code it drives; there is no warm Host
+# build yet, so none of this has executed. Devnet quality; privacy not audited.
+#
+# Columns: STEP <TAB> WHO <TAB> LITERAL SUBSTRING of the row's `line` column. WHO is `check` for
+# `check`/`expectgot` rows, `OPERATOR` for operator rows, else the friend. Every listed row must appear
+# in the run's jpriv1.tsv with verdict `ok`, and no row may be FAIL. `rooms-e2e.sh` compares; the order
+# is the script's order but is not enforced (an extra row is not an error, a missing or red one is).
+# Each substring is a literal of the script (rooms-e2e.sh --self-check proves that).
+setup	alice	keygen (own machine
+setup	check	's own-machine keygen left no custody marker
+setup	dave	keygen mini.key
+setup	check	dave's hosted keygen left the custody marker
+setup	check	id of its hybrid encryption key
+room	alice	room new lab --private
+room	check	found printed the founder fingerprint and the devnet disclaimer
+room	check	lab's reference is private and names its keys cell
+room	check	the keys cell was born in lab under the keys law naming alice
+room	check	alice holds epoch 0
+room	bob	room-key --op recipient-record for
+room	check	is a signed v3 record (1333 bytes) naming this room and keys cell
+room	alice	room invite i-bob lab
+room	check	the release records were bound first (turn 1), then the wrap disclosed (turn 2): both admitted
+room	check	turn 1 carried no ciphertext (commitments only); the wrap atom of turn 2 is 1532 bytes
+room	check	bob's invitation names lab's keys cell
+room	bob	import lab
+say	check	alice's line left her machine sealed
+say	check	bob's line left his machine sealed (whole 64-byte blocks)
+say	check	bob learned epoch 0 from the keys cell on his first sealed write
+say	check	the public control line left in plaintext
+read	check	bob opens alice's line
+read	check	every payload in bob's view is whole 64-byte blocks
+read	check	alice opens bob's line
+operator	check	the operator's signed view of sa carries the entry, digest-verified, as an envelope
+operator	check	the plaintext is absent from the operator's view (raw and hex)
+operator	check	the operator's client, holding no key, prints the sealed marker
+operator	check	control: the operator's view of the public room carries the text
+operator	check	the Store's bytes hold alice's private line 0 times in any encoding
+operator	check	the Store's bytes hold bob's private line 0 times
+operator	check	control: the same scan finds the public line
+outsider	carl	reads sa
+outsider	carl	reads sa with bob's capability number
+keyslaw	bob	invites carl himself (room-key --op invite): his CLIENT refuses
+keyslaw	check	nothing was proposed or written by bob's refused invite
+keyslaw	bob	submits it, holding mutate under lab: refused by the keys LAW
+keyslaw	alice	submits it: refused (only atoms)
+keyslaw	alice	submits it: refused (one atom per pair)
+kick	alice	room kick k-bob lab
+kick	check	the rotation moved lab to epoch 1 and wrapped for alice only; bob was named as left out
+kick	bob	reads sa after the kick
+kick	check	alice's epoch-1 line left sealed under epoch 1
+kick	check	alice opens her epoch-1 line
+kick	check	bob's client cannot: the sealed marker, never a guess
+kick	check	bob keeps the past
+kick	check	bob holds epoch 0 only
+carl	alice	room invite i-carl lab
+carl	check	carl opens the epoch-1 line
+carl	check	carl does not hold epoch 0: the marker (default: current epoch only)
+carl	check	--past wrote only the epoch carl lacked (epoch 0)
+carl	check	with --past carl opens the epoch-0 line too
+keys	check	alice holds epochs 0 and 1
+keys	check	carl holds epochs 0 and 1
+keys	check	after forget, carl's read prints the marker for epoch 0 (not re-learned)
+keys	check	carl's cache: held [1], forgotten [0]
+chat	alice	chat new pc --private
+chat	alice	chat invite pc
+chat	check	alice's signed say (intent.bin, intent.json, proposal.json: the wire) holds no plaintext
+chat	check	carl (a member holding the wrap) reads both private lines in the merged feed
+rotkey	carl	rotate-key mini.key.next
+rotkey	check	rotate-key published carl's new encryption key to lab and pc
+rotkey	check	carl's keyring (v2: X25519 secret + ML-KEM seed per entry) kept the old encryption secrets
+rotkey	check	carl's hybrid encryption key (its id) changed with the seed
+rotkey	check	the rotation wrapped pc's new epoch to carl's RECORD
+rotkey	check	carl opens the epoch sealed after his rotation, and still the line before it
+rotkey	carl	submits it: refused (each subject writes only its own record)
+rotkey	alice	submits it: refused (the founder cannot write a member's record either)
+hosted	check	dave's signed record declares hosted custody (the byte under his signature)
+hosted	alice	room invite i-dave lab
+hosted	check	the refusal says why: root could read the room key, and Hermes's provider
+hosted	check	nothing was proposed or written for dave
+hosted	alice	room invite i-carl-listed lab
+hosted	alice	room invite i-dave2 lab
+mirror	check	pc's header says private:true and every entry says it too
+transition	alice	rotate-key mini.key.next
+transition	check	the refusal names the rooms alice founded and the command that fixes it
+transition	alice	room transition t-lab lab mini.key.next
+transition	alice	room transition t-pc pc mini.key.next
+transition	check	the hand-over was bound and read back
+transition	check	the key handed the room is alice's NEXT key, not her daily one
+transition	alice	room rotate r-pc2 pc
+transition	check	carl, who never re-pinned, verifies the new founder key through the transition chain
+transition	check	carl retained the hand-over: one transition, tip = alice's new key
+restart	OPERATOR	stop the Host, audit the closed Store, serve again
+restart	check	audit re-admitted the Store (exit 0)
+restart	check	alice still opens epoch 1 after the restart
+restart	bob	bob is still refused
+restart	check	after everything, the Store holds no private line in any encoding
