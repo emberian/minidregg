@@ -29,6 +29,9 @@
 #                  tests, C4 vectors, parser, preview cohort, TS/Lean elaborator translation
 #                  validation (builds Compiler.ObjectiveBendElaborate), typed examples, and the
 #                  tutorial re-run; a Lean row with no built tree is RED ("needs warm base")
+#   website        website/status.html is what website/gen-status.py generates from README.md's
+#                  Honest state table, and every <pre data-source=PATH> block on a page is text
+#                  of PATH; two controls (a mutated README row, a mutated block) must be refused
 #   rust-tests     the filtered native test lines of scripts/check-rust-tests.sh
 #   deploy-scripts the deploy tooling's own tests, no Lean/Rust build: candidate packager (consent pair
 #                  required; stub roles), lane-build pack refusals, self-enrollment terms renderer
@@ -53,7 +56,7 @@ mkdir -p "$logdir"
 lib_targets=$(sed -n '/^\[\[lean_lib\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | grep -v '^ResearchWip$' | tr '\n' ' ')
 exe_targets=$(sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 
-GATES=(host-operations hygiene lake-build cold-start hyp-ledger drift prover-glue build-closure host-closure import-tiers exports shell-paths objective-frontend rust-tests deploy-scripts spk-shell journey)
+GATES=(host-operations hygiene lake-build cold-start hyp-ledger drift prover-glue build-closure host-closure import-tiers exports shell-paths objective-frontend website rust-tests deploy-scripts spk-shell journey)
 declare -A STATUS SECS LAST
 red=0
 only=${LOCAL_GATES_ONLY:-}
@@ -78,6 +81,7 @@ g_import-tiers()  { bash scripts/check-import-boundary.sh; }
 g_exports()       { bash scripts/check-exports.sh; }
 g_shell-paths()   { bash scripts/check-shell-paths.sh; }
 g_objective-frontend() { bash scripts/check-objective-frontend.sh; }
+g_website()       { python3 website/gen-status.py --check; }
 g_rust-tests()    { bash scripts/check-rust-tests.sh; }
 g_deploy-scripts() { python3 deploy/pay/test-render-enrol.py && python3 deploy/candidate/test-package.py && bash deploy/candidate/test-lane-build.sh; }
 g_spk-shell()     { bash scripts/check-spk-shell-tests.sh; }
