@@ -1104,7 +1104,8 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
   if stride > 0 then
     let mut checked := 0
     let mut differ := 0
-    for i in [0:durable.image.accepted.length:stride] do
+    let heights := durable.image.accepted.length
+    for i in (List.range ((heights + stride - 1) / stride)).map (· * stride) do
       if let some (some kept) := durable.rootLog[i]? then
         let spec := NativeHost.worldRoot config ⟨durable.image.seed, durable.image.accepted.take (i + 1)⟩
         checked := checked + 1

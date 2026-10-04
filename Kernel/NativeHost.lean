@@ -936,7 +936,7 @@ theorem receiptRoot_ne_spec_of_wrong (config : Config) (durable : Durable) (inde
 /-- A log that keeps no root (`loadImage`'s) is honest: every lookup below the
 head evaluates its prefix. -/
 theorem RootLogHonest.of_none (config : Config) (durable : Durable)
-    (none : ∀ index, durable.rootLog[index]? = some none ∨ durable.rootLog[index]? = none) :
+    (none : ∀ index : Nat, durable.rootLog[index]? = some none ∨ durable.rootLog[index]? = none) :
     RootLogHonest config durable := by
   intro index root kept
   rcases none index with absent | absent <;> rw [absent] at kept <;> cases kept
@@ -976,7 +976,8 @@ theorem RootLogHonest.extend (config : Config) {loaded : Durable}
     rw [Array.back?_eq_getElem?, sizeEq, Nat.add_sub_cancel, kept] at back
     cases back
     rw [loadedRoot_eq_worldRoot config (loaded.extend ready) restored rooted, imageEq]
-    simp [DurableReceiver.Image.append]
+    simp only [DurableReceiver.Image.append]
+    rw [List.take_of_length_le (by simp)]
 
 #assert_axioms receiptRoot_eq_spec
 #assert_axioms receiptRoot_ne_spec_of_wrong
