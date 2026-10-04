@@ -100,7 +100,8 @@ and full funding; deferred install + Applied marker + lock removal is one
 physical compare-and-swap. Source Appended readback precedes sourceYES export.
 A consensus COMMIT is not sourceApplied, nor a permit to bypass these checks.
 
-3. BEND SOURCE -> BOUNDED MACHINE -> NETWORK -> BACKEND
+3. BEND SOURCE -> BOUNDED MACHINE -> NETWORK -> BACKEND (retiring BendTT stack;
+   none of this section qualifies Objective Bend Core4)
 Pinned upstream Bend: 947db722640c86247849343657bf2f7ef01cb7f1.
 Compiled S in namespaced BendTTSource: book_check, confluent, sr, progress,
 halts, empty, consistent, audited standard [propext, Classical.choice, Quot.sound].

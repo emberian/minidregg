@@ -1,5 +1,11 @@
 # Public Bend on private BFV inputs
 
+> **Status (2026-10-04).** On main this package consumes artifacts of the retiring
+> BendTT path (`Host/BendLogicEmit`, `Compiler.BendArtifactBinding`). It does not
+> evaluate Objective Bend programs; its producers must be re-targeted at the
+> Objective Bend demand machine. Results below are evidence about BendTT
+> artifacts only.
+
 This physical package consumes the checked `Host/BendLogicEmit.lean` artifact.
 It does not author Bend semantics, solve relational AIR for missing wires, mint
 input-validity proofs, or create transition/release authority. Its separate

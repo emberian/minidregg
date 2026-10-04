@@ -1,5 +1,8 @@
 # Empty environment substitution fork, 2026-10-03
 
+> **Status (2026-10-04).** A performance fork of the BendTT checker (`Term.wnf`
+> substitution). It applies only to the retiring BendTT path, not to Objective Bend.
+
 Receiving owner: runtime/world source compiler and captain intake. No default checker/native receiver activation has been performed. The isolated qualified fork is a construction result; the exact source-review diff must be reconciled with the owner's current BendTTSource edition before compiling consumers.
 
 Source base: upstream pin947db722640c86247849343657bf2f7ef01cb7f1, namespaced qualified source SHA7b221b208344c69cef7962bdab264d0abf9528637ff55e2cf69787da4f753e38. The source keeps copyright/license/provenance and records fork edition env-sub-v1. Qualified fork SHA f4eb0d1b0c63ad06c453c2021ee97c114d05e468b358b40599b20e7d05333981; matched olean8fd00fdb745ba672f68a9c8a24d38919fec646b01744efbadb91b0c58b93bac1.

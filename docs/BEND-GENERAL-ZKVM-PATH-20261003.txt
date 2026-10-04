@@ -1,4 +1,9 @@
 GENERAL BEND TRACE PROOF PATH — staged construction, 2026-10-03
+STATUS 2026-10-04: this record is anchored on the retiring BendTT live machine
+(Eval/Walk, BendLiveMachine, the closure arena). It does not describe a proof path
+for Objective Bend Core4. The Objective zk statements
+(Assurance/ObjectiveBendCommittedSource) are conditional on a PackedRefinement
+hypothesis that no real program inhabits; see docs/OBJECTIVE-BEND.md.
 Owner: Codex bend_semantics_audit. This is a status/contract record, not a
 claim that general Bend proof admission is complete.
 

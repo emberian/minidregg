@@ -23,9 +23,10 @@ uses the existing `dregg.bend.package-input.v1` schema. This local source custod
 is not a canonical source identity, publication receipt or execution authority.
 
 The first source implementation is WIP and has not been compiled or received in
-a browser. Compiler/linker preview, governed publication, prototype instantiation
-and instance evolution are explicitly unavailable until their real producer and
-native intent APIs are connected. No compiler success or installed program is
+a browser. Governed publication, prototype instantiation and instance evolution
+are unavailable until their real producer and native intent APIs are connected.
+Objective Bend preview is a separate route (`studio_preview.rs` to
+`objective-preview.ts`; see [Objective Bend](OBJECTIVE-BEND.md#execution-paths)). No compiler success or installed program is
 inferred from a document save or package metadata.
 
 Module, import and entry controls apply exact revision-bound composition operations.
@@ -34,10 +35,11 @@ Earlier composition revisions are inspectable and can be forked into a separate
 workspace. Forks retain ordinary document references; they do not copy private
 source or confer access. Existing source editor drafts remain retained.
 
-Prototype declarations retain the exact authored fields of the producer
-`dregg.objective-bend.partial-input.v1`: ordered directParents and ancestorOrder,
-required scope/selector/typeEntry and provided selector/entry/captures. They are
-versioned with package composition, retained in history and forks, and captured
-with saved source. The actual Package and canonical emitted partialCorePath must
-come from the real producer before assembling a Partial request. This draft
-shape is not a checked Partial or a publication/instantiation grant.
+Prototype declarations in `native/resource-client/src/workspace/studio.rs` still
+carry the Gen-1 `dregg.objective-bend.partial-input.v1` shape (directParents,
+ancestorOrder, required finalSelf/priorSuper selectors, provided entries). Its
+producer, `Host/ObjectiveBendPartialAuthor`, was deleted with Gen-1 on 2026-10-04,
+so these declarations feed nothing. In Objective Bend Core4 ancestry and
+requirements are written in `.obend` source (`compose`, `requires`), not in a
+side declaration; this editor code must be rewritten against the Objective front
+end or deleted.
