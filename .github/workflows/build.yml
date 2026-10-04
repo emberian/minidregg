@@ -242,6 +242,66 @@ jobs:
             echo "::warning::no project build cache found: the lake-build gate is a cold build"
           fi
 
+      # Tools the gates need that the hosted image does not carry. Each is pinned
+      # to an exact version and a sha256, so a gate that needs one is measured
+      # against that tool and never skipped for lack of it (run 37198850962:
+      # objective-frontend "needs bun: 'bun' not on PATH", and spk-volume-custody
+      # "Failed to execute `capnp --version`: No such file or directory").
+      - name: Install bun (pinned)
+        # scripts/check-objective-frontend.sh runs its TypeScript rows with bun
+        # and puts $HOME/.bun/bin on PATH itself. 1.3.11 is the version the front
+        # end was authored and passes against; the sha256 is of bun-linux-x64.zip
+        # and equals the SHASUMS256.txt of that release.
+        run: |
+          set -euo pipefail
+          v=1.3.11
+          sha=8611ba935af886f05a6f38740a15160326c15e5d5d07adef966130b4493607ed
+          curl -sSfL -o "$RUNNER_TEMP/bun.zip" "https://github.com/oven-sh/bun/releases/download/bun-v${v}/bun-linux-x64.zip"
+          echo "${sha}  $RUNNER_TEMP/bun.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/bun.zip" -d "$RUNNER_TEMP/bun-dist"
+          mkdir -p "$HOME/.bun/bin"
+          install -m 755 "$RUNNER_TEMP/bun-dist/bun-linux-x64/bun" "$HOME/.bun/bin/bun"
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+          "$HOME/.bun/bin/bun" --version | grep -Fx "$v"
+
+      - name: Restore capnp 1.5.0
+        id: capnp
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.local/capnp-1.5.0
+          key: capnp-1.5.0-${{ runner.os }}-${{ runner.arch }}-v1
+
+      - name: Build capnp 1.5.0
+        # native/spk-rpc/build.rs compiles the pinned Sandstorm schemas with the
+        # capnp executable (capnpc 0.27 wants 0.5.2 or newer; native/spk-rpc/README.md
+        # pins its schema input to Cap'n Proto 1.5.0). The sha256 is of the GitHub
+        # v1.5.0 source tarball and equals the one in Homebrew's capnp formula.
+        if: ${{ steps.capnp.outputs.cache-hit != 'true' }}
+        run: |
+          set -euo pipefail
+          sha=d5ebdf858e9885c33d4b3f765006d68bd66e9b002bf4d607ff4317ef9c1aac6a
+          curl -sSfL -o "$RUNNER_TEMP/capnp.tgz" https://github.com/capnproto/capnproto/archive/refs/tags/v1.5.0.tar.gz
+          echo "${sha}  $RUNNER_TEMP/capnp.tgz" | sha256sum -c -
+          tar xzf "$RUNNER_TEMP/capnp.tgz" -C "$RUNNER_TEMP"
+          cmake -S "$RUNNER_TEMP/capnproto-1.5.0/c++" -B "$RUNNER_TEMP/capnp-build" \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DWITH_OPENSSL=OFF -DWITH_ZLIB=OFF \
+            -DCMAKE_INSTALL_PREFIX="$HOME/.local/capnp-1.5.0"
+          cmake --build "$RUNNER_TEMP/capnp-build" -j "$(nproc)"
+          cmake --install "$RUNNER_TEMP/capnp-build"
+
+      - name: Save capnp 1.5.0
+        if: ${{ steps.capnp.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.local/capnp-1.5.0
+          key: capnp-1.5.0-${{ runner.os }}-${{ runner.arch }}-v1
+
+      - name: Put capnp on PATH
+        run: |
+          set -euo pipefail
+          echo "$HOME/.local/capnp-1.5.0/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/capnp-1.5.0/bin/capnp" --version | grep -Fx "Cap'n Proto version 1.5.0"
+
       - name: Gates
         id: gates
         run: bash scripts/ci-run-sampled.sh bash scripts/local-gates.sh
@@ -263,6 +323,17 @@ jobs:
         with:
           path: ${{ env.LEAN_CACHE_PATHS }}
           key: ${{ steps.keys.outputs.tool }}-${{ steps.keys.outputs.src }}-gates-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Every build log
+        # The summary names a red gate; the cause is in the log of the cargo or
+        # lake command under it (build-logs/rust-tests, gate5-*, objective-frontend).
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: build-logs
+          path: build-logs/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Gate logs
         if: ${{ always() }}
