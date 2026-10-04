@@ -6,7 +6,7 @@ fn binding(annotation:&str,anchor:&Value)->Result<Vec<u8>>{
 pub(super) fn seal(audience:&Audience,action:&mut Value,nonce:&[u8;32],store:&mut Store,writer:&SigningKey)->Result<()>{
     if action["type"]=="annotate"{
         let address=binding(text(action,"annotation")?,&json!({"atom":action["atom"],"revision":action["revision"]}))?;
-        let plain=Zeroizing::new(private::decode_hex(text(action,"body")?)?);
+        let plain=Zeroizing::new(crate::decode_hex(text(action,"body")?)?);
         action["body"]=json!({"type":"sealed","fragment":fragments::seal(audience,&address,nonce,&plain,store,writer)?});
     }else{
         if action["wrapping"]["type"]!="sealed"{return Err("only authored sealed annotations can be rewrapped".into());}

@@ -100,19 +100,11 @@ pub(crate) fn host_image_sha256(path: &Path) -> Result<[u8; 32], String> {
 }
 
 fn parse_host_sha256(value: &str) -> Result<[u8; 32], String> {
-    if value.len() != 64
-        || !value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-    {
+    if !mini_sdk::hex::is_canonical_len(value, 32) {
         return Err("expected host SHA-256 must be 64 lowercase hex digits".to_owned());
     }
-    let mut bytes = [0u8; 32];
-    for (index, byte) in bytes.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&value[2 * index..2 * index + 2], 16)
-            .map_err(|_| "invalid expected host SHA-256")?;
-    }
-    Ok(bytes)
+    let decoded = mini_sdk::hex::decode(value).map_err(|_| "invalid expected host SHA-256")?;
+    decoded.try_into().map_err(|_| "invalid expected host SHA-256".to_owned())
 }
 
 /// Where a client's Host requests go. Every socket argument, workspace pin and

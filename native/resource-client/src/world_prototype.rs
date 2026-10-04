@@ -87,7 +87,7 @@ pub(super) fn construct(root: &Path, workspace: &Value, id: &str, target_name: &
     let kind=b"world-prototype-output";
     let mut payload=(kind.len() as u16).to_le_bytes().to_vec();
     payload.extend_from_slice(kind);
-    payload.extend(unhex(member(&dry,"output")?)?);
+    payload.extend(crate::decode_hex(member(&dry,"output")?)?);
     let result=world_kind::method_operation(workspace,8,&payload)?;
     let mut proposal_targets=vec![json!({"name":target_name,"expectedTargetRoot":origins[0]["root"],
         "payload":{"type":"kindDefinition","definition":result["definition"]}})];

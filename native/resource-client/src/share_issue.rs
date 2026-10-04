@@ -73,13 +73,6 @@ pub(super) fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
 
 pub(super) use crate::agent_reserve::private_bytes;
 
-fn strict_hex(value: &str, bytes: usize) -> bool {
-    value.len() == 2 * bytes
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-}
-
 pub(super) fn member<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
     value
         .get(name)
@@ -107,19 +100,13 @@ pub(super) fn approved_header(
         return Err("share issue signing header differs from approved custody slot".into());
     }
     let public = member(signer, "publicKey")?;
-    if !strict_hex(public, 32) || public != hex(&signing.verifying_key().to_bytes()) {
+    if !mini_sdk::hex::is_canonical_len(public, 32) || public != hex(&signing.verifying_key().to_bytes()) {
         return Err("share issue signer public key differs from approved enrollment pin".into());
     }
-    if header.is_empty() || header.len() % 2 != 0 || !strict_hex(header, header.len() / 2) {
+    if header.is_empty() || header.len() % 2 != 0 || !mini_sdk::hex::is_canonical_len(header, header.len() / 2) {
         return Err("share issue signing header is not canonical hex".into());
     }
-    let bytes: Vec<u8> = (0..header.len())
-        .step_by(2)
-        .map(|offset| {
-            u8::from_str_radix(&header[offset..offset + 2], 16)
-                .map_err(|_| "invalid Host signing header".to_owned())
-        })
-        .collect::<Result<_>>()?;
+    let bytes = mini_sdk::hex::decode(header).map_err(|_| "invalid Host signing header".to_owned())?;
     if member(signer, "headerSha256")? != digest(&bytes) {
         return Err("share issue signing header differs from exact operator approval".into());
     }
@@ -130,7 +117,7 @@ pub(super) use crate::fsio::read_secret_in_private_dir as custody_key;
 
 fn check_approval(approval: &Value, request: &[u8], inspection: &Value) -> Result<()> {
     if member(approval, "type")? != "minidregg-application-share-issue-approval-v1"
-        || !strict_hex(member(approval, "requestSha256")?, 32)
+        || !mini_sdk::hex::is_canonical_len(member(approval, "requestSha256")?, 32)
         || member(approval, "requestSha256")? != digest(request)
         || member(inspection, "canonicalRequest")? != hex(request)
         || member(approval, "canonicalSpec")? != member(inspection, "canonicalSpec")?

@@ -47,7 +47,7 @@ fn apply(directory:&Path,journal:&Value,mut step:impl FnMut(usize)->Result<()>)-
     if files.len()<2 || files.len()>3 { return Err("paid transition file count invalid".into()); }
     let selection=journal["selectionName"].as_str().ok_or("paid transition selection missing")?;
     if !selection.starts_with("onboarding-") || !selection.ends_with(".json")
-        || selection.len()!=80 || !selection.as_bytes()[11..75].iter().all(|b|b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) {
+        || selection.len()!=80 || !selection.get(11..75).is_some_and(mini_sdk::hex::is_lower) {
         return Err("paid transition selection name invalid".into());
     }
     let mut seen=std::collections::BTreeSet::new();

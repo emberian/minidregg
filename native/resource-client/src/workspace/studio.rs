@@ -141,11 +141,7 @@ fn token() -> Result<String> {
     Ok(hex(&bytes))
 }
 fn directory(root: &Path, id: &str) -> Result<PathBuf> {
-    if id.len() != 32
-        || !id
-            .bytes()
-            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
-    {
+    if !mini_sdk::hex::is_canonical_len(id, 16) {
         return Err("invalid source workspace identity".into());
     }
     Ok(root.join("studio-packages").join(id))

@@ -132,7 +132,7 @@ pub(crate) fn status_if_enrolled(
             let detail = decoded
                 .get("detail")
                 .and_then(Value::as_str)
-                .and_then(|text| workspace::private::decode_hex(text).ok())
+                .and_then(|text| crate::decode_hex(text).ok())
                 .and_then(|bytes| String::from_utf8(bytes).ok())
                 .unwrap_or_default();
             let text = format!("{detail} {decoded}");
@@ -343,7 +343,7 @@ pub(crate) fn key_status(mut args: Args) -> Result<()> {
         let manifest = participant_enrollment::json_private(&root.join("workspace.json"))?;
         if let Some(text) = manifest.get("nextPublicKey").and_then(Value::as_str) {
             Some(
-                workspace::private::decode_hex(text)?
+                crate::decode_hex(text)?
                     .try_into()
                     .map_err(|_| "workspace nextPublicKey is not 32 bytes")?,
             )
@@ -650,7 +650,7 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
             )?
         };
         check_rotation_plan(&plan_view, &command, identity.as_ref())?;
-        let header = workspace::private::decode_hex(
+        let header = crate::decode_hex(
             plan_view
                 .get("possessionHeader")
                 .and_then(Value::as_str)

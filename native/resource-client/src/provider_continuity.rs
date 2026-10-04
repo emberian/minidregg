@@ -110,9 +110,7 @@ fn retained_input(value: &Value, limit: usize, destination: &Path) -> Result<Vec
         .as_str()
         .ok_or("continuity input lacks SHA256")?;
     if expected.len() != 64
-        || !expected
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        || !mini_sdk::hex::is_lower(expected)
     {
         return Err("continuity SHA256 must be lowercase hex".into());
     }

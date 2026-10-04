@@ -136,19 +136,11 @@ pub(super) fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
         .ok_or_else(|| format!("agent reserve custody lacks {name}"))
 }
 
-fn strict_hex(value: &str) -> bool {
-    !value.is_empty()
-        && value.len().is_multiple_of(2)
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
 pub(super) fn decode_hex(value: &str) -> Result<Vec<u8>> {
-    if !strict_hex(value) {
+    if !mini_sdk::hex::is_canonical(value) {
         return Err("noncanonical reserve hex".into());
     }
-    crate::decode_hex(value)
+    mini_sdk::hex::decode(value).map_err(|e| e.0)
 }
 
 fn expect_reply(frame: &[u8], operation: u8) -> Result<&[u8]> {

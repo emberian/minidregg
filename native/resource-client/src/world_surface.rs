@@ -86,7 +86,7 @@ impl Intent {
         let export_name = string(value, "exportName")?;
         if export_name.is_empty() { return Err("surface export name is empty".into()); }
         let arguments = string(value, "arguments")?;
-        if arguments.bytes().any(|b| !b.is_ascii_hexdigit() || b.is_ascii_uppercase()) || arguments.len() % 2 != 0 {
+        if !mini_sdk::hex::is_lower(&arguments) || arguments.len() % 2 != 0 {
             return Err("surface arguments must be exact lowercase hex".into());
         }
         Ok(Self { artifact: decimal(value, "artifact")?, export_name,

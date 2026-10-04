@@ -111,8 +111,6 @@ fn aead(key: &[u8; KEY]) -> XChaCha20Poly1305 {
     XChaCha20Poly1305::new(key.into())
 }
 
-pub(crate) fn decode_hex(value: &str) -> Result<Vec<u8>> { crate::decode_hex(value) }
-
 fn fixed<const N: usize>(bytes: &[u8], label: &str) -> Result<[u8; N]> {
     bytes
         .try_into()
@@ -532,10 +530,10 @@ fn load_enc_ring(key: &Path) -> Result<Vec<RingEntry>> {
     let mut out = Vec::new();
     for entry in value.get("keys").and_then(Value::as_array).ok_or("keyring lacks keys")? {
         let epoch = entry.get("keyEpoch").and_then(Value::as_str).ok_or("keyring entry lacks keyEpoch")?;
-        let x25519: [u8; 32] = decode_hex(entry.get("x25519").and_then(Value::as_str).ok_or("keyring entry lacks x25519")?)?
+        let x25519: [u8; 32] = crate::decode_hex(entry.get("x25519").and_then(Value::as_str).ok_or("keyring entry lacks x25519")?)?
             .try_into()
             .map_err(|_| "a keyring X25519 secret is 32 bytes")?;
-        let kem: [u8; KEM_SEED_LEN] = decode_hex(entry.get("kemSeed").and_then(Value::as_str).ok_or("keyring entry lacks kemSeed")?)?
+        let kem: [u8; KEM_SEED_LEN] = crate::decode_hex(entry.get("kemSeed").and_then(Value::as_str).ok_or("keyring entry lacks kemSeed")?)?
             .try_into()
             .map_err(|_| "a keyring ML-KEM seed is 64 bytes")?;
         out.push((epoch.to_owned(), Zeroizing::new(x25519), Zeroizing::new(kem)));
@@ -770,7 +768,7 @@ pub(crate) fn load_cache(path: &Path, passphrase: &[u8]) -> Result<Keyring> {
             .ok_or("key cache room must be an object")?
         {
             let epoch: u32 = epoch.parse().map_err(|_| "key cache epoch")?;
-            let mut raw = decode_hex(key.as_str().ok_or("key cache key must be hex")?)?;
+            let mut raw = crate::decode_hex(key.as_str().ok_or("key cache key must be hex")?)?;
             let key = fixed::<KEY>(&raw, "room key")?;
             raw.zeroize();
             keys.insert(room, &RoomKey::from_parts(epoch, key));
@@ -818,7 +816,7 @@ pub(crate) fn legacy_content(lowered: Value) -> Result<Value> {
                 if before["kind"] != private_kind {
                     return Err("private strike requires a ciphertext before record".into());
                 }
-                PrivateEnvelope::from_bytes(&decode_hex(before["payload"].as_str()
+                PrivateEnvelope::from_bytes(&crate::decode_hex(before["payload"].as_str()
                     .ok_or("private edit before lacks payload")?)?)?;
                 // Striking a line retains its existing encrypted body: it neither
                 // publishes a supplied plaintext nor re-seals the old envelope.
@@ -850,7 +848,7 @@ pub(crate) fn opened_text(atom: &Value) -> Result<Option<Vec<u8>>> {
         return Ok(Some(text.as_bytes().to_vec()));
     }
     if let Some(bytes) = atom["private"]["hex"].as_str() {
-        return Ok(Some(decode_hex(bytes)?));
+        return Ok(Some(crate::decode_hex(bytes)?));
     }
     Err("private line has no authenticated opening; unlock its room key before editing".into())
 }
@@ -909,7 +907,7 @@ fn private_note(
         .get("payload")
         .and_then(Value::as_str)
         .ok_or_else(|| "private atom lacks payload".to_string())
-        .and_then(decode_hex)
+        .and_then(crate::decode_hex)
         .and_then(|bytes| PrivateEnvelope::from_bytes(&bytes))
     {
         Ok(envelope) => envelope,

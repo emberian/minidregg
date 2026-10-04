@@ -14,14 +14,10 @@ fn hash(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
 }
 fn unhex(value: &str, width: usize) -> Result<Vec<u8>> {
-    if value.len() != width * 2
-        || !value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-    {
+    if !mini_sdk::hex::is_canonical_len(value, width) {
         return Err("invalid authentication encoding".into());
     }
-    crate::decode_hex(value)
+    mini_sdk::hex::decode(value).map_err(|e| e.0)
 }
 fn ready(fd: i32, events: i16, end: Instant) -> Result<()> {
     loop {

@@ -29,9 +29,7 @@ fn primitive(codec: &str, value: &str) -> Result<()> {
         "bytes"
             if value.len() <= 32768
                 && value.len().is_multiple_of(2)
-                && value
-                    .bytes()
-                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) =>
+                && mini_sdk::hex::is_lower(value) =>
         {
             Ok(())
         }
@@ -607,7 +605,7 @@ pub(super) fn program_create(root: &Path, workspace: &Value, name: &str,
     validate_ref_name(name)?;
     let source=bounded_json(source_path)?;
     exact(&source,&["jam","abi"])?;
-    let code=unhex(member(&source,"jam")?)?;
+    let code=crate::decode_hex(member(&source,"jam")?)?;
     let length=u32::try_from(code.len()).map_err(|_|"program code too large")?;
     let mut payload=length.to_le_bytes().to_vec();
     payload.extend_from_slice(&code);

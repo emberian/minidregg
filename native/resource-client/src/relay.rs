@@ -44,7 +44,7 @@
 //! The relay -> witness message (a second unix socket; never the channel cell):
 //! `"DCW1" | epoch 8 | record length 4 | record | opening length 4 | opening`.
 
-use crate::{path, Args, Result};
+use crate::{hex, path, Args, Result};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use sha3::digest::{ExtendableOutput, Update, XofReader};
 use sha3::{CShake256, CShake256Core};
@@ -389,7 +389,7 @@ pub(crate) fn parse_leases(text: &str) -> Result<Vec<LeaseRow>> {
             return Err(format!("lease line {}: want `slot holder pubkey-hex from to`", i + 1));
         }
         let num = |s: &str| s.parse::<u64>().map_err(|_| format!("lease line {}: {s} is not a number", i + 1));
-        let key = unhex(f[2]).filter(|k| k.len() == 32).ok_or(format!("lease line {}: key is not 32 hex bytes", i + 1))?;
+        let key = crate::decode_hex(f[2]).ok().filter(|k| k.len() == 32).ok_or(format!("lease line {}: key is not 32 hex bytes", i + 1))?;
         rows.push(LeaseRow {
             slot: u32::try_from(num(f[0])?).map_err(|_| "slot out of range".to_owned())?,
             holder: num(f[1])?,
@@ -411,14 +411,6 @@ pub(crate) fn lease_records(rows: &[LeaseRow]) -> Vec<u8> {
         v.extend_from_slice(&r.to.to_be_bytes());
     }
     v
-}
-
-pub(crate) fn hex(b: &[u8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
-}
-
-pub(crate) fn unhex(s: &str) -> Option<Vec<u8>> {
-    crate::decode_hex(s).ok()
 }
 
 pub(crate) fn xof(customization: &[u8], parts: &[&[u8]], out: &mut [u8]) {
@@ -806,7 +798,7 @@ fn append_loop(rx: Receiver<Sealed>, mini: PathBuf, ws: PathBuf, stream: String,
 
 fn last_line(b: &[u8]) -> String {
     let s = String::from_utf8_lossy(b);
-    let refusal = s.lines().filter(|l| l.contains("encoded refusal")).last().and_then(|l| l.split_whitespace().last()).and_then(unhex);
+    let refusal = s.lines().filter(|l| l.contains("encoded refusal")).last().and_then(|l| l.split_whitespace().last()).and_then(|h| crate::decode_hex(h).ok());
     let decoded = refusal.map(|r| String::from_utf8_lossy(&r).chars().filter(|c| !c.is_control()).collect::<String>());
     let tail = s.lines().filter(|l| !l.trim().is_empty()).last().unwrap_or("").to_owned();
     match decoded {
@@ -1506,9 +1498,9 @@ mod tests {
 #[test]
 fn unhex_rejects_malformed_unicode_without_panicking() {
     for invalid in ["0é0", "😀", "a", "zz"] {
-        assert_eq!(unhex(invalid), None);
+        assert_eq!(crate::decode_hex(invalid).ok(), None);
     }
     let bytes: Vec<u8> = (0..=255).collect();
-    assert_eq!(unhex(&hex(&bytes)), Some(bytes));
-    assert_eq!(unhex("aAFF"), Some(vec![170, 255]));
+    assert_eq!(crate::decode_hex(&hex(&bytes)).ok(), Some(bytes));
+    assert_eq!(crate::decode_hex("aAFF").ok(), Some(vec![170, 255]));
 }

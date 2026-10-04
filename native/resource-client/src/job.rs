@@ -111,7 +111,6 @@ fn pair(first: &[u8], second: &[u8]) -> Vec<u8> {
     bytes
 }
 
-fn unhex(text: &str) -> Result<Vec<u8>> { crate::decode_hex(text).map_err(|e| format!("job: {e}")) }
 
 fn nonce() -> Result<String> {
     let mut bytes = [0u8; 16];
@@ -367,7 +366,7 @@ fn money(
     crate::shell::session_fs::replace(&ws.root, &dir.join("plan.bin"), &plan)?;
     let header = inspect(ws, "pay-plan", &plan)?;
     let canonical = header.pointer("/header/canonical").and_then(Value::as_str).ok_or("job: plan lacks a header")?;
-    let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&unhex(canonical)?).to_bytes();
+    let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&crate::decode_hex(canonical).map_err(|e| format!("job: {e}"))?).to_bytes();
     let ingress = invoke(ws, 161, &pair(&plan, &signature))?;
     retain_new_ingress(ws, dir, &ingress)?;
     submit_ingress(ws, dir, &ingress)

@@ -11,9 +11,7 @@ const AUTHORITY: &str = "carry-authority.json";
 
 fn hex64(value: &str) -> Result<()> {
     if value.len() != 64
-        || !value
-            .bytes()
-            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+        || !mini_sdk::hex::is_lower(value)
     {
         return Err(fail(
             "carry key or image digest must be 64 lowercase hex characters",

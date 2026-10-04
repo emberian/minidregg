@@ -13,8 +13,8 @@ fn message(record:&[u8])->Result<(Context,[u8;32])>{
       transition:array(&record[h+40..h+72])?,operation:array(&record[h+72..h+104])?,law:array(&record[h+104..h+136])?},array(&record[h+136..h+168])?))
 }
 fn key(object:&str,fragment:&Value,store:&Store)->Result<Zeroizing<[u8;32]>>{
-    let cipher=private::decode_hex(text(fragment,"ciphertext")?)?;
-    let wrapping=private::decode_hex(text(fragment,"wrapping")?)?;let h=WRAP.len();
+    let cipher=crate::decode_hex(text(fragment,"ciphertext")?)?;
+    let wrapping=crate::decode_hex(text(fragment,"wrapping")?)?;let h=WRAP.len();
     if !wrapping.starts_with(WRAP)||wrapping.len()<h+32{return Err("invalid fragment wrapping".into());}
     let nonce:[u8;32]=wrapping[h..h+32].try_into().unwrap();let record=&wrapping[h+32..];
     let (context,writer)=message(record)?;
@@ -40,29 +40,29 @@ pub(super) fn seal(audience:&Audience,binding:&[u8],nonce:&[u8;32],plain:&[u8],s
       "author":author,"operation":"0","wrappedBy":author,"wrappedAt":"0"}))
 }
 pub(super) fn rewrap(audience:&Audience,fragment:&Value,nonce:&[u8;32],store:&mut Store,writer:&SigningKey)->Result<String>{
-    let cipher=private::decode_hex(text(fragment,"ciphertext")?)?;
+    let cipher=crate::decode_hex(text(fragment,"ciphertext")?)?;
     let key=key(&audience.object,fragment,store)?;
     Ok(crate::hex(&wrap(audience,&cipher,nonce,&key,store,writer)?))
 }
 /// The binding a fragment's header carries (checked again by `open`).
 pub(super) fn binding_of(fragment:&Value,len:usize)->Result<Vec<u8>>{
-    let bytes=private::decode_hex(text(fragment,"ciphertext")?)?;let h=FRAGMENT.len()+len;
+    let bytes=crate::decode_hex(text(fragment,"ciphertext")?)?;let h=FRAGMENT.len()+len;
     if !bytes.starts_with(FRAGMENT)||bytes.len()<h+32{return Err("authored fragment address differs".into());}
     Ok(bytes[FRAGMENT.len()..h].to_vec())
 }
 /// Digest of a fragment's exact ciphertext (a reader's retained version identity).
 pub(super) fn digest(fragment:&Value)->Result<[u8;32]>{
-    Ok(Sha256::digest(private::decode_hex(text(fragment,"ciphertext")?)?).into())
+    Ok(Sha256::digest(crate::decode_hex(text(fragment,"ciphertext")?)?).into())
 }
 pub(super) fn open(object:&str,binding:&[u8],fragment:&Value,store:&Store)->Result<Vec<u8>>{
-    let bytes=private::decode_hex(text(fragment,"ciphertext")?)?;let h=FRAGMENT.len()+binding.len();
+    let bytes=crate::decode_hex(text(fragment,"ciphertext")?)?;let h=FRAGMENT.len()+binding.len();
     if !bytes.starts_with(FRAGMENT)||bytes.len()<h+32||bytes[FRAGMENT.len()..h]!=*binding{return Err("authored fragment address differs".into());}
     let nonce:[u8;32]=bytes[h..h+32].try_into().unwrap();let record=&bytes[h+32..];let (context,writer)=message(record)?;
     if context.object!=nat32(object)?||context.operation!=fragment_op(&context.object,binding,&nonce){return Err("authored fragment context differs".into());}
     object_messages::open(&context,&*key(object,fragment,store)?,&writer,record)
 }
 pub(super) fn epoch(fragment:&Value)->Result<u64>{
-    let bytes=private::decode_hex(text(fragment,"wrapping")?)?;let h=WRAP.len();
+    let bytes=crate::decode_hex(text(fragment,"wrapping")?)?;let h=WRAP.len();
     if !bytes.starts_with(WRAP)||bytes.len()<h+32{return Err("invalid fragment wrapping".into());}
     Ok(message(&bytes[h+32..])?.0.epoch)
 }

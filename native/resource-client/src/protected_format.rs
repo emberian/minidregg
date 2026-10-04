@@ -102,7 +102,7 @@ fn link_target(value: &Value) -> Result<()> {
             let mut total = 0usize;
             for field in ["scheme", "authority", "path"] {
                 let bytes = text(value, field)?;
-                if bytes.len() % 2 != 0 || !bytes.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+                if bytes.len() % 2 != 0 || !mini_sdk::hex::is_lower(bytes) {
                     return Err("existing external link metadata is not canonical hexadecimal".into());
                 }
                 total = total.checked_add(bytes.len() / 2).ok_or("existing link metadata is too large")?;
@@ -183,7 +183,7 @@ pub(crate) fn lower(view: &Value, target: &str, actions: &Value) -> Result<Value
                 // are projected by markJson from that same signed resource.
                 let canonical = text(record, "canonical")?;
                 if canonical.is_empty() || canonical.len() % 2 != 0
-                    || !canonical.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                    || !mini_sdk::hex::is_lower(canonical)
                 {
                     return Err("linked record lacks its canonical hexadecimal witness".into());
                 }

@@ -63,9 +63,7 @@ fn decode_claim_wire(operation: u8, bytes: &[u8]) -> Result<Vec<u8>> {
     if raw.is_empty()
         || raw.len() > 8192
         || raw.len() % 2 != 0
-        || !raw
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        || !mini_sdk::hex::is_lower(raw)
     {
         return Err(
             "claim HTTP canonical response must be 1..4096 lowercase hexadecimal bytes".into(),
@@ -346,9 +344,7 @@ fn require_type(value: &Value, kind: &str) -> Result<()> {
 fn exact_hex(value: &Value, field: &str, size: usize) -> Result<Vec<u8>> {
     let raw = text(value, field)?;
     if raw.len() != size * 2
-        || !raw
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        || !mini_sdk::hex::is_lower(raw)
     {
         return Err(format!(
             "source {field} must be {size} lowercase hexadecimal bytes"
@@ -862,9 +858,7 @@ fn run_quote(mut args: Args) -> Result<()> {
     if raw.is_empty()
         || raw.len() > 4096
         || raw.len() % 2 != 0
-        || !raw
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        || !mini_sdk::hex::is_lower(raw)
     {
         return Err("quote canonical command exceeds source bound or is malformed".into());
     }

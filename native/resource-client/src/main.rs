@@ -1083,7 +1083,7 @@ fn generate_key(
             };
             // The sponsor's full hybrid public key (`mini enc-public`): X25519 + ML-KEM-768.
             let key = workspace::private::MemberPublic::from_bytes(
-                &workspace::private::decode_hex(text.trim())?,
+                &crate::decode_hex(text.trim())?,
             )?;
             let subject = subject.to_str().ok_or("--escrow-subject must be UTF-8")?;
             Some(workspace::private::escrow_seed(subject, &seed, &key)?)
@@ -1561,30 +1561,13 @@ fn inspect_public(
     result
 }
 
-/// The crate's one hex decoder: ASCII digits only, even length, never a
-/// panic on non-ASCII input and never `from_str_radix`'s leading `+`.
-fn decode_hex(value: &str) -> Result<Vec<u8>> {
-    if !value.len().is_multiple_of(2) { return Err("hex must have even length".into()); }
-    fn nibble(byte: u8) -> Result<u8> {
-        match byte {
-            b'0'..=b'9' => Ok(byte - b'0'),
-            b'a'..=b'f' => Ok(byte - b'a' + 10),
-            b'A'..=b'F' => Ok(byte - b'A' + 10),
-            _ => Err("invalid ASCII hex".into()),
-        }
-    }
-    value.as_bytes().chunks_exact(2)
-        .map(|pair| Ok((nibble(pair[0])? << 4) | nibble(pair[1])?)).collect()
-}
-
-fn hex(bytes: &[u8]) -> String {
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        output.push(DIGITS[(byte >> 4) as usize] as char);
-        output.push(DIGITS[(byte & 15) as usize] as char);
-    }
-    output
+/// The crate's hex codec is mini_sdk::hex: lowercase on encode; this decoder accepts either case
+/// (what a person or another tool may type), ASCII digits only, even length, never a panic on
+/// non-ASCII input and never `from_str_radix`'s leading `+`. Where the spelling is part of the
+/// contract, callers check `mini_sdk::hex::is_canonical*` or decode strictly with `mini_sdk::hex::decode`.
+pub(crate) use mini_sdk::hex::encode as hex;
+pub(crate) fn decode_hex(value: &str) -> Result<Vec<u8>> {
+    mini_sdk::hex::decode_any_case(value).map_err(|error| error.0)
 }
 
 fn challenge_headers(value: &Value) -> Result<Vec<Vec<u8>>> {
@@ -1728,7 +1711,7 @@ fn ssh_identity() -> Option<&'static Path> { SSH_IDENTITY.get().map(PathBuf::as_
 /// recorded. A second, different pin within one process is refused.
 #[cfg(unix)]
 fn pin_remote_host(sha: &str) -> Result<()> {
-    if sha.len() != 64 || !sha.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+    if sha.len() != 64 || !mini_sdk::hex::is_lower(sha) {
         return Err("Host SHA-256 must be 64 lowercase hex digits".into());
     }
     match EXPECTED_HOST_SHA.get() {
@@ -3771,7 +3754,7 @@ fn run(mut args: Args) -> Result<()> {
                     let entry = args.required("entry")?;
                     let heights = args.optional("heights");
                     args.finish()?;
-                    let entry = workspace::private::decode_hex(
+                    let entry = crate::decode_hex(
                         entry.to_str().ok_or("--entry must be UTF-8 hex")?,
                     )?;
                     // The heights of the cell's writes since birth, in order: the

@@ -353,7 +353,7 @@ fn invocation_family(request: &Value) -> Result<Option<Value>> {
     }
     let context = member(family, "contextBytes")?;
     if context.len() > 2 * INVOCATION_CONTEXT_MAX_BYTES || context.len() % 2 != 0
-        || !context.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) {
+        || !mini_sdk::hex::is_lower(context) {
         return Err("invocation family contextBytes must be bounded canonical lowercase hex".into());
     }
     Ok(Some(family.clone()))
@@ -461,7 +461,7 @@ fn recorded_commitment(value: &Value) -> Result<crate::key_rotation::Commitment>
     match value.get("prerotation") {
         Some(Value::Bool(false)) => Ok(crate::key_rotation::Commitment::Without),
         Some(Value::Bool(true)) => {
-            let next: [u8; 32] = private::decode_hex(member(value, "nextPublicKey")?)?
+            let next: [u8; 32] = crate::decode_hex(member(value, "nextPublicKey")?)?
                 .try_into()
                 .map_err(|_| "workspace nextPublicKey is not 32 bytes")?;
             Ok(crate::key_rotation::Commitment::Mine(next))
@@ -2795,14 +2795,6 @@ fn legacy_private_content(lowered: Value) -> Result<Value> {
     private::legacy_content(lowered)
 }
 
-fn unhex(text: &str) -> Result<Vec<u8>> {
-    crate::decode_hex(text)
-}
-
-fn to_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 /// One stream append: `{"type":"append","topic":TEXT,"text":TEXT[,"to":SUBJECT][,"ref":{cell,sequence}]}`.
 /// Raw bytes ride as `"topicHex"` / `"payloadHex"` in place of `"topic"` / `"text"` (a channel epoch
 /// record, CH-EPOCH, is binary). The Host derives the sequence position and the payload digest; the
@@ -2828,12 +2820,12 @@ fn stream_append(payload: &Value) -> Result<Value> {
     let topic = if has("topic") {
         member(payload, "topic")?.as_bytes().to_vec()
     } else {
-        unhex(member(payload, "topicHex")?)?
+        crate::decode_hex(member(payload, "topicHex")?)?
     };
     let text = if has("text") {
         member(payload, "text")?.as_bytes().to_vec()
     } else {
-        unhex(member(payload, "payloadHex")?)?
+        crate::decode_hex(member(payload, "payloadHex")?)?
     };
     if topic.len() > 64 {
         return Err("append topic exceeds 64 bytes".into());
@@ -2853,8 +2845,8 @@ fn stream_append(payload: &Value) -> Result<Value> {
         None | Some(Value::Null) => Value::Null,
         Some(value) => json!({"cell":member(value,"cell")?,"sequence":member(value,"sequence")?}),
     };
-    Ok(json!({"type":"append","topic":to_hex(&topic),
-        "payload":to_hex(&text),"to":to,"ref":reference}))
+    Ok(json!({"type":"append","topic":hex(&topic),
+        "payload":hex(&text),"to":to,"ref":reference}))
 }
 
 /// Private intent follows the document reference. Browser and shell writers
@@ -3179,7 +3171,7 @@ fn propose_summary_once(
                         field_decimal(sequence, "stream nextSeq")?;
                         // Seal the normalized bytes so binary append proposals retain
                         // the same room privacy as text proposals.
-                        let plain = zeroize::Zeroizing::new(unhex(member(&lowered, "payload")?)?);
+                        let plain = zeroize::Zeroizing::new(crate::decode_hex(member(&lowered, "payload")?)?);
                         lowered["payload"] = json!(hex(&roomkey::seal_for_room(
                             key, room, target, sequence, &plain
                         )?));
@@ -5194,7 +5186,7 @@ fn resource_link_of(target: &Value) -> Option<(String, String)> {
         return None;
     }
     let text = |key: &str| {
-        unhex(target.get(key)?.as_str()?).ok().and_then(|bytes| String::from_utf8(bytes).ok())
+        crate::decode_hex(target.get(key)?.as_str()?).ok().and_then(|bytes| String::from_utf8(bytes).ok())
     };
     if text("scheme")? != RESOURCE_LINK_SCHEME || !text("authority")?.is_empty() {
         return None;

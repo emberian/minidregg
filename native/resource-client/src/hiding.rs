@@ -43,6 +43,7 @@
 //! entry the view displays is one of the opened entries.
 
 
+use crate::decode_hex;
 use serde_json::{json, Value};
 use sha3::digest::{core_api::CoreWrapper, ExtendableOutput, Update, XofReader};
 use sha3::CShake256Core;
@@ -329,7 +330,6 @@ fn leaf(salt: &[u8], entry: &[u8]) -> [u8; 32] {
     cshake(b"", LEAF, &preimage)
 }
 
-fn decode_hex(value: &str) -> Result<Vec<u8>> { crate::decode_hex(value) }
 
 /// One `StreamCodec.nat` prefix: base-255 digits up to the terminator 255.
 fn nat_prefix(bytes: &[u8]) -> Result<(Nat, &[u8])> {
@@ -524,10 +524,7 @@ pub(crate) fn verify_view(view: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-    }
+    use crate::hex;
 
     /// The Lean core's conformance vector (`kmac256_conforms_tagged`).
     #[test]

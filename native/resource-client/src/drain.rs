@@ -120,9 +120,7 @@ fn direct_host(host: &Path, config: &Path, args: &[&Path]) -> Result<()> {
 
 fn canonical_sha(value: &str) -> bool {
     value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && mini_sdk::hex::is_lower(value)
 }
 
 pub(super) fn private_dir(path: &Path) -> Result<()> {

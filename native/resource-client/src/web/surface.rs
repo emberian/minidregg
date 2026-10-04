@@ -67,7 +67,7 @@ impl Renderer<'_> {
             }
             "3" => {
                 let operation = &node["operation"];
-                let id = operation["id"].as_str().filter(|id| id.len() == 32 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+                let id = operation["id"].as_str().filter(|id| id.len() == 32 && mini_sdk::hex::is_lower(id));
                 let route = id.and_then(|id| self.operation_links.get(id))
                     .filter(|route| route.starts_with('/') && !route.starts_with("//") && !route.chars().any(|c| matches!(c, '\r' | '\n' | '\0')));
                 if node["state"] == "prepared" {

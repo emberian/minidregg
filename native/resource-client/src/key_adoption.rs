@@ -70,13 +70,11 @@ fn hex_bytes(value: &Value, name: &str, length: Option<usize>) -> Result<Vec<u8>
     if text.is_empty()
         || text.len() > LIMIT * 2
         || text.len() % 2 != 0
-        || !text
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        || !mini_sdk::hex::is_lower(text)
     {
         return Err(format!("adoption {name} is not bounded lowercase hex"));
     }
-    let bytes = workspace::private::decode_hex(text)?;
+    let bytes = crate::decode_hex(text)?;
     if length.is_some_and(|length| bytes.len() != length) {
         return Err(format!("adoption {name} has the wrong length"));
     }
@@ -910,7 +908,7 @@ mod tests {
         crate::create_private(&host, b"fixture host image, never executed").unwrap();
         crate::create_private(&config, b"{}").unwrap();
         let host_digest =
-            workspace::private::decode_hex(&host_image_sha256(&host).unwrap()).unwrap();
+            crate::decode_hex(&host_image_sha256(&host).unwrap()).unwrap();
         let listener = UnixListener::bind(&socket).unwrap();
         let ingress = b"exact signed ingress including zero\0byte".to_vec();
         let expected = ingress.clone();

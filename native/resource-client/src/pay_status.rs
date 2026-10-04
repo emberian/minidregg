@@ -290,9 +290,7 @@ fn bytes(value: &Value, key: &str, max: usize) -> Result<Vec<u8>> {
     need(
         text.len() <= max * 2
             && text.len() % 2 == 0
-            && text
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+            && mini_sdk::hex::is_lower(text),
         "paid status requires bounded lowercase hexadecimal",
     )?;
     decode_hex(text)

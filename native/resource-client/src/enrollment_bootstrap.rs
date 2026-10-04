@@ -254,9 +254,7 @@ fn write_response(stream: &mut TcpStream, response: Response, deadline: Instant)
 }
 fn lower_hex(value: &str, size: usize) -> bool {
     value.len() == size
-        && value
-            .bytes()
-            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+        && mini_sdk::hex::is_lower(value)
 }
 fn decimal(value: &Value, positive: bool) -> bool {
     value.as_str().is_some_and(|s| {

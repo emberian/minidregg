@@ -1194,7 +1194,7 @@ pub(crate) fn wraps_in_view(view: &Value) -> Result<Vec<WrapAtom>> {
                             .get("payload")
                             .and_then(Value::as_str)
                             .ok_or("wrap atom lacks payload")?;
-                        WrapAtom::from_atom(id, &private::decode_hex(payload)?)
+                        WrapAtom::from_atom(id, &crate::decode_hex(payload)?)
                     })());
                 } else {
                     object.values().for_each(|item| walk(item, schema, out));
@@ -2804,7 +2804,7 @@ pub(crate) fn open_local(root: &Path, room_name: &str, stream: &str, sequence: &
     let passphrase = passphrase()?;
     let (_, room, _) = private_room(root, room_name)?;
     let ring = load_ring(root, &passphrase)?;
-    let note = open_in_room(Some(&ring), &room, stream, sequence, &private::decode_hex(payload_hex.trim())?);
+    let note = open_in_room(Some(&ring), &room, stream, sequence, &crate::decode_hex(payload_hex.trim())?);
     println!("{}", serde_json::to_string_pretty(&json!({"type":"minidregg-room-open-v1",
         "room":room_name,"stream":stream,"sequence":sequence,"private":note,"authority":"local"}))
         .map_err(|e| e.to_string())?);
@@ -2845,7 +2845,7 @@ pub(crate) fn tail(root: &Path, workspace: &Value, name: &str, start: &str, coun
     if let Some(entries) = view.get_mut("entries").and_then(Value::as_array_mut) {
         for entry in entries {
             let sequence = entry.get("sequence").and_then(Value::as_str).unwrap_or("").to_owned();
-            let note = match entry.get("payload").and_then(Value::as_str).map(private::decode_hex) {
+            let note = match entry.get("payload").and_then(Value::as_str).map(crate::decode_hex) {
                 Some(Ok(bytes)) => open_in_room(keys.as_ref(), &room, &stream, &sequence, &bytes),
                 Some(Err(error)) => json!({"refused": error}),
                 None => json!({"refused": "the view carried no payload for this entry"}),

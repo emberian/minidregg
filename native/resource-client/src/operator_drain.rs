@@ -28,9 +28,7 @@ fn digest(bytes: &[u8]) -> String {
 }
 fn hex_digest(value: &str) -> bool {
     value.len() == 64
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        && mini_sdk::hex::is_lower(value)
 }
 
 pub(crate) struct State {

@@ -3,7 +3,7 @@
 //! the Host's separately authorized source/catalog check; final content admission
 //! must run the matching all-keyholder receiver gate over the exact post.
 use crate::{object_keys::{AdmittedAnchor, Store}, object_messages::{self, Context}, Result};
-use super::{content_privacy::{self, Exposure}, private};
+use super::content_privacy::{self, Exposure};
 use ed25519_dalek::SigningKey;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -374,7 +374,7 @@ fn validate_stage(stage:&Value,identity:&Value)->Result<()> {
     nat32(text(stage,"transition")?)?;
     nat32(text(stage,"catalogNonce")?)?;
     nat32(text(stage,"catalogQueryNonce")?)?;
-    let operation=private::decode_hex(text(stage,"operation")?)?;
+    let operation=crate::decode_hex(text(stage,"operation")?)?;
     if operation.len()!=32 {return Err("retained enrollment operation must be 32 bytes".into());}
     if !stage["device"].is_object() {return Err("retained enrollment lacks its device publication".into());}
     Ok(())
@@ -454,7 +454,7 @@ fn continue_enrollment(root:&std::path::Path,workspace:&Value,name:&str,stage:&V
     let (state,storage)=ensure_custody(root)?;
     let public=&stage["device"];
     // Reopen the exact retained device; losing it is not permission to keygen.
-    let generation: [u8;32]=private::decode_hex(text(public,"generation")?)?.try_into().map_err(|_|"invalid retained device generation")?;
+    let generation: [u8;32]=crate::decode_hex(text(public,"generation")?)?.try_into().map_err(|_|"invalid retained device generation")?;
     let store=custody(root)?;
     let (_,retained_public)=store.load_device(&generation)?;
     if public["kemPublic"]!=crate::hex(&retained_public.kem) || public["dhPublic"]!=crate::hex(&retained_public.dh) {
@@ -567,7 +567,7 @@ fn recover_phase(root:&std::path::Path,workspace:&Value,name:&str,home:&std::pat
             &super::member_path(workspace,"key")?,&state,&key,&phase)?;
         return finish_enrollment(root,workspace,name,home);
     }
-    let operation: [u8;32]=private::decode_hex(text(&meta,"operation")?)?.try_into().map_err(|_|"invalid enrollment operation")?;
+    let operation: [u8;32]=crate::decode_hex(text(&meta,"operation")?)?.try_into().map_err(|_|"invalid enrollment operation")?;
     let store=custody(root)?;
     let staged=store.pending_epoch(&operation);
     drop(store);
@@ -715,7 +715,7 @@ pub(crate) fn export_epoch(root:&std::path::Path,workspace:&Value,name:&str,outp
     if length!=(manifest.len()-72) as u64{return Err("retained manifest length differs".into());}
     let signed_manifest:Value=serde_json::from_slice(&manifest[8..manifest.len()-64]).map_err(|e|e.to_string())?;
     let writer=text(&signed_manifest,"writer")?;
-    if private::decode_hex(writer)?.len()!=32{return Err("retained manifest writer is invalid".into());}
+    if crate::decode_hex(writer)?.len()!=32{return Err("retained manifest writer is invalid".into());}
     let bundle=json!({"type":"mini-protected-document-epoch-v1","object":target,
         "epoch":audience.anchor.epoch.to_string(),"manifest":crate::hex(&manifest),
         "operation":meta["operation"],"writer":writer,
@@ -777,7 +777,7 @@ fn fixed<const N:usize>(bytes:&[u8]) -> Result<[u8;N]> {
 /// Current document observation authority must already have succeeded. Historical
 /// epoch keys open historical atoms; current epoch is not substituted into them.
 pub(crate) fn open_atom(object:&str, atom:&str, payload:&str, store:&Store) -> Result<Vec<u8>> {
-    let bytes = private::decode_hex(payload)?;
+    let bytes = crate::decode_hex(payload)?;
     let prefix = FRAME.len();
     let min = prefix+64+MESSAGE_FRAME.len()+32+8+32+32+32+32+24+16+64;
     if bytes.len()<min || !bytes.starts_with(FRAME) { return Err("malformed protected atom envelope".into()); }
@@ -892,10 +892,10 @@ mod tests {
         let mut wrong_anchor=newest.clone();wrong_anchor["anchor"]["revision"]=json!("5");
         assert!(annotations::open("72",&wrong_anchor,&reader).is_err());
         assert!(annotations::open("73",&newest,&reader).is_err());
-        let mut forged=newest.clone();let mut cipher=private::decode_hex(text(&forged["body"]["fragment"],"ciphertext").unwrap()).unwrap();
+        let mut forged=newest.clone();let mut cipher=crate::decode_hex(text(&forged["body"]["fragment"],"ciphertext").unwrap()).unwrap();
         *cipher.last_mut().unwrap()^=1;forged["body"]["fragment"]["ciphertext"]=json!(crate::hex(&cipher));
         assert!(annotations::open("72",&forged,&reader).is_err());
-        let mut broken_wrap=newest.clone();let mut wrap=private::decode_hex(text(&broken_wrap["body"]["fragment"],"wrapping").unwrap()).unwrap();
+        let mut broken_wrap=newest.clone();let mut wrap=crate::decode_hex(text(&broken_wrap["body"]["fragment"],"wrapping").unwrap()).unwrap();
         *wrap.last_mut().unwrap()^=1;broken_wrap["body"]["fragment"]["wrapping"]=json!(crate::hex(&wrap));
         assert_eq!(annotations::epoch(&broken_wrap["body"]).unwrap(),current.anchor.epoch);
         assert!(annotations::open("72",&broken_wrap,&reader).is_err());
@@ -947,7 +947,7 @@ mod tests {
         let request=rewriting::rekey_request("paper",&plan).unwrap();
         assert_eq!(request["targets"][0]["payload"]["actions"][0]["type"],"rewrapAtom");
         assert!(request["targets"][0]["payload"]["actions"][0].get("payload").is_none());
-        let mut tampered=newest.clone();let mut wrap=private::decode_hex(text(&tampered["kind"]["fragment"],"wrapping").unwrap()).unwrap();
+        let mut tampered=newest.clone();let mut wrap=crate::decode_hex(text(&tampered["kind"]["fragment"],"wrapping").unwrap()).unwrap();
         *wrap.last_mut().unwrap()^=1;tampered["kind"]["fragment"]["wrapping"]=json!(crate::hex(&wrap));
         assert_eq!(atoms::epoch(&tampered["kind"]).unwrap(),newer.anchor.epoch);
         assert!(atoms::open("72",&tampered,&reader).is_err());
@@ -993,7 +993,7 @@ mod tests {
         assert!(atoms::advance(Some(&skipped),&edit_version,&v1,&d1).unwrap_err().contains("predecessor"));
         // The version cannot be rewritten in the clear: the fragment operation binds it.
         let mut forged=v1.clone();
-        let mut bytes=private::decode_hex(text(&forged["kind"]["fragment"],"ciphertext").unwrap()).unwrap();
+        let mut bytes=crate::decode_hex(text(&forged["kind"]["fragment"],"ciphertext").unwrap()).unwrap();
         let at=b"MINI/PROTECTED-AUTHORED-FRAGMENT/v1".len()+33+7;bytes[at]=2;
         forged["kind"]["fragment"]["ciphertext"]=json!(crate::hex(&bytes));
         assert!(atoms::open("72",&forged,&retained).is_err());

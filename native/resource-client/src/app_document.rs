@@ -330,9 +330,7 @@ fn checked_receipt(headers: &[u8], body: &[u8], binding: &Value, capture: &str) 
     }
     let digest = member(&receipt, "permitSha256")?;
     if digest.len() != 64
-        || !digest
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        || !mini_sdk::hex::is_lower(digest)
     {
         return Err("export source permit digest is malformed".into());
     }

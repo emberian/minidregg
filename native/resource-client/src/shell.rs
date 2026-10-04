@@ -1028,12 +1028,10 @@ fn session_file(value: &str, label: &str) -> std::result::Result<(), String> {
 
 /// Exactly `length` bytes spelled as lowercase or uppercase hex.
 fn hex_bytes(word: &str, length: usize) -> Option<Vec<u8>> {
-    if word.len() != 2 * length || !word.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if word.len() != 2 * length {
         return None;
     }
-    (0..length)
-        .map(|i| u8::from_str_radix(&word[2 * i..2 * i + 2], 16).ok())
-        .collect()
+    crate::decode_hex(word).ok()
 }
 
 fn decimal(value: &str, label: &str) -> std::result::Result<(), String> {

@@ -1,6 +1,6 @@
 //! Authenticated, immutable summon handoff. Files are hints; native signed
 //! observations and the original accepted call qualify delivery, never paths.
-use crate::{workspace, Args, Result};
+use crate::{hex, workspace, Args, Result};
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -23,19 +23,11 @@ fn fields(v: &Value, names: &[&str]) -> Result<()> {
     }
     Ok(())
 }
-fn hex(b: &[u8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
-}
 fn unhex(s: &str) -> Result<Vec<u8>> {
-    if s.len() % 2 != 0
-        || s.len() > LIMIT * 2
-        || !s
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-    {
+    if s.len() > LIMIT * 2 {
         return Err("handoff hex invalid".into());
     }
-    crate::decode_hex(s)
+    mini_sdk::hex::decode(s).map_err(|_| "handoff hex invalid".to_owned())
 }
 fn digest(b: &[u8]) -> String {
     hex(&Sha256::digest(b))

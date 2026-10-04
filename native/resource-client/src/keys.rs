@@ -18,7 +18,7 @@
 //! `key ls`) map one-to-one onto the above through `shell_plan`.
 
 use super::shell::Plan;
-use super::{Args, Result};
+use super::{hex, Args, Result};
 use serde_json::{json, Value};
 use std::ffi::OsString;
 use std::io::Read;
@@ -44,10 +44,6 @@ fn text(value: OsString, label: &str) -> Result<String> {
     value
         .into_string()
         .map_err(|_| format!("--{label} must be UTF-8"))
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// The workspace's subject and the public key of its own signing key.

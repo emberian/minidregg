@@ -48,9 +48,6 @@ impl Drop for Store {
         scrub(&mut self.state);
     }
 }
-fn unhex(s: &str) -> Result<Vec<u8>> {
-    crate::workspace::private::decode_hex(s)
-}
 impl Store {
     /// Initialize durable empty custody explicitly, before publishing its backup manifest.
     pub(crate) fn initialize(path: &Path, storage_key: [u8; 32]) -> Result<Self> {
@@ -188,7 +185,7 @@ impl Store {
             .get(hex(generation))
             .ok_or("device generation not retained")?;
         let field = |name: &str| -> Result<Vec<u8>> {
-            unhex(row[name].as_str().ok_or("invalid retained device")?)
+            crate::decode_hex(row[name].as_str().ok_or("invalid retained device")?)
         };
         let secret = crate::object_keys_hybrid::DeviceSecret {
             kem: Zeroizing::new(field("kemSecret")?),
@@ -232,7 +229,7 @@ impl Store {
             anchor.epoch,
             hex(&anchor.transition)
         );
-        let bytes = Zeroizing::new(unhex(
+        let bytes = Zeroizing::new(crate::decode_hex(
             self.state["keys"][id]
                 .as_str()
                 .ok_or("historical epoch not delegated")?,
@@ -277,7 +274,7 @@ impl Store {
             {
                 return Err("operation already bound to another epoch/context".into());
             }
-            return unhex(old["wire"].as_str().ok_or("invalid pending wire")?);
+            return crate::decode_hex(old["wire"].as_str().ok_or("invalid pending wire")?);
         }
         let key = self.historical_key(current)?;
         let wire = object_messages::seal(context, &key, writer, plain)?;
@@ -303,9 +300,9 @@ impl Store {
                 || old["context"]!=json!(hex(&context.bytes())) {
                 return Err("authored fragment already bound to another plaintext/context".into());
             }
-            let key=Zeroizing::new(unhex(old["key"].as_str().ok_or("invalid fragment key")?)?
+            let key=Zeroizing::new(crate::decode_hex(old["key"].as_str().ok_or("invalid fragment key")?)?
                 .try_into().map_err(|_|"invalid fragment key length")?);
-            return Ok((key,unhex(old["wire"].as_str().ok_or("invalid fragment wire")?)?));
+            return Ok((key,crate::decode_hex(old["wire"].as_str().ok_or("invalid fragment wire")?)?));
         }
         let mut key=Zeroizing::new([0u8;32]);
         SystemRandom::new().fill(&mut *key).map_err(|_|"fragment randomness unavailable")?;
@@ -396,9 +393,9 @@ impl Store {
         if row["kind"]!=json!("epoch") && row["kind"]!=json!("control") {
             return Err("operation is not an epoch phase".into());
         }
-        Ok((unhex(row["manifest"].as_str().ok_or("invalid staged manifest")?)?,
-            unhex(row["command"].as_str().ok_or("invalid staged command")?)?,
-            row.get("intentJson").map(|intent|unhex(intent.as_str().ok_or("invalid staged intent JSON")?)).transpose()?))
+        Ok((crate::decode_hex(row["manifest"].as_str().ok_or("invalid staged manifest")?)?,
+            crate::decode_hex(row["command"].as_str().ok_or("invalid staged command")?)?,
+            row.get("intentJson").map(|intent|crate::decode_hex(intent.as_str().ok_or("invalid staged intent JSON")?)).transpose()?))
     }
     /// Bind the Host-authored command once, without changing its staged JSON,
     /// key, manifest or operation identity. Publication follows this fsync.
@@ -454,8 +451,8 @@ impl Store {
             return Err("epoch is not awaiting source reconciliation".into());
         }
         Ok((
-            unhex(row["manifest"].as_str().ok_or("invalid staged manifest")?)?,
-            unhex(row["command"].as_str().ok_or("invalid staged command")?)?,
+            crate::decode_hex(row["manifest"].as_str().ok_or("invalid staged manifest")?)?,
+            crate::decode_hex(row["command"].as_str().ok_or("invalid staged command")?)?,
         ))
     }
     /// Only after source settlement establishes this exact operation's outcome.

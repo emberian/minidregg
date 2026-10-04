@@ -107,7 +107,7 @@ fn key(mut args: Args) -> Result<()> {
     let (_, dir) = room_dir(&mut args)?;
     args.finish()?;
     let sk = xkey(&dir)?;
-    println!("{}", relay::hex(PublicKey::from(&sk).as_bytes()));
+    println!("{}", crate::hex(PublicKey::from(&sk).as_bytes()));
     Ok(())
 }
 
@@ -131,7 +131,7 @@ pub(crate) fn parse_roster(text: &str) -> Result<Vec<Peer>> {
         if f.len() != 3 {
             return Err(format!("roster line {}: want `name slot x25519-hex`", i + 1));
         }
-        let pk = relay::unhex(f[2]).filter(|k| k.len() == 32).ok_or(format!("roster line {}: key is not 32 hex bytes", i + 1))?;
+        let pk = crate::decode_hex(f[2]).ok().filter(|k| k.len() == 32).ok_or(format!("roster line {}: key is not 32 hex bytes", i + 1))?;
         let peer = Peer {
             name: f[0].trim_start_matches('@').to_owned(),
             slot: f[1].parse().map_err(|_| format!("roster line {}: slot", i + 1))?,
@@ -766,7 +766,7 @@ fn say(mut args: Args) -> Result<()> {
     let now = unix_ms();
     let mut r = [0u8; 4];
     relay::urandom(&mut r)?;
-    let id = format!("{now:013}-{}-{}", std::process::id(), relay::hex(&r));
+    let id = format!("{now:013}-{}-{}", std::process::id(), crate::hex(&r));
     let ob = dir.join("outbox");
     crate::create_private(&ob.join(format!("{id}.json")), format!("{}\n", json!({"to": to, "text": text, "queued_unix_ms": now})).as_bytes())
         .map_err(|e| format!("outbox: {e}"))?;
@@ -844,7 +844,7 @@ mod tests {
 
     #[test]
     fn roster_parses_and_refuses() {
-        let k = relay::hex(&[5u8; 32]);
+        let k = crate::hex(&[5u8; 32]);
         let r = parse_roster(&format!("# name slot key\n@alice 0 {k}\nbob 1 {k}\n")).unwrap();
         assert_eq!(r[0].name, "alice");
         assert_eq!(r[1].slot, 1);

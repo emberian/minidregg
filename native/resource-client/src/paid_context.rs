@@ -56,9 +56,7 @@ fn string<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
 fn fixed<const N: usize>(value: &Value, name: &str) -> Result<[u8; N]> {
     let text = string(value, name)?;
     if text.len() != N * 2
-        || !text
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        || !mini_sdk::hex::is_lower(text)
     {
         return Err(format!(
             "paid snapshot {name} is not {N} lowercase hexadecimal bytes"

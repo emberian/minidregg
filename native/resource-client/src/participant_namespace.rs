@@ -337,9 +337,7 @@ pub(crate) fn bind_attempt(
     source_sha: &str,
 ) -> Result<AttemptBinding> {
     if source_sha.len() != 64
-        || !source_sha
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        || !mini_sdk::hex::is_lower(source_sha)
     {
         return Err("namespace source SHA-256 must be 64 lowercase hex digits".into());
     }
