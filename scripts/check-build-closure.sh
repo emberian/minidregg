@@ -11,6 +11,8 @@ repo_root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 cd "$repo_root"
 python3 - <<'PY'
 import re, subprocess, sys, json
+sys.path.insert(0, "scripts")
+from lean_imports import file_imports
 libs = re.findall(r'^\[\[lean_lib\]\]\s*\nname\s*=\s*"([^"]+)"',
                   open("lakefile.toml").read(), re.M)
 files = subprocess.check_output(["git", "ls-files", "-z", "--", "*.lean"]).decode().split("\0")
@@ -22,7 +24,7 @@ for f in files:
     if top in libs:
         mods[f[:-5].replace("/", ".")] = f
 def imports(path):
-    return [m for m in re.findall(r"^import\s+(\S+)", open(path, encoding="utf-8").read(), re.M)]
+    return file_imports(path)
 exe_roots = re.findall(r'^\[\[lean_exe\]\]\s*\nname\s*=\s*"[^"]+"\s*\nroot\s*=\s*"([^"]+)"',
                        open("lakefile.toml").read(), re.M)
 surfaces = json.load(open("protocol/lean-build-surfaces.json"))

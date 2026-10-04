@@ -48,6 +48,8 @@ set -u
 cd "$(dirname "$0")/.." || exit 1
 python3 - <<'PY'
 import re, subprocess, sys
+sys.path.insert(0, "scripts")
+from lean_imports import header_imports
 ALLOWED = {
     "Theory":    {"Mathlib", "Lean", "Theory"},
     "Selvage":   {"Mathlib", "Theory", "Selvage"},
@@ -64,15 +66,14 @@ for f in files:
     lib = f.split("/")[0].removesuffix(".lean")
     if lib not in ALLOWED:
         continue
-    for n, line in enumerate(open(f, encoding="utf-8"), 1):
-        m = re.match(r"import\s+(\S+)", line)
-        if not m:
-            continue
-        parts = m.group(1).split(".")
+    # the header as Lean reads it: an indented import, several on one line, and the
+    # public/meta/private modifiers all count (scripts/lean_imports.py)
+    for imported in header_imports(open(f, encoding="utf-8").read()):
+        parts = imported.split(".")
         tgt = parts[1] if parts[0] == "Minidregg" and len(parts) > 1 else parts[0]
         counts[(lib, tgt)] = counts.get((lib, tgt), 0) + 1
         if tgt not in ALLOWED[lib]:
-            bad.append(f"  {f}:{n}: {line.strip()}   [new edge {lib} -> {tgt}]")
+            bad.append(f"  {f}: import {imported}   [new edge {lib} -> {tgt}]")
 for lib in ALLOWED:
     edges = sorted((t, c) for (l, t), c in counts.items() if l == lib)
     print(f"{lib:9s} -> " + " ".join(f"{t}:{c}" for t, c in edges))

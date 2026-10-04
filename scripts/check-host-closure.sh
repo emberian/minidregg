@@ -17,6 +17,8 @@ root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 cd "$root"
 python3 - "$@" <<'PY'
 import re, subprocess, sys, datetime
+sys.path.insert(0, "scripts")
+from lean_imports import file_imports
 PIN = "scripts/gates/host-closure.pin"
 libs = re.findall(r'^\[\[lean_lib\]\]\s*\nname\s*=\s*"([^"]+)"', open("lakefile.toml").read(), re.M)
 files = [f for f in subprocess.check_output(["git", "ls-files", "-z", "--", "*.lean"]).decode().split("\0") if f]
@@ -26,7 +28,7 @@ for f in files:
     if top in libs:
         mods[f[:-5].replace("/", ".")] = f
 def imports(m):
-    return re.findall(r"^import\s+(\S+)", open(mods[m], encoding="utf-8").read(), re.M)
+    return file_imports(mods[m])
 def closure(roots):
     seen, stack = set(), list(roots)
     while stack:

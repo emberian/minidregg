@@ -23,10 +23,44 @@ def rusty(f):
     # what a cargo build or test of the crate reads: Rust sources, manifests, and files under
     # src/ tests/ benches/ examples/ (fixtures, include_bytes!); a script beside the crate is not
     parts = f.split("/")
+    # golden/ and fixtures/ are read by tests through CARGO_MANIFEST_DIR (mini-sdk golden vectors)
     return (f.endswith(".rs") or parts[-1] in ("Cargo.toml", "Cargo.lock", "build.rs")
-            or (len(parts) > 3 and parts[2] in ("src", "tests", "benches", "examples")))
+            or (len(parts) > 3 and parts[2] in ("src", "tests", "benches", "examples", "golden", "fixtures", "testdata")))
+def balanced(text, i):
+    depth = 0
+    for j in range(i, len(text)):
+        depth += (text[j] == "(") - (text[j] == ")")
+        if depth == 0:
+            return j
+    return len(text)
+def embedded(crate):
+    """Repo-relative files (a trailing / names a directory) a crate's sources include_str!/include_bytes!,
+    including files outside native/ (deploy/shell/templates/..., Kernel/*.lean) and in-crate files outside
+    src/ (journey.d/*.golden.txt). A change to one is a change to the crate's tests; a selector that looks
+    only under native/<crate>/src would never run the rows that read it."""
+    out, cdir = set(), os.path.join(native, crate)
+    for dirpath, dirnames, filenames in os.walk(cdir):
+        dirnames[:] = [d for d in dirnames if d not in ("target", ".git")]
+        for fn in filenames:
+            if not fn.endswith(".rs"):
+                continue
+            path = os.path.join(dirpath, fn)
+            text = open(path, encoding="utf-8", errors="replace").read()
+            for m in re.finditer(r"include_(?:str|bytes)!\s*\(", text):
+                arg = text[m.end():balanced(text, m.end() - 1)]
+                lits = "".join(re.findall(r'"((?:[^"\\]|\\.)*)"', arg))
+                if not lits:
+                    continue
+                base = cdir if "CARGO_MANIFEST_DIR" in arg else dirpath
+                rel = os.path.relpath(os.path.normpath(os.path.join(base, lits.lstrip("/") if base == cdir else lits)), repo)
+                out.add(rel + ("/" if lits.endswith("/") else ""))
+    return out
+embeds = {c: embedded(c) for c in crates}
+def reads(c, f):
+    return any(f == e or (e.endswith("/") and f.startswith(e)) or f.startswith(e + "/") for e in embeds[c])
 touched = {f.split("/")[1] for f in changed if f.startswith("native/") and f.count("/") >= 2
            and f.split("/")[1] in crates and rusty(f)}
+touched |= {c for c in crates for f in changed if reads(c, f)}
 # anything outside native/ that a Rust build reads directly (lockfile/toolchain) selects all rows
 if any(f in ("rust-toolchain.toml", "scripts/check-rust-tests.sh") for f in changed):
     touched = set(crates)

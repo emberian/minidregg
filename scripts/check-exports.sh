@@ -19,12 +19,16 @@ ALLOW = "scripts/gates/exports-allowlist.tsv"
 ls = lambda *g: [f for f in subprocess.check_output(["git", "ls-files", "-z", "--", *g]).decode().split("\0") if f]
 exports, externs, impl = [], [], []
 for f in ls("*.lean"):
-    for n, line in enumerate(open(f, encoding="utf-8"), 1):
-        code = line.split("--", 1)[0]
-        for m in re.finditer(r"@\[\s*export\s+([A-Za-z_][A-Za-z0-9_]*)\s*\]", code):
-            exports.append((m.group(1), f"{f}:{n}"))
-        if re.search(r"@\[\s*extern\b", code): externs.append(f"{f}:{n}")
-        if re.search(r"\bimplemented_by\b", code) and "@[" in code: impl.append(f"{f}:{n}")
+    text = open(f, encoding="utf-8").read()
+    # `--` comments out, newlines kept (line numbers survive); an attribute list may sit
+    # across lines and hold several attributes: `@[export sym, noinline]`, `@[inline, export sym]`
+    code = "\n".join(l.split("--", 1)[0] for l in text.split("\n"))
+    line_of = lambda pos: code.count("\n", 0, pos) + 1
+    for attrs in re.finditer(r"@\[([^\]]*)\]", code):
+        for m in re.finditer(r"(?:^|,)\s*export\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?=,|$)", attrs.group(1)):
+            exports.append((m.group(1), f"{f}:{line_of(attrs.start())}"))
+        if re.search(r"(?:^|,)\s*extern\b", attrs.group(1)): externs.append(f"{f}:{line_of(attrs.start())}")
+        if re.search(r"(?:^|,)\s*implemented_by\b", attrs.group(1)): impl.append(f"{f}:{line_of(attrs.start())}")
 native = []
 for f in ls("native/*.rs", "native/*.c", "native/*.h"):
     for line in open(f, encoding="utf-8", errors="replace"):

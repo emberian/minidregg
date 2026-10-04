@@ -9,7 +9,11 @@ import hashlib
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from lean_imports import header_imports
 
 GROUPS = {
     "SimplexQualification": [
@@ -45,7 +49,7 @@ def source_modules(root):
 
 
 def imports(path):
-    return re.findall(r"^import\s+(\S+)", path.read_text(), re.M)
+    return header_imports(path.read_text())
 
 
 def closure(modules, roots):

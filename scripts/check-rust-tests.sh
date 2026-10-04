@@ -33,6 +33,10 @@ tail_cargo_error() { grep -q '^error' "$1" && { echo "rust-tests: tail of $1:"; 
 t() {
   local name=$1 floor=$2 crate=$3; shift 3
   local log=$logs/$name.log rc n
+  # a floor of 0 (or none) makes "the filter matches nothing" read green: the floor is the whole gate
+  case $floor in ''|*[!0-9]*|0)
+    echo "rust-tests: RED: $name: floor '$floor' is not a positive integer"; red=$((red + 1)); return ;;
+  esac
   printf '  %-22s cargo test --release --locked %s\n' "$name" "$*"
   (cd "native/$crate" && cargo "+$rust" test --release --locked -j "$jobs" "$@") >"$log" 2>&1
   rc=$?
