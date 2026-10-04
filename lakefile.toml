@@ -133,6 +133,11 @@ name = "BendQualification"
 [[lean_lib]]
 name = "SimplexQualification"
 
+# Objective Bend Core4 metatheory (proofs over the default-build definitions in
+# Theory/ObjectiveBend*). Gated separately: `lake build ObjectiveProofs`.
+[[lean_lib]]
+name = "ObjectiveProofs"
+
 # Source-first research is an explicit opt-in build.
 [[lean_lib]]
 name = "ResearchWip"

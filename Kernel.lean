@@ -142,3 +142,7 @@ import Kernel.JointInvocationCandidate
 import Kernel.JointDecisionRecovery
 import Kernel.JointReservation
 import Kernel.NativeJointAgreement
+import Kernel.Contracts.Identities
+import Kernel.Contracts.Cuts
+import Kernel.Contracts.Snapshot
+import Kernel.Contracts.Futures

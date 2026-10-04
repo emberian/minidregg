@@ -89,3 +89,13 @@ import Theory.PrivateTrace  -- the learn/infer-only interface as a state-machine
 import Theory.AssertAxioms  -- #assert_axioms (one theorem) and #assert_axioms_tree (the package): axiom footprints as failing checks
 import Theory.Channel  -- CH-CELL: channel class (C, r, E, δ, δ_relay, μ) with P0/P1/P1-phone/P2; fixed-size cell codec (256/1,024 B, regular + duty layouts) with cell_size_exact, cell_decode_canonical (both poles), injectivity; Schedule/Lease, assemble with fill + absent mask, fanout; slot_rate_bounded, no_lease_no_cell, fill_is_cell_shaped, fanout_independent_of_presence; observers (wire/relay/operator/witness/member) with observable_trace_depends_only_on_membership and member_view_independent_of_presence under explicit sealing hypotheses PayloadHidden/FillHidden, every pole on a concrete instance; @[export] codec/assemble/fanout
 import Theory.Channel.Audit  -- CH-CELL theorems axiom pins (moved out so the runtime channel closure has no Mathlib, CH-CLIENT-1)
+-- Objective Bend Core4: the DEFINITIONS (calculus, typing, demand machine, data, capacity,
+-- extensions) are default-build; the metatheory proofs about them are the separate
+-- `ObjectiveProofs` library (lakefile.toml), gated on its own.
+import Theory.ObjectiveBendTypes
+import Theory.ObjectiveBendOpenRecursion
+import Theory.ObjectiveBendTyping
+import Theory.ObjectiveBendDemandMachine
+import Theory.ObjectiveBendDemandData
+import Theory.ObjectiveBendDemandCapacity
+import Theory.ObjectiveBendExtensions
