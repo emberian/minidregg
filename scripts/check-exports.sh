@@ -4,8 +4,9 @@
 # An exported symbol is a C ABI promise. One that no native code links is a
 # claim ("Rust calls this") that nothing checks; the census of 2026-10-01 found
 # two, both uncalled, and they were deleted. The rule:
-#   * every `@[export sym]` in a tracked .lean file must be named by a
-#     non-comment line of a tracked file under native/ (.rs .c .h build.rs),
+#   * every `@[export sym]` in a tracked .lean file must be named in the LIVE code of a
+#     tracked file under native/ (.rs .c .h build.rs): a name in a comment, or in a
+#     `#[cfg(any())]` item that no build compiles, is not a call,
 #     or be listed in scripts/gates/exports-allowlist.tsv (`sym<TAB>reason`);
 #   * every allowlist row must still name an export (a stale row is red);
 #   * `@[extern]` and `implemented_by` are counted and printed, since each is a
@@ -15,6 +16,8 @@ root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 cd "$root"
 python3 - <<'PY'
 import re, subprocess, sys
+sys.path.insert(0, "scripts")
+from rust_scan import live_code
 ALLOW = "scripts/gates/exports-allowlist.tsv"
 ls = lambda *g: [f for f in subprocess.check_output(["git", "ls-files", "-z", "--", *g]).decode().split("\0") if f]
 exports, externs, impl = [], [], []
@@ -29,14 +32,11 @@ for f in ls("*.lean"):
             exports.append((m.group(1), f"{f}:{line_of(attrs.start())}"))
         if re.search(r"(?:^|,)\s*extern\b", attrs.group(1)): externs.append(f"{f}:{line_of(attrs.start())}")
         if re.search(r"(?:^|,)\s*implemented_by\b", attrs.group(1)): impl.append(f"{f}:{line_of(attrs.start())}")
-native = []
-for f in ls("native/*.rs", "native/*.c", "native/*.h"):
-    for line in open(f, encoding="utf-8", errors="replace"):
-        s = line.strip()
-        if s.startswith("//") or s.startswith("*") or s.startswith("/*"):
-            continue
-        native.append(s)
-blob = "\n".join(native)
+# a call is a name in LIVE code: not in a comment (line, trailing or block) and not in a
+# `#[cfg(any())]` item no build compiles (scripts/rust_scan.py); string literals count, since the
+# calls are dlsym("name") literals
+blob = "\n".join(live_code(open(f, encoding="utf-8", errors="replace").read())
+                 for f in ls("native/*.rs", "native/*.c", "native/*.h"))
 allow = {}
 try:
     for l in open(ALLOW, encoding="utf-8"):

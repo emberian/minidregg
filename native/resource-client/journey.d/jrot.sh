@@ -10,7 +10,8 @@
 # works; a subject enrolled --no-prerotation cannot rotate (notPrerotated), as no
 # subject could before; the service restarts and the friend still signs; the
 # operator audit re-admits every record (rotations included) through
-# NativeHostReplay.
+# NativeHostReplay; and the cold audit refuses a copy of the Store with one corrupted leaf
+# (scripts/check-audit-corrupted-leaf.sh).
 #
 # Hook contract: journey.sh exports MINI HOST CONFIG SOCKET SPONSOR_WS
 # JOURNEY_WORLD JOURNEY_STEP_DIR. Last stdout line = artifact; last stderr line = detail.
@@ -328,6 +329,14 @@ row "after restart the friend signs at epoch 3 and reads every write" "epoch 3; 
 "$HOST" "$CONFIG" audit >"$D/audit.out" 2>"$D/audit.err"; arc=$?
 row "operator audit re-admits every record, rotations included" "exit 0" \
   "exit=$arc $(tail -1 "$D/audit.out")" "$([ "$arc" = 0 ] && echo 1 || echo 0)"
+
+# One corrupted leaf above the latest checkpoint is refused by the cold audit. The check ran nowhere
+# (scripts/check-audit-corrupted-leaf.sh had no caller); it copies this Store and leaves it untouched.
+REPO=$(cd "$(dirname "$0")/../../.." && pwd)
+run corrupt-leaf sh "$REPO/scripts/check-audit-corrupted-leaf.sh" "$HOST" "$CONFIG" "$D/audit-corrupt"
+row "the cold audit refuses one corrupted leaf above the latest checkpoint" "exit 0 and PASS audit_refuses_corrupted_suffix_leaf" \
+  "exit=$(cat "$D/corrupt-leaf.rc") $(tail -1 "$D/corrupt-leaf.out") $(tail -1 "$D/corrupt-leaf.err")" \
+  "$([ "$(cat "$D/corrupt-leaf.rc")" = 0 ] && grep -q '^PASS audit_refuses_corrupted_suffix_leaf' "$D/corrupt-leaf.out" && echo 1 || echo 0)"
 
 echo "$T"
 if [ "$BAD" = 0 ]; then

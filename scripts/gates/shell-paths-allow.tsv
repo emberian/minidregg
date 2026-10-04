@@ -1,0 +1,4 @@
+# file<TAB>exact line text<TAB>reason  -- a spelling test (is_absolute, has_root, starts_with('/')) in a file that confines
+# friend-typed paths by descriptor. Every row must still match a line (a stale row is red). scripts/check-shell-paths.sh
+shell.rs	        if !path.is_absolute() {	the operator's own invocation, `mini shell --workspace/--home` (shell.rs `run`), not a friend-typed path
+selected_exchange.rs	    if !path.is_absolute() {	named_path(): the host/config/socket path fields of the exchange's operator config JSON, not a shell line

@@ -17,22 +17,32 @@
 set -uo pipefail
 root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 cd "$root/native/resource-client/src" || exit 2
-# every file below shell/ (nested directories too), not just shell/*.rs
+# The files that confine a friend-typed path are DERIVED, not listed: every file below shell/ (nested
+# directories too) and every file that names the confinement API (`session_fs`), plus the four parsers
+# that always counted. A file that starts confining paths by descriptor enters by saying so; the check
+# that the four seeds are still derived keeps the derivation from quietly shrinking.
 mapfile -t shell_dir < <(find shell -type f -name '*.rs' | sort)
-parsers=(chat.rs story.rs hermes.rs shell.rs "${shell_dir[@]}")
+mapfile -t parsers < <({ printf '%s\n' chat.rs story.rs hermes.rs shell.rs "${shell_dir[@]}"; grep -rl 'session_fs' --include='*.rs' . | sed 's|^\./||'; } | sort -u)
+for seed in chat.rs story.rs hermes.rs shell.rs; do
+  printf '%s\n' "${parsers[@]}" | grep -qx "$seed" || { echo "shell-paths: RED: seed parser $seed is no longer derived (renamed or deleted?)"; exit 1; }
+done
+# a legitimate spelling hit in a derived file is pinned with its reason, by file and exact text
+allow=$root/scripts/gates/shell-paths-allow.tsv
 # The spelling tests that confine a path by what it looks like: `p.is_absolute()`, the
 # `Path::is_absolute(p)` and `.map(Path::is_absolute)` forms, `p.has_root()`, a `starts_with('/')`
 spelling='\b(is_absolute|has_root)\b|starts_with\(.\/.\)'
 
-allowed='shell.rs:        if !path.is_absolute() {'
-
 check() { # DIR -> prints offending lines; exit 1 when any
   local dir=$1 hits
   hits=$(cd "$dir" && grep -nE "$spelling" "${parsers[@]}" 2>/dev/null \
-    | sed 's/^\([^:]*\):[0-9]*:/\1:/' | grep -vxF "$allowed")
+    | sed 's/^\([^:]*\):[0-9]*:/\1\t/' | awk -F'\t' -v allow="$allow" 'BEGIN { while ((getline l < allow) > 0) if (l !~ /^#/ && l != "") { split(l, a, "\t"); ok[a[1] "\t" a[2]] = 1 } } !(($1 "\t" $2) in ok)' | tr '\t' ':')
   if [ -n "$hits" ]; then printf '%s\n' "$hits"; return 1; fi
   # The allowed call stays exactly one: the shell's own --workspace/--home.
-  [ "$(cd "$dir" && grep -cE "$spelling" shell.rs)" = 1 ] || { echo "shell.rs: allowed call count changed"; return 1; }
+  # and every pinned row still matches a line (a stale row is red)
+  while IFS=$'\t' read -r f text _; do
+    [ -n "$f" ] && [[ $f != \#* ]] || continue
+    (cd "$dir" && grep -qxF -- "$text" "$f" 2>/dev/null) || { echo "$f: pinned allow row no longer matches a line: $text"; return 1; }
+  done <"$allow"
   return 0
 }
 
