@@ -426,7 +426,9 @@ exact rc-mix-hybrid          resource-client --bin mini -- \
   pq_mailbox::tests::shared_crypto_preserves_maximum_profile_through_all_layers \
   cohort_tcp::tests::the_link_key_needs_both_receiver_halves_and_binds_both_ciphertext_components \
   cohort_tcp::tests::the_link_combiner_matches_an_independent_known_answer \
-  cohort_tcp::tests::mce2_v1_rosters_and_bare_ml_kem_link_keys_refuse_by_name
+  cohort_tcp::tests::mce2_v1_rosters_and_bare_ml_kem_link_keys_refuse_by_name \
+  cohort_tcp::tests::enrollment_needs_both_signature_halves \
+  cohort_tcp::tests::mce3_v2_rosters_and_ed25519_only_native_keys_refuse_by_name
 # The private backend's recipient capsules share crypto_transit.rs: hybrid, algorithm 2.
 exact private-backend-hybrid private-backend --lib -- \
   crypto_transit::tests::tampering_either_ciphertext_component_or_the_box_refuses \

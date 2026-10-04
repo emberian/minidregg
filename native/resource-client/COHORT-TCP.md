@@ -8,22 +8,24 @@ private route commitments on the client-to-registrar links. The honest
 noncolluding registrar remains an explicit additional trust premise; receiver
 still sees ordinary native signatures/graph.
 
-## Roster enrollment (MCE3, hybrid X25519 + ML-KEM-768)
+## Roster enrollment (MCE4: hybrid X25519 + ML-KEM-768 exchange, hybrid Ed25519 + ML-DSA-65 signature)
 
-The public cohort roster (`minidregg-cohort-roster-v2` JSON: `generation`,
-`width`, `members[width]`, `operators[5]`, each `{native, linkKey}` hex, `linkKey`
-being the 1,216-byte hybrid public key X25519 || ML-KEM-768) is the
+The public cohort roster (`minidregg-cohort-roster-v3` JSON: `generation`,
+`width`, `members[width]`, `operators[5]`, each `{native, linkKey}` hex; `native` is the
+1,984-byte hybrid signature key Ed25519 (32) || ML-DSA-65 (1,952), the `mini_sdk::signer`
+`HybridEd25519MlDsa65` layout; `linkKey` is the 1,216-byte hybrid public key X25519 || ML-KEM-768) is the
 only admission authority. Phase 0 slot i is sent by member i; phase k>0 by
 operator k-1 (registrar, relay0, relay1, relay2, mailbox); phase k<5 is received
 by operator k and phase 5 slot i by member i. Its exact-byte SHA-256 enters
 every transcript and pin, so both ends must hold the same roster.
 
-The receiver sends `MCE3 | nonce32 | ephemeral hybrid public key` (1,252 bytes).
+The receiver sends `MCE4 | nonce32 | ephemeral hybrid public key` (1,252 bytes).
 The sender answers with a hybrid encapsulation to the receiver's roster link key,
 a hybrid encapsulation to the ephemeral key (each 1,120 bytes: an ephemeral
-X25519 key and an ML-KEM-768 ciphertext), and an Ed25519 signature by its own
+X25519 key and an ML-KEM-768 ciphertext), and a hybrid signature (Ed25519 64 || ML-DSA-65 3,309 = 3,373 bytes) by its own
 roster native key over (domain, profile identity, roster digest, start epoch,
-the whole challenge, both ciphertexts) (2,304 bytes). Each encapsulation is
+the whole challenge, both ciphertexts) (5,613 bytes). The receiver admits the sender
+only if BOTH signature halves verify. Each encapsulation is
 `hybrid_kem` (one cSHAKE256 over BOTH shared secrets and the full transcript,
 the combiner private rooms use; either primitive alone keeps the key secret).
 The link key is HMAC-derived from both encapsulation keys and the signed
@@ -32,22 +34,27 @@ acknowledgement proves it holds the roster link secret. Garbage, a non-roster
 or wrong-slot key, a response replayed from an earlier challenge and a stalled
 peer are dropped and the listener re-accepts until the public start deadline;
 none consumes the link. Handshake reads/writes are bounded at 3 s (a LAN round
-trip must fit). Native signatures are classical Ed25519: the key exchange is
-hybrid, the signer authentication is not yet. A v1 roster, an `MCE2` challenge
-and a bare ML-KEM link key refuse by name.
+trip must fit). Both halves of the enrollment are hybrid: the link key needs
+X25519 AND ML-KEM-768 to break, the sender's authentication needs Ed25519 AND
+ML-DSA-65 to forge. The native key is a separate HYBRID mix key (`mini mix --action
+native-key --state DIR --secret SK --public PK`: a 64-byte seed pair, Ed25519 seed ||
+ML-DSA-65 seed, and its 1,984-byte public key), not the participant's Ed25519 Mini identity:
+the Host admits no hybrid identity yet (docs/SDK-PQ.md); the signer and wire layout are the
+same ones, so there is no second format. A v1 or v2 roster, an `MCE2` or `MCE3` challenge,
+a bare 32-byte Ed25519 roster key or key file, and a bare ML-KEM link key refuse by name.
 
 The receiver retains the signed transcript (`enrollment-*.signed`, admission
 evidence) and writes `enrolled-link` into its record directory before adopting
 any record. Network-fed workers (`registrar`, `relay`, `mailbox`, `scan`) take
 `--roster` and consume an input directory only if its marker names the exact
 upstream link (phase, slot) and the roster's sender key: an operator directory
-list cannot relabel slots. Senders take `--native-key SEED` (a `mini keygen`
-seed); receivers take `--link-secret/--link-public` (a `mini mix --action key`
+list cannot relabel slots. Senders take `--native-key SK` (a `mini mix --action native-key`
+secret); receivers take `--link-secret/--link-public` (a `mini mix --action key`
 pair, the secret a 96-byte seed that regenerates the public key, checked against
 it and against the roster). Outer wires are
 sealed under the connection's key and never persisted; a resumed link re-enrolls
-and reseals its durable inner inventory. Profile pins carry codec `MCE3`: state
-from the pre-shared-key codec and from MCE2 refuses to resume.
+and reseals its durable inner inventory. Profile pins carry codec `MCE4`: state
+from the pre-shared-key codec, MCE2 and MCE3 refuses to resume.
 This is neither a full private evaluator nor a formal active/lifetime anonymity
 proof. See `PQ-MAILBOX.md` for the restricted shuffle/exact-set construction.
 

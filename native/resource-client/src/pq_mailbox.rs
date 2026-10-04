@@ -1087,6 +1087,13 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         args.finish()?;
         return persist(&secret, &random::<32>()?);
     }
+    if action == "native-key" {
+        // A hybrid (Ed25519 + ML-DSA-65) native key for the cohort roster.
+        let secret = PathBuf::from(args.required("secret")?);
+        let public = PathBuf::from(args.required("public")?);
+        args.finish()?;
+        return crate::cohort_tcp::generate_native_key(&secret, &public);
+    }
     if action == "key" {
         let secret = PathBuf::from(args.required("secret")?);
         let public = PathBuf::from(args.required("public")?);
@@ -1286,7 +1293,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             }
             persist(&output, &out)
         }
-        _ => Err("mix action: key|registrar-key|seal|batch|relay|mailbox|scan".into()),
+        _ => Err("mix action: key|native-key|registrar-key|seal|batch|relay|mailbox|scan".into()),
     }
 }
 #[cfg(test)]

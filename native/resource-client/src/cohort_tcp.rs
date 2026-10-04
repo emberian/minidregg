@@ -1,10 +1,11 @@
 //! Fixed enrolled-link TCP records for the guarded PQ cohort. Every link is
 //! admitted by the public cohort roster through a signed, challenge-bound
-//! hybrid X25519 + ML-KEM-768 enrollment (MCE3); this layer does not manufacture Mini outcomes.
+//! hybrid enrollment (MCE4): X25519 + ML-KEM-768 key exchange and an Ed25519 + ML-DSA-65
+//! signature; this layer does not manufacture Mini outcomes.
 use crate::scheduled_transport::{directory, persist, random, read_private};
 use crate::{transport, Args, Result};
 use crate::hybrid_kem::{self, HybridPublic, HybridSecret};
-use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
+use mini_sdk::signer::{self, HybridSigner, Scheme, Signer};
 use chacha20poly1305::{
     aead::{Aead, Payload},
     KeyInit, XChaCha20Poly1305, XNonce,
@@ -391,8 +392,9 @@ fn send(
     }
     Ok(())
 }
-// LINK ENROLLMENT (MCE3). Every fixed link is admitted only by the public
-// cohort roster: the sender proves the roster's native Ed25519 key for this
+// LINK ENROLLMENT (MCE4). Every fixed link is admitted only by the public
+// cohort roster: the sender proves the roster's HYBRID native key (Ed25519 AND
+// ML-DSA-65, `mini_sdk::signer`, the participant signer; both halves must verify) for this
 // exact (generation, slot, phase, profile, roster, start) under a FRESH
 // receiver challenge, and the link key comes from two HYBRID X25519 +
 // ML-KEM-768 encapsulations (`hybrid_kem`, the combiner private rooms use) --
@@ -401,16 +403,25 @@ fn send(
 // per-connection ephemeral pair (a later static-key compromise does not open
 // recorded link traffic). Either primitive alone keeps the link key secret.
 // No operator-provisioned shared secret exists. MCE2 (pure ML-KEM) refuses by
-// name. Native signatures stay classical Ed25519: the KEY EXCHANGE is hybrid
-// but this is NOT a PQ authentication of the signer.
+// name, and so do MCE3 (Ed25519-only native signatures) and a v2 roster. The
+// enrollment is hybrid in both halves: the key exchange needs X25519 AND
+// ML-KEM-768 to break, and the sender's authentication needs Ed25519 AND
+// ML-DSA-65 to forge. The cohort's native key is a HYBRID mix key (`mini mix
+// --action native-key`): the Host admits no hybrid Mini identity yet
+// (docs/SDK-PQ.md), so it is not the participant's Ed25519 identity key; it
+// uses the same signer and wire layout, so it needs no second format.
 const KEM_PUBLIC: usize = hybrid_kem::PUBLIC_LEN;
 /// The v1 (pure ML-KEM) link secret size: a bound wide enough to READ a v1 key
 /// file so it is refused by name, not by size.
 const V1_KEM_SECRET: usize = 2400;
 const KEM_CIPHER: usize = hybrid_kem::CIPHERTEXT_LEN;
 const CHALLENGE: usize = 4 + 32 + KEM_PUBLIC;
-const RESPONSE: usize = 2 * KEM_CIPHER + 64;
-const ENROLL_MAGIC: &[u8; 4] = b"MCE3";
+const NATIVE_PUBLIC: usize = Scheme::HybridEd25519MlDsa65.public_key_len();
+const NATIVE_SIGNATURE: usize = Scheme::HybridEd25519MlDsa65.signature_len();
+/// A native key file: the Ed25519 secret seed then the ML-DSA-65 `xi`.
+const NATIVE_SECRET: usize = 64;
+const RESPONSE: usize = 2 * KEM_CIPHER + NATIVE_SIGNATURE;
+const ENROLL_MAGIC: &[u8; 4] = b"MCE4";
 const LINK_SUITE: &[u8] = b"DREGG.COHORT-LINK.KEK/x25519+ml-kem-768/v3";
 const LINK_FRAME_FIXED: &[u8] = b"DREGG/COHORT-LINK/v3/fixed";
 const LINK_FRAME_FRESH: &[u8] = b"DREGG/COHORT-LINK/v3/fresh";
@@ -421,8 +432,31 @@ const ROSTER_LIMIT: usize = 1 << 20;
 const HANDSHAKE_MS: u64 = 3000;
 
 struct RosterEntry {
-    native: VerifyingKey,
+    /// `Ed25519 public key (32) || ML-DSA-65 public key (1952)`.
+    native: Vec<u8>,
     link_key: Vec<u8>,
+}
+/// A hybrid native key from its two seeds. A 32-byte Ed25519-only key file (the
+/// MCE3 shape) is refused by name.
+fn read_native_key(path: &Path) -> Result<HybridSigner> {
+    let bytes = zeroize::Zeroizing::new(read_private(path, 4096)?);
+    if bytes.len() == 32 {
+        return Err("native key file is a bare 32-byte Ed25519 seed (the MCE3 shape) and is refused: a cohort native key is an Ed25519 seed and an ML-DSA-65 seed, 64 bytes (mini mix --action native-key)".into());
+    }
+    if bytes.len() != NATIVE_SECRET {
+        return Err(format!("a cohort native key file is {NATIVE_SECRET} bytes, not {}", bytes.len()));
+    }
+    Ok(HybridSigner::from_seeds(
+        bytes[..32].try_into().unwrap(),
+        bytes[32..].try_into().unwrap(),
+    ))
+}
+/// `mini mix --action native-key`: a fresh hybrid native key, its public key in the roster layout.
+pub(crate) fn generate_native_key(secret: &Path, public: &Path) -> Result<()> {
+    let seeds = zeroize::Zeroizing::new([random::<32>()?, random::<32>()?].concat());
+    persist(secret, &seeds)?;
+    let key = HybridSigner::from_seeds(seeds[..32].try_into().unwrap(), seeds[32..].try_into().unwrap());
+    persist(public, &key.public_key())
 }
 /// The public fixed cohort: `width` members (phase-0 senders, phase-5
 /// receivers) and five operators (registrar, relay0, relay1, relay2, mailbox).
@@ -438,12 +472,16 @@ fn roster_entry(v: &serde_json::Value) -> Result<RosterEntry> {
     let field = |name: &str| -> Result<Vec<u8>> {
         crate::decode_hex(v[name].as_str().ok_or("roster entry field must be hex text")?)
     };
-    let native: [u8; 32] = field("native")?
-        .try_into()
-        .map_err(|_| "roster native key must be 32 bytes")?;
-    let native =
-        VerifyingKey::from_bytes(&native).map_err(|_| "roster native key is not an Ed25519 point")?;
-    if native.is_weak() {
+    let native = field("native")?;
+    if native.len() == 32 {
+        return Err("roster native key is a bare 32-byte Ed25519 key (the MCE3 shape) and is refused: a native key is Ed25519 (32) then ML-DSA-65 (1952), 1984 bytes".into());
+    }
+    if native.len() != NATIVE_PUBLIC {
+        return Err(format!("roster native key must be {NATIVE_PUBLIC} bytes, not {}", native.len()));
+    }
+    let ed = ed25519_dalek::VerifyingKey::from_bytes(native[..32].try_into().unwrap())
+        .map_err(|_| "roster native key is not an Ed25519 point")?;
+    if ed.is_weak() {
         return Err("roster native key is a weak Ed25519 point".into());
     }
     let link_key = field("linkKey")?;
@@ -457,9 +495,12 @@ fn parse_roster(bytes: &[u8]) -> Result<Roster> {
     let v: serde_json::Value =
         serde_json::from_slice(bytes).map_err(|e| format!("cohort roster JSON: {e}"))?;
     if v["type"] == "minidregg-cohort-roster-v1" {
-        return Err("cohort roster is a v1 roster (pure ML-KEM-768 link keys, linkKem): refused; the roster is v2 with hybrid X25519 + ML-KEM-768 link keys (linkKey)".into());
+        return Err("cohort roster is a v1 roster (pure ML-KEM-768 link keys, linkKem): refused; the roster is v3".into());
     }
-    if v["type"] != "minidregg-cohort-roster-v2" || v.as_object().map(|o| o.len()) != Some(5) {
+    if v["type"] == "minidregg-cohort-roster-v2" {
+        return Err("cohort roster is a v2 roster (Ed25519-only native keys): refused; the roster is v3 with hybrid Ed25519 + ML-DSA-65 native keys (native, 1984 bytes) and hybrid link keys (linkKey)".into());
+    }
+    if v["type"] != "minidregg-cohort-roster-v3" || v.as_object().map(|o| o.len()) != Some(5) {
         return Err("cohort roster type/shape refused".into());
     }
     let generation: [u8; 16] =
@@ -483,7 +524,7 @@ fn parse_roster(bytes: &[u8]) -> Result<Roster> {
         return Err("roster needs width members and exactly five operators".into());
     }
     let all = members.iter().chain(operators.iter());
-    let natives: std::collections::BTreeSet<_> = all.clone().map(|e| e.native.to_bytes()).collect();
+    let natives: std::collections::BTreeSet<_> = all.clone().map(|e| e.native.clone()).collect();
     let kems: std::collections::BTreeSet<_> = all.map(|e| e.link_key.clone()).collect();
     if natives.len() != members.len() + 5 || kems.len() != members.len() + 5 {
         return Err("roster native and link keys must be pairwise distinct".into());
@@ -510,7 +551,7 @@ impl Roster {
         Ok(())
     }
     /// Phase 0 is member `slot`; phase k>0 is sent by operator k-1.
-    fn sender(&self, p: &Profile) -> &VerifyingKey {
+    fn sender(&self, p: &Profile) -> &[u8] {
         match p.purpose {
             0 => &self.members[p.slot as usize].native,
             k => &self.operators[k as usize - 1].native,
@@ -526,7 +567,7 @@ impl Roster {
 }
 fn link_pin(root: &Path, p: &Profile, roster: &Roster, role: &[u8]) -> Result<()> {
     // A retained link of an earlier codec, roster or role refuses to resume.
-    let mut b = b"Mini/cohort-startup:MCE3/v1".to_vec();
+    let mut b = b"Mini/cohort-startup:MCE4/v1".to_vec();
     b.extend_from_slice(&p.identity());
     b.extend_from_slice(&roster.digest);
     b.extend_from_slice(&Sha256::digest(role));
@@ -541,10 +582,10 @@ fn worker_pin(root: &Path, p: &Profile) -> Result<()> {
 /// before the first adoption. A worker consumes records only from a directory
 /// whose marker binds the exact upstream link to the roster's sender.
 fn enrolled_marker(p: &Profile, roster: &Roster) -> Vec<u8> {
-    let mut b = b"Mini/cohort-enrolled-link/v1".to_vec();
+    let mut b = b"Mini/cohort-enrolled-link/v2".to_vec();
     b.extend_from_slice(&p.identity());
     b.extend_from_slice(&roster.digest);
-    b.extend_from_slice(roster.sender(p).as_bytes());
+    b.extend_from_slice(roster.sender(p));
     b
 }
 fn check_enrolled_input(dir: &Path, link: &Profile, roster: &Roster) -> Result<()> {
@@ -561,7 +602,7 @@ fn enrollment_transcript(
     challenge: &[u8],
     response_kems: &[u8],
 ) -> Vec<u8> {
-    let mut t = b"Mini/cohort-link-enrollment/v3".to_vec();
+    let mut t = b"Mini/cohort-link-enrollment/v4".to_vec();
     t.extend_from_slice(&p.identity());
     t.extend_from_slice(&roster.digest);
     t.extend_from_slice(&start.to_le_bytes());
@@ -604,7 +645,7 @@ fn sender_kems(p: &Profile, roster: &Roster, start: u64, challenge: &[u8]) -> Re
     Ok(SenderKems { response, fixed_kek: fixed_e.kek, fresh_kek: fresh_e.kek })
 }
 fn link_keys(transcript: &[u8], signature: &[u8], fixed: &[u8], fresh: &[u8]) -> ([u8; 32], [u8; 32]) {
-    let mut secret = b"Mini/cohort-link-secret/v3".to_vec();
+    let mut secret = b"Mini/cohort-link-secret/v4".to_vec();
     secret.extend_from_slice(fixed);
     secret.extend_from_slice(fresh);
     let secret = Sha256::digest(&secret);
@@ -620,8 +661,8 @@ fn link_keys(transcript: &[u8], signature: &[u8], fixed: &[u8], fresh: &[u8]) ->
             .try_into()
             .unwrap()
     };
-    let key = tag(b"Mini/cohort-link-key/v3", &secret);
-    let ack = tag(b"Mini/cohort-link-ack/v3", &key);
+    let key = tag(b"Mini/cohort-link-key/v4", &secret);
+    let ack = tag(b"Mini/cohort-link-ack/v4", &key);
     (key, ack)
 }
 fn handshake_timeouts(stream: &TcpStream, ms: u64) -> Result<()> {
@@ -633,28 +674,31 @@ fn enroll_sender(
     stream: &mut TcpStream,
     p: &Profile,
     roster: &Roster,
-    signing: &SigningKey,
+    signing: &HybridSigner,
     start: u64,
 ) -> Result<[u8; 32]> {
-    if signing.verifying_key() != *roster.sender(p) {
+    if signing.public_key() != roster.sender(p) {
         return Err("this native key is not the roster sender of this link".into());
     }
     handshake_timeouts(stream, HANDSHAKE_MS)?;
     let mut challenge = [0; CHALLENGE];
-    // The magic is read first: an MCE2 challenge is shorter than an MCE3 one,
+    // The magic is read first: an MCE2 challenge is shorter than an MCE3/MCE4 one,
     // and is refused by name rather than by waiting out a short read.
     stream
         .read_exact(&mut challenge[..4])
         .map_err(|e| e.to_string())?;
     if &challenge[..4] == b"MCE2" {
-        return Err("enrollment challenge is MCE2 (pure ML-KEM-768 link enrollment): refused; the link enrollment is MCE3, hybrid X25519 + ML-KEM-768".into());
+        return Err("enrollment challenge is MCE2 (pure ML-KEM-768 link enrollment): refused; the link enrollment is MCE4, hybrid X25519 + ML-KEM-768 with hybrid Ed25519 + ML-DSA-65 signatures".into());
+    }
+    if &challenge[..4] == b"MCE3" {
+        return Err("enrollment challenge is MCE3 (Ed25519-only native signatures): refused; the link enrollment is MCE4, hybrid X25519 + ML-KEM-768 with hybrid Ed25519 + ML-DSA-65 signatures".into());
     }
     stream
         .read_exact(&mut challenge[4..])
         .map_err(|e| e.to_string())?;
     let SenderKems { response: kems, fixed_kek, fresh_kek } = sender_kems(p, roster, start, &challenge)?;
     let transcript = enrollment_transcript(p, roster, start, &challenge, &kems);
-    let signature = signing.sign(&transcript).to_bytes();
+    let signature = signing.sign(&transcript).map_err(|e| e.0)?;
     let mut response = kems;
     response.extend_from_slice(&signature);
     stream.write_all(&response).map_err(|e| e.to_string())?;
@@ -692,11 +736,7 @@ fn answer_enrollment(
     stream.read_exact(&mut response).ok()?;
     let (kems, signature) = response.split_at(2 * KEM_CIPHER);
     let transcript = enrollment_transcript(p, roster, start, &challenge, kems);
-    let signature_bytes: [u8; 64] = signature.try_into().ok()?;
-    roster
-        .sender(p)
-        .verify_strict(&transcript, &Signature::from_bytes(&signature_bytes))
-        .ok()?;
+    signer::verify(Scheme::HybridEd25519MlDsa65, roster.sender(p), &transcript, signature).ok()?;
     let context = link_context(p, roster, start, &challenge[4..36]);
     let parts = as_parts(&context);
     let (fixed_kek, _) =
@@ -1316,9 +1356,9 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     match action.as_str() {
         "send" => {
             // The sender's own native Mini key: the roster names it for this link.
-            let signing = crate::read_secret(&PathBuf::from(args.required("native-key")?))?;
+            let signing = read_native_key(&PathBuf::from(args.required("native-key")?))?;
             args.finish()?;
-            link_pin(&state, &p, &roster, signing.verifying_key().as_bytes())?;
+            link_pin(&state, &p, &roster, &signing.public_key())?;
             if now_ms()? >= p.when(start)? {
                 return Err("live link must start before first public slot".into());
             }
@@ -1421,13 +1461,13 @@ mod tests {
     }
     struct Cohort {
         bytes: Vec<u8>,
-        members: Vec<SigningKey>,
-        operators: Vec<SigningKey>,
+        members: Vec<HybridSigner>,
+        operators: Vec<HybridSigner>,
         member_kems: Vec<crate::crypto_transit::KeyPair>,
         operator_kems: Vec<crate::crypto_transit::KeyPair>,
     }
     fn cohort(generation: [u8; 16], width: usize) -> Cohort {
-        let signer = || SigningKey::from_bytes(&random::<32>().unwrap());
+        let signer = || HybridSigner::from_seeds(&random::<32>().unwrap(), &random::<32>().unwrap());
         let members: Vec<_> = (0..width).map(|_| signer()).collect();
         let operators: Vec<_> = (0..5).map(|_| signer()).collect();
         let member_kems: Vec<_> = (0..width)
@@ -1436,12 +1476,12 @@ mod tests {
         let operator_kems: Vec<_> = (0..5)
             .map(|_| crate::crypto_transit::generate_keypair().unwrap())
             .collect();
-        let entry = |s: &SigningKey, k: &crate::crypto_transit::KeyPair| {
-            serde_json::json!({"native": crate::hex(s.verifying_key().as_bytes()),
+        let entry = |s: &HybridSigner, k: &crate::crypto_transit::KeyPair| {
+            serde_json::json!({"native": crate::hex(&s.public_key()),
                 "linkKey": crate::hex(&k.public)})
         };
         let bytes = serde_json::to_vec(&serde_json::json!({
-            "type": "minidregg-cohort-roster-v2",
+            "type": "minidregg-cohort-roster-v3",
             "generation": crate::hex(&generation),
             "width": width,
             "members": members.iter().zip(&member_kems).map(|(s, k)| entry(s, k)).collect::<Vec<_>>(),
@@ -1465,14 +1505,14 @@ mod tests {
         stream: &mut TcpStream,
         p: &Profile,
         roster: &Roster,
-        signing: &SigningKey,
+        signing: &HybridSigner,
         start: u64,
     ) -> Vec<u8> {
         let mut challenge = [0; CHALLENGE];
         stream.read_exact(&mut challenge).unwrap();
         let mut kems = sender_kems(p, roster, start, &challenge).unwrap().response;
         let t = enrollment_transcript(p, roster, start, &challenge, &kems);
-        kems.extend_from_slice(&signing.sign(&t).to_bytes());
+        kems.extend_from_slice(&signing.sign(&t).unwrap());
         kems
     }
     #[test]
@@ -1499,7 +1539,7 @@ mod tests {
         let mut garbage = TcpStream::connect(address).unwrap();
         let mut challenge = [0; CHALLENGE];
         garbage.read_exact(&mut challenge).unwrap();
-        assert_eq!(&challenge[..4], b"MCE3");
+        assert_eq!(&challenge[..4], b"MCE4");
         garbage.write_all(&[0; RESPONSE]).unwrap();
         drop(garbage);
         // 2. A valid response captured under one challenge cannot be replayed.
@@ -1513,7 +1553,7 @@ mod tests {
         let mut ack = [0; ACK];
         assert!(replay.read_exact(&mut ack).is_err(), "replay must be dropped");
         // 3. Another enrolled member cannot take slot 2; neither can an outsider.
-        for wrong in [&c.members[1], &SigningKey::from_bytes(&[5; 32]), &c.operators[0]] {
+        for wrong in [&c.members[1], &HybridSigner::from_seeds(&[5; 32], &[6; 32]), &c.operators[0]] {
             let mut s = TcpStream::connect(address).unwrap();
             let response = captured_response(&mut s, &p, &roster, wrong, 0);
             s.write_all(&response).unwrap();
@@ -1529,11 +1569,8 @@ mod tests {
         let (server_key, signed) = server.join().unwrap();
         assert_eq!(key, server_key);
         // The retained admission evidence verifies under the member's key.
-        let (t, sig) = signed.split_at(signed.len() - 64);
-        c.members[2]
-            .verifying_key()
-            .verify_strict(t, &Signature::from_bytes(sig.try_into().unwrap()))
-            .unwrap();
+        let (t, sig) = signed.split_at(signed.len() - NATIVE_SIGNATURE);
+        signer::verify(Scheme::HybridEd25519MlDsa65, &c.members[2].public_key(), t, sig).unwrap();
         assert!(t.windows(32).any(|w| w == roster.digest));
     }
     /// R2-1 #10 / C4: a stranger cannot tie up the cohort listener. One stranger
@@ -1657,14 +1694,14 @@ mod tests {
         relay.slot = 1;
         assert!(roster.admits(&relay).is_err(), "operator links have one slot");
         // Phase roles: member k sends phase 0 slot k; operator j sends phase j+1.
-        assert_eq!(roster.sender(&p), &c.members[0].verifying_key());
+        assert_eq!(roster.sender(&p), &c.members[0].public_key()[..]);
         relay.slot = 0;
-        assert_eq!(roster.sender(&relay), &c.operators[1].verifying_key());
+        assert_eq!(roster.sender(&relay), &c.operators[1].public_key()[..]);
         assert_eq!(roster.receiver(&relay), c.operator_kems[2].public.as_slice());
         let mut broadcast = p.clone();
         broadcast.purpose = 5;
         broadcast.slot = 3;
-        assert_eq!(roster.sender(&broadcast), &c.operators[4].verifying_key());
+        assert_eq!(roster.sender(&broadcast), &c.operators[4].public_key()[..]);
         assert_eq!(roster.receiver(&broadcast), c.member_kems[3].public.as_slice());
     }
     #[test]
@@ -1767,6 +1804,119 @@ mod tests {
             enroll_sender(&mut TcpStream::connect(address).unwrap(), &p, &roster, &c.members[0], 0).unwrap_err();
         assert!(error.contains("MCE2") && error.contains("refused"), "{error}");
         assert!(started.elapsed() < Duration::from_millis(HANDSHAKE_MS), "refused without waiting out a short read");
+        server.join().unwrap();
+    }
+    /// Answer a challenge with a response whose native signature is `signature_of(transcript)`.
+    fn forged_response(
+        stream: &mut TcpStream,
+        p: &Profile,
+        roster: &Roster,
+        signature_of: &dyn Fn(&[u8]) -> Vec<u8>,
+    ) -> Vec<u8> {
+        let mut challenge = [0; CHALLENGE];
+        stream.read_exact(&mut challenge).unwrap();
+        let mut kems = sender_kems(p, roster, 0, &challenge).unwrap().response;
+        let t = enrollment_transcript(p, roster, 0, &challenge, &kems);
+        kems.extend_from_slice(&signature_of(&t));
+        kems
+    }
+    /// The native signature is hybrid: the receiver admits a sender only when BOTH the
+    /// Ed25519 half and the ML-DSA-65 half verify. A signature with either half from
+    /// another key, or with either half zeroed, is dropped without an ack. (Control: the
+    /// honest signature of the same key on the same transcript is admitted.)
+    #[test]
+    fn enrollment_needs_both_signature_halves() {
+        let c = cohort([8; 16], 4);
+        let roster = parse_roster(&c.bytes).unwrap();
+        let mut p = profile();
+        p.slot = 2;
+        p.origin = now_ms().unwrap() + 60000;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let registrar = decap(&c.operator_kems[0]);
+        let (server_p, server_roster) = (p.clone(), parse_roster(&c.bytes).unwrap());
+        let server = thread::spawn(move || {
+            accept_enrolled(&listener, &server_p, &server_roster, &registrar, 0).unwrap().key
+        });
+        let honest = &c.members[2];
+        // Another key with the same Ed25519 half but a different ML-DSA half, and the reverse.
+        let seeds = |ed: u8, ml: u8| HybridSigner::from_seeds(&[ed; 32], &[ml; 32]);
+        let halves = |t: &[u8]| {
+            let mine = honest.sign(t).unwrap();
+            let other = seeds(1, 2).sign(t).unwrap();
+            (mine, other)
+        };
+        let ed_len = 64;
+        let attempts: Vec<(&str, Box<dyn Fn(&[u8]) -> Vec<u8>>)> = vec![
+            ("ed half from another key", Box::new(move |t| {
+                let (mine, other) = halves(t);
+                [&other[..ed_len], &mine[ed_len..]].concat()
+            })),
+            ("ml-dsa half from another key", Box::new(move |t| {
+                let (mine, other) = halves(t);
+                [&mine[..ed_len], &other[ed_len..]].concat()
+            })),
+            ("ml-dsa half zeroed (an Ed25519-only signature padded to hybrid width)", Box::new(move |t| {
+                let (mine, _) = halves(t);
+                [&mine[..ed_len], &vec![0u8; NATIVE_SIGNATURE - ed_len][..]].concat()
+            })),
+            ("ed half zeroed", Box::new(move |t| {
+                let (mine, _) = halves(t);
+                [&vec![0u8; ed_len][..], &mine[ed_len..]].concat()
+            })),
+        ];
+        let mut ack = [0; ACK];
+        for (what, signature_of) in &attempts {
+            let mut s = TcpStream::connect(address).unwrap();
+            let response = forged_response(&mut s, &p, &roster, signature_of.as_ref());
+            assert_eq!(response.len(), RESPONSE, "{what}");
+            s.write_all(&response).unwrap();
+            assert!(s.read_exact(&mut ack).is_err(), "{what}: must be dropped");
+        }
+        let mut valid = TcpStream::connect(address).unwrap();
+        let key = enroll_sender(&mut valid, &p, &roster, honest, 0).unwrap();
+        assert_eq!(server.join().unwrap(), key);
+    }
+    /// MCE3 (Ed25519-only), a v2 roster and a bare Ed25519 native key all refuse by name.
+    #[test]
+    fn mce3_v2_rosters_and_ed25519_only_native_keys_refuse_by_name() {
+        let c = cohort([8; 16], 4);
+        let roster = parse_roster(&c.bytes).unwrap();
+        let refuse = |v: &serde_json::Value| parse_roster(&serde_json::to_vec(v).unwrap()).err().unwrap();
+        let mut v: serde_json::Value = serde_json::from_slice(&c.bytes).unwrap();
+        v["type"] = "minidregg-cohort-roster-v2".into();
+        assert!(refuse(&v).contains("v2 roster"), "{}", refuse(&v));
+        let mut v: serde_json::Value = serde_json::from_slice(&c.bytes).unwrap();
+        let ed_only = crate::hex(&c.members[0].public_key()[..32]);
+        v["members"][0]["native"] = ed_only.into();
+        assert!(refuse(&v).contains("MCE3 shape"), "{}", refuse(&v));
+        let mut v: serde_json::Value = serde_json::from_slice(&c.bytes).unwrap();
+        v["members"][0]["native"] = crate::hex(&[7; 1983]).into();
+        assert!(refuse(&v).contains("1984"), "{}", refuse(&v));
+        // A native key file that is a bare 32-byte Ed25519 seed (what `mini keygen` writes).
+        let dir = temp();
+        persist(&dir.join("ed.key"), &[3; 32]).unwrap();
+        assert!(read_native_key(&dir.join("ed.key")).err().unwrap().contains("MCE3 shape"));
+        generate_native_key(&dir.join("n.key"), &dir.join("n.pub")).unwrap();
+        let key = read_native_key(&dir.join("n.key")).unwrap();
+        assert_eq!(read_private(&dir.join("n.pub"), 4096).unwrap(), key.public_key());
+        assert_eq!(key.public_key().len(), NATIVE_PUBLIC);
+        // An MCE3 challenge reaches a sender: refused by name, without waiting out a short read.
+        let mut p = profile();
+        p.origin = now_ms().unwrap() + 20000;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            s.write_all(b"MCE3").unwrap();
+            let mut rest = Vec::new();
+            let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
+            let _ = s.read_to_end(&mut rest);
+        });
+        let started = std::time::Instant::now();
+        let error = enroll_sender(&mut TcpStream::connect(address).unwrap(), &p, &roster, &c.members[0], 0).unwrap_err();
+        assert!(error.contains("MCE3") && error.contains("refused"), "{error}");
+        assert!(started.elapsed() < Duration::from_millis(HANDSHAKE_MS));
         server.join().unwrap();
     }
     #[test]

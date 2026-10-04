@@ -2,9 +2,9 @@
 """Receiving orchestration and byte-transparent observers; no evaluator.
 
 Every fixed link is admitted by the public cohort roster (`mini mix-live`
-MCE3 enrollment): members and operators sign challenge-bound enrollments with
-their own native Ed25519 keys and receive under roster-pinned hybrid X25519 +
-ML-KEM-768 keys. The
+MCE4 enrollment): members and operators sign challenge-bound enrollments with
+their own HYBRID native keys (Ed25519 + ML-DSA-65, `mini mix --action native-key`)
+and receive under roster-pinned hybrid X25519 + ML-KEM-768 keys. The
 orchestrator generates public test identities; it provisions no link secret.
 
 Topologies. `single`: every role on this host, observers on --bind-ip.
@@ -100,8 +100,10 @@ parser.add_argument('--real-clients',type=int,default=2)
 # advance. `capture`: a NEW effect, whose exact Host reply exists only once the
 # effect happens; the delay proxy keeps the bytes it forwarded (exactly once).
 parser.add_argument('--expect',choices=['file','capture'],default='file')
-# Optional existing native identities for member slots: SECRET:PUBLIC,... (e.g.
-# a participant's own Mini key). Absent slots get fresh test identities.
+# Optional existing native identities for member slots: SECRET:PUBLIC,... as
+# written by `mini mix --action native-key` (a 64-byte seed pair and its 1984-byte
+# hybrid public key; a bare Ed25519 `mini keygen` key is refused). Absent slots get
+# fresh test identities.
 parser.add_argument('--member-keys',default='')
 parser.add_argument('--topology',choices=['single','two-host'],default='single')
 parser.add_argument('--bind-ip',default='127.0.0.1')
@@ -153,8 +155,9 @@ if two:
     push(mini,rmini);push(pathlib.Path(__file__).resolve(),str(RD/'cohort-native-tcp.py'))
     say('remote mini sha256 '+hashlib.sha256(fetch(rmini)).hexdigest()+' local '+hashlib.sha256(mini.read_bytes()).hexdigest())
 def keygen(secret,public,remote=False):
-    if remote:ssh(f'{rmini} keygen --secret {secret} --public {public} --no-prerotation >/dev/null')
-    else:run('keygen','--secret',secret,'--public',public,'--no-prerotation')
+    state=secret+'.nativegen'
+    if remote:ssh(f'{rmini} mix --action native-key --state {state} --secret {secret} --public {public}')
+    else:run('mix','--action','native-key','--state',state,'--secret',secret,'--public',public)
 def kemgen(state,secret,public,remote=False):
     if remote:ssh(f'{rmini} mix --action key --state {state} --secret {secret} --public {public}')
     else:run('mix','--action','key','--state',state,'--secret',secret,'--public',public)
@@ -185,7 +188,7 @@ for i in range(4):
         for f in [f'k{i}.pub',f'a{i}.key']:
             path=common/f;path.write_bytes(fetch(str(base/f)));path.chmod(0o600)
 (common/'roster.json').write_text(json.dumps({
-    'type':'minidregg-cohort-roster-v2','generation':generation,'width':W,
+    'type':'minidregg-cohort-roster-v3','generation':generation,'width':W,
     'members':[{'native':m['native_pub'].hex(),'linkKey':m['link_pub'].hex()} for m in members],
     'operators':[{'native':o['native_pub'].hex(),'linkKey':o['link_pub'].hex()} for o in operators]}))
 roster=common/'roster.json'
