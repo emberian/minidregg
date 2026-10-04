@@ -58,6 +58,7 @@ field value, and the event a claim carries — EVAL §4. Nock's is N11's (`nockD
 import Kernel.NockEntry
 import Theory.TypedAuthorization
 import Compiler.Sp800185Cshake256
+import Theory.AssertAxioms
 
 namespace Minidregg.Compiler
 
@@ -441,6 +442,48 @@ semantics version (its id is their hash), in registry order. -/
 def registryManifest : List (List UInt8) :=
   registry.map fun E => E.name.toUTF8.toList ++ [0] ++ E.semantics.toUTF8.toList
 
+/-! ## Every evaluator the kernel re-executes, by name
+
+`registry` holds the program-record referees: each carries the full `Evaluator`
+facts, and only they resolve for a program record (`resolve`, `admitRecord`).
+The kernel also re-executes Objective Bend methods at admission and on replay
+(`Kernel.ObjectiveBendNativeAdmission`, Core4 `executeWith` under the capacity
+policy). That evaluator is not a program-record referee: no record can name it,
+and it does not supply the `Evaluator` facts (its big-step meaning is a deep
+source evaluation not yet proved unique). It is still a compiled-in evaluator an
+operator must be able to name and disable, so its identity is derived exactly as
+a registry entry's (`idOf name semantics`) and listed here. -/
+
+/-- A compiled-in evaluator's identity: what an operator names and disables. -/
+structure Identity where
+  name : String
+  semantics : String
+  deriving DecidableEq, Repr
+
+def Identity.id (identity : Identity) : Digest := Evaluator.idOf identity.name identity.semantics
+
+/-- Core4, as Objective admission runs it. -/
+def objectiveCore4 : Identity :=
+  ⟨"objective-core4", "Core4/ObjectiveBendDemandData.executeWith(ObjectiveBendDemandCapacity.allows)/v1"⟩
+
+/-- Every compiled-in evaluator: the referees, then Core4. -/
+def identities : List Identity :=
+  registry.map (fun E => ⟨E.name, E.semantics⟩) ++ [objectiveCore4]
+
+theorem identities_names_distinct : (identities.map Identity.name).Nodup := by
+  decide
+
+/-- An operator's evaluator name, resolved to the id the kernel checks. -/
+def resolveName (name : String) : Option Digest :=
+  (identities.find? (fun identity => identity.name == name)).map Identity.id
+
+theorem resolveName_objectiveCore4 : resolveName "objective-core4" = some objectiveCore4.id := by
+  rfl
+
+/-- A registry referee's name resolves to its own registry id. -/
+theorem resolveName_nock : resolveName "nock" = some nock.id := by
+  rfl
+
 /-! ## Resolution: a record's evaluator against the registry
 
 Moved below the kernel's run (E3) so that a record's BIRTH is refused by the same function
@@ -657,6 +700,9 @@ def refusalOf {α : Type} : Except NockProgramCodec.Refusal α → Option NockPr
 #guard_msgs (whitespace := lax) in #print axioms nock
 /-- info: 'Minidregg.Compiler.Evaluator.registry_ids_distinct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms registry_ids_distinct
+#assert_axioms identities_names_distinct
+#assert_axioms resolveName_objectiveCore4
+#assert_axioms resolveName_nock
 /-- info: 'Minidregg.Compiler.Evaluator.nock_registered' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms nock_registered
 /-- info: 'Minidregg.Compiler.Evaluator.idCustomization_spells' depends on axioms: [propext] -/

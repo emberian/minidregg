@@ -99,13 +99,11 @@ structure Settings where
 def Settings.disabledEvaluatorIds (settings : Settings) :
     List Minidregg.Theory.TypedAuthorization.Digest :=
   (settings.disabledEvaluators.getD []).map fun name =>
-    match Minidregg.Compiler.Evaluator.registry.find? (fun E => E.name == name) with
-    | some E => E.id
-    | none => Minidregg.Compiler.Evaluator.idOf name ""
+    (Minidregg.Compiler.Evaluator.resolveName name).getD (Minidregg.Compiler.Evaluator.idOf name "")
 
 def Settings.checkDisabledEvaluators (settings : Settings) : Except String Unit :=
   (settings.disabledEvaluators.getD []).forM fun name =>
-    if (Minidregg.Compiler.Evaluator.registry.find? (fun E => E.name == name)).isSome then .ok ()
+    if (Minidregg.Compiler.Evaluator.resolveName name).isSome then .ok ()
     else .error s!"disabledEvaluators: no compiled-in evaluator named {name}"
 
 def Settings.config (settings : Settings) : NativeHost.Config where

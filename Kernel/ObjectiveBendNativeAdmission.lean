@@ -20,6 +20,7 @@ import Compiler.ObjectiveBendGenericResult
 import Compiler.ObjectiveInvocationClaim
 import Compiler.NativeInvocationProfile
 import Theory.ResourceCost
+import Compiler.Evaluator
 namespace Minidregg.Kernel.ObjectiveBendNativeAdmission
 open Minidregg.Compiler Minidregg.Theory
 open Minidregg.Compiler.Tower256ConcreteBackend
@@ -37,9 +38,9 @@ def semanticsId : Digest := (Sp800185Cshake256.hash
   "DREGG.OBJECTIVE-BEND.NATIVE-SEMANTICS/v2".toUTF8.toList
   "objective-bend-1;Core4;typed-core.v2;lazy-demand-origin-thunks;global-root-and-field-capacity;current-native-authority;explicit-ordered-authenticated-input-footprint".toUTF8.toList).digest
 
-def evaluatorId : Digest := (Sp800185Cshake256.hash
-  "DREGG.OBJECTIVE-BEND.NATIVE-EVALUATOR/v1".toUTF8.toList
-  "ObjectiveBendDemandData.executeWith(ObjectiveBendDemandCapacity.allows);Core4".toUTF8.toList).digest
+/-- The compiled-in evaluator identity of Core4 (`Compiler.Evaluator.objectiveCore4`):
+the id an operator's `disabledEvaluators: ["objective-core4"]` resolves to. -/
+def evaluatorId : Digest := Compiler.Evaluator.objectiveCore4.id
 
 def charge (c : ObjectiveInvocationClaim.Capacity) : ResourceCost.Charge
   | .incidences => c.incidences
