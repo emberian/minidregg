@@ -1,0 +1,102 @@
+edition ObjectiveBend 1
+# A broker contract for seats (Kernel/SeatStore). Its one method takes the call
+# (the invoker's input, the height, and the instance's open seats with their
+# roles, proposals and allocations) and returns a Plan the seat kernel performs.
+# The kernel judges every reallocation by every touched seat's offer-safety law
+# and by the instance's clause, refuses any move outside the instance's open
+# seats, and never consults the clause for an exit. A swap moves each side's
+# WHOLE allocation of its give asset to the other: the amounts come from the
+# allocations the code reads, not from the invoker.
+record Amount:
+  asset: Nat
+  amount: Nat
+sum Amounts:
+  nil: {}
+  cons: {head: Amount, tail: Amounts}
+record Term:
+  name: String
+  value: Nat
+sum Terms:
+  nil: {}
+  cons: {head: Term, tail: Terms}
+record SeatView:
+  seat: Nat
+  role: String
+  terms: Terms
+  give: Amounts
+  want: Amounts
+  allocation: Amounts
+sum Seats:
+  nil: {}
+  cons: {head: SeatView, tail: Seats}
+record Move:
+  source: Nat
+  destination: Nat
+  asset: Nat
+  amount: Nat
+sum Moves:
+  nil: {}
+  cons: {head: Move, tail: Moves}
+record MintIn:
+  role: String
+  holder: Nat
+record SwapIn:
+  sell: Nat
+  buy: Nat
+  give: Nat
+  take: Nat
+record SweepIn:
+  source: Nat
+  destination: Nat
+  asset: Nat
+record RelayIn:
+  moves: Moves
+sum Input:
+  mint: MintIn
+  swap: SwapIn
+  sweep: SweepIn
+  relay: RelayIn
+  terminate: {}
+record Call:
+  input: Input
+  height: Nat
+  seats: Seats
+record Mint:
+  role: String
+  terms: Terms
+  holder: Nat
+record ExitSeat:
+  seat: Nat
+record Reallocate:
+  moves: Moves
+sum Action:
+  reallocate: Reallocate
+  mint: Mint
+  exit: ExitSeat
+  terminate: {}
+sum Plan:
+  nil: {}
+  cons: {head: Action, tail: Plan}
+def held(asset: Nat, amounts: Amounts) -> Nat:
+  match amounts:
+    case nil(_): 0n
+    case cons(c): if c.head.asset == asset then c.head.amount else held(asset, c.tail)
+def allocation(seat: Nat, asset: Nat, seats: Seats) -> Nat:
+  match seats:
+    case nil(_): 0n
+    case cons(c): if c.head.seat == seat then held(asset, c.head.allocation) else allocation(seat, asset, c.tail)
+def one(action: Action) -> Plan:
+  Plan.cons({head: action, tail: Plan.nil()})
+def move(source: Nat, destination: Nat, asset: Nat, amount: Nat) -> Move:
+  {source: source, destination: destination, asset: asset, amount: amount}
+def two(first: Move, second: Move) -> Moves:
+  Moves.cons({head: first, tail: Moves.cons({head: second, tail: Moves.nil()})})
+def lone(only: Move) -> Moves:
+  Moves.cons({head: only, tail: Moves.nil()})
+def broker(call: Call) -> Plan:
+  match call.input:
+    case mint(m): one(Action.mint({role: m.role, terms: Terms.nil(), holder: m.holder}))
+    case swap(s): one(Action.reallocate({moves: two(move(s.sell, s.buy, s.give, allocation(s.sell, s.give, call.seats)), move(s.buy, s.sell, s.take, allocation(s.buy, s.take, call.seats)))}))
+    case sweep(w): one(Action.reallocate({moves: lone(move(w.source, w.destination, w.asset, allocation(w.source, w.asset, call.seats)))}))
+    case relay(r): one(Action.reallocate({moves: r.moves}))
+    case terminate(_): one(Action.terminate())

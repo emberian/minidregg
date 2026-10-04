@@ -156,6 +156,11 @@ def commandJson (domain : Option Digest) (command : Command) : Json :=
    ("seatAccount", match domain, command.turn with
      | some d, .offer .. => decimal (SeatStore.seatAccount d transaction)
      | _, _ => .null),
+   -- the ids a Plan member at index 0..7 mints under (SeatStore.mintId)
+   ("mintIds", match command.turn with
+     | .invoke inst _ _ _ => Json.arr ((List.range 8).map fun index =>
+         decimal (SeatStore.mintId transaction inst index)).toArray
+     | _ => .null),
    ("turn", turnJson command.turn)]
 
 def inspectCommand (bytes : List UInt8) : Result Json :=

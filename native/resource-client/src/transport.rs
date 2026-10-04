@@ -497,6 +497,14 @@ pub(crate) fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
             .is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64),
         [214, payload @ ..] => payload.is_empty() || (payload.len() <= 65536
             && serde_json::from_slice::<serde_json::Value>(payload).is_ok_and(|v| v.is_object())),
+        // SEATS-NATIVE: seats and invitations as signed commands (215 plan, 216 assembly,
+        // 217 submit, 218 receipt-only lookup) and the public seat view (219, a JSON object
+        // or empty). Each command is authorized by its own signature inside the Host.
+        [215 | 217 | 218, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        [216, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
+            .is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64),
+        [219, payload @ ..] => payload.is_empty() || (payload.len() <= 65536
+            && serde_json::from_slice::<serde_json::Value>(payload).is_ok_and(|v| v.is_object())),
         _ => false,
     }
 }
@@ -2280,6 +2288,27 @@ mod tests {
             assert!(!allowed_operation(&[opcode], false));
             let mut oversized = vec![opcode]; oversized.resize(HOST_MAX_FRAME+1,1);
             assert!(!allowed_operation(&oversized, false));
+        }
+    }
+
+    #[test]
+    fn seat_operations_are_public_with_complete_bounded_frames() {
+        for opcode in [215, 217, 218] {
+            assert!(allowed_operation(&[opcode, 1], false));
+            assert!(!allowed_operation(&[opcode], false));
+            let mut oversized = vec![opcode];
+            oversized.resize(HOST_MAX_FRAME + 1, 1);
+            assert!(!allowed_operation(&oversized, false));
+        }
+        let assembly = [vec![216], crate::participant_enrollment::pair(b"plan", &[1; 64]).unwrap()].concat();
+        assert!(allowed_operation(&assembly, false));
+        assert!(!allowed_operation(&assembly[..assembly.len() - 1], false));
+        let short = [vec![216], crate::participant_enrollment::pair(b"plan", &[1; 63]).unwrap()].concat();
+        assert!(!allowed_operation(&short, false));
+        assert!(allowed_operation(&[219], false));
+        assert!(allowed_operation(&[vec![219], b"{\"seats\":[]}".to_vec()].concat(), false));
+        for payload in [b"[]".as_slice(), b"null", b"x"] {
+            assert!(!allowed_operation(&[vec![219], payload.to_vec()].concat(), false));
         }
     }
 

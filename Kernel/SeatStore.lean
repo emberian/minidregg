@@ -786,7 +786,53 @@ def decideTurn {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
           (by intro _ _ h; rw [hturn] at h; simp only [Turn.kernelAction, Option.some.injEq, Prod.mk.injEq] at h
               obtain ⟨rfl, rfl⟩ := h; exact ran)
 
+/-! ## An activity's end: the seats it holds
+
+The activity kernel's ending turn (`done`, `faulted`, and any later disposal
+turn that ends an activity) calls `endHeld` with the Book its own ending batch
+produced: the activity's holdings cell names its seats; they are loaded, the
+kernel's own `Seats.closeHeld` exits every open one as a step of
+`Actor.activity record` (each pays its whole allocation to its payee), and the
+activity route appends `batch` to its ending batch (ONE Book batch for the turn,
+`Posts.seq`) and writes `posts` in the same intent. -/
+
+structure HeldEnd {rootBytes : Bytes → Digest} (domain : Digest) (snapshot : Snapshot rootBytes)
+    (height record : Nat) (book : Book) where
+  private mk ::
+  loaded : Loaded
+  next : World
+  batch : Batch
+  ended : closeHeld (loaded.world book) height record = .ok (next, batch)
+  posts : List Post
+  postsExact : posts = statePosts domain snapshot loaded none next
+  guards : List ReadGuard
+  guardsExact : guards = (loadedCells domain loaded).map (guardAt snapshot)
+
+def endHeld {rootBytes : Bytes → Digest} (domain : Digest) (snapshot : Snapshot rootBytes) (height record : Nat)
+    (book : Book) : Except Refusal (HeldEnd domain snapshot height record book) := do
+  let accounts := readHoldings snapshot domain record
+  let seats ← accounts.mapM (requireSeat snapshot)
+  let instances ← (seats.map fun entry => entry.2.seat.inst).dedup.mapM (loadInstance snapshot domain)
+  let loaded : Loaded := { instances := instances.filterMap (fun found => found), seats := seats,
+                           holdings := [(record, accounts)] }
+  match ended : closeHeld (loaded.world book) height record with
+  | .error reason => throw (.kernel reason)
+  | .ok (next, batch) => pure ⟨loaded, next, batch, ended, _, rfl, _, rfl⟩
+
+/-- **An activity's end closes every seat it holds** (the kernel's
+`activity_end_closes_seats` on the loaded holdings): every held seat that was
+open is closed in the written world, and the end's batch is admitted on the
+Book it was given and conserves every asset. -/
+theorem HeldEnd.closes {rootBytes : Bytes → Digest} {domain : Digest} {snapshot : Snapshot rootBytes}
+    {height record : Nat} {book : Book} (held : HeldEnd domain snapshot height record book) :
+    (∀ seat ∈ heldOpen (held.loaded.world book) record, ∀ after ∈ held.next.seats,
+        after.account = seat.account → after.isOpen = false) ∧
+      Posts book held.batch held.next.book ∧ held.batch.registrations = [] ∧
+      ∀ asset, held.next.book.totalAsset asset = book.totalAsset asset := by
+  obtain ⟨closes, posted, conserves⟩ := activity_end_closes_seats held.ended
+  exact ⟨closes, posted, (exitEach_posts held.ended).2.1, conserves⟩
+
 #assert_axioms seatAccount_protected KernelRun.posts KernelRun.reachable KernelRun.inv Decided.conserves
-  Decided.inv Decided.book_post
+  Decided.inv Decided.book_post HeldEnd.closes
 
 end Minidregg.Kernel.SeatStore

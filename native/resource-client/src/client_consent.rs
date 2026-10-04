@@ -516,7 +516,7 @@ fn local_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u
 }
 
 pub(crate) fn plan_operation(operation:u8)->bool {
-    matches!(operation,32|36|44|48|50|52|58|66|68|70|74|78|80|82|86|92|96|103|108|113|117|123|126|140|160|170|183|201|206|210)
+    matches!(operation,32|36|44|48|50|52|58|66|68|70|74|78|80|82|86|92|96|103|108|113|117|123|126|140|160|170|183|201|206|210|215)
 }
 /// Always check adapted operator-authored plans before returning bytes to any
 /// signing consumer. A native refusal or dead verifier never falls back to the

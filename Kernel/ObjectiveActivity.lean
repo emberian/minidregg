@@ -481,7 +481,12 @@ def dataAnnotations (bounds : Bounds) : Nat → Data → Ty → List Nat → Lis
       match unalias bounds type with
       | .variant row => match row.lookup bounds 64 label with
         | some payloadType =>
-          (position, ⟨payloadType, .variant row, .unrestricted, .reusable⟩) ::
+          -- A recursive sum is declared as its bounded variable: the injection is
+          -- annotated AT that variable (the checker's `.variable` inject), so a
+          -- nested list position types as its declared name, not its unfolded row.
+          (position, ⟨payloadType, (match type with
+            | .variable index => .variable index
+            | _ => .variant row), .unrestricted, .reusable⟩) ::
             dataAnnotations bounds fuel payload payloadType (position ++ [0])
         | none => []
       | _ => []
