@@ -41,8 +41,9 @@ changes).
   two tallies   two activities on one object: the second birth cannot `set`
                 the existing state (blindWrite) and joins with `keep`; both
                 replies land whatever the order (3 + 4 = 7).
-  funding       a tally whose deposit is exactly one fee pair: its second yield
-                cannot reserve the pair (awaitsFunding: parked); a top-up; the
+  funding       a tally whose deposit is exactly one fee pair plus its record's
+                storage deposit: its second yield cannot reserve the pair
+                (awaitsFunding: parked); a top-up; the
                 delivery commits.
   timeout       a tally whose deadline passes: the decider is too late
                 (pastDeadline), any delivery expires the slot and resumes it with
@@ -79,7 +80,7 @@ changes).
 ROOT/transcript holds every command's exact output; ROOT/results.json lists every
 row with its expectation and verdict; the script exits 1 on any mismatch.
 """
-import argparse, json, os, pathlib, secrets, subprocess, sys, time
+import argparse, re, json, os, pathlib, secrets, subprocess, sys, time
 
 os.umask(0o077)
 HERE = pathlib.Path(__file__).resolve().parent
@@ -353,6 +354,9 @@ def variant(label, payload):
     return {'tag': 'variant', 'label': label, 'payload': payload}
 
 
+LAST = {}
+
+
 def birth(label, workspace, name, deposit, expect, detail=None, account=SPONSOR_ACCOUNT, account_cap=SPONSOR_SPEND,
           object_cap=None, decider=SECOND, init=None, ticks=TICKS, resume_ticks=None, pin=None):
     o = objects[name]
@@ -362,6 +366,7 @@ def birth(label, workspace, name, deposit, expect, detail=None, account=SPONSOR_
             'envelope': cap(ticks), 'resume': cap(resume_ticks or ticks), 'timeout': cap(ticks),
             'deposit': str(deposit)}
     value = turn(label, workspace, body, expect, detail)
+    LAST['value'] = value
     return value.get('transaction')
 
 
@@ -487,7 +492,14 @@ check('two-tallies-keep-both-writes', total_of(e1b) == 7 and e1b['record'].get('
        'generations': [e1b['record'].get('generation'), e2b['record'].get('generation')]})
 
 # --- funding: a purse that cannot reserve the next pair parks the activity ---------------
-tx3 = birth('birth-exact-deposit', sponsor, 'tally-three', PAIR, 'installed')
+# A yield reserves the fee pair AND the storage deposit of the record it commits
+# (storageRate * |record|); the Host's own refusal quotes both, so the exact deposit is learned from it.
+birth('birth-deposit-quote', sponsor, 'tally-three', PAIR, 'refused', 'underfunded')
+quote = re.search(r'underfunded (\d+) (\d+)', unhex(LAST['value'].get('detail', '')))
+NEED = int(quote.group(2)) if quote else 0
+check('deposit-reserves-pair-and-storage', quote is not None and int(quote.group(1)) == PAIR and NEED > PAIR,
+      {'pair': PAIR, 'quote': quote.groups() if quote else None})
+tx3 = birth('birth-exact-deposit', sponsor, 'tally-three', NEED, 'installed')
 f1 = state('tally-three', 'funding-born', tx3)
 REC3 = f1['recordCell']
 turn('funding-resolve', second, {'kind': 'resolve', 'slot': await_of(f1)['source']['slot'],
@@ -502,7 +514,7 @@ turn('top-up', second, {'kind': 'topUp', 'record': REC3, 'account': SECOND, 'acc
                         'amount': '10000'}, 'installed')
 turn('deliver-funded', sponsor, deliver3, 'installed')
 f2 = state('tally-three', 'funded', tx3)
-check('funded-resumed', total_of(f2) == 2 and f2['purse'] == PAIR - PRICE + 10000,
+check('funded-resumed', total_of(f2) == 2 and f2['purse'] == NEED - PRICE + 10000,
       {'state': f2.get('state'), 'purse': f2['purse']})
 
 # --- timeout: the deadline passes ------------------------------------------------------

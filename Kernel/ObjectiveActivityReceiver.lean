@@ -619,26 +619,33 @@ def Prepared.intent (prepared : Prepared deployment profile ambient durable comm
     DataIntent rootBytes :=
   prepared.decided.intent (admissionSeal prepared ingress)
 
-/-- A cell an activity intent writes is an activity cell or the Book. -/
+/-- A cell an activity intent writes is an activity cell at its own coordinate, the
+Book, or a cell the kernel retires: the registry's retired image at a protected
+coordinate (an ended record or a settled slot). -/
 def ActivityOrBook (deployment : Deployment) (write : DataWrite) : Prop :=
   write.cellId = ⟨deployment.resourceBookId⟩ ∨
-    ∃ payload, ObjectiveActivity.payloadOf write.canonicalPostBytes = some payload ∧
-      write.cellId.value = ObjectiveActivityCell.coordinate deployment.domain payload.role payload.key
+    (∃ payload, ObjectiveActivity.payloadOf write.canonicalPostBytes = some payload ∧
+      write.cellId.value = ObjectiveActivityCell.coordinate deployment.domain payload.role payload.key) ∨
+    (write.canonicalPostBytes = ObjectiveActivity.retiredImage ∧ ObjectiveActivityCell.reservedBase ≤ write.cellId.value)
 
 instance (deployment : Deployment) (write : DataWrite) : Decidable (ActivityOrBook deployment write) :=
   if book : write.cellId = ⟨deployment.resourceBookId⟩ then isTrue (Or.inl book)
+  else if retired : write.canonicalPostBytes = ObjectiveActivity.retiredImage ∧
+      ObjectiveActivityCell.reservedBase ≤ write.cellId.value then isTrue (Or.inr (Or.inr retired))
   else match found : ObjectiveActivity.payloadOf write.canonicalPostBytes with
     | none => isFalse (by
-        rintro (h | ⟨payload, hp, _⟩)
+        rintro (h | ⟨payload, hp, _⟩ | h)
         · exact book h
-        · rw [found] at hp; cases hp)
+        · rw [found] at hp; cases hp
+        · exact retired h)
     | some payload =>
       if at_ : write.cellId.value = ObjectiveActivityCell.coordinate deployment.domain payload.role payload.key then
-        isTrue (Or.inr ⟨payload, found, at_⟩)
+        isTrue (Or.inr (Or.inl ⟨payload, found, at_⟩))
       else isFalse (by
-        rintro (h | ⟨other, hp, hat⟩)
+        rintro (h | ⟨other, hp, hat⟩ | h)
         · exact book h
-        · rw [found] at hp; cases hp; exact at_ hat)
+        · rw [found] at hp; cases hp; exact at_ hat
+        · exact retired h)
 
 def PhysicalShape (prepared : Prepared deployment profile ambient durable command) (ingress : DecodedIngress) :
     Prop :=
@@ -688,7 +695,8 @@ def intent (accepted : Accepted deployment profile ambient durable ingress) : Da
   accepted.prepared.intent ingress
 
 /-- **Protected coordinates.** Every cell an accepted activity turn writes is
-an activity cell at its own coordinate, or the deployment's Book. -/
+an activity cell at its own coordinate, the deployment's Book, or a retirement
+(the registry's retired image) at a protected coordinate. -/
 theorem intent_writes_activity_or_book (accepted : Accepted deployment profile ambient durable ingress) :
     ∀ write ∈ (intent accepted).writes, ActivityOrBook deployment write :=
   accepted.physical.2.2.2.1
