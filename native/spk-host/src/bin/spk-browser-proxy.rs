@@ -49,6 +49,15 @@ mod linux {
         File::open(path)
     }
 
+    /// The only TLS key exchange the browser entrance accepts: X25519MLKEM768
+    /// (hybrid X25519 + ML-KEM-768, TLS 1.3). A client that offers no hybrid
+    /// group (or only TLS 1.2) fails the handshake; there is no classical fallback.
+    fn hybrid_only_provider() -> std::sync::Arc<rustls::crypto::CryptoProvider> {
+        let mut provider = rustls::crypto::aws_lc_rs::default_provider();
+        provider.kx_groups = vec![rustls::crypto::aws_lc_rs::kx_group::X25519MLKEM768];
+        std::sync::Arc::new(provider)
+    }
+
     fn tls_config(directory: &Path) -> io::Result<Arc<ServerConfig>> {
         let mut cert = BufReader::new(private_file(&directory.join("tls.crt"))?);
         let certs: Vec<_> = rustls_pemfile::certs(&mut cert).collect::<Result<_, _>>()?;
@@ -58,8 +67,16 @@ mod linux {
         let mut key = BufReader::new(private_file(&directory.join("tls.key"))?);
         let key = rustls_pemfile::private_key(&mut key)?
             .ok_or_else(|| invalid("TLS private key missing"))?;
-        let _ = rustls::crypto::ring::default_provider().install_default();
-        let config = ServerConfig::builder()
+        server_config(certs, key)
+    }
+
+    fn server_config(
+        certs: Vec<rustls::pki_types::CertificateDer<'static>>,
+        key: rustls::pki_types::PrivateKeyDer<'static>,
+    ) -> io::Result<Arc<ServerConfig>> {
+        let config = ServerConfig::builder_with_provider(hybrid_only_provider())
+            .with_protocol_versions(&[&rustls::version::TLS13])
+            .map_err(io::Error::other)?
             .with_no_client_auth()
             .with_single_cert(certs, key)
             .map_err(io::Error::other)?;
@@ -514,7 +531,6 @@ mod linux {
         const SWITCH: &[u8] = b"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n";
 
         fn configs() -> (Arc<ServerConfig>, Arc<ClientConfig>) {
-            let _ = rustls::crypto::ring::default_provider().install_default();
             let certs: Vec<_> = rustls_pemfile::certs(&mut BufReader::new(CERT))
                 .collect::<Result<_, _>>()
                 .unwrap();
@@ -524,14 +540,11 @@ mod linux {
             let mut roots = RootCertStore::empty();
             roots.add(certs[0].clone()).unwrap();
             (
+                server_config(certs, key).unwrap(),
                 Arc::new(
-                    ServerConfig::builder()
-                        .with_no_client_auth()
-                        .with_single_cert(certs, key)
-                        .unwrap(),
-                ),
-                Arc::new(
-                    ClientConfig::builder()
+                    ClientConfig::builder_with_provider(Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
+                        .with_safe_default_protocol_versions()
+                        .unwrap()
                         .with_root_certificates(roots)
                         .with_no_client_auth(),
                 ),
@@ -740,6 +753,74 @@ mod linux {
             assert!(ConnectionSlot::reserve(&count).is_some());
             drop(slots);
             assert_eq!(count.load(Ordering::Relaxed), 0);
+        }
+
+        /// Drive a client and the real server config to the end of the handshake in memory.
+        fn handshake(
+            client: Arc<ClientConfig>,
+        ) -> Result<Option<rustls::NamedGroup>, rustls::Error> {
+            let (server, _) = configs();
+            let mut client = ClientConnection::new(client, "localhost".try_into().unwrap()).unwrap();
+            let mut server = ServerConnection::new(server).unwrap();
+            for _ in 0..32 {
+                let mut flight = Vec::new();
+                while client.wants_write() {
+                    client.write_tls(&mut flight).unwrap();
+                }
+                if !flight.is_empty() {
+                    server.read_tls(&mut &flight[..]).unwrap();
+                    server.process_new_packets()?;
+                }
+                let mut flight = Vec::new();
+                while server.wants_write() {
+                    server.write_tls(&mut flight).unwrap();
+                }
+                if !flight.is_empty() {
+                    client.read_tls(&mut &flight[..]).unwrap();
+                    client.process_new_packets()?;
+                }
+                if !client.is_handshaking() && !server.is_handshaking() {
+                    return Ok(client.negotiated_key_exchange_group().map(|group| group.name()));
+                }
+            }
+            panic!("handshake did not finish");
+        }
+
+        fn client_with(
+            groups: Vec<&'static dyn rustls::crypto::SupportedKxGroup>,
+            versions: &[&'static rustls::SupportedProtocolVersion],
+        ) -> Arc<ClientConfig> {
+            let mut provider = rustls::crypto::aws_lc_rs::default_provider();
+            provider.kx_groups = groups;
+            let mut roots = RootCertStore::empty();
+            let certs: Vec<_> = rustls_pemfile::certs(&mut BufReader::new(CERT)).collect::<Result<_, _>>().unwrap();
+            roots.add(certs[0].clone()).unwrap();
+            Arc::new(
+                ClientConfig::builder_with_provider(Arc::new(provider))
+                    .with_protocol_versions(versions)
+                    .unwrap()
+                    .with_root_certificates(roots)
+                    .with_no_client_auth(),
+            )
+        }
+
+        #[test]
+        fn the_browser_entrance_negotiates_x25519mlkem768() {
+            use rustls::crypto::aws_lc_rs::kx_group;
+            let group = handshake(client_with(
+                vec![kx_group::X25519MLKEM768, kx_group::X25519],
+                &[&rustls::version::TLS13],
+            ))
+            .unwrap();
+            assert_eq!(group, Some(rustls::NamedGroup::X25519MLKEM768));
+        }
+
+        #[test]
+        fn a_client_with_no_hybrid_group_is_refused_not_negotiated_down() {
+            use rustls::crypto::aws_lc_rs::kx_group;
+            // Classical-only TLS 1.3 client: no shared group, the handshake fails.
+            assert!(handshake(client_with(vec![kx_group::X25519], &[&rustls::version::TLS13])).is_err());
+            assert!(handshake(client_with(vec![kx_group::SECP256R1], &[&rustls::version::TLS13])).is_err());
         }
     }
 }

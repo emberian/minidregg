@@ -23,7 +23,7 @@ sha2 = "=0.10.9"
 sha1 = "=0.10.6"
 base64 = "=0.22.1"
 ed25519-dalek = "=2.2.0"
-rustls = { version = "=0.23.45", default-features = false, features = ["std", "ring"] }
+rustls = { version = "=0.23.45", default-features = false, features = ["std", "aws_lc_rs"] }
 rustls-pemfile = "=2.2.0"
 sandstorm-package = { git = "https://github.com/emberian/dregg.git", rev = "5819115352bdfa43c5cbd329727d4f8d8a1b5be9" }
 minidregg-spk-rpc = { path = "../spk-rpc" }

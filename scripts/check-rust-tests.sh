@@ -332,6 +332,12 @@ exact rc-object-device-hybrid resource-client --bin mini -- \
   object_epoch_packages::tests::a_pre_hybrid_manifest_is_refused_by_name_even_when_correctly_signed \
   object_cli::tests::receive_epoch_recovers_package_law_through_durable_device_custody \
   workspace::protected_document::members::tests::device_preflight_rejects_a_forged_commitment_before_any_phase
+# The SPK browser entrance is TLS 1.3 with ONE key-exchange group, X25519MLKEM768 (rustls aws-lc-rs
+# provider): it negotiates it, and REFUSES a client that offers no hybrid group rather than
+# negotiating down to X25519.
+exact spk-tls-hybrid-entrance spk-host --bin spk-browser-proxy -- \
+  linux::tests::the_browser_entrance_negotiates_x25519mlkem768 \
+  linux::tests::a_client_with_no_hybrid_group_is_refused_not_negotiated_down
 # ONE private-invite path: the shell's room invite and chat invite (and summon) run the
 # same room-key invocation; a hosted member is refused without --i-know by the operator's
 # list AND by its own signed custody declaration; chat invite checks before granting.

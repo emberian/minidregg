@@ -16,6 +16,11 @@ resident's responsibility. Ordinary HTTP and refused upgrades retain bounded
 buffering and deadlines. Initial admission still has a 30-second response-head
 deadline; this transport change does not fix kernel admission latency.
 
+The entrance is TLS 1.3 with one key-exchange group, X25519MLKEM768 (hybrid X25519 +
+ML-KEM-768; rustls aws-lc-rs provider). A browser that offers no hybrid group (or only
+TLS 1.2) fails the handshake: there is no classical fallback. Current Chrome, Edge and
+Firefox offer it; a client built on OpenSSL older than 3.5 does not.
+
 There is one rustls owner per connection. Its poll loop uses a 64 KiB plaintext
 queue toward the app and a 64 KiB rustls outgoing buffer toward the browser.
 This prevents a held socket from monopolizing the accept loop or accumulating
