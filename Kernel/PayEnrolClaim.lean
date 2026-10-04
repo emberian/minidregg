@@ -286,7 +286,7 @@ def Consumption.valid (consumed : Consumption) : Prop :=
   0 < consumed.originalAmountAtomic ∧ consumed.originalAmountAtomic < 2 ^ 64 ∧
   consumed.originalAmountAtomic ≤ consumed.tariff.maxPerObservation ∧
   consumed.mintedCredit = consumed.tariff.creditFor consumed.originalAmountAtomic ∧
-  consumed.membershipCredit = consumed.terms.requestedWeeks * consumed.tariff.weekCredit ∧
+  consumed.membershipCredit = consumed.terms.requestedWeeks * consumed.tariff.nodeWeekRate ∧
   consumed.birthFee + consumed.membershipCredit + consumed.creditedRemainder = consumed.mintedCredit ∧
   consumed.terms.minimumStarterCredit ≤ consumed.creditedRemainder ∧
   (consumed.terms.mode = .renew → consumed.birthFee = 0)
@@ -480,7 +480,7 @@ def quoteFixed (amount : Nat) (tariff : Tariff)
   else if requestedWeeks = 0 then .error .weeksZero
   else
     let credit := tariff.creditFor amount
-    let membership := requestedWeeks * tariff.weekCredit
+    let membership := requestedWeeks * tariff.nodeWeekRate
     if credit < birthFee + membership + minimumStarterCredit then .error .insufficientCredit
     else .ok {
       amountAtomic := amount
@@ -502,7 +502,7 @@ theorem quoteFixed_success_split (amount : Nat) (tariff : Tariff)
     (accepted : quoteFixed amount tariff birthFee weeks starter = .ok quoted) :
     quoted.amountAtomic = amount ∧ quoted.credit = tariff.creditFor amount ∧
     quoted.birthFee = birthFee ∧ quoted.requestedWeeks = weeks ∧
-    quoted.membershipCredit = weeks * tariff.weekCredit ∧
+    quoted.membershipCredit = weeks * tariff.nodeWeekRate ∧
     quoted.birthFee + quoted.membershipCredit + quoted.creditedRemainder = quoted.credit ∧
     starter ≤ quoted.creditedRemainder := by
   unfold quoteFixed at accepted
@@ -518,8 +518,8 @@ theorem quoteFixed_success_split (amount : Nat) (tariff : Tariff)
   split at accepted
   · cases accepted
   rename_i covered
-  have coverage : birthFee + weeks * tariff.weekCredit + starter ≤ tariff.creditFor amount := by
-    change ¬tariff.creditFor amount < birthFee + weeks * tariff.weekCredit + starter at covered
+  have coverage : birthFee + weeks * tariff.nodeWeekRate + starter ≤ tariff.creditFor amount := by
+    change ¬tariff.creditFor amount < birthFee + weeks * tariff.nodeWeekRate + starter at covered
     omega
   injection accepted with same
   subst quoted
@@ -697,7 +697,7 @@ theorem accept_success_split (claim : Claim) (prior : Option Consumption)
     consumed.originalAmountAtomic = claim.original.amountAtomic ∧ consumed.tariff = tariff ∧
     consumed.mintedCredit = tariff.creditFor claim.original.amountAtomic ∧
     consumed.birthFee = birthFee ∧
-    consumed.membershipCredit = request.requestedWeeks * tariff.weekCredit ∧
+    consumed.membershipCredit = request.requestedWeeks * tariff.nodeWeekRate ∧
     consumed.birthFee + consumed.membershipCredit + consumed.creditedRemainder = consumed.mintedCredit ∧
     request.minimumStarterCredit ≤ consumed.creditedRemainder := by
   cases prior with
@@ -799,7 +799,7 @@ private def fixtureTariff : Tariff :=
     version := 3
     creditPerAtomic := 1
     maxPerObservation := 100000
-    nodeHourRate := 1
+    nodeWeekRate := 168
     enrolIndex := some 0
     journalFloor := 1 }
 

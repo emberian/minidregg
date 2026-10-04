@@ -230,7 +230,7 @@ private def decodeDeclared (height : Nat) (bytes : List UInt8) :
   pure (liftDeclared height (← decodePinned DeclaredEffectCell.wire declaredDescriptor bytes))
 
 /-- The source paid payload uses the literal Store2/v4 layout. Decode it
-with the frozen typed source wire, then use the shared field-preserving v5
+with the frozen typed source wire, then use the shared field-preserving v6
 lift. New claims, chain evidence, usage and activation remain absent: carry
 cannot turn unknown historical execution into an unused compute allowance. -/
 def decodePay (bytes : List UInt8) : Except String Kernel.PayCell.PayStore := do

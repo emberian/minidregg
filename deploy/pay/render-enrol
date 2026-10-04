@@ -18,13 +18,15 @@ script writes, into a NEW directory DIR:
   watcher.env      /etc/mini/pay/watcher.env: the observer and the enrollment tick variables
   report.txt       the exact integers and what they mean
 
-The price. A node week costs 168 * nodeHourRate credit and one atomic unit is creditPerAtomic
-credit, so a week is `weekPriceAtomic * creditPerAtomic` credit only if that is a multiple of 168.
-The tariff stores the HOURLY integer, so this script takes the FLOOR: the realized week is at most
-the asked price, never above it. A payer who sends exactly the asked amount plus the one-time birth
-fee is therefore always at or over the price (a ceiling would journal that payer belowPrice). The
-realized price, the shortfall and the Host-quoted total are printed in report.txt; the friend sees
-the Host's own quote (op 121), never a number computed here.
+The price. The tariff's unit is the week (`nodeWeekRate`, Kernel/PayTariff.lean, DREGG/PAY/TARIFF/v4):
+it is the Book credit one node week costs, and one atomic unit is creditPerAtomic credit, so the
+week is EXACTLY `weekPriceAtomic * creditPerAtomic` credit. Nothing is divided, floored or rounded; a
+payer who sends exactly the asked amount plus the one-time birth fee is exactly at the price. The
+friend sees the Host's own quote (op 121), never a number computed here.
+
+--verify-tariff FILE checks a tariff (a book.json / tariff-on.json, or the bare tariff object) against
+the terms and refuses unless its week rate is exactly the asked week price, its mint and token
+program are the terms' (or the --mint/--token-program override), and it carries no hourly rate.
 
 --mint/--token-program override the terms for a rehearsal on devnet with a throwaway Token-2022
 mint; the override is printed in report.txt. The receiving address is never overridden.
@@ -36,7 +38,6 @@ from pathlib import Path
 import sys
 
 ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-HOURS_PER_WEEK = 168
 HERE = Path(__file__).resolve().parent
 EXPECTED_KEYS = {"type", "enrolAddress", "enrolIndex", "mint", "tokenProgram", "decimals", "weekPriceAtomic",
                  "creditPerAtomic", "maxPerObservation", "journalFloor", "minTickSlots", "slashCallerPermille",
@@ -94,19 +95,33 @@ def tokens(atomic, decimals):
 
 
 def derive(terms):
-    """The tariff integers. Returns (nodeHourRate, realized week in atomic units, shortfall in atomic units)."""
+    """The tariff's week rate: the asked week price in credit, exactly."""
     asked = nat(terms["weekPriceAtomic"], "weekPriceAtomic")
     credit_per_atomic = nat(terms["creditPerAtomic"], "creditPerAtomic")
     if asked == 0 or credit_per_atomic == 0:
         die("weekPriceAtomic and creditPerAtomic must be positive")
-    week_credit_asked = asked * credit_per_atomic
-    rate = week_credit_asked // HOURS_PER_WEEK
-    if rate == 0:
-        die("the asked week price is below one credit per hour")
-    realized_credit = rate * HOURS_PER_WEEK
-    if realized_credit % credit_per_atomic:
-        die("the realized week is not a whole number of atomic units; choose creditPerAtomic 1 or a price that divides")
-    return rate, realized_credit // credit_per_atomic, asked - realized_credit // credit_per_atomic
+    return asked * credit_per_atomic
+
+
+def verify_tariff(terms, path, mint=None, program=None):
+    """Refuse a tariff whose week is not exactly the terms' week price (cv 01a105c0-0292: 49.999992)."""
+    document = json.loads(Path(path).read_text())
+    tariff = document.get("tariff", document) if isinstance(document, dict) else None
+    if not isinstance(tariff, dict):
+        die(f"{path} holds no tariff object")
+    if "nodeHourRate" in tariff:
+        die(f"{path} carries an hourly rate (nodeHourRate {tariff['nodeHourRate']!r}): the tariff's unit is the week; "
+            "re-render with this script")
+    expected = derive(terms)
+    got = tariff.get("nodeWeekRate")
+    if got != str(expected):
+        die(f"{path} week rate is {got!r} credit, the terms ask exactly {expected} "
+            f"({tokens(expected, nat(terms['decimals'], 'decimals'))} tokens): refusing")
+    for name, want in (("mint", mint or terms["mint"]), ("tokenProgram", program or terms["tokenProgram"]),
+                       ("creditPerAtomic", terms["creditPerAtomic"]), ("decimals", terms["decimals"])):
+        if tariff.get(name) != want:
+            die(f"{path} {name} is {tariff.get(name)!r}, the terms say {want!r}: refusing")
+    print(f"verify-tariff: {path} week rate {got} = {tokens(expected, nat(terms['decimals'], 'decimals'))} tokens exactly")
 
 
 def render(terms, args):
@@ -119,7 +134,7 @@ def render(terms, args):
     decimals = nat(terms["decimals"], "decimals")
     if decimals > 38:
         die("decimals exceed the client's exact display bound (38)")
-    rate, realized, shortfall = derive(terms)
+    rate = derive(terms)
     index = nat(terms["enrolIndex"], "enrolIndex")
     floor_ = nat(terms["journalFloor"], "journalFloor")
     if floor_ > nat(terms["weekPriceAtomic"], "weekPriceAtomic"):
@@ -143,7 +158,7 @@ def render(terms, args):
     tariff = {"version": str(args.version), "asset": "0", "mint": mint, "tokenProgram": program,
               "decimals": str(decimals), "creditPerAtomic": terms["creditPerAtomic"],
               "maxPerObservation": terms["maxPerObservation"], "minTickSlots": terms["minTickSlots"],
-              "nodeHourRate": str(rate), "enrolIndex": None, "journalFloor": terms["journalFloor"],
+              "nodeWeekRate": str(rate), "enrolIndex": None, "journalFloor": terms["journalFloor"],
               "slashCallerPermille": terms["slashCallerPermille"]}
     files = {
         "book.json": {"control": str(args.control), "book": book, "tariff": tariff},
@@ -164,7 +179,7 @@ def render(terms, args):
         f"PAY_ENROL_CAPABILITY={args.enrol_capability}",
         f"PAY_OPERATOR_SOCKET={terms['operatorSocket']}",
         ""])
-    week_total_note = (f"enrollment total = the box's one-time birth fee + {realized} atomic; "
+    week_total_note = (f"enrollment total = the box's one-time birth fee + {rate // int(terms['creditPerAtomic'])} atomic; "
                        f"the friend pays the amount `mini join --solana` prints from the Host quote (op 121)")
     report = "\n".join([
         f"enrolAddress        {address}  (book row {index}; also the join pin)",
@@ -173,8 +188,7 @@ def render(terms, args):
         f"decimals            {decimals}  (1 token = 10^{decimals} atomic units)",
         f"creditPerAtomic     {terms['creditPerAtomic']}",
         f"asked week price    {terms['weekPriceAtomic']} atomic = {tokens(int(terms['weekPriceAtomic']), decimals)} tokens",
-        f"nodeHourRate        {rate}  (tariff integer; weekCredit = {HOURS_PER_WEEK} * {rate} = {rate * HOURS_PER_WEEK})",
-        f"realized week       {realized} atomic ({shortfall} atomic below the asked price: floor of the hourly integer)",
+        f"nodeWeekRate        {rate}  (tariff integer: the week price in credit, exact)",
         f"journalFloor        {floor_} atomic",
         f"tariff versions     {args.version} (book, enrolIndex null) then {args.version + 1} (enrolIndex {index})",
         week_total_note, ""])
@@ -184,15 +198,23 @@ def render(terms, args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--terms", default=str(HERE / "enrol-terms.json"))
-    parser.add_argument("--out", required=True)
-    parser.add_argument("--version", type=int, required=True, help="tariff version of book.json; it must exceed the installed one")
-    parser.add_argument("--control", required=True, help="the factory control capability id (genesis factoryControllerCapability)")
-    parser.add_argument("--observer-capability", required=True, help="genesis payObserver.capability")
-    parser.add_argument("--enrol-capability", required=True, help="genesis payObserver.enrolCapability")
+    parser.add_argument("--out")
+    parser.add_argument("--version", type=int, help="tariff version of book.json; it must exceed the installed one")
+    parser.add_argument("--control", help="the factory control capability id (genesis factoryControllerCapability)")
+    parser.add_argument("--observer-capability", help="genesis payObserver.capability")
+    parser.add_argument("--enrol-capability", help="genesis payObserver.enrolCapability")
     parser.add_argument("--book-extra")
+    parser.add_argument("--verify-tariff", metavar="FILE",
+                        help="refuse FILE (a rendered book.json/tariff-on.json or a bare tariff) unless its week is exactly the terms' price; writes nothing")
     parser.add_argument("--mint")
     parser.add_argument("--token-program")
     args = parser.parse_args()
+    if args.verify_tariff:
+        verify_tariff(load_terms(args.terms), args.verify_tariff, args.mint, args.token_program)
+        return
+    for name in ("out", "version", "control", "observer_capability", "enrol_capability"):
+        if getattr(args, name) is None:
+            die("--" + name.replace("_", "-") + " is required (unless --verify-tariff)")
     if args.version < 1:
         die("--version must be at least 1")
     for name in ("control", "observer_capability", "enrol_capability"):

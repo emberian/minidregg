@@ -1,8 +1,9 @@
 /-
-# Explicit neutral paid-cell v4 → v5 payload carry
+# Explicit neutral paid-cell v4 → v6 payload carry
 
 This is a codec migration, not a payment or an authority transition. Every old
-row survives field-for-field. Claim, claim consumption, pending-owner custody
+row survives field-for-field, except that the tariff's hourly rate is converted
+to the week-unit rate `168 · nodeHourRate` (`liftTariff`, exact). Claim, claim consumption, pending-owner custody
 history, authenticated chain-tip, compute-usage and compute-activation namespaces
 start empty. An empty usage map is not activation or a claim about historical work. The durable caller must
 check the old anchor and atomically replace payload/root/registry commitments;
@@ -32,6 +33,14 @@ def liftEnrolRecord (row : PayCellLegacyV4.EnrolRecord) : PayCell.EnrolRecord :=
 def liftUnattributed (row : PayCellLegacyV4.Unattributed) : PayCell.Unattributed :=
   ⟨row.index, row.amount, row.slot, row.reason, row.memo⟩
 
+/-- The frozen hourly tariff becomes the week-unit tariff by the one exact
+conversion: a node week was `168 · nodeHourRate` credit, and is now stored as
+that number. Every other field is carried unchanged; no price is rounded. -/
+def liftTariff (row : PayCellLegacyV4.FrozenTariff) : PayTariff.Tariff :=
+  ⟨row.version, row.asset, row.mint, row.tokenProgram, row.decimals, row.creditPerAtomic,
+    row.maxPerObservation, row.minTickSlots, 168 * row.nodeHourRate, row.enrolIndex,
+    row.journalFloor, row.slashCallerPermille⟩
+
 def addressMap : OldAddress → NewAddress
   | ⟨.tariff, key⟩ => ⟨.tariff, key⟩
   | ⟨.book, key⟩ => ⟨.book, key⟩
@@ -42,7 +51,7 @@ def addressMap : OldAddress → NewAddress
 
 def valueMap : (address : OldAddress) →
     PayCellLegacyV4.layout.Value address.1 → PayCell.layout.Value (addressMap address).1
-  | ⟨.tariff, _⟩, value => value
+  | ⟨.tariff, _⟩, value => liftTariff value
   | ⟨.book, _⟩, value => value
   | ⟨.assignment, _⟩, value => value
   | ⟨.enrolment, _⟩, value => liftEnrolRecord value
@@ -110,14 +119,15 @@ theorem lift_apply (store : OldStore) (address : OldAddress) :
       apply fromEntries_apply_of_mem _ (mapped_entries_distinct store)
       exact List.mem_map_of_mem (entry_mem_of_read store address value found)
 
-@[simp] theorem tariff_preserved (store : OldStore) :
-    PayCell.tariffOf (lift store) = PayCellLegacyV4.tariffOf store := by
-  have identity : valueMap (PayCellLegacyV4.tariffAddress) = _root_.id := by
-    funext value
-    rfl
-  change lift store (addressMap (PayCellLegacyV4.tariffAddress)) = store (PayCellLegacyV4.tariffAddress)
-  rw [lift_apply, identity]
-  cases store (PayCellLegacyV4.tariffAddress) <;> rfl
+@[simp] theorem tariff_lifted (store : OldStore) :
+    PayCell.tariffOf (lift store) = (PayCellLegacyV4.tariffOf store).map liftTariff := by
+  simpa [PayCell.tariffOf, PayCellLegacyV4.tariffOf,
+    PayCell.tariffAddress, PayCellLegacyV4.tariffAddress, addressMap, valueMap]
+    using lift_apply store PayCellLegacyV4.tariffAddress
+
+/-- The week price survives the unit change exactly. -/
+theorem liftTariff_week (row : PayCellLegacyV4.FrozenTariff) :
+    (liftTariff row).nodeWeekRate = 168 * row.nodeHourRate := rfl
 
 @[simp] theorem book_preserved (store : OldStore) (index : Nat) :
     PayCell.bookAt (lift store) index = PayCellLegacyV4.bookAt store index := by
@@ -338,7 +348,8 @@ theorem carried_enrollment_exact :
 #assert_axioms carried_enrollment_law
 #assert_axioms carried_enrollment_exact
 #assert_axioms lift_apply
-#assert_axioms tariff_preserved
+#assert_axioms tariff_lifted
+#assert_axioms liftTariff_week
 #assert_axioms book_preserved
 #assert_axioms assignment_preserved
 #assert_axioms enrolment_preserved

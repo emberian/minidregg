@@ -52,8 +52,7 @@ COLLECTOR = 99
 P1_ADDRESS = "16946aa663362d557dd21ee08e8da60c2ea8a73467713c7c5205991e36634af5"
 P1_MINT = "8525966c00f39ff54ef5e537a4736af436494d1f1681c659bd98e37ac28beff1"
 P1_PROGRAM = "06ddf6e1ee758fde18425dbce46ccddab61afc4d83b90d27febdf928d8a18bfc"
-NODE_RATE = 5952380
-WEEK = 168 * NODE_RATE
+WEEK = 999999840
 # The factory tariff below: base 3 + perBirth 2 + 2 grants x perGrant 1 + 0 per byte.
 BIRTH_FEE = 3 + 2 + 2
 PRICE = BIRTH_FEE + WEEK
@@ -241,7 +240,7 @@ book = {"sponsor": str(EMBER), "control": str(FACTORY_CONTROL), "nonce": fresh()
         "book": [P1_ADDRESS, "01" * 32, "02" * 32],
         "tariff": {"version": "2", "asset": "0", "mint": P1_MINT, "tokenProgram": P1_PROGRAM,
                    "decimals": "6", "creditPerAtomic": "1", "maxPerObservation": "100000000000",
-                   "minTickSlots": "1", "nodeHourRate": str(NODE_RATE), "enrolIndex": None,
+                   "minTickSlots": "1", "nodeWeekRate": str(WEEK), "enrolIndex": None,
                    "journalFloor": str(FLOOR), "slashCallerPermille": "500"}}
 r, _ = sign_and_submit(host, "pay-book", book, EMBER, PAY_OPS)
 row("operator installs a 3-row book (row 0 = the enrollment address) + tariff v2", "confirmed",

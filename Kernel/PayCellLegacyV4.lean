@@ -113,6 +113,60 @@ structure Unattributed where
   memo : MemoField
   deriving DecidableEq, Repr
 
+/-- The frozen `DREGG/PAY/TARIFF/v3` tariff, whose unit was the hour.  It
+exists only so the v4 → current carry reads the old bytes as what they were
+and converts them (`PayCellUpgrade.liftTariff`); the live `PayTariff.Tariff`
+has a week rate and no hourly field. -/
+structure FrozenTariff where
+  version : Nat
+  asset : Nat
+  mint : Address32
+  tokenProgram : Address32
+  decimals : Nat
+  creditPerAtomic : Nat
+  maxPerObservation : Nat
+  minTickSlots : Nat
+  nodeHourRate : Nat
+  enrolIndex : Option Nat
+  journalFloor : Nat
+  slashCallerPermille : Nat
+  deriving DecidableEq, Repr
+
+def frozenTariffStream : StreamCodec FrozenTariff :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product bytesStream
+          (StreamCodec.product bytesStream
+            (StreamCodec.product StreamCodec.nat
+              (StreamCodec.product StreamCodec.nat
+                (StreamCodec.product StreamCodec.nat
+                  (StreamCodec.product StreamCodec.nat
+                    (StreamCodec.product StreamCodec.nat
+                      (StreamCodec.product (StreamCodec.option StreamCodec.nat)
+                        (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))))))))
+    (fun t => (t.version, t.asset, t.mint, t.tokenProgram, t.decimals, t.creditPerAtomic,
+      t.maxPerObservation, t.minTickSlots, t.nodeHourRate, t.enrolIndex, t.journalFloor,
+      t.slashCallerPermille))
+    (fun (version, asset, mint, program, decimals, rate, cap, tick, node, enrol, floor, slash) =>
+      ⟨version, asset, mint, program, decimals, rate, cap, tick, node, enrol, floor, slash⟩)
+    (by intro t; cases t; rfl)
+
+/-- The v4 genesis placeholder, as it was (invalid: version 0, zero mint). -/
+def frozenGenesisDefault : FrozenTariff where
+  version := 0
+  asset := 0
+  mint := zeroKey
+  tokenProgram := zeroKey
+  decimals := 6
+  creditPerAtomic := 1
+  maxPerObservation := 10000000000
+  minTickSlots := 150
+  nodeHourRate := 5952380
+  enrolIndex := none
+  journalFloor := 1000000
+  slashCallerPermille := 500
+
 def Namespace.Key : Namespace → Type
   | .tariff => Unit
   | .book => Nat
@@ -122,7 +176,7 @@ def Namespace.Key : Namespace → Type
   | .journal => List UInt8
 
 def Namespace.Value : Namespace → Type
-  | .tariff => Tariff
+  | .tariff => FrozenTariff
   | .book => Address32
   | .assignment => Nat
   | .enrolment => EnrolRecord
@@ -138,7 +192,7 @@ instance Namespace.keyDecEq : (space : Namespace) → DecidableEq (Namespace.Key
   | .journal => inferInstanceAs (DecidableEq (List UInt8))
 
 instance Namespace.valueDecEq : (space : Namespace) → DecidableEq (Namespace.Value space)
-  | .tariff => inferInstanceAs (DecidableEq Tariff)
+  | .tariff => inferInstanceAs (DecidableEq FrozenTariff)
   | .book => inferInstanceAs (DecidableEq (List UInt8))
   | .assignment => inferInstanceAs (DecidableEq Nat)
   | .enrolment => inferInstanceAs (DecidableEq EnrolRecord)
@@ -170,7 +224,7 @@ def enrolmentAddress (miniKey : List UInt8) : Address layout := ⟨.enrolment, m
 def sshIndexAddress (sshBlob : List UInt8) : Address layout := ⟨.sshIndex, sshBlob⟩
 def journalAddress (nullifier : List UInt8) : Address layout := ⟨.journal, nullifier⟩
 
-def tariffOf (store : PayStore) : Option Tariff := store tariffAddress
+def tariffOf (store : PayStore) : Option FrozenTariff := store tariffAddress
 /-- The deposit address at book index `index`. -/
 def bookAt (store : PayStore) (index : Nat) : Option Address32 := store (bookAddress index)
 /-- The account book index `index` is assigned to. -/
@@ -289,7 +343,7 @@ def keyStream : (space : Namespace) → StreamCodec (Namespace.Key space)
   | .journal => bytesStream
 
 def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
-  | .tariff => tariffStream
+  | .tariff => frozenTariffStream
   | .book => bytesStream
   | .assignment => StreamCodec.nat
   | .enrolment => enrolRecordStream
@@ -343,11 +397,11 @@ def physicalId (domain : Digest) : Nat :=
 /-- The genesis pay cell: the placeholder tariff, an empty book and no
 assignment. -/
 def genesisStore : PayStore :=
-  (0 : PayStore).set tariffAddress (some genesisDefault)
+  (0 : PayStore).set tariffAddress (some frozenGenesisDefault)
 
 theorem genesis_law : Law genesisStore := by decide +kernel
 
-theorem genesis_tariff : tariffOf genesisStore = some genesisDefault := by decide +kernel
+theorem genesis_tariff : tariffOf genesisStore = some frozenGenesisDefault := by decide +kernel
 
 theorem genesis_nextFree : nextFree genesisStore = 0 := by decide +kernel
 

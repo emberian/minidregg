@@ -44,7 +44,7 @@ EMBER, FLOAT, OBSERVER = 7, 20, 30
 FACTORY_CONTROL, OBSERVER_CAP, PAY_CONTROL, ENROL_CAP = 53, 4030, 4031, 4032
 SUBJECTS = [EMBER, FLOAT, OBSERVER]
 def acct(s): return 100 + s
-NODE_RATE = 5952380
+WEEK_RATE = 999999840
 STARTER = 347  # an explicit positive requested allowance; prices come only from source182
 WEEKS = 2
 FLOOR = 1_000_000
@@ -185,7 +185,7 @@ OBS = WS[OBSERVER]
 
 tariff = {"version": "2", "asset": "0", "mint": MINT_HEX, "tokenProgram": PROGRAM_HEX, "decimals": "6",
           "creditPerAtomic": "1", "maxPerObservation": "100000000000", "minTickSlots": "150",
-          "nodeHourRate": str(NODE_RATE), "enrolIndex": None, "journalFloor": str(FLOOR), "slashCallerPermille":"500"}
+          "nodeWeekRate": str(WEEK_RATE), "enrolIndex": None, "journalFloor": str(FLOOR), "slashCallerPermille":"500"}
 json.dump({"control": str(FACTORY_CONTROL), "book": BOOK, "tariff": tariff}, open(path("book.json"), "w"))
 b1 = mini("pay", "book", "--dir", WS[EMBER], "--source", path("book.json"))
 a0 = mini("pay", "address", "--dir", WS[FLOAT])

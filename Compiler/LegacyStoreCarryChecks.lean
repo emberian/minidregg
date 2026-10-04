@@ -24,7 +24,10 @@ private def enrolledCarry : Bool :=
           some ⟨PayEnrolMemo.fixtureMemo.sshBlob, 108, some 1, 500168, 900⟩ &&
         PayCell.sshIndexAt store PayEnrolMemo.fixtureMemo.sshBlob ==
           some PayEnrolMemo.fixtureMemo.miniKey &&
-        PayCell.tariffOf store == PayCellLegacyV4.tariffOf PayCellLegacyV4.enrolledFixture &&
+        PayCell.tariffOf store ==
+          (PayCellLegacyV4.tariffOf PayCellLegacyV4.enrolledFixture).map
+            PayCellUpgrade.liftTariff &&
+        (PayCell.tariffOf store).map (·.nodeWeekRate) == some (168 * 5952380) &&
         (PayCell.computeActivationOf store).isNone &&
         (PayCell.computeUsageAt store 108).isNone &&
         (PayCell.chainTipOf store).isNone &&

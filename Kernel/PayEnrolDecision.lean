@@ -16,8 +16,8 @@ decided here, purely, over the pay cell:
   the credit goes to its account and the lease grows from
   `max(now, leaseUntil)` by whole node weeks.
 * **Enrollment** (`Decision.enrol`): a fresh Mini key and a fresh ssh key,
-  both possessions verified, and at least `enrolPrice = birthFee + 168 · rate`
-  of credit; the lease runs `⌊(credit − birthFee) / (168 · rate)⌋ ≥ 1` weeks
+  both possessions verified, and at least `enrolPrice = birthFee + nodeWeekRate`
+  of credit; the lease runs `⌊(credit − birthFee) / nodeWeekRate⌋ ≥ 1` weeks
   from now.
 
 The two signature bits (`Verified`) come from the native verifier through
@@ -48,7 +48,7 @@ structure Price where
   deriving DecidableEq, Repr
 
 /-- One node week plus the birth fee; derived, never stored (PAY §11.4). -/
-def enrolPrice (tariff : Tariff) (price : Price) : Nat := price.birthFee + tariff.weekCredit
+def enrolPrice (tariff : Tariff) (price : Price) : Nat := price.birthFee + tariff.nodeWeekRate
 
 /-- The native verifier's two answers for the observation's memo. -/
 structure Verified where
@@ -93,14 +93,14 @@ inductive Decision where
 
 def enrolPlan (store : PayStore) (tariff : Tariff) (price : Price) (tip : ChainTip) (memo : Memo)
     (float credit : Nat) : EnrolPlan :=
-  let weeks := (credit - price.birthFee) / tariff.weekCredit
+  let weeks := (credit - price.birthFee) / tariff.nodeWeekRate
   ⟨memo, float, credit, weeks,
     if nextFree store < bookSize store then some (nextFree store) else none,
     tip.hour + 168 * weeks⟩
 
 def renewPlan (tariff : Tariff) (tip : ChainTip) (memo : Memo) (record : EnrolRecord)
     (float credit : Nat) : RenewPlan :=
-  let weeks := credit / tariff.weekCredit
+  let weeks := credit / tariff.nodeWeekRate
   let leaseFrom := max (tip.hour) record.leaseUntil
   ⟨memo, float, record.account, credit, weeks, leaseFrom, leaseFrom + 168 * weeks⟩
 
@@ -380,8 +380,8 @@ theorem enrol_lease_at_least_a_week {store : PayStore} {price : Price} {tip : Ch
     1 ≤ plan.weeks ∧ plan.leaseUntil = tip.hour + 168 * plan.weeks := by
   obtain ⟨tariff, credit, _, valid, _, _, _, decided⟩ := decideEnrol_ok accepted
   obtain ⟨_, _, _, _, _, _, _, _, enough, planned⟩ := classify_enrol decided.symm
-  have positive : 0 < tariff.weekCredit := by
-    unfold Tariff.weekCredit; have := valid.2.2.2.2.2.2.2; omega
+  have positive : 0 < tariff.nodeWeekRate := by
+    have := valid.2.2.2.2.2.2.2; omega
   rw [planned]
   refine ⟨?_, rfl⟩
   simp only [enrolPlan]
@@ -416,7 +416,7 @@ self-enrollment on at index 0 with the P1 mint, rate 1, a 10¹⁰ cap, node rate
 hour 500 000. -/
 
 def enrolFixtureTariff : Tariff :=
-  ⟨2, 0, fixtureMint, List.replicate 32 9, 6, 1, 10000000000, 1500, 5952380, some 0, 1000000, 500⟩
+  ⟨2, 0, fixtureMint, List.replicate 32 9, 6, 1, 10000000000, 1500, 999999840, some 0, 1000000, 500⟩
 
 def fixtureStore : PayStore :=
   ((((genesisStore.set tariffAddress (some enrolFixtureTariff)).set (bookAddress 0)

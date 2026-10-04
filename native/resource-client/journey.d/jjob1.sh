@@ -75,7 +75,7 @@ cat >"$D/req/tariff.json" <<'EOF'
 {"control":"53","book":[],"tariff":{"version":"1","asset":"0",
  "mint":"8585858585858585858585858585858585858585858585858585858585858585",
  "tokenProgram":"0606060606060606060606060606060606060606060606060606060606060606","decimals":"6",
- "creditPerAtomic":"1","maxPerObservation":"2000000000","minTickSlots":"1500","nodeHourRate":"5952380",
+ "creditPerAtomic":"1","maxPerObservation":"2000000000","minTickSlots":"1500","nodeWeekRate":"999999840",
  "enrolIndex":null,"journalFloor":"1000000","slashCallerPermille":"500"}}
 EOF
 run tariff "$MINI" pay book --dir "$WS_A" --source "$D/req/tariff.json"

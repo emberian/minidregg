@@ -519,9 +519,9 @@ what is decided, from `deploy/pay/enrol-terms.json` and `deploy/pay/README.md`:
 - the price is **50 DREGG per node week**, paid to the Solana address
   `5N2uUG4TEwvM4acjWRpZ981CJa4p5e9RcuAYQvuUZLp6` (a fresh devnet-quality key), in the token
   with mint `XkeTXo1125vz5H9svJpGiw4JvLbN8VmMu9cmMvspump` (Token-2022, 6 decimals; 1 atomic
-  unit is 1 credit). the tariff counts hours, so its week is 49999992 atomic units (49.999992
-  DREGG, 8 atomic units under 50); enrolling costs the one-time birth fee plus that, and the
-  Host's own quote, which `mini join` prints, is the amount to send.
+  unit is 1 credit). the tariff's unit is the week, so the week is exactly 50000000 atomic units
+  (50.000000 DREGG); enrolling costs the one-time birth fee plus that, and the Host's own
+  quote, which `mini join` prints, is the amount to send.
 - you run `mini join --solana` on your machine. it makes (or takes) your Mini key there, signs
   two possessions, and prints the Host's quote (the price as birth fee + membership + spendable
   credit, and that the quote does not reserve the price), then the address, the mint, the amount

@@ -41,15 +41,17 @@ to both its address (`bookAt`) and its account (`assignmentAt`); a payment
 nullifier covering signature ‖ address (PAY §10 erratum 1) reads the address
 from `bookAt`.
 
-Wire: the store codec with layout name `DREGG/PAY/CELL/v5` (its frame commits
+Wire: the store codec with layout name `DREGG/PAY/CELL/v6` (its frame commits
 to the name and every namespace's codec identifier); the tariff value is
-`DREGG/PAY/TARIFF/v3`.  v3 = P3b-1's enrolment namespaces without P2's in-cell
+`DREGG/PAY/TARIFF/v4`.  v3 = P3b-1's enrolment namespaces without P2's in-cell
 clock: namespace tag 3 (the clock) is retired and decodes to nothing.  v4 = v3
 with the tariff at `DREGG/PAY/TARIFF/v3` (C3's `slashCallerPermille`). v5 adds
 claim/custody/tip tags 7–11 and compute usage/activation tags 12–13, without
-reusing retired tag 3. Old versions refuse
+reusing retired tag 3. v6 = v5 with the tariff at `DREGG/PAY/TARIFF/v4`: the
+tariff's unit is the week (`nodeWeekRate`), not the hour. Old versions refuse
 this decoder. `PayCellLegacyV4` and `PayCellUpgrade` provide an explicit neutral
-v4 lift preserving every old row and leaving every new namespace empty. In particular, a neutral codec lift does
+v4 lift preserving every old row (the tariff's hourly rate becomes the exact
+week rate `168 · nodeHourRate`) and leaving every new namespace empty. In particular, a neutral codec lift does
 not activate compute or assert that historical execution used no allowance.
 Compute requires a separately authenticated fresh-genesis or closed-legacy
 history activation. Its append-only record prevents resetting the free epoch.
@@ -413,7 +415,7 @@ instance (store : PayStore) : Decidable (Law store) := by
   unfold Law
   infer_instance
 
-/-! ## Wire `DREGG/PAY/CELL/v5` -/
+/-! ## Wire `DREGG/PAY/CELL/v6` -/
 
 def namespaceStream : StreamCodec Namespace where
   encode
@@ -512,7 +514,7 @@ def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .computeUsage => computeUsageStream
   | .computeActivation => computeActivationStream
 
-def wireName : String := "DREGG/PAY/CELL/v5"
+def wireName : String := "DREGG/PAY/CELL/v6"
 
 def wire : Wire layout where
   name := wireName
@@ -538,7 +540,7 @@ def wire : Wire layout where
     | .computeUsage => "subject-id/nat"
     | .computeActivation => "unit"
   valueCodecId
-    | .tariff => "DREGG/PAY/TARIFF/v3"
+    | .tariff => "DREGG/PAY/TARIFF/v4"
     | .book => "address32/bytes"
     | .assignment => "account-id/nat"
     | .enrolment => "DREGG/PAY/ENROLMENT/v1"

@@ -197,7 +197,7 @@ def provision(request, result_path):
     book = [gen.ENROL] + [gen.b58(gen.key('shared-world-book-' + source.identity['id'] + '-' + str(i))) for i in range(len(rows))]
     tariff = dict(version='2', asset='0', mint=gen.MINT, tokenProgram=gen.TOKEN_2022, decimals='6',
                   creditPerAtomic='1', maxPerObservation='100000000000', minTickSlots='150',
-                  nodeHourRate='5952380', enrolIndex=None, journalFloor='1000000', slashCallerPermille='500')
+                  nodeWeekRate='999999840', enrolIndex=None, journalFloor='1000000', slashCallerPermille='500')
     save(root / 'book.json', dict(control=request['factoryControl'], book=book, tariff=tariff))
     source.mini('install-book', 'pay', 'book', '--dir', operator, '--source', root / 'book.json')
     assigned = source.mini('assign-enrollment-row', 'pay', 'address', '--dir', operator, '--account', 'paid-entry-account').decode()

@@ -29,24 +29,23 @@ of THIS genesis, `N` exceeds the installed tariff version.) It writes `book.json
 else in the repo states the address or the rate; `test-render-enrol.py` pins the integers.
 
 **The exact integers.** The mint has 6 decimals (`decimals: 6`, READ `native/pay-watcher/README.md`) and
-`creditPerAtomic` is 1, so 50 DREGG is `weekPriceAtomic = 50000000` atomic units. The tariff does not
-store a week price; it stores the *hourly* integer `nodeHourRate` and the kernel prices a week as
-`weekCredit = 168 * nodeHourRate` (`Kernel/PayTariff.lean`), an enrollment as `birthFee + weekCredit`
-(`Kernel/PayEnrolDecision.lean` `enrolPrice`) and a renewal as `credit / weekCredit` whole weeks.
-`50000000 / 168` is not an integer, so the script takes the floor: **`nodeHourRate = 297619`,
-`weekCredit = 49999992`** atomic units (49.999992 DREGG, 8 atomic units under the asked price). The floor is
-deliberate: a payer who sends exactly 50 DREGG plus the one-time birth fee is at or over the price
-(`297620` would make the week 50.00016 DREGG and journal that payer `belowPrice`), and exactly 50 DREGG
-renews one whole week. The friend never sees these integers computed on their side: `mini join --solana`
-prints the Host's own quote (op 121; `join_solana.rs` takes `atomicAmount` verbatim, no client formula),
-which is `birthFee + 49999992`. If Ember wants an exact 50.000000 DREGG week, the unit of the tariff
-must change from hourly to weekly (a Lean change to `Tariff`, `weekCredit` and its fixtures, then a
-re-genesis); that is a design choice, not a rounding fix.
+`creditPerAtomic` is 1, so 50 DREGG is `weekPriceAtomic = 50000000` atomic units. The tariff's unit is the
+week: it stores `nodeWeekRate`, the Book credit one node week costs (`Kernel/PayTariff.lean`,
+`DREGG/PAY/TARIFF/v4`), and the kernel prices an enrollment as `birthFee + nodeWeekRate`
+(`Kernel/PayEnrolDecision.lean` `enrolPrice`) and a renewal as `credit / nodeWeekRate` whole weeks.
+`render-enrol` writes `nodeWeekRate = weekPriceAtomic * creditPerAtomic = 50000000`: **exactly 50.000000
+DREGG, no division, no floor** (the retired hourly unit stored `nodeHourRate = 297619` and could only
+reach 49.999992). A payer who sends exactly 50 DREGG plus the one-time birth fee is exactly at the price,
+and exactly 50 DREGG renews one whole week; one atomic unit less is below the price and is journaled
+`belowPrice`. The friend never sees these integers computed on their side: `mini join --solana` prints
+the Host's own quote (op 121; `join_solana.rs` takes `atomicAmount` verbatim, no client formula), which is
+`birthFee + 50000000`. `render-enrol --verify-tariff FILE` refuses a tariff whose week is not exactly the
+terms' price or that still carries an hourly rate; the Host refuses a `nodeHourRate` field outright and
+a v3 tariff's bytes no longer decode.
 
-The old Lean `genesisDefault` still carries `nodeHourRate := 5952380` (about 1000 DREGG a week, PAY §11.8).
-It is a placeholder that is invalid by construction (`genesisDefault_invalid`: version 0, zero mint) and is
-replaced by the first `mini pay book` tariff before any enrollment can be decided; it is not an operating
-source of the rate.
+The Lean `genesisDefault` carries `nodeWeekRate := 50000000` too. It is a placeholder that is invalid by
+construction (`genesisDefault_invalid`: version 0, zero mint) and is replaced by the first `mini pay book`
+tariff before any enrollment can be decided; it is not an operating source of the rate.
 
 ## What ember does, once
 

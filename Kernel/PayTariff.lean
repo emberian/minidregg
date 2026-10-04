@@ -13,11 +13,10 @@ not the payer (`creditFor_le_cap`).
 A tariff is `valid` only when it names a real token: a positive version, a
 32-byte mint and token program that are not the all-zero key (the Solana
 System Program, which is no mint), positive rate and cap, and a positive node
-membership rate.
+week rate.
 
 Version 2 (`DREGG/PAY/TARIFF/v2`, PAY §11) adds self-enrollment:
-`nodeHourRate` (Book credit per hour of node membership; a node week is
-`168 · nodeHourRate`), `enrolIndex` (the book index whose observations go to
+`nodeHourRate` (an hourly unit), `enrolIndex` (the book index whose observations go to
 the enrollment receiver; `none` = self-enrollment off) and `journalFloor`
 (atomic units below which an enrollment-index transfer is not admitted at
 all, so dust cannot buy a journal row).  A v1 tariff's bytes refuse to decode.
@@ -26,7 +25,15 @@ Version 3 (`DREGG/PAY/TARIFF/v3`, COMPUTE §9 D4, lane C3 K-JOB-MONEY) adds the
 job market's slash split: `slashCallerPermille`, the share of a slashed bond
 minted back to the caller, in thousandths; the rest of the bond is never
 re-minted and stays in the well.  Valid only at most 1000.  The default is
-500 (half to the caller, half burned).  A v2 tariff's bytes refuse to decode.  The genesis
+500 (half to the caller, half burned).  A v2 tariff's bytes refuse to decode.
+
+Version 4 (`DREGG/PAY/TARIFF/v4`) makes the tariff's unit the week:
+`nodeHourRate` is deleted and `nodeWeekRate` is the Book credit one node week
+costs, so the operator's week price is stored, not derived.  The hourly unit
+made 50 DREGG a week unrepresentable (`50 000 000 / 168` is not an integer; the
+floor was 49.999992).  There is no hourly rate anywhere; the lease clock still
+counts hours (`168 · weeks`), which is a duration, not a price.  A v3 tariff's
+bytes refuse to decode.  The genesis
 default (`genesisDefault`) is deliberately invalid until the operator sets a
 tariff; while it is invalid, no deposit index is assigned
 (`PayAssignmentReceiver.assignment_requires_valid_tariff`).
@@ -72,8 +79,9 @@ structure Tariff where
   maxPerObservation : Nat
   /-- Heartbeat rate limit, in chain slots. -/
   minTickSlots : Nat
-  /-- Book credit per hour of node membership (PAY §11.8: 5 952 380). -/
-  nodeHourRate : Nat
+  /-- Book credit one node week of membership costs (the operator's week
+  price, e.g. 50 000 000 = 50.000000 DREGG at six decimals, creditPerAtomic 1). -/
+  nodeWeekRate : Nat
   /-- The self-enrollment book index; `none` turns self-enrollment off. -/
   enrolIndex : Option Nat
   /-- Enrollment-index transfers below this many atomic units are refused. -/
@@ -86,7 +94,7 @@ structure Tariff where
 def Tariff.valid (t : Tariff) : Prop :=
   0 < t.version ∧ t.mint.length = 32 ∧ t.tokenProgram.length = 32 ∧
     t.mint ≠ zeroKey ∧ t.tokenProgram ≠ zeroKey ∧
-    0 < t.creditPerAtomic ∧ 0 < t.maxPerObservation ∧ 0 < t.nodeHourRate ∧
+    0 < t.creditPerAtomic ∧ 0 < t.maxPerObservation ∧ 0 < t.nodeWeekRate ∧
     t.slashCallerPermille ≤ 1000
 
 instance (t : Tariff) : Decidable t.valid := by
@@ -117,10 +125,7 @@ theorem creditFor_under_cap (t : Tariff) (amount : Nat) (under : amount ≤ t.ma
     t.creditFor amount = amount * t.creditPerAtomic := by
   simp [Tariff.creditFor, Nat.min_eq_left under]
 
-/-- One node week, in credit: `168 · nodeHourRate`. -/
-def Tariff.weekCredit (t : Tariff) : Nat := 168 * t.nodeHourRate
-
-/-! ## Codec `DREGG/PAY/TARIFF/v3` -/
+/-! ## Codec `DREGG/PAY/TARIFF/v4` -/
 
 def tariffStream : StreamCodec Tariff :=
   StreamCodec.xmap
@@ -136,7 +141,7 @@ def tariffStream : StreamCodec Tariff :=
                       (StreamCodec.product (StreamCodec.option StreamCodec.nat)
                         (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))))))))
     (fun t => (t.version, t.asset, t.mint, t.tokenProgram, t.decimals, t.creditPerAtomic,
-      t.maxPerObservation, t.minTickSlots, t.nodeHourRate, t.enrolIndex, t.journalFloor,
+      t.maxPerObservation, t.minTickSlots, t.nodeWeekRate, t.enrolIndex, t.journalFloor,
       t.slashCallerPermille))
     (fun (version, asset, mint, program, decimals, rate, cap, tick, node, enrol, floor, slash) =>
       ⟨version, asset, mint, program, decimals, rate, cap, tick, node, enrol, floor, slash⟩)
@@ -161,7 +166,7 @@ theorem framed_canonical {α : Type} (frame : List UInt8) (stream : StreamCodec 
     (framed frame stream).encode value = bytes :=
   Minidregg.Compiler.ResourceBirthCodec.strictCodec_canonical (framedRaw frame stream) accepted
 
-def tariffFrame : List UInt8 := "DREGG/PAY/TARIFF/v3".toUTF8.toList
+def tariffFrame : List UInt8 := "DREGG/PAY/TARIFF/v4".toUTF8.toList
 
 def tariffCodec : LawfulCodec Tariff := framed tariffFrame tariffStream
 
@@ -172,10 +177,35 @@ theorem tariff_canonical {bytes : List UInt8} {t : Tariff}
     (accepted : tariffCodec.decode bytes = some t) : tariffCodec.encode t = bytes :=
   framed_canonical tariffFrame tariffStream accepted
 
+/-- The retired hourly-unit tariff is refused, not reinterpreted: a `DREGG/PAY/TARIFF/v3`
+frame is not the v4 frame, so no v3 byte string decodes, whatever follows it. -/
+theorem tariff_v3_refused (rest : List UInt8) :
+    tariffCodec.decode ("DREGG/PAY/TARIFF/v3".toUTF8.toList ++ rest) = none := by
+  have sameLength : ("DREGG/PAY/TARIFF/v3".toUTF8.toList).length = tariffFrame.length := by
+    decide +kernel
+  have differs : ("DREGG/PAY/TARIFF/v3".toUTF8.toList) ≠ tariffFrame := by decide +kernel
+  have prefixIsV3 : ("DREGG/PAY/TARIFF/v3".toUTF8.toList ++ rest).take tariffFrame.length =
+      "DREGG/PAY/TARIFF/v3".toUTF8.toList := by
+    rw [← sameLength]
+    exact List.take_left
+  have refused : (framedRaw tariffFrame tariffStream).decode
+      ("DREGG/PAY/TARIFF/v3".toUTF8.toList ++ rest) = none := by
+    change (if _ = tariffFrame then _ else none) = none
+    rw [prefixIsV3]
+    exact if_neg differs
+  change (do
+      let value ← (framedRaw tariffFrame tariffStream).decode
+        ("DREGG/PAY/TARIFF/v3".toUTF8.toList ++ rest)
+      if Minidregg.Compiler.ResourceBirthCodec.bytesEqual
+          ((framedRaw tariffFrame tariffStream).encode value)
+          ("DREGG/PAY/TARIFF/v3".toUTF8.toList ++ rest) then some value else none) = none
+  rw [refused]
+  rfl
+
 /-! ## The genesis placeholder -/
 
 /-- Installed at genesis: asset 0, 6 decimals, rate 1, cap 10⁴ tokens,
-heartbeat 150 slots, node rate 5 952 380 credit/hour (PAY §11.8),
+heartbeat 150 slots, node week rate 50 000 000 credit (50 DREGG),
 self-enrollment off, journal floor 1 token, a slashed bond split half to the
 caller, and a zeroed mint and program.
 Invalid until the operator sets the real token (`genesisDefault_invalid`). -/
@@ -188,7 +218,7 @@ def genesisDefault : Tariff where
   creditPerAtomic := 1
   maxPerObservation := 10000000000
   minTickSlots := 150
-  nodeHourRate := 5952380
+  nodeWeekRate := 50000000
   enrolIndex := none
   journalFloor := 1000000
   slashCallerPermille := 500
@@ -196,13 +226,15 @@ def genesisDefault : Tariff where
 theorem genesisDefault_invalid : ¬ genesisDefault.valid := by decide
 
 /-- A version-1 tariff naming a (fixture) mint and program: the tariff the
-probes and the concrete theorem poles set.  Self-enrollment is off. -/
+probes and the concrete theorem poles set.  Self-enrollment is off.  Its week
+rate, 999 999 840, is the fixtures' historical week (168 · 5 952 380), kept so
+every concrete amount in the poles is unchanged; it is a fixture, not a price. -/
 def exampleTariff : Tariff :=
-  ⟨1, 0, List.replicate 32 7, List.replicate 32 9, 6, 1, 10000000000, 1500, 5952380, none,
+  ⟨1, 0, List.replicate 32 7, List.replicate 32 9, 6, 1, 10000000000, 1500, 999999840, none,
     1000000, 500⟩
 
-/-- Refuting pole of the node rate: a tariff with a zero node rate is invalid. -/
-theorem zero_node_rate_invalid : ¬ { exampleTariff with nodeHourRate := 0 }.valid := by decide
+/-- Refuting pole of the node rate: a tariff with a zero week rate is invalid. -/
+theorem zero_node_rate_invalid : ¬ { exampleTariff with nodeWeekRate := 0 }.valid := by decide
 
 /-- A tariff with a named (non-zero) mint and program is valid: the
 satisfiable pole of `Tariff.valid`. -/
@@ -218,6 +250,7 @@ theorem slash_split_over_whole_invalid :
 #assert_axioms creditFor_under_cap
 #assert_axioms tariff_roundtrip
 #assert_axioms tariff_canonical
+#assert_axioms tariff_v3_refused
 #assert_axioms genesisDefault_invalid
 #assert_axioms named_tariff_valid
 #assert_axioms zero_node_rate_invalid

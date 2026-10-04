@@ -224,7 +224,7 @@ row("A posts j1 and j2 (born in lab, ordered unfunded); the fund before a valid 
     all(posted[n][0] != 0 for n in posted) and "tariffInvalid" in why)
 tariff = {"control": "53", "book": [], "tariff": {"version": "1", "asset": "0", "mint": "85" * 32,
           "tokenProgram": "06" * 32, "decimals": "6", "creditPerAtomic": "1", "maxPerObservation": "2000000000",
-          "minTickSlots": "1500", "nodeHourRate": "5952380", "enrolIndex": None, "journalFloor": "1000000",
+          "minTickSlots": "1500", "nodeWeekRate": "999999840", "enrolIndex": None, "journalFloor": "1000000",
           "slashCallerPermille": "500"}}
 json.dump(tariff, open(path("tariff.json"), "w"))
 r = run(MINI, "pay", "book", "--dir", A, "--source", path("tariff.json"))

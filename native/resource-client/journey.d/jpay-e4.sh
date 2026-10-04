@@ -57,8 +57,7 @@ EMBER, FLOAT, OBSERVER = 7, 20, 30
 FACTORY_CONTROL, OBSERVER_CAP, PAY_CONTROL, ENROL_CAP = 53, 4030, 4031, 4032
 SUBJECTS = [EMBER, FLOAT, OBSERVER]
 def acct(s): return 100 + s
-NODE_RATE = 5952380
-WEEK = 168 * NODE_RATE
+WEEK = 50_000_000                  # 50 DREGG a node week at 6 decimals, exact (the tariff unit is the week)
 BIRTH_FEE = 3 + 2 + 2 * 1           # the factory tariff below; join must print the same price
 PRICE = BIRTH_FEE + WEEK            # explicit bare entry: creditPerAtomic 1, starter zero
 STARTER = 105 * 3 + 8 * 2 + 16 * 1  # source recommendation for this exact genesis tariff
@@ -182,7 +181,7 @@ OBS = WS[OBSERVER]
 
 tariff = {"version": "2", "asset": "0", "mint": MINT_HEX, "tokenProgram": PROGRAM_HEX, "decimals": "6",
           "creditPerAtomic": "1", "maxPerObservation": "100000000000", "minTickSlots": "1",
-          "nodeHourRate": str(NODE_RATE), "enrolIndex": None, "journalFloor": str(FLOOR), "slashCallerPermille":"500"}
+          "nodeWeekRate": str(WEEK), "enrolIndex": None, "journalFloor": str(FLOOR), "slashCallerPermille":"500"}
 json.dump({"control": str(FACTORY_CONTROL), "book": BOOK, "tariff": tariff}, open(path("book.json"), "w"))
 b1 = mini("pay", "book", "--dir", WS[EMBER], "--source", path("book.json"))
 a0 = mini("pay", "address", "--dir", WS[FLOAT])

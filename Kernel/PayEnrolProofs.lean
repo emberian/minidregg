@@ -489,7 +489,7 @@ theorem enrol_affordable {store : PayStore} {price : Price} {tip : ChainTip} {o 
   have weeks := congrArg EnrolPlan.weeks planned
   have credited := congrArg EnrolPlan.credit planned
   simp only [enrolPlan] at weeks credited
-  have floor := Nat.div_mul_le_self (credit.credit - price.birthFee) tariff.weekCredit
+  have floor := Nat.div_mul_le_self (credit.credit - price.birthFee) tariff.nodeWeekRate
   simp only [enrolPrice] at priced
   unfold leaseCost
   rw [weeks, credited]
@@ -510,11 +510,25 @@ theorem enrol_patch_length (o : Observation) (plan : EnrolPlan)
     (payPatch o (.enrol plan) account none).length = 3 := by
   simp [payPatch, EnrolPlan.patch, free]
 
-/-- Every lease week granted is paid: at the journeys' rate (5 952 380 credit
-per hour) one week costs exactly `168 · rate`. -/
-theorem lease_week_cost : leaseCost { exampleTariff with nodeHourRate := 5952380 } 1 = 999999840 := by
+/-- Every lease week granted is paid, and a week costs exactly the tariff's
+week rate: the unit of the tariff is the week, so there is no hourly rate to
+round (`nodeWeekRate = 50 000 000` is 50.000000 DREGG at six decimals). -/
+theorem lease_week_cost (tariff : Tariff) (weeks : Nat) :
+    leaseCost tariff weeks = weeks * tariff.nodeWeekRate := rfl
+
+/-- The operator's asked price, exact: one week at `nodeWeekRate = 50 000 000`
+costs 50 000 000 atomic units, not 49 999 992. -/
+theorem lease_week_is_fifty_dregg :
+    leaseCost { exampleTariff with nodeWeekRate := 50000000 } 1 = 50000000 := by
   decide +kernel
 
+/-- The enrolment price at that tariff is the birth fee plus exactly 50 DREGG. -/
+theorem enrol_price_is_fifty_dregg_plus_birth_fee (price : Price) :
+    enrolPrice { exampleTariff with nodeWeekRate := 50000000 } price =
+      price.birthFee + 50000000 := rfl
+
+#assert_axioms lease_week_is_fifty_dregg
+#assert_axioms enrol_price_is_fifty_dregg_plus_birth_fee
 #assert_axioms lookupPostBytes_member
 #assert_axioms multi_cell_intent_atomic
 #assert_axioms legs_enrol_cells

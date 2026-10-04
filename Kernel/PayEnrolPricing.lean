@@ -59,7 +59,7 @@ split and journal floor. The same fixed-deposit receiver gate checks the result;
 rounding remains spendable instead of purchasing unrequested extra weeks. -/
 def quotePurchase (tariff : Tariff) (birthFee weeks starter : Nat) :
     Except PayEnrolClaim.QuoteReject FixedQuote :=
-  let target := birthFee + weeks * tariff.weekCredit + starter
+  let target := birthFee + weeks * tariff.nodeWeekRate + starter
   let amount := max (PayEnrolQuote.atomicCeil target tariff.creditPerAtomic) tariff.journalFloor
   PayEnrolClaim.quoteFixed amount tariff birthFee weeks starter
 
@@ -74,7 +74,7 @@ private def fixtureTariff : Tariff :=
   { exampleTariff with
     creditPerAtomic := 1
     maxPerObservation := 100000
-    nodeHourRate := 1
+    nodeWeekRate := 168
     enrolIndex := some 0
     journalFloor := 1 }
 

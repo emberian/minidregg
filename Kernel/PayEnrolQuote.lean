@@ -52,18 +52,18 @@ def quote (tariff : Tariff) (birthFee requestedWeeks minimumStarterCredit : Nat)
     Except Reject Quote :=
   if !decide tariff.valid then .error .tariffInvalid
   else if requestedWeeks = 0 then .error .weeksZero
-  else if tariff.weekCredit ≤ minimumStarterCredit then .error .starterTooLarge
+  else if tariff.nodeWeekRate ≤ minimumStarterCredit then .error .starterTooLarge
   else
-    let target := birthFee + requestedWeeks * tariff.weekCredit + minimumStarterCredit
+    let target := birthFee + requestedWeeks * tariff.nodeWeekRate + minimumStarterCredit
     let amount := max (atomicCeil target tariff.creditPerAtomic) tariff.journalFloor
     if tariff.maxPerObservation < amount then .error .observationCapExceeded
     else
       let credit := tariff.creditFor amount
-      let minimumEntryCredit := birthFee + tariff.weekCredit
+      let minimumEntryCredit := birthFee + tariff.nodeWeekRate
       if credit < minimumEntryCredit then .error .entryCreditUncovered
       else
-        let actualWeeks := (credit - birthFee) / tariff.weekCredit
-        let leaseCredit := actualWeeks * tariff.weekCredit
+        let actualWeeks := (credit - birthFee) / tariff.nodeWeekRate
+        let leaseCredit := actualWeeks * tariff.nodeWeekRate
         let remainder := credit - birthFee - leaseCredit
         if actualWeeks ≠ requestedWeeks then .error .exactWeeksUnrepresentable
         else if remainder < minimumStarterCredit then .error .starterUnrepresentable
@@ -95,10 +95,10 @@ theorem quote_success_split (tariff : Tariff) (birthFee requestedWeeks starter :
     q.birthFee + q.leaseCredit + q.creditedRemainder = q.credit ∧
       q.actualWeeks = requestedWeeks ∧ starter ≤ q.creditedRemainder := by
   let amount := max
-    (atomicCeil (birthFee + requestedWeeks * tariff.weekCredit + starter)
+    (atomicCeil (birthFee + requestedWeeks * tariff.nodeWeekRate + starter)
       tariff.creditPerAtomic) tariff.journalFloor
   let credit := tariff.creditFor amount
-  let actualWeeks := (credit - birthFee) / tariff.weekCredit
+  let actualWeeks := (credit - birthFee) / tariff.nodeWeekRate
   unfold quote at accepted
   dsimp only at accepted
   split at accepted
@@ -119,36 +119,36 @@ theorem quote_success_split (tariff : Tariff) (birthFee requestedWeeks starter :
   · cases accepted
   rename_i starterCovered
   have feeCovered : birthFee ≤ credit := by
-    change ¬credit < birthFee + tariff.weekCredit at entryCovered
+    change ¬credit < birthFee + tariff.nodeWeekRate at entryCovered
     omega
-  have leaseCovered := Nat.div_mul_le_self (credit - birthFee) tariff.weekCredit
-  change actualWeeks * tariff.weekCredit ≤ credit - birthFee at leaseCovered
+  have leaseCovered := Nat.div_mul_le_self (credit - birthFee) tariff.nodeWeekRate
+  change actualWeeks * tariff.nodeWeekRate ≤ credit - birthFee at leaseCovered
   have sameWeeks : actualWeeks = requestedWeeks := by
     change ¬actualWeeks ≠ requestedWeeks at exactWeeks
     omega
-  have enoughStarter : starter ≤ credit - birthFee - actualWeeks * tariff.weekCredit := by
-    change ¬credit - birthFee - actualWeeks * tariff.weekCredit < starter at starterCovered
+  have enoughStarter : starter ≤ credit - birthFee - actualWeeks * tariff.nodeWeekRate := by
+    change ¬credit - birthFee - actualWeeks * tariff.nodeWeekRate < starter at starterCovered
     omega
   injection accepted with same
   subst q
-  change birthFee + actualWeeks * tariff.weekCredit +
-      (credit - birthFee - actualWeeks * tariff.weekCredit) = credit ∧
+  change birthFee + actualWeeks * tariff.nodeWeekRate +
+      (credit - birthFee - actualWeeks * tariff.nodeWeekRate) = credit ∧
     actualWeeks = requestedWeeks ∧
-      starter ≤ credit - birthFee - actualWeeks * tariff.weekCredit
-  exact ⟨credit_decomposition credit birthFee (actualWeeks * tariff.weekCredit)
+      starter ≤ credit - birthFee - actualWeeks * tariff.nodeWeekRate
+  exact ⟨credit_decomposition credit birthFee (actualWeeks * tariff.nodeWeekRate)
     feeCovered leaseCovered, sameWeeks, enoughStarter⟩
 
 /-- No transfer selected above the cap can be described as a successful quote. -/
 theorem quote_with_floor_above_cap (tariff : Tariff)
     (birthFee requestedWeeks minimumStarterCredit : Nat)
     (valid : tariff.valid) (weeks : requestedWeeks ≠ 0)
-    (starter : minimumStarterCredit < tariff.weekCredit)
+    (starter : minimumStarterCredit < tariff.nodeWeekRate)
     (floor : tariff.maxPerObservation < tariff.journalFloor) :
     quote tariff birthFee requestedWeeks minimumStarterCredit =
       .error .observationCapExceeded := by
   have above : tariff.maxPerObservation <
       max (atomicCeil
-        (birthFee + requestedWeeks * tariff.weekCredit + minimumStarterCredit)
+        (birthFee + requestedWeeks * tariff.nodeWeekRate + minimumStarterCredit)
         tariff.creditPerAtomic) tariff.journalFloor :=
     lt_of_lt_of_le floor (Nat.le_max_right _ _)
   simp [quote, valid, weeks, Nat.not_le.mpr starter, above]
@@ -159,7 +159,7 @@ non-unit atomic rates, observation caps and journal floors. -/
 private def fixture : Tariff :=
   { exampleTariff with
       version := 3, creditPerAtomic := 1, maxPerObservation := 100000,
-      nodeHourRate := 1, enrolIndex := some 0, journalFloor := 1 }
+      nodeWeekRate := 168, enrolIndex := some 0, journalFloor := 1 }
 
 /-- The entry threshold itself leaves no spendable funds. -/
 theorem exact_entry_has_zero_remainder :

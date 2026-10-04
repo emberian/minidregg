@@ -372,7 +372,7 @@ row("refill before a valid tariff (the credit asset is the tariff's)", "refused 
 v = view(host)
 tariff = {"version": "1", "asset": "0", "mint": "85" * 32, "tokenProgram": "06" * 32, "decimals": "6",
           "creditPerAtomic": "1", "maxPerObservation": "2000000000", "minTickSlots": "1500",
-          "nodeHourRate": "5952380", "enrolIndex": None, "journalFloor": "1000000", "slashCallerPermille": "500"}
+          "nodeWeekRate": "999999840", "enrolIndex": None, "journalFloor": "1000000", "slashCallerPermille": "500"}
 book_cmd = {"sponsor": str(OPERATOR), "control": str(FACTORY_CONTROL), "nonce": fresh(),
             "expectedFactoryRoot": v["factoryRoot"], "expectedAuthorityRoot": v["authorityRoot"],
             "expectedPayRoot": v["payRoot"], "bookStart": "0", "book": ["16" * 32], "tariff": tariff}

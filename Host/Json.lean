@@ -3319,7 +3319,7 @@ private def fleetTurnCommand (json : Lean.Json) : Result (List UInt8) := do
 `tokenProgram`, which are lowercase hex of the raw 32 bytes. -/
 private def payTariff (path : String) (json : Lean.Json) : Result PayTariff.Tariff := do
   let obj ← exactObject path ["version", "asset", "mint", "tokenProgram", "decimals",
-    "creditPerAtomic", "maxPerObservation", "minTickSlots", "nodeHourRate", "enrolIndex",
+    "creditPerAtomic", "maxPerObservation", "minTickSlots", "nodeWeekRate", "enrolIndex",
     "journalFloor", "slashCallerPermille"] json
   pure
     { version := ← nat s!"{path}.version" (← field path "version" obj)
@@ -3330,7 +3330,7 @@ private def payTariff (path : String) (json : Lean.Json) : Result PayTariff.Tari
       creditPerAtomic := ← nat s!"{path}.creditPerAtomic" (← field path "creditPerAtomic" obj)
       maxPerObservation := ← nat s!"{path}.maxPerObservation" (← field path "maxPerObservation" obj)
       minTickSlots := ← nat s!"{path}.minTickSlots" (← field path "minTickSlots" obj)
-      nodeHourRate := ← nat s!"{path}.nodeHourRate" (← field path "nodeHourRate" obj)
+      nodeWeekRate := ← nat s!"{path}.nodeWeekRate" (← field path "nodeWeekRate" obj)
       enrolIndex := ← optional s!"{path}.enrolIndex" nat (← field path "enrolIndex" obj)
       journalFloor := ← nat s!"{path}.journalFloor" (← field path "journalFloor" obj)
       slashCallerPermille := ← nat s!"{path}.slashCallerPermille"
@@ -3819,7 +3819,7 @@ private def payTariffJson (tariff : PayTariff.Tariff) : Lean.Json := .mkObj
    ("decimals", decimal tariff.decimals), ("creditPerAtomic", decimal tariff.creditPerAtomic),
    ("maxPerObservation", decimal tariff.maxPerObservation),
    ("minTickSlots", decimal tariff.minTickSlots),
-   ("nodeHourRate", decimal tariff.nodeHourRate),
+   ("nodeWeekRate", decimal tariff.nodeWeekRate),
    ("enrolIndex", match tariff.enrolIndex with
      | none => .null
      | some index => decimal index),
@@ -4087,7 +4087,7 @@ def payEnrolQuoteLoadedJson (config : NativeHost.Config) (opened : NativeHost.Op
      ("tariffVersion", decimal tariff.version), ("mint", hexJson tariff.mint),
      ("tokenProgram", hexJson tariff.tokenProgram), ("decimals", decimal tariff.decimals),
      ("enrolIndex", decimal index), ("enrolAddress", hexJson address),
-     ("birthFee", decimal quoted.birthFee), ("weekCredit", decimal tariff.weekCredit),
+     ("birthFee", decimal quoted.birthFee), ("weekCredit", decimal tariff.nodeWeekRate),
      ("requestedWeeks", decimal quoted.requestedWeeks), ("grantedWeeks", decimal quoted.actualWeeks),
      ("membershipCredit", decimal quoted.leaseCredit),
      ("requestedStarterCredit", decimal quoted.minimumStarterCredit),
@@ -4096,7 +4096,7 @@ def payEnrolQuoteLoadedJson (config : NativeHost.Config) (opened : NativeHost.Op
      ("atomicAmount", decimal quoted.amountAtomic), ("totalCredit", decimal quoted.credit),
      ("minimumEntryCredit", decimal quoted.minimumEntryCredit),
      ("roundingCredit", decimal (quoted.credit -
-       (birthFee + weeks * tariff.weekCredit + starter))),
+       (birthFee + weeks * tariff.nodeWeekRate + starter))),
      ("priceReserved", .bool false)]
 
 /-- The identities a self-enrollment derives from a Mini key in this

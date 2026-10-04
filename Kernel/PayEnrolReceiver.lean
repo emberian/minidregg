@@ -18,7 +18,7 @@ durable intent:
   - the account birth through the resource-birth controller's own preparation
     (`allocate?`, `BirthsAdmissible`, `TemplateBound`, `PhysicalPostLaw`): a
     declared account owned by the new subject;
-  - Book: `mint credit` to the enrollment float, the lease (`weeks · weekCredit`)
+  - Book: `mint credit` to the enrollment float, the lease (`weeks · nodeWeekRate`)
     and the birth fee to the tariff's collector, the remainder to the new
     account — the float ends where it started;
   - pay cell: `enrolment[miniKey]`, `sshIndex[blob]`,
@@ -333,7 +333,7 @@ def birthFee (deployment : Deployment) (semantics : Digest)
 /-! ## The value legs -/
 
 /-- What a granted lease costs: every week granted is paid for. -/
-def leaseCost (tariff : Tariff) (weeks : Nat) : Nat := weeks * tariff.weekCredit
+def leaseCost (tariff : Tariff) (weeks : Nat) : Nat := weeks * tariff.nodeWeekRate
 
 /-- The friend's remainder after the birth fee and the lease (enrollment). -/
 def enrolRemainder (tariff : Tariff) (price : Price) (plan : EnrolPlan) : Nat :=

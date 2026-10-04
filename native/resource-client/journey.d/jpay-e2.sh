@@ -56,8 +56,8 @@ FIXTURE_MEMO = ("enrol:v1:197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa
                 "AAAAC3NzaC1lZDI1NTE5AAAAIG07ssw/nVQyEp4fbo6x0DefttH5CdsmuUI28/nc/UkK:"
                 "1a89a4544250df3be16bd701357d114ccb00dabd79da77f35c8a394875cf78d8ef66b47d8a3cde4c21efd6c9aefd2fe7430adc047d67746498280c274adae202:"
                 "e3024a122f7f20335c168b22d428617cbcfb4dc6d0b68f26dae8e2c2038641fd40d672e739b8a1d1a681f6d8488f46046985570f0ee30db01ae361309ff21f09")
-BIRTH_FEE, NODE_RATE = 9, 5952380
-PRICE = BIRTH_FEE + 168 * NODE_RATE          # 999 999 849 atomic units at rate 1
+BIRTH_FEE, WEEK_RATE = 9, 999999840
+PRICE = BIRTH_FEE + WEEK_RATE          # 999 999 849 atomic units at rate 1
 
 def path(name): return os.path.join(DIR, name)
 def fail(message):
@@ -177,7 +177,7 @@ def fresh():
 def tariff_json(enrol_index=0, mint=P1_MINT):
     return {"version": "2", "asset": "0", "mint": mint, "tokenProgram": P1_PROGRAM, "decimals": "6",
             "creditPerAtomic": "1", "maxPerObservation": "10000000000", "minTickSlots": "1500",
-            "nodeHourRate": str(NODE_RATE),
+            "nodeWeekRate": str(WEEK_RATE),
             "enrolIndex": None if enrol_index is None else str(enrol_index), "journalFloor": "1000000", "slashCallerPermille": "500"}
 def obs(amount, memo=None, memo_error=None, index=0, mint=P1_MINT, signature="55" * 64):
     return {"index": index, "address": P1_ADDRESS, "signature": signature, "slot": 900,

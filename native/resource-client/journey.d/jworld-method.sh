@@ -197,7 +197,7 @@ tariff={"version":str(int(view["tariff"]["version"])+1),"asset":"0",
  "mint":"8525966c00f39ff54ef5e537a4736af436494d1f1681c659bd98e37ac28beff1",
  "tokenProgram":"06ddf6e1ee758fde18425dbce46ccddab61afc4d83b90d27febdf928d8a18bfc",
  "decimals":"6","creditPerAtomic":"1","maxPerObservation":"2000000000",
- "minTickSlots":"1500","nodeHourRate":"5952380","enrolIndex":None,
+ "minTickSlots":"1500","nodeWeekRate":"999999840","enrolIndex":None,
  "journalFloor":"1000000","slashCallerPermille":"500"}
 json.dump({"control":factory["controlCapability"],"book":[],"tariff":tariff},open(sys.argv[3],"w"))
 TARIFF

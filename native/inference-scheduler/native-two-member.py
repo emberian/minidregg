@@ -163,7 +163,7 @@ if not a.continue_funded:
     bookhost=ns['Host'](); v=ns['view'](bookhost)
     tariff={'version':'1','asset':'0','mint':'85'*32,'tokenProgram':'06'*32,'decimals':'6',
         'creditPerAtomic':'1','maxPerObservation':'2000000000','minTickSlots':'1500',
-        'nodeHourRate':'5952380','enrolIndex':None,'journalFloor':'1000000','slashCallerPermille':'500'}
+        'nodeWeekRate':'999999840','enrolIndex':None,'journalFloor':'1000000','slashCallerPermille':'500'}
     book={'sponsor':'7','control':'53','nonce':ns['fresh'](),'expectedFactoryRoot':v['factoryRoot'],
         'expectedAuthorityRoot':v['authorityRoot'],'expectedPayRoot':v['payRoot'],
         'bookStart':'0','book':['16'*32,'17'*32],'tariff':tariff}

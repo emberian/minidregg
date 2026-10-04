@@ -2,7 +2,9 @@
 """render-enrol, run for real (no Lean, no Rust, no network). usage: python3 deploy/pay/test-render-enrol.py
 
 Pins the operator ruling (50 DREGG per week, receiving address 5N2u...) to the integers the tariff
-carries, shows the floor rounding cannot journal an honest payer, and that every refusal is by name.
+carries: the tariff's unit is the week, so the week is exactly 50.000000 DREGG (cv 01a105c0-0292: the
+hourly unit made it 49.999992). A tariff at 49.999992, or one still carrying an hourly rate, is refused.
+Every refusal is by name.
 """
 import json
 from pathlib import Path
@@ -42,25 +44,29 @@ class Rendered(unittest.TestCase):
     def tearDownClass(cls):
         cls.tmp.cleanup()
 
-    def test_rate_is_the_floor_of_fifty_tokens_a_week(self):
+    def test_week_rate_is_exactly_fifty_tokens_a_week(self):
         tariff = self.book["tariff"]
-        self.assertEqual(tariff["nodeHourRate"], "297619")
-        week_credit = 168 * int(tariff["nodeHourRate"])  # Kernel.PayTariff.Tariff.weekCredit
-        self.assertEqual(week_credit, 49_999_992)
+        self.assertNotIn("nodeHourRate", tariff)
+        self.assertEqual(tariff["nodeWeekRate"], "50000000")  # Kernel.PayTariff.Tariff.nodeWeekRate, exact
         self.assertEqual(tariff["creditPerAtomic"], "1")
         self.assertEqual(tariff["decimals"], "6")
-        # 50 tokens at 6 decimals is 50_000_000 atomic; the floor leaves the week 8 atomic cheaper.
-        self.assertLessEqual(week_credit, 50 * 10 ** 6)
-        self.assertGreater(week_credit + 168, 50 * 10 ** 6)  # and is the largest such integer rate
+        self.assertEqual(int(tariff["nodeWeekRate"]), 50 * 10 ** int(tariff["decimals"]))
 
-    def test_a_payer_of_exactly_the_asked_amount_is_never_journaled_below_price(self):
-        week_credit = 168 * int(self.book["tariff"]["nodeHourRate"])
-        for birth_fee in (0, 7, 9, 1000):  # Kernel.PayEnrolDecision.enrolPrice = birthFee + weekCredit
-            self.assertGreaterEqual(50 * 10 ** 6 + birth_fee, birth_fee + week_credit)
-        # one hourly step more would have priced exactly that payer out
-        self.assertLess(50 * 10 ** 6, 168 * (int(self.book["tariff"]["nodeHourRate"]) + 1))
-        # a renewal of exactly 50 tokens buys one whole week (RenewPlan.weeks = credit / weekCredit)
+    def test_a_payer_of_exactly_the_asked_amount_is_exactly_at_the_price(self):
+        week_credit = int(self.book["tariff"]["nodeWeekRate"])
+        for birth_fee in (0, 7, 9, 1000):  # Kernel.PayEnrolDecision.enrolPrice = birthFee + nodeWeekRate
+            self.assertEqual(50 * 10 ** 6 + birth_fee, birth_fee + week_credit)
+        # one atomic unit less is below the price: no payer is quietly priced in at 49.999992
+        self.assertLess(49_999_992, week_credit)
+        # a renewal of exactly 50 tokens buys one whole week (RenewPlan.weeks = credit / nodeWeekRate)
         self.assertEqual(50 * 10 ** 6 // week_credit, 1)
+        self.assertEqual((50 * 10 ** 6 - 8) // week_credit, 0)
+
+    def test_the_report_states_the_exact_week(self):
+        report = (self.out / "report.txt").read_text()
+        self.assertIn("nodeWeekRate        50000000", report)
+        self.assertNotIn("49999992", report)
+        self.assertNotIn("floor", report)
 
     def test_the_address_is_book_row_zero_and_the_pins_name_it(self):
         self.assertEqual(self.book["book"][0], ADDRESS)
@@ -83,7 +89,7 @@ class Rendered(unittest.TestCase):
         self.assertEqual(lines["PAY_ENROL_CAPABILITY"], "4032")
         self.assertEqual(lines["PAY_OPERATOR_SOCKET"], "/var/lib/mini/store/node/operator/mini.sock")
         self.assertNotIn(ADDRESS, env)
-        self.assertNotIn("297619", env)
+        self.assertNotIn("50000000", env)
 
     def test_base58_round_trip_and_one_source(self):
         for raw in (bytes(range(1, 33)), b"\0" + bytes(range(1, 32))):
@@ -98,7 +104,8 @@ class Rendered(unittest.TestCase):
             except UnicodeDecodeError:
                 continue
             self.assertNotIn(ADDRESS, text, str(path))
-            self.assertNotIn("297619", text, str(path))
+            self.assertNotIn("297619", text, str(path))  # the retired hourly integer
+            self.assertNotIn("49999992", text, str(path))
 
 
 class Refusals(unittest.TestCase):
@@ -117,7 +124,7 @@ class Refusals(unittest.TestCase):
         self.refuse(lambda t: t.update(enrolAddress=ADDRESS[:-3]), "is not a 32-byte")  # a 31-byte key
         self.refuse(lambda t: t.update(enrolAddress="1" * 32), "non-zero")  # the all-zero key
         self.refuse(lambda t: t.update(enrolAddress="EMBER_ENROL_ADDRESS"), "not base58")  # the old placeholder
-        self.refuse(lambda t: t.update(weekPriceAtomic="100"), "below one credit per hour")
+        self.refuse(lambda t: t.update(weekPriceAtomic="0"), "must be positive")
         self.refuse(lambda t: t.update(weekPriceAtomic="05000000"), "canonical decimal")
         self.refuse(lambda t: t.update(journalFloor="60000000"), "journalFloor above the week price")
         self.refuse(lambda t: t.update(decimals="39"), "decimals exceed")
@@ -137,6 +144,53 @@ class Refusals(unittest.TestCase):
             done = run(Path(tmp) / "out2", extra=("--book-extra", str(extras)))
             self.assertNotEqual(done.returncode, 0)
             self.assertIn("repeats an address", done.stderr)
+
+
+class VerifyTariff(unittest.TestCase):
+    """`render-enrol --verify-tariff`: the planted 49.999992 tariffs of the retired hourly unit are refused."""
+
+    def verify(self, tariff, extra=()):
+        with tempfile.TemporaryDirectory(prefix="render-enrol-v-") as tmp:
+            path = Path(tmp) / "tariff.json"
+            path.write_text(json.dumps(tariff))
+            return subprocess.run([sys.executable, str(RENDER), "--terms", str(TERMS), "--verify-tariff", str(path), *extra],
+                                  capture_output=True, text=True)
+
+    def rendered(self):
+        with tempfile.TemporaryDirectory(prefix="render-enrol-g-") as tmp:
+            done = run(Path(tmp) / "out")
+            assert done.returncode == 0, done.stderr
+            return json.loads((Path(tmp) / "out" / "book.json").read_text())
+
+    def test_the_rendered_tariff_verifies(self):
+        book = self.rendered()
+        done = self.verify(book)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("50 tokens exactly", done.stdout)
+        self.assertEqual(self.verify(book["tariff"]).returncode, 0)
+
+    def test_planted_49_999_992_week_is_refused(self):
+        tariff = self.rendered()["tariff"]
+        tariff["nodeWeekRate"] = "49999992"
+        done = self.verify(tariff)
+        self.assertNotEqual(done.returncode, 0, "accepted a 49.999992 week")
+        self.assertIn("week rate is '49999992' credit, the terms ask exactly 50000000", done.stderr)
+
+    def test_the_retired_hourly_tariff_is_refused(self):
+        tariff = self.rendered()["tariff"]
+        del tariff["nodeWeekRate"]
+        tariff["nodeHourRate"] = "297619"  # 168 * 297619 = 49_999_992: the retired derivation
+        done = self.verify(tariff)
+        self.assertNotEqual(done.returncode, 0, "accepted an hourly tariff")
+        self.assertIn("carries an hourly rate", done.stderr)
+
+    def test_a_wrong_mint_or_scale_is_refused(self):
+        tariff = self.rendered()["tariff"]
+        for name, value in (("mint", ADDRESS), ("creditPerAtomic", "2"), ("decimals", "9")):
+            planted = dict(tariff, **{name: value})
+            done = self.verify(planted)
+            self.assertNotEqual(done.returncode, 0, name)
+            self.assertIn(name, done.stderr)
 
 
 if __name__ == "__main__":
