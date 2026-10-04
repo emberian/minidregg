@@ -1,8 +1,12 @@
 //! Reusable deterministic transition WAL. Storage premise: honest crash domain;
 //! an unkeyed checksum detects tears, not malicious rollback/authentication.
 //! Each event and exact replay-checked outbox are fsynced before publication.
-//! A partial FINAL frame is truncated and fsynced on recovery; complete bad
-//! checksums/identities still refuse. Published records require completed fsync.
+//! A partial FINAL frame is truncated and fsynced on recovery, and so is a
+//! full-length FINAL frame whose checksum fails: a crash between the length
+//! extension and the data reaching disk leaves exactly that shape, and the
+//! frame was never published (publication requires the completed fsync).
+//! A bad checksum on any EARLIER frame, or a wrong identity, still refuses.
+//! Published records require completed fsync.
 //! This assumes crash-prefix storage; arbitrary disk corruption is not repaired.
 //! This is not an independent anti-rollback anchor and cannot mint source authority.
 use crate::{
@@ -102,6 +106,12 @@ impl<M: Machine> Journal<M> {
             }
             let b = &all[i..i + n];
             if hash(b) != all[i + n..end] {
+                if end == all.len() {
+                    // Torn final frame: never fsynced, never published.
+                    file.set_len(record_start as u64)?;
+                    file.sync_all()?;
+                    break;
+                }
                 return Err(bad("transition checksum"));
             }
             let mut c = Cursor::new(b)?;
@@ -258,11 +268,51 @@ mod tests {
                 expected + 5
             );
         }
-        let q = path("bad-checksum");
-        let mut corrupted = full;
-        *corrupted.last_mut().unwrap() ^= 1;
+        // A bad checksum on an EARLIER frame is not a tear: refuse.
+        let q = path("bad-checksum-interior");
+        let mut corrupted = full.clone();
+        corrupted[prefix.len() - 1] ^= 1;
         fs::write(&q, corrupted).unwrap();
         assert!(Journal::open(&q, b"epoch1", Counter(0)).is_err());
+    }
+    #[test]
+    fn zeroed_final_record_body_truncates_to_one_less_record() {
+        let p = path("zeroed-tail-base");
+        let prefix;
+        let full;
+        {
+            let mut j = Journal::open(&p, b"epoch1", Counter(0)).unwrap();
+            j.append(&7u64.to_le_bytes()).unwrap();
+            prefix = fs::read(&p).unwrap();
+            j.append(&11u64.to_le_bytes()).unwrap();
+            full = fs::read(&p).unwrap();
+        }
+        // Full length on disk, body (and checksum) never reached it: zeros
+        // after the 8-byte length word of the final record.
+        let mut torn = full.clone();
+        for byte in &mut torn[prefix.len() + 8..] {
+            *byte = 0;
+        }
+        assert_ne!(torn, full);
+        let q = path("zeroed-tail");
+        fs::write(&q, &torn).unwrap();
+        let mut j = Journal::open(&q, b"epoch1", Counter(0)).unwrap();
+        assert_eq!(j.replay_outboxes().len(), 1);
+        assert_eq!(j.state().0, 7);
+        assert_eq!(fs::read(&q).unwrap(), prefix);
+        j.append(&5u64.to_le_bytes()).unwrap();
+        drop(j);
+        let j = Journal::open(&q, b"epoch1", Counter(0)).unwrap();
+        assert_eq!(j.state().0, 12);
+        assert_eq!(j.replay_outboxes().len(), 2);
+        // A flipped checksum byte on the final record is the same tear shape.
+        let mut flipped = full;
+        *flipped.last_mut().unwrap() ^= 1;
+        let r = path("flipped-tail");
+        fs::write(&r, flipped).unwrap();
+        let j = Journal::open(&r, b"epoch1", Counter(0)).unwrap();
+        assert_eq!(j.state().0, 7);
+        assert_eq!(fs::read(&r).unwrap(), prefix);
     }
     #[test]
     fn partial_initial_header_recovers_but_wrong_identity_refuses() {
