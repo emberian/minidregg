@@ -1,5 +1,5 @@
 {
-  "schema": "dregg.objective-bend.typed-core.v2",
+  "schema": "dregg.objective-bend.typed-core.v3",
   "term": {
     "tag": "get",
     "target": {
@@ -184,6 +184,112 @@
     },
     "name": "LazySharedField.result"
   },
+  "types": [
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "emptyRow"
+      },
+      "codomain": {
+        "tag": "variable",
+        "index": "0"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "twice",
+      "member": {
+        "tag": "natural"
+      },
+      "tail": {
+        "tag": "emptyRow"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "costly",
+      "member": {
+        "tag": "natural"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "1"
+      }
+    },
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "ref",
+        "index": "2"
+      },
+      "codomain": {
+        "tag": "ref",
+        "index": "2"
+      }
+    },
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "natural"
+      },
+      "codomain": {
+        "tag": "natural"
+      }
+    },
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "ref",
+        "index": "2"
+      },
+      "codomain": {
+        "tag": "ref",
+        "index": "3"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "LazySharedField.result",
+      "member": {
+        "tag": "natural"
+      },
+      "tail": {
+        "tag": "emptyRow"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "LazySharedField.Fields",
+      "member": {
+        "tag": "ref",
+        "index": "5"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "6"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "LazySharedField.work",
+      "member": {
+        "tag": "ref",
+        "index": "4"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "7"
+      }
+    }
+  ],
   "annotations": [
     {
       "path": [
@@ -196,16 +302,8 @@
         "index": "0"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "emptyRow"
-        },
-        "codomain": {
-          "tag": "variable",
-          "index": "0"
-        }
+        "tag": "ref",
+        "index": "0"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -257,60 +355,12 @@
         "1"
       ],
       "domain": {
-        "tag": "field",
-        "name": "costly",
-        "member": {
-          "tag": "natural"
-        },
-        "tail": {
-          "tag": "field",
-          "name": "twice",
-          "member": {
-            "tag": "natural"
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "2"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "field",
-          "name": "costly",
-          "member": {
-            "tag": "natural"
-          },
-          "tail": {
-            "tag": "field",
-            "name": "twice",
-            "member": {
-              "tag": "natural"
-            },
-            "tail": {
-              "tag": "emptyRow"
-            }
-          }
-        },
-        "codomain": {
-          "tag": "field",
-          "name": "costly",
-          "member": {
-            "tag": "natural"
-          },
-          "tail": {
-            "tag": "field",
-            "name": "twice",
-            "member": {
-              "tag": "natural"
-            },
-            "tail": {
-              "tag": "emptyRow"
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -327,38 +377,12 @@
         "0"
       ],
       "domain": {
-        "tag": "field",
-        "name": "costly",
-        "member": {
-          "tag": "natural"
-        },
-        "tail": {
-          "tag": "field",
-          "name": "twice",
-          "member": {
-            "tag": "natural"
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "2"
       },
       "codomain": {
-        "tag": "field",
-        "name": "costly",
-        "member": {
-          "tag": "natural"
-        },
-        "tail": {
-          "tag": "field",
-          "name": "twice",
-          "member": {
-            "tag": "natural"
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "2"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -368,94 +392,8 @@
     {
       "index": "0",
       "type": {
-        "tag": "field",
-        "name": "LazySharedField.work",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "natural"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "LazySharedField.Fields",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "field",
-              "name": "costly",
-              "member": {
-                "tag": "natural"
-              },
-              "tail": {
-                "tag": "field",
-                "name": "twice",
-                "member": {
-                  "tag": "natural"
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            },
-            "codomain": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "field",
-                "name": "costly",
-                "member": {
-                  "tag": "natural"
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "twice",
-                  "member": {
-                    "tag": "natural"
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              },
-              "codomain": {
-                "tag": "field",
-                "name": "costly",
-                "member": {
-                  "tag": "natural"
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "twice",
-                  "member": {
-                    "tag": "natural"
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              }
-            }
-          },
-          "tail": {
-            "tag": "field",
-            "name": "LazySharedField.result",
-            "member": {
-              "tag": "natural"
-            },
-            "tail": {
-              "tag": "emptyRow"
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "8"
       }
     }
   ],

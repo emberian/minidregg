@@ -1352,18 +1352,83 @@ def annotateFields (bounds : List (Nat × PTy)) : List (String × ATerm) → Lis
   | (_, v) :: rest, path, i => return (← annotate bounds v (path ++ [i])) ++ (← annotateFields bounds rest path (i + 1))
 end
 
-def Annotation.json (a : Annotation) : Json :=
-  Json.mkObj [("path", toJson (a.path.map toString)), ("domain", a.domain.json), ("codomain", a.codomain.json),
+/-! ### The shared type table
+
+Mirror of `typeTable` in objective-elaborate.ts. Every composite type is one table
+entry whose children are inline leaves or `{tag:"ref", index}` to an earlier entry;
+identical entries are stored once. Entries are created in post-order (children
+before parent, in the fixed order of each constructor's fields), walking the
+annotations in order (domain, then codomain), then the global bound, then the sum
+bounds. Translation validation compares the tables, so the order is a contract. -/
+
+structure Interner where
+  table : Array Json := #[]
+  seen : Std.HashMap String Nat := {}
+
+abbrev InternM := StateM Interner
+
+def internNode (node : Json) : InternM Json := do
+  let key := node.compress
+  let s ← get
+  let index ← match s.seen[key]? with
+    | some i => pure i
+    | none => do
+      set ({ table := s.table.push node, seen := s.seen.insert key s.table.size } : Interner)
+      pure s.table.size
+  return Json.mkObj [("tag", "ref"), ("index", toString index)]
+
+def PTy.intern : PTy → InternM Json
+  | .natural => pure (Json.mkObj [("tag", "natural")])
+  | .boolean => pure (Json.mkObj [("tag", "boolean")])
+  | .label => pure (Json.mkObj [("tag", "label")])
+  | .emptyRow => pure (Json.mkObj [("tag", "emptyRow")])
+  | .variable i => pure (Json.mkObj [("tag", "variable"), ("index", toString i)])
+  | .arrow r q d c => do
+    let dj ← d.intern
+    let cj ← c.intern
+    internNode (Json.mkObj [("tag", "arrow"), ("reuse", r), ("parameter", q), ("domain", dj), ("codomain", cj)])
+  | .field n m t => do
+    let mj ← m.intern
+    let tj ← t.intern
+    internNode (Json.mkObj [("tag", "field"), ("name", n), ("member", mj), ("tail", tj)])
+  | .specification m e => do
+    let mj ← m.intern
+    let ej ← e.intern
+    internNode (Json.mkObj [("tag", "specification"), ("metadata", mj), ("extension", ej)])
+  | .variant r => do
+    let rj ← r.intern
+    internNode (Json.mkObj [("tag", "variant"), ("row", rj)])
+  | .computation p r a => do
+    let pj ← p.intern
+    let rj ← r.intern
+    let aj ← a.intern
+    internNode (Json.mkObj [("tag", "computation"), ("plan", pj), ("response", rj), ("result", aj)])
+
+def Annotation.intern (a : Annotation) : InternM Json := do
+  let d ← a.domain.intern
+  let c ← a.codomain.intern
+  return Json.mkObj [("path", toJson (a.path.map toString)), ("domain", d), ("codomain", c),
     ("parameter", a.parameter), ("reuse", a.reuse)]
+
+/-- Annotations, then the global bound, then the sum bounds, in that order. -/
+def internProposal (annotations : List Annotation) (row : PTy) (bounds : List (Nat × PTy)) :
+    InternM (List Json × List Json) := do
+  let annotationJson ← annotations.mapM Annotation.intern
+  let globalType ← row.intern
+  let sumJson ← bounds.mapM fun (k, t) => do
+    let type ← t.intern
+    return Json.mkObj [("index", toString k), ("type", type)]
+  return (annotationJson, Json.mkObj [("index", "0"), ("type", globalType)] :: sumJson)
 
 /-- The typing-proposal fields that translation validation compares. -/
 def proposalJson (out : Output) : Except String Json := do
   let bounds := out.sumBounds.mergeSort (fun a b => a.1 ≤ b.1)
   let annotations ← annotate bounds out.term []
   let some row := out.globalRow | throw (out.typeErrors[0]?.getD "global row unresolved")
-  return Json.mkObj [("annotations", Json.arr (annotations.map Annotation.json).toArray),
-    ("bounds", Json.arr ((("0", row) :: bounds.map (fun (k, t) => (toString k, t))).map
-      (fun (k, t) => Json.mkObj [("index", k), ("type", t.json)])).toArray),
+  let ((annotationJson, boundJson), interner) := (internProposal annotations row bounds).run {}
+  return Json.mkObj [("types", Json.arr interner.table),
+    ("annotations", Json.arr annotationJson.toArray),
+    ("bounds", Json.arr boundJson.toArray),
     ("shareableVariables", toJson ("0" :: bounds.map (fun b => toString b.1)))]
 
 /-! ## Driver: a batch of jobs in, one result per job out -/

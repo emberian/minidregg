@@ -1,5 +1,5 @@
 {
-  "schema": "dregg.objective-bend.typed-core.v2",
+  "schema": "dregg.objective-bend.typed-core.v3",
   "term": {
     "tag": "app",
     "fn": {
@@ -290,6 +290,172 @@
       "value": "5"
     }
   },
+  "types": [
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "emptyRow"
+      },
+      "codomain": {
+        "tag": "variable",
+        "index": "0"
+      }
+    },
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "natural"
+      },
+      "codomain": {
+        "tag": "natural"
+      }
+    },
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "natural"
+      },
+      "codomain": {
+        "tag": "ref",
+        "index": "1"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "wrapping",
+      "member": {
+        "tag": "ref",
+        "index": "2"
+      },
+      "tail": {
+        "tag": "emptyRow"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "inherited",
+      "member": {
+        "tag": "ref",
+        "index": "2"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "3"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "operator",
+      "member": {
+        "tag": "label"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "4"
+      }
+    },
+    {
+      "tag": "specification",
+      "metadata": {
+        "tag": "ref",
+        "index": "5"
+      },
+      "extension": {
+        "tag": "ref",
+        "index": "2"
+      }
+    },
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "ref",
+        "index": "2"
+      },
+      "codomain": {
+        "tag": "ref",
+        "index": "6"
+      }
+    },
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "natural"
+      },
+      "codomain": {
+        "tag": "ref",
+        "index": "2"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "GenericExtension.reuseCaptured",
+      "member": {
+        "tag": "ref",
+        "index": "1"
+      },
+      "tail": {
+        "tag": "emptyRow"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "GenericExtension.addCaptured",
+      "member": {
+        "tag": "ref",
+        "index": "8"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "9"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "GenericExtension.combined",
+      "member": {
+        "tag": "ref",
+        "index": "1"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "10"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "GenericExtension.AddSelf",
+      "member": {
+        "tag": "ref",
+        "index": "2"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "11"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "GenericExtension.AddOne",
+      "member": {
+        "tag": "ref",
+        "index": "2"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "12"
+      }
+    }
+  ],
   "annotations": [
     {
       "path": [
@@ -303,16 +469,8 @@
         "index": "0"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "emptyRow"
-        },
-        "codomain": {
-          "tag": "variable",
-          "index": "0"
-        }
+        "tag": "ref",
+        "index": "0"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -350,15 +508,8 @@
         "tag": "natural"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "natural"
-        },
-        "codomain": {
-          "tag": "natural"
-        }
+        "tag": "ref",
+        "index": "1"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -399,15 +550,8 @@
         "tag": "natural"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "natural"
-        },
-        "codomain": {
-          "tag": "natural"
-        }
+        "tag": "ref",
+        "index": "1"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -469,125 +613,12 @@
         "0"
       ],
       "domain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "natural"
-        },
-        "codomain": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "natural"
-          }
-        }
+        "tag": "ref",
+        "index": "2"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          }
-        },
-        "codomain": {
-          "tag": "specification",
-          "metadata": {
-            "tag": "field",
-            "name": "operator",
-            "member": {
-              "tag": "label"
-            },
-            "tail": {
-              "tag": "field",
-              "name": "inherited",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "wrapping",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          },
-          "extension": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "natural"
-              }
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "7"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -609,101 +640,12 @@
         "0"
       ],
       "domain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "natural"
-        },
-        "codomain": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "natural"
-          }
-        }
+        "tag": "ref",
+        "index": "2"
       },
       "codomain": {
-        "tag": "specification",
-        "metadata": {
-          "tag": "field",
-          "name": "operator",
-          "member": {
-            "tag": "label"
-          },
-          "tail": {
-            "tag": "field",
-            "name": "inherited",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              }
-            },
-            "tail": {
-              "tag": "field",
-              "name": "wrapping",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                }
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          }
-        },
-        "extension": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "6"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -723,23 +665,8 @@
         "tag": "natural"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "natural"
-        },
-        "codomain": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "natural"
-          }
-        }
+        "tag": "ref",
+        "index": "2"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -760,15 +687,8 @@
         "tag": "natural"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "natural"
-        },
-        "codomain": {
-          "tag": "natural"
-        }
+        "tag": "ref",
+        "index": "1"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -831,125 +751,12 @@
         "0"
       ],
       "domain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "natural"
-        },
-        "codomain": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "natural"
-          }
-        }
+        "tag": "ref",
+        "index": "2"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          }
-        },
-        "codomain": {
-          "tag": "specification",
-          "metadata": {
-            "tag": "field",
-            "name": "operator",
-            "member": {
-              "tag": "label"
-            },
-            "tail": {
-              "tag": "field",
-              "name": "inherited",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "wrapping",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          },
-          "extension": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "natural"
-              }
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "7"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -971,101 +778,12 @@
         "0"
       ],
       "domain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "natural"
-        },
-        "codomain": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "natural"
-          }
-        }
+        "tag": "ref",
+        "index": "2"
       },
       "codomain": {
-        "tag": "specification",
-        "metadata": {
-          "tag": "field",
-          "name": "operator",
-          "member": {
-            "tag": "label"
-          },
-          "tail": {
-            "tag": "field",
-            "name": "inherited",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              }
-            },
-            "tail": {
-              "tag": "field",
-              "name": "wrapping",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                }
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          }
-        },
-        "extension": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "6"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -1075,114 +793,8 @@
     {
       "index": "0",
       "type": {
-        "tag": "field",
-        "name": "GenericExtension.AddOne",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "GenericExtension.AddSelf",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "natural"
-              }
-            }
-          },
-          "tail": {
-            "tag": "field",
-            "name": "GenericExtension.combined",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "natural"
-              }
-            },
-            "tail": {
-              "tag": "field",
-              "name": "GenericExtension.addCaptured",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  }
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "GenericExtension.reuseCaptured",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "13"
       }
     }
   ],

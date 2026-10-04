@@ -44,15 +44,17 @@ export function preview(requestPath:string,outputDirectory:string,toolingPath:st
   mkdirSync(outputDirectory,{recursive:true});if(readdirSync(outputDirectory).length)throw new Error("preview output directory must be empty");
   const retainedCapture=resolve(join(outputDirectory,"capture.json"));writeFileSync(retainedCapture,captureBytes,{flag:"wx"});
   const runner=resolve(join(outputDirectory,"source"));stage="objective-core-elaboration";
-  const lowering=child(tooling.bunPath,[tooling.elaboratorPath,retainedCapture,runner,JSON.stringify(argumentsWire),JSON.stringify(request.projections),JSON.stringify(limits)]);
+  const lowering=child(tooling.bunPath,[tooling.elaboratorPath,retainedCapture,runner,JSON.stringify(argumentsWire),JSON.stringify(request.projections),JSON.stringify({...limits,typeFuel})]);
   writeFileSync(join(outputDirectory,"lowering.json"),lowering,{flag:"wx"});
   const corePath=runner+".core.json",typedPath=runner+".typed.json";const coreBytes=readFileSync(corePath),typedBytes=readFileSync(typedPath),core=JSON.parse(coreBytes.toString()),typed=JSON.parse(typedBytes.toString());
   binding.coreSha256=sha(coreBytes);binding.sourceEntry=core.sourceEntry;
   if(core.schema!=="dregg.objective-bend.core.v2"||core.edition!=="objective-bend-1")throw new Error("Objective runtime wire edition2 required");
-  if(typed.schema!=="dregg.objective-bend.typed-core.v2")throw {schema:"dregg.bend.compiler-diagnostic.v1",stage:"objective-source-type-proposal",message:typed.message??"source annotation proposal unsupported",span:typed.span??null};
+  if(typed.schema!=="dregg.objective-bend.typed-core.v3")throw {schema:"dregg.bend.compiler-diagnostic.v1",stage:"objective-source-type-proposal",message:typed.message??"source annotation proposal unsupported",span:typed.span??null};
   if(canonical(typed.term)!==canonical(core.term))throw new Error("checker packet term differs from actual elaborated core");
-  typed.fuel=typeFuel;const submitted=join(outputDirectory,"typed-input.json"),limitsPath=join(outputDirectory,"limits.json");
-  writeFileSync(submitted,encode(typed),{flag:"wx"});writeFileSync(limitsPath,encode(limits),{flag:"wx"});binding.typedPacketSha256=sha(readFileSync(submitted));
+  // The elaborator's own typed file IS the checker packet (its fuel field is the request's typeFuel): there is no second copy.
+  if(typed.fuel!==typeFuel)throw new Error("typing proposal fuel differs from the requested typeFuel");
+  const submitted=typedPath,limitsPath=join(outputDirectory,"limits.json");
+  writeFileSync(limitsPath,encode(limits),{flag:"wx"});binding.typedPacketSha256=sha(typedBytes);
   const responsesPath=join(outputDirectory,"responses.json");writeFileSync(responsesPath,encode(responses),{flag:"wx"});binding.responsesSha256=sha(readFileSync(responsesPath));
   stage="objective-typed-preview";const actual=child(tooling.leanPath,["-j","2","--run",tooling.previewHostPath,submitted,limitsPath,responsesPath],{LEAN_PATH:tooling.oleanRoot,LEAN_NUM_THREADS:"2"});
   const result=JSON.parse(actual.trim());if(result.schema!=="dregg.objective-bend.typed-preview.v2"||result.sameDecodedTerm!==true||result.typing!=="accepted by actual annotated checker")throw new Error("typed preview receiver shape differs");

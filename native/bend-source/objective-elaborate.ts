@@ -599,18 +599,58 @@ export function elaborate(modules:any[],entryModule:number,entryDefinition:strin
  return output;
 }
 
+// ---- the shared type table of a typing proposal ----
+// A proposal names types through a table: every composite type (arrow, field,
+// specification, prototype, variant, computation) is ONE table entry whose
+// children are either inline leaves or `{tag:"ref",index}` to an earlier entry,
+// and identical entries are stored once. A fully expanded type of a record whose
+// fields are records of records is exponential in its depth; the table is linear
+// in the number of DISTINCT types. The order is part of the contract (the Lean
+// elaborator reproduces it for translation validation): entries are created in
+// post-order (children before parent, children in the fixed order listed in
+// `typeChildren`), walking the annotations in order (domain, then codomain),
+// then the bounds, then the context.
+const typeChildren:Record<string,string[]>={arrow:["domain","codomain"],field:["member","tail"],specification:["metadata","extension"],
+ prototype:["spec","target"],variant:["row"],computation:["plan","response","result"]};
+const isLeafTy=(t:Ty)=>["natural","boolean","label","emptyRow","variable","custody"].includes(t.tag);
+export function typeTable(){
+ const table:any[]=[];const seen=new Map<string,number>();const memo=new Map<object,any>();
+ const intern=(t:Ty):any=>{
+  if(isLeafTy(t))return t;
+  const hit=memo.get(t);if(hit)return hit;
+  const children=typeChildren[t.tag];if(!children)throw Error("unknown type constructor "+t.tag);
+  const node:any={...t};for(const key of children)node[key]=intern(t[key]);
+  const key=canonicalJson(node);let index=seen.get(key);
+  if(index===undefined){index=table.length;table.push(node);seen.set(key,index);}
+  const ref={tag:"ref",index:String(index)};memo.set(t,ref);return ref;
+ };
+ return {table,intern};
+}
+// Inverse of typeTable for tests and tools: every `ref` replaced by the entry it names.
+// The result can be exponentially larger than the packet; never call it on a large proposal.
+export function expandTypes(packet:any):any{
+ const expand=(t:any):any=>{
+  if(t.tag==="ref")return expand(packet.types[Number(t.index)]);
+  const children=typeChildren[t.tag];if(!children)return t;
+  const node:any={...t};for(const key of children)node[key]=expand(t[key]);return node;
+ };
+ const {types,...rest}=packet;
+ return {...rest,annotations:packet.annotations.map((a:any)=>({...a,domain:expand(a.domain),codomain:expand(a.codomain)})),
+  bounds:packet.bounds.map((b:any)=>({...b,type:expand(b.type)})),context:packet.context.map((c:any)=>({...c,type:expand(c.type)}))};
+}
+
 // Source annotations are proposals. The Lean checker must construct a derivation
 // for the exact emitted term; this never mints a typing receipt.
 export function literalAnnotations(output:any){
  try{
   const typing=output.typing;if(!typing)throw Error("typing proposal requires the in-process elaboration output");
-  const annotations:any[]=[];
+  const annotations:any[]=[];const {table,intern}=typeTable();
   const visit=(t:Core,path:number[])=>{
    if(t.tag==="lam"){
     const p=proposals.get(t);
     if(!p)throw Error("lambda at "+path.join(".")+" has no proposal");
     if(!p.domain||!p.codomain)throw Error(p.reason??(typing.typeErrors[0]??"unresolved lambda type at "+path.join(".")));
-    annotations.push({path:path.map(String),domain:p.domain,codomain:p.codomain,parameter:p.parameter,reuse:p.reuse});
+    annotations.push({path:path.map(String),domain:intern(p.domain),codomain:intern(p.codomain),parameter:p.parameter,reuse:p.reuse});
     visit(t.body,[...path,0]);return;
    }
    const sub=(name:string,index:number)=>visit(t[name],[...path,index]);
@@ -627,11 +667,11 @@ export function literalAnnotations(output:any){
     const payload=variant?.tag==="variant"?lookupRow(variant.row,t.label):null;
     if(!payload)throw Error("injection label "+t.label+" absent from its declared sum");
     // The codomain is the DECLARED sum type: a recursive sum stays its bounded variable.
-    annotations.push({path:path.map(String),domain:payload,codomain:p.type,parameter:"unrestricted",reuse:"reusable"});sub("payload",0);
+    annotations.push({path:path.map(String),domain:intern(payload),codomain:intern(p.type),parameter:"unrestricted",reuse:"reusable"});sub("payload",0);
    }
    else if(t.tag==="perform"||t.tag==="done"){
     const e=effects.get(t);if(!e)throw Error(t.tag+" at "+path.join(".")+" has no activity signature");
-    annotations.push({path:path.map(String),domain:e.plan,codomain:e.response,parameter:"unrestricted",reuse:"reusable"});
+    annotations.push({path:path.map(String),domain:intern(e.plan),codomain:intern(e.response),parameter:"unrestricted",reuse:"reusable"});
     sub(t.tag==="perform"?"plan":"value",0);
    }
    else if(t.tag==="case"){sub("scrutinee",0);t.arms.forEach((a:any,i:number)=>visit(a.body,[...path,1,i]));}
@@ -640,9 +680,11 @@ export function literalAnnotations(output:any){
   };
   visit(output.term,[]);
   if(!typing.globalRow)throw Error(typing.typeErrors[0]??"global row unresolved");
-  const sumBounds=[...typing.sumBounds.entries()].sort((a:any,b:any)=>a[0]-b[0]).map(([k,type]:any)=>({index:String(k),type}));
-  return {schema:"dregg.objective-bend.typed-core.v2",term:output.term,annotations,
-   bounds:[{index:"0",type:typing.globalRow},...sumBounds],shareableVariables:["0",...sumBounds.map((b:any)=>b.index)],fuel:"4096",context:[],
+  const globalBound={index:"0",type:intern(typing.globalRow)};
+  const sumBounds=[...typing.sumBounds.entries()].sort((a:any,b:any)=>a[0]-b[0]).map(([k,type]:any)=>({index:String(k),type:intern(type)}));
+  const bounds=[globalBound,...sumBounds];
+  return {schema:"dregg.objective-bend.typed-core.v3",term:output.term,types:table,annotations,
+   bounds,shareableVariables:["0",...sumBounds.map((b:any)=>b.index)],fuel:output.limits?.typeFuel??"4096",context:[],
    sourceEntry:output.sourceEntry,sourceModules:output.sourceModules,
    status:"exact core annotation proposal; actual checker must return Checked; no law proof or effect authority"};
  }catch(e){return {status:"unsupported",message:e instanceof Error?e.message:String(e)};}
@@ -656,6 +698,8 @@ if(import.meta.main){
   if(mode==="definition"&&(!Array.isArray(JSON.parse(projectionRaw))||JSON.parse(projectionRaw).length!==0))throw Error("definition mode forbids result projections");
   const limits=JSON.parse(limitsRaw);
   for(const key of ["heap","stack","ticks"])if(typeof limits[key]!=="string"||!/^[1-9][0-9]*$/.test(limits[key])||BigInt(limits[key])>1000000n)throw Error("preview limits must be canonical positive decimal strings ≤1000000");
+  // The checker fuel travels in the proposal itself (its `fuel` field), so the packet the elaborator writes is exactly the packet the checker reads.
+  if(limits.typeFuel!==undefined&&(typeof limits.typeFuel!=="string"||!/^[1-9][0-9]*$/.test(limits.typeFuel)||BigInt(limits.typeFuel)>16384n))throw Error("typeFuel must be a canonical positive decimal string ≤16384");
   const capture=JSON.parse(await readFile(capturePath,"utf8"));
   if(!Array.isArray(capture.modules)||capture.modules.length>64)throw Error("preview module capacity refused");
   if(capture.schema!=="dregg.objective-bend.captured-package.v1"||capture.edition!=="objective-bend-1")throw Error("unsupported captured edition");

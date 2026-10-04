@@ -848,33 +848,66 @@ def decodeReuse (value : Json) : Except String Reuse := do
   | "once" => pure .once | "reusable" => pure .reusable
   | _ => .error "explicit Objective closure reuse required"
 
-def decodeType : Nat → Json → Except String Ty
+/-- A type on the wire, with its depth. A type is an object `{tag, ...}` whose children
+are types, or `{tag:"ref", index}` naming an EARLIER entry of the packet's type table
+(`decodeTypeTable`). A ref stands for exactly the type the entry decoded to, depth
+included: `decodeTypeWith table fuel` accepts a tree iff the fully inlined JSON of that
+tree is accepted by `decodeTypeWith #[] fuel`, and decodes it to the same `Ty`. The table
+only shares storage; it changes neither which types a proposal may name nor the
+nesting capacity. -/
+def decodeTypeWith (table : Array (Ty × Nat)) : Nat → Json → Except String (Ty × Nat)
   | 0, _ => .error "type nesting capacity"
   | fuel + 1, value => do
     match ← value.getObjValAs? String "tag" with
-    | "natural" => pure .natural | "label" => pure .label
-    | "boolean" => pure .boolean | "emptyRow" => pure .emptyRow
-    | "variable" => return .variable (← jsonNat (← value.getObjVal? "index"))
-    | "custody" => return .custody (← jsonNat (← value.getObjVal? "identity"))
-    | "field" => return (.field (← value.getObjValAs? String "name")
-        (← decodeType fuel (← value.getObjVal? "member"))
-        (← decodeType fuel (← value.getObjVal? "tail")))
-    | "arrow" => return (.arrow (← decodeReuse (← value.getObjVal? "reuse"))
-        (← decodeQuantity (← value.getObjVal? "parameter"))
-        (← decodeType fuel (← value.getObjVal? "domain"))
-        (← decodeType fuel (← value.getObjVal? "codomain")))
-    | "specification" => return (.specification
-        (← decodeType fuel (← value.getObjVal? "metadata"))
-        (← decodeType fuel (← value.getObjVal? "extension")))
-    | "prototype" => return (.prototype
-        (← decodeType fuel (← value.getObjVal? "spec"))
-        (← decodeType fuel (← value.getObjVal? "target")))
-    | "variant" => return .variant (← decodeType fuel (← value.getObjVal? "row"))
-    | "computation" => return (.computation
-        (← decodeType fuel (← value.getObjVal? "plan"))
-        (← decodeType fuel (← value.getObjVal? "response"))
-        (← decodeType fuel (← value.getObjVal? "result")))
+    | "ref" =>
+        let index ← jsonNat (← value.getObjVal? "index")
+        let some (entry, depth) := table[index]? | .error "type reference names no earlier table entry"
+        if depth > fuel + 1 then throw "type nesting capacity"
+        pure (entry, depth)
+    | "natural" => pure (.natural, 1) | "label" => pure (.label, 1)
+    | "boolean" => pure (.boolean, 1) | "emptyRow" => pure (.emptyRow, 1)
+    | "variable" => return (.variable (← jsonNat (← value.getObjVal? "index")), 1)
+    | "custody" => return (.custody (← jsonNat (← value.getObjVal? "identity")), 1)
+    | "field" =>
+        let (member, dm) ← decodeTypeWith table fuel (← value.getObjVal? "member")
+        let (tail, dt) ← decodeTypeWith table fuel (← value.getObjVal? "tail")
+        return (.field (← value.getObjValAs? String "name") member tail, max dm dt + 1)
+    | "arrow" =>
+        let (domain, dd) ← decodeTypeWith table fuel (← value.getObjVal? "domain")
+        let (codomain, dc) ← decodeTypeWith table fuel (← value.getObjVal? "codomain")
+        return (.arrow (← decodeReuse (← value.getObjVal? "reuse"))
+          (← decodeQuantity (← value.getObjVal? "parameter")) domain codomain, max dd dc + 1)
+    | "specification" =>
+        let (metadata, dm) ← decodeTypeWith table fuel (← value.getObjVal? "metadata")
+        let (extension, de) ← decodeTypeWith table fuel (← value.getObjVal? "extension")
+        return (.specification metadata extension, max dm de + 1)
+    | "prototype" =>
+        let (spec, ds) ← decodeTypeWith table fuel (← value.getObjVal? "spec")
+        let (target, dt) ← decodeTypeWith table fuel (← value.getObjVal? "target")
+        return (.prototype spec target, max ds dt + 1)
+    | "variant" =>
+        let (row, dr) ← decodeTypeWith table fuel (← value.getObjVal? "row")
+        return (.variant row, dr + 1)
+    | "computation" =>
+        let (plan, dp) ← decodeTypeWith table fuel (← value.getObjVal? "plan")
+        let (response, dr) ← decodeTypeWith table fuel (← value.getObjVal? "response")
+        let (result, da) ← decodeTypeWith table fuel (← value.getObjVal? "result")
+        return (.computation plan response result, max dp (max dr da) + 1)
     | _ => .error "unknown Objective type constructor"
+
+/-- The type nesting capacity of every type a proposal names, tabled or inline. -/
+def typeNestingCapacity : Nat := 256
+
+def decodeType (table : Array (Ty × Nat)) (value : Json) : Except String Ty := do
+  return (← decodeTypeWith table typeNestingCapacity value).1
+
+/-- The packet's type table: entry k is decoded against entries 0..k-1 only, so a ref can
+never point forward or at itself and every entry is a finite tree. -/
+def decodeTypeTable (value : Json) : Except String (Array (Ty × Nat)) := do
+  let entries ← value.getArr?
+  if entries.size > 1048576 then throw "type table capacity"
+  entries.foldlM (fun table entry => do
+    pure (table.push (← decodeTypeWith table typeNestingCapacity entry))) #[]
 
 def decodePrimitive (value : Json) : Except String Primitive := do
   match ← value.getStr? with
@@ -923,9 +956,9 @@ def decodeTerm : Nat → Json → Except String Term
     | "done" => return .done (← sub "value")
     | _ => .error "unknown Objective runtime constructor"
 
-def decodeLambda (value : Json) : Except String LambdaAnnotation := do
-  return ⟨← decodeType 256 (← value.getObjVal? "domain"),
-    ← decodeType 256 (← value.getObjVal? "codomain"),
+def decodeLambda (table : Array (Ty × Nat)) (value : Json) : Except String LambdaAnnotation := do
+  return ⟨← decodeType table (← value.getObjVal? "domain"),
+    ← decodeType table (← value.getObjVal? "codomain"),
     ← decodeQuantity (← value.getObjVal? "parameter"),
     ← decodeReuse (← value.getObjVal? "reuse")⟩
 
@@ -935,22 +968,23 @@ structure DecodedPacket where
   fuel : Nat
 
 def decodePacket (value : Json) : Except String DecodedPacket := do
-  if (← value.getObjValAs? String "schema") != "dregg.objective-bend.typed-core.v2" then
+  if (← value.getObjValAs? String "schema") != "dregg.objective-bend.typed-core.v3" then
     throw "Objective typed core edition required"
+  let table ← decodeTypeTable (← value.getObjVal? "types")
   let term ← decodeTerm 4096 (← value.getObjVal? "term")
   let annotations ← (← (← value.getObjVal? "annotations").getArr?).toList.mapM fun entry => do
     let path ← (← (← entry.getObjVal? "path").getArr?).toList.mapM jsonNat
-    return (path, ← decodeLambda entry)
+    return (path, ← decodeLambda table entry)
   if !decide (annotations.map Prod.fst).Nodup then throw "duplicate lambda annotation path"
   let bounds ← (← (← value.getObjVal? "bounds").getArr?).toList.mapM fun entry => do
-    return (← jsonNat (← entry.getObjVal? "index"), ← decodeType 256 (← entry.getObjVal? "type"))
+    return (← jsonNat (← entry.getObjVal? "index"), ← decodeType table (← entry.getObjVal? "type"))
   if !decide (bounds.map Prod.fst).Nodup then throw "duplicate future type bound"
   let shareable ← (← (← value.getObjVal? "shareableVariables").getArr?).toList.mapM jsonNat
   if !decide shareable.Nodup then throw "duplicate shareability premise"
   let context ← match value.getObjVal? "context" with
     | .error _ => pure []
     | .ok context => (← context.getArr?).toList.mapM fun entry => do
-        return (⟨← decodeType 256 (← entry.getObjVal? "type"),
+        return (⟨← decodeType table (← entry.getObjVal? "type"),
           ← decodeQuantity (← entry.getObjVal? "quantity")⟩ : Binding)
   let fuel ← match value.getObjVal? "fuel" with
     | .error _ => pure 4096

@@ -1,20 +1,22 @@
 import {parseObjective} from './objective-parser.ts';
-import {elaborate,literalAnnotations} from './objective-elaborate.ts';
+import {elaborate,literalAnnotations as rawProposal,expandTypes} from './objective-elaborate.ts';
+// Most checks below read types inline; the packet itself names them through its shared type table.
+const literalAnnotations=(output:any)=>{const p=rawProposal(output);return p.schema?expandTypes(p):p;};
 const moduleFor=(source:string)=>({name:'Probe',sha256:'test-only',astSha256:'test-only',imports:[],ast:parseObjective(source)});
 const run=(body:string,type:string)=>elaborate([moduleFor(`edition ObjectiveBend 1\ndef value() -> ${type}:\n  ${body}\n`)],0,'value',[]);
 const bool=literalAnnotations(run('true','Bool'));
-if(bool.schema!=='dregg.objective-bend.typed-core.v2'||bool.bounds[0].type.member.tag!=='boolean')throw Error('Bool source annotation lost');
+if(bool.schema!=='dregg.objective-bend.typed-core.v3'||bool.bounds[0].type.member.tag!=='boolean')throw Error('Bool source annotation lost');
 const label=literalAnnotations(run('"ordinary text"','String'));
-if(label.schema!=='dregg.objective-bend.typed-core.v2'||label.bounds[0].type.member.tag!=='label')throw Error('String source annotation lost');
+if(label.schema!=='dregg.objective-bend.typed-core.v3'||label.bounds[0].type.member.tag!=='label')throw Error('String source annotation lost');
 for(const formerlyReserved of ['true','false']){
  const strings=literalAnnotations(run(JSON.stringify(formerlyReserved),'String'));
- if(strings.schema!=='dregg.objective-bend.typed-core.v2'||strings.bounds[0].type.member.tag!=='label')throw Error('String content reclassified as Boolean');
+ if(strings.schema!=='dregg.objective-bend.typed-core.v3'||strings.bounds[0].type.member.tag!=='label')throw Error('String content reclassified as Boolean');
 }
 const unknown=literalAnnotations(run('7n','Unknown'));
 if(unknown.status!=='unsupported')throw Error('unsupported authored type silently replaced');
 const inferred=elaborate([moduleFor('edition ObjectiveBend 1\ndef value(x: Nat):\n  return x + 1n\n')],0,'value',['7']);
 const proposal=literalAnnotations(inferred);
-if(proposal.schema!=='dregg.objective-bend.typed-core.v2'||proposal.bounds[0].type.member.codomain.tag!=='natural')throw Error('ordinary result hole did not infer actual primitive body');
+if(proposal.schema!=='dregg.objective-bend.typed-core.v3'||proposal.bounds[0].type.member.codomain.tag!=='natural')throw Error('ordinary result hole did not infer actual primitive body');
 console.log('OBJECTIVE ELABORATION DIAGNOSTICS PASS: Bool/String distinction, formerly reserved String acceptance, unknown type refusal');
 
 const identityModule=moduleFor('edition ObjectiveBend 1\ndef identity(x: String) -> String:\n  return x\n');
@@ -48,15 +50,15 @@ const shared=findAll(repeated(2).term,(x:any)=>x.tag==='specification'&&x.metada
 if(shared.metadata.fields[1].value.tag!=='bound'||shared.metadata.fields[1].value.index!==1||shared.extension.lower.tag!=='bound'||shared.extension.lower.index!==1)
  throw Error('metadata inherited and mix lower do not reference one shared binder');
 const typedCompose=literalAnnotations(repeated(3));
-if(typedCompose.schema!=='dregg.objective-bend.typed-core.v2')throw Error('shared composition lost its typing proposal: '+typedCompose.message);
+if(typedCompose.schema!=='dregg.objective-bend.typed-core.v3')throw Error('shared composition lost its typing proposal: '+typedCompose.message);
 console.log('COMPOSE SHARING PASS: k=8/16/32 sizes '+[s8,s16,s32].join('/')+' (linear); metadata.inherited and mix.lower are bound 1 of one redex');
 // (b) a package that declares specifications yields a typed packet; spec method lambdas carry binder hints.
 const evenOdd=`edition ObjectiveBend 1\nrecord Parity:\n  even(n: Nat) -> Bool\n  odd(n: Nat) -> Bool\nspec Even for Parity:\n  requires odd(n: Nat) -> Bool\n  def even(n: Nat) -> Bool:\n    match n:\n      case 0n: true\n      case 1n+pred: self.odd(pred)\nspec Odd for Parity:\n  requires even(n: Nat) -> Bool\n  def odd(n: Nat) -> Bool:\n    match n:\n      case 0n: false\n      case 1n+pred: self.even(pred)\n  law total(n: Nat): self.odd(n) == self.odd(n)\ndef four() -> Nat:\n  4n\n`;
 const specTyped=literalAnnotations(elaborate([moduleFor(evenOdd)],0,'four',[]));
-if(specTyped.schema!=='dregg.objective-bend.typed-core.v2')throw Error('spec-declaring package refused: '+specTyped.message);
+if(specTyped.schema!=='dregg.objective-bend.typed-core.v3')throw Error('spec-declaring package refused: '+specTyped.message);
 const specRow=specTyped.bounds[0].type;if(specRow.member.tag!=='specification'||specRow.tail.member.metadata.tail.tail.member.member.codomain.codomain.codomain.tag!=='boolean')throw Error('spec global type or law type lost');
 if(specTyped.annotations.length<8)throw Error('spec method lambdas lack binder hints');
-console.log('SPEC TYPING PASS: spec-declaring package yields typed-core.v2; spec, law and method lambdas annotated');
+console.log('SPEC TYPING PASS: spec-declaring package yields typed-core.v3; spec, law and method lambdas annotated');
 // (c) affine/linear are reachable from the surface and reach the checker proposal.
 const affine=literalAnnotations(elaborate([moduleFor('edition ObjectiveBend 1\ndef keep(affine x: Nat, linear y: Nat, -z: Nat, +w: Nat) -> Nat:\n  x + y\n')],0,'keep',[]));
 const quantities=affine.annotations.slice(-4).map((a:any)=>a.parameter+'/'+a.reuse).join(',');
@@ -64,6 +66,29 @@ if(quantities!=='affine/reusable,linear/once,erased/once,unrestricted/once')thro
 if(affine.bounds[0].type.member.codomain.reuse!=='once')throw Error('closure after an affine parameter not one-shot in the declared type');
 expectThrow(()=>moduleFor('edition ObjectiveBend 1\ndef bad(affine +x: Nat) -> Nat:\n  x\n'),/two quantity markers/,'double quantity');
 console.log('QUANTITY SURFACE PASS: affine/linear/dead/copy reach annotations; later closures one-shot');
+// (c') the proposal names types through a shared table: a type whose expansion is exponential stays linear.
+{
+ const depth=18;
+ let src='edition ObjectiveBend 1\nrecord R0:\n  a: Nat\n  b: Nat\n';
+ for(let i=1;i<=depth;i++)src+=`record R${i}:\n  l: R${i-1}\n  r: R${i-1}\n`;
+ src+=`def pass(x: R${depth}) -> R${depth}:\n  x\n`;
+ const big=rawProposal(elaborate([moduleFor(src)],0,'pass',[],'definition'));
+ const nodes=new Map<number,number>();
+ const count=(t:any):number=>t.tag==='ref'?(nodes.get(Number(t.index))??(()=>{const n=count(big.types[Number(t.index)]);nodes.set(Number(t.index),n);return n;})()):1+['member','tail','domain','codomain','row'].reduce((a,k)=>a+(t[k]?count(t[k]):0),0);
+ const expanded=big.annotations.reduce((a:number,x:any)=>a+count(x.domain)+count(x.codomain),0);
+ if(big.schema!=='dregg.objective-bend.typed-core.v3'||JSON.stringify(big).length>60000||expanded<1000000)throw Error('type table did not share: '+JSON.stringify(big).length+' bytes, expansion '+expanded+' nodes');
+ // Entries are unique, and a ref only ever names an EARLIER entry (so every type is a finite tree).
+ const seen=new Set<string>();
+ for(const [k,entry] of big.types.entries()){
+  const sorted=(v:any):any=>v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,sorted(v[k])])):v;const key=JSON.stringify(sorted(entry));if(seen.has(key))throw Error('duplicate type table entry '+k);seen.add(key);
+  for(const v of Object.values(entry as any))if((v as any)?.tag==='ref'&&Number((v as any).index)>=k)throw Error('type table entry '+k+' refers forward');
+ }
+ // Expansion inverts the table: depth 2 expands to the nested row it names.
+ const small=expandTypes(rawProposal(elaborate([moduleFor('edition ObjectiveBend 1\nrecord A:\n  a: Nat\nrecord B:\n  l: A\n  r: A\ndef pass(x: B) -> B:\n    x\n')],0,'pass',[],'definition')));
+ const dom=small.annotations.find((a:any)=>a.domain.tag==='field')?.domain;
+ if(!dom||dom.tag!=='field'||dom.name!=='l'||dom.member.tag!=='field'||dom.member.name!=='a'||dom.tail.name!=='r'||dom.tail.member.name!=='a')throw Error('table expansion lost structure');
+ console.log('TYPE TABLE PASS: depth-'+depth+' nested records: proposal '+JSON.stringify(big).length+' bytes, '+big.types.length+' table entries, expansion would be '+expanded+' type nodes');
+}
 // (d) operators without a core constructor are refused with the constructor they wait for.
 for(const [op,wait] of [['<','Primitive.less'],['>=','Primitive.less'],['-','Primitive.subtract'],['/','Primitive.divide']]){
  expectThrow(()=>run('1n '+op+' 2n','Nat'),new RegExp('operator '+op.replace(/[-/]/g,'\\$&')+' is not yet a core constructor.*'+wait.replace('.','\\.')),'operator '+op);
@@ -79,10 +104,10 @@ const sumsTyped=literalAnnotations(sumsOut);
 // An injection's codomain is its declared sum: a variant, or a recursive sum's bounded variable (index >= 1).
 const injectAnnotations=sumsTyped.annotations?.filter((a:any)=>a.codomain.tag==='variant'||(a.codomain.tag==='variable'&&a.codomain.index!=='0'))??[];
 if(injectAnnotations.filter((a:any)=>a.codomain.tag==='variable').length!==2)throw Error('recursive-sum injections do not carry the declared sum variable');
-if(sumsTyped.schema!=='dregg.objective-bend.typed-core.v2'||injectAnnotations.length!==3||'injections' in sumsTyped)throw Error('injection annotations lost: '+JSON.stringify(sumsTyped.message??injectAnnotations.length));
+if(sumsTyped.schema!=='dregg.objective-bend.typed-core.v3'||injectAnnotations.length!==3||'injections' in sumsTyped)throw Error('injection annotations lost: '+JSON.stringify(sumsTyped.message??injectAnnotations.length));
 if(!injectAnnotations.some((a:any)=>a.domain.tag==='field'&&a.domain.name==='side'))throw Error('injection domain is not the payload type');
 if(!sumsTyped.bounds.some((b:any)=>b.index==='1'&&b.type.tag==='variant')||!sumsTyped.shareableVariables.includes('1'))throw Error('recursive sum not a bounded shareable variable');
-if(JSON.stringify(Object.keys(literalAnnotations(run('7n','Nat'))))!=='["schema","term","annotations","bounds","shareableVariables","fuel","context","sourceEntry","sourceModules","status"]')throw Error('sum-free packet shape changed');
+if(JSON.stringify(Object.keys(rawProposal(run('7n','Nat'))))!=='["schema","term","types","annotations","bounds","shareableVariables","fuel","context","sourceEntry","sourceModules","status"]')throw Error('sum-free packet shape changed');
 expectThrow(()=>elaborate([moduleFor(shapes.replace('    case none(_): 0n\n',''))],0,'main',[]),/not exhaustive: missing \[none\]/,'non-exhaustive match');
 expectThrow(()=>elaborate([moduleFor(shapes.replace('Shape.square({side: 4n})','Shape.triangle(4n)'))],0,'main',[]),/has no case triangle/,'unknown sum case');
 expectThrow(()=>elaborate([moduleFor('edition ObjectiveBend 1\ndef eq(a, b) -> Bool:\n  a == b\n')],0,'eq',[]),/operands' types resolved/,'untyped ==');
@@ -102,7 +127,7 @@ if(iface.precedence.join()!=='Probe.D,Probe.A,Probe.B,Probe.O')throw Error('C4 p
 const chain:string[]=[];for(let x=dSpec.extension;x.tag==='mix';x=x.lower)chain.unshift(x.upper.name);
 const bottom=(()=>{let x=dSpec.extension;while(x.tag==='mix')x=x.lower;return x.name;})();
 if([bottom,...chain].join()!=='Probe.O,Probe.B#primary,Probe.A#primary,Probe.D#primary')throw Error('mix chain order wrong: '+[bottom,...chain]);
-if(literalAnnotations(anc).schema!=='dregg.objective-bend.typed-core.v2')throw Error('ancestry package lost typing');
+if(literalAnnotations(anc).schema!=='dregg.objective-bend.typed-core.v3')throw Error('ancestry package lost typing');
 expectThrow(()=>elaborate([moduleFor(ancestrySource(spec('O','spec NAME for R:','    n')+spec('H','spec NAME extends O for R:')+spec('V','spec NAME extends O for R:')+spec('HV','spec NAME extends H, V for R:')+spec('VH','spec NAME extends V, H for R:')+spec('X','spec NAME extends HV, VH for R:')))],0,'blank',[]),/C4 linearization of Probe\.X refused/,'inconsistent ancestry');
 expectThrow(()=>elaborate([moduleFor(ancestrySource(spec('S','suffix spec NAME for R:','    n')+spec('T','suffix spec NAME for R:','    n')+spec('X','spec NAME extends S, T for R:')))],0,'blank',[]),/suffix incompatibility/,'incompatible suffix parents');
 expectThrow(()=>elaborate([moduleFor(ancestrySource(spec('A','spec NAME extends B for R:')+spec('B','spec NAME extends A for R:')))],0,'blank',[]),/ancestry cycle/,'ancestry cycle');

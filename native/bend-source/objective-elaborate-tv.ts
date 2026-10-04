@@ -2,8 +2,8 @@
 // against this TypeScript elaborator, on every in-repo .obend. For every
 // declaration (definition mode) and every preview-cohort invocation
 // (application mode, with its arguments), both must refuse, or both must emit
-// the same Core4 term and the same typing proposal (annotations, bounds,
-// shareable variables), compared as canonical JSON.
+// the same Core4 term and the same typing proposal (type table, annotations,
+// bounds, shareable variables), compared as canonical JSON.
 // usage: bun objective-elaborate-tv.ts NEW_WORK_DIR LEAN_COMMAND...
 //   e.g. bun objective-elaborate-tv.ts /tmp/tv lake env lean --run Host/ObjectiveBendElaborateRun.lean
 import {readFileSync,readdirSync,writeFileSync,mkdirSync,existsSync} from "node:fs";
@@ -74,7 +74,7 @@ const ts=jobs.map(job=>{
  try{
   const out=elaborate(job.modules.map((m:any)=>({...m,sha256:"tv",astSha256:"tv"})),job.entryModule,job.entryDefinition,job.arguments,job.mode);
   const typed:any=literalAnnotations(out);
-  return {ok:true,term:out.term,typed:typed.status==="unsupported"?{unsupported:typed.message}:{annotations:typed.annotations,bounds:typed.bounds,shareableVariables:typed.shareableVariables}};
+  return {ok:true,term:out.term,typed:typed.status==="unsupported"?{unsupported:typed.message}:{types:typed.types,annotations:typed.annotations,bounds:typed.bounds,shareableVariables:typed.shareableVariables}};
  }catch(e:any){return {ok:false,error:e?.message??String(e)};}
 });
 const jobsPath=join(work,"jobs.json"),leanOut=join(work,"lean-results.json");

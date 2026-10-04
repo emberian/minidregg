@@ -101,10 +101,25 @@ it with `metadata(S).interface`.
 
 ## Typing proposal
 
-`literalAnnotations` emits `dregg.objective-bend.typed-core.v2`: the term, one
-annotation per `lam` (domain, codomain, quantity, reuse) and per `inject`
-(payload → variant), the global row as bound 0, recursive sums as further
-bounded shareable variables. It is a proposal: `Host/ObjectiveBendPreview`
+`literalAnnotations` emits `dregg.objective-bend.typed-core.v3`: the term, a type
+table `types`, one annotation per `lam` (domain, codomain, quantity, reuse) and per
+`inject` (payload → variant), the global row as bound 0, recursive sums as further
+bounded shareable variables, and `fuel` (the request's `typeFuel`: the packet the
+elaborator writes, `PREFIX.typed.json`, is exactly the packet the checker reads).
+
+Types are named through the table: each composite type (arrow, field,
+specification, prototype, variant, computation) is one entry whose children are
+inline leaves (`natural`, `boolean`, `label`, `emptyRow`, `variable`, `custody`) or
+`{"tag":"ref","index":"N"}` naming an EARLIER entry; identical entries are stored
+once, in post-order over the annotations, then the bounds. A fully expanded type of
+a record whose fields are records of records is exponential in its depth; the table
+is linear in the number of distinct types. Measured on `world/commons`
+(`CommonsEscrowAmount`): the proposal was 245,444,831 bytes (and the preview wrote a
+byte-identical second copy, `typed-input.json`); it is 1,018,985 bytes and one file.
+`Theory.ObjectiveBendTyping.decodeTypeWith` decodes a ref to exactly the type it names,
+depth included, so a table-form proposal decodes to the same `Ty` as its inlined
+expansion under the same nesting capacity (256); the checker's judgment is unchanged.
+The v2 schema (every type inlined) no longer loads. It is a proposal: `Host/ObjectiveBendPreview`
 runs `check` on the same decoded term and refuses anything outside the
 checker's fragment (for example a scalar-target spec, whose `extend` needs a
 row, or an affine parameter used twice).

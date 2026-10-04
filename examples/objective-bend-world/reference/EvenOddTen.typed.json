@@ -1,5 +1,5 @@
 {
-  "schema": "dregg.objective-bend.typed-core.v2",
+  "schema": "dregg.objective-bend.typed-core.v3",
   "term": {
     "tag": "get",
     "target": {
@@ -330,6 +330,227 @@
     },
     "name": "EvenOdd.evenTen"
   },
+  "types": [
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "emptyRow"
+      },
+      "codomain": {
+        "tag": "variable",
+        "index": "0"
+      }
+    },
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "natural"
+      },
+      "codomain": {
+        "tag": "boolean"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "odd",
+      "member": {
+        "tag": "ref",
+        "index": "1"
+      },
+      "tail": {
+        "tag": "emptyRow"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "even",
+      "member": {
+        "tag": "ref",
+        "index": "1"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "2"
+      }
+    },
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "ref",
+        "index": "3"
+      },
+      "codomain": {
+        "tag": "ref",
+        "index": "3"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "laws",
+      "member": {
+        "tag": "emptyRow"
+      },
+      "tail": {
+        "tag": "emptyRow"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "interface",
+      "member": {
+        "tag": "label"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "5"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "name",
+      "member": {
+        "tag": "label"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "6"
+      }
+    },
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "ref",
+        "index": "3"
+      },
+      "codomain": {
+        "tag": "ref",
+        "index": "4"
+      }
+    },
+    {
+      "tag": "specification",
+      "metadata": {
+        "tag": "ref",
+        "index": "7"
+      },
+      "extension": {
+        "tag": "ref",
+        "index": "8"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "wrapping",
+      "member": {
+        "tag": "ref",
+        "index": "9"
+      },
+      "tail": {
+        "tag": "emptyRow"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "inherited",
+      "member": {
+        "tag": "ref",
+        "index": "9"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "10"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "operator",
+      "member": {
+        "tag": "label"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "11"
+      }
+    },
+    {
+      "tag": "specification",
+      "metadata": {
+        "tag": "ref",
+        "index": "12"
+      },
+      "extension": {
+        "tag": "ref",
+        "index": "8"
+      }
+    },
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "ref",
+        "index": "9"
+      },
+      "codomain": {
+        "tag": "ref",
+        "index": "13"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "EvenOdd.evenTen",
+      "member": {
+        "tag": "boolean"
+      },
+      "tail": {
+        "tag": "emptyRow"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "EvenOdd.parity",
+      "member": {
+        "tag": "ref",
+        "index": "4"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "15"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "EvenOdd.Odd",
+      "member": {
+        "tag": "ref",
+        "index": "9"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "16"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "EvenOdd.Even",
+      "member": {
+        "tag": "ref",
+        "index": "9"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "17"
+      }
+    }
+  ],
   "annotations": [
     {
       "path": [
@@ -342,16 +563,8 @@
         "index": "0"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "emptyRow"
-        },
-        "codomain": {
-          "tag": "variable",
-          "index": "0"
-        }
+        "tag": "ref",
+        "index": "0"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -385,108 +598,12 @@
         "1"
       ],
       "domain": {
-        "tag": "field",
-        "name": "even",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "boolean"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "odd",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "boolean"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "field",
-          "name": "even",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "boolean"
-            }
-          },
-          "tail": {
-            "tag": "field",
-            "name": "odd",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "boolean"
-              }
-            },
-            "tail": {
-              "tag": "emptyRow"
-            }
-          }
-        },
-        "codomain": {
-          "tag": "field",
-          "name": "even",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "boolean"
-            }
-          },
-          "tail": {
-            "tag": "field",
-            "name": "odd",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "boolean"
-              }
-            },
-            "tail": {
-              "tag": "emptyRow"
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "4"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -504,70 +621,12 @@
         "0"
       ],
       "domain": {
-        "tag": "field",
-        "name": "even",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "boolean"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "odd",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "boolean"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "codomain": {
-        "tag": "field",
-        "name": "even",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "boolean"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "odd",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "boolean"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -608,108 +667,12 @@
         "1"
       ],
       "domain": {
-        "tag": "field",
-        "name": "even",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "boolean"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "odd",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "boolean"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "field",
-          "name": "even",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "boolean"
-            }
-          },
-          "tail": {
-            "tag": "field",
-            "name": "odd",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "boolean"
-              }
-            },
-            "tail": {
-              "tag": "emptyRow"
-            }
-          }
-        },
-        "codomain": {
-          "tag": "field",
-          "name": "even",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "boolean"
-            }
-          },
-          "tail": {
-            "tag": "field",
-            "name": "odd",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "boolean"
-              }
-            },
-            "tail": {
-              "tag": "emptyRow"
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "4"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -727,70 +690,12 @@
         "0"
       ],
       "domain": {
-        "tag": "field",
-        "name": "even",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "boolean"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "odd",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "boolean"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "codomain": {
-        "tag": "field",
-        "name": "even",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "boolean"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "odd",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "boolean"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -830,70 +735,12 @@
         "2"
       ],
       "domain": {
-        "tag": "field",
-        "name": "even",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "boolean"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "odd",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "boolean"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "codomain": {
-        "tag": "field",
-        "name": "even",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "boolean"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "odd",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "boolean"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -913,683 +760,12 @@
         "0"
       ],
       "domain": {
-        "tag": "specification",
-        "metadata": {
-          "tag": "field",
-          "name": "name",
-          "member": {
-            "tag": "label"
-          },
-          "tail": {
-            "tag": "field",
-            "name": "interface",
-            "member": {
-              "tag": "label"
-            },
-            "tail": {
-              "tag": "field",
-              "name": "laws",
-              "member": {
-                "tag": "emptyRow"
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          }
-        },
-        "extension": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "field",
-            "name": "even",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "boolean"
-              }
-            },
-            "tail": {
-              "tag": "field",
-              "name": "odd",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "boolean"
-                }
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          },
-          "codomain": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "field",
-              "name": "even",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "boolean"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "odd",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "boolean"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            },
-            "codomain": {
-              "tag": "field",
-              "name": "even",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "boolean"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "odd",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "boolean"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "9"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "specification",
-          "metadata": {
-            "tag": "field",
-            "name": "name",
-            "member": {
-              "tag": "label"
-            },
-            "tail": {
-              "tag": "field",
-              "name": "interface",
-              "member": {
-                "tag": "label"
-              },
-              "tail": {
-                "tag": "field",
-                "name": "laws",
-                "member": {
-                  "tag": "emptyRow"
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          },
-          "extension": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "field",
-              "name": "even",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "boolean"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "odd",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "boolean"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            },
-            "codomain": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "field",
-                "name": "even",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "boolean"
-                  }
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "odd",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "boolean"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              },
-              "codomain": {
-                "tag": "field",
-                "name": "even",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "boolean"
-                  }
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "odd",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "boolean"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "codomain": {
-          "tag": "specification",
-          "metadata": {
-            "tag": "field",
-            "name": "operator",
-            "member": {
-              "tag": "label"
-            },
-            "tail": {
-              "tag": "field",
-              "name": "inherited",
-              "member": {
-                "tag": "specification",
-                "metadata": {
-                  "tag": "field",
-                  "name": "name",
-                  "member": {
-                    "tag": "label"
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "interface",
-                    "member": {
-                      "tag": "label"
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "laws",
-                      "member": {
-                        "tag": "emptyRow"
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  }
-                },
-                "extension": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "field",
-                    "name": "even",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "boolean"
-                      }
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "odd",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "boolean"
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  },
-                  "codomain": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "field",
-                      "name": "even",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "boolean"
-                        }
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "odd",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "boolean"
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    },
-                    "codomain": {
-                      "tag": "field",
-                      "name": "even",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "boolean"
-                        }
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "odd",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "boolean"
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    }
-                  }
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "wrapping",
-                "member": {
-                  "tag": "specification",
-                  "metadata": {
-                    "tag": "field",
-                    "name": "name",
-                    "member": {
-                      "tag": "label"
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "interface",
-                      "member": {
-                        "tag": "label"
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "laws",
-                        "member": {
-                          "tag": "emptyRow"
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    }
-                  },
-                  "extension": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "field",
-                      "name": "even",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "boolean"
-                        }
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "odd",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "boolean"
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    },
-                    "codomain": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "field",
-                        "name": "even",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "boolean"
-                          }
-                        },
-                        "tail": {
-                          "tag": "field",
-                          "name": "odd",
-                          "member": {
-                            "tag": "arrow",
-                            "reuse": "reusable",
-                            "parameter": "unrestricted",
-                            "domain": {
-                              "tag": "natural"
-                            },
-                            "codomain": {
-                              "tag": "boolean"
-                            }
-                          },
-                          "tail": {
-                            "tag": "emptyRow"
-                          }
-                        }
-                      },
-                      "codomain": {
-                        "tag": "field",
-                        "name": "even",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "boolean"
-                          }
-                        },
-                        "tail": {
-                          "tag": "field",
-                          "name": "odd",
-                          "member": {
-                            "tag": "arrow",
-                            "reuse": "reusable",
-                            "parameter": "unrestricted",
-                            "domain": {
-                              "tag": "natural"
-                            },
-                            "codomain": {
-                              "tag": "boolean"
-                            }
-                          },
-                          "tail": {
-                            "tag": "emptyRow"
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          },
-          "extension": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "field",
-              "name": "even",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "boolean"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "odd",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "boolean"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            },
-            "codomain": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "field",
-                "name": "even",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "boolean"
-                  }
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "odd",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "boolean"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              },
-              "codomain": {
-                "tag": "field",
-                "name": "even",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "boolean"
-                  }
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "odd",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "boolean"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              }
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "14"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -1610,542 +786,12 @@
         "0"
       ],
       "domain": {
-        "tag": "specification",
-        "metadata": {
-          "tag": "field",
-          "name": "name",
-          "member": {
-            "tag": "label"
-          },
-          "tail": {
-            "tag": "field",
-            "name": "interface",
-            "member": {
-              "tag": "label"
-            },
-            "tail": {
-              "tag": "field",
-              "name": "laws",
-              "member": {
-                "tag": "emptyRow"
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          }
-        },
-        "extension": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "field",
-            "name": "even",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "boolean"
-              }
-            },
-            "tail": {
-              "tag": "field",
-              "name": "odd",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "boolean"
-                }
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          },
-          "codomain": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "field",
-              "name": "even",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "boolean"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "odd",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "boolean"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            },
-            "codomain": {
-              "tag": "field",
-              "name": "even",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "boolean"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "odd",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "boolean"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "9"
       },
       "codomain": {
-        "tag": "specification",
-        "metadata": {
-          "tag": "field",
-          "name": "operator",
-          "member": {
-            "tag": "label"
-          },
-          "tail": {
-            "tag": "field",
-            "name": "inherited",
-            "member": {
-              "tag": "specification",
-              "metadata": {
-                "tag": "field",
-                "name": "name",
-                "member": {
-                  "tag": "label"
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "interface",
-                  "member": {
-                    "tag": "label"
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "laws",
-                    "member": {
-                      "tag": "emptyRow"
-                    },
-                    "tail": {
-                      "tag": "emptyRow"
-                    }
-                  }
-                }
-              },
-              "extension": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "field",
-                  "name": "even",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "boolean"
-                    }
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "odd",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "boolean"
-                      }
-                    },
-                    "tail": {
-                      "tag": "emptyRow"
-                    }
-                  }
-                },
-                "codomain": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "field",
-                    "name": "even",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "boolean"
-                      }
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "odd",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "boolean"
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  },
-                  "codomain": {
-                    "tag": "field",
-                    "name": "even",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "boolean"
-                      }
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "odd",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "boolean"
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            "tail": {
-              "tag": "field",
-              "name": "wrapping",
-              "member": {
-                "tag": "specification",
-                "metadata": {
-                  "tag": "field",
-                  "name": "name",
-                  "member": {
-                    "tag": "label"
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "interface",
-                    "member": {
-                      "tag": "label"
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "laws",
-                      "member": {
-                        "tag": "emptyRow"
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  }
-                },
-                "extension": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "field",
-                    "name": "even",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "boolean"
-                      }
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "odd",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "boolean"
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  },
-                  "codomain": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "field",
-                      "name": "even",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "boolean"
-                        }
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "odd",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "boolean"
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    },
-                    "codomain": {
-                      "tag": "field",
-                      "name": "even",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "boolean"
-                        }
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "odd",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "boolean"
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    }
-                  }
-                }
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          }
-        },
-        "extension": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "field",
-            "name": "even",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "boolean"
-              }
-            },
-            "tail": {
-              "tag": "field",
-              "name": "odd",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "boolean"
-                }
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          },
-          "codomain": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "field",
-              "name": "even",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "boolean"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "odd",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "boolean"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            },
-            "codomain": {
-              "tag": "field",
-              "name": "even",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "boolean"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "odd",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "boolean"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "13"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -2201,369 +847,8 @@
     {
       "index": "0",
       "type": {
-        "tag": "field",
-        "name": "EvenOdd.Even",
-        "member": {
-          "tag": "specification",
-          "metadata": {
-            "tag": "field",
-            "name": "name",
-            "member": {
-              "tag": "label"
-            },
-            "tail": {
-              "tag": "field",
-              "name": "interface",
-              "member": {
-                "tag": "label"
-              },
-              "tail": {
-                "tag": "field",
-                "name": "laws",
-                "member": {
-                  "tag": "emptyRow"
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          },
-          "extension": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "field",
-              "name": "even",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "boolean"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "odd",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "boolean"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            },
-            "codomain": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "field",
-                "name": "even",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "boolean"
-                  }
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "odd",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "boolean"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              },
-              "codomain": {
-                "tag": "field",
-                "name": "even",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "boolean"
-                  }
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "odd",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "boolean"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "EvenOdd.Odd",
-          "member": {
-            "tag": "specification",
-            "metadata": {
-              "tag": "field",
-              "name": "name",
-              "member": {
-                "tag": "label"
-              },
-              "tail": {
-                "tag": "field",
-                "name": "interface",
-                "member": {
-                  "tag": "label"
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "laws",
-                  "member": {
-                    "tag": "emptyRow"
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              }
-            },
-            "extension": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "field",
-                "name": "even",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "boolean"
-                  }
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "odd",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "boolean"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              },
-              "codomain": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "field",
-                  "name": "even",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "boolean"
-                    }
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "odd",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "boolean"
-                      }
-                    },
-                    "tail": {
-                      "tag": "emptyRow"
-                    }
-                  }
-                },
-                "codomain": {
-                  "tag": "field",
-                  "name": "even",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "boolean"
-                    }
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "odd",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "boolean"
-                      }
-                    },
-                    "tail": {
-                      "tag": "emptyRow"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "tail": {
-            "tag": "field",
-            "name": "EvenOdd.parity",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "field",
-                "name": "even",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "boolean"
-                  }
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "odd",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "boolean"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              },
-              "codomain": {
-                "tag": "field",
-                "name": "even",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "boolean"
-                  }
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "odd",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "boolean"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              }
-            },
-            "tail": {
-              "tag": "field",
-              "name": "EvenOdd.evenTen",
-              "member": {
-                "tag": "boolean"
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "18"
       }
     }
   ],

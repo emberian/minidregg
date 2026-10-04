@@ -1,5 +1,5 @@
 {
-  "schema": "dregg.objective-bend.typed-core.v2",
+  "schema": "dregg.objective-bend.typed-core.v3",
   "term": {
     "tag": "get",
     "target": {
@@ -510,6 +510,389 @@
     },
     "name": "TwiceReview.twiceOfThree"
   },
+  "types": [
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "emptyRow"
+      },
+      "codomain": {
+        "tag": "variable",
+        "index": "0"
+      }
+    },
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "natural"
+      },
+      "codomain": {
+        "tag": "natural"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "twice",
+      "member": {
+        "tag": "ref",
+        "index": "1"
+      },
+      "tail": {
+        "tag": "emptyRow"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "review",
+      "member": {
+        "tag": "ref",
+        "index": "1"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "2"
+      }
+    },
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "ref",
+        "index": "3"
+      },
+      "codomain": {
+        "tag": "ref",
+        "index": "3"
+      }
+    },
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "natural"
+      },
+      "codomain": {
+        "tag": "boolean"
+      }
+    },
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "ref",
+        "index": "3"
+      },
+      "codomain": {
+        "tag": "ref",
+        "index": "5"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "laws",
+      "member": {
+        "tag": "emptyRow"
+      },
+      "tail": {
+        "tag": "emptyRow"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "interface",
+      "member": {
+        "tag": "label"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "7"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "name",
+      "member": {
+        "tag": "label"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "8"
+      }
+    },
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "ref",
+        "index": "3"
+      },
+      "codomain": {
+        "tag": "ref",
+        "index": "4"
+      }
+    },
+    {
+      "tag": "specification",
+      "metadata": {
+        "tag": "ref",
+        "index": "9"
+      },
+      "extension": {
+        "tag": "ref",
+        "index": "10"
+      }
+    },
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "ref",
+        "index": "3"
+      },
+      "codomain": {
+        "tag": "ref",
+        "index": "6"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "twice_distinct",
+      "member": {
+        "tag": "ref",
+        "index": "12"
+      },
+      "tail": {
+        "tag": "emptyRow"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "laws",
+      "member": {
+        "tag": "ref",
+        "index": "13"
+      },
+      "tail": {
+        "tag": "emptyRow"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "interface",
+      "member": {
+        "tag": "label"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "14"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "name",
+      "member": {
+        "tag": "label"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "15"
+      }
+    },
+    {
+      "tag": "specification",
+      "metadata": {
+        "tag": "ref",
+        "index": "16"
+      },
+      "extension": {
+        "tag": "ref",
+        "index": "10"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "wrapping",
+      "member": {
+        "tag": "ref",
+        "index": "17"
+      },
+      "tail": {
+        "tag": "emptyRow"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "inherited",
+      "member": {
+        "tag": "ref",
+        "index": "11"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "18"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "operator",
+      "member": {
+        "tag": "label"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "19"
+      }
+    },
+    {
+      "tag": "specification",
+      "metadata": {
+        "tag": "ref",
+        "index": "20"
+      },
+      "extension": {
+        "tag": "ref",
+        "index": "10"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "wrapping",
+      "member": {
+        "tag": "ref",
+        "index": "11"
+      },
+      "tail": {
+        "tag": "emptyRow"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "inherited",
+      "member": {
+        "tag": "ref",
+        "index": "21"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "22"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "operator",
+      "member": {
+        "tag": "label"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "23"
+      }
+    },
+    {
+      "tag": "specification",
+      "metadata": {
+        "tag": "ref",
+        "index": "24"
+      },
+      "extension": {
+        "tag": "ref",
+        "index": "10"
+      }
+    },
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "ref",
+        "index": "11"
+      },
+      "codomain": {
+        "tag": "ref",
+        "index": "25"
+      }
+    },
+    {
+      "tag": "arrow",
+      "reuse": "reusable",
+      "parameter": "unrestricted",
+      "domain": {
+        "tag": "ref",
+        "index": "17"
+      },
+      "codomain": {
+        "tag": "ref",
+        "index": "21"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "TwiceReview.twiceOfThree",
+      "member": {
+        "tag": "natural"
+      },
+      "tail": {
+        "tag": "emptyRow"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "TwiceReview.reviewTarget",
+      "member": {
+        "tag": "ref",
+        "index": "4"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "28"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "TwiceReview.AugmentedReview",
+      "member": {
+        "tag": "ref",
+        "index": "11"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "29"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "TwiceReview.TwiceReview",
+      "member": {
+        "tag": "ref",
+        "index": "17"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "30"
+      }
+    },
+    {
+      "tag": "field",
+      "name": "TwiceReview.BaseReview",
+      "member": {
+        "tag": "ref",
+        "index": "11"
+      },
+      "tail": {
+        "tag": "ref",
+        "index": "31"
+      }
+    }
+  ],
   "annotations": [
     {
       "path": [
@@ -522,16 +905,8 @@
         "index": "0"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "emptyRow"
-        },
-        "codomain": {
-          "tag": "variable",
-          "index": "0"
-        }
+        "tag": "ref",
+        "index": "0"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -565,108 +940,12 @@
         "1"
       ],
       "domain": {
-        "tag": "field",
-        "name": "review",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "natural"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "twice",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "field",
-          "name": "review",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          },
-          "tail": {
-            "tag": "field",
-            "name": "twice",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "natural"
-              }
-            },
-            "tail": {
-              "tag": "emptyRow"
-            }
-          }
-        },
-        "codomain": {
-          "tag": "field",
-          "name": "review",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          },
-          "tail": {
-            "tag": "field",
-            "name": "twice",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "natural"
-              }
-            },
-            "tail": {
-              "tag": "emptyRow"
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "4"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -684,70 +963,12 @@
         "0"
       ],
       "domain": {
-        "tag": "field",
-        "name": "review",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "natural"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "twice",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "codomain": {
-        "tag": "field",
-        "name": "review",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "natural"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "twice",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -790,86 +1011,12 @@
         "0"
       ],
       "domain": {
-        "tag": "field",
-        "name": "review",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "natural"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "twice",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "field",
-          "name": "review",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          },
-          "tail": {
-            "tag": "field",
-            "name": "twice",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "natural"
-              }
-            },
-            "tail": {
-              "tag": "emptyRow"
-            }
-          }
-        },
-        "codomain": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "boolean"
-          }
-        }
+        "tag": "ref",
+        "index": "6"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -889,48 +1036,12 @@
         "0"
       ],
       "domain": {
-        "tag": "field",
-        "name": "review",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "natural"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "twice",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "natural"
-        },
-        "codomain": {
-          "tag": "boolean"
-        }
+        "tag": "ref",
+        "index": "5"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -971,108 +1082,12 @@
         "1"
       ],
       "domain": {
-        "tag": "field",
-        "name": "review",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "natural"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "twice",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "field",
-          "name": "review",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          },
-          "tail": {
-            "tag": "field",
-            "name": "twice",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "natural"
-              }
-            },
-            "tail": {
-              "tag": "emptyRow"
-            }
-          }
-        },
-        "codomain": {
-          "tag": "field",
-          "name": "review",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          },
-          "tail": {
-            "tag": "field",
-            "name": "twice",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "natural"
-              }
-            },
-            "tail": {
-              "tag": "emptyRow"
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "4"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -1090,70 +1105,12 @@
         "0"
       ],
       "domain": {
-        "tag": "field",
-        "name": "review",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "natural"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "twice",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "codomain": {
-        "tag": "field",
-        "name": "review",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "natural"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "twice",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -1194,108 +1151,12 @@
         "1"
       ],
       "domain": {
-        "tag": "field",
-        "name": "review",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "natural"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "twice",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "field",
-          "name": "review",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          },
-          "tail": {
-            "tag": "field",
-            "name": "twice",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "natural"
-              }
-            },
-            "tail": {
-              "tag": "emptyRow"
-            }
-          }
-        },
-        "codomain": {
-          "tag": "field",
-          "name": "review",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          },
-          "tail": {
-            "tag": "field",
-            "name": "twice",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "natural"
-              }
-            },
-            "tail": {
-              "tag": "emptyRow"
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "4"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -1313,70 +1174,12 @@
         "0"
       ],
       "domain": {
-        "tag": "field",
-        "name": "review",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "natural"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "twice",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "codomain": {
-        "tag": "field",
-        "name": "review",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "natural"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "twice",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -1416,70 +1219,12 @@
         "3"
       ],
       "domain": {
-        "tag": "field",
-        "name": "review",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "natural"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "twice",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "codomain": {
-        "tag": "field",
-        "name": "review",
-        "member": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "natural"
-          },
-          "codomain": {
-            "tag": "natural"
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "twice",
-          "member": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "natural"
-            },
-            "codomain": {
-              "tag": "natural"
-            }
-          },
-          "tail": {
-            "tag": "emptyRow"
-          }
-        }
+        "tag": "ref",
+        "index": "3"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -1499,1397 +1244,12 @@
         "0"
       ],
       "domain": {
-        "tag": "specification",
-        "metadata": {
-          "tag": "field",
-          "name": "operator",
-          "member": {
-            "tag": "label"
-          },
-          "tail": {
-            "tag": "field",
-            "name": "inherited",
-            "member": {
-              "tag": "specification",
-              "metadata": {
-                "tag": "field",
-                "name": "name",
-                "member": {
-                  "tag": "label"
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "interface",
-                  "member": {
-                    "tag": "label"
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "laws",
-                    "member": {
-                      "tag": "emptyRow"
-                    },
-                    "tail": {
-                      "tag": "emptyRow"
-                    }
-                  }
-                }
-              },
-              "extension": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "field",
-                  "name": "review",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "twice",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "emptyRow"
-                    }
-                  }
-                },
-                "codomain": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "field",
-                    "name": "review",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "twice",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  },
-                  "codomain": {
-                    "tag": "field",
-                    "name": "review",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "twice",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            "tail": {
-              "tag": "field",
-              "name": "wrapping",
-              "member": {
-                "tag": "specification",
-                "metadata": {
-                  "tag": "field",
-                  "name": "name",
-                  "member": {
-                    "tag": "label"
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "interface",
-                    "member": {
-                      "tag": "label"
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "laws",
-                      "member": {
-                        "tag": "field",
-                        "name": "twice_distinct",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "field",
-                            "name": "review",
-                            "member": {
-                              "tag": "arrow",
-                              "reuse": "reusable",
-                              "parameter": "unrestricted",
-                              "domain": {
-                                "tag": "natural"
-                              },
-                              "codomain": {
-                                "tag": "natural"
-                              }
-                            },
-                            "tail": {
-                              "tag": "field",
-                              "name": "twice",
-                              "member": {
-                                "tag": "arrow",
-                                "reuse": "reusable",
-                                "parameter": "unrestricted",
-                                "domain": {
-                                  "tag": "natural"
-                                },
-                                "codomain": {
-                                  "tag": "natural"
-                                }
-                              },
-                              "tail": {
-                                "tag": "emptyRow"
-                              }
-                            }
-                          },
-                          "codomain": {
-                            "tag": "arrow",
-                            "reuse": "reusable",
-                            "parameter": "unrestricted",
-                            "domain": {
-                              "tag": "field",
-                              "name": "review",
-                              "member": {
-                                "tag": "arrow",
-                                "reuse": "reusable",
-                                "parameter": "unrestricted",
-                                "domain": {
-                                  "tag": "natural"
-                                },
-                                "codomain": {
-                                  "tag": "natural"
-                                }
-                              },
-                              "tail": {
-                                "tag": "field",
-                                "name": "twice",
-                                "member": {
-                                  "tag": "arrow",
-                                  "reuse": "reusable",
-                                  "parameter": "unrestricted",
-                                  "domain": {
-                                    "tag": "natural"
-                                  },
-                                  "codomain": {
-                                    "tag": "natural"
-                                  }
-                                },
-                                "tail": {
-                                  "tag": "emptyRow"
-                                }
-                              }
-                            },
-                            "codomain": {
-                              "tag": "arrow",
-                              "reuse": "reusable",
-                              "parameter": "unrestricted",
-                              "domain": {
-                                "tag": "natural"
-                              },
-                              "codomain": {
-                                "tag": "boolean"
-                              }
-                            }
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  }
-                },
-                "extension": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "field",
-                    "name": "review",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "twice",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  },
-                  "codomain": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "field",
-                      "name": "review",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "twice",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    },
-                    "codomain": {
-                      "tag": "field",
-                      "name": "review",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "twice",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    }
-                  }
-                }
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          }
-        },
-        "extension": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "field",
-            "name": "review",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "natural"
-              }
-            },
-            "tail": {
-              "tag": "field",
-              "name": "twice",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          },
-          "codomain": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "field",
-              "name": "review",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "twice",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            },
-            "codomain": {
-              "tag": "field",
-              "name": "review",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "twice",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "21"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "specification",
-          "metadata": {
-            "tag": "field",
-            "name": "name",
-            "member": {
-              "tag": "label"
-            },
-            "tail": {
-              "tag": "field",
-              "name": "interface",
-              "member": {
-                "tag": "label"
-              },
-              "tail": {
-                "tag": "field",
-                "name": "laws",
-                "member": {
-                  "tag": "emptyRow"
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          },
-          "extension": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "field",
-              "name": "review",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "twice",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            },
-            "codomain": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "field",
-                "name": "review",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "twice",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              },
-              "codomain": {
-                "tag": "field",
-                "name": "review",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "twice",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "codomain": {
-          "tag": "specification",
-          "metadata": {
-            "tag": "field",
-            "name": "operator",
-            "member": {
-              "tag": "label"
-            },
-            "tail": {
-              "tag": "field",
-              "name": "inherited",
-              "member": {
-                "tag": "specification",
-                "metadata": {
-                  "tag": "field",
-                  "name": "operator",
-                  "member": {
-                    "tag": "label"
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "inherited",
-                    "member": {
-                      "tag": "specification",
-                      "metadata": {
-                        "tag": "field",
-                        "name": "name",
-                        "member": {
-                          "tag": "label"
-                        },
-                        "tail": {
-                          "tag": "field",
-                          "name": "interface",
-                          "member": {
-                            "tag": "label"
-                          },
-                          "tail": {
-                            "tag": "field",
-                            "name": "laws",
-                            "member": {
-                              "tag": "emptyRow"
-                            },
-                            "tail": {
-                              "tag": "emptyRow"
-                            }
-                          }
-                        }
-                      },
-                      "extension": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "field",
-                          "name": "review",
-                          "member": {
-                            "tag": "arrow",
-                            "reuse": "reusable",
-                            "parameter": "unrestricted",
-                            "domain": {
-                              "tag": "natural"
-                            },
-                            "codomain": {
-                              "tag": "natural"
-                            }
-                          },
-                          "tail": {
-                            "tag": "field",
-                            "name": "twice",
-                            "member": {
-                              "tag": "arrow",
-                              "reuse": "reusable",
-                              "parameter": "unrestricted",
-                              "domain": {
-                                "tag": "natural"
-                              },
-                              "codomain": {
-                                "tag": "natural"
-                              }
-                            },
-                            "tail": {
-                              "tag": "emptyRow"
-                            }
-                          }
-                        },
-                        "codomain": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "field",
-                            "name": "review",
-                            "member": {
-                              "tag": "arrow",
-                              "reuse": "reusable",
-                              "parameter": "unrestricted",
-                              "domain": {
-                                "tag": "natural"
-                              },
-                              "codomain": {
-                                "tag": "natural"
-                              }
-                            },
-                            "tail": {
-                              "tag": "field",
-                              "name": "twice",
-                              "member": {
-                                "tag": "arrow",
-                                "reuse": "reusable",
-                                "parameter": "unrestricted",
-                                "domain": {
-                                  "tag": "natural"
-                                },
-                                "codomain": {
-                                  "tag": "natural"
-                                }
-                              },
-                              "tail": {
-                                "tag": "emptyRow"
-                              }
-                            }
-                          },
-                          "codomain": {
-                            "tag": "field",
-                            "name": "review",
-                            "member": {
-                              "tag": "arrow",
-                              "reuse": "reusable",
-                              "parameter": "unrestricted",
-                              "domain": {
-                                "tag": "natural"
-                              },
-                              "codomain": {
-                                "tag": "natural"
-                              }
-                            },
-                            "tail": {
-                              "tag": "field",
-                              "name": "twice",
-                              "member": {
-                                "tag": "arrow",
-                                "reuse": "reusable",
-                                "parameter": "unrestricted",
-                                "domain": {
-                                  "tag": "natural"
-                                },
-                                "codomain": {
-                                  "tag": "natural"
-                                }
-                              },
-                              "tail": {
-                                "tag": "emptyRow"
-                              }
-                            }
-                          }
-                        }
-                      }
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "wrapping",
-                      "member": {
-                        "tag": "specification",
-                        "metadata": {
-                          "tag": "field",
-                          "name": "name",
-                          "member": {
-                            "tag": "label"
-                          },
-                          "tail": {
-                            "tag": "field",
-                            "name": "interface",
-                            "member": {
-                              "tag": "label"
-                            },
-                            "tail": {
-                              "tag": "field",
-                              "name": "laws",
-                              "member": {
-                                "tag": "field",
-                                "name": "twice_distinct",
-                                "member": {
-                                  "tag": "arrow",
-                                  "reuse": "reusable",
-                                  "parameter": "unrestricted",
-                                  "domain": {
-                                    "tag": "field",
-                                    "name": "review",
-                                    "member": {
-                                      "tag": "arrow",
-                                      "reuse": "reusable",
-                                      "parameter": "unrestricted",
-                                      "domain": {
-                                        "tag": "natural"
-                                      },
-                                      "codomain": {
-                                        "tag": "natural"
-                                      }
-                                    },
-                                    "tail": {
-                                      "tag": "field",
-                                      "name": "twice",
-                                      "member": {
-                                        "tag": "arrow",
-                                        "reuse": "reusable",
-                                        "parameter": "unrestricted",
-                                        "domain": {
-                                          "tag": "natural"
-                                        },
-                                        "codomain": {
-                                          "tag": "natural"
-                                        }
-                                      },
-                                      "tail": {
-                                        "tag": "emptyRow"
-                                      }
-                                    }
-                                  },
-                                  "codomain": {
-                                    "tag": "arrow",
-                                    "reuse": "reusable",
-                                    "parameter": "unrestricted",
-                                    "domain": {
-                                      "tag": "field",
-                                      "name": "review",
-                                      "member": {
-                                        "tag": "arrow",
-                                        "reuse": "reusable",
-                                        "parameter": "unrestricted",
-                                        "domain": {
-                                          "tag": "natural"
-                                        },
-                                        "codomain": {
-                                          "tag": "natural"
-                                        }
-                                      },
-                                      "tail": {
-                                        "tag": "field",
-                                        "name": "twice",
-                                        "member": {
-                                          "tag": "arrow",
-                                          "reuse": "reusable",
-                                          "parameter": "unrestricted",
-                                          "domain": {
-                                            "tag": "natural"
-                                          },
-                                          "codomain": {
-                                            "tag": "natural"
-                                          }
-                                        },
-                                        "tail": {
-                                          "tag": "emptyRow"
-                                        }
-                                      }
-                                    },
-                                    "codomain": {
-                                      "tag": "arrow",
-                                      "reuse": "reusable",
-                                      "parameter": "unrestricted",
-                                      "domain": {
-                                        "tag": "natural"
-                                      },
-                                      "codomain": {
-                                        "tag": "boolean"
-                                      }
-                                    }
-                                  }
-                                },
-                                "tail": {
-                                  "tag": "emptyRow"
-                                }
-                              },
-                              "tail": {
-                                "tag": "emptyRow"
-                              }
-                            }
-                          }
-                        },
-                        "extension": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "field",
-                            "name": "review",
-                            "member": {
-                              "tag": "arrow",
-                              "reuse": "reusable",
-                              "parameter": "unrestricted",
-                              "domain": {
-                                "tag": "natural"
-                              },
-                              "codomain": {
-                                "tag": "natural"
-                              }
-                            },
-                            "tail": {
-                              "tag": "field",
-                              "name": "twice",
-                              "member": {
-                                "tag": "arrow",
-                                "reuse": "reusable",
-                                "parameter": "unrestricted",
-                                "domain": {
-                                  "tag": "natural"
-                                },
-                                "codomain": {
-                                  "tag": "natural"
-                                }
-                              },
-                              "tail": {
-                                "tag": "emptyRow"
-                              }
-                            }
-                          },
-                          "codomain": {
-                            "tag": "arrow",
-                            "reuse": "reusable",
-                            "parameter": "unrestricted",
-                            "domain": {
-                              "tag": "field",
-                              "name": "review",
-                              "member": {
-                                "tag": "arrow",
-                                "reuse": "reusable",
-                                "parameter": "unrestricted",
-                                "domain": {
-                                  "tag": "natural"
-                                },
-                                "codomain": {
-                                  "tag": "natural"
-                                }
-                              },
-                              "tail": {
-                                "tag": "field",
-                                "name": "twice",
-                                "member": {
-                                  "tag": "arrow",
-                                  "reuse": "reusable",
-                                  "parameter": "unrestricted",
-                                  "domain": {
-                                    "tag": "natural"
-                                  },
-                                  "codomain": {
-                                    "tag": "natural"
-                                  }
-                                },
-                                "tail": {
-                                  "tag": "emptyRow"
-                                }
-                              }
-                            },
-                            "codomain": {
-                              "tag": "field",
-                              "name": "review",
-                              "member": {
-                                "tag": "arrow",
-                                "reuse": "reusable",
-                                "parameter": "unrestricted",
-                                "domain": {
-                                  "tag": "natural"
-                                },
-                                "codomain": {
-                                  "tag": "natural"
-                                }
-                              },
-                              "tail": {
-                                "tag": "field",
-                                "name": "twice",
-                                "member": {
-                                  "tag": "arrow",
-                                  "reuse": "reusable",
-                                  "parameter": "unrestricted",
-                                  "domain": {
-                                    "tag": "natural"
-                                  },
-                                  "codomain": {
-                                    "tag": "natural"
-                                  }
-                                },
-                                "tail": {
-                                  "tag": "emptyRow"
-                                }
-                              }
-                            }
-                          }
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  }
-                },
-                "extension": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "field",
-                    "name": "review",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "twice",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  },
-                  "codomain": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "field",
-                      "name": "review",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "twice",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    },
-                    "codomain": {
-                      "tag": "field",
-                      "name": "review",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "twice",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    }
-                  }
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "wrapping",
-                "member": {
-                  "tag": "specification",
-                  "metadata": {
-                    "tag": "field",
-                    "name": "name",
-                    "member": {
-                      "tag": "label"
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "interface",
-                      "member": {
-                        "tag": "label"
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "laws",
-                        "member": {
-                          "tag": "emptyRow"
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    }
-                  },
-                  "extension": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "field",
-                      "name": "review",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "twice",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    },
-                    "codomain": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "field",
-                        "name": "review",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "field",
-                          "name": "twice",
-                          "member": {
-                            "tag": "arrow",
-                            "reuse": "reusable",
-                            "parameter": "unrestricted",
-                            "domain": {
-                              "tag": "natural"
-                            },
-                            "codomain": {
-                              "tag": "natural"
-                            }
-                          },
-                          "tail": {
-                            "tag": "emptyRow"
-                          }
-                        }
-                      },
-                      "codomain": {
-                        "tag": "field",
-                        "name": "review",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "field",
-                          "name": "twice",
-                          "member": {
-                            "tag": "arrow",
-                            "reuse": "reusable",
-                            "parameter": "unrestricted",
-                            "domain": {
-                              "tag": "natural"
-                            },
-                            "codomain": {
-                              "tag": "natural"
-                            }
-                          },
-                          "tail": {
-                            "tag": "emptyRow"
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          },
-          "extension": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "field",
-              "name": "review",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "twice",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            },
-            "codomain": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "field",
-                "name": "review",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "twice",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              },
-              "codomain": {
-                "tag": "field",
-                "name": "review",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "twice",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              }
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "26"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -2910,899 +1270,12 @@
         "0"
       ],
       "domain": {
-        "tag": "specification",
-        "metadata": {
-          "tag": "field",
-          "name": "name",
-          "member": {
-            "tag": "label"
-          },
-          "tail": {
-            "tag": "field",
-            "name": "interface",
-            "member": {
-              "tag": "label"
-            },
-            "tail": {
-              "tag": "field",
-              "name": "laws",
-              "member": {
-                "tag": "emptyRow"
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          }
-        },
-        "extension": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "field",
-            "name": "review",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "natural"
-              }
-            },
-            "tail": {
-              "tag": "field",
-              "name": "twice",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          },
-          "codomain": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "field",
-              "name": "review",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "twice",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            },
-            "codomain": {
-              "tag": "field",
-              "name": "review",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "twice",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "11"
       },
       "codomain": {
-        "tag": "specification",
-        "metadata": {
-          "tag": "field",
-          "name": "operator",
-          "member": {
-            "tag": "label"
-          },
-          "tail": {
-            "tag": "field",
-            "name": "inherited",
-            "member": {
-              "tag": "specification",
-              "metadata": {
-                "tag": "field",
-                "name": "operator",
-                "member": {
-                  "tag": "label"
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "inherited",
-                  "member": {
-                    "tag": "specification",
-                    "metadata": {
-                      "tag": "field",
-                      "name": "name",
-                      "member": {
-                        "tag": "label"
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "interface",
-                        "member": {
-                          "tag": "label"
-                        },
-                        "tail": {
-                          "tag": "field",
-                          "name": "laws",
-                          "member": {
-                            "tag": "emptyRow"
-                          },
-                          "tail": {
-                            "tag": "emptyRow"
-                          }
-                        }
-                      }
-                    },
-                    "extension": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "field",
-                        "name": "review",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "field",
-                          "name": "twice",
-                          "member": {
-                            "tag": "arrow",
-                            "reuse": "reusable",
-                            "parameter": "unrestricted",
-                            "domain": {
-                              "tag": "natural"
-                            },
-                            "codomain": {
-                              "tag": "natural"
-                            }
-                          },
-                          "tail": {
-                            "tag": "emptyRow"
-                          }
-                        }
-                      },
-                      "codomain": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "field",
-                          "name": "review",
-                          "member": {
-                            "tag": "arrow",
-                            "reuse": "reusable",
-                            "parameter": "unrestricted",
-                            "domain": {
-                              "tag": "natural"
-                            },
-                            "codomain": {
-                              "tag": "natural"
-                            }
-                          },
-                          "tail": {
-                            "tag": "field",
-                            "name": "twice",
-                            "member": {
-                              "tag": "arrow",
-                              "reuse": "reusable",
-                              "parameter": "unrestricted",
-                              "domain": {
-                                "tag": "natural"
-                              },
-                              "codomain": {
-                                "tag": "natural"
-                              }
-                            },
-                            "tail": {
-                              "tag": "emptyRow"
-                            }
-                          }
-                        },
-                        "codomain": {
-                          "tag": "field",
-                          "name": "review",
-                          "member": {
-                            "tag": "arrow",
-                            "reuse": "reusable",
-                            "parameter": "unrestricted",
-                            "domain": {
-                              "tag": "natural"
-                            },
-                            "codomain": {
-                              "tag": "natural"
-                            }
-                          },
-                          "tail": {
-                            "tag": "field",
-                            "name": "twice",
-                            "member": {
-                              "tag": "arrow",
-                              "reuse": "reusable",
-                              "parameter": "unrestricted",
-                              "domain": {
-                                "tag": "natural"
-                              },
-                              "codomain": {
-                                "tag": "natural"
-                              }
-                            },
-                            "tail": {
-                              "tag": "emptyRow"
-                            }
-                          }
-                        }
-                      }
-                    }
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "wrapping",
-                    "member": {
-                      "tag": "specification",
-                      "metadata": {
-                        "tag": "field",
-                        "name": "name",
-                        "member": {
-                          "tag": "label"
-                        },
-                        "tail": {
-                          "tag": "field",
-                          "name": "interface",
-                          "member": {
-                            "tag": "label"
-                          },
-                          "tail": {
-                            "tag": "field",
-                            "name": "laws",
-                            "member": {
-                              "tag": "field",
-                              "name": "twice_distinct",
-                              "member": {
-                                "tag": "arrow",
-                                "reuse": "reusable",
-                                "parameter": "unrestricted",
-                                "domain": {
-                                  "tag": "field",
-                                  "name": "review",
-                                  "member": {
-                                    "tag": "arrow",
-                                    "reuse": "reusable",
-                                    "parameter": "unrestricted",
-                                    "domain": {
-                                      "tag": "natural"
-                                    },
-                                    "codomain": {
-                                      "tag": "natural"
-                                    }
-                                  },
-                                  "tail": {
-                                    "tag": "field",
-                                    "name": "twice",
-                                    "member": {
-                                      "tag": "arrow",
-                                      "reuse": "reusable",
-                                      "parameter": "unrestricted",
-                                      "domain": {
-                                        "tag": "natural"
-                                      },
-                                      "codomain": {
-                                        "tag": "natural"
-                                      }
-                                    },
-                                    "tail": {
-                                      "tag": "emptyRow"
-                                    }
-                                  }
-                                },
-                                "codomain": {
-                                  "tag": "arrow",
-                                  "reuse": "reusable",
-                                  "parameter": "unrestricted",
-                                  "domain": {
-                                    "tag": "field",
-                                    "name": "review",
-                                    "member": {
-                                      "tag": "arrow",
-                                      "reuse": "reusable",
-                                      "parameter": "unrestricted",
-                                      "domain": {
-                                        "tag": "natural"
-                                      },
-                                      "codomain": {
-                                        "tag": "natural"
-                                      }
-                                    },
-                                    "tail": {
-                                      "tag": "field",
-                                      "name": "twice",
-                                      "member": {
-                                        "tag": "arrow",
-                                        "reuse": "reusable",
-                                        "parameter": "unrestricted",
-                                        "domain": {
-                                          "tag": "natural"
-                                        },
-                                        "codomain": {
-                                          "tag": "natural"
-                                        }
-                                      },
-                                      "tail": {
-                                        "tag": "emptyRow"
-                                      }
-                                    }
-                                  },
-                                  "codomain": {
-                                    "tag": "arrow",
-                                    "reuse": "reusable",
-                                    "parameter": "unrestricted",
-                                    "domain": {
-                                      "tag": "natural"
-                                    },
-                                    "codomain": {
-                                      "tag": "boolean"
-                                    }
-                                  }
-                                }
-                              },
-                              "tail": {
-                                "tag": "emptyRow"
-                              }
-                            },
-                            "tail": {
-                              "tag": "emptyRow"
-                            }
-                          }
-                        }
-                      },
-                      "extension": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "field",
-                          "name": "review",
-                          "member": {
-                            "tag": "arrow",
-                            "reuse": "reusable",
-                            "parameter": "unrestricted",
-                            "domain": {
-                              "tag": "natural"
-                            },
-                            "codomain": {
-                              "tag": "natural"
-                            }
-                          },
-                          "tail": {
-                            "tag": "field",
-                            "name": "twice",
-                            "member": {
-                              "tag": "arrow",
-                              "reuse": "reusable",
-                              "parameter": "unrestricted",
-                              "domain": {
-                                "tag": "natural"
-                              },
-                              "codomain": {
-                                "tag": "natural"
-                              }
-                            },
-                            "tail": {
-                              "tag": "emptyRow"
-                            }
-                          }
-                        },
-                        "codomain": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "field",
-                            "name": "review",
-                            "member": {
-                              "tag": "arrow",
-                              "reuse": "reusable",
-                              "parameter": "unrestricted",
-                              "domain": {
-                                "tag": "natural"
-                              },
-                              "codomain": {
-                                "tag": "natural"
-                              }
-                            },
-                            "tail": {
-                              "tag": "field",
-                              "name": "twice",
-                              "member": {
-                                "tag": "arrow",
-                                "reuse": "reusable",
-                                "parameter": "unrestricted",
-                                "domain": {
-                                  "tag": "natural"
-                                },
-                                "codomain": {
-                                  "tag": "natural"
-                                }
-                              },
-                              "tail": {
-                                "tag": "emptyRow"
-                              }
-                            }
-                          },
-                          "codomain": {
-                            "tag": "field",
-                            "name": "review",
-                            "member": {
-                              "tag": "arrow",
-                              "reuse": "reusable",
-                              "parameter": "unrestricted",
-                              "domain": {
-                                "tag": "natural"
-                              },
-                              "codomain": {
-                                "tag": "natural"
-                              }
-                            },
-                            "tail": {
-                              "tag": "field",
-                              "name": "twice",
-                              "member": {
-                                "tag": "arrow",
-                                "reuse": "reusable",
-                                "parameter": "unrestricted",
-                                "domain": {
-                                  "tag": "natural"
-                                },
-                                "codomain": {
-                                  "tag": "natural"
-                                }
-                              },
-                              "tail": {
-                                "tag": "emptyRow"
-                              }
-                            }
-                          }
-                        }
-                      }
-                    },
-                    "tail": {
-                      "tag": "emptyRow"
-                    }
-                  }
-                }
-              },
-              "extension": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "field",
-                  "name": "review",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "twice",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "emptyRow"
-                    }
-                  }
-                },
-                "codomain": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "field",
-                    "name": "review",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "twice",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  },
-                  "codomain": {
-                    "tag": "field",
-                    "name": "review",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "twice",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            "tail": {
-              "tag": "field",
-              "name": "wrapping",
-              "member": {
-                "tag": "specification",
-                "metadata": {
-                  "tag": "field",
-                  "name": "name",
-                  "member": {
-                    "tag": "label"
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "interface",
-                    "member": {
-                      "tag": "label"
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "laws",
-                      "member": {
-                        "tag": "emptyRow"
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  }
-                },
-                "extension": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "field",
-                    "name": "review",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "twice",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  },
-                  "codomain": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "field",
-                      "name": "review",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "twice",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    },
-                    "codomain": {
-                      "tag": "field",
-                      "name": "review",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "twice",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    }
-                  }
-                }
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          }
-        },
-        "extension": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "field",
-            "name": "review",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "natural"
-              }
-            },
-            "tail": {
-              "tag": "field",
-              "name": "twice",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          },
-          "codomain": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "field",
-              "name": "review",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "twice",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            },
-            "codomain": {
-              "tag": "field",
-              "name": "review",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "twice",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "25"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -3824,865 +1297,12 @@
         "0"
       ],
       "domain": {
-        "tag": "specification",
-        "metadata": {
-          "tag": "field",
-          "name": "name",
-          "member": {
-            "tag": "label"
-          },
-          "tail": {
-            "tag": "field",
-            "name": "interface",
-            "member": {
-              "tag": "label"
-            },
-            "tail": {
-              "tag": "field",
-              "name": "laws",
-              "member": {
-                "tag": "emptyRow"
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          }
-        },
-        "extension": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "field",
-            "name": "review",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "natural"
-              }
-            },
-            "tail": {
-              "tag": "field",
-              "name": "twice",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          },
-          "codomain": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "field",
-              "name": "review",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "twice",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            },
-            "codomain": {
-              "tag": "field",
-              "name": "review",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "twice",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "11"
       },
       "codomain": {
-        "tag": "arrow",
-        "reuse": "reusable",
-        "parameter": "unrestricted",
-        "domain": {
-          "tag": "specification",
-          "metadata": {
-            "tag": "field",
-            "name": "name",
-            "member": {
-              "tag": "label"
-            },
-            "tail": {
-              "tag": "field",
-              "name": "interface",
-              "member": {
-                "tag": "label"
-              },
-              "tail": {
-                "tag": "field",
-                "name": "laws",
-                "member": {
-                  "tag": "field",
-                  "name": "twice_distinct",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "field",
-                      "name": "review",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "twice",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    },
-                    "codomain": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "field",
-                        "name": "review",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "field",
-                          "name": "twice",
-                          "member": {
-                            "tag": "arrow",
-                            "reuse": "reusable",
-                            "parameter": "unrestricted",
-                            "domain": {
-                              "tag": "natural"
-                            },
-                            "codomain": {
-                              "tag": "natural"
-                            }
-                          },
-                          "tail": {
-                            "tag": "emptyRow"
-                          }
-                        }
-                      },
-                      "codomain": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "boolean"
-                        }
-                      }
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          },
-          "extension": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "field",
-              "name": "review",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "twice",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            },
-            "codomain": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "field",
-                "name": "review",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "twice",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              },
-              "codomain": {
-                "tag": "field",
-                "name": "review",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "twice",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "codomain": {
-          "tag": "specification",
-          "metadata": {
-            "tag": "field",
-            "name": "operator",
-            "member": {
-              "tag": "label"
-            },
-            "tail": {
-              "tag": "field",
-              "name": "inherited",
-              "member": {
-                "tag": "specification",
-                "metadata": {
-                  "tag": "field",
-                  "name": "name",
-                  "member": {
-                    "tag": "label"
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "interface",
-                    "member": {
-                      "tag": "label"
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "laws",
-                      "member": {
-                        "tag": "emptyRow"
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  }
-                },
-                "extension": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "field",
-                    "name": "review",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "twice",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  },
-                  "codomain": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "field",
-                      "name": "review",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "twice",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    },
-                    "codomain": {
-                      "tag": "field",
-                      "name": "review",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "twice",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    }
-                  }
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "wrapping",
-                "member": {
-                  "tag": "specification",
-                  "metadata": {
-                    "tag": "field",
-                    "name": "name",
-                    "member": {
-                      "tag": "label"
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "interface",
-                      "member": {
-                        "tag": "label"
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "laws",
-                        "member": {
-                          "tag": "field",
-                          "name": "twice_distinct",
-                          "member": {
-                            "tag": "arrow",
-                            "reuse": "reusable",
-                            "parameter": "unrestricted",
-                            "domain": {
-                              "tag": "field",
-                              "name": "review",
-                              "member": {
-                                "tag": "arrow",
-                                "reuse": "reusable",
-                                "parameter": "unrestricted",
-                                "domain": {
-                                  "tag": "natural"
-                                },
-                                "codomain": {
-                                  "tag": "natural"
-                                }
-                              },
-                              "tail": {
-                                "tag": "field",
-                                "name": "twice",
-                                "member": {
-                                  "tag": "arrow",
-                                  "reuse": "reusable",
-                                  "parameter": "unrestricted",
-                                  "domain": {
-                                    "tag": "natural"
-                                  },
-                                  "codomain": {
-                                    "tag": "natural"
-                                  }
-                                },
-                                "tail": {
-                                  "tag": "emptyRow"
-                                }
-                              }
-                            },
-                            "codomain": {
-                              "tag": "arrow",
-                              "reuse": "reusable",
-                              "parameter": "unrestricted",
-                              "domain": {
-                                "tag": "field",
-                                "name": "review",
-                                "member": {
-                                  "tag": "arrow",
-                                  "reuse": "reusable",
-                                  "parameter": "unrestricted",
-                                  "domain": {
-                                    "tag": "natural"
-                                  },
-                                  "codomain": {
-                                    "tag": "natural"
-                                  }
-                                },
-                                "tail": {
-                                  "tag": "field",
-                                  "name": "twice",
-                                  "member": {
-                                    "tag": "arrow",
-                                    "reuse": "reusable",
-                                    "parameter": "unrestricted",
-                                    "domain": {
-                                      "tag": "natural"
-                                    },
-                                    "codomain": {
-                                      "tag": "natural"
-                                    }
-                                  },
-                                  "tail": {
-                                    "tag": "emptyRow"
-                                  }
-                                }
-                              },
-                              "codomain": {
-                                "tag": "arrow",
-                                "reuse": "reusable",
-                                "parameter": "unrestricted",
-                                "domain": {
-                                  "tag": "natural"
-                                },
-                                "codomain": {
-                                  "tag": "boolean"
-                                }
-                              }
-                            }
-                          },
-                          "tail": {
-                            "tag": "emptyRow"
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    }
-                  },
-                  "extension": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "field",
-                      "name": "review",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "twice",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    },
-                    "codomain": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "field",
-                        "name": "review",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "field",
-                          "name": "twice",
-                          "member": {
-                            "tag": "arrow",
-                            "reuse": "reusable",
-                            "parameter": "unrestricted",
-                            "domain": {
-                              "tag": "natural"
-                            },
-                            "codomain": {
-                              "tag": "natural"
-                            }
-                          },
-                          "tail": {
-                            "tag": "emptyRow"
-                          }
-                        }
-                      },
-                      "codomain": {
-                        "tag": "field",
-                        "name": "review",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "field",
-                          "name": "twice",
-                          "member": {
-                            "tag": "arrow",
-                            "reuse": "reusable",
-                            "parameter": "unrestricted",
-                            "domain": {
-                              "tag": "natural"
-                            },
-                            "codomain": {
-                              "tag": "natural"
-                            }
-                          },
-                          "tail": {
-                            "tag": "emptyRow"
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          },
-          "extension": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "field",
-              "name": "review",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "twice",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            },
-            "codomain": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "field",
-                "name": "review",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "twice",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              },
-              "codomain": {
-                "tag": "field",
-                "name": "review",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "twice",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              }
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "27"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -4705,724 +1325,12 @@
         "0"
       ],
       "domain": {
-        "tag": "specification",
-        "metadata": {
-          "tag": "field",
-          "name": "name",
-          "member": {
-            "tag": "label"
-          },
-          "tail": {
-            "tag": "field",
-            "name": "interface",
-            "member": {
-              "tag": "label"
-            },
-            "tail": {
-              "tag": "field",
-              "name": "laws",
-              "member": {
-                "tag": "field",
-                "name": "twice_distinct",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "field",
-                    "name": "review",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "twice",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  },
-                  "codomain": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "field",
-                      "name": "review",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "twice",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    },
-                    "codomain": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "boolean"
-                      }
-                    }
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          }
-        },
-        "extension": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "field",
-            "name": "review",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "natural"
-              }
-            },
-            "tail": {
-              "tag": "field",
-              "name": "twice",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          },
-          "codomain": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "field",
-              "name": "review",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "twice",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            },
-            "codomain": {
-              "tag": "field",
-              "name": "review",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "twice",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "17"
       },
       "codomain": {
-        "tag": "specification",
-        "metadata": {
-          "tag": "field",
-          "name": "operator",
-          "member": {
-            "tag": "label"
-          },
-          "tail": {
-            "tag": "field",
-            "name": "inherited",
-            "member": {
-              "tag": "specification",
-              "metadata": {
-                "tag": "field",
-                "name": "name",
-                "member": {
-                  "tag": "label"
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "interface",
-                  "member": {
-                    "tag": "label"
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "laws",
-                    "member": {
-                      "tag": "emptyRow"
-                    },
-                    "tail": {
-                      "tag": "emptyRow"
-                    }
-                  }
-                }
-              },
-              "extension": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "field",
-                  "name": "review",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "twice",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "emptyRow"
-                    }
-                  }
-                },
-                "codomain": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "field",
-                    "name": "review",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "twice",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  },
-                  "codomain": {
-                    "tag": "field",
-                    "name": "review",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "twice",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            "tail": {
-              "tag": "field",
-              "name": "wrapping",
-              "member": {
-                "tag": "specification",
-                "metadata": {
-                  "tag": "field",
-                  "name": "name",
-                  "member": {
-                    "tag": "label"
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "interface",
-                    "member": {
-                      "tag": "label"
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "laws",
-                      "member": {
-                        "tag": "field",
-                        "name": "twice_distinct",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "field",
-                            "name": "review",
-                            "member": {
-                              "tag": "arrow",
-                              "reuse": "reusable",
-                              "parameter": "unrestricted",
-                              "domain": {
-                                "tag": "natural"
-                              },
-                              "codomain": {
-                                "tag": "natural"
-                              }
-                            },
-                            "tail": {
-                              "tag": "field",
-                              "name": "twice",
-                              "member": {
-                                "tag": "arrow",
-                                "reuse": "reusable",
-                                "parameter": "unrestricted",
-                                "domain": {
-                                  "tag": "natural"
-                                },
-                                "codomain": {
-                                  "tag": "natural"
-                                }
-                              },
-                              "tail": {
-                                "tag": "emptyRow"
-                              }
-                            }
-                          },
-                          "codomain": {
-                            "tag": "arrow",
-                            "reuse": "reusable",
-                            "parameter": "unrestricted",
-                            "domain": {
-                              "tag": "field",
-                              "name": "review",
-                              "member": {
-                                "tag": "arrow",
-                                "reuse": "reusable",
-                                "parameter": "unrestricted",
-                                "domain": {
-                                  "tag": "natural"
-                                },
-                                "codomain": {
-                                  "tag": "natural"
-                                }
-                              },
-                              "tail": {
-                                "tag": "field",
-                                "name": "twice",
-                                "member": {
-                                  "tag": "arrow",
-                                  "reuse": "reusable",
-                                  "parameter": "unrestricted",
-                                  "domain": {
-                                    "tag": "natural"
-                                  },
-                                  "codomain": {
-                                    "tag": "natural"
-                                  }
-                                },
-                                "tail": {
-                                  "tag": "emptyRow"
-                                }
-                              }
-                            },
-                            "codomain": {
-                              "tag": "arrow",
-                              "reuse": "reusable",
-                              "parameter": "unrestricted",
-                              "domain": {
-                                "tag": "natural"
-                              },
-                              "codomain": {
-                                "tag": "boolean"
-                              }
-                            }
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  }
-                },
-                "extension": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "field",
-                    "name": "review",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "twice",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  },
-                  "codomain": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "field",
-                      "name": "review",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "twice",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    },
-                    "codomain": {
-                      "tag": "field",
-                      "name": "review",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "field",
-                        "name": "twice",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "emptyRow"
-                        }
-                      }
-                    }
-                  }
-                }
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          }
-        },
-        "extension": {
-          "tag": "arrow",
-          "reuse": "reusable",
-          "parameter": "unrestricted",
-          "domain": {
-            "tag": "field",
-            "name": "review",
-            "member": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "natural"
-              },
-              "codomain": {
-                "tag": "natural"
-              }
-            },
-            "tail": {
-              "tag": "field",
-              "name": "twice",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "emptyRow"
-              }
-            }
-          },
-          "codomain": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "field",
-              "name": "review",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "twice",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            },
-            "codomain": {
-              "tag": "field",
-              "name": "review",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "twice",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "21"
       },
       "parameter": "unrestricted",
       "reuse": "reusable"
@@ -5478,600 +1386,8 @@
     {
       "index": "0",
       "type": {
-        "tag": "field",
-        "name": "TwiceReview.BaseReview",
-        "member": {
-          "tag": "specification",
-          "metadata": {
-            "tag": "field",
-            "name": "name",
-            "member": {
-              "tag": "label"
-            },
-            "tail": {
-              "tag": "field",
-              "name": "interface",
-              "member": {
-                "tag": "label"
-              },
-              "tail": {
-                "tag": "field",
-                "name": "laws",
-                "member": {
-                  "tag": "emptyRow"
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          },
-          "extension": {
-            "tag": "arrow",
-            "reuse": "reusable",
-            "parameter": "unrestricted",
-            "domain": {
-              "tag": "field",
-              "name": "review",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "natural"
-                },
-                "codomain": {
-                  "tag": "natural"
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "twice",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            },
-            "codomain": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "field",
-                "name": "review",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "twice",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              },
-              "codomain": {
-                "tag": "field",
-                "name": "review",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "twice",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "tail": {
-          "tag": "field",
-          "name": "TwiceReview.TwiceReview",
-          "member": {
-            "tag": "specification",
-            "metadata": {
-              "tag": "field",
-              "name": "name",
-              "member": {
-                "tag": "label"
-              },
-              "tail": {
-                "tag": "field",
-                "name": "interface",
-                "member": {
-                  "tag": "label"
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "laws",
-                  "member": {
-                    "tag": "field",
-                    "name": "twice_distinct",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "field",
-                        "name": "review",
-                        "member": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "natural"
-                          }
-                        },
-                        "tail": {
-                          "tag": "field",
-                          "name": "twice",
-                          "member": {
-                            "tag": "arrow",
-                            "reuse": "reusable",
-                            "parameter": "unrestricted",
-                            "domain": {
-                              "tag": "natural"
-                            },
-                            "codomain": {
-                              "tag": "natural"
-                            }
-                          },
-                          "tail": {
-                            "tag": "emptyRow"
-                          }
-                        }
-                      },
-                      "codomain": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "field",
-                          "name": "review",
-                          "member": {
-                            "tag": "arrow",
-                            "reuse": "reusable",
-                            "parameter": "unrestricted",
-                            "domain": {
-                              "tag": "natural"
-                            },
-                            "codomain": {
-                              "tag": "natural"
-                            }
-                          },
-                          "tail": {
-                            "tag": "field",
-                            "name": "twice",
-                            "member": {
-                              "tag": "arrow",
-                              "reuse": "reusable",
-                              "parameter": "unrestricted",
-                              "domain": {
-                                "tag": "natural"
-                              },
-                              "codomain": {
-                                "tag": "natural"
-                              }
-                            },
-                            "tail": {
-                              "tag": "emptyRow"
-                            }
-                          }
-                        },
-                        "codomain": {
-                          "tag": "arrow",
-                          "reuse": "reusable",
-                          "parameter": "unrestricted",
-                          "domain": {
-                            "tag": "natural"
-                          },
-                          "codomain": {
-                            "tag": "boolean"
-                          }
-                        }
-                      }
-                    },
-                    "tail": {
-                      "tag": "emptyRow"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              }
-            },
-            "extension": {
-              "tag": "arrow",
-              "reuse": "reusable",
-              "parameter": "unrestricted",
-              "domain": {
-                "tag": "field",
-                "name": "review",
-                "member": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "natural"
-                  },
-                  "codomain": {
-                    "tag": "natural"
-                  }
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "twice",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  },
-                  "tail": {
-                    "tag": "emptyRow"
-                  }
-                }
-              },
-              "codomain": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "field",
-                  "name": "review",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "twice",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "emptyRow"
-                    }
-                  }
-                },
-                "codomain": {
-                  "tag": "field",
-                  "name": "review",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "twice",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "emptyRow"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "tail": {
-            "tag": "field",
-            "name": "TwiceReview.AugmentedReview",
-            "member": {
-              "tag": "specification",
-              "metadata": {
-                "tag": "field",
-                "name": "name",
-                "member": {
-                  "tag": "label"
-                },
-                "tail": {
-                  "tag": "field",
-                  "name": "interface",
-                  "member": {
-                    "tag": "label"
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "laws",
-                    "member": {
-                      "tag": "emptyRow"
-                    },
-                    "tail": {
-                      "tag": "emptyRow"
-                    }
-                  }
-                }
-              },
-              "extension": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "field",
-                  "name": "review",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "twice",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "emptyRow"
-                    }
-                  }
-                },
-                "codomain": {
-                  "tag": "arrow",
-                  "reuse": "reusable",
-                  "parameter": "unrestricted",
-                  "domain": {
-                    "tag": "field",
-                    "name": "review",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "twice",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  },
-                  "codomain": {
-                    "tag": "field",
-                    "name": "review",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "field",
-                      "name": "twice",
-                      "member": {
-                        "tag": "arrow",
-                        "reuse": "reusable",
-                        "parameter": "unrestricted",
-                        "domain": {
-                          "tag": "natural"
-                        },
-                        "codomain": {
-                          "tag": "natural"
-                        }
-                      },
-                      "tail": {
-                        "tag": "emptyRow"
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            "tail": {
-              "tag": "field",
-              "name": "TwiceReview.reviewTarget",
-              "member": {
-                "tag": "arrow",
-                "reuse": "reusable",
-                "parameter": "unrestricted",
-                "domain": {
-                  "tag": "field",
-                  "name": "review",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "twice",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "emptyRow"
-                    }
-                  }
-                },
-                "codomain": {
-                  "tag": "field",
-                  "name": "review",
-                  "member": {
-                    "tag": "arrow",
-                    "reuse": "reusable",
-                    "parameter": "unrestricted",
-                    "domain": {
-                      "tag": "natural"
-                    },
-                    "codomain": {
-                      "tag": "natural"
-                    }
-                  },
-                  "tail": {
-                    "tag": "field",
-                    "name": "twice",
-                    "member": {
-                      "tag": "arrow",
-                      "reuse": "reusable",
-                      "parameter": "unrestricted",
-                      "domain": {
-                        "tag": "natural"
-                      },
-                      "codomain": {
-                        "tag": "natural"
-                      }
-                    },
-                    "tail": {
-                      "tag": "emptyRow"
-                    }
-                  }
-                }
-              },
-              "tail": {
-                "tag": "field",
-                "name": "TwiceReview.twiceOfThree",
-                "member": {
-                  "tag": "natural"
-                },
-                "tail": {
-                  "tag": "emptyRow"
-                }
-              }
-            }
-          }
-        }
+        "tag": "ref",
+        "index": "32"
       }
     }
   ],

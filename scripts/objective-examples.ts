@@ -49,7 +49,7 @@ for(const name of names){
  const requestPath=join(dir,"request.json");writeFileSync(requestPath,JSON.stringify(request,null,2)+"\n");
  const out=preview(requestPath,join(dir,"preview"),toolingPath);
  if(out.status!=="finished"){console.error("example did not finish: "+name+" "+out.status);failed=true;continue;}
- const fresh=readFileSync(join(dir,"preview","typed-input.json"),"utf8");
+ const fresh=readFileSync(join(dir,"preview","source.typed.json"),"utf8");
  const committedPath=join(referenceDir,name+".typed.json");
  if(mode==="refresh")writeFileSync(committedPath,fresh);
  else if(!existsSync(committedPath)||readFileSync(committedPath,"utf8")!==fresh){console.error("STALE typed packet: "+name+" (run scripts/check-objective-examples.sh --refresh)");failed=true;}

@@ -18,4 +18,4 @@ Actual source consumers exercise even/odd mutual calls, repeated final-self call
 
 Preview grants no native authority. Current signatures, source admission, read laws, capacity/funding, typed effects, atomic receiving and result release must still consume the explicit new edition. The old CBV source profile cannot substitute for that join.
 
-The scalar repair uses `dregg.objective-bend.core.v2` and `dregg.objective-bend.typed-core.v2`. Immutable wire-v1/Core3 preview tooling remains a historical cohort. Tooling pins must select the matching core, checker and lowerer; old Boolean-as-label packets must not be silently reinterpreted.
+The scalar repair uses `dregg.objective-bend.core.v2` and `dregg.objective-bend.typed-core.v3` (v2, with fully inlined types, no longer loads). Immutable wire-v1/Core3 preview tooling remains a historical cohort. Tooling pins must select the matching core, checker and lowerer; old Boolean-as-label packets must not be silently reinterpreted.
