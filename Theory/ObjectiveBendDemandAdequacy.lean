@@ -129,6 +129,8 @@ inductive SourceDerivation : Term → Term → Nat → Prop where
   | ifFalse {condition whenTrue whenFalse result : Term} {conditionCost resultCost : Nat} :
       SourceDerivation condition (.boolean false) conditionCost → SourceDerivation whenFalse result resultCost →
       SourceDerivation (.ifBool condition whenTrue whenFalse) result (conditionCost+resultCost+1)
+  | done {value result : Term} {cost : Nat} :
+      SourceDerivation value result cost → SourceDerivation (.done value) result (cost+1)
 
  theorem sourceSteps_lift (context : Term → Term)
     (compatible : ∀ {first second}, Step first second → Step (context first) (context second))
@@ -190,6 +192,7 @@ small-step semantics. The value/thunk rules do not force latent fields. -/
   | ifFalse first second iht ihr =>
       exact ⟨sourceSteps_trans (sourceSteps_lift (fun c => .ifBool c _ _) (fun step => Step.ifCondition _ _ step) iht.1)
         (.next (Step.ifFalse _ _) ihr.1),ihr.2⟩
+  | done first ih => exact ⟨.next (Step.done _) ih.1,ih.2⟩
 
  theorem sourceDerivation_cost_positive {source result : Term} {cost : Nat}
     (derivation : SourceDerivation source result cost) : 0 < cost := by
@@ -231,6 +234,7 @@ strictly increases demand cost. Context reductions retain the latent terms. -/
       exact ⟨_,.case (.value (.inject tag payload)) found derivation,by omega⟩
   | ifTrue whenTrue whenFalse => exact ⟨_,.ifTrue (.value (.boolean true)) derivation,by omega⟩
   | ifFalse whenTrue whenFalse => exact ⟨_,.ifFalse (.value (.boolean false)) derivation,by omega⟩
+  | done value => exact ⟨_,.done derivation,by omega⟩
   | caseTarget arms step ih =>
       cases derivation with
       | value value => cases value
@@ -411,6 +415,8 @@ demand budget. This is the semantic component of the lazy graph progress rank. -
       intro original member
       exact Prod.ext rfl (ih original member f hf)
   | inject _ ih => simp only [Term.rename,ih f hf]
+  | perform _ ih => simp only [Term.rename,ih f hf]
+  | done _ ih => simp only [Term.rename,ih f hf]
   | ifBool _ _ _ ih₁ ih₂ ih₃ => simp only [Term.rename,ih₁ f hf,ih₂ f hf,ih₃ f hf]
   | case _ _ ih₁ ih₂ =>
       simp only [Term.rename,ih₁ f hf]
@@ -472,6 +478,8 @@ demand budget. This is the semantic component of the lazy graph progress rank. -
       intro original member
       exact Prod.ext rfl (ih original member f hf)
   | inject _ ih => simp only [Term.substitute,ih f hf]
+  | perform _ ih => simp only [Term.substitute,ih f hf]
+  | done _ ih => simp only [Term.substitute,ih f hf]
   | ifBool _ _ _ ih₁ ih₂ ih₃ => simp only [Term.substitute,ih₁ f hf,ih₂ f hf,ih₃ f hf]
   | case _ _ ih₁ ih₂ =>
       simp only [Term.substitute,ih₁ f hf]
@@ -530,6 +538,8 @@ demand budget. This is the semantic component of the lazy graph progress rank. -
       intro original member
       exact Prod.ext rfl (ih original member first second same)
   | inject _ ih => simp only [Term.substitute,ih first second same]
+  | perform _ ih => simp only [Term.substitute,ih first second same]
+  | done _ ih => simp only [Term.substitute,ih first second same]
   | ifBool _ _ _ ih₁ ih₂ ih₃ => simp only [Term.substitute,ih₁ first second same,ih₂ first second same,ih₃ first second same]
   | case _ _ ih₁ ih₂ =>
       simp only [Term.substitute,ih₁ first second same]
@@ -590,6 +600,8 @@ demand budget. This is the semantic component of the lazy graph progress rank. -
       intro original member
       exact Prod.ext rfl (ih original member first second)
   | inject _ ih => simp only [Term.rename,ih first second]
+  | perform _ ih => simp only [Term.rename,ih first second]
+  | done _ ih => simp only [Term.rename,ih first second]
   | ifBool _ _ _ ih₁ ih₂ ih₃ => simp only [Term.rename,ih₁ first second,ih₂ first second,ih₃ first second]
   | case _ _ ih₁ ih₂ =>
       simp only [Term.rename,List.map_map,ih₁ first second]
@@ -633,6 +645,8 @@ demand budget. This is the semantic component of the lazy graph progress rank. -
       intro original member
       exact Prod.ext rfl (ih original member first second)
   | inject _ ih => simp only [Term.rename,Term.substitute,ih first second]
+  | perform _ ih => simp only [Term.rename,Term.substitute,ih first second]
+  | done _ ih => simp only [Term.rename,Term.substitute,ih first second]
   | ifBool _ _ _ ih₁ ih₂ ih₃ => simp only [Term.rename,Term.substitute,ih₁ first second,ih₂ first second,ih₃ first second]
   | case _ _ ih₁ ih₂ =>
       simp only [Term.rename,Term.substitute,List.map_map,ih₁ first second]
@@ -703,6 +717,8 @@ demand budget. This is the semantic component of the lazy graph progress rank. -
       intro original member
       exact Prod.ext rfl (ih original member substitution images rename)
   | inject _ ih => simp only [Term.substitute,Term.rename,ih substitution images rename]
+  | perform _ ih => simp only [Term.substitute,Term.rename,ih substitution images rename]
+  | done _ ih => simp only [Term.substitute,Term.rename,ih substitution images rename]
   | ifBool _ _ _ ih₁ ih₂ ih₃ => simp only [Term.substitute,Term.rename,ih₁ substitution images rename,ih₂ substitution images rename,ih₃ substitution images rename]
   | case _ hs ih₁ ih₂ =>
       simp only [Term.substitute,Term.rename,List.map_map,ih₁ substitution images rename]
@@ -769,6 +785,8 @@ demand budget. This is the semantic component of the lazy graph progress rank. -
       intro original member
       exact Prod.ext rfl (ih original member first images second nextImages)
   | inject _ ih => simp only [Term.substitute,ih first images second nextImages]
+  | perform _ ih => simp only [Term.substitute,ih first images second nextImages]
+  | done _ ih => simp only [Term.substitute,ih first images second nextImages]
   | ifBool _ _ _ ih₁ ih₂ ih₃ => simp only [Term.substitute,ih₁ first images second nextImages,ih₂ first images second nextImages,ih₃ first images second nextImages]
   | case _ hs ih₁ ih₂ =>
       simp only [Term.substitute,List.map_map,ih₁ first images second nextImages]
@@ -1045,6 +1063,8 @@ def controlMeaning (meaning : AddressMeaning) : Control → Option Term
   | .enter address => some (meaning address)
   | .returned value | .complete value => some (valueMeaning meaning value)
   | .blackhole _ | .refused _ => none
+  -- A yielded program means its stuck source redex `perform plan`.
+  | .yielded plan => some (.perform (meaning plan))
 
  theorem valueMeaning_value (meaning : AddressMeaning) (value : RuntimeValue) :
     Value (valueMeaning meaning value) := by
@@ -1090,7 +1110,7 @@ def enteredFocus (meaning : AddressMeaning) (heap : Array Cell) : Control → Op
               simp [enteredFocus,found] at entered
               subst after
               exact (heapRealizes address _ found).2.1
-  | evaluate _ _ | returned _ | complete _ | blackhole _ | refused _ =>
+  | evaluate _ _ | returned _ | complete _ | blackhole _ | refused _ | yielded _ =>
       have same : some before = some after := original.symm.trans entered
       have eq := Option.some.inj same
       subst after
@@ -1694,7 +1714,9 @@ and all source origins are retained. Fields may contain general Fix. -/
 are retained operational outcomes and are deliberately not source values. -/
 def ResultControl : Control → Prop
   | .evaluate _ _ | .enter _ | .returned _ | .complete _ => True
-  | .refused _ | .blackhole _ => False
+  -- A yield is not a pure result: it is a whole-program step taken only by a
+  -- resume, so (like a fault) it never appears on a terminating pure trace.
+  | .refused _ | .blackhole _ | .yielded _ => False
 
 /-- Actual thunk birth provenance: ordinary captures precede their address;
 the sole same-address capture is the exact body installed by tied Fix. Cached
@@ -2647,12 +2669,80 @@ independent source case-of-injection reduction. -/
   obtain ⟨next,same,current,_⟩ := graph_ifBool_return_execution represented returned head
   exact ⟨next,same,current⟩
 
+ theorem closeTerm_perform (meaning : AddressMeaning) (environment : Environment) (plan : Term) :
+    closeTerm meaning environment (.perform plan) = .perform (closeTerm meaning environment plan) := by
+  cases environment <;> simp [closeTerm,Term.substitute]
+
+ theorem closeTerm_done (meaning : AddressMeaning) (environment : Environment) (value : Term) :
+    closeTerm meaning environment (.done value) = .done (closeTerm meaning environment value) := by
+  cases environment <;> simp [closeTerm,Term.substitute]
+
+/-- A perform outside every shared cell allocates its plan as one lazy cell and
+yields; the yielded control still means the same source redex `perform plan`,
+so no source step is claimed or needed. -/
+ theorem graph_evaluate_perform_names {meaning : AddressMeaning} {state : State} {source plan : Term}
+    {environment : Environment} (represented : GraphRepresentsBy meaning state source)
+    (evaluate : state.control = .evaluate (.perform plan) environment)
+    (direct : forcingShared state.stack = false) :
+    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
+  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
+  have valid : ClosureValid state.heap.size ⟨.perform plan,environment⟩ := by
+    simpa only [evaluate,ControlValid] using lexical.2.1
+  have scope : Scoped environment.length plan := by simpa using valid.1
+  obtain ⟨one,oneNames,oneHeap,oneSame,oneFresh⟩ :=
+    allocateClosure_realizes lexical.1 names heap scope valid.2
+  have sourceEq : Term.perform (one state.heap.size) = closeTerm meaning environment (.perform plan) := by
+    simp [oneFresh,closeTerm_perform]
+  simp [controlMeaning,evaluate] at control
+  subst focus
+  have consumers := stackRealizes_congr lexical.2.2 oneSame stack
+  refine ⟨one,oneSame,stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
+    stepRaw_finalStackInvariant final,?_,?_,.perform (one state.heap.size),?_,?_⟩
+  · simpa [stepRaw,evaluate,direct] using oneNames
+  · simpa [stepRaw,evaluate,direct] using oneHeap
+  · simp [stepRaw,evaluate,direct,controlMeaning]
+  · rw [sourceEq]
+    simpa [stepRaw,evaluate,direct] using consumers
+
+/-- `done` is exactly the independent source reduction `done v → v`. -/
+ theorem graph_evaluate_done_execution {meaning : AddressMeaning} {state : State} {source value : Term}
+    {environment : Environment} (represented : GraphRepresentsBy meaning state source)
+    (evaluate : state.control = .evaluate (.done value) environment) :
+    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧
+      (GraphRepresentsBy next (stepRaw state) source ∧ SourceDispatch meaning next state) := by
+  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
+  have reduce : Step (closeTerm meaning environment (.done value)) (closeTerm meaning environment value) := by
+    rw [closeTerm_done]; exact Step.done _
+  simp [controlMeaning,evaluate] at control
+  subst focus
+  have advanced := stackRealizes_steps stack (Steps.next reduce (Steps.refl _))
+  refine ⟨meaning,(fun _ _ => rfl),?_,?_⟩
+  · refine ⟨stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
+      stepRaw_finalStackInvariant final,?_,?_,closeTerm meaning environment value,?_,?_⟩
+    · simpa [stepRaw,evaluate] using names
+    · simpa [stepRaw,evaluate] using heap
+    · simp [stepRaw,evaluate,controlMeaning]
+    · simpa [stepRaw,evaluate] using advanced
+  · refine ⟨[],closeTerm meaning environment (.done value),closeTerm meaning environment value,?_,?_,?_,?_⟩
+    · simp [controlMeaning,evaluate]
+    · simp [stepRaw,evaluate,controlMeaning]
+    · simp [stepRaw,evaluate,controlMeaning]
+    · exact reduce
+
+ theorem graph_evaluate_done_names {meaning : AddressMeaning} {state : State} {source value : Term}
+    {environment : Environment} (represented : GraphRepresentsBy meaning state source)
+    (evaluate : state.control = .evaluate (.done value) environment) :
+    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
+  obtain ⟨next,same,current,_⟩ := graph_evaluate_done_execution represented evaluate
+  exact ⟨next,same,current⟩
+
 /-- EVERY running/finished raw transition retains a specified source name assignment on all already allocated addresses. New names are constructed from actual allocations. -/
  theorem graph_stepRaw_names {meaning : AddressMeaning} {state : State} {source : Term}
     (represented : GraphRepresentsBy meaning state source) (successful : ResultControl (stepRaw state).control) :
     ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
   cases control : state.control with
   | complete value => exact ⟨meaning,(fun _ _ => rfl),by simpa [stepRaw,control] using represented⟩
+  | yielded plan => exact ⟨meaning,(fun _ _ => rfl),by simpa [stepRaw,control] using represented⟩
   | refused reason | blackhole address =>
       simp [stepRaw,control,ResultControl] at successful
   | enter address =>
@@ -2690,6 +2780,11 @@ independent source case-of-injection reduction. -/
       | case scrutinee arms => exact graph_evaluate_context_names (context := .case arms) represented control
       | ifBool condition whenTrue whenFalse =>
           exact graph_evaluate_context_names (context := .ifBool whenTrue whenFalse) represented control
+      | perform plan =>
+          cases shared : forcingShared state.stack with
+          | true => simp [stepRaw,control,shared,ResultControl] at successful
+          | false => exact graph_evaluate_perform_names represented control shared
+      | done value => exact graph_evaluate_done_names represented control
   | returned value =>
       cases frames : state.stack with
       | nil => exact graph_complete_return_names represented control frames
@@ -3021,6 +3116,7 @@ fault/blackhole successors are proved independently in DemandInvariant. -/
     GraphRepresents (stepRaw state) source := by
   cases control : state.control with
   | complete value => simpa [stepRaw,control] using represented
+  | yielded plan => simpa [stepRaw,control] using represented
   | refused reason | blackhole address =>
       simp [stepRaw,control,ResultControl] at successful
   | enter address =>
@@ -3054,7 +3150,7 @@ fault/blackhole successors are proved independently in DemandInvariant. -/
       | extend inherited fields => exact graph_evaluate_context (context := .extend fields) represented control
       | ifZero value zero body => exact graph_evaluate_context (context := .condition zero body) represented control
       | binary primitive left right => exact graph_evaluate_context (context := .binary primitive right) represented control
-      | inject _ _ | case _ _ | ifBool _ _ _ => exact graph_via_names represented successful
+      | inject _ _ | case _ _ | ifBool _ _ _ | perform _ | done _ => exact graph_via_names represented successful
   | returned value =>
       cases frames : state.stack with
       | nil => exact graph_complete_return represented control frames
@@ -3250,7 +3346,8 @@ Fix and sharing; it assumes neither an acyclic heap nor finite unfolding. -/
             cases term <;> simp_all [rawRun,DemandAdministrative]
 
 def retainedState : Outcome → State
-  | .finished _ state | .suspended _ state | .divergent _ state | .refused _ state => state
+  | .finished _ state | .suspended _ state | .divergent _ state | .refused _ state
+  | .yielded _ state => state
 
 def TraceFits (limits : Limits) : Nat → State → Prop
   | 0,_ => True
@@ -3294,7 +3391,7 @@ def traceLimits : Nat → State → Limits
     (successful : ResultControl (rawRun ticks state).control) : ResultControl state.control := by
   cases control : state.control with
   | evaluate _ _ | enter _ | returned _ | complete _ => trivial
-  | refused reason | blackhole address =>
+  | refused reason | blackhole address | yielded _ =>
       have absorbing : stepRaw state = state := by simp [stepRaw,control]
       simp only [rawRun_absorbs ticks absorbing,control,ResultControl] at successful
 
@@ -3332,7 +3429,7 @@ actual final control, instead of assuming coverage along the trace. -/
       have allocated : address < state.heap.size := by simpa only [current,ControlValid] using valid
       exact (administrative_budget_halts cost state.heap.size meaning state heap born).1
         address value current (Nat.succ_le_of_lt allocated) demand
-  | returned value | complete value | refused reason | blackhole address =>
+  | returned value | complete value | refused reason | blackhole address | yielded _ =>
       exact ⟨0,by simp [rawRun,DemandAdministrative,current]⟩
 
  theorem rawRun_reachable {start state : State} (reachable : Reachable start state) (ticks : Nat) :
@@ -3444,13 +3541,13 @@ state; treating GraphRepresents as a completeness oracle would be unsound. -/
           cases reason with
           | ticks => exact ih (by simpa only [runBounded,stepped] using finished)
           | capacity => simp [runBounded,stepped] at finished
-      | divergent address next | refused reason next => simp [runBounded,stepped] at finished
+      | divergent address next | refused reason next | yielded _ next => simp [runBounded,stepped] at finished
 
  theorem runBounded_finished_resultControl {limits : Limits} {ticks : Nat} {state final : State} {value : RuntimeValue}
     (finished : runBounded limits ticks state = .finished value final) : ResultControl state.control := by
   cases control : state.control with
   | evaluate _ _ | enter _ | returned _ | complete _ => trivial
-  | blackhole address | refused reason =>
+  | blackhole address | refused reason | yielded _ =>
       cases ticks <;> simp [runBounded,step,control] at finished
 
 /-- The actual finite-resource executor is sound at EVERY bound: a finished
@@ -3485,7 +3582,7 @@ suspension and blackholes cannot be laundered into source evaluations. -/
                 simpa only [←raw] using runBounded_finished_resultControl rest
               exact ih (by simpa only [raw] using graph_stepRaw represented successful) rest
           | capacity => simp [runBounded,stepped] at finished
-      | divergent address next | refused reason next => simp [runBounded,stepped] at finished
+      | divergent address next | refused reason next | yielded _ next => simp [runBounded,stepped] at finished
 
  theorem runBounded_natural_sound {limits : Limits} {ticks : Nat} {source : Term} {number : Nat} {final : State}
     (closed : Scoped 0 source) (finished : runBounded limits ticks (initial source) = .finished (.natural number) final) :
@@ -4211,7 +4308,7 @@ including tied Fix and cached predecessor allocation, are covered. -/
     state.heap[address]? = some (.evaluating origin) ∨
       (state.control = .enter address ∧ state.heap[address]? = some (.suspended origin)) := by
   cases current : state.control with
-  | complete value | refused reason | blackhole target => exact Or.inl (by simpa [stepRaw,current] using found)
+  | complete value | refused reason | blackhole target | yielded _ => exact Or.inl (by simpa [stepRaw,current] using found)
   | enter target =>
       cases prior : state.heap[target]? with
       | none => exact Or.inl (by simpa [stepRaw,current,prior] using found)
@@ -4701,7 +4798,7 @@ finite update budgets is used separately to exclude evaluating re-entry. -/
         cases lookup : environment[index]? with
         | none => exact demandSafety_terminal (Or.inl ⟨.unbound,by simp [stepRaw,current,lookup]⟩)
         | some address => exact stepRaw_demandSafety_bound safe heap born current lookup
-  | returned value | complete value | refused reason | blackhole address => simp [DemandAdministrative,current] at administrative
+  | returned value | complete value | refused reason | blackhole address | yielded _ => simp [DemandAdministrative,current] at administrative
 
 /--
 info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.stepRaw_demandSafety_administrative' depends on axioms: [propext,
@@ -4799,7 +4896,7 @@ info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.stepRaw_demandSafety_bound' 
       simp only [actual,controlMeaning,Option.some.injEq] at control
       subst before
       exact budgetFocus_enter_steps heap actual current
-  | evaluate term environment | returned value | complete value | refused reason | blackhole address =>
+  | evaluate term environment | returned value | complete value | refused reason | blackhole address | yielded _ =>
       have aligned : before = focus := by
         apply Option.some.inj
         exact control.symm.trans (by simpa only [budgetFocus,actual] using current)
@@ -4956,6 +5053,14 @@ info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_object_access_safety' 
   obtain ⟨next,same,current,dispatch⟩ := graph_evaluate_mix_execution represented evaluate
   exact ⟨next,same,current,graph_execution_demandSafety represented same current (by intro address; simp [evaluate]) dispatch⟩
 
+ theorem graph_evaluate_done_safety {meaning : AddressMeaning} {state : State} {source value : Term} {environment : Environment}
+    (represented : GraphRepresentsBy meaning state source)
+    (evaluate : state.control = .evaluate (.done value) environment) :
+    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧
+      GraphRepresentsBy next (stepRaw state) source ∧ DemandSafety next (stepRaw state) := by
+  obtain ⟨next,same,current,dispatch⟩ := graph_evaluate_done_execution represented evaluate
+  exact ⟨next,same,current,graph_execution_demandSafety represented same current (by intro address; simp [evaluate]) dispatch⟩
+
  theorem graph_closure_call_safety {meaning : AddressMeaning} {state : State} {source body argument : Term}
     {captured environment : Environment} {rest : List Frame}
     (represented : GraphRepresentsBy meaning state source) (returned : state.control = .returned (.closure body captured))
@@ -5074,6 +5179,9 @@ info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graph_evaluate_fix_safety' d
       have valid : RuntimeValueValid state.heap.size value := by simpa [control,ControlValid] using lexical.2.1
       simp only [budgetFocus,control,controlMeaning,valueMeaning_congr valid same]
   | refused reason | blackhole address => simp [budgetFocus,control,controlMeaning]
+  | yielded plan =>
+      have allocated : plan < state.heap.size := by simpa [control,ControlValid] using lexical.2.1
+      simp only [budgetFocus,control,controlMeaning,same plan allocated]
   | enter address =>
       have allocated : address < state.heap.size := by simpa [control,ControlValid] using lexical.2.1
       cases found : state.heap[address]? with
@@ -5158,7 +5266,7 @@ info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.demandSafety_meaning_congr' 
         cases term <;> try simp [DemandAdministrative,control] at administrative
         case bound index =>
           cases found : environment[index]? <;> simp [stepRaw,control,found]
-    | returned value | complete value | refused reason | blackhole address => simp [DemandAdministrative,control] at administrative
+    | returned value | complete value | refused reason | blackhole address | yielded _ => simp [DemandAdministrative,control] at administrative
   obtain ⟨next,same,current⟩ := graph_stepRaw_names represented successful
   have agreement : ∀ address, address < (stepRaw state).heap.size → meaning address = next address := by
     intro address allocated; rw [unchanged] at allocated; exact same address allocated
@@ -5195,7 +5303,7 @@ Fault exclusion is a separate source-termination consequence. -/
       GraphRepresentsBy next (stepRaw state) source ∧ DemandSafety next (stepRaw state) := by
   cases control : state.control with
   | complete value => exact graph_next_complete_safety represented successful (by simp [stepRaw,control])
-  | refused reason | blackhole address =>
+  | refused reason | blackhole address | yielded _ =>
       simp [stepRaw,control,ResultControl] at successful
   | enter address =>
       cases found : state.heap[address]? with
@@ -5232,6 +5340,9 @@ Fault exclusion is a separate source-termination consequence. -/
       | case scrutinee arms => exact graph_evaluate_context_safety (context := .case arms) represented control
       | ifBool condition whenTrue whenFalse =>
           exact graph_evaluate_context_safety (context := .ifBool whenTrue whenFalse) represented control
+      | perform plan =>
+          cases shared : forcingShared state.stack <;> simp [stepRaw,control,shared,ResultControl] at successful
+      | done value => exact graph_evaluate_done_safety represented control
   | returned value =>
       cases frames : state.stack with
       | nil => exact graph_next_complete_safety represented successful (by simp [stepRaw,control,frames])
@@ -5587,6 +5698,16 @@ actual next raw control is running/finished, with no typed-domain premise. -/
   | refused reason | blackhole address =>
       obtain ⟨_,_,_,_,_,focus,current,_⟩ := represented
       simp [control,controlMeaning] at current
+  | yielded plan =>
+      -- A terminating source never yields: the focus would be a stuck perform.
+      exfalso
+      obtain ⟨_,_,_,_,_,focus,current,stack⟩ := represented
+      simp only [control,controlMeaning,Option.some.injEq] at current
+      subst focus
+      obtain ⟨cost,whole⟩ := source_evaluates_derivation (sourceSteps_evaluates_tail (stackRealizes_erases stack) terminates)
+      obtain ⟨_,_,demand,_⟩ := stack_derivation_demand whole
+      cases demand with
+      | value isValue => cases isValue
   | complete value => simp [stepRaw,control,ResultControl]
   | enter address =>
       cases found : state.heap[address]? with
@@ -5599,6 +5720,18 @@ actual next raw control is running/finished, with no typed-domain premise. -/
           | suspended origin | cached origin value => simp [stepRaw,control,found,ResultControl]
   | evaluate term environment =>
       cases term <;> try simp [stepRaw,control,ResultControl]
+      case perform plan =>
+        -- A terminating source never demands a perform: it has no derivation.
+        exfalso
+        obtain ⟨_,_,_,_,_,focus,current,stack⟩ := represented
+        have aligned : focus = closeTerm meaning environment (.perform plan) := by
+          simpa [controlMeaning,control] using current.symm
+        subst focus
+        obtain ⟨cost,whole⟩ := source_evaluates_derivation (sourceSteps_evaluates_tail (stackRealizes_erases stack) terminates)
+        obtain ⟨_,_,demand,_⟩ := stack_derivation_demand whole
+        rw [closeTerm_perform] at demand
+        cases demand with
+        | value isValue => cases isValue
       case bound index =>
         cases found : environment[index]? with
         | none =>
@@ -5639,9 +5772,17 @@ are excluded from these actual traces; finite completion is still separate. -/
     ResultControl (rawRun ticks (initial source)).control := by
   obtain ⟨meaning,represented,safe⟩ := rawRun_terminating_graphSafety (graphBy_initializes closed)
     (initial_demandSafety source _) (initial_originsBorn source) terminates ticks
-  obtain ⟨_,_,_,_,_,focus,control,_⟩ := represented
+  obtain ⟨_,_,_,_,_,focus,control,stack⟩ := represented
   cases actual : (rawRun ticks (initial source)).control <;> try trivial
-  all_goals simp [actual,controlMeaning] at control
+  all_goals first
+    | (simp [actual,controlMeaning] at control; done)
+    | (exfalso
+       simp only [actual,controlMeaning,Option.some.injEq] at control
+       subst focus
+       obtain ⟨cost,whole⟩ := source_evaluates_derivation (sourceSteps_evaluates_tail (stackRealizes_erases stack) terminates)
+       obtain ⟨_,_,demand,_⟩ := stack_derivation_demand whole
+       cases demand with
+       | value isValue => cases isValue)
 
 /--
 info: 'Minidregg.Theory.ObjectiveBendDemandAdequacy.graphBy_terminating_next_result' depends on axioms: [propext,
@@ -5670,7 +5811,7 @@ or replace machine state. -/
       cases control : state.control <;> simp [runBounded,control,retainedState,rawRun]
   | succ ticks ih =>
       cases control : state.control with
-      | complete value | refused reason | blackhole address =>
+      | complete value | refused reason | blackhole address | yielded _ =>
           refine ⟨0,Nat.zero_le _,?_⟩
           simp [runBounded,step,control,retainedState,rawRun]
       | evaluate term environment | enter address | returned value =>
@@ -5701,14 +5842,14 @@ suspension, never a semantic refusal or blackhole for a terminating source. -/
   | zero =>
       have current := progress 0
       cases control : state.control with
-      | refused reason | blackhole address => simp [rawRun,control,ResultControl] at current
+      | refused reason | blackhole address | yielded _ => simp [rawRun,control,ResultControl] at current
       | complete value => exact Or.inl ⟨value,state,by simp [runBounded,control]⟩
       | evaluate term environment | enter address | returned value =>
           exact Or.inr ⟨.ticks,state,by simp [runBounded,control]⟩
   | succ ticks ih =>
       have current := progress 0
       cases control : state.control with
-      | refused reason | blackhole address => simp [rawRun,control,ResultControl] at current
+      | refused reason | blackhole address | yielded _ => simp [rawRun,control,ResultControl] at current
       | complete value => exact Or.inl ⟨value,state,by simp [runBounded,step,control]⟩
       | evaluate term environment | enter address | returned value =>
           by_cases fits : (stepRaw state).heap.size ≤ limits.heap ∧ (stepRaw state).stack.length ≤ limits.stack

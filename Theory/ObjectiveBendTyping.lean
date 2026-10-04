@@ -22,15 +22,31 @@ def Assumptions.valid (assumptions : Assumptions) : Bool :=
 
 /-- Annotated recursive aliases unfold one declared head only. This explicit
 fragment supports the generated global-record knot without an arbitrary subtype
-oracle or unrestricted recursive definitional conversion. -/
+oracle or unrestricted recursive definitional conversion. An alias never names
+an activity, so no agreement crosses between an activity and a suspendable type
+(`sameType_isComputation`), whatever the bounds say. -/
 def sameType (assumptions : Assumptions) (actual expected : Ty) : Bool :=
   actual.canonical == expected.canonical ||
     (match actual with
-      | .variable index => (assumptions.bounds.lookup index).map Ty.canonical == some expected.canonical
+      | .variable index => !expected.isComputation &&
+          (assumptions.bounds.lookup index).map Ty.canonical == some expected.canonical
       | _ => false) ||
     (match expected with
-      | .variable index => (assumptions.bounds.lookup index).map Ty.canonical == some actual.canonical
+      | .variable index => !actual.isComputation &&
+          (assumptions.bounds.lookup index).map Ty.canonical == some actual.canonical
       | _ => false)
+
+theorem sameType_isComputation {assumptions : Assumptions} {actual expected : Ty}
+    (agreement : sameType assumptions actual expected = true) :
+    actual.isComputation = expected.isComputation := by
+  simp only [sameType,Bool.or_eq_true] at agreement
+  rcases agreement with (canonical | aliasActual) | aliasExpected
+  · rw [← Ty.canonical_isComputation actual, ← Ty.canonical_isComputation expected]
+    simpa using congrArg Ty.isComputation (by simpa using canonical : actual.canonical = expected.canonical)
+  · cases actual <;> simp at aliasActual
+    simp_all [Ty.isComputation]
+  · cases expected <;> simp at aliasExpected
+    simp_all [Ty.isComputation]
 
 /-- Source positions address the annotation of each actual lambda. Missing
 annotations are refused, not guessed or silently replaced by Data types. An

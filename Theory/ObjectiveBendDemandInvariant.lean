@@ -34,6 +34,8 @@ inductive Scoped : Nat → Term → Prop where
   | case {n : Nat} {t : Term} {arms : List (String × Term)} :
       Scoped n t → (∀ arm ∈ arms, Scoped (n+1) arm.2) → Scoped n (.case t arms)
   | ifBool {n : Nat} {c t f : Term} : Scoped n c → Scoped n t → Scoped n f → Scoped n (.ifBool c t f)
+  | perform {n : Nat} {plan : Term} : Scoped n plan → Scoped n (.perform plan)
+  | done {n : Nat} {value : Term} : Scoped n value → Scoped n (.done value)
 
 @[simp] theorem scoped_bound_iff (n : Nat) (i : Nat) :
     Scoped n (.bound i) ↔ i < n := by
@@ -143,6 +145,18 @@ inductive Scoped : Nat → Term → Prop where
   · intro h; cases h; exact ⟨by assumption,by assumption,by assumption⟩
   · intro h; exact .ifBool h.1 h.2.1 h.2.2
 
+@[simp] theorem scoped_perform_iff (n : Nat) (plan : Term) :
+    Scoped n (.perform plan) ↔ Scoped n plan := by
+  constructor
+  · intro h; cases h; assumption
+  · intro h; exact .perform h
+
+@[simp] theorem scoped_done_iff (n : Nat) (value : Term) :
+    Scoped n (.done value) ↔ Scoped n value := by
+  constructor
+  · intro h; cases h; assumption
+  · intro h; exact .done h
+
  theorem scoped_rename {n : Nat} {t : Term} (h : Scoped n t)
     (f : Nat → Nat) (m : Nat) (hf : ∀ i, i < n → f i < m) :
     Scoped m (t.rename f) := by
@@ -237,6 +251,12 @@ inductive Scoped : Nat → Term → Prop where
   | ifBool _ _ _ ih₁ ih₂ ih₃ =>
       simp only [Term.rename]
       exact .ifBool (ih₁ f m hf) (ih₂ f m hf) (ih₃ f m hf)
+  | perform _ ih =>
+      simp only [Term.rename]
+      exact .perform (ih f m hf)
+  | done _ ih =>
+      simp only [Term.rename]
+      exact .done (ih f m hf)
 
  theorem scoped_weaken {n : Nat} {t : Term} (h : Scoped n t) :
     Scoped (n+1) (t.rename Nat.succ) :=
@@ -336,6 +356,12 @@ inductive Scoped : Nat → Term → Prop where
   | ifBool _ _ _ ih₁ ih₂ ih₃ =>
       simp only [Term.substitute]
       exact .ifBool (ih₁ substitution m hs) (ih₂ substitution m hs) (ih₃ substitution m hs)
+  | perform _ ih =>
+      simp only [Term.substitute]
+      exact .perform (ih substitution m hs)
+  | done _ ih =>
+      simp only [Term.substitute]
+      exact .done (ih substitution m hs)
 
  theorem scoped_mixBody {n : Nat} {lower upper : Term}
     (hl : Scoped n lower) (hu : Scoped n upper) : Scoped n (mixBody lower upper) := by
@@ -397,6 +423,7 @@ def ControlValid (bound : Nat) : Control → Prop
   | .enter address | .blackhole address => address < bound
   | .returned value | .complete value => RuntimeValueValid bound value
   | .refused _ => True
+  | .yielded plan => plan < bound
 
 def LexicalInvariant (state : State) : Prop :=
   (∀ (address : Nat) (cell : Cell), state.heap[address]? = some cell → CellValid state.heap.size cell) ∧
@@ -447,6 +474,7 @@ def LexicalInvariant (state : State) : Prop :=
   | enter _ | blackhole _ => exact Nat.lt_of_lt_of_le h hab
   | returned _ | complete _ => exact runtimeValueValid_mono h hab
   | refused _ => trivial
+  | yielded _ => exact Nat.lt_of_lt_of_le h hab
 
 abbrev HeapValid (heap : Array Cell) : Prop :=
   ∀ (address : Nat) (cell : Cell), heap[address]? = some cell → CellValid heap.size cell
@@ -632,7 +660,7 @@ set_option maxHeartbeats 1200000 in
     scoped_mix_iff, scoped_fix_iff, scoped_specification_iff, scoped_prototype_iff,
     scoped_reflect_iff, scoped_metadata_iff, scoped_project_iff, scoped_binary_iff,
     scoped_extend_iff, scoped_record_iff, scoped_get_iff, scoped_condition_iff,
-    scoped_inject_iff, scoped_case_iff, scoped_ifBool_iff,
+    scoped_inject_iff, scoped_case_iff, scoped_ifBool_iff, scoped_perform_iff, scoped_done_iff,
     List.mem_cons, List.not_mem_nil, false_or, or_false, Array.size_push]
   all_goals try (have lookupValid := environmentValid_lookup hc.2 (by assumption))
   all_goals try (have allocationValid := allocateFields_valid hh hc.2 hc.1)

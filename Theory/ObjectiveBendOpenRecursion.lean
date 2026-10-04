@@ -348,6 +348,9 @@ inductive Transition (State : Type) where
   | finished (result : Observation)
   | suspended (retained : State)
   | refused (diagnostic : String)
+  /-- The program yielded: no pure result exists; only a resume (a turn)
+  continues it. The waiting state is retained exactly. -/
+  | yielded (waiting : State)
 
 inductive MachineSteps {State : Type} (step : State → Transition State) : State → State → Prop where
   | refl (state : State) : MachineSteps step state state

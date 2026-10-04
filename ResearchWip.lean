@@ -248,6 +248,7 @@ import Theory.BfvRing
 import Theory.BfvSmudging
 import Theory.BoundedNockMachine
 import Theory.Disputation
+import Theory.ObjectiveBendCheckpointRoundTrip
 import Theory.ObjectiveBendDemandAdequacy
 import Theory.ObjectiveBendDemandCapacity
 import Theory.ObjectiveBendDemandCompleteness

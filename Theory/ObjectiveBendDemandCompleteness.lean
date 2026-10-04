@@ -69,6 +69,9 @@ set_option autoImplicit false
       have valid : RuntimeValueValid state.heap.size value := by simpa [control,ControlValid] using lexical.2.1
       simp only [control,controlMeaning,valueMeaning_congr valid same]
   | refused reason | blackhole address => simp [control,controlMeaning]
+  | yielded plan =>
+      have allocated : plan < state.heap.size := by simpa [control,ControlValid] using lexical.2.1
+      simp [control,controlMeaning,same plan allocated]
   | enter address =>
       have allocated : address < state.heap.size := by simpa [control,ControlValid] using lexical.2.1
       simp [control,controlMeaning,same address allocated]
@@ -90,7 +93,7 @@ set_option autoImplicit false
       cases found : state.heap[address]? with
       | none => simp [budgetFocus,control,found]
       | some cell => cases cell <;> simp [budgetFocus,control,found]
-  | refused reason | blackhole address => simp [ResultControl,control] at successful
+  | refused reason | blackhole address | yielded _ => simp [ResultControl,control] at successful
 
  theorem rawRun_add (first second : Nat) (state : State) : rawRun (first+second) state = rawRun second (rawRun first state) := by
   induction first generalizing state with
@@ -253,7 +256,9 @@ noncomputable def controlPotential : Control → Nat
   | .evaluate term _ => 3 * sizeOf term + 1
   | .enter _ => 2
   | .returned _ => 1
-  | .complete _ | .refused _ | .blackhole _ => 0
+  -- A yield ends the pure trace: continuing it is a whole-program step taken
+  -- only by a resume (an admitted turn), never by stepRaw.
+  | .complete _ | .refused _ | .blackhole _ | .yielded _ => 0
 
 noncomputable def framePotential : Frame → Nat
   | .argument term _ => 3 * sizeOf term
@@ -336,7 +341,7 @@ def WholeAdvance (meaning next : AddressMeaning) (state successor : State) : Pro
     (current : controlMeaning meaning state.control = some focus) : budgetFocus meaning state = some focus := by
   cases control : state.control with
   | enter address => exact False.elim (noEnter address control)
-  | evaluate _ _ | returned _ | complete _ | refused _ | blackhole _ =>
+  | evaluate _ _ | returned _ | complete _ | refused _ | blackhole _ | yielded _ =>
       simpa [budgetFocus,control] using current
 
  theorem graphBy_same_size {meaning : AddressMeaning} {state : State} {source : Term}
@@ -348,6 +353,40 @@ def WholeAdvance (meaning next : AddressMeaning) (state successor : State) : Pro
   intro address allocated
   rw [size] at allocated
   exact (same address allocated).symm
+
+/-- Only a perform (or an already yielded state) reaches a yield, and the
+yielding transition leaves the continuation untouched. -/
+ theorem stepRaw_yielded_cases {state : State} {plan : Address}
+    (yielded : (stepRaw state).control = .yielded plan) :
+    state.control = .yielded plan ∨
+      ((∃ term environment, state.control = .evaluate (.perform term) environment) ∧
+        (stepRaw state).stack = state.stack) := by
+  cases control : state.control with
+  | yielded p => left; simpa [stepRaw,control] using yielded
+  | complete _ | refused _ | blackhole _ => simp [stepRaw,control] at yielded
+  | enter address =>
+      exfalso
+      cases found : state.heap[address]? with
+      | none => simp [stepRaw,control,found] at yielded
+      | some cell => cases cell <;> simp [stepRaw,control,found] at yielded
+  | returned value =>
+      exfalso
+      cases frames : state.stack with
+      | nil => simp [stepRaw,control,frames] at yielded
+      | cons frame rest =>
+          cases frame <;> simp only [stepRaw,control,frames] at yielded
+          all_goals (repeat (first | split at yielded))
+          all_goals (first | contradiction | (cases yielded) | simp at yielded)
+  | evaluate term environment =>
+      cases term
+      case perform plan' =>
+        right
+        refine ⟨⟨plan',environment,rfl⟩,?_⟩
+        cases shared : forcingShared state.stack <;> simp [stepRaw,control,shared] at yielded ⊢
+      all_goals exfalso
+      all_goals simp only [stepRaw,control] at yielded
+      all_goals (repeat (first | split at yielded))
+      all_goals (first | contradiction | (cases yielded) | simp at yielded)
 
 /-- Every SourceDispatch transition is a genuine whole-program reduction. -/
  theorem dispatch_advance {meaning next : AddressMeaning} {state : State} {source : Term}
@@ -368,6 +407,27 @@ def WholeAdvance (meaning next : AddressMeaning) (state successor : State) : Pro
     exact stackMeaning_names_congr valid same
   have successful : ResultControl (stepRaw state).control := by
     cases c : (stepRaw state).control <;> simp_all [controlMeaning,ResultControl]
+    -- A yield follows no source reduction: its stack is untouched and its
+    -- redex is a perform, which has no Step.
+    rename_i plan
+    exfalso
+    have yieldedFrom := stepRaw_yielded_cases c
+    have consumedEmpty : consumed = [] := by
+      have sameStack : (stepRaw state).stack = state.stack := by
+        rcases yieldedFrom with yielded | ⟨_,stackEq⟩
+        · simp [stepRaw,yielded]
+        · exact stackEq
+      have lengths := congrArg List.length head
+      rw [sameStack,List.length_append] at lengths
+      exact List.eq_nil_of_length_eq_zero (by omega)
+    subst consumedEmpty
+    rcases yieldedFrom with yielded | ⟨⟨term,environment,evaluate⟩,_⟩
+    · simp [controlMeaning,yielded] at control
+      subst control
+      cases reduce
+    · simp [controlMeaning,evaluate,closeTerm_perform] at control
+      subst control
+      cases reduce
   obtain ⟨focus,nextFocus⟩ := budgetFocus_result_exists next successful
   have focused := budgetFocus_control_steps current.2.2.2.2.1 newControl nextFocus
   refine ⟨stackMeaning meaning state.stack before,stackMeaning next (stepRaw state).stack focus,?_,?_,
@@ -680,7 +740,7 @@ def WholeAdvance (meaning next : AddressMeaning) (state successor : State) : Pro
       WholeAdvance meaning next state (stepRaw state) := by
   cases control : state.control with
   | complete value => exact False.elim (running value control)
-  | refused reason | blackhole address => simp [stepRaw,control,ResultControl] at successful
+  | refused reason | blackhole address | yielded _ => simp [stepRaw,control,ResultControl] at successful
   | enter address =>
       cases found : state.heap[address]? with
       | none => simp [stepRaw,control,found,ResultControl] at successful
@@ -719,6 +779,11 @@ def WholeAdvance (meaning next : AddressMeaning) (state successor : State) : Pro
       | case scrutinee arms => exact context_advance (context := .case arms) represented successful control
       | ifBool condition whenTrue whenFalse =>
           exact context_advance (context := .ifBool whenTrue whenFalse) represented successful control
+      | perform plan =>
+          cases shared : forcingShared state.stack <;> simp [stepRaw,control,shared,ResultControl] at successful
+      | done value =>
+          obtain ⟨next,same,current,dispatch⟩ := graph_evaluate_done_execution represented control
+          exact ⟨next,current,dispatch_advance represented same current noEnter dispatch⟩
   | returned value =>
       have noEnter : ∀ address, state.control ≠ .enter address := by intro address; simp [control]
       cases frames : state.stack with
@@ -925,6 +990,7 @@ def outcomeTransition : Outcome → Transition State
   | .suspended .ticks next => match next.control with
       | .refused _ => .refused "refused"
       | .blackhole _ => .refused "blackhole"
+      | .yielded _ => .yielded next
       | _ => .advanced next
   | .suspended .capacity retained => .suspended retained
   | .finished value _ => match groundObservation value with
@@ -932,6 +998,7 @@ def outcomeTransition : Outcome → Transition State
       | none => .refused "non-ground result"
   | .divergent _ _ => .refused "blackhole"
   | .refused _ _ => .refused "refused"
+  | .yielded _ waiting => .yielded waiting
 
 def machineTransition (state : State) : Transition State :=
   outcomeTransition (step (traceLimits 1 state) state)
@@ -943,7 +1010,7 @@ def machineTransition (state : State) : Transition State :=
   have fits : step (traceLimits 1 state) state = .suspended .ticks (stepRaw state) := by
     cases control : state.control with
     | complete value => exact False.elim (running value control)
-    | refused _ | blackhole _ => simp [control,ResultControl] at noFault
+    | refused _ | blackhole _ | yielded _ => simp [control,ResultControl] at noFault
     | evaluate _ _ | enter _ | returned _ => simp [step,control,traceLimits]
   simp only [machineTransition,fits,outcomeTransition]
   cases next : (stepRaw state).control <;> simp_all [ResultControl]
@@ -955,7 +1022,7 @@ def machineTransition (state : State) : Transition State :=
   | complete value =>
       cases ground : groundObservation value <;>
         simp [machineTransition,step,control,outcomeTransition,ground] at advanced
-  | refused _ | blackhole _ => simp [machineTransition,step,control,outcomeTransition] at advanced
+  | refused _ | blackhole _ | yielded _ => simp [machineTransition,step,control,outcomeTransition] at advanced
   | evaluate _ _ | enter _ | returned _ =>
       have fits : step (traceLimits 1 state) state = .suspended .ticks (stepRaw state) := by
         simp [step,control,traceLimits]
@@ -972,7 +1039,7 @@ def machineTransition (state : State) : Transition State :=
         simp [machineTransition,step,control,outcomeTransition,ground] at finished
       subst finished
       exact ⟨value,rfl,ground⟩
-  | refused _ | blackhole _ => simp [machineTransition,step,control,outcomeTransition] at finished
+  | refused _ | blackhole _ | yielded _ => simp [machineTransition,step,control,outcomeTransition] at finished
   | evaluate _ _ | enter _ | returned _ =>
       have fits : step (traceLimits 1 state) state = .suspended .ticks (stepRaw state) := by
         simp [step,control,traceLimits]
@@ -985,7 +1052,7 @@ def machineTransition (state : State) : Transition State :=
   | complete value =>
       cases ground : groundObservation value <;>
         simp [machineTransition,step,control,outcomeTransition,ground] at suspended
-  | refused _ | blackhole _ => simp [machineTransition,step,control,outcomeTransition] at suspended
+  | refused _ | blackhole _ | yielded _ => simp [machineTransition,step,control,outcomeTransition] at suspended
   | evaluate _ _ | enter _ | returned _ =>
       have fits : step (traceLimits 1 state) state = .suspended .ticks (stepRaw state) := by
         simp [step,control,traceLimits]

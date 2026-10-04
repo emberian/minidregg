@@ -25,7 +25,7 @@ set_option autoImplicit false
 
 def Terminal (state : State) : Prop :=
   match state.control with
-  | .complete _ | .refused _ | .blackhole _ => True
+  | .complete _ | .refused _ | .blackhole _ | .yielded _ => True
   | _ => False
 
  theorem runBounded_terminal {limits : Limits} {state : State} (terminal : Terminal state) (ticks : Nat) :
@@ -41,13 +41,13 @@ def Terminal (state : State) : Prop :=
   | zero => simp [forceWith]
   | succ ticks ih =>
       cases control : state.control with
-      | complete _ | refused _ | blackhole _ =>
+      | complete _ | refused _ | blackhole _ | yielded _ =>
           simp [forceWith,control,runBounded,step]
       | evaluate _ _ | enter _ | returned _ =>
           by_cases fits : (stepRaw state).heap.size ≤ limits.heap ∧ (stepRaw state).stack.length ≤ limits.stack
           · have stepped : step limits state = .suspended .ticks (stepRaw state) := by simp [step,control,fits]
             cases next : (stepRaw state).control with
-            | complete _ | refused _ | blackhole _ =>
+            | complete _ | refused _ | blackhole _ | yielded _ =>
                 have terminal : Terminal (stepRaw state) := by simp [Terminal,next]
                 have tail : runBounded limits (ticks+1) state = runBounded limits 0 (stepRaw state) := by
                   rw [show runBounded limits (ticks+1) state = runBounded limits ticks (stepRaw state) by
@@ -70,14 +70,14 @@ exact state that the unrestricted bounded run reached at that point. -/
   | zero => left; simp [forceWith]
   | succ ticks ih =>
       cases control : state.control with
-      | complete _ | refused _ | blackhole _ =>
+      | complete _ | refused _ | blackhole _ | yielded _ =>
           left; simp [forceWith,control,runBounded,step]
       | evaluate _ _ | enter _ | returned _ =>
           by_cases allowed : policy state = true
           · by_cases fits : (stepRaw state).heap.size ≤ limits.heap ∧ (stepRaw state).stack.length ≤ limits.stack
             · have stepped : step limits state = .suspended .ticks (stepRaw state) := by simp [step,control,fits]
               cases next : (stepRaw state).control with
-              | complete _ | refused _ | blackhole _ =>
+              | complete _ | refused _ | blackhole _ | yielded _ =>
                   have terminal : Terminal (stepRaw state) := by simp [Terminal,next]
                   have tail : runBounded limits (ticks+1) state = runBounded limits 0 (stepRaw state) := by
                     rw [show runBounded limits (ticks+1) state = runBounded limits ticks (stepRaw state) by
@@ -292,7 +292,7 @@ the value's source meaning, and leaves a settled heap extending the names. -/
               have allocated : payload < state.heap.size := valid
               cases forced : (forceWith policy limits budget.ticks
                   {heap := state.heap,control := .enter payload,stack := []}).1 with
-              | suspended _ _ | divergent _ _ | refused _ _ => simp [forced] at h
+              | suspended _ _ | divergent _ _ | refused _ _ | yielded _ _ => simp [forced] at h
               | finished forcedValue retained =>
                   simp only [forced] at h
                   obtain ⟨_,_,h⟩ := except_bind_ok h
@@ -336,7 +336,7 @@ the value's source meaning, and leaves a settled heap extending the names. -/
                     · obtain ⟨_,_,body⟩ := except_bind_ok body
                       cases forced : (forceWith policy limits accumulated.2.2.ticks
                           {heap := accumulated.2.1.heap,control := .enter field.2,stack := []}).1 with
-                      | suspended _ _ | divergent _ _ | refused _ _ => rw [forced] at body; cases body
+                      | suspended _ _ | divergent _ _ | refused _ _ | yielded _ _ => rw [forced] at body; cases body
                       | finished forcedValue retained =>
                           rw [forced] at body
                           obtain ⟨child,childEq,body⟩ := except_bind_ok body

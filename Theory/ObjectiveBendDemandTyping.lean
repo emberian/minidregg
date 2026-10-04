@@ -110,14 +110,19 @@ inductive ValueTyping (assumptions : Assumptions) (types : AddressTypes) : Runti
       ValueTyping assumptions types (.variant tag address) (.variant row)
 
 /-- Both origin and cached result inhabit the same assigned type. Cycles use
-address assignments; the relation never unfolds a cyclic heap into a tree. -/
+address assignments; the relation never unfolds a cyclic heap into a tree. A
+cell's type is never an activity: a shared cell is forced under an update
+frame, so an activity there would cache and share its effect. -/
 inductive CellTyping (assumptions : Assumptions) (types : AddressTypes) : Cell → Ty → Prop where
   | suspended {origin : Closure} {type : Ty} : ClosureTyping assumptions types origin type →
+      type.isComputation = false →
       CellTyping assumptions types (.suspended origin) type
   | evaluating {origin : Closure} {type : Ty} : ClosureTyping assumptions types origin type →
+      type.isComputation = false →
       CellTyping assumptions types (.evaluating origin) type
   | cached {origin : Closure} {value : RuntimeValue} {type : Ty} :
       ClosureTyping assumptions types origin type → ValueTyping assumptions types value type →
+      type.isComputation = false →
       CellTyping assumptions types (.cached origin value) type
 
 structure HeapTyping (assumptions : Assumptions) (types : AddressTypes) (heap : Array Cell) : Prop where
@@ -135,6 +140,7 @@ inductive FrameTyping (assumptions : Assumptions) (types : AddressTypes) : Frame
       argumentAllowed assumptions quantity argumentTyped.context domain argumentTyped.uses = true →
       FrameTyping assumptions types (.argument argument environment) functionType codomain
   | update {address : Address} {type : Ty} : types[address]? = some type →
+      type.isComputation = false →
       FrameTyping assumptions types (.update address) type type
   | field {name : String} {row member : Ty} {fuel : Nat} :
       row.lookup assumptions.bounds fuel name = some member →
@@ -178,6 +184,16 @@ inductive FrameTyping (assumptions : Assumptions) (types : AddressTypes) : Frame
       ClosureTyping assumptions types ⟨whenTrue,environment⟩ result →
       ClosureTyping assumptions types ⟨whenFalse,environment⟩ result →
       FrameTyping assumptions types (.ifBool whenTrue whenFalse environment) .boolean result
+  /-- The same case frame sequencing an activity: it consumes the activity's
+  produced variant and continues with an activity arm. -/
+  | effectCase {arms : List (String × Term)} {environment : Environment}
+      {planType response row result : Ty} {context : Context} {uses : Uses} :
+      EnvironmentTyping types context environment →
+      ArmsTyping assumptions context arms row (.computation planType response result) uses →
+      validContext assumptions.shareableVariables context = true →
+      result.isComputation = false →
+      FrameTyping assumptions types (.case arms environment)
+        (.computation planType response (.variant row)) (.computation planType response result)
 
 inductive StackTyping (assumptions : Assumptions) (types : AddressTypes) : List Frame → Ty → Ty → Prop where
   | nil (type : Ty) : StackTyping assumptions types [] type type
@@ -187,6 +203,13 @@ inductive StackTyping (assumptions : Assumptions) (types : AddressTypes) : List 
   | conversion {stack : List Frame} {actual expected result : Ty} :
       sameType assumptions actual expected = true → StackTyping assumptions types stack expected result →
       StackTyping assumptions types stack actual result
+  /-- Return: a continuation awaiting an activity of `type` accepts a plain
+  value of `type` (an activity that performed nothing). Values are never typed
+  at activity types. -/
+  | returns {stack : List Frame} {type planType response result : Ty} :
+      type.isComputation = false →
+      StackTyping assumptions types stack (.computation planType response type) result →
+      StackTyping assumptions types stack type result
 
 /-- A source conversion is an implicit continuation boundary. It changes
 neither runtime frames nor address types; returned values cross it using the
@@ -205,6 +228,10 @@ inductive ControlTyping (assumptions : Assumptions) (types : AddressTypes) : Con
       ControlTyping assumptions types (.complete value) type
   | blackhole {address : Address} {type : Ty} : types[address]? = some type →
       ControlTyping assumptions types (.blackhole address) type
+  /-- A yielded program: its plan cell holds a Plan; it awaits a response. -/
+  | yielded {plan : Address} {planType response : Ty} :
+      types[plan]? = some planType → planType.isPlan = true → response.isData = true →
+      ControlTyping assumptions types (.yielded plan) (.computation planType response response)
 
 structure StateTyping (assumptions : Assumptions) (types : AddressTypes) (state : State) (result : Ty) where
   current : Ty
@@ -226,7 +253,7 @@ theorem source_uses_length {assumptions : Assumptions} {context : Context}
     (motive_1 := fun context _ _ uses _ => uses.length = context.length)
     (motive_2 := fun context _ _ uses _ => uses.length = context.length)
     (motive_3 := fun context _ _ _ uses _ => uses.length = context.length)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
   · intros; simp [variableUses]
   · intros; simp [zeroUses]
   · intros; simp [zeroUses]
@@ -249,6 +276,9 @@ theorem source_uses_length {assumptions : Assumptions} {context : Context}
   · intros; assumption
   · intros; simp_all [addUses,List.length_zipWith]
   · intros; simp_all [addUses,List.length_zipWith]
+  · intros; assumption
+  · intros; assumption
+  · intros; simp_all [addUses,List.length_zipWith]
   · intros; simp [zeroUses]
   · intros; simp_all [addUses,List.length_zipWith]
   · intros; simp [zeroUses]
@@ -264,7 +294,10 @@ theorem source_fields_row {assumptions : Assumptions} {context : Context}
     (motive_1 := fun _ _ _ _ _ => True)
     (motive_2 := fun _ _ row _ _ => ∃ fuel, row.isRow assumptions.bounds fuel = true)
     (motive_3 := fun _ _ _ _ _ _ => True)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
+  · intros; trivial
+  · intros; trivial
+  · intros; trivial
   · intros; trivial
   · intros; trivial
   · intros; trivial
@@ -288,7 +321,7 @@ theorem source_fields_row {assumptions : Assumptions} {context : Context}
   · intros; trivial
   · intros; trivial
   · intro context; exact ⟨1,rfl⟩
-  · intro context name body rest type row bu ru hb hr ihBody ihRest
+  · intro context name body rest type row bu ru hb hr _ ihBody ihRest
     obtain ⟨fuel,isRow⟩ := ihRest
     exact ⟨fuel+1,isRow⟩
   · intros; trivial
@@ -304,7 +337,7 @@ theorem source_scoped {assumptions : Assumptions} {context : Context}
     (motive_1 := fun context term _ _ _ => ObjectiveBendDemandInvariant.Scoped context.length term)
     (motive_2 := fun context fields _ _ _ => ∀ field ∈ fields, ObjectiveBendDemandInvariant.Scoped context.length field.2)
     (motive_3 := fun context arms _ _ _ _ => ∀ arm ∈ arms, ObjectiveBendDemandInvariant.Scoped (context.length+1) arm.2)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
 
   · intro context index binding found
     exact .bound (List.getElem?_eq_some_iff.mp found).1
@@ -331,8 +364,11 @@ theorem source_scoped {assumptions : Assumptions} {context : Context}
   · intros; exact .inject (by assumption)
   · intros; exact .case (by assumption) (by assumption)
   · intros; exact .ifBool (by assumption) (by assumption) (by assumption)
+  · intros; exact .perform (by assumption)
+  · intros; exact .done (by assumption)
+  · intros; exact .case (by assumption) (by assumption)
   · intro context field member; simp at member
-  · intro context name body rest type row bu ru hb hr ihb ihr field member
+  · intro context name body rest type row bu ru hb hr _ ihb ihr field member
     simp only [List.mem_cons] at member
     rcases member with rfl | member
     · exact ihb
@@ -352,7 +388,7 @@ theorem source_fields_scoped {assumptions : Assumptions} {context : Context}
     (motive_1 := fun context term _ _ _ => ObjectiveBendDemandInvariant.Scoped context.length term)
     (motive_2 := fun context fields _ _ _ => ∀ field ∈ fields, ObjectiveBendDemandInvariant.Scoped context.length field.2)
     (motive_3 := fun context arms _ _ _ _ => ∀ arm ∈ arms, ObjectiveBendDemandInvariant.Scoped (context.length+1) arm.2)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ typed
 
   · intro context index binding found
     exact .bound (List.getElem?_eq_some_iff.mp found).1
@@ -379,8 +415,11 @@ theorem source_fields_scoped {assumptions : Assumptions} {context : Context}
   · intros; exact .inject (by assumption)
   · intros; exact .case (by assumption) (by assumption)
   · intros; exact .ifBool (by assumption) (by assumption) (by assumption)
+  · intros; exact .perform (by assumption)
+  · intros; exact .done (by assumption)
+  · intros; exact .case (by assumption) (by assumption)
   · intro context field member; simp at member
-  · intro context name body rest type row bu ru hb hr ihb ihr field member
+  · intro context name body rest type row bu ru hb hr _ ihb ihr field member
     simp only [List.mem_cons] at member
     rcases member with rfl | member
     · exact ihb

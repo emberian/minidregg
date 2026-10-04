@@ -42,7 +42,7 @@ No field receives a fresh allowance. Heap/stack limits stay common throughout. -
 def forceWith (policy : State → Bool) (limits : Limits) : Nat → State → Outcome × Nat
   | 0,state => (runBounded limits 0 state,0)
   | ticks+1,state => match state.control with
-    | .complete _ | .refused _ | .blackhole _ => (runBounded limits 0 state,ticks+1)
+    | .complete _ | .refused _ | .blackhole _ | .yielded _ => (runBounded limits 0 state,ticks+1)
     | _ => if !policy state then (.suspended .capacity state,ticks+1) else
       match runBounded limits 1 state with
       | .suspended .ticks next => forceWith policy limits ticks next
