@@ -39,6 +39,7 @@ statements and proofs unchanged. Dropped: §6 (emit half, imports `Dregg2.Circui
 `#guard` smoke lines (replaced by the named theorems `ringF_value` and `zeroFlow_gap_value`).
 Added: `ringLPAt`, `zeroFlow_refused_at_two`, `zeroFlow_certified_at_three`.
 -/
+import Theory.AxiomPin
 import Mathlib.Data.Matrix.Mul
 import Mathlib.LinearAlgebra.Matrix.DotProduct
 import Mathlib.Algebra.BigOperators.Fin
@@ -251,17 +252,17 @@ theorem zeroFlow_certified_at_three : Certified (ringLPAt 3) (fun _ => 0) ringπ
       simp [ringLPAt, ringLP, ringA, ringπ, ringS, Matrix.vecMul, dotProduct]
   · simp [ringLPAt, ringLP, ringS, dotProduct, Fin.sum_univ_three]
 
-#print axioms weak_duality
-#print axioms certifies_epsilon_optimal
-#print axioms gap_nonneg
-#print axioms ringCert_valid
-#print axioms ringF_optimal
-#print axioms leakF_infeasible
-#print axioms zeroFlow_not_certifiable
-#print axioms zeroFlow_gap_refused
-#print axioms ringF_value
-#print axioms zeroFlow_gap_value
-#print axioms zeroFlow_refused_at_two
-#print axioms zeroFlow_certified_at_three
+#assert_axioms weak_duality
+#assert_axioms certifies_epsilon_optimal
+#assert_axioms gap_nonneg
+#assert_axioms ringCert_valid
+#assert_axioms ringF_optimal
+#assert_axioms leakF_infeasible
+#assert_axioms zeroFlow_not_certifiable
+#assert_axioms zeroFlow_gap_refused
+#assert_axioms ringF_value
+#assert_axioms zeroFlow_gap_value
+#assert_axioms zeroFlow_refused_at_two
+#assert_axioms zeroFlow_certified_at_three
 
 end Minidregg.Theory.CertF

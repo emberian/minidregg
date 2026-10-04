@@ -40,6 +40,7 @@ test schedule that would refute it:
    for a slow reader that does not yet hold the install certificate.
 -/
 import Compiler.GenericSimplexCodec
+import Theory.AxiomPin
 
 namespace Minidregg.Kernel.GenericSimplexReconfig
 
@@ -165,7 +166,7 @@ def configAt : Context → List Install → Nat → Context
 /-- **The height-bound verifier rule.** Accept a certificate only under the configuration in force
 at its certified height. -/
 def acceptsAt (g : Context) (hist : List Install) (cert : Certificate) : Bool :=
-  cert.context == configAt g hist cert.block.length
+  decide (cert.context = configAt g hist cert.block.length)
 
 /-- **An old-configuration certificate above the install point is refused.** Refuting schedule
 (GSN:36-37 + Pastro §5): after the install at `h*`, `f+1` retired config-`k` members (keys not
@@ -205,17 +206,19 @@ theorem new_configuration_accepted_above (g : Context) (i : Install) (cert : Cer
 /-- The acceptor this rule replaces: a quorum from ANY historical committee (FDG:238 "to be
 deleted, not kept alongside"). -/
 def acceptsAnyHistorical (g : Context) (hist : List Install) (cert : Certificate) : Bool :=
-  cert.context == g || hist.any (fun i => cert.context == i.next)
+  decide (cert.context = g) || hist.any (fun i => decide (cert.context = i.next))
 
 /-- A concrete one-install history for the fork witness. -/
 def forkOld : Context :=
   { scope := [1], epoch := 0, instanceBytes := [2],
     config := { parties := 4, faults := 1, timeout := 1 }, publicKeys := [] }
-def forkNew : Context := { forkOld with epoch := 1 }
+def forkNew : Context :=
+  { scope := [1], epoch := 1, instanceBytes := [2],
+    config := { parties := 4, faults := 1, timeout := 1 }, publicKeys := [] }
+def forkInstallCert : Certificate :=
+  { context := forkOld, view := 1, block := [reconfigPayload forkNew], signers := [] }
 def forkInstall : Install :=
-  { certificate := { context := forkOld, view := 1, block := [reconfigPayload forkNew],
-      signers := [] },
-    next := forkNew, height := 1 }
+  { certificate := forkInstallCert, next := forkNew, height := 1 }
 def forkOldCert : Certificate :=
   { context := forkOld, view := 2, block := [reconfigPayload forkNew, [5]], signers := [] }
 def forkNewCert : Certificate :=
@@ -223,7 +226,7 @@ def forkNewCert : Certificate :=
 
 theorem forkInstall_valid : forkInstall.Valid forkOld := by
   refine ⟨rfl, ?_, ?_, rfl⟩
-  · simp [forkInstall, installPoint?, reconfigPayload_isReconfig]
+  · simp [forkInstall, forkInstallCert, installPoint?, reconfigPayload_isReconfig]
   · rfl
 
 /-- **The historical acceptor admits a fork; the height-bound rule does not.** Two certificates at
@@ -316,5 +319,24 @@ theorem growth_needs_readiness (f : Nat) : ¬ ChurnSafe (3 * f + 1) f (3 * (f + 
 /-- …and a same-size committee with no joiners is trivially safe (the fixed-committee engine). -/
 theorem fixed_committee_churn_safe (f : Nat) : ChurnSafe (3 * f + 1) f (3 * f + 1) f := by
   unfold ChurnSafe; push_cast; omega
+
+#assert_axioms streamEncode_injective
+#assert_axioms commitmentBytes_binds_config
+#assert_axioms commitmentBytes_binds_configNumber
+#assert_axioms reconfigPayload_isReconfig
+#assert_axioms installPoint_extend
+#assert_axioms commitAgreement_singleton
+#assert_axioms installPoint_certificate_determined
+#assert_axioms stale_certificate_refused
+#assert_axioms liability_retained_below_install
+#assert_axioms new_configuration_accepted_above
+#assert_axioms forkInstall_valid
+#assert_axioms naive_acceptor_admits_fork
+#assert_axioms oldKeysErased_inhabited
+#assert_axioms unready_signer_not_counted
+#assert_axioms readyFor_install_block
+#assert_axioms four_to_seven_unsafe
+#assert_axioms growth_needs_readiness
+#assert_axioms fixed_committee_churn_safe
 
 end Minidregg.Kernel.GenericSimplexReconfig
