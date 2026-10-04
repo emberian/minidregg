@@ -106,8 +106,18 @@ generation is STOPped through Mini (the exact-unit audit accepts a dead
 incarnation: same InvocationID, no cgroup, MainPID 0, failed/inactive), and a
 continue-START of the next generation follows on the same `/var`. An uncertain
 record exits 3 and is never retried. A START that failed after its claim
-(phase 9) calls Mini's `reconcileFailedStart`, whose receiver K-SPK owns; until
-it lands the call refuses with that reason and the app stays claimed.
+(phase 9: the journal says Entered, no child, and the manager shows the same
+dead invocation with an empty cgroup) is reconciled through Mini's
+`reconcileFailedStart` (kernel 9 -> 2, generation + 1): the supervisor authors
+the custodian-signed failed-START report from that read-only audit, prepares
+(op 206), signs, assembles (207) and submits (208) the recovery, retaining
+every artifact in `g<N>/failed-start-recovery-v1/` and writing
+`submit-requested.json` before the submission. After that marker it only asks
+Mini: lookup (209) of the exact retained bytes, and, when Mini holds no receipt
+for them, the same bytes again (the ingress's stable nullifier admits one
+recovery per START). The confirmed receipt lands in
+`g<N>/failed-start-recovered-v1.json`, and `grain status` then reports g<N>
+stopped with g<N+1> consumed; the next START is g<N+2>.
 
 **Size classes** (`broker::CLASSES`; the kernel will pin the class in the app
 birth descriptor, K-SPK): S = `MemoryMax=512M`, `CPUWeight=50`, `TasksMax=256`,

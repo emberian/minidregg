@@ -5,6 +5,11 @@
 #
 #   jspk1.sh all RUN_ROOT          every row below, in order
 #   jspk1.sh rows RUN_ROOT ROW...  named rows against RUN_ROOT (resumable)
+#   jspk1.sh failstart RUN_ROOT    Store 1's rows with s1-start-a3 replaced by
+#                                  the failed-START rows: needs an spk-host
+#                                  built with integration-qualification
+#                                  (deploy pins it; the rows FAIL by name on a
+#                                  release build, never skip)
 #
 # Store 1 (RUN_ROOT/s1): grain a (app 7101, class S) is installed through the
 #   broker, started, checked under the floor, reached, written to; its
@@ -35,7 +40,7 @@
 set -eu
 umask 077
 
-usage() { sed -n '2,37p' "$0" >&2; exit 2; }
+usage() { sed -n '2,39p' "$0" >&2; exit 2; }
 [ "$#" -ge 2 ] || usage
 MODE=$1 ROOT=$2
 shift 2
@@ -259,33 +264,95 @@ r_install_import() {
   echo "imported /var re-owned to this grain's app UID $(jq -r .appUid "$ROOT/$store/evidence/install-$1.stdout")"
 }
 
-# r_supervise_uncertain PROFILE APP: a START whose BEGIN reply was lost is
-# never retried; the supervisor reconciles it through Mini's
-# reconcileFailedStart (kernel edge 9 -> 2, ApplicationGrain.lean) and the row
-# passes only on the receiver's own record: protocol
-# mini-spk-failed-start-recovered-v1 naming this app, with reconciledGeneration
-# = generation + 1. Until 2026-10-04 this row PASSED on the refusal "receiver
-# is absent" (scout R2-1 O6): a missing receiver read as a qualified recovery.
-# An absent receiver is now a FAIL that names it; the receiver lives only in
-# the spk-recovery lane (codex-runtime-spk-recovery-20261003, not on main).
-r_supervise_uncertain() {
+# Failed START (phase 9) -> Mini's reconcileFailedStart (9 -> 2), made
+# deterministic by the failed-START fixture of an integration-qualification
+# spk-host (hostd::qualification_refuse_spawn): an operator-owned 0600
+# `qualification-fail-spawn-v1` in the app's directory makes the next unit
+# ExecStart fail after its Entered fsync, before any child exists. The rows
+# pass only on artifacts: the trigger consumed into the failed generation, the
+# receiver's receipt bound to the exact retained ingress, `grain status`
+# reporting that generation stopped, and Mini ADMITTING the next START at
+# generation + 2 (the reconciliation consumed generation + 1; a START from any
+# phase but 2 is refused by the kernel). Until 2026-10-04 a row here passed on
+# the refusal "receiver is absent" (scout R2-1 O6).
+app_state() { echo "$(jq -r .stateRoot "$1")/apps/$2"; }
+latest_generation() {
+  status "$1" "$2" | jq -er '[.runs[] | select(.state != "never-begun")][-1].generation'
+}
+
+r_failstart_arm() {
+  profile=$1 app=$2
+  dir=$(app_state "$profile" "$app")
+  status "$profile" "$app" | jq -e '[.runs[] | select(.state != "never-begun")][-1].state == "stopped"' >/dev/null ||
+    { echo "FAIL: $app must be stopped before the failed-START fixture is armed" >&2; return 1; }
+  latest_generation "$profile" "$app" >"$OUT/failstart-$app.before"
+  ( umask 077; : >"$dir/qualification-fail-spawn-v1" )
+  stat -c '%U %a %h' "$dir/qualification-fail-spawn-v1"
+  echo "armed: the next START of $app (after generation $(cat "$OUT/failstart-$app.before")) fails after Entered"
+}
+
+r_failstart_reconcile() {
+  profile=$1 app=$2 store_cmd=$3 phase=$4
+  dir=$(app_state "$profile" "$app")
+  before=$(cat "$OUT/failstart-$app.before")
   set +e
-  "$SPK_HOST" grain supervise "$1" "$2" >"$OUT/supervise-$2.json" 2>"$OUT/supervise-$2.err"
-  rc=$?
+  "$store_cmd" "$phase" >/dev/null
   set -e
-  cat "$OUT/supervise-$2.err"
-  if grep -q "reconcileFailedStart receiver is absent" "$OUT/supervise-$2.err"; then
-    echo "FAIL: reconcileFailedStart receiver is absent: the uncertain START of $2 was not reconciled" >&2
+  if [ -e "$dir/qualification-fail-spawn-v1" ]; then
+    echo "FAIL: trigger not consumed: the installed spk-host is not an integration-qualification build, or START never reached ExecStart" >&2
     return 1
   fi
-  [ "$rc" = 0 ] || { echo "FAIL: supervisor exit $rc on the uncertain START of $2" >&2; return 1; }
-  jq -e --arg app "$2" '.protocol == "mini-spk-failed-start-recovered-v1" and .app == $app
-    and (.generation | test("^[0-9]+$")) and (.reconciledGeneration | test("^[0-9]+$"))
-    and ((.reconciledGeneration | tonumber) == (.generation | tonumber) + 1)
-    and (.ingressSha256 | test("^[0-9a-f]{64}$"))' "$OUT/supervise-$2.json" >/dev/null \
-    || { echo "FAIL: supervisor output is not a failed-start recovery record for $2" >&2; return 1; }
-  status "$1" "$2" | jq -c '[.runs[] | {generation, state, unitActiveState}]'
-  echo "uncertain START of $2 not retried: reconciled through Mini's receiver, generation $(jq -r .generation "$OUT/supervise-$2.json") -> $(jq -r .reconciledGeneration "$OUT/supervise-$2.json")"
+  gen=$(for g in "$dir"/g*/qualification-fail-spawn-consumed-v1; do basename "$(dirname "$g")"; done |
+    sed 's/^g//' | sort -n | tail -n 1)
+  [ -n "$gen" ] && [ "$gen" -gt "$before" ] || { echo "FAIL: no generation consumed the trigger" >&2; return 1; }
+  receipt=$dir/g$gen/failed-start-recovered-v1.json
+  # The unit's OnFailure= supervisor reconciles on its own; wait for its receipt.
+  store=$(jq -r .stateRoot "$profile" | awk -F/ '{print $(NF-1)}')
+  sup=$PREFIX-spk-supervisor@$store-$app.service
+  tick=0
+  until [ -s "$receipt" ]; do
+    case "$(systemctl show "$sup" --property=ActiveState,Result --value | tr '\n' ' ')" in
+      failed*) break ;;
+    esac
+    tick=$((tick + 1)); [ "$tick" -lt 480 ] || break
+    sleep 5
+  done
+  if [ ! -s "$receipt" ]; then
+    # The supervisor gave up (or never ran): run it here, once, as the operator.
+    "$SPK_HOST" grain supervise "$profile" "$app" >"$OUT/supervise-$app.json" 2>"$OUT/supervise-$app.err" ||
+      { tail -n 3 "$OUT/supervise-$app.err" >&2; echo "FAIL: reconcileFailedStart of $app g$gen not confirmed" >&2; return 1; }
+  fi
+  jq -c . "$receipt"
+  ingress=$dir/g$gen/failed-start-recovery-v1/ingress.bin
+  jq -e --arg app "$app" --arg gen "$gen" --arg next "$((gen + 1))" \
+      --arg ingress "$(sha256sum "$ingress" | cut -d ' ' -f 1)" '
+    .protocol == "mini-spk-failed-start-recovered-v1" and .app == $app and
+    .generation == $gen and .reconciledGeneration == $next and .ingressSha256 == $ingress and
+    .outcome.type == "confirmed" and
+    (.outcome.confirmation == "installed" or .outcome.confirmation == "recoveredAfterUncertainResponse"
+      or .outcome.confirmation == "replayed") and
+    ([.outcome.transactionId, .outcome.eventId, .outcome.acceptedCount, .outcome.worldRoot] |
+      all(type == "string" and test("^(0|[1-9][0-9]*)$")))' "$receipt" >/dev/null ||
+    { echo "FAIL: $receipt is not Mini's reconciliation of $app g$gen bound to its retained ingress" >&2; return 1; }
+  status "$profile" "$app" | jq -e --arg gen "$gen" \
+    '[.runs[] | select(.generation == $gen)][0].state == "stopped"' >/dev/null ||
+    { echo "FAIL: grain status does not report g$gen stopped after reconciliation" >&2; return 1; }
+  # A second supervise is a no-op on a reconciled generation, never a second receipt.
+  "$SPK_HOST" grain supervise "$profile" "$app" | jq -e '.action == "none"' >/dev/null
+  echo "$gen" >"$OUT/failstart-$app.failed"
+  echo "START of $app g$gen failed after Entered with no child; Mini reconciled it (tx $(jq -r .outcome.transactionId "$receipt"), $(jq -r .outcome.confirmation "$receipt")): g$gen stopped, generation $((gen + 1)) consumed"
+}
+
+r_failstart_restart() {
+  profile=$1 app=$2 store_cmd=$3 phase=$4
+  failed=$(cat "$OUT/failstart-$app.failed")
+  "$store_cmd" "$phase" >/dev/null
+  unit=$(running_unit "$profile" "$app")
+  gen=$(status "$profile" "$app" | jq -er '[.runs[] | select(.state == "running")][-1].generation')
+  [ "$gen" = "$((failed + 2))" ] ||
+    { echo "FAIL: START after reconciliation ran generation $gen, expected $((failed + 2))" >&2; return 1; }
+  [ "$(systemctl show "$unit" --property=ActiveState --value)" = active ]
+  echo "Mini admitted the next START of $app at generation $gen ($unit active): the reconciled app was back in phase 2"
 }
 
 r_collision() {
@@ -337,6 +404,9 @@ run_row() {
     s1-stop-a) row s1-stop-a s1 stop-a ;;
     s1-export-a) row s1-export-a r_export ;;
     s1-start-a3) row s1-start-a3 s1 start-a3 ;;
+    s1-failstart-arm) row s1-failstart-arm r_failstart_arm "$(P1)" 7101 ;;
+    s1-failstart-a) row s1-failstart-a r_failstart_reconcile "$(P1)" 7101 s1 start-a3 ;;
+    s1-failstart-restart) row s1-failstart-restart r_failstart_restart "$(P1)" 7101 s1 start-a4 ;;
     s2-store) row s2-store s2 store services workroom profile ;;
     s2-birth-a) row s2-birth-a s2 birth-a ;;
     s2-install-a) row s2-install-a r_install_import a "$ROOT/export-a" ;;
@@ -358,7 +428,6 @@ run_row() {
     s2-floor-d) row s2-floor-d r_floor s2 d ;;
     s2-enroll-d) row s2-enroll-d s2 enroll-d ;;
     s2-poll-d) row s2-poll-d r_poll s2 poll-d "published by a before STOP" ;;
-    s2-supervise-d) row s2-supervise-d r_supervise_uncertain "$(P2)" 7401 ;;
     s2-birth-e) row s2-birth-e s2 birth-e ;;
     s2-install-e) row s2-install-e r_install_import e "$ROOT/export-a" ;;
     s2-share-e) row s2-share-e s2 share-e ;;
@@ -400,8 +469,14 @@ ALL="identity refusals s1-store s1-birth-a s1-install-a s1-share-a s1-start-a s1
   s3-share-e s3-start-e s3-floor-e s3-enroll-e s3-poll-e s3-birth-b s3-install-b s3-share-b
   s3-start-b s3-limits-b s3-enroll-b s3-get-b side-by-side"
 
+# The failed-START rows replace s1-start-a3: Store 1's grain a, STOPped and
+# exported, fails one START on purpose and is reconciled through Mini.
+FAILSTART=$(printf '%s\n' $ALL | sed '/^s2-store$/,$d' |
+  sed 's/^s1-start-a3$/s1-failstart-arm s1-failstart-a s1-failstart-restart/' | tr '\n' ' ')
+
 case "$MODE" in
   all) for r in $ALL; do run_row "$r"; done ;;
+  failstart) for r in $FAILSTART; do run_row "$r"; done ;;
   serve)
     # The Store services for resumed rows, kept alive by this process (run it
     # as its own unit: rows runs then find them alive and leave them).

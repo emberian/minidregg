@@ -686,6 +686,84 @@ impl UnitStopAudit {
     }
 }
 
+/// The physical projection admits a manager retaining the SAME failed
+/// InvocationID, or a cleared one. A different invocation, live unit, child,
+/// queued manager job, or populated recorded cgroup is always uncertain.
+fn failed_start_projection(
+    record: &Record,
+    manager: &str,
+    cgroup_empty: bool,
+) -> io::Result<serde_json::Value> {
+    record.validate()?;
+    let invocation = record
+        .invocation_id()
+        .ok_or_else(|| invalid("failed START invocation absent"))?;
+    let group = record
+        .control_group()
+        .ok_or_else(|| invalid("failed START cgroup absent"))?;
+    let current_invocation = property(manager, "InvocationID")?;
+    let current_group = property(manager, "ControlGroup")?;
+    let state = property(manager, "ActiveState")?;
+    if record.phase != Phase::Entered
+        || record.child_pid.is_some()
+        || record.dispatch_in_flight.is_some()
+        || property(manager, "Id")? != record.unit()
+        || property(manager, "LoadState")? != "loaded"
+        || !matches!(state, "failed" | "inactive")
+        || property(manager, "MainPID")? != "0"
+        || !matches!(property(manager, "Job")?, "0" | "")
+        || (!current_invocation.is_empty() && current_invocation != invocation)
+        || (!current_group.is_empty() && current_group != group)
+        || !cgroup_empty
+    {
+        return Err(invalid("exact failed START no-child custody not proven"));
+    }
+    Ok(serde_json::json!({
+        "protocol":"mini-spk-failed-start-audit-v1",
+        "app":record.app().to_string(), "generation":record.generation().to_string(),
+        "operationId":record.operation_id(), "transactionId":record.transaction_id(),
+        "eventId":record.event_id(), "imageIdentity":record.image_identity(),
+        "unit":record.unit(), "recordedInvocationId":invocation,
+        "recordedControlGroup":group, "recordPhase":"entered", "childPid":serde_json::Value::Null,
+        "managerLoaded":true, "managerActiveState":state, "managerMainPid":"0",
+        "managerJobEmpty":true, "managerInvocationId":current_invocation,
+        "managerControlGroup":current_group, "recordedCgroupUnpopulated":true,
+    }))
+}
+
+/// Deliberately absent from ordinary release builds (feature
+/// `integration-qualification`): the failed-START fixture. An operator-owned
+/// 0600 `qualification-fail-spawn-v1` in an app's directory makes that app's
+/// NEXT exact unit ExecStart fail after its Entered fsync and before any child
+/// exists: the claimed, childless START (phase 9) that Mini's
+/// `reconcileFailedStart` recovers. The trigger moves into the generation it
+/// failed, so it fails exactly one START and stays as evidence.
+#[cfg(feature = "integration-qualification")]
+pub(crate) fn qualification_refuse_spawn(journal: &Path) -> io::Result<()> {
+    let app_dir = journal
+        .parent()
+        .ok_or_else(|| invalid("generation journal has no app directory"))?;
+    let trigger = app_dir.join("qualification-fail-spawn-v1");
+    let meta = match fs::symlink_metadata(&trigger) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if !meta.is_file()
+        || meta.uid() != unsafe { libc::geteuid() }
+        || meta.nlink() != 1
+        || meta.permissions().mode() & 0o777 != 0o600
+    {
+        return Err(invalid("qualification trigger identity refused"));
+    }
+    fs::rename(&trigger, journal.join("qualification-fail-spawn-consumed-v1"))?;
+    File::open(app_dir)?.sync_all()?;
+    File::open(journal)?.sync_all()?;
+    Err(io::Error::other(
+        "qualification: unit ExecStart refused after Entered (failed-START fixture)",
+    ))
+}
+
 /// Complete temp bytes are fsynced, renamed, then their parent is fsynced.
 /// Callers hold their custody lock and have validated any replacement identity.
 pub(crate) fn atomic_write_locked(path: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -733,6 +811,30 @@ impl ChildHandle for BoundedChild {
 // separately testable without exposing an operator-minted launch command.
 #[allow(dead_code)]
 impl Journal {
+    /// Read-only recovery evidence for the exact claimed START whose spawn
+    /// failed before producing a child. This does not clear a manager failure,
+    /// mutate the journal, authorize a launch, or supply Mini's reserved gate.
+    pub(crate) fn audit_failed_start(
+        &self,
+        expected: &VerifiedBegin,
+    ) -> io::Result<serde_json::Value> {
+        self.with_lock(|this| {
+            let record = this
+                .read_unlocked()?
+                .ok_or_else(|| invalid("failed START journal absent"))?;
+            if &record.identity != expected {
+                return Err(invalid("failed START journal differs from retained claim"));
+            }
+            let before = systemd_show(record.unit())?;
+            let audit = UnitStopAudit::inspect(&record)?;
+            let after = systemd_show(record.unit())?;
+            if before != after {
+                return Err(invalid("failed START manager changed during audit"));
+            }
+            failed_start_projection(&record, &after, audit.exact_cgroup_empty)
+        })
+    }
+
     /// Read-only classification of a retained START incarnation after the
     /// supervisor restarts. This cannot recover fd3, authorize HTTP, or
     /// change the Mini lifecycle phase. An exact stopped audit requires a
@@ -1553,7 +1655,11 @@ impl Journal {
         self.enter_and_spawn_with(
             begin,
             &instance,
-            || spawn_gate::spawn_bounded(spec),
+            || {
+                #[cfg(feature = "integration-qualification")]
+                qualification_refuse_spawn(&self.directory)?;
+                spawn_gate::spawn_bounded(spec)
+            },
             Self::write_unlocked,
         )
     }
@@ -1865,6 +1971,42 @@ mod tests {
             process_identity: "unit-generation-2".into(),
             unit: "mini-spk-a91-g2.service".into(),
         }
+    }
+
+    #[test]
+    fn failed_start_audit_binds_dead_same_incarnation_without_clearing_failure() {
+        let record = Record {
+            version: VERSION,
+            identity: begin(),
+            phase: Phase::Entered,
+            child_pid: None,
+            invocation_id: Some("a".repeat(32)),
+            control_group: Some("/system.slice/mini-spk-a91-g2.service".into()),
+            dispatch_in_flight: None,
+        };
+        let manager = format!("Id={}\nLoadState=loaded\nActiveState=failed\nMainPID=0\nJob=0\nInvocationID={}\nControlGroup=\n", record.unit(), "a".repeat(32));
+        let projection = failed_start_projection(&record, &manager, true).unwrap();
+        assert_eq!(projection["generation"], "2");
+        assert_eq!(projection["transactionId"], "123");
+        assert_eq!(projection["managerInvocationId"], "a".repeat(32));
+        assert_eq!(record.phase, Phase::Entered);
+        assert!(failed_start_projection(&record, &manager, false).is_err());
+        for (old, new) in [
+            ("ActiveState=failed", "ActiveState=active"),
+            ("MainPID=0", "MainPID=42"),
+            ("Job=0", "Job=87"),
+            ("InvocationID=", "InvocationID=b"),
+            ("ControlGroup=\n", "ControlGroup=/foreign\n"),
+        ] {
+            assert!(failed_start_projection(&record, &manager.replace(old, new), true).is_err());
+        }
+        let mut live = record.clone();
+        live.child_pid = Some(42);
+        assert!(failed_start_projection(&live, &manager, true).is_err());
+        let mut running = record.clone();
+        running.phase = Phase::Running;
+        running.child_pid = Some(42);
+        assert!(failed_start_projection(&running, &manager, true).is_err());
     }
 
     #[test]
@@ -2934,6 +3076,52 @@ mod tests {
         stopper.join().unwrap().unwrap();
         assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Stopped);
         fs::remove_dir_all(path).unwrap();
+    }
+
+    #[cfg(feature = "integration-qualification")]
+    #[test]
+    fn qualification_trigger_fails_one_start_after_entered_with_no_child() {
+        let app = scratch();
+        let path = app.join("g2");
+        fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
+        let journal = Journal::open(&path).unwrap();
+        let identity = begin();
+        journal.arm(identity.clone()).unwrap();
+        journal.request_launch(&identity).unwrap();
+        let trigger = app.join("qualification-fail-spawn-v1");
+        fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&trigger).unwrap();
+        let spawned = Arc::new(AtomicBool::new(false));
+        let observed = spawned.clone();
+        let error = journal
+            .enter_and_spawn_with(
+                &identity,
+                &instance(),
+                || {
+                    qualification_refuse_spawn(&path)?;
+                    observed.store(true, Ordering::SeqCst);
+                    Ok(child(459))
+                },
+                Journal::write_unlocked,
+            )
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("failed-START fixture"), "{error}");
+        assert!(!spawned.load(Ordering::SeqCst));
+        let record = journal.read().unwrap().unwrap();
+        assert_eq!(record.phase, Phase::Entered);
+        assert_eq!(record.child_pid, None);
+        assert!(!trigger.exists());
+        assert!(path.join("qualification-fail-spawn-consumed-v1").is_file());
+        // Exactly the state the failed-START audit accepts once the manager
+        // reports the same dead incarnation.
+        let manager = format!(
+            "Id={}\nLoadState=loaded\nActiveState=failed\nMainPID=0\nJob=\nInvocationID={}\nControlGroup=\n",
+            record.unit(), "f".repeat(32));
+        assert_eq!(failed_start_projection(&record, &manager, true).unwrap()["recordPhase"], "entered");
+        // Consumed: the next START of this app is not refused by the fixture.
+        assert!(qualification_refuse_spawn(&path).is_ok());
+        fs::remove_dir_all(app).unwrap();
     }
 
     #[test]

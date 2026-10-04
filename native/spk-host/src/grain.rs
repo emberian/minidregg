@@ -832,12 +832,27 @@ fn scan_runs(app_dir: &Path) -> io::Result<Vec<Run>> {
         let admitted = dir.join("start-admitted-v3.json");
         let completed = dir.join("start-completed-v3.json");
         let stop_plan = dir.join("stop-begin").join("stop-plan-v2.json");
-        let stop_generation = if exists(&stop_plan)? {
+        let recovered_path=dir.join("failed-start-recovered-v1.json");
+        let recovered_generation=if exists(&recovered_path)? {
+            let recovered:Value=serde_json::from_slice(&read_private(&recovered_path,MAX_JSON)?)?;
+            let expected=generation.checked_add(1).ok_or_else(||invalid("recovered generation overflow"))?;
+            if recovered.get("protocol").and_then(Value::as_str)!=Some("mini-spk-failed-start-recovered-v1")
+                || decimal_u64(recovered.get("generation"))!=Some(generation)
+                || decimal_u64(recovered.get("reconciledGeneration"))!=Some(expected)
+                || recovered.get("app").and_then(Value::as_str)!=app_dir.file_name().and_then(|n|n.to_str())
+                || recovered.pointer("/outcome/type").and_then(Value::as_str)!=Some("confirmed") {
+                return Err(invalid("failed START recovery receipt identity refused"));
+            }
+            Some(expected)
+        } else {None};
+        let stop_generation = if recovered_generation.is_some() { recovered_generation }
+        else if exists(&stop_plan)? {
             decimal_u64(read_json(&stop_plan)?.pointer("/basePlan/processGeneration"))
         } else {
             None
         };
-        let state = if exists(&completed)? {
+        let state = if recovered_generation.is_some() { RunState::Stopped }
+        else if exists(&completed)? {
             if stop_completed(&dir)? {
                 RunState::Stopped
             } else if exists(&dir.join("stop.json"))? {
@@ -868,7 +883,7 @@ fn scan_runs(app_dir: &Path) -> io::Result<Vec<Run>> {
             generation,
             dir,
             state,
-            create,
+            create: create && recovered_generation.is_none(),
             stop_generation,
         });
     }
@@ -1244,7 +1259,10 @@ fn supervise(host: &Host, app: &str) -> io::Result<Value> {
         RunState::Uncertain(reason) if reason.starts_with("START") => {
             // A START that failed after its claim (phase 9) leaves the app
             // wedged until Mini's `reconcileFailedStart` (9 -> 2) is admitted.
-            crate::grain_export::reconcile_failed_start(app, latest.generation)
+            crate::grain_export::reconcile_failed_start(
+                &operator_of(&host.profile), &latest.dir.join("resident.json"),
+                app, latest.generation, crate::grain_export::FAILED_START_RECOVERY_ROUTES,
+            )
         }
         // A STOP this supervisor (or the operator) began resumes from STOP's
         // own journal: exact recovery, never a second claim.
@@ -1549,6 +1567,47 @@ mod tests {
                 assert!(seen.insert(pair));
             }
         }
+    }
+
+    #[test]
+    fn failed_start_receipt_makes_the_claimed_generation_stopped_at_the_next_generation() {
+        let root = std::env::temp_dir().join(format!(
+            "grain-failed-start-{}-{:?}", std::process::id(), std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let app_dir = root.join("7101");
+        let g3 = app_dir.join("g3");
+        fs::create_dir_all(&g3).unwrap();
+        let private = |path: &Path, value: &Value| {
+            let _ = fs::remove_file(path);
+            let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600)
+                .open(path).unwrap();
+            file.write_all(&serde_json::to_vec(value).unwrap()).unwrap();
+        };
+        private(&g3.join("resident.json"),
+            &json!({"startAction":{"kind":"create","index":0}}));
+        private(&g3.join("start-admitted-v3.json"), &json!({"begin":{"processGeneration":"3"}}));
+        // Claimed, never completed, no receipt: the supervisor's uncertain START.
+        let runs = scan_runs(&app_dir).unwrap();
+        assert!(matches!(&runs[0].state, RunState::Uncertain(r) if r.starts_with("START")));
+        // Mini's reconciliation receipt: STOPPED, the generation it consumed is
+        // the next START's floor, and the failed create created nothing.
+        let receipt = json!({"protocol":"mini-spk-failed-start-recovered-v1","app":"7101",
+            "generation":"3","reconciledGeneration":"4","outcome":{"type":"confirmed"}});
+        private(&g3.join("failed-start-recovered-v1.json"), &receipt);
+        let runs = scan_runs(&app_dir).unwrap();
+        assert_eq!(runs[0].state, RunState::Stopped);
+        assert_eq!(runs[0].stop_generation, Some(4));
+        assert!(!runs[0].create);
+        // Any other app, generation, advance or outcome is refused, not read as stopped.
+        for (pointer, wrong) in [("/app", json!("7102")), ("/generation", json!("2")),
+            ("/reconciledGeneration", json!("5")), ("/outcome/type", json!("absent")),
+            ("/protocol", json!("mini-spk-failed-start-recovered-v0"))] {
+            let mut bad = receipt.clone();
+            *bad.pointer_mut(pointer).unwrap() = wrong;
+            private(&g3.join("failed-start-recovered-v1.json"), &bad);
+            assert!(scan_runs(&app_dir).is_err(), "{pointer}");
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
