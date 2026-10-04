@@ -10,6 +10,10 @@ if [[ $# != 5 || ${1:-} == --help ]]; then
   exit 2
 fi
 HOST=$1 MINI=$2 STORE=$3 VERIFIER=$4 RUN=$5
+# The signing-consent provider (client_consent.rs): a signing step refuses without MINI_LOCAL_HOST,
+# MINI_CONSENT_HOST and MINI_CONSENT_CONFIG together. It ships beside the Host; CONSENT_HOST overrides.
+CONSENT_HOST=${CONSENT_HOST:-$(dirname -- "$HOST")/minidregg-client-consent}
+[[ -x $CONSENT_HOST ]] || { echo "signing-consent provider not executable: $CONSENT_HOST (set CONSENT_HOST)" >&2; exit 2; }
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 for path in "$HOST" "$MINI" "$STORE" "$VERIFIER" "$RUN"; do
   [[ $path == /* ]] || { echo "path must be absolute: $path" >&2; exit 2; }
@@ -85,6 +89,10 @@ run genesis sh "$HERE/genesis.sh" "$RUN/params.json" "$PUBLIC" "$CLOCK_PUBLIC" \
 run bootstrap "$MINI" bootstrap --host "$HOST" --config "$RUN/fixture/operator.json" \
   --source "$RUN/fixture/genesis.json" --dir "$RUN/deployment"
 CONFIG=$RUN/deployment/pinned-config.json
+# A join has no --host: its local author, inspect and signing steps select the semantic Host and the
+# consent provider by these three variables, together. The sponsor steps pass --host and sign through
+# the workspace, so naming the variables there would only widen what they read.
+LOCAL=(env MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$CONSENT_HOST" MINI_CONSENT_CONFIG="$CONFIG")
 start_server service-first
 # The SSH process seam is a local test shim; the real public socket proxy and
 # version-2 pinned remote envelopes run unchanged. Only framing is logged here.
@@ -120,7 +128,7 @@ export MINI_SSH=$RUN/ssh-shim JOIN_MINI=$MINI JOIN_SOCKET=$SOCKET
 WS=$RUN/sponsor-workspace
 run sponsor-workspace "$MINI" workspace --action init --dir "$WS" --host "$HOST" --config "$CONFIG" \
   --socket "$SOCKET" --key "$RUN/sponsor.key" --subject "$(jq -r '.sponsor.subject' "$RUN/params.json")" \
-  --birth-context "$RUN/fixture/sponsor-birth-context.json" --namespace-root "$RUN/namespace"
+  --birth-context "$RUN/fixture/sponsor-birth-context.json" --namespace-root "$RUN/namespace" --no-prerotation
 run factory-import "$MINI" workspace --action import --dir "$WS" --name factory --kind object \
   --target "$(jq -r .factoryId "$RUN/params.json")" \
   --observe-capability "$(jq -r .sponsor.factoryObserveCapabilityId "$RUN/params.json")" \
@@ -128,11 +136,12 @@ run factory-import "$MINI" workspace --action import --dir "$WS" --name factory 
 run participant-key "$MINI" join --key "$RUN/participant.key"
 ENROLL=$RUN/enrollment
 run enrollment-plan "$MINI" enroll --action plan --sponsor-workspace "$WS" --factory-ref factory \
-  --name key-only --new-public-key "$RUN/participant.pub" --dir "$ENROLL"
+  --name key-only --new-public-key "$RUN/participant.pub" \
+  --next-public-key "$RUN/participant.key.next.pub" --next-cosign "$RUN/participant.key.next.cosign" --dir "$ENROLL"
 run sponsor-offer "$MINI" enroll --action offer --dir "$ENROLL"
 cp "$RUN/logs/sponsor-offer.out" "$RUN/offer.json"
 JOIN=$RUN/participant
-run participant-possession "$MINI" join --key "$RUN/participant.key" --sponsor-plan "$RUN/offer.json" \
+run participant-possession "${LOCAL[@]}" "$MINI" join --key "$RUN/participant.key" --sponsor-plan "$RUN/offer.json" \
   --dir "$JOIN" --remote test-deployment
 jq -r .possessionSignature "$RUN/logs/participant-possession.out" | xxd -r -p >"$RUN/possession.bin"
 run enrollment-seal "$MINI" enroll --action seal --dir "$ENROLL" --possession-signature "$RUN/possession.bin"
@@ -148,7 +157,7 @@ json.dump(dict(type='minidregg-participant-join-welcome-v1',enrollment=r,birthCo
  ingressHex=b.hex(),ingressSha256=hashlib.sha256(b).hexdigest()),open(sys.argv[3],'w'))
 JSON
 cp -a "$JOIN" "$RUN/unadmitted-join"
-refused absent-lookup "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/unadmitted-welcome.json" \
+refused absent-lookup "${LOCAL[@]}" "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/unadmitted-welcome.json" \
   --dir "$RUN/unadmitted-join" --remote test-deployment --verifier "$HOST"
 [[ $(cat "$RUN/logs/absent-lookup.ops") == 89 && ! -e $RUN/unadmitted-join/workspace ]]
 grep -q 'not a confirmed admitted key' "$RUN/logs/absent-lookup.err"
@@ -161,26 +170,27 @@ run intervening-resource "$MINI" workspace --action create --dir "$WS" --name la
 run sponsor-welcome "$MINI" enroll --action welcome --dir "$ENROLL"
 cp "$RUN/logs/sponsor-welcome.out" "$RUN/welcome.json"
 cp -a "$JOIN" "$RUN/disconnected-join"
-refused unresolved-lookup env MINI_SSH="$RUN/ssh-disconnected" "$MINI" join --key "$RUN/participant.key" \
+refused unresolved-lookup "${LOCAL[@]}" MINI_SSH="$RUN/ssh-disconnected" "$MINI" join --key "$RUN/participant.key" \
   --welcome "$RUN/welcome.json" --dir "$RUN/disconnected-join" --remote test-deployment --verifier "$HOST"
 grep -q 'lookup unresolved.*no submission' "$RUN/logs/unresolved-lookup.err"
 [[ ! -e $RUN/disconnected-join/workspace ]]
 cp -a "$JOIN" "$RUN/refused-join"
-refused refused-lookup env JOIN_REFUSE_LOOKUP=1 "$MINI" join --key "$RUN/participant.key" \
+refused refused-lookup "${LOCAL[@]}" JOIN_REFUSE_LOOKUP=1 "$MINI" join --key "$RUN/participant.key" \
   --welcome "$RUN/welcome.json" --dir "$RUN/refused-join" --remote test-deployment --verifier "$HOST"
 grep -q 'Host refused op89' "$RUN/logs/refused-lookup.err"
 [[ $(cat "$RUN/logs/refused-lookup.ops") == 89 && ! -e $RUN/refused-join/workspace ]]
 cp -a "$JOIN" "$RUN/forged-join"
 jq '.enrollment.receipt.worldRoot = (if .enrollment.receipt.worldRoot == "0" then "1" else "0" end)' \
   "$RUN/welcome.json" >"$RUN/forged-welcome.json"
-refused forged-receipt "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/forged-welcome.json" \
+refused forged-receipt "${LOCAL[@]}" "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/forged-welcome.json" \
   --dir "$RUN/forged-join" --remote test-deployment --verifier "$HOST"
 grep -q 'receipt differs from exact read-only' "$RUN/logs/forged-receipt.err"
 [[ $(cat "$RUN/logs/forged-receipt.ops") == 89 && ! -e $RUN/forged-join/workspace ]]
 # Let source-owned assembly generate canonical ingress with a changed signature.
 dd if=/dev/zero of="$RUN/zero-signature.bin" bs=64 count=1 status=none
 run assemble-wrong-possession "$HOST" "$CONFIG" enroll-key-assemble "$ENROLL/plan.bin" \
-  "$ENROLL/sponsor-signature.bin" "$RUN/zero-signature.bin" "$RUN/wrong-possession.bin"
+  "$ENROLL/sponsor-signature.bin" "$RUN/zero-signature.bin" \
+  "$RUN/participant.key.next.pub" "$RUN/participant.key.next.cosign" "$RUN/wrong-possession.bin"
 rewrite_ingress() {
   python3 - "$RUN/welcome.json" "$1" "$2" <<'JSON'
 import hashlib,json,sys
@@ -191,18 +201,20 @@ JSON
 }
 rewrite_ingress "$RUN/wrong-possession.bin" "$RUN/wrong-possession-welcome.json"
 cp -a "$JOIN" "$RUN/wrong-possession-join"
-refused wrong-possession "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/wrong-possession-welcome.json" \
+refused wrong-possession "${LOCAL[@]}" "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/wrong-possession-welcome.json" \
   --dir "$RUN/wrong-possession-join" --remote test-deployment --verifier "$HOST"
 grep -q 'sealed ingress differs' "$RUN/logs/wrong-possession.err"
 [[ ! -e $RUN/logs/wrong-possession.ops && ! -e $RUN/wrong-possession-join/workspace ]]
 run other-key "$MINI" keygen --secret "$RUN/other.key" --public "$RUN/other.pub"
 run other-plan "$MINI" enroll --action plan --sponsor-workspace "$WS" --factory-ref factory \
-  --name other --new-public-key "$RUN/other.pub" --dir "$RUN/other-enrollment"
+  --name other --new-public-key "$RUN/other.pub" \
+  --next-public-key "$RUN/other.key.next.pub" --next-cosign "$RUN/other.key.next.cosign" --dir "$RUN/other-enrollment"
 run assemble-wrong-command "$HOST" "$CONFIG" enroll-key-assemble "$RUN/other-enrollment/plan.bin" \
-  "$ENROLL/sponsor-signature.bin" "$RUN/possession.bin" "$RUN/wrong-command.bin"
+  "$ENROLL/sponsor-signature.bin" "$RUN/possession.bin" \
+  "$RUN/other.key.next.pub" "$RUN/other.key.next.cosign" "$RUN/wrong-command.bin"
 rewrite_ingress "$RUN/wrong-command.bin" "$RUN/wrong-command-welcome.json"
 cp -a "$JOIN" "$RUN/wrong-command-join"
-refused wrong-command "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/wrong-command-welcome.json" \
+refused wrong-command "${LOCAL[@]}" "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/wrong-command-welcome.json" \
   --dir "$RUN/wrong-command-join" --remote test-deployment --verifier "$HOST"
 grep -q 'sealed ingress differs' "$RUN/logs/wrong-command.err"
 [[ ! -e $RUN/logs/wrong-command.ops && ! -e $RUN/wrong-command-join/workspace ]]
@@ -216,37 +228,40 @@ grep -q 'sealed ingress differs' "$RUN/logs/wrong-command.err"
 chmod 700 "$RUN/verifier-wrapper"
 touch "$RUN/proof-fault"
 cp -a "$JOIN" "$RUN/interrupted-join"
-refused interrupted-baseline "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/welcome.json" \
+refused interrupted-baseline "${LOCAL[@]}" "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/welcome.json" \
   --dir "$RUN/interrupted-join" --remote test-deployment --verifier "$RUN/verifier-wrapper"
-[[ $(cat "$RUN/logs/interrupted-baseline.ops") == $'89\n151' && ! -s $RUN/logs/interrupted-baseline.out ]]
+# 89 = the read-only enrollment lookup; 144 twice = the key-status reads that check the participant
+# key's next-key commitment against the Host (pre-rotation is the enrollment default); 151 = the
+# continuity baseline. Never 88: no join path submits an enrollment.
+[[ $(cat "$RUN/logs/interrupted-baseline.ops") == $'89\n144\n144\n151' && ! -s $RUN/logs/interrupted-baseline.out ]]
 [[ -f $RUN/interrupted-join/join/authenticated-receipt.json && ! -d $RUN/interrupted-join/workspace/receipt-continuity ]]
 rm "$RUN/proof-fault"
-run resume-baseline "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/welcome.json" \
+run resume-baseline "${LOCAL[@]}" "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/welcome.json" \
   --dir "$RUN/interrupted-join" --remote test-deployment --verifier "$RUN/verifier-wrapper"
-[[ $(cat "$RUN/logs/resume-baseline.ops") == 151 ]]
+[[ $(cat "$RUN/logs/resume-baseline.ops") == $'144\n151' ]]   # no 89: the confirmed frame is retained
 jq -e '.continuity.point.height == "1"' "$RUN/logs/resume-baseline.out" >/dev/null
-refused missing-verifier "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/welcome.json" \
+refused missing-verifier "${LOCAL[@]}" "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/welcome.json" \
   --dir "$JOIN" --remote test-deployment
-run authenticated-welcome "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/welcome.json" \
+run authenticated-welcome "${LOCAL[@]}" "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/welcome.json" \
   --dir "$JOIN" --remote test-deployment --verifier "$HOST"
 jq -e '.continuity.status == "established" and .continuity.point.height == "1"' "$RUN/logs/authenticated-welcome.out" >/dev/null
-[[ $(cat "$RUN/logs/authenticated-welcome.ops") == $'89\n151' ]]
+[[ $(cat "$RUN/logs/authenticated-welcome.ops") == $'89\n144\n144\n151' ]]
 CUSTODY=$JOIN/workspace/receipt-continuity
 jq -e --slurpfile r "$ENROLL/enrollment.json" \
   '.point == {height:$r[0].receipt.acceptedCount,worldRoot:$r[0].receipt.worldRoot}' "$CUSTODY/anchor.json" >/dev/null
 [[ -z $(find "$JOIN/workspace/refs" -type f -print -quit) ]]
 cp "$CUSTODY/anchor.json" "$RUN/anchor-established.json"
-run repeated-welcome "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/welcome.json" \
+run repeated-welcome "${LOCAL[@]}" "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/welcome.json" \
   --dir "$JOIN" --remote test-deployment --verifier "$HOST"
-[[ ! -e $RUN/logs/repeated-welcome.ops ]]
+[[ $(cat "$RUN/logs/repeated-welcome.ops") == 144 ]]   # the key status only: no lookup (89), no new baseline (151)
 cmp "$CUSTODY/anchor.json" "$RUN/anchor-established.json"
 mv "$CUSTODY/anchor.json" "$RUN/anchor.saved.json"
-refused lost-custody "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/welcome.json" \
+refused lost-custody "${LOCAL[@]}" "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/welcome.json" \
   --dir "$JOIN" --remote test-deployment --verifier "$HOST"
-[[ ! -e $CUSTODY/anchor.json && ! -e $RUN/logs/lost-custody.ops && ! -s $RUN/logs/lost-custody.out ]]
+[[ ! -e $CUSTODY/anchor.json && $(cat "$RUN/logs/lost-custody.ops") == 144 && ! -s $RUN/logs/lost-custody.out ]]
 mv "$RUN/anchor.saved.json" "$CUSTODY/anchor.json"
 mv "$JOIN/workspace" "$RUN/workspace.saved"
-refused lost-whole-workspace "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/welcome.json" \
+refused lost-whole-workspace "${LOCAL[@]}" "$MINI" join --key "$RUN/participant.key" --welcome "$RUN/welcome.json" \
   --dir "$JOIN" --remote test-deployment --verifier "$HOST"
 [[ ! -e $JOIN/workspace && ! -e $RUN/logs/lost-whole-workspace.ops && ! -s $RUN/logs/lost-whole-workspace.out ]]
 grep -q 'workspace custody is missing' "$RUN/logs/lost-whole-workspace.err"
