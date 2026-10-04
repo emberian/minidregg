@@ -68,7 +68,7 @@ theorem official_hash_vectors :
     officialHashKats.all (fun (n, h) => toHex (hash (katInput n)) == h) = true := by
   native_decide
 
-/-- fn's `fnct.store-identity.request` frame (fn specs/wire-grammar.json at 5329b38cb):
+/-- fn's `fnct.store-identity.request` frame (fn specs/wire-grammar.json at 1e38bb67a, `Compiler.FnWirePinned`):
 magic FNCT, version 1, kind 24, empty payload; its trailer. -/
 theorem fn_store_identity_request_trailer :
     toHex (hash [0x46, 0x4e, 0x43, 0x54, 0x01, 0x18, 0, 0, 0, 0]) =

@@ -1,11 +1,11 @@
 /-
 # Compiler.FnWireGrammar — fn's wire-grammar language, one interpreter, both round trips
 
-fn publishes its wire formats as GRAMMARS in one data language
-(`fn-wire-grammar`, version 1; fn `planning/design/wire-grammar-2026-10-04.md` §2, the
-normative description, read at fn 0fccd3de2; the families and vectors are fn `specs/wire-grammar.json`,
-vendored here as `protocol/fn/wire-grammar.json` and loaded by
-`Compiler.FnWireGrammarJson`). This module is Mini's ONE interpreter of that language:
+fn publishes its wire formats as GRAMMARS in one data language (`fn-wire-grammar`,
+version 1). The normative description is fn `planning/design/wire-grammar-2026-10-04.md`
+§2, read at fn 1e38bb67a; the families and vectors are fn `specs/wire-grammar.json`,
+vendored as `protocol/fn/wire-grammar.json`, loaded by `Compiler.FnWireJson` and pinned by
+`Compiler.FnWirePinned`. This module is Mini's ONE interpreter of that language:
 
 * `decode g xs` reads one value of `g` from the front of `xs` and returns it with the
   exact unconsumed suffix, or a named `Refusal`;

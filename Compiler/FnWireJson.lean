@@ -8,10 +8,10 @@ an unknown node, a wrong arity, a non-canonical hex string (fn writes lower case
 outside its grammar's JSON shape, a grammar `Grammar.wf` rejects, an unknown language
 version, an unknown refusal word.
 
-`checkDoc` is the contract check: every accepted vector decodes (with nothing left over)
-to the file's value and that value re-encodes to the identical octets; every refusal
-vector is refused with the file's word. It returns the counts, so a file with no vectors
-cannot read as a pass.
+`checkDoc` is the contract check: every vector's octets get exactly the decoder answer the
+file prints (value, octets consumed and rest; or the refusal word), and an accepted value
+re-encodes to exactly the consumed octets. It requires the coverage fn §3 promises per
+family and returns the counts, so a file with no vectors cannot read as a pass.
 -/
 import Lean.Data.Json
 import Compiler.FnWireGrammar
@@ -196,22 +196,26 @@ structure Summary where
 /-- The vector kinds of fn §3. -/
 def vectorKinds : List String := ["accept", "concat", "prefix", "mutation", "length"]
 
-/-- One vector against the decoder's whole answer (fn §2 "Decoding", §3): an accepting
-vector names the value, the octets consumed and the rest, and the value re-encodes to
-exactly the consumed octets; a refusing vector names the refusal word, and the decoder
-refuses with that word. A vector without `consumed`/`rest` (fn files before 0fccd3de2)
-is a whole message: everything consumed, nothing left. -/
-def vectorCheck (fam : Family) (version : Nat) (v : Json) : Except String Bool := do
+/-- What one vector checked: its kind and, when refused, the word. -/
+structure Checked where
+  kind : String
+  refused : Option String
+
+/-- One vector against the decoder's whole answer (fn §2 "Decoding", §3): every vector names
+its family, the language version and its kind; an accepting vector names the value, the
+octets consumed and the rest, and the value re-encodes to exactly the consumed octets; a
+refusing vector names the refusal word, and the decoder refuses with that word (a refusal
+consumes nothing). -/
+def vectorCheck (fam : Family) (version : Nat) (v : Json) : Except String Checked := do
   let label := fam.name
   unless (← jStr label (← jField label "family" v)) == fam.name do
     throw s!"{label}: vector names another family"
   unless (← jNat label (← jField label "version" v)) == version do
     throw s!"{label}: vector of another language version"
-  if let .ok kind := v.getObjVal? "kind" then
-    let kind ← jStr label kind
-    unless vectorKinds.contains kind do throw s!"{label}: unknown vector kind {kind}"
+  let kind ← jStr label (← jField label "kind" v)
+  unless vectorKinds.contains kind do throw s!"{label}: unknown vector kind {kind}"
   let octets ← ofHex label (← jStr label (← jField label "octets" v))
-  let at_ := s!"{label} {(hexOf octets).take 80}"
+  let at_ := s!"{label} {kind} {(hexOf octets).take 80}"
   match v.getObjVal? "refused" with
   | .ok word =>
       let word ← jStr label word
@@ -222,16 +226,12 @@ def vectorCheck (fam : Family) (version : Nat) (v : Json) : Except String Bool :
       | .error r =>
           unless r.fnWord == word do
             throw s!"{at_}: refused {r.fnWord} where the file says {word}"
-          return false
+          return { kind, refused := some word }
   | .error _ =>
       let valueJ ← jField label "value" v
       let value ← valueOfJson fam.grammar valueJ
-      let consumed ← match v.getObjVal? "consumed" with
-        | .ok c => jNat label c
-        | .error _ => pure octets.length
-      let rest ← match v.getObjVal? "rest" with
-        | .ok r => ofHex label (← jStr label r)
-        | .error _ => pure []
+      let consumed ← jNat label (← jField label "consumed" v)
+      let rest ← ofHex label (← jStr label (← jField label "rest" v))
       match decode fam.grammar octets with
       | .error r => throw s!"{at_}: refused ({r.fnWord}) a vector the file accepts"
       | .ok (got, gotRest) =>
@@ -247,7 +247,11 @@ def vectorCheck (fam : Family) (version : Nat) (v : Json) : Except String Bool :
           | .ok b => unless b == octets.take consumed do
               throw s!"{at_}: the file's value encodes to {hexOf b}"
           | .error r => throw s!"{at_}: the file's value is refused by the encoder ({r.fnWord})"
-          return true
+          return { kind, refused := none }
+
+def Grammar.isFrame : Grammar → Bool
+  | .frame _ _ _ _ _ => true
+  | _ => false
 
 /-- The language version this interpreter speaks; any other is refused by name. -/
 def languageVersion : Nat := 1
@@ -281,10 +285,19 @@ def checkDoc (text : String) : Except String Summary := do
   let mut accepted := 0
   let mut refused := 0
   for (fam, vs) in fams do
-    if vs.isEmpty then throw s!"{fam.name}: no vectors"
+    let mut seen : List Checked := []
     for v in vs do
-      if ← vectorCheck fam languageVersion v then accepted := accepted + 1
-      else refused := refused + 1
+      let c ← vectorCheck fam languageVersion v
+      seen := c :: seen
+      if c.refused.isSome then refused := refused + 1 else accepted := accepted + 1
+    -- Coverage (fn §3): the encodings, every truncation boundary, every one-octet change;
+    -- for a frame also the declared-length vectors and both refusal words.
+    for k in ["accept", "prefix", "mutation"] do
+      unless seen.any (·.kind == k) do throw s!"{fam.name}: no {k} vectors"
+    if fam.grammar.isFrame then
+      unless seen.any (·.kind == "length") do throw s!"{fam.name}: no length vectors"
+      for w in ["trailer", "malformed"] do
+        unless seen.any (·.refused == some w) do throw s!"{fam.name}: no {w} refusal vector"
   for ex in ← jArr "exchanges" (← jField "file" "exchanges" doc) do
     let req ← jStr "exchange" (← jField "exchange" "request" ex)
     unless names.contains req do throw s!"exchange names an unknown request family {req}"
@@ -293,11 +306,26 @@ def checkDoc (text : String) : Except String Summary := do
       unless names.contains rep do throw s!"exchange names an unknown reply family {rep}"
   return { families := fams.length, accepted, refused }
 
+def checkPasses (text : String) (expected : Summary) : Bool :=
+  match checkDoc text with
+  | .ok s => s == expected
+  | .error _ => false
+
+def checkRefuses (text : String) : Bool :=
+  match checkDoc text with
+  | .ok _ => false
+  | .error _ => true
+
 /-- A family's grammar, by NAME (never by FNCT kind). -/
 def familyGrammar (text : String) (name : String) : Except String Grammar := do
   let (_, fams) ← loadDoc text
   match fams.find? (·.1.name == name) with
   | some (f, _) => return f.grammar
   | none => throw s!"no family {name}"
+
+def familyIs (text name : String) (g : Grammar) : Bool :=
+  match familyGrammar text name with
+  | .ok g' => decide (g' = g)
+  | .error _ => false
 
 end Minidregg.Compiler.FnWire

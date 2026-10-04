@@ -13,6 +13,10 @@
 #   cold-start     the native Host starts without doing work (scripts/check-host-cold-start.sh:
 #                  peak RSS and CPU of a bare start; a computable nullary def in a module
 #                  the Host links runs at every Host start)
+#   fn-wire        fn's exported wire grammar (protocol/fn/wire-grammar.json at the fn revision
+#                  Compiler/FnWirePinned.lean pins) through Mini's one interpreter: pinned BLAKE3,
+#                  every vector's exact decoder answer, planted-fault controls (scripts/check-fn-wire.sh;
+#                  FN_REPO=<fn clone> also compares the file with fn's at that revision)
 #   hyp-ledger     scripts/check-hypothesis-ledger.sh over AxiomCensusResearch (built by
 #                  lake-build): no VACUOUS/INCONSISTENT row, no un-allowlisted TOOTHLESS
 #                  assumption, no stale allowlist entry; self-tests its instrument each run
@@ -61,7 +65,7 @@ mkdir -p "$logdir"
 lib_targets=$(sed -n '/^\[\[lean_lib\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | grep -v '^ResearchWip$' | tr '\n' ' ')
 exe_targets=$(sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 
-GATES=(host-operations hygiene lake-build cold-start hyp-ledger objective-proofs objective-c drift prover-glue build-closure host-closure import-tiers exports shell-paths objective-frontend website rust-tests deploy-scripts spk-shell journey)
+GATES=(host-operations hygiene lake-build cold-start fn-wire hyp-ledger objective-proofs objective-c drift prover-glue build-closure host-closure import-tiers exports shell-paths objective-frontend website rust-tests deploy-scripts spk-shell journey)
 declare -A STATUS SECS LAST
 red=0
 only=${LOCAL_GATES_ONLY:-}
@@ -70,6 +74,7 @@ g_host-operations() { python3 scripts/host-operations.py check && python3 script
 g_hygiene()       { bash scripts/check-proof-hygiene.sh && python3 scripts/gen-sheetlaw.py --check; }
 g_lake-build()    { echo "ResearchWip is opt-in; source classification is checked separately."; echo "lake build $lib_targets$exe_targets"; "$lake" build $lib_targets $exe_targets; }
 g_cold-start()    { bash scripts/check-host-cold-start.sh .lake/build/bin/minidregg-host; }
+g_fn-wire()       { bash scripts/check-fn-wire.sh; }
 g_hyp-ledger()    { bash scripts/check-hypothesis-ledger.sh; }
 g_objective-proofs() { bash scripts/check-objective-proofs.sh proofs; }
 g_objective-c()      { bash scripts/check-objective-proofs.sh c; }

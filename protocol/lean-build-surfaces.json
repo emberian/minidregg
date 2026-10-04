@@ -1105,7 +1105,7 @@
     {
       "module": "Compiler",
       "path": "Compiler.lean",
-      "sha256": "c08093170f0583eefad28724ac20054851bd9de9310658238cb22eea2395697e",
+      "sha256": "be130f77a6a7b2a3b7e7bd83f4e6828fd5bd423363e4035085f1551edef7de7f",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -1435,6 +1435,20 @@
       "module": "Compiler.BinaryTower256Profile",
       "path": "Compiler/BinaryTower256Profile.lean",
       "sha256": "31c263dc52ea5d005824dc12b3de223201b8493d6cb6787506267f9e5937aac5",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.Blake3",
+      "path": "Compiler/Blake3.lean",
+      "sha256": "83483441de41e24a4971b7a85f80774324dff8ea266ecff31550c47943a408e5",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.Blake3Kat",
+      "path": "Compiler/Blake3Kat.lean",
+      "sha256": "38baecc8507822ebc7f36ddd4cc07d47567c5c5c328d2e5c54ea487d65257511",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -1904,6 +1918,41 @@
       "module": "Compiler.FnEvidenceCodec",
       "path": "Compiler/FnEvidenceCodec.lean",
       "sha256": "2b8ae43dbfff63d3b80cb225eacecffe406952fca6045d04105c03d89de96b3f",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.FnWireFncu",
+      "path": "Compiler/FnWireFncu.lean",
+      "sha256": "3b174318156cb9fc06076271c118da4f54551badb66ecbf359b0d28278c441b1",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.FnWireGrammar",
+      "path": "Compiler/FnWireGrammar.lean",
+      "sha256": "5230f774da7a0f999e19557ab10823310aa6d6eddbae3e13c5a72a75e598d31f",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.FnWireJson",
+      "path": "Compiler/FnWireJson.lean",
+      "sha256": "b48544bf85e2d08915c63b76a10d55fd0181961268c9498d1061f58bcb69216a",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.FnWirePinned",
+      "path": "Compiler/FnWirePinned.lean",
+      "sha256": "7268aa969321b1e181d391ef2c194effd9a6be7c28691880d224a80905a56865",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.FnWireRoundTrip",
+      "path": "Compiler/FnWireRoundTrip.lean",
+      "sha256": "d809813aa747a1f4f643823dfb7a34bb2cc87ba6b65959a1757936c10ac03c06",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },

@@ -124,3 +124,10 @@ import Compiler.Evaluator -- K-EVAL: Machine (data) + Evaluator (every fact a fi
 import Compiler.ObliviousEvaluator
 import Compiler.PrivateSuccessorCustodyCodec
 import Compiler.PrivateWorldIR
+import Compiler.Blake3  -- BLAKE3-256 hash mode (fn frame trailers); Blake3Kat pins it to the 35 official vectors
+import Compiler.Blake3Kat
+import Compiler.FnWireGrammar  -- fn wire-grammar v1: the ONE interpreter (decode with exact rest, encode, wf, work bound)
+import Compiler.FnWireRoundTrip  -- decode_encode / encode_decode (canonicity) for every well-formed grammar
+import Compiler.FnWireJson  -- loader + contract check of fn specs/wire-grammar.json
+import Compiler.FnWireFncu  -- fncu.cursor read by the interpreter (replaces fn consumer-inspect)
+import Compiler.FnWirePinned  -- the vendored file at a pinned fn revision: digest, 249 vectors, teeth
