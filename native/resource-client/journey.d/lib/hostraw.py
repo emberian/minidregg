@@ -26,11 +26,17 @@ encoded outcome) or 254 (the socket refused to forward; the rest is text).
       client's connection without it (a lost reply); MODE never-forward closes
       the client's connection without forwarding (the Host never sees it).
       Runs until killed.
-  hostraw.py refusals LOG SKIP
+  hostraw.py refusals LOG OFFSET
       the Host's operator log (a `mini serve` log): one line per
-      "host: submission refused (operator log):" entry after the first SKIP,
-      "<n>\t<lane|signature|other>\t<the entry on one line>". The Host is serial,
+      "host: submission refused (operator log):" entry written after byte OFFSET,
+      "<n>\t<lane|authsig|legsig|other>\t<the entry on one line>". The Host is serial,
       so with one serial client the n-th entry is the n-th refused request.
+  hostraw.py debt SOCKET CONFIG HOST OP CHARGED VALID LOG OUTDIR MAX
+      sends CHARGED (a call refused AFTER authentication, so it is charged) until a
+      refusalLane entry is followed by a charged one -- the lane was closed, so that
+      charge leaves it in debt -- then sends VALID at once from this process (no
+      interpreter start between them). OUTDIR gets valid.bin and debt.tsv: tries,
+      ms from the charge's reply to sending VALID, kinds of the entries after it.
   hostraw.py flip PAYLOAD SIGHEX WHICH OUT
       copy PAYLOAD with the last byte of the WHICH-th (first|last) occurrence of
       the 64-byte signature SIGHEX inverted; prints the occurrence count.
@@ -138,10 +144,13 @@ def cmd_proxy(listen, upstream, drop_op, drop_count, mode, log):
                 client.close()
 
 
-def cmd_refusals(log, skip):
+def entries_from(log, offset):
+    """(entries, end offset): the refusal entries written after byte OFFSET."""
     head = "host: submission refused (operator log):"
     entries, current = [], None
-    for line in open(log, errors="replace"):
+    handle = open(log, errors="replace")
+    handle.seek(int(offset))
+    for line in handle:
         if line.startswith(head):
             if current is not None:
                 entries.append(current)
@@ -153,13 +162,48 @@ def cmd_refusals(log, skip):
             current = None
     if current is not None:
         entries.append(current)
-    for n, entry in enumerate(entries[int(skip):], int(skip) + 1):
-        # D3: an authority-envelope failure (signature first, unauthenticated, never
-        # charged) and a target-leg failure (authenticated, charged) are distinct names.
-        kind = ("lane" if "refusalLane" in entry else
-                "authsig" if "Reject.authoritySignature" in entry else
-                "legsig" if "Reject.legSignature" in entry else "other")
-        print("%d\t%s\t%s" % (n, kind, entry[len(head):].strip()))
+    return [entry[len(head):].strip() for entry in entries], handle.tell()
+
+
+def kind_of(entry):
+    # D3: an authority-envelope failure (signature first, unauthenticated, never
+    # charged) and a target-leg failure (authenticated, charged) are distinct names.
+    return ("lane" if "refusalLane" in entry else
+            "authsig" if "Reject.authoritySignature" in entry else
+            "legsig" if "Reject.legSignature" in entry else "other")
+
+
+def cmd_debt(sock_path, config, host, op, charged, valid, log, outdir, most):
+    os.makedirs(outdir, exist_ok=True)
+    cfg = open(config, "rb").read()
+    charge_msg = frame(cfg, host, int(op), open(charged, "rb").read())
+    valid_msg = frame(cfg, host, int(op), open(valid, "rb").read())
+    offset, prev = os.path.getsize(log), None
+    for tries in range(1, int(most) + 1):
+        exchange(sock_path, charge_msg)
+        replied = time.monotonic()
+        new, offset = entries_from(log, offset)
+        kind = kind_of(new[-1]) if new else "none"
+        if prev == "lane" and kind == "legsig":
+            gap = (time.monotonic() - replied) * 1000
+            reply = exchange(sock_path, valid_msg)
+            open(os.path.join(outdir, "valid.bin"), "wb").write(reply)
+            after = ",".join(kind_of(e) for e in entries_from(log, offset)[0]) or "none"
+            with open(os.path.join(outdir, "debt.tsv"), "w") as tsv:
+                tsv.write("%d\t%.1f\t%s\n" % (tries, gap, after))
+            print(tries, "%.1f" % gap, after)
+            return
+        prev = kind
+    sys.exit("debt: no closed-lane charge in %s tries" % most)
+
+
+def cmd_refusals(log, offset):
+    """Refusal entries written after byte OFFSET of the operator log (a mark taken
+    with `stat -c %s`): reading from the mark keeps a mark-call-read cycle at a few
+    milliseconds however long the log has grown."""
+    entries, _ = entries_from(log, offset)
+    for n, entry in enumerate(entries, 1):
+        print("%d\t%s\t%s" % (n, kind_of(entry), entry))
 
 
 def cmd_flip(payload, sighex, which, out):
@@ -184,4 +228,4 @@ def cmd_flip(payload, sighex, which, out):
 if __name__ == "__main__":
     verb, args = sys.argv[1], sys.argv[2:]
     {"call": cmd_call, "repeat": cmd_repeat, "proxy": cmd_proxy, "flip": cmd_flip,
-     "refusals": cmd_refusals}[verb](*args)
+     "refusals": cmd_refusals, "debt": cmd_debt}[verb](*args)

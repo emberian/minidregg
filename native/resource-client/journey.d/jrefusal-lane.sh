@@ -59,10 +59,10 @@ decode() {
   "$HOST" "$CONFIG" inspect outcome "$D/$2.outcome.bin" "$D/$2.json" >"$D/$2.inspect.out" 2>&1
 }
 detail() { jq -r '[.type, .reason, (.detail // "" | tostring)] | join(" ")' "$D/$1.json" 2>/dev/null | cut -c1-300; }
-OPLOG=$(ls -t "$JOURNEY_WORLD"/public/serve-*.log 2>/dev/null | head -1)
+OPLOG=$(ls -t "$JOURNEY_WORLD"/public/serve*.log 2>/dev/null | head -1)   # serve.log, or serve-<tag>.log after a restart
 [ -f "$OPLOG" ] || { echo "JRLANE: no operator log under $JOURNEY_WORLD/public" >&2; exit 1; }
-marks() { $RAW refusals "$OPLOG" 0 | wc -l; }          # refusal entries so far
-since() { $RAW refusals "$OPLOG" "$1"; }                # entries after mark $1
+marks() { stat -c %s "$OPLOG"; }                       # the log's byte length now
+since() { $RAW refusals "$OPLOG" "$1"; }                # refusal entries after mark $1
 # named CALLFILE NAME : one request; $D/NAME.reason = its operator-log entry ("" if none)
 named() {
   local m; m=$(marks)
@@ -215,15 +215,20 @@ row "B's lane is untouched while A's is charged: B's authenticated refusal is na
   "legsig" "$(kind b-target): $(why b-target)" "$([ "$(kind b-target)" = legsig ] && echo 1 || echo 0)"
 
 # 6. A's own valid call: refused right after a charged refusal, admitted after refill.
-for i in $(seq 1 100); do   # until a charged (leg) refusal: the lane then owes a fee
-  named "$D/a-target.bin" charge
-  [ "$(kind charge)" = legsig ] && break
-  sleep 0.1
-done
-named "$CA/call.bin" valid-closed
+#    The charge must come right after a refusalLane refusal: the lane was then
+#    closed (balance <= 0), so the charge (>= 50 ms) leaves it in DEBT by at least
+#    the fee less a few ms of refill (Kernel.RefusalLane.debt_refuses_until_repaid),
+#    and the valid call sent next is refused. A charge on a lane that had refilled
+#    meanwhile could leave it open: that is the lane working, not this row's case.
+#    The charge and the valid call go out from one process (hostraw.py debt): no
+#    interpreter start separates them, and the row prints the gap.
+$RAW debt "$SOCKET" "$CONFIG" "$HOST" 2 "$D/a-target.bin" "$CA/call.bin" "$OPLOG" "$D/debt" 300 \
+  >"$D/debt.out" 2>"$D/debt.err" || die "no closed-lane charge: $(tail -1 "$D/debt.err")"
+cp "$D/debt/valid.bin" "$D/r-valid-closed.bin"
+cut -f3 "$D/debt/debt.tsv" | tr , '\n' | awk '{print NR "\t" $1 "\t" $1}' >"$D/valid-closed.reason"
 decode "$D/r-valid-closed.bin" valid-closed
 row "A's own unaltered call, right after a charged refusal, is refused refusalLane (and commits nothing)" \
-  "refused; operator log refusalLane" "$(detail valid-closed); $(kind valid-closed)" \
+  "refused; operator log refusalLane" "$(detail valid-closed); $(kind valid-closed); sent $(cut -f2 "$D/debt/debt.tsv") ms after the charge's reply (try $(cut -f1 "$D/debt/debt.tsv"))" \
   "$([ "$(kind valid-closed)" = lane ] && ! jq -e '.type == "confirmed"' "$D/valid-closed.json" >/dev/null 2>&1 && echo 1 || echo 0)"
 sleep 5
 named "$CA/call.bin" valid-open
