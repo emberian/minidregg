@@ -1,10 +1,9 @@
 //! The ONE loader of secret key material from a file.
 //!
-//! The file is opened without following symlinks and its custody is checked on the OPENED
-//! descriptor (a rename between check and read cannot substitute another file): a regular file
-//! owned by this euid with no group/other permission bits. [`Custody::FileAndDirectory`]
-//! additionally requires the containing directory to be an owner-private directory. Bytes come
-//! back in `Zeroizing` buffers.
+//! Custody is checked on the OPENED descriptor (a rename between check and read cannot
+//! substitute another file): a regular file owned by this euid with no group/other permission
+//! bits. [`Custody`] says how a symlink is treated and whether the containing directory must be
+//! owner-private too. Bytes come back in `Zeroizing` buffers.
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
@@ -15,9 +14,11 @@ use zeroize::Zeroizing;
 /// How much of the path's custody is checked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Custody {
-    /// The file itself.
+    /// The file itself. A symlink is judged by the file it opens (its target's custody).
     File,
-    /// The file and its parent directory (owner-private, not a symlink).
+    /// The file itself, never reached through a symlink.
+    FileNoFollow,
+    /// No symlink, and the file's parent directory must be an owner-private directory.
     FileAndDirectory,
 }
 
@@ -45,7 +46,7 @@ impl std::fmt::Display for SecretError {
         match &self.kind {
             SecretErrorKind::Unreadable(e) => write!(f, "cannot read key file {path}: {e}"),
             SecretErrorKind::Custody(why) => write!(f, "key file {path} {why}"),
-            SecretErrorKind::Size { limit } => write!(f, "key file {path} must contain 1..={limit} bytes"),
+            SecretErrorKind::Size { limit } => write!(f, "key file {path} has an unacceptable size (at most {limit} bytes)"),
             SecretErrorKind::Width { wanted } => write!(f, "key file {path} must contain exactly {wanted} raw bytes"),
         }
     }
@@ -59,6 +60,15 @@ impl From<SecretError> for String {
 
 /// Read a private file of `1..=limit` bytes.
 pub fn read_private(path: &Path, limit: usize, custody: Custody) -> Result<Zeroizing<Vec<u8>>, SecretError> {
+    read_bounded(path, 1, limit, custody)
+}
+
+/// Read a private file of `0..=limit` bytes (an empty marker file is a valid answer).
+pub fn read_private_or_empty(path: &Path, limit: usize, custody: Custody) -> Result<Zeroizing<Vec<u8>>, SecretError> {
+    read_bounded(path, 0, limit, custody)
+}
+
+fn read_bounded(path: &Path, min: usize, limit: usize, custody: Custody) -> Result<Zeroizing<Vec<u8>>, SecretError> {
     let fail = |kind| SecretError { path: path.to_owned(), kind };
     // SAFETY: geteuid has no preconditions and cannot fail.
     let euid = unsafe { libc::geteuid() };
@@ -75,7 +85,7 @@ pub fn read_private(path: &Path, limit: usize, custody: Custody) -> Result<Zeroi
     }
     let mut file: File = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
+        .custom_flags(if custody == Custody::File { 0 } else { libc::O_NOFOLLOW } | libc::O_NONBLOCK | libc::O_CLOEXEC)
         .open(path)
         .map_err(|e| fail(SecretErrorKind::Unreadable(e)))?;
     let meta = file.metadata().map_err(|e| fail(SecretErrorKind::Unreadable(e)))?;
@@ -90,7 +100,7 @@ pub fn read_private(path: &Path, limit: usize, custody: Custody) -> Result<Zeroi
     }
     let mut bytes = Zeroizing::new(Vec::with_capacity(limit.min(4096) + 1));
     (&mut file).take(limit as u64 + 1).read_to_end(&mut bytes).map_err(|e| fail(SecretErrorKind::Unreadable(e)))?;
-    if bytes.is_empty() || bytes.len() > limit {
+    if bytes.len() < min || bytes.len() > limit {
         return Err(fail(SecretErrorKind::Size { limit }));
     }
     Ok(bytes)
@@ -137,7 +147,12 @@ mod tests {
         assert!(read_seed(&key(&dir, "world", &[9; 32], 0o604), Custody::File).is_err());
         let link = dir.join("link");
         std::os::unix::fs::symlink(dir.join("ok"), &link).unwrap();
-        assert!(read_seed(&link, Custody::File).is_err(), "a symlinked key never loads");
+        assert_eq!(*read_seed(&link, Custody::File).unwrap(), [9u8; 32], "a link is judged by the file it opens");
+        assert!(read_seed(&link, Custody::FileNoFollow).is_err(), "no-follow custody never reads through a link");
+        assert!(read_seed(&link, Custody::FileAndDirectory).is_err());
+        let loose = dir.join("loose");
+        std::os::unix::fs::symlink(dir.join("wide"), &loose).unwrap();
+        assert!(read_seed(&loose, Custody::File).is_err(), "the target's custody is what counts");
         assert!(read_seed(&dir, Custody::File).is_err(), "a directory is not a key");
         fs::remove_dir_all(dir).unwrap();
     }
@@ -158,6 +173,8 @@ mod tests {
         let dir = scratch("bound", 0o700);
         assert_eq!(read_private(&key(&dir, "a", b"abc", 0o600), 3, Custody::File).unwrap().as_slice(), b"abc");
         assert!(matches!(read_private(&key(&dir, "b", b"abcd", 0o600), 3, Custody::File).unwrap_err().kind, SecretErrorKind::Size { limit: 3 }));
+        assert!(read_private(&key(&dir, "e", b"", 0o600), 3, Custody::File).is_err(), "a secret is never empty");
+        assert!(read_private_or_empty(&key(&dir, "m", b"", 0o600), 0, Custody::File).unwrap().is_empty(), "an empty marker is");
         fs::remove_dir_all(dir).unwrap();
     }
 }

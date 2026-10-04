@@ -10,10 +10,10 @@ use chacha20poly1305::{
 use ring::hmac;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::sync::{
@@ -122,38 +122,15 @@ pub(crate) fn directory(path: &Path) -> Result<()> {
     }
     Ok(())
 }
-pub(crate) fn read_private(path: &Path, limit: usize) -> Result<Vec<u8>> {
-    let f = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)
-        .map_err(|e| e.to_string())?;
-    let m = f.metadata().map_err(|e| e.to_string())?;
-    if !m.is_file()
-        || m.uid() != transport::effective_uid()
-        || m.mode() & 0o077 != 0
-        || m.len() > limit as u64
-    {
-        return Err("traffic retained file is not bounded owner-private material".into());
-    }
-    let mut v = Vec::new();
-    f.take((limit + 1) as u64)
-        .read_to_end(&mut v)
-        .map_err(|e| e.to_string())?;
-    if v.len() > limit {
-        return Err("traffic retained file exceeds bound".into());
-    }
-    Ok(v)
-}
+pub(crate) use crate::fsio::read_private;
 pub(crate) fn persist(path: &Path, bytes: &[u8]) -> Result<()> {
     // Published only complete and fsynced, never replacing a prior immutable
     // ticket/claim/reply. Crash-left staging files are never receipts.
     crate::create_private(path, bytes)
 }
 fn key(path: &Path) -> Result<[u8; 32]> {
-    read_private(path, 32)?
-        .try_into()
-        .map_err(|_| "traffic key must contain exactly 32 raw bytes".into())
+    let bytes = read_private(path, 32)?;
+    bytes.try_into().map_err(|_| "traffic key must contain exactly 32 raw bytes".into())
 }
 
 struct Codec {

@@ -115,15 +115,13 @@ fn check_keys(value: &Value) -> Result<()> {
         return Err("pure source inspector pin changed".into());
     }
     let key = path_field(value, "participantKey")?;
-    private_bytes(&key, 32)?;
-    if hex(&read_secret(&key)?.verifying_key().to_bytes()) != field(value, "participantPublicKey")?
+    if hex(&crate::fsio::read_secret_in_private_dir(&key)?.verifying_key().to_bytes()) != field(value, "participantPublicKey")?
     {
         return Err("participant key differs from retained identity".into());
     }
     for signer in value["signers"].as_array().ok_or("signers absent")? {
         let key = path_field(signer, "keyPath")?;
-        private_bytes(&key, 32)?;
-        if hex(&read_secret(&key)?.verifying_key().to_bytes()) != field(signer, "publicKey")? {
+        if hex(&crate::fsio::read_secret_in_private_dir(&key)?.verifying_key().to_bytes()) != field(signer, "publicKey")? {
             return Err("enrollment signer key differs from retained identity".into());
         }
     }

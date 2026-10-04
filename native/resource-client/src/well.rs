@@ -8,7 +8,7 @@
 
 use crate::workspace;
 use crate::{absolute, hex, path, process, session_invoke, Args, Result, SOCKET};
-use ed25519_dalek::{Signer, SigningKey};
+use ed25519_dalek::Signer;
 use serde_json::{json, Value};
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
@@ -54,18 +54,6 @@ fn reference_capability(reference: &Option<Value>, label: &str) -> Result<String
         .and_then(Value::as_str)
         .map(str::to_owned)
         .ok_or_else(|| format!("{label} reference names no capability"))
-}
-
-fn signing_key(path: &Path) -> Result<SigningKey> {
-    let mut bytes = Vec::new();
-    File::open(path)
-        .and_then(|mut file| file.by_ref().take(33).read_to_end(&mut bytes))
-        .map_err(|error| format!("cannot read workspace key: {error}"))?;
-    let raw: [u8; 32] = bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| "workspace key must contain exactly 32 raw bytes")?;
-    Ok(SigningKey::from_bytes(&raw))
 }
 
 fn nonce() -> Result<String> {
@@ -181,7 +169,7 @@ fn command(root: &Path, mut args: Args, op: &str) -> Result<()> {
         return Err("well plan names a different command".into());
     }
     let header = crate::decode_hex(member(&view, "header")?)?;
-    let key = signing_key(Path::new(member(&workspace, "key")?))?;
+    let key = crate::read_secret(Path::new(member(&workspace, "key")?))?;
     let signature = key.sign(&header).to_bytes();
     let ingress = invoke(
         &host,

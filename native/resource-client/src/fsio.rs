@@ -5,7 +5,10 @@
 //! (replace).
 use std::path::Path;
 
+use ed25519_dalek::SigningKey;
 use mini_sdk::durable::{self, Perm, RetainError, Retained};
+use mini_sdk::secret::{self, Custody};
+use zeroize::Zeroizing;
 
 use crate::Result;
 
@@ -63,6 +66,44 @@ pub(crate) fn sync_parent(path: &Path) -> Result<()> {
 /// fsync `directory` and every ancestor.
 pub(crate) fn sync_directory_ancestors(directory: &Path) -> Result<()> {
     durable::sync_ancestors(directory).map_err(|e| format!("cannot sync directory {}: {e}", directory.display()))
+}
+
+/// The crate's one secret-file loader. Custody is checked on the opened descriptor and the file
+/// must be owner-private (a symlink is judged by the file it opens); the `_in_private_dir` forms
+/// also refuse symlinks and require an owner-private containing directory.
+fn seed_with(path: &Path, custody: Custody) -> Result<Zeroizing<[u8; 32]>> {
+    secret::read_seed(path, custody).map_err(|e| e.to_string())
+}
+
+/// A 32-byte seed file (an Ed25519 signing seed, a symmetric key).
+pub(crate) fn read_seed(path: &Path) -> Result<Zeroizing<[u8; 32]>> {
+    seed_with(path, Custody::File)
+}
+
+/// [`read_seed`], also requiring an owner-private containing directory.
+pub(crate) fn read_seed_in_private_dir(path: &Path) -> Result<Zeroizing<[u8; 32]>> {
+    seed_with(path, Custody::FileAndDirectory)
+}
+
+/// The Ed25519 signing key whose seed is the private file at `path`.
+pub(crate) fn read_secret(path: &Path) -> Result<SigningKey> {
+    Ok(SigningKey::from_bytes(&*read_seed(path)?))
+}
+
+/// [`read_secret`], also requiring an owner-private containing directory.
+pub(crate) fn read_secret_in_private_dir(path: &Path) -> Result<SigningKey> {
+    Ok(SigningKey::from_bytes(&*read_seed_in_private_dir(path)?))
+}
+
+/// A private file of `1..=limit` bytes in an owner-private directory (evidence and custody
+/// input that is not necessarily a key).
+pub(crate) fn read_private_in_private_dir(path: &Path, limit: usize) -> Result<Vec<u8>> {
+    secret::read_private(path, limit, Custody::FileAndDirectory).map(|bytes| bytes.to_vec()).map_err(|e| e.to_string())
+}
+
+/// A private file of `0..=limit` bytes (an empty marker is a valid answer), never through a symlink.
+pub(crate) fn read_private(path: &Path, limit: usize) -> Result<Vec<u8>> {
+    secret::read_private_or_empty(path, limit, Custody::FileNoFollow).map(|bytes| bytes.to_vec()).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

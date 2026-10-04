@@ -26,7 +26,7 @@
 //!
 //! `mini clock --action view --workspace DIR` prints the clock view.
 
-use crate::agent_reserve::{field, private_bytes};
+use crate::agent_reserve::field;
 use crate::workspace::make_private_dir;
 use crate::create_private;
 use crate::*;
@@ -280,10 +280,7 @@ fn tick(
         .and_then(Value::as_str)
         .ok_or("clock plan lacks a canonical header")?;
     let header_bytes = decode_hex(canonical).map_err(|_| "clock plan header is not hex")?;
-    let seed: [u8; 32] = private_bytes(&ws.key, 32)?
-        .try_into()
-        .map_err(|_| "workspace key must contain exactly 32 raw bytes")?;
-    let signature = SigningKey::from_bytes(&seed).sign(&header_bytes).to_bytes();
+    let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&header_bytes).to_bytes();
     let ingress = invoke(ws, 127, &pair(&plan, &signature))?;
     // Retained before submission: a lost reply is resolved by the next run.
     let attempt = attempts(ws)?.join(format!("t-{}", nonce()?));

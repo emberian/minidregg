@@ -22,7 +22,7 @@ use super::{Args, Result};
 use serde_json::{json, Value};
 use std::ffi::OsString;
 use std::io::Read;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -61,13 +61,9 @@ fn owner(workspace: &Path) -> Result<Owner> {
         .get("key")
         .and_then(Value::as_str)
         .ok_or("workspace has no key")?;
-    let mut seed: [u8; 32] = crate::agent_reserve::private_bytes(Path::new(key), 32)?
-        .try_into()
-        .map_err(|_| "workspace key must be exactly 32 bytes")?;
-    let public = ed25519_dalek::SigningKey::from_bytes(&seed)
+    let public = crate::fsio::read_secret_in_private_dir(Path::new(key))?
         .verifying_key()
         .to_bytes();
-    seed.fill(0);
     Owner::new(subject, &hex(&public))
 }
 
@@ -79,29 +75,12 @@ fn read_secret(source: &str) -> Result<credentials::Secret> {
             .read_to_end(&mut bytes)
             .map_err(|e| format!("cannot read provider secret from stdin: {e}"))?;
     } else {
-        let path = Path::new(source);
-        let mut file = std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-            .open(path)
-            .map_err(|_| "provider secret file is unavailable".to_owned())?;
-        let meta = file
-            .metadata()
-            .map_err(|_| "provider secret file metadata unavailable".to_owned())?;
-        if !meta.file_type().is_file()
-            || meta.len() > 4100
-            || meta.uid() != unsafe { libc::geteuid() }
-            || meta.permissions().mode() & 0o077 != 0
-        {
-            return Err(
-                "provider secret file must be an owned private regular file under 4100 bytes"
-                    .into(),
-            );
-        }
-        file.by_ref()
-            .take(4100)
-            .read_to_end(&mut bytes)
-            .map_err(|_| "cannot read provider secret file".to_owned())?;
+        let held = mini_sdk::secret::read_private_or_empty(Path::new(source), 4100, mini_sdk::secret::Custody::FileNoFollow)
+            .map_err(|error| match error.kind {
+                mini_sdk::secret::SecretErrorKind::Unreadable(_) => "provider secret file is unavailable".to_owned(),
+                _ => "provider secret file must be an owned private regular file under 4100 bytes".to_owned(),
+            })?;
+        bytes.extend_from_slice(&held);
     }
     let secret = credentials::secret_from_input(&bytes);
     bytes.fill(0);
@@ -384,9 +363,7 @@ fn sign_choice(
     action_fields(request, &["action", "provider", "model", "runner", "task"])?;
     let ws = super::workspace::load(workspace)?;
     let key = super::workspace::member_path(&ws, "key")?;
-    let mut seed: [u8; 32] = crate::agent_reserve::private_bytes(&key, 32)?
-        .try_into()
-        .map_err(|_| "workspace key size")?;
+    let mut seed = *crate::fsio::read_seed_in_private_dir(&key)?;
     let choice = credentials::choice::Choice::signed_for_catalogue(
         owner.clone(),
         required(request, "runner")?,

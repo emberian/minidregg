@@ -42,8 +42,6 @@
 //! recomputes every opened leaf and the root, and checks that every declared
 //! entry the view displays is one of the opened entries.
 
-use std::fs;
-use std::path::Path;
 
 use serde_json::{json, Value};
 use sha3::digest::{core_api::CoreWrapper, ExtendableOutput, Update, XofReader};
@@ -253,14 +251,6 @@ fn int_bytes(text: &str) -> Result<Vec<u8>> {
         magnitude.mul_add(2, 0)
     };
     Ok(zigzag.encode())
-}
-
-pub(crate) fn read_seed(path: &Path) -> Result<[u8; 32]> {
-    let bytes = fs::read(path)
-        .map_err(|error| format!("cannot read signing key {}: {error}", path.display()))?;
-    bytes.try_into().map_err(|_| {
-        format!("signing key {} must contain exactly 32 raw bytes", path.display())
-    })
 }
 
 /// The owner's blinding key, derived from its signing seed.

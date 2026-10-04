@@ -71,14 +71,7 @@ fn identity_name(value: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn key(path: &Path) -> Result<SigningKey> {
-    let mut bytes: [u8; 32] = private_bytes(path, 32)?
-        .try_into()
-        .map_err(|_| "enrollment key must contain exactly 32 raw bytes")?;
-    let signing = SigningKey::from_bytes(&bytes);
-    bytes.fill(0);
-    Ok(signing)
-}
+pub(crate) use crate::fsio::read_secret_in_private_dir as key;
 
 pub(crate) fn nonce() -> Result<String> {
     let mut bytes = [0u8; 16];

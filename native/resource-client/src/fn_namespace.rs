@@ -40,45 +40,7 @@ fn canonical_decimal(value: &str) -> bool {
         && (value.len() == 1 || !value.starts_with('0'))
 }
 
-fn private_file(path: &Path, limit: usize) -> Result<Vec<u8>> {
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
-    let uid = unsafe { geteuid() };
-    let parent = path.parent().ok_or("private file has no parent")?;
-    let directory = fs::symlink_metadata(parent).map_err(|e| e.to_string())?;
-    let named = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
-    let file = File::open(path).map_err(|e| e.to_string())?;
-    let opened = file.metadata().map_err(|e| e.to_string())?;
-    if !directory.is_dir()
-        || directory.uid() != uid
-        || directory.permissions().mode() & 0o077 != 0
-        || !named.file_type().is_file()
-        || named.uid() != uid
-        || named.permissions().mode() & 0o077 != 0
-        || (named.dev(), named.ino()) != (opened.dev(), opened.ino())
-    {
-        return Err("fn namespace custody requires owner-private file and parent".into());
-    }
-    let mut bytes = Vec::new();
-    file.take((limit + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
-    if bytes.is_empty() || bytes.len() > limit {
-        return Err("fn namespace private file exceeds bound".into());
-    }
-    Ok(bytes)
-}
 
-fn custody_key(path: &Path) -> Result<SigningKey> {
-    let bytes = private_file(path, 32)?;
-    let mut seed: [u8; 32] = bytes
-        .try_into()
-        .map_err(|_| "fn namespace key must contain exactly 32 bytes".to_owned())?;
-    let signing = SigningKey::from_bytes(&seed);
-    seed.fill(0);
-    Ok(signing)
-}
 
 fn operator_socket_owned(socket: &Path) -> Result<()> {
     unsafe extern "C" {
@@ -435,9 +397,9 @@ pub(super) fn register(directory: &Path, key: &Path, approval_path: &Path) -> Re
     let state = retained(&directory)?;
     operator_socket_owned(&state.socket)?;
     verify_inspection(&directory, &state)?;
-    let approval_bytes = private_file(approval_path, 65_536)?;
+    let approval_bytes = crate::agent_reserve::private_bytes(approval_path, 65_536)?;
     let approval: Value = serde_json::from_slice(&approval_bytes).map_err(|e| e.to_string())?;
-    let signing = custody_key(key)?;
+    let signing = crate::fsio::read_secret_in_private_dir(key)?;
     let header = check_approval(&approval, &state.inspection, &state.plan, &signing)?;
     let approval_hash = digest(&approval_bytes);
     let approval_pin = directory.join("approval-pin.json");

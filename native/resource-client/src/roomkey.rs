@@ -1464,7 +1464,7 @@ fn save_ring(root: &Path, passphrase: &[u8], ring: &Keyring) -> Result<()> {
 /// its signing key file holds.
 fn own_secret(workspace: &Value) -> Result<MemberSecret> {
     let path = member_path(workspace, "key")?;
-    derive_enc_key(&*seed_of(&path)?)
+    derive_enc_key(&*crate::fsio::read_seed(&path)?)
 }
 
 /// Every hybrid secret this workspace opens with: the current one, then every
@@ -1473,21 +1473,10 @@ fn own_secrets(workspace: &Value) -> Result<Vec<MemberSecret>> {
     private::enc_secrets(&member_path(workspace, "key")?)
 }
 
-pub(crate) fn seed_of(path: &Path) -> Result<Zeroizing<[u8; 32]>> {
-    let bytes = Zeroizing::new(
-        fs::read(path).map_err(|error| format!("cannot read signing key {}: {error}", path.display()))?,
-    );
-    let seed: [u8; 32] = bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| format!("signing key {} must contain exactly 32 raw bytes", path.display()))?;
-    Ok(Zeroizing::new(seed))
-}
-
 /// `mini enc-public --secret KEY`: the full hybrid public key (X25519 ||
 /// ML-KEM-768 encapsulation key, 1216 bytes) a sponsor's escrow is sealed to.
 pub(crate) fn enc_public_hex(secret: &Path) -> Result<String> {
-    Ok(hex(&enc_public(&*seed_of(secret)?)?.to_bytes()))
+    Ok(hex(&enc_public(&*crate::fsio::read_seed(secret)?)?.to_bytes()))
 }
 
 /// `mini enc-key-id --secret KEY`: the 32-byte id of that key, which a room's
@@ -1495,7 +1484,7 @@ pub(crate) fn enc_public_hex(secret: &Path) -> Result<String> {
 /// registration or `whoami` shows. A key id authorizes nothing by itself: a
 /// first invite needs the member's signed declaration.
 pub(crate) fn enc_key_id_hex(secret: &Path) -> Result<String> {
-    Ok(hex(&enc_public(&*seed_of(secret)?)?.id()))
+    Ok(hex(&enc_public(&*crate::fsio::read_seed(secret)?)?.id()))
 }
 
 // ---------------------------------------------------------------- references
@@ -2392,7 +2381,7 @@ pub(crate) fn signed_recipient_descriptor(workspace: &Value, room: &str, keys: &
     if epoch.to_string() != key_epoch { return Err("recipient key epoch must be canonical decimal".into()); }
     let subject = member(workspace, "subject")?;
     let signer = crate::read_secret(&member_path(workspace, "key")?)?;
-    let encryption = enc_public(&*seed_of(&member_path(workspace, "key")?)?)?;
+    let encryption = enc_public(&*crate::fsio::read_seed(&member_path(workspace, "key")?)?)?;
     let hosted = private::key_is_hosted(&member_path(workspace, "key")?);
     let payload = EncRecord::signed_payload(room, keys, subject_number(subject)?, epoch, hosted,
         &encryption, &signer)?;

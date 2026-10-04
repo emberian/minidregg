@@ -247,12 +247,7 @@ pub(crate) fn seal(
         workspace::accepted_outcome(origin)?.ok_or("summon source operation is not accepted")?;
     let payload = json!({"type":"mini-hermes-summon-bundle-v1","world":world(ws)?,"recipient":manifest["hermes"],"task":task,"founder":workspace::member(ws,"subject")?,"room":room,"roomCell":manifest["roomCell"],"assignment":manifest["assignment"],"origin":{"callHex":hex(&read(&origin.join("call.bin"))?),"planHex":hex(&read(&origin.join("plan.bin"))?),"signaturesHex":hex(&read(&origin.join("transaction-signatures.bin"))?),"command":json_file(&origin.join("intent.json"))?["purpose"]["draft"]["command"],"receipt":receipt},"files":files});
     let bytes = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
-    let mut seed: [u8; 32] =
-        crate::agent_reserve::private_bytes(&workspace::member_path(ws, "key")?, 32)?
-            .try_into()
-            .map_err(|_| "signing key width")?;
-    let key = SigningKey::from_bytes(&seed);
-    seed.fill(0);
+    let key = crate::fsio::read_secret_in_private_dir(&workspace::member_path(ws, "key")?)?;
     let bundle = json!({"type":"mini-hermes-handoff-v1","payloadHex":hex(&bytes),"publicKey":hex(key.verifying_key().as_bytes()),"signature":hex(&key.sign(&message(&bytes)).to_bytes())});
     decode(&bundle)?;
     let target = out.join("handoff.json");
@@ -612,12 +607,7 @@ pub(crate) fn seal_dismiss(ws: &Value, out: &Path, origin: &Path) -> Result<()> 
     payload["origin"] = json!({"callHex":hex(&read(&origin.join("call.bin"))?),"planHex":hex(&read(&origin.join("plan.bin"))?),"signaturesHex":hex(&read(&origin.join("transaction-signatures.bin"))?),"command":json_file(&origin.join("intent.json"))?["purpose"]["draft"]["command"],"receipt":workspace::accepted_outcome(origin)?.ok_or("dismissal is not accepted")?});
     validate_origin_command(&payload, &payload["origin"]["command"])?;
     let bytes = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
-    let mut seed: [u8; 32] =
-        crate::agent_reserve::private_bytes(&workspace::member_path(ws, "key")?, 32)?
-            .try_into()
-            .map_err(|_| "signing key width")?;
-    let key = SigningKey::from_bytes(&seed);
-    seed.fill(0);
+    let key = crate::fsio::read_secret_in_private_dir(&workspace::member_path(ws, "key")?)?;
     let bundle = json!({"type":"mini-hermes-handoff-v1","payloadHex":hex(&bytes),"publicKey":hex(key.verifying_key().as_bytes()),"signature":hex(&key.sign(&message(&bytes)).to_bytes())});
     let target = out.join("dismissal.json");
     if target.exists() {
@@ -681,12 +671,7 @@ fn check_registration_custody(r: &Value) -> Result<()> {
     {
         return Err("resident registration differs from custody subject/encryption key".into());
     }
-    let mut seed: [u8; 32] =
-        crate::agent_reserve::private_bytes(&workspace::member_path(&ws, "key")?, 32)?
-            .try_into()
-            .map_err(|_| "registered key width")?;
-    let key = SigningKey::from_bytes(&seed);
-    seed.fill(0);
+    let key = crate::fsio::read_secret_in_private_dir(&workspace::member_path(&ws, "key")?)?;
     let host = workspace::workspace_host(&ws)?;
     let config = workspace::member_path(&ws, "config")?;
     let socket = crate::SOCKET.get().ok_or("registry socket absent")?;

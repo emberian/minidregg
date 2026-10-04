@@ -12,7 +12,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod fsio;
-pub(crate) use fsio::{copy_new, create_private, create_public, retain_json, sync_directory_ancestors};
+pub(crate) use fsio::{copy_new, create_private, create_public, read_secret, retain_json, sync_directory_ancestors};
 #[cfg(unix)]
 mod agent_lifetime_grant;
 mod trace;
@@ -938,53 +938,6 @@ fn utf8_path(path: &Path) -> Result<&str> {
         .ok_or_else(|| format!("path is not valid UTF-8: {}", path.display()))
 }
 
-/// A signing seed: a regular file of exactly 32 bytes, owned by this process's
-/// user and inaccessible to group and others (checked on the opened file, so a
-/// rename between check and read cannot substitute another). The bytes are
-/// wiped when dropped; `SigningKey` zeroizes its own copy.
-fn read_secret(path: &Path) -> Result<SigningKey> {
-    use zeroize::Zeroizing;
-    let mut file = fs::File::open(path)
-        .map_err(|error| format!("cannot read signing key {}: {error}", path.display()))?;
-    #[cfg(unix)]
-    {
-        let metadata = file
-            .metadata()
-            .map_err(|error| format!("cannot inspect signing key {}: {error}", path.display()))?;
-        secret_custody(&metadata, transport::effective_uid())
-            .map_err(|why| format!("signing key {} {why}", path.display()))?;
-    }
-    let mut bytes = Zeroizing::new(Vec::with_capacity(33));
-    Read::by_ref(&mut file)
-        .take(33)
-        .read_to_end(&mut bytes)
-        .map_err(|error| format!("cannot read signing key {}: {error}", path.display()))?;
-    let seed: Zeroizing<[u8; 32]> = Zeroizing::new(bytes.as_slice().try_into().map_err(|_| {
-        format!(
-            "signing key {} must contain exactly 32 raw bytes",
-            path.display()
-        )
-    })?);
-    Ok(SigningKey::from_bytes(&seed))
-}
-
-/// The custody a secret file must have: a regular file of this user, mode
-/// without any group or other bit.
-#[cfg(unix)]
-fn secret_custody(metadata: &fs::Metadata, owner: u32) -> std::result::Result<(), &'static str> {
-    use std::os::unix::fs::MetadataExt;
-    if !metadata.is_file() {
-        return Err("is not a regular file");
-    }
-    if metadata.uid() != owner {
-        return Err("is not owned by this user");
-    }
-    if metadata.mode() & 0o077 != 0 {
-        return Err("is readable or writable by group or others (owner-private 0600 required)");
-    }
-    Ok(())
-}
-
 #[cfg(unix)]
 fn selected_release_sign(
     host: &Path,
@@ -993,7 +946,6 @@ fn selected_release_sign(
     key: &Path,
     output: &Path,
 ) -> Result<()> {
-    use std::os::unix::fs::MetadataExt;
     if SOCKET.get().is_some() {
         return Err("selected-release-sign requires direct source Host validation".into());
     }
@@ -1009,37 +961,7 @@ fn selected_release_sign(
     if bytes.is_empty() || bytes.len() > 1_520_480 {
         return Err("selected release preimage exceeds bounded profile".into());
     }
-    let named =
-        fs::symlink_metadata(key).map_err(|e| format!("cannot inspect owner signing key: {e}"))?;
-    let mut key_file =
-        File::open(key).map_err(|e| format!("cannot open owner signing key: {e}"))?;
-    let opened = key_file
-        .metadata()
-        .map_err(|e| format!("cannot inspect opened owner signing key: {e}"))?;
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
-    if !named.file_type().is_file()
-        || named.uid() != unsafe { geteuid() }
-        || named.mode() & 0o077 != 0
-        || (named.dev(), named.ino()) != (opened.dev(), opened.ino())
-    {
-        return Err("owner signing key must be an owner-private regular file".into());
-    }
-    let mut seed = [0u8; 32];
-    key_file
-        .read_exact(&mut seed)
-        .map_err(|e| format!("owner signing key must contain 32 bytes: {e}"))?;
-    let mut excess = [0u8; 1];
-    if key_file
-        .read(&mut excess)
-        .map_err(|e| format!("cannot finish owner signing key read: {e}"))?
-        != 0
-    {
-        return Err("owner signing key must contain exactly 32 bytes".into());
-    }
-    let signing = SigningKey::from_bytes(&seed);
-    seed.fill(0);
+    let signing = crate::fsio::read_secret(key)?;
     let parent = output
         .parent()
         .filter(|part| !part.as_os_str().is_empty())
@@ -3753,7 +3675,7 @@ fn run(mut args: Args) -> Result<()> {
                 &fs::read(&escrow).map_err(|e| format!("cannot read {}: {e}", escrow.display()))?,
             )?;
             let sponsor_secret =
-                workspace::private::derive_enc_key(&*workspace::roomkey::seed_of(&sponsor)?)?;
+                workspace::private::derive_enc_key(&*crate::fsio::read_seed(&sponsor)?)?;
             let seed = workspace::private::recover_escrowed_seed(&subject, &sponsor_secret, &wrapped)?;
             if secret.exists() {
                 return Err(format!("refusing to replace {}", secret.display()));
@@ -3806,7 +3728,7 @@ fn run(mut args: Args) -> Result<()> {
         }
         "key" => {
             let action = args.required("action")?;
-            let seed = hiding::read_seed(&path(args.required("secret")?))?;
+            let seed = crate::fsio::read_seed(&path(args.required("secret")?))?;
             match action.to_str() {
                 Some("export-blinding") => {
                     args.finish()?;
@@ -5063,12 +4985,6 @@ mod tests {
         let long = directory.join("long.key");
         create_private(&long, &[5u8; 33]).unwrap();
         assert!(read_secret(&long).unwrap_err().contains("exactly 32"));
-        let metadata = fs::metadata(&key).unwrap();
-        assert!(secret_custody(&metadata, transport::effective_uid()).is_ok());
-        assert_eq!(
-            secret_custody(&metadata, transport::effective_uid().wrapping_add(1)),
-            Err("is not owned by this user")
-        );
         fs::remove_dir_all(directory).unwrap();
     }
 

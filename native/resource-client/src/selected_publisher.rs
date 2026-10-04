@@ -3,7 +3,7 @@
 //! This client retains those bytes and moves them across the protected fn POST.
 use super::*;
 use sha2::{Digest, Sha256};
-use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+use std::os::unix::fs::DirBuilderExt;
 
 fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
@@ -18,34 +18,6 @@ fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn custody_key(path: &Path) -> Result<SigningKey> {
-    let named = fs::symlink_metadata(path)
-        .map_err(|e| format!("cannot inspect source signing key: {e}"))?;
-    let mut file = File::open(path).map_err(|e| format!("cannot open source signing key: {e}"))?;
-    let opened = file
-        .metadata()
-        .map_err(|e| format!("cannot inspect opened source signing key: {e}"))?;
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
-    if !named.file_type().is_file()
-        || named.uid() != unsafe { geteuid() }
-        || named.mode() & 0o077 != 0
-        || (named.dev(), named.ino()) != (opened.dev(), opened.ino())
-    {
-        return Err("source signing key must be an owner-private regular file".into());
-    }
-    let mut seed = [0u8; 32];
-    file.read_exact(&mut seed)
-        .map_err(|e| format!("source signing key must contain 32 bytes: {e}"))?;
-    let mut excess = [0u8; 1];
-    if file.read(&mut excess).map_err(|e| e.to_string())? != 0 {
-        return Err("source signing key must contain exactly 32 bytes".into());
-    }
-    let signing = SigningKey::from_bytes(&seed);
-    seed.fill(0);
-    Ok(signing)
-}
 
 /// The only source-envelope signer. Host selects the current source page and
 /// canonical `.delegateObject` header from the exact owner packet; custody
@@ -69,7 +41,7 @@ pub(super) fn sign_source(
         return Err("source delegate capability must be canonical decimal".into());
     }
     let packet = bounded(packet_path, 1_048_576)?;
-    let signing = custody_key(key)?;
+    let signing = crate::read_secret(key)?;
     let host = absolute(host)?;
     let config = absolute(config)?;
     let directory = absolute(directory)?;

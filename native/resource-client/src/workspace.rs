@@ -481,7 +481,7 @@ fn recheck_commitment(root: &Path, value: &Value) -> Result<()> {
     let commitment = recorded_commitment(value)?;
     let socket = SOCKET.get().ok_or("workspace has no socket to check its key commitment over")?;
     let key = member_path(value, "key")?;
-    let daily = ed25519_dalek::SigningKey::from_bytes(&*roomkey::seed_of(&key)?).verifying_key().to_bytes();
+    let daily = ed25519_dalek::SigningKey::from_bytes(&*crate::fsio::read_seed(&key)?).verifying_key().to_bytes();
     crate::key_rotation::check_commitment(
         &workspace_host(value)?,
         socket,
@@ -582,11 +582,7 @@ fn init_impl(
             decimal(subject, "enrolled subject")?;
             decimal(member(&record, "keyId")?, "enrolled key ID")?;
             let key = member_path(&record, "keyPath")?;
-            let key_bytes = crate::agent_reserve::private_bytes(&key, 32)?;
-            let seed: [u8; 32] = key_bytes
-                .try_into()
-                .map_err(|_| "enrolled key must be exactly 32 bytes")?;
-            let public = ed25519_dalek::SigningKey::from_bytes(&seed)
+            let public = crate::fsio::read_secret_in_private_dir(&key)?
                 .verifying_key()
                 .to_bytes();
             if member(&record, "publicKey")? != hex(&public) {
@@ -671,7 +667,7 @@ fn init_impl(
     {
         let socket = SOCKET.get().ok_or("workspace init checks the subject's key commitment at the Host: pass --socket or --remote")?;
         let host_path = host.clone().unwrap_or_default();
-        let daily = ed25519_dalek::SigningKey::from_bytes(&*roomkey::seed_of(&key)?).verifying_key().to_bytes();
+        let daily = ed25519_dalek::SigningKey::from_bytes(&*crate::fsio::read_seed(&key)?).verifying_key().to_bytes();
         if crate::key_rotation::check_commitment(&host_path, socket, &config, subject, &daily, &commitment)?.is_none() {
             eprintln!("the Host holds no current key for subject {subject} yet: its commitment is checked when this workspace is next used");
         }
@@ -4644,7 +4640,7 @@ fn birth(
         }
     }
     if matches!(shape.storage, "declared" | "content" | "grain") && program.is_none() {
-        let seed = crate::hiding::read_seed(&member_path(workspace, "key")?)?;
+        let seed = crate::fsio::read_seed(&member_path(workspace, "key")?)?;
         let target = reservation.ids["target"].as_str();
         resource["blinding"] = json!(crate::hiding::cell_blinding(
             &crate::hiding::blinding_key(&seed),

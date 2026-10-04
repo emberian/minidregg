@@ -43,25 +43,7 @@ pub(super) fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-pub(super) fn private_bytes(path: &Path, limit: usize) -> Result<Vec<u8>> {
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
-    let uid = unsafe { geteuid() };
-    let parent = path.parent().ok_or("custody path has no parent")?;
-    let directory = fs::symlink_metadata(parent).map_err(|error| error.to_string())?;
-    let named = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
-    if !directory.is_dir()
-        || directory.uid() != uid
-        || directory.permissions().mode() & 0o077 != 0
-        || !named.file_type().is_file()
-        || named.uid() != uid
-        || named.permissions().mode() & 0o077 != 0
-    {
-        return Err("agent reserve custody input must be owner-private".into());
-    }
-    bounded(path, limit)
-}
+pub(super) use crate::fsio::read_private_in_private_dir as private_bytes;
 
 pub(super) fn private_socket(path: &Path) -> Result<()> {
     unsafe extern "C" {
@@ -391,14 +373,6 @@ pub(super) fn plan(
     print_json(&inspection)
 }
 
-fn signing_key(path: &Path) -> Result<SigningKey> {
-    let bytes = private_bytes(path, 32)?;
-    let seed: [u8; 32] = bytes
-        .try_into()
-        .map_err(|_| "agent reserve key must be 32 raw bytes")?;
-    Ok(SigningKey::from_bytes(&seed))
-}
-
 pub(super) fn approve_slot(slot: &Value, signer: &Value) -> Result<String> {
     if field(slot, "role")? != field(signer, "role")?
         || field(slot, "index")? != field(signer, "index")?
@@ -423,7 +397,7 @@ pub(super) fn approve_slot(slot: &Value, signer: &Value) -> Result<String> {
     if !key_path.is_absolute() {
         return Err("agent reserve signer path must be absolute".into());
     }
-    let key = signing_key(key_path)?;
+    let key = crate::fsio::read_secret_in_private_dir(key_path)?;
     if hex(&key.verifying_key().to_bytes()) != field(signer, "publicKey")? {
         return Err("agent reserve signer differs from approved public key".into());
     }

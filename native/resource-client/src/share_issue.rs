@@ -71,37 +71,7 @@ pub(super) fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-pub(super) fn private_bytes(path: &Path, limit: usize) -> Result<Vec<u8>> {
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
-    let uid = unsafe { geteuid() };
-    let parent = path
-        .parent()
-        .ok_or("approval file has no parent directory")?;
-    let directory = fs::symlink_metadata(parent).map_err(|e| e.to_string())?;
-    let named = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
-    let file = File::open(path).map_err(|e| e.to_string())?;
-    let opened = file.metadata().map_err(|e| e.to_string())?;
-    if !directory.is_dir()
-        || directory.uid() != uid
-        || directory.permissions().mode() & 0o077 != 0
-        || !named.file_type().is_file()
-        || named.uid() != uid
-        || named.permissions().mode() & 0o077 != 0
-        || (named.dev(), named.ino()) != (opened.dev(), opened.ino())
-    {
-        return Err("share issue approval must be an operator-private file and directory".into());
-    }
-    let mut bytes = Vec::new();
-    file.take((limit + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
-    if bytes.is_empty() || bytes.len() > limit {
-        return Err("share issue approval exceeds bound".into());
-    }
-    Ok(bytes)
-}
+pub(super) use crate::agent_reserve::private_bytes;
 
 fn strict_hex(value: &str, bytes: usize) -> bool {
     value.len() == 2 * bytes
@@ -156,40 +126,7 @@ pub(super) fn approved_header(
     Ok(bytes)
 }
 
-pub(super) fn custody_key(path: &Path) -> Result<SigningKey> {
-    let parent = path
-        .parent()
-        .ok_or("share issue key has no parent directory")?;
-    let directory = fs::symlink_metadata(parent).map_err(|e| e.to_string())?;
-    let named = fs::symlink_metadata(path)
-        .map_err(|e| format!("cannot inspect share issue key {}: {e}", path.display()))?;
-    let mut file = File::open(path)
-        .map_err(|e| format!("cannot open share issue key {}: {e}", path.display()))?;
-    let opened = file.metadata().map_err(|e| e.to_string())?;
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
-    if !directory.is_dir()
-        || directory.uid() != unsafe { geteuid() }
-        || directory.permissions().mode() & 0o077 != 0
-        || !named.file_type().is_file()
-        || named.uid() != unsafe { geteuid() }
-        || named.mode() & 0o077 != 0
-        || (named.dev(), named.ino()) != (opened.dev(), opened.ino())
-    {
-        return Err("share issue signing key must be an owner-private regular file".into());
-    }
-    let mut seed = [0u8; 32];
-    file.read_exact(&mut seed)
-        .map_err(|e| format!("share issue key must contain 32 bytes: {e}"))?;
-    let mut excess = [0u8; 1];
-    if file.read(&mut excess).map_err(|e| e.to_string())? != 0 {
-        return Err("share issue key must contain exactly 32 bytes".into());
-    }
-    let signing = SigningKey::from_bytes(&seed);
-    seed.fill(0);
-    Ok(signing)
-}
+pub(super) use crate::fsio::read_secret_in_private_dir as custody_key;
 
 fn check_approval(approval: &Value, request: &[u8], inspection: &Value) -> Result<()> {
     if member(approval, "type")? != "minidregg-application-share-issue-approval-v1"

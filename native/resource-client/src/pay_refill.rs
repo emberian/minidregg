@@ -4,7 +4,7 @@
 //! frame in a fresh directory, signs the header with the owner's key, and
 //! submits once (op115). A retained directory is never resubmitted: an
 //! uncertain submission is resolved only by the receipt-only lookup (op116).
-use crate::agent_reserve::{bounded, private_bytes};
+use crate::agent_reserve::bounded;
 use crate::*;
 use serde_json::{json, Value};
 use std::os::unix::fs::DirBuilderExt;
@@ -112,11 +112,7 @@ fn submit(mut args: Args) -> Result<()> {
         .create(&dir)
         .map_err(|error| format!("pay refill --dir must be new ({}): {error}", dir.display()))?;
     let ctx = Context { host, config, socket, dir };
-    let mut raw: [u8; 32] = private_bytes(&key_path, 32)?
-        .try_into()
-        .map_err(|_| "refill key must contain exactly 32 raw bytes")?;
-    let signing = SigningKey::from_bytes(&raw);
-    raw.fill(0);
+    let signing = crate::fsio::read_secret_in_private_dir(&key_path)?;
 
     let view_bytes = invoke(&ctx, "pay-view", 107, &[])?;
     let view = inspect(&ctx, "pay-view-inspect", "pay-view", &view_bytes)?;

@@ -20,7 +20,7 @@
 //! Today the certifier is the operator, trusted as the operator is; a timer runs this
 //! verb (deploy/checkpoint). After SURPASS N1 the certificate is a witness quorum's.
 
-use crate::agent_reserve::{field, private_bytes};
+use crate::agent_reserve::field;
 use crate::*;
 use serde_json::{json, Value};
 
@@ -149,10 +149,7 @@ fn certify(ws: &Workspace, control: &str, min_tail: Option<String>) -> Result<Va
         .and_then(Value::as_str)
         .ok_or("certify plan lacks a canonical header")?;
     let header_bytes = decode_hex(canonical).map_err(|_| "certify plan header is not hex")?;
-    let seed: [u8; 32] = private_bytes(&ws.key, 32)?
-        .try_into()
-        .map_err(|_| "workspace key must contain exactly 32 raw bytes")?;
-    let signature = SigningKey::from_bytes(&seed).sign(&header_bytes).to_bytes();
+    let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&header_bytes).to_bytes();
     let ingress = invoke(ws, 171, &pair(&plan, &signature))?;
     let outcome = invoke(ws, 172, &ingress)?;
     let mut value = inspect(ws, "outcome", &outcome)?;

@@ -508,17 +508,6 @@ pub(crate) fn enc_ring_path(key: &Path) -> std::path::PathBuf {
     std::path::PathBuf::from(name)
 }
 
-fn read_seed(key: &Path) -> Result<Zeroizing<[u8; 32]>> {
-    let bytes = Zeroizing::new(
-        fs::read(key).map_err(|error| format!("cannot read signing key {}: {error}", key.display()))?,
-    );
-    let seed: [u8; 32] = bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| format!("signing key {} must contain exactly 32 raw bytes", key.display()))?;
-    Ok(Zeroizing::new(seed))
-}
-
 type RingEntry = (String, Zeroizing<[u8; 32]>, Zeroizing<[u8; KEM_SEED_LEN]>);
 
 fn load_enc_ring(key: &Path) -> Result<Vec<RingEntry>> {
@@ -557,7 +546,7 @@ fn load_enc_ring(key: &Path) -> Result<Vec<RingEntry>> {
 /// Keep the encryption secrets of the seed now at `key`, labelled with the key
 /// epoch they belonged to. Idempotent: a pair already kept is not added again.
 pub(crate) fn keyring_remember(key: &Path, key_epoch: &str) -> Result<()> {
-    let seed = read_seed(key)?;
+    let seed = crate::fsio::read_seed(key)?;
     let current = derive_enc_key(&seed)?;
     let (x25519, kem) = current.parts();
     let mut ring = load_enc_ring(key)?;
@@ -580,7 +569,7 @@ pub(crate) fn keyring_remember(key: &Path, key_epoch: &str) -> Result<()> {
 /// Every encryption identity this key file can open with: the current seed's
 /// first, then every kept past one, newest last.
 pub(crate) fn enc_secrets(key: &Path) -> Result<Vec<MemberSecret>> {
-    let seed = read_seed(key)?;
+    let seed = crate::fsio::read_seed(key)?;
     let mut out = vec![derive_enc_key(&seed)?];
     for (_, x25519, kem) in load_enc_ring(key)? {
         out.push(MemberSecret::from_parts(*x25519, *kem)?);
@@ -1297,12 +1286,12 @@ mod tests {
     fn the_encryption_keyring_keeps_every_past_secret_across_seed_rotations() {
         let dir = scratch("enc-ring");
         let key = dir.join("mini.key");
-        fs::write(&key, [1u8; 32]).unwrap();
+        crate::fsio::replace_private(&key, &[1u8; 32]).unwrap();
         assert_eq!(enc_secrets(&key).unwrap().len(), 1, "no ring: the current secret only");
         keyring_remember(&key, "1").unwrap();
         keyring_remember(&key, "1").unwrap();
         // rotate-key overwrites the seed; the old secret stays openable.
-        fs::write(&key, [2u8; 32]).unwrap();
+        crate::fsio::replace_private(&key, &[2u8; 32]).unwrap();
         let secrets: Vec<MemberPublic> = enc_secrets(&key).unwrap().iter()
             .map(|s| s.public().clone()).collect();
         assert_eq!(secrets, vec![ep(2), ep(1)]);
@@ -1323,7 +1312,7 @@ mod tests {
     fn keygen_hosted_leaves_a_marker_the_record_signer_reads() {
         let dir = scratch("hosted-marker");
         let key = dir.join("mini.key");
-        fs::write(&key, [1u8; 32]).unwrap();
+        crate::fsio::replace_private(&key, &[1u8; 32]).unwrap();
         assert!(!key_is_hosted(&key));
         fs::write(hosted_marker_path(&key), b"").unwrap();
         assert!(key_is_hosted(&key));
@@ -1335,7 +1324,7 @@ mod tests {
     fn a_v1_encryption_keyring_refuses_by_name_and_is_not_read_as_empty() {
         let dir = scratch("enc-ring-v1");
         let key = dir.join("mini.key");
-        fs::write(&key, [1u8; 32]).unwrap();
+        crate::fsio::replace_private(&key, &[1u8; 32]).unwrap();
         fs::write(enc_ring_path(&key), br#"{"type":"minidregg-encryption-keyring-v1","keys":[]}"#).unwrap();
         let error = enc_secrets(&key).err().unwrap();
         assert!(error.contains("minidregg-encryption-keyring-v1") && error.contains("refused"), "{error}");

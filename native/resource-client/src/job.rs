@@ -24,7 +24,7 @@
 //!
 //! Every write is an ordinary workspace proposal; every refusal is the Host's,
 //! by name (the law's clause, or the money decision's reason).
-use crate::agent_reserve::{field, private_bytes};
+use crate::agent_reserve::field;
 use crate::*;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -367,10 +367,7 @@ fn money(
     crate::shell::session_fs::replace(&ws.root, &dir.join("plan.bin"), &plan)?;
     let header = inspect(ws, "pay-plan", &plan)?;
     let canonical = header.pointer("/header/canonical").and_then(Value::as_str).ok_or("job: plan lacks a header")?;
-    let seed: [u8; 32] = private_bytes(&ws.key, 32)?
-        .try_into()
-        .map_err(|_| "job: workspace key must contain exactly 32 raw bytes")?;
-    let signature = SigningKey::from_bytes(&seed).sign(&unhex(canonical)?).to_bytes();
+    let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&unhex(canonical)?).to_bytes();
     let ingress = invoke(ws, 161, &pair(&plan, &signature))?;
     retain_new_ingress(ws, dir, &ingress)?;
     submit_ingress(ws, dir, &ingress)
