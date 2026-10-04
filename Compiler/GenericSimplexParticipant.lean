@@ -220,15 +220,19 @@ def certificateCandidates (journal : Journal) (state : State) : List (Nat × Blo
     journal.commitWitnesses.map (fun w => (w.view,w.block))).eraseDups
 
 /-- Recover the actual authoritative source after a lost append reply or CAS
-conflict. Every retained ingress is re-admitted at its original prefix; no engine
-flag or stale in-memory Source is promoted into a readback receipt. -/
+conflict. The retained source is a `Verified` minted by native replay; the
+physical readback must extend it byte for byte (seed and every prior record:
+`extendVerified` refuses rollback or any rewritten record), and every new
+retained ingress is re-admitted at its original prefix. No engine flag or stale
+in-memory Source is promoted into a readback receipt. A genesis re-admission of
+the whole history is the operator `audit`, not a per-certificate cost. -/
 def reloadSource {config : SourceConfig} (p : Participant config) :
     IO (Participant config × String) := do
   match ← Minidregg.Compiler.DurableReceiverIO.load config.physicalTransport
       Minidregg.Compiler.ResourceBirthCodec.rootBytes with
   | .error detail => return (p,"source reload: " ++ detail)
   | .ok target =>
-    match ← Minidregg.Kernel.NativeHostReplay.verifyLoaded config target with
+    match ← Minidregg.Kernel.NativeHostReplay.extendVerified config p.source.verified target with
     | .error failure => return (p,"source replay: " ++ failure.detail)
     | .ok verified => return ({p with source := ⟨target,verified⟩},"source reloaded and verified")
 

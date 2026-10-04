@@ -197,7 +197,7 @@ def openReplicas (root : System.FilePath) (helpers : Helpers) :
 def runCall (root : System.FilePath) (helpers : Helpers)
     (ingress : System.FilePath) (fuel : Nat) : IO Unit := do
   let replicas ← openReplicas root helpers
-  let _ ← GenericSimplexSourceHarness.runCall fuel replicas (← IO.FS.readBinFile ingress).toList
+  let _ ← GenericSimplexSourceHarness.runCallChecked fuel replicas (← IO.FS.readBinFile ingress).toList
   pure ()
 
 /-- Operator output is a native Outcome frame in a private file. Diagnostic

@@ -61,11 +61,23 @@ def drive (fuel : Nat) (replicas : Array Replica) (payload : Bytes)
       later := later ++ serviced.2.1
     drive fuel replicas payload later
 
+/-- The per-mutation replica comparison: tip height and served world root.
+The root is `deployedRoot (entriesOf image snapshot chain)` (`Loaded.worldRoot_eq`)
+and the log chain inside it folds every accepted record, so equal keys mean
+equal accepted histories up to a collision of the deployed hash. Cost: one
+cached-root read and one list length per replica, never an image encoding.
+`runWithLostResponseCheck` tests this verdict against whole-image equality. -/
+def tipKey {config : SourceConfig} (p : Participant config) :=
+  (p.source.verified.opened.durable.height, p.source.verified.opened.durable.worldRoot)
+
 /-- First real source consumer accepts initialized, source-verified replicas and
 a real signed ingress from the source fixture owner. It checks exact replicated
 record bytes and actual native source receipts. There is no toy policy or
 placeholder signature/validation callback in this driver. The factory/CLI fixture
-must initialize four independent stores before calling this function. -/
+must initialize four independent stores before calling this function.
+Replica agreement is checked by `tipKey`; the lost-response restart test and
+whole-image comparisons live in `runWithLostResponseCheck`, which only the
+fixtures call. -/
 def run (fuel : Nat) (replicas : Array Replica) (signedIngress : Bytes) : IO (Array Replica) := do
   require (replicas.size == 4) "source harness requires n=4 replicas"
   let some first := replicas[0]? | throw (IO.userError "missing first replica")
@@ -86,10 +98,8 @@ def run (fuel : Nat) (replicas : Array Replica) (signedIngress : Bytes) : IO (Ar
   for replica in replicas do
     require (replica.participant.runtime.context == first.participant.runtime.context)
       "replicas use different exact contexts"
-    require (replica.participant.source.verified.opened.durable.image ==
-      first.participant.source.verified.opened.durable.image) "replicas start at different source histories"
-  let before := replicas
-  let initialCount := first.participant.source.verified.opened.durable.image.accepted.length
+    require (tipKey replica.participant == tipKey first.participant)
+      "replicas start at different source histories"
   let (participant,proposal) ← propose first.participant signedIngress
   let payload ← match proposal with
     | .ok payload => pure payload
@@ -98,10 +108,32 @@ def run (fuel : Nat) (replicas : Array Replica) (signedIngress : Bytes) : IO (Ar
   let finished ← drive fuel replicas payload []
   let some final := finished[0]? | throw (IO.userError "missing final replica")
   for replica in finished do
-    require (replica.participant.source.verified.opened.durable.image ==
-      final.participant.source.verified.opened.durable.image) "source replicas diverged"
+    require (tipKey replica.participant == tipKey final.participant) "source replicas diverged"
     require ((completedReceipt replica.participant payload).isSome)
       "engine output occurred without actual source receipt"
+  IO.println "PASS actual source agreement: four independent configured receivers, real admission/replay, TCP, exact common record, physical source readback receipts"
+  return finished
+
+/-- Test harness only: `run`, then the four-journal lost-response/restart test
+and whole-image comparisons. Also checks that `tipKey` agreement coincides with
+whole-image agreement on every replica pair it sees, before and after restart. -/
+def runWithLostResponseCheck (fuel : Nat) (replicas : Array Replica) (signedIngress : Bytes) :
+    IO (Array Replica) := do
+  let some first := replicas[0]? | throw (IO.userError "missing first replica")
+  for replica in replicas do
+    require (replica.participant.source.verified.opened.durable.image ==
+      first.participant.source.verified.opened.durable.image) "replicas start at different source histories"
+  let before := replicas
+  let initialCount := first.participant.source.verified.opened.durable.image.accepted.length
+  let finished ← run fuel replicas signedIngress
+  let some final := finished[0]? | throw (IO.userError "missing final replica")
+  for replica in finished do
+    require (replica.participant.source.verified.opened.durable.image ==
+      final.participant.source.verified.opened.durable.image) "source replicas diverged"
+  -- The O(1) key separates histories whole-image equality separates: the
+  -- pre-mutation tip and the post-mutation tip differ by exactly one record.
+  require (tipKey first.participant != tipKey final.participant)
+    "tip key did not distinguish the pre- and post-mutation histories"
   -- Deliberately lose all caller completion responses and volatile participant
   -- state. Reopen protocol journals from the original fixture state, then load
   -- and reverify actual physical source stores. Nothing resubmits the mutation.
@@ -119,9 +151,10 @@ def run (fuel : Nat) (replicas : Array Replica) (signedIngress : Bytes) : IO (Ar
       "lost-response recovery did not preserve exactly one append"
     require (participant.source.verified.opened.durable.image ==
       final.participant.source.verified.opened.durable.image) "restart source readback differs"
+    require (tipKey participant == tipKey final.participant)
+      "tip key disagrees with whole-image equality after restart"
     restarted := restarted.push ⟨original.config,participant⟩
   IO.println "PASS source lost-response/restart: four independently reread stores, original signed-ingress receipts, exactly one append"
-  IO.println "PASS actual source agreement: four independent configured receivers, real admission/replay, TCP, exact common record, physical source readback receipts"
   return restarted
 /-- Actual resident artifact entry point: call.bin is the existing framed
 SignedCall, not the source event's inner signed-ingress bytes. -/
@@ -134,6 +167,22 @@ def runCall (fuel : Nat) (replicas : Array Replica) (callBytes : Bytes) : IO (Ar
     | .error detail => throw (IO.userError detail)
     | .ok ingress => pure ingress
   let finished ← run fuel replicas ingress
+  for replica in finished do
+    require ((completedCall replica.participant callBytes).isSome)
+      "original retained native call lacks a verified source receipt"
+  return finished
+
+/-- Fixture entry point: `runCall` with the lost-response/restart test. -/
+def runCallChecked (fuel : Nat) (replicas : Array Replica) (callBytes : Bytes) :
+    IO (Array Replica) := do
+  let some first := replicas[0]? | throw (IO.userError "missing first replica")
+  match checkLocalCall first.config callBytes with
+  | .error detail => throw (IO.userError detail)
+  | .ok () => pure ()
+  let ingress ← match sourceIngressOfCall first.config callBytes with
+    | .error detail => throw (IO.userError detail)
+    | .ok ingress => pure ingress
+  let finished ← runWithLostResponseCheck fuel replicas ingress
   for replica in finished do
     require ((completedCall replica.participant callBytes).isSome)
       "original retained native call lacks a verified source receipt"
