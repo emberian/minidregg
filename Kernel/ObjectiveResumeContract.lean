@@ -624,6 +624,59 @@ theorem second_same_await_is_collision {rootBytes : Bytes → Digest} {config : 
   rw [sameAwait, first.idExact, sameRecord, same, Delivery.next_generation first] at secondId
   exact secondId.symm
 
+/-! ### The premise is false of a malformed yield
+
+`ForcingTransparent` cannot be discharged from a successful extraction alone. The
+yield below has a stack frame whose environment names address 1 in a one-cell heap
+(it violates `LexicalInvariant`). Resumed with the identity, its own run allocates the
+argument at address 1 and enters it from inside itself: a blackhole. The extraction
+allocates address 1 first (the plan's field), so the forced run finds that field cached
+and finishes. The discharge therefore needs a premise naming every address a yield
+holds (`LexicalInvariant yielded`, which every reachable state has). Decided in the
+kernel (`decide +kernel`), no compiled evaluation. -/
+
+def danglingYield : State :=
+  ⟨#[.suspended ⟨.record [("a", .nat 1)], []⟩], .yielded 0, [.argument (.bound 0) [1]]⟩
+
+def danglingResponse : Term := .lam (.bound 0)
+
+def danglingConfig : Config := {tallyConfig with limits := ⟨8, 8⟩, planBudget := ⟨8, 16, 64⟩}
+
+theorem dangling_refuted :
+    (match ObjectiveBendDemandData.yieldedPlan danglingConfig.limits danglingConfig.planBudget danglingYield with
+      | .ok extracted => forcingOpaqueCheck danglingConfig danglingYield extracted.state danglingResponse 16
+      | .error _ => false) = true := by
+  decide +kernel
+
+/-- **Counterexample.** The extraction succeeds and the premise fails at its state. -/
+theorem not_forcingTransparent_dangling :
+    ∃ extracted, ObjectiveBendDemandData.yieldedPlan danglingConfig.limits danglingConfig.planBudget
+        danglingYield = .ok extracted ∧
+      ¬ ForcingTransparent danglingConfig danglingYield extracted.state danglingResponse 16 := by
+  have checked := dangling_refuted
+  split at checked
+  · rename_i extracted found
+    exact ⟨extracted, found, not_forcingTransparent_of_refute checked⟩
+  · cases checked
+
+/-- The counterexample's yield is the one `LexicalInvariant` rules out: its stack names
+an address past its heap. -/
+theorem not_lexicalInvariant_danglingYield :
+    ¬ ObjectiveBendDemandInvariant.LexicalInvariant danglingYield := by
+  intro invariant
+  have frame := invariant.2.2 (.argument (.bound 0) [1]) (by simp [danglingYield])
+  have := frame.2 1 (by simp)
+  simp [danglingYield] at this
+
+/-- So no theorem discharges the premise from a successful extraction alone. -/
+theorem forcingTransparent_not_of_extraction :
+    ¬ ∀ (config : Config) (yielded : State) (extracted : ObjectiveBendDemandData.Result) (response : Term)
+        (ticks : Nat), ObjectiveBendDemandData.yieldedPlan config.limits config.planBudget yielded = .ok extracted →
+        ForcingTransparent config yielded extracted.state response ticks := by
+  intro claim
+  obtain ⟨extracted, found, refuted⟩ := not_forcingTransparent_dangling
+  exact refuted (claim _ _ _ _ _ found)
+
 #assert_axioms decodeCheckpoint_checkpointBytes
 #assert_axioms typed_runBounded_yielded
 #assert_axioms runSegment_yielded
@@ -649,4 +702,8 @@ theorem second_same_await_is_collision {rootBytes : Bytes → Digest} {config : 
 #assert_axioms Delivery.installed_record_ended
 #assert_axioms delivery_advances_generation
 #assert_axioms second_same_await_is_collision
+#assert_axioms dangling_refuted
+#assert_axioms not_forcingTransparent_dangling
+#assert_axioms not_lexicalInvariant_danglingYield
+#assert_axioms forcingTransparent_not_of_extraction
 end Minidregg.Kernel.ObjectiveResumeContract
