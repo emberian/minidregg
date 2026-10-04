@@ -1171,6 +1171,27 @@ theorem exit_pays_allocation {world next : World} {height : Nat} {actor : Actor}
   cases admitted
   exact closeBatch_pays inv member opened
 
+/-- **Who may exit.** An admitted exit was of an open seat, by an actor the
+kernel's `exitAuthorized` admits: its offerer (on demand), its contract, the
+activity that holds it, or anyone at or after its due height. The instance's
+clause is not an argument of `exitAuthorized`: no contract can forbid an exit. -/
+theorem exit_step_authorized {world next : World} {height : Nat} {actor : Actor} {account : AccountId}
+    {batch : Batch} (admitted : step world height actor (.exit account) = .ok (next, batch)) :
+    ∃ seat ∈ world.seats, seat.account = account ∧ seat.isOpen = true ∧ exitAuthorized height actor seat = true := by
+  simp only [step] at admitted
+  split at admitted
+  · cases admitted
+  rename_i seat found
+  split at admitted
+  · cases admitted
+  rename_i opened
+  split at admitted
+  · cases admitted
+  rename_i authorized
+  refine ⟨seat, List.mem_of_find?_eq_some found, by simpa using List.find?_some found, ?_, ?_⟩
+  · cases h : seat.isOpen <;> simp_all
+  · cases h : exitAuthorized height actor seat <;> simp_all
+
 /-! ## Who may debit a seat -/
 
 /-- **A seat is debited only by its own instance's reallocation, its exit, or
@@ -1538,7 +1559,7 @@ theorem closeHeld_reachable {genesis world next : World} {height record : Nat} {
 
 #assert_axioms view_total safeAt_mono payout_exact_from payout_admitted_from closeSeat_inv step_inv step_posts
   seat_offer_safe_forever exit_enabled exit_after_deadline exit_by_holder exit_pays_allocation seat_conserves
-  seat_debit_authorized runPlan_posts runPlan_reachable activity_end_closes_seats closeHeld_reachable
+  seat_debit_authorized exit_step_authorized runPlan_posts runPlan_reachable activity_end_closes_seats closeHeld_reachable
 
 
 /-! ## Inhabitants and teeth

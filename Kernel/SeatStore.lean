@@ -541,6 +541,22 @@ def invitationClaim (id : InvitationId) : StableNullifier :=
     nullifierId := tagged "DREGG/SEAT/CLAIM/invitation" (StreamCodec.nat.encode id),
     canonicalBytes := "invitation".toUTF8.toList ++ StreamCodec.nat.encode id }
 
+/-- The one kernel step a signed turn is (an invocation runs a Plan instead;
+a publication runs nothing). -/
+def Turn.kernelAction (domain : Digest) (transaction : TransactionId) (subject : SubjectId) :
+    Turn → Option (Actor × Action)
+  | .create inst pin clause => some (.subject subject, .create ⟨inst, pin, clause⟩)
+  | .handOver invitation recipient => some (.subject subject, .handOver invitation recipient)
+  | .offer invitation expect funding payee proposal holder =>
+      some (.subject subject, .offer invitation expect (seatAccount domain transaction) funding payee proposal holder)
+  | .exit seat => some (.subject subject, .exit seat)
+  | .publish _ | .invoke _ _ _ _ => none
+
+/-- The claims a turn consumes: an offer spends its invitation's. -/
+def Turn.claims : Turn → List StableNullifier
+  | .offer invitation _ _ _ _ _ => [invitationClaim invitation]
+  | _ => []
+
 /-! ## A decided turn -/
 
 def packageBytes {rootBytes : Bytes → Digest} (domain : Digest) (snapshot : Snapshot rootBytes)
@@ -575,6 +591,10 @@ structure Decided {rootBytes : Bytes → Digest} (config : Config) (snapshot : S
   postsExact : posts = extra ++ statePosts config.domain snapshot loaded fresh next ++ bookPost config snapshot accepted
   guards : List ReadGuard
   nullifiers : List StableNullifier
+  nullifiersExact : nullifiers = request.turn.claims
+  /-- A signed step turn ran exactly the kernel step it names. -/
+  stepExact : ∀ actor action, request.turn.kernelAction config.domain (transactionOf request) request.subject =
+    some (actor, action) → Seats.step world height actor action = .ok (next, batch)
 
 def Decided.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : Request} (decided : Decided config snapshot height request) (sealing : Seal) :
@@ -653,12 +673,14 @@ def finish {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
     (request : Request) (loaded : Loaded) (book : BookCell) (bookExact : loadBook config snapshot = .ok book)
     (next : World) (batch : Batch) (run : KernelRun height (loaded.world (logicalBook book.logical)) next batch)
     (fees : Batch) (feesNone : fees.registrations = []) (fresh : Option Fresh) (extra : List Post)
-    (cells : List CellId) (nullifiers : List StableNullifier) :
+    (cells : List CellId) (nullifiers : List StableNullifier) (nullifiersExact : nullifiers = request.turn.claims)
+    (stepExact : ∀ actor action, request.turn.kernelAction config.domain (transactionOf request) request.subject =
+      some (actor, action) → Seats.step (loaded.world (logicalBook book.logical)) height actor action = .ok (next, batch)) :
     Except Refusal (Decided config snapshot height request) :=
   if admitted : (seqBatch batch fees).Admission (logicalBook book.logical) then
     let accepted := AcceptedBatch.ofAdmission admitted
     .ok ⟨loaded, book, bookExact, _, rfl, next, batch, run, fees, feesNone, accepted, fresh, extra, _, rfl,
-      (loadedCells config.domain loaded ++ cells).map (guardAt snapshot), nullifiers⟩
+      (loadedCells config.domain loaded ++ cells).map (guardAt snapshot), nullifiers, nullifiersExact, stepExact⟩
   else .error .bookRefused
 
 /-- The kernel's decision of one turn on a snapshot at a height. -/
@@ -670,7 +692,7 @@ def decideTurn {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
     let logical := logicalBook book.logical
     let transaction := transactionOf request
     let domain := config.domain
-    match request.turn with
+    match hturn : request.turn with
     | .publish storedBytes => do
       let some stored := decodeStored storedBytes | throw .packageMissing
       let some artifact := ObjectiveBendSourceArtifact.decode stored.artifact | throw .packageMissing
@@ -688,7 +710,7 @@ def decideTurn {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
       let loaded : Loaded := {}
       finish config snapshot height request loaded book bookExact (loaded.world logical) noPostings .nothing
         noPostings rfl none [postAt snapshot cell (image .package (packageKey pin) (encodeStored stored))]
-        [config.bookCell] []
+        [config.bookCell] [] (by rw [hturn]; rfl) (by intro _ _ h; rw [hturn] at h; cases h)
     | .create inst pin clause => do
       if !present snapshot (packageCell domain pin) then throw .packageMissing
       let found ← loadInstance snapshot domain inst
@@ -697,7 +719,9 @@ def decideTurn {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
       | .error reason => throw (.kernel reason)
       | .ok (next, batch) =>
         finish config snapshot height request loaded book bookExact next batch (.stepped ran) noPostings rfl none []
-          [packageCell domain pin, instanceCell domain inst] []
+          [packageCell domain pin, instanceCell domain inst] [] (by rw [hturn]; rfl)
+          (by intro _ _ h; rw [hturn] at h; simp only [Turn.kernelAction, Option.some.injEq, Prod.mk.injEq] at h
+              obtain ⟨rfl, rfl⟩ := h; exact ran)
     | .handOver invitation recipient => do
       let found ← loadInvitation snapshot domain invitation
       let loaded : Loaded := { invitations := found.toList }
@@ -705,6 +729,9 @@ def decideTurn {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
       | .error reason => throw (.kernel reason)
       | .ok (next, batch) =>
         finish config snapshot height request loaded book bookExact next batch (.stepped ran) noPostings rfl none [] [] []
+          (by rw [hturn]; rfl)
+          (by intro _ _ h; rw [hturn] at h; simp only [Turn.kernelAction, Option.some.injEq, Prod.mk.injEq] at h
+              obtain ⟨rfl, rfl⟩ := h; exact ran)
     | .offer invitation expect funding payee proposal holder => do
       let found ← loadInvitation snapshot domain invitation
       let inst ← match found with
@@ -721,7 +748,9 @@ def decideTurn {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
       | .error reason => throw (.kernel reason)
       | .ok (next, batch) =>
         finish config snapshot height request loaded book bookExact next batch (.stepped ran) noPostings rfl fresh []
-          [seatCell account] [invitationClaim invitation]
+          [seatCell account] [invitationClaim invitation] (by rw [hturn]; rfl)
+          (by intro _ _ h; rw [hturn] at h; simp only [Turn.kernelAction, Option.some.injEq, Prod.mk.injEq] at h
+              obtain ⟨rfl, rfl⟩ := h; exact ran)
     | .invoke inst inputBytes envelope account => do
       let some input := decodeDataBytes inputBytes | throw .inputUndecodable
       let some body ← loadInstance snapshot domain inst | throw (.instanceMissing inst)
@@ -741,7 +770,8 @@ def decideTurn {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
       | .ok (next, batch) =>
         finish config snapshot height request loaded book bookExact next batch (.planned ran)
           ⟨[], [.fee account config.collector config.asset (config.tariff.workOf envelope)]⟩ rfl none []
-          (packageCell domain body.inst.package :: ids.map (invitationCell domain)) []
+          (packageCell domain body.inst.package :: ids.map (invitationCell domain)) [] (by rw [hturn]; rfl)
+          (by intro _ _ h; rw [hturn] at h; cases h)
     | .exit seat => do
       let found ← loadSeat snapshot seat
       let inst ← match found with
@@ -752,7 +782,9 @@ def decideTurn {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
       | .error reason => throw (.kernel reason)
       | .ok (next, batch) =>
         finish config snapshot height request loaded book bookExact next batch (.stepped ran) noPostings rfl none []
-          [seatCell seat] []
+          [seatCell seat] [] (by rw [hturn]; rfl)
+          (by intro _ _ h; rw [hturn] at h; simp only [Turn.kernelAction, Option.some.injEq, Prod.mk.injEq] at h
+              obtain ⟨rfl, rfl⟩ := h; exact ran)
 
 #assert_axioms seatAccount_protected KernelRun.posts KernelRun.reachable KernelRun.inv Decided.conserves
   Decided.inv Decided.book_post
