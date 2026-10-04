@@ -85,12 +85,22 @@ def proposal (json : Json) : Result Seats.Proposal := do
     | some due => pure (Seats.ExitRule.afterDeadline due)
   pure ⟨← amounts p json "give", ← amounts p json "want", exit⟩
 
-/-- `$.turn`: `{kind: publish|create|handOver|offer|invoke|exit, ...}`. The
+/-- A declared envelope: the eighteen `Capacity` lanes as decimal strings. -/
+def capacity (path : String) (json : Json) : Result ObjectiveInvocationClaim.Capacity := do
+  let n := nat path json
+  pure ⟨← n "typeFuel", ← n "sourceTicks", ← n "heap", ← n "stack", ← n "outputNodes", ← n "outputBytes",
+    ← n "inputBytes", ← n "scalarBits", ← n "memoryTouches", ← n "proofWork", ← n "feeDebit", ← n "turnBytes",
+    ← n "witnessBytes", ← n "storageBytes", ← n "sideEffectCount", ← n "networkBytes", ← n "leaseByteBlocks",
+    ← n "incidences"⟩
+
+/-- `$.turn`: `{kind: publish|create|handOver|offer|invoke|exit, ...}`. A
+publication carries the artifact and its source package (hex) and the payer. The
 clause of `create` is a policy predicate JSON (`predicate`, the Host's own parser). -/
 def turn (predicate : String → Json → Result Pred) (json : Json) : Result Turn := do
   let p := "$.turn"
   match ← str p json "kind" with
-  | "publish" => pure (.publish (← unhex (← str p json "artifact")))
+  | "publish" => pure (.publish (ObjectiveActivity.encodeStored
+      ⟨← unhex (← str p json "artifact"), ← unhex (← str p json "package"), ← nat p json "payer"⟩))
   | "create" => pure (.create (← nat p json "instance") ⟨← nat p json "pin"⟩
       (← predicate (p ++ ".clause") (← field p json "clause")))
   | "handOver" => pure (.handOver (← nat p json "invitation") ⟨← nat p json "recipient"⟩)
@@ -103,7 +113,7 @@ def turn (predicate : String → Json → Result Pred) (json : Json) : Result Tu
         (← optNat p json "holder"))
   | "invoke" => pure (.invoke (← nat p json "instance")
       (dataBytes (← ObjectiveBendDataWire.decodeData 64 (← field p json "input")))
-      (← nat p json "ticks") (← nat p json "account"))
+      (← capacity (p ++ ".envelope") (← field p json "envelope")) (← nat p json "account"))
   | "exit" => pure (.exit (← nat p json "seat"))
   | other => throw s!"$.turn.kind {other} is not publish, create, handOver, offer, invoke or exit"
 
@@ -131,7 +141,8 @@ def proposalJson (p : Seats.Proposal) : Json :=
       | .afterDeadline due => .mkObj [("afterDeadline", decimal due)])]
 
 def turnJson : Turn → Json
-  | .publish artifact => .mkObj [("kind", "publish"), ("artifactBytes", decimal artifact.length)]
+  | .publish stored => .mkObj [("kind", "publish"), ("pin", decimal (SeatStore.publishedPin stored).value),
+      ("storedBytes", decimal stored.length)]
   | .create inst pin _ => .mkObj [("kind", "create"), ("instance", decimal inst), ("pin", decimal pin.value)]
   | .handOver invitation recipient => .mkObj [("kind", "handOver"), ("invitation", decimal invitation),
       ("recipient", decimal recipient.value)]
@@ -141,8 +152,8 @@ def turnJson : Turn → Json
          ("role", toJson expect.role)]),
        ("funding", decimal funding), ("payee", decimal payee), ("proposal", proposalJson p),
        ("holder", match holder with | some r => decimal r | none => .null)]
-  | .invoke inst input ticks account => .mkObj [("kind", "invoke"), ("instance", decimal inst),
-      ("input", dataOf input), ("ticks", decimal ticks), ("account", decimal account)]
+  | .invoke inst input envelope account => .mkObj [("kind", "invoke"), ("instance", decimal inst),
+      ("input", dataOf input), ("sourceTicks", decimal envelope.sourceTicks), ("account", decimal account)]
   | .exit seat => .mkObj [("kind", "exit"), ("seat", decimal seat)]
 
 def commandJson (domain : Option Digest) (command : Command) : Json :=
@@ -225,7 +236,8 @@ def cellJson (domain : Digest) (cell : Nat) (root : Digest) (bytes : List UInt8)
       | .holdings => match SeatStore.holdingsCodec.decode payload.body with
         | some seats => [("kind", "holdings"), ("seats", Json.arr (seats.map decimal).toArray)]
         | none => [("kind", "holdings-undecodable")]
-      | .package => match ObjectiveBendSourceArtifact.decode payload.body with
+      | .package => match (ObjectiveActivity.decodeStored payload.body).bind
+          (fun stored => ObjectiveBendSourceArtifact.decode stored.artifact) with
         | some artifact => [("kind", "package"), ("declaration", toJson artifact.declaration),
             ("pin", decimal (ObjectiveBendSourceArtifact.identity artifact).value)]
         | none => [("kind", "package-undecodable")]
@@ -281,7 +293,7 @@ def viewJson (domain : Digest) (request : ViewRequest) (view : NativeHost.SeatVi
 /-- `seat-contract-artifact SPEC OUT`: capture the spec's sources, lower the
 selected definition with this Host's own front end, and make the contract
 artifact (the seat kernel's output codec `SeatStore.contractCodecId`). -/
-def artifact (specPath : String) : IO (List UInt8 × Json) := do
+def artifact (specPath : String) : IO (List UInt8 × List UInt8 × Json) := do
   let captured ← match ← (Minidregg.Host.ObjectiveBendFrontEnd.captureSpec specPath false).run with
     | .ok c => pure c
     | .error d => throw (IO.userError d.json.compress)
@@ -295,7 +307,9 @@ def artifact (specPath : String) : IO (List UInt8 × Json) := do
   let artifact : ObjectiveBendSourceArtifact.Artifact := ⟨ObjectiveSourcePackage.identity package, declaration,
     core, Minidregg.Kernel.ObjectiveBendNativeInput.codecId, SeatStore.contractCodecId⟩
   let bytes := ObjectiveBendSourceArtifact.encode artifact
-  pure (bytes, .mkObj [("pin", decimal (ObjectiveBendSourceArtifact.identity artifact).value),
+  let packageBytes := ObjectiveSourcePackage.encode package
+  pure (bytes, packageBytes, .mkObj [("pin", decimal (ObjectiveBendSourceArtifact.identity artifact).value),
+    ("packageHex", toJson (hex packageBytes)),
     ("package", decimal artifact.package.value), ("declaration", toJson declaration),
     ("bytes", decimal bytes.length), ("hex", toJson (hex bytes))])
 

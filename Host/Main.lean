@@ -5697,8 +5697,9 @@ def run (arguments : List String) : IO UInt32 := do
           IO.println result.json.compress
           pure 0
       | "seat-contract-artifact", [specPath, outputPath] =>
-          let (bytes, json) ← Minidregg.Host.SeatJson.artifact specPath
+          let (bytes, packageBytes, json) ← Minidregg.Host.SeatJson.artifact specPath
           writeBytes outputPath bytes
+          writeBytes (outputPath ++ ".package") packageBytes
           IO.println json.compress
           pure 0
       | "carry-plan", [requestPath, outputPath] =>
