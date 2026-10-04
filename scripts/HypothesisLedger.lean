@@ -173,6 +173,17 @@ theorem unshownSat (c : Unshown) : Unshowable (c.width - c.width) := Nat.sub_sel
 theorem unshowable_ref : ¬ Unshowable 1 := by simp [Unshowable]
 theorem unshowable_consumer (n : Nat) (h : Unshowable n) : n = 0 := h
 
+/-- The other side of D6: a carrier of DATA only (no proof field, no instance
+declared) is shown inhabited by its constructor, so an instance over it still
+counts: `DataProfile` must read GREEN. -/
+structure DataCarrier where
+  width : Nat
+  height : Nat
+def DataProfile (n : Nat) : Prop := n = 0
+theorem dataProfile_sat (c : DataCarrier) : DataProfile (c.width - c.width) := Nat.sub_self _
+theorem dataProfile_ref : ¬ DataProfile 1 := by simp [DataProfile]
+theorem dataProfile_consumer (n : Nat) (h : DataProfile n) : n = 0 := h
+
 /-- A codec with a totality obligation: `decode := none` cannot discharge it, so
 the probe must NOT read it TRIVIAL. -/
 structure TotalCodec where
@@ -278,18 +289,44 @@ structure Ctx where
   existentials : Array Expr := #[] -- ∃-bound variables
   propHyps : Nat := 0              -- propositional hypotheses in scope
 
+/-- Is this type shown inhabited?  A type former; a type with a `Nonempty`
+instance; or an unindexed inductive (a structure, an enumeration) with a
+constructor whose fields are all DATA shown inhabited -- a proof field is a claim
+nobody discharged, so `Accepted x y` (proof fields) is not shown inhabited while a
+`Profile` of naturals is.  `fuel` bounds the descent through nested fields. -/
+partial def shownInhabited (ty : Expr) (fuel : Nat := 3) : MetaM Bool := do
+  if ← isTypeFormerType ty then return true
+  let synthesized ← try
+      let goal ← mkAppM ``Nonempty #[ty]
+      pure ((← trySynthInstance goal) matches .some _)
+    catch _ => pure false
+  if synthesized then return true
+  if fuel == 0 then return false
+  let ty ← whnf ty
+  let .const name levels := ty.getAppFn | return false
+  let some (.inductInfo info) := (← getEnv).find? name | return false
+  if info.numIndices != 0 || info.isRec || ty.getAppNumArgs != info.numParams then return false
+  for ctorName in info.ctors do
+    let some (.ctorInfo ctor) := (← getEnv).find? ctorName | continue
+    let ctorType ← instantiateForall (ctor.type.instantiateLevelParams ctor.levelParams levels)
+      ty.getAppArgs
+    let ok ← forallTelescopeReducing ctorType fun fields _ => do
+      for field in fields do
+        let fieldType ← inferType field
+        if ← isProp fieldType then return false
+        unless ← shownInhabited fieldType (fuel - 1) do return false
+      return true
+    if ok then return true
+  return false
+
 /-- Can a binder of this type be left free without making the statement
-conditional?  Types, instances, and types with a `Nonempty` instance (a free
-`n : Nat` is a point of every instance; a free `a : Accepted x y` is a carrier
-nobody has shown inhabited). -/
+conditional?  Instance arguments and types shown inhabited (`shownInhabited`: a
+free `n : Nat` is a point of every instance; a free `a : Accepted x y` is a
+carrier nobody has shown inhabited). -/
 def harmlessBinder (u : Expr) : MetaM Bool := do
   let decl ← u.fvarId!.getDecl
   if decl.binderInfo.isInstImplicit then return true
-  if ← isTypeFormerType decl.type then return true
-  try
-    let goal ← mkAppM ``Nonempty #[decl.type]
-    return (← trySynthInstance goal) matches .some _
-  catch _ => return false
+  shownInhabited decl.type
 
 /-- general / instance / conditional, per the header. -/
 def kindOf (ctx : Ctx) (args : Array Expr) : MetaM Kind := do
@@ -560,7 +597,8 @@ def plantMustBe : List (Name × Verdict) :=
    (`Minidregg.HypothesisLedger.Plant.Toothless, .toothless),
    (`Minidregg.HypothesisLedger.Plant.Teeth, .green),
    (`Minidregg.HypothesisLedger.Plant.UnfixedPolishchukSpielman, .vacuous),
-   (`Minidregg.HypothesisLedger.Plant.Unshowable, .toothless)]
+   (`Minidregg.HypothesisLedger.Plant.Unshowable, .toothless),
+   (`Minidregg.HypothesisLedger.Plant.DataProfile, .green)]
 
 /-- The minimum number of families with a consumer a working scan finds.
 Pinned below the 2026-10-01 count; a scan that silently stopped walking

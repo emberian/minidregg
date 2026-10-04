@@ -514,5 +514,36 @@ structure PhysicalAuthenticatedFinalityRefinement
 /-- info: 'Minidregg.Assurance.AuthenticatedSettlementFinalityWitness.final_old_key_registered_and_revoked' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms final_old_key_registered_and_revoked
 
+/-! ### Named points of `AcceptedVote`
+
+`voteAccepted` and the `wrong_*_rejected` teeth range over a
+`VerifiedSignatureBoundary`. The toy portal below accepts every signature, so it
+IS one; at it the accepted vote and a rejected one are exhibited, not assumed. -/
+
+/-- A boundary at a portal that accepts every signature. -/
+def acceptingBoundary : VerifiedSignatureBoundary where
+  Signature := Unit
+  portal := ⟨fun _ _ _ => true⟩
+  signature := fun _ => ()
+  verified := fun _ => rfl
+
+/-- **`AcceptedVote`, satisfying pole** at a named boundary and node. -/
+theorem acceptingBoundary_vote_accepted :
+    AcceptedVote authority candidateCodec payloadCodec acceptingBoundary.portal
+      0 candidate (vote acceptingBoundary 0) :=
+  voteAccepted acceptingBoundary 0
+
+/-- **`AcceptedVote`, refuting pole**: even a portal that accepts every signature
+does not accept a vote for the wrong slot. -/
+theorem acceptingBoundary_wrong_slot_rejected :
+    ¬ AcceptedVote authority candidateCodec payloadCodec acceptingBoundary.portal
+      0 candidate (wrongSlotVote acceptingBoundary 0) :=
+  wrong_slot_vote_rejected acceptingBoundary 0
+
+/-- info: 'Minidregg.Assurance.AuthenticatedSettlementFinalityWitness.acceptingBoundary_vote_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms acceptingBoundary_vote_accepted
+/-- info: 'Minidregg.Assurance.AuthenticatedSettlementFinalityWitness.acceptingBoundary_wrong_slot_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms acceptingBoundary_wrong_slot_rejected
+
 end
 end Minidregg.Assurance.AuthenticatedSettlementFinalityWitness

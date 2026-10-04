@@ -128,6 +128,10 @@ def P0 : Profile :=
   { C := 256, rateMilliHz := 100, E := 16, deltaMs := 600, deltaRelayMs := 50, muMs := 50,
     fits := by decide, epochFits := by decide }
 
+/-- A channel class exists: `P0` is one. (`Profile` carries two proof fields, so its
+inhabitation is a fact to show, not a default.) -/
+instance : Nonempty Profile := ⟨P0⟩
+
 /-- **P1 "room"**: `C = 256 B, r = 1 Hz, E = 16`, `0.3 / 0.02 / 0.05 s`. -/
 def P1 : Profile :=
   { C := 256, rateMilliHz := 1000, E := 16, deltaMs := 300, deltaRelayMs := 20, muMs := 50,
