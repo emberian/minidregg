@@ -19,8 +19,12 @@ the receiver that admitted it (`ObjectiveActivityReceiver`: the signed marker,
 the authority guards, the replay event), so its writes commit all together or
 not at all (`DurableDataIntent.execute_no_partial_data_commit`):
 
-* `publish`: the package (a checked `ObjectiveBendSourceArtifact`) into its
-  content-addressed package cell.
+* `publish`: an activity artifact AND the source package it names into the
+  artifact's content-addressed package cell, only after the kernel re-ran the Lean
+  front end on the package and the artifact's typed core is that replay's
+  rendering (`ObjectiveBendPublication.Replayed`). Every later turn reloads the
+  pair and replays again (`loadProgram`): the term an activity runs is the front
+  end's output on the stored sources, never a parse of the core bytes.
 * `birth`: instantiate the pinned definition with typed input, run to the
   first yield, commit the record, the declared-state write, the answer slot it
   awaits and the Book postings, all at once. The first segment has seen no
@@ -76,6 +80,7 @@ loaded Book (`AcceptedBatch`), so every turn conserves every asset
 computation ran (`refund_measurement_free`). -/
 import Kernel.AnswerSlot
 import Compiler.ObjectiveBendSourceArtifact
+import Compiler.ObjectiveBendPublication
 import Compiler.CanonicalCellRegistry
 import Theory.ObjectiveBendDemandCollect
 import Kernel.ObjectState
@@ -244,6 +249,25 @@ def stateCell (domain : Digest) (object : CellId) : CellId :=
 
 def packageKey (pin : Digest) : Bytes := digestStream.encode pin
 
+/-- What a package cell holds: the activity artifact's bytes and the bytes of the
+source package the artifact names. -/
+structure Stored where
+  artifact : Bytes
+  package : Bytes
+  deriving DecidableEq, Repr
+
+def storedStream : StreamCodec Stored :=
+  StreamCodec.xmap (StreamCodec.product bytesStream bytesStream)
+    (fun p => (p.artifact, p.package)) (fun w => ⟨w.1, w.2⟩) (by intro p; cases p; rfl)
+
+def storedFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-PACKAGE/v1".toUTF8.toList
+def storedCodec := framed storedFrame storedStream
+def encodeStored (stored : Stored) : Bytes := storedCodec.encode stored
+def decodeStored (bytes : Bytes) : Option Stored := storedCodec.decode bytes
+
+theorem stored_roundTrip (stored : Stored) : decodeStored (encodeStored stored) = some stored :=
+  framed_roundTrip _ _ stored
+
 def packageCell (domain : Digest) (pin : Digest) : CellId :=
   ⟨ObjectiveActivityCell.coordinate domain .package (packageKey pin)⟩
 
@@ -353,6 +377,12 @@ def Escrow.capacity (escrow : Escrow) : Path → Capacity
 
 inductive Refusal where
   | packageMissing | packageIdentity | packageType (reason : String) | packageExists
+  /-- The source package is absent, not canonical, names another artifact or another front
+  end, or selects another declaration. -/
+  | packageSource (reason : String)
+  /-- The front end's replay of the package refused, or its rendering is not the artifact's
+  typed core. -/
+  | packageReplay (reason : String)
   | inputType | outcomeProtocol (label : String)
   | recordExists | recordMissing | recordMisplaced | notAwaiting | awaitMismatch | checkpointDigest | checkpointCodec
   | patience (patience maximum : Nat)
@@ -520,20 +550,53 @@ def replyType (assumptions : Assumptions) (response : Ty) : Option Ty := do
 
 /-! ## The pinned program -/
 
-/-- The checked package of an activity and its instantiation with its input. -/
-structure Program (config : Config) (pin : Digest) (input : Data) where
+/-- A package cell's pair, replayed: the artifact (named by the pin) and its source package,
+which names this kernel's front end and selects the artifact's declaration, and the front
+end's replay of that package, whose rendering is the artifact's typed core. -/
+structure Replay (config : Config) (pin : Digest) where
   private mk ::
   artifact : ObjectiveBendSourceArtifact.Artifact
   identity : ObjectiveBendSourceArtifact.identity artifact = pin
-  definition : ObjectiveBendSourceArtifact.Checked artifact config.maxArtifactBytes
+  package : ObjectiveSourcePackage.Package
+  packageExact : ObjectiveSourcePackage.identity package = artifact.package
+  frontEndOwn : package.frontEnd = ObjectiveBendFrontEndIdentity.identity
+  declarationExact : ObjectiveSourcePackage.selectedDeclaration package = some artifact.declaration
+  replayed : ObjectiveBendPublication.Replayed package artifact.typedCore config.typeFuel
+
+/-- The definition the replay accepted: the elaborator's own term with its annotations. -/
+def Replay.source {config : Config} {pin : Digest} (r : Replay config pin) : AnnotatedTerm :=
+  r.replayed.accepted.source
+
+def replayPackage (config : Config) (stored : Stored) (pin : Digest) : Except Refusal (Replay config pin) := do
+  if stored.artifact.length > config.maxArtifactBytes then throw .packageMissing
+  if stored.package.length > config.maxArtifactBytes then throw (.packageSource "package byte capacity")
+  let some artifact := ObjectiveBendSourceArtifact.decode stored.artifact | throw .packageMissing
+  if identity : ObjectiveBendSourceArtifact.identity artifact = pin then
+    let some package := ObjectiveSourcePackage.decode stored.package
+      | throw (.packageSource "canonical Objective source package required")
+    if packageExact : ObjectiveSourcePackage.identity package = artifact.package then
+      if frontEndOwn : package.frontEnd = ObjectiveBendFrontEndIdentity.identity then
+        if declarationExact : ObjectiveSourcePackage.selectedDeclaration package = some artifact.declaration then
+          match ObjectiveBendPublication.replayAccept package artifact.typedCore config.typeFuel with
+          | .ok replayed => pure ⟨artifact, identity, package, packageExact, frontEndOwn, declarationExact, replayed⟩
+          | .error d => throw (.packageReplay d.message)
+        else throw (.packageSource "the package selects another declaration")
+      else throw (.packageSource "the package names another front end")
+    else throw (.packageSource "the artifact names another package")
+  else throw .packageIdentity
+
+/-- The replayed package of an activity and its instantiation with its input. -/
+structure Program (config : Config) (pin : Digest) (input : Data) where
+  private mk ::
+  definition : Replay config pin
   domain : Ty
   applied : AnnotatedTerm
-  appliedExact : applied = ⟨.app definition.packet.source.term input.term,
+  appliedExact : applied = ⟨.app definition.source.term input.term,
     fun path => match path with
-      | 0 :: rest => definition.packet.source.annotations rest
-      | 1 :: rest => annotationsOf (dataAnnotations definition.packet.source.assumptions.bounds 64 input domain []) rest
+      | 0 :: rest => definition.source.annotations rest
+      | 1 :: rest => annotationsOf (dataAnnotations definition.source.assumptions.bounds 64 input domain []) rest
       | _ => none,
-    definition.packet.source.assumptions⟩
+    definition.source.assumptions⟩
   checked : Checked applied []
   planType : Ty
   responseType : Ty
@@ -545,40 +608,59 @@ structure Program (config : Config) (pin : Digest) (input : Data) where
 def Program.assumptions {config : Config} {pin : Digest} {input : Data} (program : Program config pin input) :
     Assumptions := program.applied.assumptions
 
-/-- The package bytes a snapshot holds for a pin (empty when absent). -/
+/-- The package cell body a snapshot holds for a pin (empty when absent). -/
 def packageBytes {rootBytes : Bytes → Digest} (config : Config) (snapshot : DataSnapshot rootBytes)
     (pin : Digest) : Bytes :=
   (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain pin))).getD []
 
-/-- Load the artifact from its cell, check the definition, instantiate it with
-the input (typed at the declared domain), and check the instantiation. -/
+/-- Load the artifact and its package from their cell, replay the front end on the package
+(`replayPackage`), instantiate the replayed definition with the input (typed at the
+declared domain), and check the instantiation. -/
 def loadProgram (config : Config) (bytes : Bytes) (pin : Digest) (input : Data) :
     Except Refusal (Program config pin input) := do
-  let some artifact := ObjectiveBendSourceArtifact.decode bytes | throw .packageMissing
-  if identity : ObjectiveBendSourceArtifact.identity artifact = pin then
-    let definition ← match ObjectiveBendSourceArtifact.checkWithin artifact config.maxArtifactBytes config.typeFuel with
-      | .ok checked => pure checked
-      | .error reason => throw (.packageType reason)
-    let source := definition.packet.source
-    match callable definition.typed.type with
-    | .arrow _ _ domain _ =>
-      let applied : AnnotatedTerm := ⟨.app source.term input.term,
-        fun path => match path with
-          | 0 :: rest => source.annotations rest
-          | 1 :: rest => annotationsOf (dataAnnotations source.assumptions.bounds 64 input domain []) rest
-          | _ => none,
-        source.assumptions⟩
-      let some checked := check applied [] config.typeFuel | throw .inputType
-      match typeExact : checked.type with
-      | .computation planType responseType resultType =>
-        match replyExact : replyType applied.assumptions responseType with
-        | some reply =>
-          pure ⟨artifact, identity, definition, domain, applied, rfl, checked, planType, responseType,
-            resultType, typeExact, reply, replyExact⟩
-        | none => throw (.outcomeProtocol "reply")
-      | _ => throw (.packageType "the definition does not return an Activity")
-    | _ => throw (.packageType "the definition takes no input")
-  else throw .packageIdentity
+  let some stored := decodeStored bytes | throw .packageMissing
+  let definition ← replayPackage config stored pin
+  let source := definition.source
+  match callable definition.replayed.accepted.typed.type with
+  | .arrow _ _ domain _ =>
+    let applied : AnnotatedTerm := ⟨.app source.term input.term,
+      fun path => match path with
+        | 0 :: rest => source.annotations rest
+        | 1 :: rest => annotationsOf (dataAnnotations source.assumptions.bounds 64 input domain []) rest
+        | _ => none,
+      source.assumptions⟩
+    let some checked := check applied [] config.typeFuel | throw .inputType
+    match typeExact : checked.type with
+    | .computation planType responseType resultType =>
+      match replyExact : replyType applied.assumptions responseType with
+      | some reply =>
+        pure ⟨definition, domain, applied, rfl, checked, planType, responseType,
+          resultType, typeExact, reply, replyExact⟩
+      | none => throw (.outcomeProtocol "reply")
+    | _ => throw (.packageType "the definition does not return an Activity")
+  | _ => throw (.packageType "the definition takes no input")
+
+/-- The term an activity runs is the front end's output on the package stored with its
+artifact: the package names this kernel's front end, the kernel replayed it, the artifact's
+typed core is the replay's rendering, and the program applies the elaborator's erased term
+(whose decoding from the packet is a theorem, `ObjectiveBendTermWire.decode_json`) to its
+input. -/
+theorem Program.runs_front_end_output {config : Config} {pin : Digest} {input : Data}
+    (program : Program config pin input) :
+    program.definition.package.frontEnd = ObjectiveBendFrontEndIdentity.identity ∧
+    ∃ (l : ObjectiveBendFrontEnd.Lowering) (a : ObjectiveBendFrontEnd.Accepted l),
+      ObjectiveBendPublication.replay program.definition.package = .ok l ∧
+      l.packet.compress.toUTF8.toList = program.definition.artifact.typedCore ∧
+      a.packet.source.term = a.erased ∧
+      program.applied.term = .app a.erased input.term := by
+  let r := program.definition.replayed
+  refine ⟨program.definition.frontEndOwn, r.lowering, r.accepted, r.replayExact, r.coreExact,
+    r.accepted.packetTerm, ?_⟩
+  rw [program.appliedExact]
+  simp only [Replay.source, program.definition.replayed.accepted.sourceExact]
+  rfl
+
+#assert_axioms Program.runs_front_end_output
 
 /-- Type an outcome at the program's response type. -/
 def typeResponse {config : Config} {pin : Digest} {input : Data} (program : Program config pin input)
@@ -1020,29 +1102,30 @@ def codecId : Digest := tagged "DREGG/OBJECTIVE/ACTIVITY/OUTPUT-CODEC/v1" []
 def publishTransaction (pin : Digest) : TransactionId :=
   tagged "DREGG/OBJECTIVE/ACTIVITY/TX/PUBLISH/v1" (digestStream.encode pin)
 
+/-- The artifact and its package, posted together into the artifact's package cell. -/
 structure Publication {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
-    (artifactBytes : Bytes) where
+    (stored : Stored) where
   private mk ::
   pin : Digest
+  /-- The front end's replay of the stored package, which produced the artifact's core. -/
+  replay : Replay config pin
   posts : List Post
-  postsExact : posts = [postAt snapshot (packageCell config.domain pin) (image .package (packageKey pin) artifactBytes)]
+  postsExact : posts = [postAt snapshot (packageCell config.domain pin) (image .package (packageKey pin) (encodeStored stored))]
 
 def publish {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
-    (artifactBytes : Bytes) : Except Refusal (Publication config snapshot artifactBytes) := do
-  let some artifact := ObjectiveBendSourceArtifact.decode artifactBytes | throw .packageMissing
+    (stored : Stored) : Except Refusal (Publication config snapshot stored) := do
+  let some artifact := ObjectiveBendSourceArtifact.decode stored.artifact | throw .packageMissing
   if artifact.outputCodec ≠ codecId then throw (.packageType "not an activity artifact")
   let pin := ObjectiveBendSourceArtifact.identity artifact
   if (payloadOf (snapshot.canonicalBytes (packageCell config.domain pin))).isSome then throw .packageExists
-  let definition ← match ObjectiveBendSourceArtifact.checkWithin artifact config.maxArtifactBytes config.typeFuel with
-    | .ok checked => pure checked
-    | .error reason => throw (.packageType reason)
-  match callable definition.typed.type with
+  let definition ← replayPackage config stored pin
+  match callable definition.replayed.accepted.typed.type with
   | .arrow _ _ _ (.computation _ _ _) => pure ()
   | _ => throw (.packageType "an activity package selects a definition `Input -> Activity<P,R,A>`")
-  pure ⟨pin, _, rfl⟩
+  pure ⟨pin, definition, _, rfl⟩
 
 def Publication.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {artifactBytes : Bytes} (publication : Publication config snapshot artifactBytes) (sealing : Seal) :
+    {stored : Stored} (publication : Publication config snapshot stored) (sealing : Seal) :
     DataIntent rootBytes :=
   intentOf rootBytes (publishTransaction publication.pin) publication.posts [] [] sealing
 
