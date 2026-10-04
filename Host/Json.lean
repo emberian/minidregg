@@ -2101,7 +2101,8 @@ private def birthParts (path : String)
     | some (.str "open"), none => pure .open
     | some (.str "open"), some _ =>
         throw s!"{path}.fieldsFrom: an open cell already declares every field"
-    | some value, tail => (.closed · tail) <$> list (path ++ ".fields") nat value
+    | some value, tail => (fun fields => Minidregg.Kernel.FieldClosure.FieldSet.closed fields tail) <$>
+        list (path ++ ".fields") nat value
   let room ← match obj.get? "room" with
     | none => pure none
     | some value => some <$> nat (path ++ ".room") value
