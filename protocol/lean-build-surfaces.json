@@ -3978,7 +3978,7 @@
     {
       "module": "Kernel",
       "path": "Kernel.lean",
-      "sha256": "d6191a23bfc79bd1da973e85efc4d8710c72a3ca45bc3084aedc34a90dd432d3",
+      "sha256": "861ef4abfe707ccee41eaae5704bdadd43a03b46c14215d22213571e547abb3b",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4001,6 +4001,13 @@
       "path": "Kernel/AgentGrainAudit.lean",
       "sha256": "f0dd05f27f69ab96f44cc5271ab8385eca6ace8e5d5fc872d377ca70f5b82d3c",
       "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Kernel.AgreementEvidenceRegime",
+      "path": "Kernel/AgreementEvidenceRegime.lean",
+      "sha256": "738f316224280d1cea24f290fa2e073616306979a72e2de14ee02d5aef4109cb",
+      "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
@@ -5173,6 +5180,13 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Kernel.Contracts.Refinements",
+      "path": "Kernel/Contracts/Refinements.lean",
+      "sha256": "ed06248e1abf4aca635413ad1a9c74bb435fd99c4da98e16ad72ca5741be72e3",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
       "module": "Kernel.Contracts.Snapshot",
       "path": "Kernel/Contracts/Snapshot.lean",
       "sha256": "ec80532f86b88e021ea388242f7d7ee1550f02271daef863b520fcbb226599d9",
@@ -5864,6 +5878,13 @@
       "sha256": "82d93800a14a778aba861ec0a975f15051627a7aecc97f5d92555f92fb91c2bf",
       "surface": "default",
       "ownerReportedStatus": "KERNEL PASS scoped actual-source proof checks; final consumers EngineSafety12:51:27 ObservationSafety13:00:21 ReceiverSafety13:06:19 UTC"
+    },
+    {
+      "module": "Kernel.GenericSimplexReconfig",
+      "path": "Kernel/GenericSimplexReconfig.lean",
+      "sha256": "0b6795c2bf94f8ddd315576ffe2df32be54fae6e9c8d30fa5a32776d3ad18702",
+      "surface": "authored-research",
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.GenericSimplexScopeStructure",
@@ -7478,7 +7499,7 @@
     {
       "module": "ResearchWip",
       "path": "ResearchWip.lean",
-      "sha256": "4dda1b793f8285f75726f93fcbae7cd87497942c2d169b123249ccab1e238935",
+      "sha256": "a6f54878a362aed1fdcb88cd34e107e818596ca482812defcf5b37cecd68b790",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -8859,6 +8880,13 @@
       "path": "Theory/CellStateWitness.lean",
       "sha256": "ef7bbeb214411a5f024973f389cc7df5c627a92216ae85885199014a039449e8",
       "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Theory.CertF",
+      "path": "Theory/CertF.lean",
+      "sha256": "b40594a56fb31ac83c4bd69fbcf50f621a4c1ac2050549b96476adeb1efcd4a7",
+      "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },
     {

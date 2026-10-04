@@ -103,6 +103,8 @@ import Host.NativeReserveBirthConsent
 import Host.PortableContinuationInspection
 import Host.RoomKeyReleaseAuthor
 import Host.SourceAgreementBirth
+import Kernel.AgreementEvidenceRegime
+import Kernel.GenericSimplexReconfig
 import Kernel.JointBackendPartyAdmission
 import Kernel.JointBackendPartyReceiver
 import Kernel.JointBackendPartyRecovery
@@ -143,6 +145,7 @@ import Theory.BfvParams
 import Theory.BfvRing
 import Theory.BfvSmudging
 import Theory.BoundedNockMachine
+import Theory.CertF
 import Theory.Disputation
 import Theory.ObjectiveTermEquality
 import Theory.OptimisticAdjudication
