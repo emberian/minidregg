@@ -813,8 +813,8 @@ def checkCurrentFromSourceBytes {F : Type} [Field F] [DecidableEq F]
               if commandExact : matchesCommand ingress.dispatch selection ingress.parent
                   signedCommand = true then
                 let expected := command ingress.dispatch selection ingress.parent
-                match DeclaredResourceController.prepare deployment profile ambient durable
-                    expected with
+                match ← DeclaredResourceController.prepareAuthenticated deployment profile
+                    ambient native durable expected ingress.dispatch.signed.authorityEnvelope with
                 | .error _ => return .error "current dispatch session or agent preparation refused"
                 | .ok prepared =>
                     if shape : DeclaredResourceController.PhysicalShape prepared then

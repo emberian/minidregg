@@ -363,7 +363,8 @@ def admitLoaded {F : Type} [Field F] [DecidableEq F]
       let expected := command deployment.domain profile.semantics source
       unless ingress.signed.commandBytes == DeclaredResourceController.commandCodec.encode expected do
         return .error "signed lifecycle begin command differs from source"
-      match DeclaredResourceController.prepare deployment profile ambient durable expected with
+      match ← DeclaredResourceController.prepareAuthenticated deployment profile ambient native
+          durable expected ingress.signed.authorityEnvelope with
       | .error _ => return .error "lifecycle begin preparation refused"
       | .ok prepared =>
           if linked : linkedCurrentPolicy deployment profile ambient durable source prepared = true then

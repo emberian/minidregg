@@ -535,6 +535,10 @@ inductive Reject where
   /-- K-FIELDS: a named field moved past a per-field bound (`maxDelta`). -/
   | maxDeltaExceeded
   | run (reason : Run.Refusal)
+  /-- The signer authenticated, but its refusal lane (`Kernel.RefusalLane`) is
+  empty: its recent refused commands already cost the Host their budget. The
+  command was not prepared. -/
+  | refusalLane
   deriving Repr
 
 def requireSome {α : Type} (reason : Reject) : Option α → Except Reject α

@@ -134,9 +134,9 @@ def admitAt (config : Config) (opened : Opened config)
   if command != current.command ||
       DeclaredResourceController.commandCodec.encode command != signed.commandBytes then
     return .error "signed enrollment command differs from source"
-  match DeclaredResourceController.prepare config.deployment config.profile
-      ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.durable command with
+  match ← DeclaredResourceController.prepareAuthenticated config.deployment config.profile
+      ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩ config.signature
+      opened.durable command signed.authorityEnvelope with
   | .error _ => return .error "joint enrollment preparation refused"
   | .ok prepared =>
       if shape : DeclaredResourceController.PhysicalShape prepared then

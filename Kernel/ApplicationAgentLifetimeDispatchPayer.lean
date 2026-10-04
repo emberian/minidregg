@@ -71,9 +71,9 @@ def checkCurrent (config : Config) (opened : Opened config)
                 nonce := payerNonce context
                 targets := [AgentGrain.Operation.target .input context.base.purseTask
                   payerCapability cell.payload.root state (some payerObserve)] } then
-            match DeclaredResourceController.prepare config.deployment config.profile
-                ⟨config.federation, logicalHeight config opened.durable⟩
-                opened.durable command with
+            match ← DeclaredResourceController.prepareAuthenticated config.deployment config.profile
+                ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
+                opened.durable command signed.authorityEnvelope with
             | .error _ => return .error "lifetime payer preparation refused"
             | .ok prepared =>
               if shape : DeclaredResourceController.PhysicalShape prepared then

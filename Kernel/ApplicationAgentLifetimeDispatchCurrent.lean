@@ -160,8 +160,9 @@ def checkCurrent {F : Type} [Field F] [DecidableEq F]
               | some signedCommand =>
                 if parentCurrent : currentParentMatches ingress grant = true then
                   if commandExact : signedCommand = command base.dispatch selection base.parent then
-                    match DeclaredResourceController.prepare deployment profile ambient durable
-                        (command base.dispatch selection base.parent) with
+                    match ← DeclaredResourceController.prepareAuthenticated deployment profile
+                        ambient native durable (command base.dispatch selection base.parent)
+                        base.dispatch.signed.authorityEnvelope with
                     | .error _ => return .error "lifetime dispatch current preparation refused"
                     | .ok prepared =>
                       if shape : DeclaredResourceController.PhysicalShape prepared then

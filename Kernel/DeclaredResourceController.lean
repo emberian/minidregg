@@ -7,6 +7,7 @@ import Kernel.ResourceTransaction
 import Kernel.ResourceInvocationSignatureFirst
 import Kernel.ObjectiveBendNativeAdmission
 import Compiler.NativeInvocationProfile
+import Kernel.RefusalLane
 import Compiler.PhysicalLawResolution
 import Compiler.ComposedLawDiagnostics
 import Compiler.WorldKindLawDependencies
@@ -1967,14 +1968,24 @@ def withAcceptedLoadedFrom {F : Type} [Field F] [DecidableEq F] {R : Type}
             deployment profile.semantics ambient durable command signed.authorityEnvelope
           ResourceInvocationSignatureFirst.continueAfter authentication
             (fun reason => ordinaryResult (.rejected reason)) (do
+              -- The signer is authenticated: its refusals from here on are
+              -- charged to its own lane, and an empty lane is refused before
+              -- any preparation (R2-1 #5).
+              let subject := command.subject.value
+              let started ← IO.monoMsNow
+              if !(← RefusalLane.isOpenAt subject started) then
+                return ← ordinaryResult (.rejected .refusalLane)
+              let refuse := fun (reason : Reject) => do
+                RefusalLane.chargeSince subject started
+                ordinaryResult (.rejected reason)
               match prepareFrom deployment profile ambient durable directory? command with
-              | .error reason => ordinaryResult (.rejected reason)
+              | .error reason => refuse reason
               | .ok prepared =>
                   if shape : PhysicalShape prepared then
                     match ← admit native prepared signed objective with
-                    | .error reason => ordinaryResult (.rejected reason)
+                    | .error reason => refuse reason
                     | .ok accepted => acceptedResult prepared shape accepted
-                  else ordinaryResult (.rejected .physicalPreparation))
+                  else refuse .physicalPreparation)
 
 /-- The receiver over the image's own directory, loaded here. A caller holding
 that directory passes it to `withAcceptedLoadedFrom` (`withAcceptedLoaded_eq_from`). -/
@@ -1990,6 +2001,29 @@ def withAcceptedLoaded {F : Type} [Field F] [DecidableEq F] {R : Type}
     (objective : ObjectiveBendNativeAdmission.ReadOracle := .refuse) : IO R :=
   withAcceptedLoadedFrom deployment profile ambient native durable (loadDirectory durable) signed
     acceptedResult ordinaryResult objective
+
+/-- For receivers that prepare a command whose authority envelope they admit
+later (application dispatch, ...): authenticate that envelope first, gate on
+the signer's refusal lane, and charge a refused preparation to it, as
+`withAcceptedLoadedFrom` does for opcode 2. -/
+def prepareAuthenticated {F : Type} [Field F] [DecidableEq F]
+    (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
+    (durable : Durable) (command : Command) (authorityEnvelope : List UInt8) :
+    IO (Except Reject (PreparedInvocation deployment profile ambient durable command)) := do
+  match ← ResourceInvocationSignatureFirst.authenticate native deployment profile.semantics
+      ambient durable command authorityEnvelope with
+  | .error reason => return .error reason
+  | .ok () =>
+      let subject := command.subject.value
+      let started ← IO.monoMsNow
+      if !(← RefusalLane.isOpenAt subject started) then
+        return .error .refusalLane
+      match prepare deployment profile ambient durable command with
+      | .error reason =>
+          RefusalLane.chargeSince subject started
+          return .error reason
+      | .ok prepared => return .ok prepared
 
 theorem withAcceptedLoaded_eq_from {F : Type} [Field F] [DecidableEq F] {R : Type}
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
