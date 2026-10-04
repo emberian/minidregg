@@ -375,11 +375,11 @@ def authorPolicy (json : Json) : Except String String := do
     let some digest := ObjectiveNativeScalarBinding.rootCodec.decode bytes | throw "outputs must be digests"
     pure digest
   let tariff ← field json "tariff"
-  let tariff : ObjectiveBendNativeAdmission.Tariff := ⟨← natOf tariff "version",← natOf tariff "base",
+  let tariff : ObjectiveTariff.Tariff := ⟨← natOf tariff "version",← natOf tariff "base",
     ← natOf tariff "typeFuel",← natOf tariff "sourceTicks",← natOf tariff "heap",← natOf tariff "stack",
     ← natOf tariff "outputNodes",← natOf tariff "outputBytes",← natOf tariff "inputBytes"⟩
   if !tariff.valid then
-    throw s!"tariff must be version {ObjectiveBendNativeAdmission.tariffVersion} with a positive base"
+    throw s!"tariff must be version {ObjectiveTariff.tariffVersion} with a positive base"
   let policy : ObjectiveBendNativeAdmission.Policy := ⟨ObjectiveBendNativeAdmission.semanticsId,← natOf json "sourceBytes",
     ← capacityOf (← field json "maximum"),outputs,← digestOf json "clearAudience",
     frontEnd,tariff⟩

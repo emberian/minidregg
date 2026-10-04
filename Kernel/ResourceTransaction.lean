@@ -508,7 +508,7 @@ inductive Reject where
   signed-query read oracle: a wiring refusal, never a policy verdict. -/
   | noReadOracle
   /-- An Objective claim's signed `proofWork` is not the operator tariff's
-  price of its own declared envelope (`ObjectiveBendNativeAdmission.Tariff.workOf`). -/
+  price of its own declared envelope (`ObjectiveTariff.Tariff.workOf`). -/
   | objectiveTariff
   /-- The claim's source query does not select a live artifact and package
   whose declaration, parser/frontend/elaborator pins and codecs the policy admits. -/

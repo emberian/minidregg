@@ -22,7 +22,9 @@ import Compiler.ObjectiveInvocationClaim
 import Compiler.NativeInvocationProfile
 import Theory.ResourceCost
 import Compiler.Evaluator
+import Kernel.ObjectiveTariff
 namespace Minidregg.Kernel.ObjectiveBendNativeAdmission
+open Minidregg.Kernel.ObjectiveTariff
 open Minidregg.Compiler Minidregg.Theory
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Theory.TypedAuthorization
@@ -54,73 +56,6 @@ def charge (c : ObjectiveInvocationClaim.Capacity) : ResourceCost.Charge
   | .sideEffectCount => c.sideEffectCount
   | .feeDebit => c.feeDebit
   | .leaseByteBlocks => c.leaseByteBlocks
-
-/-- The public, versioned price of a DECLARED execution envelope (the charge
-law of 2026-10-04): the caller declares its envelope in the signed claim, the
-claim's `proofWork` must equal this price of it, execution beyond the envelope
-refuses, and nothing is refunded when a run uses less. The price is a function
-of the signed public envelope only, never of measured ticks, so a private
-branch cannot leak through the charge. `base ≥ 1` (`Tariff.valid`) makes every
-admitted invocation cost work: a caller cannot choose zero. -/
-structure Tariff where
-  version : Nat
-  base : Nat
-  typeFuel : Nat
-  sourceTicks : Nat
-  heap : Nat
-  stack : Nat
-  outputNodes : Nat
-  outputBytes : Nat
-  inputBytes : Nat
-  deriving DecidableEq, Repr
-
-def tariffStream : StreamCodec Tariff := StreamCodec.xmap
-  (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))))
-  (fun t => (t.version,t.base,t.typeFuel,t.sourceTicks,t.heap,t.stack,t.outputNodes,t.outputBytes,t.inputBytes))
-  (fun t => ⟨t.1,t.2.1,t.2.2.1,t.2.2.2.1,t.2.2.2.2.1,t.2.2.2.2.2.1,t.2.2.2.2.2.2.1,t.2.2.2.2.2.2.2.1,
-    t.2.2.2.2.2.2.2.2⟩) (by intro t; cases t; rfl)
-
-/-- The tariff edition this receiver prices with. -/
-def tariffVersion : Nat := 1
-
-/-- The work units a declared envelope costs. -/
-def Tariff.workOf (t : Tariff) (c : ObjectiveInvocationClaim.Capacity) : Nat :=
-  t.base + t.typeFuel * c.typeFuel + t.sourceTicks * c.sourceTicks + t.heap * c.heap +
-    t.stack * c.stack + t.outputNodes * c.outputNodes + t.outputBytes * c.outputBytes +
-    t.inputBytes * c.inputBytes
-
-def Tariff.valid (t : Tariff) : Bool := t.version == tariffVersion && decide (0 < t.base)
-
-/-- A valid tariff prices every envelope, the empty one included, above zero. -/
-theorem Tariff.workOf_pos {t : Tariff} (valid : t.valid = true) (c : ObjectiveInvocationClaim.Capacity) :
-    0 < t.workOf c := by
-  simp only [Tariff.valid, Bool.and_eq_true, decide_eq_true_eq] at valid
-  unfold Tariff.workOf
-  omega
-
-/-- Monotone in the envelope: declaring more never costs less. -/
-theorem Tariff.workOf_mono (t : Tariff) {a b : ObjectiveInvocationClaim.Capacity}
-    (typeFuel : a.typeFuel ≤ b.typeFuel) (sourceTicks : a.sourceTicks ≤ b.sourceTicks)
-    (heap : a.heap ≤ b.heap) (stack : a.stack ≤ b.stack) (outputNodes : a.outputNodes ≤ b.outputNodes)
-    (outputBytes : a.outputBytes ≤ b.outputBytes) (inputBytes : a.inputBytes ≤ b.inputBytes) :
-    t.workOf a ≤ t.workOf b := by
-  unfold Tariff.workOf
-  have := Nat.mul_le_mul_left t.typeFuel typeFuel
-  have := Nat.mul_le_mul_left t.sourceTicks sourceTicks
-  have := Nat.mul_le_mul_left t.heap heap
-  have := Nat.mul_le_mul_left t.stack stack
-  have := Nat.mul_le_mul_left t.outputNodes outputNodes
-  have := Nat.mul_le_mul_left t.outputBytes outputBytes
-  have := Nat.mul_le_mul_left t.inputBytes inputBytes
-  omega
-
-/-- An inhabitant of `Tariff.valid`: one work unit per call and per declared
-source tick (the premise of `workOf_pos` is satisfiable). -/
-def Tariff.unit : Tariff := ⟨tariffVersion,1,0,1,0,0,0,0,0⟩
-theorem Tariff.unit_valid : Tariff.unit.valid = true := by decide
 
 structure Policy where
   edition : Digest
@@ -740,9 +675,6 @@ def admit {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
 #assert_axioms refMatches_sound
 #assert_axioms Authenticated.sound
 #assert_axioms ReadOracle.refuse_refuses
-#assert_axioms Tariff.workOf_pos
-#assert_axioms Tariff.workOf_mono
-#assert_axioms Tariff.unit_valid
 #assert_axioms decodePolicy_tariff_valid
 #assert_axioms Core.proofWork_pos
 #assert_axioms methodSemanticId_provenance_free

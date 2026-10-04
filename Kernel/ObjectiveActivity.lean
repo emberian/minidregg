@@ -65,7 +65,7 @@ and names the clause: nothing commits, and the activity stays at its yield
 Fees are Book postings in the deployment's credit asset. An activity's purse is
 a Book account of its own, `heldAccount cell` (the record cell's id), registered
 by the birth. Every turn that runs Core4 pays the public price of its DECLARED
-envelope (`Tariff.price`) to the collector. A yield reserves, in the purse, the
+envelope (`ObjectiveTariff.Tariff.workOf`, the native tariff) to the collector. A yield reserves, in the purse, the
 fee pair of the await (`resumeFee`, `timeoutFee`): exactly one of the pair pays
 the turn that ends the await, the other stays in the purse, and the purse is
 returned to the payer's account when the activity ends. A yield the purse cannot
@@ -80,6 +80,7 @@ import Compiler.CanonicalCellRegistry
 import Theory.ObjectiveBendDemandCollect
 import Kernel.ObjectState
 import Kernel.ObjectRecord
+import Kernel.ObjectiveTariff
 
 namespace Minidregg.Kernel.ObjectiveActivity
 open Minidregg.Theory Minidregg.Compiler
@@ -96,6 +97,8 @@ open Minidregg.Compiler.ResourceBirthCodec (LifecycleImage)
 open Minidregg.Theory.CanonicalResourceKernel (Book Batch Operation AccountId AssetId logicalBook AcceptedBatch)
 open Minidregg.Kernel.ObjectState (encodeObjectState decodeObjectState)
 open Minidregg.Kernel.ObjectRecord (ObjectRecord Facts WriteRefusal admitWrite)
+open Minidregg.Kernel.ObjectiveTariff (Tariff zeroCapacity addCapacity)
+open Minidregg.Compiler.ObjectiveInvocationClaim (Capacity capacityStream)
 set_option autoImplicit false
 
 abbrev Role := ObjectiveActivityCell.Role
@@ -121,8 +124,10 @@ returned to, and the fee pair each await reserves in the purse. -/
 structure Escrow where
   payer : SubjectId
   account : AccountId
-  resumeTicks : Nat
-  timeoutTicks : Nat
+  /-- The declared envelopes of the turn that resumes the await and of the turn
+  that times it out. -/
+  resume : Capacity
+  timeout : Capacity
   resumeFee : Nat
   timeoutFee : Nat
   deriving DecidableEq, Repr
@@ -175,9 +180,9 @@ def awaitStream : StreamCodec Await :=
 def escrowStream : StreamCodec Escrow :=
   StreamCodec.xmap
     (StreamCodec.product subjectStream (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product capacityStream (StreamCodec.product capacityStream
         (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))
-    (fun e => (e.payer, e.account, e.resumeTicks, e.timeoutTicks, e.resumeFee, e.timeoutFee))
+    (fun e => (e.payer, e.account, e.resume, e.timeout, e.resumeFee, e.timeoutFee))
     (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2⟩)
     (by intro e; cases e; rfl)
 
@@ -206,10 +211,10 @@ def recordStream : StreamCodec Record :=
       w.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.2⟩)
     (by intro r; cases r; rfl)
 
-/-- v4: the record carries `tried` (the envelope its exhausted attempts at the
+/-- v5: the escrow holds declared envelopes (`Capacity`), not tick counts; v4: the record carries `tried` (the envelope its exhausted attempts at the
 current await reached); v3: no recorded reads (resume with view reads the state
 in the resuming turn); v2: the escrow names the payer's Book account. -/
-def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v4".toUTF8.toList
+def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v5".toUTF8.toList
 def recordCodec := framed recordFrame recordStream
 def encodeRecord (record : Record) : Bytes := recordCodec.encode record
 def decodeRecord (bytes : Bytes) : Option Record := recordCodec.decode bytes
@@ -290,14 +295,6 @@ def heldAccount (cell : CellId) : AccountId := cell.value
 
 /-! ## Configuration and fees -/
 
-/-- The public price of a DECLARED envelope of ticks. -/
-structure Tariff where
-  base : Nat
-  perTick : Nat
-  deriving DecidableEq, Repr
-
-def Tariff.price (tariff : Tariff) (ticks : Nat) : Nat := tariff.base + tariff.perTick * ticks
-
 structure Config where
   /-- The deployment: its domain names the activity coordinates; its Book holds the fees. -/
   deployment : CanonicalCellRegistry.Deployment
@@ -314,13 +311,22 @@ structure Config where
   /-- Heights past an await's deadline after which anyone may abandon it. -/
   abandonGrace : Nat
 
+/-- A declared envelope covers what the kernel spends on a turn: its source
+ticks are within the ceiling, and it declares at least the kernel's fixed heap,
+stack, type-checking fuel and Plan extraction budget, so the whole turn's work
+(the run, the per-turn package check, the extraction) is in the price. -/
+def Config.covers (config : Config) (envelope : Capacity) : Bool :=
+  decide (envelope.sourceTicks ≤ config.maxTicks) && decide (config.limits.heap ≤ envelope.heap) &&
+    decide (config.limits.stack ≤ envelope.stack) && decide (config.typeFuel ≤ envelope.typeFuel) &&
+    decide (config.planBudget.nodes ≤ envelope.outputNodes) && decide (config.planBudget.bytes ≤ envelope.outputBytes)
+
 def Config.domain (config : Config) : Digest := config.deployment.domain
 def Config.bookCell (config : Config) : CellId := ⟨config.deployment.resourceBookId⟩
 
 /-- The escrow terms for an activity. -/
-def escrowOf (tariff : Tariff) (payer : SubjectId) (account : AccountId) (resumeTicks timeoutTicks : Nat) :
+def escrowOf (tariff : Tariff) (payer : SubjectId) (account : AccountId) (resume timeout : Capacity) :
     Escrow :=
-  ⟨payer, account, resumeTicks, timeoutTicks, tariff.price resumeTicks, tariff.price timeoutTicks⟩
+  ⟨payer, account, resume, timeout, tariff.workOf resume, tariff.workOf timeout⟩
 
 def Escrow.pair (escrow : Escrow) : Nat := escrow.resumeFee + escrow.timeoutFee
 
@@ -339,9 +345,9 @@ def Escrow.used (escrow : Escrow) : Path → Nat
 def Escrow.unused (escrow : Escrow) : Path → Nat
   | .resumed => escrow.timeoutFee
   | .timedOut => escrow.resumeFee
-def Escrow.ticks (escrow : Escrow) : Path → Nat
-  | .resumed => escrow.resumeTicks
-  | .timedOut => escrow.timeoutTicks
+def Escrow.capacity (escrow : Escrow) : Path → Capacity
+  | .resumed => escrow.resume
+  | .timedOut => escrow.timeout
 
 /-! ## Refusals -/
 
@@ -349,7 +355,9 @@ inductive Refusal where
   | packageMissing | packageIdentity | packageType (reason : String) | packageExists
   | inputType | outcomeProtocol (label : String)
   | recordExists | recordMissing | recordMisplaced | notAwaiting | awaitMismatch | checkpointDigest | checkpointCodec
-  | envelope (ticks maximum : Nat) | patience (patience maximum : Nat)
+  | patience (patience maximum : Nat)
+  /-- A declared envelope does not cover the turn (`Config.covers`). -/
+  | uncovered (envelope : Capacity)
   | plan (reason : String) | messageAwaitNeedsInbox
   | planExtraction (reason : String) | resultExtraction (reason : String)
   | exhausted
@@ -1046,9 +1054,11 @@ structure BirthRequest where
   pin : Digest
   input : Data
   nonce : Nat
-  ticks : Nat
-  resumeTicks : Nat
-  timeoutTicks : Nat
+  /-- The declared envelope of the birth turn. -/
+  envelope : Capacity
+  /-- The declared envelopes each await escrows for its resume and its timeout. -/
+  resume : Capacity
+  timeout : Capacity
   /-- The payer's Book account: it pays the birth's envelope and the deposit,
   and receives the purse when the activity ends. -/
   account : AccountId
@@ -1067,7 +1077,7 @@ to the collector, move the deposit into the purse; then the purse settles
 def birthBatch (config : Config) (book : Book) (held : AccountId) (request : BirthRequest)
     (escrow : Escrow) (segment : Segment) : Except Refusal Batch :=
   settlePurse config (Batch.apply ⟨[held], []⟩ book) held escrow
-    ⟨[], [.fee request.account config.collector config.asset (config.tariff.price request.ticks)] ++
+    ⟨[], [.fee request.account config.collector config.asset (config.tariff.workOf request.envelope)] ++
       (if request.deposit = 0 then [] else [.transfer request.account held config.asset request.deposit])⟩ segment
   |>.map fun settled => ⟨held :: settled.registrations, settled.operations⟩
 
@@ -1086,7 +1096,7 @@ structure Birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
   current : Option ObjectState
   currentExact : readState config snapshot request.object = .ok current
   segment : Segment
-  segmentExact : runSegment config request.ticks (initial program.applied.erase) = .ok segment
+  segmentExact : runSegment config request.envelope.sourceTicks (initial program.applied.erase) = .ok segment
   yielded : Option YieldCommit
   yieldedExact : segmentCommit config snapshot height (birthTransaction request) cell request.object 0
     current false segment = .ok yielded
@@ -1094,7 +1104,7 @@ structure Birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
   recordExact : record = nextRecord
     ⟨request.object, activityId request.object (birthTransaction request), request.pin, dataBytes request.input,
       0, [], checkpointDigest [],
-      escrowOf config.tariff request.subject request.account request.resumeTicks request.timeoutTicks,
+      escrowOf config.tariff request.subject request.account request.resume request.timeout,
       0, .faulted "unborn"⟩ 0 segment yielded
   book : BookCell
   bookExact : loadBook config snapshot = .ok book
@@ -1122,9 +1132,9 @@ def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
   | .ok none => throw .notAnObject
   | .ok (some object) =>
     if pinned : object.pin = request.pin then
-      if config.maxTicks < request.ticks then throw (.envelope request.ticks config.maxTicks)
-      if config.maxTicks < request.resumeTicks then throw (.envelope request.resumeTicks config.maxTicks)
-      if config.maxTicks < request.timeoutTicks then throw (.envelope request.timeoutTicks config.maxTicks)
+      if !config.covers request.envelope then throw (.uncovered request.envelope)
+      if !config.covers request.resume then throw (.uncovered request.resume)
+      if !config.covers request.timeout then throw (.uncovered request.timeout)
       match programExact : loadProgram config (packageBytes config snapshot request.pin) request.pin request.input with
       | .error reason => throw reason
       | .ok program =>
@@ -1143,7 +1153,7 @@ def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
           match currentExact : readState config snapshot request.object with
           | .error reason => throw reason
           | .ok current =>
-          match segmentExact : runSegment config request.ticks (initial program.applied.erase) with
+          match segmentExact : runSegment config request.envelope.sourceTicks (initial program.applied.erase) with
           | .error reason => throw reason
           | .ok segment =>
             match yieldedExact : segmentCommit config snapshot height transaction cell request.object 0
@@ -1160,7 +1170,7 @@ def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
                   | some view => viewProtocol program view
                   | none => throw .stateMissing
                 | none => pure ()
-                let escrow := escrowOf config.tariff request.subject request.account request.resumeTicks request.timeoutTicks
+                let escrow := escrowOf config.tariff request.subject request.account request.resume request.timeout
                 if segment.yields ∧ request.deposit < escrow.pair then
                   throw (.underfunded request.deposit escrow.pair)
                 let batch ← birthBatch config (logicalBook book.logical) held request escrow segment
@@ -1308,7 +1318,8 @@ submitter names the record and may add envelope it pays for from `account`. -/
 structure DeliverRequest where
   subject : SubjectId
   record : CellId
-  extraTicks : Nat
+  /-- Envelope the submitter adds (and pays for) on top of the escrowed one. -/
+  extra : Capacity
   account : AccountId
 
 /-- The ending turn's own postings: the used fee from the purse, and the
@@ -1316,8 +1327,8 @@ submitter's added envelope from its account, both to the collector. -/
 def deliveryCharges (config : Config) (record : Record) (cell : CellId) (path : Path)
     (request : DeliverRequest) : Batch :=
   ⟨[], [.fee (heldAccount cell) config.collector config.asset (record.escrow.used path)] ++
-    (if request.extraTicks = 0 then []
-     else [.fee request.account config.collector config.asset (config.tariff.price request.extraTicks)])⟩
+    (if request.extra = zeroCapacity then []
+     else [.fee request.account config.collector config.asset (config.tariff.workOf request.extra)])⟩
 
 structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : DeliverRequest) where
@@ -1343,10 +1354,10 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   stateExact : decodeCheckpoint record.checkpoint = some state
   resumed : State
   resumeExact : resume (responseData settlement.decided view).term state = some resumed
-  envelope : Nat
-  envelopeExact : envelope = record.escrow.ticks settlement.path + request.extraTicks
+  envelope : Capacity
+  envelopeExact : envelope = addCapacity (record.escrow.capacity settlement.path) request.extra
   segment : Segment
-  segmentExact : runSegment config envelope resumed = .ok segment
+  segmentExact : runSegment config envelope.sourceTicks resumed = .ok segment
   yielded : Option YieldCommit
   yieldedExact : segmentCommit config snapshot height (deliveryTransaction await.id) request.record record.object
     (record.generation + 1) (some view) true segment = .ok yielded
@@ -1414,10 +1425,10 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   match resumeExact : resume (responseData settlement.decided view).term state with
   | none => .error .checkpointCodec
   | some resumed =>
-  let envelope := record.escrow.ticks settlement.path + request.extraTicks
-  if config.maxTicks < envelope then .error (.envelope envelope config.maxTicks) else
-  if 0 < record.tried ∧ envelope ≤ record.tried then .error (.alreadyExhausted record.tried envelope) else
-  match segmentExact : runSegment config envelope resumed with
+  let envelope := addCapacity (record.escrow.capacity settlement.path) request.extra
+  if !config.covers envelope then .error (.uncovered envelope) else
+  if 0 < record.tried ∧ envelope.sourceTicks ≤ record.tried then .error (.alreadyExhausted record.tried envelope.sourceTicks) else
+  match segmentExact : runSegment config envelope.sourceTicks resumed with
   | .error reason => .error reason
   | .ok segment =>
   let transaction := deliveryTransaction await.id
@@ -1487,7 +1498,8 @@ one at or below `tried` before running): no attempt is ever run or paid twice. -
 structure ExhaustRequest where
   subject : SubjectId
   record : CellId
-  extraTicks : Nat
+  /-- Envelope the submitter adds (and pays for) on top of the escrowed one. -/
+  extra : Capacity
   account : AccountId
   nonce : Nat
 
@@ -1500,15 +1512,15 @@ def exhaustTransaction (await : Digest) (request : ExhaustRequest) : Transaction
 /-- The declared charge of an exhausted attempt. -/
 def exhaustCharge (config : Config) (record : Record) (path : Path) (request : ExhaustRequest) : Nat :=
   (if record.tried = 0 then record.escrow.used path else 0) +
-    (if request.extraTicks = 0 then 0 else config.tariff.price request.extraTicks)
+    (if request.extra = zeroCapacity then 0 else config.tariff.workOf request.extra)
 
 /-- Its postings: the purse's part, then the submitter's, both to the collector. -/
 def exhaustCharges (config : Config) (record : Record) (cell : CellId) (path : Path)
     (request : ExhaustRequest) : Batch :=
   ⟨[], (if record.tried = 0 then [.fee (heldAccount cell) config.collector config.asset (record.escrow.used path)]
         else []) ++
-    (if request.extraTicks = 0 then []
-     else [.fee request.account config.collector config.asset (config.tariff.price request.extraTicks)])⟩
+    (if request.extra = zeroCapacity then []
+     else [.fee request.account config.collector config.asset (config.tariff.workOf request.extra)])⟩
 
 /-- Guard every cell a settlement would write, at the root the attempt read:
 an exhaustion is decided against exactly the slot state its run saw. -/
@@ -1540,12 +1552,12 @@ structure Exhaustion {rootBytes : Bytes → Digest} (config : Config) (snapshot 
   stateExact : decodeCheckpoint record.checkpoint = some state
   resumed : State
   resumeExact : resume (responseData settlement.decided view).term state = some resumed
-  envelope : Nat
-  envelopeExact : envelope = record.escrow.ticks settlement.path + request.extraTicks
-  raises : record.tried < envelope
-  ran : runSegment config envelope resumed = .error .exhausted
+  envelope : Capacity
+  envelopeExact : envelope = addCapacity (record.escrow.capacity settlement.path) request.extra
+  raises : record.tried < envelope.sourceTicks
+  ran : runSegment config envelope.sourceTicks resumed = .error .exhausted
   next : Record
-  nextExact : next = { record with tried := envelope }
+  nextExact : next = { record with tried := envelope.sourceTicks }
   book : BookCell
   bookExact : loadBook config snapshot = .ok book
   posted : Postings book
@@ -1589,9 +1601,9 @@ def exhaust {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   match resumeExact : resume (responseData settlement.decided view).term state with
   | none => .error .checkpointCodec
   | some resumed =>
-  let envelope := record.escrow.ticks settlement.path + request.extraTicks
-  if config.maxTicks < envelope then .error (.envelope envelope config.maxTicks) else
-  if raises : record.tried < envelope then
+  let envelope := addCapacity (record.escrow.capacity settlement.path) request.extra
+  if !config.covers envelope then .error (.uncovered envelope) else
+  if raises : record.tried < envelope.sourceTicks then
   -- The charge must be payable BEFORE the run: an unpayable attempt never runs.
   match bookExact : loadBook config snapshot with
   | .error reason => .error reason
@@ -1600,10 +1612,10 @@ def exhaust {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   | .error reason => .error reason
   | .ok posted =>
   if postedBatch : posted.batch = exhaustCharges config record request.record settlement.path request then
-  match ran : runSegment config envelope resumed with
+  match ran : runSegment config envelope.sourceTicks resumed with
   | .ok _ => .error .notExhausted
   | .error .exhausted =>
-    let next := { record with tried := envelope }
+    let next := { record with tried := envelope.sourceTicks }
     let posts := [recordPost config snapshot request.record next, posted.write config snapshot]
     let guards := guardAt snapshot (packageCell config.domain record.pin) ::
       guardAt snapshot (stateCell config.domain record.object) :: settlementGuards settlement
@@ -1612,7 +1624,7 @@ def exhaust {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
       envelope, rfl, raises, ran, next, rfl, book, bookExact, posted, postedBatch, posts, rfl, guards, rfl⟩
   | .error reason => .error reason
   else .error .bookRefused
-  else .error (.alreadyExhausted record.tried envelope)
+  else .error (.alreadyExhausted record.tried envelope.sourceTicks)
   else .error .checkpointDigest
   else .error .awaitMismatch
   else .error .recordMisplaced
@@ -2419,7 +2431,7 @@ theorem resume_binds_checkpoint {rootBytes : Bytes → Digest} {config : Config}
       delivery.await.id = awaitId request.record record.generation (checkpointDigest record.checkpoint) ∧
       decodeCheckpoint record.checkpoint = some state ∧
       resume (responseData delivery.settlement.decided delivery.view).term state = some delivery.resumed ∧
-      runSegment config delivery.envelope delivery.resumed = .ok delivery.segment := by
+      runSegment config delivery.envelope.sourceTicks delivery.resumed = .ok delivery.segment := by
   refine ⟨delivery.record, delivery.state, delivery.recordExact, delivery.awaiting, ?_, delivery.stateExact,
     delivery.resumeExact, delivery.segmentExact⟩
   rw [delivery.digestExact]; exact delivery.idExact
@@ -2430,7 +2442,7 @@ given the same envelope, end their segments identically. -/
 theorem resume_deterministic {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {first second : DeliverRequest} (one : Delivery config snapshot height first)
     (two : Delivery config snapshot height second) (sameRecord : first.record = second.record)
-    (sameEnvelope : first.extraTicks = second.extraTicks) :
+    (sameEnvelope : first.extra = second.extra) :
     one.resumed = two.resumed ∧ one.segment = two.segment ∧ one.next = two.next := by
   have records : one.record = two.record := by
     have := one.recordExact; rw [sameRecord, two.recordExact] at this; exact (Option.some.inj this).symm
@@ -2487,10 +2499,10 @@ theorem refund_measurement_free {rootBytes : Bytes → Digest} {config : Config}
 /-- The submitter's charge for added envelope is the public price of what it
 DECLARED, never of what ran. -/
 theorem submitter_charge_declared (config : Config) (record : Record) (cell : CellId) (path : Path)
-    (request : DeliverRequest) (extra : 0 < request.extraTicks) :
-    Operation.fee request.account config.collector config.asset (config.tariff.price request.extraTicks) ∈
+    (request : DeliverRequest) (extra : request.extra ≠ zeroCapacity) :
+    Operation.fee request.account config.collector config.asset (config.tariff.workOf request.extra) ∈
       (deliveryCharges config record cell path request).operations := by
-  simp [deliveryCharges, Nat.pos_iff_ne_zero.mp extra]
+  simp [deliveryCharges, extra]
 
 /-- A yield never leaves its purse short: the postings a yielding segment
 commits leave at least the await's fee pair in the purse. -/
@@ -2534,7 +2546,7 @@ theorem exhaustion_charges_declared {rootBytes : Bytes → Digest} {config : Con
     ex.next.checkpointDigest = ex.record.checkpointDigest ∧
     ex.next.generation = ex.record.generation ∧
     ex.next.phase = ex.record.phase ∧
-    ex.next.tried = ex.record.escrow.ticks ex.settlement.path + request.extraTicks ∧
+    ex.next.tried = (addCapacity (ex.record.escrow.capacity ex.settlement.path) request.extra).sourceTicks ∧
     ex.record.tried < ex.next.tried := by
   have n := ex.nextExact
   refine ⟨ex.postedBatch, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;> rw [n]
@@ -2549,8 +2561,8 @@ theorem exhaust_charges_are_declared (config : Config) (record : Record) (cell :
     (exhaustCharges config record cell path request).operations =
       (if record.tried = 0 then [Operation.fee (heldAccount cell) config.collector config.asset
           (record.escrow.used path)] else []) ++
-      (if request.extraTicks = 0 then []
-       else [Operation.fee request.account config.collector config.asset (config.tariff.price request.extraTicks)]) :=
+      (if request.extra = zeroCapacity then []
+       else [Operation.fee request.account config.collector config.asset (config.tariff.workOf request.extra)]) :=
   rfl
 
 /-- **An exhaustion spends no claim of its own**: the await stays open. -/
@@ -2566,7 +2578,7 @@ outcome either exhausts or ends its segment. -/
 theorem exhaustion_excludes_delivery {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {exReq : ExhaustRequest} {delReq : DeliverRequest}
     (ex : Exhaustion config snapshot height exReq) (delivery : Delivery config snapshot height delReq)
-    (sameRecord : exReq.record = delReq.record) (sameExtra : exReq.extraTicks = delReq.extraTicks) : False := by
+    (sameRecord : exReq.record = delReq.record) (sameExtra : exReq.extra = delReq.extra) : False := by
   have records : ex.record = delivery.record := by
     have := ex.recordExact; rw [sameRecord, delivery.recordExact] at this; exact (Option.some.inj this).symm
   have awaits : ex.await = delivery.await := by
@@ -2596,7 +2608,7 @@ exceed the raised `tried`). -/
 theorem exhaustion_charge_measurement_free {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {first second : ExhaustRequest}
     (one : Exhaustion config snapshot height first) (two : Exhaustion config snapshot height second)
-    (sameRecord : first.record = second.record) (sameExtra : first.extraTicks = second.extraTicks) :
+    (sameRecord : first.record = second.record) (sameExtra : first.extra = second.extra) :
     one.envelope = two.envelope ∧ one.next.tried = two.next.tried ∧
       exhaustCharge config one.record one.settlement.path first =
         exhaustCharge config two.record two.settlement.path second := by
@@ -2611,7 +2623,7 @@ theorem exhaustion_charge_measurement_free {rootBytes : Bytes → Digest} {confi
   have envelopes : one.envelope = two.envelope := by
     rw [one.envelopeExact, two.envelopeExact, records, settlements, sameExtra]
   refine ⟨envelopes, ?_, ?_⟩
-  · rw [one.nextExact, two.nextExact]; exact envelopes
+  · rw [one.nextExact, two.nextExact]; simp [envelopes]
   · simp [exhaustCharge, records, settlements, sameExtra]
 
 /-- **A reclaimed cell reads as nothing, by name.** The empty kernel body of a

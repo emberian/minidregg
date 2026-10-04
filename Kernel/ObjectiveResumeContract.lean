@@ -119,7 +119,7 @@ theorem birth_checkpoint_typed {rootBytes : Bytes → Digest} {config : Config} 
     rw [yieldedSegment] at ran
     obtain ⟨_, retained, executed, collected⟩ := runSegment_yielded ran
     obtain ⟨_, ⟨typed⟩⟩ := typed_runBounded_yielded
-      (checked_initial_state birth.program.applied birth.program.checked) config.limits request.ticks executed
+      (checked_initial_state birth.program.applied birth.program.checked) config.limits request.envelope.sourceTicks executed
     subst collected
     exact ⟨_, ⟨typed_collect typed⟩⟩
 
@@ -153,7 +153,7 @@ theorem delivery_checkpoint_typed {rootBytes : Bytes → Digest} {config : Confi
     rw [yieldedSegment] at ran
     obtain ⟨_, retained, executed, collected⟩ := runSegment_yielded ran
     rw [computation]
-    obtain ⟨_, ⟨typedRetained⟩⟩ := typed_runBounded_yielded resumedState config.limits delivery.envelope executed
+    obtain ⟨_, ⟨typedRetained⟩⟩ := typed_runBounded_yielded resumedState config.limits delivery.envelope.sourceTicks executed
     subst collected
     exact ⟨_, ⟨typed_collect typedRetained⟩⟩
 
