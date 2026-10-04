@@ -8576,7 +8576,7 @@
     {
       "module": "Theory.AssertAxioms",
       "path": "Theory/AssertAxioms.lean",
-      "sha256": "23b154b7519537ce3b134e8fb2f19c36d7735c6c0f780137013070e3440e069f",
+      "sha256": "221ad34010d85dedf2a449772393e5451b85c7f0861786ac9d1368a5ff38e90a",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -8607,6 +8607,13 @@
       "sha256": "d80e53cc95cf6bed2afd94120c42740ca8432bd586c72a72d1bb78dea8206dd7",
       "surface": "default",
       "ownerReportedStatus": "AUTHORED_UNCOMPILED_WIP"
+    },
+    {
+      "module": "Theory.AxiomPin",
+      "path": "Theory/AxiomPin.lean",
+      "sha256": "23bb438981bd7d93299b1d1184dcc5a55784f5789919d68d094fad087ec68dce",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Theory.BendMaskingDescent",
@@ -9199,14 +9206,14 @@
     {
       "module": "Theory.ObjectiveBendCheckpointRoundTrip",
       "path": "Theory/ObjectiveBendCheckpointRoundTrip.lean",
-      "sha256": "c0db39a71e2a820e681f4a463dc20f42198f5fb8ab48a28bc93c5493b162760d",
+      "sha256": "fa9220e3f58688924c9905101e2eae44bdcf7f63c4ae67a85913dc186372fb19",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Theory.ObjectiveBendDemandAdequacy",
       "path": "Theory/ObjectiveBendDemandAdequacy.lean",
-      "sha256": "b2b9d6438bbdcc453630bb73879eb73bd99e0548336204c4db1a39976dfd714e",
+      "sha256": "9283795d15c68a1dbae6edfbc1bb43f2f1ff0efc5afcb48f073e749627d40811",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -9220,7 +9227,7 @@
     {
       "module": "Theory.ObjectiveBendDemandCompleteness",
       "path": "Theory/ObjectiveBendDemandCompleteness.lean",
-      "sha256": "d52a0a421f3a314e591d31236a2b3406c82127a3f95bafe71ab6facba0bb66d6",
+      "sha256": "2ad6f39bf102301b3dd1a28aa84e023c121a39ad2a8da1f310331a2370c4b772",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -9234,21 +9241,21 @@
     {
       "module": "Theory.ObjectiveBendDemandDataSoundness",
       "path": "Theory/ObjectiveBendDemandDataSoundness.lean",
-      "sha256": "5838e1ab14b8ef754be554d6ccde1159f40385c793c57e197a6edabddedc9935",
+      "sha256": "46c4cd3eb7bd7d03f1aa2351945f62985e3a9059b8b25046233a4124b28272c0",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Theory.ObjectiveBendDemandInvariant",
       "path": "Theory/ObjectiveBendDemandInvariant.lean",
-      "sha256": "d804913915b4a310658bf7a3b92b9efcfdbcf4fdec3689b53ebc5769ff23410a",
+      "sha256": "66a6e2cff8c1dd834128567087effd33b3cbd7776ee39905d5e8d8fc92111d39",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Theory.ObjectiveBendDemandMachine",
       "path": "Theory/ObjectiveBendDemandMachine.lean",
-      "sha256": "e056ede6a5ff5e099668eb0951c2f3f16446adb4ed925e21c8af67b2846dbea8",
+      "sha256": "946c05b26c378dff016368241c34f19d41c456ddec4aa84a8e14224fdc7d67a8",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -9262,7 +9269,56 @@
     {
       "module": "Theory.ObjectiveBendDemandPreservation",
       "path": "Theory/ObjectiveBendDemandPreservation.lean",
-      "sha256": "5873150292faeec3d60356a9d526f2e6c9438b5022cd96f67799b26d70cecfb3",
+      "sha256": "2c0c8e80e82c55853fdffae32dc93382e81435413bf20b86d8a5dbbb3d2d1344",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Theory.ObjectiveBendDemandPreservation.Base",
+      "path": "Theory/ObjectiveBendDemandPreservation/Base.lean",
+      "sha256": "27636a9d235266013ffb21a05a82c59b2727fffbd1ec4cb26215048f7d2100cb",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Theory.ObjectiveBendDemandPreservation.Cases.Activities",
+      "path": "Theory/ObjectiveBendDemandPreservation/Cases/Activities.lean",
+      "sha256": "11f4c913162a7ca4c3b2053fe6720d72798b5ba473955c6f9dbf75082bf89fbc",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Theory.ObjectiveBendDemandPreservation.Cases.Arithmetic",
+      "path": "Theory/ObjectiveBendDemandPreservation/Cases/Arithmetic.lean",
+      "sha256": "4138e95c20cbe3bede8ac820fb4be0c259c2ab4cfc9fbeefd735d85667c0484f",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Theory.ObjectiveBendDemandPreservation.Cases.Functions",
+      "path": "Theory/ObjectiveBendDemandPreservation/Cases/Functions.lean",
+      "sha256": "496b0dbd82d1a744711d4e814ce76ae915e1a4136a9f520e8285917c20924449",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Theory.ObjectiveBendDemandPreservation.Cases.Pairs",
+      "path": "Theory/ObjectiveBendDemandPreservation/Cases/Pairs.lean",
+      "sha256": "777c5fbcb36f8f54dba3aaaee20a0bc0bc8379ebdb441d7dc8783e9d50c796a0",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Theory.ObjectiveBendDemandPreservation.Cases.Records",
+      "path": "Theory/ObjectiveBendDemandPreservation/Cases/Records.lean",
+      "sha256": "766f11fc3e45ff89366ebb314508e446c4e2b91764882bc6d9d5781074cb5815",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Theory.ObjectiveBendDemandPreservation.Cases.Sums",
+      "path": "Theory/ObjectiveBendDemandPreservation/Cases/Sums.lean",
+      "sha256": "3855ac1b60fdb662b533508e23384c8f981324ee14269cc1f41e7e84ab82b84e",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -9283,7 +9339,14 @@
     {
       "module": "Theory.ObjectiveBendOpenRecursion",
       "path": "Theory/ObjectiveBendOpenRecursion.lean",
-      "sha256": "bea93fd7e6271a4bd2f1efdb84e35e37a81b60a0148811328ec09e40955f5bca",
+      "sha256": "76dc0120e2858d1ac76909389f59825621f2fb957bcb80814626b335a08fcd31",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Theory.ObjectiveBendStepCases",
+      "path": "Theory/ObjectiveBendStepCases.lean",
+      "sha256": "21e99208ef59e41ba16103eff3321467c4d8e042463af52e2f79d46b0bf5abca",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -9297,7 +9360,7 @@
     {
       "module": "Theory.ObjectiveBendTyping",
       "path": "Theory/ObjectiveBendTyping.lean",
-      "sha256": "55bea1eead911a409d3e638f80219c1b8ce4d10c4143883c56b68e5bb18188bf",
+      "sha256": "0b671d7e50a47d4362dae936386e7d9173f22a7fb0c483fb98756f07a4e2eb15",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
