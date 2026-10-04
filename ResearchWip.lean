@@ -14,6 +14,7 @@ import Assurance.BoundedNockChecks
 import Assurance.BoundedNockNetworkChecks
 import Assurance.BoundedNockRefinement
 import Assurance.ObjectiveBendZkClaims
+import Assurance.ObjectiveDemandPhysicalChecks
 import Assurance.ObliviousNetworkChecks
 import Assurance.ResourceMoneyOperationDomainAudit
 import Assurance.ResourceMoneyReceiverAudit
@@ -89,6 +90,15 @@ import Compiler.ObjectiveBendDataWire
 import Compiler.ObjectiveBendElaborate
 import Compiler.ObjectiveBendEmitC
 import Compiler.ObjectiveBendQuoteRequest
+import Compiler.ObjectiveDemandCode
+import Compiler.ObjectiveDemandLiteralNetwork
+import Compiler.ObjectiveDemandPackedCode
+import Compiler.ObjectiveDemandPhysical
+import Compiler.ObjectiveDemandStateCodec
+import Compiler.ObjectiveDemandStateEquality
+import Compiler.ObjectiveDemandStorage
+import Compiler.ObjectiveThunkNetwork
+import Compiler.ObliviousBitCodec
 import Compiler.ObliviousBuilderSemantics
 import Compiler.ObliviousCompositeSemantics
 import Compiler.ObliviousConstantSemantics
@@ -148,10 +158,6 @@ import Kernel.BendOpaqueResultReceiver
 import Kernel.BendReturnRelease
 import Kernel.BendSourcePublication
 import Kernel.BendWorldMethod
-import Kernel.Contracts.Cuts
-import Kernel.Contracts.Futures
-import Kernel.Contracts.Identities
-import Kernel.Contracts.Snapshot
 import Kernel.JointBackendPartyAdmission
 import Kernel.JointBackendPartyReceiver
 import Kernel.JointBackendPartyRecovery
@@ -251,11 +257,7 @@ import Theory.BoundedNockMachine
 import Theory.Disputation
 import Theory.ObjectiveBendCheckpoint
 import Theory.ObjectiveBendCheckpointRoundTrip
-import Theory.ObjectiveBendDemandCompleteness
-import Theory.ObjectiveBendDemandDataSoundness
-import Theory.ObjectiveBendDemandPreservation
-import Theory.ObjectiveBendDemandTyping
-import Theory.ObjectiveBendExtensions
+import Theory.ObjectiveTermEquality
 import Theory.OptimisticAdjudication
 import Theory.ResearchRegime
 import Theory.Transferability
