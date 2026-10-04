@@ -70,7 +70,6 @@ mod query_refusal;
 #[cfg(unix)]
 mod provider_continuity;
 mod replan;
-mod retry_evidence;
 #[cfg(unix)]
 mod proxy;
 #[cfg(unix)]
@@ -2371,7 +2370,7 @@ fn manifest_paths(directory: &Path) -> Result<(PathBuf, PathBuf, Option<PathBuf>
 }
 
 fn next_retry(directory: &Path) -> Result<(PathBuf, PathBuf)> {
-    retry_evidence::next_paths(directory)
+    Ok(mini_sdk::store::AttemptDir(directory.to_path_buf()).next_retry()?)
 }
 
 fn retry_with_upgrade(

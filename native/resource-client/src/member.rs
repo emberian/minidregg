@@ -649,7 +649,7 @@ mod tests {
         std::fs::create_dir_all(&op).unwrap();
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&op, std::fs::Permissions::from_mode(0o700)).unwrap();
-        std::fs::write(op.join("fetch-started.json"),br#"{"type":"mini-app-document-fetch-v1","capture":"a","subject":"8","app":"9","generation":"1","document":"10"}"#).unwrap();
+        std::fs::write(op.join("fetch.json"),br#"{"binding":{"type":"mini-app-document-fetch-v1","id":"export-a","subject":"8","app":"9","generation":"1","document":"10"},"phase":"started","request":{"capture":"a"},"at":0}"#).unwrap();
         let rows = connector_operations(&root, &json!({"subject":"8"})).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0]["status"], "source-uncertain");

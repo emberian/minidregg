@@ -117,7 +117,7 @@ fn accepted_outbox(
     if let Some(txn) = transaction(&directory.join("outcome.json"))? {
         return Ok(txn);
     }
-    for path in crate::retry_evidence::outcomes(&directory)?.into_iter().rev() {
+    for path in mini_sdk::store::AttemptDir(directory.clone()).outcome_files()?.into_iter().rev() {
         if let Some(txn) = transaction(&path)? {
             return Ok(txn);
         }

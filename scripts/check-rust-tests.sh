@@ -225,11 +225,21 @@ exact rc-board-sparse        resource-client --bin mini -- \
 exact rc-retry-order         resource-client --bin mini -- \
   workspace::tests::retry_metadata_and_five_digit_order_never_fabricate_a_terminal_refusal \
   workspace::tests::recovered_exact_readback_is_confirmed_despite_a_later_uncertain_lookup \
-  publisher::tests::high_numbered_retained_outbox_confirmation_recovers_without_host_or_resubmit \
-  retry_evidence::tests::metadata_and_partial_writes_reserve_their_attempt_without_becoming_outcomes \
-  retry_evidence::tests::later_outcomes_remain_later_beyond_four_digits_and_legacy_padding_is_preserved \
-  retry_evidence::tests::sparse_history_does_not_reuse_old_attempt_numbers \
-  retry_evidence::tests::representational_exhaustion_refuses_without_wrapping_to_prior_evidence
+  publisher::tests::high_numbered_retained_outbox_confirmation_recovers_without_host_or_resubmit
+# (the numeric-order and exhaustion tests of the retry files moved with the code into mini-sdk:
+# row sdk-custody, store::tests::*; resource-client no longer has a second copy)
+# cv 01a0f627-4a20: a `can` delegate probe is a dry run and burns no namespace identity
+exact rc-can-probe           resource-client --bin mini -- \
+  participant_namespace::tests::a_probe_id_is_side_effect_free_fresh_and_never_a_reservation
+# cv 01a104fe-953e: app_document custody is the SDK's (Delivery for the fetch, write_once phase
+# records, AttemptDir::standing for the write): a started fetch is UNKNOWN and never repeated
+exact rc-app-document-sdk    resource-client --bin mini -- \
+  workspace::app_document::tests::a_started_fetch_without_an_export_is_source_uncertain_and_is_never_repeated \
+  workspace::app_document::tests::a_completed_fetch_beside_a_missing_export_is_a_refusal_not_a_refetch \
+  workspace::app_document::tests::status_uses_latest_retry_instead_of_original_refusal \
+  workspace::app_document::tests::interrupted_phase_before_document_call_recovers_without_losing_export \
+  workspace::app_document::tests::occupied_rebase_successor_prevents_any_new_physical_capture \
+  member::tests::connector_source_uncertainty_uses_owner_status_and_never_recaptures
 # D3: a restarted Host is re-checked against its sealed pin (bce707b7, 3f81c7db)
 exact rc-host-pin            resource-client --bin mini -- \
   transport::tests::socket_restart_refuses_replaced_host_under_original_pin \

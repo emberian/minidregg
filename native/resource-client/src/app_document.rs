@@ -1,7 +1,16 @@
 //! A delegated app export is retained once, then written using this
 //! participant's ordinary document authority. App response provenance is
 //! explicitly host/TLS custody, not a kernel attestation of app state.
+//!
+//! Custody is the SDK's (`mini_sdk`), not a local state machine. The export fetch is an EXTERNAL
+//! effect: `custody::Delivery` (a started, uncompleted fetch is UNKNOWN and is never repeated; only
+//! the retained export completes it), persisted with `store::atomic_json`, phase markers with
+//! `store::write_once`. The document write is a Mini call: its retained attempt directory is read
+//! by `workspace::retained_attempt_outcome` (`store::AttemptDir::outcome`, one classification rule
+//! shared by every client).
 use super::*;
+use mini_sdk::custody::{Delivery, DeliveryState};
+use mini_sdk::store;
 use chacha20poly1305::{
     aead::{Aead, Payload},
     ChaCha20Poly1305, KeyInit, Nonce,
@@ -213,18 +222,25 @@ fn opened(root: &Path, workspace: &Value, id: &str) -> Result<Value> {
         .map_err(|e| e.to_string())?;
     Ok(value)
 }
-/// Immutable phase records are atomically published under their custody lock.
+/// Immutable phase records are atomically published under their custody lock: written once, an
+/// equal retry accepted, a different record refused (`store::write_once`).
 fn save(path: &Path, v: &Value) -> Result<()> {
-    if path.exists() {
-        if bounded_json(path)? == *v {
-            File::open(path.parent().ok_or("phase parent absent")?)
-                .and_then(|f| f.sync_all())
-                .map_err(|e| e.to_string())?;
-            return Ok(());
-        }
-        return Err("retained connector phase differs; no replacement".into());
-    }
-    replace_private_file(path, &serde_json::to_vec(v).map_err(|e| e.to_string())?)
+    Ok(store::write_once(path, v)?)
+}
+
+/// What a fetch IS, fixed before it starts: the same retained export is the same fetch.
+fn fetch_binding(binding: &Value, document_target: &Value, id: &str) -> Value {
+    json!({"type":"mini-app-document-fetch-v1","id":id,"subject":binding["subject"],"app":binding["app"],
+        "generation":binding["generation"],"document":document_target})
+}
+
+/// The fetch's custody record for operation `id`, if it ever started.
+fn fetch_delivery(dir: &Path, binding: Value) -> Result<Delivery> {
+    Ok(Delivery::open(binding, store::read_json(&dir.join("fetch.json"))?)?)
+}
+
+fn unix_seconds() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
 /// Discovery heads change when an admitted export or an unrelated write lands.
@@ -466,7 +482,7 @@ fn occupied_capture(
         }
         return Ok(Some(status(root, workspace, id)?));
     }
-    if dir.join("fetch-started.json").exists() {
+    if dir.join("fetch.json").exists() {
         return Ok(Some(status(root, workspace, id)?));
     }
     Ok(None)
@@ -520,10 +536,10 @@ pub(crate) fn capture(root: &Path, workspace: &Value, binding: &Value, id: &str)
         .and_then(|mut f| f.read_exact(&mut nonce))
         .map_err(|e| e.to_string())?;
     let capture = hex(&nonce);
-    save(
-        &dir.join("fetch-started.json"),
-        &json!({"type":"mini-app-document-fetch-v1","capture":capture,"subject":binding["subject"],"app":binding["app"],"generation":binding["generation"],"document":refs["document"]["target"]}),
-    )?;
+    // The fetch is an external effect: retain that it STARTED (naming the send) before any byte
+    // leaves. From here, anything short of the retained export leaves it UNKNOWN, never repeated.
+    let fetch_record = fetch_delivery(&dir, fetch_binding(binding, &refs["document"]["target"], id))?;
+    store::atomic_json(&dir.join("fetch.json"), &fetch_record.start(json!({"capture":capture}), unix_seconds())?)?;
     let (headers, body) = fetch(&dir, binding, &capture)?;
     let receipt = checked_receipt(&headers, &body, binding, &capture)?;
     let _ = std::str::from_utf8(&body).map_err(|_| "sheet export is not UTF-8")?;
@@ -534,6 +550,12 @@ pub(crate) fn capture(root: &Path, workspace: &Value, binding: &Value, id: &str)
         "appObservation":app,"appChallenge":app_challenge,"packageObservation":package,"packageChallenge":package_challenge,"taskObservation":task,"taskChallenge":task_challenge,
         "body":hex(&body),"receipt":receipt});
     seal(root, workspace, id, &v)?;
+    // The retained export is the evidence; the completion marker follows it. A cut between the two
+    // leaves a `started` marker beside a retained export, which `status` reads as captured (it reads
+    // the export, not the marker).
+    let started = fetch_delivery(&dir, fetch_binding(binding, &refs["document"]["target"], id))?;
+    store::atomic_json(&dir.join("fetch.json"), &started.complete(json!({"bodySha256":receipt["bodySha256"],
+        "operation":receipt["operation"],"transaction":receipt["transaction"],"event":receipt["event"]}), unix_seconds())?)?;
     status(root, workspace, id)
 }
 
@@ -607,14 +629,17 @@ pub(crate) fn status(root: &Path, workspace: &Value, id: &str) -> Result<Value> 
     let dir = operation(root, id)?;
     private_dir(&dir)?;
     if !dir.join("capture.enc").exists() {
-        let started = bounded_json(&dir.join("fetch-started.json"))?;
-        if started["subject"] != workspace["subject"] {
+        let record = store::read_json(&dir.join("fetch.json"))?.ok_or("no export is retained for this operation")?;
+        if record["binding"]["subject"] != workspace["subject"] {
             return Err("export belongs to another participant".into());
         }
-        return Ok(
-            json!({"type":"mini-app-document-result-v1","id":id,"status":"source-uncertain","capture":started,
-            "message":"No complete export is retained. This operation cannot fetch again."}),
-        );
+        return match Delivery::open(record["binding"].clone(), Some(record.clone()))?.state() {
+            DeliveryState::Unknown => Ok(
+                json!({"type":"mini-app-document-result-v1","id":id,"status":"source-uncertain","capture":record,
+                "message":"No complete export is retained. This operation cannot fetch again."})),
+            DeliveryState::Completed(_) => Err("the fetch completed but its retained export is missing; restore the complete workspace custody".into()),
+            DeliveryState::Fresh => Err("no export is retained for this operation".into()),
+        };
     }
     let v = opened(root, workspace, id)?;
     let mut state = json!({"type":"mini-app-document-result-v1","id":id,"subject":v["binding"]["subject"],
@@ -719,7 +744,7 @@ pub(crate) fn rebase(root: &Path, workspace: &Value, id: &str, next: &str) -> Re
         }
         return status(root, workspace, next);
     }
-    if nextdir.join("fetch-started.json").exists() {
+    if nextdir.join("fetch.json").exists() {
         return Err("successor is already an original source capture; no replacement".into());
     }
     let mut v = opened(root, workspace, id)?;
@@ -864,7 +889,48 @@ mod tests {
         let mut wrong = binding();
         wrong["document"] = json!("other");
         assert!(occupied_capture(&root, &ws, &wrong, "next").is_err());
-        assert!(!dir.join("fetch-started.json").exists());
+        assert!(!dir.join("fetch.json").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn a_started_fetch_without_an_export_is_source_uncertain_and_is_never_repeated() {
+        let root = std::env::temp_dir().join(format!("app-doc-unknown-{}", random_nonce().unwrap()));
+        make_private_dir(&root).unwrap();
+        let ws = json!({"subject":"8"});
+        store_key(&root).unwrap();
+        let dir = operation(&root, "one").unwrap();
+        make_private_dir(&dir).unwrap();
+        let fetch = fetch_delivery(&dir, fetch_binding(&binding(), &json!("22"), "one")).unwrap();
+        assert_eq!(fetch.state(), DeliveryState::Fresh);
+        store::atomic_json(&dir.join("fetch.json"), &fetch.start(json!({"capture":"ab"}), 5).unwrap()).unwrap();
+        // The crash happened mid-fetch: the operation is occupied, reports UNKNOWN, names the send.
+        let held = occupied_capture(&root, &ws, &binding(), "one").unwrap().expect("a started fetch occupies the operation");
+        assert_eq!(held["status"], "source-uncertain");
+        assert_eq!(held["capture"]["request"], json!({"capture":"ab"}));
+        // Another participant's workspace never reads it.
+        assert!(status(&root, &json!({"subject":"9"}), "one").is_err());
+        // The Delivery discipline itself refuses a second start.
+        let again = fetch_delivery(&dir, fetch_binding(&binding(), &json!("22"), "one")).unwrap();
+        assert_eq!(again.state(), DeliveryState::Unknown);
+        assert!(again.start(json!({"capture":"cd"}), 6).unwrap_err().0.contains("UNKNOWN"));
+        // A fetch bound to a different source or destination refuses to open this record.
+        assert!(fetch_delivery(&dir, fetch_binding(&binding(), &json!("23"), "one")).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn a_completed_fetch_beside_a_missing_export_is_a_refusal_not_a_refetch() {
+        let root = std::env::temp_dir().join(format!("app-doc-lost-{}", random_nonce().unwrap()));
+        make_private_dir(&root).unwrap();
+        let ws = json!({"subject":"8"});
+        store_key(&root).unwrap();
+        let dir = operation(&root, "one").unwrap();
+        make_private_dir(&dir).unwrap();
+        let fetch = fetch_delivery(&dir, fetch_binding(&binding(), &json!("22"), "one")).unwrap();
+        store::atomic_json(&dir.join("fetch.json"), &fetch.start(json!({"capture":"ab"}), 5).unwrap()).unwrap();
+        let started = fetch_delivery(&dir, fetch_binding(&binding(), &json!("22"), "one")).unwrap();
+        store::atomic_json(&dir.join("fetch.json"), &started.complete(json!({"bodySha256":"x"}), 6).unwrap()).unwrap();
+        let error = status(&root, &ws, "one").unwrap_err();
+        assert!(error.contains("restore the complete workspace custody"), "{error}");
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

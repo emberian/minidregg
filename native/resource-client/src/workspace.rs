@@ -4014,20 +4014,12 @@ pub(crate) enum AttemptOutcome {
 }
 
 pub(crate) fn retained_attempt_outcome(attempt: &Path) -> Result<AttemptOutcome> {
-    let mut paths = Vec::new();
-    let original = attempt.join("outcome.json");
-    if original.exists() { paths.push(original); }
-    paths.extend(crate::retry_evidence::outcomes(attempt)?);
-    let mut newest_refused = None;
-    for path in paths.iter().rev() {
-        let value = bounded_json(path)?;
-        newest_refused.get_or_insert(value.get("type").and_then(Value::as_str) == Some("refused"));
-        if value.get("type").and_then(Value::as_str) == Some("confirmed")
-            && matches!(value.get("confirmation").and_then(Value::as_str), Some("installed" | "replayed" | "recoveredAfterUncertainResponse")) {
-            return Ok(AttemptOutcome::Confirmed(value));
-        }
-    }
-    Ok(if newest_refused == Some(true) {AttemptOutcome::Refused} else {AttemptOutcome::Pending})
+    // The rule and the reading of the retained files are the SDK's (`AttemptDir::standing`).
+    Ok(match mini_sdk::store::AttemptDir(attempt.to_path_buf()).standing()? {
+        mini_sdk::custody::Standing::Confirmed(value) => AttemptOutcome::Confirmed(value),
+        mini_sdk::custody::Standing::Refused => AttemptOutcome::Refused,
+        mini_sdk::custody::Standing::Pending => AttemptOutcome::Pending,
+    })
 }
 
 pub(crate) fn accepted_outcome(attempt: &Path) -> Result<Option<Value>> {
