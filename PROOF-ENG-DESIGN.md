@@ -154,7 +154,9 @@ must read TRIVIAL; a codec-shaped structure with a totality obligation must not.
 `scripts/check-objective-proofs.sh`, a `local-gates.sh` gate `objective-proofs`:
 `lake build ObjectiveProofs`; the snapshot diff (self-tested: a planted statement change
 must turn it red); the preview cohort (`tests/objective-bend-source/check-preview.ts`);
-translation validation (`native/bend-source/objective-elaborate-tv.ts`); the C differential
+the front-end gate (`scripts/check-objective-frontend.sh`: one Lean front end, so no
+translation validation remains to run; its record is in docs/OBJECTIVE-BEND-FRONTEND.md,
+"Provenance"); the C differential
 (`native/objective-emit/differential.py` over `packets.ts`). `bun` is required (`BUN=`);
 absent → the gate is RED, never skipped.
 

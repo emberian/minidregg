@@ -10,8 +10,9 @@
 #             scripts/gates/objective-axioms.pin byte for byte. Self-tested every run:
 #             (a) a theorem planted in a scratch copy must appear and turn the diff red;
 #             (b) a copy whose scan loop is deleted must fail its instrument floor.
-#   (the front end -- preview cohort, translation validation, examples, tutorial -- is
-#   scripts/check-objective-frontend.sh, gate objective-frontend)
+#   (the front end -- identity, elaboration and parser cohorts, C4, preview cohort,
+#   publication replay, examples, tutorial -- is scripts/check-objective-frontend.sh,
+#   gate objective-frontend)
 #   c         the C differential (native/objective-emit/differential.py) over the
 #             packets of the preview cohort and native/objective-emit/extra-cohort.json:
 #             runtime.c against runBounded, per case, State bytes included.
@@ -120,8 +121,10 @@ EOF
 
 gate_c() {
   local bun; bun=$(bun_bin)
-  # `lean --run Compiler/ObjectiveBendEmitCRun.lean` needs every import built
-  "$lake" build Compiler.ObjectiveBendEmitCRun
+  # `lean --run Compiler/ObjectiveBendEmitCRun.lean` needs every import built; the packets come
+  # from the Lean front end (Host/ObjectiveBendFrontEnd, run by tests/objective-bend-source/front.ts)
+  "$lake" build Compiler.ObjectiveBendEmitCRun Host.ObjectiveBendFrontEnd
+  LEAN=$("$lake" env which lean); LEAN_PATH=$("$lake" env printenv LEAN_PATH); export LEAN LEAN_PATH
   echo "== packets"
   "$bun" native/objective-emit/packets.ts "$tmp/packets" tests/objective-bend-source/preview-cohort.json \
     native/objective-emit/extra-cohort.json
