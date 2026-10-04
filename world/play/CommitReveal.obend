@@ -1,0 +1,405 @@
+edition ObjectiveBend 1
+# A two-party commit/reveal game (rock, paper, scissors): friends play without
+# trusting each other and nobody can win by walking away.
+#
+# Two players each put a stake in escrow; the table is fixed when the game is
+# made. They then act in a fixed order, each within `window` heights of the
+# previous move:
+#
+#   A commits, B commits, A reveals, B reveals.
+#
+# A commit is a digest of (move, salt) and nothing else is shown. A reveal must
+# open its own player's digest; a reveal that does not match is refused and the
+# game stays where it was. A move that is out of turn, from a stranger, or after
+# the window is refused. When a window lapses, anyone may call `timeout`:
+#
+#   - a lapse in a COMMIT window voids the game and both stakes go back (nothing
+#     has been revealed, so nobody has an advantage to protect);
+#   - a lapse in A's REVEAL window forfeits A: the pot goes to B;
+#   - a lapse in B's REVEAL window forfeits B: the pot goes to A.
+#
+# So the last party to reveal (B), who alone could learn the result before it
+# lands, loses the whole stake by refusing to reveal: that is never better than
+# losing the round. This closes the selective-abort gap Bread's dice crate named
+# and left open ("commit-reveal does NOT prevent selective abort ... needs
+# timeout finalization with a deterministic consequence").
+#
+# The pot is conserved: every settlement pays out exactly twice the stake, in
+# total, once (`potConserved`).
+#
+# Layers, as in BountyBoard: (1) pure transitions over a sum-typed Game; (2) the
+# same game as an Activity that yields one Plan per step and is resumed with a
+# typed Response. The Plans are proposals: the stake escrow and the payouts are
+# lowered by the kernel's seats (one per player, give = stake, want = the pot or
+# the stake back), never by this program. Preview evidence only.
+#
+# THE DIGEST IS A STAND-IN. Core4 has no hash primitive, so `seal` is an
+# injective arithmetic pairing: it BINDS a commit to one (move, salt) but does
+# not HIDE the move (seal mod 3 is the move). The native commit is the kernel's
+# cSHAKE256 opening predicate (Pred.hashEq, as Kernel/SealedMarket uses for
+# sealed bids); only `seal` changes then. The README says so as well.
+
+record Table:
+  a: Nat
+  b: Nat
+  stake: Nat
+  window: Nat
+
+# The game, by whose move it is. `due` is the last height the mover may act at.
+record Waiting:
+  table: Table
+  due: Nat
+
+record AfterA:
+  table: Table
+  due: Nat
+  sealA: Nat
+
+record Sealed:
+  table: Table
+  due: Nat
+  sealA: Nat
+  sealB: Nat
+
+record OneOpen:
+  table: Table
+  due: Nat
+  sealA: Nat
+  sealB: Nat
+  moveA: Nat
+
+record Verdict:
+  outcome: String
+  toA: Nat
+  toB: Nat
+
+sum Game:
+  commitA: Waiting
+  commitB: AfterA
+  revealA: Sealed
+  revealB: OneOpen
+  settled: Verdict
+
+record Commit:
+  who: Nat
+  seal: Nat
+  now: Nat
+
+record Reveal:
+  who: Nat
+  move: Nat
+  salt: Nat
+  now: Nat
+
+record Tick:
+  now: Nat
+
+sum Event:
+  commit: Commit
+  reveal: Reveal
+  timeout: Tick
+
+sum Transition:
+  refused: Game
+  moved: Game
+  ended: Verdict
+
+# ---- (1) the pure game --------------------------------------------------------
+
+# Moves are 0 rock, 1 paper, 2 scissors.
+def validMove(m: Nat) -> Bool:
+  m < 3n
+
+def beats(x: Nat, y: Nat) -> Bool:
+  (x == 1n && y == 0n) || (x == 2n && y == 1n) || (x == 0n && y == 2n)
+
+# The commitment. Injective on valid moves, so a digest opens to one move; not
+# hiding (see the header).
+def seal(move: Nat, salt: Nat) -> Nat:
+  salt * 3n + move
+
+def pot(t: Table) -> Nat:
+  t.stake * 2n
+
+def tableOf(g: Game) -> Table:
+  match g:
+    case commitA(w): w.table
+    case commitB(h): h.table
+    case revealA(s): s.table
+    case revealB(o): o.table
+    case settled(_): {a: 0n, b: 0n, stake: 0n, window: 0n}
+
+def phaseOf(g: Game) -> String:
+  match g:
+    case commitA(_): "commitA"
+    case commitB(_): "commitB"
+    case revealA(_): "revealA"
+    case revealB(_): "revealB"
+    case settled(v): v.outcome
+
+def isSettled(g: Game) -> Bool:
+  match g:
+    case commitA(_): false
+    case commitB(_): false
+    case revealA(_): false
+    case revealB(_): false
+    case settled(_): true
+
+def dueOf(g: Game) -> Nat:
+  match g:
+    case commitA(w): w.due
+    case commitB(h): h.due
+    case revealA(s): s.due
+    case revealB(o): o.due
+    case settled(_): 0n
+
+def start(a: Nat, b: Nat, stake: Nat, window: Nat, now: Nat) -> Game:
+  Game.commitA({table: {a: a, b: b, stake: stake, window: window}, due: now + window})
+
+def voided(t: Table) -> Transition:
+  Transition.ended({outcome: "voided", toA: t.stake, toB: t.stake})
+
+def forfeitsA(t: Table) -> Transition:
+  Transition.ended({outcome: "aForfeits", toA: 0n, toB: pot(t)})
+
+def forfeitsB(t: Table) -> Transition:
+  Transition.ended({outcome: "bForfeits", toA: pot(t), toB: 0n})
+
+def decide(t: Table, moveA: Nat, moveB: Nat) -> Transition:
+  if beats(moveA, moveB) then Transition.ended({outcome: "aWins", toA: pot(t), toB: 0n}) else if beats(moveB, moveA) then Transition.ended({outcome: "bWins", toA: 0n, toB: pot(t)}) else Transition.ended({outcome: "draw", toA: t.stake, toB: t.stake})
+
+def commitOn(g: Game, c: Commit) -> Transition:
+  match g:
+    case commitA(w):
+      if c.who == w.table.a && c.now <= w.due then Transition.moved(Game.commitB({table: w.table, due: c.now + w.table.window, sealA: c.seal})) else Transition.refused(g)
+    case commitB(h):
+      if c.who == h.table.b && c.now <= h.due then Transition.moved(Game.revealA({table: h.table, due: c.now + h.table.window, sealA: h.sealA, sealB: c.seal})) else Transition.refused(g)
+    case revealA(_): Transition.refused(g)
+    case revealB(_): Transition.refused(g)
+    case settled(_): Transition.refused(g)
+
+def revealOn(g: Game, r: Reveal) -> Transition:
+  match g:
+    case revealA(s):
+      if r.who == s.table.a && r.now <= s.due && validMove(r.move) && seal(r.move, r.salt) == s.sealA then Transition.moved(Game.revealB({table: s.table, due: r.now + s.table.window, sealA: s.sealA, sealB: s.sealB, moveA: r.move})) else Transition.refused(g)
+    case revealB(o):
+      if r.who == o.table.b && r.now <= o.due && validMove(r.move) && seal(r.move, r.salt) == o.sealB then decide(o.table, o.moveA, r.move) else Transition.refused(g)
+    case commitA(_): Transition.refused(g)
+    case commitB(_): Transition.refused(g)
+    case settled(_): Transition.refused(g)
+
+# Anyone may end a game whose mover let the window lapse.
+def timeoutOn(g: Game, k: Tick) -> Transition:
+  match g:
+    case commitA(w):
+      if w.due < k.now then voided(w.table) else Transition.refused(g)
+    case commitB(h):
+      if h.due < k.now then voided(h.table) else Transition.refused(g)
+    case revealA(s):
+      if s.due < k.now then forfeitsA(s.table) else Transition.refused(g)
+    case revealB(o):
+      if o.due < k.now then forfeitsB(o.table) else Transition.refused(g)
+    case settled(_): Transition.refused(g)
+
+def react(g: Game, e: Event) -> Transition:
+  match e:
+    case commit(c): commitOn(g, c)
+    case reveal(r): revealOn(g, r)
+    case timeout(k): timeoutOn(g, k)
+
+def stateOf(t: Transition) -> Game:
+  match t:
+    case refused(g): g
+    case moved(g): g
+    case ended(v): Game.settled(v)
+
+def wasRefused(t: Transition) -> Bool:
+  match t:
+    case refused(_): true
+    case moved(_): false
+    case ended(_): false
+
+# The pot law: a settlement pays out exactly the pot, in total.
+def not(b: Bool) -> Bool:
+  if b then false else true
+
+def potConserved(t: Transition, before: Game) -> Bool:
+  match t:
+    case refused(g): phaseOf(g) == phaseOf(before) && dueOf(g) == dueOf(before)
+    case moved(g): not(isSettled(g)) && pot(tableOf(g)) == pot(tableOf(before))
+    case ended(v): v.toA + v.toB == pot(tableOf(before))
+
+# ---- (2) the game as an Activity ----------------------------------------------
+
+record Await:
+  phase: String
+  due: Nat
+
+record Payout:
+  toA: Nat
+  toB: Nat
+
+sum Plan:
+  await: Await
+  disburse: Payout
+
+sum Response:
+  event: Event
+  settled: {}
+  refused: {}
+
+def awaiting(g: Game) -> Await:
+  {phase: phaseOf(g), due: dueOf(g)}
+
+# The result is the outcome ("aWins", "bWins", "draw", "voided", "aForfeits",
+# "bForfeits"). Every unfolding of `serve` past a yield costs one admitted turn.
+def serve(g: Game) -> Activity<Plan, Response, String>:
+  match perform(Plan.await(awaiting(g))):
+    case event(e): step(g, react(g, e))
+    case settled(_): serve(g)
+    case refused(_): serve(g)
+
+def step(g: Game, t: Transition) -> Activity<Plan, Response, String>:
+  match t:
+    case refused(unchanged): serve(unchanged)
+    case moved(next): serve(next)
+    case ended(v): disburse(g, v)
+
+# The payout is the last Plan; a refused disbursement leaves the game where it was.
+def disburse(g: Game, v: Verdict) -> Activity<Plan, Response, String>:
+  match perform(Plan.disburse({toA: v.toA, toB: v.toB})):
+    case settled(_): v.outcome
+    case refused(_): serve(g)
+    case event(_): serve(g)
+
+def play(a: Nat, b: Nat, stake: Nat, window: Nat, now: Nat) -> Activity<Plan, Response, String>:
+  serve(start(a, b, stake, window, now))
+
+# ---- the named scenario -------------------------------------------------------
+# Player 1 (A) and player 2 (B) stake 10 each; the window is 5 heights; the game
+# is made at height 0. A plays paper (1) with salt 7 (seal 22); B plays rock (0)
+# with salt 4 (seal 12). A commits at 2, B at 4, A reveals at 6, B at 8.
+
+def demo() -> Game:
+  start(1n, 2n, 10n, 5n, 0n)
+
+def commitAt(g: Game, who: Nat, move: Nat, salt: Nat, now: Nat) -> Game:
+  stateOf(react(g, Event.commit({who: who, seal: seal(move, salt), now: now})))
+
+def revealAt(g: Game, who: Nat, move: Nat, salt: Nat, now: Nat) -> Game:
+  stateOf(react(g, Event.reveal({who: who, move: move, salt: salt, now: now})))
+
+def demoAfterA() -> Game:
+  commitAt(demo(), 1n, 1n, 7n, 2n)
+
+def demoSealed() -> Game:
+  commitAt(demoAfterA(), 2n, 0n, 4n, 4n)
+
+def demoOneOpen() -> Game:
+  revealAt(demoSealed(), 1n, 1n, 7n, 6n)
+
+# A whole honest game: A plays x (salt 7), B plays y (salt 4), on time.
+def play2(x: Nat, y: Nat) -> Game:
+  revealAt(revealAt(commitAt(commitAt(demo(), 1n, x, 7n, 2n), 2n, y, 4n, 4n), 1n, x, 7n, 6n), 2n, y, 4n, 8n)
+
+def outcome(x: Nat, y: Nat) -> String:
+  phaseOf(play2(x, y))
+
+def paidA(g: Game) -> Nat:
+  match g:
+    case settled(v): v.toA
+    case commitA(_): 0n
+    case commitB(_): 0n
+    case revealA(_): 0n
+    case revealB(_): 0n
+
+def paidB(g: Game) -> Nat:
+  match g:
+    case settled(v): v.toB
+    case commitA(_): 0n
+    case commitB(_): 0n
+    case revealA(_): 0n
+    case revealB(_): 0n
+
+def paperBeatsRock() -> String:
+  outcome(1n, 0n)
+
+def rockLosesToPaper() -> String:
+  outcome(0n, 1n)
+
+def scissorsDraw() -> String:
+  outcome(2n, 2n)
+
+# Every one of the nine move pairs settles, and pays exactly the pot.
+def allPairsPayThePot() -> Bool:
+  let p = pot({a: 1n, b: 2n, stake: 10n, window: 5n})
+  paidA(play2(0n, 0n)) + paidB(play2(0n, 0n)) == p && paidA(play2(0n, 1n)) + paidB(play2(0n, 1n)) == p && paidA(play2(0n, 2n)) + paidB(play2(0n, 2n)) == p && paidA(play2(1n, 0n)) + paidB(play2(1n, 0n)) == p && paidA(play2(1n, 1n)) + paidB(play2(1n, 1n)) == p && paidA(play2(1n, 2n)) + paidB(play2(1n, 2n)) == p && paidA(play2(2n, 0n)) + paidB(play2(2n, 0n)) == p && paidA(play2(2n, 1n)) + paidB(play2(2n, 1n)) == p && paidA(play2(2n, 2n)) + paidB(play2(2n, 2n)) == p
+
+def winnerTakesThePot() -> Nat:
+  paidA(play2(1n, 0n))
+
+def loserGetsNothing() -> Nat:
+  paidB(play2(1n, 0n))
+
+def drawRefundsBoth() -> Bool:
+  paidA(play2(2n, 2n)) == 10n && paidB(play2(2n, 2n)) == 10n
+
+# Out of turn: B cannot commit first, A cannot reveal before both committed, B
+# cannot reveal before A, and nobody commits twice.
+def outOfTurnRefused() -> Bool:
+  wasRefused(react(demo(), Event.commit({who: 2n, seal: 12n, now: 2n}))) && wasRefused(react(demoAfterA(), Event.reveal({who: 1n, move: 1n, salt: 7n, now: 3n}))) && wasRefused(react(demoSealed(), Event.reveal({who: 2n, move: 0n, salt: 4n, now: 5n}))) && wasRefused(react(demoAfterA(), Event.commit({who: 1n, seal: 22n, now: 3n}))) && wasRefused(react(demoOneOpen(), Event.reveal({who: 1n, move: 1n, salt: 7n, now: 7n})))
+
+def strangerRefused() -> Bool:
+  wasRefused(react(demo(), Event.commit({who: 9n, seal: 22n, now: 2n}))) && wasRefused(react(demoSealed(), Event.reveal({who: 9n, move: 1n, salt: 7n, now: 6n}))) && wasRefused(react(demoOneOpen(), Event.reveal({who: 9n, move: 0n, salt: 4n, now: 8n})))
+
+# A reveal that does not open the commitment is refused, whoever sends it and
+# however close it is, and the game stays where it was (the right reveal still works).
+def mismatchRefused() -> Bool:
+  wasRefused(react(demoSealed(), Event.reveal({who: 1n, move: 2n, salt: 7n, now: 6n}))) && wasRefused(react(demoSealed(), Event.reveal({who: 1n, move: 1n, salt: 8n, now: 6n}))) && wasRefused(react(demoOneOpen(), Event.reveal({who: 2n, move: 1n, salt: 4n, now: 8n}))) && phaseOf(revealAt(demoSealed(), 1n, 2n, 7n, 6n)) == "revealA" && phaseOf(revealAt(revealAt(demoSealed(), 1n, 2n, 7n, 6n), 1n, 1n, 7n, 7n)) == "revealB"
+
+# 3n * salt + move collides across moves (seal(3, 7) = seal(0, 8) = 24): only the
+# range check keeps a digest from opening to a move outside {0, 1, 2}.
+def outOfRangeMoveRefused() -> Bool:
+  seal(3n, 7n) == seal(0n, 8n) && wasRefused(react(commitAt(commitAt(demo(), 1n, 0n, 8n, 2n), 2n, 0n, 4n, 4n), Event.reveal({who: 1n, move: 3n, salt: 7n, now: 6n})))
+
+def lateMoveRefused() -> Bool:
+  wasRefused(react(demo(), Event.commit({who: 1n, seal: 22n, now: 6n}))) && wasRefused(react(demoAfterA(), Event.commit({who: 2n, seal: 12n, now: 8n}))) && wasRefused(react(demoSealed(), Event.reveal({who: 1n, move: 1n, salt: 7n, now: 10n}))) && wasRefused(react(demoOneOpen(), Event.reveal({who: 2n, move: 0n, salt: 4n, now: 12n})))
+
+def lastMomentAllowed() -> Bool:
+  not(wasRefused(react(demo(), Event.commit({who: 1n, seal: 22n, now: 5n})))) && not(wasRefused(react(demoOneOpen(), Event.reveal({who: 2n, move: 0n, salt: 4n, now: 11n}))))
+
+# A timeout is refused until the window has lapsed (at the due height itself the
+# mover can still act), and from then on anyone may call it.
+def earlyTimeoutRefused() -> Bool:
+  wasRefused(react(demo(), Event.timeout({now: 5n}))) && wasRefused(react(demoSealed(), Event.timeout({now: 9n}))) && wasRefused(react(demoOneOpen(), Event.timeout({now: 11n}))) && not(wasRefused(react(demoOneOpen(), Event.timeout({now: 12n}))))
+
+# A lapsed commit window voids the game: both stakes go back.
+def commitLapseVoids() -> Bool:
+  phaseOf(stateOf(react(demo(), Event.timeout({now: 6n})))) == "voided" && phaseOf(stateOf(react(demoAfterA(), Event.timeout({now: 8n})))) == "voided" && paidA(stateOf(react(demoAfterA(), Event.timeout({now: 8n})))) == 10n && paidB(stateOf(react(demoAfterA(), Event.timeout({now: 8n})))) == 10n
+
+# A lapsed reveal window forfeits the staller: the pot goes to the other player.
+def aRevealLapseForfeits() -> String:
+  phaseOf(stateOf(react(demoSealed(), Event.timeout({now: 10n}))))
+
+def bRevealLapseForfeits() -> String:
+  phaseOf(stateOf(react(demoOneOpen(), Event.timeout({now: 12n}))))
+
+def forfeitPaysTheOther() -> Nat:
+  paidA(stateOf(react(demoOneOpen(), Event.timeout({now: 12n}))))
+
+# Walking away is never better than losing: B, who sees A's move first, gets
+# nothing by refusing to reveal when the reveal would have lost.
+def walkingAwayNeverPays() -> Bool:
+  paidB(stateOf(react(demoOneOpen(), Event.timeout({now: 12n})))) == paidB(play2(1n, 0n)) && paidB(stateOf(react(demoOneOpen(), Event.timeout({now: 12n})))) == 0n
+
+# A settled game accepts nothing.
+def settledIsFinal() -> Bool:
+  let done = play2(1n, 0n)
+  wasRefused(react(done, Event.commit({who: 1n, seal: 22n, now: 9n}))) && wasRefused(react(done, Event.reveal({who: 1n, move: 1n, salt: 7n, now: 9n}))) && wasRefused(react(done, Event.timeout({now: 99n})))
+
+# The pot law over every event from every phase.
+def lawFrom(g: Game) -> Bool:
+  potConserved(react(g, Event.commit({who: 1n, seal: 22n, now: 3n})), g) && potConserved(react(g, Event.commit({who: 2n, seal: 12n, now: 4n})), g) && potConserved(react(g, Event.reveal({who: 1n, move: 1n, salt: 7n, now: 6n})), g) && potConserved(react(g, Event.reveal({who: 2n, move: 0n, salt: 4n, now: 8n})), g) && potConserved(react(g, Event.timeout({now: 50n})), g) && potConserved(react(g, Event.timeout({now: 1n})), g)
+
+def potLawHolds() -> Bool:
+  lawFrom(demo()) && lawFrom(demoAfterA()) && lawFrom(demoSealed()) && lawFrom(demoOneOpen()) && lawFrom(play2(1n, 0n)) && lawFrom(stateOf(react(demoOneOpen(), Event.timeout({now: 12n}))))

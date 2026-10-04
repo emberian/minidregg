@@ -1,0 +1,1950 @@
+[
+ {
+  "name": "CommitRevealPaperBeatsRock",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "paperBeatsRock",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "aWins"
+ },
+ {
+  "name": "CommitRevealRockLosesToPaper",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "rockLosesToPaper",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "bWins"
+ },
+ {
+  "name": "CommitRevealScissorsDraw",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "scissorsDraw",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "draw"
+ },
+ {
+  "name": "CommitRevealAllPairsPayThePot",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "allPairsPayThePot",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CommitRevealWinnerTakesThePot",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "winnerTakesThePot",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "20"
+ },
+ {
+  "name": "CommitRevealLoserGetsNothing",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "loserGetsNothing",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "0"
+ },
+ {
+  "name": "CommitRevealDrawRefundsBoth",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "drawRefundsBoth",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CommitRevealOutOfTurnRefused",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "outOfTurnRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CommitRevealStrangerRefused",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "strangerRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CommitRevealMismatchRefused",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "mismatchRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CommitRevealOutOfRangeMoveRefused",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "outOfRangeMoveRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CommitRevealLateMoveRefused",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lateMoveRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CommitRevealLastMomentAllowed",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "lastMomentAllowed",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CommitRevealEarlyTimeoutRefused",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "earlyTimeoutRefused",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CommitRevealCommitLapseVoids",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "commitLapseVoids",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CommitRevealARevealLapseForfeits",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "aRevealLapseForfeits",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "aForfeits"
+ },
+ {
+  "name": "CommitRevealBRevealLapseForfeits",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "bRevealLapseForfeits",
+  "arguments": [],
+  "expectedType": "label",
+  "expected": "bForfeits"
+ },
+ {
+  "name": "CommitRevealForfeitPaysTheOther",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "forfeitPaysTheOther",
+  "arguments": [],
+  "expectedType": "natural",
+  "expected": "20"
+ },
+ {
+  "name": "CommitRevealWalkingAwayNeverPays",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "walkingAwayNeverPays",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CommitRevealSettledIsFinal",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "settledIsFinal",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CommitRevealPotLawHolds",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "potLawHolds",
+  "arguments": [],
+  "expectedType": "boolean",
+  "expected": true
+ },
+ {
+  "name": "CommitRevealActivityAWins",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "play",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "natural",
+    "value": "1"
+   },
+   {
+    "tag": "natural",
+    "value": "2"
+   },
+   {
+    "tag": "natural",
+    "value": "10"
+   },
+   {
+    "tag": "natural",
+    "value": "5"
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "seal",
+        "value": {
+         "tag": "natural",
+         "value": "22"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "seal",
+        "value": {
+         "tag": "natural",
+         "value": "12"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "4"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reveal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "move",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "salt",
+        "value": {
+         "tag": "natural",
+         "value": "7"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "6"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reveal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "move",
+        "value": {
+         "tag": "natural",
+         "value": "0"
+        }
+       },
+       {
+        "name": "salt",
+        "value": {
+         "tag": "natural",
+         "value": "4"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "8"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "label",
+  "expected": "aWins",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "disburse",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "toA",
+      "value": {
+       "tag": "natural",
+       "value": "20"
+      }
+     },
+     {
+      "name": "toB",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 5
+ },
+ {
+  "name": "CommitRevealActivityBForfeits",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "play",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "natural",
+    "value": "1"
+   },
+   {
+    "tag": "natural",
+    "value": "2"
+   },
+   {
+    "tag": "natural",
+    "value": "10"
+   },
+   {
+    "tag": "natural",
+    "value": "5"
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "seal",
+        "value": {
+         "tag": "natural",
+         "value": "22"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "seal",
+        "value": {
+         "tag": "natural",
+         "value": "12"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "4"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reveal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "move",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "salt",
+        "value": {
+         "tag": "natural",
+         "value": "7"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "6"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "timeout",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "12"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "label",
+  "expected": "bForfeits",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "disburse",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "toA",
+      "value": {
+       "tag": "natural",
+       "value": "20"
+      }
+     },
+     {
+      "name": "toB",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 5
+ },
+ {
+  "name": "CommitRevealActivityAForfeits",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "play",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "natural",
+    "value": "1"
+   },
+   {
+    "tag": "natural",
+    "value": "2"
+   },
+   {
+    "tag": "natural",
+    "value": "10"
+   },
+   {
+    "tag": "natural",
+    "value": "5"
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "seal",
+        "value": {
+         "tag": "natural",
+         "value": "22"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "seal",
+        "value": {
+         "tag": "natural",
+         "value": "12"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "4"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "timeout",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "10"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "label",
+  "expected": "aForfeits",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "disburse",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "toA",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "toB",
+      "value": {
+       "tag": "natural",
+       "value": "20"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 4
+ },
+ {
+  "name": "CommitRevealActivityLapseVoids",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "play",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "natural",
+    "value": "1"
+   },
+   {
+    "tag": "natural",
+    "value": "2"
+   },
+   {
+    "tag": "natural",
+    "value": "10"
+   },
+   {
+    "tag": "natural",
+    "value": "5"
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "seal",
+        "value": {
+         "tag": "natural",
+         "value": "22"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "timeout",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "8"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "label",
+  "expected": "voided",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "disburse",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "toA",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "toB",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 3
+ },
+ {
+  "name": "CommitRevealActivityOutOfTurnIgnored",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "play",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "natural",
+    "value": "1"
+   },
+   {
+    "tag": "natural",
+    "value": "2"
+   },
+   {
+    "tag": "natural",
+    "value": "10"
+   },
+   {
+    "tag": "natural",
+    "value": "5"
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "seal",
+        "value": {
+         "tag": "natural",
+         "value": "12"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "seal",
+        "value": {
+         "tag": "natural",
+         "value": "22"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "seal",
+        "value": {
+         "tag": "natural",
+         "value": "12"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "4"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reveal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "move",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "salt",
+        "value": {
+         "tag": "natural",
+         "value": "7"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "6"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reveal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "move",
+        "value": {
+         "tag": "natural",
+         "value": "0"
+        }
+       },
+       {
+        "name": "salt",
+        "value": {
+         "tag": "natural",
+         "value": "4"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "8"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "label",
+  "expected": "aWins",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "disburse",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "toA",
+      "value": {
+       "tag": "natural",
+       "value": "20"
+      }
+     },
+     {
+      "name": "toB",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 6
+ },
+ {
+  "name": "CommitRevealActivityBadRevealIgnored",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "play",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "natural",
+    "value": "1"
+   },
+   {
+    "tag": "natural",
+    "value": "2"
+   },
+   {
+    "tag": "natural",
+    "value": "10"
+   },
+   {
+    "tag": "natural",
+    "value": "5"
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "seal",
+        "value": {
+         "tag": "natural",
+         "value": "22"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "seal",
+        "value": {
+         "tag": "natural",
+         "value": "12"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "4"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reveal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "move",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "salt",
+        "value": {
+         "tag": "natural",
+         "value": "7"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "5"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reveal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "move",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "salt",
+        "value": {
+         "tag": "natural",
+         "value": "8"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "5"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reveal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "move",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "salt",
+        "value": {
+         "tag": "natural",
+         "value": "7"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "6"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reveal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "move",
+        "value": {
+         "tag": "natural",
+         "value": "0"
+        }
+       },
+       {
+        "name": "salt",
+        "value": {
+         "tag": "natural",
+         "value": "4"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "8"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "label",
+  "expected": "aWins",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "disburse",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "toA",
+      "value": {
+       "tag": "natural",
+       "value": "20"
+      }
+     },
+     {
+      "name": "toB",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 7
+ },
+ {
+  "name": "CommitRevealActivityRefusedPayoutWaits",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "play",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "natural",
+    "value": "1"
+   },
+   {
+    "tag": "natural",
+    "value": "2"
+   },
+   {
+    "tag": "natural",
+    "value": "10"
+   },
+   {
+    "tag": "natural",
+    "value": "5"
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "seal",
+        "value": {
+         "tag": "natural",
+         "value": "22"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "seal",
+        "value": {
+         "tag": "natural",
+         "value": "12"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "4"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reveal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "move",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "salt",
+        "value": {
+         "tag": "natural",
+         "value": "7"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "6"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "timeout",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "12"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "refused",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "timeout",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "13"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "settled",
+    "payload": {
+     "tag": "record",
+     "fields": []
+    }
+   }
+  ],
+  "expectedType": "label",
+  "expected": "bForfeits",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "disburse",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "toA",
+      "value": {
+       "tag": "natural",
+       "value": "20"
+      }
+     },
+     {
+      "name": "toB",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 7
+ },
+ {
+  "name": "CommitRevealActivityAwaitsRevealB",
+  "modules": [
+   {
+    "name": "CommitReveal",
+    "source": "CommitReveal.obend",
+    "imports": []
+   }
+  ],
+  "entry": "play",
+  "argumentEncoding": "typed-values-v1",
+  "arguments": [
+   {
+    "tag": "natural",
+    "value": "1"
+   },
+   {
+    "tag": "natural",
+    "value": "2"
+   },
+   {
+    "tag": "natural",
+    "value": "10"
+   },
+   {
+    "tag": "natural",
+    "value": "5"
+   },
+   {
+    "tag": "natural",
+    "value": "0"
+   }
+  ],
+  "responses": [
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "seal",
+        "value": {
+         "tag": "natural",
+         "value": "22"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "commit",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "2"
+        }
+       },
+       {
+        "name": "seal",
+        "value": {
+         "tag": "natural",
+         "value": "12"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "4"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "event",
+    "payload": {
+     "tag": "variant",
+     "label": "reveal",
+     "payload": {
+      "tag": "record",
+      "fields": [
+       {
+        "name": "who",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "move",
+        "value": {
+         "tag": "natural",
+         "value": "1"
+        }
+       },
+       {
+        "name": "salt",
+        "value": {
+         "tag": "natural",
+         "value": "7"
+        }
+       },
+       {
+        "name": "now",
+        "value": {
+         "tag": "natural",
+         "value": "6"
+        }
+       }
+      ]
+     }
+    }
+   }
+  ],
+  "expectedStatus": "yielded",
+  "expectedLastPlan": {
+   "tag": "variant",
+   "label": "await",
+   "payload": {
+    "tag": "record",
+    "fields": [
+     {
+      "name": "phase",
+      "value": {
+       "tag": "label",
+       "value": "revealB"
+      }
+     },
+     {
+      "name": "due",
+      "value": {
+       "tag": "natural",
+       "value": "11"
+      }
+     }
+    ]
+   }
+  },
+  "expectedTurns": 4
+ }
+]
