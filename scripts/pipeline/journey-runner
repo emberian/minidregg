@@ -89,8 +89,7 @@ run_tip() {
   { printf 'tip %s  labels: %s\njourney wall %s s on %s (%s CPUs), finished %s; set built %s\n\n' "$tip" "${labels% }" \
       "$wall" "$(hostname)" "$(nproc)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(sed -n 's/.*finished=\([^ ]*\).*/\1/p' "$set/PROVENANCE" 2>/dev/null)"
     { printf 'ROW\tSTATUS\tWALL_S\tOWNER\tDETAIL\n'; cat "$J/results.tsv"; } | column -t -s $'\t'; } >"$J/table.txt"
-  awk -F'\t' -v tip="${tip:0:12}" -v l="${labels% }" '$2=="FAIL"||$2=="UNBUILT"||$2=="SKIPPED"||$2=="NOT-RUN" {
-      printf "- [RED] %s %s | tip %s (%s) | owner: %s | %s\n", $1, $2, tip, l, $4, $5 }' "$J/results.tsv" >"$J/red.txt"
+  bash "$here/journey-red-lines" "$JOURNEY_ROOT" "$tip" "${labels% }" >"$J/red.txt"
   echo "$wall" >"$J/WALL_S"; date -u +%Y-%m-%dT%H:%M:%SZ >"$J/DONE"
   pipeline_log "DONE $tip in ${wall}s: $(awk -F'\t' '{c[$2]++} END {for (k in c) printf "%s=%d ", k, c[k]}' "$J/results.tsv")"
   # lean envs: drop those already run and no longer labelled, but keep the newest run one (the

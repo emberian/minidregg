@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# scripts/pipeline/journey-red-lines JOURNEY_ROOT TIP LABELS -- the MERGE-QUEUE red lines of one journey run
+# (JOURNEY_ROOT/TIP/results.tsv). journey-runner writes them to JOURNEY_ROOT/TIP/red.txt.
+#
+# FAIL, UNBUILT, SKIPPED and NOT-RUN are red. So is ABSENT AFTER PASS: a row (or sub-row) that PASSed on an
+# earlier tip in JOURNEY_ROOT and is now ABSENT. ABSENT means "this tip's tree has no driver for the row",
+# which is right for a tip that predates the driver and wrong for one that RENAMED or DELETED it: that tip's
+# table row read ABSENT, the line was in no red.txt, and a journey nobody ran was a green table.
+# (measured by a mutation of native/resource-client/objective-native-acceptance.py, W20-GATE-MUTATION)
+set -uo pipefail
+root=${1:?JOURNEY_ROOT}; tip=${2:?TIP}; labels=${3:-}
+res=$root/$tip/results.tsv
+awk -F'\t' -v tip="${tip:0:12}" -v l="$labels" '$2=="FAIL"||$2=="UNBUILT"||$2=="SKIPPED"||$2=="NOT-RUN" {
+    printf "- [RED] %s %s | tip %s (%s) | owner: %s | %s\n", $1, $2, tip, l, $4, $5 }' "$res"
+prev=$(for f in "$root"/*/results.tsv; do [ "$f" = "$res" ] || [ ! -f "$f" ] || printf '%s\n' "$f"; done)
+[ -n "$prev" ] || exit 0
+awk -F'\t' '$2=="ABSENT" {print $1}' "$res" | while IFS= read -r row; do
+  # shellcheck disable=SC2086
+  if echo "$prev" | xargs awk -F'\t' -v r="$row" '$1==r && $2=="PASS" {found=1} END {exit !found}' 2>/dev/null; then
+    awk -F'\t' -v r="$row" -v tip="${tip:0:12}" -v l="$labels" '$1==r {
+      printf "- [RED] %s ABSENT-AFTER-PASS | tip %s (%s) | owner: %s | the row PASSed on an earlier tip and its driver is gone (renamed or deleted?): %s\n", $1, tip, l, $4, $5; exit }' "$res"
+  fi
+done
