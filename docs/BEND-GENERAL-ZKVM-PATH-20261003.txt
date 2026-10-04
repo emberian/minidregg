@@ -33,7 +33,7 @@ compiler, native handlers or an arithmetized closure machine.
 Stable module namespaces and paths:
   Minidregg.Theory.BendTT (Theory/BendTTSource.lean)
   Minidregg.Theory.BendLiveMachine (Theory/BendLiveMachine.lean)
-  hbox:/tank/dregg-build/codex-private-lifecycle-20261003/src
+  (in the private-lifecycle lane's tree at the time; not on main)
 
 Trace book count initial final records actual Eval edges. Execution.complete
 also contains Value final; refusal contains a genuine prefix and a reason,
@@ -42,8 +42,8 @@ bounded recursive classification. It is not yet the fixed arena or circuit.
 Astra reserves Theory/BendClosureArena.lean and Compiler/BendClosureNetwork.lean.
 
 THIS LANE'S CURRENT STAGING
-Local: /Users/ember/workbox/bend-zkvm-20261003
-Hbox: /home/hbox/workbox/codex-bend-trace-20261003
+Staged in two lane working trees outside this repository (a Mac copy and an hbox
+copy); none of items 1-5 is on main. What each staged file did is below.
 Mini source copied independently from captain common66042a8c, no hardlinks,
 no shared upstream/source edits. Root owns integration/Git.
 
@@ -83,8 +83,7 @@ no shared upstream/source edits. Root owns integration/Git.
    Three release nextest tests PASSED on hbox: successive clone segments,
    cross-thread continuation, stale process identity refusal. This is an RNG
    conformance repair, not a proof of ZK. Test-only fixed seeds are private.
-   Log: hbox:/home/hbox/workbox/codex-bend-trace-20261003/entropy-check.log
-   1.83s compilation, 0.006s tests, 8GiB/2CPU cgroup, jobs2. Slot released.
+   (The run log stayed in the lane tree.) 1.83s compilation, 0.006s tests, 8GiB/2CPU cgroup, jobs2. Slot released.
 
 5. native/bend-ir2-proof/src/{config,main}.rs
    Offline harness staged; NOT compiled/linked or an admission endpoint.

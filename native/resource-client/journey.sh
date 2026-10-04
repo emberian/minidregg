@@ -11,7 +11,7 @@
 # Status is whatever a run prints; nothing else is status.
 #
 # Steps, in execution order (the bake-off order: growth runs between J6 and J7):
-#   J0-J8  the tree-neutral journey, claudesplosion/bakeoff/BAKEOFF.md
+#   J0-J8  the tree-neutral journey (docs/JOURNEY.md, "The steps J0-J8 and growth")
 #   J12X   host-malformed: malformed requests are refused by name and the service
 #          survives (journey.d/j12x.sh, on this Store, between J3 and J4)
 #   G      growth at 10/100/500/1000 accepted records; pass = write median
