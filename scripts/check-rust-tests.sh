@@ -244,6 +244,31 @@ exact rc-tenancy             resource-client --bin mini -- \
   tests::read_secret_requires_owner_private_regular_32_byte_file \
   workspace::private::tests::keycache_passphrase_leaves_the_environment_before_any_child \
   shell::session_fs::tests::session_fs_confined_refuses_links_and_special_leaves_and_linked_parents
+# --- W1.9 ship-the-fixes rows (0191cb8a, re-applied as exact rows beside L0.4's).
+# Grain journal publication through journal_io, in-process digests, plain status (6a291924)
+exact grain-journal-digest   grain-runtime --bin grain-runtime -- \
+  journal_io::tests::journal_actual_process_death_before_rename_recovers_committed_cut \
+  journal_io::tests::journal_foreign_symlink_and_hardlink_refuse_without_changes \
+  journal_io::tests::journal_orphan_temp_is_preserved_and_never_promoted \
+  controller_digest::tests::controller_digest_standard_vectors \
+  controller_digest::tests::controller_digest_stream_file_matches_original_bytes \
+  public_status::tests::plain_status_projects_without_private_configuration_or_custody \
+  tests::birth_ordinal_legacy_temp_does_not_fence_retained_marker_retirement
+# A full-length torn final WAL record truncates like a short one (fa84160e)
+exact private-transition-wal private-backend --lib -- \
+  transition_journal::tests::zeroed_final_record_body_truncates_to_one_less_record \
+  transition_journal::tests::invalid_event_has_no_effect_or_outbox
+# One hex decoder (c158f9ba); rate budgets per IPv6 /64 with eviction (664ee3c4)
+exact rc-hex-rate-limit      resource-client --bin mini -- \
+  decode_hex_tests::decode_hex_refuses_non_ascii_sign_and_odd_input_without_panic \
+  enrollment_bootstrap::tests::rate_limit_has_burst_minute_and_memory_bounds \
+  enrollment_bootstrap::tests::one_ipv6_slash64_is_one_budget_and_cannot_lock_out_a_fresh_ipv4_client \
+  enrollment_bootstrap::tests::spoofed_real_ip_cannot_bypass_quote_limit
+# Operator `resolve` frees the slot of a dead lease holder (0c148911)
+exact scheduler-resolve      inference-scheduler --test core -- \
+  dead_lease_holder_frees_its_slot_only_by_operator_resolve
+# --- end W1.9 rows
+
 # SUDO-ONLY (W1.8 two-uid tests, #[ignore]d: they run a probe as a second uid via
 # `sudo -n setpriv`). Armed by MINI_TEST_FOREIGN_UID=<uid other than ours> on a
 # runner with passwordless sudo; then they are ordinary exact rows (red on any
