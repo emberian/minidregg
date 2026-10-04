@@ -9,6 +9,11 @@ import Assurance.ObjectiveBendCommittedSource
 import Assurance.ObjectiveBendProofSource
 import Assurance.ObjectiveBendZkClaims
 import Assurance.ObjectiveDemandPhysicalChecks
+import Assurance.ObjectiveZkLiteralArithmetic
+import Assurance.ObjectiveZkLiteralInstance
+import Assurance.ObjectiveZkRefinementAudit
+import Assurance.ObjectiveZkStepTariff
+import Assurance.ObjectiveZkTraceDisclosure
 import Assurance.ObliviousNetworkChecks
 import Assurance.ResourceMoneyOperationDomainAudit
 import Assurance.ResourceMoneyReceiverAudit
@@ -49,14 +54,14 @@ import Compiler.GenericSimplexTransferability
 import Compiler.JointBackendPartyCodec
 import Compiler.NativeDurableEventRegistry
 import Compiler.ObjectiveBendC4
-import Compiler.ObjectiveBendDataWire
 import Compiler.ObjectiveBendElaborate
 import Compiler.ObjectiveBendEmitC
-import Compiler.ObjectiveBendQuoteRequest
 import Compiler.ObjectiveDemandCode
+import Compiler.ObjectiveDemandLayout
 import Compiler.ObjectiveDemandLiteralNetwork
 import Compiler.ObjectiveDemandPackedCode
 import Compiler.ObjectiveDemandPhysical
+import Compiler.ObjectiveDemandRegions
 import Compiler.ObjectiveDemandStateCodec
 import Compiler.ObjectiveDemandStateEquality
 import Compiler.ObjectiveDemandStorage
@@ -109,7 +114,6 @@ import Kernel.JointSourcePrefixValidation
 import Kernel.NativeCurrentMemberKey
 import Kernel.NativeCurrentMemberKeyIO
 import Kernel.NativeCurrentSigningKey
-import Kernel.ObjectiveBendAuthenticatedInputs
 import Kernel.PortableContinuationManifest
 import Kernel.PortableHomeCurrentGuard
 import Kernel.PortableHomeTransfer

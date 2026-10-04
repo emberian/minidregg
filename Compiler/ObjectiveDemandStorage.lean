@@ -1,5 +1,6 @@
 /- Objective runtime storage references and their literal source meaning.
-All seven runtime values and all frames/controls are represented. Heap cycles
+All eight runtime values (sum variants included) and all frames/controls
+(case and Boolean frames, the yielded control) are represented. Heap cycles
 are ordinary thunk addresses: decoding an environment/record never recursively
 forces those addresses. This is a representation decoder, not an evaluator.
 Fixed-bit serialization and emitted transition refinement consume this seam. -/
@@ -35,6 +36,7 @@ inductive ValueRef where
   | record (fields : Nat)
   | specification (metadata extension : Nat)
   | prototype (specification target : Nat)
+  | variant (label payload : Nat)
   deriving Repr, DecidableEq
 
 inductive CellRef where
@@ -52,6 +54,8 @@ inductive FrameRef where
   | condition (zero successorBody environment : Nat)
   | binaryLeft (primitive : Primitive) (right environment : Nat)
   | binaryRight (primitive : Primitive) (left : ValueRef)
+  | case (arms environment : Nat)
+  | ifBool (whenTrue whenFalse environment : Nat)
   deriving Repr, DecidableEq
 
 private def refusalDecEq : DecidableEq Refusal := by
@@ -68,6 +72,7 @@ inductive ControlRef where
   | returned (value : ValueRef)
   | complete (value : ValueRef)
   | refused (reason : Refusal)
+  | yielded (plan : Nat)
   deriving Repr, DecidableEq
 
 structure StateRef where
@@ -98,6 +103,7 @@ def value (tables : Tables) (depth : Nat) : ValueRef → Option RuntimeValue
   | .record fields => do pure (.record (← addressFields tables fields))
   | .specification metadata extension => pure (.specification metadata extension)
   | .prototype specification target => pure (.prototype specification target)
+  | .variant name payload => do pure (.variant (← tables.program.names[name]?) payload)
 
 def cell (tables : Tables) (depth : Nat) : CellRef → Option Cell
   | .suspended origin => do pure (.suspended (← closure tables depth origin))
@@ -121,6 +127,11 @@ def frame (tables : Tables) (depth : Nat) : FrameRef → Option Frame
     pure (.binaryLeft primitive (← ObjectiveDemandCode.decode tables.program depth right)
       (← tables.environments[environment]?))
   | .binaryRight primitive left => do pure (.binaryRight primitive (← value tables depth left))
+  | .case arms environment => do
+    pure (.case (← termFields tables depth arms) (← tables.environments[environment]?))
+  | .ifBool whenTrue whenFalse environment => do
+    pure (.ifBool (← ObjectiveDemandCode.decode tables.program depth whenTrue)
+      (← ObjectiveDemandCode.decode tables.program depth whenFalse) (← tables.environments[environment]?))
 
 def control (tables : Tables) (depth : Nat) : ControlRef → Option Control
   | .evaluate term environment => do
@@ -130,6 +141,7 @@ def control (tables : Tables) (depth : Nat) : ControlRef → Option Control
   | .returned result => do pure (.returned (← value tables depth result))
   | .complete result => do pure (.complete (← value tables depth result))
   | .refused reason => pure (.refused reason)
+  | .yielded plan => pure (.yielded plan)
 
 def decode (tables : Tables) (depth : Nat) (reference : StateRef) : Option State := do
   pure ⟨← reference.heap.mapM (cell tables depth), ← control tables depth reference.control,

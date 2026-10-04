@@ -1,6 +1,7 @@
 /- Sole Objective language public code ROM. All actual Core4 constructors are
-represented, including lazy fix/mix, reflective specifications/prototypes and
-per-field records. This is a source compiler and translation validator, not a
+represented, including lazy fix/mix, reflective specifications/prototypes,
+per-field records, sums (inject/case with named arms), the Boolean eliminator
+and the activity forms (perform/done). This is a source compiler and translation validator, not a
 second evaluator. Runtime generated closures still need the demand-machine
 representation/simulation bridge. -/
 import Theory.ObjectiveTermEquality
@@ -28,6 +29,11 @@ inductive Code where
   | record (fields : List (Nat × Nat))
   | get (target name : Nat)
   | ifZero (value zero successor : Nat)
+  | inject (label payload : Nat)
+  | case (scrutinee : Nat) (arms : List (Nat × Nat))
+  | ifBool (condition whenTrue whenFalse : Nat)
+  | perform (plan : Nat)
+  | done (value : Nat)
   deriving Repr, DecidableEq
 
 structure Program where
@@ -86,6 +92,11 @@ mutual
         | .record fields => pure (.record (← lowerFields limits fuel fields))
         | .get target name => pure (.get (← lower limits fuel target) (← intern limits name))
         | .ifZero value zero successor => pure (.ifZero (← lower limits fuel value) (← lower limits fuel zero) (← lower limits fuel successor))
+        | .inject name payload => pure (.inject (← intern limits name) (← lower limits fuel payload))
+        | .case scrutinee arms => pure (.case (← lower limits fuel scrutinee) (← lowerFields limits fuel arms))
+        | .ifBool condition whenTrue whenFalse => pure (.ifBool (← lower limits fuel condition) (← lower limits fuel whenTrue) (← lower limits fuel whenFalse))
+        | .perform plan => pure (.perform (← lower limits fuel plan))
+        | .done value => pure (.done (← lower limits fuel value))
       emit limits code
 
   def lowerFields (limits : Limits) : Nat → List (String × Term) → Build (List (Nat × Nat))
@@ -121,6 +132,11 @@ mutual
       | .record fields => pure (.record (← decodeFields program fuel fields))
       | .get target name => pure (.get (← decode program fuel target) (← program.names[name]?))
       | .ifZero value zero successor => pure (.ifZero (← decode program fuel value) (← decode program fuel zero) (← decode program fuel successor))
+      | .inject name payload => pure (.inject (← program.names[name]?) (← decode program fuel payload))
+      | .case scrutinee arms => pure (.case (← decode program fuel scrutinee) (← decodeFields program fuel arms))
+      | .ifBool condition whenTrue whenFalse => pure (.ifBool (← decode program fuel condition) (← decode program fuel whenTrue) (← decode program fuel whenFalse))
+      | .perform plan => pure (.perform (← decode program fuel plan))
+      | .done value => pure (.done (← decode program fuel value))
 
   def decodeFields (program : Program) : Nat → List (Nat × Nat) → Option (List (String × Term))
     | _, [] => some []
@@ -131,15 +147,16 @@ end
 
 def Code.references : Code → List Nat
   | .bound _ | .natural _ | .boolean _ | .label _ => []
-  | .lam body | .reflect body | .metadata body | .project body | .get body _ => [body]
+  | .lam body | .reflect body | .metadata body | .project body | .get body _
+  | .inject _ body | .perform body | .done body => [body]
   | .app a b | .mix a b | .fix a b | .specification a b | .prototype a b | .binary _ a b => [a,b]
   | .record fields => fields.map (·.2)
-  | .extend inherited fields => inherited :: fields.map (·.2)
-  | .ifZero a b c => [a,b,c]
+  | .extend inherited fields | .case inherited fields => inherited :: fields.map (·.2)
+  | .ifZero a b c | .ifBool a b c => [a,b,c]
 
 def Code.names : Code → List Nat
-  | .label name | .get _ name => [name]
-  | .record fields | .extend _ fields => fields.map (·.1)
+  | .label name | .get _ name | .inject name _ => [name]
+  | .record fields | .extend _ fields | .case _ fields => fields.map (·.1)
   | _ => []
 
 def Program.valid (program : Program) : Bool :=

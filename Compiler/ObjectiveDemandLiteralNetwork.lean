@@ -2,15 +2,15 @@
 fixed code-table layout. Literal Nat/Bool/label and lambda return, plus empty
 return completion, compose with the real thunk enter/update graph. Remaining
 opcodes explicitly return handled=false. Code rows are input wires and every
-fixed row is scanned; public constant-program specialization is optional. -/
-import Compiler.ObjectiveThunkNetwork
-import Compiler.ObjectiveDemandPackedCode
+fixed row is scanned; public constant-program specialization is optional.
+Every table region of the layout (code rows, code fields, names, environments,
+record fields) is an input and is carried to the next tick, so a decoder of the
+output reads the same tables the graph executed. -/
+import Compiler.ObjectiveDemandLayout
 
 namespace Minidregg.Compiler.ObjectiveDemandLiteralNetwork
-open ObliviousNetwork ObliviousWords ObjectiveThunkNetwork
+open ObliviousNetwork ObliviousWords ObjectiveThunkNetwork ObjectiveDemandLayout
 set_option autoImplicit false
-
-def rowBits (shape : Shape) : Nat := 7+3*shape.wordBits
 
 def valuePayload (shape : Shape) (tag : Word 3) (a b : Word shape.wordBits) : Word shape.payloadBits :=
   Vector.ofFn fun bit =>
@@ -18,7 +18,7 @@ def valuePayload (shape : Shape) (tag : Word 3) (a b : Word shape.wordBits) : Wo
     else if bit.val < 3+shape.wordBits then a.toArray[bit.val-3]?.getD 0
     else b.toArray[bit.val-3-shape.wordBits]?.getD 0
 
-def build (shape : Shape) (codeSlots : Nat) : Builder Unit := do
+def build (shape : Shape) (codeSlots tableBits : Nat) : Builder Unit := do
   ObjectiveThunkNetwork.build shape
   let thunk ← get
   let old := inputWires shape
@@ -29,8 +29,9 @@ def build (shape : Shape) (codeSlots : Nat) : Builder Unit := do
   let codePointer := slice shape.wordBits 0 old.payload
   let environment := slice shape.wordBits shape.wordBits old.payload
   let (codePresent,code) ← readRows zero one codePointer codeRows
-  let opcode := slice 5 0 code
-  let a := slice shape.wordBits 7 code
+  let opcode := slice ObjectiveDemandPackedCode.tagBits 0 code
+  let a := slice shape.wordBits
+    (ObjectiveDemandPackedCode.tagBits+ObjectiveDemandPackedCode.primitiveBits) code
   let isNat ← equalConstant one opcode 10
   let isBool ← equalConstant one opcode 11
   let isLabel ← equalConstant one opcode 12
@@ -61,14 +62,14 @@ def build (shape : Shape) (codeSlots : Nat) : Builder Unit := do
     let before := thunk.outputs[index+1]?.getD zero
     let after := candidate[index]?.getD zero
     output := output.push (← if before == after then pure before else emitMux selected after before)
-  for index in [:codeSlots*rowBits shape] do
+  for index in [:tableBits] do
     output := output.push (shape.inputCount+index)
   modify fun network => {network with outputs:=output}
 
-def network (shape : Shape) (codeSlots : Nat) : Option Network :=
-  if shape.fits && shape.payloadBits == 3+2*shape.wordBits && codeSlots < 2^shape.wordBits then
-    let result := (build shape codeSlots).run
-      {inputCount:=shape.inputCount+codeSlots*rowBits shape}
+def network (layout : Layout) : Option Network :=
+  if layout.fits then
+    let result := (build layout.shape layout.codeSlots layout.tableBits).run
+      {inputCount:=layout.inputCount}
     if result.2.valid then some result.2 else none
   else none
 

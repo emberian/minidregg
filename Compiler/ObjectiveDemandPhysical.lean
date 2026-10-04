@@ -1,58 +1,53 @@
 /- Concrete Objective source-to-initial-physical-state producer. The actual
-compiler, bounded table packer and actual state codec establish the initial
-source interpretation. The current generated controller covers an explicit
+compiler, bounded table packer and the layout's one decoder (state region plus
+every table region, ObjectiveDemandRegions) establish the initial source
+interpretation. The current generated controller covers an explicit
 opcode tranche; construction of a program does not assert all-run coverage. -/
-import Compiler.ObjectiveDemandStateCodec
+import Compiler.ObjectiveDemandRegions
 import Compiler.ObjectiveDemandLiteralNetwork
+import Compiler.ObjectiveDemandStateEquality
 
 namespace Minidregg.Compiler.ObjectiveDemandPhysical
 open Minidregg.Theory.ObjectiveBendOpenRecursion
 open Minidregg.Theory.ObjectiveBendDemandMachine
-open ObjectiveDemandCode ObjectiveDemandStorage
+open ObjectiveDemandCode ObjectiveDemandStorage ObjectiveDemandLayout
 set_option autoImplicit false
 
-def paddedTable (table : ObjectiveDemandPackedCode.Table) (codeSlots : Nat) :
-    ObjectiveDemandPackedCode.Table :=
-  {table with rows := (table.rows ++ Array.replicate (codeSlots-table.rows.size) (ObjectiveDemandPackedCode.Row.mk 31 0 0 0 0))}
-
-structure Prepared (source : Minidregg.Theory.ObjectiveBendOpenRecursion.Term)
-    (shape : ObjectiveThunkNetwork.Shape) where
+/-- A program prepared for the graph of a public layout. `initialExact` is the
+initial-state premise of the receivers, discharged by translation validation:
+the layout's one decoder, applied to the complete initial bits (state region and
+every table region), returns the source machine's initial state. -/
+structure Prepared (source : Minidregg.Theory.ObjectiveBendOpenRecursion.Term) (layout : Layout) where
   compiled : Compiled source
-  packed : ObjectiveDemandPackedCode.Encoded compiled.program shape.wordBits (2^shape.wordBits-1)
-  codeSlots : Nat
+  packed : ObjectiveDemandPackedCode.Encoded compiled.program layout.word layout.codeFieldSlots
   graph : ObliviousNetwork.Network
-  initialStateBits : Array Bool
   initialBits : Array Bool
-  graphExact : ObjectiveDemandLiteralNetwork.network shape codeSlots = some graph
-  bitsExact : initialBits = initialStateBits ++ (paddedTable packed.table codeSlots).codeBits shape.wordBits
+  graphExact : ObjectiveDemandLiteralNetwork.network layout = some graph
   initialShape : initialBits.size = graph.inputCount
-  decodedInitial : ObjectiveDemandStateCodec.decode shape initialStateBits =
-    some (initialRef compiled.entry,false)
-  initialMeaning : ObjectiveDemandStateCodec.represents shape
-    (initialTables compiled.program) compiled.decodeDepth initialStateBits (initial source)
+  initialExact : ObjectiveDemandRegions.state layout initialBits = some (initial source)
 
 def ofCompiled {source : Minidregg.Theory.ObjectiveBendOpenRecursion.Term}
-    (compiled : Compiled source) (shape : ObjectiveThunkNetwork.Shape) (codeSlots : Nat) : Option (Prepared source shape) := do
-  let packed ← ObjectiveDemandPackedCode.encode compiled.program shape.wordBits (2^shape.wordBits-1)
-  if packed.table.rows.size > codeSlots then none else do
-    match selected : ObjectiveDemandLiteralNetwork.network shape codeSlots with
-    | none => none
-    | some graph =>
-      let initialStateBits ← ObjectiveDemandStateCodec.encode shape (initialRef compiled.entry)
-      if decoded : ObjectiveDemandStateCodec.decode shape initialStateBits =
-          some (initialRef compiled.entry,false) then
-        let padded := paddedTable packed.table codeSlots
-        let initialBits := initialStateBits ++ padded.codeBits shape.wordBits
-        if shaped : initialBits.size = graph.inputCount then
-          pure ⟨compiled,packed,codeSlots,graph,initialStateBits,initialBits,selected,rfl,shaped,decoded,
-            ⟨initialRef compiled.entry,false,decoded,ObjectiveDemandStorage.initial_exact compiled⟩⟩
-        else none
-      else none
+    (compiled : Compiled source) (layout : Layout) : Option (Prepared source layout) := do
+  let packed ← ObjectiveDemandPackedCode.encode compiled.program layout.word layout.codeFieldSlots
+  match selected : ObjectiveDemandLiteralNetwork.network layout with
+  | none => none
+  | some graph =>
+    let initialBits ← ObjectiveDemandRegions.encode layout (initialRef compiled.entry) packed.table
+      (initialTables compiled.program).environments (initialTables compiled.program).fields
+    if shaped : initialBits.size = graph.inputCount then
+      match decoded : ObjectiveDemandRegions.state layout initialBits with
+      | none => none
+      | some state =>
+        match ObjectiveDemandStateEquality.state layout.depth state (initial source) with
+        | none => none
+        | some same =>
+          pure ⟨compiled, packed, graph, initialBits, selected, shaped,
+            by rw [decoded, same.down]⟩
+    else none
 
-def prepare (limits : ObjectiveDemandCode.Limits)
-    (shape : ObjectiveThunkNetwork.Shape) (codeSlots : Nat)
-    (source : Minidregg.Theory.ObjectiveBendOpenRecursion.Term) : Option (Prepared source shape) := do
-  ofCompiled (← ObjectiveDemandCode.compile limits source) shape codeSlots
+def prepare (limits : ObjectiveDemandCode.Limits) (layout : Layout)
+    (source : Minidregg.Theory.ObjectiveBendOpenRecursion.Term) : Option (Prepared source layout) := do
+  ofCompiled (← ObjectiveDemandCode.compile limits source) layout
 
 /-- Raw graph output state is carried unchanged between physical ticks.
 Handled=false is an explicit unsupported/invalid physical transition, not a
@@ -63,32 +58,18 @@ def runGraph (graph : ObliviousNetwork.Network) : Nat → Array Bool → Option 
     let output ← graph.evaluate input
     if output[0]?.getD false then runGraph graph ticks (output.extract 1 output.size) else none
 
-def result {source : Minidregg.Theory.ObjectiveBendOpenRecursion.Term}
-    {shape : ObjectiveThunkNetwork.Shape} (prepared : Prepared source shape)
-    (input : Array Bool) : Option (State × Bool) := do
-  let (reference,suspended) ← ObjectiveDemandStateCodec.decode shape (input.extract 0 shape.inputCount)
-  pure (← ObjectiveDemandStorage.decode (initialTables prepared.compiled.program)
-    prepared.compiled.decodeDepth reference,suspended)
+/-- The physical result: the layout's one decoder. No program enters it. -/
+def result (layout : Layout) (input : Array Bool) : Option (State × Bool) :=
+  ObjectiveDemandRegions.decode layout input
 
-theorem initial_source {source : Minidregg.Theory.ObjectiveBendOpenRecursion.Term}
-    {shape : ObjectiveThunkNetwork.Shape} (prepared : Prepared source shape) :
-    ObjectiveDemandStateCodec.represents shape (initialTables prepared.compiled.program)
-      prepared.compiled.decodeDepth prepared.initialStateBits (initial source) :=
-  prepared.initialMeaning
-
-#assert_axioms initial_source
-
-/-- At the same public capacities, the generated gates are independent of
-source contents. Program bits remain inputs; this alone is not an MPC/privacy
-proof, but it prevents source-dependent constant-ROM specialization here. -/
+/-- At the same public layout, the generated gates are independent of source
+contents. Program bits remain inputs; this alone is not an MPC/privacy proof,
+but it prevents source-dependent constant-ROM specialization here. -/
 theorem graph_source_independent
     {leftSource rightSource : Minidregg.Theory.ObjectiveBendOpenRecursion.Term}
-    {shape : ObjectiveThunkNetwork.Shape}
-    (left : Prepared leftSource shape) (right : Prepared rightSource shape)
-    (sameCapacity : left.codeSlots = right.codeSlots) : left.graph = right.graph := by
-  have leftGraph := left.graphExact
-  rw [sameCapacity] at leftGraph
-  exact Option.some.inj (leftGraph.symm.trans right.graphExact)
+    {layout : Layout} (left : Prepared leftSource layout) (right : Prepared rightSource layout) :
+    left.graph = right.graph :=
+  Option.some.inj (left.graphExact.symm.trans right.graphExact)
 
 #assert_axioms graph_source_independent
 

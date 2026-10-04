@@ -28,6 +28,7 @@ def valueData : ValueRef → Nat × Nat × Nat
   | .record fields => (4,fields,0)
   | .specification metadata extension => (5,metadata,extension)
   | .prototype specification target => (6,specification,target)
+  | .variant name payload => (7,name,payload)
 
 def encodeValue (width : Nat) (value : ValueRef) : Option (Array Bool) :=
   let (tag,a,b) := valueData value
@@ -44,6 +45,7 @@ def decodeValue (width : Nat) (input : Array Bool) (offset : Nat) : Option Value
   | 4 => some (.record a)
   | 5 => some (.specification a b)
   | 6 => some (.prototype a b)
+  | 7 => some (.variant a b)
   | _ => none
 
 def encodeClosure (width : Nat) (origin : ClosureRef) : Option (Array Bool) :=
@@ -57,15 +59,21 @@ def decodeClosure (width : Nat) (input : Array Bool) (offset : Nat) : ClosureRef
 def refusalCode : Refusal → Nat
   | .unbound => 0 | .missingCell => 1 | .missingField => 2
   | .wrongValue => 3 | .invalidUpdate => 4 | .capacity => 5
+  | .missingArm => 6 | .sharedEffect => 7
 def refusalOf : Nat → Option Refusal
   | 0 => some .unbound | 1 => some .missingCell | 2 => some .missingField
   | 3 => some .wrongValue | 4 => some .invalidUpdate | 5 => some .capacity
+  | 6 => some .missingArm | 7 => some .sharedEffect
   | _ => none
 
+theorem refusalOf_code (reason : Refusal) : refusalOf (refusalCode reason) = some reason := by
+  cases reason <;> rfl
+
 def primitiveCode : Primitive → Nat
-  | .add => 0 | .multiply => 1 | .equal => 2 | .conjunction => 3
+  | .add => 0 | .multiply => 1 | .equal => 2 | .conjunction => 3 | .labelEqual => 4
 def primitiveOf : Nat → Option Primitive
   | 0 => some .add | 1 => some .multiply | 2 => some .equal | 3 => some .conjunction
+  | 4 => some .labelEqual
   | _ => none
 
 def encodeCell (shape : Shape) : CellRef → Option (Array Bool)
@@ -95,6 +103,8 @@ def frameData : FrameRef → Nat × Nat × Nat × Nat
   | .condition zero successor environment => (7,zero,successor,environment)
   | .binaryLeft primitive right environment => (8,primitiveCode primitive,right,environment)
   | .binaryRight primitive _ => (9,primitiveCode primitive,0,0)
+  | .case arms environment => (10,arms,environment,0)
+  | .ifBool whenTrue whenFalse environment => (11,whenTrue,whenFalse,environment)
 
 /-- Physical update tag0 is shared with the actual thunk graph; other tags
 are shifted only where necessary, never inferred from semantic constructor order. -/
@@ -124,6 +134,8 @@ def decodeFrame (shape : Shape) (input : Array Bool) (offset : Nat) : Option Fra
   | 8 => pure (.binaryLeft (← primitiveOf a) b c)
   | 9 => pure (.binaryRight (← primitiveOf a)
       (← decodeValue shape.wordBits input (offset+4+shape.wordBits)))
+  | 10 => pure (.case a b)
+  | 11 => pure (.ifBool a b c)
   | _ => none
 
 def encodeControl (shape : Shape) : ControlRef → Option (Nat × Nat × Array Bool)
@@ -133,6 +145,7 @@ def encodeControl (shape : Shape) : ControlRef → Option (Nat × Nat × Array B
   | .blackhole address => if address < 2^shape.wordBits then some (3,address,bits shape.payloadBits 0) else none
   | .refused reason => some (4,refusalCode reason,bits shape.payloadBits 0)
   | .complete result => do pure (5,0,← encodeValue shape.wordBits result)
+  | .yielded plan => if plan < 2^shape.wordBits then some (6,plan,bits shape.payloadBits 0) else none
 
 def decodeControl (shape : Shape) (input : Array Bool) : Option ControlRef := do
   let address := number input 4 shape.wordBits
@@ -146,6 +159,7 @@ def decodeControl (shape : Shape) (input : Array Bool) : Option ControlRef := do
   | 3 => pure (.blackhole address)
   | 4 => pure (.refused (← refusalOf address))
   | 5 => pure (.complete (← decodeValue shape.wordBits input payload))
+  | 6 => pure (.yielded address)
   | _ => none
 
 def encode (shape : Shape) (state : StateRef) (suspended : Bool := false) : Option (Array Bool) := do
@@ -181,5 +195,6 @@ def represents (shape : Shape) (tables : Tables) (depth : Nat) (input : Array Bo
   ∃ reference suspended, decode shape input = some (reference,suspended) ∧
     ObjectiveDemandStorage.decode tables depth reference = some state
 
+#assert_axioms refusalOf_code
 end Minidregg.Compiler.ObjectiveDemandStateCodec
 

@@ -24,11 +24,16 @@ structure Table where
   deriving Repr, DecidableEq
 
 def primitiveTag : Primitive → Nat
-  | .add => 0 | .multiply => 1 | .equal => 2 | .conjunction => 3
+  | .add => 0 | .multiply => 1 | .equal => 2 | .conjunction => 3 | .labelEqual => 4
 
 def primitiveOf : Nat → Option Primitive
   | 0 => some .add | 1 => some .multiply | 2 => some .equal | 3 => some .conjunction
+  | 4 => some .labelEqual
   | _ => none
+
+/-- Row layout widths: a 5-bit opcode, a 3-bit primitive, then three words. -/
+def tagBits : Nat := 5
+def primitiveBits : Nat := 3
 
 def lowerRow (base : Nat) : Code → Row × List (Nat × Nat)
   | .bound a => (⟨0,a,0,0,0⟩,[])
@@ -49,6 +54,11 @@ def lowerRow (base : Nat) : Code → Row × List (Nat × Nat)
   | .record fields => (⟨15,base,fields.length,0,0⟩,fields)
   | .get a b => (⟨16,a,b,0,0⟩,[])
   | .ifZero a b c => (⟨17,a,b,c,0⟩,[])
+  | .inject name payload => (⟨18,name,payload,0,0⟩,[])
+  | .case a arms => (⟨19,a,base,arms.length,0⟩,arms)
+  | .ifBool a b c => (⟨20,a,b,c,0⟩,[])
+  | .perform a => (⟨21,a,0,0,0⟩,[])
+  | .done a => (⟨22,a,0,0,0⟩,[])
 
 def lower (program : Program) : Table :=
   program.code.foldl (fun table code =>
@@ -79,6 +89,11 @@ def decodeRow (fields : Array (Nat × Nat)) (row : Row) : Option Code := do
   | 15 => pure (.record (← fieldSlice fields row.a row.b))
   | 16 => pure (.get row.a row.b)
   | 17 => pure (.ifZero row.a row.b row.c)
+  | 18 => pure (.inject row.a row.b)
+  | 19 => pure (.case row.a (← fieldSlice fields row.b row.c))
+  | 20 => pure (.ifBool row.a row.b row.c)
+  | 21 => pure (.perform row.a)
+  | 22 => pure (.done row.a)
   | _ => none
 
 def decode (table : Table) : Option Program := do
@@ -87,7 +102,7 @@ def decode (table : Table) : Option Program := do
 def Table.fits (width maxFields : Nat) (table : Table) : Bool :=
   table.names.size < 2^width && table.rows.size < 2^width &&
   table.fields.size < 2^width && table.fields.size ≤ maxFields &&
-  table.rows.all (fun row => row.tag < 32 && row.primitive < 4 &&
+  table.rows.all (fun row => row.tag < 2^tagBits && row.primitive < 2^primitiveBits &&
     row.a < 2^width && row.b < 2^width && row.c < 2^width) &&
   table.fields.all (fun field => field.1 < 2^width && field.2 < 2^width)
 
@@ -106,7 +121,7 @@ def encode (program : Program) (width maxFields : Nat) : Option (Encoded program
 
 def natBits (width value : Nat) : Array Bool := (List.range width).toArray.map value.testBit
 def Row.bits (width : Nat) (row : Row) : Array Bool :=
-  natBits 5 row.tag ++ natBits 2 row.primitive ++ natBits width row.a ++ natBits width row.b ++ natBits width row.c
+  natBits tagBits row.tag ++ natBits primitiveBits row.primitive ++ natBits width row.a ++ natBits width row.b ++ natBits width row.c
 def Table.codeBits (width : Nat) (table : Table) : Array Bool :=
   table.rows.foldl (fun out row => out ++ row.bits width) #[]
 def Table.fieldBits (width : Nat) (table : Table) : Array Bool :=

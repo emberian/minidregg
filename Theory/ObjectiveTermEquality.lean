@@ -1,4 +1,5 @@
-/- Bounded, proof-producing structural comparison of Objective source syntax.
+/- Bounded, proof-producing structural comparison of Objective source syntax,
+every Core4 constructor (sums, the Boolean eliminator and activities included).
 Success contains equality of the actual terms; mismatch or exhausted public
 comparison fuel refuses. No classical equality oracle or old calculus import. -/
 import Theory.ObjectiveBendOpenRecursion
@@ -61,6 +62,22 @@ mutual
         let second ← termEqual fuel b e
         let third ← termEqual fuel c f
         pure ⟨by cases first.down; cases second.down; cases third.down; rfl⟩
+      | .inject name a,.inject other b =>
+        if names : name = other then do
+          let same ← termEqual fuel a b
+          pure ⟨by cases names; cases same.down; rfl⟩
+        else none
+      | .case a arms,.case b other => do
+        let first ← termEqual fuel a b
+        let second ← fieldsEqual fuel arms other
+        pure ⟨by cases first.down; cases second.down; rfl⟩
+      | .ifBool a b c,.ifBool d e f => do
+        let first ← termEqual fuel a d
+        let second ← termEqual fuel b e
+        let third ← termEqual fuel c f
+        pure ⟨by cases first.down; cases second.down; cases third.down; rfl⟩
+      | .perform a,.perform b => do let same ← termEqual fuel a b; pure ⟨by cases same.down; rfl⟩
+      | .done a,.done b => do let same ← termEqual fuel a b; pure ⟨by cases same.down; rfl⟩
       | _,_ => none
 
   def fieldsEqual : (fuel : Nat) → (left right : List (String × Term)) → Option (PLift (left = right))

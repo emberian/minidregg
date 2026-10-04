@@ -39,6 +39,9 @@ def value (fuel : Nat) : (left right : RuntimeValue) → Option (PLift (left = r
   | .prototype a b,.prototype c d => do
     let first ← scalar a c; let second ← scalar b d
     pure ⟨by cases first.down; cases second.down; rfl⟩
+  | .variant a p,.variant b q => do
+    let first ← scalar a b; let second ← scalar p q
+    pure ⟨by cases first.down; cases second.down; rfl⟩
   | _,_ => none
 
 def cell (fuel : Nat) : (left right : Cell) → Option (PLift (left = right))
@@ -52,10 +55,12 @@ def cell (fuel : Nat) : (left right : Cell) → Option (PLift (left = right))
 def refusalCode : Refusal → Nat
   | .unbound => 0 | .missingCell => 1 | .missingField => 2
   | .wrongValue => 3 | .invalidUpdate => 4 | .capacity => 5
+  | .missingArm => 6 | .sharedEffect => 7
 
 def refusalOf : Nat → Refusal
   | 1 => .missingCell | 2 => .missingField | 3 => .wrongValue
-  | 4 => .invalidUpdate | 5 => .capacity | _ => .unbound
+  | 4 => .invalidUpdate | 5 => .capacity | 6 => .missingArm | 7 => .sharedEffect
+  | _ => .unbound
 
 theorem refusal_roundtrip (r : Refusal) : refusalOf (refusalCode r) = r := by cases r <;> rfl
 
@@ -72,6 +77,7 @@ def control (fuel : Nat) : (left right : Control) → Option (PLift (left = righ
   | .returned a,.returned b => do let same ← value fuel a b; pure ⟨by cases same.down; rfl⟩
   | .complete a,.complete b => do let same ← value fuel a b; pure ⟨by cases same.down; rfl⟩
   | .refused a,.refused b => do let same ← refusal a b; pure ⟨by cases same.down; rfl⟩
+  | .yielded a,.yielded b => do let same ← scalar a b; pure ⟨by cases same.down; rfl⟩
   | _,_ => none
 
 def frame (fuel : Nat) : (left right : Frame) → Option (PLift (left = right))
@@ -93,6 +99,12 @@ def frame (fuel : Nat) : (left right : Frame) → Option (PLift (left = right))
   | .binaryRight p a,.binaryRight q b => do
     let prim ← scalar p q; let result ← value fuel a b
     pure ⟨by cases prim.down; cases result.down; rfl⟩
+  | .case a e,.case b f => do
+    let arms ← fieldsEqual fuel a b; let env ← scalar e f
+    pure ⟨by cases arms.down; cases env.down; rfl⟩
+  | .ifBool a b e,.ifBool c d f => do
+    let first ← termEqual fuel a c; let second ← termEqual fuel b d; let env ← scalar e f
+    pure ⟨by cases first.down; cases second.down; cases env.down; rfl⟩
   | _,_ => none
 
 def state (fuel : Nat) (left right : State) : Option (PLift (left = right)) := do
@@ -117,6 +129,9 @@ def outcome (fuel : Nat) : (left right : Outcome) → Option (PLift (left = righ
   | .refused a s,.refused b t => do
     let reason ← refusal a b; let states ← state fuel s t
     pure ⟨by cases reason.down; cases states.down; rfl⟩
+  | .yielded a s,.yielded b t => do
+    let plan ← scalar a b; let states ← state fuel s t
+    pure ⟨by cases plan.down; cases states.down; rfl⟩
   | _,_ => none
 
 #assert_axioms outcome
