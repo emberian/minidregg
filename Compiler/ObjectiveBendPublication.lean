@@ -1,8 +1,8 @@
 /- The typed core a source package publishes is a FUNCTION of the package.
 
 `replay` runs the Lean front end (`ObjectiveBendFrontEnd`) on the package's own
-source bytes: decode and fingerprint every module, parse it, lock each parsed
-import edge to the module the package says it targets, and lower the selected
+source bytes: decode and fingerprint every module, parse it, lock each of its
+parsed import edges to the module the package says it targets, lower the selected
 declaration in definition mode with the publication type fuel. `publishedCore`
 is the canonical bytes of the resulting typed-core packet.
 
