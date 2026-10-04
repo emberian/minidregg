@@ -19,7 +19,8 @@ definition, read at `Id` where a statement needs the verifier's verdicts.
   from the claims and the verdicts alone: neither `prepare` (the gate, the
   re-execution) nor the shape check is consulted.  Every receiver, any `prepare`.
 * `admit_ok_iff` -- admission is exactly: the claims resolve, every claim is
-  vouched for, preparation succeeds, the shape check passes.
+  vouched for, preparation succeeds, the shape check passes, and the written
+  cells' laws raise no fault.
 * `admitVia_vouches_only_verified`, `admitVia_claims_verified` -- the oracle
   `admitVia` builds vouches only for claims the verifier accepted, so an
   admitted ingress had every claim verified; `admitVia_unauthenticated` -- a
@@ -125,6 +126,13 @@ structure Receiver (J : Journal) where
     Except Reject (Prepared env state command)
   shape : {env : Env} → {state : J.State} → {command : Command} →
     Prepared env state command → Bool
+  /-- Why the laws of the written cells refuse a prepared patch. -/
+  Fault : Type
+  /-- The law check, after the physical shape: `none` when every written cell's
+  law admits the patch, else the first fault.  A function of the prepared value
+  alone, so replay and the audit walk re-derive the same verdict. -/
+  lawFault : {env : Env} → {state : J.State} → {command : Command} →
+    Prepared env state command → Option Fault
   txId : Env → Ingress → J.TxId
   event : Env → Ingress → J.Event
   nullifiers : Env → Ingress → List J.Nullifier
@@ -134,12 +142,14 @@ structure Receiver (J : Journal) where
 variable {J : Journal}
 
 /-- Every refusal a receiver can produce. -/
-inductive Refusal (Reject : Type) where
+inductive Refusal (Reject Fault : Type) where
   | malformed
   | family (reason : Reject)
   | unauthenticated (claim : SigQuery)
   | verifier (detail : String)
   | shape
+  /-- A written cell's law refused the patch; the receiver names why. -/
+  | law (fault : Fault)
   deriving Repr
 
 namespace Receiver
@@ -152,9 +162,10 @@ structure Accepted (env : R.Env) (state : J.State) (ingress : R.Ingress) where
   prepared : R.Prepared env state (R.command ingress)
 
 /-- Admission over a verdict oracle: authenticate every claim, then prepare,
-then check shape.  The order is the content of `admit_signature_first`. -/
+then check the physical shape, then the written cells' laws.  The order is the
+content of `admit_signature_first`. -/
 def admit (env : R.Env) (state : J.State) (ingress : R.Ingress) (ok : SigQuery → Bool) :
-    Except (Refusal R.Reject) (R.Accepted env state ingress) :=
+    Except (Refusal R.Reject R.Fault) (R.Accepted env state ingress) :=
   match R.claims env state ingress with
   | .error reason => .error (.family reason)
   | .ok claims =>
@@ -163,7 +174,12 @@ def admit (env : R.Env) (state : J.State) (ingress : R.Ingress) (ok : SigQuery �
       | none =>
           match R.prepare env state (R.command ingress) with
           | .error reason => .error (.family reason)
-          | .ok prepared => if R.shape prepared then .ok ⟨prepared⟩ else .error .shape
+          | .ok prepared =>
+              if R.shape prepared then
+                match R.lawFault prepared with
+                | none => .ok ⟨prepared⟩
+                | some fault => .error (.law fault)
+              else .error .shape
 
 /-- **Signature before any re-execution.**  When a claim is refused, admission
 is the `unauthenticated` refusal of the first refused claim -- a value fixed by
@@ -183,7 +199,7 @@ theorem admit_ok_iff {env : R.Env} {state : J.State} {ingress : R.Ingress}
       ∃ claims, R.claims env state ingress = .ok claims ∧
         (∀ claim ∈ claims, ok claim = true) ∧
         R.prepare env state (R.command ingress) = .ok accepted.prepared ∧
-        R.shape accepted.prepared = true := by
+        R.shape accepted.prepared = true ∧ R.lawFault accepted.prepared = none := by
   obtain ⟨prepared⟩ := accepted
   unfold admit
   constructor
@@ -199,13 +215,28 @@ theorem admit_ok_iff {env : R.Env} {state : J.State} {ingress : R.Ingress}
         · rename_i prepared' preparedEq
           split at admitted
           · rename_i shaped
-            cases admitted
-            exact ⟨claims, resolved, (firstRefused_none_iff ok claims).1 none_refused,
-              preparedEq, shaped⟩
+            split at admitted
+            · rename_i lawful
+              cases admitted
+              exact ⟨claims, resolved, (firstRefused_none_iff ok claims).1 none_refused,
+                preparedEq, shaped, lawful⟩
+            · cases admitted
           · cases admitted
-  · rintro ⟨claims, resolved, verified, preparedEq, shaped⟩
+  · rintro ⟨claims, resolved, verified, preparedEq, shaped, lawful⟩
     simp only [resolved, (firstRefused_none_iff ok claims).2 verified, preparedEq, shaped,
-      if_true]
+      lawful, if_true]
+
+/-- **A law fault refuses**, naming the fault: a patch that prepares and passes
+the physical shape but whose laws raise `fault` is refused `law fault`. -/
+theorem admit_law_refused {env : R.Env} {state : J.State} {ingress : R.Ingress}
+    {ok : SigQuery → Bool} {claims : List SigQuery}
+    {prepared : R.Prepared env state (R.command ingress)} {fault : R.Fault}
+    (resolved : R.claims env state ingress = .ok claims)
+    (verified : ∀ claim ∈ claims, ok claim = true)
+    (preparedEq : R.prepare env state (R.command ingress) = .ok prepared)
+    (shaped : R.shape prepared = true) (faulted : R.lawFault prepared = some fault) :
+    R.admit env state ingress ok = .error (.law fault) := by
+  simp [admit, resolved, (firstRefused_none_iff ok claims).2 verified, preparedEq, shaped, faulted]
 
 /-! ## The verifier, and admission through it -/
 
@@ -232,12 +263,20 @@ structure Admitted (env : R.Env) (state : J.State) (ingress : R.Ingress) where
   accepted : R.Accepted env state ingress
   admitted : R.admit env state ingress ok = .ok accepted
 
+/-- **Every admission is lawful**: its prepared patch passed the physical shape
+and its laws raised no fault. -/
+theorem Admitted.lawful {R : Receiver J} {env : R.Env} {state : J.State} {ingress : R.Ingress}
+    (admission : R.Admitted env state ingress) :
+    R.shape admission.accepted.prepared = true ∧ R.lawFault admission.accepted.prepared = none := by
+  obtain ⟨-, -, -, -, shaped, lawful⟩ := (R.admit_ok_iff admission.accepted).1 admission.admitted
+  exact ⟨shaped, lawful⟩
+
 /-- The one admission path: resolve claims, verify them, admit.  The live
 receiver and the audit walk both call this, so the walk's re-admission is the
 live admission. -/
 def admitVia {m : Type → Type} [Monad m] (verify : SigQuery → m (Except String Bool))
     (env : R.Env) (state : J.State) (ingress : R.Ingress) :
-    m (Except (Refusal R.Reject) (R.Admitted env state ingress)) := do
+    m (Except (Refusal R.Reject R.Fault) (R.Admitted env state ingress)) := do
   match R.claims env state ingress with
   | .error reason => pure (.error (.family reason))
   | .ok claims =>
@@ -331,7 +370,7 @@ inductive Outcome (env : R.Env) (state : J.State)
     (Exact : J.State → J.Intent → Type) (Other : Type) where
   | replayed (receipt : J.TxId × J.Event)
   | conflict
-  | refused (reason : Refusal R.Reject)
+  | refused (reason : Refusal R.Reject R.Fault)
   | committed (ingress : R.Ingress) (admission : R.Admitted env state ingress)
       (witness : Exact state (R.intent admission.accepted))
   | durable (ingress : R.Ingress) (outcome : Other)
@@ -417,7 +456,7 @@ theorem admitVia_claims_verified {env : R.Env} {state : J.State} {ingress : R.In
     {admission : R.Admitted env state ingress}
     (admitted : R.admitVia (pureVerifier v) env state ingress = (pure (.ok admission) : Id _)) :
     ∃ claims, R.claims env state ingress = .ok claims ∧ ∀ claim ∈ claims, v claim = true := by
-  obtain ⟨claims, resolved, vouched, -, -⟩ := (R.admit_ok_iff admission.accepted).1 admission.admitted
+  obtain ⟨claims, resolved, vouched, -, -, -⟩ := (R.admit_ok_iff admission.accepted).1 admission.admitted
   exact ⟨claims, resolved, fun claim member =>
     R.admitVia_vouches_only_verified v admitted claim (vouched claim member)⟩
 
@@ -496,6 +535,17 @@ theorem receive_committed_verified (v : SigQuery → Bool)
     ∃ claims, R.claims env state ingress = .ok claims ∧ ∀ claim ∈ claims, v claim = true :=
   R.admitVia_claims_verified v (R.receive_committed committed).2.2.1
 
+/-- **A committed ingress is lawful**: the admission a committed outcome carries
+passed the physical shape and raised no law fault. -/
+theorem receive_committed_lawFault {verify : SigQuery → Id (Except String Bool)}
+    {Exact : J.State → J.Intent → Type} {Other : Type}
+    {append : (state : J.State) → (intent : J.Intent) → Id (Commit (Exact state intent) Other)}
+    {env : R.Env} {state : J.State} {bytes : List UInt8} {ingress : R.Ingress}
+    {admission : R.Admitted env state ingress} {witness : Exact state (R.intent admission.accepted)}
+    (_committed : R.receive verify append env state bytes = pure (.committed ingress admission witness)) :
+    R.shape admission.accepted.prepared = true ∧ R.lawFault admission.accepted.prepared = none :=
+  admission.lawful
+
 end Verdicts
 
 end Receiver
@@ -538,6 +588,8 @@ def receiver : Receiver journal where
   claims := fun _ _ _ => .ok [key]
   prepare := fun _ _ _ => .ok ()
   shape := fun _ => true
+  Fault := Empty
+  lawFault := fun _ => none
   txId := fun _ ingress => ingress
   event := fun _ ingress => ingress + 1
   nullifiers := fun _ ingress => [ingress]
@@ -569,6 +621,9 @@ end Fixture
 #assert_axioms firstRefused_some
 #assert_axioms Receiver.admit_signature_first
 #assert_axioms Receiver.admit_ok_iff
+#assert_axioms Receiver.admit_law_refused
+#assert_axioms Receiver.Admitted.lawful
+#assert_axioms Receiver.receive_committed_lawFault
 #assert_axioms Receiver.guardsOff_readonly
 #assert_axioms Receiver.guardsOff_complete
 #assert_axioms Receiver.replay_only_original

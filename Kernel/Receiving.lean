@@ -8,26 +8,37 @@ journal.  This module instantiates that journal with the deployed durable layer
 append) and the native Ed25519 verifier, and turns a receiving `Family` -- what
 is specific to one operation -- into a `Theory.Receiving.Receiver`.
 
-A family supplies: the ingress codec, the command, the signature claims, the
-gate (`prepare`), the per-cell patch (`writes`, with its root binding), the
-cells it observed, its post law, its journal identity (`txId`, `event`,
-`nullifiers`), the signing subject and its witness bytes.  This module
-supplies, once: the read guards (`readGuards`, written cells removed), the
-physical shape check, the exact charge on every lane, the `DataIntent` with
-both construction obligations discharged, the receipt, `receiveLoaded`,
-`admitNative` (the audit walk's re-admission, the same function the live path
-runs), and `lookupLoaded`.
+A family supplies: its identity (`id`, the registry's `FamilyId`), the ingress
+codec, the command, the signature claims, the gate (`prepare`), the per-cell
+patch (`writes`, with its root binding), the law step it projects for each write
+(`lawStep`), the cells it observed, its physical post law, its journal identity
+(`txId`, `event`, `nullifiers`), the signing subject and its witness bytes.
+This module supplies, once: the read guards (`readGuards`, written cells
+removed, the laws' source cells added), the physical shape check, THE LAW
+JUDGEMENT of every written cell (`lawFault`, `Kernel.ReceivingLaw`: a family
+projects, the Receiver judges), the exact charge on every lane, the
+`DataIntent` with both construction obligations discharged, the receipt,
+`receiveLoaded`, `admitNative` (the audit walk's re-admission, the same
+function the live path runs), and `lookupLoaded`.
+
+The laws are read through a `ReceivingLaw.Laws` value; the deployed entry
+points (`receiveLoaded`, `admitNative`) take the deployment's compiler profile
+and install `Laws.physical` themselves (`receiveLoaded_laws`,
+`admitNative_laws`), so a host cannot hand a family another law source.
 
 Theorems: `lookup_install` (the store law the abstract replay theorem needs,
 over the real `Snapshot.install`), `execute_accepted_install`,
 `replay_after_execute` (the record the executor installs for an admission is
 the record replay confirms), `shape_sound` (the shape check means what it
-says about the loaded snapshot).
+says about the loaded snapshot), `shape_lawful` (an admitted patch's every
+written cell is lawful), `receive_committed_lawful` and
+`kernelOnly_writers_sound` (the same, for a committed outcome).
 -/
 import Compiler.DurableReceiverIO
 import Compiler.CredentialSignatureIO
 import Compiler.ResourceBirthCodec
 import Theory.Receiving
+import Kernel.ReceivingLaw
 
 namespace Minidregg.Kernel.Receiving
 
@@ -36,6 +47,9 @@ open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Theory.ResourceCost (Charge Lane)
 open Minidregg.Theory.TypedAuthorization (Digest SubjectId)
 open Minidregg.Theory.Receiving (SigQuery Journal Recorded Refusal Receiver)
+open Minidregg.Kernel.ReceivingLaw (Laws LawFault Lawful)
+open Minidregg.Compiler.CanonicalCellRegistry (FamilyId Kind LawClass)
+open Minidregg.Compiler.CanonicalPolicyAdmission (PolicyStepContext PolicyCompilerProfile)
 
 set_option autoImplicit false
 
@@ -113,6 +127,8 @@ theorem execute_accepted_install {before next : DataSnapshot rootBytes}
 
 /-- What is specific to one receiving operation. -/
 structure Family where
+  /-- The family's registry identity: the writer a `kernelOnly` row names. -/
+  id : FamilyId
   Env : Type
   Ingress : Type
   Command : Type
@@ -134,11 +150,18 @@ structure Family where
   writes_bound : ∀ {env : Env} {durable : Durable} {command : Command}
     (prepared : Prepared env durable command) (write : DataWrite),
     write ∈ writes prepared → rootBytes write.canonicalPostBytes = write.exactPost
+  /-- The law step of one write: the old and new predicate states of the real
+  pre and post stores, for the written cell's committed law.  `none` for a write
+  to a kernel-only cell.  The family projects; the Receiver judges. -/
+  lawStep : {env : Env} → {durable : Durable} → {command : Command} →
+    (prepared : Prepared env durable command) → (write : DataWrite) →
+    write ∈ writes prepared → Option PolicyStepContext
   /-- The cells the gate observed; `readGuards` removes the written ones. -/
   observed : {env : Env} → {durable : Durable} → {command : Command} →
     Prepared env durable command → List ReadGuard
-  /-- Family checks on the post images beyond the standard shape. -/
-  postLaw : {env : Env} → {durable : Durable} → {command : Command} →
+  /-- Physical well-formedness of the post images (`CellLaw` and the like).
+  Never a committed law: those are the Receiver's (`lawFault`). -/
+  physicalPostLaw : {env : Env} → {durable : Durable} → {command : Command} →
     Prepared env durable command → Bool
   txId : Env → Ingress → Digest
   event : Env → Ingress → StableEvent
@@ -153,40 +176,65 @@ variable (F : Family)
 
 instance : Repr F.Reject := F.rejectRepr
 
-variable {F} {env : F.Env} {durable : Durable} {command : F.Command}
+variable {F} (laws : Laws Durable) {env : F.Env} {durable : Durable} {command : F.Command}
 
-/-- The read guards: observed cells the patch does not write. -/
+/-- **The law judgement**, every family: the first fault the written cells' laws
+raise against the patch (`ReceivingLaw.lawFault` on the family's own writes and
+steps, under its own identity), on the loaded state it prepared against. -/
+def lawFault (prepared : F.Prepared env durable command) : Option LawFault :=
+  ReceivingLaw.lawFault laws F.id durable (F.writes prepared) (F.lawStep prepared)
+
+def lawful (prepared : F.Prepared env durable command) : Bool := (lawFault laws prepared).isNone
+
+/-- The read guards: observed cells the patch does not write, and the source
+cells of every law-bearing write's committed law (`ReceivingLaw.lawGuards`). -/
 def readGuards (prepared : F.Prepared env durable command) : List ReadGuard :=
-  Receiver.guardsOff DataWrite.cellId ReadGuard.cellId (F.writes prepared) (F.observed prepared)
+  Receiver.guardsOff DataWrite.cellId ReadGuard.cellId (F.writes prepared)
+    (F.observed prepared ++ ReceivingLaw.lawGuards laws durable (F.writes prepared) (F.lawStep prepared))
 
 /-- The physical shape every receiver checks before it emits an intent:
 distinct written cells, each write's expected pre-root and each guard's root
-current in the loaded snapshot, and the family's post law. -/
+current in the loaded snapshot, and the family's physical post law. -/
 def shape (prepared : F.Prepared env durable command) : Bool :=
   decide ((F.writes prepared).map DataWrite.cellId).Nodup &&
     (F.writes prepared).all (fun write =>
       decide (write.expectedPre = durable.snapshot.model.roots write.cellId)) &&
-    (readGuards prepared).all (fun guard =>
+    (readGuards laws prepared).all (fun guard =>
       decide (guard.expectedRoot = durable.snapshot.model.roots guard.cellId)) &&
-    F.postLaw prepared
+    F.physicalPostLaw prepared
 
 /-- **The shape check means what it says.** -/
-theorem shape_sound {prepared : F.Prepared env durable command} (shaped : shape prepared = true) :
+theorem shape_sound {prepared : F.Prepared env durable command} (shaped : shape laws prepared = true) :
     ((F.writes prepared).map DataWrite.cellId).Nodup ∧
       (∀ write ∈ F.writes prepared, write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
-      (∀ guard ∈ readGuards prepared,
+      (∀ guard ∈ readGuards laws prepared,
         guard.expectedRoot = durable.snapshot.model.roots guard.cellId) ∧
-      F.postLaw prepared = true := by
+      F.physicalPostLaw prepared = true := by
   simpa [shape, List.all_eq_true, and_assoc] using shaped
+
+/-- **Every written cell of an admitted patch is lawful.**  When the shape check
+and the law judgement pass, every write is either to a `lawBearing` cell, not a
+birth, whose committed law resolved on the family's step with both compiler
+verdicts true and `Pred.eval` accepting the step; or to a `kernelOnly writers`
+cell, with no step, by a family its row names. -/
+theorem shape_lawful {prepared : F.Prepared env durable command}
+    (shaped : shape laws prepared = true) (judged : lawful laws prepared = true) :
+    F.physicalPostLaw prepared = true ∧
+      ∀ write (member : write ∈ F.writes prepared),
+        Lawful laws F.id durable write (F.lawStep prepared write member) := by
+  refine ⟨(shape_sound laws shaped).2.2.2, ?_⟩
+  have none_ : lawFault laws prepared = none := by
+    simpa [lawful, Option.isNone_iff_eq_none] using judged
+  exact (ReceivingLaw.lawFault_none_iff laws F.id durable _ _).1 none_
 
 variable (F)
 
 /-- The exact charge, one definition for every family. -/
-def charge (env : F.Env) (durable : Durable) (ingress : F.Ingress)
+def charge (laws : Laws Durable) (env : F.Env) (durable : Durable) (ingress : F.Ingress)
     (prepared : F.Prepared env durable (F.command ingress)) : Charge
   | .incidences => 1
   | .turnBytes => (F.bytes ingress).length
-  | .memoryTouches => (F.writes prepared).length + (readGuards prepared).length
+  | .memoryTouches => (F.writes prepared).length + (readGuards laws prepared).length
   | .storageBytes => ((F.writes prepared).map fun write => write.canonicalPostBytes.length).sum
   | .witnessBytes => F.witnessBytes ingress
   | .proofWork =>
@@ -195,17 +243,18 @@ def charge (env : F.Env) (durable : Durable) (ingress : F.Ingress)
       | .error _ => 0
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
 
-def payload {env : F.Env} {durable : Durable} (ingress : F.Ingress)
+def payload (laws : Laws Durable) {env : F.Env} {durable : Durable} (ingress : F.Ingress)
     (prepared : F.Prepared env durable (F.command ingress)) : Payload where
   writes := F.writes prepared
-  readGuards := readGuards prepared
-  exactCharge := F.charge env durable ingress prepared
+  readGuards := readGuards laws prepared
+  exactCharge := F.charge laws env durable ingress prepared
   subject := F.subject ingress
   postRootsBound := F.writes_bound prepared
   guardsReadOnly := fun _ member => Receiver.guardsOff_readonly member
 
-/-- The family as a `Theory.Receiving.Receiver` over the deployed journal. -/
-def receiver : Receiver journal where
+/-- The family as a `Theory.Receiving.Receiver` over the deployed journal,
+judged by `laws`. -/
+def receiver (laws : Laws Durable) : Receiver journal where
   Env := F.Env
   Ingress := F.Ingress
   Command := F.Command
@@ -215,15 +264,20 @@ def receiver : Receiver journal where
   command := F.command
   claims := F.claims
   prepare := F.prepare
-  shape := fun prepared => shape prepared
+  shape := fun prepared => shape laws prepared
+  Fault := LawFault
+  lawFault := fun prepared => lawFault laws prepared
   txId := F.txId
   event := F.event
   nullifiers := F.nullifiers
-  payload := fun ingress prepared => F.payload ingress prepared
+  payload := fun ingress prepared => F.payload laws ingress prepared
 
 /-- `F.receiver.Reject` is `F.Reject` by definition, but instance search does not unfold
 `receiver`: a refusal of the receiver prints with the family's own `Repr`. -/
-instance receiverRejectRepr : Repr F.receiver.Reject := F.rejectRepr
+instance receiverRejectRepr (laws : Laws Durable) : Repr (F.receiver laws).Reject := F.rejectRepr
+
+instance receiverFaultRepr (laws : Laws Durable) : Repr (F.receiver laws).Fault :=
+  inferInstanceAs (Repr LawFault)
 
 /-! ## Native verification and the durable append -/
 
@@ -258,20 +312,45 @@ def verifyNative (native : CredentialSignatureIO.NativeConfig) (claim : SigQuery
   | .error reason => pure (.error s!"{repr reason}")
   | .ok verdict => pure (.ok verdict)
 
-abbrev Outcome (env : F.Env) (durable : Durable) :=
-  F.receiver.Outcome env durable Appended Settled
+abbrev Outcome (laws : Laws Durable) (env : F.Env) (durable : Durable) :=
+  (F.receiver laws).Outcome env durable Appended Settled
 
-/-- **The receiver**, every family: `Theory.Receiving.Receiver.receive` in `IO`. -/
-def receiveLoaded (native : CredentialSignatureIO.NativeConfig)
+/-- **The receiver**, every family: `Theory.Receiving.Receiver.receive` in `IO`,
+judged by the deployment's laws (`Laws.physical` of its compiler profile). -/
+def receiveLoaded {Fld : Type} [Field Fld] [DecidableEq Fld]
+    (profile : PolicyCompilerProfile Fld) (deployment : CanonicalCellRegistry.Deployment)
+    (native : CredentialSignatureIO.NativeConfig)
     (transport : DurableReceiverIO.Transport) (env : F.Env) (durable : Durable)
-    (bytes : List UInt8) : IO (F.Outcome env durable) :=
-  F.receiver.receive (verifyNative native) (appendNative transport) env durable bytes
+    (bytes : List UInt8) : IO (F.Outcome (Laws.physical profile deployment) env durable) :=
+  (F.receiver (Laws.physical profile deployment)).receive (verifyNative native)
+    (appendNative transport) env durable bytes
+
+/-- **The live receiver judges by the deployed laws**: the host chooses the
+profile and deployment, never the law source. -/
+theorem receiveLoaded_laws {Fld : Type} [Field Fld] [DecidableEq Fld]
+    (profile : PolicyCompilerProfile Fld) (deployment : CanonicalCellRegistry.Deployment)
+    (native : CredentialSignatureIO.NativeConfig) (transport : DurableReceiverIO.Transport)
+    (env : F.Env) (durable : Durable) (bytes : List UInt8) :
+    F.receiveLoaded profile deployment native transport env durable bytes =
+      (F.receiver (Laws.physical profile deployment)).receive (verifyNative native)
+        (appendNative transport) env durable bytes := rfl
 
 /-- The audit walk's re-admission: the live admission path, exactly. -/
-def admitNative (native : CredentialSignatureIO.NativeConfig) (env : F.Env)
+def admitNative {Fld : Type} [Field Fld] [DecidableEq Fld]
+    (profile : PolicyCompilerProfile Fld) (deployment : CanonicalCellRegistry.Deployment)
+    (native : CredentialSignatureIO.NativeConfig) (env : F.Env)
     (durable : Durable) (ingress : F.Ingress) :
-    IO (Except (Refusal F.Reject) (F.receiver.Admitted env durable ingress)) :=
-  F.receiver.admitVia (verifyNative native) env durable ingress
+    IO (Except (Refusal F.Reject LawFault)
+      ((F.receiver (Laws.physical profile deployment)).Admitted env durable ingress)) :=
+  (F.receiver (Laws.physical profile deployment)).admitVia (verifyNative native) env durable ingress
+
+theorem admitNative_laws {Fld : Type} [Field Fld] [DecidableEq Fld]
+    (profile : PolicyCompilerProfile Fld) (deployment : CanonicalCellRegistry.Deployment)
+    (native : CredentialSignatureIO.NativeConfig) (env : F.Env) (durable : Durable)
+    (ingress : F.Ingress) :
+    F.admitNative profile deployment native env durable ingress =
+      (F.receiver (Laws.physical profile deployment)).admitVia (verifyNative native) env durable
+        ingress := rfl
 
 structure Receipt where
   transactionId : Digest
@@ -282,30 +361,79 @@ def receipt (env : F.Env) (ingress : F.Ingress) : Receipt :=
   ⟨F.txId env ingress, (F.event env ingress).eventId⟩
 
 /-- Receipt-only lookup: the journal, never fresh work. -/
-def lookupLoaded (env : F.Env) (durable : Durable) (ingress : F.Ingress) :
+def lookupLoaded (laws : Laws Durable) (env : F.Env) (durable : Durable) (ingress : F.Ingress) :
     Option (Except Unit Receipt) :=
-  (F.receiver.replay env durable ingress).map fun selected =>
+  ((F.receiver laws).replay env durable ingress).map fun selected =>
     selected.map fun _ => F.receipt env ingress
 
 /-- **Replay after the executor commits.**  When the executor accepts an
 admission's intent on the loaded snapshot, any later loaded state at that
 snapshot looks the same ingress up as confirmed with the same receipt. -/
-theorem replay_after_execute {env : F.Env} {durable : Durable} {ingress : F.Ingress}
-    (accepted : F.receiver.Accepted env durable ingress) {next : DataSnapshot rootBytes}
+theorem replay_after_execute {laws : Laws Durable} {env : F.Env} {durable : Durable}
+    {ingress : F.Ingress}
+    (accepted : (F.receiver laws).Accepted env durable ingress) {next : DataSnapshot rootBytes}
     (executed : DurableDataIntent.execute .complete durable.snapshot
-      (F.receiver.intent accepted) = .accepted next)
+      ((F.receiver laws).intent accepted) = .accepted next)
     (later : Durable) (atNext : later.snapshot = next) :
-    F.lookupLoaded env later ingress = some (.ok (F.receipt env ingress)) := by
-  have replayed := F.receiver.replay_after_install accepted later durable.snapshot
+    F.lookupLoaded laws env later ingress = some (.ok (F.receipt env ingress)) := by
+  have replayed := (F.receiver laws).replay_after_install accepted later durable.snapshot
     (by rw [show journal.snap later = later.snapshot from rfl, atNext,
       execute_accepted_install executed])
   simp [lookupLoaded, replayed, Except.map]
+
+/-! ## A committed write was judged -/
+
+/-- **A committed outcome's every written cell is lawful.**  Exactly
+`receive_committed`'s premises, at `Id`: the admission a committed outcome
+carries wrote only cells whose laws admit it -- a `lawBearing` cell (not a
+birth) under its own committed law resolved on the loaded state, with both
+compiler verdicts and `Pred.eval` true on the family's step; or a `kernelOnly`
+cell its row lets this family write.  Every family on `Family`, any `prepare`. -/
+theorem receive_committed_lawful {laws : Laws Durable}
+    {verify : SigQuery → Id (Except String Bool)}
+    {Exact : Durable → DataIntent rootBytes → Type} {Other : Type}
+    {append : (state : Durable) → (intent : DataIntent rootBytes) →
+      Id (Receiver.Commit (Exact state intent) Other)}
+    {env : F.Env} {durable : Durable} {bytes : List UInt8} {ingress : F.Ingress}
+    {admission : (F.receiver laws).Admitted env durable ingress}
+    {witness : Exact durable ((F.receiver laws).intent admission.accepted)}
+    (committed : (F.receiver laws).receive verify append env durable bytes =
+      pure (.committed ingress admission witness)) :
+    ∀ write (member : write ∈ F.writes admission.accepted.prepared),
+      Lawful laws F.id durable write (F.lawStep admission.accepted.prepared write member) := by
+  obtain ⟨shaped, faultless⟩ := (F.receiver laws).receive_committed_lawFault committed
+  exact (shape_lawful laws shaped (by simpa [lawful, Option.isNone_iff_eq_none] using faultless)).2
+
+/-- **Only the named families write a kernel-only cell**: in a committed
+outcome of family `F`, every written cell of a `kernelOnly writers` kind has
+`F.id ∈ writers`.  The registry review cites this. -/
+theorem kernelOnly_writers_sound {laws : Laws Durable}
+    {verify : SigQuery → Id (Except String Bool)}
+    {Exact : Durable → DataIntent rootBytes → Type} {Other : Type}
+    {append : (state : Durable) → (intent : DataIntent rootBytes) →
+      Id (Receiver.Commit (Exact state intent) Other)}
+    {env : F.Env} {durable : Durable} {bytes : List UInt8} {ingress : F.Ingress}
+    {admission : (F.receiver laws).Admitted env durable ingress}
+    {witness : Exact durable ((F.receiver laws).intent admission.accepted)}
+    (committed : (F.receiver laws).receive verify append env durable bytes =
+      pure (.committed ingress admission witness)) :
+    ∀ write ∈ F.writes admission.accepted.prepared, ∀ (kind : Kind) (writers : List FamilyId),
+      laws.kindOf durable write = some kind → kind.lawClass = .kernelOnly writers →
+        F.id ∈ writers := by
+  intro write member kind writers kindEq row
+  obtain ⟨-, faultless⟩ := (F.receiver laws).receive_committed_lawFault committed
+  exact ReceivingLaw.kernelOnly_writers laws F.id durable faultless member kindEq row
 
 end Family
 
 #assert_axioms lookup_install
 #assert_axioms execute_accepted_install
 #assert_axioms Family.shape_sound
+#assert_axioms Family.shape_lawful
 #assert_axioms Family.replay_after_execute
+#assert_axioms Family.receiveLoaded_laws
+#assert_axioms Family.admitNative_laws
+#assert_axioms Family.receive_committed_lawful
+#assert_axioms Family.kernelOnly_writers_sound
 
 end Minidregg.Kernel.Receiving

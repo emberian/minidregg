@@ -18,7 +18,10 @@ The family declares:
   the verifier's actual verdict), a fresh public key, an Ed25519 key shape, an
   unspent marker, and the validated patch;
 * the patch (`writes`): `KeyPreRotation.patch`, the subject's key rows only,
-  as the authority cell's one write;
+  as the authority cell's one write.  The authority cell is `kernelOnly` in
+  the registry with this family among its writers, so the Receiver's law
+  judgement admits the write with no law step (`lawStep` is `none`) and adds
+  no guard: the intent is byte-identical to the pre-judgement one;
 * the journal identity: the operation marker is the transaction id and the
   durable nullifier, so an exact rotation is admitted once; a second rotation
   needs the next commitment, so a replayed ingress fails the gate as well.
@@ -33,6 +36,7 @@ replay are unchanged.
 import Compiler.SigningKeyCommitment
 import Kernel.ParticipantKeyEnrollment
 import Kernel.Receiving
+import Kernel.ReceivingLaw
 import Theory.KeyPreRotation
 
 namespace Minidregg.Kernel.SubjectKeyRotation
@@ -236,7 +240,7 @@ theorem writes_roots_bound (prepared : Prepared env durable command)
   subst write
   exact prepared.authority.write_root_bound _
 
-def postLaw (prepared : Prepared env durable command) : Bool :=
+def physicalPostLaw (prepared : Prepared env durable command) : Bool :=
   (writes prepared).all fun write =>
     decide (ResourceBirthController.Concrete.PhysicalPostLaw env.deployment write)
 
@@ -257,6 +261,7 @@ def nullifier (domain semantics : Digest) (ingress : DecodedIngress) : StableNul
 /-! ## The family -/
 
 def family : Receiving.Family where
+  id := .subjectKeyRotation
   Env := Env
   Ingress := DecodedIngress
   Command := Command
@@ -270,8 +275,10 @@ def family : Receiving.Family where
   prepare := prepare
   writes := writes
   writes_bound := writes_roots_bound
+  -- The one write is the authority cell, kernel-only: no committed law to project for.
+  lawStep := fun _ _ _ => none
   observed := fun prepared => prepared.authority.readGuards
-  postLaw := postLaw
+  physicalPostLaw := physicalPostLaw
   txId := fun env ingress => transactionId env.deployment.domain env.semantics ingress
   event := fun env ingress => event env.deployment.domain env.semantics ingress
   nullifiers := fun env ingress => [nullifier env.deployment.domain env.semantics ingress]
@@ -279,26 +286,44 @@ def family : Receiving.Family where
   subject := fun ingress => some ingress.command.subject
   witnessBytes := fun ingress => ingress.ingress.possessionSignature.length
 
-abbrev receiver := family.receiver
+abbrev receiver (laws : ReceivingLaw.Laws Durable) := family.receiver laws
+
+/-- **The law judgement leaves the rotation's intent as it was.**  The one write
+is to the kernel-only authority cell with no step, so whatever laws the Receiver
+judges by, the record's read guards are exactly the authority guards off the
+written cell -- the pre-judgement payload, byte for byte (writes, nullifier,
+event, subject and every charge lane are untouched by the judgement). -/
+theorem readGuards_unjudged (laws : ReceivingLaw.Laws Durable)
+    {env : Env} {durable : Durable} {command : Command} (prepared : Prepared env durable command) :
+    Receiving.Family.readGuards (F := family) laws prepared =
+      Minidregg.Theory.Receiving.Receiver.guardsOff DataWrite.cellId ReadGuard.cellId
+        (writes prepared) prepared.authority.readGuards := by
+  have none_ : ReceivingLaw.lawGuards laws durable (family.writes prepared)
+      (family.lawStep prepared) = [] := by
+    show ReceivingLaw.lawGuards laws durable (writes prepared) (fun _ _ => none) = []
+    rw [ReceivingLaw.lawGuards_uniform]
+    simp [ReceivingLaw.writeGuards]
+  simp only [Receiving.Family.readGuards, none_, List.append_nil]
+  rfl
 
 /-! ## What an admission means here -/
 
-variable {ingress : DecodedIngress}
+variable {ingress : DecodedIngress} {laws : ReceivingLaw.Laws Durable}
 
 /-- **An admitted rotation's possession signature was vouched for**: the
 verdict oracle of the admission accepts the new key's signature over this
 command's possession frame. -/
-theorem admitted_possession (admission : receiver.Admitted env durable ingress) :
+theorem admitted_possession (admission : (receiver laws).Admitted env durable ingress) :
     admission.ok (claim env ingress) = true := by
-  obtain ⟨claims, resolved, vouched, -, -⟩ :=
-    (receiver.admit_ok_iff admission.accepted).1 admission.admitted
+  obtain ⟨claims, resolved, vouched, -, -, -⟩ :=
+    ((receiver laws).admit_ok_iff admission.accepted).1 admission.admitted
   cases resolved
   exact vouched _ (List.mem_singleton_self _)
 
 /-- **The gate under the verifier's verdict.**  An admitted rotation passes
 `KeyPreRotation.gate` with the oracle that vouches for the new key exactly when
 the verifier accepted its possession signature (`presented`). -/
-theorem admitted_gate (admission : receiver.Admitted env durable ingress) :
+theorem admitted_gate (admission : (receiver laws).Admitted env durable ingress) :
     let prepared : Prepared env durable ingress.command := admission.accepted.prepared
     KeyPreRotation.gate nextKeyDigest prepared.authority.snapshot.logical
         ingress.command.rotation (presented ingress.command (admission.ok (claim env ingress))) =
@@ -311,10 +336,10 @@ theorem admitted_gate (admission : receiver.Admitted env durable ingress) :
 verifier refuses is refused `unauthenticated` before the gate runs. -/
 theorem refused_possession_unauthenticated (v : SigQuery → Bool)
     (refused : v (claim env ingress) = false) :
-    receiver.admitVia (Minidregg.Theory.Receiving.Receiver.pureVerifier v) env durable ingress =
+    (receiver laws).admitVia (Minidregg.Theory.Receiving.Receiver.pureVerifier v) env durable ingress =
       (pure (.error (.unauthenticated (claim env ingress))) : Id _) := by
   obtain ⟨selected, member, admitted⟩ :=
-    receiver.admitVia_unauthenticated v (claims := [claim env ingress]) rfl
+    (receiver laws).admitVia_unauthenticated v (claims := [claim env ingress]) rfl
       (List.mem_singleton_self _) refused
   rw [List.mem_singleton.mp member] at admitted
   exact admitted
@@ -361,6 +386,7 @@ def status (logical : Store CredentialAuthorityState.layout) (subject : SubjectI
     (logical ⟨.revoked, signingKeyRevocation current⟩).isSome⟩
 
 #assert_axioms Prepared.precommitted
+#assert_axioms readGuards_unjudged
 #assert_axioms writes_roots_bound
 #assert_axioms admitted_possession
 #assert_axioms admitted_gate

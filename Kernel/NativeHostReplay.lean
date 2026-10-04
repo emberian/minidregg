@@ -715,6 +715,11 @@ def LifetimeDispatchAt.intent {config : Config} {opened : Opened config}
 def rotationEnv (config : Config) : SubjectKeyRotation.Env :=
   ⟨config.deployment, config.profile.semantics⟩
 
+/-- The laws every `Kernel.Receiving` family is judged by on this host: the
+deployment's committed laws under its own compiler profile. -/
+def receivingLaws (config : Config) : ReceivingLaw.Laws Durable :=
+  ReceivingLaw.Laws.physical config.profile.compilerProfile config.deployment
+
 /-- Evidence is one of the actual privately admitted receiving objects,
 never a policy decision, signature Boolean, or arbitrary DataIntent handed in
 from outside. -/
@@ -770,8 +775,10 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (ParticipantKeyEnrollmentReceiver.intent accepted)
   | subjectKeyRotation {ingress : SubjectKeyRotation.DecodedIngress}
-      (admission : SubjectKeyRotation.receiver.Admitted (rotationEnv config) opened.durable ingress) :
-      NativeAdmission config opened (SubjectKeyRotation.receiver.intent admission.accepted)
+      (admission : (SubjectKeyRotation.receiver (receivingLaws config)).Admitted (rotationEnv config)
+        opened.durable ingress) :
+      NativeAdmission config opened ((SubjectKeyRotation.receiver (receivingLaws config)).intent
+        admission.accepted)
   | subjectKeyCommitmentAdoption {ingress : SubjectKeyCommitmentAdoption.DecodedIngress}
       (accepted : SubjectKeyCommitmentAdoption.AcceptedAdoption config.deployment config.profile.semantics
         opened.durable ingress) :
@@ -1754,11 +1761,11 @@ private def derive (config : Config) (opened : Opened config)
         return .ok ⟨ParticipantKeyEnrollmentReceiver.intent accepted,
           .participantKeyEnrollment accepted, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := SubjectKeyRotation.decodeIngress bytes then
-    match ← SubjectKeyRotation.family.admitNative config.signature (rotationEnv config)
-        opened.durable ingress with
+    match ← SubjectKeyRotation.family.admitNative config.profile.compilerProfile config.deployment
+        config.signature (rotationEnv config) opened.durable ingress with
     | .error reason => return .error s!"subject key rotation refused: {repr reason}"
     | .ok admission =>
-        return .ok ⟨SubjectKeyRotation.receiver.intent admission.accepted,
+        return .ok ⟨(SubjectKeyRotation.receiver (receivingLaws config)).intent admission.accepted,
           .subjectKeyRotation admission, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := SubjectKeyCommitmentAdoption.decodeIngress bytes then
     match ← SubjectKeyCommitmentAdoption.admitDecodedNative config.deployment config.profile.semantics

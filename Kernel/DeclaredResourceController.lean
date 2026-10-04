@@ -639,12 +639,11 @@ def kindDependencies (prepared : PreparedInvocation deployment profile ambient d
 def policyConfigFromStep [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (incidence : Incidence command) (context : PolicyStepContext) : ComposedPolicyAdmission.Config F :=
-  PhysicalLawResolution.config profile.compilerProfile prepared.authority.snapshot
+  PhysicalLawResolution.targetConfig deployment profile.compilerProfile prepared.authority.snapshot
     prepared.directory.directory
     (sourceCapabilityPortal prepared.authority.snapshot
       (operationMarker prepared.authority.snapshot.domain profile.semantics command))
     context (incidenceTarget command incidence).target
-    ((kindDependencies prepared incidence).map (·.additional) |>.getD [])
 
 def policyConfig [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
@@ -689,11 +688,14 @@ def authorizeLeg [DecidableEq F]
   let _ ← requireSome .policyUnavailable (kindDependencies prepared incidence)
   let evidence ← requireSome .capabilityRejected
     (config.capabilityEvidenceChecked wanted capability () signature () (fun _ => ())).toOption
-  let law ← requireSome .policyUnavailable config.resolve?
+  -- The one law judgement (`PhysicalLawResolution.judge`), shared with the Receiver's
+  -- `ReceivingLaw.Laws.physical`: resolve, then the range and cast verdicts on this step.
+  let judged ← requireSome .policyUnavailable (PhysicalLawResolution.judge config)
+  let law := judged.law
   let witness := law.witness
-  if inputsInRange profile.compilerProfile.compiler law.predicate context.oldState context.newState != true then
+  if judged.inRange != true then
     throw .policyInputRange
-  if !decide (castInjOn F (intsOf law.predicate context.oldState context.newState)) then
+  if !judged.castsInjective then
     throw .policyCastAlias
   requireSome .policyRejected (law.admit wanted evidence witness
     (.policy wanted.policyId wanted.policyRevision)

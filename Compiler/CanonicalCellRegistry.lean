@@ -26,6 +26,26 @@ the hyperdocument event record (`VersionEventRecord.historyDomain`, hashed into
 the event id and supplied by the authoring request), so the event-history law
 requires every recorded event to name this deployment's domain
 (`foreign_domain_event_refused`).
+
+**Laws on write (`Kind.lawClass`).**  Every kind is classified, with no default
+arm: a `lawBearing` cell carries a committed law (`PhysicalLawResolution`, keyed
+by the cell's id) and the Receiver (`Kernel.ReceivingLaw`) judges that law on
+every write, whoever proposes it; a `kernelOnly` cell carries no user law and
+only the families its row names may write it (`Kernel.ReceivingLaw.kernelOnly_writers`).  The
+table was measured at main 3b709c87 (lane LAWS-RECEIVER census).  Three kinds
+have writers today that do not judge the cell's own law: `pay` (PayBook,
+PayClaim, PayEnrol, PayAssignment judge the factory or account law; DRC compute
+judges none), `clock` (PayObservation and PayEnrol advance it under the pay or
+factory law) and `stream` (FleetTurn checks only `CellLaw` on a topic head).
+They are `lawBearing` here, and each of those families meets the cell's own law
+when it moves onto `Kernel.Receiving.Family`.
+
+**Next obligation (births).**  A newborn has no committed law at its fresh
+pre-image; it is judged by its parent's export law (the factory for
+`declaredObject`, the world kind for `worldInstance`, the head for
+`streamEntry`).  Until `birthParent` exists here, the Receiver refuses a
+law-bearing birth (`lawUnavailable … birth`).  No family on `Family` writes one
+yet; the lane that migrates the birth families adds `birthParent`.
 -/
 import Compiler.WorldKindCell
 import Compiler.DeclaredEffectCell
@@ -81,7 +101,10 @@ inductive Kind where
   /-- A Nock program cell (`NockProgramCodec`): jam + ABI, keyed by programId. -/
   | nockProgram
   /-- The deployment's one clock (`Kernel.ClockCell`): unix seconds and the
-  last observed chain slot, advanced only by `ClockTickReceiver`. -/
+  last observed chain slot.  `ClockTickReceiver` advances it under the clock's
+  own committed law; PayObservation and PayEnrol(V2) also advance it today
+  WITHOUT judging that law (measured at 3b709c87: a live bypass, cv task
+  01a1087d-8a58), until they move onto `Kernel.Receiving.Family`. -/
   | clock
   /-- The deployment's system cell (`Kernel.SystemCell`): the certified head
   and the tail bound `L`, written only by a certify record. -/
@@ -97,6 +120,123 @@ inductive Kind where
 def Kind.all : List Kind :=
   [.content, .eventHistory, .authority, .declaredObject,
     .resourceBook, .accountMetadata, .declaredProgram, .policySource, .pay, .stream, .nockProgram, .clock, .streamEntry, .system, .worldKind, .worldInstance, .objectiveActivity]
+
+/-! ## Who may write which kind -/
+
+/-- The receiving families, one constructor each: the writers a `kernelOnly` row
+names.  A family on `Kernel.Receiving.Family` carries its own constructor. -/
+inductive FamilyId where
+  | declaredResourceController
+  | subjectKeyRotation
+  | subjectKeyCommitmentAdoption
+  | participantKeyEnrollment
+  | participantFactoryProvisioning
+  | capabilityDelegation
+  | capabilityRevocation
+  | capabilityRenounce
+  | policyInstall
+  | resourceBirth
+  | grainResourceBirth
+  | applicationShareIssue
+  | applicationShareIssueGrain
+  | applicationAgentLifetimeGrant
+  | clockTick
+  | certify
+  | payBook
+  | payAssignment
+  | payObservation
+  | payClaim
+  | payEnrol
+  | payEnrolV2
+  | realmWell
+  | purseRefill
+  | jobMoney
+  | fleetTurn
+  | objectiveActivity
+  deriving DecidableEq, Repr
+
+/-- How a cell kind is judged on write. -/
+inductive LawClass where
+  /-- Its committed law (`PhysicalLawResolution`, at the cell's id) judges every write. -/
+  | lawBearing
+  /-- No user law; only the named kernel families may write it. -/
+  | kernelOnly (writers : List FamilyId)
+  deriving DecidableEq, Repr
+
+/-- The writers of the authority cell, each with what it changes there.  A
+writer here is permitted to skip a user law, never to write arbitrary authority:
+bounding each family's authority fields by a shape lemma is cv task 01a10887-e79f. -/
+def authorityWriters : List FamilyId :=
+  [ .subjectKeyRotation               -- the subject's key rows (KeyPreRotation.patch)
+  , .subjectKeyCommitmentAdoption     -- the subject's next-key commitment
+  , .participantKeyEnrollment         -- a new participant's key record
+  , .participantFactoryProvisioning   -- a participant's factory grant
+  , .capabilityDelegation             -- a delegated capability grant
+  , .capabilityRevocation             -- a revocation entry
+  , .capabilityRenounce               -- the holder's own grant, removed
+  , .policyInstall                    -- policy head/revision/address rows
+  , .resourceBirth                    -- the newborns' control grants, the spent marker
+  , .grainResourceBirth               -- the same, for grain-backed births
+  , .applicationShareIssue            -- the issued share's grants
+  , .applicationShareIssueGrain       -- the same, grain-backed
+  , .applicationAgentLifetimeGrant    -- the agent's lifetime grant
+  , .payClaim                         -- the claim's spent marker
+  , .payEnrol                         -- the enrolled account's grants and marker
+  , .payEnrolV2 ]                     -- the same, v2
+
+/-- The writers of the resource Book: every family that moves money or meters it.
+The Book carries no user law (`LogicalLaw` pins only its id); conservation is
+the Book's own kernel invariant, which every writer's plan proves. -/
+def bookWriters : List FamilyId :=
+  [.declaredResourceController, .resourceBirth, .grainResourceBirth, .applicationShareIssue,
+    .applicationShareIssueGrain, .applicationAgentLifetimeGrant, .payObservation, .payClaim,
+    .payEnrol, .payEnrolV2, .realmWell, .purseRefill, .jobMoney, .fleetTurn, .objectiveActivity]
+
+/-- **The law class of every kind**: reviewed data, one row per kind, no default arm. -/
+def Kind.lawClass : Kind → LawClass
+  | .content => .lawBearing
+  | .declaredObject => .lawBearing
+  | .accountMetadata => .lawBearing
+  | .declaredProgram => .lawBearing
+  | .worldKind => .lawBearing
+  | .worldInstance => .lawBearing
+  | .stream => .lawBearing
+  | .pay => .lawBearing
+  | .clock => .lawBearing
+  | .authority => .kernelOnly authorityWriters
+  | .resourceBook => .kernelOnly bookWriters
+  -- Installed by `PolicyInstall` under the OLD law's judgement of the candidate; the new
+  -- source is never judged against its own install (`LawComposition`).
+  | .policySource => .kernelOnly [.policyInstall]
+  -- The certified head and tail bound, written only by a certify record.
+  | .system => .kernelOnly [.certify]
+  -- Born by an append (DRC stream append, FleetTurn topic append), never written again;
+  -- judged at its birth by the head's law once `birthParent` exists (cv task 01a1087d-8a12).
+  | .streamEntry => .kernelOnly [.declaredResourceController, .fleetTurn]
+  -- Activity records, answer slots, declared state and packages at ids >= 2^256, written
+  -- only by the activity kernel turns (their object law is ObjectRecord's).
+  | .objectiveActivity => .kernelOnly [.objectiveActivity]
+  -- A Nock program is not an external resource (`ResourceTargetAdmission.externalKind`):
+  -- no law sits at its id; it is born by a birth plan and immutable after.
+  | .nockProgram => .kernelOnly [.resourceBirth, .grainResourceBirth, .applicationShareIssue,
+      .applicationShareIssueGrain, .applicationAgentLifetimeGrant]
+  -- Written by no receiving family: produced at genesis only (`UserShape` refuses its birth;
+  -- no event-log writer is in the Host closure, measured at d27d1cad).
+  | .eventHistory => .kernelOnly []
+
+theorem policySource_only_policyInstall :
+    Kind.policySource.lawClass = .kernelOnly [.policyInstall] := rfl
+
+theorem system_only_certify : Kind.system.lawClass = .kernelOnly [.certify] := rfl
+
+theorem activity_kernelOnly :
+    Kind.objectiveActivity.lawClass = .kernelOnly [.objectiveActivity] := rfl
+
+/-- The pinned exemption list: exactly these kinds carry no user law. -/
+theorem kernelOnly_kinds :
+    Kind.all.filter (fun kind => kind.lawClass != .lawBearing) =
+      [.eventHistory, .authority, .resourceBook, .policySource, .nockProgram, .streamEntry,
+        .system, .objectiveActivity] := by decide
 
 /-- Tags 1/2/3/5/6/8/9/10/11/12/13/14/15/16 are deployment pins. The final table across
 lanes: 11 pay, 12 stream (head), 13 nockProgram, 14 clock, 15 streamEntry, 16 system.  Tag 3 is the one authority

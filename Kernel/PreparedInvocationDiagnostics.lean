@@ -90,7 +90,8 @@ private theorem config_step [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
     (policyConfig prepared tuple incidence).step = step prepared tuple incidence := by
-  unfold policyConfig policyConfigFromStep PhysicalLawResolution.config
+  unfold policyConfig policyConfigFromStep PhysicalLawResolution.targetConfig
+    PhysicalLawResolution.config
   rfl
 
 theorem preparePolicyLeg_range [DecidableEq F]

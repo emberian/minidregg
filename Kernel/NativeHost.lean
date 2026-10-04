@@ -1110,7 +1110,8 @@ def enrollmentLookup (config : Config) (bytes : List UInt8) : IO Outcome := do
 /-- The Host settlement of every `Kernel.Receiving` family, one copy: a
 confirmed outcome is sealed against its original accepted prefix. -/
 def receivingOutcome (config : Config) (family : Receiving.Family) (label : String)
-    {env : family.Env} {durable : Durable} : family.Outcome env durable → IO Outcome
+    {laws : ReceivingLaw.Laws Durable} {env : family.Env} {durable : Durable} :
+    family.Outcome laws env durable → IO Outcome
   | .replayed (transactionId, (event : DurableDataIntent.StableEvent)) =>
       confirmed config .replayed transactionId event.eventId
   | .conflict => return refused .conflict "replay" "transaction identity conflict"
@@ -1128,7 +1129,8 @@ def receivingOutcome (config : Config) (family : Receiving.Family) (label : Stri
 def receivingSubmitLoaded (config : Config) (opened : Opened config) (family : Receiving.Family)
     (env : family.Env) (label : String) (bytes : List UInt8) : IO Outcome := do
   receivingOutcome config family label
-    (← family.receiveLoaded config.signature config.transport env opened.durable bytes)
+    (← family.receiveLoaded config.profile.compilerProfile config.deployment config.signature
+      config.transport env opened.durable bytes)
 
 /-- Receipt-only historical lookup through a `Kernel.Receiving` family.
 Absence never submits fresh work. -/
@@ -1137,7 +1139,7 @@ def receivingLookupLoaded (config : Config) (opened : Opened config) (family : R
   match family.decode bytes with
   | none => refused .malformed label "noncanonical signed ingress"
   | some ingress =>
-    match family.lookupLoaded env opened.durable ingress with
+    match family.lookupLoaded (NativeHostReplay.receivingLaws config) env opened.durable ingress with
     | some (.ok receipt) =>
         match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
         | some original => .confirmed .replayed original

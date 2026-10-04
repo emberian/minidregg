@@ -32,7 +32,8 @@ committed cell's current key for the subject is the new record, at a different
 epoch, and the old version is in the append-only `revoked` plane, so
 `CredentialSignatureAdmission.select` (current key only, `live` standing only)
 never selects it again. -/
-theorem accepted_old_key_refused (admission : receiver.Admitted env durable ingress) :
+theorem accepted_old_key_refused {laws : Minidregg.Kernel.ReceivingLaw.Laws Durable}
+    (admission : (receiver laws).Admitted env durable ingress) :
     let prepared : Prepared env durable ingress.command := admission.accepted.prepared
     currentSigningKey prepared.authorityPost.logical ingress.command.subject =
         some ingress.command.key ∧
