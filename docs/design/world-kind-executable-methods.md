@@ -1,7 +1,20 @@
 # Executable methods on world-resident kinds
 
-After-core source construction, 2026-10-02. This is not part of the finite native
-core receiving freeze and has not yet passed Lean or a native journey.
+After-core source construction, 2026-10-02. When written, this was not part of the finite
+native core receiving freeze and had not passed Lean or a native journey.
+
+**Status at main 5216e02f (READ, import closure computed over the `import` lines).**
+`Kernel/WorldKindMethods.lean` is imported by `Kernel/ResourceTransaction.lean`;
+`Kernel/RunComputeBudgetDomain.lean` is imported by `Kernel/BendComputeCapacity.lean`,
+`Kernel/ResourceMoneyOperationDomain.lean`, `Kernel/RunComputeView.lean` and
+`Kernel/ResourceTransaction.lean`; `Compiler/WorldExecutionContract.lean` exists. All
+three are in the import closure of `Minidregg.lean` and of `Host.Main`. The shell has
+`instance call ID NAME METHOD [--fund ACCOUNT --max-compute-credits N]`
+(`native/resource-client/src/shell.rs`, the `instance` verb). The methods are Nock-only
+(no mention of Objective in either module). The header of `Kernel/WorldKindMethods.lean` still says
+"After-core construction: not activated by the frozen native runtime profile"; this note does not
+establish that a running Host activates it. A native journey of `instance call` is not recorded in
+`docs/evidence/`.
 
 A runtime type descriptor describes operations as well as storage. Faré's
 `poof-paper.md` §5.1.2–5.2 makes the useful distinction between a descriptor and
@@ -73,7 +86,7 @@ Existing exact steps flow into `ResourceCost.proofWork`, then the durable global
 lifetime deployment meter. The new source quota is separate. `RunComputeBudgetDomain`
 loads actual PayCell/Book, and the prepared transaction binds its quote to the
 accepted step count. `DeclaredResourceController` adds usage and Book posts to the
-same `DataIntent` as the ordinary effects. This is source-connected but uncompiled.
+same `DataIntent` as the ordinary effects. (On 2026-10-02 this was source-connected but uncompiled; see the status above.)
 
 The after-core policy is 1,000,000 admitted steps per subject per authenticated
 clock day free, then one credit per step. Quota belongs to the subject, independently
