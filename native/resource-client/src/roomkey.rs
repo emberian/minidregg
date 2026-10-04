@@ -31,8 +31,9 @@
 //!     atom id   = m
 //!     kind      = inlineObject(schema of "DREGG/PRIVATE-ENC-KEY/v3")
 //!     payload   = epoch (4) ‖ X25519 key (32) ‖ ML-KEM-768 encapsulation key (1184)
-//!                 ‖ room (8) ‖ keys cell (8) ‖ member signing key (32) ‖ member signature (64).
-//! The signature binds the suite, room, keys cell, member, epoch and BOTH encryption keys.
+//!                 ‖ room (8) ‖ keys cell (8) ‖ custody (1) ‖ member signing key (32) ‖ member signature (64).
+//! The signature binds the suite, room, keys cell, member, epoch, BOTH encryption keys and
+//! the member's own declaration of custody (hosted on a shared box, or its own machine).
 //! Pre-hybrid records (v1, v2) and wraps (v2) REFUSE by name; nothing reads them as a key.
 //! Recipient selection additionally requires the record to verify under the
 //! founder's PIN for that member; the record's own public key is never an anchor.
@@ -640,13 +641,15 @@ fn verify_lineage(room: &str, keys: &str, founder: &[u8; 32], view: &Value,
 /// A member's encryption-key record in the keys cell.
 ///
 /// v3 (hybrid): `key epoch (4) || X25519 key (32) || ML-KEM-768 encapsulation key (1184)
-/// || room (8) || keys cell (8) || member signing key (32) || member signature (64)`,
-/// 1332 bytes, the signature over BOTH encryption keys. v1 (unsigned, 36 bytes) and v2
+/// || room (8) || keys cell (8) || custody (1) || member signing key (32) || member
+/// signature (64)`, 1333 bytes, the signature over BOTH encryption keys and the custody
+/// byte: 1 = the member declares its signing key is a file on a shared (hosted) box,
+/// 0 = it declares the key stays on its own machine. v1 (unsigned, 36 bytes) and v2
 /// (signed, X25519 only, 148 bytes) records refuse by name; nothing reads them as a key.
 pub(crate) const RECORD_FRAME_V1: &[u8] = b"DREGG/PRIVATE-ENC-KEY/v1";
 const RECORD_FRAME_V2: &[u8] = b"DREGG/PRIVATE-ENC-KEY/v2";
 const SIGNED_RECORD_FRAME: &[u8] = b"DREGG/PRIVATE-ENC-KEY/v3";
-const SIGNED_RECORD_LEN: usize = 4 + MEMBER_PUBLIC_LEN + 8 + 8 + 32 + 64;
+const SIGNED_RECORD_LEN: usize = 4 + MEMBER_PUBLIC_LEN + 8 + 8 + 1 + 32 + 64;
 
 pub(crate) fn record_schema() -> String {
     private::schema_decimal_of(SIGNED_RECORD_FRAME)
@@ -709,6 +712,8 @@ pub(crate) struct EncRecord {
 struct KeyAttestation {
     room: u64,
     keys: u64,
+    /// The member's own signed statement that its signing key is a file on a shared box.
+    hosted: bool,
     signing_public: [u8; 32],
     signature: [u8; 64],
 }
@@ -723,27 +728,29 @@ pub(crate) struct AuthenticatedRecord {
     record: EncRecord,
 }
 
-fn record_statement(room: u64, keys: u64, member: u64, epoch: u32,
+fn record_statement(room: u64, keys: u64, member: u64, epoch: u32, hosted: bool,
     signing_public: &[u8; 32], encryption_public: &MemberPublic) -> Vec<u8> {
     [SIGNED_RECORD_FRAME, &[1u8], &room.to_be_bytes(), &keys.to_be_bytes(),
-        &member.to_be_bytes(), &epoch.to_be_bytes(), signing_public, &encryption_public.to_bytes()].concat()
+        &member.to_be_bytes(), &epoch.to_be_bytes(), &[u8::from(hosted)], signing_public,
+        &encryption_public.to_bytes()].concat()
 }
 
 impl EncRecord {
-    fn signed_payload(room: &str, keys: &str, member: u64, key_epoch: u32,
+    fn signed_payload(room: &str, keys: &str, member: u64, key_epoch: u32, hosted: bool,
         enc: &MemberPublic, signer: &SigningKey) -> Result<Vec<u8>> {
         let room = subject_number(room)?;
         let keys = subject_number(keys)?;
         let public = signer.verifying_key().to_bytes();
-        let signature = signer.sign(&record_statement(room, keys, member, key_epoch, &public, enc));
+        let signature = signer.sign(&record_statement(room, keys, member, key_epoch, hosted, &public, enc));
         Ok([&key_epoch.to_be_bytes()[..], &enc.to_bytes(), &room.to_be_bytes(),
-            &keys.to_be_bytes(), &public, &signature.to_bytes()].concat())
+            &keys.to_be_bytes(), &[u8::from(hosted)], &public, &signature.to_bytes()].concat())
     }
 
     fn canonical_signed_payload(&self) -> Result<Vec<u8>> {
         let attestation = &self.attestation;
         Ok([&self.key_epoch.to_be_bytes()[..], &self.enc.to_bytes(), &attestation.room.to_be_bytes(),
-            &attestation.keys.to_be_bytes(), &attestation.signing_public, &attestation.signature].concat())
+            &attestation.keys.to_be_bytes(), &[u8::from(attestation.hosted)],
+            &attestation.signing_public, &attestation.signature].concat())
     }
 
     pub(crate) fn from_atom(id: &str, payload: &[u8], atom: &Value) -> Result<Self> {
@@ -766,8 +773,13 @@ impl EncRecord {
             attestation: KeyAttestation {
                 room: u64::from_be_bytes(payload[at..at + 8].try_into().expect("8 bytes")),
                 keys: u64::from_be_bytes(payload[at + 8..at + 16].try_into().expect("8 bytes")),
-                signing_public: payload[at + 16..at + 48].try_into().expect("32 bytes"),
-                signature: payload[at + 48..at + 112].try_into().expect("64 bytes"),
+                hosted: match payload[at + 16] {
+                    0 => false,
+                    1 => true,
+                    other => return Err(format!("record {id} declares custody {other}; it is 0 (own machine) or 1 (hosted)")),
+                },
+                signing_public: payload[at + 17..at + 49].try_into().expect("32 bytes"),
+                signature: payload[at + 49..at + 113].try_into().expect("64 bytes"),
             },
         })
     }
@@ -780,7 +792,7 @@ impl EncRecord {
         }
         VerifyingKey::from_bytes(current_public).map_err(|_| "invalid authenticated signing key")?
             .verify_strict(&record_statement(attestation.room, attestation.keys, self.member,
-                self.key_epoch, current_public, &self.enc), &Signature::from_bytes(&attestation.signature))
+                self.key_epoch, attestation.hosted, current_public, &self.enc), &Signature::from_bytes(&attestation.signature))
             .map_err(|_| "recipient encryption key signature does not verify under the pinned member key")?;
         Ok(SignatureCheckedRecord(self.clone()))
     }
@@ -1999,12 +2011,43 @@ pub(crate) fn found(root: &Path, workspace: &Value, room_name: &str) -> Result<(
     Ok(())
 }
 
-/// B6, before anything is proposed: a hosted invitee needs `--i-know`.
+/// B6, before anything is proposed: a hosted invitee needs `--i-know`. Two
+/// independent signals say an invitee is hosted, and EITHER refuses: the
+/// operator's list of hosted subjects, and (once its signed record is in hand,
+/// `check_declared_custody`) the invitee's own signed declaration that its
+/// signing key is a file on a shared box.
 pub(crate) fn check_invitee(invitee: &str, i_know: bool) -> Result<()> {
     subject_number(invitee)?;
     let (list, hosted) = hosted_subjects()?;
     hosted_private_invite(true, hosted.contains(invitee), i_know)
         .map_err(|why| format!("{why} ({invitee} is listed in {})", list.display()))
+}
+
+/// THE one spelling of a private-room invite. The shell's `room invite` and
+/// `chat invite` (and `summon`, which invites through chat) all run the
+/// `room-key` operation with exactly these flags, so the hosted-subject rule
+/// (`check_invitee`, `check_declared_custody`) and the release state machine
+/// guard every path. `op` is `invite`, or `invite-check`: the same checks with
+/// nothing written, which a caller that grants first runs BEFORE granting.
+pub(crate) fn invite_flags(op: &str, dir: &Path, room: &str, member: &str, enc: &str,
+    proposal_id: &str, request: Option<&Path>, past: bool, i_know: bool)
+    -> Vec<(String, std::ffi::OsString)> {
+    let mut flags: Vec<(String, std::ffi::OsString)> = vec![
+        ("action".into(), "room-key".into()), ("op".into(), op.into()), ("dir".into(), dir.into()),
+        ("name".into(), room.into()), ("member".into(), member.into()), ("enc-pub".into(), enc.into()),
+        ("proposal-id".into(), proposal_id.into())];
+    if let Some(request) = request { flags.push(("request".into(), request.into())); }
+    if past { flags.push(("past".into(), "true".into())); }
+    if i_know { flags.push(("i-know".into(), "true".into())); }
+    flags
+}
+
+/// The same rule, from the invitee's own SIGNED custody declaration. A member
+/// that lies about its custody lies in a record that carries its signature; one
+/// that tells the truth cannot be wrapped for by accident.
+fn check_declared_custody(record: &EncRecord, i_know: bool) -> Result<()> {
+    hosted_private_invite(true, record.attestation.hosted, i_know).map_err(|why| format!(
+        "{why} (member {} declared this itself: its signed key record says its signing key is a file on a shared box)", record.member))
 }
 
 /// A member may sign its first room encryption declaration before it has a
@@ -2018,7 +2061,8 @@ pub(crate) fn signed_recipient_descriptor(workspace: &Value, room: &str, keys: &
     let subject = member(workspace, "subject")?;
     let signer = crate::read_secret(&member_path(workspace, "key")?)?;
     let encryption = enc_public(&*seed_of(&member_path(workspace, "key")?)?)?;
-    let payload = EncRecord::signed_payload(room, keys, subject_number(subject)?, epoch,
+    let hosted = private::key_is_hosted(&member_path(workspace, "key")?);
+    let payload = EncRecord::signed_payload(room, keys, subject_number(subject)?, epoch, hosted,
         &encryption, &signer)?;
     Ok(json!({"type":"minidregg-signed-room-recipient-v3","member":subject,
         "room":room,"keysCell":keys,"keyEpoch":key_epoch,"recordHex":hex(&payload),
@@ -2092,6 +2136,7 @@ pub(crate) fn invite_preflight(root: &Path, workspace: &Value, room_name: &str,
     let record = invitation_record(number, declaration_hex, synced.records.get(&number))?;
     let signing = record.attestation.signing_public;
     record.authenticate(&room, &keys, &signing)?;
+    check_declared_custody(&record, i_know)?;
     let (_, pins) = member_pins(root, &room, &keys)?;
     if pins.get(&number).is_some_and(|pinned| *pinned != signing) {
         return Err(format!("{invitee} declared a signing key different from its pin: accept it only from the member directly (room-key --op pin-member --replace true)"));
@@ -2130,6 +2175,7 @@ pub(crate) fn invite(
     let record = invitation_record(invitee_number, enc_pub_hex, synced.records.get(&invitee_number))?;
     let signing = record.attestation.signing_public;
     record.authenticate(&room, &keys, &signing)?;
+    check_declared_custody(&record, i_know)?;
     pin_member(root, &room, &keys, invitee_number, &signing, false)?;
     let (_, pins) = member_pins(root, &room, &keys)?;
     let recipient = Recipient::of(&authenticate_recipient(&pins, &room, &keys, &record)?)?;
@@ -2270,10 +2316,12 @@ pub(crate) fn register(root: &Path, workspace: &Value, room_name: &str, key_epoc
     let public = own_secret(workspace)?.public().clone();
     let wraps = wraps_in_view(&view)?;
     let signer = crate::read_secret(&member_path(workspace, "key")?)?;
-    let payload = EncRecord::signed_payload(&room, &keys, me, key_epoch, &public, &signer)?;
+    let hosted = private::key_is_hosted(&member_path(workspace, "key")?);
+    let payload = EncRecord::signed_payload(&room, &keys, me, key_epoch, hosted, &public, &signer)?;
     let kind = json!({"type":"inlineObject","schema":record_schema()});
     let action = match records_in_view(&view).remove(&me) {
         Some(record) if record.enc == public && record.key_epoch == key_epoch
+            && record.attestation.hosted == hosted
             && record.authenticate(&room, &keys, &signer.verifying_key().to_bytes()).is_ok() => {
             return Ok(json!({"room":room_name,"record":"already current","keyEpoch":key_epoch.to_string()}));
         }
@@ -2539,7 +2587,7 @@ mod tests {
     }
 
     fn signed_record(seed: u8, member: u64, epoch: u32) -> EncRecord {
-        let payload = EncRecord::signed_payload(ROOM, KEYS, member, epoch,
+        let payload = EncRecord::signed_payload(ROOM, KEYS, member, epoch, false,
             &ep(seed), &SigningKey::from_bytes(&[seed; 32])).unwrap();
         EncRecord::from_atom(&member.to_string(), &payload, &json!({})).unwrap()
     }
@@ -2681,7 +2729,7 @@ mod tests {
     fn recipient_signature_rejects_operator_substitution_and_unpinned_members() {
         let signer = SigningKey::from_bytes(&[9; 32]);
         let trusted_public = signer.verifying_key().to_bytes();
-        let payload = EncRecord::signed_payload(ROOM, KEYS, 11, 2, &ep(9), &signer).unwrap();
+        let payload = EncRecord::signed_payload(ROOM, KEYS, 11, 2, false, &ep(9), &signer).unwrap();
         let parse = |bytes: &[u8]| EncRecord::from_atom("11", bytes, &json!({})).unwrap();
         let pins = pins_for(&[(11, 9)]);
         let legitimate = Recipient::of(&authenticate_recipient(&pins, ROOM, KEYS, &parse(&payload)).unwrap()).unwrap();
@@ -2703,7 +2751,7 @@ mod tests {
         assert!(parse(&spliced).authenticate(ROOM, KEYS, &trusted_public).is_err(),
             "the signature binds the ML-KEM-768 half");
         let operator = SigningKey::from_bytes(&[8; 32]);
-        let forged = EncRecord::signed_payload(ROOM, KEYS, 11, 2, &ep(8), &operator).unwrap();
+        let forged = EncRecord::signed_payload(ROOM, KEYS, 11, 2, false, &ep(8), &operator).unwrap();
         assert!(authenticate_recipient(&pins, ROOM, KEYS, &parse(&forged)).is_err(),
             "a record self-signed by an operator-chosen key is not the pinned member");
         assert!(parse(&payload).authenticate("70", KEYS, &trusted_public).is_err());
@@ -2802,6 +2850,51 @@ mod tests {
         let e0 = RoomKey::generate(0).unwrap();
         let (_, d) = epoch(&e0, [0; 32], &[(13, 3)], &founder_key());
         assert!(wraps_in_view(&cell(&[&d[0]])).is_ok());
+    }
+
+    #[test]
+    fn a_member_that_declares_hosted_custody_is_refused_without_i_know_and_cannot_be_altered_into_own_machine() {
+        let signer = SigningKey::from_bytes(&[9; 32]);
+        let public = signer.verifying_key().to_bytes();
+        let hosted = EncRecord::signed_payload(ROOM, KEYS, 9, 0, true, &ep(9), &signer).unwrap();
+        let own = EncRecord::signed_payload(ROOM, KEYS, 9, 0, false, &ep(9), &signer).unwrap();
+        assert_eq!((hosted.len(), own.len()), (SIGNED_RECORD_LEN, SIGNED_RECORD_LEN));
+        assert_eq!(SIGNED_RECORD_LEN, 1333);
+        let parse = |bytes: &[u8]| EncRecord::from_atom("9", bytes, &json!({})).unwrap();
+        let hosted_record = parse(&hosted);
+        assert!(hosted_record.attestation.hosted && !parse(&own).attestation.hosted);
+        assert!(hosted_record.authenticate(ROOM, KEYS, &public).is_ok());
+        let refusal = check_declared_custody(&hosted_record, false).unwrap_err();
+        assert!(refusal.contains("--i-know") && refusal.contains("declared this itself"), "{refusal}");
+        assert!(check_declared_custody(&hosted_record, true).is_ok());
+        assert!(check_declared_custody(&parse(&own), false).is_ok());
+        // The custody byte is under the member's signature: flipping it to look
+        // like an own-machine member breaks the record (an operator cannot launder a hosted member).
+        let at = 4 + MEMBER_PUBLIC_LEN + 16;
+        assert_eq!(hosted[at], 1);
+        let mut laundered = hosted.clone();
+        laundered[at] = 0;
+        assert!(parse(&laundered).authenticate(ROOM, KEYS, &public).is_err());
+        assert_ne!(record_digest(&hosted_record).unwrap(), record_digest(&parse(&own)).unwrap());
+        let mut odd = hosted.clone();
+        odd[at] = 2;
+        assert!(EncRecord::from_atom("9", &odd, &json!({})).unwrap_err().contains("custody 2"));
+    }
+
+    #[test]
+    fn every_private_invite_path_spells_one_room_key_invocation() {
+        let dir = Path::new("/w");
+        let flags = |op: &str, request: Option<&Path>, past, i_know|
+            invite_flags(op, dir, "lab", "12", "ab", "i1", request, past, i_know)
+                .into_iter().map(|(k, v)| (k, v.into_string().unwrap())).collect::<Vec<_>>();
+        let pairs = |rows: &[(&str, &str)]| rows.iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect::<Vec<_>>();
+        assert_eq!(flags("invite", None, false, false), pairs(&[("action", "room-key"), ("op", "invite"),
+            ("dir", "/w"), ("name", "lab"), ("member", "12"), ("enc-pub", "ab"), ("proposal-id", "i1")]));
+        assert_eq!(flags("invite", Some(Path::new("/h/r.json")), true, true), pairs(&[("action", "room-key"),
+            ("op", "invite"), ("dir", "/w"), ("name", "lab"), ("member", "12"), ("enc-pub", "ab"),
+            ("proposal-id", "i1"), ("request", "/h/r.json"), ("past", "true"), ("i-know", "true")]));
+        assert_eq!(flags("invite-check", None, false, true)[1], ("op".to_owned(), "invite-check".to_owned()));
     }
 
     #[test]
@@ -2959,7 +3052,7 @@ mod tests {
     fn first_invite_signed_descriptor_pins_its_key_but_needs_no_prior_wrap_or_record() {
         let signer = SigningKey::from_bytes(&[9; 32]);
         let encryption = ep(9);
-        let payload = EncRecord::signed_payload(ROOM, KEYS, 9, 0, &encryption, &signer).unwrap();
+        let payload = EncRecord::signed_payload(ROOM, KEYS, 9, 0, false, &encryption, &signer).unwrap();
         assert_eq!(payload.len(), SIGNED_RECORD_LEN);
         assert!(invitation_record(9, &hex(&encryption.id()), None).is_err());
         let declaration = json!({"type":"minidregg-signed-room-recipient-v3","member":"9",

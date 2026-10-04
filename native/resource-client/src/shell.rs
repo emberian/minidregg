@@ -454,22 +454,8 @@ fn room_plan(session: &Session, w: &[String], u: &str) -> std::result::Result<Pl
                 Some(enc) => {
                     let enc = enc_argument(session, &enc)?;
                     let path = session.home.join("requests").join(format!("{}.json", w[2]));
-                    let mut flags = vec![
-                        flag("action", "room-key"),
-                        flag("op", "invite"),
-                        flag("dir", ws),
-                        flag("name", w[3].clone()),
-                        flag("member", w[4].clone()),
-                        flag("enc-pub", enc),
-                        flag("proposal-id", w[2].clone()),
-                        flag("request", path.clone()),
-                    ];
-                    if past {
-                        flags.push(flag("past", "true"));
-                    }
-                    if i_know {
-                        flags.push(flag("i-know", "true"));
-                    }
+                    let flags = crate::workspace::roomkey::invite_flags("invite", Path::new(&ws), &w[3],
+                        &w[4], &enc, &w[2], Some(&path), past, i_know);
                     Plan::Client {
                         command: "workspace".into(),
                         flags,

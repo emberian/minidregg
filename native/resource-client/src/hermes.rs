@@ -644,7 +644,7 @@ fn summon(
     let account = state["steps"]["account"].as_str().unwrap_or_default().to_owned();
     // 3. Hermes on the roster
     if !done(&state, "invite") {
-        let invited = chat::invite(session, room, &h, Some("hermes"), enc.as_deref(), &role.room_verbs)?;
+        let invited = chat::invite(session, room, &h, Some("hermes"), enc.as_deref(), &role.room_verbs, i_know)?;
         put(&out.join(format!("{room}-invite.json")), &invited.invitation)?;
         state["steps"]["invite"] = json!(invited.stream);
         put(&state_file, &state)?;

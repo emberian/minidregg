@@ -6432,6 +6432,18 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                         &format!("{proposal_id}-keys"))?;
                     Ok(())
                 }
+                // The refusals of `invite` with nothing written: for a caller (`chat
+                // invite`) that grants the room BEFORE releasing the key, so a
+                // refused invitee (hosted, unpinned, changed key) never holds a grant.
+                "invite-check" => {
+                    let member_subject = os_string(args.required("member")?, "invitee")?;
+                    let enc = os_string(args.required("enc-pub")?, "invitee encryption key")?;
+                    let _ = os_string(args.required("proposal-id")?, "proposal ID")?;
+                    let _ = flag(&mut args, "past")?;
+                    let i_know = flag(&mut args, "i-know")?;
+                    args.finish()?;
+                    roomkey::invite_preflight(&root, &workspace, &name, &member_subject, &enc, i_know)
+                }
                 "rotate" => {
                     let proposal_id = os_string(args.required("proposal-id")?, "proposal ID")?;
                     let drop = args
@@ -6493,7 +6505,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                     println!("{}", serde_json::to_string_pretty(&pinned).map_err(|e| e.to_string())?);
                     Ok(())
                 }
-                _ => Err("room-key --op is recipient-record, pin-founder, pin-member, found, sync, invite, rotate, kick, register, rewrap, list, open or forget".into()),
+                _ => Err("room-key --op is recipient-record, pin-founder, pin-member, found, sync, invite, invite-check, rotate, kick, register, rewrap, list, open or forget".into()),
             }
         }
         "submit" => {

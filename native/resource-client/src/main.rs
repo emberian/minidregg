@@ -1200,6 +1200,9 @@ fn generate_key(
         })?;
         return Err(error);
     }
+    if hosted {
+        create_private(&workspace::private::hosted_marker_path(secret), b"")?;
+    }
     if let Some(wrapped) = escrowed {
         let mut escrow_path = public.as_os_str().to_owned();
         escrow_path.push(".escrow");

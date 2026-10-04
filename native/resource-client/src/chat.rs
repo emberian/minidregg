@@ -71,7 +71,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "pin", usage: "pin N | unpin", operation: "append {\"type\":\"pin\"} with ref = entry #N, or {\"type\":\"unpin\"} (the founder's count)" },
     Verb { name: "unpin", usage: "unpin", operation: "append {\"type\":\"unpin\"} in the current room (the founder's counts)" },
     Verb { name: "react", usage: "react N EMOJI", operation: "append {\"type\":\"react\",\"emoji\":EMOJI} with ref = entry #N" },
-    Verb { name: "chat", usage: "chat new ROOM [--private] | chat adopt ROOM | chat invite ROOM SUBJECT [NAME] [--enc ENC-PUB|@FILE] | chat join ROOM INVITE-JSON|@FILE | chat enter ROOM | chat rooms | chat name SUBJECT NAME", operation: "the room template: a founder-written roster cell, one stream per member born by the founder; `help chat`" },
+    Verb { name: "chat", usage: "chat new ROOM [--private] | chat adopt ROOM | chat invite ROOM SUBJECT [NAME] [--enc ENC-PUB|@FILE] [--i-know] | chat join ROOM INVITE-JSON|@FILE | chat enter ROOM | chat rooms | chat name SUBJECT NAME", operation: "the room template: a founder-written roster cell, one stream per member born by the founder; `help chat`" },
 ];
 
 pub(crate) const HELP: &str = "\
@@ -98,7 +98,11 @@ A room's founder:
                                   to the roster; prints the invitation to give bob
   chat new den --private          a private room (K-ROOM's keys cell; needs MINI_KEYCACHE_PASSPHRASE):
                                   every say is sealed under the room key; the Host stores ciphertext
-  chat invite den SUBJECT bob --enc HEX   wrap the room key for bob too (bob's `whoami` prints HEX)
+  chat invite den SUBJECT bob --enc @FILE wrap the room key for bob too: @FILE holds bob's signed declaration
+                                  (`room-key --op recipient-record`), or the 32-byte key id `whoami` prints
+                                  when bob has already published his key record (`room register`)
+                                  a hosted friend (its key is a file on this box) needs --i-know: the room
+                                  key then sits where root can read it. DEVNET QUALITY; PRIVACY NOT AUDITED.
 A member:
   chat join commons INVITATION    take the invitation (JSON, or @FILE in requests/)
 
@@ -161,7 +165,7 @@ pub(crate) enum Line {
     /// `chat adopt ROOM`: the founder gives a room it already controls (a
     /// workroom, or any room born with the room schema) the chat roster.
     Adopt { room: String },
-    Invite { room: String, subject: String, name: Option<String>, enc: Option<String>, verbs: Vec<String> },
+    Invite { room: String, subject: String, name: Option<String>, enc: Option<String>, verbs: Vec<String>, i_know: bool },
     /// `room ls [--in ROOM] [--since H] [--import] [--json]`: the cells under
     /// the room the Host's signed `since` view names, with the roster's streams.
     Ls { room: Option<String>, since: u64, import: bool, json: bool },
@@ -454,9 +458,14 @@ fn parse_ls(rest: &str) -> Result<Line, String> {
 
 fn parse_chat(rest: &str) -> Result<Line, String> {
     let mut words: Vec<&str> = rest.split_whitespace().collect();
-    // `--enc ENC-PUB|@FILE` (chat invite into a private room): taken out first.
+    // `--enc ENC-PUB|@FILE` and `--i-know` (chat invite into a private room): taken out first.
     let mut enc = None;
+    let mut i_know = false;
     if words.first() == Some(&"invite") {
+        if let Some(i) = words.iter().position(|w| *w == "--i-know") {
+            i_know = true;
+            words.remove(i);
+        }
         if let Some(i) = words.iter().position(|w| *w == "--enc") {
             let value = words.get(i + 1).ok_or("--enc names the invitee's encryption key (64 hex digits, or @FILE)")?;
             enc = Some((*value).to_owned());
@@ -486,7 +495,7 @@ fn parse_chat(rest: &str) -> Result<Line, String> {
                     return Err(String::new());
                 }
             }
-            Ok(Line::Invite { room: (*room).to_owned(), subject: (*subject).to_owned(), name, enc, verbs })
+            Ok(Line::Invite { room: (*room).to_owned(), subject: (*subject).to_owned(), name, enc, verbs, i_know })
         }
         ["join", room, ..] if words.len() >= 3 => {
             ref_name(room, "room name")?;
@@ -1731,7 +1740,7 @@ fn run_inner(session: &Session, line: Line) -> Result<(), Done> {
         }
         Line::New { room, private } => chat_new(session, &room, private),
         Line::Adopt { room } => chat_adopt(session, &room),
-        Line::Invite { room, subject, name, enc, verbs } => chat_invite(session, &room, &subject, name.as_deref(), enc.as_deref(), &verbs),
+        Line::Invite { room, subject, name, enc, verbs, i_know } => chat_invite(session, &room, &subject, name.as_deref(), enc.as_deref(), &verbs, i_know),
         Line::Ls { room, since, import, json: as_json } => {
             let room = match room {
                 // `room ls` is listed under `room`: a room made by `room new` (or
@@ -2108,8 +2117,8 @@ pub(crate) struct Invited {
     pub stream: String,
 }
 
-fn chat_invite(session: &Session, name: &str, subject: &str, petname: Option<&str>, enc: Option<&str>, verbs: &[String]) -> Result<(), Done> {
-    let invited = invite(session, name, subject, petname, enc, verbs)?;
+fn chat_invite(session: &Session, name: &str, subject: &str, petname: Option<&str>, enc: Option<&str>, verbs: &[String], i_know: bool) -> Result<(), Done> {
+    let invited = invite(session, name, subject, petname, enc, verbs, i_know)?;
     println!("invited {} to {name}: their stream {} (you paid for it; they own it)", petname.unwrap_or(subject), invited.stream);
     println!("give them this line:");
     println!("chat join {name} {}", serde_json::to_string(&invited.invitation).expect("JSON"));
@@ -2120,9 +2129,12 @@ fn chat_invite(session: &Session, name: &str, subject: &str, petname: Option<&st
 /// under the room), the member's stream born `--in` the room under the
 /// member's author law (the founder pays; the member owns it), the roster row;
 /// in a private room also the room key wrapped to `enc` (PRIVATE-ROOMS).
-pub(crate) fn invite(session: &Session, name: &str, subject: &str, petname: Option<&str>, enc: Option<&str>, verbs: &[String]) -> Result<Invited, Done> {
+pub(crate) fn invite(session: &Session, name: &str, subject: &str, petname: Option<&str>, enc: Option<&str>, verbs: &[String], i_know: bool) -> Result<Invited, Done> {
     let room = load_room(session, name).map_err(error)?;
     let private = room_is_private(session, name);
+    if i_know && !private {
+        return Err(usage(format!("{name} is not a private room: --i-know is a private room's")));
+    }
     let enc = match (private, enc) {
         (false, None) => None,
         (false, Some(_)) => return Err(usage(format!("{name} is not a private room: --enc is a private room's"))),
@@ -2145,6 +2157,16 @@ pub(crate) fn invite(session: &Session, name: &str, subject: &str, petname: Opti
     if roster.founder.as_deref() != Some(me.as_str()) {
         return Err(usage(format!("only the founder of {name} invites")));
     }
+    // The hosted-subject rule and the key checks run BEFORE the grant is
+    // published and the stream is born: a refused invitee never holds a grant
+    // to a room whose key it will not get. Same flags, same operation as
+    // `room invite` (`roomkey::invite_flags`).
+    if let Some(enc) = &enc {
+        let id = fresh_id("wrap")?;
+        let flags = crate::workspace::roomkey::invite_flags("invite-check", &session.workspace, name, subject, enc, &id, None, false, i_know);
+        let flags: Vec<(&str, OsString)> = flags.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+        client("workspace", &flags)?;
+    }
     // A kick/leave revokes grants but retains the stream and roster history.
     // Re-invitation gives fresh source authority and reuses that subject's slot.
     let prior=roster.members.iter().find(|(s,_)|s==subject).map(|(_,stream)|stream.clone());
@@ -2164,18 +2186,9 @@ pub(crate) fn invite(session: &Session, name: &str, subject: &str, petname: Opti
         // The room key, wrapped to the invitee's encryption key, in one write
         // to the keys cell (only the founder writes it).
         let id = fresh_id("wrap")?;
-        client(
-            "workspace",
-            &[
-                ("action", os("room-key")),
-                ("op", os("invite")),
-                ("dir", os(&session.workspace)),
-                ("name", os(name)),
-                ("member", os(subject)),
-                ("enc-pub", os(enc)),
-                ("proposal-id", os(&id)),
-            ],
-        )?;
+        let flags = crate::workspace::roomkey::invite_flags("invite", &session.workspace, name, subject, enc, &id, None, false, i_know);
+        let flags: Vec<(&str, OsString)> = flags.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+        client("workspace", &flags)?;
     }
     if let Some(p) = petname {
         set_petname(session, subject, p).map_err(error)?;
@@ -2423,11 +2436,15 @@ mod tests {
         assert!(plan("chat adopt lab extra").unwrap().is_err());
         assert_eq!(
             plan("chat invite commons 1234 bob").unwrap().unwrap(),
-            Line::Invite { room: "commons".into(), subject: "1234".into(), name: Some("bob".into()), enc: None, verbs: vec!["observe".into(), "append".into()] }
+            Line::Invite { room: "commons".into(), subject: "1234".into(), name: Some("bob".into()), enc: None, verbs: vec!["observe".into(), "append".into()], i_know: false }
         );
         assert_eq!(
             plan("chat invite den 1234 --enc ab12 bob").unwrap().unwrap(),
-            Line::Invite { room: "den".into(), subject: "1234".into(), name: Some("bob".into()), enc: Some("ab12".into()), verbs: vec!["observe".into(), "append".into()] }
+            Line::Invite { room: "den".into(), subject: "1234".into(), name: Some("bob".into()), enc: Some("ab12".into()), verbs: vec!["observe".into(), "append".into()], i_know: false }
+        );
+        assert_eq!(
+            plan("chat invite den 1234 --i-know --enc ab12 bob").unwrap().unwrap(),
+            Line::Invite { room: "den".into(), subject: "1234".into(), name: Some("bob".into()), enc: Some("ab12".into()), verbs: vec!["observe".into(), "append".into()], i_know: true }
         );
         assert_eq!(
             plan(r#"chat join commons {"a": "b c"}"#).unwrap().unwrap(),

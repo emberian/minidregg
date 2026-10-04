@@ -647,6 +647,20 @@ fn ml_kem_768_from_seed(seed: &[u8; KEM_SEED_LEN]) -> Result<(DecapsulationKey, 
     }
 }
 
+/// The marker `keygen --hosted` leaves beside a signing key that lives on a
+/// shared box: an empty file `KEY.hosted`. The key's owner reads it when it
+/// SIGNS its encryption-key record (`hosted` byte), so an inviter learns the
+/// custody from the invitee itself instead of depending on an operator list.
+pub(crate) fn hosted_marker_path(key: &Path) -> std::path::PathBuf {
+    let mut name = key.as_os_str().to_owned();
+    name.push(".hosted");
+    std::path::PathBuf::from(name)
+}
+
+pub(crate) fn key_is_hosted(key: &Path) -> bool {
+    hosted_marker_path(key).exists()
+}
+
 /// The friend's secret encryption keys for the seed its signing key file holds.
 pub(crate) fn derive_enc_key(seed: &[u8; 32]) -> Result<MemberSecret> {
     MemberSecret::from_seed(seed)
@@ -1570,6 +1584,18 @@ mod tests {
         assert_eq!(fs::metadata(enc_ring_path(&key)).unwrap().mode() & 0o777, 0o600);
         let text = fs::read_to_string(enc_ring_path(&key)).unwrap();
         assert!(!text.contains(&hex(&[1u8; 32])), "the ring holds no signing seed");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn keygen_hosted_leaves_a_marker_the_record_signer_reads() {
+        let dir = scratch("hosted-marker");
+        let key = dir.join("mini.key");
+        fs::write(&key, [1u8; 32]).unwrap();
+        assert!(!key_is_hosted(&key));
+        fs::write(hosted_marker_path(&key), b"").unwrap();
+        assert!(key_is_hosted(&key));
+        assert_eq!(hosted_marker_path(&key), dir.join("mini.key.hosted"));
         fs::remove_dir_all(dir).unwrap();
     }
 
