@@ -12,13 +12,12 @@ proposal, and qualifying a new runtime are different operations.
 | What does an Objective Bend program mean? | [OpenRecursion](../Theory/ObjectiveBendOpenRecursion.lean): `Term`, `Step`, `Evaluates` (the lazy reference semantics) |
 | How does it execute? | [DemandMachine](../Theory/ObjectiveBendDemandMachine.lean): `stepRaw`, `runBounded`; [DemandData](../Theory/ObjectiveBendDemandData.lean) and [DemandCapacity](../Theory/ObjectiveBendDemandCapacity.lean): deep result extraction under a capacity policy |
 | How is it typed? | [Types](../Theory/ObjectiveBendTypes.lean), [Typing](../Theory/ObjectiveBendTyping.lean): `check` returns an actual derivation |
-| Where is the original Bend calculus? | [Vendor provenance](../vendor/bend/PROVENANCE.json) and [BendTTSource](../Theory/BendTTSource.lean): a reference artifact only, not a language target |
 | What does a program identity commit? | [Evaluator](../Compiler/Evaluator.lean), [Program codec](../Compiler/NockProgramCodec.lean); the codec's historical name does not mean the record can identify only Nock |
 | How does a real method become checked effects? | [WorldKindMethods](../Kernel/WorldKindMethods.lean) → [ResourceTransaction](../Kernel/ResourceTransaction.lean) → [Run](../Kernel/Run.lean) → [WorldMethodTrace](../Kernel/WorldMethodTrace.lean) |
 | Where do native fields and signed views come from? | [WorldKindDescriptor](../Compiler/WorldKindDescriptor.lean), [WorldKindProjection](../Kernel/WorldKindProjection.lean), [Host JSON](../Host/Json.lean) |
 | Where is the client method/proposal path? | [world_kind.rs](../native/resource-client/src/world_kind.rs), [workspace.rs](../native/resource-client/src/workspace.rs), [shell.rs](../native/resource-client/src/shell.rs) |
 | What owns durability? | [DurableReceiver](../Kernel/DurableReceiver.lean), [DurableReceiverIO](../Compiler/DurableReceiverIO.lean), [store contract](DURABLE-STORE.md) |
-| Is there a circuit or FHE specialization? | Not on main for Objective Bend. `Compiler/BendLogic*` specializes the retiring BendTT core and must be re-targeted at the demand machine before it says anything about Objective Bend |
+| Is there a circuit or FHE specialization? | No. The circuit, natural-number and FHE specializations of the upstream Bend kernel were deleted on 2026-10-04; deriving them from the demand machine is open work |
 
 Objective Bend's semantics, machine and typing live in `Theory/ObjectiveBend*.lean`.
 The front end is TypeScript: `native/bend-source/objective-parser.ts`,

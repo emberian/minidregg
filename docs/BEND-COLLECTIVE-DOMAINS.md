@@ -1,22 +1,23 @@
 # Authored collective and allocation domains
 
-These are **upstream-Bend** source modules (`world/Workshop/*.bend`) for authored
-worlds, community decisions, resource exchange and service markets, checked through
-the retiring BendTT path. They are not Objective Bend; the mechanism designs below
-survive and must be ported to `.obend` to run on Core4 (see
-[Objective Bend](OBJECTIVE-BEND.md)). Their effects must use the shared Mini Plan
+These are authored-domain designs for community decisions, resource exchange and
+service markets. Their Objective Bend sources are `world/market/*.obend` (cohort
+`world/market/market-cohort.json`) and `world/collective/CollectiveAdoption.obend`
+(see [Objective Bend](OBJECTIVE-BEND.md)). The upstream-Bend originals and their
+checked artifacts were deleted on 2026-10-04; Git history keeps them. Their effects must use the shared Mini Plan
 and receiver; a successful domain decision never grants authority.
 
-| Module | Purpose | Qualification (BendTT path, historical) |
-| --- | --- | --- |
-| MarketMath | Exact structural natural arithmetic | Source and BendTT Book checked |
-| CollectiveAdoption | Unique ballot use, derived tally, exact reviewed-source adoption proposal | Source and BendTT Book checked |
-| SingleSellerAllocation | Descending bid price, original-index ties, last-filled price | Source and BendTT Book checked |
-| UniformProRata | Lowest grid-index volume argmax and integer largest remainder | Source and BendTT Book checked |
-| SingleSellerSettlement | Logical balance/preimage reference | Book checked; raw account balance writes are not a production route |
-| SingleSellerTransfers | Earlier scalar-move grouping candidate | Source checked; superseded because scalar account targets are refused |
-| CanonicalBookSettlement | Single-seller canonical book transfer batch | Source checked; new Book and native qualification pending |
-| CanonicalUniformSettlement | Two-sided pro-rata batch through clearing pools | Source checked; new Book and native qualification pending |
+| Module | Purpose |
+| --- | --- |
+| MarketMath | Exact structural natural arithmetic |
+| CollectiveAdoption | Unique ballot use, derived tally, exact reviewed-source adoption proposal |
+| SingleSellerAllocation | Descending bid price, original-index ties, last-filled price |
+| UniformProRata | Lowest grid-index volume argmax and integer largest remainder |
+| CanonicalBookSettlement | Single-seller canonical book transfer batch |
+| CanonicalUniformSettlement | Two-sided pro-rata batch through clearing pools |
+| SharedBookSettlement | Multiple orders debiting one funding coordinate |
+
+No native settlement receipt exists for any of them.
 
 The dependency modules Prelude and CatalogReview are shared with the authored
 Workshop. Their identities are pinned in each sealed source package; imports
@@ -74,24 +75,9 @@ atom-denominated markets need compact arithmetic with source refinement and an
 explicit charge conversion. Silent machine overflow, floating tolerances and
 an arbitrary small order ceiling are not substitutes.
 
-## Checks
+## Receiving scenario
 
-These checks run on the retiring BendTT path and stop running when it is
-deleted. They qualify the upstream-Bend artifacts only.
-
-Run the portable source driver with the qualified Bend tooling directory:
-
-    bun scripts/check-collective-source.ts TOOLING_DIR OUTPUT_DIR
-
-It uses only sealed local imports and records source/package/Book identities.
-It checks every published module, including explicitly superseded candidates.
-It does not certify emitted Books.
-
-Run the shared world/Workshop/check-core.lean against the emitted Book paths with the normal
-repository Lean environment. It refuses opaque definitions and calls actual
-BendTT Book.check. Follow the project resource/build coordination policy.
-
-A useful receiving scenario has seller account 1 holding goods asset 7 balance
+A useful receiving scenario: seller account 1 holding goods asset 7 balance
 7 and payment asset 8 balance 10. Buyer 2 bids price 5, quantity 4, with payment
 20 and goods 0. Buyer 3 bids price 3, quantity 5, with payment 15 and goods 2.
 Clearing price is 3, quantities are 4 and 3. Transfers are (1,2,7,4),
@@ -100,13 +86,6 @@ buyer 2 balances 4 goods and 8 payment; buyer 3 balances 5 goods and 6 payment.
 These expected values still need actual native qualification with stale-root,
 revocation, account-membership, altered-amount, duplicate-use and atomicity
 refusers. A source or kernel check must not be reported as that receiving test.
-
-
-CollectiveDemonstration.actual_source_settlement evaluates the actual authored
-settlement source and proves the four operation/two return result above, for
-arbitrary native root, subjects, audiences and key epoch. The numeric example
-is distinct from the general conservation theorem. Its sealed source check
-passes; actual Book/native qualification remains separately recorded.
 
 ## Shared account roles
 
@@ -123,8 +102,8 @@ first trust input copies and treat the source output table as authentic after
 the calculation. The prepared money API still owns current authority, exact
 fee-adjusted balances and sequential solvency.
 
-SharedSettlementDemonstration evaluates two orders sharing one account: funding
+A worked case: two orders sharing one account, funding
 35 supports reservation budgets20+15; actual payments12+9 leave14. A copied
 funding balance20 is insufficient despite each order being individually backed,
-and inconsistent copies35/36 refuse. These named source laws await source/core
-qualification when published; they do not replace native receiving refusers.
+and inconsistent copies35/36 refuse. These cases do not replace native
+receiving refusers.

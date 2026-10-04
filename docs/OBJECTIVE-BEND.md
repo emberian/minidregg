@@ -332,11 +332,10 @@ authority and funding.
 
 The lazy semantics is the target for native, oblivious, proof-producing and
 homomorphic execution; on main none of those routes runs Objective Bend. The
-oblivious-execution and circuit families (`BendOblivious*`, `BendLogic*`,
-`BendNatural*`) target the retiring BendTT machine. The zk statements for Objective
+oblivious-execution, circuit, natural-number and FHE families built for the upstream
+Bend machine were deleted with it on 2026-10-04. The zk statements for Objective
 (`Assurance/ObjectiveBendCommittedSource`) are conditional on a `PackedRefinement`
-hypothesis that nothing inhabits for a real program. The FHE route that runs today
-evaluates a public natural-number expression, not an Objective method. Laziness
+hypothesis that nothing inhabits for a real program. No FHE route runs today. Laziness
 leaks through access pattern and timing: forcing order and cache state are
 data-dependent. So a private backend needs a both-arms (mux) lowering of `case` and
 an explicit public resource bound; the type system already keeps every effect out of
@@ -389,24 +388,18 @@ Known front-end defects:
 The drivers in `examples/objective-bend-world/reference/` embed packets from the
 current front end; `scripts/check-objective-examples.sh` fails when one is stale.
 
-## What was Gen-1, and why it is retiring
+## What was Gen-1
 
-The first generation elaborated this OO surface into checked BendTT Books
-(`Compiler/ObjectiveBendLinker`, `ObjectiveBendElaboration`, the Workshop and its
-instance loaders), which bound the language to the restrictions of that embedding:
-data-only reusable captures, acyclic linking and total strict calls. On 2026-10-03
-Objective Bend became its own lazy language with Core4 as its only core. Its linker
-contract and the BendTT semantics audit are deleted from `docs/`, its `./NAME.bend`
-imports are refused by the parser and the frontend, and nothing in this guide claims
-anything about it. **Its Lean modules are
-still in the tree at 6909eaf9**. Nine `Compiler/ObjectiveBend{Composition,Order,
-Elaboration,Linker,Instance,Prototype,Construction,Reference,ReferenceInstance}` and
-four `Kernel/ObjectiveBend{InstanceLoader,ReferenceLoader,ReferenceSource,CallContext}`
-modules are compiled by the default build, all through `BendQualification`
-(`Kernel/ObjectiveBendCallContext` imports `Compiler.ObjectiveBendInstance`);
-`LinkerRefinement`, `Workshop` and `Persistence` are in `ResearchWip` only. Deleting them is the cut's work and has not landed.
-Read any claim about pinned instance births, kind evolution or a persistence contract
-over the strict closure machine as a claim about that retiring stack, not about Core4.
+The first generation elaborated this OO surface into checked Books of the upstream
+Bend kernel (`Compiler/ObjectiveBendLinker`, `ObjectiveBendElaboration`, the Workshop
+and its instance loaders), which bound the language to the restrictions of that
+embedding: data-only reusable captures, acyclic linking and total strict calls. On
+2026-10-03 Objective Bend became its own lazy language with Core4 as its only core.
+The cut (2026-10-04) deleted Gen-1; the same day the vendored kernel and every module
+that reached it (its closure machine, the oblivious, logic, natural-number, FHE and
+activity families, and their artifacts and checks) were deleted too. Git history holds
+them; `./NAME.bend` imports are refused by the parser and the front end, and nothing in
+this guide claims anything about them.
 
 ## Sources
 
@@ -425,9 +418,9 @@ Faré's work cited above, by short name:
 - **Persistence model**: gerbil-persist
   (<https://github.com/mighty-gerbils/gerbil-persist/blob/master/persist.md>).
 
-The original Bend calculus remains pinned in `vendor/bend` and
-`Theory/BendTTSource.lean` as a reference only; strict-machine proofs say nothing
-about the demand machine.
+The original Bend calculus (upstream pin `947db722`) was vendored as a reference
+until 2026-10-04 and is in Git history; strict-machine proofs say nothing about the
+demand machine.
 
 These are design sources. The repository's semantics, theorem premises and admitted
 receiving paths determine what Objective Bend guarantees.

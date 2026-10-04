@@ -77,8 +77,8 @@ in a joined world), *deployed* (running on the public node for real users).
 | Discord entrance | executed | against a simulated Discord ([2026-10-03-discord-world](docs/evidence/2026-10-03-discord-world/README.md)); no Discord application exists and the entrance is inactive on the public node |
 | Agreement mesh | compiled safety theorem; executed | safety over the Lean engine model; four replicas on one host, one failure domain; liveness not established |
 | Traffic privacy | executed | one host, honest registrar, endpoint sees the plaintext call; no anonymity proof |
-| MPC / FHE | executed (research) | MPC: a width-8 adder over private inputs with per-dealer OS entropy, and a curious-holder transcript check over 8,067 frames, in `native/private-backend` tests (`cf6a4c1d`); FHE on a public two-input expression with one owner |
-| Oblivious and zk execution of Objective Bend | authored, conditional | zk theorems are conditional on a `PackedRefinement` hypothesis that nothing inhabits for a real program ([OBJECTIVE-BEND.md](docs/OBJECTIVE-BEND.md#execution-and-privacy)); oblivious machinery targets the retiring BendTT core |
+| MPC / FHE | executed (research) | MPC: a width-8 adder over private inputs with per-dealer OS entropy, and a curious-holder transcript check over 8,067 frames, in `native/private-backend` tests (`cf6a4c1d`); FHE: none on main (the BFV consumer ran only upstream-Bend artifacts and was deleted on 2026-10-04) |
+| Oblivious and zk execution of Objective Bend | authored, conditional | zk theorems are conditional on a `PackedRefinement` hypothesis that nothing inhabits for a real program ([OBJECTIVE-BEND.md](docs/OBJECTIVE-BEND.md#execution-and-privacy)); the generic oblivious/arithmetic circuit stack has no Objective producer yet |
 | Payments | executed (fixtures) | the pay journeys ran on private Stores with recorded Solana answers ([deploy/pay/README.md](deploy/pay/README.md#current-composed-rehearsal-2026-10-02)); the enrolment address and rate (50 DREGG per week) are decided in [enrol-terms.json](deploy/pay/enrol-terms.json) but nothing is deployed: the pay watcher and roster sync are inactive on the public node, and no mainnet transaction has been made |
 
 Evidence rows cite runs of lane builds. Unless a row says otherwise, the run was not
@@ -148,14 +148,13 @@ executable does not establish deployment.
 | `Assurance/` | cross-boundary theorems with pinned axiom checks |
 | `Verify/` | verification drivers and emitters |
 | `Selvage/` | proof-system research |
-| `native/` | Rust: the `mini` client (`resource-client`), SPK host and RPC, grain runtime, stores, agreement crypto, private backend, FHE, Discord, pay watcher |
+| `native/` | Rust: the `mini` client (`resource-client`), SPK host and RPC, grain runtime, stores, agreement crypto, private backend, IR2 proof harness, Discord, pay watcher |
 | `prover/` | Rust prover glue |
 | `protocol/` | generated protocol and build-surface inventories |
 | `scripts/` | build, gate and check scripts |
 | `deploy/` | candidate build and service configuration |
 | `testing/`, `tests/` | scenario drivers, journeys and focused tests (`tests/objective-bend-source/` holds the `.obend` probes) |
-| `examples/`, `world/` | example programs; the `.bend` modules there are upstream-Bend source on the retiring BendTT path, kept as domain designs to port |
-| `vendor/bend/` | the pinned original Bend calculus, a reference only |
+| `examples/`, `world/` | Objective Bend reference drivers and `.obend` domain programs |
 | `docs/` | contracts, guides and dated evidence |
 | `website/` | the static project site |
 

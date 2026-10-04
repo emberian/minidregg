@@ -63,7 +63,7 @@ A4. TYPES — answering council-2 Q1 (effects only under bind; pure thunks): YES
  thunk; only the function's type carries that to the caller. Partiality stays a judgment
  (PartialTyping, no delay monad): divergence is idempotent under sharing (the blackhole
  already observes it) and effects are not. That asymmetry is the answer to Q1, and it keeps
- BendTT-style total laws untouched: no Comp wrapper on non-effectful code.
+ total laws untouched: no Comp wrapper on non-effectful code.
  Runtime typing (DemandTyping, step 3): values are never typed at computation types.
   StackTyping.returns : stack accepts computation P R A, A pure ⇒ stack accepts A
   FrameTyping.effectCase : (case arms env) : computation P R (variant row) → computation P R B

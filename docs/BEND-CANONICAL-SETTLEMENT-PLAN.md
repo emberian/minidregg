@@ -1,9 +1,9 @@
 # Authored canonical settlement Plan
 
-> **Status (2026-10-04).** This program is upstream-Bend source checked through the
-> retiring BendTT path, not Objective Bend. The design below survives; the checked
-> artifacts do not carry over and the program must be ported to `.obend` to run on
-> Core4. See [Objective Bend](OBJECTIVE-BEND.md).
+> **Status (2026-10-04).** The upstream-Bend source of this program and its checked
+> artifacts were deleted on 2026-10-04 (Git history keeps them). The design below
+> survives; its Objective Bend sources are `world/market/*.obend`. See
+> [Objective Bend](OBJECTIVE-BEND.md).
 
 The `CanonicalSettlementPlan.settle` and `settle_shared` methods invoke the
 existing single-seller allocation and settlement sources. They convert the
@@ -86,19 +86,9 @@ audience mechanisms retain their own obligations. Compact arithmetic and
 source-charge refinement remain compiler obligations, not a four-order or
 machine-width restriction on this domain.
 
-## Qualification and use
+## Qualification
 
-`scripts/check-collective-money-source.ts TOOLING OUTPUT [WORKSHOP] [WORLD]`
-seals imports by exact source hash and emits the actual BendTT Books. Logical
-`./WorldPlanMoney.bend` / `./WorldPlanScalarBytes.bend` import edges resolve to
-the canonical files under `examples/objective-bend-world` via that manifest;
-the loader does not permit filesystem traversal imports.
-
-Source elaboration/emission currently passes for ScalarBytes, Money,
-CanonicalSettlementPlan and its demonstration. General constructor/refusal
-laws and source cases cover ordered mapping, missing assets, duplicate tokens,
-split native aliases, two orders using one balance, insufficient aggregate
-backing, stale book roots, and the actual room transition.
-The earlier five canonical allocation/settlement Books passed no-opaque BendTT
-`Book.check` (historical; BendTT path). No native settlement receipt exists, and
-none of this qualifies an Objective Bend program.
+No native settlement receipt exists, and nothing here qualifies the Objective Bend
+port. Refusal cases the design must keep: ordered mapping, missing assets,
+duplicate tokens, split native aliases, two orders using one balance, insufficient
+aggregate backing, stale book roots, and the actual room transition.

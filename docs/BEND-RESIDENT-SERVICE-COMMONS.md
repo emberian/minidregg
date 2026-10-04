@@ -1,9 +1,9 @@
 # Resident service commons
 
-> **Status (2026-10-04).** ResidentServiceCommons is upstream-Bend source checked through the
-> retiring BendTT path, not Objective Bend. The design below survives; the checked
-> artifacts do not carry over and the program must be ported to `.obend` to run on
-> Core4. See [Objective Bend](OBJECTIVE-BEND.md).
+> **Status (2026-10-04).** The upstream-Bend ResidentServiceCommons and its checked
+> artifacts were deleted on 2026-10-04 (Git history keeps them). The design below
+> survives; its Objective Bend source is `world/commons/ResidentServiceCommons.obend`.
+> See [Objective Bend](OBJECTIVE-BEND.md).
 
 ResidentServiceCommons is an authored world program. It proposes ordinary
 state, canonical money and Activity effects; it is not a second execution,
@@ -50,11 +50,10 @@ identity remain the ordinary native receiver's job.
   them. Do not substitute private controller journals for public receipts.
 - takeover_service owns physical provider calls, pending-write-before-call
   custody, exact native operation lookup and lost-reply recovery.
-- Kernel/BendActivityProgram, Proposal, Ingress and Receiver are the native
-  Activity owner; initialization/advance and pending-yield/outcome qualification
-  are separate. Source does not fabricate Activity checkpoints.
-- Compiler/BendActivityYield.extract reads actual source-produced PlanData and
-  captured continuation. The current response ABI is finite false/true. Result
+- The native Activity owner (program, proposal, ingress, receiver, yield
+  extraction) was built over the upstream-Bend closure machine and was deleted
+  with it on 2026-10-04. It must be re-derived over the Core4 `yield`/`resume`
+  of the demand machine. Source must not fabricate Activity checkpoints; result
   content stays in separately admitted typed result slots; arbitrary Hermes
   JSON/text injection requires its own typed ABI.
 - Before external dispatch, the native pending constructor must reserve enough
@@ -72,9 +71,8 @@ link survives uncertainty and delivery. The resident home and request are
 ordinary admitted object/document mounts; source code is inspected through the
 same Studio, not an untrusted renderer script.
 
-The published source was checked only on the retiring BendTT path. An
-Objective Bend port, typed source-to-native effect adaptation and native receiving
-must each report their own result. This contract serves research
+Typed source-to-native effect adaptation and native receiving for the Objective
+Bend port must each report their own result. This contract serves research
 reviews, authored tools, world participation and service exchange. It does not
 turn every resident action into a paid numeric market or assert current private
 execution supports arbitrary model/provider tasks.

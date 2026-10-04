@@ -1,6 +1,6 @@
 # Objective Bend reference preview
 
-The `objective-bend-1` edition has its own lazy reference semantics and demand machine. It does not inherit upstream BendTT termination or consistency claims. The historical BendTT execution profile remains separate.
+The `objective-bend-1` edition has its own lazy reference semantics and demand machine. It does not inherit termination or consistency claims from upstream Bend.
 
 `native/bend-source/objective-elaborate.ts` consumes a locked captured package, verifies source and AST hashes, reparses the exact source with the captured parser snapshot, checks import coordinates, and emits the actual term executed by `Theory.ObjectiveBendDemandMachine`. It also retains authored declarations, requirements and law bodies. Retained laws are not discharged proofs.
 
