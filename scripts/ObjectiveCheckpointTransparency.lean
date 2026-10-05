@@ -19,7 +19,8 @@ line is the verdict. Exit 0 iff every segment agrees.
 
 What this measures and what it does not: it EXECUTES the claim that
 `Kernel.ObjectiveResumeContract.ForcingTransparent` states, on these programs and these
-responses. It is evidence for that open premise, not a proof of it.
+responses: an executed cross-check of `forcingTransparent_of_yieldedPlan` (proved at every
+lexically valid yield), and of the codec and kernel paths around it the proof does not cover.
 
 MUTANT (self-test only): `drop-stack-roots` stores a checkpoint whose collection traces
 only the control, so cells live through the stack are dropped. The gate requires the

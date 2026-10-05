@@ -1,7 +1,8 @@
 /- Named poles for the Objective Bend families the hypothesis ledger reads.
 
 `scripts/HypothesisLedger.lean` now imports the `ObjectiveProofs` modules (through
-`Kernel.ObjectiveResumeContract`, for the open premise `ForcingTransparent`), so it reads
+`Kernel.ObjectiveResumeContract`, whose resume contract `ForcingTransparent` is now proved at
+every lexically valid yield), so it reads
 four families it never saw before, each consumed and each TOOTHLESS: no named instance
 showed it can hold AND can fail. These are those instances, one satisfying and one
 refuting per family, over the real definitions. -/

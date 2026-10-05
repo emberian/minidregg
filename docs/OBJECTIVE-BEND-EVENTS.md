@@ -179,13 +179,22 @@ over a step relation of three kinds (an admitted kernel turn, an inert seat inte
 intent the ordinary gate admits); `derived_route` (`ObjectiveActivityGateRoute`) says every
 record the replay walk admits is one of those kinds.
 
-**Open:** `runSegment_stored_complete` (resuming the stored checkpoint ends every segment the
-machine's own yield ends, alike) holds under the premise `ForcingTransparent`, sharing
-transparency of the Plan extraction's forcing. It has a satisfying instance
-(`forcingTransparent_tally`) and refuting ones (`not_forcingTransparent_lostStack`,
-`not_forcingTransparent_dangling`), and it does not follow from a successful extraction
-(`forcingTransparent_not_of_extraction`); a discharge needs a premise naming every address a
-yield holds. Executed, not proved: `scripts/check-objective-proofs.sh transparency` resumes every
+`runSegment_stored_complete`: resuming the stored checkpoint ends every segment the program's
+own yield ends, alike, with heap headroom of the forced state's size, at every yield that names
+only allocated addresses (`LexicalInvariant`). Its core is `forcingTransparent_of_yieldedPlan`:
+a successful Plan extraction is a chain of finished closed demands, each a forcing chain
+(`Theory/ObjectiveBendDemandForcingDemand.lean`, `demand_forces`), and along a forcing chain
+the forced run ends every segment the lazy run ends (`Theory/ObjectiveBendDemandForcingExtract.lean`,
+`forces_segment`). The first statement took `ForcingTransparent` as a premise of every yield
+whose Plan extracts; that is refuted by a malformed yield for which the extraction succeeds and
+the statement fails (`not_forcingTransparent_dangling`, `forcingTransparent_not_of_extraction`).
+The repaired premise has poles (`lexicalInvariant_initialNat`, `not_lexicalInvariant_danglingYield`)
+and is discharged for every checkpoint the kernel stores, since every such yield is typed:
+`birth_stored_complete` (no premise), `delivery_stored_complete`, and on every reachable world
+`reachable_delivery_stored_complete` (`Kernel/ObjectiveCheckpointInvariant.lean`, no premise but
+the typed genesis). Not proved: the comparison runs the stored side with that heap headroom,
+not under the kernel's own limits.
+Executed, not proved: `scripts/check-objective-proofs.sh transparency` resumes every
 activity of the preview cohort and `native/objective-emit/activity-cohort.json` both ways and
 compares each segment (outcome, Data, ticks), plus a growth leg (TallyTwelve's checkpoint size
 is constant over twelve replies; a planted checkpoint that drops the stack's cells must go red).
@@ -292,7 +301,8 @@ row of `scripts/pipeline/journey-rows` runs them.
 - The package pin as an object's law: `Pred.objectivePin` exists, but no turn installs it and
   the object law view carries no `objective/artifact` slot
   ([overview](OBJECTIVE-BEND.md#native-admission-by-re-execution)).
-- A guardedness check; the discharge of `ForcingTransparent`.
+- A guardedness check; the stored-checkpoint comparison under the kernel's own heap limits
+  (it is proved with headroom of the forced state's size).
 
 ## Compared with deos-js
 

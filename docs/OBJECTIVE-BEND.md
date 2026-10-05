@@ -619,13 +619,13 @@ records that a value came from the call that produced it.
 - **Reflection** (LT4): a provenance-establishing prototype constructor; `R(Y M)` vs `Y(R∘M)`;
   resource observations stated as theorems; `composition_associative` tied to `Term.mix`.
 - **Guardedness** (LT6): no check that a well-typed resident's segment terminates.
-- **`ForcingTransparent`**: `runSegment_stored_complete` (resuming the stored checkpoint ends
-  every segment as the machine's own yield would) holds under this open premise
-  (`Kernel/ObjectiveResumeContract.lean`). It has a satisfying instance
-  (`forcingTransparent_tally`) and refuting ones (`not_forcingTransparent_lostStack`,
-  `not_forcingTransparent_dangling`), and cannot follow from a successful extraction alone
-  (`forcingTransparent_not_of_extraction`). `scripts/check-objective-proofs.sh transparency`
-  compares the two resumptions by execution.
+- **Forcing transparency, under the kernel's limits**: `runSegment_stored_complete` (resuming
+  the stored checkpoint ends every segment as the machine's own yield would) is proved at every
+  lexically valid yield (`forcingTransparent_of_yieldedPlan`, `Kernel/ObjectiveResumeContract.lean`),
+  so for every checkpoint the kernel stores (`birth_stored_complete`,
+  `reachable_delivery_stored_complete`), but with heap headroom of the forced state's size;
+  the unconditional `ForcingTransparent` is refuted (`not_forcingTransparent_dangling`).
+  `scripts/check-objective-proofs.sh transparency` compares the two resumptions by execution.
 - **Machine**: a resource bound for completeness (completion is finite, not bounded); use
   counts at run time (quantities are static); `stepRaw` linear in the heap.
 - **Kernel**: upgrade (no upgrade turn; nothing produces `upgraded`; `ObjectRecord` has no

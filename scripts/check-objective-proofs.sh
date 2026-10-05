@@ -37,7 +37,7 @@
 #             collected) against resuming the machine's own yielded state, per segment:
 #             outcome, Plan/result Data, kernel ticks <= lazy ticks; plus the growth leg
 #             (TallyTwelve stored checkpoint has one byte count over segments 1..12, the twelve replies).
-#             Executed evidence for the open premise ForcingTransparent, not a proof.
+#             Executed cross-check of forcingTransparent_of_yieldedPlan (proved, Kernel/ObjectiveResumeContract).
 #             Self-tested every run: the planted `drop-stack-roots` checkpoint must go red.
 #
 # usage: scripts/check-objective-proofs.sh [proofs|c|cgen|transparency|all] [--update]
