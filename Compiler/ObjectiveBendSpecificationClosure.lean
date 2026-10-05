@@ -208,6 +208,39 @@ def wrongTargetSource : String :=
 
 theorem wrong_target_refused : acceptsSource wrongTargetSource "asSpecification" = false := by native_decide
 
+/-! ## The open inherited row of a closed spec (OB-LTUO LT2 D3)
+
+`fix` over declared plain specs with a seed that is not a whole target instantiates each
+layer at the row actually beneath it and discharges the target at the end. -/
+
+def reviewSpecs : String :=
+  "edition ObjectiveBend 1\nrecord Review:\n  review(value: Nat) -> Nat\n  twice(value: Nat) -> Nat\n" ++
+  "spec Base for Review:\n  def review(value: Nat) -> Nat:\n    value + 1n\n" ++
+  "spec Twice for Review:\n  requires review(value: Nat) -> Nat\n  def twice(value: Nat) -> Nat:\n    self.review(self.review(value))\n" ++
+  "spec Augmented for Review:\n  def review(value: Nat) -> Nat:\n    super.review(value) + 1n\n"
+
+/-- LTUO probe W05: no placeholder seed. -/
+theorem empty_seed_accepted :
+    acceptsSource (reviewSpecs ++ "def run() -> Nat:\n  fix(compose(Base, Twice, Augmented), {}).twice(3n)\n") "run" = true := by
+  native_decide
+
+/-- A target member nobody provides is refused (W06's shape: Twice's requirement unmet). -/
+theorem unprovided_requirement_refused :
+    acceptsSource (reviewSpecs ++ "def run() -> Nat:\n  fix(compose(Twice, Augmented), {}).twice(3n)\n") "run" = false := by
+  native_decide
+
+/-- A `super` read with nothing beneath it is refused. -/
+theorem inherited_unprovided_refused :
+    acceptsSource (reviewSpecs ++ "def run() -> Nat:\n  fix(compose(Augmented, Base, Twice), {}).twice(3n)\n") "run" = false := by
+  native_decide
+
+/-- A requirement at another type than the target's member is refused (W07). -/
+theorem requires_signature_refused :
+    acceptsSource ("edition ObjectiveBend 1\nrecord R:\n  review(value: Nat) -> Nat\n" ++
+      "spec S for R:\n  requires review(value: String) -> Nat\n  def review(value: Nat) -> Nat:\n    value\n" ++
+      "def run() -> Nat:\n  fix(S, {}).review(1n)\n") "run" = false := by
+  native_decide
+
 /-- The built-in module declaring `SpecMeta`/`SpecLaws` is Objective Bend source the
 front end's own parser reads. -/
 theorem builtin_parses : ObjectiveBendElaborate.builtinModule.toBool = true := by native_decide
@@ -219,4 +252,8 @@ theorem builtin_parses : ObjectiveBendElaborate.builtinModule.toBool = true := b
 #assert_compiled non_boolean_law_refused
 #assert_compiled wrong_target_refused
 #assert_compiled builtin_parses
+#assert_compiled empty_seed_accepted
+#assert_compiled unprovided_requirement_refused
+#assert_compiled inherited_unprovided_refused
+#assert_compiled requires_signature_refused
 end Minidregg.Compiler.ObjectiveBendSpecificationClosure

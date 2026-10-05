@@ -1,0 +1,17 @@
+edition ObjectiveBend 1
+# D3 control: one spec used at two chain positions over an empty seed. Base provides
+# review; each Augmented reads the review beneath it: review(3) = 3 + 1 + 1 + 1 = 6.
+
+record Review:
+  review(value: Nat) -> Nat
+
+spec Base for Review:
+  def review(value: Nat) -> Nat:
+    value + 1n
+
+spec Augmented for Review:
+  def review(value: Nat) -> Nat:
+    super.review(value) + 1n
+
+def reviewOfThree() -> Nat:
+  fix(compose(Base, Augmented, Augmented), {}).review(3n)

@@ -1,0 +1,12 @@
+edition ObjectiveBend 1
+# D3 tooth: the seed carries a field the target does not declare: refused (seed-extra).
+
+record Review:
+  review(value: Nat) -> Nat
+
+spec Base for Review:
+  def review(value: Nat) -> Nat:
+    value + 1n
+
+def reviewOfThree() -> Nat:
+  fix(Base, {stray: 1n}).review(3n)

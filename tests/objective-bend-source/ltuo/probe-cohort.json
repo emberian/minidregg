@@ -181,8 +181,8 @@
   "arguments": [],
   "prediction": "REFUSED: spec S for T types super as the whole T, so a one-method spec needs a whole-T seed",
   "current": {
-   "status": "refused",
-   "refusal": "typing refused"
+   "status": "finished",
+   "value": "7"
   },
   "target": {
    "status": "finished",
@@ -203,7 +203,7 @@
   "prediction": "(audit: requires is unchecked metadata) the whole-T seed rule refuses the empty seed before any requirement is examined",
   "current": {
    "status": "refused",
-   "refusal": "typing refused"
+   "refusal": "refused (requires-unprovided)"
   },
   "target": {
    "status": "refused",
@@ -244,14 +244,77 @@
   "arguments": [],
   "prediction": "ACCEPTED: the requires signature is never compared with the target",
   "current": {
-   "status": "finished",
-   "value": "5"
+   "status": "refused",
+   "refusal": "refused (requires-signature)"
   },
   "target": {
    "status": "refused",
    "refusal": "refused (requires-signature)"
   },
   "owner": "LT2"
+ },
+ {
+  "name": "D3a-InheritedUnprovided",
+  "modules": [
+   {
+    "name": "OpenSuperInheritedUnprovided",
+    "source": "OpenSuperInheritedUnprovided.obend"
+   }
+  ],
+  "entry": "reviewOfThree",
+  "arguments": [],
+  "prediction": "LT2 D3 tooth: a super read with nothing below is refused by name",
+  "current": {
+   "status": "refused",
+   "refusal": "refused (inherited-unprovided)"
+  },
+  "target": {
+   "status": "refused",
+   "refusal": "refused (inherited-unprovided)"
+  },
+  "owner": "control"
+ },
+ {
+  "name": "D3b-SeedExtra",
+  "modules": [
+   {
+    "name": "OpenSuperSeedExtra",
+    "source": "OpenSuperSeedExtra.obend"
+   }
+  ],
+  "entry": "reviewOfThree",
+  "arguments": [],
+  "prediction": "LT2 D3 tooth: a seed field outside the target is refused by name",
+  "current": {
+   "status": "refused",
+   "refusal": "refused (seed-extra)"
+  },
+  "target": {
+   "status": "refused",
+   "refusal": "refused (seed-extra)"
+  },
+  "owner": "control"
+ },
+ {
+  "name": "D3c-RepeatedLayer",
+  "modules": [
+   {
+    "name": "OpenSuperRepeatedLayer",
+    "source": "OpenSuperRepeatedLayer.obend"
+   }
+  ],
+  "entry": "reviewOfThree",
+  "arguments": [],
+  "prediction": "LT2 D3 control: one spec at two chain positions over an empty seed",
+  "current": {
+   "status": "finished",
+   "value": "6"
+  },
+  "target": {
+   "status": "finished",
+   "value": "6"
+  },
+  "owner": "control"
  },
  {
   "name": "W08-LawImpossible",

@@ -2378,7 +2378,7 @@
     {
       "module": "Compiler.ObjectiveBendElaborate",
       "path": "Compiler/ObjectiveBendElaborate.lean",
-      "sha256": "49435f0f3eeadbc6c5e2539bf77d437d93681211ada071421d30b28f9761e23c",
+      "sha256": "9933dfb7a165eec147e045f1cc724d24eddba035736f086694340ba648492fa0",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -2476,7 +2476,7 @@
     {
       "module": "Compiler.ObjectiveBendSpecificationClosure",
       "path": "Compiler/ObjectiveBendSpecificationClosure.lean",
-      "sha256": "83cdd5b87b1a5ebce06f387cc9a3fd1e927f774f476cfaabed3c9d31895470b6",
+      "sha256": "7942505344695bd16312d0cc83dfbb29c088cb9b7f08ec123c53619abf4491f7",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },

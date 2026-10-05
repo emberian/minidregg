@@ -1,7 +1,22 @@
 # Modular typing for Objective Bend (design, OB-LTUO LT2)
 
-Status: DESIGN, not built. LT0 (the probes) and LT1 (`Specification<T>` closed under
-`compose` and `law`) are landed on lane `ob-ltuo`. This document is what LT2 implements.
+Status: D3 and D4 BUILT (step 1, below); D1, D2, D5 for open selves and D6 are design.
+LT0 (the probes) and LT1 (`Specification<T>` closed under `compose` and `law`) are landed.
+
+Step 1 as built (`chainFix`, `layerAt` in `Compiler/ObjectiveBendElaborate.lean`): `fix(S,
+seed)` / `fix(compose(S1..Sn), seed)` over declared plain specs with a seed that is not a
+whole target instantiates each layer at the row beneath it by re-elaborating the layer
+with `super` typed at that row (memoized knot fields `M.S@i`, metadata = the declared
+spec's), discharges at the end, and refuses by name: `inherited-unprovided` (a `super.m`
+read with nothing beneath), `requires-unprovided` (a target member nobody provides, naming
+the specs that require it), `seed-extra`, `provided-mismatch`; `requires-signature` and
+an undeclared requirement are refused at the declaration. A whole-target seed, or any
+operand that is not a declared plain spec (ancestry specs, extensions, computed values),
+keeps the closed lowering, so every existing program elaborates to the same term. The
+re-elaboration stands in for the rigid template check of section 4.1 for CLOSED specs: the
+declared closed layer (Super = T) is still emitted and checked, so any error in a body
+other than a `super` read already refuses there. Not yet covered: ancestry (non-plain)
+specs in a partial-seed chain (they keep the whole-target rule).
 Every acceptance program below is already a pinned row of
 `tests/objective-bend-source/ltuo/probe-cohort.json` with its current outcome and its
 target, so the work is done when those rows are promoted, not when this document says so.

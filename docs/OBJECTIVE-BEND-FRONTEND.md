@@ -134,6 +134,14 @@ every module names by bare name (no module may declare them):
                 |  composed: {inherited: SpecMeta, wrapping: SpecMeta}
                 |  extension: {}
 
+`fix` over declared plain specs need not be given a whole target as its seed: each layer is
+instantiated at the row actually beneath it, so `fix(compose(Base, Twice, Augmented), {})`
+needs no placeholder methods. A `super.m` read that nothing below provides is `refused
+(inherited-unprovided)`; a target member that no layer and not the seed provides is
+`refused (requires-unprovided)`; a `requires` line must name a member of the target at its
+type (`refused (requires-signature)`). Design and limits:
+[objective-bend/MODULAR-TYPING.md](objective-bend/MODULAR-TYPING.md).
+
 So laws and composition never change a specification's type: `def twice(e:
 Extension<Nat>) -> Specification<Nat>: compose(e, e)` checks, and so does a spec with
 a law where `Specification<T>` is expected

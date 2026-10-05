@@ -429,6 +429,8 @@ structure St where
   precedence : List (String × List String) := []
   linearizing : List String := []
   hidden : Array (String × ATerm × Option PTy) := #[]
+  /-- Layer instances emitted so far: (spec key, inherited type JSON) ↦ knot field name. -/
+  instances : List ((String × String) × String) := []
   /-- The Plan/Response of the activity being lowered (none outside one). -/
   effect : Option (PTy × PTy) := none
 
@@ -923,6 +925,125 @@ def lowerLet (c : Ctx) (fuel : Nat) (name type : String) (value : Expr) (env : L
   let fn ← abstractWith c fuel [⟨name, type, "default"⟩] (some [ty]) env lowerBody "let" (.given codomain) m.name
   return .app fn (← elaborateValue)
 
+/-! ## Specifications, declared ancestry and method combination -/
+
+def outerEnv : List Binding := [⟨"$seed", some .emptyRow, "unrestricted"⟩, ⟨"$globals", some (.variable 0), "unrestricted"⟩]
+
+def specOf (c : Ctx) (key : String) : Option (Spec × Module) :=
+  match declOf c key with
+  | some (.spec s, m) => some (s, m)
+  | _ => none
+
+def specKey (c : Ctx) (name : String) (m : Module) : M String := do
+  let key ← match qualifiedName name with
+    | some (alias, n) => match importOf m alias with
+      | some mod => pure (mod ++ "." ++ n)
+      | none => fail ("unknown import alias in spec parent " ++ name)
+    | none => pure (m.name ++ "." ++ name)
+  if (specOf c key).isNone then fail ("spec parent " ++ name ++ " is not a spec declaration")
+  return key
+
+def precedence (c : Ctx) : Nat → String → M (List String)
+  | 0, _ => fail "ancestry depth fuel"
+  | fuel + 1, key => do
+    if let some l := (← get).precedence.lookup key then return l
+    let some (s, m) := specOf c key | fail ("internal: unknown spec " ++ key)
+    if (← get).linearizing.contains key then fail ("spec ancestry cycle through " ++ key)
+    modify fun st => { st with linearizing := st.linearizing ++ [key] }
+    let parents ← s.parents.mapM (specKey c · m)
+    for p in parents do discard <| precedence c fuel p
+    let memo := (← get).precedence
+    let graph : ObjectiveBendC4.Graph := ⟨fun k => (memo.lookup k).getD [k],
+      fun k => match specOf c k with | some (s', _) => s'.suffix | none => false⟩
+    let list ← match ObjectiveBendC4.linearize graph [key] [parents] with
+      | .ok (l, _) => pure l
+      | .error e => fail ("C4 linearization of " ++ key ++ " refused: " ++ e)
+    modify fun st => { st with linearizing := st.linearizing.erase key, precedence := st.precedence ++ [(key, list)] }
+    return list
+
+def qualifierGroup (q : String) : String := if q == "around" then "around" else "primary"
+def hasLayer (s : Spec) (group : String) : Bool := s.methods.any (fun x => qualifierGroup x.qualifier == group)
+def plainSpec (s : Spec) : Bool :=
+  s.parents.isEmpty && !hasLayer s "around" && s.methods.all (·.qualifier == "primary")
+def combination : String → Option (String × ATerm)
+  | "+" => some ("add", .nat "0")
+  | "*" => some ("multiply", .nat "1")
+  | "and" => some ("conjunction", .boolean true)
+  | _ => none
+
+def checkSpecMethods (s : Spec) : M Unit := do
+  for method in s.methods do
+    if method.qualifier == "before" || method.qualifier == "after" then
+      fail (method.qualifier ++ " methods run for their effects and discard their result; Objective Bend core has no effect constructor yet")
+  for group in ["primary", "around"] do
+    if duplicate ((s.methods.filter (fun x => qualifierGroup x.qualifier == group)).map (·.name)) then
+      fail ("duplicate " ++ group ++ " method")
+
+def selfSuperParams (s : Spec) : List Param := [⟨"self", s.targetType, "default"⟩, ⟨"super", s.targetType, "default"⟩]
+def selfSuperEnv (target : Option PTy) : List Binding :=
+  ⟨"super", target, "unrestricted"⟩ :: ⟨"self", target, "unrestricted"⟩ :: outerEnv
+
+
+/-- `overlay provided inherited`: the provided fields first, then the inherited row
+(the first field of a name wins, as Core4 `overlay` after `extend`). -/
+def PTy.overlay : PTy → PTy → PTy
+  | .field n t rest, inherited => .field n t (rest.overlay inherited)
+  | _, inherited => inherited
+
+def isRowTy : PTy → Bool
+  | .field .. | .emptyRow => true
+  | _ => false
+
+/-- A declared plain spec named in a `fix` chain (bare or `Alias.Name`, not shadowed). -/
+def chainSpec (c : Ctx) (e : Expr) (env : List Binding) (m : Module) : Option (String × Spec × Module) :=
+  let key? : Option String := match e with
+    | .var n => if env.any (·.name == n) then none else lookupGlobal c n m
+    | .member (.var alias) n => if env.any (·.name == alias) then none else (importOf m alias).map (· ++ "." ++ n)
+    | _ => none
+  key?.bind fun key => match specOf c key with
+    | some (s, sm) => if plainSpec s then some (key, s, sm) else none
+    | none => none
+
+/-- The specs of `fix(S, seed)` / `fix(compose(S1, ..., Sn), seed)` when every operand is a
+declared plain spec; otherwise none (the expression is lowered as an ordinary value). -/
+def fixChain (c : Ctx) (spec : Expr) (env : List Binding) (m : Module) : Option (List (String × Spec × Module)) :=
+  let ops := match spec with
+    | .compose ops => ops
+    | e => [e]
+  ops.mapM (chainSpec c · env m)
+
+/-- One `compose` step over lowered operands (the composite's metadata is
+`SpecMeta.composed{P value, P right}`). -/
+def composeStep (metaTy : Option PTy) (value : ATerm) (valueTy : Option PTy) (right : ATerm) (rightTy : Option PTy) :
+    ATerm × Option PTy :=
+  let composite := metaTy.bind (composeTy · valueTy rightTy)
+  let reason := if composite.isSome then none else some "composition operand types are not resolvable as extensions"
+  -- An operand's provenance: its own SpecMeta when it is a specification, else
+  -- `extension {}` (a bare extension carries no metadata). Decided statically.
+  let provenance := fun (ty : Option PTy) (operand : ATerm) => match ty with
+    | some (.specification _ _) => ATerm.metadata operand
+    | _ => ATerm.inject "extension" metaTy reason (.record [])
+  let body := ATerm.specification
+    (.inject "composed" metaTy reason
+      (.record [("inherited", provenance valueTy (.bound 1)), ("wrapping", provenance rightTy (.bound 0))]))
+    (.mix (.bound 1) (.bound 0))
+  let inner := ATerm.lam ⟨rightTy, composite, "unrestricted", "reusable", reason⟩ body
+  let outerCodomain := match rightTy, composite with
+    | some r, some comp => some (arrowTy r comp)
+    | _, _ => none
+  let outer := ATerm.lam ⟨valueTy, outerCodomain, "unrestricted", "reusable", reason⟩ inner
+  (.app (.app outer value) right, composite)
+
+def requirementsOf (s : Spec) : M (List Signature) :=
+  match s.requirements.getArr? with
+  | .ok a => a.toList.mapM fun j => match decodeSignature j with
+    | .ok r => pure r
+    | .error e => fail ("requirement of spec " ++ s.name ++ ": " ++ e)
+  | .error _ => pure []
+
+def signatureText (r : Signature) : String :=
+  r.name ++ "(" ++ ", ".intercalate (r.params.map fun p => p.name ++ ": " ++ p.type) ++ ") -> " ++ r.resultType
+
 mutual
 def expression (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
   | 0, _, _, _ => fail "elaboration fuel"
@@ -944,6 +1065,12 @@ def expression (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
             let key := importedModule ++ "." ++ name
             if (declOf c key).isNone then fail ("missing imported declaration " ++ key)
             return ← globalRef env key
+      if let .var "super" := target then
+        if let some b := env.find? (·.name == "super") then
+          if let some ty := b.ty then
+            if isRowTy ty && (lookupRow (some ty) name).isNone then
+              fail ("refused (inherited-unprovided): super." ++ name ++ " is read, but nothing below this layer provides " ++
+                name ++ " (inherited: {" ++ ", ".intercalate (rowNames ty) ++ "})")
       return .get (← expression c fuel target env m) name
     | .record fields =>
       if duplicate (fields.map (·.1)) then fail "duplicate record field"
@@ -1007,26 +1134,11 @@ def expression (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
         for next in rest do
           let right ← expression c fuel next env m
           let rightTy ← synth c fuel next env m
-          let composite := metaTy.bind (composeTy · valueTy rightTy)
-          let reason := if composite.isSome then none else some "composition operand types are not resolvable as extensions"
-          -- An operand's provenance: its own SpecMeta when it is a specification, else
-          -- `extension {}` (a bare extension carries no metadata). Decided statically.
-          let provenance := fun (ty : Option PTy) (operand : ATerm) => match ty with
-            | some (.specification _ _) => ATerm.metadata operand
-            | _ => ATerm.inject "extension" metaTy reason (.record [])
-          let body := ATerm.specification
-            (.inject "composed" metaTy reason
-              (.record [("inherited", provenance valueTy (.bound 1)), ("wrapping", provenance rightTy (.bound 0))]))
-            (.mix (.bound 1) (.bound 0))
-          let inner := ATerm.lam ⟨rightTy, composite, "unrestricted", "reusable", reason⟩ body
-          let outerCodomain := match rightTy, composite with
-            | some r, some comp => some (arrowTy r comp)
-            | _, _ => none
-          let outer := ATerm.lam ⟨valueTy, outerCodomain, "unrestricted", "reusable", reason⟩ inner
-          value := .app (.app outer value) right
-          valueTy := composite
+          (value, valueTy) := composeStep metaTy value valueTy right rightTy
         return value
     | .fix spec inherited =>
+      if let some chain := fixChain c spec env m then
+        if let some lowered := (← chainFix c fuel chain inherited env m) then return lowered
       let st ← expression c fuel spec env m
       let it ← expression c fuel inherited env m
       return .fix st it
@@ -1089,6 +1201,85 @@ def tail (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
       return ← expression c fuel e env m
     return .done p r (← expression c fuel e env m)
 
+/-- The primary layer of plain spec `s` at final self `target` and inherited `inherited`:
+`λself: target. λsuper: inherited. extend super {defs}`, typed
+target → inherited → provided (provided = overlay(defs, inherited), canonical). -/
+def layerAt (c : Ctx) : Nat → Spec → Module → PTy → PTy → PTy → M ATerm
+  | 0, _, _, _, _, _ => fail "elaboration fuel"
+  | fuel + 1, s, m, target, inherited, provided => do
+    let env : List Binding := ⟨"super", some inherited, "unrestricted"⟩ :: ⟨"self", some target, "unrestricted"⟩ :: outerEnv
+    let mut methods : List (String × ATerm) := []
+    for method in s.methods do
+      let value ← abstract c fuel method.params env (fun inner => body c fuel method.body inner m)
+        method.name (.source method.resultType) m.name
+      methods := methods ++ [(method.name, value)]
+    abstractWith c fuel (selfSuperParams s) (some [some target, some inherited]) outerEnv
+      (fun _ => pure (.extend (.bound 0) methods)) s.name (.given (some provided)) m.name
+
+/-- `fix` over a chain of declared plain specs with a seed that is not a whole target: the
+open inherited row (OB-LTUO LT2 D3). Each layer is instantiated at the row actually
+beneath it (I₀ = the seed's type, Iₖ = overlay(defsₖ, Iₖ₋₁)); a layer reading `super.m`
+that nothing below provides is refused by name, and the final row must be exactly the
+target: a member that no layer and not the seed provides is `requires-unprovided`. A
+whole-target seed (or any operand that is not a declared plain spec) keeps the closed
+lowering (none). -/
+def chainFix (c : Ctx) : Nat → List (String × Spec × Module) → Expr → List Binding → Module → M (Option ATerm)
+  | 0, _, _, _, _ => fail "elaboration fuel"
+  | fuel + 1, chain, inherited, env, m => do
+    let some (_, s0, m0) := chain.head? | return none
+    let some target ← sourceType c fuel s0.targetType m0.name [] | return none
+    for (_, s, sm) in chain do
+      if !sameTy (← sourceType c fuel s.targetType sm.name []) (some target) then return none
+    let some seedTy ← synth c fuel inherited env m | return none
+    if sameTy (some seedTy) (some target) || !isRowTy seedTy then return none
+    let metaTy ← sourceType c fuel specMetaName builtinModuleName []
+    let mut below := seedTy.canonical
+    let mut operands : List (ATerm × Option PTy) := []
+    for (key, s, sm) in chain do
+      let mut defs : List (String × PTy) := []
+      for method in s.methods do
+        let some t ← signatureTy c fuel method.params (.source method.resultType) sm.name [] | return none
+        defs := defs ++ [(method.name, t)]
+      let provided := (PTy.overlay (PTy.row defs) below).canonical
+      if sameTy (some below) (some target) then
+        -- At a whole target the declared (closed) layer is this instance.
+        operands := operands ++ [(← globalRef env key, some (.specification (metaTy.getD .emptyRow) (extensionTy target)))]
+      else
+        let index := (key, (below.json).compress)
+        let name ← match (← get).instances.lookup index with
+          | some name => pure name
+          | none => do
+            let name := key ++ "@" ++ toString (← get).instances.length
+            let layer ← layerAt c fuel s sm target below provided
+            let value := ATerm.specification (.metadata (← globalRef outerEnv key)) layer
+            let type := metaTy.map fun mt => .specification mt (arrowTy target (arrowTy below provided))
+            modify fun st => { st with instances := st.instances ++ [(index, name)] }
+            modify fun st => { st with hidden := st.hidden.push (name, value, type) }
+            pure name
+        operands := operands ++ [(← globalRef env name, metaTy.map fun mt => .specification mt (arrowTy target (arrowTy below provided)))]
+      below := provided
+    if !sameTy (some below) (some target) then
+      let targetNames := rowNames target
+      let providedNames := rowNames below
+      let missing := targetNames.filter (fun n => !providedNames.contains n)
+      let extra := providedNames.filter (fun n => !targetNames.contains n)
+      if !missing.isEmpty then
+        let mut requiredBy : List String := []
+        for (key, s, _) in chain do
+          if (← requirementsOf s).any (fun r => missing.contains r.name) then requiredBy := requiredBy ++ [key]
+        fail ("refused (requires-unprovided): fix at " ++ s0.targetType ++ " leaves " ++ ", ".intercalate missing ++
+          " unprovided: no layer of the composition and not the seed provides it" ++
+          (if requiredBy.isEmpty then "" else " (required by " ++ ", ".intercalate requiredBy ++ ")"))
+      if !extra.isEmpty then
+        fail ("refused (seed-extra): the seed provides " ++ ", ".intercalate extra ++ ", which " ++ s0.targetType ++ " does not declare")
+      fail ("refused (provided-mismatch): the composition provides members of " ++ s0.targetType ++ " at other types than it declares")
+    let some (first, firstTy) := operands.head? | return none
+    let mut value := first
+    let mut valueTy := firstTy
+    for (right, rightTy) in operands.drop 1 do
+      (value, valueTy) := composeStep metaTy value valueTy right rightTy
+    return some (.fix value (← expression c fuel inherited env m))
+
 def fieldsOf (c : Ctx) : Nat → List (String × Expr) → List Binding → Module → M (List (String × ATerm))
   | 0, _, _, _ => fail "elaboration fuel"
   | _ + 1, [], _, _ => return []
@@ -1145,64 +1336,6 @@ def body (c : Ctx) : Nat → Body → List Binding → Module → M ATerm
     | _, _ => fail "Nat match currently requires exactly zero and successor branches"
 end
 
-/-! ## Specifications, declared ancestry and method combination -/
-
-def outerEnv : List Binding := [⟨"$seed", some .emptyRow, "unrestricted"⟩, ⟨"$globals", some (.variable 0), "unrestricted"⟩]
-
-def specOf (c : Ctx) (key : String) : Option (Spec × Module) :=
-  match declOf c key with
-  | some (.spec s, m) => some (s, m)
-  | _ => none
-
-def specKey (c : Ctx) (name : String) (m : Module) : M String := do
-  let key ← match qualifiedName name with
-    | some (alias, n) => match importOf m alias with
-      | some mod => pure (mod ++ "." ++ n)
-      | none => fail ("unknown import alias in spec parent " ++ name)
-    | none => pure (m.name ++ "." ++ name)
-  if (specOf c key).isNone then fail ("spec parent " ++ name ++ " is not a spec declaration")
-  return key
-
-def precedence (c : Ctx) : Nat → String → M (List String)
-  | 0, _ => fail "ancestry depth fuel"
-  | fuel + 1, key => do
-    if let some l := (← get).precedence.lookup key then return l
-    let some (s, m) := specOf c key | fail ("internal: unknown spec " ++ key)
-    if (← get).linearizing.contains key then fail ("spec ancestry cycle through " ++ key)
-    modify fun st => { st with linearizing := st.linearizing ++ [key] }
-    let parents ← s.parents.mapM (specKey c · m)
-    for p in parents do discard <| precedence c fuel p
-    let memo := (← get).precedence
-    let graph : ObjectiveBendC4.Graph := ⟨fun k => (memo.lookup k).getD [k],
-      fun k => match specOf c k with | some (s', _) => s'.suffix | none => false⟩
-    let list ← match ObjectiveBendC4.linearize graph [key] [parents] with
-      | .ok (l, _) => pure l
-      | .error e => fail ("C4 linearization of " ++ key ++ " refused: " ++ e)
-    modify fun st => { st with linearizing := st.linearizing.erase key, precedence := st.precedence ++ [(key, list)] }
-    return list
-
-def qualifierGroup (q : String) : String := if q == "around" then "around" else "primary"
-def hasLayer (s : Spec) (group : String) : Bool := s.methods.any (fun x => qualifierGroup x.qualifier == group)
-def plainSpec (s : Spec) : Bool :=
-  s.parents.isEmpty && !hasLayer s "around" && s.methods.all (·.qualifier == "primary")
-def combination : String → Option (String × ATerm)
-  | "+" => some ("add", .nat "0")
-  | "*" => some ("multiply", .nat "1")
-  | "and" => some ("conjunction", .boolean true)
-  | _ => none
-
-def checkSpecMethods (s : Spec) : M Unit := do
-  for method in s.methods do
-    if method.qualifier == "before" || method.qualifier == "after" then
-      fail (method.qualifier ++ " methods run for their effects and discard their result; Objective Bend core has no effect constructor yet")
-  for group in ["primary", "around"] do
-    if duplicate ((s.methods.filter (fun x => qualifierGroup x.qualifier == group)).map (·.name)) then
-      fail ("duplicate " ++ group ++ " method")
-
-def selfSuperParams (s : Spec) : List Param := [⟨"self", s.targetType, "default"⟩, ⟨"super", s.targetType, "default"⟩]
-def selfSuperEnv (target : Option PTy) : List Binding :=
-  ⟨"super", target, "unrestricted"⟩ :: ⟨"self", target, "unrestricted"⟩ :: outerEnv
-
 def layer (c : Ctx) (fuel : Nat) (s : Spec) (m : Module) (group : String) : M ATerm := do
   let selfSuper := selfSuperEnv (← sourceType c fuel s.targetType m.name [])
   let mut methods : List (String × ATerm) := []
@@ -1237,6 +1370,16 @@ def specification (c : Ctx) (fuel : Nat) (s : Spec) (m : Module) : M ATerm := do
   checkSpecMethods s
   let key := m.name ++ "." ++ s.name
   let target ← sourceType c fuel s.targetType m.name []
+  -- `requires` is checked: a requirement is a member of the closed target, at its type.
+  if let some t := target then
+    for r in ← requirementsOf s do
+      let rt ← signatureTy c fuel r.params (.source r.resultType) m.name []
+      match lookupRow (some t) r.name with
+      | none => fail ("refused (requires-unprovided): spec " ++ key ++ " requires " ++ signatureText r ++
+          ", which " ++ s.targetType ++ " does not declare")
+      | some mt => if !sameTy rt (some mt) then
+          fail ("refused (requires-signature): spec " ++ key ++ " requires " ++ signatureText r ++
+            ", but " ++ s.targetType ++ "." ++ r.name ++ " has another type")
   let list ← precedence c fuel key
   let extension ← if plainSpec s then layer c fuel s m "primary" else do
     for ancestor in list do

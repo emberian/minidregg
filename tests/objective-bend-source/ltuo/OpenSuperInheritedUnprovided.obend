@@ -1,0 +1,17 @@
+edition ObjectiveBend 1
+# D3 tooth: Augmented reads super.review, but in this order nothing below it provides
+# review (Base is above it) and the seed is empty: refused by name at the fix.
+
+record Review:
+  review(value: Nat) -> Nat
+
+spec Base for Review:
+  def review(value: Nat) -> Nat:
+    value + 1n
+
+spec Augmented for Review:
+  def review(value: Nat) -> Nat:
+    super.review(value) + 1n
+
+def reviewOfThree() -> Nat:
+  fix(compose(Augmented, Base), {}).review(3n)
