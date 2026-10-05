@@ -15,6 +15,7 @@ What is proved, and over which hash:
 
 * `preimage_injective` — the encoding is injective whenever the first operand has fewer than `2^64`
   bytes (every `a < 2^256` does: `natBytesBE_length_le`).
+  The domain has both poles: `admissible_zero` and `not_admissible_wide` (`256 ^ 2^64`).
 * `binds_or_collides` — generic in the hash `H`: equal digests have equal operands, or `H` has a
   `Collision` (Theory.HashBytes, the carrier Pred's `hashEq` names). `sealed_binds_or_collides` is
   the nested ballot shape. Nothing about cSHAKE256 is assumed: the disjunct is where its collision
@@ -133,6 +134,25 @@ theorem admissible_of_lt {a : Nat} (h : a < 2 ^ 256) : Admissible a := by
   have := natBytesBE_length_le (k := 32) (by decide) (h256 ▸ h)
   unfold Admissible
   omega
+
+/-- The satisfying pole of `Admissible`: zero (one byte) is admissible. -/
+theorem admissible_zero : Admissible 0 := admissible_of_lt (by decide)
+
+/-- A natural at or above `256 ^ k` takes more than `k` bytes: `ofBE` of `n` bytes is below
+`256 ^ n` (`ofBE_lt`) and `natBytesBE` reads back exactly (`ofBE_natBytesBE`). -/
+theorem lt_natBytesBE_length {a k : Nat} (h : 256 ^ k ≤ a) : k < (natBytesBE a).length := by
+  have hlt := ofBE_lt (natBytesBE a)
+  rw [ofBE_natBytesBE] at hlt
+  refine Nat.lt_of_not_le fun hle => Nat.lt_irrefl a ?_
+  exact Nat.lt_of_lt_of_le hlt (Nat.le_trans (Nat.pow_le_pow_right (by decide) hle) h)
+
+/-- Anything at or above `256 ^ 2^64` takes more than `2^64` bytes: outside the domain. -/
+theorem not_admissible_of_le {a : Nat} (h : 256 ^ (2 ^ 64) ≤ a) : ¬ Admissible a :=
+  fun ha => Nat.lt_asymm (lt_natBytesBE_length h) ha
+
+/-- The refuting pole of `Admissible`: `256 ^ 2^64` is not admissible, so the premise of
+`preimage_injective` and `binds_or_collides` excludes something. -/
+theorem not_admissible_wide : ¬ Admissible (256 ^ (2 ^ 64)) := not_admissible_of_le (Nat.le_refl _)
 
 /-- **The encoding is injective on its domain.** Different operand pairs have different
 preimages, so a digest equality between them is a collision of the hash. -/
