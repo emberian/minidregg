@@ -1,0 +1,25 @@
+verdict	step	expected	observed
+PASS	genesis ledger (before any turn)	clock 0/0, well = -(4 x 100), payers none	well=-400 clock=0/0 payers=0
+PASS	observation before a valid tariff	refused tariffInvalid	refused Minidregg.Kernel.PayObservation.Reject.tariffInvalid
+PASS	operator installs 4-row book (row 0 = P1's address) + tariff on P1's mint	confirmed	confirmed
+PASS	subject 8 takes index 0 for account 108	confirmed	confirmed
+PASS	subject 9 takes index 1 for account 109	confirmed	confirmed
+PASS	P1 happy record (1e9 atomic to index 0) at tip 1000	confirmed	confirmed
+PASS	clock is the tip	clock 1000/1759250000	clock=1000/1759250000
+PASS	payer 108 credited exactly creditFor(amount)	+1000000000	+1000000000 well -400 -> -1000000400
+PASS	the SAME transfer resubmitted in a new report (tip 1100)	refused durable alreadyConsumed	refused Minidregg.Kernel.DurableDataIntent.RejectReason.durable (Minidregg.Kernel.DurableCommitProtocol.RejectReason.alreadyConsumed)
+PASS	the same transfer twice in one report	refused duplicateInBatch	refused Minidregg.Kernel.PayObservation.Reject.duplicateInBatch
+PASS	same signature, DIFFERENT address (index 1, account 109)	confirmed (a second credit)	confirmed
+PASS	over-cap transfer (3e9 atomic, cap 2e9)	confirmed	confirmed
+PASS	receipt-only lookup of the over-cap report; its journaled command	confirmed replayed, amount 3000000000	confirmed replayed amount=3000000000
+PASS	heartbeat 1499 slots after the clock	refused tickTooSoon	refused Minidregg.Kernel.PayObservation.Reject.tickTooSoon
+PASS	heartbeat 1500 slots after the clock	confirmed, clock 2800	confirmed clock=2800/1759251800
+PASS	report at a tip behind the clock and the retained chain tip (2700 < 2800)	refused tipInvalidOrRegressing	refused Minidregg.Kernel.PayObservation.Reject.tipInvalidOrRegressing
+PASS	observation for the unassigned index 2	refused unassignedIndex	refused Minidregg.Kernel.PayObservation.Reject.unassignedIndex
+PASS	observation of a different mint	refused wrongMint	refused Minidregg.Kernel.PayObservation.Reject.wrongMint
+PASS	observation naming another index's address	refused addressMismatch	refused Minidregg.Kernel.PayObservation.Reject.addressMismatch
+PASS	over-cap credits the cap	payer 108 +2000000000	+2000000000
+PASS	same signature to index 1 credited account 109	+250000000	+250000000
+PASS	well_tracks_observed on this Store: -well_h = -well_0 + sum creditFor	-well_h = 3250000400	-well_h=3250000400 -well_0=400 credited=3250000000 payers_delta=3250000000
+PASS	cold reopen	same pay root, clock 2800	payRoot equal=True clock=2800
+PASS	operator audit re-admits every record (NativeHostReplay)	exit 0	exit=0 links []

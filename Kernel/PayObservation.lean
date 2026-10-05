@@ -38,6 +38,7 @@ import Kernel.ClockCell
 import Kernel.PayChainTip
 import Theory.CanonicalResourceKernel
 import Compiler.CredentialSignatureAdmission
+import Kernel.ReceivingLaw
 
 namespace Minidregg.Kernel.PayObservation
 
@@ -205,6 +206,9 @@ inductive Reject where
   | bookAdmission | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
+  /-- The committed law of a written cell refused the write (`Kernel.ReceivingLaw`):
+  the clock's own law, judged on the report's clock advance. -/
+  | law (fault : ReceivingLaw.LawFault)
   deriving DecidableEq, Repr
 
 /-- One observation's credit: the payer the index is assigned to and the

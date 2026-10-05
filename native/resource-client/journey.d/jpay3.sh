@@ -85,6 +85,8 @@ genesis = {"domain": "8501", "factoryId": str(FACTORY), "resourceBookId": str(BO
            "enrollments": [enrollment(s) for s in SUBJECTS],
            "factoryControllerSubject": str(EMBER),
            "factoryControllerCapability": str(FACTORY_CONTROL),
+           "clockTickers": [],
+           "tailBound": "1000000",
            "meterAllowance": {k: "10000000" for k in ("incidences", "turnBytes", "memoryTouches",
                "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
                "feeDebit", "leaseByteBlocks")},
@@ -281,7 +283,10 @@ row("heartbeat 1500 slots after the clock", "confirmed, clock 2800",
     f"{show(r)} clock={c['slot']}/{c['now']}",
     r.get("type") == "confirmed" and c == {"now": str(1759249000 + 2800), "slot": "2800"})
 r, _ = observe(host, tip(2700), [record(0, P1_ADDRESS, signature("late"), 2650, 5)])
-row("report at a tip behind the clock (2700 < 2800)", "refused tipBehindClock", show(r), refused_with(r, "tipBehindClock"))
+# The pay cell retains the finalized chain tip (2800, PayChainTip): a report at 2700 regresses it and
+# is refused by the chain-tip check, which decideObservations runs before the clock comparison.
+row("report at a tip behind the clock and the retained chain tip (2700 < 2800)", "refused tipInvalidOrRegressing",
+    show(r), refused_with(r, "tipInvalidOrRegressing"))
 r, _ = observe(host, tip(2900), [record(2, address(2), signature("unassigned"), 2850, 5)])
 row("observation for the unassigned index 2", "refused unassignedIndex", show(r), refused_with(r, "unassignedIndex"))
 r, _ = observe(host, tip(2900), [record(0, P1_ADDRESS, signature("mint"), 2850, 5, mint="07" * 32)])

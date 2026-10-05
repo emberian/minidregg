@@ -12,6 +12,7 @@ import Kernel.PayEnrolV2Legs
 import Compiler.PhysicalLawResolution
 import Compiler.ComposedPolicyAdmission
 import Compiler.WorldKindLawDependencies
+import Kernel.ClockLaw
 
 namespace Minidregg.Kernel.PayEnrolV2Receiver
 
@@ -53,6 +54,9 @@ inductive Reject where
   | validation | physicalPreparation | policyUnavailable | capabilityRejected
   | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
+  /-- The committed law of a written cell refused the write (`Kernel.ReceivingLaw`):
+  the clock's own law, judged on the enrollment's clock advance. -/
+  | law (fault : ReceivingLaw.LawFault)
   deriving Repr
 
 def requireSome {A : Type} (reason : Reject) : Option A → Except Reject A
@@ -113,7 +117,21 @@ def payPatch (observation : Observation) (decision : Decision) (account : Nat) :
   | .journal reason => PayEnrolDecision.journalPatch observation reason
 
 section Preparation
-variable {F : Type} [Field F]
+variable {F : Type} [Field F] [DecidableEq F]
+
+/-- The clock write's law step (`ClockLaw.step`): the clock target's selector
+slots, the observer's signed self-enrollment request, operation
+`pay-self-enrol`, and the clock before and after the validated advance. -/
+def clockStepOf (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (command : Command) (directory : Directory Nat Registry)
+    (snapshot : PayEnrolReceiver.Snapshot) (pay : PayCell.Cell) (clock : ClockCell.Cell)
+    (current : ClockCell.Clock) (d : Declaration) {patch : Patch ClockCell.layout}
+    (clockValid : ValidatedPatch ClockCell.materializer clock clock.root patch) : PolicyStepContext :=
+  ClockLaw.step (WorldKindLawDependencies.targetSelectorSlots directory
+      (ClockCell.physicalId deployment.domain))
+    (request deployment snapshot pay profile.semantics ambient command d)
+    ClockLaw.paySelfEnrolSlot current profile.semantics
+    (PayEnrolReceiver.effectDigest snapshot.domain profile.semantics command d) clockValid
 
 def declarationOf {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : Ambient} {durable : Durable} {directory : LoadedDirectory durable}
@@ -165,6 +183,11 @@ structure Prepared (deployment : Deployment) (profile : CanonicalRuntimeProfile.
   legs : PayEnrolV2Legs.Legs deployment profile ambient directory authority pay book tariff input
   candidate : Candidate (family deployment authority.snapshot pay.cell profile.semantics ambient command
       (patchOf command decision legs)) pay.cell (declarationOf command decision legs) ()
+  /-- The clock's own committed law admits the advance (no fault). -/
+  clockJudged : ReceivingLaw.judgeWrite (PayObservationReceiver.laws deployment profile) .payEnrolV2
+    durable (clock.write clockValid.apply)
+    (some (clockStepOf deployment profile ambient command directory.directory authority.snapshot
+      pay.cell clock.cell clock.clock (declarationOf command decision legs) clockValid)) = none
   source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
     (authority.snapshot.authState.policyAddress ⟨deployment.factoryId⟩
       (authority.snapshot.authState.policyRevision ⟨deployment.factoryId⟩))
@@ -221,6 +244,14 @@ def prepare (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile
                     match validate PayCell.materializer pay.cell pay.cell.root (patchOf command decision legs) with
                     | .rejected _ => throw .validation
                     | .accepted validated =>
+                     match clockJudged : ReceivingLaw.judgeWrite
+                         (PayObservationReceiver.laws deployment profile) .payEnrolV2 durable
+                         (clock.write clockValid.apply)
+                         (some (clockStepOf deployment profile ambient command directory.directory
+                           snapshot pay.cell clock.cell clock.clock (declarationOf command decision legs)
+                           clockValid)) with
+                     | some fault => throw (.law fault)
+                     | none =>
                       let source ← requireSome .policyUnavailable (CanonicalCellRegistry.loadPolicySource
                         snapshot.domain directory.directory
                         (snapshot.authState.policyAddress ⟨deployment.factoryId⟩
@@ -242,7 +273,7 @@ def prepare (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile
                           pure ⟨seed, directory, authority, pay, book, factory, tariff, tariffExact,
                             clock, tipAhead, chainTipAhead, by simpa [exactTip] using tipFresh,
                             clockValid, decision, decided, input, inputExact, legs, candidate,
-                            source, dependencies, dependenciesExact, lawGuards, lawGuardsExact⟩
+                            clockJudged, source, dependencies, dependenciesExact, lawGuards, lawGuardsExact⟩
             else throw .chainTipRegressed
         else throw .chainTipRegressed
       else throw .tipBehindClock
@@ -266,7 +297,7 @@ def project (prepared : Prepared deployment profile ambient durable command memo
     CanonicalRuntimeProfile.requestSlots
       (request deployment prepared.authority.snapshot prepared.pay.cell profile.semantics ambient
         command prepared.declaration) ++
-    [(NativeHostGenesis.selfEnrolSlot, 1),
+    [(ClockLaw.paySelfEnrolSlot, 1),
      ("pay/decision", Int.ofNat (decisionTag prepared.decision)),
      ("pay/amount", Int.ofNat command.observation.amount),
      ("pay/price", Int.ofNat (match prepared.decision.consumption with
@@ -286,7 +317,7 @@ def sourceStore (prepared : Prepared deployment profile ambient durable command 
 
 /-- The factory is the request's actual target. Preparation retains the exact
 structural dependencies and complete current/pinned law-source read set. -/
-def policyConfig [DecidableEq F]
+def policyConfig
     (prepared : Prepared deployment profile ambient durable command memo verified) :
     ComposedPolicyAdmission.Config F :=
   PhysicalLawResolution.config profile.compilerProfile prepared.authority.snapshot
@@ -307,7 +338,7 @@ theorem Prepared.complete_law_dependencies
       profile.semantics deployment.factoryId prepared.dependencies.additional = some prepared.lawGuards :=
   ⟨prepared.dependenciesExact, prepared.lawGuardsExact⟩
 
-abbrev Prepared.SemanticAccepted [DecidableEq F]
+abbrev Prepared.SemanticAccepted
     (prepared : Prepared deployment profile ambient durable command memo verified) :=
   AcceptedCellEffect (portal := (policyConfig prepared).portal)
     (authState := prepared.authority.snapshot.authState)
@@ -319,7 +350,7 @@ abbrev Prepared.SemanticAccepted [DecidableEq F]
 
 /-- The observer's request under the factory's CURRENT law: capability mode
 with `C_enrol`, the slot `authority/operation/pay-self-enrol = 1`. -/
-def authorize [DecidableEq F]
+def authorize
     (prepared : Prepared deployment profile ambient durable command memo verified)
     (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot) :
     Except Reject prepared.SemanticAccepted := do
@@ -342,7 +373,7 @@ def authorize [DecidableEq F]
   | some authorization =>
       .ok (prepared.candidate.accept authorization rfl rfl rfl .sealed trivial)
 
-structure Accepted [DecidableEq F]
+structure Accepted
     (prepared : Prepared deployment profile ambient durable command memo verified)
     (ingress : DecodedIngress) where
   private mk ::
@@ -352,7 +383,7 @@ structure Accepted [DecidableEq F]
 
 /-- An accepted observer submission satisfies the resolved current law, including
 inherited/ambient/kind components, on this exact source-prepared effect. -/
-theorem Accepted.composed_law_evaluated [DecidableEq F]
+theorem Accepted.composed_law_evaluated
     {prepared : Prepared deployment profile ambient durable command memo verified}
     {ingress : DecodedIngress} (accepted : Accepted prepared ingress) :
     ∃ graph : PolicyComponentResolution.LoadedGraph
@@ -369,7 +400,7 @@ theorem Accepted.composed_law_evaluated [DecidableEq F]
     (request deployment prepared.authority.snapshot prepared.pay.cell profile.semantics
       ambient command prepared.declaration) accepted.semantic.authorization
 
-def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
+def admitNative (native : CredentialSignatureIO.NativeConfig)
     (prepared : Prepared deployment profile ambient durable command memo verified)
     (ingress : DecodedIngress) : IO (Except Reject (Accepted prepared ingress)) := do
   match ← CredentialSignatureAdmission.verifyNative native prepared.authority.snapshot
@@ -398,6 +429,29 @@ def Prepared.clockPost (prepared : Prepared deployment profile ambient durable c
 def clockWrite (prepared : Prepared deployment profile ambient durable command memo verified) : DataWrite :=
   prepared.clock.write prepared.clockPost
 
+/-- The clock write's law step. -/
+def Prepared.clockStep (prepared : Prepared deployment profile ambient durable command memo verified) :
+    PolicyStepContext :=
+  clockStepOf deployment profile ambient command prepared.directory.directory
+    prepared.authority.snapshot prepared.pay.cell prepared.clock.cell prepared.clock.clock
+    prepared.declaration prepared.clockValid
+
+/-- **The clock's own law admitted the advance** (`ReceivingLaw.Lawful` under the
+deployed laws, the conclusion `Receiving.Family.shape_lawful` gives a migrated
+family per write). -/
+theorem Prepared.clock_lawful
+    (prepared : Prepared deployment profile ambient durable command memo verified) :
+    ReceivingLaw.Lawful (PayObservationReceiver.laws deployment profile) .payEnrolV2 durable
+      (clockWrite prepared) (some prepared.clockStep) :=
+  (ReceivingLaw.judgeWrite_none_iff _ _ _ _ _).1 prepared.clockJudged
+
+/-- The cells the clock law's resolution read: a concurrent change of the
+clock's law conflicts with the enrollment. -/
+def clockLawGuards (prepared : Prepared deployment profile ambient durable command memo verified) :
+    List ReadGuard :=
+  ReceivingLaw.writeGuards (PayObservationReceiver.laws deployment profile) durable
+    (clockWrite prepared) (some prepared.clockStep)
+
 /-- The pay cell, the clock cell, then the decision's other cells. -/
 def writes (prepared : Prepared deployment profile ambient durable command memo verified) :
     List DataWrite :=
@@ -411,7 +465,8 @@ def readGuards (prepared : Prepared deployment profile ambient durable command m
     List ReadGuard :=
   policyGuard prepared ::
     (prepared.authority.readGuards ++
-      (lawReadGuards prepared).map (fun (cellIdentifier, expectedRoot) => (⟨⟨cellIdentifier⟩, expectedRoot⟩ : ReadGuard))).filter fun guard =>
+      (lawReadGuards prepared).map (fun (cellIdentifier, expectedRoot) => (⟨⟨cellIdentifier⟩, expectedRoot⟩ : ReadGuard)) ++
+      clockLawGuards prepared).filter fun guard =>
       guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
 def PhysicalShape (prepared : Prepared deployment profile ambient durable command memo verified) : Prop :=
@@ -549,7 +604,7 @@ end Receiver
 
 /-- The observer signs the actual source-prepared v2 decision. Failure is
 returned before a signing plan is handed to the watcher. -/
-def signingHeader {F : Type} [Field F] (deployment : Deployment)
+def signingHeader {F : Type} [Field F] [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (seed : Digest)
     (durable : Durable) (native : CredentialSignatureIO.NativeConfig) (command : Command) :
     IO (Except String CredentialSignedEnvelopeController.SignedHeader) := do
@@ -564,5 +619,7 @@ def signingHeader {F : Type} [Field F] (deployment : Deployment)
         ⟨.program, request deployment prepared.authority.snapshot prepared.pay.cell profile.semantics
           ambient command prepared.declaration⟩).mapError
         (fun reason => s!"v2 payment observer key: {repr reason}")
+
+#assert_axioms Prepared.clock_lawful
 
 end Minidregg.Kernel.PayEnrolV2Receiver

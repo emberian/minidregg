@@ -113,7 +113,7 @@ SUBJECTS = [EMBER, OBSERVER] + FRIENDS
 os.makedirs(path("keys"))
 public = {}
 for s in SUBJECTS:
-    mini("keygen", "--secret", path("keys", f"{s}.key"), "--public", path("keys", f"{s}.pub"), check=True)
+    mini("keygen", "--secret", path("keys", f"{s}.key"), "--public", path("keys", f"{s}.pub"), "--no-prerotation", check=True)
     public[s] = open(path("keys", f"{s}.pub"), "rb").read().hex()
 def enrollment(s):
     return {"key": {"keyId": str(7000 + s), "keyEpoch": "2", "algorithm": "1", "subject": str(s),
@@ -180,7 +180,7 @@ for s in SUBJECTS:
     WS[s] = path("ws", str(s))
     os.makedirs(path("ws"), exist_ok=True)
     mini("workspace", "--action", "init", "--host", HOST, "--config", CONFIG, "--socket", SOCKET,
-         "--key", path("keys", f"{s}.key"), "--subject", s, "--dir", WS[s], check=True)
+         "--key", path("keys", f"{s}.key"), "--subject", s, "--dir", WS[s], "--no-prerotation", check=True)
 for s in FRIENDS:
     mini("workspace", "--action", "import", "--dir", WS[s], "--name", "account", "--kind", "account",
          "--target", acct(s), "--observe-capability", 1000 + s, "--operation-capability", 1000 + s,

@@ -5,8 +5,9 @@ A tick asserts a new clock value `{now, slot}`.  It is admitted exactly when:
 * the sponsor presents a `C_tick`: a capability on the clock cell itself
   carrying the verb `tickClock`, admitted in capability mode under the clock
   cell's current law.  Genesis issues `C_tick` only to the configured clock
-  tickers (`NativeHostGenesis.tickCapability`, `clock_subject_confined`) and the
-  clock law admits exactly their `tickClock` (`clockPredicate_eval`): the
+  tickers (`NativeHostGenesis.tickCapability`, `clock_subject_confined`) and,
+  of ticks, the clock law admits exactly theirs, forward only
+  (`Kernel.ClockLaw.clockPredicate`, `tickClause_eval`): the
   operator's wall-clock ticker is the dedicated clock subject, and a chain
   observer is another ticker.  The factory controller holds no such capability
   (`tick_requires_clock_capability`);
@@ -253,7 +254,8 @@ structure Ambient where
   height : Height
 
 /-- The clock cell is the tick's resource and policy: `C_tick` names it, and
-its law (installed at genesis, `NativeHostGenesis.clockPredicate`) decides. -/
+its law (installed at genesis, `NativeHostGenesis.clockPredicate`) decides.  The
+same law judges the pay families' clock writes (`Kernel.ClockLaw`). -/
 def clockTarget (deployment : Deployment) : Nat := ClockCell.physicalId deployment.domain
 
 def context (deployment : Deployment) (snapshot : Snapshot) (semantics : Digest)

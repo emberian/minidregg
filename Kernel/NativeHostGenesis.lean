@@ -15,6 +15,7 @@ A deliberately denying factory policy is valid deployment configuration.
 import Compiler.WorldExecutionContract
 import Kernel.ResourceBirthPolicyController
 import Kernel.PayClaimLaw
+import Kernel.ClockLaw
 import Theory.AssertAxioms
 
 namespace Minidregg.Kernel.NativeHostGenesis
@@ -73,8 +74,9 @@ structure PayObserver where
 /-- A subject that advances the deployment's one clock cell, and the
 identifier of its `C_tick`: a root capability on the clock cell
 (`ClockCell.physicalId`) carrying the one verb `tickClock`
-(`tickCapability`).  The clock cell's genesis law admits exactly these
-subjects and that verb (`clockPredicate`), and the factory law refuses them
+(`tickCapability`).  The clock cell's genesis law admits these subjects'
+`tickClock`, and, beside it, only the pay operations' forward advance
+(`clockPredicate`, `Kernel.ClockLaw`), and the factory law refuses them
 everything (`factoryLaw`): a ticker can advance the clock and do nothing else
 (`clock_subject_confined`).  The operator's wall-clock ticker is one; a chain
 observer that asserts chain time is another. -/
@@ -372,18 +374,15 @@ def policy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
   audience := none
   objectDescriptor := none
 
-/-- The law slot that only `PayEnrolReceiver` projects (as `1`). -/
-def selfEnrolSlot : String := "authority/operation/pay-self-enrol"
-
 /-- The factory law with the payment observer confined (PAY §11.4): the
 observer is admitted only on a self-enrollment request (the receiver projects
-`selfEnrolSlot = 1`), and every clause of the deployment's own factory law is
+`ClockLaw.paySelfEnrolSlot = 1`), and every clause of the deployment's own factory law is
 reached only by a request that is neither the observer's nor a
 self-enrollment.  `observer_control_confined`, `self_enrol_only_observer`. -/
 def confinedFactoryLaw (observer : SubjectId) (base : Minidregg.Pred.Pred) : Minidregg.Pred.Pred :=
   .any [
-    .all [.eq "request/subject" (Int.ofNat observer.value), .eq selfEnrolSlot 1],
-    .all [.not (.eq "request/subject" (Int.ofNat observer.value)), .not (.eq selfEnrolSlot 1),
+    .all [.eq "request/subject" (Int.ofNat observer.value), .eq ClockLaw.paySelfEnrolSlot 1],
+    .all [.not (.eq "request/subject" (Int.ofNat observer.value)), .not (.eq ClockLaw.paySelfEnrolSlot 1),
       base]]
 
 /-- The configured ordinary factory law plus the source-authorized claim
@@ -411,19 +410,18 @@ def factoryPolicy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profil
     (config : Config) : PolicyRecord :=
   policy profile config config.deployment.factoryId (factoryLaw config)
 
-/-- The request-verb tag of a tick (`CredentialAuthorityEntryCodec.verbTag`). -/
-def tickVerbTag : Nat := CredentialAuthorityEntryCodec.verbTag (Verb.tickClock : Verb .program)
-
-/-- The clock cell's law: the verb is `tickClock` and the subject is a ticker. -/
-def clockPredicate (tickers : List ClockTicker) : Minidregg.Pred.Pred :=
-  .all [.eq "request/verb" (Int.ofNat tickVerbTag),
-    .any (tickers.map fun ticker => .eq "request/subject" (Int.ofNat ticker.subject.value))]
+/-- The clock cell's law (`Kernel.ClockLaw.clockPredicate`): the clock never
+goes back; it advances by a ticker's `tickClock`, and, when the deployment has
+a payment observer, by a payment observation or a self-enrollment, which write
+it beside their own cells and are judged by it (`ReceivingLaw.judgeWrite`). -/
+def clockPredicate (config : Config) : Minidregg.Pred.Pred :=
+  ClockLaw.clockPredicate (config.clockTickers.map (·.subject)) config.payObserver.isSome
 
 def clockTarget (config : Config) : Nat := Kernel.ClockCell.physicalId config.deployment.domain
 
 def clockPolicy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
     (config : Config) : PolicyRecord :=
-  policy profile config (clockTarget config) (clockPredicate config.clockTickers)
+  policy profile config (clockTarget config) (clockPredicate config)
 
 def accountPolicy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
     (config : Config) (enrollment : Enrollment) : PolicyRecord :=
@@ -793,56 +791,23 @@ def buildBytes {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F
 /-! ## The clock subject (CLOCK-SUBJECT)
 
 Genesis names the clock tickers.  Each holds one `C_tick` (`tickCapability`):
-the clock cell as target and policy, the verb `tickClock` alone.  The clock
-cell's law admits exactly a ticker's `tickClock` (`clockPredicate_eval`); the
+the clock cell as target and policy, the verb `tickClock` alone.  Of
+`tickClock` requests, the clock cell's law admits exactly a ticker's
+(`ClockLaw.tickClause_eval`, `clock_law_refuses_nonticker_tick`); the
 factory law refuses every ticker request (`factory_refuses_ticker`) and leaves
 every other request to the deployment's own law (`factory_law_others`).  No
 genesis capability of the factory controller carries `tickClock`, and the
-clock law refuses the controller (`tick_requires_clock_capability`). -/
+clock law refuses the controller's tick (`tick_requires_clock_capability`). -/
 
-theorem tickVerbTag_eq : tickVerbTag = 11 := rfl
-
-/-- The clock law, decided: a request is admitted exactly when its verb is
-`tickClock` and its subject is a ticker. -/
-theorem clockPredicate_eval (tickers : List ClockTicker) (old new : Minidregg.Pred.State)
-    (subject verb : Nat)
-    (named : new.get "request/subject" = some (Int.ofNat subject))
-    (verbed : new.get "request/verb" = some (Int.ofNat verb)) :
-    Minidregg.Pred.eval (clockPredicate tickers) old new = true ↔
-      verb = tickVerbTag ∧ subject ∈ tickers.map (·.subject.value) := by
-  unfold Minidregg.Pred.eval clockPredicate
-  rw [Minidregg.Pred.evalWith_all]
-  simp only [List.all_cons, List.all_nil, Bool.and_true, Bool.and_eq_true]
-  rw [Minidregg.Pred.evalWith_any]
-  simp only [List.any_map, List.any_eq_true, Function.comp_apply, Minidregg.Pred.evalWith,
-    named, verbed, decide_eq_true_eq, Option.some.injEq, Int.ofNat.injEq, List.mem_map]
-  constructor
-  · rintro ⟨verbExact, ticker, member, subjectExact⟩
-    exact ⟨verbExact, ticker, member, subjectExact.symm⟩
-  · rintro ⟨verbExact, ticker, member, subjectExact⟩
-    exact ⟨verbExact, ticker, member, subjectExact.symm⟩
-
-/-- Refuting pole of the clock law: a subject that is not a ticker is refused,
-whatever its verb. -/
-theorem clock_law_refuses_nonticker (tickers : List ClockTicker) (old new : Minidregg.Pred.State)
+/-- **A non-ticker's tick is refused** by the genesis clock law, whatever the
+deployment: no pay clause reads `tickClock` (`ClockLaw.clock_refuses_nonticker_tick`). -/
+theorem clock_law_refuses_nonticker_tick (config : Config) (old new : Minidregg.Pred.State)
     (subject : Nat) (named : new.get "request/subject" = some (Int.ofNat subject))
-    (other : subject ∉ tickers.map (·.subject.value)) :
-    Minidregg.Pred.eval (clockPredicate tickers) old new = false := by
-  unfold Minidregg.Pred.eval clockPredicate
-  rw [Minidregg.Pred.evalWith_all]
-  simp only [List.all_cons, List.all_nil, Bool.and_true]
-  rw [Minidregg.Pred.evalWith_any]
-  have none_ : (tickers.map fun ticker =>
-      (Minidregg.Pred.Pred.eq "request/subject" (Int.ofNat ticker.subject.value))).any
-      (fun q => Minidregg.Pred.evalWith Minidregg.Pred.failClosed q old new) = false := by
-    rw [Bool.eq_false_iff]
-    intro some_
-    obtain ⟨q, member, holds⟩ := List.any_eq_true.mp some_
-    obtain ⟨ticker, tickerMember, rfl⟩ := List.mem_map.mp member
-    simp only [Minidregg.Pred.evalWith, named, decide_eq_true_eq, Option.some.injEq,
-      Int.ofNat.injEq] at holds
-    exact other (List.mem_map.mpr ⟨ticker, tickerMember, holds.symm⟩)
-  rw [none_, Bool.and_false]
+    (ticking : new.get "request/verb" = some (Int.ofNat ClockLaw.tickVerbTag))
+    (other : subject ∉ config.clockTickers.map (·.subject.value)) :
+    Minidregg.Pred.eval (clockPredicate config) old new = false :=
+  ClockLaw.clock_refuses_nonticker_tick _ _ old new subject named ticking
+    (by simpa [List.map_map, Function.comp_def] using other)
 
 /-- **`factory_refuses_ticker`**: under the confined factory law a ticker's
 request is refused, whatever the deployment's own law says: no birth, no key
@@ -910,7 +875,7 @@ theorem clock_subject_confined {F : Type} [Field F] (profile : CanonicalRuntimeP
 /-- **`tick_requires_clock_capability`** (K-CLOCK's `tick_requires_capability`
 at the genesis shape): the factory controller's genesis program capabilities
 do not carry `tickClock`, and the clock cell's law refuses the factory
-controller (a valid genesis never makes it a ticker).  The sponsor cannot
+controller's tick (a valid genesis never makes it a ticker).  The sponsor cannot
 tick: with no evidence the receiver refuses `capabilityRejected`
 (`ClockTickReceiver.tick_requires_capability`), and with any evidence the law
 refuses. -/
@@ -921,11 +886,12 @@ theorem tick_requires_clock_capability {F : Type} [Field F]
         Verb.tickClock ∉ (accountControlCapability profile config enrollment).scope.verbs) ∧
       (∀ old new, new.get "request/subject" =
           some (Int.ofNat config.factoryController.subject.value) →
+        new.get "request/verb" = some (Int.ofNat ClockLaw.tickVerbTag) →
         Minidregg.Pred.eval (clockPolicy profile config).predicate old new = false) := by
   obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, notTicker, -⟩ := valid
   refine ⟨by simp [controlCapability, rootCapability], fun _ _ => by
-    simp [accountControlCapability, rootCapability], fun old new named => ?_⟩
-  exact clock_law_refuses_nonticker _ old new _ named notTicker
+    simp [accountControlCapability, rootCapability], fun old new named ticking => ?_⟩
+  exact clock_law_refuses_nonticker_tick config old new _ named ticking notTicker
 
 /-- Request states for the poles: clock ticker 70 (the journey's clock subject),
 sponsor 7, the journeys' permit-all base law. -/
@@ -933,18 +899,6 @@ def requestState (subject verb : Nat) : Minidregg.Pred.State :=
   ⟨[("request/subject", Int.ofNat subject), ("request/verb", Int.ofNat verb)]⟩
 
 def poleTickers : List ClockTicker := [⟨⟨70⟩, ⟨71⟩⟩]
-
-theorem ticker_tick_admitted :
-    Minidregg.Pred.eval (clockPredicate poleTickers) ⟨[]⟩ (requestState 70 11) = true := by
-  decide +kernel
-
-theorem sponsor_tick_refused :
-    Minidregg.Pred.eval (clockPredicate poleTickers) ⟨[]⟩ (requestState 7 11) = false := by
-  decide +kernel
-
-theorem ticker_install_refused :
-    Minidregg.Pred.eval (clockPredicate poleTickers) ⟨[]⟩ (requestState 70 4) = false := by
-  decide +kernel
 
 theorem ticker_factory_refused :
     Minidregg.Pred.eval (tickerConfinedLaw poleTickers (.all [])) ⟨[]⟩ (requestState 70 4) = false := by
@@ -954,15 +908,11 @@ theorem sponsor_factory_admitted :
     Minidregg.Pred.eval (tickerConfinedLaw poleTickers (.all [])) ⟨[]⟩ (requestState 7 4) = true := by
   decide +kernel
 
-#assert_axioms clockPredicate_eval
-#assert_axioms clock_law_refuses_nonticker
+#assert_axioms clock_law_refuses_nonticker_tick
 #assert_axioms factory_refuses_ticker
 #assert_axioms factory_law_others
 #assert_axioms clock_subject_confined
 #assert_axioms tick_requires_clock_capability
-#assert_axioms ticker_tick_admitted
-#assert_axioms sponsor_tick_refused
-#assert_axioms ticker_install_refused
 #assert_axioms ticker_factory_refused
 #assert_axioms sponsor_factory_admitted
 
@@ -1046,17 +996,17 @@ theorem observer_cannot_manage (controller : SubjectId) (observer : PayObserver)
 
 /-- **`observer_control_confined`**: under the confined factory law, every
 admitted request whose subject is the observer is a self-enrollment
-(`selfEnrolSlot = 1`).  The observer can do nothing else on the factory: no
+(`ClockLaw.paySelfEnrolSlot = 1`).  The observer can do nothing else on the factory: no
 key enrollment, no birth, no provisioning, no policy install. -/
 theorem observer_control_confined (observer : SubjectId) (base : Minidregg.Pred.Pred)
     (old new : Minidregg.Pred.State)
     (admitted : Minidregg.Pred.eval (confinedFactoryLaw observer base) old new = true)
     (byObserver : new.get "request/subject" = some (Int.ofNat observer.value)) :
-    new.get selfEnrolSlot = some 1 := by
+    new.get ClockLaw.paySelfEnrolSlot = some 1 := by
   simp only [Minidregg.Pred.eval, confinedFactoryLaw, Minidregg.Pred.evalWith_any,
     Minidregg.Pred.evalWith_all, List.any_cons, List.all_cons, List.any_nil, List.all_nil,
     Minidregg.Pred.evalWith, byObserver] at admitted
-  by_cases slot : new.get selfEnrolSlot = some 1
+  by_cases slot : new.get ClockLaw.paySelfEnrolSlot = some 1
   · exact slot
   · simp [slot] at admitted
 
@@ -1065,7 +1015,7 @@ when its subject is the observer, whatever the deployment's own law says. -/
 theorem self_enrol_only_observer (observer : SubjectId) (base : Minidregg.Pred.Pred)
     (old new : Minidregg.Pred.State)
     (admitted : Minidregg.Pred.eval (confinedFactoryLaw observer base) old new = true)
-    (selfEnrol : new.get selfEnrolSlot = some 1) :
+    (selfEnrol : new.get ClockLaw.paySelfEnrolSlot = some 1) :
     new.get "request/subject" = some (Int.ofNat observer.value) := by
   simp only [Minidregg.Pred.eval, confinedFactoryLaw, Minidregg.Pred.evalWith_any,
     Minidregg.Pred.evalWith_all, List.any_cons, List.all_cons, List.any_nil, List.all_nil,
@@ -1080,7 +1030,7 @@ meets exactly the deployment's own law. -/
 theorem confined_law_others (observer : SubjectId) (base : Minidregg.Pred.Pred)
     (old new : Minidregg.Pred.State) (subject : Nat) (other : subject ≠ observer.value)
     (named : new.get "request/subject" = some (Int.ofNat subject))
-    (ordinary : new.get selfEnrolSlot = none) :
+    (ordinary : new.get ClockLaw.paySelfEnrolSlot = none) :
     Minidregg.Pred.eval (confinedFactoryLaw observer base) old new =
       Minidregg.Pred.eval base old new := by
   have distinct : ¬ (some (Int.ofNat subject) = some (Int.ofNat observer.value)) := by
@@ -1099,7 +1049,7 @@ def controllerState (slots : List (String × Int)) : Minidregg.Pred.State :=
 
 theorem observer_self_enrol_admitted :
     Minidregg.Pred.eval (confinedFactoryLaw ⟨30⟩ (.all [])) ⟨[]⟩
-      (observerState [(selfEnrolSlot, 1)]) = true := by decide +kernel
+      (observerState [(ClockLaw.paySelfEnrolSlot, 1)]) = true := by decide +kernel
 
 theorem observer_enroll_key_refused :
     Minidregg.Pred.eval (confinedFactoryLaw ⟨30⟩ (.all [])) ⟨[]⟩
@@ -1115,7 +1065,7 @@ theorem controller_enroll_key_admitted :
 
 theorem controller_self_enrol_refused :
     Minidregg.Pred.eval (confinedFactoryLaw ⟨30⟩ (.all [])) ⟨[]⟩
-      (controllerState [(selfEnrolSlot, 1)]) = false := by decide +kernel
+      (controllerState [(ClockLaw.paySelfEnrolSlot, 1)]) = false := by decide +kernel
 
 /-- Genesis installs the confined law whenever an observer is configured, and
 holds the observer's `C_enrol`: the factory as target, verb `installPolicy` only. -/
@@ -1138,7 +1088,7 @@ theorem factory_default_allows_claim (config : Config) (old new : Minidregg.Pred
     (named : new.get "request/subject" = some (Int.ofNat subject))
     (operation : new.get PayClaimLaw.operationSlot = some 1)
     (authorized : new.get PayClaimLaw.authorizedSlot = some 1)
-    (notSelfEnrol : new.get selfEnrolSlot = none)
+    (notSelfEnrol : new.get ClockLaw.paySelfEnrolSlot = none)
     (notTicker : subject ∉ config.clockTickers.map (·.subject.value))
     (notObserver : ∀ observer ∈ config.payObserver, subject ≠ observer.subject.value) :
     Minidregg.Pred.eval (factoryLaw config) old new = true := by
@@ -1161,7 +1111,7 @@ path, the claim projection never carries the self-enrollment marker. -/
 theorem observer_cannot_claim (observer : SubjectId) (base : Minidregg.Pred.Pred)
     (old new : Minidregg.Pred.State)
     (named : new.get "request/subject" = some (Int.ofNat observer.value))
-    (notSelfEnrol : new.get selfEnrolSlot = none) :
+    (notSelfEnrol : new.get ClockLaw.paySelfEnrolSlot = none) :
     Minidregg.Pred.eval (confinedFactoryLaw observer (PayClaimLaw.extend base)) old new = false := by
   simp [confinedFactoryLaw, Minidregg.Pred.eval, Minidregg.Pred.evalWith, named, notSelfEnrol]
 
