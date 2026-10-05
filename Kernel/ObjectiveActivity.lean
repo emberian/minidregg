@@ -967,6 +967,19 @@ def readState {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snaps
     | none => .error .stateCodec
   | none => if (payloadOf bytes).isSome then .error .stateCodec else .ok none
 
+/-- The image an inbox installs. -/
+def inboxImage (inbox : Inbox.Inbox) : Bytes :=
+  image .inbox (Inbox.key inbox.sender inbox.target) (Inbox.encode inbox)
+
+/-- The inbox an inbox cell holds: `none` when the cell holds no activity cell
+(no inbox yet), refused when it holds anything else. -/
+def readInbox {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (cell : CellId) :
+    Option (Option Inbox.Inbox) :=
+  let bytes := snapshot.canonicalBytes cell
+  match bodyOf .inbox bytes with
+  | some body => (Inbox.decode body).map some
+  | none => if (payloadOf bytes).isSome then none else some none
+
 /-- The image an object record installs. -/
 def objectImage (object : CellId) (record : ObjectRecord) : Bytes :=
   image .object (objectKey object) (ObjectRecord.encodeRecord record)
@@ -1177,7 +1190,7 @@ def commitYield {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
     .ok ⟨⟨awaitId cell generation checkpoint, .reply (AnswerSlot.name transaction cell generation) decider,
         height + plan.patience, height⟩, written,
       (written.map StateWritten.post).toList ++ [slotPost config snapshot
-        ⟨AnswerSlot.name transaction cell generation, cell, decider, height + plan.patience, .opened⟩]⟩
+        ⟨AnswerSlot.name transaction cell generation, cell, .subject decider, height + plan.patience, .opened, []⟩]⟩
   | .height due =>
     if height + plan.patience < due then .error (.plan "a height await is due after its deadline") else
     .ok ⟨⟨awaitId cell generation checkpoint, .height due, height + plan.patience, height⟩, written,
@@ -2407,7 +2420,7 @@ theorem slot_decided_once {rootBytes : Bytes → Digest} {config : Config} {snap
 decider, on an open slot, at or before its deadline. -/
 theorem slot_single_decider {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : ResolveRequest} (resolution : Resolution config snapshot height request) :
-    request.subject = resolution.slot.decider ∧ resolution.slot.phase = .opened ∧
+    resolution.slot.decider = .subject request.subject ∧ resolution.slot.phase = .opened ∧
       height ≤ resolution.slot.deadline :=
   let decided := AnswerSlot.decide_single_decider resolution.decidedExact
   ⟨decided.1, decided.2.1, decided.2.2.1⟩
@@ -3604,6 +3617,8 @@ inductive PayerRoute where
   | objectOfState
   | objectRecord
   | stored
+  /-- An inbox: its sender object's payer. -/
+  | objectOfInbox
   deriving DecidableEq, Repr
 
 def payerRoute : Role → Option PayerRoute
@@ -3612,6 +3627,7 @@ def payerRoute : Role → Option PayerRoute
   | .state => some .objectOfState
   | .package => some .stored
   | .object => some .objectRecord
+  | .inbox => some .objectOfInbox
 
 /-- A census of retained cell kinds: every kind listed, each with its payer route. -/
 structure RetentionCensus (Kind : Type) where
@@ -3628,7 +3644,7 @@ instance {Kind : Type} (census : RetentionCensus Kind) : Decidable census.Paid :
 
 /-- The activity registry's retained kinds: every activity role. -/
 def activityCensus : RetentionCensus Role where
-  kinds := [.record, .slot, .state, .package, .object]
+  kinds := [.record, .slot, .state, .package, .object, .inbox]
   complete := by intro kind; cases kind <;> simp
   route := payerRoute
 
@@ -3658,12 +3674,20 @@ def recordAt (bytesAt : CellId → Bytes) (cell : CellId) : Option Record :=
 def objectAt (config : Config) (bytesAt : CellId → Bytes) (object : CellId) : Option ObjectRecord :=
   (bodyOf .object (bytesAt (objectCell config.domain object))).bind ObjectRecord.decodeRecord
 
-/-- The payer a payload's route resolves to. -/
+/-- The inbox an inbox cell holds, over any byte map. -/
+def inboxAt (bytesAt : CellId → Bytes) (cell : CellId) : Option Inbox.Inbox :=
+  (bodyOf .inbox (bytesAt cell)).bind Inbox.decode
+
+/-- The payer a payload's route resolves to. A slot's is its awaiting
+activity's escrow account, or (a delivery slot) its inbox's sender's payer. -/
 def routePayer (config : Config) (bytesAt : CellId → Bytes) (payload : ObjectiveActivityCell.Payload) :
     PayerRoute → Option AccountId
   | .escrow => (decodeRecord payload.body).map fun record => record.escrow.account
   | .activityOfSlot => (AnswerSlot.decode payload.body).bind fun slot =>
-      (recordAt bytesAt slot.activity).map fun record => record.escrow.account
+      ((recordAt bytesAt slot.activity).map fun record => record.escrow.account).orElse fun _ =>
+        (inboxAt bytesAt slot.activity).bind fun inbox => (objectAt config bytesAt ⟨inbox.sender⟩).map ObjectRecord.payer
+  | .objectOfInbox => (Inbox.decode payload.body).bind fun inbox =>
+      (objectAt config bytesAt ⟨inbox.sender⟩).map ObjectRecord.payer
   | .objectOfState => (digestStream.toLawful.decode payload.key).bind fun object =>
       (objectAt config bytesAt object).map ObjectRecord.payer
   | .objectRecord => (ObjectRecord.decodeRecord payload.body).map ObjectRecord.payer

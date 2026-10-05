@@ -1,0 +1,88 @@
+edition ObjectiveBend 1
+# Asynchronous sends between objects (Kernel/ObjectiveCall `send`, Kernel/ObjectiveSend).
+# A method may yield `send {to, method, args}`: `to` is an object's inbox
+# (`To.object(n)`) or the reply of an earlier send not yet delivered
+# (`To.slot(n)`, pipelined: queued on that reply slot and forwarded when it is
+# decided). A send is answered in the same turn with `queued {slot}`, the
+# message's id, which is also its reply slot's name. The message is delivered
+# later, by anyone, in its own turn (`deliverMessage`): the target's method runs
+# with `request/caller` the sender and no subject.
+record State:
+  total: Nat
+sum EditNat:
+  keep: {}
+  set: Nat
+  add: Nat
+record Write:
+  total: EditNat
+record View:
+  version: Nat
+  state: State
+record Return:
+  result: Nat
+  write: Write
+record Got:
+  result: Nat
+sum Returned:
+  returned: Got
+record CallN:
+  target: Nat
+  method: String
+  args: Nat
+sum PlanN:
+  call: CallN
+sum To:
+  object: Nat
+  slot: Nat
+record SendN:
+  to: To
+  method: String
+  args: Nat
+sum PlanS:
+  send: SendN
+record Slot:
+  slot: Nat
+sum Queued:
+  queued: Slot
+record Post:
+  target: Nat
+  amount: Nat
+record Pipe:
+  via: Nat
+  amount: Nat
+sum Ref:
+  ref: Nat
+  none: {}
+record Found:
+  result: Ref
+  write: Write
+# A leaf: adds `amount` and returns the new total.
+def deposit(view: View, amount: Nat) -> Activity<PlanN, Returned, Return>:
+  {result: view.state.total + amount, write: {total: EditNat.add(amount)}}
+# Sends `deposit(amount)` to `target`; returns the message id (its reply slot).
+def post(view: View, p: Post) -> Activity<PlanS, Queued, Return>:
+  match perform(PlanS.send({to: To.object(p.target), method: "deposit", args: p.amount})):
+    case queued(q): {result: q.slot, write: {total: EditNat.add(1n)}}
+# Three sends to one target in one turn; returns the last message id.
+def post3(view: View, p: Post) -> Activity<PlanS, Queued, Return>:
+  match perform(PlanS.send({to: To.object(p.target), method: "deposit", args: p.amount})):
+    case queued(a):
+      match perform(PlanS.send({to: To.object(p.target), method: "deposit", args: p.amount})):
+        case queued(b):
+          match perform(PlanS.send({to: To.object(p.target), method: "deposit", args: p.amount})):
+            case queued(c): {result: c.slot, write: {total: EditNat.add(3n)}}
+# Pipelining: asks `via` to look up an object, and sends `deposit(amount)` to the
+# REPLY of that lookup before it is delivered. Returns the lookup's message id.
+def pipe(view: View, p: Pipe) -> Activity<PlanS, Queued, Return>:
+  match perform(PlanS.send({to: To.object(p.via), method: "lookup", args: 0n})):
+    case queued(first):
+      match perform(PlanS.send({to: To.slot(first.slot), method: "deposit", args: p.amount})):
+        case queued(second): {result: first.slot, write: {total: EditNat.keep()}}
+# A directory: replies with a reference to the object its state names (total),
+# or no reference when it names none (0).
+def lookup(view: View, unused: Nat) -> Activity<PlanN, Returned, Found>:
+  if view.state.total == 0n then {result: Ref.none({}), write: {total: EditNat.keep()}} else {result: Ref.ref(view.state.total), write: {total: EditNat.keep()}}
+# Sends `deposit(amount)` to the reply slot `target` (a pipelined send to a slot by name).
+def chase(view: View, p: Post) -> Activity<PlanS, Queued, Return>:
+  match perform(PlanS.send({to: To.slot(p.target), method: "deposit", args: p.amount})):
+    case queued(q): {result: q.slot, write: {total: EditNat.keep()}}

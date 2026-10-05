@@ -2,7 +2,7 @@
 `Kernel.ObjectiveActivity` and the call tree of `Kernel.ObjectiveCall`. Its own
 module (in the `ObjectiveActivity` namespace, names unchanged) because the call
 kernel builds on the activity kernel and the turn sum must name both. -/
-import Kernel.ObjectiveCall
+import Kernel.ObjectiveSend
 
 namespace Minidregg.Kernel.ObjectiveActivity
 open Minidregg.Theory Minidregg.Compiler
@@ -16,7 +16,7 @@ set_option autoImplicit false
 /-- **One admitted kernel turn** on a snapshot at a height: the witness of
 exactly one of the kernel's admission functions (each `private mk`, so built
 only by `publish`, `create`, `birth`, `resolve`, `deliver`, `topUp`,
-`writeState`, `exhaust`, `abandon` or `ObjectiveCall.invoke`). Every write the kernel activity commits
+`writeState`, `exhaust`, `abandon`, `ObjectiveCall.invoke` or `ObjectiveSend.deliverMessage`). Every write the kernel activity commits
 is `AdmittedTurn.intent` of one (the native receiver's decided turn is this
 type, `ObjectiveActivityReceiver.Decided`), and the invariant
 `stored_checkpoints_typed` (`Kernel.ObjectiveCheckpointInvariant`) is stated
@@ -33,6 +33,8 @@ inductive AdmittedTurn {rootBytes : Bytes → Digest} (config : Config) (snapsho
   | exhaust (request : ExhaustRequest) (exhausted : Exhaustion config snapshot height request)
   | abandon (request : AbandonRequest) (abandoned : Abandonment config snapshot height request)
   | invoke (request : ObjectiveCall.InvokeRequest) (invoked : ObjectiveCall.Invocation config snapshot height request)
+  | deliverMessage (request : ObjectiveSend.MessageRequest)
+      (delivered : ObjectiveSend.MessageDelivery config snapshot height request)
 
 /-- The posts a turn commits. -/
 def AdmittedTurn.posts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -47,6 +49,7 @@ def AdmittedTurn.posts {rootBytes : Bytes → Digest} {config : Config} {snapsho
   | .exhaust _ exhausted => exhausted.posts
   | .abandon _ abandoned => abandoned.posts
   | .invoke _ invoked => invoked.posts
+  | .deliverMessage _ delivered => delivered.posts
 
 /-- The one intent a turn commits under a receiver's sealing. -/
 def AdmittedTurn.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -61,6 +64,7 @@ def AdmittedTurn.intent {rootBytes : Bytes → Digest} {config : Config} {snapsh
   | .exhaust _ exhausted => exhausted.intent sealing
   | .abandon _ abandoned => abandoned.intent sealing
   | .invoke _ invoked => invoked.intent sealing
+  | .deliverMessage _ delivered => delivered.intent sealing
 
 /-- Every turn's intent is `intentOf` its posts: its writes are exactly the
 post images, nothing else. -/

@@ -3,11 +3,28 @@
 A slot is named `H(turn, call site)`: the transaction of the yielding turn and
 the yield's place in its activity (record cell and generation), so every
 validator derives the same name and no submitter chooses it. It has exactly
-one decider (a subject, fixed when the slot opens), one deadline height, and
-one terminal decision, written once:
+one decider, fixed when the slot opens, and one terminal decision, written once.
+The decider is a ROLE (`Decider`, BREAD review D-4):
 
-  open --decider, at or before the deadline--> decided (reply | refused | unknown | broken)
-  open --anyone, strictly after the deadline--> decided expired
+* `subject s`: an activity's await names a subject; with a deadline height:
+
+    open --s, at or before the deadline--> decided (reply | refused | unknown | broken)
+    open --anyone, strictly after the deadline--> decided expired
+
+* `delivery m`: the reply slot of a sent message `m` (`Kernel.ObjectiveSend`,
+  named `m`, the message's own id). Only the kernel turn that delivers `m`
+  decides it (`decideDelivery`): the turn that pops `m` from the head of the
+  inbox holding it decides `reply` with the method's result, or `broken` when the
+  delivery failed. No subject decides it (`decide_delivery_refused`) and it never
+  expires (`expire_delivery_refused`): a queued message is always deliverable by
+  anyone, so its slot needs no deadline. The role travels with the message: a
+  message forwarded from a resolved slot keeps its id, so its slot (opened when
+  it enters an inbox) names the same role.
+
+A delivery slot also holds the sends queued ON it (`queued`, at most
+`Inbox.bound`): sends addressed to the reply of a message not yet delivered. The
+turn that decides the slot forwards them (when the reply names an object) or
+refunds them, in that same turn.
 
 The rule below is pure. Its intents (in `Kernel.ObjectiveActivity`) write the
 slot cell against its open root AND spend the slot's claim, so a second
@@ -19,6 +36,7 @@ awaiting activity's declared response type before it is ever written
 kernel-driven `conflict` are outcomes of the activity, never slot decisions. -/
 import Kernel.ObjectiveActivityWire
 import Kernel.ObjectiveActivityCell
+import Kernel.Inbox
 
 namespace Minidregg.Kernel.AnswerSlot
 open Minidregg.Theory Minidregg.Compiler
@@ -43,13 +61,23 @@ inductive Phase where
   | decided (decision : Decision) (height : Nat)
   deriving DecidableEq, Repr
 
+/-- Who decides a slot: a subject, or the delivery of one message. -/
+inductive Decider where
+  | subject (subject : SubjectId)
+  | delivery (message : Digest)
+  deriving DecidableEq, Repr
+
 structure Slot where
   name : Digest
-  /-- The record cell of the one activity this slot answers. -/
+  /-- The cell this slot answers to: the record cell of the awaiting activity
+  (a subject slot), or the inbox holding the message (a delivery slot; its
+  purse holds the postage of the sends queued here). -/
   activity : CellId
-  decider : SubjectId
+  decider : Decider
   deadline : Nat
   phase : Phase
+  /-- Sends queued on this slot's reply (delivery slots only). -/
+  queued : List Inbox.Message
   deriving DecidableEq, Repr
 
 def decisionStream : StreamCodec Decision :=
@@ -80,15 +108,28 @@ def phaseStream : StreamCodec Phase :=
       | .inr (decision, height) => .decided decision height)
     (by intro phase; cases phase <;> rfl)
 
+def deciderStream : StreamCodec Decider :=
+  StreamCodec.xmap (StreamCodec.sum subjectStream digestStream)
+    (fun decider => match decider with
+      | .subject subject => .inl subject
+      | .delivery message => .inr message)
+    (fun wire => match wire with
+      | .inl subject => .subject subject
+      | .inr message => .delivery message)
+    (by intro decider; cases decider <;> rfl)
+
 def slotStream : StreamCodec Slot :=
   StreamCodec.xmap
     (StreamCodec.product digestStream (StreamCodec.product digestStream
-      (StreamCodec.product subjectStream (StreamCodec.product StreamCodec.nat phaseStream))))
-    (fun slot => (slot.name, slot.activity, slot.decider, slot.deadline, slot.phase))
-    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1, wire.2.2.2.2⟩)
+      (StreamCodec.product deciderStream (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product phaseStream (StreamCodec.list Inbox.messageStream))))))
+    (fun slot => (slot.name, slot.activity, slot.decider, slot.deadline, slot.phase, slot.queued))
+    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1, wire.2.2.2.2.1, wire.2.2.2.2.2⟩)
     (by intro slot; cases slot; rfl)
 
-def frame : Bytes := "DREGG/OBJECTIVE/ANSWER-SLOT/v1".toUTF8.toList
+/-- v2: the decider is a role (`Decider`) and a slot carries its queued sends;
+a v1 slot refuses to decode. -/
+def frame : Bytes := "DREGG/OBJECTIVE/ANSWER-SLOT/v2".toUTF8.toList
 def codec := framed frame slotStream
 def encode (slot : Slot) : Bytes := codec.encode slot
 def decode (bytes : Bytes) : Option Slot := codec.decode bytes
@@ -119,6 +160,8 @@ inductive Refusal where
   | pastDeadline (deadline height : Nat)
   | notYetExpired (deadline height : Nat)
   | expiryIsKernelOnly
+  /-- A delivery slot is decided only by the delivery of its message. -/
+  | deliveryDecides
   deriving DecidableEq, Repr
 
 /-- The decider's decision, at or before the deadline, of an open slot. -/
@@ -128,22 +171,38 @@ def decide (slot : Slot) (subject : SubjectId) (height : Nat) (decision : Decisi
   | .decided _ _ => .error .notOpen
   | .opened =>
     if decision = .expired then .error .expiryIsKernelOnly
-    else if subject ≠ slot.decider then .error .notDecider
+    else if slot.decider ≠ .subject subject then .error .notDecider
     else if slot.deadline < height then .error (.pastDeadline slot.deadline height)
     else .ok {slot with phase := .decided decision height}
 
-/-- Anyone's expiry, strictly after the deadline, of a slot still open. -/
+/-- Anyone's expiry, strictly after the deadline, of a subject slot still open.
+A delivery slot never expires. -/
 def expire (slot : Slot) (height : Nat) : Except Refusal Slot :=
   match slot.phase with
   | .decided _ _ => .error .notOpen
   | .opened =>
-    if slot.deadline < height then .ok {slot with phase := .decided .expired height}
-    else .error (.notYetExpired slot.deadline height)
+    match slot.decider with
+    | .delivery _ => .error .deliveryDecides
+    | .subject _ =>
+      if slot.deadline < height then .ok {slot with phase := .decided .expired height}
+      else .error (.notYetExpired slot.deadline height)
+
+/-- The delivery of `message` decides its reply slot: only an open slot whose
+decider is that delivery, and never `expired`. The decided slot keeps nothing
+queued: the deciding turn forwards or refunds every queued send. -/
+def decideDelivery (slot : Slot) (message : Digest) (height : Nat) (decision : Decision) :
+    Except Refusal Slot :=
+  match slot.phase with
+  | .decided _ _ => .error .notOpen
+  | .opened =>
+    if decision = .expired then .error .expiryIsKernelOnly
+    else if slot.decider ≠ .delivery message then .error .notDecider
+    else .ok {slot with phase := .decided decision height, queued := []}
 
 /-- Exactly one decider: a decided slot names the subject that decided it. -/
 theorem decide_single_decider {slot decided : Slot} {subject : SubjectId} {height : Nat}
     {decision : Decision} (ok : decide slot subject height decision = .ok decided) :
-    subject = slot.decider ∧ slot.phase = .opened ∧ height ≤ slot.deadline ∧
+    slot.decider = .subject subject ∧ slot.phase = .opened ∧ height ≤ slot.deadline ∧
       decided = {slot with phase := .decided decision height} ∧ decision ≠ .expired := by
   unfold decide at ok
   split at ok
@@ -179,20 +238,86 @@ theorem expire_after_deadline {slot expired : Slot} {height : Nat}
   · cases ok
   · rename_i opened
     split at ok
-    · rename_i late
-      cases ok
-      exact ⟨late, opened, rfl⟩
     · cases ok
+    · split at ok
+      · rename_i late
+        cases ok
+        exact ⟨late, opened, rfl⟩
+      · cases ok
+
+/-! ### The delivery role (condition (c) of OB8, at the rule) -/
+
+/-- **No subject decides a delivery slot**, whatever it decides. -/
+theorem decide_delivery_refused (slot : Slot) (message : Digest) (subject : SubjectId) (height : Nat)
+    (decision : Decision) (role : slot.decider = .delivery message) :
+    ∃ reason, decide slot subject height decision = .error reason := by
+  unfold decide
+  split
+  · exact ⟨_, rfl⟩
+  · split
+    · exact ⟨_, rfl⟩
+    · rw [if_pos (by rw [role]; exact fun same => by cases same)]
+      exact ⟨_, rfl⟩
+
+/-- **A delivery slot never expires.** -/
+theorem expire_delivery_refused (slot : Slot) (message : Digest) (height : Nat)
+    (role : slot.decider = .delivery message) (opened : slot.phase = .opened) :
+    expire slot height = .error .deliveryDecides := by
+  simp [expire, opened, role]
+
+/-- **Only the delivery of its own message decides a delivery slot**: a decided
+slot was open, its decider is that delivery, and its queue is emptied. -/
+theorem decideDelivery_single {slot decided : Slot} {message : Digest} {height : Nat} {decision : Decision}
+    (ok : decideDelivery slot message height decision = .ok decided) :
+    slot.decider = .delivery message ∧ slot.phase = .opened ∧ decision ≠ .expired ∧
+      decided = {slot with phase := .decided decision height, queued := []} := by
+  unfold decideDelivery at ok
+  split at ok
+  · cases ok
+  · rename_i opened
+    split at ok
+    · cases ok
+    · rename_i notExpired
+      split at ok
+      · cases ok
+      · rename_i same
+        cases ok
+        exact ⟨Classical.not_not.mp same, opened, notExpired, rfl⟩
+
+/-- A subject's decision cannot take a delivery slot's role. -/
+theorem decideDelivery_subject_refused (slot : Slot) (subject : SubjectId) (message : Digest) (height : Nat)
+    (decision : Decision) (role : slot.decider = .subject subject) :
+    ∃ reason, decideDelivery slot message height decision = .error reason := by
+  unfold decideDelivery
+  split
+  · exact ⟨_, rfl⟩
+  · split
+    · exact ⟨_, rfl⟩
+    · rw [if_pos (by rw [role]; exact fun same => by cases same)]
+      exact ⟨_, rfl⟩
 
 /-- A non-decider is refused whatever it decides. -/
 theorem stranger_refused (slot : Slot) (subject : SubjectId) (height : Nat) (decision : Decision)
-    (opened : slot.phase = .opened) (stranger : subject ≠ slot.decider) (notExpired : decision ≠ .expired) :
+    (opened : slot.phase = .opened) (stranger : slot.decider ≠ .subject subject) (notExpired : decision ≠ .expired) :
     decide slot subject height decision = .error .notDecider := by
   simp [decide, opened, notExpired, stranger]
 
 /-! Inhabitants of the premises above (closed slots, no hashing). -/
 
-def sampleSlot : Slot := ⟨⟨1⟩, ⟨2⟩, ⟨7⟩, 10, .opened⟩
+def sampleSlot : Slot := ⟨⟨1⟩, ⟨2⟩, .subject ⟨7⟩, 10, .opened, []⟩
+
+/-- A delivery slot: the reply of message 1. -/
+def sampleSendSlot : Slot := ⟨⟨1⟩, ⟨2⟩, .delivery ⟨1⟩, 0, .opened, []⟩
+
+theorem sample_delivered :
+    decideDelivery sampleSendSlot ⟨1⟩ 5 (.reply [3]) =
+      .ok {sampleSendSlot with phase := .decided (.reply [3]) 5, queued := []} := rfl
+
+theorem sample_other_message : decideDelivery sampleSendSlot ⟨2⟩ 5 (.reply [3]) = .error .notDecider := rfl
+
+theorem sample_subject_on_send_slot : decide sampleSendSlot ⟨1⟩ 5 (.reply [3]) = .error .notDecider := rfl
+
+theorem sample_send_slot_never_expires : expire sampleSendSlot 1000 = .error .deliveryDecides := rfl
 
 theorem sample_decided :
     decide sampleSlot ⟨7⟩ 5 (.reply [3]) = .ok {sampleSlot with phase := .decided (.reply [3]) 5} := rfl
@@ -218,4 +343,12 @@ theorem sample_not_yet_expired : expire sampleSlot 10 = .error (.notYetExpired 1
 #assert_axioms sample_late
 #assert_axioms sample_expired
 #assert_axioms sample_not_yet_expired
+#assert_axioms decide_delivery_refused
+#assert_axioms expire_delivery_refused
+#assert_axioms decideDelivery_single
+#assert_axioms decideDelivery_subject_refused
+#assert_axioms sample_delivered
+#assert_axioms sample_other_message
+#assert_axioms sample_subject_on_send_slot
+#assert_axioms sample_send_slot_never_expires
 end Minidregg.Kernel.AnswerSlot

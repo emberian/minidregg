@@ -3,8 +3,8 @@
 
 Every cell the kernel activity (`Kernel.ObjectiveActivity`) writes, other than
 the Book, is one registry cell of this kind (`CanonicalCellRegistry.Kind.objectiveActivity`):
-an activity record, an answer slot, an object declared state, or a published
-activity package, built by the one protected-cell construction
+an activity record, an answer slot, an object declared state, a published
+activity package, an object record or an inbox, built by the one protected-cell construction
 (`Kernel.ProtectedCell`, this family's `spec`). `body` is the kernel's own
 framed bytes (`encodeRecord`, `AnswerSlot.encode`, `dataBytes`,
 `ObjectiveBendSourceArtifact.encode`). With `UserShape` false for the kind, no
@@ -39,13 +39,15 @@ inductive Role where
   | package
   /-- An object's record (`Kernel.ObjectRecord`): pin, law, upgrade policy, payer. -/
   | object
+  /-- A per-(sender, target) message queue (`Kernel.Inbox`). -/
+  | inbox
   deriving DecidableEq, Repr
 
 def Role.tag : Role → Nat
-  | .record => 0 | .slot => 1 | .state => 2 | .package => 3 | .object => 4
+  | .record => 0 | .slot => 1 | .state => 2 | .package => 3 | .object => 4 | .inbox => 5
 
 def Role.ofTag : Nat → Role
-  | 0 => .record | 1 => .slot | 2 => .state | 3 => .package | _ => .object
+  | 0 => .record | 1 => .slot | 2 => .state | 3 => .package | 4 => .object | _ => .inbox
 
 def roleStream : StreamCodec Role :=
   StreamCodec.xmap StreamCodec.nat Role.tag Role.ofTag (by intro role; cases role <;> rfl)

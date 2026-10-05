@@ -111,6 +111,13 @@ def extra (path : String) (json : Json) : Result Capacity :=
   | .ok value => capacity (path ++ ".extra") value
   | .error _ => .ok ObjectiveTariff.zeroCapacity
 
+/-- An invocation's sends' delivery envelope: `postage` (a `Capacity`), or none
+(the zero envelope, which no deployment covers: such an invocation may not send). -/
+def postage (path : String) (json : Json) : Result Capacity :=
+  match json.getObjVal? "postage" with
+  | .ok value => capacity (path ++ ".postage") value
+  | .error _ => .ok ObjectiveTariff.zeroCapacity
+
 /-- An invocation's scoped grants: `[{object, method, uses}]` (absent: none). -/
 def grants (path : String) (json : Json) : Result (List ObjectiveCall.Grant) :=
   match json.getObjVal? "grants" with
@@ -148,9 +155,11 @@ def turn (law : String → Json → Result Minidregg.Pred.Pred) (json : Json) : 
   | "abandon" => pure (.abandon ⟨← nat p json "record"⟩ ⟨← nat p json "await"⟩)
   | "invoke" => pure (.invoke (← nat p json "object") ⟨← nat p json "objectCapability"⟩ (← str p json "method")
       (← data p json "args") (← grants p json) (← capacity (p ++ ".envelope") (← field p json "envelope"))
-      (← nat p json "account") ⟨← nat p json "accountCapability"⟩)
+      (← postage p json) (← nat p json "account") ⟨← nat p json "accountCapability"⟩)
+  | "deliverMessage" => pure (.deliverMessage (← nat p json "sender") (← nat p json "target")
+      ⟨← nat p json "message"⟩)
   | other => throw s!"$.turn.kind {other} is not publish, create, birth, resolve, deliver, topUp, writeState, \
-      exhaust, abandon or invoke"
+      exhaust, abandon, invoke or deliverMessage"
 
 /-- `author objective-activity`: `{subject, nonce, expectedAuthorityRoot, turn}`. -/
 def author (law : String → Json → Result Minidregg.Pred.Pred) (json : Json) : Result (List UInt8) := do
@@ -203,15 +212,19 @@ def turnJson : Turn → Json
        ("extra", capacityJson extra), ("account", decimal account), ("accountCapability", decimal ac.value)]
   | .abandon record await => .mkObj
       [("kind", "abandon"), ("record", decimal record.value), ("await", decimal await.value)]
-  | .invoke object oc method args grants envelope account ac => .mkObj
+  | .invoke object oc method args grants envelope postage account ac => .mkObj
       [("kind", "invoke"), ("object", decimal object), ("objectCapability", decimal oc.value),
        ("method", toJson method), ("args", dataOf args),
        ("grants", .arr (grants.map fun grant => .mkObj [("object", decimal grant.object),
          ("method", toJson grant.method), ("uses", decimal grant.uses)]).toArray),
-       ("envelope", capacityJson envelope), ("account", decimal account), ("accountCapability", decimal ac.value)]
+       ("envelope", capacityJson envelope), ("postage", capacityJson postage), ("account", decimal account),
+       ("accountCapability", decimal ac.value)]
+  | .deliverMessage sender target message => .mkObj
+      [("kind", "deliverMessage"), ("sender", decimal sender), ("target", decimal target),
+       ("message", decimal message.value)]
 
 def commandJson (command : Command) : Json := .mkObj
-  [("type", "objective-activity-command-v3"),
+  [("type", "objective-activity-command-v4"),
    ("canonical", toJson (hex (ObjectiveActivityReceiver.commandCodec.encode command))),
    ("subject", decimal command.subject.value), ("nonce", decimal command.nonce),
    ("expectedAuthorityRoot", decimal command.expectedAuthorityRoot.value),
@@ -277,12 +290,25 @@ def decisionJson : AnswerSlot.Decision → Json
   | .broken reason => .mkObj [("kind", "broken"), ("reason", toJson reason)]
   | .expired => .mkObj [("kind", "expired")]
 
+def messageJson (message : Inbox.Message) : Json :=
+  .mkObj [("id", decimal message.id.value), ("sender", decimal message.sender), ("method", toJson message.method),
+    ("args", dataOf message.args), ("envelope", capacityJson message.envelope), ("postage", decimal message.postage),
+    ("refund", decimal message.refund)]
+
 def slotJson (slot : AnswerSlot.Slot) : Json :=
   .mkObj [("name", decimal slot.name.value), ("activity", decimal slot.activity.value),
-    ("decider", decimal slot.decider.value), ("deadline", decimal slot.deadline),
+    ("decider", match slot.decider with
+      | .subject subject => .mkObj [("subject", decimal subject.value)]
+      | .delivery message => .mkObj [("delivery", decimal message.value)]),
+    ("deadline", decimal slot.deadline),
     ("phase", match slot.phase with
       | .opened => "open"
-      | .decided decision height => .mkObj [("decision", decisionJson decision), ("height", decimal height)])]
+      | .decided decision height => .mkObj [("decision", decisionJson decision), ("height", decimal height)]),
+    ("queued", Json.arr (slot.queued.map messageJson).toArray)]
+
+def inboxJson (inbox : Inbox.Inbox) : Json :=
+  .mkObj [("sender", decimal inbox.sender), ("target", decimal inbox.target), ("head", decimal inbox.head),
+    ("tail", decimal inbox.tail), ("messages", Json.arr (inbox.messages.map messageJson).toArray)]
 
 def cellJson (domain : Digest) (cell : Nat) (root : Digest) (bytes : List UInt8) : Json :=
   let described : List (String × Json) :=
@@ -317,17 +343,24 @@ def cellJson (domain : Digest) (cell : Nat) (root : Digest) (bytes : List UInt8)
             ("upgrade", upgradeJson record.upgrade), ("continuity", decimal record.continuity),
             ("payer", decimal record.payer)]
         | none => [("kind", "object-undecodable")]
+      | .inbox => match Inbox.decode payload.body with
+        | some inbox => [("kind", "inbox"), ("inbox", inboxJson inbox), ("purseAccount", decimal cell)]
+        | none => [("kind", "inbox-undecodable")]
   .mkObj ([("cell", decimal cell), ("root", decimal root.value)] ++ described)
 
 /-- The view request: `{cells: [id..], accounts: [id..], objects: [id..], pins: [pin..],
-births: [{object, transaction}..]}`; objects name their state and record cells, pins their
-package cells, and births (an object and a birth's transaction) their record cells. -/
+births: [{object, transaction}..], inboxes: [{sender, target}..], slots: [name..]}`; objects
+name their state and record cells, pins their package cells, births (an object and a birth's
+transaction) their record cells, inboxes their cells, and slots (a slot or message id) their
+answer-slot cells. -/
 structure ViewRequest where
   cells : List Nat
   accounts : List Nat
   objects : List Nat
   pins : List Nat
   births : List (Nat × Nat)
+  inboxes : List (Nat × Nat)
+  slots : List Nat
 
 def natList (json : Json) (name : String) : Result (List Nat) :=
   match json.getObjVal? name with
@@ -346,12 +379,19 @@ def births (json : Json) : Result (List (Nat × Nat)) :=
     let items ← match value.getArr? with | .ok items => pure items | .error _ => throw "$.births must be an array"
     items.toList.mapM fun item => do pure (← nat "$.births" item "object", ← nat "$.births" item "transaction")
 
+def inboxPairs (json : Json) : Result (List (Nat × Nat)) :=
+  match json.getObjVal? "inboxes" with
+  | .error _ => .ok []
+  | .ok value => do
+    let items ← match value.getArr? with | .ok items => pure items | .error _ => throw "$.inboxes must be an array"
+    items.toList.mapM fun item => do pure (← nat "$.inboxes" item "sender", ← nat "$.inboxes" item "target")
+
 def parseViewRequest (bytes : List UInt8) : Result ViewRequest := do
-  if bytes.isEmpty then return ⟨[], [], [], [], []⟩
+  if bytes.isEmpty then return ⟨[], [], [], [], [], [], []⟩
   let some text := String.fromUTF8? ⟨bytes.toArray⟩ | throw "view request is not UTF-8"
   let json ← Json.parse text
   pure ⟨← natList json "cells", ← natList json "accounts", ← natList json "objects", ← natList json "pins",
-    ← births json⟩
+    ← births json, ← inboxPairs json, ← natList json "slots"⟩
 
 def stateCellOf (domain : Digest) (object : Nat) : Nat := (ObjectiveActivity.stateCell domain ⟨object⟩).value
 def objectCellOf (domain : Digest) (object : Nat) : Nat := (ObjectiveActivity.objectCell domain ⟨object⟩).value
@@ -361,10 +401,15 @@ def packageCellOf (domain : Digest) (pin : Nat) : Nat := (ObjectiveActivity.pack
 def recordCellOf (domain : Digest) (object transaction : Nat) : Nat :=
   (ObjectiveActivity.recordCell domain ⟨object⟩ (ObjectiveActivity.activityId ⟨object⟩ ⟨transaction⟩)).value
 
+def inboxCellOf (domain : Digest) (sender target : Nat) : Nat := (Inbox.cell domain sender target).value
+def slotCellOf (domain : Digest) (name : Nat) : Nat := (AnswerSlot.cell domain ⟨name⟩).value
+
 def viewCells (domain : Digest) (request : ViewRequest) : List Nat :=
   request.cells ++ request.objects.map (stateCellOf domain) ++ request.objects.map (objectCellOf domain) ++
     request.pins.map (packageCellOf domain) ++
-    request.births.map fun (object, transaction) => recordCellOf domain object transaction
+    request.births.map (fun (object, transaction) => recordCellOf domain object transaction) ++
+    request.inboxes.map (fun (sender, target) => inboxCellOf domain sender target) ++
+    request.slots.map (slotCellOf domain)
 
 def viewJson (domain : Digest) (asset : Nat) (request : ViewRequest) (view : NativeHost.ActivityView) : Json :=
   let book := view.book.map fun cell => Minidregg.Theory.CanonicalResourceKernel.logicalBook cell.logical
@@ -380,6 +425,11 @@ def viewJson (domain : Digest) (asset : Nat) (request : ViewRequest) (view : Nat
         ("record", decimal (recordCellOf domain object transaction))]).toArray),
     ("pins", Json.arr (request.pins.map fun pin =>
       .mkObj [("pin", decimal pin), ("packageCell", decimal (packageCellOf domain pin))]).toArray),
+    ("inboxes", Json.arr (request.inboxes.map fun (sender, target) =>
+      .mkObj [("sender", decimal sender), ("target", decimal target),
+        ("cell", decimal (inboxCellOf domain sender target))]).toArray),
+    ("slots", Json.arr (request.slots.map fun name =>
+      .mkObj [("name", decimal name), ("cell", decimal (slotCellOf domain name))]).toArray),
     ("balances", match book with
       | none => .null
       | some book => Json.arr (request.accounts.map fun account =>

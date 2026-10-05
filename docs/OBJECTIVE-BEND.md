@@ -138,9 +138,9 @@ Item-by-item status against the code, with commits and owners:
 [ROADMAP-STATUS](objective-bend/ROADMAP-STATUS.md).
 
 1. **Sends between objects** (kernel). Synchronous `call` is built (see
-   [calls across objects](#calls-across-objects)); asynchronous sends with inboxes, the
-   decider of a slot as a role, escrowed postage and forwarding at slot resolution are
-   not. Lane OB-ROADMAP.
+   [calls across objects](#calls-across-objects)), and so are asynchronous sends with
+   inboxes, the decider of a slot as a role, escrowed postage and forwarding at slot
+   resolution ([sends and inboxes](#sends-and-inboxes), OB8). An activity awaiting a message is not.
 2. **A guardedness check** (typing). Every self-call of a resident under a perform,
    so that a well-typed resident never diverges inside a turn.
 3. **The theorem for declared ancestry** (proof; poof §4.3; ltuo §7.3–7.4, §9.2). The
@@ -394,7 +394,7 @@ them (`Kernel.Seat`, `Kernel.Invitation` and `Kernel.ObjectStateType` are not in
   reallocation of a seat's Book balances, with an exit no contract clause can forbid.
 
 Not built, by lane (status and commits in [ROADMAP-STATUS](objective-bend/ROADMAP-STATUS.md)):
-OB-ROADMAP (sends and inboxes; calls are built, above), RETENTION-PAYERS activity half (a storage charge
+OB-ROADMAP (an activity's `message` await; calls and sends are built, above), RETENTION-PAYERS activity half (a storage charge
 for packages and checkpoints; the Book half `c74f3120` landed), UPGRADE (record v2: state
 type, upgrade turns; wave 1 `ObjectStateType` landed, `4795b657`), CHECKPOINT-INVARIANT (the
 turn gate), FORCING-TRANSPARENT (the premise is still open), SEATS-NATIVE and W18-STEPRAW-LINEAR
@@ -414,8 +414,8 @@ rows C1-C8, with world plants and a code mutant; see the lane evidence).
 - **A method** is a declaration of the entry module of the package the object pins, lowered
   by the kernel's own front end with that declaration selected (`loadMethod`; never an offered
   core). Its type is `method(view: {version, state}, args: X) -> Activity<P, R, {result, write}>`
-  where `P` has the one label `call` and `R` the one label `returned`: a method can yield
-  nothing but a call, answered in the same turn, so no frame suspends across turns (a method
+  where `P` has labels among `call | send` and `R` among `returned | queued`: a method can
+  yield nothing but a call or a send, each answered in the same turn, so no frame suspends across turns (a method
   whose Plan admits `await` is refused `notCallable` before it runs). A method that never
   calls is a pure function. Example: [world/call/Calls.obend](../world/call/Calls.obend).
 - **Re-entry is refused**, mandatorily: a call whose target is on the stack is refused
@@ -441,8 +441,43 @@ rows C1-C8, with world plants and a code mutant; see the lane evidence).
   signing plan's `report` (`PLAN/v2`), shown before signing and printed by `mini activity`.
 
 Not built: an activity yielding `call` (calls from a resident's segment), pipelines,
-multi-party segments, method controllers beyond the object capability, object c-lists
-(an object holding capabilities), and sends.
+multi-party segments, method controllers beyond the object capability, and object c-lists
+(an object holding capabilities).
+
+### Sends and inboxes
+
+`Kernel/Inbox.lean`, the `send` yield of `Kernel/ObjectiveCall.lean`, and
+`Kernel/ObjectiveSend.lean` (OB8). **Evidence class: integrated on scratch worlds**
+(`native/resource-client/objective-send-native-journey.py`, rows S1-S7, with world plants).
+
+- **A send** is a call frame's yield `send {to: object n | slot n, method, args}`, answered in
+  the same turn with `queued {slot}`: the message id `H(turn, index)`, also the name of its
+  reply slot. The invocation (`COMMAND/v4`) declares `postage`, the envelope every message it
+  sends is delivered under; each send escrows that envelope's public price from the
+  invocation's account into the purse of the queue holding it. An invocation that sends with
+  no covered postage is refused `uncovered`.
+- **Inboxes** are per-(sender, target) FIFO queues at a protected activity coordinate (role
+  `inbox`, `Inbox.cell_reserved`). Their law is the queue discipline (`Inbox.Lawful`: push at the
+  tail within `Inbox.bound` = 16, pop the head; `lawful_fifo`; the tooth `reorder_unlawful`).
+  A send to a full inbox is refused `queueFull` naming (sender, target). Every inbox a turn
+  posts is a lawful change of what the turn read at that cell (`Mail.inboxes_lawful`).
+- **Delivery** (`deliverMessage {sender, target, message}`, anyone): pops the head and runs
+  the target's method with `request/caller` the sender and NO subject, under the message's
+  escrowed envelope, paid from the inbox's purse only (`debits_only_purse`). It decides the
+  message's reply slot, whose decider is the role `delivery m` (`AnswerSlot.Decider`; no
+  subject decides it, it never expires: `decide_delivery_refused`, `expire_delivery_refused`,
+  `decides_own_slot`). A failed delivery (law, fault, exhaustion, not callable, a send from a
+  delivered frame) is not a refusal: it pops, decides `broken`, commits no write
+  (`failed_delivery_pops`).
+- **Forwarding**: a send to `slot n` (the reply of a message not yet delivered) is queued on
+  that slot with its postage in the purse of the inbox holding the message. The turn that
+  decides the slot forwards each queued send into the inbox (its sender, n) when the reply is
+  `ref n` naming an object, its postage moving purse to purse, its own slot opened; otherwise
+  (no reference, a failed delivery, a full inbox) the send is refunded to its payer.
+
+Not built: sends from a delivered message (refused as a failure: a delivery has no paying
+account), pipelining onto the reply of a pipelined send (its slot exists only once forwarded),
+an activity awaiting a message, and a retention charge for inboxes and decided send slots.
 
 ### Which code wrote: the `objective/artifact` slot and the package pin
 

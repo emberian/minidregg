@@ -9,9 +9,9 @@ lowered by the kernel's own front end with that declaration selected
 
     method(view: {version: Nat, state: S}, args: X) -> Activity<P, R, {result: A, write: W}>
 
-where the Plan type `P` has exactly one label, `call`, and the response type `R`
-exactly one, `returned`. A method can therefore yield nothing but a call, and
-a call is answered in the same turn: no frame ever suspends across turns (the
+where the Plan type `P` has labels among `call | send` and the response type `R`
+among `returned | queued`. A method can therefore yield nothing but a call or a
+send, each answered in the same turn: no frame ever suspends across turns (the
 design's "an Activity cannot be called", stated as a type rule the loader checks
 before anything runs: `notCallable`). A method that never calls is a pure
 function whose body is its `{result, write}` record.
@@ -53,9 +53,26 @@ source ticks (`runCounted`, proven equal to the machine's own `runBounded`,
 envelope (`ObjectiveTariff`), never a measured amount. Exhaustion refuses the
 invocation: nothing commits, nothing is charged.
 
-**The turn** (`invoke`) commits every written object's state cell and the fee,
-as ONE intent, guarded on every object record, package cell and state cell it
-read, so a concurrent change refuses it. -/
+**Sends (OB8).** A frame may also yield `send {to, method, args}`: an
+asynchronous message to an object's inbox (`to: object n`) or to the reply of
+an earlier send not yet delivered (`to: slot n`, pipelined: queued on that reply
+slot and forwarded by the turn that decides it, `Kernel.ObjectiveSend`). A send
+is answered in the same turn with `queued {slot}`, the message's id
+(`Inbox.sendId`: this turn's transaction and the send's index), which is also
+the name of its reply slot. A frame's Plan type therefore has labels among
+`call | send` and its response type among `returned | queued`. The turn's sends
+(`Journal.outbox`, in order) become its MAIL (`postMail`): each message is
+pushed onto the per-(sender, target) inbox, bounded at `Inbox.bound` (a full
+queue refuses the turn by name, `queueFull`), with its reply slot opened (decided
+only by the message's delivery, `AnswerSlot.Decider.delivery`), and its postage
+(the public price of the invocation's declared `postage` envelope, the envelope
+its delivery runs under) moved from the invocation's account into the purse of
+the queue holding it. Every inbox and slot the mail writes is a cell the turn
+read: its post is a lawful change (`Inbox.Lawful`) of what the cell held.
+
+**The turn** (`invoke`) commits every written object's state cell, its mail and
+the fee and escrow postings, as ONE intent, guarded on every object record,
+package cell and state cell it read, so a concurrent change refuses it. -/
 import Kernel.ObjectiveActivity
 
 namespace Minidregg.Kernel.ObjectiveCall
@@ -147,6 +164,19 @@ inductive CallRefusal where
   | lawDenied (target : Nat) (method : String) (reason : WriteRefusal)
   /-- The invocation's declared envelope ran out (nothing commits). -/
   | exhausted
+  /-- The inbox of (sender, target) holds `Inbox.bound` messages: the send is refused. -/
+  | queueFull (sender target : Nat)
+  /-- The reply slot a pipelined send names already queues `Inbox.bound` sends. -/
+  | slotQueueFull (slot : Nat)
+  /-- A pipelined send names no open delivery slot (no such slot, decided, or a
+  subject's slot: only the reply of a message in an inbox queues sends). -/
+  | notPipelinable (slot : Nat)
+  /-- The reply slot a send would open is already a cell. -/
+  | slotTaken (slot : Nat)
+  /-- The inbox cell of (sender, target) holds something that is not that inbox. -/
+  | inboxCodec (sender target : Nat)
+  /-- A mail write would land on a cell that holds a package (never, for a cell read as an inbox or a slot). -/
+  | packageCell (cell : Nat)
   deriving Repr
 
 /-- The deepest call stack a turn may build. -/
@@ -165,11 +195,19 @@ def rowLabels (bounds : Bounds) : Nat → Ty → Option (List String)
   | fuel + 1, .variable index => (bounds.lookup index).bind (rowLabels bounds fuel)
   | _ + 1, _ => none
 
-/-- A sum type whose ONLY label is `label`. -/
-def soleLabel (assumptions : Assumptions) (type : Ty) (label : String) : Bool :=
+/-- A sum type with at least one label, every label among `allowed`. -/
+def labelsWithin (assumptions : Assumptions) (type : Ty) (allowed : List String) : Bool :=
   match unalias assumptions.bounds type with
-  | .variant row => rowLabels assumptions.bounds 64 row == some [label]
+  | .variant row => match rowLabels assumptions.bounds 64 row with
+    | some labels => !labels.isEmpty && labels.all (fun label => allowed.contains label)
+    | none => false
   | _ => false
+
+/-- The Plan labels a call frame may yield: both answered in the same turn. -/
+def framePlans : List String := ["call", "send"]
+
+/-- The responses a call frame is resumed with. -/
+def frameResponses : List String := ["returned", "queued"]
 
 /-- The package `pin` names with `method` selected: the same sources. -/
 def methodPackage (package : ObjectiveSourcePackage.Package) (method : String) :
@@ -191,8 +229,8 @@ structure Method (config : Config) (pin : Digest) (method : String) (view args :
   responseType : Ty
   resultType : Ty
   typeExact : checked.type = .computation planType responseType resultType
-  callsOnly : soleLabel applied.assumptions planType "call" = true
-  returnsOnly : soleLabel applied.assumptions responseType "returned" = true
+  callsOnly : labelsWithin applied.assumptions planType framePlans = true
+  returnsOnly : labelsWithin applied.assumptions responseType frameResponses = true
 
 def loadMethod (config : Config) (target : Nat) (bytes : Bytes) (pin : Digest) (method : String)
     (view args : Data) : Except CallRefusal (Method config pin method view args) :=
@@ -224,12 +262,13 @@ def loadMethod (config : Config) (target : Nat) (bytes : Bytes) (pin : Digest) (
       | some checked =>
         match typeExact : checked.type with
         | .computation planType responseType resultType =>
-          if callsOnly : soleLabel applied.assumptions planType "call" = true then
-            if returnsOnly : soleLabel applied.assumptions responseType "returned" = true then
+          if callsOnly : labelsWithin applied.assumptions planType framePlans = true then
+            if returnsOnly : labelsWithin applied.assumptions responseType frameResponses = true then
               .ok ⟨definition, lowering, replayExact, accepted, fuelWithin, applied, checked, planType,
                 responseType, resultType, typeExact, callsOnly, returnsOnly⟩
-            else .error (.notCallable target method "its response type is not `returned` alone")
-          else .error (.notCallable target method "its Plan type is not `call` alone: a method that awaits is not callable")
+            else .error (.notCallable target method "its response type is not within `returned | queued`")
+          else .error (.notCallable target method
+            "its Plan type is not within `call | send`: a method that awaits is not callable")
         | _ => .error (.notCallable target method "it does not return an Activity")
     | _ => .error (.notCallable target method "it does not take a view and arguments")
   else .error (.notCallable target method "typed core checker fuel exceeds the kernel's capacity")
@@ -242,12 +281,40 @@ structure CallPlan where
   method : String
   args : Data
 
-def decodeCall (target : Nat) (method : String) : Data → Except CallRefusal CallPlan
+/-- Where a send goes: an object's inbox, or the reply slot of an earlier send
+(pipelined: queued there and forwarded when that slot is decided). -/
+inductive Destination where
+  | object (target : Nat)
+  | slot (name : Digest)
+  deriving DecidableEq, Repr
+
+/-- A send a frame yields: `send {to, method, args}`. -/
+structure SendPlan where
+  destination : Destination
+  method : String
+  args : Data
+
+inductive Yield where
+  | call (plan : CallPlan)
+  | send (plan : SendPlan)
+
+def decodeYield (target : Nat) (method : String) : Data → Except CallRefusal Yield
   | .variant "call" (.record fields) =>
     match fieldOf fields "target", fieldOf fields "method", fieldOf fields "args" with
-    | some (.natural object), some (.label name), some args => .ok ⟨⟨object⟩, name, args⟩
+    | some (.natural object), some (.label name), some args => .ok (.call ⟨⟨object⟩, name, args⟩)
     | _, _, _ => .error (.callShape target method "call needs target (Nat), method (String) and args")
-  | _ => .error (.callShape target method "a frame yields only `call`")
+  | .variant "send" (.record fields) =>
+    match fieldOf fields "to", fieldOf fields "method", fieldOf fields "args" with
+    | some (.variant "object" (.natural object)), some (.label name), some args =>
+      .ok (.send ⟨.object object, name, args⟩)
+    | some (.variant "slot" (.natural slot)), some (.label name), some args =>
+      .ok (.send ⟨.slot ⟨slot⟩, name, args⟩)
+    | _, _, _ => .error (.callShape target method "send needs to (object Nat | slot Nat), method (String) and args")
+  | _ => .error (.callShape target method "a frame yields only `call` or `send`")
+
+/-- The response a frame is resumed with after a send: its message id, which is
+also its reply slot's name. -/
+def queuedData (id : Digest) : Data := .variant "queued" (.record [("slot", .natural id.value)])
 
 /-- The response a frame is resumed with after its callee returned. -/
 def returnedData (result : Data) : Data := .variant "returned" (.record [("result", result)])
@@ -306,6 +373,16 @@ structure Written where
   before : ObjectState
   after : ObjectState
 
+/-- A send a frame of this turn made. -/
+structure Outgoing where
+  /-- `Inbox.sendId turn index`. -/
+  id : Digest
+  /-- The sending frame's object. -/
+  sender : Nat
+  destination : Destination
+  method : String
+  args : Data
+
 structure Journal where
   entries : List Entry
   grants : List Grant
@@ -313,8 +390,18 @@ structure Journal where
   innermost first (the frame's own object at the head). -/
   frames : List (List Nat)
   writes : List Written
+  /-- Every send, in the order the frames made them. -/
+  outbox : List Outgoing
 
-def Journal.start (grants : List Grant) : Journal := ⟨[], grants, [], []⟩
+def Journal.start (grants : List Grant) : Journal := ⟨[], grants, [], [], []⟩
+
+/-- Who a call tree runs for: the root frame's subject (an invocation's signer;
+none for a delivered message) and the root's caller (none for an invocation;
+the sending object for a delivered message). -/
+structure Authority where
+  signer : Option SubjectId
+  origin : Option Nat
+
 
 /-- The state the journal holds for an object (`none`: not touched). -/
 def Journal.lookup (journal : Journal) (object : CellId) : Option (Option ObjectState) :=
@@ -345,6 +432,13 @@ structure Ctx where
   responseType : Ty
   view : ObjectState
   facts : Facts
+
+/-- `request/caller` of a frame entered on `stack`: the calling frame's object,
+or the root's origin. -/
+def callerOf (authority : Authority) (stack : List Ctx) : Option Nat :=
+  match stack.head? with
+  | some ctx => some ctx.object.value
+  | none => authority.origin
 
 /-- Replace the current state of one object. -/
 def Journal.install (journal : Journal) (object : CellId) (state : ObjectState) : Journal :=
@@ -383,7 +477,8 @@ it yields depth-first and resuming it with the callee's result. The result is
 the frame's `result`, the journal, and the ticks left. `fuel` only bounds the
 recursion; the envelope's ticks bound the work. -/
 def exec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (height : Nat)
-    (signer : SubjectId) : Nat → List Ctx → Task → Journal → Nat → Except CallRefusal (Data × Journal × Nat)
+    (authority : Authority) (turn : TransactionId) :
+    Nat → List Ctx → Task → Journal → Nat → Except CallRefusal (Data × Journal × Nat)
   | 0, _, _, _, _ => .error .exhausted
   | fuel + 1, stack, .enter call, journal, ticks =>
     if stack.any (fun ctx => ctx.object == call.target) then
@@ -398,10 +493,10 @@ def exec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot r
     | some view =>
     let granted : Except CallRefusal (Option SubjectId × List Grant) :=
       match stack with
-      | [] => .ok (some signer, journal.grants)
+      | [] => .ok (authority.signer, journal.grants)
       | _ :: _ => match spendGrant call.target.value call.method journal.grants with
         | .ungranted => .ok (none, journal.grants)
-        | .spent grants => .ok (some signer, grants)
+        | .spent grants => .ok (authority.signer, grants)
         | .exhausted => .error (.grantSpent call.target.value call.method)
     match granted with
     | .error reason => .error reason
@@ -411,10 +506,10 @@ def exec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot r
     | .error reason => .error reason
     | .ok program =>
     let ctx : Ctx := ⟨call.target, call.method, entry.record, program.applied.assumptions, program.responseType,
-      view, ⟨subject, height, call.target.value, callTurn, stack.head?.map (·.object.value)⟩⟩
+      view, ⟨subject, height, call.target.value, callTurn, callerOf authority stack⟩⟩
     let journal : Journal := ⟨journal.entries, grants,
-      journal.frames ++ [call.target.value :: stack.map (·.object.value)], journal.writes⟩
-    exec config snapshot height signer fuel (ctx :: stack) (.run (initial program.applied.erase)) journal ticks
+      journal.frames ++ [call.target.value :: stack.map (·.object.value)], journal.writes, journal.outbox⟩
+    exec config snapshot height authority turn fuel (ctx :: stack) (.run (initial program.applied.erase)) journal ticks
   | _ + 1, [], .run _, _, _ => .error .exhausted
   | fuel + 1, ctx :: rest, .run state, journal, ticks =>
     match runCounted config.limits ticks state with
@@ -422,18 +517,28 @@ def exec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot r
       match ObjectiveBendDemandData.yieldedPlan config.limits config.planBudget yielded with
       | .error (failure, _) => .error (.frameFault ctx.object.value ctx.method s!"plan extraction: {reprStr failure}")
       | .ok extracted =>
-      match decodeCall ctx.object.value ctx.method extracted.value with
+      match decodeYield ctx.object.value ctx.method extracted.value with
       | .error reason => .error reason
-      | .ok call =>
-      match exec config snapshot height signer fuel (ctx :: rest) (.enter call) journal left with
-      | .error reason => .error reason
-      | .ok (result, journal, left) =>
-      match typeData ctx.assumptions config.typeFuel (returnedData result) ctx.responseType with
-      | none => .error (.resultType ctx.object.value ctx.method)
-      | some _ =>
-      match resume (returnedData result).term yielded with
-      | none => .error (.frameFault ctx.object.value ctx.method "resume")
-      | some next => exec config snapshot height signer fuel (ctx :: rest) (.run next) journal left
+      | .ok (.call call) =>
+        match exec config snapshot height authority turn fuel (ctx :: rest) (.enter call) journal left with
+        | .error reason => .error reason
+        | .ok (result, journal, left) =>
+        match typeData ctx.assumptions config.typeFuel (returnedData result) ctx.responseType with
+        | none => .error (.resultType ctx.object.value ctx.method)
+        | some _ =>
+        match resume (returnedData result).term yielded with
+        | none => .error (.frameFault ctx.object.value ctx.method "resume")
+        | some next => exec config snapshot height authority turn fuel (ctx :: rest) (.run next) journal left
+      | .ok (.send send) =>
+        let id := Inbox.sendId turn journal.outbox.length
+        match typeData ctx.assumptions config.typeFuel (queuedData id) ctx.responseType with
+        | none => .error (.resultType ctx.object.value ctx.method)
+        | some _ =>
+        match resume (queuedData id).term yielded with
+        | none => .error (.frameFault ctx.object.value ctx.method "resume")
+        | some next => exec config snapshot height authority turn fuel (ctx :: rest) (.run next)
+            { journal with outbox := journal.outbox ++ [⟨id, ctx.object.value, send.destination, send.method, send.args⟩] }
+            left
     | (.finished _ finished, left) =>
       match ObjectiveBendDemandData.complete config.limits config.planBudget finished with
       | .error (failure, _) => .error (.frameFault ctx.object.value ctx.method s!"result extraction: {reprStr failure}")
@@ -448,6 +553,203 @@ def exec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot r
     | (.divergent _ _, _) => .error (.frameFault ctx.object.value ctx.method "divergent")
     | (.refused reason _, _) => .error (.frameFault ctx.object.value ctx.method (reprStr reason))
 
+
+/-! ## The turn's mail: inboxes and reply slots -/
+
+/-- An inbox as this turn holds it: what its cell held when the turn read it
+(`none`: no inbox yet) and what the turn will post, a LAWFUL change of it
+(`Inbox.Lawful`: pushes within the bound and pops of the head). A cell is held
+only after it was read and found to be that inbox or empty. -/
+structure HeldInbox {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) where
+  sender : Nat
+  target : Nat
+  read : Option Inbox.Inbox
+  readExact : readInbox snapshot (Inbox.cell config.domain sender target) = some read
+  clean : bodyOf .package (snapshot.canonicalBytes (Inbox.cell config.domain sender target)) = none
+  now : Inbox.Inbox
+  lawful : Inbox.Lawful (read.getD (Inbox.Inbox.empty sender target)) now
+  ends : now.sender = sender ∧ now.target = target
+
+def HeldInbox.cell {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (held : HeldInbox config snapshot) : CellId :=
+  Inbox.cell config.domain held.sender held.target
+
+/-- A reply slot this turn writes, open: one it opens for a message entering an
+inbox (`read = none`), or an open delivery slot it read and queues a send on. -/
+structure HeldSlot {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) where
+  name : Digest
+  read : Option AnswerSlot.Slot
+  clean : bodyOf .package (snapshot.canonicalBytes (AnswerSlot.cell config.domain name)) = none
+  now : AnswerSlot.Slot
+  named : now.name = name
+  opened : now.phase = .opened
+
+structure Mail {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) where
+  inboxes : List (HeldInbox config snapshot)
+  slots : List (HeldSlot config snapshot)
+  /-- The postage each queued message escrows, in order: the purse of the queue
+  holding it (an inbox's, or the inbox holding the message a slot answers). -/
+  credits : List (AccountId × Nat)
+  /-- Every object a message was addressed to (read as an object; guarded). -/
+  targets : List Nat
+
+def Mail.empty {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes} :
+    Mail config snapshot := ⟨[], [], [], []⟩
+
+/-- The inbox of (sender, target): the one this turn holds, else read from the
+snapshot. Returns it and the other held inboxes. -/
+def holdInbox {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (mail : Mail config snapshot) (sender target : Nat) :
+    Except CallRefusal (HeldInbox config snapshot × List (HeldInbox config snapshot)) :=
+  match mail.inboxes.find? (fun held => held.sender == sender && held.target == target) with
+  | some held => .ok (held, mail.inboxes.filter (fun other => !(other.sender == sender && other.target == target)))
+  | none =>
+    match readExact : readInbox snapshot (Inbox.cell config.domain sender target) with
+    | none => .error (.inboxCodec sender target)
+    | some read =>
+      if ends : (read.getD (Inbox.Inbox.empty sender target)).sender = sender ∧
+          (read.getD (Inbox.Inbox.empty sender target)).target = target then
+        if clean : bodyOf .package (snapshot.canonicalBytes (Inbox.cell config.domain sender target)) = none then
+          .ok (⟨sender, target, read, readExact, clean, read.getD (Inbox.Inbox.empty sender target), .refl _, ends⟩,
+            mail.inboxes)
+        else .error (.packageCell (Inbox.cell config.domain sender target).value)
+      else .error (.inboxCodec sender target)
+
+/-- Open the reply slot of a message entering the inbox `inbox`: its cell must
+hold nothing (no slot, never retired) and no slot of this turn may name it. -/
+def openSlot {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (mail : Mail config snapshot) (name : Digest) (inbox : CellId) : Except CallRefusal (HeldSlot config snapshot) :=
+  let bytes := snapshot.canonicalBytes (AnswerSlot.cell config.domain name)
+  if (payloadOf bytes).isSome || isRetired bytes || mail.slots.any (fun held => held.name == name) then
+    .error (.slotTaken name.value)
+  else if clean : bodyOf .package bytes = none then
+    .ok ⟨name, none, clean, ⟨name, inbox, .delivery name, 0, .opened, []⟩, rfl, rfl⟩
+  else .error (.packageCell (AnswerSlot.cell config.domain name).value)
+
+/-- The open slot a pipelined send names: the one this turn holds, else read. -/
+def holdSlot {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (mail : Mail config snapshot) (name : Digest) :
+    Except CallRefusal (HeldSlot config snapshot × List (HeldSlot config snapshot)) :=
+  match mail.slots.find? (fun held => held.name == name) with
+  | some held => .ok (held, mail.slots.filter (fun other => !(other.name == name)))
+  | none =>
+    match readSlot config snapshot name with
+    | none => .error (.notPipelinable name.value)
+    | some slot =>
+      if named : slot.name = name then
+        if opened : slot.phase = .opened then
+          if clean : bodyOf .package (snapshot.canonicalBytes (AnswerSlot.cell config.domain name)) = none then
+            .ok (⟨name, some slot, clean, slot, named, opened⟩, mail.slots)
+          else .error (.packageCell (AnswerSlot.cell config.domain name).value)
+        else .error (.notPipelinable name.value)
+      else .error (.notPipelinable name.value)
+
+/-- **Queue one message.** To an object: it must be an object; the message is
+pushed onto the inbox (sender, target), refused `queueFull` at the bound, and
+its reply slot is opened, decided only by its delivery. To a slot: the slot must
+be an open delivery slot (the reply of a message in an inbox); the message is
+queued on it, refused `slotQueueFull` at the bound. Either way its postage is
+credited to the purse of the queue that holds it. -/
+def Mail.send {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (mail : Mail config snapshot) (message : Inbox.Message) :
+    Destination → Except CallRefusal (Mail config snapshot)
+  | .object target =>
+    match readObject config snapshot ⟨target⟩ with
+    | .error reason => .error (.kernel reason)
+    | .ok none => .error (.notAnObject target)
+    | .ok (some _) =>
+    match holdInbox config snapshot mail message.sender target with
+    | .error reason => .error reason
+    | .ok (held, others) =>
+    match pushed : held.now.push message with
+    | none => .error (.queueFull message.sender target)
+    | some next =>
+    match openSlot config snapshot mail message.id held.cell with
+    | .error reason => .error reason
+    | .ok slot =>
+      have keeps := (Inbox.push_step pushed).keeps
+      let updated : HeldInbox config snapshot :=
+        ⟨held.sender, held.target, held.read, held.readExact, held.clean, next,
+          held.lawful.snoc (Inbox.push_step pushed), ⟨keeps.1.trans held.ends.1, keeps.2.1.trans held.ends.2⟩⟩
+      .ok ⟨others ++ [updated], mail.slots ++ [slot], mail.credits ++ [(held.cell.value, message.postage)],
+        mail.targets ++ [target]⟩
+  | .slot name =>
+    match holdSlot config snapshot mail name with
+    | .error reason => .error reason
+    | .ok (held, others) =>
+      match held.now.decider with
+      | .subject _ => .error (.notPipelinable name.value)
+      | .delivery _ =>
+        if held.now.queued.length < Inbox.bound then
+          let updated : HeldSlot config snapshot :=
+            ⟨held.name, held.read, held.clean, { held.now with queued := held.now.queued ++ [message] },
+              held.named, held.opened⟩
+          .ok ⟨mail.inboxes, others ++ [updated], mail.credits ++ [(held.now.activity.value, message.postage)],
+            mail.targets⟩
+        else .error (.slotQueueFull name.value)
+
+/-- The message a send queues: its delivery runs under `postage`, whose public
+price it escrows, refunded to `refund` if it is never delivered. -/
+def messageOf (config : Config) (postage : Capacity) (refund : AccountId) (out : Outgoing) : Inbox.Message :=
+  ⟨out.id, out.sender, out.method, dataBytes out.args, postage, config.tariff.workOf postage, refund⟩
+
+/-- The mail of a turn's sends, in order. -/
+def postMail {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (postage : Capacity) (refund : AccountId) : Mail config snapshot → List Outgoing → Except CallRefusal (Mail config snapshot)
+  | mail, [] => .ok mail
+  | mail, out :: rest =>
+    match mail.send (messageOf config postage refund out) out.destination with
+    | .error reason => .error reason
+    | .ok mail => postMail config snapshot postage refund mail rest
+
+/-- The posts of the mail: every held inbox and every held slot, against the
+roots the turn read them at. -/
+def Mail.posts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (mail : Mail config snapshot) : List Post :=
+  mail.inboxes.map (fun held => postAt snapshot held.cell (inboxImage held.now)) ++
+    mail.slots.map (fun held => slotPost config snapshot held.now)
+
+/-- The purses of inboxes the mail opens: registered on the Book in its batch. -/
+def Mail.registrations {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (mail : Mail config snapshot) (book : Book) : List AccountId :=
+  (mail.inboxes.map fun held => held.cell.value).filter fun account => !decide (account ∈ book.accounts)
+
+/-- Postage credits as transfers from `source` (zero amounts and self-transfers dropped). -/
+def creditTransfers (config : Config) (source : AccountId) (credits : List (AccountId × Nat)) : List Operation :=
+  credits.filterMap fun (purse, amount) =>
+    if amount = 0 ∨ purse = source then none else some (.transfer source purse config.asset amount)
+
+/-- Every post of the mail is an inbox or slot image at a cell that holds no package. -/
+theorem Mail.posts_shape {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (mail : Mail config snapshot) :
+    ∀ post ∈ mail.posts, ∃ cell role key body, role ≠ .record ∧
+      bodyOf .package (snapshot.canonicalBytes cell) = none ∧ post = postAt snapshot cell (image role key body) := by
+  intro post member
+  rcases List.mem_append.mp member with inInbox | inSlot
+  · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inInbox
+    exact ⟨held.cell, .inbox, Inbox.key held.now.sender held.now.target, Inbox.encode held.now,
+      (by decide : ObjectiveActivityCell.Role.inbox ≠ .record), held.clean, rfl⟩
+  · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inSlot
+    refine ⟨AnswerSlot.cell config.domain held.name, .slot, AnswerSlot.key held.now.name, AnswerSlot.encode held.now,
+      (by decide : ObjectiveActivityCell.Role.slot ≠ .record), held.clean, ?_⟩
+    unfold slotPost
+    rw [held.named]
+
+/-- **Every inbox the mail posts is a lawful change of what its cell held**
+(condition (b) of OB8, for the mail): the cell was read in this turn, held
+that inbox or nothing, and the post is pushes within the bound and pops of the
+head, at that cell, under that inbox's own key. -/
+theorem Mail.inboxes_lawful {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (mail : Mail config snapshot) :
+    ∀ held ∈ mail.inboxes,
+      readInbox snapshot (Inbox.cell config.domain held.sender held.target) = some held.read ∧
+      Inbox.Lawful (held.read.getD (Inbox.Inbox.empty held.sender held.target)) held.now ∧
+      postAt snapshot held.cell (inboxImage held.now) =
+        postAt snapshot (Inbox.cell config.domain held.now.sender held.now.target) (inboxImage held.now) := by
+  intro held _
+  refine ⟨held.readExact, held.lawful, ?_⟩
+  rw [held.ends.1, held.ends.2]; rfl
+
 /-! ## The invocation turn -/
 
 structure InvokeRequest where
@@ -458,9 +760,12 @@ structure InvokeRequest where
   grants : List Grant
   /-- The one declared envelope of the whole call tree. -/
   envelope : Capacity
-  /-- The signer's Book account: pays the envelope's public price. -/
+  /-- The signer's Book account: pays the envelope's public price and every send's postage. -/
   account : AccountId
   nonce : Nat
+  /-- The declared envelope every message this invocation sends is delivered
+  under; each send escrows its public price (`Inbox.Message.postage`). -/
+  postage : Capacity
 
 def grantStream : StreamCodec Grant :=
   StreamCodec.xmap (StreamCodec.product StreamCodec.nat (StreamCodec.product stringStream StreamCodec.nat))
@@ -495,8 +800,20 @@ def Journal.guards {rootBytes : Bytes → Digest} (journal : Journal) (config : 
      guardAt snapshot (packageCell config.domain entry.record.pin),
      guardAt snapshot (stateCell config.domain entry.object)]
 
+/-- The root authority of an invocation: the signer, no caller. -/
+def InvokeRequest.authority (request : InvokeRequest) : Authority := ⟨some request.subject, none⟩
+
+/-- An invocation's Book batch: register the purses of inboxes its mail opens,
+pay the envelope's public price, escrow every send's postage in its queue's purse. -/
+def invokeBatch {rootBytes : Bytes → Digest} {snapshot : Snapshot rootBytes} (config : Config) (book : Book)
+    (request : InvokeRequest) (mail : Mail config snapshot) : Batch :=
+  ⟨mail.registrations book,
+    .fee request.account config.collector config.asset (config.tariff.workOf request.envelope) ::
+      creditTransfers config request.account mail.credits, []⟩
+
 /-- An admitted invocation: the call tree ran to the root's return within the
-envelope, every frame write passed its object's law, and the fee is posted. -/
+envelope, every frame write passed its object's law, its sends are queued (each
+inbox within its bound, each reply slot opened), and the fee and postage are posted. -/
 structure Invocation {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : InvokeRequest) where
   private mk ::
@@ -504,28 +821,35 @@ structure Invocation {rootBytes : Bytes → Digest} (config : Config) (snapshot 
   result : Data
   journal : Journal
   left : Nat
-  execExact : exec config snapshot height request.subject (callFuel request.envelope) []
+  execExact : exec config snapshot height request.authority (invokeTransaction request) (callFuel request.envelope) []
     (.enter (rootCall request)) (Journal.start request.grants) request.envelope.sourceTicks = .ok (result, journal, left)
+  /-- A turn that sends declares a postage envelope the deployment covers. -/
+  postageCovered : journal.outbox ≠ [] → config.covers request.postage = true
+  mail : Mail config snapshot
+  mailExact : postMail config snapshot request.postage request.account Mail.empty journal.outbox = .ok mail
   book : BookCell
   bookExact : loadBook config snapshot = .ok book
   posted : Postings book
-  batchExact : posted.batch = ⟨[], [.fee request.account config.collector config.asset
-    (config.tariff.workOf request.envelope)], []⟩
+  batchExact : posted.batch = invokeBatch config (logicalBook book.logical) request mail
   posts : List Post
-  postsExact : posts = journal.posts config snapshot ++ [posted.write config snapshot]
+  postsExact : posts = journal.posts config snapshot ++ mail.posts ++ [posted.write config snapshot]
 
 def invoke {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : InvokeRequest) : Except CallRefusal (Invocation config snapshot height request) :=
   if covered : config.covers request.envelope = true then
-    match execExact : exec config snapshot height request.subject (callFuel request.envelope) []
-        (.enter (rootCall request)) (Journal.start request.grants) request.envelope.sourceTicks with
+    match execExact : exec config snapshot height request.authority (invokeTransaction request)
+        (callFuel request.envelope) [] (.enter (rootCall request)) (Journal.start request.grants)
+        request.envelope.sourceTicks with
     | .error reason => .error reason
     | .ok (result, journal, left) =>
+      if postageCovered : journal.outbox ≠ [] → config.covers request.postage = true then
+      match mailExact : postMail config snapshot request.postage request.account Mail.empty journal.outbox with
+      | .error reason => .error reason
+      | .ok mail =>
       match bookExact : loadBook config snapshot with
       | .error reason => .error (.kernel reason)
       | .ok book =>
-        let batch : Batch := ⟨[], [.fee request.account config.collector config.asset
-          (config.tariff.workOf request.envelope)], []⟩
+        let batch := invokeBatch config (logicalBook book.logical) request mail
         match postedExact : postings book batch with
         | .error reason => .error (.kernel reason)
         | .ok posted =>
@@ -534,12 +858,15 @@ def invoke {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
             split at postedExact
             · cases postedExact; rfl
             · cases postedExact
-          .ok ⟨covered, result, journal, left, execExact, book, bookExact, posted, batchExact, _, rfl⟩
+          .ok ⟨covered, result, journal, left, execExact, postageCovered, mail, mailExact, book, bookExact, posted,
+            batchExact, _, rfl⟩
+      else .error (.kernel (.uncovered request.postage))
   else .error (.kernel (.uncovered request.envelope))
 
 def Invocation.guards {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : InvokeRequest} (invoked : Invocation config snapshot height request) : List ReadGuard :=
-  invoked.journal.guards config snapshot
+  invoked.journal.guards config snapshot ++
+    invoked.mail.targets.map fun target => guardAt snapshot (objectCell config.domain ⟨target⟩)
 
 def Invocation.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : InvokeRequest} (invoked : Invocation config snapshot height request) (sealing : Seal) :
@@ -557,9 +884,9 @@ theorem Invocation.conserves {rootBytes : Bytes → Digest} {config : Config} {s
 /-- **Re-entry is refused**: a call whose target is on the stack is refused by
 name, whatever the journal, ticks or fuel. -/
 theorem reentry_refused {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
-    (height : Nat) (signer : SubjectId) (fuel : Nat) (stack : List Ctx) (call : CallPlan) (journal : Journal)
-    (ticks : Nat) (onStack : ∃ ctx ∈ stack, ctx.object = call.target) :
-    exec config snapshot height signer (fuel + 1) stack (.enter call) journal ticks =
+    (height : Nat) (authority : Authority) (turn : TransactionId) (fuel : Nat) (stack : List Ctx) (call : CallPlan)
+    (journal : Journal) (ticks : Nat) (onStack : ∃ ctx ∈ stack, ctx.object = call.target) :
+    exec config snapshot height authority turn (fuel + 1) stack (.enter call) journal ticks =
       .error (.reentry call.target.value (stack.map (·.object.value))) := by
   have hit : stack.any (fun ctx => ctx.object == call.target) = true := by
     obtain ⟨ctx, member, same⟩ := onStack
@@ -722,10 +1049,10 @@ def Task.below : Task → List Ctx → List Ctx
   under that frame's object's law and facts;
 * every stack it enters holds each object at most once. -/
 theorem exec_invariant {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
-    (height : Nat) (signer : SubjectId) :
+    (height : Nat) (authority : Authority) (turn : TransactionId) :
     ∀ (fuel : Nat) (stack : List Ctx) (task : Task) (journal : Journal) (ticks : Nat)
       (result : Data) (journal' : Journal) (left : Nat),
-    exec config snapshot height signer fuel stack task journal ticks = .ok (result, journal', left) →
+    exec config snapshot height authority turn fuel stack task journal ticks = .ok (result, journal', left) →
     (stack.map (·.object)).Nodup →
     (∀ ctx state, task = .run state → stack.head? = some ctx → journal.lookup ctx.object = some (some ctx.view)) →
     ObjectsRead config snapshot journal →
@@ -767,7 +1094,7 @@ theorem exec_invariant {rootBytes : Bytes → Digest} (config : Config) (snapsho
                     exact List.any_eq_true.mpr ⟨ctx, member, by simp [same]⟩
                   have distinct' : ((⟨call.target, call.method, entry.record, program.applied.assumptions,
                       program.responseType, view, ⟨subject, height, call.target.value, callTurn,
-                      stack.head?.map (·.object.value)⟩⟩ : Ctx) :: stack).map (·.object) |>.Nodup := by
+                      callerOf authority stack⟩⟩ : Ctx) :: stack).map (·.object) |>.Nodup := by
                     simp only [List.map_cons, List.nodup_cons, List.mem_map]
                     exact ⟨fun ⟨ctx, member, same⟩ => notOn ctx member same, distinct⟩
                   obtain ⟨read', kept, ⟨new, writes', fresh⟩, ⟨frames, frames', nodupFrames⟩⟩ :=
@@ -844,6 +1171,22 @@ theorem exec_invariant {rootBytes : Bytes → Digest} (config : Config) (snapsho
                       rcases List.mem_append.mp member with a | b
                       · exact nodup1 frame a
                       · exact nodup2 frame b
+            · -- a send: only the outbox grows
+              rename_i send _
+              split at ran
+              · cases ran
+              · split at ran
+                · cases ran
+                · rename_i next _
+                  obtain ⟨read2, kept2, ⟨new2, writes2, fresh2⟩, ⟨frames2, framesEq2, nodup2⟩⟩ :=
+                    ih _ _ _ _ _ _ _ ran distinct (by
+                      intro c _ _ head
+                      simp only [List.head?_cons, Option.some.injEq] at head
+                      subst head; exact viewed) read
+                  refine ⟨read2, ?_, ⟨new2, writes2, fresh2⟩, ⟨frames2, framesEq2, nodup2⟩⟩
+                  intro c member
+                  simp only [Task.below, List.tail_cons] at member
+                  exact kept2 c (by simpa [Task.below] using member)
         · -- finished
           split at ran
           · cases ran
@@ -875,7 +1218,7 @@ theorem invocation_reentry_free {rootBytes : Bytes → Digest} {config : Config}
     {height : Nat} {request : InvokeRequest} (invoked : Invocation config snapshot height request) :
     ∀ frame ∈ invoked.journal.frames, frame.Nodup := by
   obtain ⟨_, _, _, ⟨new, frames, nodup⟩⟩ :=
-    exec_invariant config snapshot height request.subject _ [] _ _ _ _ _ _ invoked.execExact (by simp)
+    exec_invariant config snapshot height request.authority (invokeTransaction request) _ [] _ _ _ _ _ _ invoked.execExact (by simp)
       (by intro _ _ h; cases h) (by intro _ h; cases h)
   intro frame member
   rw [frames] at member
@@ -892,7 +1235,7 @@ theorem invocation_writes_from_view {rootBytes : Bytes → Digest} {config : Con
     ∀ w ∈ invoked.journal.writes, w.before = w.viewed ∧
       admitWrite w.record w.facts (some w.before.value) w.after.value = .ok () := by
   obtain ⟨_, _, ⟨new, writes, fresh⟩, _⟩ :=
-    exec_invariant config snapshot height request.subject _ [] _ _ _ _ _ _ invoked.execExact (by simp)
+    exec_invariant config snapshot height request.authority (invokeTransaction request) _ [] _ _ _ _ _ _ invoked.execExact (by simp)
       (by intro _ _ h; cases h) (by intro _ h; cases h)
   intro w member
   rw [writes] at member
@@ -905,15 +1248,18 @@ call tree read from the snapshot (the premise of the checkpoint invariant's
 theorem Invocation.posts_shape {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : InvokeRequest} (invoked : Invocation config snapshot height request) :
     ∀ post ∈ invoked.posts, post = invoked.posted.write config snapshot ∨
-      ∃ object current state, readState config snapshot object = .ok current ∧
-        post = postAt snapshot (stateCell config.domain object) (stateImage object state) := by
+      (∃ object current state, readState config snapshot object = .ok current ∧
+        post = postAt snapshot (stateCell config.domain object) (stateImage object state)) ∨
+      ∃ cell role key body, role ≠ .record ∧ bodyOf .package (snapshot.canonicalBytes cell) = none ∧
+        post = postAt snapshot cell (image role key body) := by
   obtain ⟨read, _⟩ :=
-    exec_invariant config snapshot height request.subject _ [] _ _ _ _ _ _ invoked.execExact (by simp)
+    exec_invariant config snapshot height request.authority (invokeTransaction request) _ [] _ _ _ _ _ _ invoked.execExact (by simp)
       (by intro _ _ h; cases h) (by intro _ h; cases h)
   rw [invoked.postsExact]
   intro post member
   rcases List.mem_append.mp member with inJournal | isBook
-  · right
+  rcases List.mem_append.mp inJournal with inJournal | inMail
+  · right; left
     simp only [Journal.posts, List.mem_filterMap] at inJournal
     obtain ⟨entry, entryIn, made⟩ := inJournal
     obtain ⟨current, readOk⟩ := read entry entryIn
@@ -924,6 +1270,7 @@ theorem Invocation.posts_shape {rootBytes : Bytes → Digest} {config : Config} 
         simp only [found, Option.map_some, Option.some.injEq] at made
         exact ⟨entry.object, current, state, readOk, made.symm⟩
     · cases made
+  · right; right; exact invoked.mail.posts_shape post inMail
   · left; simpa using isBook
 
 #assert_axioms Invocation.posts_shape
@@ -939,5 +1286,7 @@ theorem Invocation.posts_shape {rootBytes : Bytes → Digest} {config : Config} 
 #assert_axioms invocation_reentry_free
 #assert_axioms invocation_writes_from_view
 #assert_axioms Invocation.conserves
+#assert_axioms Mail.posts_shape
+#assert_axioms Mail.inboxes_lawful
 
 end Minidregg.Kernel.ObjectiveCall

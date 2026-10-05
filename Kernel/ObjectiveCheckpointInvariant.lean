@@ -671,9 +671,67 @@ theorem invocation_safe {rootBytes : Bytes → Digest} {config : Config} {snapsh
     (invoked : ObjectiveCall.Invocation config snapshot height request) :
     ∀ post ∈ invoked.posts, PostSafe config snapshot post := by
   intro post member
-  rcases ObjectiveCall.Invocation.posts_shape invoked post member with isBook | ⟨_, _, state, readOk, isState⟩
+  rcases ObjectiveCall.Invocation.posts_shape invoked post member with
+    isBook | ⟨_, _, state, readOk, isState⟩ | ⟨cell, role, key, body, notRecord, clean, isMail⟩
   · subst isBook; exact book_post_safe invoked.bookExact invoked.posted
   · subst isState; exact state_post_safe readOk state
+  · subst isMail; exact postSafe_inert clean (recordIn_image_other key body notRecord)
+
+/-- A delivery's call tree posts only state cells of objects it read. -/
+theorem outcome_posts_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {target : Nat} {message : Inbox.Message} {outcome : ObjectiveSend.Outcome}
+    (ran : ObjectiveSend.runMessage config snapshot height target message = outcome) :
+    ∀ post ∈ outcome.posts config snapshot, PostSafe config snapshot post := by
+  intro post member
+  cases outcome with
+  | failed _ => cases member
+  | replied result journal =>
+    simp only [ObjectiveSend.Outcome.posts] at member
+    unfold ObjectiveSend.runMessage at ran
+    split at ran
+    · cases ran
+    · split at ran
+      · cases ran
+      · rename_i execExact
+        split at ran
+        · cases ran
+          obtain ⟨read, _⟩ := ObjectiveCall.exec_invariant config snapshot height _ _ _ [] _ _ _ _ _ _ execExact
+            (by simp) (by intro _ _ h; cases h) (by intro _ h; cases h)
+          simp only [ObjectiveCall.Journal.posts, List.mem_filterMap] at member
+          obtain ⟨entry, entryIn, made⟩ := member
+          obtain ⟨current, readOk⟩ := read entry entryIn
+          split at made
+          · cases found : entry.current with
+            | none => simp [found] at made
+            | some state =>
+              simp only [found, Option.map_some, Option.some.injEq] at made
+              subst made
+              exact state_post_safe readOk state
+          · cases made
+        · cases ran
+
+/-- A message delivery writes its inboxes and slots (cells it read), the slot it
+decides, its call tree's state cells and the Book: no record or package cell. -/
+theorem messageDelivery_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : ObjectiveSend.MessageRequest}
+    (delivered : ObjectiveSend.MessageDelivery config snapshot height request) :
+    ∀ post ∈ delivered.posts, PostSafe config snapshot post := by
+  rw [delivered.postsExact]
+  intro post member
+  rcases List.mem_append.mp member with front | last
+  · rcases List.mem_append.mp front with fromCalls | fromMail
+    · exact outcome_posts_safe delivered.outcomeExact post fromCalls
+    · obtain ⟨cell, role, key, body, notRecord, clean, isMail⟩ := delivered.mail.posts_shape post fromMail
+      subst isMail; exact postSafe_inert clean (recordIn_image_other key body notRecord)
+  · simp only [List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at last
+    rcases last with isSlot | isBook
+    · subst isSlot
+      obtain ⟨_, _, _, decided⟩ := AnswerSlot.decideDelivery_single delivered.decidedExact
+      have named : delivered.decided.name = delivered.message.id := by rw [decided]; exact delivered.slotNamed
+      unfold slotPost
+      rw [named]
+      exact slot_post_safe (readSlot_package delivered.slotExact) _
+    · subst isBook; exact book_post_safe delivered.bookExact delivered.posted
 
 /-- **Every admitted kernel turn's posts are safe** on a typed snapshot. -/
 theorem AdmittedTurn.safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -694,6 +752,7 @@ theorem AdmittedTurn.safe {rootBytes : Bytes → Digest} {config : Config} {snap
   | exhaust _ exhausted => exact exhaustion_safe typed exhausted
   | abandon _ abandoned => exact abandonment_safe abandoned
   | invoke _ invoked => exact invocation_safe invoked
+  | deliverMessage _ delivered => exact messageDelivery_safe delivered
 
 /-! ## An ending turn's final posts are safe
 
@@ -720,6 +779,8 @@ theorem finalIntent_writes {rootBytes : Bytes → Digest} {config : Config} {sna
   | writeState _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
   | exhaust _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
   | invoke _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
+  | deliverMessage _ _ =>
+    simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
 
 /-- **Posts the seat kernel checked inert are safe**: they sit on no package and
 write no record. -/
