@@ -11,7 +11,9 @@ induction hypothesis). This module closes the induction:
   record whose checkpoint decodes to a state typed at the program its pinned
   package and input instantiate (`CheckpointTyped`);
 * `reachable_delivery_typed`: so every delivery admitted on a reachable snapshot
-  stores a typed checkpoint, with no premise left.
+  stores a typed checkpoint, with no premise left;
+* `reachable_delivery_stored_complete`: and that checkpoint resumes as the program's own
+  yield (`ObjectiveResumeContract.StoredComplete`), with no premise left.
 
 A step is one of three things (`Step`), and the node commits nothing else:
 
@@ -1404,6 +1406,19 @@ theorem reachable_delivery_typed {rootBytes : Bytes → Digest} {config : Config
     (Delivery.prior delivery (stored_checkpoints_typed genesisTyped reachable request.record delivery.record
       delivery.recordExact delivery.located)) yieldedSegment
 
+/-- **What a delivery on a reachable world stores resumes as the program's own yield**, with
+no premise left: `delivery_stored_complete`'s `prior` is the invariant. -/
+theorem reachable_delivery_stored_complete {rootBytes : Bytes → Digest} {config : Config}
+    {genesis snapshot : Snapshot rootBytes} (genesisTyped : RecordCellsTyped config genesis)
+    (reachable : Reachable config genesis snapshot) {height : Nat} {request : DeliverRequest}
+    (delivery : Delivery config snapshot height request)
+    {state : State} {plan : PlanAwait} (yieldedSegment : delivery.segment = .yielded state plan) :
+    StoredComplete config state :=
+  delivery_stored_complete delivery
+    (Delivery.prior delivery (stored_checkpoints_typed genesisTyped reachable request.record delivery.record
+      delivery.recordExact delivery.located)) yieldedSegment
+
+#assert_axioms reachable_delivery_stored_complete
 #assert_axioms readRecord_eq
 #assert_axioms payloadOf_image
 #assert_axioms bodyOf_some

@@ -802,8 +802,8 @@ is kept, compacted). So a checkpoint is storage-charged for what the continuatio
 can use: a Plan field the extraction evaluated is stored as its value, never as the
 chain of suspended computations that produced it. Resuming the stored state is
 resuming the extracted one exactly (`ObjectiveResumeContract.runSegment_checkpoint`);
-that resuming the extracted state is resuming the yielded one is the premise
-`ObjectiveResumeContract.ForcingTransparent`, an open obligation of this lane. -/
+that resuming the extracted state is resuming the yielded one, within heap headroom, is
+`ObjectiveResumeContract.forcingTransparent_of_yieldedPlan` (every lexically valid yield). -/
 inductive Segment where
   | yielded (state : State) (plan : PlanAwait)
   | finished (result : Data)

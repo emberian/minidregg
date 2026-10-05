@@ -13,7 +13,7 @@ at the extended address types (`typed_yieldedPlanWith`). With `typed_settle` and
 
 What this module does NOT prove: that resuming the extraction's state ends as resuming
 the yielded state (sharing transparency). That is `Kernel.ObjectiveResumeContract.
-ForcingTransparent`, an open obligation. -/
+forcingTransparent_of_yieldedPlan`, over `Theory.ObjectiveBendDemandForcing*`. -/
 import Theory.ObjectiveBendDemandSettleProofs
 import Theory.ObjectiveBendDemandPreservation
 namespace Minidregg.Theory.ObjectiveBendDemandCollect
@@ -447,7 +447,7 @@ a suspended record of three fields; the stack holds cell 0 too. Unforced and col
 two cells. Forced, settled and collected: five (cell 0's record, the Plan cell and the
 three field cells, all reachable from the stack through cell 0). So a resumed forced
 checkpoint may run out of heap where the unforced one would not, and the resume
-premise `Kernel.ObjectiveResumeContract.ForcingTransparent` is stated with heap headroom
+statement `Kernel.ObjectiveResumeContract.ForcingTransparent` carries heap headroom
 of the forced state's size. -/
 
 def largerYield : State :=

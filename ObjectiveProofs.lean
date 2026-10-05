@@ -15,6 +15,7 @@ import Theory.ObjectiveBendLedgerPoles
 import Theory.ObjectiveBendTemplates
 import Theory.ObjectiveBendCheckpointRoundTrip
 import Kernel.ObjectiveBendAdmissionSemantics
+import Theory.ObjectiveBendDemandForcingExtract
 import Kernel.ObjectiveResumeContract
 import Kernel.ObjectiveCheckpointInvariant
 import Kernel.ObjectiveActivityGateRoute
