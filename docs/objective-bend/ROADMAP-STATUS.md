@@ -27,7 +27,7 @@ nothing on `next`. Owner = the lane that holds it.
 | Turn gate (`stored_checkpoints_typed`) | unbuilt | | CHECKPOINT-INVARIANT |
 | `ForcingTransparent` discharged | partial | still an open premise (`Kernel/ObjectiveResumeContract.lean:309`); refuting instance for a malformed yield `2c746bf8`; executed by the `transparency` gate only | FORCING-TRANSPARENT |
 | Seats on a native route | unbuilt | `Kernel.Seat`/`Kernel.Invitation` compiled and proved (`6347dcb4`), not in the Host closure; no seat driver; activities do not hold seats | SEATS-NATIVE |
-| **OB7 synchronous cross-object `call`** | unbuilt | no turn lets one object's method reach another object | **in progress: lane OB-ROADMAP** |
+| OB7 synchronous cross-object `call` | built, integrated on scratch worlds | `Kernel/ObjectiveCall` (lane/ob-roadmap): `invoke` turn, re-entry refused (`reentry_refused`, `invocation_reentry_free`), apply-at-return own-object writes judged by the callee's law (`invocation_writes_from_view`), scoped grants, `request/caller` facets, one envelope; journey `objective-call-native-journey.py` C1-C8 + plants + guard mutant. Missing: calls from an activity's segment, pipelines, object c-lists | — |
 | **OB8 sends, inboxes, `message` awaits** (decider as role, escrowed postage, bounded queues, forwarding at slot resolution) | unbuilt | | **in progress: lane OB-ROADMAP (after OB7)** |
 | Guardedness: a well-typed resident never diverges inside a turn | unbuilt | no check on self-calls under `perform`; LT6 extends it to all demanded recursion | OB-LTUO (LT6) |
 

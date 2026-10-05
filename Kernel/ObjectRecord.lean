@@ -166,19 +166,29 @@ where
 
 /-- The facts of the request a write is judged under. -/
 structure Facts where
-  subject : SubjectId
+  /-- The subject whose authority the write carries. `none` in a nested call
+  frame that no scoped grant of the signer covers (`Kernel.ObjectiveCall`): the
+  signer's authority does not flow to callees it did not grant, so the slot
+  `request/subject` is ABSENT and every atom reading it fails closed. -/
+  subject : Option SubjectId
   height : Nat
   /-- The object the write is about (its id's value). -/
   target : Nat
-  /-- Which kernel turn writes: 1 birth, 2 delivery, 3 direct write, 4 creation. -/
+  /-- Which kernel turn writes: 1 birth, 2 delivery, 3 direct write, 4 creation,
+  5 a call frame. -/
   turn : Nat
+  /-- The object whose frame called the writing frame (`request/caller`); `none`
+  (slot absent) when the write is not a nested call frame's. A callee's law
+  names the callers it admits with this slot: an object's facet, as a clause. -/
+  caller : Option Nat
   deriving DecidableEq, Repr
 
 def Facts.slots (facts : Facts) : List (Slot × Int) :=
-  [("request/subject", Int.ofNat facts.subject.value),
-   ("request/height", Int.ofNat facts.height),
+  (facts.subject.map (fun subject => ("request/subject", Int.ofNat subject.value))).toList ++
+  [("request/height", Int.ofNat facts.height),
    ("request/target", Int.ofNat facts.target),
-   ("request/turn", Int.ofNat facts.turn)]
+   ("request/turn", Int.ofNat facts.turn)] ++
+  (facts.caller.map (fun caller => ("request/caller", Int.ofNat caller))).toList
 
 /-- The (old, new) views a write is judged on. A first write has no old state:
 its old view holds the request facts only. -/

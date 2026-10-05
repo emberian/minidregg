@@ -111,6 +111,16 @@ def extra (path : String) (json : Json) : Result Capacity :=
   | .ok value => capacity (path ++ ".extra") value
   | .error _ => .ok ObjectiveTariff.zeroCapacity
 
+/-- An invocation's scoped grants: `[{object, method, uses}]` (absent: none). -/
+def grants (path : String) (json : Json) : Result (List ObjectiveCall.Grant) :=
+  match json.getObjVal? "grants" with
+  | .error _ => .ok []
+  | .ok value => match value.getArr? with
+    | .error _ => .error s!"{path}.grants must be an array"
+    | .ok items => items.toList.mapM fun item => do
+      pure ⟨← nat (path ++ ".grants") item "object", ← str (path ++ ".grants") item "method",
+        ← nat (path ++ ".grants") item "uses"⟩
+
 /-- The turn of a command. `law` reads a predicate (the Host's `predicate` JSON
 reader), for a creation's law and upgrade policy. -/
 def turn (law : String → Json → Result Minidregg.Pred.Pred) (json : Json) : Result Turn := do
@@ -136,8 +146,11 @@ def turn (law : String → Json → Result Minidregg.Pred.Pred) (json : Json) : 
   | "exhaust" => pure (.exhaust ⟨← nat p json "record"⟩ ⟨← nat p json "await"⟩ (← extra p json)
       (← nat p json "account") ⟨← nat p json "accountCapability"⟩)
   | "abandon" => pure (.abandon ⟨← nat p json "record"⟩ ⟨← nat p json "await"⟩)
+  | "invoke" => pure (.invoke (← nat p json "object") ⟨← nat p json "objectCapability"⟩ (← str p json "method")
+      (← data p json "args") (← grants p json) (← capacity (p ++ ".envelope") (← field p json "envelope"))
+      (← nat p json "account") ⟨← nat p json "accountCapability"⟩)
   | other => throw s!"$.turn.kind {other} is not publish, create, birth, resolve, deliver, topUp, writeState, \
-      exhaust or abandon"
+      exhaust, abandon or invoke"
 
 /-- `author objective-activity`: `{subject, nonce, expectedAuthorityRoot, turn}`. -/
 def author (law : String → Json → Result Minidregg.Pred.Pred) (json : Json) : Result (List UInt8) := do
@@ -190,9 +203,15 @@ def turnJson : Turn → Json
        ("extra", capacityJson extra), ("account", decimal account), ("accountCapability", decimal ac.value)]
   | .abandon record await => .mkObj
       [("kind", "abandon"), ("record", decimal record.value), ("await", decimal await.value)]
+  | .invoke object oc method args grants envelope account ac => .mkObj
+      [("kind", "invoke"), ("object", decimal object), ("objectCapability", decimal oc.value),
+       ("method", toJson method), ("args", dataOf args),
+       ("grants", .arr (grants.map fun grant => .mkObj [("object", decimal grant.object),
+         ("method", toJson grant.method), ("uses", decimal grant.uses)]).toArray),
+       ("envelope", capacityJson envelope), ("account", decimal account), ("accountCapability", decimal ac.value)]
 
 def commandJson (command : Command) : Json := .mkObj
-  [("type", "objective-activity-command-v2"),
+  [("type", "objective-activity-command-v3"),
    ("canonical", toJson (hex (ObjectiveActivityReceiver.commandCodec.encode command))),
    ("subject", decimal command.subject.value), ("nonce", decimal command.nonce),
    ("expectedAuthorityRoot", decimal command.expectedAuthorityRoot.value),
@@ -209,7 +228,8 @@ def inspectPlan (bytes : List UInt8) : Result Json :=
   match ObjectiveActivityReceiver.signingPlanCodec.decode bytes with
   | none => .error "noncanonical activity plan"
   | some plan => .ok (.mkObj
-      [("type", "objective-activity-plan-v1"), ("canonical", toJson (hex bytes)),
+      [("type", "objective-activity-plan-v2"), ("canonical", toJson (hex bytes)),
+       ("report", if plan.report.isEmpty then .null else dataOf plan.report),
        ("domain", decimal plan.domain.value), ("semantics", decimal plan.semantics.value),
        ("command", match ObjectiveActivityReceiver.commandCodec.decode plan.commandBytes with
          | some command => commandJson command | none => .null),

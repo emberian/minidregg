@@ -20,6 +20,7 @@ An activity with no holdings is untouched: `join` returns `none` and the turn
 is exactly the activity kernel's.
 -/
 import Kernel.SeatStore
+import Kernel.ObjectiveAdmittedTurn
 
 namespace Minidregg.Kernel.ActivitySeatEnd
 

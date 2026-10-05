@@ -59,6 +59,7 @@ import Kernel.CapabilityRevocationController
 import Kernel.ResourceBirthController
 import Kernel.ObjectiveActivity
 import Kernel.ActivitySeatEnd
+import Kernel.ObjectiveAdmittedTurn
 import Kernel.ObjectiveKernelConfig
 import Kernel.ObjectiveBendNativeAdmission
 import Kernel.PayAssignmentReceiver
@@ -157,6 +158,13 @@ inductive Turn where
   deadline plus the deployment's grace: reclaim the record and its slot and
   return the purse. Anyone may. -/
   | abandon (record : Digest) (await : Digest)
+  /-- Call `method` of `object` with `args` (data bytes): the call tree runs in
+  this turn (`Kernel.ObjectiveCall`), every callee on its own pinned package,
+  within the one declared `envelope`, whose public price `account` pays.
+  `grants` lend the signer's authority to named nested frames. Only a holder of
+  a capability on `object`, spending an account it owns. -/
+  | invoke (object : Nat) (objectCapability : CapabilityId) (method : String) (args : List UInt8)
+      (grants : List ObjectiveCall.Grant) (envelope : Capacity) (account : Nat) (accountCapability : CapabilityId)
   deriving DecidableEq, Repr
 
 abbrev CreateWire :=
@@ -165,11 +173,13 @@ abbrev PublishWire := List UInt8 × List UInt8 × Nat × CapabilityId
 abbrev BirthWire :=
   Nat × CapabilityId × Nat × CapabilityId × Digest × List UInt8 × Capacity × Capacity × Capacity × Nat
 abbrev EndWire := Digest × Digest × Capacity × Nat × CapabilityId
+abbrev InvokeWire :=
+  Nat × CapabilityId × String × List UInt8 × List ObjectiveCall.Grant × Capacity × Nat × CapabilityId
 
 abbrev TurnWire :=
   Sum PublishWire (Sum CreateWire (Sum BirthWire (Sum (Digest × AnswerWire) (Sum EndWire
     (Sum (Digest × Nat × CapabilityId × Nat) (Sum (Nat × CapabilityId × List UInt8)
-      (Sum EndWire (Digest × Digest))))))))
+      (Sum EndWire (Sum (Digest × Digest) InvokeWire))))))))
 
 def Turn.toWire : Turn → TurnWire
   | .publish artifact package p pc => .inl (artifact, package, p, pc)
@@ -181,7 +191,9 @@ def Turn.toWire : Turn → TurnWire
   | .writeState object cap value => .inr (.inr (.inr (.inr (.inr (.inr (.inl (object, cap, value)))))))
   | .exhaust record await extra account cap =>
       .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (record, await, extra, account, cap))))))))
-  | .abandon record await => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (record, await))))))))
+  | .abandon record await => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (record, await)))))))))
+  | .invoke o oc method args grants envelope a ac =>
+      .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (o, oc, method, args, grants, envelope, a, ac)))))))))
 
 def Turn.ofWire : TurnWire → Turn
   | .inl (artifact, package, p, pc) => .publish artifact package p pc
@@ -193,7 +205,9 @@ def Turn.ofWire : TurnWire → Turn
   | .inr (.inr (.inr (.inr (.inr (.inr (.inl (object, cap, value))))))) => .writeState object cap value
   | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (record, await, extra, account, cap)))))))) =>
       .exhaust record await extra account cap
-  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (record, await)))))))) => .abandon record await
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (record, await))))))))) => .abandon record await
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (o, oc, method, args, grants, envelope, a, ac))))))))) =>
+      .invoke o oc method args grants envelope a ac
 
 def createStream : StreamCodec CreateWire :=
   StreamCodec.product StreamCodec.nat (StreamCodec.product capabilityIdStream
@@ -215,6 +229,12 @@ def endStream : StreamCodec EndWire :=
   StreamCodec.product digestStream (StreamCodec.product digestStream
     (StreamCodec.product capacityStream (StreamCodec.product StreamCodec.nat capabilityIdStream)))
 
+def invokeStream : StreamCodec InvokeWire :=
+  StreamCodec.product StreamCodec.nat (StreamCodec.product capabilityIdStream
+    (StreamCodec.product stringStream (StreamCodec.product bytesStream
+      (StreamCodec.product (StreamCodec.list ObjectiveCall.grantStream) (StreamCodec.product capacityStream
+        (StreamCodec.product StreamCodec.nat capabilityIdStream))))))
+
 def turnStream : StreamCodec Turn :=
   StreamCodec.xmap
     (StreamCodec.sum publishStream (StreamCodec.sum createStream (StreamCodec.sum birthStream
@@ -224,7 +244,8 @@ def turnStream : StreamCodec Turn :=
             (StreamCodec.product capabilityIdStream StreamCodec.nat)))
           (StreamCodec.sum
             (StreamCodec.product StreamCodec.nat (StreamCodec.product capabilityIdStream bytesStream))
-            (StreamCodec.sum endStream (StreamCodec.product digestStream digestStream)))))))))
+            (StreamCodec.sum endStream (StreamCodec.sum (StreamCodec.product digestStream digestStream)
+              invokeStream)))))))))
     Turn.toWire Turn.ofWire (by intro turn; cases turn <;> rfl)
 
 structure Command where
@@ -242,10 +263,9 @@ def commandStream : StreamCodec Command :=
     (fun (subject, nonce, root, turn) => ⟨subject, nonce, root, turn⟩)
     (by intro c; cases c; rfl)
 
-/-- v2: the turn sum carries `create`, `exhaust` and `abandon`, a state write names its
-object, publish carries the package and its payer, envelopes are declared `Capacity`s
-(v1 commands refuse to decode). -/
-def commandFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/COMMAND/v2".toUTF8.toList
+/-- v3: the turn sum carries `invoke` (a synchronous call tree, `Kernel.ObjectiveCall`);
+v2 (and v1) commands refuse to decode. -/
+def commandFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/COMMAND/v3".toUTF8.toList
 
 def commandCodec : LawfulCodec Command := ObjectiveActivityWire.framed commandFrame commandStream
 
@@ -318,6 +338,10 @@ def createRequest (command : Command) (object : Nat) (pin : Digest) (law : Minid
     (upgrade : ObjectRecord.UpgradePolicy) (payer : Nat) : CreateRequest :=
   ⟨command.subject, ⟨object⟩, pin, law, upgrade, payer⟩
 
+def invokeRequest (command : Command) (object : Nat) (method : String) (args : Data)
+    (grants : List ObjectiveCall.Grant) (envelope : Capacity) (account : Nat) : ObjectiveCall.InvokeRequest :=
+  ⟨command.subject, ⟨object⟩, method, args, grants, envelope, account, command.nonce⟩
+
 /-- The kernel turn a command decided: one `ObjectiveActivity.AdmittedTurn`
 (the command fixes which admission function ran). -/
 abbrev Decided {rootBytes : List UInt8 → Digest} (config : Config) (snapshot : DataSnapshot rootBytes)
@@ -347,6 +371,9 @@ def transactionOf (command : Command) : Option TransactionId :=
   | .exhaust record await extra account _ =>
       some (ObjectiveActivity.exhaustTransaction await ⟨command.subject, record, extra, account, command.nonce⟩)
   | .abandon _ await => some (ObjectiveActivity.abandonTransaction await)
+  | .invoke object _ method args grants envelope account _ =>
+      (decodeDataBytes args).map fun value =>
+        ObjectiveCall.invokeTransaction (invokeRequest command object method value grants envelope account)
 
 /-- Refusals of this receiver: the kernel's, the authority's, the ingress's. -/
 inductive Reject where
@@ -355,6 +382,8 @@ inductive Reject where
   | kernel (reason : ObjectiveActivity.Refusal)
   /-- The ending activity's held seats could not be closed (`ActivitySeatEnd.join`). -/
   | seats (reason : SeatStore.Refusal)
+  /-- The call tree of an `invoke` was refused (re-entry, a law, a grant, a fault). -/
+  | call (reason : ObjectiveCall.CallRefusal)
   /-- The command's await is not the one the record awaits now. -/
   | staleAwait
   /-- The signer holds no capability admissible for mutating the object. -/
@@ -407,6 +436,12 @@ def decideTurn {rootBytes : List UInt8 → Digest} (config : Config) (snapshot :
       let abandoned ← kernel (ObjectiveActivity.abandon config snapshot height request)
       if abandoned.await.id ≠ await then throw .staleAwait
       pure (.abandon request abandoned)
+  | .invoke object _ method args grants envelope account _ => do
+      let some value := decodeDataBytes args | throw .inputUndecodable
+      let request := invokeRequest command object method value grants envelope account
+      match ObjectiveCall.invoke config snapshot height request with
+      | .ok invoked => pure (.invoke request invoked)
+      | .error reason => throw (.call reason)
 
 def postStream : StreamCodec Post :=
   StreamCodec.xmap (StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream))
@@ -456,6 +491,7 @@ def signedTarget (domain : Digest) (command : Command) : ResourceKind × Nat :=
   | .writeState object _ _ => (.object, object)
   | .exhaust record _ _ _ _ => (.object, record.value)
   | .abandon record _ => (.object, record.value)
+  | .invoke object _ _ _ _ _ _ _ => (.object, object)
 
 def verbFor : (kind : ResourceKind) → Verb kind
   | .object => .mutateObject
@@ -536,6 +572,7 @@ def authorized (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (c
       if extra = zeroCapacity then .ok () else account a ac
   | .topUp _ a ac _ => account a ac
   | .writeState o oc _ => object o oc
+  | .invoke o oc _ _ _ _ a ac => do object o oc; account a ac
 
 /-! ## Preparation -/
 
@@ -963,22 +1000,43 @@ def signingHeader (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
     (signedRequest authority.snapshot profile.semantics ambient command preRoot outcome)).mapError
       (fun reason => s!"activity signer key: {repr reason}")
 
+/-- What the decided turn returns to its signer, shown before it signs: an
+invocation's root result (its data bytes); nothing for every other turn. It is
+a function of the snapshot and the command, so every replay recomputes it. -/
+def Decided.report {rootBytes : List UInt8 → Digest} {config : Config} {snapshot : DataSnapshot rootBytes}
+    {height : Nat} {command : Command} : Decided config snapshot height command → List UInt8
+  | .invoke _ invoked => dataBytes invoked.result
+  | _ => []
+
+/-- The report of a command at a durable snapshot (empty when it is refused). -/
+def planReport (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (durable : Durable) (command : Command) : List UInt8 :=
+  match configOf deployment profile ambient with
+  | .ok config => match decideTurn config durable.snapshot ambient.height command with
+    | .ok decided => decided.report
+    | .error _ => []
+  | .error _ => []
+
 structure SigningPlan where
   domain : Digest
   semantics : Digest
   commandBytes : List UInt8
   header : List UInt8
+  /-- `Decided.report`: what the turn returns (an invocation's result). Not signed:
+  the header binds the turn's posts, and the report is recomputed from them. -/
+  report : List UInt8
   deriving DecidableEq, Repr
 
 def signingPlanStream : StreamCodec SigningPlan :=
   StreamCodec.xmap (StreamCodec.product digestStream
-    (StreamCodec.product digestStream (StreamCodec.product bytesStream bytesStream)))
-    (fun plan => (plan.domain, plan.semantics, plan.commandBytes, plan.header))
-    (fun (domain, semantics, command, header) => ⟨domain, semantics, command, header⟩)
+    (StreamCodec.product digestStream (StreamCodec.product bytesStream (StreamCodec.product bytesStream bytesStream))))
+    (fun plan => (plan.domain, plan.semantics, plan.commandBytes, plan.header, plan.report))
+    (fun (domain, semantics, command, header, report) => ⟨domain, semantics, command, header, report⟩)
     (by intro plan; cases plan; rfl)
 
+/-- v2 carries the report; a v1 plan refuses to decode. -/
 def signingPlanCodec : LawfulCodec SigningPlan :=
-  ObjectiveActivityWire.framed "DREGG/OBJECTIVE/ACTIVITY/PLAN/v1".toUTF8.toList signingPlanStream
+  ObjectiveActivityWire.framed "DREGG/OBJECTIVE/ACTIVITY/PLAN/v2".toUTF8.toList signingPlanStream
 
 #assert_axioms command_roundtrip
 #assert_axioms command_canonical

@@ -46,6 +46,7 @@ not this invariant's. -/
 import Kernel.ObjectiveResumeContract
 import Kernel.ObjectiveActivityGate
 import Kernel.ActivitySeatEnd
+import Kernel.ObjectiveAdmittedTurn
 
 namespace Minidregg.Kernel.ObjectiveCheckpointInvariant
 open Minidregg.Theory Minidregg.Compiler
@@ -663,6 +664,17 @@ theorem stateWrite_safe {rootBytes : Bytes → Digest} {config : Config} {snapsh
   subst member
   exact state_post_safe written.currentExact _
 
+/-- An invocation writes only the Book and the state cells of objects its call
+tree read: no record or package cell. -/
+theorem invocation_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : ObjectiveCall.InvokeRequest}
+    (invoked : ObjectiveCall.Invocation config snapshot height request) :
+    ∀ post ∈ invoked.posts, PostSafe config snapshot post := by
+  intro post member
+  rcases ObjectiveCall.Invocation.posts_shape invoked post member with isBook | ⟨_, _, state, readOk, isState⟩
+  · subst isBook; exact book_post_safe invoked.bookExact invoked.posted
+  · subst isState; exact state_post_safe readOk state
+
 /-- **Every admitted kernel turn's posts are safe** on a typed snapshot. -/
 theorem AdmittedTurn.safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} (typed : RecordCellsTyped config snapshot) (turn : AdmittedTurn config snapshot height) :
@@ -681,6 +693,7 @@ theorem AdmittedTurn.safe {rootBytes : Bytes → Digest} {config : Config} {snap
   | writeState _ written => exact stateWrite_safe written
   | exhaust _ exhausted => exact exhaustion_safe typed exhausted
   | abandon _ abandoned => exact abandonment_safe abandoned
+  | invoke _ invoked => exact invocation_safe invoked
 
 /-! ## An ending turn's final posts are safe
 
@@ -706,6 +719,7 @@ theorem finalIntent_writes {rootBytes : Bytes → Digest} {config : Config} {sna
   | topUp _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
   | writeState _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
   | exhaust _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
+  | invoke _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
 
 /-- **Posts the seat kernel checked inert are safe**: they sit on no package and
 write no record. -/
@@ -881,6 +895,7 @@ theorem reachable_delivery_typed {rootBytes : Bytes → Digest} {config : Config
 #assert_axioms publication_safe
 #assert_axioms creation_safe
 #assert_axioms stateWrite_safe
+#assert_axioms invocation_safe
 #assert_axioms AdmittedTurn.safe
 #assert_axioms finalIntent_writes
 #assert_axioms finalize_safe

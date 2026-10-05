@@ -987,7 +987,7 @@ def readObject {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
 is the activity's principal (its birth subject, `escrow.payer`: the subject the
 native route checked as a holder of the object), never the deliverer. -/
 def factsOf (subject : SubjectId) (height : Nat) (object : CellId) (turn : Nat) : Facts :=
-  ⟨subject, height, object.value, turn⟩
+  ⟨some subject, height, object.value, turn, none⟩
 
 /-- The object's law judges a write: nothing to judge when nothing is written. -/
 def judgeWrite (record : ObjectRecord) (facts : Facts) (old : Option Data) (new : Data) : Except Refusal Unit :=
@@ -1440,7 +1440,11 @@ def publish {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
       let definition ← replayPackage config stored pin
       match callable definition.replayed.accepted.typed.type with
       | .arrow _ _ _ (.computation _ _ _) => pure ()
-      | _ => throw (.packageType "an activity package selects a definition `Input -> Activity<P,R,A>`")
+      -- a call method `View -> Args -> Activity<..>` (`Kernel.ObjectiveCall`): an object pinning
+      -- a package of methods only; whether a named method is callable is checked at each call.
+      | .arrow _ _ _ (.arrow _ _ _ (.computation _ _ _)) => pure ()
+      | _ => throw (.packageType "a package selects an activity `Input -> Activity<P,R,A>` or a call method \
+          `View -> Args -> Activity<P,R,A>`")
       pure ⟨pin, fresh, definition, book, bookExact, payerRegistered, _, rfl, _, rfl⟩
     else throw .payerInvalid
 
@@ -2320,61 +2324,6 @@ def Creation.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot :
     DataIntent rootBytes :=
   intentOf rootBytes (createTransaction request) created.posts
     [guardAt snapshot (packageCell config.domain request.pin)] [] sealing
-
-/-! ## One admitted turn -/
-
-/-- **One admitted kernel turn** on a snapshot at a height: the witness of
-exactly one of the kernel's admission functions (each `private mk`, so built
-only by `publish`, `create`, `birth`, `resolve`, `deliver`, `topUp`,
-`writeState`, `exhaust` or `abandon`). Every write the kernel activity commits
-is `AdmittedTurn.intent` of one (the native receiver's decided turn is this
-type, `ObjectiveActivityReceiver.Decided`), and the invariant
-`stored_checkpoints_typed` (`Kernel.ObjectiveCheckpointInvariant`) is stated
-over exactly these. -/
-inductive AdmittedTurn {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
-    (height : Nat) : Type where
-  | publish (stored : Stored) (publication : Publication config snapshot stored)
-  | create (request : CreateRequest) (created : Creation config snapshot request)
-  | birth (request : BirthRequest) (born : Birth config snapshot height request)
-  | resolve (request : ResolveRequest) (resolution : Resolution config snapshot height request)
-  | deliver (request : DeliverRequest) (delivery : Delivery config snapshot height request)
-  | topUp (request : TopUpRequest) (topped : TopUp config snapshot request)
-  | writeState (request : StateWriteRequest) (written : StateWrite config snapshot height request)
-  | exhaust (request : ExhaustRequest) (exhausted : Exhaustion config snapshot height request)
-  | abandon (request : AbandonRequest) (abandoned : Abandonment config snapshot height request)
-
-/-- The posts a turn commits. -/
-def AdmittedTurn.posts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {height : Nat} : AdmittedTurn config snapshot height → List Post
-  | .publish _ publication => publication.posts
-  | .create _ created => created.posts
-  | .birth _ born => born.posts
-  | .resolve _ resolution => resolution.posts
-  | .deliver _ delivery => delivery.posts
-  | .topUp _ topped => [topped.posted.write config snapshot]
-  | .writeState _ written => written.posts
-  | .exhaust _ exhausted => exhausted.posts
-  | .abandon _ abandoned => abandoned.posts
-
-/-- The one intent a turn commits under a receiver's sealing. -/
-def AdmittedTurn.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {height : Nat} (sealing : Seal) : AdmittedTurn config snapshot height → DataIntent rootBytes
-  | .publish _ publication => publication.intent sealing
-  | .create _ created => created.intent sealing
-  | .birth _ born => born.intent sealing
-  | .resolve _ resolution => resolution.intent sealing
-  | .deliver _ delivery => delivery.intent sealing
-  | .topUp _ topped => topped.intent sealing
-  | .writeState _ written => written.intent sealing
-  | .exhaust _ exhausted => exhausted.intent sealing
-  | .abandon _ abandoned => abandoned.intent sealing
-
-/-- Every turn's intent is `intentOf` its posts: its writes are exactly the
-post images, nothing else. -/
-theorem AdmittedTurn.intent_writes {rootBytes : Bytes → Digest} {config : Config}
-    {snapshot : Snapshot rootBytes} {height : Nat} (sealing : Seal) (turn : AdmittedTurn config snapshot height) :
-    (turn.intent sealing).writes = turn.posts.map (Post.write rootBytes) := by
-  cases turn <;> rfl
 
 /-! ## The resume contract -/
 
@@ -3554,7 +3503,6 @@ theorem create_refuses_existing {rootBytes : Bytes → Digest} {config : Config}
 #assert_axioms editFields_add_comm
 #assert_axioms add_writes_commute
 #assert_axioms delivery_fields_bind_checkpoint
-#assert_axioms AdmittedTurn.intent_writes
 #assert_axioms faultOr_refused
 #assert_axioms faultOr_ok
 #assert_axioms resumedSegment_never_refuses_program_fault

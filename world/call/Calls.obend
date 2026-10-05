@@ -1,0 +1,101 @@
+edition ObjectiveBend 1
+# Synchronous calls between objects (Kernel/ObjectiveCall). Every object here
+# pins this package; a call names an object and one of these methods. A method
+# takes the VIEW of its object's declared state (as the turn holds it: the
+# snapshot plus every write an earlier frame already applied at its return) and
+# its arguments, and returns {result, write}. Its Plan type has the one label
+# `call`, so it can yield nothing but a call, answered in the same turn with
+# `returned {result}`. Its `write` (keep, set or add per field) is applied to
+# ITS OWN object when its frame returns, judged then by that object's law.
+record State:
+  total: Nat
+sum EditNat:
+  keep: {}
+  set: Nat
+  add: Nat
+record Write:
+  total: EditNat
+record View:
+  version: Nat
+  state: State
+record Return:
+  result: Nat
+  write: Write
+record Got:
+  result: Nat
+sum Returned:
+  returned: Got
+record CallN:
+  target: Nat
+  method: String
+  args: Nat
+sum PlanN:
+  call: CallN
+record Hop:
+  target: Nat
+  amount: Nat
+record CallH:
+  target: Nat
+  method: String
+  args: Hop
+sum PlanH:
+  call: CallH
+record Route:
+  via: Nat
+  target: Nat
+  amount: Nat
+record Pay:
+  to: Nat
+  bank: Nat
+  amount: Nat
+  hook: String
+record CallP:
+  target: Nat
+  method: String
+  args: Pay
+sum PlanP:
+  call: CallP
+# A leaf: adds `amount` and returns the new total. It never calls.
+def deposit(view: View, amount: Nat) -> Activity<PlanN, Returned, Return>:
+  {result: view.state.total + amount, write: {total: EditNat.add(amount)}}
+# Reads, writes nothing.
+def read(view: View, amount: Nat) -> Activity<PlanN, Returned, Return>:
+  {result: view.state.total, write: {total: EditNat.keep()}}
+# One hop: deposits on `target`, counts the hop on its own object.
+def forward(view: View, hop: Hop) -> Activity<PlanN, Returned, Return>:
+  match perform(PlanN.call({target: hop.target, method: "deposit", args: hop.amount})):
+    case returned(got): {result: got.result, write: {total: EditNat.add(1n)}}
+# Two hops: asks `via` to forward to `target` (A -> B -> C).
+def relay(view: View, route: Route) -> Activity<PlanH, Returned, Return>:
+  match perform(PlanH.call({target: route.via, method: "forward", args: {target: route.target, amount: route.amount}})):
+    case returned(got): {result: got.result, write: {total: EditNat.add(1n)}}
+# Two calls on one object in one turn: the second callee sees the first's write.
+def twice(view: View, hop: Hop) -> Activity<PlanN, Returned, Return>:
+  match perform(PlanN.call({target: hop.target, method: "deposit", args: hop.amount})):
+    case returned(first):
+      match perform(PlanN.call({target: hop.target, method: "deposit", args: hop.amount})):
+        case returned(second): {result: second.result, write: {total: EditNat.keep()}}
+# The DAO shape: pays out by calling the payee's hook BEFORE it records the
+# debit, and records it as a `set` computed from the balance it was shown.
+def withdraw(view: View, pay: Pay) -> Activity<PlanP, Returned, Return>:
+  match perform(PlanP.call({target: pay.to, method: pay.hook, args: pay})):
+    case returned(got): {result: pay.amount, write: {total: EditNat.set(view.state.total - pay.amount)}}
+# An honest payee: credits what it is paid.
+def receive(view: View, pay: Pay) -> Activity<PlanP, Returned, Return>:
+  {result: pay.amount, write: {total: EditNat.add(pay.amount)}}
+# The attacker: on payment, withdraws ONCE more from the bank that is paying
+# it (to its own `receive`), while the bank's first withdrawal has not yet
+# recorded its debit. Without the re-entry guard the inner withdrawal debits
+# 70 -> 40 and pays 30, then the outer one sets 40 again from the 70 it was
+# shown: 60 paid for 30 debited. With the guard the call into the bank, which
+# is on the stack, is refused and nothing commits.
+def drain(view: View, pay: Pay) -> Activity<PlanP, Returned, Return>:
+  match perform(PlanP.call({target: pay.bank, method: "withdraw", args: {to: pay.to, bank: pay.bank, amount: pay.amount, hook: "receive"}})):
+    case returned(got): {result: got.result, write: {total: EditNat.add(got.result)}}
+# NOT callable: its Plan type admits `await`, so a frame could suspend across
+# turns. The kernel refuses it before it runs (notCallable).
+sum PlanW:
+  call: CallN
+  await: Nat
+def waits(view: View, amount: Nat) -> Activity<PlanW, Returned, Return>:
+  {result: amount, write: {total: EditNat.keep()}}

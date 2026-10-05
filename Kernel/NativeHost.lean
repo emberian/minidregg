@@ -2051,8 +2051,8 @@ def jobMoneyLookupLoaded (config : Config) (opened : Opened config) (bytes : Lis
 /-! ## The kernel activity (ACTIVITY-NATIVE): session operations 210–214
 
 Publish, object creation, birth, resolve, deliver, top-up, declared-state write,
-exhaustion and abandonment
-(`DREGG/OBJECTIVE/ACTIVITY/COMMAND/v2`) share one plan/assembly/submission/
+exhaustion, abandonment and invocation (a synchronous call tree)
+(`DREGG/OBJECTIVE/ACTIVITY/COMMAND/v3`) share one plan/assembly/submission/
 lookup quartet; the signed ingress is `DREGG/OBJECTIVE/ACTIVITY/SIGNED/v1`;
 214 is the public activity view. A refusal names its reason to the signer:
 every activity cell is public (op 214), so the reason discloses nothing the
@@ -2068,7 +2068,9 @@ def activityPlanLoaded (config : Config) (opened : Opened config) (commandBytes 
   let header ← ObjectiveActivityReceiver.signingHeader config.deployment config.profile
     (activityAmbient config opened) opened.durable command
   pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
-    CredentialSignedEnvelopeController.headerCodec.encode header⟩
+    CredentialSignedEnvelopeController.headerCodec.encode header,
+    ObjectiveActivityReceiver.planReport config.deployment config.profile (activityAmbient config opened)
+      opened.durable command⟩
 
 def activityAssemble (plan : ObjectiveActivityReceiver.SigningPlan) (signature : List UInt8) :
     Except String (List UInt8) := do

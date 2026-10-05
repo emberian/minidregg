@@ -137,11 +137,10 @@ and **the package root as a specification**.
 Item-by-item status against the code, with commits and owners:
 [ROADMAP-STATUS](objective-bend/ROADMAP-STATUS.md).
 
-1. **Calls and sends between objects** (kernel). A synchronous `call` into another
-   object's pinned package on the turn's snapshot (writes deferred to frame return,
-   re-entry refused, authority over the call tree), then asynchronous sends with inboxes.
-   Nothing on main lets one object's method reach another object. In progress: lane
-   OB-ROADMAP.
+1. **Sends between objects** (kernel). Synchronous `call` is built (see
+   [calls across objects](#calls-across-objects)); asynchronous sends with inboxes, the
+   decider of a slot as a role, escrowed postage and forwarding at slot resolution are
+   not. Lane OB-ROADMAP.
 2. **A guardedness check** (typing). Every self-call of a resident under a perform,
    so that a well-typed resident never diverges inside a turn.
 3. **The theorem for declared ancestry** (proof; poof §4.3; ltuo §7.3–7.4, §9.2). The
@@ -395,13 +394,55 @@ them (`Kernel.Seat`, `Kernel.Invitation` and `Kernel.ObjectStateType` are not in
   reallocation of a seat's Book balances, with an exit no contract clause can forbid.
 
 Not built, by lane (status and commits in [ROADMAP-STATUS](objective-bend/ROADMAP-STATUS.md)):
-OB-ROADMAP (calls, then sends and inboxes), RETENTION-PAYERS activity half (a storage charge
+OB-ROADMAP (sends and inboxes; calls are built, above), RETENTION-PAYERS activity half (a storage charge
 for packages and checkpoints; the Book half `c74f3120` landed), UPGRADE (record v2: state
 type, upgrade turns; wave 1 `ObjectStateType` landed, `4795b657`), CHECKPOINT-INVARIANT (the
 turn gate), FORCING-TRANSPARENT (the premise is still open), SEATS-NATIVE and W18-STEPRAW-LINEAR
 (`stepRaw` linear in the heap). Landed since this list was first written: the signed activity
 route, the program-fault liveness fix (`3573afaf`), the Receiver judging every written cell's
 law (`77df1dec`) and the machine primitives (W17).
+
+### Calls across objects
+
+`Kernel/ObjectiveCall.lean` (OB7). An `invoke` turn (the activity command, `COMMAND/v3`;
+`mini activity` with `{"kind": "invoke", "object", "objectCapability", "method", "args",
+"grants", "envelope", "account", "accountCapability"}`) calls one method of one object, and
+that method may call methods of other objects in the same turn, depth-first. **Evidence
+class: integrated on scratch worlds** (`native/resource-client/objective-call-native-journey.py`,
+rows C1-C8, with world plants and a code mutant; see the lane evidence).
+
+- **A method** is a declaration of the entry module of the package the object pins, lowered
+  by the kernel's own front end with that declaration selected (`loadMethod`; never an offered
+  core). Its type is `method(view: {version, state}, args: X) -> Activity<P, R, {result, write}>`
+  where `P` has the one label `call` and `R` the one label `returned`: a method can yield
+  nothing but a call, answered in the same turn, so no frame suspends across turns (a method
+  whose Plan admits `await` is refused `notCallable` before it runs). A method that never
+  calls is a pure function. Example: [world/call/Calls.obend](../world/call/Calls.obend).
+- **Re-entry is refused**, mandatorily: a call whose target is on the stack is refused
+  `reentry` naming the stack (`reentry_refused`); `invocation_reentry_free`: no object occurs
+  twice on any stack an admitted invocation entered. The stack is at most `callDepth` (8).
+- **Writes are applied at frame return** to the frame's OWN object, and judged then by that
+  object's law on (the state the frame was shown, the new state) under the frame's facts; a
+  refusal names the object, the method and the clause (`lawDenied`).
+  `invocation_writes_from_view`: every write is computed from exactly the state its frame was
+  shown, so a callee never sees a caller's pending write and no write is lost. That settles the
+  design's Scribe note D4: the frame-conflict abort has nothing left to catch, and two calls to
+  one object in one turn compose in order. The DAO shape is refused (journey C5); with the guard
+  removed (the mutant) the same turn commits 60 paid for 30 debited.
+- **Authority** (`Facts`, `Kernel/ObjectRecord.lean`): the root frame carries the signer (who
+  must hold a capability on the root object). A nested frame carries the signer's subject ONLY
+  if a scoped grant `{object, method, uses}` of the invocation names it, and spends one use
+  (`grantSpent` when none is left); otherwise `request/subject` is absent and every atom
+  reading it fails closed. `request/caller` names the calling object, so a law can admit
+  chosen callers (a facet as a clause); `request/turn` is 5 for a call frame.
+- **One envelope**: the whole tree runs within the invocation's declared source ticks
+  (`runCounted`, proven equal to `runBounded`); the invocation pays the public tariff of its
+  declared envelope; exhaustion refuses it and nothing is charged. The root's result is the
+  signing plan's `report` (`PLAN/v2`), shown before signing and printed by `mini activity`.
+
+Not built: an activity yielding `call` (calls from a resident's segment), pipelines,
+multi-party segments, method controllers beyond the object capability, object c-lists
+(an object holding capabilities), and sends.
 
 ### Which code wrote: the `objective/artifact` slot and the package pin
 

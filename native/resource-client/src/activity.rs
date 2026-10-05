@@ -119,12 +119,16 @@ fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool) -> Result<Value
     let ingress = invoke(ws, 211, &pair(&plan, &signature))?;
     write_new(&out.join("ingress.bin"), &ingress)?;
     let transaction = inspected.pointer("/command/transaction").cloned().unwrap_or(Value::Null);
+    // What the decided turn returns (an invocation's result), shown before signing; null otherwise.
+    let report = inspected.get("report").cloned().unwrap_or(Value::Null);
     if prepare_only {
-        return Ok(json!({"type": "prepared", "ingress": out.join("ingress.bin"), "transaction": transaction}));
+        return Ok(json!({"type": "prepared", "ingress": out.join("ingress.bin"), "transaction": transaction,
+            "report": report}));
     }
     let mut outcome = inspect(ws, "outcome", &invoke(ws, 212, &ingress)?)?;
     write_new(&out.join("outcome.json"), outcome.to_string().as_bytes())?;
     outcome["transaction"] = transaction;
+    outcome["report"] = report;
     outcome["ingress"] = json!(out.join("ingress.bin"));
     Ok(outcome)
 }
