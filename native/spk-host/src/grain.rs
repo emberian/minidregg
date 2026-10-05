@@ -831,8 +831,11 @@ fn scan_runs(app_dir: &Path) -> io::Result<Vec<Run>> {
         let dir = entry.path();
         let config = read_json(&dir.join("resident.json"))?;
         let create = config.pointer("/startAction/kind").and_then(Value::as_str) == Some("create");
-        let admitted = dir.join("start-admitted-v3.json");
-        let completed = dir.join("start-completed-v3.json");
+        // The lane of this generation's START (v3, or the governed v4 retry of a
+        // recovered create) names its admitted and completed markers.
+        let lane = crate::resident_service::StartLane::of_journal(&dir)?;
+        let admitted = dir.join(lane.admitted_name());
+        let completed = dir.join(lane.completed_name());
         let stop_plan = dir.join("stop-begin").join("stop-plan-v2.json");
         let recovered_path=dir.join("failed-start-recovered-v1.json");
         let recovered_generation=if exists(&recovered_path)? {
@@ -865,6 +868,8 @@ fn scan_runs(app_dir: &Path) -> io::Result<Vec<Run>> {
         } else if exists(&admitted)?
             || exists(&dir.join("begin-attempt"))?
             || exists(&dir.join("lifecycle-begin-v3-active.json"))?
+            || exists(&dir.join("begin-attempt-retry-v4"))?
+            || exists(&dir.join("lifecycle-begin-retry-v4-active.json"))?
         {
             RunState::Uncertain("START attempted without a completion record".into())
         } else {
@@ -1048,7 +1053,8 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
     {
         None => json!({"kind":"create","index":0}),
         Some(created) => {
-            let completed = read_json(&created.dir.join("start-completed-v3.json"))?;
+            let lane = crate::resident_service::StartLane::of_journal(&created.dir)?;
+            let completed = read_json(&created.dir.join(lane.completed_name()))?;
             let count = decimal_u64(completed.pointer("/completionReceipt/acceptedCount"))
                 .filter(|count| *count > 0)
                 .ok_or_else(|| invalid("prior create completion receipt malformed"))?;
@@ -1123,8 +1129,10 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
             return Err(error);
         }
     }
-    let completed = journal.join("start-completed-v3.json");
     loop {
+        // Re-read each turn: the lane is fixed only once the resident retains
+        // its admitted marker (a recovered create retries under v4).
+        let completed = journal.join(crate::resident_service::StartLane::of_journal(&journal)?.completed_name());
         let sockets_ready = entrances.iter().all(|route| {
             route
                 .get("directory")
@@ -1590,6 +1598,43 @@ mod tests {
                 assert!(seen.insert(pair));
             }
         }
+    }
+
+    #[test]
+    fn retry_v4_generation_is_read_by_its_own_lane_markers() {
+        let root = std::env::temp_dir().join(format!(
+            "grain-retry-v4-{}-{:?}", std::process::id(), std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let app_dir = root.join("7101");
+        let g4 = app_dir.join("g4");
+        fs::create_dir_all(&g4).unwrap();
+        let private = |path: &Path, value: &Value| {
+            let _ = fs::remove_file(path);
+            let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600)
+                .open(path).unwrap();
+            file.write_all(&serde_json::to_vec(value).unwrap()).unwrap();
+        };
+        private(&g4.join("resident.json"), &json!({"startAction":{"kind":"create","index":0}}));
+        // A retried create retains only retry-v4 markers: before them it is not NeverBegun.
+        fs::create_dir_all(g4.join("begin-attempt-retry-v4")).unwrap();
+        let runs = scan_runs(&app_dir).unwrap();
+        assert!(matches!(&runs[0].state, RunState::Uncertain(r) if r.starts_with("START")));
+        private(&g4.join("start-admitted-retry-v4.json"), &json!({"begin":{"processGeneration":"4"}}));
+        let runs = scan_runs(&app_dir).unwrap();
+        assert!(matches!(&runs[0].state, RunState::Uncertain(_)));
+        private(&g4.join("start-completed-retry-v4.json"),
+            &json!({"completionReceipt":{"acceptedCount":"28"}}));
+        let runs = scan_runs(&app_dir).unwrap();
+        assert_eq!(runs[0].state, RunState::Running);
+        assert!(runs[0].create);
+        // The admitted generation is checked on the retry lane too.
+        private(&g4.join("start-admitted-retry-v4.json"), &json!({"begin":{"processGeneration":"5"}}));
+        assert!(scan_runs(&app_dir).is_err());
+        // Both lanes' admitted markers in one generation are refused.
+        private(&g4.join("start-admitted-retry-v4.json"), &json!({"begin":{"processGeneration":"4"}}));
+        private(&g4.join("start-admitted-v3.json"), &json!({"begin":{"processGeneration":"4"}}));
+        assert!(scan_runs(&app_dir).is_err());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

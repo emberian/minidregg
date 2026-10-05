@@ -94,6 +94,12 @@ pub(crate) fn systemctl() -> Command {
     )
 }
 
+/// The modeled identity switch keeps the principal's credentials, so the process
+/// that executes the launcher is the principal: judge the execute bit for it.
+pub(crate) fn executes_as_app(owner: u32, group: u32, mode: u32, _app_uid: u32, _app_gid: u32) -> bool {
+    crate::spawn_gate::execute_mode_permits(owner, group, mode, euid(), unsafe { libc::getegid() })
+}
+
 /// Every pool UID names an account whose primary group has the same number.
 pub(crate) fn account_gid(uid: u32) -> Option<u32> {
     (uid != 0 && uid != euid()).then_some(uid)

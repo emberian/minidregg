@@ -99,7 +99,7 @@ fn validate(spec: &SpawnSpec, test_mode: bool) -> io::Result<()> {
 /// The gate clears supplementary groups before execveat. Check the execute
 /// class of that exact UID/GID, rather than accepting any inode execute bit.
 /// The kernel still checks ACLs and LSM policy at the final exec boundary.
-fn execute_mode_permits(owner: u32, group: u32, mode: u32, uid: u32, gid: u32) -> bool {
+pub(crate) fn execute_mode_permits(owner: u32, group: u32, mode: u32, uid: u32, gid: u32) -> bool {
     let bit = if owner == uid { 0o100 } else if group == gid { 0o010 } else { 0o001 };
     mode & bit != 0
 }
@@ -140,7 +140,7 @@ fn pinned_executable(spec: &SpawnSpec) -> io::Result<OwnedFd> {
     if !meta.is_file()
         || meta.uid() == spec.app_uid
         || meta.mode() & 0o022 != 0
-        || !execute_mode_permits(meta.uid(), meta.gid(), meta.mode(), spec.app_uid, spec.app_gid)
+        || !crate::os::executes_as_app(meta.uid(), meta.gid(), meta.mode(), spec.app_uid, spec.app_gid)
         || meta.len() > MAX_ELF_BYTES
     {
         return Err(invalid(
