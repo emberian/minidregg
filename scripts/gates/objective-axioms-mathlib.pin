@@ -3207,6 +3207,7 @@ A Minidregg.Compiler.ObjectiveBendElaborate.Module.imports : Classical.choice, Q
 A Minidregg.Compiler.ObjectiveBendElaborate.Module.name : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendElaborate.Output.globalRow : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Output.sumBounds : -
+A Minidregg.Compiler.ObjectiveBendElaborate.Output.templates : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Output.term : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Output.typeErrors : -
 A Minidregg.Compiler.ObjectiveBendElaborate.PTy.arrow.elim : -
@@ -3263,6 +3264,7 @@ A Minidregg.Compiler.ObjectiveBendElaborate.St.precedence : -
 A Minidregg.Compiler.ObjectiveBendElaborate.St.resultType : -
 A Minidregg.Compiler.ObjectiveBendElaborate.St.sumBounds : -
 A Minidregg.Compiler.ObjectiveBendElaborate.St.sumVariables : -
+A Minidregg.Compiler.ObjectiveBendElaborate.St.templates : -
 A Minidregg.Compiler.ObjectiveBendElaborate.St.typeBindings : -
 A Minidregg.Compiler.ObjectiveBendElaborate.St.typeErrors : -
 A Minidregg.Compiler.ObjectiveBendElaborate.abstract : Classical.choice, Quot.sound, propext
@@ -3428,11 +3430,15 @@ A Minidregg.Compiler.ObjectiveBendFrontEnd.SourceModule.sha256 : Classical.choic
 A Minidregg.Compiler.ObjectiveBendFrontEnd.SourceModule.source : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendFrontEnd.accept : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendFrontEnd.checkParsed : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.ObjectiveBendFrontEnd.checkTemplate : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.ObjectiveBendFrontEnd.checkTemplates : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendFrontEnd.declarationName : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendFrontEnd.elaborationRefusal : -
+A Minidregg.Compiler.ObjectiveBendFrontEnd.knotContext : -
 A Minidregg.Compiler.ObjectiveBendFrontEnd.lower : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendFrontEnd.lowerDecoded : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendFrontEnd.options : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.ObjectiveBendFrontEnd.packetJson : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendFrontEnd.parseModule : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendFrontEnd.parseSource : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendFrontEnd.positive : Classical.choice, Quot.sound, propext
@@ -6327,6 +6333,8 @@ A Minidregg.Kernel.AgentGrain.tripped_worker_refused : Classical.choice, Quot.so
 A Minidregg.Kernel.AgentGrain.witnessCaveat : -
 A Minidregg.Kernel.AgentGrain.witness_generation_before_exact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.AgentGrain.worker_generation_exact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.AnswerSlot.Decider.delivery.elim : -
+A Minidregg.Kernel.AnswerSlot.Decider.subject.elim : -
 A Minidregg.Kernel.AnswerSlot.Decision.broken.elim : -
 A Minidregg.Kernel.AnswerSlot.Decision.expired.elim : -
 A Minidregg.Kernel.AnswerSlot.Decision.refused.elim : -
@@ -6334,6 +6342,7 @@ A Minidregg.Kernel.AnswerSlot.Decision.reply.elim : -
 A Minidregg.Kernel.AnswerSlot.Decision.unknown.elim : -
 A Minidregg.Kernel.AnswerSlot.Phase.decided.elim : -
 A Minidregg.Kernel.AnswerSlot.Phase.opened.elim : -
+A Minidregg.Kernel.AnswerSlot.Refusal.deliveryDecides.elim : -
 A Minidregg.Kernel.AnswerSlot.Refusal.expiryIsKernelOnly.elim : -
 A Minidregg.Kernel.AnswerSlot.Refusal.notDecider.elim : -
 A Minidregg.Kernel.AnswerSlot.Refusal.notOpen.elim : -
@@ -6344,28 +6353,40 @@ A Minidregg.Kernel.AnswerSlot.Slot.deadline : -
 A Minidregg.Kernel.AnswerSlot.Slot.decider : -
 A Minidregg.Kernel.AnswerSlot.Slot.name : -
 A Minidregg.Kernel.AnswerSlot.Slot.phase : -
+A Minidregg.Kernel.AnswerSlot.Slot.queued : -
 A Minidregg.Kernel.AnswerSlot.cell : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.AnswerSlot.codec : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.AnswerSlot.decide : -
+A Minidregg.Kernel.AnswerSlot.decideDelivery : -
+A Minidregg.Kernel.AnswerSlot.decideDelivery_single : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.AnswerSlot.decideDelivery_subject_refused : Quot.sound
+A Minidregg.Kernel.AnswerSlot.decide_delivery_refused : Quot.sound
 A Minidregg.Kernel.AnswerSlot.decide_single_decider : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.AnswerSlot.decided_refuses : propext
+A Minidregg.Kernel.AnswerSlot.deciderStream : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.AnswerSlot.decisionClaim : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.AnswerSlot.decisionStream : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.AnswerSlot.decode : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.AnswerSlot.encode : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.AnswerSlot.expire : -
 A Minidregg.Kernel.AnswerSlot.expire_after_deadline : -
+A Minidregg.Kernel.AnswerSlot.expire_delivery_refused : propext
 A Minidregg.Kernel.AnswerSlot.frame : propext
 A Minidregg.Kernel.AnswerSlot.key : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.AnswerSlot.name : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.AnswerSlot.phaseStream : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.AnswerSlot.roundTrip : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.AnswerSlot.sampleSendSlot : -
 A Minidregg.Kernel.AnswerSlot.sampleSlot : -
 A Minidregg.Kernel.AnswerSlot.sample_decided : -
+A Minidregg.Kernel.AnswerSlot.sample_delivered : -
 A Minidregg.Kernel.AnswerSlot.sample_expired : -
 A Minidregg.Kernel.AnswerSlot.sample_late : -
 A Minidregg.Kernel.AnswerSlot.sample_not_yet_expired : -
+A Minidregg.Kernel.AnswerSlot.sample_other_message : -
+A Minidregg.Kernel.AnswerSlot.sample_send_slot_never_expires : -
 A Minidregg.Kernel.AnswerSlot.sample_stranger : -
+A Minidregg.Kernel.AnswerSlot.sample_subject_on_send_slot : -
 A Minidregg.Kernel.AnswerSlot.slotStream : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.AnswerSlot.stranger_refused : propext
 A Minidregg.Kernel.ApplicationAgentLifetimeDispatchCore.Checked.contextExact : Classical.choice, Quot.sound, propext
@@ -7048,6 +7069,26 @@ A Minidregg.Kernel.ApplicationDispatchPending.special_event_eq_iff_ingress_eq : 
 A Minidregg.Kernel.ApplicationDispatchWitness.matchesServing : -
 A Minidregg.Kernel.ApplicationDispatchWitness.matchesServing_exact : propext
 A Minidregg.Kernel.ApplicationDispatchWitness.servingState : -
+A Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.Conditional.bindingExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.Conditional.markersExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.Conditional.matched : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.Conditional.recovered : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.Conditional.recovery_record_exact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.Conditional.selected : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.Selector.canonicalBytes : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.Selector.recovery : -
+A Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.Selector.recoveryIndex : -
+A Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.bindingMatches : propext
+A Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.bindingMatches_before : propext
+A Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.bindingMatches_descriptor : propext
+A Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.bindingMatches_stopped_generation : propext
+A Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.consumed_retry_refuses : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.markersCurrent : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.prepare : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.retryToken : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.selectorCodec : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.selectorStream : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.selector_decode_encode : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationFailedStartRecoveryAdmission.Candidate.appCell : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationFailedStartRecoveryAdmission.Candidate.appCurrent : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationFailedStartRecoveryAdmission.Candidate.appExact : Classical.choice, Quot.sound, propext
@@ -8116,6 +8157,240 @@ A Minidregg.Kernel.ApplicationLifecycleLaunchBinding.volumeIdBytes : Classical.c
 A Minidregg.Kernel.ApplicationLifecycleLaunchBinding.volumeIdBytes_length : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationLifecycleLaunchBinding.volumeIdOutput : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationLifecycleLaunchBinding.volumeId_digestBytesLE : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Admission.Accepted.base : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Admission.Accepted.evidence : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Admission.Accepted.installed : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Admission.Accepted.intent : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Admission.Accepted.intent_no_retry_consumption : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Admission.Accepted.intent_writes : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Admission.Accepted.shape : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Admission.admitNative : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Admission.event : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Ingress.Ingress.authorizationOperationId : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Ingress.Ingress.base : -
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Ingress.Ingress.begin : -
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Ingress.Ingress.canonicalBytes : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Ingress.Ingress.descriptor : -
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Ingress.Ingress.retry : -
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Ingress.Ingress.shape : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Ingress.Ingress.start : -
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Ingress.Ingress.volume : -
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Ingress.Ingress.withAuthorizationId : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Ingress.authorizationBytes : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Ingress.authorizationBytes_ignores_operationId : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Ingress.authorizationBytes_retry_eq : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Ingress.authorizationCodec : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Ingress.codec : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Ingress.decoded_canonical : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Ingress.ingressStream : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Ingress.prospectiveManifest : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Ingress.withAuthorizationId_authorized : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Core.Conditional.current : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Core.Conditional.exact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Core.Conditional.installed : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Core.Conditional.intent : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Core.Conditional.intent_consumes_retry : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Core.Conditional.intent_writes : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Core.Conditional.markers : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Core.Conditional.original : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Core.Conditional.originalAccepted : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Core.Conditional.originalMatch : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Core.event : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Core.prepare : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Ingress.Ingress.base : -
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Ingress.Ingress.canonicalBytes : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Ingress.Ingress.originalBegin : -
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Ingress.Ingress.originalExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Ingress.Ingress.retryToken : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Ingress.codec : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Ingress.decoded_canonical : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Ingress.ingressStream : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Ingress.originalExact_source : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Projection.Committed.canonicalBytes : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Projection.Committed.core : -
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Projection.Committed.originalClaim : -
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Projection.Committed.selectedCommandDigest : -
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Projection.Committed.valid : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Projection.Committed.volume : -
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Projection.canonical_injective : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Projection.codec : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Projection.committedStream : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Projection.decode_encode : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Projection.decoded_canonical : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Projection.frame : propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.Candidate.appCell : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.Candidate.appCurrent : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.Candidate.appExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.Candidate.creationMarkers : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.Candidate.historical : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.Candidate.installed : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.Candidate.invocation : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.Candidate.key : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.Candidate.keyPinned : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.Candidate.linked : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.Candidate.packageAtomExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.Candidate.packageCell : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.Candidate.packageCurrent : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.Candidate.packageGuardReadOnly : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.Candidate.packageRead : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.Candidate.physical : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.Candidate.prepared : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.Candidate.profileExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.Candidate.shape : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.Candidate.sourceValid : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.PackageRead.checked : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.PackageRead.observedExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.PackageRead.physicalCurrent : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.PackageRead.selected : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.appState : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.checkPackage : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.creationMarkersCurrent : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.currentCell : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.linkedCurrentPolicies : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.packageAtom : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.packageMatches : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.packageRequest : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.prepareConditional : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Core.charge : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Core.extraGuards : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Core.extraGuards_current : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Core.extraGuards_readonly : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Core.intent : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Core.intent_event : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Core.intent_event_version : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Core.intent_has_created_marker : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Core.intent_has_report_nullifier : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Core.intent_package_guard_current : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Core.intent_writes : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Core.packageGuard : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.accepted : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.after : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.afterImage : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.appExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.created : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.custody : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.custodyExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.index : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.indexExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.ingress : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.ingressExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.priorExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.receipt : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.receiptBoundary : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.receiptEvent : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.receiptTransaction : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.recordExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.record_contains_created_marker : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.same_volume_lineage : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.selected : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.sourceChoice : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.Candidate.volumeExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.select : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4History.Candidate.accepted : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4History.Candidate.after : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4History.Candidate.afterImage : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4History.Candidate.claimBytes : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4History.Candidate.index : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4History.Candidate.projectionExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4History.Candidate.recordExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4History.Candidate.selected : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4History.projection : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4History.select : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Ingress.Ingress.canonicalBytes : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Ingress.Ingress.creationMarker : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Ingress.Ingress.domain : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Ingress.Ingress.packageObservationEnvelope : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Ingress.Ingress.semantics : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Ingress.Ingress.signed : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Ingress.Ingress.source : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Ingress.codec : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Ingress.continue_has_no_creation_marker : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Ingress.decode_encode : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Ingress.decoded_canonical : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Ingress.event : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Ingress.event_retains_full_ingress : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Ingress.frame : propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Ingress.ingressStream : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Ingress.nonstart_has_no_creation_marker : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Ingress.nullifierKey : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Ingress.stableNullifier : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.Accepted.envelopeCount : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.Accepted.ingressExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.Accepted.legs : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.Accepted.observations : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.Accepted.observeCount : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.Accepted.tuple : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.CheckedLeg.admitted : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.CheckedLeg.authorization : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.CheckedLeg.envelopeExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.CheckedLeg.receipt : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.admit : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.authority_completion_slot_iff_app_first : Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.authorizeLeg : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.extraSlots : Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.non_app_target_has_no_completion_slot : Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.policyConfig : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.portals : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.step : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.verifyLeg : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Checked.keyLength : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Checked.shape : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Checked.signatureLength : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Checked.signed : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Report.canonicalBytes : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Report.claim : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Report.controlGroup : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Report.custodyContinuous : propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Report.installedManifest : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Report.invocationId : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Report.materializedImage : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Report.nonce : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Report.outcome : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Report.pid : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Report.stopAudit : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Report.unit : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Report.validFor : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Report.volumeCustody : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Signed.report : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Signed.signature : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.check : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.codec : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.continue_custody_exact : propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.decode_encode : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.decoded_canonical : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.frame : propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.reportStream : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.signedCodec : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.signedFrame : propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.signedStream : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.signingFrame : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.wrong_begin_refused : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.app : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.appCapability : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.appObserveCapability : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.canonicalBytes : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.claimedState : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.command : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.command_has_app_first : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.command_subject : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.currentAppRoot : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.currentPackageRoot : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.kind : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.manifestBytes : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.needsPackageWrite : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.operation : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.originalBegin : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.originalClaim : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.packageAction : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.packageAtomBefore : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.packageCapability : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.packageObserveCapability : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.packageTarget : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.physical : -
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.Source.valid : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.codec : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.frame : propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Source.sourceStream : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationPermissionSchema.Permission.name : -
 A Minidregg.Kernel.ApplicationPermissionSchema.Permission.obsolete : -
 A Minidregg.Kernel.ApplicationPermissionSchema.Permission.validName : -
@@ -12265,6 +12540,46 @@ A Minidregg.Kernel.Hyperedge.legs_agree : Quot.sound, propext
 A Minidregg.Kernel.Hyperedge.t : Quot.sound, propext
 A Minidregg.Kernel.Hyperedge.tid : Quot.sound, propext
 A Minidregg.Kernel.Hyperedge.x : Quot.sound, propext
+A Minidregg.Kernel.Inbox.Inbox.empty : -
+A Minidregg.Kernel.Inbox.Inbox.head : -
+A Minidregg.Kernel.Inbox.Inbox.messages : -
+A Minidregg.Kernel.Inbox.Inbox.pop : -
+A Minidregg.Kernel.Inbox.Inbox.push : -
+A Minidregg.Kernel.Inbox.Inbox.sender : -
+A Minidregg.Kernel.Inbox.Inbox.tail : -
+A Minidregg.Kernel.Inbox.Inbox.target : -
+A Minidregg.Kernel.Inbox.Lawful.keeps : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Inbox.Lawful.snoc : -
+A Minidregg.Kernel.Inbox.Lawful.trans : -
+A Minidregg.Kernel.Inbox.Message.args : -
+A Minidregg.Kernel.Inbox.Message.envelope : -
+A Minidregg.Kernel.Inbox.Message.id : -
+A Minidregg.Kernel.Inbox.Message.method : -
+A Minidregg.Kernel.Inbox.Message.postage : -
+A Minidregg.Kernel.Inbox.Message.refund : -
+A Minidregg.Kernel.Inbox.Message.sender : -
+A Minidregg.Kernel.Inbox.Step.keeps : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Inbox.bound : -
+A Minidregg.Kernel.Inbox.cell : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Inbox.cell_reserved : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Inbox.codec : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Inbox.decode : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Inbox.encode : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Inbox.frame : propext
+A Minidregg.Kernel.Inbox.inboxStream : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Inbox.key : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Inbox.lawful_fifo : Quot.sound, propext
+A Minidregg.Kernel.Inbox.messageStream : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Inbox.pop_step : propext
+A Minidregg.Kernel.Inbox.push_full : propext
+A Minidregg.Kernel.Inbox.push_step : -
+A Minidregg.Kernel.Inbox.reorder_unlawful : Quot.sound, propext
+A Minidregg.Kernel.Inbox.roundTrip : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Inbox.sampleInbox : -
+A Minidregg.Kernel.Inbox.sampleMessage : -
+A Minidregg.Kernel.Inbox.sample_full : propext
+A Minidregg.Kernel.Inbox.sample_push_pop : -
+A Minidregg.Kernel.Inbox.sendId : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Invitations.Expectation.inst : -
 A Minidregg.Kernel.Invitations.Expectation.package : -
 A Minidregg.Kernel.Invitations.Expectation.role : -
@@ -13609,6 +13924,15 @@ A Minidregg.Kernel.NativeHostReplay.AgentDispatchAt.untouched : Classical.choice
 A Minidregg.Kernel.NativeHostReplay.BeginAtV3.accepted : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.BeginAtV3.history : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.BeginAtV3.intent : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.BeginAtV4.accepted : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.BeginAtV4.indexExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.BeginAtV4.ingressExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.BeginAtV4.intent : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.BeginAtV4.present : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.BeginAtV4.prior : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.BeginAtV4.recoveryExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.BeginAtV4.toDerived : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.BeginAtV4.toDerived_intent : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.BeginV3History.continue.elim : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.BeginV3History.create.elim : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.BeginV3History.install.elim : Classical.choice, Quot.sound, propext
@@ -13644,6 +13968,15 @@ A Minidregg.Kernel.NativeHostReplay.ClaimAtV3.prior : Classical.choice, Quot.sou
 A Minidregg.Kernel.NativeHostReplay.ClaimAtV3.recordExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.ClaimAtV3.toDerived : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.ClaimAtV3.toDerived_intent : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.ClaimAtV4.conditional : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.ClaimAtV4.indexExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.ClaimAtV4.ingressExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.ClaimAtV4.intent : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.ClaimAtV4.present : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.ClaimAtV4.prior : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.ClaimAtV4.recordExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.ClaimAtV4.toDerived : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.ClaimAtV4.toDerived_intent : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.CompletionAt.conditional : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.CompletionAt.event_version : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.CompletionAt.indexExact : Classical.choice, Quot.sound, propext
@@ -13665,6 +13998,24 @@ A Minidregg.Kernel.NativeHostReplay.CompletionAtV2.recordExact : Classical.choic
 A Minidregg.Kernel.NativeHostReplay.CompletionAtV2.running : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.CompletionAtV2.toDerived : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.CompletionAtV2.toDerived_intent : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.CompletionAtV4.conditional : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.CompletionAtV4.indexExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.CompletionAtV4.ingressExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.CompletionAtV4.intent : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.CompletionAtV4.present : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.CompletionAtV4.prior : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.CompletionAtV4.recordExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.CompletionAtV4.toDerived : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.CompletionAtV4.toDerived_intent : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.CompletionIngress.Admitted : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.CompletionIngress.beginSource : -
+A Minidregg.Kernel.NativeHostReplay.CompletionIngress.canonicalBytes : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.CompletionIngress.createChoice : propext
+A Minidregg.Kernel.NativeHostReplay.CompletionIngress.creationMarker : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.CompletionIngress.physical : -
+A Minidregg.Kernel.NativeHostReplay.CompletionIngress.v2.elim : -
+A Minidregg.Kernel.NativeHostReplay.CompletionIngress.v4.elim : -
+A Minidregg.Kernel.NativeHostReplay.CompletionIngress.volume : -
 A Minidregg.Kernel.NativeHostReplay.CompletionV2Running.other.elim : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.CompletionV2Running.stop.elim : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.CreatedAt.indexExact : Classical.choice, Quot.sound, propext
@@ -13674,15 +14025,26 @@ A Minidregg.Kernel.NativeHostReplay.CreatedAt.prior : Classical.choice, Quot.sou
 A Minidregg.Kernel.NativeHostReplay.CreatedAt.receiptExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.CreatedAt.recordExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.CreatedAt.selected : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.CreatedSelected.atIndex : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.CreatedSelected.index : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.CreatedSelected.ingress : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.CreatedSelected.receipt : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.CreatedSelected.record : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.CreatedSelected.v2.elim : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.CreatedSelected.v4.elim : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.Derived.admission : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.Derived.begin : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.Derived.beginV2 : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.Derived.beginV3 : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.Derived.beginV4 : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.Derived.bootstrap : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.Derived.bootstrapBundle : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.Derived.claimV2 : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.Derived.claimV3 : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.Derived.claimV4 : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.Derived.completionV2 : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.Derived.completionV4 : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.Derived.failedStartRecovery : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.Derived.grantIssue : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.Derived.intent : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.Derived.issue : Classical.choice, Quot.sound, propext
@@ -13761,6 +14123,12 @@ A Minidregg.Kernel.NativeHostReplay.OrdinaryAt.intentExact : Classical.choice, Q
 A Minidregg.Kernel.NativeHostReplay.OrdinaryAt.prepared : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.OrdinaryAt.shape : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.OrdinaryAt.signed : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.PhysicalFacts.controlGroup : -
+A Minidregg.Kernel.NativeHostReplay.PhysicalFacts.invocationId : -
+A Minidregg.Kernel.NativeHostReplay.PhysicalFacts.materializedImage : -
+A Minidregg.Kernel.NativeHostReplay.PhysicalFacts.outcome : -
+A Minidregg.Kernel.NativeHostReplay.PhysicalFacts.unit : -
+A Minidregg.Kernel.NativeHostReplay.PhysicalFacts.volumeCustody : -
 A Minidregg.Kernel.NativeHostReplay.PriorBegin.admitted : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.PriorBegin.index : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.PriorBegin.ingress : Classical.choice, Quot.sound, propext
@@ -13773,6 +14141,10 @@ A Minidregg.Kernel.NativeHostReplay.PriorBeginV3.admitted : Classical.choice, Qu
 A Minidregg.Kernel.NativeHostReplay.PriorBeginV3.index : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.PriorBeginV3.ingress : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.PriorBeginV3.record : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.PriorBeginV4.admitted : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.PriorBeginV4.index : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.PriorBeginV4.ingress : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.PriorBeginV4.record : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.PriorClaimV2.admitted : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.PriorClaimV2.index : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.PriorClaimV2.ingress : Classical.choice, Quot.sound, propext
@@ -13781,6 +14153,10 @@ A Minidregg.Kernel.NativeHostReplay.PriorClaimV3.admitted : Classical.choice, Qu
 A Minidregg.Kernel.NativeHostReplay.PriorClaimV3.index : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.PriorClaimV3.ingress : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.PriorClaimV3.record : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.PriorClaimV4.admitted : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.PriorClaimV4.index : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.PriorClaimV4.ingress : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.PriorClaimV4.record : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.PriorCreatedV3.admitted : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.PriorCreatedV3.created : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.PriorCreatedV3.index : Classical.choice, Quot.sound, propext
@@ -13800,6 +14176,10 @@ A Minidregg.Kernel.NativeHostReplay.PriorLifetimeGrant.ingress : Classical.choic
 A Minidregg.Kernel.NativeHostReplay.PriorLifetimeGrant.receipt : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.PriorLifetimeGrant.record : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.PriorLifetimeGrant.ticket : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.PriorRecovery.admitted : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.PriorRecovery.index : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.PriorRecovery.ingress : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.PriorRecovery.record : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.PriorRunningV3.admitted : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.PriorRunningV3.index : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.PriorRunningV3.ingress : Classical.choice, Quot.sound, propext
@@ -13809,6 +14189,9 @@ A Minidregg.Kernel.NativeHostReplay.PriorRunningV3.running : Classical.choice, Q
 A Minidregg.Kernel.NativeHostReplay.PriorRunningV3.started : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.PriorSelectedRelease.receipt : -
 A Minidregg.Kernel.NativeHostReplay.PriorSelectedRelease.record : -
+A Minidregg.Kernel.NativeHostReplay.RetryHistory.beginsV4 : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.RetryHistory.claimsV4 : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.RetryHistory.recoveries : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.RunningAt.appExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.RunningAt.generationExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.RunningAt.imageExact : Classical.choice, Quot.sound, propext
@@ -13853,6 +14236,7 @@ A Minidregg.Kernel.NativeHostReplay.SuffixContext.grants : Classical.choice, Quo
 A Minidregg.Kernel.NativeHostReplay.SuffixContext.issues : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.SuffixContext.releases : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.SuffixContext.reserves : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.SuffixContext.retry : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.SuffixContext.runningV3 : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.SuffixDerived.carriedDispatch.elim : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.SuffixDerived.carriedEnrollment.elim : Classical.choice, Quot.sound, propext
@@ -13885,6 +14269,7 @@ A Minidregg.Kernel.NativeHostReplay.SuffixVerified.receiptAt_before_anchor : Cla
 A Minidregg.Kernel.NativeHostReplay.SuffixVerified.receipts : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.SuffixVerified.releases : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.SuffixVerified.reserves : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.SuffixVerified.retry : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.SuffixVerified.runningV3 : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.SuffixVerified.seedExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.Verified.accepted_history : Classical.choice, Quot.sound, propext
@@ -13912,6 +14297,7 @@ A Minidregg.Kernel.NativeHostReplay.Verified.origin : Classical.choice, Quot.sou
 A Minidregg.Kernel.NativeHostReplay.Verified.receipts : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.Verified.releases : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.Verified.reserves : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.Verified.retry : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.Verified.runningV3 : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.Verified.selectCreated : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.Verified.selectRunning : Classical.choice, Quot.sound, propext
@@ -13932,6 +14318,9 @@ A Minidregg.Kernel.NativeHostReplay.admitDispatchSuffixVerified : Classical.choi
 A Minidregg.Kernel.NativeHostReplay.admitDispatchVerified : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.admitFailedStartRecoveryVerified : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.admitLifetimeDispatchVerified : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.admitRetryBeginV4Verified : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.admitRetryClaimV4Verified : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.admitRetryCompletionV4Verified : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.admitSessionEnrollmentVerified : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.advance : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.advanceSuffix : Classical.choice, Quot.sound, propext
@@ -13942,6 +14331,7 @@ A Minidregg.Kernel.NativeHostReplay.appendedSuffixWalk_image : Classical.choice,
 A Minidregg.Kernel.NativeHostReplay.appendedWalk_image : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.beginV2Derived : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.beginV2Derived_intent : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.createdV3After_retry_completion : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.deriveSuffixVerified : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.deriveVerified : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.dispatchPurseUntouched : propext
@@ -13959,6 +14349,7 @@ A Minidregg.Kernel.NativeHostReplay.receivingLaws : Classical.choice, Quot.sound
 A Minidregg.Kernel.NativeHostReplay.recordMatches : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.recordMatches_iff : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.rotationEnv : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.NativeHostReplay.runningV3After_retry_completion : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.verifyBytes : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.verifyCarriedSuffixLoaded : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.NativeHostReplay.verifyLoaded : Classical.choice, Quot.sound, propext
@@ -14451,6 +14842,7 @@ A Minidregg.Kernel.ObjectiveActivity.AdmittedTurn.abandon.elim : Classical.choic
 A Minidregg.Kernel.ObjectiveActivity.AdmittedTurn.birth.elim : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.AdmittedTurn.create.elim : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.AdmittedTurn.deliver.elim : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivity.AdmittedTurn.deliverMessage.elim : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.AdmittedTurn.exhaust.elim : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.AdmittedTurn.intent : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.AdmittedTurn.intent_writes : Classical.choice, Quot.sound, propext
@@ -14674,6 +15066,7 @@ A Minidregg.Kernel.ObjectiveActivity.Path.resumed.elim : -
 A Minidregg.Kernel.ObjectiveActivity.Path.timedOut.elim : -
 A Minidregg.Kernel.ObjectiveActivity.PayerRoute.activityOfSlot.elim : -
 A Minidregg.Kernel.ObjectiveActivity.PayerRoute.escrow.elim : -
+A Minidregg.Kernel.ObjectiveActivity.PayerRoute.objectOfInbox.elim : -
 A Minidregg.Kernel.ObjectiveActivity.PayerRoute.objectOfState.elim : -
 A Minidregg.Kernel.ObjectiveActivity.PayerRoute.objectRecord.elim : -
 A Minidregg.Kernel.ObjectiveActivity.PayerRoute.ofNat : -
@@ -14949,6 +15342,8 @@ A Minidregg.Kernel.ObjectiveActivity.guardAt_cellId : -
 A Minidregg.Kernel.ObjectiveActivity.guardAt_expectedRoot : -
 A Minidregg.Kernel.ObjectiveActivity.heldAccount : -
 A Minidregg.Kernel.ObjectiveActivity.image : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivity.inboxAt : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivity.inboxImage : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.install_afterPosts : Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.installed_retry_replays : Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.instantiate : Classical.choice, Quot.sound, propext
@@ -15002,6 +15397,7 @@ A Minidregg.Kernel.ObjectiveActivity.publishTransaction : Classical.choice, Quot
 A Minidregg.Kernel.ObjectiveActivity.purse : Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.purseAssets : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.purse_released_only_at_end : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivity.readInbox : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.readObject : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.readRecord : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.readRecord_of_retired : Classical.choice, Quot.sound, propext
@@ -15095,6 +15491,7 @@ A Minidregg.Kernel.ObjectiveActivity.yield_short_parks : Classical.choice, Quot.
 A Minidregg.Kernel.ObjectiveActivity.yield_write_from_current_read : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivityCell.CellValid : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivityCell.Payload : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivityCell.Role.inbox.elim : -
 A Minidregg.Kernel.ObjectiveActivityCell.Role.object.elim : -
 A Minidregg.Kernel.ObjectiveActivityCell.Role.ofNat : -
 A Minidregg.Kernel.ObjectiveActivityCell.Role.ofNat_ctorIdx : -
@@ -15195,6 +15592,7 @@ A Minidregg.Kernel.ObjectiveActivityReceiver.Reject.directoryUnavailable.elim : 
 A Minidregg.Kernel.ObjectiveActivityReceiver.Reject.inputUndecodable.elim : -
 A Minidregg.Kernel.ObjectiveActivityReceiver.Reject.kernel.elim : -
 A Minidregg.Kernel.ObjectiveActivityReceiver.Reject.malformedIngress.elim : -
+A Minidregg.Kernel.ObjectiveActivityReceiver.Reject.message.elim : -
 A Minidregg.Kernel.ObjectiveActivityReceiver.Reject.notAccountOwner.elim : -
 A Minidregg.Kernel.ObjectiveActivityReceiver.Reject.notObjectHolder.elim : -
 A Minidregg.Kernel.ObjectiveActivityReceiver.Reject.physicalPreparation.elim : -
@@ -15220,6 +15618,7 @@ A Minidregg.Kernel.ObjectiveActivityReceiver.Turn.abandon.elim : -
 A Minidregg.Kernel.ObjectiveActivityReceiver.Turn.birth.elim : -
 A Minidregg.Kernel.ObjectiveActivityReceiver.Turn.create.elim : -
 A Minidregg.Kernel.ObjectiveActivityReceiver.Turn.deliver.elim : -
+A Minidregg.Kernel.ObjectiveActivityReceiver.Turn.deliverMessage.elim : -
 A Minidregg.Kernel.ObjectiveActivityReceiver.Turn.exhaust.elim : -
 A Minidregg.Kernel.ObjectiveActivityReceiver.Turn.invoke.elim : -
 A Minidregg.Kernel.ObjectiveActivityReceiver.Turn.ofWire : -
@@ -15267,6 +15666,7 @@ A Minidregg.Kernel.ObjectiveActivityReceiver.invokeRequest : -
 A Minidregg.Kernel.ObjectiveActivityReceiver.invokeStream : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivityReceiver.kernel : -
 A Minidregg.Kernel.ObjectiveActivityReceiver.marker : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivityReceiver.messageRequest : -
 A Minidregg.Kernel.ObjectiveActivityReceiver.native_birth_on_pinned_object : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivityReceiver.native_delivery_consumes_once : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivityReceiver.native_delivery_fields_bind_checkpoint : Classical.choice, Quot.sound, propext
@@ -15560,6 +15960,8 @@ A Minidregg.Kernel.ObjectiveBendPublishedPackage.Loaded.wellFormed : Classical.c
 A Minidregg.Kernel.ObjectiveBendPublishedPackage.canonical : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveBendPublishedPackage.lookup : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveBendPublishedPackage.schema : Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.Authority.origin : -
+A Minidregg.Kernel.ObjectiveCall.Authority.signer : -
 A Minidregg.Kernel.ObjectiveCall.CallPlan.args : -
 A Minidregg.Kernel.ObjectiveCall.CallPlan.method : -
 A Minidregg.Kernel.ObjectiveCall.CallPlan.target : -
@@ -15569,12 +15971,18 @@ A Minidregg.Kernel.ObjectiveCall.CallRefusal.depth.elim : -
 A Minidregg.Kernel.ObjectiveCall.CallRefusal.exhausted.elim : -
 A Minidregg.Kernel.ObjectiveCall.CallRefusal.frameFault.elim : -
 A Minidregg.Kernel.ObjectiveCall.CallRefusal.grantSpent.elim : -
+A Minidregg.Kernel.ObjectiveCall.CallRefusal.inboxCodec.elim : -
 A Minidregg.Kernel.ObjectiveCall.CallRefusal.kernel.elim : -
 A Minidregg.Kernel.ObjectiveCall.CallRefusal.lawDenied.elim : -
 A Minidregg.Kernel.ObjectiveCall.CallRefusal.notAnObject.elim : -
 A Minidregg.Kernel.ObjectiveCall.CallRefusal.notCallable.elim : -
+A Minidregg.Kernel.ObjectiveCall.CallRefusal.notPipelinable.elim : -
+A Minidregg.Kernel.ObjectiveCall.CallRefusal.packageCell.elim : -
+A Minidregg.Kernel.ObjectiveCall.CallRefusal.queueFull.elim : -
 A Minidregg.Kernel.ObjectiveCall.CallRefusal.reentry.elim : -
 A Minidregg.Kernel.ObjectiveCall.CallRefusal.resultType.elim : -
+A Minidregg.Kernel.ObjectiveCall.CallRefusal.slotQueueFull.elim : -
+A Minidregg.Kernel.ObjectiveCall.CallRefusal.slotTaken.elim : -
 A Minidregg.Kernel.ObjectiveCall.CallRefusal.stateMissing.elim : -
 A Minidregg.Kernel.ObjectiveCall.Ctx.assumptions : -
 A Minidregg.Kernel.ObjectiveCall.Ctx.facts : -
@@ -15583,6 +15991,8 @@ A Minidregg.Kernel.ObjectiveCall.Ctx.object : -
 A Minidregg.Kernel.ObjectiveCall.Ctx.record : -
 A Minidregg.Kernel.ObjectiveCall.Ctx.responseType : -
 A Minidregg.Kernel.ObjectiveCall.Ctx.view : -
+A Minidregg.Kernel.ObjectiveCall.Destination.object.elim : -
+A Minidregg.Kernel.ObjectiveCall.Destination.slot.elim : -
 A Minidregg.Kernel.ObjectiveCall.Entry.current : -
 A Minidregg.Kernel.ObjectiveCall.Entry.dirty : -
 A Minidregg.Kernel.ObjectiveCall.Entry.object : -
@@ -15590,6 +16000,21 @@ A Minidregg.Kernel.ObjectiveCall.Entry.record : -
 A Minidregg.Kernel.ObjectiveCall.Grant.method : -
 A Minidregg.Kernel.ObjectiveCall.Grant.object : -
 A Minidregg.Kernel.ObjectiveCall.Grant.uses : -
+A Minidregg.Kernel.ObjectiveCall.HeldInbox.cell : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.HeldInbox.clean : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.HeldInbox.ends : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.HeldInbox.lawful : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.HeldInbox.now : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.HeldInbox.read : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.HeldInbox.readExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.HeldInbox.sender : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.HeldInbox.target : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.HeldSlot.clean : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.HeldSlot.name : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.HeldSlot.named : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.HeldSlot.now : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.HeldSlot.opened : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.HeldSlot.read : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.Invocation.batchExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.Invocation.book : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.Invocation.bookExact : Classical.choice, Quot.sound, propext
@@ -15600,6 +16025,9 @@ A Minidregg.Kernel.ObjectiveCall.Invocation.guards : Classical.choice, Quot.soun
 A Minidregg.Kernel.ObjectiveCall.Invocation.intent : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.Invocation.journal : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.Invocation.left : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.Invocation.mail : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.Invocation.mailExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.Invocation.postageCovered : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.Invocation.posted : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.Invocation.posts : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.Invocation.postsExact : Classical.choice, Quot.sound, propext
@@ -15607,11 +16035,13 @@ A Minidregg.Kernel.ObjectiveCall.Invocation.posts_shape : Classical.choice, Quot
 A Minidregg.Kernel.ObjectiveCall.Invocation.result : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.InvokeRequest.account : -
 A Minidregg.Kernel.ObjectiveCall.InvokeRequest.args : -
+A Minidregg.Kernel.ObjectiveCall.InvokeRequest.authority : -
 A Minidregg.Kernel.ObjectiveCall.InvokeRequest.envelope : -
 A Minidregg.Kernel.ObjectiveCall.InvokeRequest.grants : -
 A Minidregg.Kernel.ObjectiveCall.InvokeRequest.method : -
 A Minidregg.Kernel.ObjectiveCall.InvokeRequest.nonce : -
 A Minidregg.Kernel.ObjectiveCall.InvokeRequest.object : -
+A Minidregg.Kernel.ObjectiveCall.InvokeRequest.postage : -
 A Minidregg.Kernel.ObjectiveCall.InvokeRequest.subject : -
 A Minidregg.Kernel.ObjectiveCall.Journal.entries : -
 A Minidregg.Kernel.ObjectiveCall.Journal.frames : -
@@ -15619,9 +16049,20 @@ A Minidregg.Kernel.ObjectiveCall.Journal.grants : -
 A Minidregg.Kernel.ObjectiveCall.Journal.guards : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.Journal.install : -
 A Minidregg.Kernel.ObjectiveCall.Journal.lookup : -
+A Minidregg.Kernel.ObjectiveCall.Journal.outbox : -
 A Minidregg.Kernel.ObjectiveCall.Journal.posts : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.Journal.start : -
 A Minidregg.Kernel.ObjectiveCall.Journal.writes : -
+A Minidregg.Kernel.ObjectiveCall.Mail.credits : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.Mail.empty : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.Mail.inboxes : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.Mail.inboxes_lawful : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.Mail.posts : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.Mail.posts_shape : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.Mail.registrations : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.Mail.send : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.Mail.slots : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.Mail.targets : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.Method.accepted : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.Method.applied : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.Method.callsOnly : Classical.choice, Quot.sound, propext
@@ -15636,6 +16077,14 @@ A Minidregg.Kernel.ObjectiveCall.Method.resultType : Classical.choice, Quot.soun
 A Minidregg.Kernel.ObjectiveCall.Method.returnsOnly : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.Method.typeExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.ObjectsRead : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.Outgoing.args : -
+A Minidregg.Kernel.ObjectiveCall.Outgoing.destination : -
+A Minidregg.Kernel.ObjectiveCall.Outgoing.id : -
+A Minidregg.Kernel.ObjectiveCall.Outgoing.method : -
+A Minidregg.Kernel.ObjectiveCall.Outgoing.sender : -
+A Minidregg.Kernel.ObjectiveCall.SendPlan.args : -
+A Minidregg.Kernel.ObjectiveCall.SendPlan.destination : -
+A Minidregg.Kernel.ObjectiveCall.SendPlan.method : -
 A Minidregg.Kernel.ObjectiveCall.Spend.exhausted.elim : -
 A Minidregg.Kernel.ObjectiveCall.Spend.spent.elim : -
 A Minidregg.Kernel.ObjectiveCall.Spend.ungranted.elim : -
@@ -15648,27 +16097,41 @@ A Minidregg.Kernel.ObjectiveCall.Written.method : -
 A Minidregg.Kernel.ObjectiveCall.Written.object : -
 A Minidregg.Kernel.ObjectiveCall.Written.record : -
 A Minidregg.Kernel.ObjectiveCall.Written.viewed : -
+A Minidregg.Kernel.ObjectiveCall.Yield.call.elim : -
+A Minidregg.Kernel.ObjectiveCall.Yield.send.elim : -
 A Minidregg.Kernel.ObjectiveCall.callDepth : -
 A Minidregg.Kernel.ObjectiveCall.callFuel : -
 A Minidregg.Kernel.ObjectiveCall.callTurn : -
-A Minidregg.Kernel.ObjectiveCall.decodeCall : propext
+A Minidregg.Kernel.ObjectiveCall.callerOf : -
+A Minidregg.Kernel.ObjectiveCall.creditTransfers : -
 A Minidregg.Kernel.ObjectiveCall.decodeReturn : propext
+A Minidregg.Kernel.ObjectiveCall.decodeYield : propext
 A Minidregg.Kernel.ObjectiveCall.exec : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.exec_invariant : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.framePlans : -
+A Minidregg.Kernel.ObjectiveCall.frameResponses : -
 A Minidregg.Kernel.ObjectiveCall.frameReturn : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.frameReturn_read : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.frameReturn_spec : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.grantStream : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.holdInbox : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.holdSlot : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.install_read : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.invocation_reentry_free : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.invocation_writes_from_view : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.invoke : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.invokeBatch : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.invokeTransaction : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.labelsWithin : propext
 A Minidregg.Kernel.ObjectiveCall.loadMethod : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.lookup_entries : propext
 A Minidregg.Kernel.ObjectiveCall.lookup_install_ne : Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.messageOf : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.methodPackage : -
 A Minidregg.Kernel.ObjectiveCall.nodup_values : Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.openSlot : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.postMail : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.queuedData : -
 A Minidregg.Kernel.ObjectiveCall.reentry_refused : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.returnedData : -
 A Minidregg.Kernel.ObjectiveCall.rootCall : -
@@ -15676,7 +16139,6 @@ A Minidregg.Kernel.ObjectiveCall.rowLabels : propext
 A Minidregg.Kernel.ObjectiveCall.runCounted : Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.runCounted_left_le : Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.runCounted_outcome : Quot.sound, propext
-A Minidregg.Kernel.ObjectiveCall.soleLabel : propext
 A Minidregg.Kernel.ObjectiveCall.spendGrant : propext
 A Minidregg.Kernel.ObjectiveCall.touch : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.touch_read : Classical.choice, Quot.sound, propext
@@ -15714,9 +16176,11 @@ A Minidregg.Kernel.ObjectiveCheckpointInvariant.loadBook_payload : Classical.cho
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.loadProgram_present : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.lookupPostBytes_absent : -
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.lookupPostBytes_posts : propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.messageDelivery_safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.nextRecord_awaiting : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.nextRecord_input : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.nextRecord_pin : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCheckpointInvariant.outcome_posts_safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.packageBytes_eq : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.payloadOf_book : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.payloadOf_image : Classical.choice, Quot.sound, propext
@@ -15798,6 +16262,65 @@ A Minidregg.Kernel.ObjectiveResumeContract.tallyReply : -
 A Minidregg.Kernel.ObjectiveResumeContract.tallyTerm : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.tallyYield : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveResumeContract.typed_runBounded_yielded : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.batchExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.book : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.bookExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.claims : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.clean : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.conserves : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.debits_only_purse : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.decided : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.decidedExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.decides_own_slot : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.ends : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.failed_delivery_pops : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.forwarded : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.guards : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.inbox : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.intent : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.mail : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.message : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.named : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.outcome : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.outcomeExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.popped : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.pops : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.posted : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.posts : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.postsExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.readExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.refunds : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.remaining : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.seed : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.seedExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.slot : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.slotExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.slotNamed : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageRefusal.empty.elim : -
+A Minidregg.Kernel.ObjectiveSend.MessageRefusal.kernel.elim : -
+A Minidregg.Kernel.ObjectiveSend.MessageRefusal.noInbox.elim : -
+A Minidregg.Kernel.ObjectiveSend.MessageRefusal.replySlot.elim : -
+A Minidregg.Kernel.ObjectiveSend.MessageRefusal.staleHead.elim : -
+A Minidregg.Kernel.ObjectiveSend.MessageRequest.message : -
+A Minidregg.Kernel.ObjectiveSend.MessageRequest.sender : -
+A Minidregg.Kernel.ObjectiveSend.MessageRequest.subject : -
+A Minidregg.Kernel.ObjectiveSend.MessageRequest.target : -
+A Minidregg.Kernel.ObjectiveSend.Outcome.decision : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.Outcome.failed.elim : -
+A Minidregg.Kernel.ObjectiveSend.Outcome.guards : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.Outcome.posts : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.Outcome.reference : propext
+A Minidregg.Kernel.ObjectiveSend.Outcome.replied.elim : -
+A Minidregg.Kernel.ObjectiveSend.creditTransfers_debit : Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.debited : -
+A Minidregg.Kernel.ObjectiveSend.deliverMessage : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.deliveryBatch : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.forward : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.messageClaim : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.messageTransaction : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.referenceOf : propext
+A Minidregg.Kernel.ObjectiveSend.runMessage : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.seedMail : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveTariff.Tariff.base : -
 A Minidregg.Kernel.ObjectiveTariff.Tariff.heap : -
 A Minidregg.Kernel.ObjectiveTariff.Tariff.inputBytes : -
@@ -26801,6 +27324,8 @@ A private Minidregg.Kernel.ApplicationLifecycleClaimProjection.frameV2 : propext
 A private Minidregg.Kernel.ApplicationLifecycleCompletionAdmission.requirePresent : -
 A private Minidregg.Kernel.ApplicationLifecycleCompletionV2Admission.requirePresent : -
 A private Minidregg.Kernel.ApplicationLifecycleCreatedHistory.decodeSelected : Classical.choice, Quot.sound, propext
+A private Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission.requirePresent : -
+A private Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory.decodeSelected : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.ApplicationPermissionSchema.asciiDigit : -
 A private Minidregg.Kernel.ApplicationPermissionSchema.asciiLetter : -
 A private Minidregg.Kernel.ApplicationPermissionSchema.nameKnown : -
@@ -26878,17 +27403,21 @@ A private Minidregg.Kernel.NativeHostReplay.Walked.issues : Classical.choice, Qu
 A private Minidregg.Kernel.NativeHostReplay.Walked.receipts : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.NativeHostReplay.Walked.releases : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.NativeHostReplay.Walked.reserves : Classical.choice, Quot.sound, propext
+A private Minidregg.Kernel.NativeHostReplay.Walked.retry : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.NativeHostReplay.Walked.runningV3 : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.NativeHostReplay.Walked.selected : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.NativeHostReplay.Walked.trace : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.NativeHostReplay.admissionPhase : propext
 A private Minidregg.Kernel.NativeHostReplay.admitAgentDispatchAt : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.NativeHostReplay.admitBeginV3At : Classical.choice, Quot.sound, propext
+A private Minidregg.Kernel.NativeHostReplay.admitBeginV4At : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.NativeHostReplay.admitClaimAt : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.NativeHostReplay.admitClaimV2At : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.NativeHostReplay.admitClaimV3At : Classical.choice, Quot.sound, propext
+A private Minidregg.Kernel.NativeHostReplay.admitClaimV4At : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.NativeHostReplay.admitCompletionAt : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.NativeHostReplay.admitCompletionV2At : Classical.choice, Quot.sound, propext
+A private Minidregg.Kernel.NativeHostReplay.admitCompletionV4At : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.NativeHostReplay.admitDispatchAt : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.NativeHostReplay.admitFailedStartRecoveryAt : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.NativeHostReplay.admitLifetimeDispatchAt : Classical.choice, Quot.sound, propext
@@ -26920,6 +27449,7 @@ A private Minidregg.Kernel.NativeHostReplay.priorIssueForLifetimeGrant : Classic
 A private Minidregg.Kernel.NativeHostReplay.priorIssueForSessionEnrollment : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.NativeHostReplay.priorIssueFor_empty : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.NativeHostReplay.reservesAfter : Classical.choice, Quot.sound, propext
+A private Minidregg.Kernel.NativeHostReplay.retryAfter : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.NativeHostReplay.runningV3After : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.NativeHostReplay.selectCreatedAt : Classical.choice, Quot.sound, propext
 A private Minidregg.Kernel.NativeHostReplay.selectRunningAt : Classical.choice, Quot.sound, propext
