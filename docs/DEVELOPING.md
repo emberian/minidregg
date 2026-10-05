@@ -63,7 +63,7 @@ and takes the toolchain and built `Theory` modules from `LAKE_ROOT` (default: th
 repository); it compiles `Theory.AssertCompiled` and `Host.ObjectiveBendPreview`
 itself into a scratch directory, so neither has to be built first. The source-to-execution route
 (capture, elaborate, check, run) is the preview tooling described in the
-[language guide](OBJECTIVE-BEND.md#execution-paths).
+[language guide](OBJECTIVE-BEND.md#writing-a-program).
 
 None of these commands installs a method, creates an instance, spends credits,
 emits a world effect or verifies a private backend.
@@ -135,7 +135,7 @@ For a new backend, retain the same semantic statement and bind its real verifier
 or execution evidence to exact code, input, output and profile. An enum variant,
 backend label or a theorem conditional on an uninhabited adapter is not a joined
 execution route. Use the arithmetic and privacy requirements in
-[Objective Bend](OBJECTIVE-BEND.md#execution-and-privacy).
+[Objective Bend](OBJECTIVE-BEND.md#backends-and-privacy).
 
 ## Build and verify without disturbing another run
 

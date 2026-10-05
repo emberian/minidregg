@@ -1,302 +1,209 @@
-# Objective Bend front end, edition 1
+# Objective Bend front end
 
-The front end turns `.obend` source into the Core4 term that
-`Theory.ObjectiveBendDemandMachine` runs, plus a typing proposal that the
-proof-producing checker (`Theory.ObjectiveBendTyping.check`) either accepts
-with a derivation or refuses. It is ONE program, in Lean; there is no other
-parser or elaborator. See "Trust boundary" for what is proved of it.
+Reference for the one front end: the Lean program that turns `.obend` source into the Core4
+term `Theory.ObjectiveBendDemandMachine` runs, plus a typing proposal that the
+proof-producing checker (`Theory.ObjectiveBendTyping.check`) accepts with a derivation or
+refuses. There is no other parser or elaborator. The overview, including what is proved and
+what is open, is [OBJECTIVE-BEND.md](OBJECTIVE-BEND.md).
 
 | Stage | Module | Output |
 | --- | --- | --- |
 | Parse | `Compiler/ObjectiveBendParse.lean` | `dregg.objective-bend.module.v1` AST |
-| Capture | `Host/ObjectiveBendFrontEnd.lean` (`capture`) | locked package (`objective.json`, `source/<i>.obend`) |
+| Capture | `Host/ObjectiveBendFrontEnd.lean` (`capture`) | a locked package (`objective.json`, `source/<i>.obend`) |
 | Elaborate | `Compiler/ObjectiveBendElaborate.lean`, driven by `Compiler/ObjectiveBendFrontEnd.lean` | `PREFIX.core.json`, `PREFIX.typed.json` |
 | Linearize | `Compiler/ObjectiveBendC4.lean` | C4 precedence lists |
-| Preview | `Host/ObjectiveBendFrontEnd.lean` (`preview`) → `Host/ObjectiveBendPreview.lean` | check + `runBounded` result |
+| Preview | `Host/ObjectiveBendFrontEnd.lean` (`preview`) → `Host/ObjectiveBendPreview.lean` | check, then `runBounded` |
 | Publish | `Compiler/ObjectiveBendPublication.lean` (`publishedCore`) | the typed core a package publishes |
 
-The commands (`identity`, `parse`, `capture`, `elaborate`, `preview`, `batch`) run
-as `lake env lean --run Host/ObjectiveBendFrontEndMain.lean COMMAND ...` or, compiled,
-as `minidregg-host /dev/null objective-front COMMAND ...`; the Host's
-`objective-publication PACKAGE_SPEC CODEC NEW_DIR` and the receiver's admission run the
-same code.
+## Commands
+
+```text
+lake env lean --run Host/ObjectiveBendFrontEndMain.lean COMMAND ...
+minidregg-host /dev/null objective-front COMMAND ...          # the same code, compiled
+```
+
+`identity`; `parse FILE`; `capture PACKAGE_INPUT NEW_DIR [--objective-edition-1]`;
+`elaborate CAPTURE PREFIX ARGUMENTS LIMITS ... [application|definition]`;
+`preview REQUEST NEW_DIR`; `batch JOBS OUT`. The Host's `objective-publication` and the
+receiver's admission run the same code. For one file, `bun docs/tutorial/run.ts FILE.obend
+ENTRY [ARGS] [RESPONSES]` captures and previews it (see the
+[tutorial](OBJECTIVE-BEND-TUTORIAL.md#before-you-start)).
 
 ## Identity
 
-`Compiler/ObjectiveBendFrontEndIdentity.lean` fingerprints the front end compiled
-into a program: `manifest` lists the SHA-256 of the parser, elaborator, C4, driver and
-SHA-256 sources (read when that module is elaborated; it imports all of them, so an
-edit rebuilds it), and `identity` is the SHA-256 of the manifest. `objective-front
-identity` prints both; the `identity` row of `scripts/check-objective-frontend.sh`
-recomputes them with `sha256sum`. A source package names the front end that lowered
-it (`ObjectiveSourcePackage.Package.frontEnd`), the operator policy pins one
-(`ObjectiveBendNativeAdmission.Policy.frontEnd`, printed by `objective-constants`),
-and admission requires the package's pin to be the policy's and the policy's to be the
-receiver's own, then recomputes the core (below). Any edit to a fingerprinted file is a
-new identity: re-pin the policy (a re-genesis) and re-publish.
+`Compiler/ObjectiveBendFrontEndIdentity.lean` fingerprints the front end compiled into a
+program: `manifest` lists the SHA-256 of `ObjectiveBendParse`, `ObjectiveBendElaborate`,
+`ObjectiveBendC4`, `ObjectiveBendTermWire`, `ObjectiveBendFrontEnd` and `Sha256`, and
+`identity` is the SHA-256 of the manifest. A source package names the front end that lowered
+it, the operator policy pins one, and admission requires the package's pin to be the policy's
+and the policy's to be the receiver's own, then recomputes the core. Any edit to a listed file,
+comments included, is a new identity: re-pin the policy (a re-genesis) and re-publish.
 
 ## Capture
 
-`capture` reads `dregg.objective-bend.package-input.v1` (edition
-`objective-bend-1`): modules `{name, sourcePath, imports:[{alias, path, module,
-sha256?}], sha256?}`, canonical decimal module indices, `entryModule`,
-`entryDefinition`. Imports name earlier modules only, by `./NAME.obend`; the
-manifest locks alias and path. Gen-1 `./NAME.bend` imports are refused by the parser
-and the capture. Each source is read once and decoded as strict UTF-8 (a leading
-byte-order mark is consumed); optional expected hashes refuse changed bytes. The
-explicit `--objective-edition-1` option adopts a `dregg.bend.package-input.v1` Studio
-capture (same `.obend` import rule). The capture
-(`dregg.objective-bend.captured-package.v2`) records the front-end identity, each
-module's source copy and SHA-256, and each import edge with its lock; there is no
-stored AST (the source is the package; `parse` prints the AST on demand). A v1 capture
-(with ASTs and TypeScript tool hashes) does not load. SHA-256 values here are byte
-fingerprints, not Mini package identities.
+`capture` reads `dregg.objective-bend.package-input.v1` (edition `objective-bend-1`): modules
+`{name, sourcePath, imports: [{alias, path, module, sha256?}], sha256?}`, `entryModule`,
+`entryDefinition`. Imports name earlier modules only, by `./NAME.obend`. Each source is read
+once as strict UTF-8; optional expected hashes refuse changed bytes. The capture
+(`dregg.objective-bend.captured-package.v2`) records the front-end identity, each module's
+source copy and SHA-256, and each import edge; there is no stored AST. A capture made by
+another front end refuses.
+
+## Preview wire
+
+Request `dregg.objective-bend.preview-input.v2`: `capturePath` and its exact `captureSha256`;
+`argumentEncoding` (`legacy-values-v1`, the default: canonical decimal Nat strings, Booleans,
+records; or `typed-values-v1`: `{tag: natural|boolean|label, value}` and
+`{tag: record, fields: [{name, value}]}`, so a string is never read as a number); `arguments`;
+`projections` (`{field, argument?}`); `responses` (at most 64 typed data values, one per yield
+of an activity); `limits` with positive canonical decimal `ticks`, `heap`, `stack` (each at
+most 100000) and `typeFuel` (at most 16384).
+
+The preview re-reads the retained source, elaborates, writes the core and the typed packet,
+decodes the packet, runs `check`, and only on acceptance runs `runBounded` on that same term.
+An activity runs to its first yield; each supplied response is checked against the entry's
+declared response type and resumes it to the next yield.
+
+Result `dregg.objective-bend.preview-result.v2`: `status` (`finished`, `suspended`,
+`divergent`, `yielded` or `refused`), `binding` (capture, source, core and typed-packet hashes,
+the front-end identity, the limits, the responses' hash), and `preview`: the checked type and
+uses, the weak-head `result`, the deep `resultData` (every field and payload forced by the
+machine's own budgeted materialization; `null` with a `resultDataStatus` such as
+`executableValue`, `suspended` or `budget` when the result is not first-order data or exhausts
+the allowance), the per-turn Plans and checkpoint observations, and capacity observations. A
+source, type or tooling refusal has `status: refused` with a structured `diagnostic` and exit
+status 2; machine outcomes exit 0. The result carries `authority: none`: responses are
+supplied, not admitted.
 
 ## Surface language and its core lowering
 
 | Surface | Core4 |
 | --- | --- |
 | `def f(x: T, ...) -> R:` | a field `M.f` of the package knot: curried `lam`s |
+| `fn(x: T) -> R: e`, `extension(self: S, super: I) -> P: e` | `lam` |
 | `extension E(self: S, super: I) -> P:` | `λself λsuper. body` |
+| `extension E[Self has R, Super has R'](self: Self, super: Super) -> Super with {...}:` | an open template, instantiated at each `fix` (below) |
 | `spec S for T:` with `def m(...)` | `specification(SpecMeta.declared{name, interface, laws}, λself λsuper. extend super {m: ...})` |
-| `spec S extends A, B for T:` | C4 precedence list; extension = `mix` chain of ancestor layers (below) |
-| `suffix spec S ...` | S must stay a suffix of every descendant's precedence list |
-| `requires m(...)` | recorded in the interface label only (not checked) |
-| `law l(x): e` | a hidden knot field `M.S#law#l` (`λself λsuper λx. e`, checked to return Bool, never evaluated); the metadata lists `l` with status `unchecked` |
-| `compose(a, b, ...)` | `(λl λr. specification(SpecMeta.composed{inherited: P l, wrapping: P r}, mix l r)) a b`, folded left, where `P x` is `metadata(x)` for a specification operand and `SpecMeta.extension{}` for a bare extension; the inherited composite is bound once, so size is linear |
-| `fix(s, seed)` | `fix` |
+| `spec S[Self has R, Super has R']:` | an open spec; its provided type is `Super with {defs}` |
+| `spec S extends A, B for T:`, `suffix spec`, `around`, `combine + / * / and` | the C4 precedence list; the extension is the `mix` chain of the ancestors' hidden layers |
+| `requires m(...) -> R` | a member of the Self bound; checked against the target (below) |
+| `law l(x): e` | a hidden knot field `M.S#law#l` typed to return Bool, never evaluated; `SpecMeta` lists `l` with status `unchecked` |
+| `compose(a, b, ...)` | left fold of `specification(SpecMeta.composed{inherited: P a, wrapping: P b}, mix a b)`, `P x` = `metadata(x)` for a specification and `SpecMeta.extension{}` for a bare extension; the inherited composite is bound once, so size is linear |
+| `fix(s, seed)` | `fix`, with each layer instantiated at the row beneath it (below) |
 | `extend(x, {f: e})`, `{f: e}`, `x.f`, `()` | `extend`, `record`, `get`, empty record |
 | `prototype(s, t)`, `reflect(p)`, `metadata(s)`, `targetOf(p)` | `prototype`, `reflect`, `metadata`, `project` |
-| `fn(x: T) -> R: e`, `extension(self: S, super: I) -> P: e` | `lam` |
-| `+`, `*`, `&&` | `binary add / multiply / conjunction` |
-| `==` / `!=` on Nat; on String | `equal`; `labelEqual` (negated through `ifBool` for `!=`) |
-| `==` / `!=` on Bool | `(λr. if a then r else not r) b` |
-| `a \|\| b`, `if c then a else b` | `ifBool` |
-| `match n:` `case 0n:` / `case 1n+p:` | `ifZero` (exactly those two branches) |
+| `+ * - / % < <=` | `binary add / multiply / subtract / divide / modulo / less / lessEqual` |
+| `a > b`, `a >= b` | `!(a <= b)`, `!(a < b)` through `ifBool`, so the left operand is evaluated first |
+| `&&` | `binary conjunction` (strict) |
+| `a \|\| b`, `if c then a else b` | `ifBool` (lazy in the untaken branch) |
+| `==` / `!=` on Nat; on String; on Bool | `equal`; `labelEqual`; `(λr. if a then r else not r) b`; `!=` negates through `ifBool` |
+| `match n:` `case 0n:` / `case 1n+p:` | `ifZero` (exactly those two arms) |
 | `match b:` `case true:` / `case false:` | `ifBool` |
-| `sum S:` `l: T`; `S.l(e)`; `match s:` `case l(x):` | variant type; `inject l e`; `case` (exhaustive, no wildcard) |
-| `-`, `/`, `%`, `<`, `<=`, `>`, `>=` | `binary subtract / divide / modulo / less / lessEqual`; `>` and `>=` are `!(a <= b)` and `!(a < b)`: see below |
-| `let x = v` + rest of the body, `let x: T = v in e` | `(λx. body) v`, one lazy cell for `v`: see below |
+| `sum S:` `l: T`; `S.l(e)`; `match s:` `case l(x):` | variant type; `inject`; `case` (exhaustive, no wildcard) |
+| `-> Activity<P, R, A>`, `perform(plan)`, `match perform(...):` | `perform`; a pure tail becomes `done`; the match is a `case` typed as an effect case |
+| `let x = v` + the rest of the body, `let x: T = v in e` | `(λx. body) v`: one lazy cell, evaluated at most once |
+| `true`/`false`, `"text"`, `7n` | `boolean`, `label`, `nat` |
 
-The `==` dispatch needs both operand types; an unannotated operand is refused.
-`inject`, `case`, `ifBool` and `Primitive.labelEqual` are Core4 constructors
-(SUMS-DESIGN §9, §11): the Lean decoder in `Theory/ObjectiveBendTyping.lean` reads
-them and the Lean elaborator erases them.
-
-The package is one lazy knot whose root is a specification:
-`fix(specification({package: [modules]}, λ$globals λ$seed. extend $seed {M.decl: ...}), {})`.
-A global reference is `get $globals "M.name"`. The root extends its inherited
-row instead of ignoring it, so a package is an extensible value in the core;
-no surface form yet names another package's root.
+The `==` dispatch needs both operand types; an unannotated operand is refused. The machine
+primitives take naturals only (`nat_primitive_label_operand_refused`); `a / 0n = 0n` and
+`a % 0n = a`, because the machine has no catchable exception. There is no unary `!` and no
+string operation but equality.
 
 ### Parameters and quantities
 
-`x: T` and `+x: T` are unrestricted; `-x: T` is erased; `affine x: T` and
-`linear x: T` are at most once (the checker's `safeQuantity`; exact-once for
-`linear` is not enforced). Every closure built after an affine or linear
-parameter is one-shot (`reuse = once`) in its proposal and in the declared
-arrow type. An omitted type is `_`: a function result `_` is inferred from
-the body when the inference reaches a single type; otherwise the typing
-proposal is unsupported and preview refuses.
+`x: T` and `+x: T` are unrestricted; `-x: T` is erased; `affine x: T` and `linear x: T` are at
+most once (exactly-once for `linear` is not enforced). Every closure built after an affine or
+linear parameter is one-shot. An omitted type is `_`: a function result `_` is inferred from
+the body when inference reaches a single type; otherwise the typing proposal is unsupported
+and the preview refuses with a reason.
 
-### Declared ancestry and method combination
+### Ancestry and method combination
 
-Identity is the qualified declaration key, fixed at elaboration (generative,
-static): a diamond's shared ancestor appears once, while `compose(E, E)`
-applies `E` twice. The precedence list is the C4 linearization (C3 plus the
-suffix property; ltuo §7.4.4); refusals: no C3 candidate, incompatible
-suffixes, an ancestor out of order against the suffix tail, ancestry cycles,
-unknown parents, ancestors with another target type.
+Identity is the qualified declaration key, fixed at elaboration: a diamond's shared ancestor
+appears once, while `compose(E, E)` applies `E` twice. The precedence list is C4 (C3 plus the
+suffix property); refusals: no C3 candidate, incompatible suffixes, an ancestor out of order
+against the suffix tail, cycles, unknown parents, ancestors with another target type.
+`def` is primary (`super.m` calls the next method); `around` wraps every primary, including
+those of more specific specs; `combine +`, `combine *`, `combine and` combine the own result
+with the next method's (identities 0, 1, true at the bottom). A spec with ancestry stores its
+layers as hidden globals `M.S#primary` and `M.S#around`. `before` and `after` are parsed and
+refused. A method may not be primary in one ancestor and combined in another.
 
-Method qualifiers: `def` (primary; `super.m` calls the next method), `around`,
-and the pure simple combinations `combine +`, `combine *`, `combine and` (own
-result combined with the next method's result; identity 0, 1, true at the
-bottom). A spec with ancestry or qualifiers stores its own layers as hidden
-globals `M.S#primary` and `M.S#around`; its extension is the mix chain,
-least specific lowest: combination identities, every ancestor's primary layer,
-every ancestor's around layer. So an around method wraps every primary,
-including primaries of specs more specific than itself. `before` and `after`
-are refused: they run for effects and discard their result. Core4 has `perform`
-now, so they are buildable ([activities and events](OBJECTIVE-BEND-EVENTS.md)) and
-are not built; a pure one would be silently discarded. A method may not be primary in one
-ancestor and combined in another.
+### Specifications, `requires` and `fix`
 
-The spec interface label (canonical JSON) records target type, suffix mark,
-parents, precedence list, requirements and method signatures; reflection reads
-it from `metadata(S)` with `match metadata(S): case declared(d): d.interface ...`.
+`SpecMeta` and `SpecLaws` are built-in sums (module `$builtin`) that no module may declare
+(`refused (builtin-type)`); every specification has the type `Specification<T>`, so laws,
+ancestry and composition never change it. The interface label (canonical JSON) records target,
+suffix mark, parents, precedence list, requirements and signatures.
 
-Every specification has the one type `Specification<T>` =
-`specification(SpecMeta, Extension<T>)`. `SpecMeta` and `SpecLaws` are built-in sums (module `$builtin`)
-every module names by bare name (no module may declare them):
-
-    sum SpecLaws:  none: {}  |  law: {name: String, status: String, rest: SpecLaws}
-    sum SpecMeta:  declared: {name: String, interface: String, laws: SpecLaws}
-                |  composed: {inherited: SpecMeta, wrapping: SpecMeta}
-                |  extension: {}
-
-`fix` over declared plain specs need not be given a whole target as its seed: each layer is
-instantiated at the row actually beneath it, so `fix(compose(Base, Twice, Augmented), {})`
-needs no placeholder methods. A `super.m` read that nothing below provides is `refused
-(inherited-unprovided)`; a target member that no layer and not the seed provides is
-`refused (requires-unprovided)`; a `requires` line must name a member of the target at its
-type (`refused (requires-signature)`). A record may name itself (`record Node: combine(other: Node) -> Node`): it is a recursive type
-like a recursive sum.
-
-An extension or spec can be written over what it uses rather than over a closed target:
-
-    extension AddY[Self has {x: Nat}, Super has {x: Nat}](self: Self, super: Super) -> Super with {y: Nat}:
-      extend(super, {y: 2n * self.x})
-    spec Heavier[Self has {weight: Nat, heavier(other: Self) -> Self}, Super has {weight: Nat}]:
-      def heavier(other: Self) -> Self: ...
-
-It is checked once against its binder alone (`self.m` outside the Self bound is `refused
-(self-unbound-member)`), and `fix` instantiates it at the final self and the row beneath it,
-discharging both bounds (`refused (self-bound)`, `refused (inherited-unprovided)`), so AddY,
-written for a three-field record, is reused at a four-field one without edits. The final self
-comes from the closed layers, else from the enclosing definition's result type or an
-annotated `let`, else `refused (self-undetermined)`. `Super with {f: T}` is the row Super
-overlaid by f. Design and limits:
+`fix` over a chain of declared plain specs and open declarations types each layer at the row
+beneath it, bottom up from the seed, and refuses by name: `inherited-unprovided`,
+`requires-unprovided`, `requires-signature`, `seed-extra`, `provided-mismatch`,
+`inherited-mismatch`, `self-bound`, `self-conflict`, `self-undetermined`. An open declaration
+is checked once at its own bounds with `Self` rigid (`self-rigid`, `self-unbound-member`), and
+instantiated per use as a memoized knot field `M.E@i`. A whole-target seed, or an operand that
+is not a declared plain spec or open declaration (ancestry specs, computed values), keeps the
+closed lowering. A record may name itself (`record Node: combine(other: Node) -> Node`), a
+recursive type like a recursive sum. Rules and design:
+[OBJECTIVE-BEND.md](OBJECTIVE-BEND.md#modular-typing),
 [objective-bend/MODULAR-TYPING.md](objective-bend/MODULAR-TYPING.md).
-
-So laws and composition never change a specification's type: `def twice(e:
-Extension<Nat>) -> Specification<Nat>: compose(e, e)` checks, and so does a spec with
-a law where `Specification<T>` is expected
-(`Compiler/ObjectiveBendSpecificationClosure.lean`). What reflection may observe, and
-why compose is associative for behaviour but not for `SpecMeta`, is
-[objective-bend/REFLECTION.md](objective-bend/REFLECTION.md).
-
-## Subtraction, order, division, and `let`
-
-Each of these operators is one Core4 primitive (`Theory/ObjectiveBendOpenRecursion`,
-`primitiveResult`), so it is one machine transition on unbounded naturals whatever
-their size:
-
-| Operator | Core4 | Meaning |
-| --- | --- | --- |
-| `a - b` | `binary subtract` | truncated: `0n` when `b` exceeds `a` (`subtract_truncated_exact`) |
-| `a / b` | `binary divide` | floor division, and `a / 0n = 0n` (`divide_floor_exact`) |
-| `a % b` | `binary modulo` | the remainder of `/`, so `a % 0n = a` and `(a / b) * b + a % b = a` for every `b` (`divide_modulo_reconstruct`) |
-| `a < b` | `binary less` | Bool (`order_exact`) |
-| `a <= b` | `binary lessEqual` | Bool |
-| `a > b` | `!(a <= b)`, i.e. `ifBool (lessEqual a b) false true` | Bool |
-| `a >= b` | `!(a < b)` | Bool |
-
-`>` and `>=` are negations rather than swapped operands so the left operand is still
-evaluated first. A zero divisor must mean something because the machine has no
-catchable exception; `0n` is the `Nat.div` convention, and a program whose zero
-divisor is a real case must test it first. The machine primitives take naturals
-only: a label or Boolean operand is a typing refusal (`nat_primitive_label_operand_refused`)
-and, untyped, a `wrongValue` refusal. The C backend computes them on its 32-bit-limb
-naturals (`native/objective-emit/runtime.c`: `nat_sub`, `nat_divmod`, `nat_cmp`). The preview
-cohort pins the whole-run tick count of its money-sized operator rows (`expectedTicks`,
-checked by the C differential against `runBounded`), so a lowering back to recursion is red.
-
-`let x = v` (statement form: the rest of the body follows at the same indent) and
-`let x: T = v in e` (expression form) lower to `app (lam body) v`. An application
-allocates one lazy cell for its argument and the machine caches it on first demand
-(`DemandMachine`, frame `argument`), so `v` is evaluated at most once however often
-`x` is used and not at all when unused: call-by-need, never a copy. The value is
-elaborated outside the binder (`let x = x + 1n` reads the outer `x`), `x` is
-unrestricted, and an omitted type is synthesized from `v` (an unresolvable one makes
-the typing proposal unsupported with a reason, never a guess). A `let` in an
-activity's tail has the activity type as its lambda codomain; `let x = perform(..)`
-is refused like any activity in a shared position.
 
 ## Typing proposal
 
-`literalAnnotations` emits `dregg.objective-bend.typed-core.v3`: the term, a type
-table `types`, one annotation per `lam` (domain, codomain, quantity, reuse) and per
-`inject` (payload → variant), the global row as bound 0, recursive sums as further
-bounded shareable variables, and `fuel` (the request's `typeFuel`: the packet the
-elaborator writes, `PREFIX.typed.json`, is exactly the packet the checker reads).
+The elaborator emits `dregg.objective-bend.typed-core.v3`: the term, a type table `types`, one
+annotation per `lam` (domain, codomain, quantity, reuse) and per `inject`, the global row as
+bound 0, recursive sums and records as further bounded variables, and `fuel` (the request's
+`typeFuel`). Each composite type is one table entry whose children are leaves or references
+to earlier entries; identical entries are stored once, so the proposal is linear in the number
+of distinct types (on `world/commons`'s `CommonsEscrowAmount`: 1,018,985 bytes, where fully
+inlined types took 245,444,831). `decodeTypeWith` decodes a reference to exactly the type it
+names. It is a proposal: the checker runs on the decoded term and refuses anything outside its
+fragment.
 
-Types are named through the table: each composite type (arrow, field,
-specification, prototype, variant, computation) is one entry whose children are
-inline leaves (`natural`, `boolean`, `label`, `emptyRow`, `variable`, `custody`) or
-`{"tag":"ref","index":"N"}` naming an EARLIER entry; identical entries are stored
-once, in post-order over the annotations, then the bounds. A fully expanded type of
-a record whose fields are records of records is exponential in its depth; the table
-is linear in the number of distinct types. Measured on `world/commons`
-(`CommonsEscrowAmount`): the proposal was 245,444,831 bytes (and the preview wrote a
-byte-identical second copy, `typed-input.json`); it is 1,018,985 bytes and one file.
-`Theory.ObjectiveBendTyping.decodeTypeWith` decodes a ref to exactly the type it names,
-depth included, so a table-form proposal decodes to the same `Ty` as its inlined
-expansion under the same nesting capacity (256); the checker's judgment is unchanged.
-The v2 schema (every type inlined) no longer loads. It is a proposal: `Host/ObjectiveBendPreview`
-runs `check` on the same decoded term and refuses anything outside the
-checker's fragment (for example a scalar-target spec, whose `extend` needs a
-row, or an affine parameter used twice).
+## Publication
 
-## Publication and the receiver
-
-`ObjectiveBendPublication.replay` is the front end on a package's own source bytes:
-decode and fingerprint each module, parse it, lock every parsed import edge to the
-module the package names, lower the selected declaration in definition mode with type
-fuel 16384; `publishedCore` is the canonical bytes of the typed packet.
-`objective-publication` publishes exactly those bytes for a package naming this Host's
-front end, and native admission recomputes them: an artifact whose typed core differs
-from the receiver's own `publishedCore` of its package is refused
-(`SourceSelection.replayExact`), as is a package naming another front end. The source
-package is edition 3 (`frame` byte 3: sources, import locks, entry, one `frontEnd`
-pin; no ASTs, no parser/frontend/elaborator pin triple); the policy is edition 4 (one
-`frontEnd` pin). Earlier editions do not decode. The activity kernel holds the same replay
-token: `publish` stores an activity artifact and its package together only after this
-replay, and every later turn reloads the pair and replays it again
-(`Kernel/ObjectiveActivity.lean:1131`, `:622`).
+`ObjectiveBendPublication.replay` is the front end on a package's own source bytes: decode and
+fingerprint each module, parse it, lock every import edge to the module the package names, and
+lower the selected declaration in definition mode with type fuel 16384; `publishedCore` is the
+canonical bytes of the typed packet. Native admission and the activity kernel recompute it and
+accept only an identical artifact (`SourceSelection`, `Replayed`; `publish` and `loadProgram`
+in `Kernel/ObjectiveActivity.lean`). The source package is edition 3 (sources, import locks,
+entry, one `frontEnd` pin); the policy is edition 4. Earlier editions do not decode.
 
 ## Provenance
 
-The parser and elaborator were ported from TypeScript and translation-validated
-against it before the TypeScript was deleted (2026-10-04): the parser on every
-in-repo `.obend` plus 2720 seeded mutants and 66 probes (2854 jobs: identical ASTs and
-identical refusal messages and spans, except two deliberate divergences where the
-TypeScript accepted what it should not: an identifier such as `valueOf` read as a
-binary operator through `Object.prototype`, and a string literal holding a lone UTF-16
-surrogate escape); and the whole pipeline, source to core term and typing proposal, on
-every declaration of every `tests/objective-bend-source/*.obend`, every
-preview-cohort invocation and the elaborator probes (302 jobs, 0 disagreements; a
-mutated term is caught). Reports: `docs/objective-bend/evidence/front-end-port-20261004.json`.
+The parser and elaborator were ported from TypeScript and translation-validated before the
+TypeScript was deleted (2026-10-04): the parser on every in-repo `.obend` plus 2720 seeded
+mutants and 66 probes (identical ASTs and refusals, except two deliberate fixes), and the whole
+pipeline on every declaration of `tests/objective-bend-source/*.obend`, every preview-cohort
+invocation and the elaborator probes (302 jobs, 0 disagreements). Report:
+`docs/objective-bend/evidence/front-end-port-20261004.json`.
 
 ## Checks
 
-```
+```text
 bash scripts/check-objective-frontend.sh
 ```
 
-runs every row through the Lean front end: `identity` (the compiled-in manifest is
-`sha256sum` of the files), `elaborate-tests` (`tests/objective-bend-source/check-elaborate.ts`:
-the elaboration cohort, one batch), `c4-tests` (`Compiler/ObjectiveBendC4Vectors`:
-pommette's vectors and refusals, and the ordered-presentation invariance on 4000
-seeded DAGs, compiled theorems), `check-parser`, `check-preview` (each cohort item
-captured, elaborated, checked and run; a wrong capture pin and a typing-budget
-refusal; tick and heap suspensions), `publication`
-(`tests/objective-native/PublicationReplay.lean`: the Host's publication of
-`world/NativeReceipt.obend` is what the receiver's replay recomputes; a foreign pin, a
-changed source and a tampered core are refused), `activity-replay`
-(`tests/objective-native/ActivityReplay.lean`: the activity kernel replays the package
-stored with an activity artifact and loads the program from it; a foreign core, a foreign
-front end, a missing package and another source are refused), `examples`, `tutorial`. A cohort item pins a
-scalar result (`expected`), or a whole structured result (`expectedData`, typed data
-compared with record fields ordered by name), or the reason a result has no deep view
-(`expectedDataStatus`), or exhaustion of the preview's tick budget
-(`expectedStatus: "suspended"`).
+Every row drives the Lean front end and is red, saying "needs warm base", without a built tree:
+`identity`; `elaborate-tests` (`tests/objective-bend-source/check-elaborate.ts`); `c4-tests`
+(`Compiler/ObjectiveBendC4Vectors`: published vectors, refusals, ordered-presentation invariance
+on 4000 seeded DAGs); `check-parser`; `check-preview` (`preview-cohort.json`: each item
+captured, elaborated, checked and run, pinning a scalar, a structured result, a no-deep-view
+reason or a suspension; a wrong capture pin, a typing-budget refusal, tick and heap
+suspensions); `ltuo-probes` (`ltuo/probe-cohort.json`: each probe pinned at its current outcome
+with the target its LTUO row owes); `publication`; `activity-replay`; `examples`
+(`scripts/check-objective-examples.sh`); `tutorial` and `overview`
+(`scripts/check-objective-tutorial.ts` over [the tutorial](OBJECTIVE-BEND-TUTORIAL.md) and
+[the overview](OBJECTIVE-BEND.md): every command re-run, every listing equal to its file).
 
 ## Trust boundary
 
-Trusted (no theorem): the parser, the elaborator and its typing proposal's choices,
-the C4 implementation. Their output is not trusted blindly:
-`Compiler/ObjectiveBendFrontEndAdequacy` proves that whenever the checker accepts the
-front end's own packet (`ObjectiveBendFrontEnd.accept`), the erasure of the
-elaborator's term is closed and typed by the checker's derivation (`accepted_typed`),
-is never refused by the bounded demand machine at any budget
-(`accepted_never_refused`), and a finished run of it extracts the unique deep source
-evaluation of it (`accepted_execution_semantics`); `accept_inhabited` exhibits a surface program it
-holds for. `Kernel/ObjectiveBendAdmissionSemantics.admitted_front_end` proves an
-admitted invocation's typed core is byte-for-byte this front end's lowering of the
-package's sources. The link from the packet to the term is a theorem: the checker's decoder inverts the
-front end's rendering (`decode_json`, `Compiler/ObjectiveBendTermWire.lean:69`;
-`decodePacket_term`, `:280`), so the term the checker reads from the packet is the
-elaborator's erasure by proof, and a receiver types that term, never a parse of the
-published bytes (`Compiler/ObjectiveBendPublication.lean:1-20`). Open: there is no
-surface semantics, so nothing states that the core means what the source means. Laws are retained,
-never discharged; `requires` is not checked.
+Trusted, with no theorem: the parser, the elaborator and its typing proposal's choices, the C4
+implementation. There is no surface semantics, so nothing states that the core means what the
+source means. What is proved of the output: `Compiler/ObjectiveBendFrontEndAdequacy`
+(`accepted_typed`, `accepted_never_refused`, `accepted_execution_semantics`, inhabited by
+`accept_inhabited`); `decode_json` and `decodePacket_term` (the checker's decoder inverts the
+front end's rendering, so a receiver types the front end's own term, never a parse of published
+bytes); `admitted_front_end` (an admitted invocation's typed core is this front end's lowering
+of the package's sources).

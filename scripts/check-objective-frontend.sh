@@ -29,6 +29,8 @@
 #     examples          scripts/check-objective-examples.sh (typed packets, drivers, cohort)
 #     tutorial          scripts/check-objective-tutorial.ts: every command block of
 #                       docs/OBJECTIVE-BEND-TUTORIAL.md re-run through docs/tutorial/run.ts
+#     overview          the same over docs/OBJECTIVE-BEND.md, whose every ```obend PATH listing
+#                       must also equal its file (docs/objective-bend/examples/)
 #
 # A row with no lean binary or no built front end is RED and says "needs warm base":
 # nothing is skipped and nothing falls back.
@@ -46,7 +48,7 @@ logs=$repo/build-logs/objective-frontend; mkdir -p "$logs"
 work=$(mktemp -d "${TMPDIR:-/tmp}/objective-frontend.XXXXXX")
 only=${OBJECTIVE_FRONTEND_ONLY:-}
 export LEAN_NUM_THREADS=2
-ROWS=(identity elaborate-tests c4-tests check-parser check-preview ltuo-probes publication activity-replay examples tutorial)
+ROWS=(identity elaborate-tests c4-tests check-parser check-preview ltuo-probes publication activity-replay examples tutorial overview)
 declare -A STATUS
 red=0
 
@@ -108,6 +110,7 @@ r_examples()        {
   LAKE_ROOT=$lake_root BUN=$bun WORK=$work/examples bash scripts/check-objective-examples.sh
 }
 r_tutorial()        { need_bun && need_lean && front_env && "$bun" scripts/check-objective-tutorial.ts; }
+r_overview()        { need_bun && need_lean && front_env && "$bun" scripts/check-objective-tutorial.ts docs/OBJECTIVE-BEND.md; }
 # The marker each row must print (extended regex); a row with no marker line is red.
 declare -A MARK=(
   [identity]='^FRONT-END IDENTITY PASS: [0-9a-f]{64} '
@@ -120,6 +123,7 @@ declare -A MARK=(
   [activity-replay]='^ACTIVITY REPLAY PASS: '
   [examples]='^results: '
   [tutorial]='^TUTORIAL PASS: [0-9]+ commands'
+  [overview]='^TUTORIAL PASS: [0-9]+ commands .*; [1-9][0-9]* listings equal their files$'
 )
 
 for row in "${ROWS[@]}"; do

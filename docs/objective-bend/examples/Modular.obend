@@ -1,0 +1,19 @@
+edition ObjectiveBend 1
+
+record XY:
+  x: Nat
+  y: Nat
+record XYZW:
+  x: Nat
+  y: Nat
+  z: Nat
+  w: Nat
+
+extension AddY[Self has {x: Nat}, Super has {x: Nat}](self: Self, super: Super) -> Super with {y: Nat}:
+  extend(super, {y: 2n * self.x})
+
+extension AddZW(self: XYZW, super: XY) -> XYZW:
+  extend(super, {z: self.y, w: self.z + 1n})
+
+def wOfFive() -> Nat:
+  fix(compose(AddY, AddZW), {x: 5n}).w

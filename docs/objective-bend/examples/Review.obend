@@ -1,0 +1,24 @@
+edition ObjectiveBend 1
+
+record Review:
+  review(value: Nat) -> Nat
+  twice(value: Nat) -> Nat
+
+spec Base for Review:
+  def review(value: Nat) -> Nat:
+    value + 1n
+
+spec Twice for Review:
+  requires review(value: Nat) -> Nat
+  def twice(value: Nat) -> Nat:
+    self.review(self.review(value))
+
+spec Augmented for Review:
+  def review(value: Nat) -> Nat:
+    super.review(value) + 1n
+
+def reviewOfThree() -> Nat:
+  fix(compose(Base, Twice, Augmented), {}).review(3n)
+
+def twiceOfThree() -> Nat:
+  fix(compose(Base, Twice, Augmented), {}).twice(3n)

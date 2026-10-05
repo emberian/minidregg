@@ -37,7 +37,7 @@ preview's own result, unchanged, instead of the short form used here.
 elaborates the source to a core term and a typing proposal. The preview then
 asks the checker to type that term. If the checker accepts, the preview runs the
 same term on the machine. See [OBJECTIVE-BEND-FRONTEND.md](OBJECTIVE-BEND-FRONTEND.md)
-and [OBJECTIVE-BEND-PREVIEW.md](OBJECTIVE-BEND-PREVIEW.md).
+([preview wire](OBJECTIVE-BEND-FRONTEND.md#preview-wire)).
 
 The short form prints these lines:
 
@@ -1162,7 +1162,7 @@ kernel itself runs uses the kernel's shapes: its Plan is `await {write, on, pati
 and its response is `resumed {outcome, view}`, the settled outcome together with the
 object's declared state read in the resuming turn.
 [world/activity/Tally.obend](../world/activity/Tally.obend) is the reference program, and
-[OBJECTIVE-BEND-EVENTS.md](OBJECTIVE-BEND-EVENTS.md#the-kernel-activity) describes the
+[OBJECTIVE-BEND-EVENTS.md](OBJECTIVE-BEND-EVENTS.md#the-kernel) describes the
 kernel's side.
 
 ### An effect may not hide in a shared value

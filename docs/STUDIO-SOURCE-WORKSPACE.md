@@ -27,7 +27,7 @@ focused tests; routes in `native/resource-client/src/web/studio.rs`); it has bee
 browser only on lane builds, with no member-reachable route. Governed publication, prototype instantiation and instance evolution
 are unavailable until their real producer and native intent APIs are connected.
 Objective Bend preview is a separate route (`studio_preview.rs` to the pinned Host's
-`objective-front` command; see [Objective Bend](OBJECTIVE-BEND.md#execution-paths)). No compiler success or installed program is
+`objective-front` command; see [Objective Bend](OBJECTIVE-BEND-FRONTEND.md#preview-wire)). No compiler success or installed program is
 inferred from a document save or package metadata.
 
 Module, import and entry controls apply exact revision-bound composition operations.

@@ -11,10 +11,12 @@ subset). The continuous runner (`scripts/pipeline/journey-rows:15`) runs the row
 `journey` (J0–J8, `JROT`, `JROTL`, and `JRLANE` and any seat step when present),
 `objective` (`native/resource-client/objective-native-acceptance.py all`: the native
 Objective Accepted receipt and its refusals,
-[native admission](OBJECTIVE-BEND.md#native-admission)), `rooms`, `activity` and `seats`;
-the last two report ABSENT while no driver exists in the tree (the activity and seat
-modules have no native route yet, [activities](OBJECTIVE-BEND-EVENTS.md#the-kernel-activity),
-[seats](SEATS.md)). It prints
+[native admission](OBJECTIVE-BEND.md#native-admission-by-re-execution)), `rooms`, `activity`
+(`objective-activity-native-acceptance.py`: the signed activity turns,
+[activities](OBJECTIVE-BEND-EVENTS.md#the-kernel)), `seats`
+(`objective-seat-native-acceptance.py`, [seats](SEATS.md)) and `objectrecord`; the call and
+send drivers (`objective-call-native-journey.py`, `objective-send-native-journey.py`) are not
+rows. It prints
 one row per step (PASS / FAIL / UNBUILT, wall seconds, the artifact that decided
 it), writes `journey-result.json`, and exits 0 only when every step passes. The
 frontier is the first step that did not pass; it is read from a run, never

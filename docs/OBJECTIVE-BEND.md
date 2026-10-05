@@ -1,663 +1,665 @@
 # Objective Bend
 
-Objective Bend is Mini's authored language and its only Bend language. Its model
-is François-René Rideau's ("Faré") account of object orientation as modularity and
-incrementality made available as ordinary in-language computation: **lazy open
-recursion over first-class, partial, composable specifications**. Mini supplies
-what the language does not: durable identity, current authority, effect admission,
-funding and controlled disclosure.
+Objective Bend is Mini's authored language. Its model is François-René Rideau's
+("Faré") account of object orientation as modularity plus incrementality: **lazy open
+recursion over first-class, partial, composable specifications**. A program is a
+package of `.obend` source; the one front end (in Lean) lowers it to a term of the core
+calculus, **Core4**; the proof-producing checker types that term; the demand machine
+runs it. Mini supplies what the language does not: durable identity (objects), current
+authority, admission, funding and the laws that judge every write.
 
-This page has five parts: the language in Faré's terms (what the core has, and what
-it lacks, ranked), its formal status, its execution paths and trust boundary (the
-preview, native admission, the kernel's activities, objects and seats, and the laws that
-judge them), how surface syntax becomes core terms, and a note on the deleted first
-generation.
-Evidence classes used below: *authored* (source exists), *compiled* (Lean checked
-it), *executed* (it ran), *integrated* (a native Host admitted it), *deployed*.
+This page is the overview. It is written against the code; where it names a theorem, the
+theorem is in `scripts/gates/objective-statements.snapshot` (Core4) or
+`scripts/gates/objective-statements-mathlib.snapshot` (kernel, front end). Companion
+documents:
 
-## The language in Faré's terms
+- [OBJECTIVE-BEND-TUTORIAL.md](OBJECTIVE-BEND-TUTORIAL.md): the language from zero, every
+  result re-run by a gate.
+- [OBJECTIVE-BEND-FRONTEND.md](OBJECTIVE-BEND-FRONTEND.md): reference for the front end
+  (commands, capture, preview wire, surface-to-core lowering, publication).
+- [OBJECTIVE-BEND-EVENTS.md](OBJECTIVE-BEND-EVENTS.md): reference for activities and the
+  object kernel (turns, cells, fees, calls, sends).
+- [objective-bend/MODULAR-TYPING.md](objective-bend/MODULAR-TYPING.md) and
+  [objective-bend/REFLECTION.md](objective-bend/REFLECTION.md): the design records behind
+  modular typing and the reflection contract.
+- [OBJECTIVE-BEND-BACKENDS.md](OBJECTIVE-BEND-BACKENDS.md): executors other than the Lean
+  machine; [SEATS.md](SEATS.md): seats and invitations.
 
-### Extensions, self and super
+Evidence words used below: *compiled* (Lean checked it), *proved* (a theorem in a
+snapshot), *executed* (a gate or lane ran it), *integrated* (a native Host admitted it on
+a scratch world), *deployed* (nothing here is).
 
-A **specification** is a first-class partial extension `C → V → W`: given the
-eventual context `C` (the **final self**) and an inherited value `V` (the **whole
-super**), it produces `W`. It can add fields, wrap behaviour, replace a value or
-build a function; it is not limited to overriding a method selector, and it is a
-value before any target exists (Faré, ltuo §2.1, §5.4.1–4; EOOMI §3.3.5).
+## Core4
 
-Composition passes the same final self to every layer and feeds each layer the
-whole result of the layers below it (Faré, poof §1.2.3, §1.3.2):
+### Specifications, `mix` and `fix`
 
-```text
-mix(lower, upper) = λself. λsuper. upper self (lower self super)
-```
-
-`fix(spec, inherited)` closes the knot: it is a computation, not an equation
-(ltuo §5.3.2). Every value satisfies `x = identity(x)`, yet `fix(identity)`
-produces no result; the operational rule is what gives `fix` meaning. Laziness is
-part of the meaning, not an optimisation: `{good = 7, bad = self.bad}.good` is `7`,
-and an unused divergent argument is never forced (EOOMI §5.1; ltuo §10.3.2).
-A **prototype** pairs a specification with its target so that reflection can reach
-the specification without forcing the target (ltuo §2.3.3, §6.1.2–4).
-
-### What Core4 has
-
-The core calculus ("Core4") is `Term` in
-[ObjectiveBendOpenRecursion](../Theory/ObjectiveBendOpenRecursion.lean). Each
-constructor, with its one-line semantics:
-
-| Constructor | Semantics | Faré concept |
-| --- | --- | --- |
-| `bound i` | de Bruijn variable; the machine enters the heap cell at that environment address | — |
-| `lam body` | weak-head value; the machine builds a closure | — |
-| `app f a` | call-by-name β in the reference semantics; the machine makes `a` a shared heap thunk (call-by-need) | laziness, shared suspensions |
-| `mix lower upper` | steps to `λself.λsuper. upper self (lower self super)` | mixin composition, one final self, whole super |
-| `fix spec inherited` | steps to `spec (fix spec inherited) inherited`; the machine ties one heap address to itself | fixpoint as computation |
-| `specification metadata extension` | value; applying it applies `extension`; `metadata` is reachable without forcing the extension | first-class partial specification |
-| `prototype spec target` | value pairing a specification with its target | conflation of spec and target |
-| `reflect` / `metadata` / `project` | eliminators: spec of a prototype, metadata of a spec, target of a prototype, each without forcing the other part | reflection (partial) |
-| `nat n`, `boolean b`, `label s` | scalars; labels are opaque strings | — |
-| `binary p l r` | strict, left to right; `p` ∈ {add, multiply, equal (Nat → Bool), conjunction (Bool), labelEqual (label → Bool)} | — |
-| `record fields` | fields are separate suspensions; lookup takes the first match | records of suspensions (slots and methods are not distinguished) |
-| `extend inherited fields` | defined only when `inherited` is a record; new fields shadow | method override |
-| `get t name` | field selection by a static name | — |
-| `ifZero v z s` | case on a Nat; the successor branch binds the predecessor | — |
-| `inject l p`, `case s arms`, `ifBool c t f` | sums: a lazy injection, case on its label (first matching arm), the Boolean branch | variants, lists, branching |
-| `perform plan`, `done v` | an activity yields a typed Plan and is resumed with a typed response; `done` returns a pure value from an activity | effects as yield ([activities and events](OBJECTIVE-BEND-EVENTS.md)) |
-
-**Types and quantities** ([Types](../Theory/ObjectiveBendTypes.lean),
-[Typing](../Theory/ObjectiveBendTyping.lean)). `check` is proof-producing: it returns
-a typing derivation for the actual term. Rows are compared canonically; there is
-no subtyping, and type equality is exact up to one bounded head unfolding. Rigid
-type variables carry explicit bounds and keep row tails, so a method can be typed
-against a future self it has not seen (ltuo §8.2.1–4). `fix` is typed
-homogeneously (`target → inherited → target`); heterogeneity lives only in `mix`.
-Quantities are erased, affine, linear and unrestricted; the checker enforces
-at-most-once for both affine and linear (not exactly-once), and a reusable closure
-may capture only unrestricted, shareable bindings. Nothing creates a custody value,
-so `Ty.custody` is unused by any closed program.
-
-The whole package is one lazy fixpoint: every global declaration is a field of one
-record knot, so mutually recursive definitions (the `EvenOdd` example) work through
-it. That is Faré's "global fixed point of the namespace" (ltuo §9.3.7). The root is
-itself a specification, `fix(specification(package, λglobals λseed. extend seed
-{…}), {})`: its extension overlays the declarations on the inherited row
-(`Compiler/ObjectiveBendElaborate.lean`, the package knot in `elaborateM`), so a
-package is an extensible value in the core. No surface form yet names another
-package's root, so another package still cannot extend it from source.
-
-### An example
-
-[ReviewBase](../tests/objective-bend-source/ReviewBase.obend) declares a `Review`
-record and a `Base` spec. [ReviewMember](../tests/objective-bend-source/ReviewMember.obend),
-written separately, imports it and adds `Twice` (which uses `self.review`) and
-`Augmented` (which wraps `super.review`):
+A **specification** is a first-class partial extension `C → V → W`: given the eventual
+whole (the **final self**, `C`) and the value inherited from the layers below (the **whole
+super**, `V`), it produces `W`. It can add fields, wrap behaviour, replace a value or build
+a function, and it is a value before any target exists (ltuo §2.1, §5.4). Composition
+passes one final self to every layer and feeds each layer the whole result below it
+(poof §1.2.3, §1.3.2). The reference relation `Step`
+(`Theory/ObjectiveBendOpenRecursion.lean`) says exactly that:
 
 ```text
-def review(inherited: Prior.Review) -> Prior.Review:
-  fix(compose(Prior.Base, Twice, Augmented), inherited)
+mix lower upper     ⟶  λself. λsuper. upper self (lower self super)
+fix spec inherited  ⟶  spec (fix spec inherited) inherited
 ```
 
-`twice` sees the final, augmented `review` through self, so `twice(3)` reads as
-`7`. [reference/TwiceReview.lean](../examples/objective-bend-world/reference/TwiceReview.lean)
-embeds the typed packet the front end produces for the source, and pins the result
-`7` (checked type `natural`, no uses) as a `native_decide` theorem under
-`scripts/check-objective-examples.sh`.
-Smaller probes in
-`tests/objective-bend-source/` separate the lazy cases (`LazyUnusedArgument`,
-`LazyUnusedField`, `LazySharedField`), heterogeneous extension (`Heterogeneous`),
-captured reusable extensions (`GenericExtension`) and reflection of an incomplete
-prototype (`ReflectLazyPrototype`).
+`fix` is a computation, not an equation (ltuo §5.3.2): the operational rule is its
+meaning. **Laziness is part of the meaning**: `{good = 7, bad = self.bad}.good` is `7`, and
+an unused divergent argument is never forced (EOOMI §5.1). The reference semantics is
+call-by-name; the demand machine is call-by-need (an argument or field is one shared heap
+cell, evaluated at most once), and `fix` ties one heap address to itself.
 
-### What Core4 lacks: the roadmap
+A **prototype** pairs a specification with its target so reflection can reach the
+specification without forcing the target (ltuo §2.3.3, §6.1).
 
-Ranked by how much later work each one unblocks. *Elaboration* means expressible
-by compiling into existing constructors; *core* means new constructors, new machine
-frames and new preservation and adequacy cases.
+### The terms
 
-Landed since this list was written: **sums with case** (`inject`, `case`,
-`ifBool`, and the `labelEqual` primitive; design [SUMS-DESIGN.txt](../SUMS-DESIGN.txt)),
-**an activity** (`perform`/`done`, a yielded machine state with a resume rule, effects as
-a type, an effect never inside a forced shared thunk, and a checkpoint codec with a
-proved round trip; [activities and events](OBJECTIVE-BEND-EVENTS.md)) and its kernel
-half (persisted records, answer slots, the resume contract, resume with a view of the
-object's state, paid exhaustion and disposal) **with its native signed route** (every turn
-a signed command, `Kernel/ObjectiveActivityReceiver`, Host operations 210-214, `mini
-activity`; integrated on scratch worlds by `objective-activity-native-acceptance.py` and
-`objectrecord-native-journey.py`, journey rows `activity` and `objectrecord`; `34d803f8`,
-`259a2fb0`), **the object record** (`de9c84f7`), **machine primitives** for `- / % < <=`
-(one step each; the `$prelude` is deleted; `0afaf7f2`, `606e4e17`), **deterministic deep
-evaluation** (`deepEvaluates_unique`, `1f812657`),
-**declared
-ancestry with C4 linearization and method combination** in the elaborator (`spec S
-extends A, B`, `suffix spec`, `around`, `combine`; a diamond's shared ancestor counts
-once; [front end](OBJECTIVE-BEND-FRONTEND.md#declared-ancestry-and-method-combination)),
-and **the package root as a specification**.
+`Term` in `Theory/ObjectiveBendOpenRecursion.lean`, all of it:
 
-Item-by-item status against the code, with commits and owners:
-[ROADMAP-STATUS](objective-bend/ROADMAP-STATUS.md).
+| Term | Meaning |
+| --- | --- |
+| `bound i`, `lam b`, `app f a` | de Bruijn variable, abstraction, application (β; the machine makes `a` a shared thunk) |
+| `mix lower upper`, `fix spec inherited` | the two rules above |
+| `specification meta ext` | a value; applying it applies `ext`; `meta` is reachable without forcing `ext` |
+| `prototype spec target` | a value pairing a specification with its target |
+| `reflect p`, `metadata s`, `project p` | the spec of a prototype, the metadata of a spec, the target of a prototype; none forces the other part |
+| `nat n`, `boolean b`, `label s` | scalars; naturals are unbounded, labels are opaque strings |
+| `binary p l r` | strict, left to right; `p` ∈ `add multiply equal conjunction labelEqual subtract divide less lessEqual modulo`, each one machine step |
+| `record fs`, `extend r fs`, `get t name` | records of separate suspensions (first match wins), override, selection by a static name |
+| `ifZero v z s` | case on a Nat; the successor branch binds the predecessor |
+| `inject l p`, `case s arms`, `ifBool c t f` | sums: a lazy injection, case on its label, the Boolean branch |
+| `perform plan`, `done v` | an activity yields a Plan and is resumed with a response; `done` returns a pure value from an activity |
 
-1. **Sends between objects** (kernel). Synchronous `call` is built (see
-   [calls across objects](#calls-across-objects)), and so are asynchronous sends with
-   inboxes, the decider of a slot as a role, escrowed postage and forwarding at slot
-   resolution ([sends and inboxes](#sends-and-inboxes), OB8). An activity awaiting a message is not.
-2. **A guardedness check** (typing). Every self-call of a resident under a perform,
-   so that a well-typed resident never diverges inside a turn.
-3. **The theorem for declared ancestry** (proof; poof §4.3; ltuo §7.3–7.4, §9.2). The
-   elaborator linearizes a declared static DAG with C4 and builds the `mix` chain from
-   it, with no new constructors (see "landed" above). What is missing is the theorem:
-   invariance under renaming of the ordered presentation, and suffix soundness.
-   `OrderedPresentationInvariant` (`Compiler/ObjectiveBendC4.lean`) is stated as a
-   `Prop` and not proved; the evidence is `Compiler/ObjectiveBendC4Vectors.lean`
-   (56 published precedence vectors and 4000 seeded random DAGs, compiled theorems). `before` and `after`
-   methods are still refused by the elaborator; Core4 has `perform` now, so they are
-   buildable and not built.
-4. **Checked `requires` and closed final-self assumptions** (typing rules only;
-   ltuo §8.2). `requires` survives only as a JSON string inside the metadata label.
-   Checking the required row against the composed provided row at `fix` turns
-   partial specifications into checked collaborations.
-5. **Dynamic `get`, and a surface form that names another package's root** (ltuo
-   §9.3.7, §9.2.9; Houyhnhnm ch.7). The root is a specification and label equality is
-   a primitive (both landed); dynamic `get` is one constructor. Makes "extend what you
-   do not own" true.
+`subtract` is truncated, `divide` floors with `a / 0 = 0`, `modulo` is its remainder
+(`subtract_truncated_exact`, `divide_floor_exact`, `divide_modulo_reconstruct`,
+`order_exact`). There is no digest primitive and no dynamic (computed-name) `get`.
 
-Further gaps, unranked: sealing, `final` and suffix declarations (ltuo §9.4.4.1,
-§10.4.2), which are what let a backend reduce dynamic dispatch to static; reflection
-beyond `reflect`/`metadata`/`project` (field enumeration, has-field), which must wait
-for a decision on what reflection may observe, because every observer forbids an
-optimisation (ltuo §10.7); a consumed mark for linear values in the heap; fresh
-persistent instances (poof §1.3.1), which are Mini's identity rather than a core
-construct; governed live upgrade (Houyhnhnm ch.5; ltuo §6.3.2); and a canonical cost
-law on the machine.
+### Types and quantities
 
-### Relation to Preoscript
+`Theory/ObjectiveBendTypes.lean` and `Theory/ObjectiveBendTyping.lean`. `check` is
+proof-producing: it returns a typing derivation for the actual term (`Checked`). Rows are
+compared canonically; there is no subtyping, and type equality is exact up to one bounded
+head unfolding of an alias variable. Bounded type variables keep row tails, so a method can
+be typed against a future self it has not seen (`future_row_instantiation_accepted`,
+`future_binary_instantiation_accepted`; ltuo §8.2). `fix` is typed homogeneously
+(`target → inherited → target`); heterogeneity lives in `mix`
+(`heterogeneous_runtime_mix_accepted`). Effects are a type, `Ty.computation P R A`; an
+activity type is never shareable, so no effect can sit in a field, argument, payload or
+Plan (`effect_as_argument_refused`, `effect_in_record_field_refused`, ...). Quantities are
+erased, affine, linear and unrestricted; the checker enforces at most once for both affine
+and linear (`duplicate_affine_refused`), not exactly once, and a reusable closure captures
+only unrestricted, shareable bindings (`reusable_lambda_capture_rule`).
 
-Preoscript (in the separate `lean-uwueave` library) is a contract language about
-promises over replicated state: invariants, future-indexed certificates, status,
-coordination obligations. It has nothing about self, super or open recursion, and
-Core4 has nothing about futures or merge; the two do not overlap at the constructor
-level. They meet at Core4's weak spots: laws kept separate from authority, `requires`
-checked at compose and fix, and a Plan as data. Preoscript is a contract language
-Core4 specifications should carry and check, not a projection target to emit. An
-ordered override can delete an obligation, so the obligation profile of a `mix` is
-not simply a sum; that needs a theorem.
+### The package is a specification
 
-## Formal status
+Every global declaration is a field of one record knot, so mutual recursion works through
+it (ltuo §9.3.7). The root is itself a specification:
+`fix(specification({package: …}, λ$globals λ$seed. extend $seed {M.decl: …}), {})`, a
+global reference is `get $globals "M.name"`, and the root extends its inherited row. No
+surface form names another package's root, so another package cannot yet extend it.
 
-The proofs are in `Theory/ObjectiveBend*.lean` (compiled, in the `ObjectiveProofs`
-library). Every theorem's exact axiom set is pinned in `scripts/gates/objective-axioms.pin`
-(each set is within `propext`, `Classical.choice`, `Quot.sound`; none uses `sorryAx` or
-`Lean.ofReduceBool`) and its statement in `scripts/gates/objective-statements.snapshot`;
-there is no `sorry`, `axiom`, `native_decide`, `partial` or `extern` in those files. The
-compiled machine runs through proven-equal `@[csimp]` replacements
-(`Theory/ObjectiveBendDemandMachineFast.lean:77`, `:171`, `:207`; `forceWith_eq_fast`,
-`Theory/ObjectiveBendDemandData.lean:54`): the compiler's substitution is trusted, the
-equalities are theorems.
+### Ancestry and method combination
 
-### What is proven
+`spec S extends A, B for T` is linearized by C4 (C3 plus the suffix property, ltuo §7.4;
+`Compiler/ObjectiveBendC4.lean`) in the elaborator; the extension is the `mix` chain of the
+ancestors' hidden layers, with no new constructors. Identity is the qualified declaration
+key, so a diamond's shared ancestor counts once while `compose(E, E)` applies `E` twice.
+Qualifiers: `def` (primary), `suffix spec`, `around`, and the pure combinations
+`combine +`, `combine *`, `combine and`. `before` and `after` are parsed and refused by the
+elaborator.
 
-| Theorem | In plain words | Hypotheses |
-| --- | --- | --- |
-| `sourceStep_deterministic` | The reference step relation is deterministic. | none |
-| `runBounded_natural_sound`, `_boolean_sound`, `_label_sound` | If the bounded machine finishes a source term with a scalar, the reference semantics evaluates that term to the same scalar. | the term is closed (`Scoped 0`, met by every elaborated program); the run finished. Holds for every heap/stack limit and tick count. |
-| `runBounded_value_sound` | A finished run of any value (closure, record, spec, prototype) has a meaning for every heap address, the final heap realizes it, and the source evaluates to the returned value's meaning. Weak-head only. | closed; finished |
-| `runBounded_observes_sound`, `runBounded_observation_sound`, `runBounded_resource_independent` | Ground observations of finished runs agree with the reference semantics, and two finished runs under different limits observe the same result. | closed; finished |
-| `typed_stepRaw_preserved` | Every raw machine step preserves heap, control and stack typing, over an address typing that only grows. | a typed state (`checked_initial_state` builds one from any `Checked` term) |
-| `checked_reachable_no_refusal`, `check_runBounded_no_refusal` | A closed term the checker accepts never reaches any refusal (wrong operand, missing field, unbound reference, an effect inside a forced shared thunk), for every limit and tick count. Divergence, blackholes and resource suspension remain possible. | `Checked source []` |
-| `reachable_no_internalRefusal` | Closed scoped executions never refuse for an unbound variable, a missing cell or an invalid update. | closed |
-| `typed_yield_quiescent`, `stack_activity_signature`, `typed_resume_preserved` | A typed yield forces no shared cell and has no half-evaluated cell; it carries the program's own Plan/Response types; resuming it with a closed response of that type gives a typed state. | a typed state; the response typed at the program's Response type |
-| `state_roundTrip` | The checkpoint codec restores every machine state exactly. | none |
-| `machine_evaluation_complete` (from `rawRun_finite_completion`) | Completeness: a closed source that the reference semantics evaluates to a value with a ground observation is finished by the machine with that observation, in finitely many transitions. `coreRepresentation` inhabits `Representation` (soundness, completeness, observation) for every closed source. | `Scoped 0 source`, `Evaluates source value`, `Observes value result`; the machine step is the bounded `step` at limits that admit each next transition. |
-| `forceWith_unrestricted`, `forceWith_policy_suspends` | `forceWith` under the always-true policy is `runBounded`; any other policy can only stop early with a capacity suspension that retains the state the unrestricted bounded run had reached at that point. | none |
-| `materialize_sound`, `execution_source_semantics` | The Plan path is source semantics: a successful `executeWith` on a closed term, under any policy, limits and budget, is a finished `runBounded` of the same term, and the extracted Data is THE deep reference evaluation (`DeepEvaluates`) of the source term: a Data deep-evaluates the term exactly when it is the extracted Data. | `Scoped 0 term`; an `ExecutionWith` value |
-| `deepEvaluates_unique`, `execution_data_unique` | `DeepEvaluates` is deterministic (from `source_evaluates_unique`), so two successful executions of one closed term extract the same Data under any two policies (e.g. the native capacity profile and the unrestricted reference), limits and budgets. `sampleRecord_data` consumes it: every execution of `{answer: 6 * 7}` extracts `{answer: 42}`. | two `DeepEvaluates` derivations; `Scoped 0 term` and two `ExecutionWith` values |
-| `mix_append`, `composition_associative` | Folding a list of homogeneous extensions distributes over append, and specification composition is associative, on the list model in `ObjectiveBendExtensions`. | none; but it is a separate model, and no theorem ties it to `Term.mix` |
+### Specification metadata
 
-The no-refusal theorems are about the same function the preview runs: the preview
-calls `check` on the empty context and then `runBounded` on the same decoded term.
+Every specification has the one type `Specification<T>` =
+`specification(SpecMeta, Extension<T>)`, where `SpecMeta` and `SpecLaws` are built-in sums:
 
-### What is open
+```text
+sum SpecLaws:  none: {}  |  law: {name: String, status: String, rest: SpecLaws}
+sum SpecMeta:  declared: {name: String, interface: String, laws: SpecLaws}
+            |  composed: {inherited: SpecMeta, wrapping: SpecMeta}
+            |  extension: {}
+```
 
-- **A resource bound for completeness.** `machine_evaluation_complete` gives finite
-  completion, not a bound on the limits that suffice. `adequate_trace_completion` is
-  not it either: its premise is that the unbounded run already finished, and it
-  concludes only that bounded limits suffice. `Representation` is inhabited
-  (`coreRepresentation`) at `Supported := Scoped 0`, closedness; nothing in its type
-  stops a degenerate `Supported := fun _ => False` instance, so what makes the
-  instance mean something is that `Supported` is the real admission predicate, which
-  is a reading of the definition, not a theorem; the non-vacuity theorems are
-`lazyFixedSeed_supported_by_representation` and `open_term_not_started`. (The docstring on `Representation`, `Theory/ObjectiveBendOpenRecursion.lean:416-420`, still says "no instance is claimed here"; `coreRepresentation` at `Theory/ObjectiveBendDemandCompleteness.lean:1127` is the instance.)
-- **`OrderedPresentationInvariant`.** The C4 renaming-invariance statement is a `Prop`
-  that nothing proves (see the roadmap).
-- **Front-end adequacy.** No theorem relates `.obend` source to the core term (see
-  [the trust boundary](#the-trusted-front-end-boundary)).
-- **Quantities at run time.** Use counts are static only; no theorem says a value is
-  used at most once at run time.
-- **Forcing transparency.** The kernel stores the checkpoint of the Plan extraction's
-  state, not of the machine's own yielded state. That resuming it is equivalent is
-  proved only under the open premise `ForcingTransparent`
-  (`Kernel/ObjectiveResumeContract.lean:501`), which has a satisfying instance and
-  refuting ones (`:506`, `:652`, `:310`); the `transparency` gate compares the two
-  by execution ([activities and events](OBJECTIVE-BEND-EVENTS.md#the-resume-contract)).
+`compose(a, b)` is `specification(SpecMeta.composed{…}, mix a b)`. Laws, ancestry and
+composition change the metadata *value*, never the type, so
+`def twice(e: Extension<Nat>) -> Specification<Nat>: compose(e, e)` checks
+(`Compiler/ObjectiveBendSpecificationClosure.lean`: `composeTy_closed`, `twice_accepted`,
+`law_spec_accepted`). Reflection sees exactly: `metadata`, `reflect`, `targetOf`, the
+behaviour of application/`fix`/`mix`, and string equality on `SpecMeta` fields. Because
+`metadata` observes construction history, `compose` is associative for behaviour but not
+for reflection: the two associations are told apart by a program (probes R01/R02). The
+contract and its open half (a provenance-establishing prototype constructor) are in
+[REFLECTION.md](objective-bend/REFLECTION.md).
 
-Some facts read like semantics and are not: `TotalProof law := law`; the prepared
-output's `native_matches` and `no_returns`, and `checked_erasure`, are field
-projections; `ExecutionWith.runExact` records that a value is the output of the very
-call that produced it. A spec `law` is checked code (its own knot field, typed to
-return Bool) listed in the spec's `SpecMeta` with status `unchecked`; nothing evaluates
-or discharges it.
+## Writing a program
 
-### What the default build checks
+A source file starts with `edition ObjectiveBend 1`. Here a `Review` record is built from
+three separately written specifications. `Twice` declares that it needs `review` from the
+final self; `Augmented` wraps the inherited `review` through `super`:
 
-The `Theory/ObjectiveBend*` definition modules (term syntax, types and checker, the
-demand machine and its data and capacity layers) and the kernel, compiler and Host
-modules that use them are in the default build (`defaultTargets = ["Minidregg"]`,
-`lakefile.toml:2`). The proofs about them are a separate library, `ObjectiveProofs`
-(`ObjectiveProofs.lean`; `lakefile.toml:128-131`), gated by
-`scripts/check-objective-proofs.sh proofs`: it builds the library, then requires the
-statement snapshot and the axiom pin to equal the scan of the elaborated environment byte
-for byte, and self-tests its instrument on every run (a planted theorem must turn the diff
-red; a copy with the scan loop deleted must fail its floor). A default build alone
-therefore re-checks none of the proofs above; the gate does. The opt-in `ResearchWip`
-library holds the Objective zk assurance modules (`Assurance/ObjectiveBend*`,
-`Assurance/ObjectiveZk*`) and the C emitter, not the Core4 definitions or proofs. The
-front-end checks (elaborator and C4 tests, parser, preview cohort, publication and
-activity-replay, typed examples, the tutorial re-run) are the gate `objective-frontend`
-(`scripts/check-objective-frontend.sh`): its Lean rows are red, naming "needs warm base",
-when no built tree exists, and its TypeScript rows only drive the Lean front end through
-`bun`. The C-backend differential and the checkpoint-transparency differential are
-`check-objective-proofs.sh c` and `transparency`. All are rows of `scripts/local-gates.sh`.
+```obend docs/objective-bend/examples/Review.obend
+edition ObjectiveBend 1
 
-### The honest label for executed results
+record Review:
+  review(value: Nat) -> Nat
+  twice(value: Nat) -> Nat
 
-A Plan or result produced on the native path is **"Core4 `executeWith` output"**: what
-the evaluator computed, re-executed deterministically at admission and on every
-replay. `execution_source_semantics` relates it to the source: the run is a finished
-`runBounded` of the same term and the Data is THE deep reference evaluation of it
-(`deepEvaluates_unique`): the Core4 meaning of the term, the same under every policy
-that lets the run finish. It says nothing about the front end that produced the term.
+spec Base for Review:
+  def review(value: Nat) -> Nat:
+    value + 1n
 
-## Execution paths
+spec Twice for Review:
+  requires review(value: Nat) -> Nat
+  def twice(value: Nat) -> Nat:
+    self.review(self.review(value))
 
-### Preview: `runBounded`
+spec Augmented for Review:
+  def review(value: Nat) -> Nat:
+    super.review(value) + 1n
 
-Studio's preview runs: Rust `native/resource-client/src/workspace/studio_preview.rs`
-runs the pinned native Host's `objective-front` command, the Lean front end
-(`Host/ObjectiveBendFrontEnd`): `capture` locks the package's sources, `preview`
-parses (`Compiler/ObjectiveBendParse`), elaborates (`Compiler/ObjectiveBendElaborate`),
-writes the core and the typed packet, decodes the packet, runs `check`, then
-`runBounded`, in one process. This is the function the soundness and no-refusal
-theorems describe. An activity runs to its first yield; the preview prints the typed
-Plan, resumes with each supplied response (checked against the entry's declared
-response type) and runs to the next yield. Responses stand in for the kernel: nothing
-is admitted. From the repository root, against built oleans:
+def reviewOfThree() -> Nat:
+  fix(compose(Base, Twice, Augmented), {}).review(3n)
+
+def twiceOfThree() -> Nat:
+  fix(compose(Base, Twice, Augmented), {}).twice(3n)
+```
+
+`super.review(3)` is `Base`'s `4`, so the final `review(3)` is `5`. `twice` reads `review`
+through `self`, which is the final, augmented `review`, so `twice(3)` is
+`review(review(3)) = review(5) = 7`. The seed is `{}`: each layer is typed at the row
+actually beneath it, so no placeholder methods are needed.
+
+The preview runs it. `docs/tutorial/run.ts` captures the file, runs the Lean front end,
+asks the checker to type the term and, only on acceptance, runs the same term on the
+machine (the tutorial's "Before you start" says what it needs):
 
 ```sh
-F="lake env lean --run Host/ObjectiveBendFrontEndMain.lean"
-$F capture tests/objective-bend-source/GenericExtension-package.json NEW_CAPTURE_DIR
-# a preview-input.v2 request naming NEW_CAPTURE_DIR/objective.json and its sha256
-$F preview NEW_REQUEST_JSON NEW_RESULT_DIR
+$ bun docs/tutorial/run.ts docs/objective-bend/examples/Review.obend reviewOfThree
+status: finished
+type: Nat
+result: 5
+
+$ bun docs/tutorial/run.ts docs/objective-bend/examples/Review.obend twiceOfThree
+status: finished
+type: Nat
+result: 7
 ```
 
-or `bun docs/tutorial/run.ts FILE.obend ENTRY [ARGS]` for one file. Schemas:
-[capture](OBJECTIVE-BEND-FRONTEND.md), [preview](OBJECTIVE-BEND-PREVIEW.md). The
-preview carries `authority: none`.
+Every source block and command on this page is re-run by the `overview` row of
+`scripts/check-objective-frontend.sh`: each ```` ```obend PATH ```` block must equal the
+file byte for byte, and each command must print exactly what is shown.
 
-### Native admission
+The surface in brief (the full lowering table is in the
+[front-end reference](OBJECTIVE-BEND-FRONTEND.md#surface-language-and-its-core-lowering)):
+`def` (curried `lam`s in the package knot), `record`, `sum`, `extension(self, super)`,
+`spec … for T` / `spec …[Self has …, Super has …]`, `compose`, `fix`, `extend`, `prototype`,
+`reflect`, `metadata`, `targetOf`, `match` on Nats (`0n` / `1n+p`), Booleans and sums,
+`if … then … else`, `let` (one lazy cell), `fn`, `+ * - / % == != < <= > >= && ||`
+(`&&` is the strict primitive; `||` lowers to `ifBool` and is lazy in its right operand;
+`>`/`>=` are negations so the left operand is still evaluated first). There is no unary
+`!`, no wildcard arm, and no string operation but equality.
 
-A member invocation of an Objective method reaches an accepted receipt through the
-ordinary native path; Objective needs no new receipt type. **Evidence class: integrated on
-scratch worlds (a native Host admitted the signed invocations), not deployed.** `native/resource-client/objective-native-acceptance.py all`
-(the journey row `objective`, `scripts/pipeline/journey-rows:40`) builds a fresh
-one-sponsor Store whose genesis pins an Objective invocation policy, publishes a method,
-invokes it with a signed claim and checks the Accepted receipt and the stored result; a
-dishonest signer then tries every refusal below, the world is stopped and reopened, and
-every receipt must replay or look up as the same receipt. The path:
+## Modular typing
 
-- **Publish.** The Host's `objective-publication` (`Host/ObjectivePackageAuthor.lean`) runs
-  its own front end on the package and signs exactly `publishedCore`
-  (`Compiler/ObjectiveBendPublication.lean:67`); the package (edition 3) and the artifact
-  are two content atoms in one ordinary content proposal. Publication creates no authority.
-- **Quote and sign.** From the member's retained request (signed source and input queries
-  inside it) the local Host derives the final command (`Host/ObjectiveInvocationQuote.lean`:
-  it never accepts a remote final command, claimed output or `expectedInput`, and re-runs
-  the receiver's full gate unsigned). The client signs a prepare intent for exactly that
-  command (`mini objective-invoke`, `native/resource-client/src/objective_invoke.rs`); the
-  local consent endpoint 227 re-derives the command and compares the whole plan before any
-  header is signed. A lost reply is recovered by `mini retry --mode lookup`, never by
-  resubmitting.
-- **Admit.** `DeclaredResourceController.admit` dispatches to Objective admission, which
-  checks every signature and capability first, then (`prepareCore`,
-  `Kernel/ObjectiveBendNativeAdmission.lean:85`): the closed registered policy (edition 4,
-  `:512`), the declared envelope within the policy maximum (`capacityWithin`, `:115`), **the
-  tariff** (the claim's `proofWork` must equal the policy tariff's price of its declared
-  envelope, `tariffExact`, `:468`; a decodable policy's tariff is valid, so no admitted
-  invocation costs zero, `Core.proofWork_pos`, `:487`), the authenticated reads (sources and
-  inputs enter only as current signed queries, `:1-14`) with their consumed-read guards
-  (`guardsExact`, `:475`; `readGuardsOf`, `:370`), source selection (`SourceSelection`,
-  `:378`: the package names the policy's front end, which is the receiver's own, and the
-  receiver **re-runs that front end** on the package, so the artifact's typed core must be
-  byte-identical to the replay, `Replayed`), the inputs against the claim's commitment, and
-  the typed check of the applied term. `admit` (`:650`) then runs `executeWith` under the
-  declared limits, lowers the result to a Plan, requires the Plan's effects to equal the
-  command's (`Output.exact`, `:219`) and the measured usage to fit the declared envelope
-  (`fits`, `:578`).
-- **Commit.** The existing durable path; on reopen the Host re-executes the program during
+A specification is typed against what it uses, not against a whole target it has seen
+(Faré's distinction between "trivial non-modular" and modular types, ltuo §8.2). The rules,
+as built in `Compiler/ObjectiveBendElaborate.lean` (`chainFix`, `checkTemplates`) and
+pinned by `tests/objective-bend-source/ltuo/probe-cohort.json`:
+
+- **Closed specs.** `spec S for T` types `self` as `T` but `super` as an open row: the
+  members `S` reads through `super`. `requires m(…) -> R` must name a member of `T` at its
+  exact type, else `refused (requires-signature)`.
+- **`fix` discharges.** `fix(compose(L1, …, Ln), seed)` over declared plain specs types each
+  layer at the row beneath it, bottom up from the seed. A `super.m` that nothing below
+  provides is `refused (inherited-unprovided)`; a target member that no layer and not the
+  seed provides is `refused (requires-unprovided)`, naming the specs that require it; a
+  seed field outside the target is `refused (seed-extra)`. A seed that provides a member
+  discharges a requirement for it: that is inheritance from the seed.
+- **Open declarations.** An extension or spec may bind its assumptions:
+
+  ```obend docs/objective-bend/examples/Modular.obend
+  edition ObjectiveBend 1
+
+  record XY:
+    x: Nat
+    y: Nat
+  record XYZW:
+    x: Nat
+    y: Nat
+    z: Nat
+    w: Nat
+
+  extension AddY[Self has {x: Nat}, Super has {x: Nat}](self: Self, super: Super) -> Super with {y: Nat}:
+    extend(super, {y: 2n * self.x})
+
+  extension AddZW(self: XYZW, super: XY) -> XYZW:
+    extend(super, {z: self.y, w: self.z + 1n})
+
+  def wOfFive() -> Nat:
+    fix(compose(AddY, AddZW), {x: 5n}).w
+  ```
+
+  `AddY` is checked once, at its own bounds, with `Self` **rigid**: it is a lower bound,
+  not an alias of its row, so the body may read `self.x` and nothing else, and may not use
+  `self` where a value of exactly `{x: Nat}` is expected (`refused (self-rigid)`,
+  `refused (self-unbound-member)`). `Super with {y: Nat}` keeps whatever else `Super` has.
+  At `fix`, each open layer is instantiated at the final self and the row beneath it, after
+  both bounds are discharged (`refused (self-bound)`, `refused (inherited-unprovided)`). The
+  final self comes from the closed layers, else the enclosing definition's result type or
+  an annotated `let`, else `refused (self-undetermined)`. Here `AddY`, written without
+  knowing about `z` or `w`, is used under a four-field self:
+
+  ```sh
+  $ bun docs/tutorial/run.ts docs/objective-bend/examples/Modular.obend wOfFive
+  status: finished
+  type: Nat
+  result: 11
+  ```
+
+- **F-bounds and recursive records.** A bound may mention `Self`, so a binary method is
+  typed against the future self, and a record may name itself:
+
+  ```obend docs/objective-bend/examples/Heavier.obend
+  edition ObjectiveBend 1
+
+  record Node:
+    weight: Nat
+    heavier(other: Node) -> Node
+  record ColoredNode:
+    weight: Nat
+    color: Nat
+    heavier(other: ColoredNode) -> ColoredNode
+
+  spec Heavier[Self has {weight: Nat, heavier(other: Self) -> Self}, Super has {weight: Nat}]:
+    def heavier(other: Self) -> Self:
+      if other.weight <= self.weight then self else other
+
+  def node(n: Nat) -> Node:
+    fix(Heavier, {weight: n})
+
+  def colored(n: Nat, c: Nat) -> ColoredNode:
+    fix(Heavier, {weight: n, color: c})
+
+  def pick() -> Nat:
+    node(3n).heavier(node(5n)).weight + colored(2n, 7n).heavier(colored(1n, 9n)).color
+  ```
+
+  ```sh
+  $ bun docs/tutorial/run.ts docs/objective-bend/examples/Heavier.obend pick
+  status: finished
+  type: Nat
+  result: 12
+  ```
+
+**Design.** Templates, not polymorphic core terms: an open declaration is checked once
+against rigid variables, and every use is an instance with the actual types substituted, so
+the emitted program is an ordinary closed Core4 program and every machine theorem keeps its
+statement and proof (D1, D2 of [MODULAR-TYPING.md](objective-bend/MODULAR-TYPING.md)).
+
+**What is proved** (`Theory/ObjectiveBendTemplates.lean`): `canonical_instantiate`;
+`Discharges.infer_instantiate` and `Discharges.check_instantiate` (if the checker accepts a
+template under rigid bounds and a substitution discharges them, it accepts the instance, at
+the instantiated type, with the same uses, given `extra` more fuel); inhabited by
+`coloured_discharges` / `coloured_instance_accepted` (a `{weight}` template accepted at
+`{colour, weight}` by the theorem); the rigidity tooth `self_as_bound_row_alias_accepted` /
+`self_as_bound_row_rigid_refused`. The theorem is about the checker.
+
+**What is not.** The elaborator does not yet emit an instance as the substitution of the
+checked template: it re-elaborates each layer at its instance (`chainFix`), and `Super` in a
+template is the literal bound row rather than a second rigid variable. So the front-end
+corollary `instance_accepted` (a discharged instance is accepted, so every refusal after a
+template check is a named discharge refusal) is not stated; until it is, every instance is
+re-checked in the whole program, which is sound but means an anonymous `typing refused` is
+still possible. Ancestry specs and non-plain operands in a `fix` chain keep the closed
+whole-target rule. Instances across package roots are not addressed.
+
+## Activities
+
+An **activity** hands a typed Plan to its host, waits, and continues with the typed
+response. `Activity<P, R, A>` yields Plans of the sum `P`, is resumed with data of type `R`,
+and finishes with an `A`. `match perform(plan):` sequences: its arms are the handlers, and a
+pure tail is lifted with `done`.
+
+```obend docs/objective-bend/examples/Counter.obend
+edition ObjectiveBend 1
+
+record Write:
+  field: Nat
+  before: Nat
+  after: Nat
+
+sum Plan:
+  write: Write
+
+sum Response:
+  written: {}
+  refused: {}
+
+def bump(count: Nat) -> Activity<Plan, Response, Nat>:
+  match perform(Plan.write({field: 0n, before: count, after: count + 1n})):
+    case written(_): count + 1n
+    case refused(_): count
+```
+
+The preview has no kernel; responses are supplied on the command line and checked against
+the declared response type:
+
+```sh
+$ bun docs/tutorial/run.ts docs/objective-bend/examples/Counter.obend bump '["4"]'
+status: yielded
+type: Activity<sum {write: {field: Nat, before: Nat, after: Nat}}, sum {written: {}, refused: {}}, Nat>
+turn 1: yield write({field: 0, before: 4, after: 5})  (waiting)
+diagnostic: waiting for a response
+
+$ bun docs/tutorial/run.ts docs/objective-bend/examples/Counter.obend bump '["4"]' '["written"]'
+status: finished
+type: Activity<sum {write: {field: Nat, before: Nat, after: Nat}}, sum {written: {}, refused: {}}, Nat>
+turn 1: yield write({field: 0, before: 4, after: 5})  <- written({})
+result: 5
+```
+
+Semantics. `perform` is not a value and never a reduction: a term whose next redex is a
+perform has **yielded** (`yields_no_step`, `yields_deterministic`). On the machine,
+`perform` under an update frame (a shared cell being forced) is refused `sharedEffect`
+(`perform_under_update_refused`); otherwise the Plan becomes a heap cell and the state is
+`yielded` (`perform_yields`); `resume` is defined only on a yielded state and changes
+nothing but the control (`resume_requires_yield`, `resume_keeps_heap_and_stack`). The
+front end refuses, by name, an activity as an argument, field, payload or Plan
+(`effect-as-argument`, `effect-in-field`, `effect-in-payload`, `effect-in-plan`), a
+`perform` outside an activity and a parameterless activity (`nullary-activity`: it would be
+a shared value, its effect cached). The checker proves the same at the core
+(`checked_reachable_no_refusal` covers `sharedEffect`). Inside a turn, recursion is lazy
+`fix` and may diverge or exhaust its ticks; across turns a resident's self-call sits under a
+perform, so each unfolding costs one resume. No check yet guarantees that a well-typed
+resident's pure segment terminates.
+
+## Objects and the activity kernel
+
+The kernel runs activities on objects. Detail, with every turn and theorem, is in
+[OBJECTIVE-BEND-EVENTS.md](OBJECTIVE-BEND-EVENTS.md); the shape:
+
+- **An object** is a cell with an `ObjectRecord` (`Kernel/ObjectRecord.lean`: id, package
+  `pin`, `schemaVersion`, `law`, upgrade policy, continuity, payer), installed by `create`.
+  Its declared state is an `ObjectState {version, value}`. **Every declared-state write is
+  judged by the object's law** over the old and new state and the request facts
+  (`admitWrite`; `Birth.write_judged`, `Delivery.write_judged`, `StateWrite.write_judged`).
+  A birth must run the pinned package (`birth_refuses_non_object`,
+  `birth_refuses_other_pin`, `native_birth_on_pinned_object`). The kernel's cells sit at
+  reserved coordinates (≥ 2^256) that the ordinary route cannot write
+  (`ObjectiveActivityGate`: `ordinaryGate_refuses`, `forged_protected_write_refused`, run
+  for every non-kernel facet by `NativeHost.Config.sourceGate`).
+- **The program is the front end's output.** `publish` stores an artifact and its source
+  package only after re-running the Lean front end; every later turn reloads and replays
+  the pair (`Program.runs_front_end_output`).
+- **Kernel Plans and responses.** A resident yields `await {write, on, patience}`: a record
+  of per-field edits (`keep | set v | add n`) and what it waits for (an answer slot with one
+  decider, or a height), with a mandatory deadline. It is resumed with
+  `resumed {outcome, view}`: the settled outcome (`reply | refused | unknown | timedOut |
+  broken | upgraded`) and the object's declared state **read in the resuming turn**. The
+  kernel applies the edits to that view, so no write is computed from a stale read
+  (`resume_view_current`, `moved_state_refuses`, `yield_write_from_current_read`).
+  Reference program: [world/activity/Tally.obend](../world/activity/Tally.obend).
+- **Answer slots** (`Kernel/AnswerSlot.lean`): a name no submitter chooses, one decider,
+  one deadline, one terminal decision (`decide_single_decider`, `slot_decided_once`).
+- **The resume contract.** A delivery spends the await as a nullifier bound to the
+  checkpoint digest and writes the record against its current root: consume-once
+  (`resume_consumes_once`, `native_delivery_consumes_once`), the outcome arrives exactly as
+  decided (`resume_outcome_preserved`), one generation per resume
+  (`delivery_advances_generation`).
+- **The checkpoint** is the Plan extraction's state, settled and garbage-collected
+  (`ObjectiveBendDemandCollect.checkpoint`), stored as `encodeState` tokens
+  (`state_roundTrip`). It is typed (`birth_checkpoint_typed`, `delivery_checkpoint_typed`),
+  and across every reachable snapshot every awaiting record's checkpoint is typed
+  (`stored_checkpoints_typed`, `Kernel/ObjectiveCheckpointInvariant.lean`, over the three
+  kinds of step the replay walk admits, `derived_route`).
+- **Metering.** One public tariff (`Kernel/ObjectiveTariff.lean`, `Tariff.workOf`) prices a
+  **declared** envelope; no fee depends on measured work (`refund_measurement_free`,
+  `submitter_charge_declared`). A yield reserves its resume/timeout fee pair in the
+  activity's purse, a Book account of its own. **Exhaustion is a paid turn**: an attempt
+  that runs out of its envelope commits a charge and changes nothing else; an attempt at or
+  below the largest envelope already tried is refused before it runs
+  (`exhaustion_charges_declared`, `exhaustion_spends_nothing`,
+  `exhaustion_excludes_delivery`). Every turn's postings conserve every asset
+  (`Birth.conserves`, `Delivery.conserves`, …).
+- **Disposal.** An ended activity's record and settled slots are retired: the id never
+  returns, and a late delivery or decision is refused by name. Anyone may `abandon` an await
+  past its deadline plus a grace; the purse returns to the payer
+  (`abandon_returns_escrow`, `abandon_delivery_exclusive`).
+- **Faults.** A resumed segment that diverges, refuses, yields a malformed Plan or ends
+  with an unextractable result commits `faulted` and returns the unused escrow; it never
+  refuses the turn, so a faulty program cannot park its activity
+  (`resumedSegment_never_refuses_program_fault`).
+- **Route.** Eleven turns (`publish`, `create`, `birth`, `resolve`, `deliver`, `exhaust`,
+  `abandon`, `topUp`, `writeState`, `invoke`, `deliverMessage`), each a signed native command
+  (`Kernel/ObjectiveActivityReceiver.lean`; Host operations 210-214; `mini activity`). The
+  receiver writes only kernel cells and the Book (`intent_writes_activity_or_book`).
+  **Integrated on scratch worlds**: journey rows `activity`
+  (`objective-activity-native-acceptance.py`) and `objectrecord`.
+
+## Calls and sends
+
+**Call** (`Kernel/ObjectiveCall.lean`). An `invoke` turn calls one method of one object; the
+method may call other objects' methods in the same turn, depth first, to depth 8. A method
+is a declaration of the object's pinned package, lowered by the kernel's own front end, of
+type `method(view: {version, state}, args: X) -> Activity<P, R, {result, write}>` with `P`
+among `call | send` and `R` among `returned | queued`: every yield is answered in the same
+turn, so no frame suspends across turns (a method whose Plan admits `await` is refused
+`notCallable`).
+
+- Re-entry is refused (`reentry_refused`; `invocation_reentry_free`: no object occurs twice
+  on a stack an admitted invocation entered).
+- Writes apply at frame return, to the frame's own object, judged by that object's law
+  against exactly the state the frame was shown (`invocation_writes_from_view`), so a callee
+  never sees a caller's pending write and none is lost.
+- Authority: the root frame carries the signer; a nested frame carries the signer as
+  `request/subject` only under a scoped grant `{object, method, uses}` of the invocation,
+  spending a use (`grantSpent` when none is left); `request/caller` names the calling
+  object, so a law can admit chosen callers.
+- One declared envelope for the whole tree (`runCounted`, proven equal to `runBounded`),
+  priced by the tariff.
+
+**Send** (`Kernel/ObjectiveSend.lean`, `Kernel/Inbox.lean`). A frame may yield
+`send {to: object n | slot n, method, args}`, answered at once with `queued {slot}`; the
+message id names its reply slot. The invocation declares `postage`, the envelope each
+message is delivered under, and each send escrows its price into the purse of the queue
+holding it (`uncovered` otherwise). Inboxes are per-(sender, target) FIFO queues of at most
+16 (`Inbox.Lawful`, `lawful_fifo`, `reorder_unlawful`; `queueFull`). `deliverMessage`
+(anyone) pops the head and runs the target's method with `request/caller` the sender and no
+subject, paid from the inbox purse only (`debits_only_purse`); it decides the message's
+reply slot, whose decider is the role `delivery m` (`decide_delivery_refused`,
+`decides_own_slot`). A failed delivery pops, decides `broken` and commits no write
+(`failed_delivery_pops`). A send to `slot n` (the reply of an undelivered message) queues on
+that slot and is forwarded when the reply is an object reference, else refunded; a send on
+the reply of an already pipelined send is refused `notPipelinable`.
+
+**Evidence:** compiled and proved; executed on scratch native worlds by
+`native/resource-client/objective-call-native-journey.py` (C1-C8) and
+`objective-send-native-journey.py` (S1-S7). No pipeline journey row runs those two drivers.
+
+**Not built:** an activity's segment yielding `call` or `send` (the kernel performs only
+`await`), an activity awaiting a message (`messageAwaitNeedsInbox`), sends from a delivered
+message, nested pipelining, objects holding capabilities.
+
+## Seats
+
+A seat (`Kernel/Seat.lean`, [SEATS.md](SEATS.md)) holds Book balances under an offer whose
+safety is a law judged on every reallocation, with an exit no clause can forbid
+(`seat_offer_safe_forever`, `exit_enabled`, `exit_pays_allocation`, `seat_conserves`).
+Seats have a signed native route (`Kernel/SeatReceiver.lean`, Host operations 215-219,
+`mini seat`; journey row `seats`), an activity may hold a seat, and an ending activity closes
+the seats it holds in the same Book batch (`Kernel/ActivitySeatEnd.lean`).
+
+## Native admission by re-execution
+
+A member's invocation of an Objective method reaches an ordinary accepted receipt; there is
+no proof carrier ([ZK.md](ZK.md)). Admission re-executes:
+
+- **Publish.** `objective-publication` (`Host/ObjectivePackageAuthor.lean`) runs the Host's
+  own front end on the package and publishes exactly `publishedCore`
+  (`Compiler/ObjectiveBendPublication.lean`); package edition 3 names one front-end
+  identity. Publication creates no authority.
+- **Quote and sign.** The local Host derives the final command from the member's retained
+  request and never accepts a remote command, output or input (`Host/ObjectiveInvocationQuote.lean`);
+  `mini objective-invoke` signs a prepare intent for exactly that command, and the consent
+  endpoint re-derives it before any header is signed.
+- **Admit** (`Kernel/ObjectiveBendNativeAdmission.lean`, `prepareCore` then `admit`): the
+  registered policy (edition 4) decodes and re-encodes exactly; the declared envelope is
+  within the policy maximum (`capacityWithin`); the claim's `proofWork` is exactly the
+  tariff's price of it (`tariffExact`; `Core.proofWork_pos`); the evaluator `objective-core4`
+  is not disabled; funding is checked before execution; sources and inputs enter only as
+  current authenticated reads with exact guards (`guardsExact`); the package must name the
+  policy's front end, which must be the receiver's own, and the receiver **re-runs that front
+  end**, admitting only a byte-identical typed core (`SourceSelection`, `Replayed`); the
+  applied term is type-checked; then `executeWith` runs under the declared limits, the
+  result is lowered to a Plan whose effects must equal the command's (`Output.exact`), and
+  measured usage must fit the declared envelope (`fits`).
+- **Commit and replay.** The ordinary durable path; a reopened Host re-executes during
   replay.
 
-The refusals the acceptance exercises (`native/resource-client/objective-native-acceptance.py`,
-the `refuse` rows of `all`): a source atom that is the package itself, a core that differs
-from the replay, a foreign front-end pin, a foreign capability, a wrong query nonce, a stale
-and a moved source, a fee that is not the quote, a wrong tariff, an altered argument, an
-injected output, and a world whose operator disabled the evaluator `objective-core4` by name.
-Admission is by re-execution; no proof carrier gates anything ([ZK.md](ZK.md)).
+`objective-native-acceptance.py all` (journey row `objective`) publishes, invokes, checks the
+Accepted receipt, tries thirteen refusals (the package as its own source, a core that differs
+from the replay, a foreign front-end pin, a foreign capability, a wrong query nonce, stale,
+moved and stale-queried sources, a fee that is not the quote, a wrong tariff, an altered
+argument, an injected output, and, on a second world, the evaluator disabled by name), then
+stops, reopens and looks every receipt up again. **Integrated on scratch worlds.**
 
-### Objects, activities and seats
+What admission proves (`Kernel/ObjectiveBendAdmissionSemantics.lean`):
+`admitted_front_end` (the admitted typed core is byte-for-byte this front end's lowering of
+the package's sources, and neither it nor the applied term is ever refused by the machine);
+`admitted_source_semantics` (the admitted run is a finished `runBounded` of the applied term,
+and the extracted Data is *the* deep reference evaluation of that term);
+`admitted_data_unique` (two admissions of one term extract the same Data under any
+capacities). An accepted receipt reaches these through
+`AcceptedInvocation.objective_artifact_slot_sound`.
 
-The kernel also has a second family of Objective-adjacent modules. Activities and
-objects have a native signed route (`Kernel.ObjectiveActivity`, `Kernel.AnswerSlot`,
-`Kernel.ObjectRecord`, `Kernel.ObjectState` and the receiver
-`Kernel.ObjectiveActivityReceiver` are in `scripts/gates/host-closure.pin`; Host operations
-210-214, `mini activity`; **evidence class: integrated on scratch worlds**, the journey rows
-`activity` and `objectrecord`). Seats are compiled and proved but no native route reaches
-them (`Kernel.Seat`, `Kernel.Invitation` and `Kernel.ObjectStateType` are not in the pin):
+Every cell law sees, first in its state, the slot `objective/artifact`: the claimed method
+artifact's identity, or `-1` for a command with no Objective claim
+(`objective_artifact_slot_exact`). `Pred.objectivePin` is the package pin as a law clause
+(`ordinary_objectivePin_refused`, `pinned_objectivePin_accepts`). No turn installs it, and
+the object kernel's law view (`ObjectRecord.views`) carries no `objective/artifact` slot, so
+an object's law cannot yet use it.
 
-- **Activities** ([activities and events](OBJECTIVE-BEND-EVENTS.md#the-kernel-activity)):
-  an activity is a persisted checkpoint plus an await; answer slots with one decider;
-  `deliver` resumes it with `resumed {outcome, view}`, the settled outcome and the object's
-  declared state read in the same turn; the resume contract (consume-once, one generation per
-  resume); exhaustion is a paid turn, ended activities leave tombstones, and anyone may
-  abandon an await after its deadline plus a grace.
-- **The object record** (`Kernel/ObjectRecord.lean`): a cell is an object to the kernel only
-  with a record (id, package `pin`, schema version, `law`, upgrade policy, continuity,
-  payer). `create` installs it, a birth refuses a cell without one
-  (`birth_refuses_non_object`, `Kernel/ObjectiveActivity.lean:2933`) and a package other
-  than the pin (`birth_refuses_other_pin`, `:2943`), and **every declared-state write is
-  judged by the object's law** over the old and new state plus the request facts
-  (`admitWrite`, `Kernel/ObjectRecord.lean:202`; `Birth.write_judged`,
-  `Kernel/ObjectiveActivity.lean:2904`, `Delivery.write_judged`, `:2915`,
-  `StateWrite.write_judged`, `:2925`). The declared-state cell is a registry cell of role
-  `objectiveActivity`, whose one named writer is the activity receiver
-  (`Kind.objectiveActivity.lawClass = .kernelOnly [.objectiveActivity]`,
-  `Compiler/CanonicalCellRegistry.lean:218`, judged by the Receiver since `77df1dec`); the
-  receiver writes only activity cells and the Book (`intent_writes_activity_or_book`,
-  `Kernel/ObjectiveActivityReceiver.lean:724`), and a native birth runs only the pinned
-  package (`native_birth_on_pinned_object`, `:795`).
-- **One shared tariff** (`Kernel/ObjectiveTariff.lean`, in the Host closure): the public
-  price of a declared envelope, `Tariff.workOf` (`:49`), used by native admission (above)
-  and by the activity kernel for every turn, so there is one shape for "what a declared
-  envelope costs" and no price depends on measured work.
-- **Declared state types** (`Kernel/ObjectStateType.lean`): a strict `Ty` codec, closed
-  first-order typing of a value (`typedAt`) and value subtyping (`stateSubtype`). Defined
-  and proved; no turn consumes it, and `ObjectRecord` has no state-type field yet.
-- **Seats and invitations** ([SEATS.md](SEATS.md)): offer safety as a law judged on every
-  reallocation of a seat's Book balances, with an exit no contract clause can forbid.
+## Three things called "law" or "requires"
 
-Not built, by lane (status and commits in [ROADMAP-STATUS](objective-bend/ROADMAP-STATUS.md)):
-OB-ROADMAP (an activity's `message` await; calls and sends are built, above), RETENTION-PAYERS activity half (a storage charge
-for packages and checkpoints; the Book half `c74f3120` landed), UPGRADE (record v2: state
-type, upgrade turns; wave 1 `ObjectStateType` landed, `4795b657`), CHECKPOINT-INVARIANT (the
-turn gate), FORCING-TRANSPARENT (the premise is still open), SEATS-NATIVE and W18-STEPRAW-LINEAR
-(`stepRaw` linear in the heap). Landed since this list was first written: the signed activity
-route, the program-fault liveness fix (`3573afaf`), the Receiver judging every written cell's
-law (`77df1dec`) and the machine primitives (W17).
+- **A cell law** (`Pred`) is a decidable predicate over a write's old and new projected
+  state and the request: the admission judge for every write, whoever proposed it. An
+  object's `law` in its record is one.
+- **A spec `law name(args): expr`** in `.obend` elaborates to a hidden knot field typed to
+  return Bool and is listed in `SpecMeta` with status `unchecked`. Nothing evaluates or
+  discharges it, and it never reaches admission; `law impossible: false` is accepted (probe
+  W08, whose target is a refusal).
+- **A spec `requires m(…)`** declares a member needed from the final self; it is checked
+  (above). It is not a precondition.
 
-### Calls across objects
+`.obend` has no form for stating an object's admission law (`invariant`, `guard`, `permit`,
+`forbid` compiled to `Pred` are a design, not built), so a program cannot yet state the law
+of its own object.
 
-`Kernel/ObjectiveCall.lean` (OB7). An `invoke` turn (the activity command, `COMMAND/v3`;
-`mini activity` with `{"kind": "invoke", "object", "objectCapability", "method", "args",
-"grants", "envelope", "account", "accountCapability"}`) calls one method of one object, and
-that method may call methods of other objects in the same turn, depth-first. **Evidence
-class: integrated on scratch worlds** (`native/resource-client/objective-call-native-journey.py`,
-rows C1-C8, with world plants and a code mutant; see the lane evidence).
+## What is proved
 
-- **A method** is a declaration of the entry module of the package the object pins, lowered
-  by the kernel's own front end with that declaration selected (`loadMethod`; never an offered
-  core). Its type is `method(view: {version, state}, args: X) -> Activity<P, R, {result, write}>`
-  where `P` has labels among `call | send` and `R` among `returned | queued`: a method can
-  yield nothing but a call or a send, each answered in the same turn, so no frame suspends across turns (a method
-  whose Plan admits `await` is refused `notCallable` before it runs). A method that never
-  calls is a pure function. Example: [world/call/Calls.obend](../world/call/Calls.obend).
-- **Re-entry is refused**, mandatorily: a call whose target is on the stack is refused
-  `reentry` naming the stack (`reentry_refused`); `invocation_reentry_free`: no object occurs
-  twice on any stack an admitted invocation entered. The stack is at most `callDepth` (8).
-- **Writes are applied at frame return** to the frame's OWN object, and judged then by that
-  object's law on (the state the frame was shown, the new state) under the frame's facts; a
-  refusal names the object, the method and the clause (`lawDenied`).
-  `invocation_writes_from_view`: every write is computed from exactly the state its frame was
-  shown, so a callee never sees a caller's pending write and no write is lost. That settles the
-  design's Scribe note D4: the frame-conflict abort has nothing left to catch, and two calls to
-  one object in one turn compose in order. The DAO shape is refused (journey C5); with the guard
-  removed (the mutant) the same turn commits 60 paid for 30 debited.
-- **Authority** (`Facts`, `Kernel/ObjectRecord.lean`): the root frame carries the signer (who
-  must hold a capability on the root object). A nested frame carries the signer's subject ONLY
-  if a scoped grant `{object, method, uses}` of the invocation names it, and spends one use
-  (`grantSpent` when none is left); otherwise `request/subject` is absent and every atom
-  reading it fails closed. `request/caller` names the calling object, so a law can admit
-  chosen callers (a facet as a clause); `request/turn` is 5 for a call frame.
-- **One envelope**: the whole tree runs within the invocation's declared source ticks
-  (`runCounted`, proven equal to `runBounded`); the invocation pays the public tariff of its
-  declared envelope; exhaustion refuses it and nothing is charged. The root's result is the
-  signing plan's `report` (`PLAN/v2`), shown before signing and printed by `mini activity`.
+The Core4 proofs live in `Theory/ObjectiveBend*.lean`; the kernel's and front end's in the
+named modules. They build in the `ObjectiveProofs` library (`ObjectiveProofs.lean`), not the
+default target. The gate `scripts/check-objective-proofs.sh proofs` builds it and requires the
+two statement snapshots and two axiom pins to equal a scan of the environment byte for byte;
+every pinned axiom set is within `propext`, `Classical.choice`, `Quot.sound`. Compiled code
+runs the machine through proven-equal `@[csimp]` replacements (`stepRaw_eq_fast`,
+`step_eq_fast`, `runBounded_eq_fast`, `forceWith_eq_fast`): the compiler's substitution is
+trusted, the equalities are theorems.
 
-Not built: an activity yielding `call` (calls from a resident's segment), pipelines,
-multi-party segments, method controllers beyond the object capability, and object c-lists
-(an object holding capabilities).
+**Core4 semantics** (scope: closed Core4 terms; nothing here mentions `.obend`):
 
-### Sends and inboxes
+| Theorem | Statement in words | Premises |
+| --- | --- | --- |
+| `sourceStep_deterministic`, `source_evaluates_unique` | the reference step and evaluation are deterministic | none |
+| `runBounded_natural_sound`, `_boolean_sound`, `_label_sound`, `runBounded_value_sound` | a finished bounded run's result is the reference evaluation of the term (scalars; for any value, weak head) | `Scoped 0`; the run finished |
+| `runBounded_observation_sound`, `runBounded_resource_independent` | ground observations agree with the reference; two finished runs under different limits observe the same | closed; finished |
+| `machine_evaluation_complete` (`rawRun_finite_completion`) | a closed term the reference evaluates to an observable value is finished by the machine in finitely many steps; `coreRepresentation` inhabits `Representation` | `Scoped 0`, `Evaluates`, `Observes` |
+| `typed_stepRaw_preserved` | every machine step preserves heap, control and stack typing | a typed state (`checked_initial_state`) |
+| `checked_reachable_no_refusal`, `check_runBounded_no_refusal` | a checked closed term never reaches any refusal (wrong operand, missing field, unbound reference, `sharedEffect`) at any limits; divergence, blackholes and suspension remain possible | `Checked source []` |
+| `typed_yield_quiescent`, `stack_activity_signature`, `typed_resume_preserved` | a typed yield forces no shared cell, carries the program's own Plan/Response types, and resuming it with a typed response gives a typed state | a typed state; a typed response |
+| `state_roundTrip` | the checkpoint codec restores every machine state | none |
+| `execution_source_semantics`, `deepEvaluates_unique`, `execution_data_unique` | a successful `executeWith` is a finished `runBounded`, its Data is the deep reference evaluation, and two executions of one term under any policies extract the same Data | `Scoped 0`; an `ExecutionWith` |
+| `forceWith_unrestricted`, `forceWith_policy_suspends` | a capacity policy can only stop a run early, retaining its state | none |
+| `mix_append`, `composition_associative` | homogeneous extension lists compose associatively | on the separate list model `ObjectiveBendExtensions`; no theorem ties it to `Term.mix` |
 
-`Kernel/Inbox.lean`, the `send` yield of `Kernel/ObjectiveCall.lean`, and
-`Kernel/ObjectiveSend.lean` (OB8). **Evidence class: integrated on scratch worlds**
-(`native/resource-client/objective-send-native-journey.py`, rows S1-S7, with world plants).
+**Templates** (scope: the checker): `Discharges.infer_instantiate`,
+`Discharges.check_instantiate` (above).
 
-- **A send** is a call frame's yield `send {to: object n | slot n, method, args}`, answered in
-  the same turn with `queued {slot}`: the message id `H(turn, index)`, also the name of its
-  reply slot. The invocation (`COMMAND/v4`) declares `postage`, the envelope every message it
-  sends is delivered under; each send escrows that envelope's public price from the
-  invocation's account into the purse of the queue holding it. An invocation that sends with
-  no covered postage is refused `uncovered`.
-- **Inboxes** are per-(sender, target) FIFO queues at a protected activity coordinate (role
-  `inbox`, `Inbox.cell_reserved`). Their law is the queue discipline (`Inbox.Lawful`: push at the
-  tail within `Inbox.bound` = 16, pop the head; `lawful_fifo`; the tooth `reorder_unlawful`).
-  A send to a full inbox is refused `queueFull` naming (sender, target). Every inbox a turn
-  posts is a lawful change of what the turn read at that cell (`Mail.inboxes_lawful`).
-- **Delivery** (`deliverMessage {sender, target, message}`, anyone): pops the head and runs
-  the target's method with `request/caller` the sender and NO subject, under the message's
-  escrowed envelope, paid from the inbox's purse only (`debits_only_purse`). It decides the
-  message's reply slot, whose decider is the role `delivery m` (`AnswerSlot.Decider`; no
-  subject decides it, it never expires: `decide_delivery_refused`, `expire_delivery_refused`,
-  `decides_own_slot`). A failed delivery (law, fault, exhaustion, not callable, a send from a
-  delivered frame) is not a refusal: it pops, decides `broken`, commits no write
-  (`failed_delivery_pops`).
-- **Forwarding**: a send to `slot n` (the reply of a message not yet delivered) is queued on
-  that slot with its postage in the purse of the inbox holding the message. The turn that
-  decides the slot forwards each queued send into the inbox (its sender, n) when the reply is
-  `ref n` naming an object, its postage moving purse to purse, its own slot opened; otherwise
-  (no reference, a failed delivery, a full inbox) the send is refunded to its payer.
+**Front end** (scope: the elaborator's output, not the source):
+`Compiler/ObjectiveBendFrontEndAdequacy.lean` proves that whenever the checker accepts the
+front end's own packet, the erased term is closed and typed (`accepted_typed`), never refused
+by the machine (`accepted_never_refused`), and a finished run extracts its unique deep
+evaluation (`accepted_execution_semantics`); `accept_inhabited` exhibits a program.
+`decode_json` and `decodePacket_term` prove that the checker's decoder inverts the front
+end's rendering, so the receiver types the front end's own term, never a parse of the
+published bytes.
 
-Not built: sends from a delivered message (refused as a failure: a delivery has no paying
-account), pipelining onto the reply of a pipelined send (its slot exists only once forwarded),
-an activity awaiting a message, and a retention charge for inboxes and decided send slots.
+**Kernel** (scope: the Lean kernel model of each turn): the theorems named in the sections
+above, and `admitted_front_end`, `admitted_source_semantics`, `admitted_data_unique`.
 
-### Which code wrote: the `objective/artifact` slot and the package pin
+**Not proved, though it reads like it:** `TotalProof law := law`; `checked_erasure` and the
+prepared output's `native_matches`/`no_returns` are projections; `ExecutionWith.runExact`
+records that a value came from the call that produced it.
 
-Every cell law judges a step whose projected state begins with the slot
-`objective/artifact` (`Pred.objectiveArtifactSlot`, `Pred/Core.lean:156`). For a command with an Objective
-claim it holds the claimed method artifact's identity, which commits the package, the
-selected declaration and the typed core; for any other command it holds `-1`, never an
-identity (`objectiveArtifactValue`, `Kernel/DeclaredResourceController.lean:214`). It is first in every law state, so no target, request or content projection
-can shadow it (`DeclaredResourceController.objective_artifact_slot_exact`, `Kernel/DeclaredResourceController.lean:514`). Laws run
-BEFORE the method executes (a refused law costs no execution); judging the claim is
-sound because `AcceptedInvocation` exists only after the executed artifact is shown to
-be the claimed one (`AcceptedInvocation.objective_artifact_slot_sound`, `Kernel/DeclaredResourceController.lean:1684`).
+## What is open
 
-`Pred.objectivePin artifacts` (`Pred/Core.lean:372`) is the package pin as a law clause: the step's writes are
-the product of one of the named artifacts. A command without an Objective claim is
-refused by it whatever its writes (`ordinary_objectivePin_refused`, `Kernel/DeclaredResourceController.lean:523`); a claim naming a
-pinned artifact passes it (`pinned_objectivePin_accepts`, `:534`). Installed on an object's state
-cells, it makes the object's package pin a law the ordinary resource route cannot
-bypass. No turn installs the pin yet. The object record's `create`
-(`Kernel/ObjectiveActivity.lean:1993`) stores whatever `law` its caller supplies, and the
-kernel's own law views (`views`, `Kernel/ObjectRecord.lean:185`) carry the request facts
-and the state slots only, with no `objective/artifact` slot, so a pin placed inside an
-object's law would read an absent slot and refuse every kernel write (`eval_objectivePin`,
-`Pred/Core.lean:376`: an absent slot is false). Joining the two is not built (in flight:
-LAWS-RECEIVER). Before this slot, the Objective route projected no `run/` slot (`run =
-none` for an Objective claim), so no law could tell an Objective method's write from an
-ordinary command with the same writes.
+- **Surface semantics** (OB1, LT3). `.obend` has no meaning of its own, so nothing states that
+  the core means what the source says; the front end is trusted, and what is proved is about
+  its output. This includes compose order, C4 ancestry and method combination:
+  `OrderedPresentationInvariant` (`Compiler/ObjectiveBendC4.lean`) is a `Prop` nothing proves;
+  the evidence is compiled vector theorems (`Compiler/ObjectiveBendC4Vectors.lean`: published
+  precedence vectors and 4000 seeded DAGs).
+- **`instance_accepted`** (LT2, above).
+- **Laws** (LT6, OB5): spec laws are never checked; no object-law clauses in the source.
+- **Ecosystem** (LT5, OB5): no surface form names another package's root; no dynamic
+  selection by label; no generative identity beyond the kernel's object ids.
+- **Reflection** (LT4): a provenance-establishing prototype constructor; `R(Y M)` vs `Y(R∘M)`;
+  resource observations stated as theorems; `composition_associative` tied to `Term.mix`.
+- **Guardedness** (LT6): no check that a well-typed resident's segment terminates.
+- **`ForcingTransparent`**: `runSegment_stored_complete` (resuming the stored checkpoint ends
+  every segment as the machine's own yield would) holds under this open premise
+  (`Kernel/ObjectiveResumeContract.lean`). It has a satisfying instance
+  (`forcingTransparent_tally`) and refuting ones (`not_forcingTransparent_lostStack`,
+  `not_forcingTransparent_dangling`), and cannot follow from a successful extraction alone
+  (`forcingTransparent_not_of_extraction`). `scripts/check-objective-proofs.sh transparency`
+  compares the two resumptions by execution.
+- **Machine**: a resource bound for completeness (completion is finite, not bounded); use
+  counts at run time (quantities are static); `stepRaw` linear in the heap.
+- **Kernel**: upgrade (no upgrade turn; nothing produces `upgraded`; `ObjectRecord` has no
+  state-type field and `Kernel/ObjectStateType` is consumed by no turn); a storage charge for
+  packages, records and state cells (an activity's record carries only a refundable storage
+  deposit); the package pin installed as an object's law; `message` awaits, resident calls and
+  sends (above).
+- **Language** (OB3, OB6): a digest primitive callable from source (`Theory/ObjectiveBendDigest`
+  exists; Core4 has no digest term); sum-typed entry arguments and unary `!`; `before` and
+  `after` methods; sealing, `final`, field enumeration.
+- **Registry** (OB4): Core4 is a named evaluator identity (`Compiler/Evaluator.lean`,
+  `resolveName_objectiveCore4`), not an entry of `registry`, which holds only `nock`.
 
-### Three different things called "law" and "requires"
+## Backends and privacy
 
-The surface language and the kernel use the same words for different things. Keep them
-apart:
-
-- **A cell law (`Pred`)** is a decidable predicate over a write's (old, new) projected
-  state and the request. It is the admission judge: every write is checked by its cell's
-  committed law, whoever proposed it.
-- **A spec `law name(args): expr`** in `.obend` is a universally quantified property of a
-  specification's *methods* (`law positive(n: Nat): self.v(n) < n`). It elaborates to a
-  hidden knot field typed `(self, super, n) -> Bool`, listed by name in the spec's
-  `SpecMeta` with status `unchecked`; nothing evaluates or discharges it. It is package evidence (proved by the
-  certifying checker where it can be, otherwise reported as unproved). It never reaches
-  admission.
-- **A spec `requires m(x: T) -> U`** declares a member the specification needs from final
-  self (a mixin dependency, checked at composition). It is not a precondition.
-
-A design exists to declare admission rules in `.obend` with their own clause kinds,
-`invariant` (a state law), `guard` (a method guard over arguments and request slots),
-`permit` and `forbid`, compiled by the Lean elaborator to `Pred` (refusing any clause
-outside the fragment), so that `Pred` stays the one judge. None of it is built: the parser
-knows `law` and `requires` and no admission clause (`Compiler/ObjectiveBendParse.lean:640`
-is the `law` form), so a program cannot yet state the law of its own object.
-
-### The trusted front-end boundary
-
-Trusted (no theorem; one Lean implementation, recomputed by the receiver):
-
-- the Lean parser, capture and elaborator (`Compiler/ObjectiveBendParse`,
-  `Host/ObjectiveBendFrontEnd`, `Compiler/ObjectiveBendElaborate`) and the typing
-  proposal: there is no surface semantics, so no theorem says the core means what the
-  source says. What IS proved of the front end's output is in
-  `Compiler/ObjectiveBendFrontEndAdequacy` (typed when the checker accepts, never
-  refused by the machine, finished runs are source evaluations of it), and the link from
-  the published typed-core bytes to the term the front end built is a theorem, not a
-  comparison (`decode_json`, `Compiler/ObjectiveBendTermWire.lean:69`: the checker's
-  decoder inverts the front end's rendering; the receiver types the front end's own term,
-  never a parse of the core bytes);
-- the package capture and fingerprint tooling; `ObjectiveSourcePackage.wellFormed`
-  is structural only;
-- source-to-core correspondence beyond "this core is what the Lean front end computes
-  from these sources": admission recomputes the core from the package and admits only
-  an identical artifact (`ObjectiveBendAdmissionSemantics.admitted_front_end`), so a
-  publisher cannot pair benign source with a different core; whether that front end is
-  right is the first item above;
-- spec laws (closures, never checked); `linear`, which the checker enforces as at most
-  once, not exactly once;
-- the meaning of a Plan extracted from deep Data, until the two open theorems above
-  exist.
-
-Not trusted, because native admission re-executes it: argument JSON to `Term`
-(bounded, canonical), the typed check, `executeWith`, the exact effect match,
-authority and funding.
-
-## Execution and privacy
-
-The lazy semantics is the target for native, oblivious, proof-producing and
-homomorphic execution; on main none of those routes runs Objective Bend. The
-oblivious-execution, circuit, natural-number and FHE families built for the upstream
-Bend machine were deleted with it on 2026-10-04. The zk statements for Objective
-(`Assurance/ObjectiveBendCommittedSource`) take a refinement premise. The audit
-(`Assurance/ObjectiveZkRefinementAudit`) shows the original `PackedRefinement` is inhabited
-for every network by an administrative stutter, so it certifies nothing alone; the corrected
-`PackedCodec` has an instance for five programs of the literal tranche
-(`Assurance/ObjectiveZkLiteralInstance`) and for no real program, and native proof
-verification is not connected to the arithmetic relation ([ZK.md](ZK.md), Part 2). Mini
-admits by re-execution only. No FHE route runs today. Laziness
-leaks through access pattern and timing: forcing order and cache state are
-data-dependent. So a private backend needs a both-arms (mux) lowering of `case` and
-an explicit public resource bound; the type system already keeps every effect out of
-forced shared thunks.
-Source `Nat` is unbounded; a native or circuit backend needs a bounded domain that
-fails stop, never wraps. A private profile names observers and permitted leakage
-(code, branches, memory access, timing, output shape, failure); encryption alone
-hides none of these.
-
-## Surface → core elaboration
-
-`Compiler/ObjectiveBendElaborate.lean`, as it is:
-
-| Surface | Core |
-| --- | --- |
-| global declarations | fields of one record knot: `fix (λglobals λseed. record{Module.name: …}) (record [])`; a global reference is `get globals "Module.name"` through the tied address |
-| `def f(x…) -> T: body` | nested `lam`s with binder hints and annotations |
-| `extension(self, super) -> T: e` | `lam lam e`, typed `T → T → T` (homogeneous) |
-| `spec S for T: …` | `specification (record{name, interface: <signatures as a JSON label>, laws: record of law closures}) (λself λsuper. extend super {methods})` |
-| `compose(a, b, c…)` | left fold to `specification (record{operator, inherited: v, wrapping: r}) (mix v r)`, the inherited composite bound once |
-| `spec S extends A, B for T`, `suffix spec`, `around` and `combine` methods | the C4 precedence list; the extension is the `mix` chain of the ancestors' hidden layers `M.S#primary` and `M.S#around` |
-| `fix(s, i)`, `extend(x, {…})` | `fix`, `extend` |
-| `prototype`, `reflect`, `metadata`, `targetOf` | `prototype`, `reflect`, `metadata`, `project` |
-| `x.f`, `f(a, b)`, `()` | `get`, curried `app`, `record []` |
-| `+ * == &&` | `add`, `multiply`, `equal`, `conjunction`; `==` on String is `labelEqual`, and `!=` and `\|\|` go through `ifBool` |
-| `match n: case 0n / case 1n+p` | `ifZero`; exactly those two branches |
-| `sum S: …`, `S.l(e)`, `match s: case l(x): …`, `if c then a else b` | `inject`, `case` (exhaustive), `ifBool` |
-| `-> Activity<P, R, A>`, `perform(plan)`, `match perform(…): case l(x): …` | `perform`; a pure tail becomes `done`; the match is the same `case`, typed as an effect case |
-| `let x = v` (statement or expression form) | `app (lam body) v`: one lazy cell for `v`, evaluated at most once (call-by-need) |
-| `true`/`false`, strings, `7n` | `boolean`, `label`, `nat` |
-
-Arguments and fields stay thunks; laziness is preserved.
-
-Known front-end defects:
-
-- `- / % < <=` are the Core4 primitives `subtract / divide / modulo / less / lessEqual` (one machine
-  step each on unbounded naturals; see [front end](OBJECTIVE-BEND-FRONTEND.md#subtraction-order-division-and-let));
-  `>` and `>=` are their negations through `ifBool`, as `!=` is `equal`/`labelEqual`
-  and `||` is `ifBool`.
-- A `match` on a sum takes only `label(binder)` cases; wildcards are refused because
-  there is no default arm.
-- Quantities: `default`/`copy` map to unrestricted and `dead` to erased; `affine x`
-  and `linear x` are at most once in the checker, exactly once is not enforced, and
-  every closure built after one is one-shot.
-- `requires` is carried as a string and never checked.
-- `before` and `after` methods are refused (`Compiler/ObjectiveBendElaborate.lean:1160`).
-- `compose` is shared: the inherited composite is bound once, so term size is linear in
-  the number of composed specs (`tests/objective-bend-source/check-elaborate.ts`, "COMPOSE SHARING").
-
-The drivers in `examples/objective-bend-world/reference/` embed packets from the
-current front end; `scripts/check-objective-examples.sh` fails when one is stale.
-
-## What was Gen-1
-
-The first generation elaborated this OO surface into checked Books of the upstream
-Bend kernel (`Compiler/ObjectiveBendLinker`, `ObjectiveBendElaboration`, the Workshop
-and its instance loaders), which bound the language to the restrictions of that
-embedding: data-only reusable captures, acyclic linking and total strict calls. On
-2026-10-03 Objective Bend became its own lazy language with Core4 as its only core.
-The cut (2026-10-04) deleted Gen-1; the same day the vendored kernel and every module
-that reached it (its closure machine, the oblivious, logic, natural-number, FHE and
-activity families, and their artifacts and checks) were deleted too. Git history holds
-them; `./NAME.bend` imports are refused by the parser and the front end, and nothing in
-this guide claims anything about them.
+The preview and admission run the Lean machine (`runBounded`, compiled through the `@[csimp]`
+replacements). A hand-written C machine is checked against it by differential gates
+(`check-objective-proofs.sh c` and `cgen`), with no refinement theorem and no Mini path that
+invokes it. No route on main runs Objective Bend obliviously, in a circuit, or under FHE; the
+oblivious-network and zk modules are in the opt-in `ResearchWip` library, and their refinement
+premise is open ([ZK.md](ZK.md) Part 2). Laziness leaks through access pattern and timing, so a
+private backend needs a both-arms lowering of `case` and a public resource bound; source `Nat`
+is unbounded, so a bounded backend must fail stop, never wrap. Details:
+[OBJECTIVE-BEND-BACKENDS.md](OBJECTIVE-BEND-BACKENDS.md).
 
 ## Sources
-
-Faré's work cited above, by short name:
 
 - **ltuo**: Rideau, Knauth and Amin, *The Land of the Ultimate Object*
   (<https://fare.tunes.org/files/cs/poof/ltuo.html>).
 - **poof**: *Prototypes: Object-Orientation, Functionally*
   (<https://fare.tunes.org/files/cs/poof.pdf>).
-- **EOOMI**: *The Essence of Object-Orientation: Modularity and Incrementality*,
-  2024 draft (<https://fare.tunes.org/files/cs/poof/eoomi2024.pdf>).
-- **Houyhnhnm**: *Houyhnhnm Computing*, chapters 1–11
-  (<https://ngnghm.github.io/>).
-- **FCI**: *First-Class Implementations* (<https://fare.tunes.org/files/fci2017/fci.html>)
-  and *Climbing* (<https://fare.tunes.org/files/climbing/climbing.html>).
-- **Persistence model**: gerbil-persist
-  (<https://github.com/mighty-gerbils/gerbil-persist/blob/master/persist.md>).
+- **EOOMI**: *The Essence of Object-Orientation: Modularity and Incrementality*, 2024 draft
+  (<https://fare.tunes.org/files/cs/poof/eoomi2024.pdf>).
+- **Houyhnhnm**: *Houyhnhnm Computing*, chapters 1–11 (<https://ngnghm.github.io/>).
 
-The original Bend calculus (upstream pin `947db722`) was vendored as a reference
-until 2026-10-04 and is in Git history; strict-machine proofs say nothing about the
-demand machine.
-
-These are design sources. The repository's semantics, theorem premises and admitted
-receiving paths determine what Objective Bend guarantees.
+These are design sources. The repository's semantics, theorem premises and admitted paths
+determine what Objective Bend guarantees.

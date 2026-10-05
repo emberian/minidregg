@@ -57,6 +57,7 @@ os.umask(0o077)
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 ap = argparse.ArgumentParser()
+ap.add_argument('mode', nargs='?', default='all', choices=['all'])  # journey-rows passes `all`, as to every driver
 ap.add_argument('--bin', required=True)
 ap.add_argument('--root', required=True)
 a = ap.parse_args()

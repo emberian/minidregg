@@ -1,0 +1,18 @@
+edition ObjectiveBend 1
+
+record Write:
+  field: Nat
+  before: Nat
+  after: Nat
+
+sum Plan:
+  write: Write
+
+sum Response:
+  written: {}
+  refused: {}
+
+def bump(count: Nat) -> Activity<Plan, Response, Nat>:
+  match perform(Plan.write({field: 0n, before: count, after: count + 1n})):
+    case written(_): count + 1n
+    case refused(_): count
