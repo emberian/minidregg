@@ -1,0 +1,26 @@
+edition ObjectiveBend 1
+# LTUO LT2 step 4 tooth (D2): Self is a LOWER bound, not its row. AddY passes `self` to a
+# function that takes exactly the bound row {x: Nat}. The program alias checker would accept
+# that at AddY's own bounds and refuse only the wider instance (an anonymous typing refusal at
+# XYZW); the template check, with Self rigid, refuses it here, naming AddY.
+
+record XY:
+  x: Nat
+  y: Nat
+record XYZW:
+  x: Nat
+  y: Nat
+  z: Nat
+  w: Nat
+
+def firstX(r: {x: Nat}) -> Nat:
+  r.x
+
+extension AddY[Self has {x: Nat}, Super has {x: Nat}](self: Self, super: Super) -> Super with {y: Nat}:
+  extend(super, {y: firstX(self)})
+
+extension AddZW(self: XYZW, super: XY) -> XYZW:
+  extend(super, {z: self.y, w: self.z + 1n})
+
+def wOfFive() -> Nat:
+  fix(compose(AddY, AddZW), {x: 5n}).w

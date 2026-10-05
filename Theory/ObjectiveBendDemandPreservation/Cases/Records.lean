@@ -282,7 +282,7 @@ theorem stack_extend_value {assumptions : Assumptions} {types : AddressTypes}
       ∃ inherited row context uses,
         EnvironmentTyping types context environment ∧ FieldsTyping assumptions context fields row uses ∧
         safeUses context uses = true ∧ validContext assumptions.shareableVariables context = true ∧
-        inherited.isRow assumptions.bounds 64 = true ∧ ValueTyping assumptions types value inherited ∧
+        (∃ fuel, inherited.isRow assumptions.bounds fuel = true) ∧ ValueTyping assumptions types value inherited ∧
         StackTyping assumptions types rest (overlay row inherited) result := by
   induction continuation with
   | nil => intro fields environment rest impossible; simp at impossible
@@ -290,7 +290,7 @@ theorem stack_extend_value {assumptions : Assumptions} {types : AddressTypes}
       intro fields environment rest same
       cases same
       cases frame with
-      | extend environment source safe valid row => exact ⟨_,_,_,_,environment,source,safe,valid,row,valueTyped,restTyped⟩
+      | extend environment source safe valid row => exact ⟨_,_,_,_,environment,source,safe,valid,⟨_,row⟩,valueTyped,restTyped⟩
   | conversion agreement restTyped ih => exact ih (.conversion valueTyped agreement)
   | returns pure restTyped ih =>
       intro fields environment rest same
@@ -312,14 +312,14 @@ theorem typed_extend_preserved {assumptions : Assumptions} {types : AddressTypes
     have control := typed.control
     rw [returned] at control
     cases control with | returned valueTyped => exact valueTyped
-  obtain ⟨inherited,row,context,uses,environmentTyped,source,safe,valid,rowValid,inheritedTyped,restTyped⟩ :=
+  obtain ⟨inherited,row,context,uses,environmentTyped,source,safe,valid,⟨rowFuel,rowValid⟩,inheritedTyped,restTyped⟩ :=
     stack_extend_value typed.stack valueTyped fields environment rest stack
-  obtain ⟨prior,rfl⟩ := record_value_form inheritedTyped 64 rowValid
+  obtain ⟨prior,rfl⟩ := record_value_form inheritedTyped rowFuel rowValid
   obtain ⟨after,extension,heap,newMembers⟩ := typed_fields_allocation source typed.heap environmentTyped safe valid
   let allocated := allocateFields state.heap environment fields
   let retained := prior.filter (fun old => !(fields.any fun field => field.1 == old.1))
   have newValue : ValueTyping assumptions after (.record (allocated.2 ++ retained)) (overlay row inherited) := by
-    refine .record (fields_overlay_row source inherited 64 rowValid) ?_
+    refine .record (fields_overlay_row source inherited rowFuel rowValid) ?_
     intro fuel name member lookup
     rcases fields_overlay_lookup source inherited fuel name member lookup with ⟨depth,newLookup⟩ | ⟨absent,depth,oldLookup⟩
     · obtain ⟨address,found,assigned⟩ := newMembers depth name member newLookup

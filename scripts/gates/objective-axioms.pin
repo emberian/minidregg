@@ -1397,13 +1397,61 @@ A Minidregg.Theory.ObjectiveBendOpenRecursion.yields_deterministic : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.yields_no_step : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.yields_not_value : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.yields_plug : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.Discharges.agree_instantiate : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.Discharges.aliases : propext
+A Minidregg.Theory.ObjectiveBendTemplates.Discharges.argumentAllowed_instantiate : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.Discharges.bounds : propext
+A Minidregg.Theory.ObjectiveBendTemplates.Discharges.check_instantiate : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.Discharges.closed : propext
+A Minidregg.Theory.ObjectiveBendTemplates.Discharges.fixed : propext
+A Minidregg.Theory.ObjectiveBendTemplates.Discharges.infer_instantiate : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.Discharges.isRow_instantiate : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.Discharges.lookup : propext
+A Minidregg.Theory.ObjectiveBendTemplates.Discharges.lookup_instantiate : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.Discharges.pure : propext
+A Minidregg.Theory.ObjectiveBendTemplates.Discharges.reusableAllowed_instantiate : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.Discharges.row : propext
+A Minidregg.Theory.ObjectiveBendTemplates.Discharges.sameType_instantiate : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.Discharges.shareable : propext
+A Minidregg.Theory.ObjectiveBendTemplates.Discharges.variantRow_instantiate : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.alias_not_rigid : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.callable_instantiate : propext
 A Minidregg.Theory.ObjectiveBendTemplates.canonical_eq_instantiate : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTemplates.canonical_instantiate : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTemplates.canonical_instantiate_insert : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.colouredRow : -
+A Minidregg.Theory.ObjectiveBendTemplates.colouredSelf : -
+A Minidregg.Theory.ObjectiveBendTemplates.coloured_discharges : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.coloured_instance_accepted : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.getElem?_instantiateContext : propext
+A Minidregg.Theory.ObjectiveBendTemplates.inferFields_tail : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTemplates.insertCanonical_comm : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTemplates.insertCanonical_same : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.instantiateAnnotation : propext
+A Minidregg.Theory.ObjectiveBendTemplates.instantiateAnnotations : propext
+A Minidregg.Theory.ObjectiveBendTemplates.instantiateContext : propext
+A Minidregg.Theory.ObjectiveBendTemplates.instantiateContext_cons : propext
+A Minidregg.Theory.ObjectiveBendTemplates.instantiateContext_length : propext
+A Minidregg.Theory.ObjectiveBendTemplates.instantiate_isComputation : propext
+A Minidregg.Theory.ObjectiveBendTemplates.instantiate_of_isData : propext
+A Minidregg.Theory.ObjectiveBendTemplates.isPlan_instantiate : propext
 A Minidregg.Theory.ObjectiveBendTemplates.lt_of_not_lt_ne : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.overlay_instantiate : propext
+A Minidregg.Theory.ObjectiveBendTemplates.primitiveTypes_instantiate : propext
+A Minidregg.Theory.ObjectiveBendTemplates.reusableCaptures_instantiate : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.safeUses_instantiate : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.selfAsBoundRow : -
+A Minidregg.Theory.ObjectiveBendTemplates.self_as_bound_row_alias_accepted : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.self_as_bound_row_rigid_refused : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.shareableUnder_instantiate : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.templateAssumptions : -
 A Minidregg.Theory.ObjectiveBendTemplates.tri : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.validContext_instantiate : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.variableUses_instantiate : propext
+A Minidregg.Theory.ObjectiveBendTemplates.weightBound : -
+A Minidregg.Theory.ObjectiveBendTemplates.weightTemplate : -
+A Minidregg.Theory.ObjectiveBendTemplates.weight_template_accepted : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.zeroUses_instantiate : propext
 A Minidregg.Theory.ObjectiveBendTypes.Binding.quantity : -
 A Minidregg.Theory.ObjectiveBendTypes.Binding.type : -
 A Minidregg.Theory.ObjectiveBendTypes.Bounds : -
@@ -1479,7 +1527,12 @@ A Minidregg.Theory.ObjectiveBendTyping.AnnotatedTerm.assumptions : -
 A Minidregg.Theory.ObjectiveBendTyping.AnnotatedTerm.erase : -
 A Minidregg.Theory.ObjectiveBendTyping.AnnotatedTerm.term : -
 A Minidregg.Theory.ObjectiveBendTyping.Annotations : -
+A Minidregg.Theory.ObjectiveBendTyping.Assumptions.alias : -
+A Minidregg.Theory.ObjectiveBendTyping.Assumptions.alias_bound : -
+A Minidregg.Theory.ObjectiveBendTyping.Assumptions.alias_of_rigid_nil : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTyping.Assumptions.alias_rigid : -
 A Minidregg.Theory.ObjectiveBendTyping.Assumptions.bounds : -
+A Minidregg.Theory.ObjectiveBendTyping.Assumptions.rigid : -
 A Minidregg.Theory.ObjectiveBendTyping.Assumptions.shareableVariables : -
 A Minidregg.Theory.ObjectiveBendTyping.Assumptions.valid : propext
 A Minidregg.Theory.ObjectiveBendTyping.Checked.assumptionsValid : Classical.choice, Quot.sound, propext
@@ -1517,6 +1570,8 @@ A Minidregg.Theory.ObjectiveBendTyping.RefusalKind.ownership.elim : -
 A Minidregg.Theory.ObjectiveBendTyping.RefusalKind.typing.elim : -
 A Minidregg.Theory.ObjectiveBendTyping.RetainedContracts.providers : -
 A Minidregg.Theory.ObjectiveBendTyping.TotalProof : -
+A Minidregg.Theory.ObjectiveBendTyping.Ty.isRow_mono : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTyping.Ty.lookup_mono : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.absent_future_requirement_refused : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.affine_in_one_arm_accepted : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTyping.affine_in_two_arms_refused : Classical.choice, Quot.sound, propext

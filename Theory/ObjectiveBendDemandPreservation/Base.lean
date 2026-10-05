@@ -488,18 +488,20 @@ theorem same_type_lookup_transport {assumptions : Assumptions} {actual expected 
   · exact canonical_lookup_transport assumptions.bounds actual expected (by simpa using canonical) fuel name member lookup
   · cases actual <;> simp at aliasActual
     rename_i index
-    cases found : assumptions.bounds.lookup index with
-    | none => simp [found] at aliasActual
+    cases aliased : assumptions.alias index with
+    | none => simp [aliased] at aliasActual
     | some bound =>
-      obtain ⟨-,equal⟩ : _ ∧ bound.canonical = expected.canonical := by simpa [found] using aliasActual
+      have found := Assumptions.alias_bound aliased
+      obtain ⟨-,equal⟩ : _ ∧ bound.canonical = expected.canonical := by simpa [aliased] using aliasActual
       obtain ⟨depth,actualMember,actualLookup,memberEq⟩ := canonical_lookup_transport assumptions.bounds bound expected equal fuel name member lookup
       exact ⟨depth+1,actualMember,by simpa [Ty.lookup,found] using actualLookup,memberEq⟩
   · cases expected <;> simp at aliasExpected
     rename_i index
-    cases found : assumptions.bounds.lookup index with
-    | none => simp [found] at aliasExpected
+    cases aliased : assumptions.alias index with
+    | none => simp [aliased] at aliasExpected
     | some bound =>
-      obtain ⟨-,equal⟩ : _ ∧ bound.canonical = actual.canonical := by simpa [found] using aliasExpected
+      have found := Assumptions.alias_bound aliased
+      obtain ⟨-,equal⟩ : _ ∧ bound.canonical = actual.canonical := by simpa [aliased] using aliasExpected
       cases fuel with
       | zero => simp [Ty.lookup] at lookup
       | succ fuel =>
@@ -555,10 +557,11 @@ theorem same_type_preserves_head {assumptions : Assumptions} {first second resul
   · exact canonical_agreement_normalizes (by simpa using canonical) normal
   · cases first <;> simp at aliasFirst
     rename_i index
-    cases found : assumptions.bounds.lookup index with
-    | none => simp [found] at aliasFirst
+    cases aliased : assumptions.alias index with
+    | none => simp [aliased] at aliasFirst
     | some bound =>
-      obtain ⟨-,equal⟩ : _ ∧ bound.canonical = second.canonical := by simpa [found] using aliasFirst
+      have found := Assumptions.alias_bound aliased
+      obtain ⟨-,equal⟩ : _ ∧ bound.canonical = second.canonical := by simpa [aliased] using aliasFirst
       cases normal with
       | direct type terminal => simp [isVariable] at terminal
       | alias found' prior =>
@@ -567,10 +570,11 @@ theorem same_type_preserves_head {assumptions : Assumptions} {first second resul
         exact canonical_agreement_normalizes equal prior
   · cases second <;> simp at aliasSecond
     rename_i index
-    cases found : assumptions.bounds.lookup index with
-    | none => simp [found] at aliasSecond
+    cases aliased : assumptions.alias index with
+    | none => simp [aliased] at aliasSecond
     | some bound =>
-      obtain ⟨-,equal⟩ : _ ∧ bound.canonical = first.canonical := by simpa [found] using aliasSecond
+      have found := Assumptions.alias_bound aliased
+      obtain ⟨-,equal⟩ : _ ∧ bound.canonical = first.canonical := by simpa [aliased] using aliasSecond
       exact .alias found (canonical_agreement_normalizes equal.symm normal)
 
 inductive HeadKind where
@@ -1103,7 +1107,7 @@ theorem source_insert_binding {assumptions : Assumptions} {context : Context}
     intro context target targetType member uses name fuel targetTyped lookup ih depth binding bound bindingValid
     simpa only [Term.rename] using (PartialTyping.get (ih depth binding bound bindingValid) lookup)
   case extend =>
-    intro context target fields targetType row tu fu targetTyped fieldsTyped isRow ihTarget ihFields depth binding bound bindingValid
+    intro context target fields targetType row tu fu rowFuel targetTyped fieldsTyped isRow ihTarget ihFields depth binding bound bindingValid
     have fieldLength := source_uses_length (PartialTyping.record fieldsTyped)
     have counts := add_uses_insert tu fu depth ((source_uses_length targetTyped).trans fieldLength.symm) (insert_usage_bound targetTyped bound)
     simpa only [Term.rename,counts] using
@@ -1517,7 +1521,7 @@ theorem source_focus_typed {assumptions : Assumptions} {context : Context}
     intro context target targetType member uses name fuel targetTyped lookup ih types environment environmentTyped safe valid
     exact ⟨⟨targetType,member,⟨context,uses,environmentTyped,targetTyped,safe,valid⟩,.field lookup,.refl member⟩⟩
   case extend =>
-    intro context target fields targetType row targetUses fieldUses targetTyped fieldsTyped rowValid ihTarget ihFields types environment environmentTyped safe valid
+    intro context target fields targetType row targetUses fieldUses rowFuel targetTyped fieldsTyped rowValid ihTarget ihFields types environment environmentTyped safe valid
     have targetSafe := safe_add_uses_left context targetUses fieldUses (source_uses_length targetTyped)
       (source_uses_length (PartialTyping.record fieldsTyped)) safe
     have fieldsSafe := safe_add_uses_right context targetUses fieldUses (source_uses_length targetTyped)

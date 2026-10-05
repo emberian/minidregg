@@ -109,6 +109,58 @@ def positive (value : Json) (cap : Nat) : Option Nat := do
   let n ← text.toNat?
   if n == 0 || toString n != text || n > cap then none else some n
 
+/-- The typed-core packet fields around a typing proposal for `term`, `context` empty. -/
+def packetJson (proposal : Json) (term : ATerm) (sourceEntry : String) (modules : List SourceModule)
+    (typeFuel : Nat) : Json :=
+  let field (k : String) := (proposal.getObjVal? k).toOption.getD .null
+  Json.mkObj [("schema", toJson "dregg.objective-bend.typed-core.v3"), ("term", term.json),
+    ("types", field "types"), ("annotations", field "annotations"), ("bounds", field "bounds"),
+    ("shareableVariables", field "shareableVariables"), ("fuel", toJson (toString typeFuel)),
+    ("context", Json.arr #[]), ("sourceEntry", toJson sourceEntry),
+    ("sourceModules", Json.arr (modules.map SourceModule.binding).toArray),
+    ("status", toJson "exact core annotation proposal; actual checker must return Checked; no law proof or effect authority")]
+
+/-! ## Templates: each open declaration checked once against its bounds alone (D2) -/
+
+/-- The context every knot field is checked in: `$seed : {}` then `$globals : the knot`. -/
+def knotContext : Minidregg.Theory.ObjectiveBendTypes.Context :=
+  [⟨.emptyRow, .unrestricted⟩, ⟨.variable 0, .unrestricted⟩]
+
+/-- OB-LTUO LT2 D2. An open declaration's knot field is its template at its own bounds. It is
+checked here by the checker with its `Self` variable RIGID: `Self`'s bound is a lower bound
+(members are read through it) and never an alias, so a body that uses `self` where a value
+of exactly its bound row is expected, which the alias checker of the whole program would
+accept and only a wider instance would refuse, is refused HERE, naming the declaration.
+`Theory.ObjectiveBendTemplates.Discharges.check_instantiate` is what a template accepted
+here buys: acceptance at every instance whose bounds are discharged. -/
+def checkTemplate (output : Output) (sourceEntry : String) (modules : List SourceModule) (typeFuel : Nat)
+    (key : String) (selfIndex : Nat) (field : ATerm) : Except Diagnostic Unit := do
+  let refuse := fun (why : String) =>
+    (throw (elaborationRefusal why) : Except Diagnostic Unit)
+  let proposal ← match ObjectiveBendElaborate.proposalJson { output with term := field } with
+    | .ok proposal => pure proposal
+    | .error e => throw (elaborationRefusal ("refused (template-typing): open declaration " ++ key ++
+        " has no typed template: " ++ e))
+  let packet ← match decodePacket (packetJson proposal field sourceEntry modules typeFuel) with
+    | .ok packet => pure packet
+    | .error e => throw (elaborationRefusal ("refused (template-typing): open declaration " ++ key ++
+        " has no typed template: " ++ e))
+  let source := packet.source
+  let rigid := { source with assumptions := { source.assumptions with rigid := [selfIndex] } }
+  match check rigid knotContext packet.fuel with
+  | some _ => pure ()
+  | none =>
+    match check source knotContext packet.fuel with
+    | some _ => refuse ("refused (self-rigid): open declaration " ++ key ++ " uses self as a value of its " ++
+        "Self bound row; Self ranges over every type that HAS that row (a lower bound), so a value of type " ++
+        "Self is not a value of the row. Read the members it needs (self.m) instead")
+    | none => refuse ("refused (template-typing): open declaration " ++ key ++
+        " does not type-check against its declared bounds")
+
+def checkTemplates (output : Output) (sourceEntry : String) (modules : List SourceModule) (typeFuel : Nat) :
+    Except Diagnostic Unit :=
+  output.templates.forM fun (key, selfIndex, field) => checkTemplate output sourceEntry modules typeFuel key selfIndex field
+
 structure Lowering where
   output : Output
   /-- The selected term after projections: what the core and the packet carry. -/
@@ -168,6 +220,7 @@ def lowerDecoded (modules : List SourceModule) (decoded : List ObjectiveBendElab
     else match args with
       | .arr _ => "legacy-canonical-nat-bool-record"
       | _ => "dregg.objective-bend.argument-values.v1"
+  checkTemplates output (entry.name ++ "." ++ entryDefinition) modules typeFuel
   return ⟨output, term, entry.name ++ "." ++ entryDefinition, argumentCodec, mode, modules, limits, typeFuel⟩
 
 /-- The whole front end on read modules: options, parse and check every module, elaborate,
@@ -194,14 +247,7 @@ proposal is `{status: "unsupported", message}`. -/
 def Lowering.packet (l : Lowering) : Json :=
   match l.proposal with
   | .error message => Json.mkObj [("status", toJson "unsupported"), ("message", toJson message)]
-  | .ok proposal =>
-    let field (k : String) := (proposal.getObjVal? k).toOption.getD .null
-    Json.mkObj [("schema", toJson "dregg.objective-bend.typed-core.v3"), ("term", l.term.json),
-      ("types", field "types"), ("annotations", field "annotations"), ("bounds", field "bounds"),
-      ("shareableVariables", field "shareableVariables"), ("fuel", toJson (toString l.typeFuel)),
-      ("context", Json.arr #[]), ("sourceEntry", toJson l.sourceEntry),
-      ("sourceModules", Json.arr (l.modules.map SourceModule.binding).toArray),
-      ("status", toJson "exact core annotation proposal; actual checker must return Checked; no law proof or effect authority")]
+  | .ok proposal => packetJson proposal l.term l.sourceEntry l.modules l.typeFuel
 
 /-! ## Acceptance: the checker on the front end's own packet -/
 
@@ -210,6 +256,7 @@ theorem Lowering.packet_term (l : Lowering) {proposal : Json} (proposed : l.prop
     l.packet.getObjVal? "term" = .ok l.term.json := by
   unfold Lowering.packet
   rw [proposed]
+  unfold packetJson
   exact ObjectiveBendTermWire.getObjVal_mkObj (by simp) (by simp)
 
 /-- The front end's packet, decoded by the checker's decoder: its annotations and assumptions

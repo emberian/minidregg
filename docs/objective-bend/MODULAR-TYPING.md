@@ -1,10 +1,40 @@
 # Modular typing for Objective Bend (design, OB-LTUO LT2)
 
-Status: BUILT except D2 and the step-4 theorem. Step 1 (D3, D4: closed specs with an open
+Status: BUILT through step 4. Step 1 (D3, D4: closed specs with an open
 inherited row, checked `requires`), step 2 (`canonical_instantiate`,
-`Theory/ObjectiveBendTemplates.lean`), step 3a (D6: records may name themselves) and step 3b
-(D1, D5: open declarations over `Self`/`Super`, discharged at `fix`) are landed. Open:
-D2 (`Assumptions.rigid`) and `infer_instantiate` (step 4), below.
+`Theory/ObjectiveBendTemplates.lean`), step 3a (D6: records may name themselves), step 3b
+(D1, D5: open declarations over `Self`/`Super`, discharged at `fix`) and step 4 (D2 rigid
+`Self`, `infer_instantiate`) are landed.
+
+Step 4 as built. `Assumptions.rigid : List Nat` (default `[]`); conversions unfold a variable
+through `Assumptions.alias`, which is `none` for a rigid index, so `sameType`, `variantRow` and
+the recursive-sum injection never equate a rigid variable with its bound, while `Ty.lookup` and
+`Ty.isRow` still read members through it. Emitted programs keep `rigid = []` (the wire carries
+no rigid list; `decodePacketParts` builds `[]`). The front end (`checkTemplates`, run by
+`lowerDecoded`, so by every consumer of a lowering) checks each open declaration's knot field
+once, under the program's bounds with its `Self` index rigid, in the knot context
+`[$seed : {}, $globals : variable 0]`; a refusal names the declaration: `refused (self-rigid)`
+when only rigidity refuses it (the alias checker accepts), `refused (template-typing)`
+otherwise. Probe S4a pins the first; before the check was wired into lowering the same program
+was the anonymous checker refusal at the wider instance. In
+`Theory/ObjectiveBendTemplates.lean`: `Discharges σ template instance extra` (non-rigid
+variables fixed, keeping bounds that mention no rigid variable; each rigid image supports its
+bound's lookups and row-ness within `extra` more fuel, is shareable exactly when assumed, is
+never an activity); `Discharges.infer_instantiate` (by induction on fuel over `infer`,
+`inferFields`, `inferArms`: an accepted template term is accepted at the instance with fuel
+`+ extra`, at type `τ.instantiate σ`, same uses) and `Discharges.check_instantiate`; an
+inhabitant (`coloured_discharges`, `coloured_instance_accepted`: a `{weight}` template accepted
+at `{colour, weight}` BY the theorem) and the D2 tooth (`self_as_bound_row_alias_accepted` /
+`self_as_bound_row_rigid_refused`). `extend`'s row check reads `isRow` at `fuel + 64` (was the
+constant 64) and `PartialTyping.extend`/`FrameTyping.extend` carry their own fuel: a constant
+depth admits no instantiation theorem (a wider instance needs more depth), and the machine
+proofs never depended on 64.
+
+Not yet covered by step 4: instances are still produced by RE-ELABORATION (`chainFix`) and
+`Super` is the literal bound row in a template, so the emitted instance is not literally
+`template[σ]`; the front-end corollary `instance_accepted` needs instances emitted as
+substitutions of the checked template (Super as a second rigid variable). Until then a
+re-elaborated instance is still checked in the whole program (never unsoundly accepted).
 
 Step 3b as built. An open declaration (`extension E[Self has {...}, Super has {...}](self:
 Self, super: Super) -> Super with {...}:` or `spec S[Self has {...}, Super has {...}]:`, its
@@ -22,7 +52,7 @@ keep their declared types (`inherited-mismatch` when the row beneath differs). A
 record target is discharged against its row and the last layer is annotated with the variable
 itself. An open declaration referenced as an ordinary value is its bound instance.
 
-What stands in for D2 today: the bound-instance check uses the existing checker, where the
+Before step 4 (superseded above): the bound-instance check used the existing checker, where the
 Self variable is an ALIAS of its bound. That is stricter than nothing and catches every
 undeclared member read, but it is not the rigid check: a body could use `self` where a value
 of exactly the bound row is expected, which an alias accepts and a wider instance then refuses

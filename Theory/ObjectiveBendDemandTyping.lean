@@ -152,11 +152,11 @@ inductive FrameTyping (assumptions : Assumptions) (types : AddressTypes) : Frame
   | project (specType targetType : Ty) :
       FrameTyping assumptions types .project (.prototype specType targetType) targetType
   | extend {fields : List (String × Term)} {environment : Environment} {row inherited : Ty}
-      {context : Context} {uses : Uses} :
+      {context : Context} {uses : Uses} {fuel : Nat} :
       EnvironmentTyping types context environment →
       FieldsTyping assumptions context fields row uses → safeUses context uses = true →
       validContext assumptions.shareableVariables context = true →
-      inherited.isRow assumptions.bounds 64 = true →
+      inherited.isRow assumptions.bounds fuel = true →
       FrameTyping assumptions types (.extend fields environment) inherited (overlay row inherited)
   | condition {zero successor : Term} {environment : Environment} {result : Ty}
       {context : Context} {uses : Uses} :

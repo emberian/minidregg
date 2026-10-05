@@ -546,5 +546,26 @@
    "value": "false"
   },
   "owner": "control"
+ },
+ {
+  "name": "S4a-SelfRigid",
+  "modules": [
+   {
+    "name": "OpenSelfRigid",
+    "source": "OpenSelfRigid.obend"
+   }
+  ],
+  "entry": "wOfFive",
+  "arguments": [],
+  "prediction": "LT2 step 4 tooth (D2): a template that uses self as a value of its Self bound row is refused at the declaration, by name, not anonymously at a wider instance",
+  "current": {
+   "status": "refused",
+   "refusal": "refused (self-rigid): open declaration OpenSelfRigid.AddY"
+  },
+  "target": {
+   "status": "refused",
+   "refusal": "refused (self-rigid): open declaration OpenSelfRigid.AddY"
+  },
+  "owner": "control"
  }
 ]

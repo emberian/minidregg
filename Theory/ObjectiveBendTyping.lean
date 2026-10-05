@@ -8,6 +8,66 @@ set_option autoImplicit false
 structure Assumptions where
   bounds : Bounds := []
   shareableVariables : List Nat := []
+  /-- Rigid variables (OB-LTUO LT2 D2): a template's `Self`, checked once against its
+  declared bound. A rigid variable's bound is a LOWER bound: members are looked up
+  through it (`Ty.lookup`, `Ty.isRow`), but it is never an alias, so no conversion
+  equates the variable with its bound row. Emitted programs have `rigid = []`, where
+  `alias` is `bounds.lookup` and the checker is the alias checker. -/
+  rigid : List Nat := []
+
+/-- The declared head a variable unfolds to in a conversion: its bound unless it is rigid. -/
+def Assumptions.alias (assumptions : Assumptions) (index : Nat) : Option Ty :=
+  if assumptions.rigid.contains index then none else assumptions.bounds.lookup index
+
+theorem Assumptions.alias_bound {assumptions : Assumptions} {index : Nat} {bound : Ty}
+    (found : assumptions.alias index = some bound) : assumptions.bounds.lookup index = some bound := by
+  unfold Assumptions.alias at found
+  split at found
+  · cases found
+  · exact found
+
+theorem Assumptions.alias_of_rigid_nil {assumptions : Assumptions} (open_ : assumptions.rigid = [])
+    (index : Nat) : assumptions.alias index = assumptions.bounds.lookup index := by
+  simp [Assumptions.alias, open_]
+
+theorem Assumptions.alias_rigid {assumptions : Assumptions} {index : Nat}
+    (rigid : assumptions.rigid.contains index = true) : assumptions.alias index = none := by
+  unfold Assumptions.alias; rw [if_pos rigid]
+
+/-- More fuel never turns an accepted row into a refused one. -/
+theorem Ty.isRow_mono {bounds : Bounds} : ∀ {fuel fuel' : Nat} {type : Ty},
+    type.isRow bounds fuel = true → fuel ≤ fuel' → type.isRow bounds fuel' = true
+  | 0, _, _, h, _ => by simp [Ty.isRow] at h
+  | fuel + 1, fuel', type, h, le => by
+    obtain ⟨f, rfl⟩ : ∃ f, fuel' = f + 1 := ⟨fuel' - 1, by omega⟩
+    cases type with
+    | emptyRow => rfl
+    | field _ _ tail => simp only [Ty.isRow] at h ⊢; exact Ty.isRow_mono h (by omega)
+    | «variable» index =>
+      simp only [Ty.isRow] at h ⊢
+      split at h
+      · exact Ty.isRow_mono h (by omega)
+      · cases h
+    | _ => simp [Ty.isRow] at h
+
+/-- More fuel never changes a successful lookup. -/
+theorem Ty.lookup_mono {bounds : Bounds} : ∀ {fuel fuel' : Nat} {type : Ty} {name : String} {member : Ty},
+    type.lookup bounds fuel name = some member → fuel ≤ fuel' → type.lookup bounds fuel' name = some member
+  | 0, _, _, _, _, h, _ => by simp [Ty.lookup] at h
+  | fuel + 1, fuel', type, name, member, h, le => by
+    obtain ⟨f, rfl⟩ : ∃ f, fuel' = f + 1 := ⟨fuel' - 1, by omega⟩
+    cases type with
+    | field prior m tail =>
+      simp only [Ty.lookup] at h ⊢
+      split at h
+      · rw [if_pos ‹_›]; exact h
+      · rw [if_neg ‹_›]; exact Ty.lookup_mono h (by omega)
+    | «variable» index =>
+      simp only [Ty.lookup, Option.bind_eq_bind] at h ⊢
+      cases found : bounds.lookup index with
+      | none => simp [found] at h
+      | some bound => simp only [found, Option.bind_some] at h ⊢; exact Ty.lookup_mono h (by omega)
+    | _ => simp [Ty.lookup] at h
 
 /-- Finite guarded shareability premises are checked from the declared bounds.
 A recursive immutable row may refer to itself; a custody/once member rejects
@@ -30,11 +90,11 @@ def sameType (assumptions : Assumptions) (actual expected : Ty) : Bool :=
   actual.canonical == expected.canonical ||
     (match actual with
       | .variable index => !expected.isComputation &&
-          (assumptions.bounds.lookup index).map Ty.canonical == some expected.canonical
+          (assumptions.alias index).map Ty.canonical == some expected.canonical
       | _ => false) ||
     (match expected with
       | .variable index => !actual.isComputation &&
-          (assumptions.bounds.lookup index).map Ty.canonical == some actual.canonical
+          (assumptions.alias index).map Ty.canonical == some actual.canonical
       | _ => false)
 
 theorem sameType_isComputation {assumptions : Assumptions} {actual expected : Ty}
@@ -154,10 +214,10 @@ inductive PartialTyping (assumptions : Assumptions) : Context → Term → Ty �
       targetType.lookup assumptions.bounds fuel name = some member →
       PartialTyping assumptions context (.get target name) member uses
   | extend {context : Context} {target : Term} {fields : List (String × Term)}
-      {targetType row : Ty} {targetUses fieldUses : Uses} :
+      {targetType row : Ty} {targetUses fieldUses : Uses} {fuel : Nat} :
       PartialTyping assumptions context target targetType targetUses →
       FieldsTyping assumptions context fields row fieldUses →
-      targetType.isRow assumptions.bounds 64 = true →
+      targetType.isRow assumptions.bounds fuel = true →
       PartialTyping assumptions context (.extend target fields) (overlay row targetType) (addUses targetUses fieldUses)
   | specification {context : Context} {metadata extension : Term} {metadataType extensionType : Ty} {mu eu : Uses} :
       PartialTyping assumptions context metadata metadataType mu →
@@ -274,7 +334,7 @@ structure InferredArms (assumptions : Assumptions) (context : Context) (arms : L
 unfolds, as in sameType. The final sameType premise is what is trusted. -/
 def variantRow (assumptions : Assumptions) : Ty → Option Ty
   | .variant row => some row
-  | .variable index => match assumptions.bounds.lookup index with
+  | .variable index => match assumptions.alias index with
     | some (.variant row) => some row
     | _ => none
   | _ => none
@@ -328,7 +388,7 @@ def infer (assumptions : Assumptions) (annotations : Annotations) (context : Con
   | fuel + 1, .extend target fields => do
       let prior ← infer assumptions annotations context (position ++ [0]) fuel target
       let members ← inferFields assumptions annotations context (position ++ [1]) 0 fuel fields
-      if hr : prior.type.isRow assumptions.bounds 64 = true then
+      if hr : prior.type.isRow assumptions.bounds (fuel + 64) = true then
         some ⟨overlay members.type prior.type, addUses prior.uses members.uses,
           .extend prior.derivation members.derivation hr⟩ else none
   | fuel + 1, .specification metadata extension => do
@@ -446,7 +506,7 @@ def infer (assumptions : Assumptions) (annotations : Annotations) (context : Con
           -- A recursive sum is declared as its bounded variable: inject at the
           -- bound's row, then convert to the variable (one declared head unfolds),
           -- so a nested injection already carries the sum's declared name.
-          match assumptions.bounds.lookup index with
+          match assumptions.alias index with
           | some (.variant row) =>
             if hm : row.lookup assumptions.bounds (fuel + 1) tag = some annotation.domain then
               if hs : agree assumptions value.type annotation.domain = true then
@@ -663,7 +723,7 @@ def futureRowSource : AnnotatedTerm :=
       else if position = [0] then some ⟨.variable 1,.field "answer" .natural (.variable 1),.unrestricted,.reusable⟩
       else none,
     ⟨[(0,.field "combine" (.arrow .reusable .unrestricted (.variable 0) (.variable 0)) .emptyRow),
-       (1,.emptyRow)], [0,1]⟩⟩
+       (1,.emptyRow)], [0,1], []⟩⟩
 
 theorem independently_checked_future_rows :
     (check futureRowSource [] 16).isSome = true := by decide
@@ -686,9 +746,10 @@ theorem future_row_instantiation_accepted (self super : Ty)
     (superRow : super.isRow [] 64 = true) :
     (check (futureRowInstantiation self super) [] 16).isSome = true := by
   simp [check, infer, inferFields, futureRowInstantiation, futureRowSource, agree,
-    sameType, Assumptions.valid, overlay, zeroUses, variableUses, addUses, safeUses, safeQuantity,
+    sameType, Assumptions.alias, Assumptions.valid, overlay, zeroUses, variableUses, addUses, safeUses, safeQuantity,
     validContext, reusableAllowed, reusableCaptures,
-    List.range_succ, List.zipWith, selfShareable, superShareable, superRow, Ty.isComputation]
+    List.range_succ, List.zipWith, selfShareable, superShareable, (Ty.isRow_mono superRow (by omega) : super.isRow [] 77 = true),
+    Ty.isComputation]
 
 /-- A total law provider proves a law ABOUT the partial runtime term; source
 law names alone cannot construct this evidence. Compatible retention is chosen
@@ -716,9 +777,9 @@ theorem future_row_typed : FutureRowTyped futureRowInstantiation := by
   intro self super hs ht hr
   refine ⟨futureRowInstanceChecked self super hs ht hr, ?_⟩
   simp [futureRowInstanceChecked, check, infer, inferFields, futureRowInstantiation,
-    futureRowSource, sameType, Assumptions.valid, overlay, zeroUses, variableUses, addUses, safeUses, safeQuantity,
+    futureRowSource, Assumptions.alias, Assumptions.valid, overlay, zeroUses, variableUses, addUses, safeUses, safeQuantity,
     validContext, reusableAllowed, reusableCaptures,
-    List.range_succ, List.zipWith, hs, ht, hr, Ty.isComputation]
+    List.range_succ, List.zipWith, hs, ht, (Ty.isRow_mono hr (by omega) : super.isRow [] 77 = true), Ty.isComputation]
 
 /-- Independently authored code changes a self-sensitive method type at every
 future Self instantiation, including negative arrow occurrences. -/
@@ -737,10 +798,11 @@ theorem future_binary_instantiation_accepted (self super : Ty)
     (selfShareable : self.shareable = true) (superShareable : super.shareable = true)
     (superRow : super.isRow [] 64 = true) :
     (check (futureBinaryInstantiation self super) [] 20).isSome = true := by
-  simp [check, infer, inferFields, futureBinaryInstantiation, agree, sameType, Assumptions.valid, overlay,
+  simp [check, infer, inferFields, futureBinaryInstantiation, agree, sameType, Assumptions.alias, Assumptions.valid, overlay,
     zeroUses, variableUses, addUses, safeUses, safeQuantity,
     validContext, reusableAllowed, reusableCaptures,
-    List.range_succ, List.zipWith, selfShareable, superShareable, superRow, Ty.isComputation]
+    List.range_succ, List.zipWith, selfShareable, superShareable,
+    (Ty.isRow_mono superRow (by omega) : super.isRow [] 81 = true), Ty.isComputation]
 
 def scalarExtend : AnnotatedTerm :=
   ⟨.extend (.nat 3) [("answer",.nat 42)], fun _ => none, {}⟩
@@ -768,11 +830,11 @@ def recursiveGlobalKnot : AnnotatedTerm :=
         .arrow .reusable .unrestricted .emptyRow (.variable 0),.unrestricted,.reusable⟩
       else if position = [0,0,0] then some ⟨.emptyRow,.variable 0,.unrestricted,.reusable⟩
       else none,
-    ⟨[(0,.field "answer" .natural .emptyRow)],[0]⟩⟩
+    ⟨[(0,.field "answer" .natural .emptyRow)],[0],[]⟩⟩
 theorem recursive_global_knot_accepted : (check recursiveGlobalKnot [] 16).isSome = true := by decide
 
 def dishonestRecursiveCustody : AnnotatedTerm :=
-  ⟨.nat 7, fun _ => none, ⟨[(0,.field "authority" (.custody 17) (.variable 0))],[0]⟩⟩
+  ⟨.nat 7, fun _ => none, ⟨[(0,.field "authority" (.custody 17) (.variable 0))],[0],[]⟩⟩
 theorem recursive_alias_does_not_hide_custody :
     (check dishonestRecursiveCustody [] 8).isNone = true := by decide
 
@@ -880,7 +942,7 @@ W3.EVENTS 6b2616db; refused/accepted logs in the W25 evidence). -/
 
 def listRow : Ty :=
   .field "nil" .emptyRow (.field "cons" (.field "head" .natural (.field "tail" (.variable 0) .emptyRow)) .emptyRow)
-def listAssumptions : Assumptions := ⟨[(0, .variant listRow)], [0]⟩
+def listAssumptions : Assumptions := ⟨[(0, .variant listRow)], [0], []⟩
 def listAnnotations : Annotations := fun position =>
   if position = [] then
     some ⟨.field "head" .natural (.field "tail" (.variable 0) .emptyRow), .variable 0, .unrestricted, .reusable⟩
@@ -1136,7 +1198,7 @@ def decodePacketParts (value : Json) (table : Array (Ty × Nat)) : Except String
     | .ok fuel => jsonNat fuel
   if fuel > 16384 then throw "checker fuel capacity"
   return ⟨fun path => (annotations.find? (fun entry => entry.1 == path)).map Prod.snd,
-      ⟨bounds,shareable⟩,context,fuel⟩
+      ⟨bounds,shareable,[]⟩,context,fuel⟩
 
 /-- Schema, type table, term, then the rest (`decodePacketParts`), in that order. -/
 def decodePacket (value : Json) : Except String DecodedPacket := do

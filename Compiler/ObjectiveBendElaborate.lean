@@ -438,6 +438,10 @@ structure St where
   typeBindings : List (String × PTy) := []
   /-- Per open declaration: its `Self` variable and its `Super` bound row. -/
   openBounds : List (String × (PTy × PTy)) := []
+  /-- Per open declaration, in emission order: its key, its `Self` variable's index and its
+  knot field (the template at its own bounds). The front end checks each once with that
+  variable RIGID (`ObjectiveBendFrontEnd.checkTemplates`, D2). -/
+  templates : List (String × Nat × ATerm) := []
   /-- The declared result type of the body being lowered (for a `fix` in tail position). -/
   resultType : Option PTy := none
   /-- The target a `fix` about to be lowered must produce (tail position or annotated let). -/
@@ -1766,6 +1770,8 @@ structure Output where
   globalRow : Option PTy
   sumBounds : List (Nat × PTy)
   typeErrors : Array String
+  /-- The open declarations' templates (`St.templates`). -/
+  templates : List (String × Nat × ATerm) := []
 
 /-- One declaration of the package knot: its field and the hidden layer fields it created. -/
 def emitDecl (c : Ctx) (fuel : Nat) (m : Module) (d : Decl) (fields : List (String × ATerm)) : M (List (String × ATerm)) := do
@@ -1791,6 +1797,10 @@ def emitDecl (c : Ctx) (fuel : Nat) (m : Module) (d : Decl) (fields : List (Stri
           (abstract c fuel params outerEnv (fun next => body c fuel b next m) d.name (.source targetType) m.name)
     | .spec s => specification c fuel s m
     | _ => fail "unsupported declaration"
+  if !d.binders.isEmpty then
+    match (← get).openBounds.lookup key with
+    | some (.variable k, _) => modify fun st => { st with templates := st.templates ++ [(key, k, value)] }
+    | _ => fail ("open declaration " ++ key ++ ": its Self variable is unresolved")
   let mut fields := fields ++ [(key, value)]
   for (name, value, type) in (← get).hidden do
     fields := fields ++ [(name, value)]
@@ -1840,7 +1850,7 @@ def elaborateM (c : Ctx) (entryModule : Nat) (entryDefinition : String) (args : 
         | .error _ => fail "arguments must select a supported complete value envelope"
       else fail "arguments must select a supported complete value envelope"
   let st ← get
-  return ⟨selected, globalRow, st.sumBounds, st.typeErrors⟩
+  return ⟨selected, globalRow, st.sumBounds, st.typeErrors, st.templates⟩
 
 /-- The built-in module: `builtinSource` through the parser and the AST decoder. -/
 def builtinModule : Except String Module := do
