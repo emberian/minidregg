@@ -148,5 +148,7 @@
  {"name":"Structured-nestedRow","modules":[{"name":"Structured","source":"Structured.obend"}],"entry":"nestedRow","arguments":[],"expectedType":"field","expectedData":{"tag":"record","fields":[{"name":"a","value":{"tag":"record","fields":[{"name":"b","value":{"tag":"natural","value":"3"}},{"name":"c","value":{"tag":"boolean","value":false}}]}},{"name":"d","value":{"tag":"label","value":"x"}}]}},
  {"name":"Structured-viaLet","modules":[{"name":"Structured","source":"Structured.obend"}],"entry":"viaLet","arguments":[],"expectedType":"field","expectedData":{"tag":"record","fields":[{"name":"left","value":{"tag":"natural","value":"10"}},{"name":"right","value":{"tag":"natural","value":"20"}}]}},
  {"name":"Structured-neverFinishing-no-partial-value","modules":[{"name":"Structured","source":"Structured.obend"}],"entry":"neverFinishing","arguments":[],"expectedType":"field","expectedRecord":true,"expectedDataStatus":"suspended"},
- {"name":"Structured-closureInside-not-data","modules":[{"name":"Structured","source":"Structured.obend"}],"entry":"closureInside","arguments":[],"expectedType":"field","expectedRecord":true,"expectedDataStatus":"executableValue"}
+ {"name":"Structured-closureInside-not-data","modules":[{"name":"Structured","source":"Structured.obend"}],"entry":"closureInside","arguments":[],"expectedType":"field","expectedRecord":true,"expectedDataStatus":"executableValue"},
+ {"name":"RecordParametersSeven","modules":[{"name":"RecordParameters","source":"RecordParameters.obend"}],"entry":"seven","arguments":[],"expected":"7"},
+ {"name":"RecordParametersScaled","modules":[{"name":"RecordParameters","source":"RecordParameters.obend"}],"entry":"scaled","arguments":["5"],"expected":"21"}
 ]

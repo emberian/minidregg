@@ -1,0 +1,17 @@
+edition ObjectiveBend 1
+# Parameter lists split only at top-level commas: a record type {x: Nat, y: Nat} and an
+# arrow type (Nat) -> Nat are each ONE parameter type, and the parameters after them are
+# their own. A parser that counted neither the brace nor the arrow cut the record at its
+# first comma and swallowed n into the arrow type.
+
+def sumXY(r: {x: Nat, y: Nat}, scale: Nat) -> Nat:
+  (r.x + r.y) * scale
+
+def twiceApplied(f: (Nat) -> Nat, n: Nat) -> Nat:
+  f(f(n))
+
+def seven() -> Nat:
+  sumXY({x: 3n, y: 4n}, 1n)
+
+def scaled(k: Nat) -> Nat:
+  sumXY({x: k, y: 2n}, 3n)

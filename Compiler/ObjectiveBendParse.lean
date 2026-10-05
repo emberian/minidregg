@@ -250,15 +250,20 @@ def parameterRe : Re := seqs [many space, opt (seqs [group 1 (alts [str "affine"
 def parameterJson (name type quantity : String) : Json :=
   Json.mkObj [("name", toJson name), ("type", toJson type), ("quantity", toJson quantity)]
 
-/-- Top-level comma split; `(<[` open and `)>]` close (so `->` closes: the TypeScript
-original, kept). -/
+/-- Top-level comma split of a parameter list. `( < [ {` open and `) > ] }` close, except the
+`>` of an arrow `->`, which is not a bracket: so a record type `{x: Nat, y: Nat}` and an
+arrow `(Nat, Nat) -> Nat` are each one parameter type (the elaborator's `splitTop` counts
+the same way). The TypeScript original counted neither `{` nor the arrow, so a record-typed
+parameter was cut at its first comma and every parameter after an arrow-typed one was
+swallowed into its type. -/
 def splitPieces (raw : List Char) : List (List Char) :=
-  let step := fun (acc : List (List Char) × List Char × Int) (c : Char) =>
-    let (pieces, current, depth) := acc
-    let depth := if c == '(' || c == '<' || c == '[' then depth + 1 else depth
-    let depth := if c == ')' || c == '>' || c == ']' then depth - 1 else depth
-    if c == ',' && depth == 0 then (current.reverse :: pieces, [], depth) else (pieces, c :: current, depth)
-  let (pieces, current, _) := raw.foldl step ([], [], 0)
+  let step := fun (acc : List (List Char) × List Char × Int × Option Char) (c : Char) =>
+    let (pieces, current, depth, prev) := acc
+    let depth := if c == '(' || c == '<' || c == '[' || c == '{' then depth + 1 else depth
+    let depth := if c == ')' || c == ']' || c == '}' || (c == '>' && prev != some '-') then depth - 1 else depth
+    if c == ',' && depth == 0 then (current.reverse :: pieces, [], depth, some c)
+    else (pieces, c :: current, depth, some c)
+  let (pieces, current, _, _) := raw.foldl step ([], [], 0, none)
   (current.reverse :: pieces).reverse
 
 def splitParameters (raw : List Char) : Except String (List Json) := do
