@@ -12,6 +12,7 @@ import Theory.ObjectiveBendDemandCollectProofs
 import Theory.ObjectiveBendDemandSettleProofs
 import Theory.ObjectiveBendDemandForceProofs
 import Theory.ObjectiveBendLedgerPoles
+import Theory.ObjectiveBendTemplates
 import Theory.ObjectiveBendCheckpointRoundTrip
 import Kernel.ObjectiveBendAdmissionSemantics
 import Kernel.ObjectiveResumeContract

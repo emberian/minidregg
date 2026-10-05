@@ -7635,7 +7635,7 @@
     {
       "module": "ObjectiveProofs",
       "path": "ObjectiveProofs.lean",
-      "sha256": "cc368a06eb7584e0a6677e01d21920d7f1e2308d43f7d25a241093f3acca3d16",
+      "sha256": "a7e2f0fa985827d2a513733c8db12e2b3b6b07fc9971c24bda3df7ce02604994",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -9687,6 +9687,13 @@
       "module": "Theory.ObjectiveBendStepCases",
       "path": "Theory/ObjectiveBendStepCases.lean",
       "sha256": "21e99208ef59e41ba16103eff3321467c4d8e042463af52e2f79d46b0bf5abca",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Theory.ObjectiveBendTemplates",
+      "path": "Theory/ObjectiveBendTemplates.lean",
+      "sha256": "befbc7e7e4923c2b7dd2609cf6223ac4ae3b97c245a5977e3bd4d3530464d450",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },

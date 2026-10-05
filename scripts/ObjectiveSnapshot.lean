@@ -35,6 +35,7 @@ import Theory.ObjectiveBendDemandCollectProofs
 import Theory.ObjectiveBendDemandSettleProofs
 import Theory.ObjectiveBendDemandForceProofs
 import Theory.ObjectiveBendLedgerPoles
+import Theory.ObjectiveBendTemplates
 import Verify.ObjectiveSnapshot
 
 namespace Minidregg.ObjectiveSnapshot.TheoryRun

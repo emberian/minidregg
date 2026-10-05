@@ -1397,6 +1397,13 @@ A Minidregg.Theory.ObjectiveBendOpenRecursion.yields_deterministic : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.yields_no_step : Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendOpenRecursion.yields_not_value : -
 A Minidregg.Theory.ObjectiveBendOpenRecursion.yields_plug : Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.canonical_eq_instantiate : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.canonical_instantiate : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.canonical_instantiate_insert : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.insertCanonical_comm : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.insertCanonical_same : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.lt_of_not_lt_ne : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.ObjectiveBendTemplates.tri : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.ObjectiveBendTypes.Binding.quantity : -
 A Minidregg.Theory.ObjectiveBendTypes.Binding.type : -
 A Minidregg.Theory.ObjectiveBendTypes.Bounds : -
