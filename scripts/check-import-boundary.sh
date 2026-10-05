@@ -13,7 +13,7 @@
 #   Compiler  Mathlib Lean Std Init Theory Pred Kernel Selvage Assurance Compiler
 #   Assurance Mathlib Theory Pred Kernel Compiler Selvage Assurance
 #   Effects   Mathlib Kernel Compiler Effects
-#   Host      Mathlib Lean Theory Pred Kernel Compiler Host  (no Selvage, no Assurance)
+#   Host      Mathlib Lean Std Theory Pred Kernel Compiler Host  (no Selvage, no Assurance)
 #
 # Two consequences worth naming: Host and Effects are SINKS (no library imports
 # either; only the roots Minidregg and AxiomCensus do), and Pred/Kernel/Compiler/
@@ -45,6 +45,11 @@
 # NARROWED (2026-10-04, W30-CORE4-DIGEST): the Pred row loses Compiler. Its only Compiler
 # imports were the cSHAKE256 leaf (Spec/Fast/Core), which moved to Theory so that Core4's
 # `digest` primitive (Theory/ObjectiveBendDigest) and Pred's `hashEq` share one sponge.
+# WIDENED (2026-10-05, merge keeper, batch c14): the Host row admits Std. Its first importer is
+# Host/FnArchivePublisher (Std.Internal.Async.TCP, fn-direct). This adds nothing to any Host
+# module's closure: Host already admits Lean, and `import Lean` reaches Std.Internal.Async.TCP
+# through Lean.Elab -> Lean.Elab.Idbg (toolchain v4.30.0). Std is the standard library, not
+# candidate code; the sink rule (no core library imports Host) is unchanged.
 # A new edge between libraries is a red until this table is changed on purpose.
 # Exits 1 listing every offending import line, with the edge it would add.
 set -u
@@ -61,7 +66,7 @@ ALLOWED = {
     "Compiler":  {"Mathlib", "Lean", "Std", "Init", "Theory", "Pred", "Kernel", "Selvage", "Assurance", "Compiler"},
     "Assurance": {"Mathlib", "Theory", "Pred", "Kernel", "Compiler", "Selvage", "Assurance"},
     "Effects":   {"Mathlib", "Kernel", "Compiler", "Effects"},
-    "Host":      {"Mathlib", "Lean", "Theory", "Pred", "Kernel", "Compiler", "Host"},
+    "Host":      {"Mathlib", "Lean", "Std", "Theory", "Pred", "Kernel", "Compiler", "Host"},
 }
 files = [f for f in subprocess.check_output(["git", "ls-files", "-z", "--", "*.lean"]).decode().split("\0") if f]
 bad, counts = [], {}
