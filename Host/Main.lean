@@ -5929,6 +5929,129 @@ def usage : String :=
 "inspect-agent-lifetime-paid-ingress PAID-PLAN.bin INGRESS.bin RESULT.json\ninspect-stop-claim STOP-PLAN.bin FRESH-COMMITTED-CLAIM.bin RESULT.json\nfn-frontier-request selected MINI-TX REQUEST.bin|fn-frontier-request empty - REQUEST.bin|fn-frontier-plan selected MINI-TX PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-plan empty - PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-export PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-assemble PLAN.bin RAW64-SIGNATURE.bin INGRESS.bin|fn-selected-poll-submit INGRESS.bin OUTCOME.bin|fn-selected-poll-lookup INGRESS.bin OUTCOME.bin|fn-empty-poll-submit INGRESS.bin OUTCOME.bin|fn-empty-poll-lookup INGRESS.bin OUTCOME.bin|fn-empty-page-ack CURSOR.fncu REPORT.fn-e COVERAGE19.bin RESULT.json\n" ++
 "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|law-sat REQUEST.json RESULT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|checkpoint-differential HEIGHT|well-ledger LEDGER.json|pay-ledger LEDGER.json|pay-purse TASK PURSE.json|pay-job JOB JOB.json|job-money-explain COMMAND.bin|pay-enrol-probe INPUT.json OUTPUT.json|pay-enrol-ids MINI-KEY-HEX OUTPUT.json|challenge INTENT.bin INTENT-SIGNATURE.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|pin-plan-height PLAN.bin PINNED-PLAN.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|selected-release-submit INGRESS.bin OUTCOME.bin|selected-release-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-begin-submit INGRESS.bin OUTCOME.bin|application-lifecycle-begin-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-completion-submit INGRESS.bin OUTCOME.bin|application-lifecycle-completion-lookup INGRESS.bin OUTCOME.bin|diagnose-completion INGRESS.bin RESULT.json|selected-source-publication-submit INGRESS.bin OUTCOME.bin|selected-source-publication-lookup INGRESS.bin OUTCOME.bin|selected-release-source-plan PACKET.bin DELEGATE-CAP-DEC SPEC.bin HEADER.bin ROOT.txt|selected-release-source-assemble SPEC.bin HEADER.bin SIGNATURE.bin INGRESS.bin|selected-release-prepare REQUEST.json PREIMAGE.bin|selected-release-check-preimage PREIMAGE.bin CANONICAL.bin|selected-release-assemble PREIMAGE.bin SIGNATURE.bin FROM_MAILBOX DATE SUBJECT PACKET.bin ARTICLE.eml|selected-release-ingress PACKET.bin CAPABILITY_DEC TARGET_ROOT_DEC INGRESS.bin|selected-release-fn-poll FN-BINARY SCOPE.json CONTROL.sock CAPABILITY_DEC TARGET_ROOT_DEC CURSOR.fncu REPORT.fn-e SOURCE.eml PACKET.bin INGRESS.bin RESULT.json|selected-release-fn-ack CURSOR.fncu REPORT.fn-e MINI-TRANSACTION COVERAGE17.bin RESULT.json|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
+/-- Ops 66-71 of the operator session: launch BEGIN, CLAIM and COMPLETION plans
+and assemblies, each v4 failed-create retry frame routed first (it decodes under
+its own tag, so the v3 and STOP/continue paths are unchanged). Kept out of `run`
+so `run` elaborates within the default heartbeats: no heartbeat raise. -/
+def launchLifecycleOperatorOp (pinnedConfig : NativeHost.Config)
+    (lifecycleManagement : Option LifecycleManagementSettings)
+    (state : IO.Ref (Option (NativeHostSession.Session pinnedConfig)))
+    (op : UInt8) (payload : List UInt8) : IO (UInt8 × List UInt8) := do
+  match op with
+  | 66 =>
+      let some management := lifecycleManagement
+        | return ((255 : UInt8), failure .operationRejected "application-lifecycle-launch-begin-author"
+            "lifecycle management identity is not configured")
+      let (selectorBytes, payload) ← splitPair payload
+      let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
+      let pin := selector.beginPin management
+      let session ← sessionWalked pinnedConfig state
+      if let some routed ←
+          retryLifecycleBeginPlan pinnedConfig session pin payload then
+        return routed
+      let bytes ← if let some request :=
+          ApplicationLifecycleLaunchBeginAuthoring.requestCodec.decode payload then
+        if request.kind == .stop then do
+          let plan ← IO.ofExcept <|
+            ApplicationLifecycleLaunchBeginAuthoring.prepareStopRequestVerified
+              pinnedConfig session.verified pin payload
+          pure (ApplicationLifecycleLaunchBeginAuthoring.stopPlanCodec.encode plan)
+        else do
+          let plan ← IO.ofExcept <|
+            ApplicationLifecycleLaunchBeginAuthoring.prepareVerified
+              pinnedConfig session.verified pin request
+          pure (ApplicationLifecycleLaunchBeginAuthoring.planCodec.encode plan)
+      else do
+        let plan ← IO.ofExcept <|
+          (← ApplicationLifecycleLaunchBeginAuthoring.prepareContinueRequestVerified
+            pinnedConfig session.verified pin payload)
+        pure (ApplicationLifecycleLaunchBeginAuthoring.planCodec.encode plan)
+      unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+        throw (IO.userError "launch BEGIN plan exceeds host frame bound")
+      return ((66 : UInt8), bytes)
+  | 67 =>
+      let (planBytes, signaturesBytes) ← splitPair payload
+      let signatures ← decodeSignatures signaturesBytes
+      if let some routed ← retryLifecycleBeginAssemble planBytes signatures then
+        return routed
+      let ingress ← if let some plan :=
+          ApplicationLifecycleLaunchBeginAuthoring.stopPlanCodec.decode
+            planBytes then
+        IO.ofExcept <|
+          ApplicationLifecycleLaunchBeginAuthoring.assembleStop plan signatures
+      else if let some plan :=
+          ApplicationLifecycleLaunchBeginAuthoring.planCodec.decode
+            planBytes then
+        IO.ofExcept <|
+          ApplicationLifecycleLaunchBeginAuthoring.assemble plan signatures
+      else throw (RequestRefusal.malformed "noncanonical launch BEGIN plan")
+      unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+        throw (IO.userError "launch BEGIN ingress exceeds host frame bound")
+      return ((67 : UInt8), ingress)
+  | 68 =>
+      let some management := lifecycleManagement
+        | return ((255 : UInt8), failure .operationRejected "application-lifecycle-launch-claim-author"
+            "lifecycle management identity is not configured")
+      let (selectorBytes, payload) ← splitPair payload
+      let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
+      let session ← sessionWalked pinnedConfig state
+      if let some routed ← retryLifecycleClaimPlan pinnedConfig session
+          (selector.claimPin management) payload then
+        return routed
+      let plan ← IO.ofExcept <|
+        ApplicationLifecycleLaunchClaimAuthoring.prepareRequestVerified
+          pinnedConfig session.verified (selector.claimPin management) payload
+      let bytes := ApplicationLifecycleLaunchClaimAuthoring.planCodec.encode plan
+      unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+        throw (IO.userError "launch claim plan exceeds host frame bound")
+      return ((68 : UInt8), bytes)
+  | 69 =>
+      let (planBytes, signaturesBytes) ← splitPair payload
+      if let some routed ← retryLifecycleClaimAssemble pinnedConfig.expectedSeed
+          planBytes (← decodeSignatures signaturesBytes) then
+        return routed
+      let some plan := ApplicationLifecycleLaunchClaimAuthoring.planCodec.decode
+          planBytes
+        | throw (RequestRefusal.malformed "noncanonical launch claim plan")
+      let signatures ← decodeSignatures signaturesBytes
+      let ingress ← IO.ofExcept <|
+        ApplicationLifecycleLaunchClaimAuthoring.assemble pinnedConfig.expectedSeed plan signatures
+      unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+        throw (IO.userError "launch claim ingress exceeds host frame bound")
+      return ((69 : UInt8), ingress)
+  | 70 =>
+      let some management := lifecycleManagement
+        | return ((255 : UInt8), failure .operationRejected "application-lifecycle-launch-completion-author"
+            "lifecycle management identity is not configured")
+      let (selectorBytes, payload) ← splitPair payload
+      let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
+      let session ← sessionWalked pinnedConfig state
+      if let some routed ← retryLifecycleCompletionPlan pinnedConfig session
+          (selector.completionPin management) payload then
+        return routed
+      let plan ← IO.ofExcept <|
+        (← ApplicationLifecycleLaunchCompletionAuthoring.prepareRequestVerified
+          pinnedConfig session.verified (selector.completionPin management) payload)
+      let bytes := ApplicationLifecycleLaunchCompletionAuthoring.planCodec.encode plan
+      unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+        throw (IO.userError "launch completion plan exceeds host frame bound")
+      return ((70 : UInt8), bytes)
+  | 71 =>
+      let (planBytes, signaturesBytes) ← splitPair payload
+      if let some routed ← retryLifecycleCompletionAssemble planBytes
+          (← decodeSignatures signaturesBytes) then
+        return routed
+      let some plan := ApplicationLifecycleLaunchCompletionAuthoring.planCodec.decode
+          planBytes
+        | throw (RequestRefusal.malformed "noncanonical launch completion plan")
+      let signatures ← decodeSignatures signaturesBytes
+      let ingress ← IO.ofExcept <|
+        ApplicationLifecycleLaunchCompletionAuthoring.assemble plan signatures
+      unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+        throw (IO.userError "launch completion ingress exceeds host frame bound")
+      return ((71 : UInt8), ingress)
+  | _ => throw (IO.userError s!"operation {op} is not a launch lifecycle operation")
+
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
   -- Pure operator authoring before any Store exists: the policy a genesis pins
@@ -7244,118 +7367,9 @@ def run (arguments : List String) : IO UInt32 := do
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "lifecycle claim ingress exceeds host frame bound")
                             return ((53 : UInt8), ingress)
-                        | 66 =>
-                            let some management := settings.lifecycleManagement
-                              | return ((255 : UInt8), failure .operationRejected "application-lifecycle-launch-begin-author"
-                                  "lifecycle management identity is not configured")
-                            let (selectorBytes, payload) ← splitPair payload
-                            let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
-                            let pin := selector.beginPin management
-                            let session ← sessionWalked pinnedConfig state
-                            if let some routed ←
-                                retryLifecycleBeginPlan pinnedConfig session pin payload then
-                              return routed
-                            let bytes ← if let some request :=
-                                ApplicationLifecycleLaunchBeginAuthoring.requestCodec.decode payload then
-                              if request.kind == .stop then do
-                                let plan ← IO.ofExcept <|
-                                  ApplicationLifecycleLaunchBeginAuthoring.prepareStopRequestVerified
-                                    pinnedConfig session.verified pin payload
-                                pure (ApplicationLifecycleLaunchBeginAuthoring.stopPlanCodec.encode plan)
-                              else do
-                                let plan ← IO.ofExcept <|
-                                  ApplicationLifecycleLaunchBeginAuthoring.prepareVerified
-                                    pinnedConfig session.verified pin request
-                                pure (ApplicationLifecycleLaunchBeginAuthoring.planCodec.encode plan)
-                            else do
-                              let plan ← IO.ofExcept <|
-                                (← ApplicationLifecycleLaunchBeginAuthoring.prepareContinueRequestVerified
-                                  pinnedConfig session.verified pin payload)
-                              pure (ApplicationLifecycleLaunchBeginAuthoring.planCodec.encode plan)
-                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
-                              throw (IO.userError "launch BEGIN plan exceeds host frame bound")
-                            return ((66 : UInt8), bytes)
-                        | 67 =>
-                            let (planBytes, signaturesBytes) ← splitPair payload
-                            let signatures ← decodeSignatures signaturesBytes
-                            if let some routed ← retryLifecycleBeginAssemble planBytes signatures then
-                              return routed
-                            let ingress ← if let some plan :=
-                                ApplicationLifecycleLaunchBeginAuthoring.stopPlanCodec.decode
-                                  planBytes then
-                              IO.ofExcept <|
-                                ApplicationLifecycleLaunchBeginAuthoring.assembleStop plan signatures
-                            else if let some plan :=
-                                ApplicationLifecycleLaunchBeginAuthoring.planCodec.decode
-                                  planBytes then
-                              IO.ofExcept <|
-                                ApplicationLifecycleLaunchBeginAuthoring.assemble plan signatures
-                            else throw (RequestRefusal.malformed "noncanonical launch BEGIN plan")
-                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
-                              throw (IO.userError "launch BEGIN ingress exceeds host frame bound")
-                            return ((67 : UInt8), ingress)
-                        | 68 =>
-                            let some management := settings.lifecycleManagement
-                              | return ((255 : UInt8), failure .operationRejected "application-lifecycle-launch-claim-author"
-                                  "lifecycle management identity is not configured")
-                            let (selectorBytes, payload) ← splitPair payload
-                            let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
-                            let session ← sessionWalked pinnedConfig state
-                            if let some routed ← retryLifecycleClaimPlan pinnedConfig session
-                                (selector.claimPin management) payload then
-                              return routed
-                            let plan ← IO.ofExcept <|
-                              ApplicationLifecycleLaunchClaimAuthoring.prepareRequestVerified
-                                pinnedConfig session.verified (selector.claimPin management) payload
-                            let bytes := ApplicationLifecycleLaunchClaimAuthoring.planCodec.encode plan
-                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
-                              throw (IO.userError "launch claim plan exceeds host frame bound")
-                            return ((68 : UInt8), bytes)
-                        | 69 =>
-                            let (planBytes, signaturesBytes) ← splitPair payload
-                            if let some routed ← retryLifecycleClaimAssemble pinnedConfig.expectedSeed
-                                planBytes (← decodeSignatures signaturesBytes) then
-                              return routed
-                            let some plan := ApplicationLifecycleLaunchClaimAuthoring.planCodec.decode
-                                planBytes
-                              | throw (RequestRefusal.malformed "noncanonical launch claim plan")
-                            let signatures ← decodeSignatures signaturesBytes
-                            let ingress ← IO.ofExcept <|
-                              ApplicationLifecycleLaunchClaimAuthoring.assemble pinnedConfig.expectedSeed plan signatures
-                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
-                              throw (IO.userError "launch claim ingress exceeds host frame bound")
-                            return ((69 : UInt8), ingress)
-                        | 70 =>
-                            let some management := settings.lifecycleManagement
-                              | return ((255 : UInt8), failure .operationRejected "application-lifecycle-launch-completion-author"
-                                  "lifecycle management identity is not configured")
-                            let (selectorBytes, payload) ← splitPair payload
-                            let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
-                            let session ← sessionWalked pinnedConfig state
-                            if let some routed ← retryLifecycleCompletionPlan pinnedConfig session
-                                (selector.completionPin management) payload then
-                              return routed
-                            let plan ← IO.ofExcept <|
-                              (← ApplicationLifecycleLaunchCompletionAuthoring.prepareRequestVerified
-                                pinnedConfig session.verified (selector.completionPin management) payload)
-                            let bytes := ApplicationLifecycleLaunchCompletionAuthoring.planCodec.encode plan
-                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
-                              throw (IO.userError "launch completion plan exceeds host frame bound")
-                            return ((70 : UInt8), bytes)
-                        | 71 =>
-                            let (planBytes, signaturesBytes) ← splitPair payload
-                            if let some routed ← retryLifecycleCompletionAssemble planBytes
-                                (← decodeSignatures signaturesBytes) then
-                              return routed
-                            let some plan := ApplicationLifecycleLaunchCompletionAuthoring.planCodec.decode
-                                planBytes
-                              | throw (RequestRefusal.malformed "noncanonical launch completion plan")
-                            let signatures ← decodeSignatures signaturesBytes
-                            let ingress ← IO.ofExcept <|
-                              ApplicationLifecycleLaunchCompletionAuthoring.assemble plan signatures
-                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
-                              throw (IO.userError "launch completion ingress exceeds host frame bound")
-                            return ((71 : UInt8), ingress)
+                        | 66 | 67 | 68 | 69 | 70 | 71 =>
+                            launchLifecycleOperatorOp pinnedConfig settings.lifecycleManagement
+                              state operation payload
                         | 206 =>
                             let some management := settings.lifecycleManagement
                               | return ((255 : UInt8), failure .operationRejected "failed-start-recovery"
