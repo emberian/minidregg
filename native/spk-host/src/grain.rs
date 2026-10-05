@@ -1129,7 +1129,7 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
             return Err(error);
         }
     }
-    loop {
+    let completed = loop {
         // Re-read each turn: the lane is fixed only once the resident retains
         // its admitted marker (a recovered create retries under v4).
         let completed = journal.join(crate::resident_service::StartLane::of_journal(&journal)?.completed_name());
@@ -1140,7 +1140,7 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
                 .is_some_and(|dir| Path::new(dir).join("http.sock").exists())
         });
         if exists(&completed)? && sockets_ready {
-            break;
+            break completed;
         }
         let state = unit_active(&unit)?;
         if !matches!(state.as_str(), "active" | "activating") {
@@ -1155,7 +1155,7 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
             )));
         }
         std::thread::sleep(Duration::from_millis(500));
-    }
+    };
     Ok(json!({
         "protocol":"mini-spk-grain-start-v1",
         "app":app,
