@@ -28,6 +28,7 @@
 # updated 2026-10-04: batch c13: 17 queued ranges (W09 W11 W13 W14 W16 W19 W20 W23 W24 W25 W26 W27 w06 retention-payers ports-b agreement-2c fn-wire-2)  [counts: Minidregg 0 1, Theory 70 154, Kernel 355 498, Pred 7 11, Effects 0 3, Compiler 144 315, Selvage 12 153, Assurance 0 151, Host 76 109, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 11, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-04: batch c14  [counts: Minidregg 0 1, Theory 74 161, Kernel 358 503, Pred 7 11, Effects 0 3, Compiler 141 311, Selvage 12 153, Assurance 0 153, Host 77 110, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 12, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-04: Kernel.ClockLaw (the clock law and the clock write law step) enters with the pay receivers that judge the clock write (kn-law-bypass)  [counts: Minidregg 0 1, Theory 74 161, Kernel 359 504, Pred 7 11, Effects 0 3, Compiler 141 311, Selvage 12 153, Assurance 0 153, Host 77 110, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 12, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-05: batch n3 (ob-ltuo x5 + rollup-1 + rollup-2 + ob-roadmap + protocol-night rooms/pd53/rotpub on 5d0b452d)  [counts: Minidregg 0 1, Theory 74 162, Kernel 369 514, Pred 7 11, Effects 0 3, Compiler 141 312, Selvage 12 153, Assurance 0 153, Host 78 111, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -243,9 +244,11 @@ Host.ReceiptContinuity
 Host.RequestRefusal
 Host.ResidentContextInspection
 Host.RetainedSegmentInspection
+Host.SeatJson
 Host.SourceAgreementContextInspection
 Host.SourceAgreementJson
 Host.SourceAgreementLegacyView
+Kernel.ActivitySeatEnd
 Kernel.AgentGrain
 Kernel.AnswerSlot
 Kernel.ApplicationAgentLifetimeDispatchCore
@@ -468,6 +471,7 @@ Kernel.GrainResourceBirthReceiver
 Kernel.GrainResourceBirthTransaction
 Kernel.HyperdocumentEventLog
 Kernel.HyperdocumentIndexSync
+Kernel.Invitation
 Kernel.Job
 Kernel.JobMoney
 Kernel.JobMoneyReceiver
@@ -512,14 +516,17 @@ Kernel.ObjectRecord
 Kernel.ObjectState
 Kernel.ObjectiveActivity
 Kernel.ObjectiveActivityCell
+Kernel.ObjectiveActivityGate
 Kernel.ObjectiveActivityReceiver
 Kernel.ObjectiveActivityWire
+Kernel.ObjectiveAdmittedTurn
 Kernel.ObjectiveBendArtifactSource
 Kernel.ObjectiveBendAuthenticatedInputs
 Kernel.ObjectiveBendNativeAdmission
 Kernel.ObjectiveBendNativeInput
 Kernel.ObjectiveBendPreparedOutput
 Kernel.ObjectiveBendPublishedPackage
+Kernel.ObjectiveCall
 Kernel.ObjectiveKernelConfig
 Kernel.ObjectiveTariff
 Kernel.ParticipantFactoryProvisioning
@@ -562,6 +569,7 @@ Kernel.PolicyInstallReceiver
 Kernel.PreparedInvocationDiagnostics
 Kernel.PresenceIndex
 Kernel.PrivateSuccessorCustody
+Kernel.ProtectedCell
 Kernel.ProtectedContentGate
 Kernel.ProviderMetering
 Kernel.ProviderRoute
@@ -589,6 +597,10 @@ Kernel.Run
 Kernel.RunComputeBudget
 Kernel.RunComputeBudgetDomain
 Kernel.RunComputeView
+Kernel.Seat
+Kernel.SeatCell
+Kernel.SeatReceiver
+Kernel.SeatStore
 Kernel.SessionIndex
 Kernel.SparseAuthenticatedState
 Kernel.StreamWrite
