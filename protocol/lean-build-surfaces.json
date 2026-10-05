@@ -530,7 +530,7 @@
     {
       "module": "Assurance.NativeAcceptedFixtureData",
       "path": "Assurance/NativeAcceptedFixtureData.lean",
-      "sha256": "fbb105135ff5ab948f64f890ecd29d63739e0486d9788b4cc920e6e770e8712e",
+      "sha256": "6f2662e139b03c756ce85851798268437022fcfb1dc78cb4d5df2902d4186589",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -9637,7 +9637,7 @@
     {
       "module": "Theory.ObjectiveBendDigest",
       "path": "Theory/ObjectiveBendDigest.lean",
-      "sha256": "e852ea1170538c89358bef56d86b135431cc6f558379e052a01a65ad3cf1a200",
+      "sha256": "d459e0eb69da44c28b3ad8e3c1e1b80261028d4e1d40f51af63d9e8b74005117",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
