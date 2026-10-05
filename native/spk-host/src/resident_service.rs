@@ -277,7 +277,7 @@ struct SavedStartStage {
 /// Which lawful lifecycle lane a retained START belongs to. The two lanes keep
 /// disjoint artifact names, so exactly one admitted marker can exist.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum StartLane {
+pub(crate) enum StartLane {
     V3,
     RetryV4,
 }
@@ -285,7 +285,7 @@ enum StartLane {
 impl StartLane {
     /// The lane of the admitted marker in `journal_dir`. Both markers present
     /// is refused: two lanes cannot both own one generation's journal.
-    fn of_journal(journal_dir: &Path) -> io::Result<Self> {
+    pub(crate) fn of_journal(journal_dir: &Path) -> io::Result<Self> {
         let present = |name: &str| -> io::Result<bool> {
             match fs::symlink_metadata(journal_dir.join(name)) {
                 Ok(_) => Ok(true),
@@ -306,7 +306,7 @@ impl StartLane {
         }
     }
 
-    fn admitted_name(self) -> &'static str {
+    pub(crate) fn admitted_name(self) -> &'static str {
         match self {
             Self::V3 => "start-admitted-v3.json",
             Self::RetryV4 => "start-admitted-retry-v4.json",
@@ -320,7 +320,7 @@ impl StartLane {
         }
     }
 
-    fn completed_name(self) -> &'static str {
+    pub(crate) fn completed_name(self) -> &'static str {
         match self {
             Self::V3 => "start-completed-v3.json",
             Self::RetryV4 => "start-completed-retry-v4.json",
