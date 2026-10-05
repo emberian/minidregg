@@ -183,9 +183,10 @@ network or client input; this helper alone grants no exception authority. -/
 inductive ControlFacet
   | joint
   | activity
-  /-- The kernel activity's own typed turns (`ObjectiveActivityReceiver.Accepted`):
-  the one facet that may write the protected activity coordinates. -/
-  | objectiveActivity
+  /-- The object kernel's own typed turns (`ObjectiveActivityReceiver.Accepted`,
+  `SeatReceiver.Accepted`): the one facet that may write the protected
+  coordinates. -/
+  | objectKernel
   deriving DecidableEq
 
 /-- Whole-cell roots are shared protection coordinates. This first concrete
@@ -204,8 +205,8 @@ def Config.sourceGate (config : Config) (own : Option ControlFacet)
     (intent : DurableDataIntent.DataIntent rootBytes) :
     Except DurableDataIntent.RejectReason Unit := do
   if !config.controlLayoutValid then throw (.durable .transactionConflict)
-  -- The protected activity coordinates: only the kernel activity's own facet writes them.
-  if own ≠ some .objectiveActivity then ObjectiveActivityGate.ordinaryGate intent
+  -- The protected coordinates: only the object kernel's own facet writes them.
+  if own ≠ some .objectKernel then ObjectiveActivityGate.ordinaryGate intent
   match config.jointControl with
   | none => pure ()
   | some pin =>
@@ -237,7 +238,7 @@ coordinate (`ObjectiveActivityGate.ordinaryGate`). -/
 theorem Config.sourceGate_ordinary (config : Config) {own : Option ControlFacet}
     {rootBytes : List UInt8 → Digest}
     {snapshot : DurableDataIntent.DataSnapshot rootBytes} {intent : DurableDataIntent.DataIntent rootBytes}
-    (foreign : own ≠ some .objectiveActivity)
+    (foreign : own ≠ some .objectKernel)
     (admitted : config.sourceGate own snapshot intent = .ok ()) :
     ObjectiveActivityGate.ordinaryGate intent = .ok () := by
   cases layout : config.controlLayoutValid with
@@ -258,7 +259,7 @@ intent writes. -/
 theorem Config.sourceGate_refuses_protected (config : Config) {own : Option ControlFacet}
     {rootBytes : List UInt8 → Digest}
     {snapshot : DurableDataIntent.DataSnapshot rootBytes} {intent : DurableDataIntent.DataIntent rootBytes}
-    (foreign : own ≠ some .objectiveActivity) (layout : config.controlLayoutValid = true)
+    (foreign : own ≠ some .objectKernel) (layout : config.controlLayoutValid = true)
     {write : DurableDataIntent.DataWrite} (writes : write ∈ intent.writes)
     (isProtected : ObjectiveActivityGate.Protected write.cellId) :
     ∃ cell, config.sourceGate own snapshot intent = .error (.protectedWrite cell) ∧
@@ -275,7 +276,7 @@ write a source transition of any other facet admits that obeys
 theorem Config.sourceGate_physicalPostLaw_live (config : Config) {own : Option ControlFacet}
     {rootBytes : List UInt8 → Digest}
     {snapshot : DurableDataIntent.DataSnapshot rootBytes} {intent : DurableDataIntent.DataIntent rootBytes}
-    (foreign : own ≠ some .objectiveActivity)
+    (foreign : own ≠ some .objectKernel)
     (admitted : config.sourceGate own snapshot intent = .ok ())
     {deployment : Minidregg.Compiler.CanonicalCellRegistry.Deployment}
     {write : DurableDataIntent.DataWrite} (member : write ∈ intent.writes)
@@ -313,7 +314,7 @@ theorem Config.physicalTransport_systemCell (config : Config) :
     config.physicalTransport.systemCell = some config.systemCell := rfl
 
 /-- The deployment's ordinary transport judges through `sourceGate none`, a
-facet that is not the kernel activity's: only `activityTransport` is exempt. -/
+facet that is not the object kernel's: only `kernelTransport` is exempt. -/
 theorem Config.transport_sourceGate (config : Config) {rootBytes : List UInt8 → Digest}
     (snapshot : DurableDataIntent.DataSnapshot rootBytes) (intent : DurableDataIntent.DataIntent rootBytes) :
     config.transport.sourceGate snapshot intent = config.sourceGate none snapshot intent := by
@@ -322,14 +323,14 @@ theorem Config.transport_sourceGate (config : Config) {rootBytes : List UInt8 �
 
 #assert_axioms Config.transport_sourceGate
 
-/-- The transport of the kernel activity's own typed turns: the deployment's
-transport with the `objectiveActivity` facet, so the protected activity
+/-- The transport of the object kernel's own typed turns (activity and seat): the
+deployment's transport with the `objectKernel` facet, so the protected
 coordinates may be written, and every other facet's law still applies. -/
-def Config.activityTransport (config : Config) : DurableReceiverIO.Transport :=
-  { config.transport with sourceGate := config.sourceGate (some .objectiveActivity) }
+def Config.kernelTransport (config : Config) : DurableReceiverIO.Transport :=
+  { config.transport with sourceGate := config.sourceGate (some .objectKernel) }
 
-theorem Config.activityTransport_systemCell (config : Config) :
-    config.activityTransport.systemCell = some config.systemCell :=
+theorem Config.kernelTransport_systemCell (config : Config) :
+    config.kernelTransport.systemCell = some config.systemCell :=
   config.transport_systemCell
 
 def logicalHeight (config : Config) (durable : Durable) : Height :=

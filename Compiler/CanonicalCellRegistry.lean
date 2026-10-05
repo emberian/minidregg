@@ -158,6 +158,7 @@ inductive FamilyId where
   | jobMoney
   | fleetTurn
   | objectiveActivity
+  | seat
   deriving DecidableEq, Repr
 
 /-- How a cell kind is judged on write. -/
@@ -195,7 +196,7 @@ the Book's own kernel invariant, which every writer's plan proves. -/
 def bookWriters : List FamilyId :=
   [.declaredResourceController, .resourceBirth, .grainResourceBirth, .applicationShareIssue,
     .applicationShareIssueGrain, .applicationAgentLifetimeGrant, .payObservation, .payClaim,
-    .payEnrol, .payEnrolV2, .realmWell, .purseRefill, .jobMoney, .fleetTurn, .objectiveActivity]
+    .payEnrol, .payEnrolV2, .realmWell, .purseRefill, .jobMoney, .fleetTurn, .objectiveActivity, .seat]
 
 /-- **The law class of every kind**: reviewed data, one row per kind, no default arm. -/
 def Kind.lawClass : Kind → LawClass
@@ -221,6 +222,10 @@ def Kind.lawClass : Kind → LawClass
   -- Activity records, answer slots, declared state and packages at ids >= 2^256, written
   -- only by the activity kernel turns (their object law is ObjectRecord's).
   | .objectiveActivity => .kernelOnly [.objectiveActivity]
+  -- Seat instances, invitations, seats, holdings and contract packages at ids >= 2^256,
+  -- written by the seat kernel turns and by an activity's end (which closes the seats
+  -- the activity holds, `ActivitySeatEnd`).
+  | .seat => .kernelOnly [.seat, .objectiveActivity]
   -- A Nock program is not an external resource (`ResourceTargetAdmission.externalKind`):
   -- no law sits at its id; it is born by a birth plan and immutable after.
   | .nockProgram => .kernelOnly [.resourceBirth, .grainResourceBirth, .applicationShareIssue,
@@ -237,11 +242,13 @@ theorem system_only_certify : Kind.system.lawClass = .kernelOnly [.certify] := r
 theorem activity_kernelOnly :
     Kind.objectiveActivity.lawClass = .kernelOnly [.objectiveActivity] := rfl
 
+theorem seat_kernelOnly : Kind.seat.lawClass = .kernelOnly [.seat, .objectiveActivity] := rfl
+
 /-- The pinned exemption list: exactly these kinds carry no user law. -/
 theorem kernelOnly_kinds :
     Kind.all.filter (fun kind => kind.lawClass != .lawBearing) =
       [.eventHistory, .authority, .resourceBook, .policySource, .nockProgram, .streamEntry,
-        .system, .objectiveActivity] := by decide
+        .system, .objectiveActivity, .seat] := by decide
 
 /-- Tags 1/2/3/5/6/8/9/10/11/12/13/14/15/16 are deployment pins. The final table across
 lanes: 11 pay, 12 stream (head), 13 nockProgram, 14 clock, 15 streamEntry, 16 system.  Tag 3 is the one authority

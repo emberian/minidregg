@@ -953,6 +953,20 @@ inductive IssueAdmission (config : Config) (opened : Opened config)
         opened.durable ⟨config.federation, logicalHeight config opened.durable⟩ ingress)
       (intentExact : intent = ApplicationShareIssueGrainReceiver.intent accepted)
 
+/-- A turn of the object kernel, as admitted: the kernel activity's or the seat
+kernel's, each with the intent it commits. -/
+inductive KernelTurn (config : Config) (opened : Opened config) (intent : DataIntent rootBytes) : Type
+  | activity (ingress : ObjectiveActivityReceiver.DecodedIngress)
+      (accepted : ObjectiveActivityReceiver.Accepted config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector⟩
+        opened.durable ingress)
+      (exact : intent = ObjectiveActivityReceiver.intent accepted)
+  | seat (ingress : SeatReceiver.DecodedIngress)
+      (accepted : SeatReceiver.Accepted config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector⟩
+        opened.durable ingress)
+      (exact : intent = SeatReceiver.intent accepted)
+
 structure Derived (config : Config) (opened : Opened config) where
   private mk ::
   intent : DataIntent rootBytes
@@ -985,13 +999,10 @@ structure Derived (config : Config) (opened : Opened config) where
   bootstrapBundle : Option (Σ source : JointControlBootstrapBundle.Source,
     { accepted : JointControlBootstrapBundle.Accepted config opened source //
       intent = accepted.intent }) := none
-  /-- The kernel activity's own typed turn: the one admission judged under the
-  `objectiveActivity` facet (`Config.activityTransport`), which alone may write
-  the protected activity coordinates (`Kernel.ObjectiveActivityGate`). -/
-  activity : Option (Σ ingress : ObjectiveActivityReceiver.DecodedIngress,
-    { accepted : ObjectiveActivityReceiver.Accepted config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector⟩
-        opened.durable ingress // intent = ObjectiveActivityReceiver.intent accepted }) := none
+  /-- The object kernel's own typed turn (activity or seat): the one admission
+  judged under the `objectKernel` facet (`Config.kernelTransport`), which alone may
+  write the protected coordinates (`Kernel.ObjectiveActivityGate`). -/
+  kernel : Option (KernelTurn config opened intent) := none
 
 /-- Controller-only exception for a precisely rederived source-owned operation.
 Ordinary records continue through the centrally installed conflicting-write gate. -/
@@ -1013,8 +1024,8 @@ private def Derived.bootstrapAdmission {config : Config} {opened : Opened config
 No normal source transition receives it while the pinned control is uninitialized. -/
 def Derived.transport {config : Config} {opened : Opened config}
     (derived : Derived config opened) : DurableReceiverIO.Transport :=
-  match derived.activity with
-  | some _ => config.activityTransport
+  match derived.kernel with
+  | some _ => config.kernelTransport
   | none =>
   match derived.jointReservation with
   | some held => JointReceiver.reservedTransport config opened held.val
@@ -1028,7 +1039,7 @@ theorem Derived.transport_systemCell {config : Config} {opened : Opened config}
     (derived : Derived config opened) : derived.transport.systemCell = some config.systemCell := by
   unfold Derived.transport
   split
-  · exact config.activityTransport_systemCell
+  · exact config.kernelTransport_systemCell
   split
   · exact Config.physicalTransport_systemCell config
   · split
@@ -1877,7 +1888,7 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted =>
         return .ok ⟨ObjectiveActivityReceiver.intent accepted,
           .activity accepted, none, none, none, none, none, none, none, none, none, none, none, none,
-          some ⟨ingress, ⟨accepted, rfl⟩⟩⟩
+          some (.activity ingress accepted rfl)⟩
   if let some ingress := SeatReceiver.decodeIngress bytes then
     match ← SeatReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height, config.tariff.asset, config.tariff.collector⟩ opened.durable
@@ -1885,7 +1896,8 @@ private def derive (config : Config) (opened : Opened config)
     | .error reason => return .error s!"seat turn refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨SeatReceiver.intent accepted,
-          .seat accepted, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
+          .seat accepted, none, none, none, none, none, none, none, none, none, none, none, none,
+          some (.seat ingress accepted rfl)⟩
   if let some ingress := CertifyReceiver.decodeIngress bytes then
     match ← CertifyReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with

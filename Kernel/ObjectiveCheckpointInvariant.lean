@@ -13,12 +13,16 @@ induction hypothesis). This module closes the induction:
 * `reachable_delivery_typed`: so every delivery admitted on a reachable snapshot
   stores a typed checkpoint, with no premise left.
 
-A step is one of two things (`Step`), and the node commits nothing else:
+A step is one of three things (`Step`), and the node commits nothing else:
 
 1. an admitted kernel turn (`ObjectiveActivity.AdmittedTurn`: `publish`,
    `create`, `birth`, `resolve`, `deliver`, `topUp`, `writeState`, `exhaust`,
-   `abandon`), executed under any schedule and any receiver's sealing;
-2. any other intent the ordinary gate admits (`ObjectiveActivityGate.ordinaryGate`:
+   `abandon`), executed under any schedule and any receiver's sealing, with its
+   final posts (`ActivitySeatEnd.finalize`: an ending turn also closes the seats
+   its activity holds);
+2. a seat turn: an intent whose posts the seat kernel checked inert
+   (`SeatStore.Inert`: no post sits on or writes a kernel-activity cell);
+3. any other intent the ordinary gate admits (`ObjectiveActivityGate.ordinaryGate`:
    it writes no protected activity coordinate), under any schedule. The deployed
    source gate runs that gate for every facet but the kernel activity's own
    (`NativeHost.Config.sourceGate_ordinary`), and the replay walk's judge admits nothing
@@ -41,6 +45,7 @@ decider silent, nobody delivering); that is the disposal turn `abandon`'s job,
 not this invariant's. -/
 import Kernel.ObjectiveResumeContract
 import Kernel.ObjectiveActivityGate
+import Kernel.ActivitySeatEnd
 
 namespace Minidregg.Kernel.ObjectiveCheckpointInvariant
 open Minidregg.Theory Minidregg.Compiler
@@ -215,7 +220,9 @@ theorem loadProgram_present {rootBytes : Bytes → Digest} {config : Config} {sn
     have empty : packageBytes config snapshot pin = [] := by
       unfold packageBytes; unfold PackageBody at present; rw [present]; rfl
     rw [empty] at loaded
-    simp [loadProgram, decodeStored_nil, bind, Except.bind] at loaded
+    have refused : instantiate config [] pin input = .error .packageMissing := by
+      simp [instantiate, decodeStored_nil, bind, Except.bind]; rfl
+    simp [loadProgram, refused, bind, Except.bind] at loaded
 
 /-- **A record's checkpoint is typed.** The record awaits; the snapshot holds
 its pinned package; its input decodes; the package and input instantiate a
@@ -675,14 +682,98 @@ theorem AdmittedTurn.safe {rootBytes : Bytes → Digest} {config : Config} {snap
   | exhaust _ exhausted => exact exhaustion_safe typed exhausted
   | abandon _ abandoned => exact abandonment_safe abandoned
 
+/-! ## An ending turn's final posts are safe
+
+A turn that ends an activity holding seats commits the joint posts: its own with
+the Book post replaced by the joint batch's, then the seat cells the closing
+changed (`ActivitySeatEnd.Joined.rewrite`). The replaced Book post sits on the
+cell its original sat on and holds the Book; a closing post sits on a cell that
+holds no kernel-activity cell and is none (`HeldEnd.inert`, the closing's own
+check). -/
+
+/-- The writes of an admitted turn's final intent are exactly its final posts. -/
+theorem finalIntent_writes {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} (sealing : Seal) {turn : AdmittedTurn config snapshot height} {posts : List Post}
+    {extra : List ReadGuard} (final : ActivitySeatEnd.finalize config snapshot height turn = .ok (posts, extra)) :
+    (ActivitySeatEnd.AdmittedTurn.finalIntent sealing posts extra turn).writes = posts.map (Post.write rootBytes) := by
+  cases turn with
+  | birth _ _ => rfl
+  | deliver _ _ => rfl
+  | abandon _ _ => rfl
+  | publish _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
+  | create _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
+  | resolve _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
+  | topUp _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
+  | writeState _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
+  | exhaust _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
+
+/-- **Posts the seat kernel checked inert are safe**: they sit on no package and
+write no record. -/
+theorem inert_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {posts : List Post} (inert : SeatStore.Inert snapshot posts) :
+    ∀ post ∈ posts, PostSafe config snapshot post := fun post member =>
+  postSafe_inert (bodyOf_of_payload_none (inert post member).1)
+    (by simp [recordIn, bodyOf_of_payload_none (inert post member).2])
+
+/-- **An ending turn's final posts are safe.** -/
+theorem finalize_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} (typed : RecordCellsTyped config snapshot) (turn : AdmittedTurn config snapshot height)
+    {posts : List Post} {extra : List ReadGuard}
+    (final : ActivitySeatEnd.finalize config snapshot height turn = .ok (posts, extra)) :
+    ∀ post ∈ posts, PostSafe config snapshot post := by
+  have safe := AdmittedTurn.safe typed turn
+  unfold ActivitySeatEnd.finalize at final
+  cases ending : ActivitySeatEnd.AdmittedTurn.ending turn with
+  | none =>
+    rw [ending] at final
+    simp only [Except.ok.injEq, Prod.mk.injEq] at final
+    rw [← final.1]; exact safe
+  | some found =>
+    obtain ⟨record, pre, posted⟩ := found
+    rw [ending] at final
+    cases joined : ActivitySeatEnd.join config snapshot height record posted with
+    | error reason => simp [joined] at final
+    | ok optional =>
+      cases optional with
+      | none =>
+        simp only [joined, Except.ok.injEq, Prod.mk.injEq] at final
+        rw [← final.1]; exact safe
+      | some made =>
+        simp only [joined, Except.ok.injEq, Prod.mk.injEq] at final
+        rw [← final.1]
+        intro post member
+        unfold ActivitySeatEnd.Joined.rewrite at member
+        rcases List.mem_append.mp member with mapped | closing
+        · obtain ⟨original, inOriginal, replaced⟩ := List.mem_map.mp mapped
+          by_cases isBook : original.cell = config.bookCell
+          · rw [if_pos isBook] at replaced
+            subst replaced
+            have base := safe original inOriginal
+            refine ⟨?_, fun found read _ => ?_⟩
+            · simpa [ActivitySeatEnd.Joined.bookPost, postAt, isBook] using base.1
+            · simp [recordIn, ActivitySeatEnd.Joined.bookPost, postAt, bodyOf, payloadOf_book] at read
+          · rw [if_neg isBook] at replaced
+            subst replaced
+            exact safe original inOriginal
+        · exact inert_safe made.held.inert post closing
+
 /-! ## Reachable worlds -/
 
-/-- One committed step of a world: an admitted kernel turn, or an intent the
-ordinary gate admits; each under any schedule and (for a turn) any sealing. -/
+/-- One committed step of a world: an admitted kernel activity turn (its final,
+possibly seat-closing, intent), an intent whose posts the seat kernel checked
+inert, or an intent the ordinary gate admits; each under any schedule and (for a
+turn) any sealing. -/
 inductive Step {rootBytes : Bytes → Digest} (config : Config) : Snapshot rootBytes → Snapshot rootBytes → Prop
   | turn {snapshot : Snapshot rootBytes} {height : Nat} (turn : AdmittedTurn config snapshot height)
-      (sealing : Seal) (schedule : DurableCommitProtocol.Schedule) :
-      Step config snapshot ((execute schedule snapshot (turn.intent sealing)).storeAfter snapshot)
+      (sealing : Seal) (posts : List Post) (extra : List ReadGuard)
+      (final : ActivitySeatEnd.finalize config snapshot height turn = .ok (posts, extra))
+      (schedule : DurableCommitProtocol.Schedule) :
+      Step config snapshot ((execute schedule snapshot
+        (ActivitySeatEnd.AdmittedTurn.finalIntent sealing posts extra turn)).storeAfter snapshot)
+  | inert {snapshot : Snapshot rootBytes} (intent : DataIntent rootBytes) (posts : List Post)
+      (writes : intent.writes = posts.map (Post.write rootBytes)) (inert : SeatStore.Inert snapshot posts)
+      (schedule : DurableCommitProtocol.Schedule) :
+      Step config snapshot ((execute schedule snapshot intent).storeAfter snapshot)
   | foreign {snapshot : Snapshot rootBytes} (intent : DataIntent rootBytes)
       (admitted : ObjectiveActivityGate.ordinaryGate intent = .ok ()) (schedule : DurableCommitProtocol.Schedule) :
       Step config snapshot ((execute schedule snapshot intent).storeAfter snapshot)
@@ -715,8 +806,9 @@ theorem Step.preserves {rootBytes : Bytes → Digest} {config : Config} {before 
     (typed : RecordCellsTyped config before) (step : Step config before after) :
     RecordCellsTyped config after := by
   cases step with
-  | turn turn sealing schedule =>
-    exact execute_preserves typed (AdmittedTurn.intent_writes sealing turn) (AdmittedTurn.safe typed turn) schedule
+  | turn turn sealing posts extra final schedule =>
+    exact execute_preserves typed (finalIntent_writes sealing final) (finalize_safe typed turn final) schedule
+  | inert intent posts writes inert schedule => exact execute_preserves typed writes (inert_safe inert) schedule
   | foreign intent admitted schedule => exact foreign_preserves typed admitted schedule
 
 /-- **`stored_checkpoints_typed`.** In every world reachable from a genesis whose
@@ -790,6 +882,9 @@ theorem reachable_delivery_typed {rootBytes : Bytes → Digest} {config : Config
 #assert_axioms creation_safe
 #assert_axioms stateWrite_safe
 #assert_axioms AdmittedTurn.safe
+#assert_axioms finalIntent_writes
+#assert_axioms finalize_safe
+#assert_axioms inert_safe
 #assert_axioms foreign_preserves
 #assert_axioms Step.preserves
 #assert_axioms stored_checkpoints_typed

@@ -15,6 +15,7 @@ import Kernel.ObjectiveBendPublishedPackage
 import Kernel.ObjectiveBendNativeAdmission
 import Compiler.ObjectiveBendGenericResult
 import Kernel.ObjectiveActivity
+import Kernel.SeatStore
 namespace Minidregg.Host.ObjectivePackageAuthor
 open Minidregg.Compiler
 open Lean Minidregg.Theory Minidregg.Theory.TypedAuthorization
@@ -72,6 +73,7 @@ def outputCodecOf : String → Except String Digest
   | "combined" => pure Minidregg.Kernel.ObjectiveBendNativeAdmission.combinedCodec
   | "generic" => pure ObjectiveBendGenericResult.codecId
   | "activity" => pure Minidregg.Kernel.ObjectiveActivity.codecId
+  | "seat" => pure Minidregg.Kernel.SeatStore.contractCodecId
   | other => throw s!"unknown output codec {other}"
 
 structure Publication where

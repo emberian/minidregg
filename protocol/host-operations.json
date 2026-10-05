@@ -2097,6 +2097,66 @@
       "owner": "activity-native",
       "purpose": "Public read-only kernel activity view: JSON object request (or empty), at most 65536 bytes, JSON reply",
       "receiver": "fnDispatch"
+    },
+    {
+      "code": 215,
+      "symbol": "SEAT_PLAN",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "seats-native",
+      "purpose": "Seat signed command: signing plan for one seat Turn (publish, create, handOver, offer, invoke, exit) judged by Kernel.SeatReceiver; session-opened, bounded canonical plan, no state change",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 216,
+      "symbol": "SEAT_ASSEMBLE",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "seats-native",
+      "purpose": "Seat signed command: detached assembly of a signing plan and its signature into the exact ingress bytes; no state change",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 217,
+      "symbol": "SEAT_SUBMIT",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "seats-native",
+      "purpose": "Seat signed command: submit one ingress; the receiver re-decides it on the opened Store and commits or refuses by name",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 218,
+      "symbol": "SEAT_LOOKUP",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "seats-native",
+      "purpose": "Seat signed command: receipt-only lookup of one ingress; absence never submits",
+      "receiver": "fnDispatch"
+    },
+    {
+      "code": 219,
+      "symbol": "SEAT_VIEW",
+      "status": "active",
+      "routes": [
+        "public",
+        "operator"
+      ],
+      "owner": "seats-native",
+      "purpose": "Public read-only seat view: JSON object request (or empty), at most 65536 bytes, JSON reply",
+      "receiver": "fnDispatch"
     }
   ],
   "response_markers": [

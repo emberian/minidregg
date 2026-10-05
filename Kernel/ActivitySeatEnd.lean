@@ -145,7 +145,7 @@ ends an activity that holds seats, the joint turn (`Joined.rewrite`). -/
 def finalize {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (turn : AdmittedTurn config snapshot height) :
     Except SeatStore.Refusal (List Post × List ReadGuard) :=
-  match turn.ending with
+  match AdmittedTurn.ending turn with
   | none => .ok (turn.posts, [])
   | some (record, ⟨_, posted⟩) =>
     match join config snapshot height record posted with
@@ -159,13 +159,13 @@ def AdmittedTurn.finalIntent {rootBytes : Bytes → Digest} {config : Config} {s
     {height : Nat} (sealing : Seal) (posts : List Post) (extra : List ReadGuard) :
     AdmittedTurn config snapshot height → DataIntent rootBytes
   | .birth request born =>
-      ObjectiveActivity.intentOf rootBytes (ObjectiveActivity.birthTransaction request) posts
+      intentOf rootBytes (ObjectiveActivity.birthTransaction request) posts
         (born.guards ++ extra) [] sealing
   | .deliver _ delivery =>
-      ObjectiveActivity.intentOf rootBytes (ObjectiveActivity.deliveryTransaction delivery.await.id) posts
+      intentOf rootBytes (ObjectiveActivity.deliveryTransaction delivery.await.id) posts
         (delivery.guards ++ extra) delivery.claims sealing
   | .abandon _ abandoned =>
-      ObjectiveActivity.intentOf rootBytes (ObjectiveActivity.abandonTransaction abandoned.await.id) posts extra
+      intentOf rootBytes (ObjectiveActivity.abandonTransaction abandoned.await.id) posts extra
         abandoned.claims sealing
   | turn => turn.intent sealing
 

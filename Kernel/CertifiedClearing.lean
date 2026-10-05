@@ -235,7 +235,7 @@ def clear (world : World) (height : Nat) (inst : InstanceId) (market : Market)
   | .ok () =>
     match step world height (.inst inst) (.reallocate inst transfers) with
     | .error reason => .error (.seat reason)
-    | .ok next => .ok next
+    | .ok (next, _) => .ok next
 
 /-! ## What the judgment guarantees -/
 
@@ -272,7 +272,7 @@ theorem clear_spec {world next : World} {height : Nat} {inst : InstanceId} {mark
     {transfers : List Transfer} {certificate : Certificate}
     (cleared : clear world height inst market transfers certificate = .ok next) :
     judge market (batchOrders world inst market) transfers certificate = .ok () ∧
-      step world height (.inst inst) (.reallocate inst transfers) = .ok next := by
+      ∃ batch, step world height (.inst inst) (.reallocate inst transfers) = .ok (next, batch) := by
   unfold clear at cleared
   split at cleared
   · cases cleared
@@ -281,7 +281,7 @@ theorem clear_spec {world next : World} {height : Nat} {inst : InstanceId} {mark
     · cases cleared
     · rename_i stepped
       cases cleared
-      exact ⟨judged, stepped⟩
+      exact ⟨judged, _, stepped⟩
 
 /-- **A cleared batch carries a Cert-F certificate.** The fills read off the
 admitted transfers, with the clearer's dual, certify the batch LP at the
@@ -337,21 +337,21 @@ the settled allocation. -/
 theorem clear_inv {world next : World} {height : Nat} {inst : InstanceId} {market : Market}
     {transfers : List Transfer} {certificate : Certificate} (inv : Inv world)
     (cleared : clear world height inst market transfers certificate = .ok next) : Inv next :=
-  step_inv inv (clear_spec cleared).2
+  step_inv inv (clear_spec cleared).2.choose_spec
 
 theorem clear_offer_safe {genesis world next : World} {height : Nat} {inst : InstanceId}
     {market : Market} {transfers : List Transfer} {certificate : Certificate}
     (empty : genesis.seats = []) (reachable : Reachable genesis world)
     (cleared : clear world height inst market transfers certificate = .ok next) :
     ∀ seat ∈ next.seats, seat.isOpen = true → safeAt next.book seat.account seat.proposal = true :=
-  seat_offer_safe_forever empty (Reachable.admit height _ _ reachable (clear_spec cleared).2)
+  seat_offer_safe_forever empty (Reachable.admit height _ _ reachable (clear_spec cleared).2.choose_spec)
 
 /-- **Conservation.** A clearing conserves every asset of the Book. -/
 theorem clear_conserves {world next : World} {height : Nat} {inst : InstanceId} {market : Market}
     {transfers : List Transfer} {certificate : Certificate}
     (cleared : clear world height inst market transfers certificate = .ok next) (asset : AssetId) :
     next.book.totalAsset asset = world.book.totalAsset asset :=
-  seat_conserves (clear_spec cleared).2 asset
+  seat_conserves (clear_spec cleared).2.choose_spec asset
 
 /-- **Refusal.** A proposal whose fills and dual are not a Cert-F certificate of
 the batch LP within `ε` is refused, whatever offer safety would say. -/
@@ -402,10 +402,10 @@ def aliceAccount : AccountId := 10
 def bobAccount : AccountId := 20
 def carolAccount : AccountId := 30
 def daveAccount : AccountId := 40
-def aliceSeat : AccountId := 51
-def bobSeat : AccountId := 52
-def carolSeat : AccountId := 53
-def daveSeat : AccountId := 54
+def aliceSeat : AccountId := reservedBase + 51
+def bobSeat : AccountId := reservedBase + 52
+def carolSeat : AccountId := reservedBase + 53
+def daveSeat : AccountId := reservedBase + 54
 def package : Digest := ⟨88⟩
 
 def genesisBook : Book where
@@ -414,9 +414,7 @@ def genesisBook : Book where
     DFinsupp.single (carolAccount, G) 2 + DFinsupp.single (daveAccount, G) 3
   leaseRecords := 0
 
-def genesis : World :=
-  ⟨genesisBook, [(aliceAccount, alice), (bobAccount, bob), (carolAccount, carol), (daveAccount, dave)],
-    ⟨[], [], []⟩, []⟩
+def genesis : World := ⟨genesisBook, ⟨[], [], [], []⟩, []⟩
 
 def drex : Instance := ⟨1, package, Pred.all []⟩
 
@@ -425,19 +423,15 @@ def bobBid : Proposal := ⟨[(C, 12)], [(G, 3)], .onDemand⟩
 def carolAsk : Proposal := ⟨[(G, 2)], [(C, 6)], .onDemand⟩
 def daveAsk : Proposal := ⟨[(G, 3)], [(C, 12)], .onDemand⟩
 
-def invite (id : Nat) (role : String) (holder : SubjectId) : Invitation := ⟨id, 1, package, role, [], holder⟩
-
-/-- The window: the instance, four invitations, four orders. -/
-def window : List (Nat × Actor × Action) :=
-  [ (1, .subject alice, .create drex),
-    (1, .inst 1, .mint (invite 1 "bid" alice)),
-    (1, .inst 1, .mint (invite 2 "bid" bob)),
-    (1, .inst 1, .mint (invite 3 "ask" carol)),
-    (1, .inst 1, .mint (invite 4 "ask" dave)),
-    (2, .subject alice, .offer 1 ⟨1, package, "bid"⟩ aliceSeat aliceAccount aliceAccount aliceBid),
-    (3, .subject bob, .offer 2 ⟨1, package, "bid"⟩ bobSeat bobAccount bobAccount bobBid),
-    (4, .subject carol, .offer 3 ⟨1, package, "ask"⟩ carolSeat carolAccount carolAccount carolAsk),
-    (5, .subject dave, .offer 4 ⟨1, package, "ask"⟩ daveSeat daveAccount daveAccount daveAsk) ]
+/-- The window: the instance, its method minting four invitations (ids 1-4,
+`Seats.Example.mintIds`), four orders. -/
+def window : List Seats.Example.Entry :=
+  [ .signed 1 alice (.create drex),
+    .method 1 drex [.mint "bid" [] alice, .mint "bid" [] bob, .mint "ask" [] carol, .mint "ask" [] dave],
+    .signed 2 alice (.offer 1 ⟨1, package, "bid"⟩ aliceSeat aliceAccount aliceAccount aliceBid none),
+    .signed 3 bob (.offer 2 ⟨1, package, "bid"⟩ bobSeat bobAccount bobAccount bobBid none),
+    .signed 4 carol (.offer 3 ⟨1, package, "ask"⟩ carolSeat carolAccount carolAccount carolAsk none),
+    .signed 5 dave (.offer 4 ⟨1, package, "ask"⟩ daveSeat daveAccount daveAccount daveAsk none) ]
 
 def opened : World :=
   match Seats.Example.run genesis window with
@@ -471,8 +465,8 @@ def clearThenExit (transfers : List Transfer) (certificate : Certificate) (epsil
   | .error reason => .error reason
   | .ok cleared =>
     match Seats.Example.run cleared
-        [(7, .subject alice, .exit aliceSeat), (7, .subject bob, .exit bobSeat),
-         (7, .subject carol, .exit carolSeat), (7, .subject dave, .exit daveSeat)] with
+        [.signed 7 alice (.exit aliceSeat), .signed 7 bob (.exit bobSeat),
+         .signed 7 carol (.exit carolSeat), .signed 7 dave (.exit daveSeat)] with
     | .error reason => .error (.seat reason)
     | .ok closed => .ok (balances closed)
 
@@ -551,8 +545,8 @@ theorem over_limit_refused :
 order's offerer exits, and every Book account is back at genesis. -/
 theorem abort_returns_deposits :
     (Seats.Example.run opened
-      [(7, .subject alice, .exit aliceSeat), (7, .subject bob, .exit bobSeat),
-       (7, .subject carol, .exit carolSeat), (7, .subject dave, .exit daveSeat)]).map balances =
+      [.signed 7 alice (.exit aliceSeat), .signed 7 bob (.exit bobSeat),
+       .signed 7 carol (.exit carolSeat), .signed 7 dave (.exit daveSeat)]).map balances =
       .ok (balances genesis) := by
   decide +kernel
 
@@ -561,12 +555,11 @@ theorem genesis_balances : balances genesis = [0, 10, 0, 12, 2, 0, 3, 0] := by d
 /-- **The integrality gap.** Bob alone (3 G) against Carol (2 G) cannot trade
 all-or-nothing, while the LP relaxation trades 2: refused at `ε = 0` with the
 honest dual; with no transfers at all the certificate holds at `ε = 4`. -/
-def thinWindow : List (Nat × Actor × Action) :=
-  [ (1, .subject alice, .create drex),
-    (1, .inst 1, .mint (invite 2 "bid" bob)),
-    (1, .inst 1, .mint (invite 3 "ask" carol)),
-    (3, .subject bob, .offer 2 ⟨1, package, "bid"⟩ bobSeat bobAccount bobAccount bobBid),
-    (4, .subject carol, .offer 3 ⟨1, package, "ask"⟩ carolSeat carolAccount carolAccount carolAsk) ]
+def thinWindow : List Seats.Example.Entry :=
+  [ .signed 1 alice (.create drex),
+    .method 1 drex [.mint "bid" [] bob, .mint "ask" [] carol],
+    .signed 3 bob (.offer 1 ⟨1, package, "bid"⟩ bobSeat bobAccount bobAccount bobBid none),
+    .signed 4 carol (.offer 2 ⟨1, package, "ask"⟩ carolSeat carolAccount carolAccount carolAsk none) ]
 
 def thin : World :=
   match Seats.Example.run genesis thinWindow with

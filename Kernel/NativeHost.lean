@@ -2083,7 +2083,7 @@ def activityAssemble (plan : ObjectiveActivityReceiver.SigningPlan) (signature :
 def activitySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome := do
   match ← ObjectiveActivityReceiver.receiveLoaded config.deployment config.profile
-      (activityAmbient config opened) config.signature config.activityTransport opened.durable bytes with
+      (activityAmbient config opened) config.signature config.kernelTransport opened.durable bytes with
   | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "activity" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
@@ -2154,7 +2154,7 @@ def seatAssemble (plan : SeatReceiver.SigningPlan) (signature : List UInt8) :
 
 def seatSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) : IO Outcome := do
   match ← SeatReceiver.receiveLoaded config.deployment config.profile
-      (seatAmbient config opened) config.signature config.transport opened.durable bytes with
+      (seatAmbient config opened) config.signature config.kernelTransport opened.durable bytes with
   | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "seat" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"

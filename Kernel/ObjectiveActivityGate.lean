@@ -12,13 +12,14 @@ outside the kernel activity that writes any cell in the protected space is
 refused by name, `RejectReason.protectedWrite cell`.
 
 The gate runs on every durable commit. `NativeHost.Config.sourceGate` calls it
-for every source facet except the kernel activity's own typed facet
-(`ControlFacet.objectiveActivity`), and the receiving loop and the replay walk both judge
+for every source facet except the object kernel's own typed facet
+(`ControlFacet.objectKernel`: the kernel activity's and the seat kernel's turns), and the receiving loop and the replay walk both judge
 through that source gate (`DurableReceiverIO.Loaded.judge`).
-So the protected coordinates change only under a turn the kernel activity
-admitted. `Kernel.ObjectiveCheckpointInvariant` builds the invariant
+So the protected coordinates change only under a turn the object kernel
+admitted; a seat turn additionally carries the kernel's own check that it touches
+no kernel-activity cell (`SeatStore.Inert`). `Kernel.ObjectiveCheckpointInvariant` builds the invariant
 `stored_checkpoints_typed` on this, and `Kernel.ObjectiveActivityGateRoute.derived_route`
-proves the replay walk's judge admits only these two kinds of record.
+proves the replay walk's judge admits only these three kinds of record.
 -/
 import Kernel.DurableDataIntent
 import Kernel.ObjectiveActivityCell

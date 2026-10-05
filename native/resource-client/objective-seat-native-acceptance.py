@@ -14,7 +14,8 @@ Host's, by name, and the public seat view (op 219) is read after each step,
 with the Book's totals of X, Y and the credit asset (which never change).
 
   E1 publication  world/seats/Broker.obend made a contract artifact
-                  (`seat-contract-artifact`) and published; an instance created
+                  (`objective-publication SPEC seat OUT`, the seat
+                  kernel's output codec) and published; an instance created
                   on the sponsor's object; the subject 40 cannot invoke its method
                   (notObjectHolder) nor create an instance on it; the instance's
                   method mints the sell and buy invitations (code proposes, the
@@ -36,7 +37,12 @@ with the Book's totals of X, Y and the credit asset (which never change).
   E7 exits        a stranger's exit of an on-demand seat is refused
                   (exitNotAuthorized); a deadline seat's exit by a third party
                   before the due height is refused and after it admitted.
-  E8 holder       (needs the kernel activity route on the base: see results)
+  E8 holder       naming a non-activity as a seat's holder, or an activity another
+                  subject pays for, is refused (notActivityPayer); Alice's seat
+                  held by her awaiting Tally activity (published, created, born by
+                  `mini activity`) is CLOSED by that activity's end -- Bob's
+                  delivery of the timed-out await -- in the same turn, paying her
+                  back its 2 X; the record is retired.
   E9 lost reply   an exit prepared and not submitted: lookup finds nothing;
                   submit installs; resubmit and lookup replay. Reopen: the world's
                   `mini serve` restarts; the replay walk re-admits every seat turn;
@@ -151,7 +157,8 @@ W = root / 'w'
 sock = W / 'public' / 'mini.sock'
 sh('genesis', 'sh', HERE / 'newparticipant-acceptance.sh', host, mini, store, verifier, W, sock,
    env={'OBJECTIVE_INVOCATION_POLICY': (root / 'policy.hex').read_text().strip(),
-        'EXTRA_GENESIS_ENROLLMENTS': str(root / 'enrollment-40.json')})
+        'EXTRA_GENESIS_ENROLLMENTS': str(root / 'enrollment-40.json'),
+        'NEWPARTICIPANT_SPONSOR_BALANCE': '1000000'})
 config = W / 'deployment' / 'pinned-config.json'
 alice_ws = W / 'sponsor'
 bob_ws = root / 'subject40'
@@ -274,10 +281,20 @@ def roots(v):
     return {c['cell']: c['root'] for c in v.get('cells', [])}
 
 
+def activity_cap(ticks):
+    """A declared envelope (Capacity): `ticks` source ticks, the kernel's fixed heap, stack,
+    type fuel and Plan budget, priced at 0 (as the activity driver's `cap`)."""
+    c = {k: '0' for k in MAXIMUM}
+    for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes']:
+        c[k] = str(MAXIMUM[k])
+    c['sourceTicks'] = str(ticks)
+    return c
+
+
 def invoke(tag, workspace, inst, inp, expect, detail=None, object_cap=None, account=ALICE_ACCOUNT,
            account_cap=ALICE_SPEND, ticks=2000, prepare=False):
     return turn(tag, workspace, {'kind': 'invoke', 'instance': objects[inst]['object'], 'input': inp,
-                                 'ticks': str(ticks), 'account': account},
+                                 'envelope': activity_cap(ticks), 'account': account},
                 expect, detail, prepare, object_cap=object_cap or objects[inst]['capability'],
                 account_cap=account_cap)
 
@@ -315,14 +332,18 @@ spec = {'schema': 'dregg.objective-bend.package-input.v1', 'edition': 'objective
         'modules': [{'name': 'Broker', 'sourcePath': str(REPO / 'world/seats/Broker.obend'), 'imports': []}],
         'entryModule': '0', 'entryDefinition': 'broker'}
 (pub / 'spec.json').write_text(json.dumps(spec))
-artifact = last_json(sh('artifact', host, config, 'seat-contract-artifact', pub / 'spec.json', pub / 'artifact.bin'))
-PIN = artifact['pin']
+published = last_json(sh('publication', host, config, 'objective-publication', pub / 'spec.json', 'seat', pub / 'out'))
+PIN = published['artifactId']
+ARTIFACT_HEX = (pub / 'out' / 'artifact.bin').read_bytes().hex()
+PACKAGE_HEX = (pub / 'out' / 'package.bin').read_bytes().hex()
 v0 = view('credit', {})
 mint('gold', ALICE_ACCOUNT, 30)
 mint('kelp', BOB_ACCOUNT, 21)
 start = world('genesis')
-turn('E1-publish', alice_ws, {'kind': 'publish', 'artifact': artifact['hex']}, 'installed')
-turn('E1-republish-conflicts', bob_ws, {'kind': 'publish', 'artifact': artifact['hex']}, 'conflict')
+turn('E1-publish', alice_ws, {'kind': 'publish', 'artifact': ARTIFACT_HEX, 'package': PACKAGE_HEX,
+     'payer': ALICE_ACCOUNT}, 'installed', account_cap=ALICE_SPEND)
+turn('E1-republish-conflicts', bob_ws, {'kind': 'publish', 'artifact': ARTIFACT_HEX, 'package': PACKAGE_HEX,
+     'payer': BOB_ACCOUNT}, 'conflict', account_cap=BOB_SPEND)
 turn('E1-stranger-create-refused', bob_ws, {'kind': 'create', 'instance': objects['swap']['object'], 'pin': PIN,
      'clause': {'type': 'all', 'predicates': []}}, 'refused', 'notObjectHolder',
      object_cap=objects['swap']['capability'])
@@ -438,10 +459,12 @@ exit_('E7-third-party-after-due', bob_ws, dseat, 'installed')
 b = balances(world('deadline-exited', seats=[dseat]))
 check('E7-deadline-paid-offerer', b[(ALICE_ACCOUNT, X)] - before_pay[(ALICE_ACCOUNT, X)] == 5, b[(ALICE_ACCOUNT, X)])
 
-# --- E8: an activity as a seat's holder ---------------------------------------------
-# Only the payer of an AWAITING activity may make it a seat's holder (whose end
-# exits the seat). With no activity route on this base, no record is awaiting:
-# naming any cell as the holder is refused by name, roots unchanged.
+# --- E8: an activity as a seat's holder -------------------------------------------------
+# Only the payer of an AWAITING activity may make it a seat's holder; the activity's end
+# closes the seat in the same turn (ActivitySeatEnd: one Book batch; the offerer is paid).
+# The activity is the Tally of world/activity, published with the activity codec, born
+# by Alice (its payer) with Bob as its decider; nobody decides, so the deadline passes
+# and Bob's delivery of the timed-out await ENDS it -- natively, by signed commands.
 hsell = invoke('E8-mint', alice_ws, 'swap', mint_input('held', ALICE), 'installed')['mintIds'][0]
 v = world('before-held', instances=[objects['swap']['object']], invitations=[hsell])
 before = roots(v)
@@ -449,6 +472,87 @@ offer('E8-holder-not-an-awaiting-activity-refused', alice_ws, 'swap', hsell, 'he
       'notActivityPayer', funding=ALICE_ACCOUNT, account_cap=ALICE_SPEND, holder=objects['swap']['object'])
 v = world('after-held-refused', instances=[objects['swap']['object']], invitations=[hsell])
 check('E8-roots-unchanged', roots(v) == before, {'changed': [k for k in roots(v) if roots(v)[k] != before.get(k)]})
+
+
+def activity(tag, workspace, body, expect, detail=None):
+    out = attempts / tag
+    command = root / f'{tag}.turn.json'
+    command.write_text(json.dumps(body))
+    value = last_json(sh(tag, mini, 'activity', '--action', 'submit', '--workspace', workspace,
+                         '--command', command, '--out', out, ok=(0, 1, 2)))
+    return judge(tag, value, expect, detail)
+
+
+def activity_view(tag, request):
+    return last_json(sh(f'activity-view-{tag}', mini, 'activity', '--action', 'view', '--workspace', alice_ws,
+                        '--request', json.dumps(request)))
+
+
+hpub = root / 'held-publication'
+hpub.mkdir()
+(hpub / 'spec.json').write_text(json.dumps({
+    'schema': 'dregg.objective-bend.package-input.v1', 'edition': 'objective-bend-1',
+    'modules': [{'name': 'Tally', 'sourcePath': str(REPO / 'world/activity/Tally.obend'), 'imports': []}],
+    'entryModule': '0', 'entryDefinition': 'tally'}))
+TALLY_PIN = last_json(sh('held-publication', host, config, 'objective-publication', hpub / 'spec.json', 'activity',
+                         hpub / 'out'))['artifactId']
+activity('E8-publish-tally', alice_ws, {'kind': 'publish', 'artifact': (hpub / 'out' / 'artifact.bin').read_bytes().hex(),
+         'package': (hpub / 'out' / 'package.bin').read_bytes().hex(), 'payer': ALICE_ACCOUNT,
+         'payerCapability': ALICE_SPEND}, 'installed')
+sh('create-object-held', mini, 'workspace', '--action', 'create', '--dir', alice_ws, '--name', 'held-tally',
+   '--storage', 'content', '--predicate', permit)
+href = json.loads((alice_ws / 'refs' / 'held-tally.json').read_text())
+HELD = {'object': href['target'], 'capability': href['operationCapability']}
+activity('E8-create-tally', alice_ws, {'kind': 'create', 'object': HELD['object'], 'objectCapability': HELD['capability'],
+         'pin': TALLY_PIN, 'law': {'type': 'all', 'predicates': []}, 'upgrade': {'frozen': {}},
+         'payer': ALICE_ACCOUNT, 'payerCapability': ALICE_SPEND}, 'installed')
+TICKS = 3000
+born = activity('E8-birth-tally', alice_ws, {'kind': 'birth', 'object': HELD['object'],
+                'objectCapability': HELD['capability'], 'account': ALICE_ACCOUNT, 'accountCapability': ALICE_SPEND,
+                'pin': TALLY_PIN, 'input': record(init=variant('set', nat(0)), decider=nat(int(BOB))),
+                'envelope': activity_cap(TICKS), 'resume': activity_cap(TICKS), 'timeout': activity_cap(TICKS),
+                'deposit': '20000'}, 'installed')
+
+
+def held_state(tag):
+    hv = activity_view(tag, {'objects': [HELD['object']],
+                             'births': [{'object': HELD['object'], 'transaction': born.get('transaction')}]})
+    rec_cell = hv['births'][0]['record']
+    return rec_cell, next((c for c in hv.get('cells', []) if c.get('cell') == rec_cell), {})
+
+
+HREC, hrec = held_state('held-born')
+check('E8-activity-awaiting', hrec.get('record', {}).get('phase', {}).get('kind') == 'awaiting', hrec.get('kind'))
+hawait = hrec['record']['phase']['await']
+hbob = invoke('E8-mint-bob', alice_ws, 'swap', mint_input('held', BOB), 'installed')['mintIds'][0]
+offer('E8-stranger-holder-refused', bob_ws, 'swap', hbob, 'held', [(Y, 1)], [(X, 1)], 'refused',
+      'notActivityPayer', funding=BOB_ACCOUNT, account_cap=BOB_SPEND, holder=HREC)
+pre_held = balances(world('before-held-seat'))
+held_seat = offer('E8-held-seat', alice_ws, 'swap', hsell, 'held', [(X, 2)], [(Y, 1)], 'installed',
+                  funding=ALICE_ACCOUNT, account_cap=ALICE_SPEND, holder=HREC)
+v = world('held-seat-open', seats=[held_seat])
+b = balances(v)
+check('E8-held-seat-funded', b.get((held_seat, X)) == 2
+      and b.get((ALICE_ACCOUNT, X)) == pre_held.get((ALICE_ACCOUNT, X)) - 2,
+      {'seatX': b.get((held_seat, X)), 'aliceX': [pre_held.get((ALICE_ACCOUNT, X)), b.get((ALICE_ACCOUNT, X))]})
+held_cell = cell(v, held_seat)
+check('E8-held-seat-names-holder', held_cell.get('seat', {}).get('holder') == HREC, held_cell)
+passes = 0
+while int(activity_view('height-held', {})['height']) <= int(hawait['deadline']):
+    passes += 1
+    activity(f'E8-pass-height-{passes}', alice_ws, {'kind': 'topUp', 'record': HREC, 'account': ALICE_ACCOUNT,
+             'accountCapability': ALICE_SPEND, 'amount': '1'}, 'installed')
+activity('E8-activity-ends', bob_ws, {'kind': 'deliver', 'record': HREC, 'await': hawait['id'],
+         'account': '0', 'accountCapability': '0'}, 'installed')
+_, hrec_after = held_state('held-ended')
+check('E8-activity-retired', hrec_after.get('kind') == 'retired', hrec_after.get('kind'))
+v = world('held-seat-closed', seats=[held_seat])
+b = balances(v)
+held_after = cell(v, held_seat)
+check('E8-activity-end-closes-held-seat', held_after.get('seat', {}).get('open') is False, held_after)
+check('E8-held-seat-pays-offerer', b.get((held_seat, X)) == 0
+      and b.get((ALICE_ACCOUNT, X)) == pre_held.get((ALICE_ACCOUNT, X)),
+      {'seatX': b.get((held_seat, X)), 'aliceX': [pre_held.get((ALICE_ACCOUNT, X)), b.get((ALICE_ACCOUNT, X))]})
 
 # --- E9: lost reply and reopen ---------------------------------------------------------
 lsell2 = invoke('E9-mint', alice_ws, 'swap', mint_input('lost', ALICE), 'installed')['mintIds'][0]
@@ -508,14 +612,10 @@ mx = {t['minted'][X] for t in totals}
 my = {t['minted'][Y] for t in totals}
 check('X-minted-constant-across-seat-turns', mx == {30}, sorted(mx))
 check('Y-minted-constant-across-seat-turns', my == {21}, sorted(my))
-PENDING = [{'step': 'E8-activity-end-closes-held-seat', 'status': 'not executed',
-            'why': 'the native activity route (birth/deliver) is not on main; the end hook is decided by the '
-                   'kernel (Seats.closeHeld, activity_end_closes_seats; SeatStore.endHeld, HeldEnd.closes) and '
-                   'executed only in decide +kernel (Seats.Example.activity_end_pays_held_seat)'}]
 
 (root / 'results.json').write_text(json.dumps({
     'rows': results, 'totals': totals, 'pin': PIN, 'objects': objects, 'assets': {'X': X, 'Y': Y},
-    'seats': ALL_SEATS, 'pending': PENDING}, indent=1))
+    'seats': ALL_SEATS + [held_seat]}, indent=1))
 bad = [r for r in results if not r['ok']]
 print(f'{len(results) - len(bad)}/{len(results)} rows ok; results in {root / "results.json"}')
 sys.exit(1 if bad else 0)

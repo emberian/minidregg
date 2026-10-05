@@ -5630,6 +5630,79 @@ def runFnReplyAckSession (config : NativeHost.Config)
        ("fnStoreTransactionId", toJson (toString stored.transactionId)),
        ("fnAck", toJson status)]).compress.toUTF8.toList)
 
+/-- The object kernel's session operations, one dispatcher: the kernel activity
+(210 signing plan, 211 detached assembly, 212 submit, 213 receipt-only lookup, 214
+public view) and seats (215-219, the same shape). `fnDispatch` forwards them here, so
+its operation match stays within the elaborator's budget. -/
+def objectKernelOperation (pinnedConfig : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session pinnedConfig))) (operation : UInt8)
+    (payload : List UInt8) : IO (UInt8 × List UInt8) := do
+  match operation with
+  | 210 =>
+      let opened ← sessionOpened pinnedConfig state
+      let plan ← IO.ofExcept (NativeHost.activityPlanLoaded pinnedConfig opened payload)
+      let bytes := ObjectiveActivityReceiver.signingPlanCodec.encode plan
+      unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+        throw (IO.userError "activity plan exceeds host frame bound")
+      return ((210 : UInt8), bytes)
+  | 211 =>
+      let (planBytes, signature) ← splitPair payload
+      let some plan := ObjectiveActivityReceiver.signingPlanCodec.decode planBytes
+        | throw (IO.userError "noncanonical activity plan")
+      let ingress ← IO.ofExcept (NativeHost.activityAssemble plan signature)
+      unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+        throw (IO.userError "activity ingress exceeds host frame bound")
+      return ((211 : UInt8), ingress)
+  | 212 =>
+      let opened ← sessionOpened pinnedConfig state
+      let outcome ← NativeHost.activitySubmitLoaded pinnedConfig opened payload
+      return ((212 : UInt8), outcomeCodec.encode outcome)
+  | 213 =>
+      let opened ← sessionOpened pinnedConfig state
+      let outcome := NativeHost.activityLookupLoaded pinnedConfig opened payload
+      return ((213 : UInt8), outcomeCodec.encode outcome)
+  | 214 =>
+      let opened ← sessionOpened pinnedConfig state
+      let request ← IO.ofExcept (Minidregg.Host.ObjectiveActivityJson.parseViewRequest payload)
+      let domain := pinnedConfig.deployment.domain
+      let view ← IO.ofExcept (NativeHost.activityViewLoaded pinnedConfig opened
+        (Minidregg.Host.ObjectiveActivityJson.viewCells domain request))
+      let json := Minidregg.Host.ObjectiveActivityJson.viewJson domain
+        pinnedConfig.tariff.asset request view
+      return ((214 : UInt8), json.compress.toUTF8.toList)
+  | 215 =>
+      let opened ← sessionOpened pinnedConfig state
+      let plan ← IO.ofExcept (NativeHost.seatPlanLoaded pinnedConfig opened payload)
+      let bytes := SeatReceiver.signingPlanCodec.encode plan
+      unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+        throw (IO.userError "seat plan exceeds host frame bound")
+      return ((215 : UInt8), bytes)
+  | 216 =>
+      let (planBytes, signature) ← splitPair payload
+      let some plan := SeatReceiver.signingPlanCodec.decode planBytes
+        | throw (IO.userError "noncanonical seat plan")
+      let ingress ← IO.ofExcept (NativeHost.seatAssemble plan signature)
+      unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+        throw (IO.userError "seat ingress exceeds host frame bound")
+      return ((216 : UInt8), ingress)
+  | 217 =>
+      let opened ← sessionOpened pinnedConfig state
+      let outcome ← NativeHost.seatSubmitLoaded pinnedConfig opened payload
+      return ((217 : UInt8), outcomeCodec.encode outcome)
+  | 218 =>
+      let opened ← sessionOpened pinnedConfig state
+      let outcome := NativeHost.seatLookupLoaded pinnedConfig opened payload
+      return ((218 : UInt8), outcomeCodec.encode outcome)
+  | 219 =>
+      let opened ← sessionOpened pinnedConfig state
+      let request ← IO.ofExcept (Minidregg.Host.SeatJson.parseViewRequest payload)
+      let domain := pinnedConfig.deployment.domain
+      let view ← IO.ofExcept (NativeHost.seatViewLoaded pinnedConfig opened
+        (Minidregg.Host.SeatJson.viewCells domain request))
+      let json := Minidregg.Host.SeatJson.viewJson domain request view
+      return ((219 : UInt8), json.compress.toUTF8.toList)
+  | _ => throw (IO.userError "unsupported object kernel operation")
+
 def usage : String :=
 "enroll-key-plan OBSERVED.bin COMMAND.bin PLAN.bin|enroll-key-assemble PLAN.bin SPONSOR-SIG.bin POSSESSION-SIG.bin NEXT.pub NEXT-SIG.bin INGRESS.bin|enroll-key-submit INGRESS.bin OUTCOME.bin|enroll-key-lookup INGRESS.bin OUTCOME.bin\n" ++
 "inspect-agent-lifetime-paid-ingress PAID-PLAN.bin INGRESS.bin RESULT.json\ninspect-stop-claim STOP-PLAN.bin FRESH-COMMITTED-CLAIM.bin RESULT.json\nfn-frontier-request selected MINI-TX REQUEST.bin|fn-frontier-request empty - REQUEST.bin|fn-frontier-plan selected MINI-TX PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-plan empty - PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-export PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-assemble PLAN.bin RAW64-SIGNATURE.bin INGRESS.bin|fn-selected-poll-submit INGRESS.bin OUTCOME.bin|fn-selected-poll-lookup INGRESS.bin OUTCOME.bin|fn-empty-poll-submit INGRESS.bin OUTCOME.bin|fn-empty-poll-lookup INGRESS.bin OUTCOME.bin|fn-empty-page-ack CURSOR.fncu REPORT.fn-e COVERAGE19.bin RESULT.json\n" ++
@@ -5695,12 +5768,6 @@ def run (arguments : List String) : IO UInt32 := do
               (← IO.ofExcept (Minidregg.Host.ObjectivePackageAuthor.outputCodecOf outputCodec))).toArray⟩
           IO.FS.writeFile (directory / "publication.json") result.json.compress
           IO.println result.json.compress
-          pure 0
-      | "seat-contract-artifact", [specPath, outputPath] =>
-          let (bytes, packageBytes, json) ← Minidregg.Host.SeatJson.artifact specPath
-          writeBytes outputPath bytes
-          writeBytes (outputPath ++ ".package") packageBytes
-          IO.println json.compress
           pure 0
       | "carry-plan", [requestPath, outputPath] =>
           let operator ← carryOperator settings
@@ -6603,69 +6670,8 @@ def run (arguments : List String) : IO UInt32 := do
                             let opened ← sessionOpened pinnedConfig state
                             let view ← IO.ofExcept (NativeHost.certifyViewLoaded pinnedConfig opened)
                             return ((173 : UInt8), CertifyReceiver.viewCodec.encode view)
-                        | 210 =>
-                            let opened ← sessionOpened pinnedConfig state
-                            let plan ← IO.ofExcept (NativeHost.activityPlanLoaded pinnedConfig opened payload)
-                            let bytes := ObjectiveActivityReceiver.signingPlanCodec.encode plan
-                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
-                              throw (IO.userError "activity plan exceeds host frame bound")
-                            return ((210 : UInt8), bytes)
-                        | 211 =>
-                            let (planBytes, signature) ← splitPair payload
-                            let some plan := ObjectiveActivityReceiver.signingPlanCodec.decode planBytes
-                              | throw (IO.userError "noncanonical activity plan")
-                            let ingress ← IO.ofExcept (NativeHost.activityAssemble plan signature)
-                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
-                              throw (IO.userError "activity ingress exceeds host frame bound")
-                            return ((211 : UInt8), ingress)
-                        | 212 =>
-                            let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.activitySubmitLoaded pinnedConfig opened payload
-                            return ((212 : UInt8), outcomeCodec.encode outcome)
-                        | 213 =>
-                            let opened ← sessionOpened pinnedConfig state
-                            let outcome := NativeHost.activityLookupLoaded pinnedConfig opened payload
-                            return ((213 : UInt8), outcomeCodec.encode outcome)
-                        | 214 =>
-                            let opened ← sessionOpened pinnedConfig state
-                            let request ← IO.ofExcept (Minidregg.Host.ObjectiveActivityJson.parseViewRequest payload)
-                            let domain := pinnedConfig.deployment.domain
-                            let view ← IO.ofExcept (NativeHost.activityViewLoaded pinnedConfig opened
-                              (Minidregg.Host.ObjectiveActivityJson.viewCells domain request))
-                            let json := Minidregg.Host.ObjectiveActivityJson.viewJson domain
-                              pinnedConfig.tariff.asset request view
-                            return ((214 : UInt8), json.compress.toUTF8.toList)
-                        | 215 =>
-                            let opened ← sessionOpened pinnedConfig state
-                            let plan ← IO.ofExcept (NativeHost.seatPlanLoaded pinnedConfig opened payload)
-                            let bytes := SeatReceiver.signingPlanCodec.encode plan
-                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
-                              throw (IO.userError "seat plan exceeds host frame bound")
-                            return ((215 : UInt8), bytes)
-                        | 216 =>
-                            let (planBytes, signature) ← splitPair payload
-                            let some plan := SeatReceiver.signingPlanCodec.decode planBytes
-                              | throw (IO.userError "noncanonical seat plan")
-                            let ingress ← IO.ofExcept (NativeHost.seatAssemble plan signature)
-                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
-                              throw (IO.userError "seat ingress exceeds host frame bound")
-                            return ((216 : UInt8), ingress)
-                        | 217 =>
-                            let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.seatSubmitLoaded pinnedConfig opened payload
-                            return ((217 : UInt8), outcomeCodec.encode outcome)
-                        | 218 =>
-                            let opened ← sessionOpened pinnedConfig state
-                            let outcome := NativeHost.seatLookupLoaded pinnedConfig opened payload
-                            return ((218 : UInt8), outcomeCodec.encode outcome)
-                        | 219 =>
-                            let opened ← sessionOpened pinnedConfig state
-                            let request ← IO.ofExcept (Minidregg.Host.SeatJson.parseViewRequest payload)
-                            let domain := pinnedConfig.deployment.domain
-                            let view ← IO.ofExcept (NativeHost.seatViewLoaded pinnedConfig opened
-                              (Minidregg.Host.SeatJson.viewCells domain request))
-                            let json := Minidregg.Host.SeatJson.viewJson domain request view
-                            return ((219 : UInt8), json.compress.toUTF8.toList)
+                        | 210 | 211 | 212 | 213 | 214 | 215 | 216 | 217 | 218 | 219 =>
+                            objectKernelOperation pinnedConfig state operation payload
                         | 60 =>
                             let outcome ← fnSelectedPollSubmitSession
                               pinnedConfig state payload

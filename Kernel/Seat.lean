@@ -265,13 +265,184 @@ theorem ops_nonneg {book : Book} {transfers : List Transfer} {account : AccountI
     have := nonneg asset'
     split_ifs with h1 h2 <;> (try obtain ⟨rfl, rfl⟩ := h1) <;> omega
 
-/-- No postings. -/
-def noPostings : Batch := ⟨[], []⟩
+/-! ## Closing an account commutes with postings that do not name it
 
-/-- Two batches in sequence (the second registers nothing: only an offer
-registers, and an offer is one step on its own). -/
+A batch closes its accounts after its operations (`Batch.apply`). Two batches in
+sequence close the first's accounts BEFORE the second's operations; their joint
+batch (`seqBatch`) closes them after. The two agree, and the joint batch is
+admitted, because every operation the second batch admits names only present
+accounts, so none the first closed: closing changes only the account set, an
+operation never reads it, and an operation that names neither endpoint leaves an
+account's balances and leases as they were. -/
+
+theorem Operation.apply_deregisterAccount (operation : Operation) (book : Book) (account : AccountId) :
+    operation.apply (book.deregisterAccount account) = (operation.apply book).deregisterAccount account := by
+  cases operation <;> rfl
+
+theorem applyOperations_deregisterAccount (account : AccountId) :
+    ∀ (operations : List Operation) (book : Book),
+      applyOperations (book.deregisterAccount account) operations =
+        (applyOperations book operations).deregisterAccount account
+  | [], _ => rfl
+  | operation :: rest, book => by
+    simp only [applyOperations]
+    rw [Operation.apply_deregisterAccount]
+    exact applyOperations_deregisterAccount account rest _
+
+theorem applyOperations_deregisterAccounts (operations : List Operation) :
+    ∀ (accounts : List AccountId) (book : Book),
+      applyOperations (deregisterAccounts book accounts) operations =
+        deregisterAccounts (applyOperations book operations) accounts
+  | [], _ => rfl
+  | account :: rest, book => by
+    simp only [deregisterAccounts]
+    rw [applyOperations_deregisterAccounts operations rest, applyOperations_deregisterAccount]
+
+theorem Operation.apply_deregisterAccounts (operation : Operation) (book : Book) (accounts : List AccountId) :
+    operation.apply (deregisterAccounts book accounts) = deregisterAccounts (operation.apply book) accounts := by
+  have := applyOperations_deregisterAccounts [operation] accounts book
+  simpa only [applyOperations] using this
+
+theorem deregisterAccounts_append :
+    ∀ (book : Book) (first later : List AccountId),
+      deregisterAccounts book (first ++ later) = deregisterAccounts (deregisterAccounts book first) later
+  | _, [], _ => rfl
+  | book, account :: rest, later => deregisterAccounts_append (book.deregisterAccount account) rest later
+
+theorem deregistrationsAdmitted_append :
+    ∀ (book : Book) (first later : List AccountId),
+      DeregistrationsAdmitted book (first ++ later) ↔
+        DeregistrationsAdmitted book first ∧ DeregistrationsAdmitted (deregisterAccounts book first) later
+  | _, [], _ => by simp [DeregistrationsAdmitted, deregisterAccounts]
+  | book, account :: rest, later => by
+    simp only [List.cons_append, DeregistrationsAdmitted, deregisterAccounts]
+    rw [deregistrationsAdmitted_append _ rest later, and_assoc]
+
+theorem mem_of_mem_deregisterAccounts {account : AccountId} :
+    ∀ {book : Book} {accounts : List AccountId},
+      account ∈ (deregisterAccounts book accounts).accounts → account ∈ book.accounts
+  | _, [], member => member
+  | book, closed :: rest, member =>
+    Finset.mem_of_mem_erase (mem_of_mem_deregisterAccounts (book := book.deregisterAccount closed) member)
+
+theorem deregisterAccounts_leaseRecords :
+    ∀ (book : Book) (accounts : List AccountId),
+      (deregisterAccounts book accounts).leaseRecords = book.leaseRecords
+  | _, [] => rfl
+  | book, account :: rest => deregisterAccounts_leaseRecords (book.deregisterAccount account) rest
+
+/-- An operation admitted after some accounts closed is admitted before. -/
+theorem Admission.of_deregistered {book : Book} {accounts : List AccountId} {operation : Operation}
+    (admitted : Admission (deregisterAccounts book accounts) operation) : Admission book operation where
+  sourcePresent := mem_of_mem_deregisterAccounts admitted.sourcePresent
+  destinationPresent := mem_of_mem_deregisterAccounts admitted.destinationPresent
+  sourceSolvent := by
+    have solvent := admitted.sourceSolvent
+    simpa only [Book.balance, deregisterAccounts_balances] using solvent
+  leaseWellFormed := by
+    have formed := admitted.leaseWellFormed
+    cases operation with
+    | lease => simpa only [Book.leases, deregisterAccounts_leaseRecords] using formed
+    | _ => trivial
+
+theorem OperationsAdmitted.of_deregistered (accounts : List AccountId) :
+    ∀ {book : Book} {operations : List Operation},
+      OperationsAdmitted (deregisterAccounts book accounts) operations → OperationsAdmitted book operations
+  | _, [], _ => trivial
+  | book, operation :: rest, ⟨first, later⟩ => by
+    refine ⟨Admission.of_deregistered first, ?_⟩
+    rw [Operation.apply_deregisterAccounts] at later
+    exact OperationsAdmitted.of_deregistered accounts later
+
+theorem Operation.apply_balances (operation : Operation) (book : Book) :
+    (operation.apply book).balances = (book.applyPosting operation.posting).balances := by
+  cases operation <;> rfl
+
+/-- An operation leaves the balances of an account it does not name. -/
+theorem Operation.apply_balance_other {book : Book} {operation : Operation} {account : AccountId}
+    (asset : AssetId) (source : operation.posting.source ≠ account)
+    (destination : operation.posting.destination ≠ account) :
+    (operation.apply book).balances (account, asset) = book.balances (account, asset) := by
+  rw [Operation.apply_balances]
+  show (book.balances + DFinsupp.single (operation.posting.source, operation.posting.asset)
+      (-(Int.ofNat operation.posting.amount)) +
+      DFinsupp.single (operation.posting.destination, operation.posting.asset)
+        (Int.ofNat operation.posting.amount) : Π₀ _ : AccountId × AssetId, Int) (account, asset) = _
+  rw [DFinsupp.add_apply, DFinsupp.add_apply, single_at, single_at,
+    if_neg (fun h => source h.1.symm), if_neg (fun h => destination h.1.symm)]
+  simp
+
+/-- A closing stays admitted across an operation that names neither endpoint as it. -/
+theorem deregistrationAdmission_apply {book : Book} {account : AccountId} {operation : Operation}
+    (admitted : DeregistrationAdmission book account)
+    (source : operation.posting.source ≠ account) (destination : operation.posting.destination ≠ account) :
+    DeregistrationAdmission (operation.apply book) account := by
+  obtain ⟨kernel, present, noBalance, noLease⟩ := admitted
+  refine ⟨kernel, by rw [Operation.apply_accounts]; exact present, ?_, ?_⟩
+  · intro coordinate member same
+    obtain ⟨named, asset⟩ := coordinate
+    simp only at same
+    subst same
+    have nonzero := (DFinsupp.mem_support_toFun _ _).mp member
+    rw [Operation.apply_balance_other asset source destination] at nonzero
+    exact noBalance _ ((DFinsupp.mem_support_toFun _ _).mpr nonzero) rfl
+  · cases operation with
+    | lease leaseId holder lessor asset rate epochs startsAt =>
+      simp only [Operation.posting] at source destination
+      intro id member
+      have records : ((Operation.lease leaseId holder lessor asset rate epochs startsAt).apply book).leaseRecords id =
+          if id = leaseId then some (⟨holder, lessor, asset, rate * epochs, startsAt, startsAt + epochs⟩ : LeaseRecord)
+          else book.leaseRecords id := by
+        by_cases same : id = leaseId
+        · subst same
+          simp [Operation.apply, Operation.leaseRecord?, DFinsupp.coe_update, Function.update_self]
+        · simp [Operation.apply, Operation.leaseRecord?, DFinsupp.coe_update, Function.update_of_ne same, same,
+            Book.applyPosting]
+      rw [records]
+      by_cases same : id = leaseId
+      · rw [if_pos same]
+        simp [LeaseRecord.names, source, destination]
+      · rw [if_neg same]
+        apply noLease
+        rw [DFinsupp.mem_support_iff] at member ⊢
+        rwa [records, if_neg same] at member
+    | _ => exact noLease
+
+theorem deregistrationsAdmitted_apply {operation : Operation} :
+    ∀ {book : Book} {accounts : List AccountId}, DeregistrationsAdmitted book accounts →
+      operation.posting.source ∉ accounts → operation.posting.destination ∉ accounts →
+      DeregistrationsAdmitted (operation.apply book) accounts
+  | _, [], _, _, _ => trivial
+  | book, account :: rest, ⟨first, later⟩, source, destination => by
+    refine ⟨deregistrationAdmission_apply first (fun h => source (by simp [h])) (fun h => destination (by simp [h])), ?_⟩
+    rw [← Operation.apply_deregisterAccount]
+    exact deregistrationsAdmitted_apply later (fun m => source (List.mem_cons_of_mem _ m))
+      (fun m => destination (List.mem_cons_of_mem _ m))
+
+/-- Closings stay admitted across operations admitted after them. -/
+theorem deregistrationsAdmitted_afterOperations {accounts : List AccountId} :
+    ∀ {book : Book} {operations : List Operation}, DeregistrationsAdmitted book accounts →
+      OperationsAdmitted (deregisterAccounts book accounts) operations →
+      DeregistrationsAdmitted (applyOperations book operations) accounts
+  | _, [], closed, _ => closed
+  | book, operation :: rest, closed, ⟨first, later⟩ => by
+    have source : operation.posting.source ∉ accounts := fun member =>
+      deregisterAccounts_not_mem book accounts _ (Or.inl member) first.sourcePresent
+    have destination : operation.posting.destination ∉ accounts := fun member =>
+      deregisterAccounts_not_mem book accounts _ (Or.inl member) first.destinationPresent
+    rw [Operation.apply_deregisterAccounts] at later
+    exact deregistrationsAdmitted_afterOperations (book := operation.apply book) (operations := rest)
+      (deregistrationsAdmitted_apply closed source destination) later
+
+/-- No postings. -/
+def noPostings : Batch := ⟨[], [], []⟩
+
+/-- Two batches in sequence: registrations, operations and closings each in
+order (the second registers nothing: only an offer registers, and an offer is one
+step on its own). -/
 def seqBatch (first later : Batch) : Batch :=
-  ⟨first.registrations ++ later.registrations, first.operations ++ later.operations⟩
+  ⟨first.registrations ++ later.registrations, first.operations ++ later.operations,
+    first.deregistrations ++ later.deregistrations⟩
 
 /-- What a step posts: one batch admitted on the step's own Book, and the next
 Book is that batch applied. -/
@@ -283,24 +454,35 @@ theorem Posts.conserves {book next : Book} {batch : Batch} (posted : Posts book 
   rw [posted.2]; exact Batch.conservation book batch posted.1 asset
 
 theorem Posts.accounts {book next : Book} {batch : Batch} (posted : Posts book batch next)
-    (none : batch.registrations = []) : next.accounts = book.accounts := by
-  rw [posted.2]; unfold Batch.apply; rw [none, applyOperations_accounts_eq]; rfl
+    (none : batch.registrations = []) (kept : batch.deregistrations = []) : next.accounts = book.accounts := by
+  rw [posted.2]; unfold Batch.apply; rw [none, kept, deregisterAccounts_nil, applyOperations_accounts_eq]; rfl
 
-theorem posts_none (book : Book) : Posts book noPostings book := ⟨⟨trivial, trivial⟩, rfl⟩
+theorem posts_none (book : Book) : Posts book noPostings book := ⟨⟨trivial, trivial, trivial⟩, rfl⟩
 
+/-- **Two batches in sequence post their joint batch**, the first's closings
+included (`deregistrationsAdmitted_afterOperations`). -/
 theorem Posts.seq {book middle next : Book} {first later : Batch} (p : Posts book first middle)
     (q : Posts middle later next) (none : later.registrations = []) : Posts book (seqBatch first later) next := by
-  obtain ⟨⟨regs, ops⟩, rfl⟩ := p
-  obtain ⟨⟨_, ops'⟩, rfl⟩ := q
-  simp only [Batch.apply, none, registerAccounts] at ops' ⊢
-  refine ⟨⟨by simpa [seqBatch, none] using regs, ?_⟩, ?_⟩
+  obtain ⟨⟨regs, ops, closes⟩, rfl⟩ := p
+  obtain ⟨⟨_, ops', closes'⟩, rfl⟩ := q
+  simp only [Batch.apply, none, registerAccounts] at ops' closes'
+  rw [applyOperations_deregisterAccounts] at closes'
+  refine ⟨⟨by simpa [seqBatch, none] using regs, ?_, ?_⟩, ?_⟩
   · show OperationsAdmitted (registerAccounts book (first.registrations ++ later.registrations))
       (first.operations ++ later.operations)
     rw [none, List.append_nil, operationsAdmitted_append]
-    exact ⟨ops, ops'⟩
-  · show _ = applyOperations (registerAccounts book (first.registrations ++ later.registrations))
-      (first.operations ++ later.operations)
-    rw [none, List.append_nil, applyOperations_append_eq]
+    exact ⟨ops, OperationsAdmitted.of_deregistered _ ops'⟩
+  · show DeregistrationsAdmitted (applyOperations (registerAccounts book (first.registrations ++ later.registrations))
+      (first.operations ++ later.operations)) (first.deregistrations ++ later.deregistrations)
+    rw [none, List.append_nil, applyOperations_append_eq, deregistrationsAdmitted_append]
+    exact ⟨deregistrationsAdmitted_afterOperations closes ops', closes'⟩
+  · show deregisterAccounts (applyOperations (registerAccounts (deregisterAccounts (applyOperations
+        (registerAccounts book first.registrations) first.operations) first.deregistrations) later.registrations)
+        later.operations) later.deregistrations =
+      deregisterAccounts (applyOperations (registerAccounts book (first.registrations ++ later.registrations))
+        (first.operations ++ later.operations)) (first.deregistrations ++ later.deregistrations)
+    rw [none, List.append_nil, applyOperations_append_eq, deregisterAccounts_append]
+    simp only [registerAccounts, applyOperations_deregisterAccounts]
 
 /-- Why a batch was refused: a label for the signer, read off the first failing
 posting (the decision itself is `Batch.Admission`). -/
@@ -487,7 +669,7 @@ def closeSeats (seats : List Seat) (account : AccountId) : List Seat :=
 
 /-- The batch that closes one seat: its whole allocation to its payee. -/
 def closeBatch (book : Book) (seat : Seat) : Batch :=
-  ⟨[], opsOf (payoutTransfers book seat.account seat.payee seat.proposal.assets)⟩
+  ⟨[], opsOf (payoutTransfers book seat.account seat.payee seat.proposal.assets), []⟩
 
 /-- Close one open seat: pay its whole allocation to its payee. -/
 def closeSeat (world : World) (seat : Seat) : Except Refusal (World × Batch) :=
@@ -551,7 +733,7 @@ def retireInstance (registry : Registry) (inst : InstanceId) : Registry :=
 
 /-- The batch an offer posts: register the seat account, move `give` into it. -/
 def offerBatch (funding seat : AccountId) (proposal : Proposal) : Batch :=
-  ⟨[seat], opsOf (giveTransfers funding seat proposal)⟩
+  ⟨[seat], opsOf (giveTransfers funding seat proposal), []⟩
 
 /-- The one transition function of the seat world: the next world and the one
 Book batch the step posts. -/
@@ -610,12 +792,12 @@ def step (world : World) (height : Nat) (actor : Actor) : Action → Except Refu
         else match transfers.find? (fun transfer => !addressed (openSeatsOf world instId) transfer) with
         | some transfer => .error (.outsideSeats transfer instId)
         | none =>
-          match admit world.book ⟨[], opsOf transfers⟩ with
+          match admit world.book ⟨[], opsOf transfers, []⟩ with
           | .error reason => .error reason
           | .ok book =>
             match firstUnsafe world.seats book transfers with
             | some seat => .error (.offerUnsafe seat.account)
-            | none => .ok ({ world with book := book }, ⟨[], opsOf transfers⟩)
+            | none => .ok ({ world with book := book }, ⟨[], opsOf transfers, []⟩)
     | _ => .error .notAnInstance
   | .exit account =>
     match world.seat? account with
@@ -824,7 +1006,7 @@ theorem closeSeat_inv {world next : World} {seat : Seat} {batch : Batch} (inv : 
     (closed : closeSeat world seat = .ok (next, batch)) : Inv next := by
   have book := closeSeat_book closed
   obtain ⟨rfl, posted, shape⟩ := closeSeat_spec closed
-  have accounts := posted.accounts rfl
+  have accounts := posted.accounts rfl rfl
   rw [shape]
   constructor
   · intro s hs openS
@@ -909,7 +1091,9 @@ theorem offer_inv {world : World} (inv : Inv world) {seatAccount funding payee :
   have fresh := registered.1
   have accountsEq : (Batch.apply (offerBatch funding seatAccount proposal) world.book).accounts =
       insert seatAccount world.book.accounts := by
-    unfold Batch.apply; rw [applyOperations_accounts_eq]; rfl
+    unfold Batch.apply
+    rw [show (offerBatch funding seatAccount proposal).deregistrations = [] from rfl, deregisterAccounts_nil,
+      applyOperations_accounts_eq]; rfl
   have fundingOther : funding ≠ seatAccount := ordinary_ne_protected fundingOrdinary protectedSeat
   have away : ∀ s ∈ world.seats, ∀ t ∈ giveTransfers funding seatAccount proposal,
       t.source ≠ s.account ∧ t.destination ≠ s.account := by
@@ -962,11 +1146,11 @@ theorem offer_inv {world : World} (inv : Inv world) {seatAccount funding payee :
     exact fresh (eq ▸ (inv.member s hs).1)
 
 theorem reallocate_inv {world : World} (inv : Inv world) {transfers : List Transfer} {book : Book}
-    (admitted : admit world.book ⟨[], opsOf transfers⟩ = .ok book)
+    (admitted : admit world.book ⟨[], opsOf transfers, []⟩ = .ok book)
     (noneUnsafe : firstUnsafe world.seats book transfers = none) :
     Inv { world with book := book } := by
-  obtain ⟨⟨_, ops⟩, rfl⟩ := admit_posts admitted
-  have bookEq : Batch.apply ⟨[], opsOf transfers⟩ world.book = applyOperations world.book (opsOf transfers) := rfl
+  obtain ⟨⟨_, ops, _⟩, rfl⟩ := admit_posts admitted
+  have bookEq : Batch.apply ⟨[], opsOf transfers, []⟩ world.book = applyOperations world.book (opsOf transfers) := rfl
   unfold firstUnsafe at noneUnsafe
   rw [List.find?_eq_none] at noneUnsafe
   rw [bookEq] at noneUnsafe ⊢
@@ -1111,7 +1295,7 @@ theorem closeBatch_admitted {world : World} {seat : Seat} (inv : Inv world) (mem
     (opened : seat.isOpen = true) : (closeBatch world.book seat).Admission world.book :=
   ⟨trivial, payout_admitted_from world.book seat.account seat.payee (inv.payeeOther member) _ world.book
     (List.nodup_dedup _) (inv.member seat member).1 (inv.member seat member).2
-    (fun asset _ => ⟨rfl, inv.nonneg seat member opened asset⟩)⟩
+    (fun asset _ => ⟨rfl, inv.nonneg seat member opened asset⟩), trivial⟩
 
 theorem exit_admitted {world : World} {height : Nat} {actor : Actor} {seat : Seat} (inv : Inv world)
     (member : seat ∈ world.seats) (opened : seat.isOpen = true)

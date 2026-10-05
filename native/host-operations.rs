@@ -364,3 +364,13 @@ pub const ACTIVITY_SUBMIT: u8 = 212;
 pub const ACTIVITY_LOOKUP: u8 = 213;
 // active; public,operator; owner: activity-native
 pub const ACTIVITY_VIEW: u8 = 214;
+// active; public,operator; owner: seats-native
+pub const SEAT_PLAN: u8 = 215;
+// active; public,operator; owner: seats-native
+pub const SEAT_ASSEMBLE: u8 = 216;
+// active; public,operator; owner: seats-native
+pub const SEAT_SUBMIT: u8 = 217;
+// active; public,operator; owner: seats-native
+pub const SEAT_LOOKUP: u8 = 218;
+// active; public,operator; owner: seats-native
+pub const SEAT_VIEW: u8 = 219;

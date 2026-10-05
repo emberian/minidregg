@@ -1,14 +1,13 @@
 /- Seats and invitations, JSON surface: authoring a signed seat command's bytes
 (`author seat`), inspecting a command, a signing plan or an ingress, the public
-seat view (session op 219), and the contract artifact of a package spec
-(`seat-contract-artifact`).
+seat view (session op 219). A contract package is published like any other
+Objective package: `objective-publication SPEC seat OUT` (the seat kernel's output
+codec `SeatStore.contractCodecId`).
 
 Nothing here decides anything: commands are judged by `Kernel.SeatReceiver`,
 artifacts by the seat kernel's `publish`. -/
 import Kernel.NativeHost
 import Compiler.ObjectiveBendDataWire
-import Host.ObjectivePackageAuthor
-import Host.ObjectiveBendFrontEnd
 
 namespace Minidregg.Host.SeatJson
 open Lean (Json toJson)
@@ -287,30 +286,5 @@ def viewJson (domain : Digest) (request : ViewRequest) (view : NativeHost.SeatVi
       | none => .null
       | some book => Json.arr (request.assets.map fun asset =>
           Json.mkObj [("asset", decimal asset), ("total", toJson (toString (book.totalAsset asset)))]).toArray)]
-
-/-! ## The contract artifact of a package spec -/
-
-/-- `seat-contract-artifact SPEC OUT`: capture the spec's sources, lower the
-selected definition with this Host's own front end, and make the contract
-artifact (the seat kernel's output codec `SeatStore.contractCodecId`). -/
-def artifact (specPath : String) : IO (List UInt8 × List UInt8 × Json) := do
-  let captured ← match ← (Minidregg.Host.ObjectiveBendFrontEnd.captureSpec specPath false).run with
-    | .ok c => pure c
-    | .error d => throw (IO.userError d.json.compress)
-  let package := Minidregg.Host.ObjectivePackageAuthor.packageOf
-    (captured.modules.toList.zip (captured.bytes.toList.map (·.toList))) captured.entryModule captured.entryDefinition
-  let core ← match ObjectiveBendPublication.publishedCore package with
-    | .ok core => pure core
-    | .error d => throw (IO.userError (d.stage ++ ": " ++ d.message))
-  let some declaration := ObjectiveSourcePackage.selectedDeclaration package
-    | throw (IO.userError "selected declaration missing")
-  let artifact : ObjectiveBendSourceArtifact.Artifact := ⟨ObjectiveSourcePackage.identity package, declaration,
-    core, Minidregg.Kernel.ObjectiveBendNativeInput.codecId, SeatStore.contractCodecId⟩
-  let bytes := ObjectiveBendSourceArtifact.encode artifact
-  let packageBytes := ObjectiveSourcePackage.encode package
-  pure (bytes, packageBytes, .mkObj [("pin", decimal (ObjectiveBendSourceArtifact.identity artifact).value),
-    ("packageHex", toJson (hex packageBytes)),
-    ("package", decimal artifact.package.value), ("declaration", toJson declaration),
-    ("bytes", decimal bytes.length), ("hex", toJson (hex bytes))])
 
 end Minidregg.Host.SeatJson

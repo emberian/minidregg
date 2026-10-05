@@ -625,7 +625,8 @@ def admissionSeal (prepared : Prepared deployment profile ambient durable comman
 
 def Prepared.intent (prepared : Prepared deployment profile ambient durable command) (ingress : DecodedIngress) :
     DataIntent rootBytes :=
-  prepared.decided.finalIntent (admissionSeal prepared ingress) prepared.final.1 prepared.final.2
+  ActivitySeatEnd.AdmittedTurn.finalIntent (admissionSeal prepared ingress) prepared.final.1 prepared.final.2
+    prepared.decided
 
 /-- A cell an activity intent writes is an activity cell or a seat cell (the seats
 an ending activity held), each at its own protected coordinate; the Book; or a
@@ -834,7 +835,7 @@ theorem native_delivery_consumes_once
       ∀ schedule after, DurableDataIntent.execute schedule next later ≠ .accepted after) ∧
     (∀ schedule, DurableDataIntent.execute schedule next (intent accepted) = .replayed (intent accepted).erase) := by
   have carries : ObjectiveActivity.awaitClaim delivery.await.id ∈ (intent accepted).nullifiers := by
-    simp [intent, Prepared.intent, decided, ObjectiveActivity.AdmittedTurn.finalIntent, delivery.claimsExact]
+    simp [intent, Prepared.intent, decided, ActivitySeatEnd.AdmittedTurn.finalIntent, delivery.claimsExact]
   exact ⟨fun later again schedule after =>
       ObjectiveActivity.spent_claim_never_accepted carries installed later again schedule after,
     ObjectiveActivity.installed_retry_replays installed⟩

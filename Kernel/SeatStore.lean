@@ -214,6 +214,9 @@ inductive Refusal where
   | packageMissing | packageExists | notAContract (reason : String)
   | instanceMissing (inst : InstanceId)
   | cellUndecodable (cell : Nat)
+  /-- A post of a seat turn or of an ending activity's closing would sit on, or write, a
+  kernel-activity cell (`checkInert`). -/
+  | activityCellInSeatSpace (cell : Nat)
   | inputUndecodable
   | plan (reason : String)
   | methodYielded | methodFaulted (reason : String)
@@ -569,6 +572,41 @@ def bookPost {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsh
   else [postAt snapshot config.bookCell
     (LifecycleImage.bytes CanonicalCellRegistry.registry (.live ⟨.resourceBook, accepted.post⟩))]
 
+/-! ## Seat posts never touch a kernel-activity cell
+
+The seat kernel writes its own protected coordinates under the object kernel's
+facet (`ControlFacet.objectKernel`), which the ordinary gate does not judge. What
+keeps that sound for the activity side is this check, made by the kernel itself on
+every seat turn and every closing: no post sits on a cell that holds a
+kernel-activity cell, and none writes one. The checkpoint invariant
+(`ObjectiveCheckpointInvariant.Step.inert`) needs nothing else about seat cells,
+in particular no coordinate-disjointness assumption. -/
+
+/-- The post sits on, or writes, a kernel-activity cell. -/
+def touchesActivity {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (post : Post) : Bool :=
+  (ObjectiveActivity.payloadOf (snapshot.canonicalBytes post.cell)).isSome ||
+    (ObjectiveActivity.payloadOf post.bytes).isSome
+
+/-- Every post leaves kernel-activity cells alone: the cell it sits on holds none,
+and it writes none. -/
+def Inert {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (posts : List Post) : Prop :=
+  ∀ post ∈ posts, ObjectiveActivity.payloadOf (snapshot.canonicalBytes post.cell) = none ∧
+    ObjectiveActivity.payloadOf post.bytes = none
+
+theorem inert_of_find {rootBytes : Bytes → Digest} {snapshot : Snapshot rootBytes} {posts : List Post}
+    (none : posts.find? (touchesActivity snapshot) = none) : Inert snapshot posts := by
+  intro post member
+  have untouched := List.find?_eq_none.mp none post member
+  simp only [touchesActivity, Bool.or_eq_true, Option.isSome_iff_ne_none, ne_eq, not_or, Decidable.not_not] at untouched
+  exact untouched
+
+/-- Check `Inert`, refusing by the first offending cell. -/
+def checkInert {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (posts : List Post) :
+    Except Refusal (PLift (Inert snapshot posts)) :=
+  match found : posts.find? (touchesActivity snapshot) with
+  | none => .ok ⟨inert_of_find found⟩
+  | some post => .error (.activityCellInSeatSpace post.cell.value)
+
 /-- A turn the seat kernel decided: the loaded cells and Book, the kernel's run
 on them, the fees, the ONE admitted batch on the loaded Book, and the posts. -/
 structure Decided {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
@@ -589,6 +627,8 @@ structure Decided {rootBytes : Bytes → Digest} (config : Config) (snapshot : S
   extra : List Post
   posts : List Post
   postsExact : posts = extra ++ statePosts config.domain snapshot loaded fresh next ++ bookPost config snapshot accepted
+  /-- The kernel checked it (`checkInert`). -/
+  inert : Inert snapshot posts
   guards : List ReadGuard
   nullifiers : List StableNullifier
   nullifiersExact : nullifiers = request.turn.claims
@@ -627,7 +667,8 @@ theorem Decided.book_post {rootBytes : Bytes → Digest} {config : Config} {snap
   simp only [Loaded.world] at posts
   rw [posts.2]
   unfold Batch.apply seqBatch
-  simp only [decided.feesNone, List.append_nil, applyOperations_append_eq, registerAccounts]
+  simp only [decided.feesNone, List.append_nil, applyOperations_append_eq, registerAccounts,
+    applyOperations_deregisterAccounts, deregisterAccounts_append]
 
 /-! ## Deciding a turn -/
 
@@ -677,9 +718,11 @@ def finish {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
     (stepExact : ∀ actor action, request.turn.kernelAction config.domain (transactionOf request) request.subject =
       some (actor, action) → Seats.step (loaded.world (logicalBook book.logical)) height actor action = .ok (next, batch)) :
     Except Refusal (Decided config snapshot height request) :=
-  if admitted : (seqBatch batch fees).Admission (logicalBook book.logical) then
+  if admitted : (seqBatch batch fees).Admission (logicalBook book.logical) then do
     let accepted := AcceptedBatch.ofAdmission admitted
-    .ok ⟨loaded, book, bookExact, _, rfl, next, batch, run, fees, feesNone, accepted, fresh, extra, _, rfl,
+    let ⟨inert⟩ ← checkInert snapshot
+      (extra ++ statePosts config.domain snapshot loaded fresh next ++ bookPost config snapshot accepted)
+    .ok ⟨loaded, book, bookExact, _, rfl, next, batch, run, fees, feesNone, accepted, fresh, extra, _, rfl, inert,
       (loadedCells config.domain loaded ++ cells).map (guardAt snapshot), nullifiers, nullifiersExact, stepExact⟩
   else .error .bookRefused
 
@@ -769,7 +812,7 @@ def decideTurn {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
       | .error reason => throw (.kernel reason)
       | .ok (next, batch) =>
         finish config snapshot height request loaded book bookExact next batch (.planned ran)
-          ⟨[], [.fee account config.collector config.asset (config.tariff.workOf envelope)]⟩ rfl none []
+          ⟨[], [.fee account config.collector config.asset (config.tariff.workOf envelope)], []⟩ rfl none []
           (packageCell domain body.inst.package :: ids.map (invitationCell domain)) [] (by rw [hturn]; rfl)
           (by intro _ _ h; rw [hturn] at h; cases h)
     | .exit seat => do
@@ -805,6 +848,8 @@ structure HeldEnd {rootBytes : Bytes → Digest} (domain : Digest) (snapshot : S
   ended : closeHeld (loaded.world book) height record = .ok (next, batch)
   posts : List Post
   postsExact : posts = statePosts domain snapshot loaded none next
+  /-- The kernel checked it (`checkInert`): the closing touches no kernel-activity cell. -/
+  inert : Inert snapshot posts
   guards : List ReadGuard
   guardsExact : guards = (loadedCells domain loaded).map (guardAt snapshot)
 
@@ -817,7 +862,9 @@ def endHeld {rootBytes : Bytes → Digest} (domain : Digest) (snapshot : Snapsho
                            holdings := [(record, accounts)] }
   match ended : closeHeld (loaded.world book) height record with
   | .error reason => throw (.kernel reason)
-  | .ok (next, batch) => pure ⟨loaded, next, batch, ended, _, rfl, _, rfl⟩
+  | .ok (next, batch) =>
+    let ⟨inert⟩ ← checkInert snapshot (statePosts domain snapshot loaded none next)
+    pure ⟨loaded, next, batch, ended, _, rfl, inert, _, rfl⟩
 
 /-- **An activity's end closes every seat it holds** (the kernel's
 `activity_end_closes_seats` on the loaded holdings): every held seat that was
