@@ -37,7 +37,6 @@ mod volume_custody;
 pub const SOCKET: &str = "/run/mini-spk-broker.sock";
 const MAX_REQUEST: u64 = 16 * 1024;
 const MAX_CONFIG: u64 = 64 * 1024;
-const RUNTIME_UNITS: &str = "/run/systemd/system";
 const PACKAGE_STORE: &str = "/var/lib/minidregg/spk/packages";
 const INBOX: &str = "/var/lib/minidregg/spk/inbox";
 
@@ -208,13 +207,13 @@ fn validate_spk_namespace(root: Option<&Path>) -> io::Result<()> {
     }
     for entry in root.ancestors() {
         let metadata=fs::symlink_metadata(entry)?;
-        if !metadata.is_dir() || metadata.uid()!=0 || metadata.mode()&0o022!=0 {
+        if !metadata.is_dir() || !crate::os::root_owner(metadata.uid()) || metadata.mode()&0o022!=0 {
             return Err(invalid(format!("SPK root custody differs: {}",entry.display())));
         }
     }
     for (path,mode) in [(root,0o755),(packages.as_path(),0o755),(inbox.as_path(),0o700)] {
         let metadata=fs::symlink_metadata(path)?;
-        if !metadata.is_dir() || metadata.uid()!=0 || metadata.mode()&0o777!=mode {
+        if !metadata.is_dir() || !crate::os::root_owner(metadata.uid()) || metadata.mode()&0o777!=mode {
             return Err(invalid(format!("SPK namespace directory custody differs: {}",path.display())));
         }
     }
@@ -360,7 +359,7 @@ fn read_private_root(path: &Path, max: u64) -> io::Result<Vec<u8>> {
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
         .open(path)?;
     let meta = file.metadata()?;
-    if !meta.is_file() || meta.uid() != 0 || meta.mode() & 0o077 != 0 || meta.len() > max {
+    if !meta.is_file() || !crate::os::root_owner(meta.uid()) || meta.mode() & 0o077 != 0 || meta.len() > max {
         return Err(invalid(format!("{} must be root 0600", path.display())));
     }
     let mut bytes = Vec::new();
@@ -383,7 +382,7 @@ fn file_sha256(file: &mut File) -> io::Result<String> {
 
 fn pinned_root_executable(path: &Path, sha: Option<&str>) -> io::Result<()> {
     let meta = fs::symlink_metadata(path)?;
-    if !path.is_absolute() || !meta.is_file() || meta.uid() != 0 || meta.mode() & 0o022 != 0 {
+    if !path.is_absolute() || !meta.is_file() || !crate::os::root_owner(meta.uid()) || meta.mode() & 0o022 != 0 {
         return Err(invalid(format!(
             "{} must be a root-owned executable",
             path.display()
@@ -412,7 +411,11 @@ fn root_dir(path: &Path, mode: u32) -> io::Result<()> {
         Ok(_) => {}
     }
     let meta = fs::symlink_metadata(path)?;
-    if !meta.is_dir() || meta.uid() != 0 || meta.gid() != 0 || meta.mode() & 0o7777 != mode {
+    if !meta.is_dir()
+        || !crate::os::root_owner(meta.uid())
+        || !crate::os::root_group(meta.gid())
+        || meta.mode() & 0o7777 != mode
+    {
         return Err(invalid(format!("{} must be root {mode:o}", path.display())));
     }
     Ok(())
@@ -472,7 +475,7 @@ fn open_operator_file(root: &Path, rel: &[&str], operator_uid: u32) -> io::Resul
 /// `spk-var-volume` writes into every witness.
 fn host_identity() -> io::Result<(String, String)> {
     let text = String::from_utf8(read_private_root(
-        Path::new("/etc/minidregg/spk/host-identity"),
+        &crate::os::host_identity_path(),
         4096,
     )?)
     .map_err(|_| invalid("host identity is not UTF-8"))?;
@@ -494,7 +497,7 @@ fn host_identity() -> io::Result<(String, String)> {
 }
 
 fn systemctl(args: &[&str]) -> io::Result<String> {
-    let output = Command::new("/usr/bin/systemctl")
+    let output = crate::os::systemctl()
         .arg("--system")
         .args(args)
         .stdin(Stdio::null())
@@ -630,7 +633,7 @@ impl Broker {
         }
         home_visibility::validate(&config.resident_home_read_only_paths,operator_uid)?;
         for uid in &config.app_uids {
-            if unsafe { libc::getpwuid(*uid) }.is_null() {
+            if crate::os::account_gid(*uid).is_none() {
                 return Err(invalid(format!("app pool UID {uid} has no account")));
             }
         }
@@ -643,7 +646,7 @@ impl Broker {
                 break;
             }
             let meta = fs::symlink_metadata(&prefix)?;
-            if !meta.is_dir() || meta.uid() != 0 || meta.mode() & 0o022 != 0 {
+            if !meta.is_dir() || !crate::os::root_owner(meta.uid()) || meta.mode() & 0o022 != 0 {
                 return Err(invalid(format!(
                     "grains root ancestor {} is not root-owned",
                     prefix.display()
@@ -689,7 +692,7 @@ impl Broker {
         let slice = "# rendered by mini-spk-broker\n[Unit]\nDescription=Mini SPK grains\n\n\
              [Slice]\nCPUWeight=50\nIOWeight=50\n";
         write_root_text(
-            &Path::new(RUNTIME_UNITS).join(format!("{prefix}-grains.slice")),
+            &crate::os::runtime_units().join(format!("{prefix}-grains.slice")),
             slice,
             0o644,
             true,
@@ -707,7 +710,7 @@ impl Broker {
             root = self.root().display(),
         );
         write_root_text(
-            &Path::new(RUNTIME_UNITS).join(format!("{prefix}-spk-supervisor@.service")),
+            &crate::os::runtime_units().join(format!("{prefix}-spk-supervisor@.service")),
             &supervisor,
             0o644,
             true,
@@ -849,11 +852,8 @@ impl Broker {
                     .copied()
                     .find(|uid| !bound.contains(uid))
                     .ok_or_else(|| invalid("app UID pool exhausted"))?;
-                let entry = unsafe { libc::getpwuid(uid) };
-                if entry.is_null() {
-                    return Err(invalid("app UID has no account"));
-                }
-                let gid = unsafe { (*entry).pw_gid };
+                let gid = crate::os::account_gid(uid)
+                    .ok_or_else(|| invalid("app UID has no account"))?;
                 if gid == 0 || gid == self.operator_gid {
                     return Err(invalid("app account group refused"));
                 }
@@ -894,7 +894,7 @@ impl Broker {
                     tasks = class.tasks_max,
                     io = class.io_weight,
                 );
-                write_root_text(&Path::new(RUNTIME_UNITS).join(&slice), &text, 0o644, true)?;
+                write_root_text(&crate::os::runtime_units().join(&slice), &text, 0o644, true)?;
                 systemctl(&["daemon-reload"])?;
                 placement.class = Some(class.name.into());
                 self.save_placement(&placement)?;
@@ -1090,7 +1090,7 @@ impl Broker {
                             "unit {unit} is recorded for store {owner}, not the store its name carries"
                         )));
                     }
-                } else if fs::symlink_metadata(Path::new(RUNTIME_UNITS).join(&unit)).is_ok()
+                } else if fs::symlink_metadata(crate::os::runtime_units().join(&unit)).is_ok()
                     || !active_state(&unit)
                         .map(|s| s == "inactive")
                         .unwrap_or(false)
@@ -1151,12 +1151,12 @@ impl Broker {
                     0o600,
                     false,
                 )?;
-                write_root_text(&Path::new(RUNTIME_UNITS).join(&unit), &text, 0o644, false)?;
+                write_root_text(&crate::os::runtime_units().join(&unit), &text, 0o644, false)?;
                 // No reset-failed here: a crashed generation's failed state and
                 // InvocationID are what STOP's pre-stop check identifies the
                 // dead incarnation by. `start` and `stop` reset it.
                 if !visibility.is_empty() {
-                    let drop_dir=Path::new(RUNTIME_UNITS).join(format!("{unit}.d"));
+                    let drop_dir=crate::os::runtime_units().join(format!("{unit}.d"));
                     fs::create_dir_all(&drop_dir)?;
                     fs::set_permissions(&drop_dir,fs::Permissions::from_mode(0o755))?;
                     write_root_text(&drop_dir.join("10-native-visibility.conf"),&visibility,0o644,false)?;
@@ -1224,7 +1224,7 @@ impl Broker {
 /// stopped app's copy is exact. Each copy is checked (`e2fsck -fn`) and its
 /// root directory listed (`debugfs`) without mounting it.
 pub fn backup(config_path: &Path, out: &Path) -> io::Result<Value> {
-    if unsafe { libc::geteuid() } != 0 {
+    if !crate::os::privileged() {
         return Err(invalid("backup runs as root"));
     }
     Broker::load(config_path)?.backup_into(out)
@@ -1298,7 +1298,7 @@ fn peer_credentials(stream: &UnixStream) -> io::Result<libc::ucred> {
 /// `mini-spk-broker CONFIG`: serve until killed, one request per connection,
 /// strictly sequentially (two requests never race on one grain).
 pub fn serve(config_path: &Path) -> io::Result<()> {
-    if unsafe { libc::geteuid() } != 0 {
+    if !crate::os::privileged() {
         return Err(invalid("mini-spk-broker runs as root"));
     }
     unsafe {

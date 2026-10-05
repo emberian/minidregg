@@ -181,7 +181,7 @@ fn pinned_executable(path: &Path, sha: &str) -> io::Result<()> {
     let meta = fs::symlink_metadata(path)?;
     if !path.is_absolute()
         || !meta.is_file()
-        || meta.uid() != 0
+        || !crate::os::root_owner(meta.uid())
         || meta.permissions().mode() & 0o022 != 0
         || !hex64(sha)
         || file_sha256(path)? != sha
@@ -894,7 +894,7 @@ fn scan_runs(app_dir: &Path) -> io::Result<Vec<Run>> {
 }
 
 fn unit_property(unit: &str, property: &str) -> io::Result<String> {
-    let output = Command::new("/usr/bin/systemctl")
+    let output = crate::os::systemctl()
         .args(["--system", "show", unit, &format!("--property={property}"), "--value"])
         .stdin(Stdio::null())
         .output()?;
