@@ -1,7 +1,34 @@
 # Modular typing for Objective Bend (design, OB-LTUO LT2)
 
-Status: D3 and D4 BUILT (step 1, below); D1, D2, D5 for open selves and D6 are design.
-LT0 (the probes) and LT1 (`Specification<T>` closed under `compose` and `law`) are landed.
+Status: BUILT except D2 and the step-4 theorem. Step 1 (D3, D4: closed specs with an open
+inherited row, checked `requires`), step 2 (`canonical_instantiate`,
+`Theory/ObjectiveBendTemplates.lean`), step 3a (D6: records may name themselves) and step 3b
+(D1, D5: open declarations over `Self`/`Super`, discharged at `fix`) are landed. Open:
+D2 (`Assumptions.rigid`) and `infer_instantiate` (step 4), below.
+
+Step 3b as built. An open declaration (`extension E[Self has {...}, Super has {...}](self:
+Self, super: Super) -> Super with {...}:` or `spec S[Self has {...}, Super has {...}]:`, its
+`requires` lines joining the Self bound) is checked ONCE at its own bounds: its knot field is
+the instance at Self = a bounded variable whose bound is the Self row (so an F-bound such as
+`heavier(other: Self) -> Self` refers to it) and Super = the Super bound row; a body that
+reads `self.m` outside the Self bound is `refused (self-unbound-member)`, a `super.m` outside
+the Super bound `refused (inherited-unprovided)`. In `fix(X, seed)` / `fix(compose(...), seed)`
+each open layer is instantiated (re-elaborated, memoized `M.E@i`) at Self = the final self and
+Super = the row beneath it, after discharging both bounds (`refused (self-bound)` /
+`(inherited-unprovided)`, by member). The final self is the closed layers' (all equal, else
+`self-conflict`), else the expected type (the enclosing definition's result when the fix is
+its tail, or an annotated `let`), else `refused (self-undetermined)`. Closed extension layers
+keep their declared types (`inherited-mismatch` when the row beneath differs). A recursive
+record target is discharged against its row and the last layer is annotated with the variable
+itself. An open declaration referenced as an ordinary value is its bound instance.
+
+What stands in for D2 today: the bound-instance check uses the existing checker, where the
+Self variable is an ALIAS of its bound. That is stricter than nothing and catches every
+undeclared member read, but it is not the rigid check: a body could use `self` where a value
+of exactly the bound row is expected, which an alias accepts and a wider instance then refuses
+(as an anonymous typing refusal, never unsoundly: every instance is checked). D2 plus
+`infer_instantiate` (step 4) is what turns "every instance is re-checked" into "an instance
+whose bounds are discharged is accepted".
 
 Step 1 as built (`chainFix`, `layerAt` in `Compiler/ObjectiveBendElaborate.lean`): `fix(S,
 seed)` / `fix(compose(S1..Sn), seed)` over declared plain specs with a seed that is not a

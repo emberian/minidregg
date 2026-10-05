@@ -139,7 +139,23 @@ instantiated at the row actually beneath it, so `fix(compose(Base, Twice, Augmen
 needs no placeholder methods. A `super.m` read that nothing below provides is `refused
 (inherited-unprovided)`; a target member that no layer and not the seed provides is
 `refused (requires-unprovided)`; a `requires` line must name a member of the target at its
-type (`refused (requires-signature)`). Design and limits:
+type (`refused (requires-signature)`). A record may name itself (`record Node: combine(other: Node) -> Node`): it is a recursive type
+like a recursive sum.
+
+An extension or spec can be written over what it uses rather than over a closed target:
+
+    extension AddY[Self has {x: Nat}, Super has {x: Nat}](self: Self, super: Super) -> Super with {y: Nat}:
+      extend(super, {y: 2n * self.x})
+    spec Heavier[Self has {weight: Nat, heavier(other: Self) -> Self}, Super has {weight: Nat}]:
+      def heavier(other: Self) -> Self: ...
+
+It is checked once against its binder alone (`self.m` outside the Self bound is `refused
+(self-unbound-member)`), and `fix` instantiates it at the final self and the row beneath it,
+discharging both bounds (`refused (self-bound)`, `refused (inherited-unprovided)`), so AddY,
+written for a three-field record, is reused at a four-field one without edits. The final self
+comes from the closed layers, else from the enclosing definition's result type or an
+annotated `let`, else `refused (self-undetermined)`. `Super with {f: T}` is the row Super
+overlaid by f. Design and limits:
 [objective-bend/MODULAR-TYPING.md](objective-bend/MODULAR-TYPING.md).
 
 So laws and composition never change a specification's type: `def twice(e:

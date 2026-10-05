@@ -630,16 +630,21 @@ def importRe : Re := seqs [str "import", many1 space, group 1 (many1 nonSpace),
   opt (seqs [many1 space, str "as", many1 space, group 2 ident]), .done]
 def importLeadRe : Re := .seq (str "import") space
 def genOneRe : Re := seqs [str ".bend", opt (chr '"'), alts [space, .done]]
+/-- `spec S [extends P, ...] for T:` (closed) or `spec S[Self has {...}, Super has {...}]:`
+(open over its future self and inherited row, OB-LTUO LT2). -/
 def specRe : Re := seqs [opt (group 1 (.seq (str "suffix") (many1 space))), str "spec", many1 space, group 2 ident,
-  opt (seqs [many1 space, str "extends", many1 space, group 3 (lazy1 dot)]), many1 space, str "for", many1 space,
-  group 4 (many1 dot), chr ':', .done]
+  alts [seqs [opt (seqs [many1 space, str "extends", many1 space, group 3 (lazy1 dot)]), many1 space, str "for", many1 space,
+      group 4 (many1 dot)],
+    seqs [chr '[', group 5 (many1 (.char (· != ']'))), chr ']']],
+  chr ':', .done]
 def parentRe : Re := seqs [ident, opt (.seq (chr '.') ident), .done]
 def qualifiedRe : Re := seqs [group 1 (alts [str "def", str "around", str "before", str "after",
   seqs [str "combine", many1 space, group 2 (alts [chr '+', chr '*', str "and"])]]), many1 space, group 3 (many dot),
   chr ':', .done]
 def lawRe : Re := seqs [str "law", many1 space, group 1 ident, opt (seqs [chr '(', group 2 (many dot), chr ')']),
   many space, chr ':', many space, group 3 (many1 dot), .done]
-def extensionRe : Re := seqs [str "extension", many1 space, group 1 ident, chr '(', group 2 (many dot), chr ')',
+def extensionRe : Re := seqs [str "extension", many1 space, group 1 ident,
+  opt (seqs [chr '[', group 4 (many1 (.char (· != ']'))), chr ']']), chr '(', group 2 (many dot), chr ')',
   many space, str "->", many space, group 3 (many1 dot), chr ':', .done]
 def sumRe : Re := seqs [str "sum", many1 space, group 1 ident, chr ':', .done]
 def sumCaseRe : Re := seqs [group 1 ident, many space, chr ':', many space, group 2 (many1 dot), .done]
@@ -725,17 +730,23 @@ def declarations (lines : Array Line) : PS (Array Json × Array Json) := do
             ("body", lawBody), ("span", clause.span.json)])
           continue
         fail clause "expected requires, actual method body, or law"
-      decls := decls.push (Json.mkObj [("kind", toJson "spec"), ("name", toJson (cap line.text caps 2)),
+      decls := decls.push (Json.mkObj ([("kind", toJson "spec"), ("name", toJson (cap line.text caps 2)),
         ("suffix", toJson (capture line.text caps 1).isSome), ("parents", toJson (parents.map String.ofList)),
         ("targetType", toJson (cap line.text caps 4)), ("requirements", Json.arr requirements), ("methods", Json.arr methods),
-        ("laws", Json.arr laws), ("span", line.span.json)])
+        ("laws", Json.arr laws), ("span", line.span.json)] ++
+        (match capture line.text caps 5 with
+          | some b => [("binders", toJson (String.ofList b))]
+          | none => [])))
       continue
     if let some (_, caps) ← matchAt line extensionRe line.text then
       let parameters ← liftBare (splitParameters ((capture line.text caps 2).getD []))
       let extensionBody ← body lines fuel line.indent
-      decls := decls.push (Json.mkObj [("kind", toJson "extension"), ("name", toJson (cap line.text caps 1)),
+      decls := decls.push (Json.mkObj ([("kind", toJson "extension"), ("name", toJson (cap line.text caps 1)),
         ("parameters", Json.arr parameters.toArray), ("targetType", toJson (cap line.text caps 3)),
-        ("body", extensionBody), ("span", line.span.json)])
+        ("body", extensionBody), ("span", line.span.json)] ++
+        (match capture line.text caps 4 with
+          | some b => [("binders", toJson (String.ofList b))]
+          | none => [])))
       continue
     if let some (_, caps) ← matchAt line sumRe line.text then
       let mut cases : Array Json := #[]

@@ -1,0 +1,10 @@
+edition ObjectiveBend 1
+# Step 3b tooth: an open extension is checked against its binder ALONE. It reads self.z,
+# which its Self bound does not declare: refused at the declaration, whatever selves it
+# would later be closed at.
+
+extension Bad[Self has {x: Nat}, Super has {x: Nat}](self: Self, super: Super) -> Super with {y: Nat}:
+  extend(super, {y: self.z})
+
+def zero() -> Nat:
+  0n

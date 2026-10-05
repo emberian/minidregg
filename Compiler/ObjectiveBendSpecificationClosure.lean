@@ -241,6 +241,39 @@ theorem requires_signature_refused :
       "def run() -> Nat:\n  fix(S, {}).review(1n)\n") "run" = false := by
   native_decide
 
+/-! ## Open declarations over Self and Super (OB-LTUO LT2 step 3b) -/
+
+def fourthFieldSource : String :=
+  "edition ObjectiveBend 1\nrecord X:\n  x: Nat\nrecord XY:\n  x: Nat\n  y: Nat\n" ++
+  "record XYZW:\n  x: Nat\n  y: Nat\n  z: Nat\n  w: Nat\n" ++
+  "extension AddY[Self has {x: Nat}, Super has {x: Nat}](self: Self, super: Super) -> Super with {y: Nat}:\n" ++
+  "  extend(super, {y: 2n * self.x})\n" ++
+  "extension AddZW(self: XYZW, super: XY) -> XYZW:\n  extend(super, {z: self.y, w: self.z + 1n})\n" ++
+  "def run() -> Nat:\n  fix(compose(AddY, AddZW), {x: 5n}).w\n"
+
+/-- An extension written over what it uses is reused at a self it never named (W09b). -/
+theorem open_extension_reused_accepted : acceptsSource fourthFieldSource "run" = true := by native_decide
+
+def heavierSpec : String :=
+  "spec Heavier[Self has {weight: Nat, heavier(other: Self) -> Self}, Super has {weight: Nat}]:\n" ++
+  "  def heavier(other: Self) -> Self:\n    if other.weight <= self.weight then self else other\n"
+
+/-- An F-bounded binary method closes at a recursive record (W10). -/
+theorem binary_self_accepted :
+    acceptsSource ("edition ObjectiveBend 1\nrecord Node:\n  weight: Nat\n  heavier(other: Node) -> Node\n" ++
+      heavierSpec ++ "def node(n: Nat) -> Node:\n  fix(Heavier, {weight: n})\n") "node" = true := by native_decide
+
+/-- ... and is refused where the self's method has another type (the F-bound is discharged). -/
+theorem f_bound_mismatch_refused :
+    acceptsSource ("edition ObjectiveBend 1\nrecord Pair:\n  weight: Nat\n  heavier(other: Nat) -> Pair\n" ++
+      heavierSpec ++ "def pair(n: Nat) -> Pair:\n  fix(Heavier, {weight: n})\n") "pair" = false := by native_decide
+
+/-- A template is checked against its binder alone: reading an undeclared self member refuses. -/
+theorem unbound_self_member_refused :
+    acceptsSource ("edition ObjectiveBend 1\n" ++
+      "extension Bad[Self has {x: Nat}, Super has {x: Nat}](self: Self, super: Super) -> Super with {y: Nat}:\n" ++
+      "  extend(super, {y: self.z})\ndef zero() -> Nat:\n  0n\n") "zero" = false := by native_decide
+
 /-- The built-in module declaring `SpecMeta`/`SpecLaws` is Objective Bend source the
 front end's own parser reads. -/
 theorem builtin_parses : ObjectiveBendElaborate.builtinModule.toBool = true := by native_decide
@@ -256,4 +289,8 @@ theorem builtin_parses : ObjectiveBendElaborate.builtinModule.toBool = true := b
 #assert_compiled unprovided_requirement_refused
 #assert_compiled inherited_unprovided_refused
 #assert_compiled requires_signature_refused
+#assert_compiled open_extension_reused_accepted
+#assert_compiled binary_self_accepted
+#assert_compiled f_bound_mismatch_refused
+#assert_compiled unbound_self_member_refused
 end Minidregg.Compiler.ObjectiveBendSpecificationClosure

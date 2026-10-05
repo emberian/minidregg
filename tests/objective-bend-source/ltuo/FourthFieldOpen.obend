@@ -6,6 +6,9 @@ edition ObjectiveBend 1
 
 record X:
   x: Nat
+record XY:
+  x: Nat
+  y: Nat
 record XYZW:
   x: Nat
   y: Nat
@@ -15,7 +18,7 @@ record XYZW:
 extension AddY[Self has {x: Nat}, Super has {x: Nat}](self: Self, super: Super) -> Super with {y: Nat}:
   extend(super, {y: 2n * self.x})
 
-extension AddZW(self: XYZW, super: {x: Nat, y: Nat}) -> XYZW:
+extension AddZW(self: XYZW, super: XY) -> XYZW:
   extend(super, {z: self.y, w: self.z + 1n})
 
 def wOfFive() -> Nat:

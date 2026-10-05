@@ -1,0 +1,12 @@
+edition ObjectiveBend 1
+# Step 3b tooth: AddY needs a final self with x: Nat; this fix closes at a self without x.
+
+record Y:
+  y: Nat
+
+extension AddY[Self has {x: Nat}, Super has {}](self: Self, super: Super) -> Super with {y: Nat}:
+  extend(super, {y: 2n * self.x})
+
+def yOfNothing() -> Nat:
+  let built: Y = fix(AddY, {})
+  built.y

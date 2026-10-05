@@ -391,8 +391,8 @@
   "arguments": [],
   "prediction": "design acceptance (LT2): an extension written over its assumptions survives a fourth field without edits",
   "current": {
-   "status": "refused",
-   "refusal": "unsupported Objective Bend declaration"
+   "status": "finished",
+   "value": "11"
   },
   "target": {
    "status": "finished",
@@ -412,14 +412,98 @@
   "arguments": [],
   "prediction": "design acceptance (LT2): an F-bounded binary method closes at two records (5 + 7)",
   "current": {
-   "status": "refused",
-   "refusal": "unsupported Objective Bend declaration"
+   "status": "finished",
+   "value": "12"
   },
   "target": {
    "status": "finished",
    "value": "12"
   },
   "owner": "LT2"
+ },
+ {
+  "name": "S3a-SelfUnboundMember",
+  "modules": [
+   {
+    "name": "OpenSelfUnboundMember",
+    "source": "OpenSelfUnboundMember.obend"
+   }
+  ],
+  "entry": "zero",
+  "arguments": [],
+  "prediction": "LT2 step 3b tooth: a template reads only what its binder declares",
+  "current": {
+   "status": "refused",
+   "refusal": "refused (self-unbound-member)"
+  },
+  "target": {
+   "status": "refused",
+   "refusal": "refused (self-unbound-member)"
+  },
+  "owner": "control"
+ },
+ {
+  "name": "S3b-SelfBoundUnmet",
+  "modules": [
+   {
+    "name": "OpenSelfBoundUnmet",
+    "source": "OpenSelfBoundUnmet.obend"
+   }
+  ],
+  "entry": "yOfNothing",
+  "arguments": [],
+  "prediction": "LT2 step 3b tooth: fix discharges the Self bound",
+  "current": {
+   "status": "refused",
+   "refusal": "refused (self-bound)"
+  },
+  "target": {
+   "status": "refused",
+   "refusal": "refused (self-bound)"
+  },
+  "owner": "control"
+ },
+ {
+  "name": "S3c-SelfUndetermined",
+  "modules": [
+   {
+    "name": "OpenSelfUndetermined",
+    "source": "OpenSelfUndetermined.obend"
+   }
+  ],
+  "entry": "weight",
+  "arguments": [],
+  "prediction": "LT2 step 3b tooth: an all-open fix needs a named final self",
+  "current": {
+   "status": "refused",
+   "refusal": "refused (self-undetermined)"
+  },
+  "target": {
+   "status": "refused",
+   "refusal": "refused (self-undetermined)"
+  },
+  "owner": "control"
+ },
+ {
+  "name": "S3d-FBoundMismatch",
+  "modules": [
+   {
+    "name": "OpenFBoundMismatch",
+    "source": "OpenFBoundMismatch.obend"
+   }
+  ],
+  "entry": "pair",
+  "arguments": [],
+  "prediction": "LT2 step 3b tooth: an F-bound is discharged at the instance's self",
+  "current": {
+   "status": "refused",
+   "refusal": "refused (self-bound)"
+  },
+  "target": {
+   "status": "refused",
+   "refusal": "refused (self-bound)"
+  },
+  "owner": "control"
  },
  {
   "name": "R01-LeftAssociationNested",

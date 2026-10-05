@@ -1,0 +1,14 @@
+edition ObjectiveBend 1
+# Step 3b tooth: Heavier's F-bound needs heavier(other: Self) -> Self; Pair's heavier takes
+# a Nat. Refused at the fix (self-bound), naming heavier.
+
+record Pair:
+  weight: Nat
+  heavier(other: Nat) -> Pair
+
+spec Heavier[Self has {weight: Nat, heavier(other: Self) -> Self}, Super has {weight: Nat}]:
+  def heavier(other: Self) -> Self:
+    if other.weight <= self.weight then self else other
+
+def pair(n: Nat) -> Pair:
+  fix(Heavier, {weight: n})

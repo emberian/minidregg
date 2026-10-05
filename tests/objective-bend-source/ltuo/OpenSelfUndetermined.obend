@@ -1,0 +1,10 @@
+edition ObjectiveBend 1
+# Step 3b tooth: every layer is open and nothing names the final self: refused by name
+# (annotate the definition's result or a let), never guessed.
+
+spec Weighs[Self has {weight: Nat}, Super has {}]:
+  def weight() -> Nat:
+    1n
+
+def weight() -> Nat:
+  fix(Weighs, {}).weight

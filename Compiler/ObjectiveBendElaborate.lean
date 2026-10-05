@@ -90,6 +90,8 @@ structure Spec where
   requirements : Json
   methods : List Method
   laws : List Law
+  /-- `Self has {...}, Super has {...}` of an open spec (OB-LTUO LT2), "" for `spec S for T`. -/
+  binders : String := ""
   deriving Inhabited
 
 structure Signature where
@@ -100,7 +102,7 @@ structure Signature where
 
 inductive Decl where
   | spec (s : Spec)
-  | extension (name : String) (params : List Param) (targetType : String) (body : Body)
+  | extension (name : String) (params : List Param) (targetType : String) (body : Body) (binders : String)
   | function (name : String) (params : List Param) (resultType : String) (body : Body)
   | record (name : String) (fields : List (String × String)) (methods : List Signature)
   | sum (name : String) (cases : List (String × String))
@@ -204,13 +206,14 @@ def decodeDecl (j : Json) : Except String Decl := do
     let parents ← (← arr j "parents").mapM (fun p => p.getStr?)
     let targetType ← str j "targetType"
     let requirements ← j.getObjVal? "requirements"
-    return .spec (Spec.mk name suffix parents targetType requirements methods laws)
+    let binders := (j.getObjValAs? String "binders").toOption.getD ""
+    return .spec (Spec.mk name suffix parents targetType requirements methods laws binders)
   | "extension" =>
     let name ← str j "name"
     let params ← (← arr j "parameters").mapM decodeParam
     let targetType ← str j "targetType"
     let body ← decodeBody fuel (← j.getObjVal? "body")
-    return .extension name params targetType body
+    return .extension name params targetType body ((j.getObjValAs? String "binders").toOption.getD "")
   | "function" =>
     let s ← j.getObjVal? "signature"
     let name ← str s "name"
@@ -431,6 +434,14 @@ structure St where
   hidden : Array (String × ATerm × Option PTy) := #[]
   /-- Layer instances emitted so far: (spec key, inherited type JSON) ↦ knot field name. -/
   instances : List ((String × String) × String) := []
+  /-- Source type names bound while a template is elaborated (`Self`, `Super`). -/
+  typeBindings : List (String × PTy) := []
+  /-- Per open declaration: its `Self` variable and its `Super` bound row. -/
+  openBounds : List (String × (PTy × PTy)) := []
+  /-- The declared result type of the body being lowered (for a `fix` in tail position). -/
+  resultType : Option PTy := none
+  /-- The target a `fix` about to be lowered must produce (tail position or annotated let). -/
+  fixTarget : Option PTy := none
   /-- The Plan/Response of the activity being lowered (none outside one). -/
   effect : Option (PTy × PTy) := none
 
@@ -584,12 +595,56 @@ def isPerform (c : Ctx) (e : Expr) (env : List Binding) (m : Module) : Bool :=
 
 /-! ## Types: source annotations, declaration types, synthesis -/
 
+/-- `overlay provided inherited`: the provided fields first, then the inherited row
+(the first field of a name wins, as Core4 `overlay` after `extend`). -/
+def PTy.overlay : PTy → PTy → PTy
+  | .field n t rest, inherited => .field n t (rest.overlay inherited)
+  | _, inherited => inherited
+
+def isRowTy : PTy → Bool
+  | .field .. | .emptyRow => true
+  | _ => false
+
+def requirementsOf (s : Spec) : M (List Signature) :=
+  match s.requirements.getArr? with
+  | .ok a => a.toList.mapM fun j => match decodeSignature j with
+    | .ok r => pure r
+    | .error e => fail ("requirement of spec " ++ s.name ++ ": " ++ e)
+  | .error _ => pure []
+
+def signatureText (r : Signature) : String :=
+  r.name ++ "(" ++ ", ".intercalate (r.params.map fun p => p.name ++ ": " ++ p.type) ++ ") -> " ++ r.resultType
+
+/-- `Self has {...}, Super has {...}`: the Self and Super bound texts (Super defaults to `{}`). -/
+def bindersOf (text : String) : M (String × String) := do
+  let mut selfBound : Option String := none
+  let mut superBound : Option String := none
+  for part in splitTop text "," do
+    match part.splitOn " has " with
+    | [name, bound] =>
+      let n := trimStr name
+      if n == "Self" && selfBound.isNone then selfBound := some (trimStr bound)
+      else if n == "Super" && superBound.isNone then superBound := some (trimStr bound)
+      else fail ("binder " ++ n ++ ": only `Self has {...}` and `Super has {...}`, once each")
+    | _ => fail ("binder `" ++ part ++ "`: expected `Self has {...}` or `Super has {...}`")
+  let some sb := selfBound | fail "an open declaration binds `Self has {...}`"
+  return (sb, superBound.getD "{}")
+
+/-- Run `k` with source type names bound (restored afterwards). -/
+def withTypes {α : Type} (bindings : List (String × PTy)) (k : M α) : M α := do
+  let saved := (← get).typeBindings
+  modify fun st => { st with typeBindings := bindings ++ saved }
+  let r ← k
+  modify fun st => { st with typeBindings := saved }
+  return r
+
 mutual
 def sourceType (c : Ctx) : Nat → String → String → List String → M (Option PTy)
   | 0, _, _, _ => fail "type resolution fuel"
   | fuel + 1, raw, moduleName, seen => do
     let name := trimStr raw
     if name == "_" || name == "" then return none
+    if let some t := (← get).typeBindings.lookup name then return some t
     let arrows := splitTop name "->"
     if arrows.length > 1 then
       let mut t ← sourceType c fuel arrows.getLast! moduleName seen
@@ -599,12 +654,36 @@ def sourceType (c : Ctx) : Nat → String → String → List String → M (Opti
       return t
     if name.startsWith "(" && name.endsWith ")" then
       return ← sourceType c fuel (dropEndStr (dropStr name 1) 1) moduleName seen
+    -- `R with {f: T, ...}`: the row R overlaid by the listed fields (R's other fields kept).
+    if let [left, right] := splitTop name " with " then
+      let some l ← sourceType c fuel left moduleName seen | return none
+      let some r ← sourceType c fuel right moduleName seen | return none
+      if !isRowTy l || !isRowTy r then
+        typeError ("`" ++ name ++ "`: `with` overlays a record row on a record row"); return none
+      return some (PTy.overlay r l).canonical
     if name.startsWith "{" && name.endsWith "}" then
       let inner := trimStr (dropEndStr (dropStr name 1) 1)
       if inner.isEmpty then return some .emptyRow
       let mut fields : List (String × PTy) := []
       let mut ok := true
       for f in splitTop inner "," do
+        -- A method member `m(p: T, ...) -> R` (as in a record declaration).
+        let arrowParts := splitTop f "->"
+        let head := arrowParts.headD ""
+        if arrowParts.length > 1 && head.endsWith ")" && (head.splitOn "(").length > 1 &&
+            isIdent (trimStr ((head.splitOn "(").headD "")) then
+          let n := trimStr ((head.splitOn "(").headD "")
+          let paramsText := dropEndStr (dropStr head (n.length + 1)) 1
+          let resultText := String.intercalate "->" (arrowParts.drop 1)
+          let mut params : List Param := []
+          for pt in (if (trimStr paramsText).isEmpty then [] else splitTop paramsText ",") do
+            match pt.splitOn ":" with
+            | pn :: prest => params := params ++ [⟨trimStr pn, trimStr (String.intercalate ":" prest), "default"⟩]
+            | [] => ok := false
+          match ← signatureTy c fuel params (.source resultText) moduleName seen with
+          | some t => fields := fields ++ [(n, t)]
+          | none => ok := false
+          continue
         match f.splitOn ":" with
         | fieldName :: rest =>
           let n := trimEnd fieldName
@@ -733,17 +812,71 @@ def globalType (c : Ctx) : Nat → String → M (Option PTy)
           result ← synthBody c fuel body env m
           if result.isNone then typeError ("result inference requires an annotation for " ++ key)
         signatureTy c fuel params (.given result) m.name []
-      | .extension _ params targetType _ => signatureTy c fuel params (.source targetType) m.name []
+      | .extension _ params targetType _ binders =>
+        if binders.isEmpty then signatureTy c fuel params (.source targetType) m.name []
+        else do
+          -- An open extension's knot field is its instance at its own bounds.
+          let some (selfVar, superRow) ← openBinding c fuel key binders [] m.name | pure none
+          withTypes [("Self", selfVar), ("Super", superRow)] (signatureTy c fuel params (.source targetType) m.name [])
       | .spec s => do
         -- Laws are not part of the type (they are checked as their own hidden fields).
-        let target ← sourceType c fuel s.targetType m.name []
         let metaTy ← sourceType c fuel specMetaName builtinModuleName []
-        pure (match target, metaTy with
-          | some target, some metaTy => some (.specification metaTy (extensionTy target))
-          | _, _ => none)
+        if !s.binders.isEmpty then
+          -- An open spec's knot field is its instance at its own bounds.
+          let some (selfVar, superRow) ← openBinding c fuel key s.binders (← requirementsOf s) m.name | pure none
+          let some provided ← withTypes [("Self", selfVar), ("Super", superRow)] (specProvided c fuel s m.name superRow)
+            | pure none
+          pure (metaTy.map fun mt => .specification mt (arrowTy selfVar (arrowTy superRow provided)))
+        else
+          let target ← sourceType c fuel s.targetType m.name []
+          pure (match target, metaTy with
+            | some target, some metaTy => some (.specification metaTy (extensionTy target))
+            | _, _ => none)
       | _ => pure none
     modify fun s => { s with inferring := s.inferring.erase key, globalTypes := s.globalTypes ++ [(key, t)] }
     return t
+
+/-- An open declaration's `Self` (a bounded variable whose bound is the Self row, its
+`requires` lines included, so an F-bound such as `heavier(other: Self) -> Self` refers to
+it) and its `Super` bound row. Memoized per declaration. -/
+def openBinding (c : Ctx) : Nat → String → String → List Signature → String → M (Option (PTy × PTy))
+  | 0, _, _, _, _ => fail "type resolution fuel"
+  | fuel + 1, key, binders, requirements, moduleName => do
+    if let some b := (← get).openBounds.lookup key then return some b
+    let (selfText, superText) ← bindersOf binders
+    let s ← get
+    let index := s.sumVariables.length + 1
+    modify fun s => { s with sumVariables := s.sumVariables ++ [("$Self:" ++ key, index)] }
+    let selfVar := PTy.variable index
+    let saved := (← get).typeBindings
+    modify fun st => { st with typeBindings := [("Self", selfVar)] ++ saved }
+    let selfRow ← sourceType c fuel selfText moduleName []
+    let mut required : List (String × PTy) := []
+    let mut ok := true
+    for r in requirements do
+      match ← signatureTy c fuel r.params (.source r.resultType) moduleName [] with
+      | some t => required := required ++ [(r.name, t)]
+      | none => ok := false
+    let superRow ← sourceType c fuel superText moduleName []
+    modify fun st => { st with typeBindings := saved }
+    match selfRow, superRow with
+    | some sr, some ir =>
+      if !ok || !isRowTy sr || !isRowTy ir then
+        typeError ("open declaration " ++ key ++ ": Self and Super bounds must be record rows"); return none
+      modify fun s => { s with sumBounds := s.sumBounds ++ [(index, (PTy.overlay (PTy.row required) sr).canonical)] }
+      modify fun s => { s with openBounds := s.openBounds ++ [(key, (selfVar, ir))] }
+      return some (selfVar, ir)
+    | _, _ => return none
+
+/-- The row a plain spec provides over `inherited`: its methods overlaid on it (canonical). -/
+def specProvided (c : Ctx) : Nat → Spec → String → PTy → M (Option PTy)
+  | 0, _, _, _ => fail "type resolution fuel"
+  | fuel + 1, s, moduleName, inherited => do
+    let mut defs : List (String × PTy) := []
+    for method in s.methods do
+      let some t ← signatureTy c fuel method.params (.source method.resultType) moduleName [] | return none
+      defs := defs ++ [(method.name, t)]
+    return some (PTy.overlay (PTy.row defs) inherited).canonical
 
 def synth (c : Ctx) : Nat → Expr → List Binding → Module → M (Option PTy)
   | 0, _, _, _ => fail "type synthesis fuel"
@@ -882,12 +1015,14 @@ def abstractWith (c : Ctx) (fuel : Nat) (params : List Param) (domains : Option 
     | .given given => pure given)
   -- A body whose declared result is an Activity is lowered in effect mode.
   let saved := (← get).effect
+  let savedResult := (← get).resultType
   modify fun s => { s with effect := match initial with
     | some (.computation p r _) => some (p, r)
     | _ => none }
+  modify fun s => { s with resultType := initial }
   -- (A failure aborts the whole elaboration, so only success restores the mode.)
   let lowered ← lower (bindings.reverse ++ env)
-  modify fun s => { s with effect := saved }
+  modify fun s => { s with effect := saved, resultType := savedResult }
   let mut value := lowered
   let mut codomain := initial
   for i in (List.range params.length).reverse do
@@ -939,6 +1074,8 @@ def lowerLet (c : Ctx) (fuel : Nat) (name type : String) (value : Expr) (env : L
     if let (some (p, r), some cod) := ((← get).effect, codomain) then
       if !isComputation (some cod) then codomain := some (.computation p r cod)
   let fn ← abstractWith c fuel [⟨name, type, "default"⟩] (some [ty]) env lowerBody "let" (.given codomain) m.name
+  if let .fix .. := value then
+    if type != "_" then modify fun st => { st with fixTarget := ty }
   return .app fn (← elaborateValue)
 
 /-! ## Specifications, declared ancestry and method combination -/
@@ -995,38 +1132,61 @@ def checkSpecMethods (s : Spec) : M Unit := do
     if duplicate ((s.methods.filter (fun x => qualifierGroup x.qualifier == group)).map (·.name)) then
       fail ("duplicate " ++ group ++ " method")
 
-def selfSuperParams (s : Spec) : List Param := [⟨"self", s.targetType, "default"⟩, ⟨"super", s.targetType, "default"⟩]
+def selfSuperParams (s : Spec) : List Param :=
+  if s.binders.isEmpty then [⟨"self", s.targetType, "default"⟩, ⟨"super", s.targetType, "default"⟩]
+  else [⟨"self", "Self", "default"⟩, ⟨"super", "Super", "default"⟩]
 def selfSuperEnv (target : Option PTy) : List Binding :=
   ⟨"super", target, "unrestricted"⟩ :: ⟨"self", target, "unrestricted"⟩ :: outerEnv
 
 
-/-- `overlay provided inherited`: the provided fields first, then the inherited row
-(the first field of a name wins, as Core4 `overlay` after `extend`). -/
-def PTy.overlay : PTy → PTy → PTy
-  | .field n t rest, inherited => .field n t (rest.overlay inherited)
-  | _, inherited => inherited
-
-def isRowTy : PTy → Bool
-  | .field .. | .emptyRow => true
-  | _ => false
-
-/-- A declared plain spec named in a `fix` chain (bare or `Alias.Name`, not shadowed). -/
-def chainSpec (c : Ctx) (e : Expr) (env : List Binding) (m : Module) : Option (String × Spec × Module) :=
+/-- A declaration named in a `fix` chain (bare or `Alias.Name`, not shadowed): a plain spec
+(closed or open) or an extension declaration with exactly `self` and `super` parameters. -/
+def chainOp (c : Ctx) (e : Expr) (env : List Binding) (m : Module) : Option (String × Decl × Module) :=
   let key? : Option String := match e with
     | .var n => if env.any (·.name == n) then none else lookupGlobal c n m
     | .member (.var alias) n => if env.any (·.name == alias) then none else (importOf m alias).map (· ++ "." ++ n)
     | _ => none
-  key?.bind fun key => match specOf c key with
-    | some (s, sm) => if plainSpec s then some (key, s, sm) else none
-    | none => none
+  key?.bind fun key => match declOf c key with
+    | some (d@(.spec s), sm) => if plainSpec s then some (key, d, sm) else none
+    | some (d@(.extension _ params _ _ _), sm) => if params.length == 2 then some (key, d, sm) else none
+    | _ => none
 
-/-- The specs of `fix(S, seed)` / `fix(compose(S1, ..., Sn), seed)` when every operand is a
-declared plain spec; otherwise none (the expression is lowered as an ordinary value). -/
-def fixChain (c : Ctx) (spec : Expr) (env : List Binding) (m : Module) : Option (List (String × Spec × Module)) :=
+/-- The operands of `fix(X, seed)` / `fix(compose(X1, ..., Xn), seed)` when every operand is a
+chain declaration; otherwise none (the expression is lowered as an ordinary value). -/
+def fixChain (c : Ctx) (spec : Expr) (env : List Binding) (m : Module) : Option (List (String × Decl × Module)) :=
   let ops := match spec with
     | .compose ops => ops
     | e => [e]
-  ops.mapM (chainSpec c · env m)
+  ops.mapM (chainOp c · env m)
+
+def Decl.binders : Decl → String
+  | .spec s => s.binders
+  | .extension _ _ _ _ b => b
+  | _ => ""
+
+def rowFields : PTy → List (String × PTy)
+  | .field n t rest => (n, t) :: rowFields rest
+  | _ => []
+
+/-- The members of `required` that `actual` lacks or has at another type. -/
+def unsupported (actual required : PTy) : List String :=
+  (rowFields required).filterMap fun (n, t) =>
+    match lookupRow (some actual) n with
+    | some t' => if sameTy (some t) (some t') then none else some n
+    | none => some n
+
+/-- An open declaration's Self and Super bounds at a final self `target`. -/
+def boundsAt (c : Ctx) (fuel : Nat) (binders : String) (requirements : List Signature) (moduleName : String)
+    (target : PTy) : M (Option (PTy × PTy)) :=
+  withTypes [("Self", target)] do
+    let (selfText, superText) ← bindersOf binders
+    let some selfRow ← sourceType c fuel selfText moduleName [] | return none
+    let mut required : List (String × PTy) := []
+    for r in requirements do
+      let some t ← signatureTy c fuel r.params (.source r.resultType) moduleName [] | return none
+      required := required ++ [(r.name, t)]
+    let some superRow ← sourceType c fuel superText moduleName [] | return none
+    return some ((PTy.overlay (PTy.row required) selfRow).canonical, superRow)
 
 /-- One `compose` step over lowered operands (the composite's metadata is
 `SpecMeta.composed{P value, P right}`). -/
@@ -1050,15 +1210,7 @@ def composeStep (metaTy : Option PTy) (value : ATerm) (valueTy : Option PTy) (ri
   let outer := ATerm.lam ⟨valueTy, outerCodomain, "unrestricted", "reusable", reason⟩ inner
   (.app (.app outer value) right, composite)
 
-def requirementsOf (s : Spec) : M (List Signature) :=
-  match s.requirements.getArr? with
-  | .ok a => a.toList.mapM fun j => match decodeSignature j with
-    | .ok r => pure r
-    | .error e => fail ("requirement of spec " ++ s.name ++ ": " ++ e)
-  | .error _ => pure []
 
-def signatureText (r : Signature) : String :=
-  r.name ++ "(" ++ ", ".intercalate (r.params.map fun p => p.name ++ ": " ++ p.type) ++ ") -> " ++ r.resultType
 
 mutual
 def expression (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
@@ -1081,6 +1233,13 @@ def expression (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
             let key := importedModule ++ "." ++ name
             if (declOf c key).isNone then fail ("missing imported declaration " ++ key)
             return ← globalRef env key
+      if let .var "self" := target then
+        if let some b := env.find? (·.name == "self") then
+          if let some (.variable k) := b.ty then
+            if let some bound := (← get).sumBounds.lookup k then
+              if isRowTy bound && (lookupRow (some bound) name).isNone then
+                fail ("refused (self-unbound-member): self." ++ name ++ " is read, but the self's type declares only {" ++
+                  ", ".intercalate (rowNames bound) ++ "}")
       if let .var "super" := target then
         if let some b := env.find? (·.name == "super") then
           if let some ty := b.ty then
@@ -1153,8 +1312,10 @@ def expression (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
           (value, valueTy) := composeStep metaTy value valueTy right rightTy
         return value
     | .fix spec inherited =>
+      let expected := (← get).fixTarget
+      modify fun st => { st with fixTarget := none }
       if let some chain := fixChain c spec env m then
-        if let some lowered := (← chainFix c fuel chain inherited env m) then return lowered
+        if let some lowered := (← chainFix c fuel chain inherited expected env m) then return lowered
       let st ← expression c fuel spec env m
       let it ← expression c fuel inherited env m
       return .fix st it
@@ -1204,6 +1365,7 @@ def expression (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
 def tail (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
   | 0, _, _, _ => fail "elaboration fuel"
   | fuel + 1, e, env, m => do
+    if let .fix .. := e then modify fun st => { st with fixTarget := st.resultType }
     let some (p, r) := (← get).effect | expression c fuel e env m
     if let .letE name type value bodyE := e then
       return ← lowerLet c fuel name type value env m true (expression c fuel value env m)
@@ -1239,60 +1401,132 @@ that nothing below provides is refused by name, and the final row must be exactl
 target: a member that no layer and not the seed provides is `requires-unprovided`. A
 whole-target seed (or any operand that is not a declared plain spec) keeps the closed
 lowering (none). -/
-def chainFix (c : Ctx) : Nat → List (String × Spec × Module) → Expr → List Binding → Module → M (Option ATerm)
-  | 0, _, _, _, _ => fail "elaboration fuel"
-  | fuel + 1, chain, inherited, env, m => do
-    let some (_, s0, m0) := chain.head? | return none
-    let some target ← sourceType c fuel s0.targetType m0.name [] | return none
-    for (_, s, sm) in chain do
-      if !sameTy (← sourceType c fuel s.targetType sm.name []) (some target) then return none
-    let some seedTy ← synth c fuel inherited env m | return none
-    -- A recursive record target (a bounded variable) keeps the closed lowering: the
-    -- checker's fix needs the chain's provided row to BE the target, and a row is not
-    -- the variable (it agrees with it only by one unfold).
-    if let .variable _ := target then return none
-    if sameTy (some seedTy) (some target) || !isRowTy seedTy then return none
+def chainFix (c : Ctx) : Nat → List (String × Decl × Module) → Expr → Option PTy → List Binding → Module → M (Option ATerm)
+  | 0, _, _, _, _, _ => fail "elaboration fuel"
+  | fuel + 1, chain, inherited, expected, env, m => do
+    let anyOpen := chain.any fun (_, d, _) => !d.binders.isEmpty
+    let allClosedSpecs := chain.all fun (_, d, _) => match d with
+      | .spec s => s.binders.isEmpty
+      | _ => false
+    if !anyOpen && !allClosedSpecs then return none
+    -- The final self: every closed layer's, else the expected type, else refused.
+    let mut targets : List PTy := []
+    for (_, d, dm) in chain do
+      if !d.binders.isEmpty then continue
+      match d with
+      | .spec s => if let some t ← sourceType c fuel s.targetType dm.name [] then targets := targets ++ [t]
+      | .extension _ params _ _ _ => if let some t ← sourceType c fuel params[0]!.type dm.name [] then targets := targets ++ [t]
+      | _ => pure ()
+    let target ← match targets.head?, expected with
+      | some t, _ => pure t
+      | none, some e => pure e
+      | none, none =>
+        if anyOpen then fail ("refused (self-undetermined): every layer of this fix is open over Self; " ++
+          "give the enclosing definition a result type or bind the fix with an annotated let")
+        else return none
+    if targets.any (fun t => !sameTy (some t) (some target)) then
+      if anyOpen then fail "refused (self-conflict): the closed layers of this fix name different final selves"
+      else return none
+    let some seedTy ← synth c fuel inherited env m
+      | if anyOpen then fail "refused (seed-unresolved): the seed's type does not resolve" else return none
+    if !anyOpen && sameTy (some seedTy) (some target) then return none
+    if !isRowTy seedTy then
+      if anyOpen then fail "refused (seed-not-record): an open chain closes over a record seed" else return none
+    let bounds := (← get).sumBounds
+    -- A recursive record target is a bounded variable: discharge against its row; the last
+    -- layer is annotated with the variable itself (one declared head unfolds to it).
+    let targetRow := match target with
+      | .variable k => (bounds.lookup k).getD target
+      | t => t
+    if !isRowTy targetRow then return none
     let metaTy ← sourceType c fuel specMetaName builtinModuleName []
     let mut below := seedTy.canonical
     let mut operands : List (ATerm × Option PTy) := []
-    for (key, s, sm) in chain do
-      let mut defs : List (String × PTy) := []
-      for method in s.methods do
-        let some t ← signatureTy c fuel method.params (.source method.resultType) sm.name [] | return none
-        defs := defs ++ [(method.name, t)]
-      let provided := (PTy.overlay (PTy.row defs) below).canonical
-      if sameTy (some below) (some target) then
-        -- At a whole target the declared (closed) layer is this instance.
-        operands := operands ++ [(← globalRef env key, some (.specification (metaTy.getD .emptyRow) (extensionTy target)))]
-      else
-        let index := (key, (below.json).compress)
-        let name ← match (← get).instances.lookup index with
-          | some name => pure name
-          | none => do
-            let name := key ++ "@" ++ toString (← get).instances.length
-            let layer ← layerAt c fuel s sm target below provided
-            let value := ATerm.specification (.metadata (← globalRef outerEnv key)) layer
-            let type := metaTy.map fun mt => .specification mt (arrowTy target (arrowTy below provided))
-            modify fun st => { st with instances := st.instances ++ [(index, name)] }
-            modify fun st => { st with hidden := st.hidden.push (name, value, type) }
-            pure name
-        operands := operands ++ [(← globalRef env name, metaTy.map fun mt => .specification mt (arrowTy target (arrowTy below provided)))]
-      below := provided
-    if !sameTy (some below) (some target) then
-      let targetNames := rowNames target
-      let providedNames := rowNames below
+    let last := chain.length - 1
+    for ((key, d, dm), position) in chain.zipIdx do
+      -- Open declarations: discharge the bounds at Self = target, Super = the row beneath.
+      let mut bindings : List (String × PTy) := []
+      if !d.binders.isEmpty then
+        let requirements ← match d with
+          | .spec s => requirementsOf s
+          | _ => pure []
+        let some (selfBound, superBound) ← boundsAt c fuel d.binders requirements dm.name target
+          | fail ("open declaration " ++ key ++ ": its bounds do not resolve at this self")
+        let missingSelf := unsupported targetRow selfBound
+        if !missingSelf.isEmpty then
+          fail ("refused (self-bound): " ++ key ++ " needs the final self to have " ++ ", ".intercalate missingSelf ++
+            " at the types its Self bound declares; the self of this fix does not")
+        let missingSuper := unsupported below superBound
+        if !missingSuper.isEmpty then
+          fail ("refused (inherited-unprovided): " ++ key ++ " needs " ++ ", ".intercalate missingSuper ++
+            " from the row beneath it, which is {" ++ ", ".intercalate (rowNames below) ++ "}")
+        bindings := [("Self", target), ("Super", below)]
+      let mut provided? : Option PTy := none
+      match d with
+      | .spec s => provided? ← withTypes bindings (specProvided c fuel s dm.name below)
+      | .extension _ params targetType _ binders =>
+        if binders.isEmpty then
+          -- A closed extension keeps its declared types: the row beneath must be its super.
+          let some inheritedTy ← sourceType c fuel params[1]!.type dm.name [] | return none
+          if !sameTy (some inheritedTy) (some below) then
+            fail ("refused (inherited-mismatch): extension " ++ key ++ " takes super : {" ++
+              ", ".intercalate (rowNames inheritedTy) ++ "}, but the row beneath it is {" ++ ", ".intercalate (rowNames below) ++ "}")
+          provided? ← sourceType c fuel targetType dm.name []
+        else
+          provided? := (← withTypes bindings (sourceType c fuel targetType dm.name [])).map PTy.canonical
+      | _ => pure ()
+      let some provided := provided? | return none
+      let annotated := if position == last && (match target with | .variable _ => true | _ => false) &&
+          sameTy (some provided) (some targetRow) then target else provided
+      match d with
+      | .extension _ _ _ _ binders =>
+        if binders.isEmpty then
+          operands := operands ++ [(← globalRef env key, some (arrowTy target (arrowTy below provided)))]
+          below := provided
+          continue
+      | _ => pure ()
+      let index := (key, (Json.arr #[target.json, below.json, annotated.json]).compress)
+      let name ← match (← get).instances.lookup index with
+        | some name => pure name
+        | none => do
+          let name := key ++ "@" ++ toString (← get).instances.length
+          let (value, type) ← match d with
+            | .spec s => do
+              let layer ← withTypes bindings (layerAt c fuel s dm target below annotated)
+              pure (ATerm.specification (.metadata (← globalRef outerEnv key)) layer,
+                metaTy.map fun mt => PTy.specification mt (arrowTy target (arrowTy below annotated)))
+            | .extension _ params _ b _ => do
+              let layer ← withTypes bindings (abstractWith c fuel params (some [some target, some below]) outerEnv
+                (fun next => body c fuel b next dm) key (.given (some annotated)) dm.name)
+              pure (layer, some (arrowTy target (arrowTy below annotated)))
+            | _ => fail "internal: chain operand"
+          modify fun st => { st with instances := st.instances ++ [(index, name)] }
+          modify fun st => { st with hidden := st.hidden.push (name, value, type) }
+          pure name
+      let operandTy := match d with
+        | .spec _ => metaTy.map fun mt => PTy.specification mt (arrowTy target (arrowTy below annotated))
+        | _ => some (arrowTy target (arrowTy below annotated))
+      operands := operands ++ [(← globalRef env name, operandTy)]
+      below := annotated
+    let finalRow := match below with
+      | .variable k => (bounds.lookup k).getD below
+      | t => t
+    if !sameTy (some finalRow) (some targetRow) then
+      let targetNames := rowNames targetRow
+      let providedNames := rowNames finalRow
       let missing := targetNames.filter (fun n => !providedNames.contains n)
       let extra := providedNames.filter (fun n => !targetNames.contains n)
       if !missing.isEmpty then
         let mut requiredBy : List String := []
-        for (key, s, _) in chain do
-          if (← requirementsOf s).any (fun r => missing.contains r.name) then requiredBy := requiredBy ++ [key]
-        fail ("refused (requires-unprovided): fix at " ++ s0.targetType ++ " leaves " ++ ", ".intercalate missing ++
-          " unprovided: no layer of the composition and not the seed provides it" ++
+        for (key, d, _) in chain do
+          if let .spec s := d then
+            if (← requirementsOf s).any (fun r => missing.contains r.name) then requiredBy := requiredBy ++ [key]
+        fail ("refused (requires-unprovided): this fix leaves " ++ ", ".intercalate missing ++
+          " of its final self unprovided: no layer of the composition and not the seed provides it" ++
           (if requiredBy.isEmpty then "" else " (required by " ++ ", ".intercalate requiredBy ++ ")"))
       if !extra.isEmpty then
-        fail ("refused (seed-extra): the seed provides " ++ ", ".intercalate extra ++ ", which " ++ s0.targetType ++ " does not declare")
-      fail ("refused (provided-mismatch): the composition provides members of " ++ s0.targetType ++ " at other types than it declares")
+        fail ("refused (seed-extra): the composition and seed provide " ++ ", ".intercalate extra ++ ", which the final self does not declare")
+      fail ("refused (provided-mismatch): the composition provides members of the final self at other types than it declares")
     let some (first, firstTy) := operands.head? | return none
     let mut value := first
     let mut valueTy := firstTy
@@ -1395,13 +1629,46 @@ def shiftRef (t : ATerm) (by_ : Nat) : M ATerm :=
   | _ => fail "internal: only global references are shifted"
 
 def interfaceLabel (s : Spec) (list : List String) : String :=
-  (Json.mkObj [("targetType", s.targetType), ("suffix", toJson s.suffix), ("parents", toJson s.parents),
+  (Json.mkObj ([("targetType", toJson s.targetType), ("suffix", toJson s.suffix), ("parents", toJson s.parents),
     ("precedence", toJson list), ("requirements", s.requirements),
-    ("methods", Json.arr (s.methods.map (·.signature)).toArray)]).compress
+    ("methods", Json.arr (s.methods.map (·.signature)).toArray)] ++
+    (if s.binders.isEmpty then [] else [("binders", toJson s.binders)]))).compress
+
+/-- Laws and the declared SpecMeta around a spec's extension. -/
+def finishSpecification (c : Ctx) (fuel : Nat) (s : Spec) (m : Module) (key : String) (list : List String)
+    (extension : ATerm) : M ATerm := do
+  -- Each law is checked code in its own hidden knot field `key#law#name` (typed over
+  -- self, super and its parameters, result Bool); the metadata records its name and
+  -- status. Status `unchecked`: typed, retained, never evaluated (LT6 owns discharge).
+  if duplicate (s.laws.map (·.name)) then fail ("duplicate law in spec " ++ key)
+  let lawsMeta ← sourceType c fuel specLawsName builtinModuleName []
+  let lawsReason := if lawsMeta.isSome then none else some "SpecLaws type unresolved"
+  let mut lawList : ATerm := .inject "none" lawsMeta lawsReason (.record [])
+  for law in s.laws.reverse do
+    lawList := .inject "law" lawsMeta lawsReason
+      (.record [("name", .label law.name), ("status", .label "unchecked"), ("rest", lawList)])
+  for law in s.laws do
+    let params := selfSuperParams s ++ law.params
+    let code ← abstract c fuel params outerEnv
+      (fun inner => expression c fuel law.body inner m) law.name (.source "Bool") m.name
+    let type ← signatureTy c fuel params (.given (some .boolean)) m.name []
+    modify fun st => { st with hidden := st.hidden.push (key ++ "#law#" ++ law.name, code, type) }
+  let metaTy ← sourceType c fuel specMetaName builtinModuleName []
+  let metadata := ATerm.inject "declared" metaTy (if metaTy.isSome then none else some "SpecMeta type unresolved")
+    (.record [("name", .label key), ("interface", .label (interfaceLabel s list)), ("laws", lawList)])
+  return .specification metadata extension
 
 def specification (c : Ctx) (fuel : Nat) (s : Spec) (m : Module) : M ATerm := do
   checkSpecMethods s
   let key := m.name ++ "." ++ s.name
+  if !s.binders.isEmpty then
+    -- An open spec: checked once at its own bounds; its knot field is that instance.
+    let some (selfVar, superRow) ← openBinding c fuel key s.binders (← requirementsOf s) m.name
+      | fail ("open spec " ++ key ++ ": its Self/Super bounds do not resolve")
+    return ← withTypes [("Self", selfVar), ("Super", superRow)] do
+      let some provided ← specProvided c fuel s m.name superRow
+        | fail ("open spec " ++ key ++ ": a method signature does not resolve")
+      finishSpecification c fuel s m key [key] (← layerAt c fuel s m selfVar superRow provided)
   let target ← sourceType c fuel s.targetType m.name []
   -- `requires` is checked: a requirement is a member of the closed target, at its type.
   if let some t := target then
@@ -1448,26 +1715,8 @@ def specification (c : Ctx) (fuel : Nat) (s : Spec) (m : Module) : M ATerm := do
       let shifted ← shiftRef only 2
       abstract c fuel (selfSuperParams s) outerEnv (fun _ => pure (.app (.app shifted (.bound 1)) (.bound 0))) s.name (.source s.targetType) m.name
     | first :: rest => pure (rest.foldl (fun lower upper => .mix lower upper) first)
-  -- Each law is checked code in its own hidden knot field `key#law#name` (typed over
-  -- self, super and its parameters, result Bool); the metadata records its name and
-  -- status. Status `unchecked`: typed, retained, never evaluated (LT6 owns discharge).
-  if duplicate (s.laws.map (·.name)) then fail ("duplicate law in spec " ++ key)
-  let lawsMeta ← sourceType c fuel specLawsName builtinModuleName []
-  let lawsReason := if lawsMeta.isSome then none else some "SpecLaws type unresolved"
-  let mut lawList : ATerm := .inject "none" lawsMeta lawsReason (.record [])
-  for law in s.laws.reverse do
-    lawList := .inject "law" lawsMeta lawsReason
-      (.record [("name", .label law.name), ("status", .label "unchecked"), ("rest", lawList)])
-  for law in s.laws do
-    let params := selfSuperParams s ++ law.params
-    let code ← abstract c fuel params outerEnv
-      (fun inner => expression c fuel law.body inner m) law.name (.source "Bool") m.name
-    let type ← signatureTy c fuel params (.given (some .boolean)) m.name []
-    modify fun st => { st with hidden := st.hidden.push (key ++ "#law#" ++ law.name, code, type) }
-  let metaTy ← sourceType c fuel specMetaName builtinModuleName []
-  let metadata := ATerm.inject "declared" metaTy (if metaTy.isSome then none else some "SpecMeta type unresolved")
-    (.record [("name", .label key), ("interface", .label (interfaceLabel s list)), ("laws", lawList)])
-  return .specification metadata extension
+  finishSpecification c fuel s m key list extension
+
 
 /-! ## The package knot, entry selection, arguments -/
 
@@ -1532,7 +1781,14 @@ def emitDecl (c : Ctx) (fuel : Nat) (m : Module) (d : Decl) (fields : List (Stri
       let result ← if resultType == "_" then do pure (ResultSpec.given (resultOf (← globalType c fuel key) params.length))
         else pure (ResultSpec.source resultType)
       abstract c fuel params outerEnv (fun next => body c fuel b next m) d.name result m.name
-    | .extension _ params targetType b => abstract c fuel params outerEnv (fun next => body c fuel b next m) d.name (.source targetType) m.name
+    | .extension _ params targetType b binders =>
+      if binders.isEmpty then abstract c fuel params outerEnv (fun next => body c fuel b next m) d.name (.source targetType) m.name
+      else do
+        -- Checked once, at its own bounds (Self = the bounded variable, Super = the bound row).
+        let some (selfVar, superRow) ← openBinding c fuel key binders [] m.name
+          | fail ("open extension " ++ key ++ ": its Self/Super bounds do not resolve")
+        withTypes [("Self", selfVar), ("Super", superRow)]
+          (abstract c fuel params outerEnv (fun next => body c fuel b next m) d.name (.source targetType) m.name)
     | .spec s => specification c fuel s m
     | _ => fail "unsupported declaration"
   let mut fields := fields ++ [(key, value)]
