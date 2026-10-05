@@ -94,7 +94,7 @@ try:
             'kind': 'writeState', 'object': w.objects['bare']['object'],
             'objectCapability': w.objects['bare']['capability'], 'value': record(total=nat(1))},
             'refused', 'notAnObject')
-        w.birth('birth-without-record-refused', w.sponsor, 'bare', 8000, 'refused', 'notAnObject')
+        w.birth('birth-without-record-refused', w.sponsor, 'bare', 20000, 'refused', 'notAnObject')
         bare = w.state('bare', 'bare-after')
         w.check('bare-has-no-record-and-no-state', bare['objectRecord'].get('kind') == 'absent'
                 and bare['stateKind'] == 'absent', {'object': bare['objectRecord'].get('kind'),
@@ -139,7 +139,7 @@ try:
     with w.group('OR4-birth-law'):
         w.create('create-ledger-b', w.sponsor, 'ledger-b', ledger_law, 'installed')
         before = w.watched('before-bad-birth')
-        w.birth('birth-set-500-refused', w.sponsor, 'ledger-b', 8000, 'refused',
+        w.birth('birth-set-500-refused', w.sponsor, 'ledger-b', 20000, 'refused',
                 ['lawDenied', 'le "state/total" 100', 'before := none', 'after := some 500'],
                 init=variant('set', nat(500)))
         after = w.watched('after-bad-birth')
@@ -148,7 +148,7 @@ try:
                 and w.balance(after, w.SPONSOR_ACCOUNT) == w.balance(before, w.SPONSOR_ACCOUNT),
                 {'state': lb['stateKind'], 'sponsor': [w.balance(before, w.SPONSOR_ACCOUNT),
                                                        w.balance(after, w.SPONSOR_ACCOUNT)]})
-        txb = w.birth('birth-set-0-installed', w.sponsor, 'ledger-b', 8000, 'installed')
+        txb = w.birth('birth-set-0-installed', w.sponsor, 'ledger-b', 20000, 'installed')
         lb2 = w.state('ledger-b', 'ledger-b-born', txb)
         w.check('lawful-birth-created-the-state', total_state(lb2, 0, 1), {'state': lb2.get('state'),
                                                                           'version': lb2.get('stateVersion')})
