@@ -49,7 +49,7 @@ changes).
                 (pastDeadline), any delivery expires the slot and resumes it with
                 `timedOut`; it ends, its record and its slot are RECLAIMED (empty
                 tombstones) and its purse returns to the payer; a further delivery
-                is refused (recordMissing).
+                is refused (recordRetired).
   exhaustion    a tally whose declared resume envelope is too small: a delivery
                 is refused `exhausted` (nothing commits); an `exhaust` turn
                 commits the attempt and charges the purse the declared price of
@@ -69,7 +69,7 @@ changes).
                 ends faulted, its record and slot are reclaimed, its purse returns
                 to the payer minus the used resume fee, the declared state keeps
                 its last write, and later deliveries are refused by name
-                (recordMissing).
+                (recordRetired).
   growth        twelve resumes of one tally: the stored checkpoint (the Plan
                 extraction's state, settled and collected) grows at most 200 B
                 per resume after the first (measured: about 0).
@@ -545,7 +545,7 @@ turn('deliver-after-end-refused', sponsor, {'kind': 'deliver', 'record': REC2, '
      'conflict')
 turn('deliver-done-refused', sponsor, {'kind': 'deliver', 'record': REC2, 'await': '1',
                                        'account': '0', 'accountCapability': '0'},
-     'refused', 'recordMissing')
+     'refused', 'recordRetired')
 
 # --- exhaustion: an attempt that runs out of its declared envelope is committed and paid -----
 SMALL = 5
@@ -622,10 +622,10 @@ sv6 = view('abandoned-slot', {'cells': [slot6cell]})
 check('abandon-reclaims-slot', cell_of(sv6, slot6cell).get('kind') == 'retired', cell_of(sv6, slot6cell))
 resubmit('abandon-retry-replays', abandon_ingress, 'replayed')
 turn('late-decider-finds-no-slot', second, {'kind': 'resolve', 'slot': slot6,
-                                            'answer': {'reply': record(amount=nat(1))}}, 'refused', 'slotMissing')
+                                            'answer': {'reply': record(amount=nat(1))}}, 'refused', 'slotRetired')
 turn('late-delivery-finds-no-record', sponsor, {'kind': 'deliver', 'record': REC6, 'await': await6,
                                                 'account': '0', 'accountCapability': '0'},
-     'refused', 'recordMissing')
+     'refused', 'recordRetired')
 
 # --- fault (scenario E): a resumed program's own fault commits, never wedges -------------
 tx7 = birth('birth-fault', sponsor, 'tally-fault', 20000, 'installed', pin=PIN3)
@@ -650,7 +650,7 @@ check('fault-ends-and-returns-escrow', e2['recordKind'] == 'retired' and e2['pur
        'state': e2.get('state'), 'version': e2.get('stateVersion')})
 sv7 = view('faulted-slot', {'cells': [slot7cell]})
 check('fault-reclaims-slot', cell_of(sv7, slot7cell).get('kind') == 'retired', cell_of(sv7, slot7cell))
-turn('fault-later-delivery-refused', sponsor, dict(deliver7, **{'await': '1'}), 'refused', 'recordMissing')
+turn('fault-later-delivery-refused', sponsor, dict(deliver7, **{'await': '1'}), 'refused', 'recordRetired')
 turn('fault-retry-other-ingress-conflicts', sponsor, deliver7, 'conflict')
 
 # --- growth: the checkpoint at every yield, over GROWTH turns ----------------------------
