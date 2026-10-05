@@ -34,12 +34,13 @@ mkdir -p "$STAGE/scripts/workroom" "$STAGE/scripts/grain-birth" \
   "$STAGE/scripts/application-current-birth"
 sed -e 's/"tariffPerInitialPayloadByte":0/"tariffPerInitialPayloadByte":1/' \
   -e 's/"tariffPerInitialPayloadByte":"0"/"tariffPerInitialPayloadByte":"1"/' \
-  -e 's/"initialBalance":"100"/"initialBalance":"1000000"/g' \
+  -e 's/^WORKROOM_SPONSOR_BALANCE=\${WORKROOM_SPONSOR_BALANCE-100}$/WORKROOM_SPONSOR_BALANCE=${WORKROOM_SPONSOR_BALANCE-1000000}/' \
+  -e 's/^WORKROOM_TOOL_BALANCE=\${WORKROOM_TOOL_BALANCE-100}$/WORKROOM_TOOL_BALANCE=${WORKROOM_TOOL_BALANCE-1000000}/' \
   "$PROVISION_SOURCE" >"$STAGE/scripts/workroom/provision.sh"
 [ "$(rg -c 'tariffPerInitialPayloadByte.*1' \
-    "$STAGE/scripts/workroom/provision.sh")" -eq 2 ] || exit 2
-[ "$(rg -c '"initialBalance":"1000000"' \
-    "$STAGE/scripts/workroom/provision.sh")" -eq 2 ] || exit 2
+    "$STAGE/scripts/workroom/provision.sh")" = 2 ] || exit 2
+[ "$(rg -c '^WORKROOM_(SPONSOR|TOOL)_BALANCE=\$\{WORKROOM_(SPONSOR|TOOL)_BALANCE-1000000\}$' \
+    "$STAGE/scripts/workroom/provision.sh")" = 2 ] || exit 2
 PROVISION_SHA=$(sha256sum "$STAGE/scripts/workroom/provision.sh" | cut -d ' ' -f 1)
 sed -e "s/^SOURCE_SHA=[0-9a-f]*$/SOURCE_SHA=$PROVISION_SHA/" \
   -e 's/initialBalance:"100"/initialBalance:"1"/' \

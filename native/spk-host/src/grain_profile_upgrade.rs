@@ -76,7 +76,7 @@ fn profile_layout(path: &Path, profile: &HostProfile) -> io::Result<()> {
     broker::socket_path(&profile.grains_root, profile.broker_socket.as_deref())?;
     root_ancestors(&profile.grains_root)?;
     let root = fs::symlink_metadata(&profile.grains_root)?;
-    if !root.is_dir() || root.uid() != 0 || root.mode() & 0o022 != 0 {
+    if !root.is_dir() || !crate::os::root_owner(root.uid()) || root.mode() & 0o022 != 0 {
         return Err(invalid("grains root custody refused"));
     }
     private_store_dirs(&profile.grains_root.join(store), &profile.state_root)?;
@@ -322,7 +322,7 @@ fn stopped(store: &str, state_root: &Path) -> io::Result<()> {
                 )));
             }
             let unit = broker::resident_unit(store, &app, &run.generation.to_string());
-            let output = Command::new("/usr/bin/systemctl")
+            let output = crate::os::systemctl()
                 .args([
                     "--system",
                     "show",
@@ -356,10 +356,7 @@ fn stopped(store: &str, state_root: &Path) -> io::Result<()> {
                 if !canonical(Path::new(cgroup)) {
                     return Err(invalid("unit cgroup path refused"));
                 }
-                let events = Path::new("/sys/fs/cgroup")
-                    .join(cgroup.trim_start_matches('/'))
-                    .join("cgroup.events");
-                if !fs::read_to_string(events)?
+                if !crate::os::cgroup_events(cgroup)?
                     .lines()
                     .any(|l| l == "populated 0")
                 {

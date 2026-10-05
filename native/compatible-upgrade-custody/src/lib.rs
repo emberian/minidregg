@@ -74,6 +74,16 @@ pub struct ProfilePin {
     pub store: String,
     pub host_identity_sha256: String,
 }
+/// Whether `uid` is the owner a root custody check accepts: uid 0. A
+/// `fixture-os` build (native/spk-host/src/os.rs) runs every privileged role
+/// as one unprivileged principal, which then also stands in for root.
+pub fn root_owner(uid: u32) -> bool {
+    #[cfg(feature = "fixture-os")]
+    if uid == unsafe { libc::geteuid() } {
+        return true;
+    }
+    uid == 0
+}
 pub fn canonical(path: &Path) -> bool {
     path.is_absolute()
         && path
@@ -97,7 +107,7 @@ pub fn root_ancestors(path: &Path) -> io::Result<()> {
     {
         prefix.push(part);
         let meta = fs::symlink_metadata(&prefix)?;
-        if !meta.is_dir() || meta.uid() != 0 || meta.mode() & 0o022 != 0 {
+        if !meta.is_dir() || !root_owner(meta.uid()) || meta.mode() & 0o022 != 0 {
             return Err(invalid(format!(
                 "unsafe root custody ancestor: {}",
                 prefix.display()
@@ -115,7 +125,7 @@ pub fn root_bytes(path: &Path, max: u64) -> io::Result<Vec<u8>> {
         .open(path)?;
     let meta = file.metadata()?;
     if !meta.is_file()
-        || meta.uid() != 0
+        || !root_owner(meta.uid())
         || meta.nlink() != 1
         || meta.mode() & 0o022 != 0
         || meta.len() == 0
@@ -138,7 +148,7 @@ pub fn sha(bytes: &[u8]) -> String {
 pub fn root_pin(path: &Path, digest: &str) -> io::Result<()> {
     root_ancestors(path)?;
     let meta = fs::symlink_metadata(path)?;
-    if !meta.is_file() || meta.uid() != 0 || meta.mode() & 0o022 != 0 || !hex64(digest) {
+    if !meta.is_file() || !root_owner(meta.uid()) || meta.mode() & 0o022 != 0 || !hex64(digest) {
         return Err(invalid("root image pin custody refused"));
     }
     let mut file = File::open(path)?;
