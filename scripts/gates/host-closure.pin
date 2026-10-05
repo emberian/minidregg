@@ -29,6 +29,7 @@
 # updated 2026-10-04: batch c14  [counts: Minidregg 0 1, Theory 74 161, Kernel 358 503, Pred 7 11, Effects 0 3, Compiler 141 311, Selvage 12 153, Assurance 0 153, Host 77 110, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 12, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-04: Kernel.ClockLaw (the clock law and the clock write law step) enters with the pay receivers that judge the clock write (kn-law-bypass)  [counts: Minidregg 0 1, Theory 74 161, Kernel 359 504, Pred 7 11, Effects 0 3, Compiler 141 311, Selvage 12 153, Assurance 0 153, Host 77 110, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 12, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-05: batch n3 (ob-ltuo x5 + rollup-1 + rollup-2 + ob-roadmap + protocol-night rooms/pd53/rotpub on 5d0b452d)  [counts: Minidregg 0 1, Theory 74 162, Kernel 369 514, Pred 7 11, Effects 0 3, Compiler 141 312, Selvage 12 153, Assurance 0 153, Host 78 111, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-05: batch n4 (ob-ltuo-s4 + ob-lt2-parser + ob8 + protocol-night w04b on 47487ee4)  [counts: Minidregg 0 1, Theory 74 162, Kernel 389 534, Pred 7 11, Effects 0 3, Compiler 141 312, Selvage 12 153, Assurance 0 153, Host 86 119, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -190,6 +191,7 @@ Host.ApplicationLifecycleBeginOperator
 Host.ApplicationLifecycleClaimInspection
 Host.ApplicationLifecycleClaimOperator
 Host.ApplicationLifecycleClaimV3Inspection
+Host.ApplicationLifecycleClaimV4Inspection
 Host.ApplicationLifecycleCompletionAuthoring
 Host.ApplicationLifecycleCompletionOperator
 Host.ApplicationLifecycleLaunchBeginAuthoring
@@ -199,6 +201,13 @@ Host.ApplicationLifecycleLaunchClaimInspection
 Host.ApplicationLifecycleLaunchCompletionAuthoring
 Host.ApplicationLifecycleLaunchCompletionInspection
 Host.ApplicationLifecycleLaunchReportAuthoring
+Host.ApplicationLifecycleRetryBeginV4Authoring
+Host.ApplicationLifecycleRetryBeginV4Inspection
+Host.ApplicationLifecycleRetryClaimV4Authoring
+Host.ApplicationLifecycleRetryClaimV4Inspection
+Host.ApplicationLifecycleRetryCompletionV4Authoring
+Host.ApplicationLifecycleRetryCompletionV4Inspection
+Host.ApplicationLifecycleRetryLaunchReportAuthoring
 Host.ApplicationLifecycleStopClaimInspection
 Host.ApplicationPermissionSchemaAuthoring
 Host.ApplicationRouteAdmissionInspection
@@ -293,6 +302,7 @@ Kernel.ApplicationDispatchPending
 Kernel.ApplicationDispatchProjection
 Kernel.ApplicationDispatchReceiver
 Kernel.ApplicationDispatchWitness
+Kernel.ApplicationFailedCreateRetryEvidence
 Kernel.ApplicationFailedStartRecoveryAdmission
 Kernel.ApplicationFailedStartRecoveryCore
 Kernel.ApplicationFailedStartRecoveryHistory
@@ -355,6 +365,23 @@ Kernel.ApplicationLifecycleCompletionV2Source
 Kernel.ApplicationLifecycleCreatedHistory
 Kernel.ApplicationLifecycleLaunchBinding
 Kernel.ApplicationLifecycleResidentProfile
+Kernel.ApplicationLifecycleRetryBeginV4Admission
+Kernel.ApplicationLifecycleRetryBeginV4Ingress
+Kernel.ApplicationLifecycleRetryBeginV4Receiver
+Kernel.ApplicationLifecycleRetryClaimV4Core
+Kernel.ApplicationLifecycleRetryClaimV4Ingress
+Kernel.ApplicationLifecycleRetryClaimV4Projection
+Kernel.ApplicationLifecycleRetryClaimV4Receiver
+Kernel.ApplicationLifecycleRetryCompletionV4Admission
+Kernel.ApplicationLifecycleRetryCompletionV4Core
+Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory
+Kernel.ApplicationLifecycleRetryCompletionV4History
+Kernel.ApplicationLifecycleRetryCompletionV4Ingress
+Kernel.ApplicationLifecycleRetryCompletionV4Policy
+Kernel.ApplicationLifecycleRetryCompletionV4Receiver
+Kernel.ApplicationLifecycleRetryCompletionV4Report
+Kernel.ApplicationLifecycleRetryCompletionV4Source
+Kernel.ApplicationLifecycleRetryV4Lookup
 Kernel.ApplicationLifecycleV2Lookup
 Kernel.ApplicationLifecycleV3Lookup
 Kernel.ApplicationPermissionSchema
@@ -471,6 +498,7 @@ Kernel.GrainResourceBirthReceiver
 Kernel.GrainResourceBirthTransaction
 Kernel.HyperdocumentEventLog
 Kernel.HyperdocumentIndexSync
+Kernel.Inbox
 Kernel.Invitation
 Kernel.Job
 Kernel.JobMoney
@@ -528,6 +556,7 @@ Kernel.ObjectiveBendPreparedOutput
 Kernel.ObjectiveBendPublishedPackage
 Kernel.ObjectiveCall
 Kernel.ObjectiveKernelConfig
+Kernel.ObjectiveSend
 Kernel.ObjectiveTariff
 Kernel.ParticipantFactoryProvisioning
 Kernel.ParticipantFactoryProvisioningReceiver
