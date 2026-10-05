@@ -9917,7 +9917,7 @@
     {
       "module": "Verify",
       "path": "Verify.lean",
-      "sha256": "62d3d38dcbcd4bc2934fd33c1a784e2a86e01d6e10a5a41a793c406c7d61a157",
+      "sha256": "6e09094e462c100ca007c4633a45f91227372580eaecdd2e2175a8a32a1790d7",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -9988,6 +9988,13 @@
       "module": "Verify.NativeJointSourceFixture",
       "path": "Verify/NativeJointSourceFixture.lean",
       "sha256": "22eb4713e1e58f0e21c7c56eb0d2a3f165bdd7c865c4bba6dd013c933ec810bf",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Verify.ObjectiveSnapshot",
+      "path": "Verify/ObjectiveSnapshot.lean",
+      "sha256": "f2e9bd5947218329701fb6a98227dd532456e87995b0e14da953841dd55ebb94",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },

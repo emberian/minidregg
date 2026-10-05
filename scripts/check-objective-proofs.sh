@@ -2,14 +2,21 @@
 # check-objective-proofs.sh -- the Objective Bend Core4 gates.
 #
 #   proofs    `lake build ObjectiveProofs` (+ the checkpoint round trip), then the
-#             statement/axiom snapshot: scripts/ObjectiveSnapshot.lean prints every
-#             declaration of a Theory.ObjectiveBend* module (elaborated type; the body
-#             of a Prop-valued definition; a hash of any other definition's body) and
-#             every theorem's exact axiom set. They must equal
-#             scripts/gates/objective-statements.snapshot and
-#             scripts/gates/objective-axioms.pin byte for byte. Self-tested every run:
-#             (a) a theorem planted in a scratch copy must appear and turn the diff red;
-#             (b) a copy whose scan loop is deleted must fail its instrument floor.
+#             statement/axiom snapshots. Two runs of one scanner (Verify/ObjectiveSnapshot.lean)
+#             partition the repository modules of the ObjectiveProofs import closure:
+#             scripts/ObjectiveSnapshot.lean covers the Theory.ObjectiveBend* modules in an
+#             environment that refuses Mathlib (scripts/gates/objective-statements.snapshot,
+#             scripts/gates/objective-axioms.pin); scripts/ObjectiveSnapshotMathlib.lean covers
+#             every other one (Kernel, Compiler, Pred, Selvage, the rest of Theory) with Mathlib in
+#             the environment (scripts/gates/objective-statements-mathlib.snapshot,
+#             scripts/gates/objective-axioms-mathlib.pin). Each prints every declaration
+#             (elaborated type; the body of a Prop-valued definition; a hash of any other
+#             definition's body) and every theorem's exact axiom set; all four files must match
+#             byte for byte. Self-tested every run, per run: (a) a theorem planted in a scratch
+#             copy must appear and turn the diff red; (b) a copy whose scan is deleted must fail
+#             its instrument floor; and once: (c) the measured defect -- `(_vacuous : False)`
+#             planted on Kernel.ObjectiveBendAdmissionSemantics.admitted_source_semantics -- must
+#             change that statement's row.
 #   (the front end -- identity, elaboration and parser cohorts, C4, preview cohort,
 #   publication replay, examples, tutorial -- is scripts/check-objective-frontend.sh,
 #   gate objective-frontend)
@@ -34,7 +41,7 @@
 #             Self-tested every run: the planted `drop-stack-roots` checkpoint must go red.
 #
 # usage: scripts/check-objective-proofs.sh [proofs|c|cgen|transparency|all] [--update]
-#   --update rewrites the two snapshot files (proofs only); commit them with the change
+#   --update rewrites the four snapshot files (proofs only); commit them with the change
 #   they announce. Requires `bun` for c (BUN=/path/to/bun or on PATH):
 #   absent, those gates are RED, never skipped. Logs: build-logs/objective/<gate>/.
 set -euo pipefail
@@ -49,6 +56,8 @@ if [ "$what" = "--update" ]; then what=proofs; update=1; fi
 if [ "${2:-}" = "--update" ]; then update=1; fi
 statements=scripts/gates/objective-statements.snapshot
 axioms=scripts/gates/objective-axioms.pin
+statements_mathlib=scripts/gates/objective-statements-mathlib.snapshot
+axioms_mathlib=scripts/gates/objective-axioms-mathlib.pin
 logs=$root/build-logs/objective
 mkdir -p "$logs"
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/objective-proofs.XXXXXX")
@@ -72,65 +81,146 @@ snapshot() { # snapshot <lean file> <out> <err>; prints exit status. Lean report
   echo "$s"
 }
 
+scratch_lean() { # scratch_lean <mode> <script> <out>: a scratch copy of a snapshot script.
+  #   plant   the copy declares Minidregg.ObjectiveSnapshot.Plant.planted and counts it (includeLocal)
+  #   noscan  the copy runs the scanner's source (Verify/ObjectiveSnapshot.lean, inlined) with its
+  #           SCAN-BEGIN..SCAN-END region deleted
+  python3 - "$1" "$2" Verify/ObjectiveSnapshot.lean "$3" <<'EOF'
+import sys
+mode, script, scanner, out = sys.argv[1:]
+src = open(script).read()
+if mode == "plant":
+    anchor = "set_option maxHeartbeats 0 in\nrun_meta"
+    assert src.count(anchor) == 1, "self-test: run_meta anchor not found"
+    switch = "def includeLocal : Bool := false"
+    assert src.count(switch) == 1, "self-test: includeLocal switch not found"
+    plant = "theorem Minidregg.ObjectiveSnapshot.Plant.planted (n : Nat) : n + 0 = n := rfl\n\n"
+    src = src.replace(switch, "def includeLocal : Bool := true").replace(anchor, plant + anchor)
+else:
+    # the import block: the lines starting `import ` right after the module doc comment
+    assert src.startswith("/-") and src.count("\n-/\n") >= 1, "self-test: script doc comment not found"
+    lines = src.split("\n")
+    k = lines.index("-/") + 1
+    imports = []
+    while k < len(lines) and lines[k].startswith("import "):
+        imports.append(k); k += 1
+    assert imports and "import Verify.ObjectiveSnapshot" in [lines[i] for i in imports], "self-test: script imports not found"
+    head = [lines[i] for i in imports if lines[i] != "import Verify.ObjectiveSnapshot"]
+    body = "\n".join(lines[imports[-1] + 1:])
+    scan = open(scanner).read()
+    assert scan.count("\nimport Lean\n") == 1, "self-test: scanner import not found"
+    scan = scan.split("\nimport Lean\n", 1)[1]
+    b, e = "  -- SCAN-BEGIN\n", "  -- SCAN-END\n"
+    assert scan.count(b) == 1 and scan.count(e) == 1, "self-test: scan markers not found"
+    scan = scan[:scan.index(b)] + scan[scan.index(e) + len(e):]
+    src = "\n".join(head) + "\nimport Lean\n" + scan + body
+open(out, "w").write(src)
+EOF
+}
+
 gate_proofs() {
-  # every module scripts/ObjectiveSnapshot.lean imports
-  local targets="ObjectiveProofs Theory.ObjectiveBendCheckpointRoundTrip Theory.ObjectiveBendExtensions Theory.ObjectiveBendDemandCapacity"
+  # every module the two snapshot scripts import (the scanner, Verify.ObjectiveSnapshot, is rooted by Verify)
+  local targets="ObjectiveProofs Theory.ObjectiveBendCheckpointRoundTrip Theory.ObjectiveBendExtensions Theory.ObjectiveBendDemandCapacity Verify.ObjectiveSnapshot"
   echo "== lake build $targets"
   "$lake" build $targets
-  local failed=0
-  # (a) a planted theorem must appear and turn the comparison red
-  python3 - scripts/ObjectiveSnapshot.lean "$tmp/plant.lean" <<'EOF'
+  local failed=0 run script stmts axs label plantrow s
+  # Two runs partition the repository modules of the ObjectiveProofs closure (see the headers of
+  # the two scripts): the Theory.ObjectiveBend* modules without Mathlib in the environment, the
+  # rest with it. Each run is self-tested: (a) a planted theorem must appear and turn its diff red;
+  # (b) a copy with the scan deleted must fail its instrument floor. The two runs execute in
+  # parallel with their planted copies.
+  for run in theory mathlib; do
+    script=scripts/ObjectiveSnapshot.lean
+    [ "$run" = mathlib ] && script=scripts/ObjectiveSnapshotMathlib.lean
+    scratch_lean plant "$script" "$tmp/$run-plant.lean"
+    scratch_lean noscan "$script" "$tmp/$run-noscan.lean"
+    snapshot "$script" "$tmp/$run.out" "$tmp/$run.err" >"$tmp/$run.rc" &
+    snapshot "$tmp/$run-plant.lean" "$tmp/$run-plant.out" "$tmp/$run-plant.err" >"$tmp/$run-plant.rc" &
+    snapshot "$tmp/$run-noscan.lean" "$tmp/$run-noscan.out" "$tmp/$run-noscan.err" >"$tmp/$run-noscan.rc" &
+    wait
+  done
+  for run in theory mathlib; do
+    if [ "$run" = theory ]; then
+      stmts=$statements; axs=$axioms; label=objective-snapshot
+      plantrow='S theorem Minidregg.ObjectiveSnapshot.Plant.planted : ∀ (n : Nat), n + 0 = n'
+    else
+      stmts=$statements_mathlib; axs=$axioms_mathlib; label=objective-snapshot-mathlib
+      plantrow='S theorem Minidregg.ObjectiveSnapshot.Plant.planted : ∀ (n : ℕ), n + 0 = n'
+    fi
+    s=$(cat "$tmp/$run-plant.rc")
+    if [ "$s" = 0 ] && grep -qxF "$plantrow" "$tmp/$run-plant.out" \
+       && ! diff -q <(grep '^S ' "$tmp/$run-plant.out") "$stmts" >/dev/null 2>&1; then
+      echo "self-test ($run a) planted theorem: PASS (row present; comparison red)"
+    else
+      echo "self-test ($run a) planted theorem: FAIL (exit $s)"; head -20 "$tmp/$run-plant.err"; failed=1
+    fi
+    s=$(cat "$tmp/$run-noscan.rc")
+    if [ "$s" != 0 ] && grep -q "^$label: instrument:" "$tmp/$run-noscan.err"; then
+      echo "self-test ($run b) scan deleted: PASS (exit $s; $(grep -m1 "^$label: instrument:" "$tmp/$run-noscan.err"))"
+    else
+      echo "self-test ($run b) scan deleted: FAIL (exit $s)"; head -20 "$tmp/$run-noscan.err"; failed=1
+    fi
+    s=$(cat "$tmp/$run.rc")
+    grep -av "warning\|^Note:\|^$" "$tmp/$run.err" || true
+    if [ "$s" != 0 ]; then echo "$label: FAILED (exit $s)"; failed=1; continue; fi
+    grep '^S ' "$tmp/$run.out" >"$tmp/$run.statements"
+    grep '^A ' "$tmp/$run.out" >"$tmp/$run.axioms"
+    if [ "$update" = 1 ]; then
+      cp "$tmp/$run.statements" "$stmts"; cp "$tmp/$run.axioms" "$axs"
+      echo "$label: UPDATED $stmts ($(wc -l <"$stmts") rows), $axs ($(wc -l <"$axs") rows); commit them with the change they announce"
+    else
+      local changed=0
+      if ! diff -u "$stmts" "$tmp/$run.statements" >"$logs/$run-statements.diff"; then
+        echo "$label: STATEMENTS CHANGED (unannounced):"; head -60 "$logs/$run-statements.diff"; changed=1
+      fi
+      if ! diff -u "$axs" "$tmp/$run.axioms" >"$logs/$run-axioms.diff"; then
+        echo "$label: AXIOM SETS CHANGED (unannounced):"; head -60 "$logs/$run-axioms.diff"; changed=1
+      fi
+      [ "$changed" = 0 ] && echo "$label: $(wc -l <"$stmts") statements and $(wc -l <"$axs") axiom sets unchanged"
+      [ "$changed" = 0 ] || failed=1
+    fi
+  done
+  # (c) the measured defect, planted every run: an unused `(_vacuous : False)` premise on
+  # admitted_source_semantics (W20-GATE-MUTATION left the gate green under exactly this). A scratch
+  # copy of the module, mutated (the mutation is asserted to have happened), prints the row with the
+  # scanner; it must be the pinned row with `False → ` inserted, and absent from the pin.
+  local planted=1
+  python3 - Kernel/ObjectiveBendAdmissionSemantics.lean "$tmp/premise.lean" <<'EOF' || planted=0
 import sys
 src = open(sys.argv[1]).read()
-anchor = "set_option maxHeartbeats 0 in\nrun_meta"
-assert src.count(anchor) == 1, "self-test: run_meta anchor not found"
-plant = "theorem Minidregg.ObjectiveSnapshot.Plant.planted (n : Nat) : n + 0 = n := rfl\n\n"
-switch = "def includeLocal : Bool := false"
-assert src.count(switch) == 1, "self-test: includeLocal switch not found"
-src = src.replace(switch, "def includeLocal : Bool := true")
-open(sys.argv[2], "w").write(src.replace(anchor, plant + anchor))
+anchor = "    (admitted : Admitted prepared ingress writes guards) :\n    runBounded"
+assert src.count(anchor) == 1, "self-test: admitted_source_semantics binder anchor not found"
+mutated = src.replace(anchor, "    (admitted : Admitted prepared ingress writes guards) (_vacuous : False) :\n    runBounded")
+assert mutated != src and mutated.count("(_vacuous : False)") == 1, "self-test: the premise was not planted"
+lines = mutated.split("\n")
+last = max(i for i, l in enumerate(lines) if l.startswith("import "))
+lines.insert(last + 1, "import Verify.ObjectiveSnapshot")
+open(sys.argv[2], "w").write("\n".join(lines) + "\nrun_meta Minidregg.ObjectiveSnapshot.printStatementRow "
+  "`Minidregg.Kernel.ObjectiveBendAdmissionSemantics.admitted_source_semantics\n")
 EOF
-  local s; s=$(snapshot "$tmp/plant.lean" "$tmp/plant.out" "$tmp/plant.err")
-  if [ "$s" = 0 ] && grep -q "^S theorem Minidregg.ObjectiveSnapshot.Plant.planted : ∀ (n : Nat), n + 0 = n$" "$tmp/plant.out" \
-     && ! diff -q <(grep '^S ' "$tmp/plant.out") "$statements" >/dev/null 2>&1; then
-    echo "self-test (a) planted theorem: PASS (row present; comparison red)"
+  s=-
+  if [ "$planted" = 1 ]; then
+    set +e
+    "$lake" env lean --root=Kernel "$tmp/premise.lean" >"$tmp/premise.out" 2>&1
+    s=$?
+    set -e
   else
-    echo "self-test (a) planted theorem: FAIL (exit $s)"; head -20 "$tmp/plant.err"; failed=1
+    echo "the premise could not be planted (see the assertion above)" >"$tmp/premise.out"
   fi
-  # (b) delete the scan; the instrument floor must fail the run
-  python3 - scripts/ObjectiveSnapshot.lean "$tmp/noscan.lean" <<'EOF'
+  if [ "$planted" = 1 ] && python3 - "$tmp/premise.out" "$statements_mathlib" <<'EOF'
 import sys
-src = open(sys.argv[1]).read()
-b, e = "  -- SCAN-BEGIN\n", "  -- SCAN-END\n"
-assert src.count(b) == 1 and src.count(e) == 1, "self-test: scan markers not found"
-i, j = src.index(b), src.index(e) + len(e)
-open(sys.argv[2], "w").write(src[:i] + src[j:])
+rows = [l for l in open(sys.argv[1]).read().splitlines() if l.startswith("S ")]
+pin = open(sys.argv[2]).read().splitlines()
+assert len(rows) == 1, f"expected one row from the mutated module, got {len(rows)}"
+row = rows[0]
+assert row.count("False → ") == 1, "the planted premise is not in the row"
+assert row not in pin, "the row with the planted premise is in the pin"
+assert row.replace("False → ", "", 1) in pin, "the row minus the planted premise is not the pinned row"
 EOF
-  s=$(snapshot "$tmp/noscan.lean" "$tmp/noscan.out" "$tmp/noscan.err")
-  if [ "$s" != 0 ] && grep -q "objective-snapshot: instrument:" "$tmp/noscan.err"; then
-    echo "self-test (b) scan deleted: PASS (exit $s; $(grep -m1 'objective-snapshot: instrument:' "$tmp/noscan.err"))"
+  then
+    echo "self-test (c) planted (_vacuous : False) on admitted_source_semantics: PASS (exit $s; row changed by exactly 'False → ', absent from the pin)"
   else
-    echo "self-test (b) scan deleted: FAIL (exit $s)"; head -20 "$tmp/noscan.err"; failed=1
-  fi
-  # the real run
-  s=$(snapshot scripts/ObjectiveSnapshot.lean "$tmp/real.out" "$tmp/real.err")
-  grep -av "warning\|^Note:\|^$" "$tmp/real.err" || true
-  if [ "$s" != 0 ]; then echo "objective-snapshot: FAILED (exit $s)"; return 1; fi
-  grep '^S ' "$tmp/real.out" >"$tmp/statements"
-  grep '^A ' "$tmp/real.out" >"$tmp/axioms"
-  if [ "$update" = 1 ]; then
-    cp "$tmp/statements" "$statements"; cp "$tmp/axioms" "$axioms"
-    echo "objective-snapshot: UPDATED $statements ($(wc -l <"$statements") rows), $axioms ($(wc -l <"$axioms") rows); commit them with the change they announce"
-  else
-    local changed=0
-    if ! diff -u "$statements" "$tmp/statements" >"$logs/statements.diff"; then
-      echo "objective-snapshot: STATEMENTS CHANGED (unannounced):"; head -60 "$logs/statements.diff"; changed=1
-    fi
-    if ! diff -u "$axioms" "$tmp/axioms" >"$logs/axioms.diff"; then
-      echo "objective-snapshot: AXIOM SETS CHANGED (unannounced):"; head -60 "$logs/axioms.diff"; changed=1
-    fi
-    [ "$changed" = 0 ] && echo "objective-snapshot: $(wc -l <"$statements") statements and $(wc -l <"$axioms") axiom sets unchanged"
-    [ "$changed" = 0 ] || failed=1
+    echo "self-test (c) planted (_vacuous : False) on admitted_source_semantics: FAIL (exit $s)"; head -20 "$tmp/premise.out"; failed=1
   fi
   [ "$failed" = 0 ]
 }
