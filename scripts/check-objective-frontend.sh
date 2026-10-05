@@ -16,6 +16,9 @@
 #                       ordered-presentation invariance on 4000 seeded DAGs (compiled theorems)
 #     check-parser      tests/objective-bend-source/check-parser.ts
 #     check-preview     tests/objective-bend-source/check-preview.ts over preview-cohort.json
+#     ltuo-probes       tests/objective-bend-source/ltuo/check-probes.ts: the LTUO characterization
+#                       probes, each pinned at its CURRENT outcome with the TARGET its LT row owes
+#                       (a target met without promoting the pin is red, as is any other move)
 #     publication       tests/objective-native/PublicationReplay.lean: what the Host publishes is
 #                       what the receiver's replay recomputes; foreign pin, changed source and
 #                       tampered core are refused
@@ -43,7 +46,7 @@ logs=$repo/build-logs/objective-frontend; mkdir -p "$logs"
 work=$(mktemp -d "${TMPDIR:-/tmp}/objective-frontend.XXXXXX")
 only=${OBJECTIVE_FRONTEND_ONLY:-}
 export LEAN_NUM_THREADS=2
-ROWS=(identity elaborate-tests c4-tests check-parser check-preview publication activity-replay examples tutorial)
+ROWS=(identity elaborate-tests c4-tests check-parser check-preview ltuo-probes publication activity-replay examples tutorial)
 declare -A STATUS
 red=0
 
@@ -87,6 +90,11 @@ r_check-preview()   {
   "$bun" tests/objective-bend-source/check-preview.ts tests/objective-bend-source/preview-cohort.json \
     "$work/preview" "$LEAN" "$LEAN_PATH"
 }
+r_ltuo-probes()     {
+  need_bun && need_lean && front_env || return 1
+  "$bun" tests/objective-bend-source/ltuo/check-probes.ts tests/objective-bend-source/ltuo/probe-cohort.json \
+    "$work/ltuo-probes" "$LEAN" "$LEAN_PATH"
+}
 r_publication()     {
   need_lean && front_env || return 1
   "$LEAN" --run tests/objective-native/PublicationReplay.lean world/NativeReceipt.obend note
@@ -107,6 +115,7 @@ declare -A MARK=(
   [c4-tests]='^C4 ORDERED-PRESENTATION INVARIANCE PASS'
   [check-parser]='^EVERY OBEND PARSES: [0-9]+ files$'
   [check-preview]='"status":"passed"'
+  [ltuo-probes]='^LTUO PROBES CURRENT: [0-9]+ rows pinned'
   [publication]='^PUBLICATION REPLAY PASS: '
   [activity-replay]='^ACTIVITY REPLAY PASS: '
   [examples]='^results: '

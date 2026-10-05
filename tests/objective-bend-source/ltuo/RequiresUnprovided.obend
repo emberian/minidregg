@@ -1,0 +1,17 @@
+edition ObjectiveBend 1
+# LTUO probe W06. `requires missing` names a member that no composed layer and no seed
+# provides. With the whole-T seed rule the requirement is never examined (a seed must
+# carry a placeholder, which then answers). A checked requires refuses at fix, naming
+# the member.
+
+record Target:
+  missing(value: Nat) -> Nat
+  result(value: Nat) -> Nat
+
+spec Needs for Target:
+  requires missing(value: Nat) -> Nat
+  def result(value: Nat) -> Nat:
+    self.missing(value)
+
+def resultOfThree() -> Nat:
+  fix(Needs, {}).result(3n)

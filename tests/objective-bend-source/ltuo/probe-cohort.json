@@ -1,0 +1,298 @@
+[
+ {
+  "name": "P01-ReviewSelfSuper",
+  "modules": [
+   {
+    "name": "ReviewSelfSuper",
+    "source": "ReviewSelfSuper.obend"
+   }
+  ],
+  "entry": "twiceOfThree",
+  "arguments": [],
+  "prediction": "accepted, twice(3) = 7",
+  "current": {
+   "status": "finished",
+   "value": "7"
+  },
+  "target": {
+   "status": "finished",
+   "value": "7"
+  },
+  "owner": "control"
+ },
+ {
+  "name": "P02-ReviewSuperNotSelf",
+  "modules": [
+   {
+    "name": "ReviewSelfSuper",
+    "source": "ReviewSelfSuper.obend"
+   }
+  ],
+  "entry": "reviewOfThree",
+  "arguments": [],
+  "prediction": "super reaches the inherited review: review(3) = 5",
+  "current": {
+   "status": "finished",
+   "value": "5"
+  },
+  "target": {
+   "status": "finished",
+   "value": "5"
+  },
+  "owner": "control"
+ },
+ {
+  "name": "P03-GenericExtension",
+  "modules": [
+   {
+    "name": "GenericExtension",
+    "source": "../GenericExtension.obend"
+   }
+  ],
+  "entry": "reuseCaptured",
+  "arguments": [
+   "5"
+  ],
+  "prediction": "captured extensions compose: 5+2+3",
+  "current": {
+   "status": "finished",
+   "value": "10"
+  },
+  "target": {
+   "status": "finished",
+   "value": "10"
+  },
+  "owner": "control"
+ },
+ {
+  "name": "P04-HeterogeneousXYZ",
+  "modules": [
+   {
+    "name": "HeterogeneousXYZ",
+    "source": "HeterogeneousXYZ.obend"
+   }
+  ],
+  "entry": "zOfFive",
+  "arguments": [],
+  "prediction": "X -> XY -> XYZ under one self XYZ: z = y = 2x",
+  "current": {
+   "status": "finished",
+   "value": "10"
+  },
+  "target": {
+   "status": "finished",
+   "value": "10"
+  },
+  "owner": "control"
+ },
+ {
+  "name": "W01-TwiceSpecification",
+  "modules": [
+   {
+    "name": "TwiceSpecification",
+    "source": "TwiceSpecification.obend"
+   }
+  ],
+  "entry": "twiceOfFive",
+  "arguments": [],
+  "prediction": "REFUSED: Specification<Nat> metadata {name,interface,laws:{}} vs compose's {operator,inherited,wrapping}",
+  "current": {
+   "status": "refused",
+   "refusal": "typing refused"
+  },
+  "target": {
+   "status": "finished",
+   "value": "7"
+  },
+  "owner": "LT1"
+ },
+ {
+  "name": "W02-LawSpecification",
+  "modules": [
+   {
+    "name": "LawSpecification",
+    "source": "LawSpecification.obend"
+   }
+  ],
+  "entry": "built",
+  "arguments": [],
+  "prediction": "REFUSED: a law changes the exact laws row, so the spec is not Specification<T>",
+  "current": {
+   "status": "refused",
+   "refusal": "typing refused"
+  },
+  "target": {
+   "status": "finished",
+   "value": "41"
+  },
+  "owner": "LT1"
+ },
+ {
+  "name": "W03-AssociatedSpecifications",
+  "modules": [
+   {
+    "name": "AssociatedSpecifications",
+    "source": "AssociatedSpecifications.obend"
+   }
+  ],
+  "entry": "leftOfOne",
+  "arguments": [],
+  "prediction": "(audit section 5) the two associations carry differently shaped metadata types",
+  "current": {
+   "status": "refused",
+   "refusal": "typing refused"
+  },
+  "target": {
+   "status": "finished",
+   "value": "7"
+  },
+  "owner": "LT1"
+ },
+ {
+  "name": "W04-RecursiveNode",
+  "modules": [
+   {
+    "name": "RecursiveNode",
+    "source": "RecursiveNode.obend"
+   }
+  ],
+  "entry": "two",
+  "arguments": [],
+  "prediction": "REFUSED: recursive row annotation requires explicit future-row binder (the elaborator records exactly this, but the user-visible diagnostic was the downstream 'parameter self has no resolvable type')",
+  "current": {
+   "status": "refused",
+   "refusal": "parameter self has no resolvable type"
+  },
+  "target": {
+   "status": "finished",
+   "value": "2"
+  },
+  "owner": "LT2"
+ },
+ {
+  "name": "W05-PartialSeed",
+  "modules": [
+   {
+    "name": "PartialSeed",
+    "source": "PartialSeed.obend"
+   }
+  ],
+  "entry": "twiceOfThree",
+  "arguments": [],
+  "prediction": "REFUSED: spec S for T types super as the whole T, so a one-method spec needs a whole-T seed",
+  "current": {
+   "status": "refused",
+   "refusal": "typing refused"
+  },
+  "target": {
+   "status": "finished",
+   "value": "7"
+  },
+  "owner": "LT2"
+ },
+ {
+  "name": "W06-RequiresUnprovided",
+  "modules": [
+   {
+    "name": "RequiresUnprovided",
+    "source": "RequiresUnprovided.obend"
+   }
+  ],
+  "entry": "resultOfThree",
+  "arguments": [],
+  "prediction": "(audit: requires is unchecked metadata) the whole-T seed rule refuses the empty seed before any requirement is examined",
+  "current": {
+   "status": "refused",
+   "refusal": "typing refused"
+  },
+  "target": {
+   "status": "refused",
+   "refusal": "refused (requires-unprovided)"
+  },
+  "owner": "LT2"
+ },
+ {
+  "name": "W06b-RequiresPlaceholderSeed",
+  "modules": [
+   {
+    "name": "RequiresPlaceholderSeed",
+    "source": "RequiresPlaceholderSeed.obend"
+   }
+  ],
+  "entry": "placeholderOfThree",
+  "arguments": [],
+  "prediction": "ACCEPTED: the seed's placeholder discharges the requirement by type alone and answers 0",
+  "current": {
+   "status": "finished",
+   "value": "0"
+  },
+  "target": {
+   "status": "finished",
+   "value": "0"
+  },
+  "owner": "control"
+ },
+ {
+  "name": "W07-RequiresWrongSignature",
+  "modules": [
+   {
+    "name": "RequiresWrongSignature",
+    "source": "RequiresWrongSignature.obend"
+   }
+  ],
+  "entry": "twiceOfThree",
+  "arguments": [],
+  "prediction": "ACCEPTED: the requires signature is never compared with the target",
+  "current": {
+   "status": "finished",
+   "value": "5"
+  },
+  "target": {
+   "status": "refused",
+   "refusal": "refused (requires-signature)"
+  },
+  "owner": "LT2"
+ },
+ {
+  "name": "W08-LawImpossible",
+  "modules": [
+   {
+    "name": "LawImpossible",
+    "source": "LawImpossible.obend"
+   }
+  ],
+  "entry": "built",
+  "arguments": [],
+  "prediction": "ACCEPTED: law impossible: false is a retained closure, never evaluated",
+  "current": {
+   "status": "finished",
+   "value": "41"
+  },
+  "target": {
+   "status": "refused",
+   "refusal": "refused (law-refuted)"
+  },
+  "owner": "LT6"
+ },
+ {
+  "name": "W09-FourthField",
+  "modules": [
+   {
+    "name": "FourthField",
+    "source": "FourthField.obend"
+   }
+  ],
+  "entry": "wOfFive",
+  "arguments": [],
+  "prediction": "REFUSED: yesterday's AddY names the concrete self XYZ, not a future row containing x",
+  "current": {
+   "status": "refused",
+   "refusal": "typing refused"
+  },
+  "target": {
+   "status": "finished",
+   "value": "11"
+  },
+  "owner": "LT2"
+ }
+]

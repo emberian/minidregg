@@ -1,0 +1,22 @@
+edition ObjectiveBend 1
+# LTUO probe P03 (positive control). Heterogeneous inheritance X -> XY -> XYZ under
+# one final self XYZ, composed before closing.
+
+record X:
+  x: Nat
+record XY:
+  x: Nat
+  y: Nat
+record XYZ:
+  x: Nat
+  y: Nat
+  z: Nat
+
+extension AddY(self: XYZ, super: X) -> XY:
+  extend(super, {y: 2n * self.x})
+
+extension AddZ(self: XYZ, super: XY) -> XYZ:
+  extend(super, {z: self.y})
+
+def zOfFive() -> Nat:
+  fix(compose(AddY, AddZ), {x: 5n}).z

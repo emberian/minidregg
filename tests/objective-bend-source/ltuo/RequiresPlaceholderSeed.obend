@@ -1,0 +1,16 @@
+edition ObjectiveBend 1
+# LTUO probe W06b (control for W06). The placeholder form the whole-T seed rule forces
+# today: accepted, and the placeholder answers 0. A seed that provides a required member
+# discharges the requirement, so this stays accepted under checked requires.
+
+record Target:
+  missing(value: Nat) -> Nat
+  result(value: Nat) -> Nat
+
+spec Needs for Target:
+  requires missing(value: Nat) -> Nat
+  def result(value: Nat) -> Nat:
+    self.missing(value)
+
+def placeholderOfThree() -> Nat:
+  fix(Needs, {missing: fn(value: Nat) -> Nat: 0n, result: fn(value: Nat) -> Nat: 0n}).result(3n)

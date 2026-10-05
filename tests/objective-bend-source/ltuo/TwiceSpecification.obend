@@ -1,0 +1,12 @@
+edition ObjectiveBend 1
+# LTUO probe W01. The audit's API witness: the declared Specification<Nat> result and
+# the type compose builds must agree, or Specification<T> is not closed under compose.
+
+def twice(e: Extension<Nat>) -> Specification<Nat>:
+  compose(e, e)
+
+def addOne() -> Extension<Nat>:
+  extension(self: Nat, super: Nat) -> Nat: super + 1n
+
+def twiceOfFive() -> Nat:
+  fix(twice(addOne()), 5n)

@@ -1,0 +1,17 @@
+edition ObjectiveBend 1
+# LTUO probe W02. A named spec with a `law` against the public Specification<T>.
+# The law-free twin (LazySpecification.obend `unforced`) is accepted today.
+
+record Counter:
+  n: Nat
+
+spec Start for Counter:
+  law positive: self.n == 41n
+  def n() -> Nat:
+    41n
+
+def asSpecification() -> Specification<Counter>:
+  Start
+
+def built() -> Nat:
+  fix(asSpecification(), {n: 0n}).n

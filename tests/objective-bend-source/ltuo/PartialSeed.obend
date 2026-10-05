@@ -1,0 +1,24 @@
+edition ObjectiveBend 1
+# LTUO probe W05. Every method of Review is provided by some layer, so no layer needs a
+# placeholder: the inherited seed is the empty record. Today `spec S for T` types both
+# self and super as the whole T, so the seed must be a whole T.
+
+record Review:
+  review(value: Nat) -> Nat
+  twice(value: Nat) -> Nat
+
+spec Base for Review:
+  def review(value: Nat) -> Nat:
+    value + 1n
+
+spec Twice for Review:
+  requires review(value: Nat) -> Nat
+  def twice(value: Nat) -> Nat:
+    self.review(self.review(value))
+
+spec Augmented for Review:
+  def review(value: Nat) -> Nat:
+    super.review(value) + 1n
+
+def twiceOfThree() -> Nat:
+  fix(compose(Base, Twice, Augmented), {}).twice(3n)

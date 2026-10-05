@@ -1,0 +1,22 @@
+edition ObjectiveBend 1
+# LTUO probe W03. compose(compose(A,B),C) and compose(A,compose(B,C)) behave alike;
+# both must inhabit one public Specification<T> so a program can choose either.
+
+record Counter:
+  n: Nat
+
+spec A for Counter:
+  def n() -> Nat:
+    super.n + 1n
+spec B for Counter:
+  def n() -> Nat:
+    super.n * 2n
+spec C for Counter:
+  def n() -> Nat:
+    super.n + 3n
+
+def either(left: Bool) -> Specification<Counter>:
+  if left then compose(compose(A, B), C) else compose(A, compose(B, C))
+
+def leftOfOne() -> Nat:
+  fix(either(true), {n: 1n}).n

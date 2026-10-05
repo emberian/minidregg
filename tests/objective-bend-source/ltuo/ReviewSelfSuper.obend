@@ -1,0 +1,32 @@
+edition ObjectiveBend 1
+# LTUO probe P01 (positive control). The audit's review example: Twice is written
+# without knowing Augmented, yet final.twice(3) = final.review(final.review(3)) = 7
+# because `self` is the final whole and `super` the result beneath each layer.
+
+record Review:
+  review(value: Nat) -> Nat
+  twice(value: Nat) -> Nat
+
+spec Base for Review:
+  def review(value: Nat) -> Nat:
+    value + 1n
+
+spec Twice for Review:
+  requires review(value: Nat) -> Nat
+  def twice(value: Nat) -> Nat:
+    self.review(self.review(value))
+
+spec Augmented for Review:
+  def review(value: Nat) -> Nat:
+    super.review(value) + 1n
+
+def final(seed: Review) -> Review:
+  fix(compose(Base, Twice, Augmented), seed)
+
+def twiceOfThree() -> Nat:
+  final({review: fn(value: Nat) -> Nat: value, twice: fn(value: Nat) -> Nat: value}).twice(3n)
+
+# Replacing super by self in Augmented would recurse into the augmentation itself;
+# here the inherited review is reached, so review(3) = 5.
+def reviewOfThree() -> Nat:
+  final({review: fn(value: Nat) -> Nat: value, twice: fn(value: Nat) -> Nat: value}).review(3n)

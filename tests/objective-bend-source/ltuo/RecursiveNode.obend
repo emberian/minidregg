@@ -1,0 +1,18 @@
+edition ObjectiveBend 1
+# LTUO probe W04. A recursive record with a binary self method.
+
+record Node:
+  weight: Nat
+  combine(other: Node) -> Node
+
+spec Weighted for Node:
+  def weight() -> Nat:
+    1n
+  def combine(other: Node) -> Node:
+    {weight: self.weight + other.weight, combine: self.combine}
+
+def leaf() -> Node:
+  fix(Weighted, {weight: 0n, combine: fn(other: Node) -> Node: other})
+
+def two() -> Nat:
+  leaf().combine(leaf()).weight

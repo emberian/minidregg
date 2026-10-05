@@ -1,0 +1,28 @@
+edition ObjectiveBend 1
+# LTUO probe W09 (LT2 acceptance). AddY was typed yesterday against XYZ. Tomorrow a
+# collaborator adds w. Yesterday's extension should be reused without naming XYZW;
+# today its self annotation is the concrete XYZ, so it does not compose under XYZW.
+
+record X:
+  x: Nat
+record XY:
+  x: Nat
+  y: Nat
+record XYZ:
+  x: Nat
+  y: Nat
+  z: Nat
+record XYZW:
+  x: Nat
+  y: Nat
+  z: Nat
+  w: Nat
+
+extension AddY(self: XYZ, super: X) -> XY:
+  extend(super, {y: 2n * self.x})
+
+extension AddZW(self: XYZW, super: XY) -> XYZW:
+  extend(super, {z: self.y, w: self.z + 1n})
+
+def wOfFive() -> Nat:
+  fix(compose(AddY, AddZW), {x: 5n}).w

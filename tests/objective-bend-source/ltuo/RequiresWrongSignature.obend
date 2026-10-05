@@ -1,0 +1,19 @@
+edition ObjectiveBend 1
+# LTUO probe W07. The declared requirement disagrees with the member the target
+# provides (String vs Nat). As metadata it is never compared.
+
+record Target:
+  review(value: Nat) -> Nat
+  twice(value: Nat) -> Nat
+
+spec Base for Target:
+  def review(value: Nat) -> Nat:
+    value + 1n
+
+spec Twice for Target:
+  requires review(value: String) -> Nat
+  def twice(value: Nat) -> Nat:
+    self.review(self.review(value))
+
+def twiceOfThree() -> Nat:
+  fix(compose(Base, Twice), {review: fn(value: Nat) -> Nat: value, twice: fn(value: Nat) -> Nat: value}).twice(3n)

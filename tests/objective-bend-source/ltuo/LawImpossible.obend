@@ -1,0 +1,14 @@
+edition ObjectiveBend 1
+# LTUO probe W08. A closed law that is false. Retained as a Boolean closure and never
+# evaluated, it is accepted; a checked law with a stated status refuses it.
+
+record Counter:
+  n: Nat
+
+spec Start for Counter:
+  law impossible: false
+  def n() -> Nat:
+    41n
+
+def built() -> Nat:
+  fix(Start, {n: 0n}).n
