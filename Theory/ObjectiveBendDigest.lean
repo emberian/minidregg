@@ -315,9 +315,11 @@ theorem permutations_le_two {a b : Nat} (ha : a < 2 ^ 256) (hb : b < 2 ^ 256) :
 
 /-! ## §7. The C entry
 
-The C transcription (`native/objective-emit/runtime.c`) links this module's compiled object and
-calls this export for `P_DIGEST`: it passes each operand's limbs as little-endian bytes and reads the
-32 big-endian digest bytes back. It computes no part of the digest itself. -/
+The C transcription (`native/objective-emit/runtime.c`) is to link this module's compiled object and
+call this export for `P_DIGEST`, passing each operand's limbs as little-endian bytes and reading the
+32 big-endian digest bytes back; it computes no part of the digest itself. That caller arrives with
+`Primitive.digest` (W30 3c541dd5, not yet on main); until then the export has no native caller and
+`scripts/gates/exports-allowlist.tsv` names it. -/
 
 /-- The digest of two little-endian operands, as 32 big-endian bytes. -/
 @[export minidregg_obend_digest]

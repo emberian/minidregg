@@ -1,2 +1,3 @@
 # sym<TAB>one-line reason it is exported and no native/ code calls it
 minidregg_nock_run_jammed	the oracle's exported byte entry, bound by oracle_is_export (K-RAN §1); consumed by the Nock differential and the runner
+minidregg_obend_digest	Core4 digest entry for the C runtime P_DIGEST; its runtime.c caller lands with Primitive.digest (W30 3c541dd5): delete this row then

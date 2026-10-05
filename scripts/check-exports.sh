@@ -8,7 +8,8 @@
 #     tracked file under native/ (.rs .c .h build.rs): a name in a comment, or in a
 #     `#[cfg(any())]` item that no build compiles, is not a call,
 #     or be listed in scripts/gates/exports-allowlist.tsv (`sym<TAB>reason`);
-#   * every allowlist row must still name an export (a stale row is red);
+#   * every allowlist row must still name an export, and an export native code now calls
+#     must leave the allowlist (a stale row is red either way);
 #   * `@[extern]` and `implemented_by` are counted and printed, since each is a
 #     place the compiled code is not the Lean definition.
 set -euo pipefail
@@ -50,6 +51,9 @@ print(f"exports: {len(exports)} @[export], {len(externs)} @[extern], {len(impl)}
 for sym, where in exports:
     if re.search(r"\b" + re.escape(sym) + r"\b", blob):
         print(f"  {sym:40s} {where:50s} called from native/")
+        if sym in allow:
+            print(f"exports: FAIL: allowlist row {sym} is stale: native code names it now; delete the row")
+            bad += 1
     elif sym in allow and allow[sym]:
         print(f"  {sym:40s} {where:50s} allowlisted: {allow[sym]}")
     else:
