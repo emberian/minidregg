@@ -441,7 +441,7 @@ theorem demand_forces : ∀ (n : Nat) (B : Array Cell) (y : Nat) (Bf : Array Cel
       have := exec_preservesCached _ (n - i - (p + 1)) w' o' vp cachedP
       rw [← exec_add, ← exec_add, show i + (p + 1 + (n - i - (p + 1))) = n by omega, d.final] at this
       exact ⟨o', vp, this⟩
-    rcases result with pend | ⟨g, agree, cover, ident, n2lt, sizeEq⟩
+    rcases result with pend | ⟨g, agree, cover, ident, _, n2lt, sizeEq⟩
     · exfalso
       obtain ⟨oc, wc, ca⟩ := cachedEnd
       have := pend.heap.cellKept

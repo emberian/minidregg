@@ -5,7 +5,8 @@
 address map `F`, with heap headroom `gap`.
 
 * `forces_transfer`: a halting lazy run is matched by a forced run that halts no later,
-  each forced state bounded by a lazy state no earlier, ending again in a chain.
+  each forced state bounded by a lazy state no earlier, ending again in a chain whose map
+  extends the first on every address the lazy state held.
 * `ForcesBy.reenter`: a chain relates heaps: any valid control and stack of the lazy heap,
   renamed, are related alike (what extraction needs: it re-enters cells with an empty stack).
 * `agree_inverse`: a covering exact agreement between equal-size heaps inverts. -/
@@ -100,27 +101,30 @@ theorem bounded_mono {σ τ : State} {n n' g g' : Nat} (b : Bounded σ τ n n' g
 
 /-- **Transfer along a forcing chain.** -/
 theorem forces_transfer {gap : Nat} {F : Nat → Nat} {σ τ : State} (h : ForcesBy gap F σ τ) :
-    ∀ n, Halts σ n → ∃ n' F', n' ≤ n ∧ Halts τ n' ∧ Bounded σ τ n n' gap ∧ ForcesBy gap F' (exec n σ) (exec n' τ) := by
+    ∀ n, Halts σ n → ∃ n' F', n' ≤ n ∧ Halts τ n' ∧ Bounded σ τ n n' gap ∧ ForcesBy gap F' (exec n σ) (exec n' τ) ∧
+      ∀ a, a < σ.heap.size → F' a = F a := by
   induction h with
   | @pend e f gap σ τ r g =>
     intro n halts
     obtain ⟨n', le, haltsT, bounded, result⟩ := pend_transfer n σ τ r halts
-    rcases result with p | ⟨g', a, _, _, _, sz⟩
-    · exact ⟨n', f, le, haltsT, bounded_mono bounded g, .pend p g⟩
-    · exact ⟨n', g', le, haltsT, bounded_mono bounded g, .agree a (by omega)⟩
+    rcases result with p | ⟨g', a, _, _, ext, _, sz⟩
+    · exact ⟨n', f, le, haltsT, bounded_mono bounded g, .pend p g, fun _ _ => rfl⟩
+    · exact ⟨n', g', le, haltsT, bounded_mono bounded g, .agree a (by omega), ext⟩
   | @agree f gap σ τ r g =>
     intro n halts
     obtain ⟨haltsT, agreeEnd, sizes, _⟩ := agree_transfer r halts
-    refine ⟨n, f, Nat.le_refl _, haltsT, ?_, .agree agreeEnd ?_⟩
+    refine ⟨n, f, Nat.le_refl _, haltsT, ?_, .agree agreeEnd ?_, fun _ _ => rfl⟩
     · intro j' hj'
       have ⟨sz, st⟩ := sizes j' hj'
       exact ⟨j', hj', Nat.le_refl _, by omega, by omega⟩
     · have ⟨sz, _⟩ := sizes n (Nat.le_refl _); omega
   | trans one two g ih1 ih2 =>
     intro n halts
-    obtain ⟨n1, F1', le1, halts1, b1, r1⟩ := ih1 n halts
-    obtain ⟨n2, F2', le2, halts2, b2, r2⟩ := ih2 n1 halts1
-    exact ⟨n2, _, by omega, halts2, bounded_mono (bounded_trans b1 b2) g, .trans r1 r2 g⟩
+    obtain ⟨n1, F1', le1, halts1, b1, r1, e1⟩ := ih1 n halts
+    obtain ⟨n2, F2', le2, halts2, b2, r2, e2⟩ := ih2 n1 halts1
+    refine ⟨n2, _, by omega, halts2, bounded_mono (bounded_trans b1 b2) g, .trans r1 r2 g, fun a lt => ?_⟩
+    simp only [Function.comp_apply]
+    rw [e1 a lt, e2 _ (one.image a lt)]
 
 /-! ## Exact agreements: the identity, and the inverse of a covering one -/
 
