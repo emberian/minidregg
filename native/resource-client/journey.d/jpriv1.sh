@@ -188,7 +188,7 @@ for f in alice bob carl dave; do
     check setup "$f's own-machine keygen left no custody marker" test ! -e "$H/$f/keys/mini.key.hosted"
   fi
   operator setup "CUSTODY: copy $f's secret into the sponsor home (enroll plan+seal sign with both keys)" \
-    install -D -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/jp-$f.key"
+    sh -c 'install -d -m 0700 "$1" && install -m 0600 "$2" "$1/$3"' _ "$H/sponsor/keys" "$H/$f/keys/mini.key" "jp-$f.key"
   ok setup sponsor "enroll plan jp-$f jp-$f.key $(xxd -p -c 256 "$H/$f/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$f/keys/mini.key.next.cosign")"
   ok setup sponsor "enroll seal jp-$f"
   ok setup sponsor "enroll submit jp-$f"
@@ -417,12 +417,17 @@ raw outsider carl "reads sa with bob's capability number" "no-grant" "$MINI" wor
 
 # ------------------------------------------------ the keys cell's law, on the live Host
 declare_for carl lab
+# The generation a wrap is addressed to is the key epoch of the recipient's signed record (an enrolled key starts at 1).
+CGEN=$(jq -r .keyEpoch "$H/alice/requests/decl-lab-carl.json")
+CWRAP=$(echo "2^96 + $CGEN * 2^64 + $C" | BC_LINE_LENGTH=0 bc)
+operator keyslaw "bob imports the keys cell by his room grant (the grant under lab that covers it)" "$MINI" workspace --action import \
+  --dir "$WS/bob" --name lab-keys --kind object --target "$KEYS" --observe-capability "$(jq -r .observeCapability "$WS/bob/refs/lab.json")"
 raw keyslaw bob "invites carl himself (room-key --op invite): his CLIENT refuses, he is not the founder-key chain's tip" "current founder key" \
   "$MINI" workspace --action room-key --op invite --dir "$WS/bob" --name lab --member "$C" \
   --enc-pub "$(jq -r .recordHex "$H/alice/requests/decl-lab-carl.json")" --proposal-id i-carl-by-bob
 check keyslaw "nothing was proposed or written by bob's refused invite" \
   sh -c "[ ! -e '$WS/bob/proposals/i-carl-by-bob-keys-bind' ] && [ ! -e '$WS/bob/proposals/i-carl-by-bob-keys-wraps' ]"
-jq -n --arg a "$(echo "2^96 + $C" | BC_LINE_LENGTH=0 bc)" '{type:"minidregg-workspace-proposal-v1",action:"invoke",targets:[{name:"lab-keys",
+jq -n --arg a "$CWRAP" '{type:"minidregg-workspace-proposal-v1",action:"invoke",targets:[{name:"lab-keys",
   payload:{type:"content",actions:[{type:"createAtom",atom:$a,kind:{type:"text"},payload:"00"}]}}]}' >"$RQ/bob-wrap.json"
 raw keyslaw bob "plans a raw write at the wrap atom id of (epoch 0, carl) in the keys cell" ok "$MINI" workspace --action propose --dir "$WS/bob" \
   --request "$RQ/bob-wrap.json" --proposal-id bob-wrap
@@ -478,9 +483,9 @@ expectgot carl "carl opens the epoch-1 line" "$T_A1" "$(jq -r '.entries[1].priva
 expectgot carl "carl does not hold epoch 0: the marker (default: current epoch only)" \
   "[sealed under epoch 0 — you do not hold that key]" "$(jq -r '.entries[0].private' "$OUT")"
 ok carl alice "room invite i-carl-past lab $C @decl-lab-carl.json --past --verbs observe"
-# The wrap of (epoch 0, generation 0, carl): (0 + 1) * 2^96 + carl (Kernel/PrivateRoomKeys.lean wrapAtomId).
+# The wrap of (epoch 0, generation = carl's record key epoch, carl): (0 + 1) * 2^96 + gen * 2^64 + carl (Kernel/PrivateRoomKeys.lean wrapAtomId).
 check carl "--past wrote only the epoch carl lacked (epoch 0)" \
-  jq -e --arg c "$(echo "2^96 + $C" | BC_LINE_LENGTH=0 bc)" '[.purpose.draft.command.targets[0].payload.actions[].atom] == [$c]' \
+  jq -e --arg c "$CWRAP" '[.purpose.draft.command.targets[0].payload.actions[].atom] == [$c]' \
     "$WS/alice/proposals/i-carl-past-keys-wraps/intent.json"
 tail_of carl sa-c --private lab
 expectgot carl "with --past carl opens the epoch-0 line too" "$T_A0" "$(jq -r '.entries[0].private.text' "$OUT")"
@@ -524,9 +529,13 @@ check chat "alice reads carl's private line" grep -q 'PRIVATE-FOXTROT' "$OUT"
 
 # ------------------------------------------------ a member rotates its signing key (FIX-IDENTITY B)
 # rotate-key keeps the old encryption secret (KEY.enc-ring) and publishes the new
-# public key as carl's record in every private room he is in; the founder's next
-# rotation wraps to the record; the keys law lets only carl write his record.
+# public key as carl's record in every private room he is in; the keys law lets only
+# carl write his record. The record is signed by carl's NEW signing key, and the
+# founder pinned his OLD one at invite: a served record is the operator's word, so
+# alice's next rotation refuses it until carl re-declares to her directly and she
+# re-pins (`room-key --op pin-member --replace true`, roomkey.rs pinned authority).
 ENC_OLD=${ENC[carl]}   # the 32-byte ID of carl's hybrid key (whoami's encryptionKey)
+CARL_SIGNING0=$(od -An -tx1 -v "$H/carl/keys/mini.key.pub" | tr -d ' \n')   # the key alice pinned at invite
 ok rotkey carl "rotate-key mini.key.next"
 check rotkey "rotate-key published carl's new encryption key to lab and pc" \
   jq -s -e 'last | [.privateRooms[] | select(.record == "published") | .room] | sort == ["lab","pc"]' "$OUT"
@@ -537,6 +546,17 @@ ENC_NEW=$(jq -r .encryptionKey "$OUT")
 check rotkey "carl's hybrid encryption key (its id) changed with the seed" test "$ENC_NEW" != "$ENC_OLD"
 T_RK="PRIVATE-GOLF alice says this after carl rotated"
 T_RK2="PRIVATE-HOTEL alice says this after she rotated her own signing key"
+fails rotkey alice "room rotate r-pc-unpinned pc" 1 "pinned member signing key"
+check rotkey "the refused rotation proposed and wrote nothing" \
+  sh -c "[ ! -e '$WS/alice/proposals/r-pc-unpinned-bind' ] && [ ! -e '$WS/alice/proposals/r-pc-unpinned-wraps' ]"
+declare_for carl pc
+raw rotkey alice "re-pins carl from his own new declaration (pin-member --replace true)" ok \
+  "$MINI" workspace --action room-key --op pin-member --dir "$WS/alice" --name pc --member "$C" \
+  --enc-pub "$(jq -r .recordHex "$H/alice/requests/decl-pc-carl.json")" --replace true
+# A v3 record is enc-epoch (4) | hybrid public (1216) | room (8) | keys (8) | custody (1) | signing key (32) | signature (64).
+CARL_SIGNING=$(jq -r .recordHex "$H/alice/requests/decl-pc-carl.json" | cut -c$(( (4 + 1216 + 17) * 2 + 1 ))-$(( (4 + 1216 + 17 + 32) * 2 )))
+check rotkey "alice now pins carl's NEW signing key for pc" \
+  jq -e --arg k "$CARL_SIGNING" --arg old "$CARL_SIGNING0" '.signingKey == $k and $k != $old' "$OUT"
 ok rotkey alice "room rotate r-pc pc"
 # the rotation is two turns: r-pc-bind (release records) then r-pc-wraps (the wraps)
 # pc's epoch 1 for carl at generation 2 (his key epoch): (1 + 1) * 2^96 + 2 * 2^64 + carl.

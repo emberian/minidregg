@@ -70,6 +70,11 @@ rotkey	carl	rotate-key mini.key.next
 rotkey	check	rotate-key published carl's new encryption key to lab and pc
 rotkey	check	carl's keyring (v2: X25519 secret + ML-KEM seed per entry) kept the old encryption secrets
 rotkey	check	carl's hybrid encryption key (its id) changed with the seed
+rotkey	alice	room rotate r-pc-unpinned pc
+rotkey	check	the refused rotation proposed and wrote nothing
+rotkey	alice	re-pins carl from his own new declaration
+rotkey	check	alice now pins carl's NEW signing key for pc
+rotkey	alice	room rotate r-pc pc
 rotkey	check	the rotation wrapped pc's new epoch to carl's RECORD
 rotkey	check	carl opens the epoch sealed after his rotation, and still the line before it
 rotkey	carl	submits it: refused (each subject writes only its own record)

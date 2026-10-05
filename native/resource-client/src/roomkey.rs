@@ -1653,8 +1653,12 @@ pub(crate) fn reader_keys(root: &Path, workspace: &Value, room_name: &str) -> Re
 fn turn(root: &Path, workspace: &Value, proposal_id: &str, request: &Value) -> Result<()> {
     validate_name(proposal_id)?;
     let directory = root.join("proposals").join(proposal_id);
-    if !directory.exists() { make_private_dir(&directory)?; }
-    let _lock = crate::transport::service_lock(&directory.join("roomkey-turn.lock"))?;
+    // The lock lives beside the proposals, never inside `proposals/ID`: `propose` creates that
+    // directory itself and refuses one that already exists.
+    let locks = root.join("private").join("roomkey-turns");
+    if !root.join("private").exists() { make_private_dir(&root.join("private"))?; }
+    if !locks.exists() { make_private_dir(&locks)?; }
+    let _lock = crate::transport::service_lock(&locks.join(format!("{proposal_id}.lock")))?;
     let source = root.join("sources").join(format!("roomkey-{proposal_id}.json"));
     super::publish_retained_json(&source, request, None)?;
     let intent = directory.join("intent.json");
