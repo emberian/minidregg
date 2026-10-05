@@ -10,7 +10,8 @@
 * `pend_transfer`: through a pending demand, the forced run halts no later, every forced
   state is bounded by a lazy state no earlier (heap within `e.gap`, stack no deeper), and
   the final states are still pending or, once the lazy run entered the pending cell, agree
-  exactly with equal heaps, the forced run then strictly shorter. -/
+  exactly with equal heaps, the forced run then strictly shorter, under a map that extends
+  the pending one on every address the lazy state held. -/
 import Theory.ObjectiveBendDemandForcingPend
 namespace Minidregg.Theory.ObjectiveBendDemandForcing
 open Minidregg.Theory.ObjectiveBendOpenRecursion
@@ -358,7 +359,8 @@ theorem pend_transfer {e : Pending} {f : Nat → Nat} :
       ∃ n', n' ≤ n ∧ Halts τ n' ∧ Bounded σ τ n n' e.gap ∧
         (PendRel e f (exec n σ) (exec n' τ) ∨
           ∃ g, AgreeRel g (exec n σ) (exec n' τ) ∧ Covers g (exec n σ).heap (exec n' τ).heap ∧
-            (∀ a, a < e.base.size → g a = a) ∧ n' < n ∧ (exec n' τ).heap.size = (exec n σ).heap.size) := by
+            (∀ a, a < e.base.size → g a = a) ∧ (∀ a, a < σ.heap.size → g a = f a) ∧ n' < n ∧
+            (exec n' τ).heap.size = (exec n σ).heap.size) := by
   intro n
   induction n using Nat.strongRecOn with
   | ind n ih =>
@@ -401,7 +403,8 @@ theorem pend_transfer {e : Pending} {f : Nat → Nat} :
           rw [show exec ((n - m) + 1) τ = exec (n - m) (stepRaw τ) from rfl, e1]
           have hT : (stepRaw τ).heap.size = τ.heap.size := by rw [heapT0]
           omega
-        refine ⟨(n - m) + 1, by omega, halts_succ τActive haltsT1, ?_, Or.inr ⟨_, ?_, ?_, ident, by omega, finalSize⟩⟩
+        refine ⟨(n - m) + 1, by omega, halts_succ τActive haltsT1, ?_, Or.inr ⟨_, ?_, ?_, ident,
+          fun a lt => by simp only [switchMap, lt, if_true], by omega, finalSize⟩⟩
         · intro j' hj'
           cases j' with
           | zero => exact ⟨0, Nat.zero_le _, Nat.le_refl _, by simp only [exec]; omega, by simp only [exec]; omega⟩
@@ -458,9 +461,9 @@ theorem pend_transfer {e : Pending} {f : Nat → Nat} :
           · show (exec i (stepRaw τ)).stack.length ≤ (exec j (stepRaw σ)).stack.length; exact stk
       · rw [eqS]
         show PendRel e f (exec (n - 1) (stepRaw σ)) (exec n'' (stepRaw τ)) ∨ _
-        rcases result with p | ⟨g, a, c, i, lt, sz⟩
+        rcases result with p | ⟨g, a, c, i, ext, lt, sz⟩
         · exact Or.inl p
-        · exact Or.inr ⟨g, a, c, i, by omega, sz⟩
+        · exact Or.inr ⟨g, a, c, i, fun x hx => ext x (Nat.lt_of_lt_of_le hx (stepRaw_size_mono σ)), by omega, sz⟩
 
 #assert_axioms pend_update_read
 #assert_axioms pend_transfer
