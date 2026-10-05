@@ -17,14 +17,44 @@ def seed() -> Tally:
 def built() -> Tally:
   fix(Start, seed())
 
+# metadata(s) is a SpecMeta: what a declaration says about itself
+# (declared), how a composition was built (composed), or nothing for a bare
+# extension. Every spec has this one metadata type, so a match reads it.
+def nameOf(meta: SpecMeta) -> String:
+  match meta:
+    case declared(d): d.name
+    case composed(c): "a composition"
+    case extension(e): "an extension"
+
+def interfaceOf(meta: SpecMeta) -> String:
+  match meta:
+    case declared(d): d.interface
+    case composed(c): ""
+    case extension(e): ""
+
+def lawsOf(meta: SpecMeta) -> SpecLaws:
+  match meta:
+    case declared(d): d.laws
+    case composed(c): SpecLaws.none({})
+    case extension(e): SpecLaws.none({})
+
 def firstName() -> String:
-  metadata(reflect(prototype(Start, built()))).name
+  nameOf(metadata(reflect(prototype(Start, built()))))
 
 def target() -> Nat:
   targetOf(prototype(Start, built())).n
 
 def interface() -> String:
-  metadata(Start).interface
+  interfaceOf(metadata(Start))
+
+def composedName() -> String:
+  nameOf(metadata(compose(Start, Start)))
+
+# A law is listed by name, with its status.
+def lawStatus() -> String:
+  match lawsOf(metadata(Start)):
+    case none(n): "no laws"
+    case law(l): l.status
 
 # stuck never finishes. The prototype is never asked for its target, so
 # reflecting on it still works.
@@ -32,7 +62,7 @@ def stuck() -> Tally:
   stuck()
 
 def name() -> String:
-  metadata(reflect(prototype(Start, stuck()))).name
+  nameOf(metadata(reflect(prototype(Start, stuck()))))
 
 # Asking for the target of the same prototype does run it.
 def stuckTarget() -> Nat:

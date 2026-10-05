@@ -62,4 +62,7 @@ def composedWeight() -> Nat:
   fix(compose(Left, Right), blank()).weight
 
 def interface() -> String:
-  metadata(Last).interface
+  match metadata(Last):
+    case declared(d): d.interface
+    case composed(c): ""
+    case extension(e): ""

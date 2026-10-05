@@ -2378,7 +2378,7 @@
     {
       "module": "Compiler.ObjectiveBendElaborate",
       "path": "Compiler/ObjectiveBendElaborate.lean",
-      "sha256": "c0024d3cf8d0754010dd5786ee5e56aa7fa5683f1f6544493e5ac5cf11f04c4f",
+      "sha256": "49435f0f3eeadbc6c5e2539bf77d437d93681211ada071421d30b28f9761e23c",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -2470,6 +2470,13 @@
       "module": "Compiler.ObjectiveBendSourceArtifact",
       "path": "Compiler/ObjectiveBendSourceArtifact.lean",
       "sha256": "09af5924d833c37a9d1cc2296bfe169b97b111d5272b4783d0e98c832991e390",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.ObjectiveBendSpecificationClosure",
+      "path": "Compiler/ObjectiveBendSpecificationClosure.lean",
+      "sha256": "83cdd5b87b1a5ebce06f387cc9a3fd1e927f774f476cfaabed3c9d31895470b6",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7628,7 +7635,7 @@
     {
       "module": "ObjectiveProofs",
       "path": "ObjectiveProofs.lean",
-      "sha256": "fb221e3a27b788f3425f040b53a6c292a9d0417a38125abdad2ddf52996b4cae",
+      "sha256": "cc368a06eb7584e0a6677e01d21920d7f1e2308d43f7d25a241093f3acca3d16",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },

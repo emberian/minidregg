@@ -7,4 +7,7 @@ extension Identity(self: Nat, super: Nat) -> Nat:
   self
 
 def inspect() -> String:
-  metadata(reflect(prototype(Named, fix(Identity, 0n)))).name
+  match metadata(reflect(prototype(Named, fix(Identity, 0n)))):
+    case declared(d): d.name
+    case composed(c): "composed"
+    case extension(e): "extension"

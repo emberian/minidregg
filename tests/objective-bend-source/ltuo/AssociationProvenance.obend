@@ -1,0 +1,36 @@
+edition ObjectiveBend 1
+# LTUO probes R01/R02 (reflection contract, docs/objective-bend/REFLECTION.md). The two
+# associations of compose behave alike (W03) and share one type, but their SpecMeta
+# provenance differs and a program can observe it: associativity holds for behaviour,
+# not for reflective specifications.
+
+record Counter:
+  n: Nat
+
+spec A for Counter:
+  def n() -> Nat:
+    super.n + 1n
+spec B for Counter:
+  def n() -> Nat:
+    super.n * 2n
+spec C for Counter:
+  def n() -> Nat:
+    super.n + 3n
+
+def isComposed(meta: SpecMeta) -> Bool:
+  match meta:
+    case declared(d): false
+    case composed(c): true
+    case extension(e): false
+
+def inheritedOf(meta: SpecMeta) -> SpecMeta:
+  match meta:
+    case declared(d): meta
+    case composed(c): c.inherited
+    case extension(e): meta
+
+def leftNested() -> Bool:
+  isComposed(inheritedOf(metadata(compose(compose(A, B), C))))
+
+def rightNested() -> Bool:
+  isComposed(inheritedOf(metadata(compose(A, compose(B, C)))))

@@ -235,8 +235,9 @@ calls `check` on the empty context and then `runBounded` on the same decoded ter
 Some facts read like semantics and are not: `TotalProof law := law`; the prepared
 output's `native_matches` and `no_returns`, and `checked_erasure`, are field
 projections; `ExecutionWith.runExact` records that a value is the output of the very
-call that produced it. Spec `law`s are callable closures stored in metadata; nothing
-discharges them.
+call that produced it. A spec `law` is checked code (its own knot field, typed to
+return Bool) listed in the spec's `SpecMeta` with status `unchecked`; nothing evaluates
+or discharges it.
 
 ### What the default build checks
 
@@ -419,7 +420,8 @@ apart:
   committed law, whoever proposed it.
 - **A spec `law name(args): expr`** in `.obend` is a universally quantified property of a
   specification's *methods* (`law positive(n: Nat): self.v(n) < n`). It elaborates to a
-  closure in spec metadata and nothing discharges it. It is package evidence (proved by the
+  hidden knot field typed `(self, super, n) -> Bool`, listed by name in the spec's
+  `SpecMeta` with status `unchecked`; nothing evaluates or discharges it. It is package evidence (proved by the
   certifying checker where it can be, otherwise reported as unproved). It never reaches
   admission.
 - **A spec `requires m(x: T) -> U`** declares a member the specification needs from final

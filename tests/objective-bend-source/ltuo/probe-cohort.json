@@ -97,8 +97,8 @@
   "arguments": [],
   "prediction": "REFUSED: Specification<Nat> metadata {name,interface,laws:{}} vs compose's {operator,inherited,wrapping}",
   "current": {
-   "status": "refused",
-   "refusal": "typing refused"
+   "status": "finished",
+   "value": "7"
   },
   "target": {
    "status": "finished",
@@ -118,8 +118,8 @@
   "arguments": [],
   "prediction": "REFUSED: a law changes the exact laws row, so the spec is not Specification<T>",
   "current": {
-   "status": "refused",
-   "refusal": "typing refused"
+   "status": "finished",
+   "value": "41"
   },
   "target": {
    "status": "finished",
@@ -139,8 +139,8 @@
   "arguments": [],
   "prediction": "(audit section 5) the two associations carry differently shaped metadata types",
   "current": {
-   "status": "refused",
-   "refusal": "typing refused"
+   "status": "finished",
+   "value": "7"
   },
   "target": {
    "status": "finished",
@@ -161,7 +161,7 @@
   "prediction": "REFUSED: recursive row annotation requires explicit future-row binder (the elaborator records exactly this, but the user-visible diagnostic was the downstream 'parameter self has no resolvable type')",
   "current": {
    "status": "refused",
-   "refusal": "parameter self has no resolvable type"
+   "refusal": "recursive row annotation requires explicit future-row binder"
   },
   "target": {
    "status": "finished",
@@ -294,5 +294,47 @@
    "value": "11"
   },
   "owner": "LT2"
+ },
+ {
+  "name": "R01-LeftAssociationNested",
+  "modules": [
+   {
+    "name": "AssociationProvenance",
+    "source": "AssociationProvenance.obend"
+   }
+  ],
+  "entry": "leftNested",
+  "arguments": [],
+  "prediction": "(audit section 5) composition retains an observable construction history that differs between the two associations",
+  "current": {
+   "status": "finished",
+   "value": "true"
+  },
+  "target": {
+   "status": "finished",
+   "value": "true"
+  },
+  "owner": "control"
+ },
+ {
+  "name": "R02-RightAssociationFlat",
+  "modules": [
+   {
+    "name": "AssociationProvenance",
+    "source": "AssociationProvenance.obend"
+   }
+  ],
+  "entry": "rightNested",
+  "arguments": [],
+  "prediction": "(audit section 5) composition retains an observable construction history that differs between the two associations",
+  "current": {
+   "status": "finished",
+   "value": "false"
+  },
+  "target": {
+   "status": "finished",
+   "value": "false"
+  },
+  "owner": "control"
  }
 ]

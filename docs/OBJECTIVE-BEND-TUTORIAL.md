@@ -779,7 +779,10 @@ def composedWeight() -> Nat:
   fix(compose(Left, Right), blank()).weight
 
 def interface() -> String:
-  metadata(Last).interface
+  match metadata(Last):
+    case declared(d): d.interface
+    case composed(c): ""
+    case extension(e): ""
 ```
 
 ```sh
@@ -852,8 +855,12 @@ instead of composing them by hand.
 pair apart:
 
 - `reflect(p)` gives the spec.
-- `metadata(s)` gives the spec's metadata, a record. This chapter reads its
-  `name` and `interface` fields.
+- `metadata(s)` gives the spec's metadata, a `SpecMeta`. Every spec has this one
+  metadata type, whatever its laws and however it was composed, so a function
+  over `Specification<T>` accepts them all. `SpecMeta` is a sum: `declared` (a
+  `spec` declaration: its `name`, `interface` and `laws`), `composed` (a
+  `compose`: the `inherited` and `wrapping` operands' metadata) or `extension`
+  (a bare extension operand, which carries none). A `match` reads it.
 - `targetOf(p)` gives the object.
 
 `reflect` and `metadata` do not run the object. `targetOf` does.
@@ -878,14 +885,44 @@ def seed() -> Tally:
 def built() -> Tally:
   fix(Start, seed())
 
+# metadata(s) is a SpecMeta: what a declaration says about itself
+# (declared), how a composition was built (composed), or nothing for a bare
+# extension. Every spec has this one metadata type, so a match reads it.
+def nameOf(meta: SpecMeta) -> String:
+  match meta:
+    case declared(d): d.name
+    case composed(c): "a composition"
+    case extension(e): "an extension"
+
+def interfaceOf(meta: SpecMeta) -> String:
+  match meta:
+    case declared(d): d.interface
+    case composed(c): ""
+    case extension(e): ""
+
+def lawsOf(meta: SpecMeta) -> SpecLaws:
+  match meta:
+    case declared(d): d.laws
+    case composed(c): SpecLaws.none({})
+    case extension(e): SpecLaws.none({})
+
 def firstName() -> String:
-  metadata(reflect(prototype(Start, built()))).name
+  nameOf(metadata(reflect(prototype(Start, built()))))
 
 def target() -> Nat:
   targetOf(prototype(Start, built())).n
 
 def interface() -> String:
-  metadata(Start).interface
+  interfaceOf(metadata(Start))
+
+def composedName() -> String:
+  nameOf(metadata(compose(Start, Start)))
+
+# A law is listed by name, with its status.
+def lawStatus() -> String:
+  match lawsOf(metadata(Start)):
+    case none(n): "no laws"
+    case law(l): l.status
 
 # stuck never finishes. The prototype is never asked for its target, so
 # reflecting on it still works.
@@ -893,7 +930,7 @@ def stuck() -> Tally:
   stuck()
 
 def name() -> String:
-  metadata(reflect(prototype(Start, stuck()))).name
+  nameOf(metadata(reflect(prototype(Start, stuck()))))
 
 # Asking for the target of the same prototype does run it.
 def stuckTarget() -> Nat:
@@ -915,6 +952,16 @@ $ bun docs/tutorial/run.ts docs/tutorial/ch6-reflection.obend interface
 status: finished
 type: String
 result: "{\"methods\":[{\"name\":\"n\",\"parameters\":[],\"qualifier\":\"primary\",\"resultType\":\"Nat\",\"span\":{\"end\":311,\"line\":11,\"start\":296}}],\"parents\":[],\"precedence\":[\"ch6_reflection.Start\"],\"requirements\":[],\"suffix\":false,\"targetType\":\"Tally\"}"
+
+$ bun docs/tutorial/run.ts docs/tutorial/ch6-reflection.obend composedName
+status: finished
+type: String
+result: "a composition"
+
+$ bun docs/tutorial/run.ts docs/tutorial/ch6-reflection.obend lawStatus
+status: finished
+type: String
+result: "unchecked"
 ```
 
 `stuck()` never finishes. The prototype built from it can still be reflected on,
@@ -937,8 +984,12 @@ definition has no parameters, so it is one shared value that needs itself to
 finish. The machine reports `divergent`. `spin` in chapter 1 was different: it
 ran until its budget ended and reported `suspended`.
 
-The `law` line in `Start` is kept in the spec and is never checked. The
-language guide says so.
+The `law` line in `Start` is type-checked as its own function returning `Bool`
+and listed in the metadata with the status `unchecked`: nothing evaluates it
+yet. Two associations of the same composition, `compose(compose(A, B), C)` and
+`compose(A, compose(B, C))`, run the same way but have different `SpecMeta`
+trees, and a program can tell them apart
+([reflection contract](objective-bend/REFLECTION.md)).
 
 ## 7. Quantities
 

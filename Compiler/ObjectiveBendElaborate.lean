@@ -479,7 +479,29 @@ def splitTop (text : String) (sep : String) : List String :=
       else go fuel rest (some c) depth (current ++ [c]) parts
   (go (chars.length + 1) chars none 0 [] []).map trimStr
 
-def specMetadataTy (laws : PTy) : PTy := PTy.row [("name", .label), ("interface", .label), ("laws", laws)]
+/-- The one public metadata type of every specification (`Specification<T>` is
+`specification(SpecMeta, Extension<T>)`), declared in the built-in module as two
+recursive sums (`builtinSource`):
+
+    sum SpecLaws:  none: {} | law: {name: String, status: String, rest: SpecLaws}
+    sum SpecMeta:  declared: {name: String, interface: String, laws: SpecLaws}
+                 | composed: {inherited: SpecMeta, wrapping: SpecMeta}
+                 | extension: {}
+
+It is first-order data, the same for every target, so laws and composition never change
+a specification's public type, and `compose` is closed over `Specification<T>`. The
+reflection contract (what a client may observe) is docs/objective-bend/REFLECTION.md. -/
+def specMetaName : String := "SpecMeta"
+def specLawsName : String := "SpecLaws"
+/-- The built-in module: types every module resolves by bare name; no module may declare
+them, and it has no definitions (nothing of it is emitted). Not a legal source module name. -/
+def builtinModuleName : String := "$builtin"
+def builtinTypeNames : List String := [specMetaName, specLawsName]
+def builtinSource : String :=
+  "edition ObjectiveBend 1\n" ++
+  "sum SpecLaws:\n  none: {}\n  law: {name: String, status: String, rest: SpecLaws}\n\n" ++
+  "sum SpecMeta:\n  declared: {name: String, interface: String, laws: SpecLaws}\n" ++
+  "  composed: {inherited: SpecMeta, wrapping: SpecMeta}\n  extension: {}\n"
 
 def lookupGlobal (c : Ctx) (name : String) (m : Module) : Option String :=
   let key := m.name ++ "." ++ name
@@ -512,11 +534,16 @@ def operatorTypes (op : String) : Option (PTy × PTy) :=
   match primitiveSignature op with
   | some (_, input, output) => some (input, output)
   | none => (negatedOrder op).map fun _ => (.natural, .boolean)
-def composeTy (left right : Option PTy) : Option PTy :=
-  match left, right, callable left, callable right with
-  | some l, some r, some (.arrow _ _ ld (.arrow _ _ li _)), some (.arrow _ _ _ (.arrow _ _ _ rp)) =>
-    some (.specification (PTy.row [("operator", .label), ("inherited", l), ("wrapping", r)]) (arrowTy ld (arrowTy li rp)))
-  | _, _, _, _ => none
+/-- The type of `compose(left, right)`: a specification whose metadata is `metaTy` (the
+one SpecMeta type, whatever the operands' metadata) and whose extension runs `right`
+over `left` under one final self. It depends on the operands only through their
+callable extension types, so composing two `Specification<T>`/`Extension<T>` values
+gives `Specification<T>` (`composeTy_closed`). -/
+def composeTy (metaTy : PTy) (left right : Option PTy) : Option PTy :=
+  match callable left, callable right with
+  | some (.arrow _ _ ld (.arrow _ _ li _)), some (.arrow _ _ _ (.arrow _ _ _ rp)) =>
+    some (.specification metaTy (arrowTy ld (arrowTy li rp)))
+  | _, _ => none
 /-- `Sum.label(…)` / `Alias.Sum.label(…)`: (label, module name, sum type name). -/
 def sumCase (c : Ctx) (callee : Expr) (env : List Binding) (m : Module) : Option (String × String × String) :=
   match callee with
@@ -528,7 +555,8 @@ def sumCase (c : Ctx) (callee : Expr) (env : List Binding) (m : Module) : Option
     typeName.bind fun typeName =>
       let resolved : Option (String × String) := match qualifiedName typeName with
         | some (alias, n) => (importOf m alias).map fun mod => (mod ++ "." ++ n, mod)
-        | none => some (m.name ++ "." ++ typeName, m.name)
+        | none => if builtinTypeNames.contains typeName then some (builtinModuleName ++ "." ++ typeName, builtinModuleName)
+            else some (m.name ++ "." ++ typeName, m.name)
       resolved.bind fun (key, moduleName) =>
         match c.sums.find? (·.1 == key) with
         | some (_, .sum sumName _) => some (caseLabel, moduleName, sumName)
@@ -603,11 +631,14 @@ def sourceType (c : Ctx) : Nat → String → String → List String → M (Opti
     for (generic, isExtension) in [("Extension<", true), ("Specification<", false)] do
       if name.startsWith generic && name.endsWith ">" && name.length > generic.length + 1 then
         let some target ← sourceType c fuel (dropEndStr (dropStr name generic.length) 1) moduleName seen | return none
-        return some (if isExtension then extensionTy target else .specification (specMetadataTy .emptyRow) (extensionTy target))
+        if isExtension then return some (extensionTy target)
+        let some metaTy ← sourceType c fuel specMetaName builtinModuleName [] | return none
+        return some (.specification metaTy (extensionTy target))
     if let some (alias, typeName) := qualifiedName name then
       let imported := (moduleNamed c moduleName).bind (importOf · alias)
       let some importedModule := imported | do typeError ("unresolved source type import " ++ name); return none
       return ← sourceType c fuel typeName importedModule seen
+    let moduleName := if builtinTypeNames.contains name then builtinModuleName else moduleName
     let key := moduleName ++ "." ++ name
     if let some (_, .sum _ cases) := c.sums.find? (·.1 == key) then
       let s ← get
@@ -686,16 +717,12 @@ def globalType (c : Ctx) : Nat → String → M (Option PTy)
         signatureTy c fuel params (.given result) m.name []
       | .extension _ params targetType _ => signatureTy c fuel params (.source targetType) m.name []
       | .spec s => do
+        -- Laws are not part of the type (they are checked as their own hidden fields).
         let target ← sourceType c fuel s.targetType m.name []
-        let mut laws : List (String × PTy) := []
-        let mut ok := true
-        for law in s.laws do
-          match ← signatureTy c fuel (⟨"self", s.targetType, "default"⟩ :: ⟨"super", s.targetType, "default"⟩ :: law.params) (.given (some .boolean)) m.name [] with
-          | some t => laws := laws ++ [(law.name, t)]
-          | none => ok := false
-        pure (match target with
-          | some target => if ok then some (.specification (specMetadataTy (PTy.row laws)) (extensionTy target)) else none
-          | none => none)
+        let metaTy ← sourceType c fuel specMetaName builtinModuleName []
+        pure (match target, metaTy with
+          | some target, some metaTy => some (.specification metaTy (extensionTy target))
+          | _, _ => none)
       | _ => pure none
     modify fun s => { s with inferring := s.inferring.erase key, globalTypes := s.globalTypes ++ [(key, t)] }
     return t
@@ -745,8 +772,9 @@ def synth (c : Ctx) : Nat → Expr → List Binding → Module → M (Option PTy
       match specs with
       | [] => return none
       | first :: rest =>
+        let some metaTy ← sourceType c fuel specMetaName builtinModuleName [] | return none
         let mut t ← synth c fuel first env m
-        for next in rest do t := composeTy t (← synth c fuel next env m)
+        for next in rest do t := composeTy metaTy t (← synth c fuel next env m)
         return t
     | .fix spec _ =>
       return match callable (← synth c fuel spec env m) with
@@ -758,7 +786,13 @@ def synth (c : Ctx) : Nat → Expr → List Binding → Module → M (Option PTy
         return (← get).effect.map fun (p, r) => .computation p r r
       if let some sc := sumCase c callee env m then return ← sourceType c fuel sc.2.2 sc.2.1 []
       if let .var name := callee then
-        if ["reflect", "metadata", "targetOf", "prototype"].contains name && !env.any (·.name == name) then return none
+        if ["reflect", "metadata", "targetOf", "prototype"].contains name && !env.any (·.name == name) then
+          -- metadata(s) of a specification-typed s is its SpecMeta; the prototype
+          -- forms have no synthesized type (annotate a let).
+          if name == "metadata" then
+            if let [a] := args then
+              if let some (.specification metaTy _) := (← synth c fuel a env m) then return some metaTy
+          return none
       let mut t ← synth c fuel callee env m
       for _ in args do
         match callable t with
@@ -967,15 +1001,22 @@ def expression (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
       match specs with
       | [] => fail "empty composition requires an explicit identity extension"
       | first :: rest =>
+        let metaTy ← sourceType c fuel specMetaName builtinModuleName []
         let mut value ← expression c fuel first env m
         let mut valueTy ← synth c fuel first env m
         for next in rest do
           let right ← expression c fuel next env m
           let rightTy ← synth c fuel next env m
-          let composite := composeTy valueTy rightTy
+          let composite := metaTy.bind (composeTy · valueTy rightTy)
           let reason := if composite.isSome then none else some "composition operand types are not resolvable as extensions"
+          -- An operand's provenance: its own SpecMeta when it is a specification, else
+          -- `extension {}` (a bare extension carries no metadata). Decided statically.
+          let provenance := fun (ty : Option PTy) (operand : ATerm) => match ty with
+            | some (.specification _ _) => ATerm.metadata operand
+            | _ => ATerm.inject "extension" metaTy reason (.record [])
           let body := ATerm.specification
-            (.record [("operator", .label "compose"), ("inherited", .bound 1), ("wrapping", .bound 0)])
+            (.inject "composed" metaTy reason
+              (.record [("inherited", provenance valueTy (.bound 1)), ("wrapping", provenance rightTy (.bound 0))]))
             (.mix (.bound 1) (.bound 0))
           let inner := ATerm.lam ⟨rightTy, composite, "unrestricted", "reusable", reason⟩ body
           let outerCodomain := match rightTy, composite with
@@ -1231,11 +1272,26 @@ def specification (c : Ctx) (fuel : Nat) (s : Spec) (m : Module) : M ATerm := do
       let shifted ← shiftRef only 2
       abstract c fuel (selfSuperParams s) outerEnv (fun _ => pure (.app (.app shifted (.bound 1)) (.bound 0))) s.name (.source s.targetType) m.name
     | first :: rest => pure (rest.foldl (fun lower upper => .mix lower upper) first)
-  let mut laws : List (String × ATerm) := []
+  -- Each law is checked code in its own hidden knot field `key#law#name` (typed over
+  -- self, super and its parameters, result Bool); the metadata records its name and
+  -- status. Status `unchecked`: typed, retained, never evaluated (LT6 owns discharge).
+  if duplicate (s.laws.map (·.name)) then fail ("duplicate law in spec " ++ key)
+  let lawsMeta ← sourceType c fuel specLawsName builtinModuleName []
+  let lawsReason := if lawsMeta.isSome then none else some "SpecLaws type unresolved"
+  let mut lawList : ATerm := .inject "none" lawsMeta lawsReason (.record [])
+  for law in s.laws.reverse do
+    lawList := .inject "law" lawsMeta lawsReason
+      (.record [("name", .label law.name), ("status", .label "unchecked"), ("rest", lawList)])
   for law in s.laws do
-    laws := laws ++ [(law.name, ← abstract c fuel (selfSuperParams s ++ law.params) outerEnv
-      (fun inner => expression c fuel law.body inner m) law.name (.source "Bool") m.name)]
-  return .specification (.record [("name", .label key), ("interface", .label (interfaceLabel s list)), ("laws", .record laws)]) extension
+    let params := selfSuperParams s ++ law.params
+    let code ← abstract c fuel params outerEnv
+      (fun inner => expression c fuel law.body inner m) law.name (.source "Bool") m.name
+    let type ← signatureTy c fuel params (.given (some .boolean)) m.name []
+    modify fun st => { st with hidden := st.hidden.push (key ++ "#law#" ++ law.name, code, type) }
+  let metaTy ← sourceType c fuel specMetaName builtinModuleName []
+  let metadata := ATerm.inject "declared" metaTy (if metaTy.isSome then none else some "SpecMeta type unresolved")
+    (.record [("name", .label key), ("interface", .label (interfaceLabel s list)), ("laws", lawList)])
+  return .specification metadata extension
 
 /-! ## The package knot, entry selection, arguments -/
 
@@ -1354,7 +1410,15 @@ def elaborateM (c : Ctx) (entryModule : Nat) (entryDefinition : String) (args : 
   let st ← get
   return ⟨selected, globalRow, st.sumBounds, st.typeErrors⟩
 
-/-- Build the context; duplicate declarations / types refuse as in the TS. -/
+/-- The built-in module: `builtinSource` through the parser and the AST decoder. -/
+def builtinModule : Except String Module := do
+  let ast ← match ObjectiveBendParse.parseObjective builtinSource with
+    | .ok ast => pure ast
+    | .error d => throw ("builtin: " ++ d.message)
+  decodeModule (Json.mkObj [("name", toJson builtinModuleName), ("imports", Json.arr #[]), ("ast", ast)])
+
+/-- Build the context; duplicate declarations / types refuse as in the TS. The built-in
+module contributes types only (no declaration of it is emitted). -/
 def context (modules : List Module) : Except String Ctx := do
   let mut decls : List (String × Decl × Module) := []
   let mut records : List (String × Decl) := []
@@ -1367,12 +1431,14 @@ def context (modules : List Module) : Except String Ctx := do
       | _ =>
         if (decls.find? (·.1 == key)).isSome then throw ("duplicate declaration " ++ key)
         decls := decls ++ [(key, d, m)]
-  for m in modules do
+  for m in modules ++ [← builtinModule] do
     for d in m.decls do
       let key := m.name ++ "." ++ d.name
       match d with
       | .record .. | .sum .. =>
         if (records.find? (·.1 == key)).isSome || (sums.find? (·.1 == key)).isSome then throw ("duplicate type " ++ key)
+        if m.name != builtinModuleName && builtinTypeNames.contains d.name then
+          throw ("refused (builtin-type): " ++ d.name ++ " is the built-in specification metadata type; choose another name")
         match d with
         | .record .. => records := records ++ [(key, d)]
         | _ => sums := sums ++ [(key, d)]
@@ -1501,7 +1567,13 @@ def internProposal (annotations : List Annotation) (row : PTy) (bounds : List (N
 /-- The typing-proposal fields that translation validation compares. -/
 def proposalJson (out : Output) : Except String Json := do
   let bounds := out.sumBounds.mergeSort (fun a b => a.1 ≤ b.1)
-  let annotations ← annotate bounds out.term []
+  -- A lambda whose type did not resolve names the downstream symptom; the type error the
+  -- resolver recorded first is the cause, so the refusal leads with it.
+  let annotations ← match annotate bounds out.term [] with
+    | .ok a => pure a
+    | .error e => throw (match out.typeErrors[0]? with
+      | some cause => cause ++ " (" ++ e ++ ")"
+      | none => e)
   let some row := out.globalRow | throw (out.typeErrors[0]?.getD "global row unresolved")
   let ((annotationJson, boundJson), interner) := (internProposal annotations row bounds).run {}
   return Json.mkObj [("types", Json.arr interner.table),

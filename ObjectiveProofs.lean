@@ -16,3 +16,4 @@ import Theory.ObjectiveBendCheckpointRoundTrip
 import Kernel.ObjectiveBendAdmissionSemantics
 import Kernel.ObjectiveResumeContract
 import Compiler.ObjectiveBendFrontEndAdequacy
+import Compiler.ObjectiveBendSpecificationClosure

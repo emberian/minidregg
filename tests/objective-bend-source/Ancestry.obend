@@ -55,4 +55,7 @@ def logged() -> Nat:
 
 # Reflection reads the static precedence list from the spec's interface label.
 def interface() -> String:
-  metadata(Inner).interface
+  match metadata(Inner):
+    case declared(d): d.interface
+    case composed(c): ""
+    case extension(e): ""

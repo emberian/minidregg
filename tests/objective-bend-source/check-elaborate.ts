@@ -104,14 +104,30 @@ const findTag=(t:any,tag:string):any=>{if(!t||typeof t!=="object")return null;if
 const findAll=(t:any,pred:(x:any)=>boolean,acc:any[]=[]):any[]=>{if(t&&typeof t==="object"){if(pred(t))acc.push(t);for(const v of Object.values(t))findAll(v,pred,acc);}return acc;};
 const s8=size(out("repeated-8").term),s16=size(out("repeated-16").term),s32=size(out("repeated-32").term);
 if(s32-s16!==2*(s16-s8))throw Error("compose term growth is not linear: "+[s8,s16,s32]);
-const shared=findAll(out("repeated-2").term,(x:any)=>x.tag==="specification"&&x.metadata.fields[0]?.name==="operator")[0];
-if(shared.metadata.fields[1].value.tag!=="bound"||shared.metadata.fields[1].value.index!==1||shared.extension.lower.tag!=="bound"||shared.extension.lower.index!==1)
+// compose's metadata is SpecMeta.composed{inherited, wrapping}: a specification operand
+// contributes metadata(<its binder>), a bare extension SpecMeta.extension{}. In
+// compose(compose(AddOne, AddOne), AddOne) the outer step's inherited operand is the inner
+// composite: its provenance and the mix's lower must read the SAME binder (no copy).
+const composedMeta=(x:any)=>x.tag==="specification"&&x.metadata.tag==="inject"&&x.metadata.label==="composed";
+const shared=findAll(out("repeated-3").term,(x:any)=>composedMeta(x)&&x.metadata.payload.fields[0].value.tag==="metadata")[0];
+if(!shared)throw Error("no composed SpecMeta with a specification operand");
+const inheritedMeta=shared.metadata.payload.fields[0].value.value;
+if(inheritedMeta.tag!=="bound"||inheritedMeta.index!==1||shared.extension.lower.tag!=="bound"||shared.extension.lower.index!==1)
  throw Error("metadata inherited and mix lower do not reference one shared binder");
+const bare=findAll(out("repeated-2").term,composedMeta)[0];
+if(bare?.metadata.payload.fields[0].value.tag!=="inject"||bare.metadata.payload.fields[0].value.label!=="extension")
+ throw Error("a bare extension operand did not record SpecMeta.extension");
 if(literal("repeated-3").schema!=="dregg.objective-bend.typed-core.v3")throw Error("shared composition lost its typing proposal");
-console.log("COMPOSE SHARING PASS: k=8/16/32 sizes "+[s8,s16,s32].join("/")+" (linear); metadata.inherited and mix.lower are bound 1 of one redex");
+console.log("COMPOSE SHARING PASS: k=8/16/32 sizes "+[s8,s16,s32].join("/")+" (linear); SpecMeta.composed inherited and mix.lower are bound 1 of one redex");
 const specTyped=literal("evenodd");
 if(specTyped.schema!=="dregg.objective-bend.typed-core.v3")throw Error("spec-declaring package refused: "+specTyped.message);
-const specRow=specTyped.bounds[0].type;if(specRow.member.tag!=="specification"||specRow.tail.member.metadata.tail.tail.member.member.codomain.codomain.codomain.tag!=="boolean")throw Error("spec global type or law type lost");
+// Both specs have the ONE metadata type (the SpecMeta variable), law or no law; the law
+// is its own knot field Probe.Odd#law#total : (self, super, n) -> Bool.
+const specRow=specTyped.bounds[0].type;const rowField=(row:any,name:string):any=>row?.tag==="field"?(row.name===name?row.member:rowField(row.tail,name)):null;
+const evenTy=rowField(specRow,"Probe.Even"),oddTy=rowField(specRow,"Probe.Odd"),lawTy=rowField(specRow,"Probe.Odd#law#total");
+if(evenTy?.tag!=="specification"||oddTy?.tag!=="specification"||evenTy.metadata.tag!=="variable"||JSON.stringify(evenTy.metadata)!==JSON.stringify(oddTy.metadata))
+ throw Error("spec global types do not share the one SpecMeta metadata type");
+if(lawTy?.codomain?.codomain?.codomain?.tag!=="boolean")throw Error("law field type lost: "+JSON.stringify(lawTy));
 if(specTyped.annotations.length<8)throw Error("spec method lambdas lack binder hints");
 if(results.get("evenodd").output.check.accepted!==true)throw Error("the checker refused the front end's own packet: "+JSON.stringify(results.get("evenodd").output.check));
 console.log("SPEC TYPING PASS: spec-declaring package yields typed-core.v3; spec, law and method lambdas annotated; the front end's packet checks");
@@ -179,8 +195,8 @@ console.log("SUMS SURFACE PASS: inject/case/ifBool/labelEqual, != and || via ifB
 if(results.get("gen1")?.ok!==false||!/Gen-1 \.\/NAME\.bend imports are retired/.test(results.get("gen1").diagnostic.message))throw Error("Gen-1 import accepted");
 console.log("GEN-1 IMPORT REFUSAL PASS");
 const anc=out("diamond");
-const dSpec=findAll(anc.term,(x:any)=>x.tag==="specification"&&x.metadata.fields[0]?.value?.value==="Probe.D")[0];
-const iface=JSON.parse(dSpec.metadata.fields[1].value.value);
+const dSpec=findAll(anc.term,(x:any)=>x.tag==="specification"&&x.metadata.tag==="inject"&&x.metadata.label==="declared"&&x.metadata.payload.fields[0]?.value?.value==="Probe.D")[0];
+const iface=JSON.parse(dSpec.metadata.payload.fields[1].value.value);
 if(iface.precedence.join()!=="Probe.D,Probe.A,Probe.B,Probe.O")throw Error("C4 precedence list wrong: "+iface.precedence);
 const chain:string[]=[];for(let x=dSpec.extension;x.tag==="mix";x=x.lower)chain.unshift(x.upper.name);
 const bottom=(()=>{let x=dSpec.extension;while(x.tag==="mix")x=x.lower;return x.name;})();

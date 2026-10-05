@@ -58,12 +58,12 @@ fingerprints, not Mini package identities.
 | --- | --- |
 | `def f(x: T, ...) -> R:` | a field `M.f` of the package knot: curried `lam`s |
 | `extension E(self: S, super: I) -> P:` | `λself λsuper. body` |
-| `spec S for T:` with `def m(...)` | `specification({name, interface, laws}, λself λsuper. extend super {m: ...})` |
+| `spec S for T:` with `def m(...)` | `specification(SpecMeta.declared{name, interface, laws}, λself λsuper. extend super {m: ...})` |
 | `spec S extends A, B for T:` | C4 precedence list; extension = `mix` chain of ancestor layers (below) |
 | `suffix spec S ...` | S must stay a suffix of every descendant's precedence list |
 | `requires m(...)` | recorded in the interface label only (not checked) |
-| `law l(x): e` | a Bool-valued closure in the spec metadata (retained, never discharged) |
-| `compose(a, b, ...)` | `(λl λr. specification({operator, inherited: l, wrapping: r}, mix l r)) a b`, folded left; the inherited composite is bound once, so size is linear |
+| `law l(x): e` | a hidden knot field `M.S#law#l` (`λself λsuper λx. e`, checked to return Bool, never evaluated); the metadata lists `l` with status `unchecked` |
+| `compose(a, b, ...)` | `(λl λr. specification(SpecMeta.composed{inherited: P l, wrapping: P r}, mix l r)) a b`, folded left, where `P x` is `metadata(x)` for a specification operand and `SpecMeta.extension{}` for a bare extension; the inherited composite is bound once, so size is linear |
 | `fix(s, seed)` | `fix` |
 | `extend(x, {f: e})`, `{f: e}`, `x.f`, `()` | `extend`, `record`, `get`, empty record |
 | `prototype(s, t)`, `reflect(p)`, `metadata(s)`, `targetOf(p)` | `prototype`, `reflect`, `metadata`, `project` |
@@ -123,7 +123,23 @@ ancestor and combined in another.
 
 The spec interface label (canonical JSON) records target type, suffix mark,
 parents, precedence list, requirements and method signatures; reflection reads
-it with `metadata(S).interface`.
+it from `metadata(S)` with `match metadata(S): case declared(d): d.interface ...`.
+
+Every specification has the one type `Specification<T>` =
+`specification(SpecMeta, Extension<T>)`. `SpecMeta` and `SpecLaws` are built-in sums (module `$builtin`)
+every module names by bare name (no module may declare them):
+
+    sum SpecLaws:  none: {}  |  law: {name: String, status: String, rest: SpecLaws}
+    sum SpecMeta:  declared: {name: String, interface: String, laws: SpecLaws}
+                |  composed: {inherited: SpecMeta, wrapping: SpecMeta}
+                |  extension: {}
+
+So laws and composition never change a specification's type: `def twice(e:
+Extension<Nat>) -> Specification<Nat>: compose(e, e)` checks, and so does a spec with
+a law where `Specification<T>` is expected
+(`Compiler/ObjectiveBendSpecificationClosure.lean`). What reflection may observe, and
+why compose is associative for behaviour but not for `SpecMeta`, is
+[objective-bend/REFLECTION.md](objective-bend/REFLECTION.md).
 
 ## Subtraction, order, division, and `let`
 
