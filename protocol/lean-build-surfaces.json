@@ -530,7 +530,7 @@
     {
       "module": "Assurance.NativeAcceptedFixtureData",
       "path": "Assurance/NativeAcceptedFixtureData.lean",
-      "sha256": "d3ba10ccb24fb1d0af1b2573aaff3ebec6fe828e0f9a0bd4010d529247ca4235",
+      "sha256": "9e0246af8ccea6ce201107109caed5fb87e61e0e5dd1fccd1ee58ff250ac6743",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
