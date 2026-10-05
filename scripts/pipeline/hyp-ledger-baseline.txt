@@ -1,0 +1,6 @@
+Minidregg.Assurance.PrivateEvaluatorCustodyJoin.NativeBinding
+Minidregg.Kernel.GeneralSimplexReachability.AuditRefinement
+Minidregg.Kernel.GeneralSimplexReachability.LocalCommitOutputAttestations
+Minidregg.Kernel.GenericSimplexLocal.AuditExtension
+Minidregg.Kernel.GenericSimplexLocal.ViewLock
+Minidregg.Kernel.GenericSimplexVAInvariant.LocalFaithful

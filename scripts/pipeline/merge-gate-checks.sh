@@ -46,6 +46,23 @@ run website         python3 website/gen-status.py --check
 # Deployed + the census module only.
 run axiom-census    ${LAKE_WRAP:-nice -n 10} lake build AxiomCensus
 run objective-proofs bash scripts/check-objective-proofs.sh proofs
+# The hypothesis ledger over AxiomCensusResearch. Its [RED] families on main are a known
+# baseline (hyp-ledger-baseline.txt next to this script, ROOT 10-05: six toothless rows red on
+# clean 259a2fb0); a batch is RED here only for a [RED] family outside that baseline, a failed
+# self-test, or an instrument that did not run. KNOWN-RED is reported and does not count.
+ledger() {
+  local log="$L/gate-$TAG-hyp-ledger.log" s=$(date +%s) rc reds new st
+  ${LAKE_WRAP:-nice -n 10} lake build AxiomCensusResearch > "$L/gate-$TAG-hyp-ledger-build.log" 2>&1 \
+    || { echo "hyp-ledger RED (AxiomCensusResearch did not build)" | tee -a "$S"; red=$((red+1)); return; }
+  bash scripts/check-hypothesis-ledger.sh > "$log" 2>&1; rc=$?
+  reds=$(grep -aE '^[A-Za-z0-9_.]+ [|] [A-Z]+ [|] [A-Z]+ \[RED\]' "$log" | cut -d' ' -f1 | sort -u)
+  new=$(comm -23 <(printf '%s\n' "$reds" | sed '/^$/d') <(sort -u "$H/hyp-ledger-baseline.txt") | tr '\n' ' ')
+  if [ $rc = 0 ]; then st=PASS
+  elif [ -n "$reds" ] && [ -z "$new" ] && ! grep -aq 'self-test .*: FAIL' "$log"; then st="KNOWN-RED($(printf '%s\n' "$reds" | wc -l) baseline)"
+  else st="RED(new: ${new:-none}; self-test/instrument: see log)"; red=$((red+1)); fi
+  echo "hyp-ledger $st rc=$rc $(( $(date +%s) - s ))s :: $(grep -ac 'self-test .*: PASS' "$log") self-tests pass" | tee -a "$S"
+}
+ledger
 python3 "$H/rust-rows.py" "$SRC" "$FROM" "$TO" "$B/tmp-rust-rows-$TAG.sh" > "$L/gate-$TAG-rust-rows.txt" 2>&1 || { echo "rust-rows RED (selector failed)" | tee -a "$S"; red=$((red+1)); }
 cat "$L/gate-$TAG-rust-rows.txt"
 run rust-rows       ${LAKE_WRAP:-} bash "$B/tmp-rust-rows-$TAG.sh"
