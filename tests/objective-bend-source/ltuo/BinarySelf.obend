@@ -1,0 +1,25 @@
+edition ObjectiveBend 1
+# LTUO probe W10 (LT2 acceptance). A binary method over the FUTURE self: Heavier is
+# F-bounded (its Self bound mentions Self) and is closed at two different records, Node
+# and ColoredNode, without edits. It can return self or other, never a fabricated Self.
+
+record Node:
+  weight: Nat
+  heavier(other: Node) -> Node
+record ColoredNode:
+  weight: Nat
+  color: Nat
+  heavier(other: ColoredNode) -> ColoredNode
+
+spec Heavier[Self has {weight: Nat, heavier(other: Self) -> Self}, Super has {weight: Nat}]:
+  def heavier(other: Self) -> Self:
+    if other.weight <= self.weight then self else other
+
+def node(n: Nat) -> Node:
+  fix(Heavier, {weight: n})
+
+def colored(n: Nat, c: Nat) -> ColoredNode:
+  fix(Heavier, {weight: n, color: c})
+
+def pick() -> Nat:
+  node(3n).heavier(node(5n)).weight + colored(2n, 7n).heavier(colored(1n, 9n)).color

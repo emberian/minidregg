@@ -275,7 +275,7 @@
   "owner": "LT6"
  },
  {
-  "name": "W09-FourthField",
+  "name": "C09-ConcreteSelfStaysClosed",
   "modules": [
    {
     "name": "FourthField",
@@ -284,14 +284,56 @@
   ],
   "entry": "wOfFive",
   "arguments": [],
-  "prediction": "REFUSED: yesterday's AddY names the concrete self XYZ, not a future row containing x",
+  "prediction": "REFUSED: AddY names the concrete self XYZ, so it does not compose under XYZW. Correct after LT2 as well: reuse is earned by the binder (W09b), not by loosening closed annotations",
   "current": {
    "status": "refused",
    "refusal": "typing refused"
   },
   "target": {
+   "status": "refused",
+   "refusal": "typing refused"
+  },
+  "owner": "control"
+ },
+ {
+  "name": "W09b-FourthFieldOpen",
+  "modules": [
+   {
+    "name": "FourthFieldOpen",
+    "source": "FourthFieldOpen.obend"
+   }
+  ],
+  "entry": "wOfFive",
+  "arguments": [],
+  "prediction": "design acceptance (LT2): an extension written over its assumptions survives a fourth field without edits",
+  "current": {
+   "status": "refused",
+   "refusal": "unsupported Objective Bend declaration"
+  },
+  "target": {
    "status": "finished",
    "value": "11"
+  },
+  "owner": "LT2"
+ },
+ {
+  "name": "W10-BinarySelf",
+  "modules": [
+   {
+    "name": "BinarySelf",
+    "source": "BinarySelf.obend"
+   }
+  ],
+  "entry": "pick",
+  "arguments": [],
+  "prediction": "design acceptance (LT2): an F-bounded binary method closes at two records (5 + 7)",
+  "current": {
+   "status": "refused",
+   "refusal": "unsupported Objective Bend declaration"
+  },
+  "target": {
+   "status": "finished",
+   "value": "12"
   },
   "owner": "LT2"
  },

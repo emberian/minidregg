@@ -1,0 +1,22 @@
+edition ObjectiveBend 1
+# LTUO probe W09b (LT2 acceptance, docs/objective-bend/MODULAR-TYPING.md). AddY is written
+# against what it USES: a future self with x, an inherited row with x. It provides
+# `Super with {y: Nat}`, preserving whatever else Super has. Yesterday it closed at XYZ;
+# today a collaborator adds w and reuses it at XYZW without editing it.
+
+record X:
+  x: Nat
+record XYZW:
+  x: Nat
+  y: Nat
+  z: Nat
+  w: Nat
+
+extension AddY[Self has {x: Nat}, Super has {x: Nat}](self: Self, super: Super) -> Super with {y: Nat}:
+  extend(super, {y: 2n * self.x})
+
+extension AddZW(self: XYZW, super: {x: Nat, y: Nat}) -> XYZW:
+  extend(super, {z: self.y, w: self.z + 1n})
+
+def wOfFive() -> Nat:
+  fix(compose(AddY, AddZW), {x: 5n}).w
