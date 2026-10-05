@@ -157,9 +157,10 @@ else
 for f in amy ben cal rhea; do
   mkdir -p -m 700 "$H/$f" "$H/$f/requests"
   ok setup "$f" "keygen mini.key"
-  operator setup "CUSTODY: copy $f's secret into the sponsor home" \
-    install -D -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/$f.key"
-  ok setup sponsor "enroll plan $f $f.key"
+  operator setup "CUSTODY: copy $f's secret into the sponsor home (enroll plan+seal sign with both keys)" \
+    sh -c 'install -d -m 0700 "$1" && install -m 0600 "$2" "$1/$3"' _ "$H/sponsor/keys" "$H/$f/keys/mini.key" "$f.key"
+  # The record commits to the newcomer's next key, and that key co-signs (keygen wrote both).
+  ok setup sponsor "enroll plan $f $f.key $(xxd -p -c 256 "$H/$f/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$f/keys/mini.key.next.cosign")"
   ok setup sponsor "enroll seal $f"
   ok setup sponsor "enroll submit $f"
   SUBJ[$f]=$(jq -r '.subject // empty' "$OUT")

@@ -2348,6 +2348,26 @@ def submitRenounceWith (config : Config) (opened : Opened config) (bytes : List 
     IO (Outcome × Disclosure) :=
   submitRenounceVia config.transport config opened bytes confirm
 
+/-- The named reason of a refused invocation. The all-holder audience gate
+(`DeclaredResourceController.checkTargetAudience`: some holder of the target's
+current epoch no longer stands) is `audienceTransition`; every other controller
+refusal is `operationRejected`, its typed `Reject` in the detail. Either is told
+only on a channel that established the requester's read authority (the dry run,
+op 130); a blind submission's frame stays `undisclosed`
+(`blind_audienceTransition_undisclosed`). -/
+def invokeRejection : DeclaredResourceController.Reject → RefusalReason
+  | .audience .transition => .audienceTransition
+  | _ => .operationRejected
+
+theorem invokeRejection_audienceTransition :
+    invokeRejection (.audience .transition) = .audienceTransition := rfl
+
+/-- Only the all-holder gate is named `audienceTransition`. -/
+theorem invokeRejection_eq_audienceTransition (reason : DeclaredResourceController.Reject) :
+    invokeRejection reason = .audienceTransition ↔ reason = .audience .transition := by
+  unfold invokeRejection
+  split <;> simp_all
+
 /-- The submission path, over the Store writer it is handed. The served path
 passes `config.transport` (`submitLoadedWith`); the dry run (`Host.DryRun`,
 op 130) passes a writer that never appends, so both run this one program. -/
@@ -2424,7 +2444,7 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
                   transport ResourceBirthCodec.rootBytes opened.durable intent))
               pure ObjectiveBendAuthenticatedInputs.oracle with
           | .replayed record => confirm .replayed record.transactionId record.event.event.eventId
-          | .rejected reason => return refused .operationRejected "invoke" s!"{repr reason}"
+          | .rejected reason => return refused (invokeRejection reason) "invoke" s!"{repr reason}"
           | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
           | .unavailable detail => return .unavailable detail.toUTF8.toList
           | .settlement result =>
@@ -2486,6 +2506,16 @@ theorem public_refusal_uniform (reason : RefusalReason) (phase detail : List UIn
     publicSubmissionOutcome (.refused reason phase detail leaf) =
       refused .undisclosed "admission" "request refused" := by
   cases reason <;> first | rfl | exact absurd rfl notTail
+
+/-- The all-holder gate's named refusal is still uniform on a blind submission. -/
+theorem blind_audienceTransition_undisclosed (phase detail : List UInt8) :
+    publicSubmissionOutcome (.refused .audienceTransition phase detail none) =
+      refused .undisclosed "admission" "request refused" :=
+  public_refusal_uniform .audienceTransition phase detail none (by decide)
+
+#assert_axioms invokeRejection_audienceTransition
+#assert_axioms invokeRejection_eq_audienceTransition
+#assert_axioms blind_audienceTransition_undisclosed
 
 /-- The submitter's view of a submission: uniform, except a renounce's gate
 refusal to its authenticated signer. -/

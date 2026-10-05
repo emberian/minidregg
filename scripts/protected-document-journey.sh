@@ -18,9 +18,10 @@ OWNER_HOME=${PD_OWNER_HOME:-$FIXTURE/h/amy}
 MEMBER_HOME=${PD_MEMBER_HOME:-$FIXTURE/h/ben}
 DOC=${PD_DOCUMENT:-pd-paper}
 CAT=${PD_CATALOG:-pd-paper-catalog}
-# Must name the actual source gate; unrelated law/stale/transport failures do
-# not satisfy this row. Override only for the common Host's precise spelling.
-ALL_HOLDER_REASON=${PD_ALL_HOLDER_REASON:-audience.*transition|transition.*audience}
+# The all-holder gate's own RefusalReason name (Compiler/RefusalReason.lean,
+# NativeHost.invokeRejection): unrelated law/stale/transport failures, and a
+# generic operation-rejected, do not satisfy this row.
+ALL_HOLDER_REASON=audience-transition
 AUTH_REASON='revoked|no-grant|noGrant|undisclosed|not.standing|unauthorized|authorization'
 for file in "$OWNER_WS/workspace.json" "$MEMBER_WS/workspace.json"; do
   [ -f "$file" ] || { echo "JPROTECTED-DOCS missing fixture: $file" >&2; exit 1; }
@@ -250,7 +251,13 @@ pull owner "$SD/before-blocked.txt"; seen owner "$SD/before-blocked-seen.json"
 line owner "doc append pd-blocked $DOC PROTECTED-DOCS-must-not-enter"
 if [ "$RC" = 0 ]; then
   row 'owner prepares fresh protected bytes against revoked holder' "$OUT"
-  refused owner 'submit pd-blocked' "$ALL_HOLDER_REASON"
+  # A blind submission names no reason (NativeHost.public_refusal_uniform). The
+  # owner reads the document, so `why` dry-runs the same intent (op 130, gated on
+  # the owner's signed observation) and that verdict names the gate.
+  refused owner 'submit pd-blocked' 'undisclosed'
+  ok owner 'why pd-blocked --json'
+  check 'blind refusal is the all-holder gate, named by the read-authorized dry run' \
+    jq -e --arg r "$ALL_HOLDER_REASON" '.reason == "undisclosed" and .dryRun.reason == $r' "$OUT"
 else
   grep -Eiq -- "$ALL_HOLDER_REASON" "$ERR" || fail 'fresh owner bytes did not reach the all-holder refusal'
   row 'Host authoring refuses fresh bytes for revoked roster holder' "$ERR"
