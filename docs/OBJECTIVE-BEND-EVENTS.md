@@ -11,13 +11,13 @@ Evidence classes as in [OBJECTIVE-BEND.md](OBJECTIVE-BEND.md): *authored*,
 *compiled*, *executed*, *integrated*, *deployed*. The language half below is compiled
 and, where it says so, executed in the clear preview. The kernel half, which persists
 an activity and delivers its responses, is [below](#the-kernel-activity): compiled and
-proved in Lean on main, with the stored checkpoint's transparency executed by a gate.
-**No native route reaches it on main**: `Kernel.ObjectiveActivity`, `Kernel.AnswerSlot`,
-`Kernel.ObjectRecord` and `Kernel.ObjectState` are not in the Host closure
-(`scripts/gates/host-closure.pin` lists only `Kernel.ObjectiveActivityCell` of
-them), so no Host operation births, delivers to or writes an activity, and no activity
-has run on a native Host. In flight: ACTIVITY-ROUTE (the receiver and Host ops),
-RETENTION-PAYERS, UPGRADE, CHECKPOINT-INVARIANT, FORCING-TRANSPARENT, SCHOLAR-CALLS.
+proved in Lean on main, with the stored checkpoint's transparency executed by a gate,
+and **integrated on scratch worlds**: every turn is a signed native command
+(`Kernel/ObjectiveActivityReceiver`, Host operations 210-214 plan/assemble/submit/lookup/view,
+`mini activity`), exercised by `native/resource-client/objective-activity-native-acceptance.py`
+and `objectrecord-native-journey.py` (journey rows `activity` and `objectrecord`). Not
+deployed. Not built: see [Not on main](#not-on-main) and
+[ROADMAP-STATUS](objective-bend/ROADMAP-STATUS.md).
 
 ## In the source
 
@@ -351,10 +351,12 @@ loaded Book, so every turn conserves every asset: `Birth.conserves` (`:1303`),
   what the purse still holds of it) to the collector and returns the rest of the purse to
   the payer. `abandon_returns_escrow` (`:2842`), `abandon_closes_open_slot` (`:2859`),
   `Abandonment.spends` (`:2873`), `abandon_delivery_exclusive` (`:2882`).
-- **A program fault.** A resumed segment that diverges or refuses commits `faulted`
-  (`runSegment`, `:761-762`), but a malformed Plan or an unextractable result is a refusal
-  of the turn (`decodePlan`, `:714`; `planExtraction`, `resultExtraction`), which leaves
-  the activity parked at its yield. Lane SCHOLAR-CALLS is in flight on that wedge.
+- **A program fault.** A resumed segment whose program faults (it diverges or refuses,
+  yields a malformed Plan or out-of-bounds patience, or ends with an unextractable result)
+  commits `faulted` and returns the unused escrow; it never refuses the turn and so never
+  parks the activity at its yield (`resumedSegment_never_refuses_program_fault`,
+  `Kernel/ObjectiveActivity.lean:1154`; `3573afaf`). Tick exhaustion is a fault only at the
+  turn cap.
 
 ### Objects and their law
 
@@ -370,8 +372,10 @@ refuses the whole turn and names the failing clause (`WriteRefusal`, `:194-199`)
 commits and the activity stays at its yield. Proved for the three writers of the state
 cell: `Birth.write_judged` (`Kernel/ObjectiveActivity.lean:2904`), `Delivery.write_judged`
 (`:2915`), `StateWrite.write_judged` (`:2925`), `writeState_refuses_lawless` (`:2958`).
-These are statements about this module's own turns; the receiver that would be the only
-writer of the state cell does not exist on main. The law sees the value, not the write
+The state cell has registry role `objectiveActivity`, whose one named writer is the
+activity receiver (`Compiler/CanonicalCellRegistry.lean:218`, judged by the Receiver since
+`77df1dec`), and that receiver writes only activity cells and the Book
+(`intent_writes_activity_or_book`, `Kernel/ObjectiveActivityReceiver.lean:724`). The law sees the value, not the write
 version or the declared type: typing a write at a declared state type
 ([Kernel/ObjectStateType](../Kernel/ObjectStateType.lean): a strict `Ty` codec, closed
 first-order typing `typedAt` and value subtyping `stateSubtype`) is defined but no turn
@@ -382,10 +386,9 @@ built (lane UPGRADE).
 
 ### Not on main
 
-The native signed route (Host ops, `mini` verbs, the receiver) and its acceptance
-(`scripts/pipeline/journey-rows:66-78` runs one when a driver exists; none does); a
-storage charge for packages and checkpoints (the payer is recorded; lane RETENTION-PAYERS);
-upgrade dispositions; sends, inboxes and `message` awaits; the turn gate every turn goes
+A storage charge for packages and checkpoints (the payer is recorded; lane RETENTION-PAYERS);
+upgrade dispositions; synchronous calls into another object and sends, inboxes and
+`message` awaits (lane OB-ROADMAP); the turn gate every turn goes
 through (CHECKPOINT-INVARIANT); the object's law pinned to its package at birth
 ([the laws pin](OBJECTIVE-BEND.md#which-code-wrote-the-objectiveartifact-slot-and-the-package-pin)).
 

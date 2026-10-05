@@ -1255,9 +1255,9 @@ tutorial did not run these items.
 
 Roadmap, in the guide's order:
 
-1. A native route for activities. The kernel's turns (persist the checkpoint,
-   resume with a typed response and a view of the object's state) are built and
-   proved, but no Host operation reaches them yet.
+1. Calls and sends between objects. The kernel's activity turns have a native
+   signed route (Host operations 210-214, `mini activity`), but no method can yet
+   call or send to another object.
 2. A guardedness check, so that a well-typed resident never diverges inside a
    turn.
 3. The theorem for declared ancestry. Declared ancestry with C4 linearization

@@ -121,18 +121,27 @@ Landed since this list was written: **sums with case** (`inject`, `case`,
 a type, an effect never inside a forced shared thunk, and a checkpoint codec with a
 proved round trip; [activities and events](OBJECTIVE-BEND-EVENTS.md)) and its kernel
 half (persisted records, answer slots, the resume contract, resume with a view of the
-object's state, paid exhaustion and disposal; compiled and proved, no native route yet),
+object's state, paid exhaustion and disposal) **with its native signed route** (every turn
+a signed command, `Kernel/ObjectiveActivityReceiver`, Host operations 210-214, `mini
+activity`; integrated on scratch worlds by `objective-activity-native-acceptance.py` and
+`objectrecord-native-journey.py`, journey rows `activity` and `objectrecord`; `34d803f8`,
+`259a2fb0`), **the object record** (`de9c84f7`), **machine primitives** for `- / % < <=`
+(one step each; the `$prelude` is deleted; `0afaf7f2`, `606e4e17`), **deterministic deep
+evaluation** (`deepEvaluates_unique`, `1f812657`),
 **declared
 ancestry with C4 linearization and method combination** in the elaborator (`spec S
 extends A, B`, `suffix spec`, `around`, `combine`; a diamond's shared ancestor counts
 once; [front end](OBJECTIVE-BEND-FRONTEND.md#declared-ancestry-and-method-combination)),
 and **the package root as a specification**.
 
-1. **A native route for activities** (integration). The kernel's turns are built and
-   proved (publish, create, birth, resolve, deliver, exhaust, abandon, topUp, writeState;
-   [the kernel activity](OBJECTIVE-BEND-EVENTS.md#the-kernel-activity)), but no Host
-   operation reaches them: `Kernel.ObjectiveActivity` is not in the Host closure
-   (`scripts/gates/host-closure.pin`). In flight: ACTIVITY-ROUTE.
+Item-by-item status against the code, with commits and owners:
+[ROADMAP-STATUS](objective-bend/ROADMAP-STATUS.md).
+
+1. **Calls and sends between objects** (kernel). A synchronous `call` into another
+   object's pinned package on the turn's snapshot (writes deferred to frame return,
+   re-entry refused, authority over the call tree), then asynchronous sends with inboxes.
+   Nothing on main lets one object's method reach another object. In progress: lane
+   OB-ROADMAP.
 2. **A guardedness check** (typing). Every self-call of a resident under a perform,
    so that a well-typed resident never diverges inside a turn.
 3. **The theorem for declared ancestry** (proof; poof §4.3; ltuo §7.3–7.4, §9.2). The
@@ -218,7 +227,7 @@ calls `check` on the empty context and then `runBounded` on the same decoded ter
   stops a degenerate `Supported := fun _ => False` instance, so what makes the
   instance mean something is that `Supported` is the real admission predicate, which
   is a reading of the definition, not a theorem; the non-vacuity theorems are
-`lazyFixedSeed_supported_by_representation` and `open_term_not_started`. (The docstring on `Representation`, `Theory/ObjectiveBendOpenRecursion.lean:361-365`, still says "no instance is claimed here"; `coreRepresentation` at `Theory/ObjectiveBendDemandCompleteness.lean:1127` is the instance.)
+`lazyFixedSeed_supported_by_representation` and `open_term_not_started`. (The docstring on `Representation`, `Theory/ObjectiveBendOpenRecursion.lean:416-420`, still says "no instance is claimed here"; `coreRepresentation` at `Theory/ObjectiveBendDemandCompleteness.lean:1127` is the instance.)
 - **`OrderedPresentationInvariant`.** The C4 renaming-invariance statement is a `Prop`
   that nothing proves (see the roadmap).
 - **Front-end adequacy.** No theorem relates `.obend` source to the core term (see
@@ -346,10 +355,13 @@ Admission is by re-execution; no proof carrier gates anything ([ZK.md](ZK.md)).
 
 ### Objects, activities and seats
 
-The kernel also has a second family of Objective-adjacent modules, compiled and proved,
-that no native route reaches yet (`Kernel.ObjectiveActivity`, `Kernel.AnswerSlot`,
-`Kernel.ObjectRecord`, `Kernel.ObjectState`, `Kernel.Seat` and `Kernel.Invitation` are not
-in `scripts/gates/host-closure.pin`):
+The kernel also has a second family of Objective-adjacent modules. Activities and
+objects have a native signed route (`Kernel.ObjectiveActivity`, `Kernel.AnswerSlot`,
+`Kernel.ObjectRecord`, `Kernel.ObjectState` and the receiver
+`Kernel.ObjectiveActivityReceiver` are in `scripts/gates/host-closure.pin`; Host operations
+210-214, `mini activity`; **evidence class: integrated on scratch worlds**, the journey rows
+`activity` and `objectrecord`). Seats are compiled and proved but no native route reaches
+them (`Kernel.Seat`, `Kernel.Invitation` and `Kernel.ObjectStateType` are not in the pin):
 
 - **Activities** ([activities and events](OBJECTIVE-BEND-EVENTS.md#the-kernel-activity)):
   an activity is a persisted checkpoint plus an await; answer slots with one decider;
@@ -365,8 +377,13 @@ in `scripts/gates/host-closure.pin`):
   judged by the object's law** over the old and new state plus the request facts
   (`admitWrite`, `Kernel/ObjectRecord.lean:202`; `Birth.write_judged`,
   `Kernel/ObjectiveActivity.lean:2904`, `Delivery.write_judged`, `:2915`,
-  `StateWrite.write_judged`, `:2925`). Those statements are about this module's three
-  producers of the state cell; the receiver that would be its only writer is not on main.
+  `StateWrite.write_judged`, `:2925`). The declared-state cell is a registry cell of role
+  `objectiveActivity`, whose one named writer is the activity receiver
+  (`Kind.objectiveActivity.lawClass = .kernelOnly [.objectiveActivity]`,
+  `Compiler/CanonicalCellRegistry.lean:218`, judged by the Receiver since `77df1dec`); the
+  receiver writes only activity cells and the Book (`intent_writes_activity_or_book`,
+  `Kernel/ObjectiveActivityReceiver.lean:724`), and a native birth runs only the pinned
+  package (`native_birth_on_pinned_object`, `:795`).
 - **One shared tariff** (`Kernel/ObjectiveTariff.lean`, in the Host closure): the public
   price of a declared envelope, `Tariff.workOf` (`:49`), used by native admission (above)
   and by the activity kernel for every turn, so there is one shape for "what a declared
@@ -377,11 +394,14 @@ in `scripts/gates/host-closure.pin`):
 - **Seats and invitations** ([SEATS.md](SEATS.md)): offer safety as a law judged on every
   reallocation of a seat's Book balances, with an exit no contract clause can forbid.
 
-In flight (lane names): ACTIVITY-ROUTE (the signed route: receiver, Host ops, `mini`
-verbs), RETENTION-PAYERS (a storage charge for packages and checkpoints), UPGRADE (record
-v2: state type, upgrade turns), CHECKPOINT-INVARIANT (the turn gate), FORCING-TRANSPARENT,
-SCHOLAR-CALLS (a faulted resumed program), SEATS-NATIVE, LAWS-RECEIVER, W17-MACHINE-OPS
-(`- < <= > >= /` as O(1) machine steps) and W18-STEPRAW-LINEAR (`stepRaw` linear in the heap).
+Not built, by lane (status and commits in [ROADMAP-STATUS](objective-bend/ROADMAP-STATUS.md)):
+OB-ROADMAP (calls, then sends and inboxes), RETENTION-PAYERS activity half (a storage charge
+for packages and checkpoints; the Book half `c74f3120` landed), UPGRADE (record v2: state
+type, upgrade turns; wave 1 `ObjectStateType` landed, `4795b657`), CHECKPOINT-INVARIANT (the
+turn gate), FORCING-TRANSPARENT (the premise is still open), SEATS-NATIVE and W18-STEPRAW-LINEAR
+(`stepRaw` linear in the heap). Landed since this list was first written: the signed activity
+route, the program-fault liveness fix (`3573afaf`), the Receiver judging every written cell's
+law (`77df1dec`) and the machine primitives (W17).
 
 ### Which code wrote: the `objective/artifact` slot and the package pin
 
