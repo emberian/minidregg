@@ -176,12 +176,26 @@ row "after both thief attempts the subject is still at epoch 1 under the daily k
 
 # ---------------------------------------------------------------- the friend rotates
 old_next=$(sha256sum "$D/offline/friend.next" | cut -d' ' -f1)
+cp "$D/friend.key.next.pub" "$D/friend-next-before.pub"   # the key that becomes the daily key
+# The shell keeps the public half at KEY.pub (`keygen FILE`); this friend chose --public friend.pub,
+# so put the conventional copy beside the key too: the rotation must move it, not leave it stale.
+cp "$D/friend.pub" "$D/friend.key.pub"
 run frot1 "$MINI" rotate-key --workspace "$FW" --next-key "$D/offline/friend.next"
 row "the friend rotates with the committed next key" "admitted, epoch 2" \
   "rc=$(cat "$D/frot1.rc") epoch=$(jq -r .keyEpoch "$D/frot1.out" 2>/dev/null)" \
   "$([ "$(cat "$D/frot1.rc")" = 0 ] && [ "$(jq -r .keyEpoch "$D/frot1.out")" = 2 ] && echo 1 || echo 0)"
 [ "$(sha256sum "$D/offline/friend.next" | cut -d' ' -f1)" != "$old_next" ]
 row "the next-key file now holds the key after next" "replaced" "rotated" "$([ $? = 0 ] && echo 1 || echo 0)"
+# KEY.pub and KEY.next.cosign are derived from the pair: after the rotation they name the NEW daily
+# key (the old next) and co-sign the new pair. `enroll --action cosign` recomputes the co-signature
+# from the secrets and refuses a KEY.next.cosign that holds another one.
+pub_ok=0; cmp -s "$D/friend.key.pub" "$D/friend-next-before.pub" && pub_ok=1
+row "after the rotation KEY.pub names the new daily key (the old next key), not the old one" "equal" \
+  "$(xxd -p -c 64 "$D/friend.key.pub" 2>/dev/null || echo absent)" "$pub_ok"
+run fcosign "$MINI" enroll --action cosign --key "$D/friend.key" --next-key "$D/offline/friend.next"
+row "after the rotation KEY.next.cosign is the new pair's co-signature" "exit 0, same cosign" \
+  "rc=$(cat "$D/fcosign.rc")" \
+  "$([ "$(cat "$D/fcosign.rc")" = 0 ] && [ "$(jq -r .cosign "$D/fcosign.out")" = "$(xxd -p -c 128 "$D/friend.key.next.cosign")" ] && echo 1 || echo 0)"
 
 # An honest client of the OLD key refuses to build on a subject whose commitment
 # is no longer its next key (FIX-IDENTITY: every load re-checks).

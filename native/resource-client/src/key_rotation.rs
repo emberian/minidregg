@@ -276,6 +276,51 @@ pub(crate) fn public_file(path: &Path) -> Result<[u8; 32]> {
         })
 }
 
+/// The public half of a secret key file, by the keygen convention (KEY.pub).
+pub(crate) fn conventional_public(secret: &Path) -> PathBuf {
+    let mut name = secret.as_os_str().to_owned();
+    name.push(".pub");
+    PathBuf::from(name)
+}
+
+/// The derived public files of a daily key (KEY.pub, KEY.next.cosign) as they stand
+/// before a rotation, checked against the secrets they describe. A rotation that
+/// would leave a file naming a key pair it cannot verify refuses before the Host
+/// advances: it never overwrites a file it does not recognise.
+fn derived_public_priors(daily: &Path, next_public: &[u8; 32]) -> Result<(Value, Value)> {
+    let daily_public = key(daily)?.verifying_key().to_bytes();
+    let public_path = conventional_public(daily);
+    let public_prior = if public_path.exists() {
+        if public_file(&public_path)? != daily_public {
+            return Err(format!("{} does not name the public half of {}; refusing to rotate a key whose public file is not its own (restore it, or remove it and rotate)", public_path.display(), daily.display()));
+        }
+        json!(hex(&daily_public))
+    } else {
+        Value::Null
+    };
+    let cosign_path = conventional_next_cosign(daily);
+    let cosign_prior = if cosign_path.exists() {
+        let bytes: [u8; 64] = fs::read(&cosign_path)
+            .map_err(|e| format!("cannot read {}: {e}", cosign_path.display()))?
+            .try_into()
+            .map_err(|_| format!("{} must contain exactly 64 raw bytes", cosign_path.display()))?;
+        verify_cosign(&daily_public, next_public, &bytes)
+            .map_err(|e| format!("{}: {e}; refusing to rotate past a co-signature that is not this pair's", cosign_path.display()))?;
+        json!(hex(&bytes))
+    } else {
+        Value::Null
+    };
+    Ok((public_prior, cosign_prior))
+}
+
+fn retained_prior(state: &Value, field: &str) -> Result<Option<Vec<u8>>> {
+    match state.get(field) {
+        None => Err(format!("retained rotation lacks {field} (prepared by an older mini): finish it with that mini, or start another with --new-attempt ID")),
+        Some(Value::Null) => Ok(None),
+        Some(value) => Ok(Some(crate::decode_hex(value.as_str().ok_or_else(|| format!("retained {field} is not hex"))?)?)),
+    }
+}
+
 /// The public half of a secret key file's next key, by the keygen convention.
 pub(crate) fn conventional_next_public(secret: &Path) -> PathBuf {
     let mut name = secret.as_os_str().to_owned();
@@ -503,8 +548,14 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
         } else {
             None
         };
+        let (daily_public_prior, cosign_prior) = if named.is_none() {
+            derived_public_priors(&ws.key, &signer_public)?
+        } else {
+            (Value::Null, Value::Null)
+        };
         let prepared = json!({"type":"minidregg-retained-rotation-v2","binding":binding,"phase":"preparing","epoch":epoch.to_string(),"newEpoch":new_epoch.to_string(),
-            "keyId":key_id,"signerPublic":hex(&signer_public),"namedPublic":hex(&named_public),"destinationPrior":prior_destination,"publicPrior":prior_public,"manifestPrior":manifest});
+            "keyId":key_id,"signerPublic":hex(&signer_public),"namedPublic":hex(&named_public),"destinationPrior":prior_destination,"publicPrior":prior_public,
+            "dailyPublicPrior":daily_public_prior,"cosignPrior":cosign_prior,"manifestPrior":manifest});
         custody::publish(&state_path, &prepared, None)?;
         prepared
     };
@@ -740,6 +791,20 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
             prior_public.as_deref(),
             &after_public,
         )?;
+        // KEY.pub and KEY.next.cosign are derived from the pair just installed: the
+        // new daily key (the old next) and its new next key. Each is installed against
+        // its retained prior, so a crash here is finished by the same retained attempt.
+        let daily_public = key(&attempt.join("original-next.key"))?.verifying_key().to_bytes();
+        custody::install(
+            &conventional_public(&ws.key),
+            retained_prior(&state, "dailyPublicPrior")?.as_deref(),
+            &daily_public,
+        )?;
+        custody::install(
+            &conventional_next_cosign(&ws.key),
+            retained_prior(&state, "cosignPrior")?.as_deref(),
+            &cosign(&daily_public, &key(&after_path)?),
+        )?;
         let prior_manifest = state["manifestPrior"].clone();
         let mut updated = prior_manifest.clone();
         updated["prerotation"] = json!(true);
@@ -798,5 +863,41 @@ mod key_source_tests {
             .unwrap_err()
             .contains("explicitly upgrade"));
         check_rotation_plan(&old, &[1, 2], None).unwrap();
+    }
+
+    /// The derived public files are checked against the secrets before a rotation:
+    /// KEY.pub naming another key, or a co-signature over another pair, refuses.
+    #[test]
+    fn derived_public_priors_refuse_files_that_are_not_this_pair() {
+        use std::os::unix::fs::DirBuilderExt;
+        let dir = std::env::temp_dir().join(format!(
+            "mini-rot-derived-{}-{}",
+            std::process::id(),
+            hex(&crate::fsio::random::<8>().unwrap())
+        ));
+        std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        let daily = dir.join("k.key");
+        let daily_signing = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let next_signing = ed25519_dalek::SigningKey::from_bytes(&[9; 32]);
+        crate::create_private(&daily, &[7; 32]).unwrap();
+        let daily_public = daily_signing.verifying_key().to_bytes();
+        let next_public = next_signing.verifying_key().to_bytes();
+        // Neither file: nothing to check, both priors absent (install creates them).
+        assert_eq!(derived_public_priors(&daily, &next_public).unwrap(), (Value::Null, Value::Null));
+        crate::create_public(&conventional_public(&daily), &next_public).unwrap();
+        assert!(derived_public_priors(&daily, &next_public).is_err(), "KEY.pub of another key");
+        fs::remove_file(conventional_public(&daily)).unwrap();
+        crate::create_public(&conventional_public(&daily), &daily_public).unwrap();
+        let other = ed25519_dalek::SigningKey::from_bytes(&[11; 32]);
+        crate::create_public(&conventional_next_cosign(&daily), &cosign(&daily_public, &other)).unwrap();
+        assert!(derived_public_priors(&daily, &next_public).is_err(), "co-signature over another pair");
+        fs::remove_file(conventional_next_cosign(&daily)).unwrap();
+        let good = cosign(&daily_public, &next_signing);
+        crate::create_public(&conventional_next_cosign(&daily), &good).unwrap();
+        assert_eq!(
+            derived_public_priors(&daily, &next_public).unwrap(),
+            (json!(hex(&daily_public)), json!(hex(&good)))
+        );
+        fs::remove_dir_all(&dir).unwrap();
     }
 }
