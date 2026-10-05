@@ -1,0 +1,19 @@
+edition ObjectiveBend 1
+# D6 tooth: a recursive record is checked like any record. combine builds a Node without
+# its combine member: refused.
+
+record Node:
+  weight: Nat
+  combine(other: Node) -> Node
+
+spec Bad for Node:
+  def weight() -> Nat:
+    1n
+  def combine(other: Node) -> Node:
+    {weight: self.weight + other.weight}
+
+def leaf() -> Node:
+  fix(Bad, {weight: 0n, combine: fn(other: Node) -> Node: other})
+
+def two() -> Nat:
+  leaf().combine(leaf()).weight

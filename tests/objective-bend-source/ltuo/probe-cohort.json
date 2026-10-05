@@ -160,14 +160,35 @@
   "arguments": [],
   "prediction": "REFUSED: recursive row annotation requires explicit future-row binder (the elaborator records exactly this, but the user-visible diagnostic was the downstream 'parameter self has no resolvable type')",
   "current": {
-   "status": "refused",
-   "refusal": "recursive row annotation requires explicit future-row binder"
+   "status": "finished",
+   "value": "2"
   },
   "target": {
    "status": "finished",
    "value": "2"
   },
   "owner": "LT2"
+ },
+ {
+  "name": "D6a-RecursiveNodeIllTyped",
+  "modules": [
+   {
+    "name": "RecursiveNodeIllTyped",
+    "source": "RecursiveNodeIllTyped.obend"
+   }
+  ],
+  "entry": "two",
+  "arguments": [],
+  "prediction": "LT2 D6 tooth: a recursive record value missing a member is refused",
+  "current": {
+   "status": "refused",
+   "refusal": "typing refused"
+  },
+  "target": {
+   "status": "refused",
+   "refusal": "typing refused"
+  },
+  "owner": "control"
  },
  {
   "name": "W05-PartialSeed",

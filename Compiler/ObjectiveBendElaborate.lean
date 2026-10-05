@@ -666,10 +666,22 @@ def sourceType (c : Ctx) : Nat → String → String → List String → M (Opti
         modify fun s => { s with sumBounds := s.sumBounds ++ [(k, variant)] }
         return some (.variable k)
       return some variant
+    -- A record naming itself is a recursive type, like a recursive sum: every occurrence,
+    -- the outermost included, is one bounded variable whose bound is the record's row
+    -- (OB-LTUO LT2 D6). The checker unfolds one declared head (`sameType`).
     if seen.contains key then
-      typeError ("recursive row annotation requires explicit future-row binder: " ++ key); return none
+      let s ← get
+      let index ← match s.sumVariables.lookup key with
+        | some k => pure k
+        | none => do
+          let k := s.sumVariables.length + 1
+          modify fun s => { s with sumVariables := s.sumVariables ++ [(key, k)] }
+          pure k
+      return some (.variable index)
     let some (_, .record _ recordFields methods) := c.records.find? (·.1 == key)
       | do typeError ("unsupported source type " ++ name); return none
+    if let some k := (← get).sumVariables.lookup key then
+      if ((← get).sumBounds.lookup k).isSome then return some (.variable k)
     let mut row : List (String × PTy) := []
     let mut ok := true
     for (fieldName, fieldType) in recordFields do
@@ -680,7 +692,11 @@ def sourceType (c : Ctx) : Nat → String → String → List String → M (Opti
       match ← signatureTy c fuel method.params (.source method.resultType) moduleName (seen ++ [key]) with
       | some t => row := row ++ [(method.name, t)]
       | none => ok := false
-    return if ok then some (PTy.row row) else none
+    if !ok then return none
+    if let some k := (← get).sumVariables.lookup key then
+      modify fun s => { s with sumBounds := s.sumBounds ++ [(k, PTy.row row)] }
+      return some (.variable k)
+    return some (PTy.row row)
 
 def signatureTy (c : Ctx) : Nat → List Param → ResultSpec → String → List String → M (Option PTy)
   | 0, _, _, _, _ => fail "type resolution fuel"
@@ -1231,6 +1247,10 @@ def chainFix (c : Ctx) : Nat → List (String × Spec × Module) → Expr → Li
     for (_, s, sm) in chain do
       if !sameTy (← sourceType c fuel s.targetType sm.name []) (some target) then return none
     let some seedTy ← synth c fuel inherited env m | return none
+    -- A recursive record target (a bounded variable) keeps the closed lowering: the
+    -- checker's fix needs the chain's provided row to BE the target, and a row is not
+    -- the variable (it agrees with it only by one unfold).
+    if let .variable _ := target then return none
     if sameTy (some seedTy) (some target) || !isRowTy seedTy then return none
     let metaTy ← sourceType c fuel specMetaName builtinModuleName []
     let mut below := seedTy.canonical
@@ -1337,7 +1357,8 @@ def body (c : Ctx) : Nat → Body → List Binding → Module → M ATerm
 end
 
 def layer (c : Ctx) (fuel : Nat) (s : Spec) (m : Module) (group : String) : M ATerm := do
-  let selfSuper := selfSuperEnv (← sourceType c fuel s.targetType m.name [])
+  let target ← sourceType c fuel s.targetType m.name []
+  let selfSuper := selfSuperEnv target
   let mut methods : List (String × ATerm) := []
   for method in s.methods.filter (fun x => qualifierGroup x.qualifier == group) do
     let n := method.params.length
@@ -1350,7 +1371,19 @@ def layer (c : Ctx) (fuel : Nat) (s : Spec) (m : Module) (group : String) : M AT
         for i in List.range n do next := .app next (.bound (n - 1 - i))
         return .binary primitive own next) method.name (.source method.resultType) m.name
     methods := methods ++ [(method.name, value)]
-  abstract c fuel (selfSuperParams s) outerEnv (fun _ => pure (.extend (.bound 0) methods)) s.name (.source s.targetType) m.name
+  -- A recursive record target is a bounded variable: `extend` would keep the variable as
+  -- an open tail, which is not the record. Rebuild the record from its bound instead:
+  -- every field is the layer's method or the lazy `super.f` (same laziness as extend).
+  let bounds := (← get).sumBounds
+  let recursiveRow : Option PTy := match target with
+    | some (.variable k) => match bounds.lookup k with
+      | some row@(.field ..) => some row
+      | _ => none
+    | _ => none
+  let provided := match recursiveRow with
+    | some row => ATerm.record ((rowNames row).map fun f => (f, (methods.lookup f).getD (.get (.bound 0) f)))
+    | none => ATerm.extend (.bound 0) methods
+  abstract c fuel (selfSuperParams s) outerEnv (fun _ => pure provided) s.name (.source s.targetType) m.name
 
 def layerRef (c : Ctx) (key group : String) : M ATerm := do
   let some (s, _) := specOf c key | fail ("internal: unknown spec " ++ key)

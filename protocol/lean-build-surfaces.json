@@ -2378,7 +2378,7 @@
     {
       "module": "Compiler.ObjectiveBendElaborate",
       "path": "Compiler/ObjectiveBendElaborate.lean",
-      "sha256": "9933dfb7a165eec147e045f1cc724d24eddba035736f086694340ba648492fa0",
+      "sha256": "315759c79f6bf51393ddf261b9c781581e2e4c3ab8efb40deee9b50d1cc148d0",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
