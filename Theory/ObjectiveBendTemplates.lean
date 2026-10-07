@@ -1023,7 +1023,7 @@ theorem Discharges.infer_instantiate : ∀ fuel : Nat,
         have l1 : later'.result = first'.type := by rw [laterResult, firstType, same]
         simp only [inferArms, Option.bind_eq_bind, found', Option.bind_some, dif_pos s1, firstTyped', dif_pos u1,
           laterTyped', dif_pos l1]
-        exact ⟨_, sorry
+        exact ⟨_, sorrysorry
 
 
 end
