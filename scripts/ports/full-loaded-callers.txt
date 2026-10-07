@@ -54,6 +54,8 @@ scripts/durable-receiver.lean
 scripts/kn2/history-tamper.lean
 # PROBE (KN2-NEUTRAL-BIRTHS): the executed neutral-birth plant boots a native Store through the full open; the birth receiver it drives is still full-shaped (cv 01a1163e-62a7)
 scripts/kn2/neutral-birth.lean
+# PROBE (KN2-NEUTRAL-BIRTHS cluster 4): boots a native Store through the full open, then installs through the light submit path
+scripts/kn2/neutral-birth-install.lean
 scripts/kn2/port-b-tamper.lean
 scripts/kn2/receipt-tamper.lean
 scripts/native-accepted-fixture/replay.lean

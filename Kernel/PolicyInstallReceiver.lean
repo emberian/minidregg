@@ -198,6 +198,9 @@ inductive Reject where
   /-- The ground has no answer for the operation marker's replay nullifier (a light
   basis that did not declare it): refused before any state is read, never "unspent". -/
   | undeclaredMarker
+  /-- A birth write of the installation that its admitted step does not name
+  (`ReceivingLaw.namesBirth`): the successor source must be the one the old law judged. -/
+  | neutralBirthUnjudged (cell : Nat)
   deriving DecidableEq, Repr
 
 private def require (condition : Prop) [Decidable condition] (reason : Reject) :
@@ -388,6 +391,9 @@ structure AcceptedInstall (profile : CanonicalRuntimeProfile.Profile F) (deploym
   lawGuardsExact : dependencyGuards prepared semantic = some lawGuards
   lawGuardsBound : lawGuards.all (fun guard =>
     decide (guard.2 = ground.view.model.roots ⟨guard.1⟩)) = true
+  /-- Every birth write the installation commits (its successor source) is named by
+  the step the old source's law admitted. -/
+  named : ResourceBirthController.Concrete.Named prepared.semantic.step prepared.writes
 
 /-- Admission on a ground. The marker's spent bit is answered declared and
 unspent by `prepare` before the native verifier reads the authority's spent set
@@ -418,8 +424,12 @@ def admitDecodedNative (profile : CanonicalRuntimeProfile.Profile F) (deployment
                 | some guards =>
                     if bound : guards.all (fun guard =>
                         decide (guard.2 = ground.view.model.roots ⟨guard.1⟩)) = true then
-                      return .ok ⟨ingress, prepared, receipt, envelopeExact, semantic, admitted,
-                        guards, guardsExact, bound⟩
+                      match ResourceBirthController.Concrete.checkNamed prepared.semantic.step
+                          prepared.writes with
+                      | .error cell => return .error (.neutralBirthUnjudged cell)
+                      | .ok named =>
+                          return .ok ⟨ingress, prepared, receipt, envelopeExact, semantic, admitted,
+                            guards, guardsExact, bound, named.down⟩
                     else return .error .lawDependencies
           else return .error .envelopeMismatch
 
@@ -544,6 +554,31 @@ def intent (accepted : AcceptedInstall profile deployment ground federation heig
   subject := some accepted.ingress.ingress.subject
   postRootsBound := accepted.prepared.write_roots_bound
   guardsReadOnly := accepted.readGuards_readonly
+
+/-- **The installation's committed birth is named and judged**: every write of the
+intent that creates its cell (the successor policy source) is named by the install
+step, and the OLD source's committed law, resolved at the ground, accepts that step. -/
+theorem intent_births_named (accepted : AcceptedInstall profile deployment ground federation height) :
+    (∀ write ∈ (intent accepted).writes, ResourceBirthController.Concrete.bornIn write = true →
+        ReceivingLaw.namesBirth accepted.prepared.semantic.step write = true) ∧
+      ∃ graph : PolicyComponentResolution.LoadedGraph
+          (accepted.prepared.semantic.policyConfig (payloadStore ground)).snapshot
+          (accepted.prepared.semantic.policyConfig (payloadStore ground)).store
+          (accepted.prepared.semantic.policyConfig (payloadStore ground)).profile.semantics
+          (accepted.prepared.semantic.policyConfig (payloadStore ground)).target
+          (accepted.prepared.semantic.policyConfig (payloadStore ground)).additional,
+        PolicyComponentResolution.loadTarget
+            (accepted.prepared.semantic.policyConfig (payloadStore ground)).snapshot
+            (accepted.prepared.semantic.policyConfig (payloadStore ground)).store
+            (accepted.prepared.semantic.policyConfig (payloadStore ground)).profile.semantics
+            (accepted.prepared.semantic.policyConfig (payloadStore ground)).target
+            (accepted.prepared.semantic.policyConfig (payloadStore ground)).resolutionBudget
+            (accepted.prepared.semantic.policyConfig (payloadStore ground)).additional = .ok graph ∧
+        Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
+          accepted.prepared.semantic.step.oldState accepted.prepared.semantic.step.newState = true :=
+  ⟨accepted.named, ComposedPolicyAdmission.authorized_effective_law _ _ accepted.semantic.authorization⟩
+
+#assert_axioms intent_births_named
 
 theorem intent_exact_source (accepted : AcceptedInstall profile deployment ground federation height) :
     (intent accepted).writes = accepted.prepared.writes ∧
