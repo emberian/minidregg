@@ -188,10 +188,14 @@ try:
         allowance and storage deposit)."""
         return w.quoted[label][1]
 
+    PROBE_ALLOWANCE = 10 ** 8  # a quote's allowance: room for every onward send, so its sends are deliverable
+
     def quoted_stamp(label, name, method, args, loads=1):
         """A row whose ARGUMENTS name its postage price (an allowance sized in messages, a hop's price) quotes
-        first: the postage's front end depends on the target methods only, never on these amounts."""
-        w.quote_front_end(label, w.sponsor, invoke_body(name, method, args, loads=loads))
+        first, with PROBE_ALLOWANCE in the arguments and the request: the postage's front end depends on the
+        target methods only, never on these amounts. (A quote whose send were refused `notDeliverable`, an
+        allowance covering no onward send, would report no root load: that refusal comes before the postage.)"""
+        w.quote_front_end(label, w.sponsor, invoke_body(name, method, args, allowance=PROBE_ALLOWANCE, loads=loads))
         return stamp(label)
 
     def deliver(label, sender, target, message, expect, detail=None):
@@ -555,8 +559,9 @@ try:
 
     with w.group('S14-continue'):
         how = 'bounce2' if 'bounce-twice' in plants else 'bounce'
-        # the delivery checks its onward send on its own postage: two loads
-        P = quoted_stamp('s14-relay', 'relayer', 'relayA', relay_a('counter', how, int(O['counter']), 0), loads=2)
+        # the delivery checks its onward send on its own postage: two loads, but the onward target (deposit)
+        # lowers a slightly larger core than the root (bounce), so the row declares the room of three
+        P = quoted_stamp('s14-relay', 'relayer', 'relayA', relay_a('counter', how, int(O['counter']), PROBE_ALLOWANCE), loads=3)
         A = P + P // 2
         c0 = total('counter', 's14-c0')
         start = inbox('relayer', 'counter', 's14-start')
@@ -594,7 +599,7 @@ try:
                 and inbox('counter', 'counter', 's14-cc2')['purse'] == cc0['purse'], None)
 
     with w.group('S15-exceed'):
-        P = quoted_stamp('s15-relay', 'relayer', 'relayA', relay_a('counter', 'bounce2', int(O['counter']), 0), loads=3)
+        P = quoted_stamp('s15-relay', 'relayer', 'relayA', relay_a('counter', 'bounce2', int(O['counter']), PROBE_ALLOWANCE), loads=3)
         A = 2 * (P + P // 4) if 'roomy-allowance' in plants else P + P // 2  # roomy: two onward sends and their deposits
         c0 = total('counter', 's15-c0')
         start = inbox('relayer', 'counter', 's15-start')
@@ -628,7 +633,7 @@ try:
 
     with w.group('S16-fanout'):
         how = 'bounce4' if 'fan-four' in plants else 'bounce5'
-        P = quoted_stamp('s16-relay', 'relayer', 'relayA', relay_a('counter', how, int(O['counter']), 0), loads=6)
+        P = quoted_stamp('s16-relay', 'relayer', 'relayA', relay_a('counter', how, int(O['counter']), PROBE_ALLOWANCE), loads=6)
         A = 6 * P
         start = inbox('relayer', 'counter', 's16-start')
         cc0 = inbox('counter', 'counter', 's16-cc0')
@@ -650,7 +655,7 @@ try:
 
     with w.group('S17-depth'):
         # each hop's delivery checks its onward hop on its own postage: two loads
-        P = quoted_stamp('s17-hop', 'relayer', 'hop', record(target=nat(O['hopper']), price=nat(0), allowance=nat(0),
+        P = quoted_stamp('s17-hop', 'relayer', 'hop', record(target=nat(O['hopper']), price=nat(0), allowance=nat(PROBE_ALLOWANCE),
                                                              reserve=nat(0)), loads=2)
         A = 3 * P if 'short-chain' in plants else 10 * P
         R = P // 4  # each hop's reserve for its onward message's storage deposit
@@ -689,7 +694,7 @@ try:
     with w.group('S18-cancel'):
         bare = 'cancel-bare' in plants
         target = 'deposit' if bare else 'bounce'
-        P = quoted_stamp('s18-relay', 'relayer', 'relayA', relay_a('counter', target, int(O['counter']), 0), loads=2)
+        P = quoted_stamp('s18-relay', 'relayer', 'relayA', relay_a('counter', target, int(O['counter']), PROBE_ALLOWANCE), loads=2)
         A = 0 if bare else P + P // 2
         body = invoke_body('relayer', 'relayA', relay_a('counter', target, int(O['counter']), A), allowance=A)
         body.update({k: w.quote_bodies['s18-relay'][k] for k in ('opId', 'envelope', 'postage')})

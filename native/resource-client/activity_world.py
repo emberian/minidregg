@@ -431,7 +431,7 @@ class World:
         kind = value.get('type')
         reason = value.get('reason', '')
         text = unhex(value.get('detail', '')) if 'detail' in value else value.get('error', '')
-        if expect in ('charged', 'prepared') and value.get('verdict'):
+        if expect in ('charged', 'prepared', 'installed') and value.get('verdict'):
             # A charged failure commits (the price, nothing else) and confirms; what it failed for is the plan's
             # verdict (`charged failure: <reason>`), which a prepared turn also reports before it is submitted.
             text = value.get('verdict')
