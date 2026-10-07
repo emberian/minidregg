@@ -56,6 +56,10 @@ sum Ref:
 record Found:
   result: Ref
   write: Write
+record Relay:
+  target: Nat
+  method: String
+  amount: Nat
 # A leaf: adds `amount` and returns the new total.
 def deposit(view: View, amount: Nat) -> Activity<PlanN, Returned, Return>:
   {result: view.state.total + amount, write: {total: EditNat.add(amount)}}
@@ -86,3 +90,20 @@ def lookup(view: View, unused: Nat) -> Activity<PlanN, Returned, Found>:
 def chase(view: View, p: Post) -> Activity<PlanS, Queued, Return>:
   match perform(PlanS.send({to: To.slot(p.target), method: "deposit", args: p.amount})):
     case queued(q): {result: q.slot, write: {total: EditNat.keep()}}
+# Row F, the interface check: a method whose Plan admits `send` cannot be delivered (a
+# delivered message has no paying account for onward sends), so a send naming it is
+# refused `notDeliverable` AT THE SEND, before any postage is escrowed.
+def bounce(view: View, n: Nat) -> Activity<PlanS, Queued, Return>:
+  match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+    case queued(q): {result: q.slot, write: {total: EditNat.keep()}}
+# Sends `method(amount)` to `target`: any method name, Nat arguments.
+def relay(view: View, r: Relay) -> Activity<PlanS, Queued, Return>:
+  match perform(PlanS.send({to: To.object(r.target), method: r.method, args: r.amount})):
+    case queued(q): {result: q.slot, write: {total: EditNat.keep()}}
+# Pipelined: asks `target` to look up an object and sends `method(amount)` to the REPLY;
+# whether that method is deliverable is decided when the reply resolves (refunded if not).
+def relayVia(view: View, r: Relay) -> Activity<PlanS, Queued, Return>:
+  match perform(PlanS.send({to: To.object(r.target), method: "lookup", args: 0n})):
+    case queued(first):
+      match perform(PlanS.send({to: To.slot(first.slot), method: r.method, args: r.amount})):
+        case queued(second): {result: first.slot, write: {total: EditNat.keep()}}
