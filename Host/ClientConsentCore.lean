@@ -1,6 +1,6 @@
 /- Local full-peer consent process. Settings and executable are selected by
 local custody. The operator supplies proposed frames only. History is admitted
-before the first consent frame, never for a pure codec frame: from genesis, or,
+before the first full-peer consent frame: from genesis, or,
 when custody offers its retained anchor (frame 228) first, natively after that
 anchor once the Store is shown to extend it (`Kernel.ConsentAnchor`). Later
 frames admit only the exact new suffix (`DurableReceiverIO.extendFrom`). Frame
@@ -192,27 +192,12 @@ def loadSettings (path : System.FilePath) : IO Settings := do
   IO.ofExcept settings.checkJointConsensus
   pure settings
 
-def splitKind (payload : List UInt8) : IO (String × List UInt8) := do
-  unless payload.length ≥ 2 do throw (RequestRefusal.malformed "short native host kind frame")
-  let width := payload[0]!.toNat + 256 * payload[1]!.toNat
-  unless width > 0 && width ≤ payload.length - 2 do
-    throw (RequestRefusal.malformed "invalid native host kind length")
-  let some kind := String.fromUTF8? (payload.drop 2 |>.take width).toByteArray
-    | throw (RequestRefusal.malformed "native host kind is not UTF-8")
-  return (kind, payload.drop (2 + width))
-
 def splitPair (payload : List UInt8) : IO (List UInt8 × List UInt8) := do
   unless payload.length ≥ 4 do throw (RequestRefusal.malformed "short native host pair frame")
   let width := payload[0]!.toNat + 256 * payload[1]!.toNat +
     65536 * payload[2]!.toNat + 16777216 * payload[3]!.toNat
   unless width ≤ payload.length - 4 do throw (RequestRefusal.malformed "invalid native host pair length")
   return ((payload.drop 4).take width, payload.drop (4 + width))
-
-def decodeSignatures (bytes : List UInt8) : IO (List (List UInt8)) := do
-  let signaturesCodec := ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful
-  let some signatures := signaturesCodec.decode bytes
-    | throw (RequestRefusal.malformed "noncanonical signature list")
-  return signatures
 
 def maxFrame : Nat := FnEvidenceCodec.maxHostFrameBytes
 
@@ -254,39 +239,6 @@ def withPinnedSignature {α : Type} (config : NativeHost.Config)
     body { config with signature := ⟨pinned⟩ }
 
 
-
-def codec (config : NativeHost.Config) (operation : UInt8) (payload : List UInt8) : IO (List UInt8) := do
-  match operation with
-  | 7 =>
-      let (kind, source) ← splitKind payload
-      let some text := String.fromUTF8? source.toByteArray
-        | throw (RequestRefusal.malformed "native host author source is not UTF-8")
-      let json ← RequestRefusal.clientBytes (SourceAgreementJson.parse text)
-      return ← RequestRefusal.clientBytes (SourceAgreementJson.author kind json (some config))
-  | 8 =>
-      let (kind, source) ← splitKind payload
-      let value ← RequestRefusal.clientBytes (SourceAgreementJson.inspect kind source)
-      return value.compress.toUTF8.toList
-  | 9 =>
-      let some text := String.fromUTF8? payload.toByteArray
-        | throw (RequestRefusal.malformed "native host signatures source is not UTF-8")
-      let json ← RequestRefusal.clientBytes (SourceAgreementJson.parse text)
-      return ← RequestRefusal.clientBytes (SourceAgreementJson.signatures json)
-  | 10 =>
-      let (challengeBytes, signaturesBytes) ← splitPair payload
-      let some challenge := NativeObservationCodec.challengeCodec.decode challengeBytes
-        | throw (RequestRefusal.malformed "noncanonical observation challenge")
-      let signatures ← decodeSignatures signaturesBytes
-      let signed ← RequestRefusal.clientBytes (NativeObservationCodec.assemble challenge signatures)
-      return NativeObservationCodec.signedCodec.encode signed
-  | 11 =>
-      let (planBytes, signaturesBytes) ← splitPair payload
-      let some plan := signingPlanCodec.decode planBytes
-        | throw (RequestRefusal.malformed "noncanonical signing plan")
-      let signatures ← decodeSignatures signaturesBytes
-      let call ← RequestRefusal.clientBytes (NativeHost.assemble plan signatures)
-      return callCodec.encode call
-  | _ => throw (IO.userError "not a local codec operation")
 
 /-- The retained proof is updated only by independent native admission. The
 physical Store/MAC is merely an input reader, never a semantic trust source.
@@ -520,8 +472,11 @@ def objectiveHeaders (extraObjective : ExtraObjective) (settings : Settings)
   pure (headersBytes headers)
 
 /-- Frame 228 offers custody's retained anchor before the first admission;
-frame 229 returns the anchor of the current admission. Pure codec frames
-(7–11) and thin consent frames (230–232) admit nothing. Every other frame first admits the Store (`verifyInitial`
+frame 229 returns the anchor of the current admission. Possession (226) is a
+function of the retained command and the configuration, and thin consent
+frames (230–232) read no Store: they admit nothing. This process serves no
+codec frames: the one pure codec implementation is the Host's storeless
+`codec` loop (`Host.Main.serveCodec`). Every other frame first admits the Store (`verifyInitial`
 once, then `refresh`); a failed admission terminates the provider, so no cached
 success survives an observed rollback, rewritten prefix, or failed suffix. -/
 partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjective) (settings : Settings)
@@ -535,13 +490,9 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
   let body ← readExactly input length
   let operation := body[0]!
   let payload := body.toList.drop 1
-  if operation ≥ 7 && operation ≤ 11 then
-    let answer ← try pure (operation, ← codec config operation payload)
-      catch error => pure (255, error.toString.toUTF8.toList)
-    writeSessionFrame output answer.1 answer.2
-    serve extraExpected extraObjective settings config retained held input output
-  else if operation ≥ 230 && operation ≤ 232 then
-    let answer ← try pure (operation, ← thin config operation payload)
+  if operation ≥ 230 && operation ≤ 232 || operation == 226 then
+    let answer ← try pure (operation, ← if operation == 226 then possession config payload
+        else thin config operation payload)
       catch error => pure (255, error.toString.toUTF8.toList)
     writeSessionFrame output answer.1 answer.2
     serve extraExpected extraObjective settings config retained held input output
@@ -575,7 +526,6 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
       else pure (none, admitted)
     let answer ← try pure (operation, ← if operation == 224 then
         specialized extraExpected settings config updated full payload
-      else if operation == 226 then possession config payload
       else if operation == 227 then objectiveHeaders extraObjective settings config updated payload
       else consent config updated operation payload)
       catch error => pure (255, error.toString.toUTF8.toList)

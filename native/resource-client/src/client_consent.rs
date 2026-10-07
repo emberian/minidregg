@@ -298,8 +298,8 @@ pub(crate) fn configured_record()->Result<Option<Value>> {
     pin_record(&value)?;Ok(Some(value))
 }
 
-/// The full-peer provider also serves its own pure native codecs. This keeps
-/// retained authoring, inspection and assembly on the exact consent source.
+/// With local consent selected, retained authoring, inspection and assembly go
+/// through the local Host's storeless codec loop (`local_frame`).
 pub(crate) fn codec_process(host:&Path,config:&Path,args:&[&OsStr])->Result<Option<Output>> {
     if PINS.get().is_none() && std::env::var_os("MINI_CONSENT_HOST").is_none(){return Ok(None);}
     let verb=args.first().and_then(|s|s.to_str()).ok_or("missing local codec command")?;
@@ -552,8 +552,10 @@ pub(crate) fn codec_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->R
 }
 
 /// Full native pure codec authority is selected independently of the remote
-/// operator. Specialized grammars remain authored/decoded by that real image.
-/// This process never receives keys, and these operations never mutate source.
+/// operator: the local Host image's storeless `codec` loop (`Host.Main.serveCodec`)
+/// answers frames 7-11 and never opens a Store, so a member's own machine needs
+/// none. This process never receives keys, and these operations never mutate
+/// source.
 fn local_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u8>> {
     let executable=pure_host(host)?;
     let settings=PINS.get().map(|pins|pins.config.clone())
@@ -561,7 +563,7 @@ fn local_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u
         .unwrap_or_else(||config.to_path_buf());
     if !settings.is_absolute(){return Err("local native settings must be absolute".into());}
     let settings_bytes=crate::fsio::read_bounded_or_empty(&settings, CAP)?;
-    let mut child=Command::new(&executable).arg(&settings).arg("stdio")
+    let mut child=Command::new(&executable).arg(&settings).arg("codec")
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit())
         .spawn().map_err(|e|format!("cannot start local native codec: {e}"))?;
     let input=child.stdin.take().ok_or("local codec stdin missing")?;

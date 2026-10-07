@@ -131,13 +131,13 @@ sponsor() { ssh -F "$SPONSOR_TERM/config" sponsor-box "$1"; }
 friend_ssh() { ssh -F "$LAPTOP/.ssh/config" box "$@"; }
 FMINI=$LAPTOP/bin/mini                 # the friend's own copy of the client
 install -m 0500 "$MINI" "$FMINI"
-# The friend's laptop holds its own consent provider (also its local pure-codec
-# authority, MINI_LOCAL_HOST), its own Host image (only as the portable
-# `join --welcome --verifier`) and credential verifier, and a consent config
-# naming only laptop paths and NO Store. A remote member cannot replay the box's
-# history, so it signs through thin consent (MINI_THIN_CONSENT=1). Any frame
-# that admits a Store fails loudly on the absent one; nothing on the laptop
-# reads a box file.
+# The friend's laptop holds its own Host image (its local pure-codec authority,
+# MINI_LOCAL_HOST, run as the storeless `codec` loop, and the portable
+# `join --welcome --verifier`), its own consent provider and credential
+# verifier, and a consent config naming only laptop paths and NO Store. A remote
+# member cannot replay the box's history, so it signs through thin consent
+# (MINI_THIN_CONSENT=1). Any frame that admits a Store fails loudly on the
+# absent one; nothing on the laptop reads a box file.
 install -m 0500 "$HOST" "$LAPTOP/bin/minidregg-host"
 install -m 0500 "$(dirname "$HOST")/minidregg-client-consent" "$LAPTOP/bin/minidregg-client-consent"
 install -m 0500 "$VERIFIER" "$LAPTOP/bin/minidregg-credential-signature-verifier"
@@ -145,7 +145,7 @@ jq --arg none "$LAPTOP/no-store" --arg verifier "$LAPTOP/bin/minidregg-credentia
   '.storageRoot = $none | .storageBinary = $none | .signatureBinary = $verifier | .checkpointKey = null' \
   "$CONFIG" >"$LAPTOP/consent.json" || die "laptop consent config"
 fmini() {
-  MINI_SSH=$LAPTOP/bin/ssh MINI_THIN_CONSENT=1 MINI_LOCAL_HOST=$LAPTOP/bin/minidregg-client-consent \
+  MINI_SSH=$LAPTOP/bin/ssh MINI_THIN_CONSENT=1 MINI_LOCAL_HOST=$LAPTOP/bin/minidregg-host \
     MINI_CONSENT_HOST=$LAPTOP/bin/minidregg-client-consent MINI_CONSENT_CONFIG=$LAPTOP/consent.json \
     MINI_CONSENT_ANCHOR_DIR=$LAPTOP/.consent-anchors "$FMINI" "$@"
 }
