@@ -818,7 +818,7 @@ theorem Invocation.escrows_every_send {rootBytes : Bytes → Digest} {config : C
         invoked.journal.outbox.length * config.tariff.workOf request.postage + outboxAllowance invoked.journal.outbox +
           (invoked.journal.outbox.map fun out => (messageOf config request.postage request.account 0 out).deposit).sum ∧
       outboxAllowance invoked.journal.outbox ≤ request.allowance := by
-  obtain ⟨len, sum⟩ := postMail_credits request.postage request.account 0 invoked.journal.outbox Mail.empty
+  obtain ⟨len, sum⟩ := postMail_credits request.postage request.account 0 invoked.journal.outbox (Mail.start invoked.journal.meter)
     invoked.sent invoked.sentExact
   rw [(postControls_credits height _ _ _ invoked.mailExact).1]
   have each : ∀ (outs : List Outgoing),
@@ -833,8 +833,8 @@ theorem Invocation.escrows_every_send {rootBytes : Bytes → Digest} {config : C
       simp only [messageOf, Inbox.Message.escrow, outboxAllowance] at ⊢ ih
       rw [Nat.succ_mul]; omega
   refine ⟨?_, ?_, invoked.allowanceCovered⟩
-  · rw [len]; simp [Mail.empty]
-  · rw [sum, each]; simp [Mail.empty]
+  · rw [len]; simp [Mail.start]
+  · rw [sum, each]; simp [Mail.start]
 
 /-- **An inbox the mail holds stays within `Inbox.bound`** when the inbox the turn read
 was (a fresh inbox, read as nothing, always is). -/
@@ -1024,6 +1024,7 @@ theorem continueMessage_credits {rootBytes : Bytes → Digest} {config : Config}
   · exact ⟨by simp, Nat.zero_le _, by omega, fun same => absurd rfl same⟩
   · exact ⟨by simp, Nat.zero_le _, by omega, fun same => absurd rfl same⟩
   · obtain ⟨len, sum⟩ := postMail_credits _ _ _ _ _ _ posted
+    simp only at len sum
     exact ⟨by rw [sum]; rfl, within, by omega, fun _ => shallow⟩
 
 /-- The flows of a delivery out of its purse, payee and amount: the onward sends' and the

@@ -240,7 +240,10 @@ theorem Meter.Reaches.within {envelope : Capacity} {m : Meter} (reached : Meter.
   | refl => simp [Meter.start, Meter.source, Meter.core]
   | draw _ drawn ih =>
     obtain ⟨r, c, _, w⟩ := Meter.draw_ok drawn
-    exact ⟨r ▸ ih.2.2.1 ▸ w.1, c ▸ ih.2.2.2 ▸ w.2, r.trans ih.2.2.1, c.trans ih.2.2.2⟩
+    obtain ⟨_, _, r0, c0⟩ := ih
+    have r' := r.trans r0
+    have c' := c.trans c0
+    exact ⟨r' ▸ w.1, c' ▸ w.2, r', c'⟩
 
 /-- An instance: two replays of a 10-byte package with a 4-byte core fit a budget of 20 source
 and 8 core bytes; a third is refused naming the source stage with nothing left. -/

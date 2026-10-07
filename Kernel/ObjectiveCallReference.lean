@@ -218,9 +218,10 @@ theorem exec_enter_reference {rootBytes : Bytes → Digest} {config : Config} {s
     {journal : Journal} {ticks : Nat} {result : Data} {journal' : Journal} {left : Nat}
     (ran : exec config snapshot height authority turn (fuel + 1) stack (.enter call) journal ticks =
       .ok (result, journal', left)) :
-    ∃ (pin : Digest) (view : ObjectState) (program : Method config pin call.method (viewData view) call.args),
-      loadMethod config call.target.value (packageBytes config snapshot pin) pin call.method (viewData view) call.args =
-        .ok program ∧
+    ∃ (pin : Digest) (view : ObjectState) (program : Method config pin call.method (viewData view) call.args)
+      (meter meter' : ObjectiveWorkAccount.Meter),
+      loadMethod config call.target.value (packageBytes config snapshot pin) pin call.method (viewData view) call.args
+        meter = .ok (program, meter') ∧
       ∃ more out write, (∀ r ∈ more, FrameResponse r) ∧
         observe config.planBudget (initial program.applied.erase) more = .ret out ∧
         decodeReturn call.target.value call.method out = .ok (result, write) := by
@@ -248,12 +249,13 @@ theorem exec_enter_reference {rootBytes : Bytes → Digest} {config : Config} {s
             rw [object, method] at decoded
             exact ⟨more, out, write, each, by simpa using observed, decoded⟩
           cases loaded : loadMethod config call.target.value (packageBytes config snapshot entry.record.activePin)
-              entry.record.activePin call.method (viewData view) call.args with
+              entry.record.activePin call.method (viewData view) call.args journal1.meter with
           | error reason =>
             simp only [loaded] at ran
             split at ran <;> (try dsimp only at ran) <;> (try split at ran) <;> simp at ran
-          | ok program =>
-            refine ⟨entry.record.activePin, view, program, loaded, ?_⟩
+          | ok pm =>
+            obtain ⟨program, meter⟩ := pm
+            refine ⟨entry.record.activePin, view, program, journal1.meter, meter, loaded, ?_⟩
             simp only [loaded] at ran
             split at ran <;> (try dsimp only at ran) <;> (try split at ran) <;> (try dsimp only at ran) <;>
               first
@@ -264,9 +266,11 @@ theorem exec_enter_reference {rootBytes : Bytes → Digest} {config : Config} {s
 theorem runMessage_reference {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height target : Nat} {message : Inbox.Message} {result : Data} {journal : Journal}
     (ran : ObjectiveSend.runMessage config snapshot height target message = .replied result journal) :
-    ∃ (args : Data) (pin : Digest) (view : ObjectState) (program : Method config pin message.method (viewData view) args),
+    ∃ (args : Data) (pin : Digest) (view : ObjectState) (program : Method config pin message.method (viewData view) args)
+      (meter meter' : ObjectiveWorkAccount.Meter),
       decodeDataBytes message.args = some args ∧
-      loadMethod config target (packageBytes config snapshot pin) pin message.method (viewData view) args = .ok program ∧
+      loadMethod config target (packageBytes config snapshot pin) pin message.method (viewData view) args meter =
+        .ok (program, meter') ∧
       ∃ more out write, (∀ r ∈ more, FrameResponse r) ∧
         observe config.planBudget (initial program.applied.erase) more = .ret out ∧
         decodeReturn target message.method out = .ok (result, write) := by
@@ -284,8 +288,8 @@ theorem runMessage_reference {rootBytes : Bytes → Digest} {config : Config} {s
         | zero => rw [fuel] at executed; simp [exec] at executed
         | succ n =>
           rw [fuel] at executed
-          obtain ⟨pin, view, program, loaded, rest⟩ := exec_enter_reference executed
-          exact ⟨args, pin, view, program, decoded, loaded, rest⟩
+          obtain ⟨pin, view, program, meter, meter', loaded, rest⟩ := exec_enter_reference executed
+          exact ⟨args, pin, view, program, meter, meter', decoded, loaded, rest⟩
       · cases ran
 
 /-- **(f) A message delivery's reply is the reference's**: when the delivery decided
@@ -295,10 +299,10 @@ theorem messageDelivery_reference {rootBytes : Bytes → Digest} {config : Confi
     (delivery : ObjectiveSend.MessageDelivery config snapshot height request) {result : Data} {journal : Journal}
     (replied : delivery.outcome = .replied result journal) :
     ∃ (args : Data) (pin : Digest) (view : ObjectState)
-      (program : Method config pin delivery.message.method (viewData view) args),
+      (program : Method config pin delivery.message.method (viewData view) args) (meter meter' : ObjectiveWorkAccount.Meter),
       decodeDataBytes delivery.message.args = some args ∧
       loadMethod config request.target (packageBytes config snapshot pin) pin delivery.message.method (viewData view)
-        args = .ok program ∧
+        args meter = .ok (program, meter') ∧
       ∃ more out write, (∀ r ∈ more, FrameResponse r) ∧
         observe config.planBudget (initial program.applied.erase) more = .ret out ∧
         decodeReturn request.target delivery.message.method out = .ok (result, write) :=
