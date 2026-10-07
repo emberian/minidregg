@@ -37,18 +37,18 @@ structure RawEvidence (config : Config) where
   receiptTransaction : receipt.transactionId = record.transactionId
   receiptEvent : receipt.eventId = record.event.eventId
   sourceExact :
-    ∃ (original : Durable)
+    ∃ (original : DeclaredResourceController.Ground config.deployment)
       (prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
-        ⟨config.federation, logicalHeight config original⟩ original command)
+        ⟨config.federation, config.genesisHeight + original.height⟩ original command)
       (shape : DeclaredResourceController.PhysicalShape prepared)
       (accepted : DeclaredResourceController.AcceptedInvocation prepared signed),
       record = DurableReceiver.IntentRecord.ofIntent (accepted.dataIntent shape)
 
-def RawEvidence.fromAccepted (config : Config) (original : Durable)
+def RawEvidence.fromAccepted (config : Config) (original : DeclaredResourceController.Ground config.deployment)
     (command : DeclaredResourceController.Command)
     (signed : DeclaredResourceController.SignedCommand)
     (prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
-      ⟨config.federation, logicalHeight config original⟩ original command)
+      ⟨config.federation, config.genesisHeight + original.height⟩ original command)
     (shape : DeclaredResourceController.PhysicalShape prepared)
     (accepted : DeclaredResourceController.AcceptedInvocation prepared signed)
     (record : DurableReceiver.IntentRecord) (receipt : NativeHostCodec.Receipt)
@@ -77,11 +77,11 @@ structure ReservedEvidence (config : Config) where
   capability : CapabilityId
   observe : CapabilityId
   sourceExact :
-    ∃ (original : Durable)
+    ∃ (original : DeclaredResourceController.Ground config.deployment)
       (command : DeclaredResourceController.Command)
       (signed : DeclaredResourceController.SignedCommand)
       (prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
-        ⟨config.federation, logicalHeight config original⟩ original command)
+        ⟨config.federation, config.genesisHeight + original.height⟩ original command)
       (shape : DeclaredResourceController.PhysicalShape prepared)
       (accepted : DeclaredResourceController.AcceptedInvocation prepared signed),
       command.subject = context.payerSubject ∧
@@ -96,13 +96,13 @@ structure ReservedEvidence (config : Config) where
       context.reserveAmount ≤ beforeState.remaining ∧
       record = DurableReceiver.IntentRecord.ofIntent (accepted.dataIntent shape)
 
-def ReservedEvidence.fromAccepted (config : Config) (original : Durable)
+def ReservedEvidence.fromAccepted (config : Config) (original : DeclaredResourceController.Ground config.deployment)
     (context : Context) (beforeState : AgentGrain.State) (beforeRoot : Digest)
     (capability observe : CapabilityId)
     (command : DeclaredResourceController.Command)
     (signed : DeclaredResourceController.SignedCommand)
     (prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
-      ⟨config.federation, logicalHeight config original⟩ original command)
+      ⟨config.federation, config.genesisHeight + original.height⟩ original command)
     (shape : DeclaredResourceController.PhysicalShape prepared)
     (accepted : DeclaredResourceController.AcceptedInvocation prepared signed)
     (record : DurableReceiver.IntentRecord)
@@ -147,12 +147,12 @@ def RawEvidence.bindContext {config : Config} (raw : RawEvidence config)
                 if chargeBound : context.maximumCharge ≤ context.reserveAmount then
                   if allowance : context.reserveAmount ≤ raw.beforeState.remaining then
                     let sourceExact :
-                        ∃ (original : Durable)
+                        ∃ (original : DeclaredResourceController.Ground config.deployment)
                           (command : DeclaredResourceController.Command)
                           (signed : DeclaredResourceController.SignedCommand)
                           (prepared : DeclaredResourceController.PreparedInvocation
                             config.deployment config.profile
-                            ⟨config.federation, logicalHeight config original⟩
+                            ⟨config.federation, config.genesisHeight + original.height⟩
                             original command)
                           (shape : DeclaredResourceController.PhysicalShape prepared)
                           (accepted : DeclaredResourceController.AcceptedInvocation prepared signed),
