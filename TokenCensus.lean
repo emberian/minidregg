@@ -145,21 +145,23 @@ def conclusionHead (type : Expr) : Option Name :=
 def conclusionArgs (type : Expr) : List Name :=
   type.getForallBody.getAppArgs.toList.filterMap fun arg => arg.getAppFn.constName?
 
-/-- `cast`-like applications in an expression and the type each produces. -/
-partial def castTargets (expr : Expr) : List Name :=
-  let here : List Name :=
-    match expr.getAppFn.constName?, expr.getAppArgs with
-    | some ``cast, args => (args[1]?.bind fun t => t.getAppFn.constName?).toList
-    | some ``unsafeCast, args => (args[1]?.bind fun t => t.getAppFn.constName?).toList
-    | some ``Eq.mp, args => (args[1]?.bind fun t => t.getAppFn.constName?).toList
-    | some ``Eq.mpr, args => (args[0]?.bind fun t => t.getAppFn.constName?).toList
-    | _, _ => []
-  match expr with
-  | .app f a => here ++ castTargets f ++ castTargets a
-  | .lam _ t b _ | .forallE _ t b _ => castTargets t ++ castTargets b
-  | .letE _ t v b _ => castTargets t ++ castTargets v ++ castTargets b
-  | .mdata _ e | .proj _ _ e => castTargets e
-  | _ => here
+/-- The `cast`-like constants: each produces a value of a type it is told. -/
+def castLike : List Name := [``cast, ``unsafeCast, ``Eq.mp, ``Eq.mpr]
+
+/-- `cast`-like applications in an expression and the head of the type each
+produces (visited once per shared subterm). -/
+def castTargets (expr : Expr) : MetaM (Array Name) := do
+  let found ← IO.mkRef (#[] : Array Name)
+  expr.forEach fun sub => do
+    let target? := match sub.getAppFn.constName?, sub.getAppArgs with
+      | some ``cast, args => args[1]?
+      | some ``unsafeCast, args => args[1]?
+      | some ``Eq.mp, args => args[1]?
+      | some ``Eq.mpr, args => args[0]?
+      | _, _ => none
+    if let some target := target? then
+      if let some head := target.getAppFn.constName? then found.modify (·.push head)
+  found.get
 
 /-- The names a row's note justifies as bare minters (`mints: a, b`). -/
 def justifiedMinters (note : String) : List Name :=
@@ -238,13 +240,15 @@ elab "#assert_token_census " table:ident : command => do
                 faults := faults.push s!"{name} in {module}: a {cls} instance mints the L2 token {type} without its constructor"
       -- casts into an L2 type
       if let some value := info.value? then
-        let targets := (castTargets value).filter fun type => (l2Types.find? type).isSome
-        unless targets.isEmpty do
-          unless info matches .thmInfo _ do
-            unless ← isProp info.type do
-              for type in targets.eraseDups do
-                if l2Home type != some module then
-                  faults := faults.push s!"{name} in {module} casts into the L2 token {type}"
+        let used := info.getUsedConstantsAsSet
+        if castLike.any used.contains && (used.toList.any fun c => (l2Types.find? c).isSome) then
+          let targets := (← castTargets value).toList.filter fun type => (l2Types.find? type).isSome
+          unless targets.isEmpty do
+            unless info matches .thmInfo _ do
+              unless ← isProp info.type do
+                for type in targets.eraseDups do
+                  if l2Home type != some module then
+                    faults := faults.push s!"{name} in {module} casts into the L2 token {type}"
       -- bare minters at home
       if let .defnInfo _ := info then
         unless isInstanceCore env name do
