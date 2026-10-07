@@ -47,12 +47,16 @@ Minidregg.Compiler.CarriedSegmentIO.PreservedPrefix.mk | Compiler.CarriedSegment
 Minidregg.Compiler.CredentialAuthorityDomainReceiver.Loaded.mk | Compiler.CredentialAuthorityDomainReceiver | evidence | L2 | 5 proof / 1 data fields; layer-1 review pending
 Minidregg.Compiler.CredentialAuthorityDomainReceiver.LoadedDirectory.mk | Compiler.CredentialAuthorityDomainReceiver | evidence | L2 | 2 proof / 1 data fields; layer-1 review pending
 Minidregg.Compiler.CredentialAuthorityDomainReceiver.PreparedGrantBatch.mk | Compiler.CredentialAuthorityDomainReceiver | evidence | L2 | 0 proof / 2 data fields; layer-1 review pending
+Minidregg.Compiler.CredentialAuthorityServed.ServedAuthority.mk | Compiler.CredentialAuthorityServed | evidence | L2 | an authority snapshot served from a verified open (kn2-store-open ii); layer-1 review pending
+Minidregg.Compiler.CredentialAuthorityServed.ServedDirectory.mk | Compiler.CredentialAuthorityServed | evidence | L2 | a directory served from a verified open (kn2-store-open ii); layer-1 review pending
 Minidregg.Compiler.CredentialSignatureAdmission.CheckedSignature.mk | Compiler.CredentialSignatureAdmission | evidence | L2 | 2 proof / 6 data fields; layer-1 review pending
 Minidregg.Compiler.CredentialSignatureAdmission.ReceiverSignature.mk | Compiler.CredentialSignatureAdmission | evidence | L2 | a voucher erased to a value a Prepared record can hold; the oracle verdict it carries is a runtime fact
 Minidregg.Compiler.DurableHistory.Head.mk | Compiler.DurableHistory | evidence | L2 | a verified history head of an opened Store; a genesis head asserts every nullifier and tx id absent; mints: Head.genesis
 Minidregg.Compiler.DurableHistory.RawEntry.mk | Compiler.DurableHistory | encapsulation | L2 | a raw history entry as stored; trusted only after Head.verify checks it at use (kn2-store-open)
 Minidregg.Compiler.DurableHistory.RawNode.mk | Compiler.DurableHistory | encapsulation | L2 | a raw accumulator node as stored; trusted only after Head.verify checks it at use (kn2-store-open)
 Minidregg.Compiler.DurableHistory.StoreIdentity.mk | Compiler.DurableHistory | evidence | L2 | the identity of an opened Store; minted only by the open (kn2-store-open); mints: StoreIdentity.ofOpen
+Minidregg.Compiler.DurableServed.Served.mk | Compiler.DurableServed | evidence | L2 | the served Store open (kn2-store-open ii); layer-1 review pending
+Minidregg.Compiler.DurableServed.Start.mk | Compiler.DurableServed | evidence | L2 | the served Store open's start state (kn2-store-open ii); layer-1 review pending
 Minidregg.Compiler.GenericSimplexIO.VerifiedCommit.mk | Compiler.GenericSimplexIO | evidence | L2 | 4 proof / 1 data fields; layer-1 review pending
 Minidregg.Compiler.GrainResourceBirthAuthority.Prepared.mk | Compiler.GrainResourceBirthAuthority | evidence | L2 | 3 proof / 2 data fields; layer-1 review pending
 Minidregg.Compiler.GrainResourceBirthController.PreparedSourceAuthority.mk | Compiler.GrainResourceBirthController | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
@@ -288,6 +292,7 @@ Minidregg.Kernel.NativeHostReplay.SuffixWalked.mk | Kernel.NativeHostReplay | ev
 Minidregg.Kernel.NativeHostReplay.Verified.mk | Kernel.NativeHostReplay | evidence | L2 | 3 proof / 16 data fields; layer-1 review pending
 Minidregg.Kernel.NativeHostReplay.VerifiedSelection.mk | Kernel.NativeHostReplay | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.NativeHostReplay.Walked.mk | Kernel.NativeHostReplay | evidence | L2 | 1 proof / 16 data fields; layer-1 review pending
+Minidregg.Kernel.NativeHostServed.OpenedServed.mk | Kernel.NativeHostServed | evidence | L2 | the Host's served open (kn2-store-open ii); layer-1 review pending
 Minidregg.Kernel.NativeObservationController.AuthorizedIntent.mk | Kernel.NativeObservationController | evidence | L2 | 2 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.NativeObservationController.CheckedGrant.mk | Kernel.NativeObservationController | evidence | L2 | 2 proof / 4 data fields; layer-1 review pending
 Minidregg.Kernel.NativeObservationController.Selected.mk | Kernel.NativeObservationController | evidence | L2 | 5 proof / 2 data fields; layer-1 review pending
@@ -296,6 +301,7 @@ Minidregg.Kernel.ObjectiveActivity.Abandonment.mk | Kernel.ObjectiveActivity | e
 Minidregg.Kernel.ObjectiveActivity.Abort.mk | Kernel.ObjectiveActivityUpgrade | evidence | L2 | upgrade-turns (DEPUTY-OB-ENG): proof fields mirror the admitting checks per its audit; L1 theorem pending from OB-ENG
 Minidregg.Kernel.ObjectiveActivity.Adoption.mk | Kernel.ObjectiveActivityUpgrade | evidence | L2 | upgrade-turns (DEPUTY-OB-ENG): proof fields mirror the admitting checks per its audit; L1 theorem pending from OB-ENG
 Minidregg.Kernel.ObjectiveActivity.Birth.mk | Kernel.ObjectiveActivity | evidence | L2 | 15 proof / 11 data fields; layer-1 review pending
+Minidregg.Kernel.ObjectiveActivity.BirthPrefix.mk | Kernel.ObjectiveActivity | evidence | L2 | DEPUTY-OB-ENG type; layer-1 review pending (OB-ENG)
 Minidregg.Kernel.ObjectiveActivity.Creation.mk | Kernel.ObjectiveActivity | evidence | L2 | 3 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Delivery.mk | Kernel.ObjectiveActivity | evidence | L2 | 23 proof / 20 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Exhaustion.mk | Kernel.ObjectiveActivity | evidence | L2 | 20 proof / 15 data fields; layer-1 review pending
@@ -308,6 +314,8 @@ Minidregg.Kernel.ObjectiveActivity.Publication.mk | Kernel.ObjectiveActivity | e
 Minidregg.Kernel.ObjectiveActivity.Rebirth.mk | Kernel.ObjectiveActivityUpgrade | evidence | L2 | upgrade-turns (DEPUTY-OB-ENG): proof fields mirror the admitting checks per its audit; L1 theorem pending from OB-ENG
 Minidregg.Kernel.ObjectiveActivity.Replay.mk | Kernel.ObjectiveActivity | evidence | L2 | 4 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Resolution.mk | Kernel.ObjectiveActivity | evidence | L2 | 5 proof / 3 data fields; layer-1 review pending
+Minidregg.Kernel.ObjectiveActivity.ResumeHead.mk | Kernel.ObjectiveActivity | evidence | L2 | DEPUTY-OB-ENG type; layer-1 review pending (OB-ENG)
+Minidregg.Kernel.ObjectiveActivity.ResumeTail.mk | Kernel.ObjectiveActivity | evidence | L2 | DEPUTY-OB-ENG type; layer-1 review pending (OB-ENG)
 Minidregg.Kernel.ObjectiveActivity.TopUp.mk | Kernel.ObjectiveActivity | evidence | L2 | 3 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.TypedData.mk | Kernel.ObjectiveActivity | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivityReceiver.Accepted.mk | Kernel.ObjectiveActivityReceiver | evidence | L2 | 2 proof / 2 data fields; layer-1 review pending
@@ -416,8 +424,8 @@ Minidregg.Theory.ReactiveCellTransition.Accepted.mk | Theory.ReactiveCellTransit
 Minidregg.Theory.ReceiptEvent.mk | Theory.AcceptedCellEffect | evidence | L2 | 5 proof / 10 data fields; layer-1 review pending
 Minidregg.Theory.Receiving.Receiver.Accepted.mk | Theory.Receiving | evidence | L1 Minidregg.Theory.Receiving.Receiver.Accepted.sound | carries `admits`: prepared under covering vouchers, shape and laws passed; the vouchers are L2
 Minidregg.Theory.Receiving.Vouchers.mk | Theory.Receiving | evidence | L2 | the claims the Receiver's verifier answered true on; an oracle (IO) verdict no proof expresses; minted only by Receiver.admitVia; mints: Vouchers.empty (vouches for nothing)
-restrict | Minidregg.Compiler.DurableHistory.Head.genesis | Compiler.DurableHistoryStore, Compiler.DurableReceiverIO | a genesis head for a non-empty Store is a replay bypass: only the open mints one
-restrict | Minidregg.Compiler.DurableHistory.StoreIdentity.ofOpen | Compiler.DurableHistoryStore, Compiler.DurableReceiverIO | a Store identity comes only from the open
+restrict | Minidregg.Compiler.DurableHistory.Head.genesis | Compiler.DurableHistoryStore, Compiler.DurableReceiverIO, Compiler.DurableServed | a genesis head for a non-empty Store is a replay bypass: only the open mints one
+restrict | Minidregg.Compiler.DurableHistory.StoreIdentity.ofOpen | Compiler.DurableHistoryStore, Compiler.DurableReceiverIO, Compiler.DurableServed | a Store identity comes only from the open
 "
 
 end Minidregg.TokenCensus
