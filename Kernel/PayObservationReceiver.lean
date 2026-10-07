@@ -831,7 +831,7 @@ theorem intent_spends {laws : ReceivingLaw.Laws Durable} {m : Type → Type}
     (o : Observation) (member : o ∈ ingress.command.observations) :
     nullifier deployment.domain o ∈
       (((family deployment profile).receiver laws oracle).intent accepted).nullifiers :=
-  List.mem_append_left _ (List.mem_map_of_mem member)
+  List.mem_append_left _ (List.mem_append_left _ (List.mem_map_of_mem member))
 
 /-- An admitted report spends its tip's tick nullifier. -/
 theorem intent_spends_tick {laws : ReceivingLaw.Laws Durable} {m : Type → Type}
@@ -839,7 +839,7 @@ theorem intent_spends_tick {laws : ReceivingLaw.Laws Durable} {m : Type → Type
     (accepted : ((family deployment profile).receiver laws oracle).Accepted ambient durable ingress) :
     tickNullifier deployment.domain ingress.command.tip ∈
       (((family deployment profile).receiver laws oracle).intent accepted).nullifiers :=
-  List.mem_append_right _ (List.mem_singleton_self _)
+  List.mem_append_left _ (List.mem_append_right _ (List.mem_singleton_self _))
 
 /-- An admitted report writes retained chain evidence, the clock and the Book. -/
 theorem intent_writes {laws : ReceivingLaw.Laws Durable} {m : Type → Type}
