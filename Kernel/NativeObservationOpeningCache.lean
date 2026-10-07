@@ -68,7 +68,8 @@ def queryResultUsing {deployment : CanonicalCellRegistry.Deployment} {F : Type} 
     {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation genesisHeight intent)
-    (opening : OpeningProvider) (history : Durable) (bound : context.sourceImage = some history.image) :
+    (opening : OpeningProvider) (history : Durable) (bound : context.sourceImage = some history.image)
+    (past : Past) :
     Except RefusalReason (List UInt8) := do
   let .query query := intent.purpose | throw .malformed
   match query.view with
@@ -86,19 +87,20 @@ def queryResultUsing {deployment : CanonicalCellRegistry.Deployment} {F : Type} 
         else pure (resourceScopeViewCodec.encode
           (grant.kind, grant.capability.value, stored.head.scope.fields, view))
       else throw .malformed
-  | _ => accepted.queryResult history bound
+  | _ => accepted.queryResultWith history bound past
 
 theorem queryResultUsing_exact {deployment : CanonicalCellRegistry.Deployment} {F : Type} [Field F] [DecidableEq F]
     {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation genesisHeight intent)
-    (opening : OpeningProvider) (history : Durable) (bound : context.sourceImage = some history.image) :
-    queryResultUsing accepted opening history bound = accepted.queryResult history bound := by
+    (opening : OpeningProvider) (history : Durable) (bound : context.sourceImage = some history.image)
+    (past : Past) :
+    queryResultUsing accepted opening history bound past = accepted.queryResultWith history bound past := by
   cases purpose : intent.purpose with
-  | prepare preparation => simp [queryResultUsing, AuthorizedIntent.queryResult, purpose]
+  | prepare preparation => simp [queryResultUsing, AuthorizedIntent.queryResultWith, purpose]
   | query query =>
       cases view : query.view <;>
-        simp [queryResultUsing, AuthorizedIntent.queryResult, purpose, view, resourceViewUsing_exact] <;> rfl
+        simp [queryResultUsing, AuthorizedIntent.queryResultWith, purpose, view, resourceViewUsing_exact] <;> rfl
 
 /-- Cached data remain private to the native Host. Every possible scope is
 certified against the exact old opening, rather than retaining a reader view. -/
@@ -188,9 +190,15 @@ def queryLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config)
               let packed := (token.grants ⟨0, present⟩).selected.packed
               cache.modify (fun old => retain old packed)
       | _ => pure ()
-      match queryResultUsing token (provider (← cache.get)) opened.durable rfl with
-      | .ok view => return .ok view
-      | .error reason => return .error (.of reason)
+      let pastRead ← match signed.challenge.intent.purpose with
+        | .query query => NativeHost.queryPast config opened query
+        | _ => pure (.ok (Past.ofLoaded opened.durable config.genesisHeight))
+      match pastRead with
+      | .error refusal => return .error refusal
+      | .ok past =>
+          match queryResultUsing token (provider (← cache.get)) opened.durable rfl past with
+          | .ok view => return .ok view
+          | .error reason => return .error (.of reason)
 
 /-- Same bounded coherent batch and all-or-nothing reply as NativeHost. Only
 resource opening construction changes, by the exact-result theorem. -/

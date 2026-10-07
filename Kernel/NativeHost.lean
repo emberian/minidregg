@@ -897,6 +897,73 @@ def prepare (config : Config) (bytes : List UInt8) : IO (Except Refusal SigningP
   let light ← IO.ofExcept (← NativeHostLight.start config)
   prepareAuthorizedLoaded config opened light bytes
 
+/-- A history refusal as a Host refusal frame: the detail is `Refusal.message`
+verbatim (it names the height); never "absent". -/
+def historyRefusal (refusal : DurableHistory.Refusal) : Refusal :=
+  { reason := .operationRejected, detail := refusal.message }
+
+/-- The Reader of one loaded Store image: the Store's authenticated head and the
+verify-at-use reads under it. One per request. -/
+def historyReaderOfDurable (config : Config) (durable : Durable) :
+    IO (Except Refusal ((store : DurableHistory.StoreIdentity) ×
+      DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)) := do
+  match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes durable with
+  | .error message => return .error { reason := .operationRejected, detail := message }
+  | .ok reader => return .ok reader
+
+/-- The Reader of one opened image. -/
+def historyReader (config : Config) (opened : Opened config) :
+    IO (Except Refusal ((store : DurableHistory.StoreIdentity) ×
+      DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)) :=
+  historyReaderOfDurable config opened.durable
+
+/-- Records `low..top` read in verified `Reader.range` windows of 256: one pass,
+each record verified at use. A refusal names its height. -/
+def readWindows {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader rootBytes store) (low top : Nat) :
+    IO (Except Refusal (List DurableReceiver.IntentRecord)) := do
+  let mut log : Array DurableReceiver.IntentRecord := #[]
+  let mut first := low
+  while first ≤ top do
+    let last := min top (first + 255)
+    match ← reader.range first last with
+    | .error refusal => return .error (historyRefusal refusal)
+    | .ok reads => for read in reads do log := log.push read.2.record
+    first := last + 1
+  return .ok log.toList
+
+/-- What a query reads beyond the served snapshot, authenticated by the Store's
+Reader: an `at` query's past state is `Reader.stateAt` (latest retained checkpoint
+at or below the height plus at most 63 verified records); a `since` query's
+records are the verified windows above its cursor. Every other view reads none.
+A refusal names its height. -/
+def queryPast (config : Config) (opened : Opened config) (query : NativeObservationCodec.Query) :
+    IO (Except Refusal NativeObservationController.Past) := do
+  let none : NativeObservationController.Past :=
+    NativeObservationController.Past.ofLoaded opened.durable config.genesisHeight
+  match query.view with
+  | .atHeight height =>
+      if config.genesisHeight ≤ height ∧ height ≤ config.genesisHeight + opened.durable.height then
+        match ← historyReader config opened with
+        | .error refusal => return .error refusal
+        | .ok ⟨_, reader⟩ =>
+            match ← reader.stateAt (height - config.genesisHeight) with
+            | .error refusal => return .error (historyRefusal refusal)
+            | .ok state =>
+                let snapshot := state.snapshot
+                return .ok { none with state := fun k =>
+                  if k = height - config.genesisHeight then some snapshot else Option.none }
+      else return .ok none
+  | .since after =>
+      match ← historyReader config opened with
+      | .error refusal => return .error refusal
+      | .ok ⟨_, reader⟩ =>
+          let low := max 1 (after + 1 - config.genesisHeight)
+          match ← readWindows reader low reader.head.height with
+          | .error refusal => return .error refusal
+          | .ok log => return .ok { none with since := fun _ => (config.genesisHeight + low, log) }
+  | _ => return .ok none
+
 /-- The controller projects the authorized logical resource/account cut. Raw
 snapshots, whole Books, and unrelated authority pages never escape this API. -/
 def queryLoaded (config : Config) (opened : Opened config)
@@ -907,10 +974,16 @@ def queryLoaded (config : Config) (opened : Opened config)
       config.profile config.federation config.genesisHeight signed with
   | .error refusal => return .error refusal
   | .ok token =>
-      -- History queries read the opening's own image (the context's source image).
-      match token.queryResult opened.durable rfl with
-      | .ok view => return .ok view
-      | .error reason => return .error (.of reason)
+      -- History queries read what the Store's Reader authenticates (`queryPast`).
+      let pastRead ← match signed.challenge.intent.purpose with
+        | .query query => queryPast config opened query
+        | _ => pure (.ok (NativeObservationController.Past.ofLoaded opened.durable config.genesisHeight))
+      match pastRead with
+      | .error refusal => return .error refusal
+      | .ok past =>
+          match token.queryResultWith opened.durable rfl past with
+          | .ok view => return .ok view
+          | .error reason => return .error (.of reason)
 
 /-- One-shot form. An unopenable Store is an error, never a refusal. -/
 def query (config : Config) (bytes : List UInt8) : IO (Except Refusal (List UInt8)) := do
@@ -1464,26 +1537,6 @@ def fleetLookupLoaded (config : Config) (opened : Opened config)
         | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
     | some (.error _) => refused .conflict "replay" "transaction identity conflict"
     | none => .absent
-
-/-- A history refusal as a Host refusal frame: the detail is `Refusal.message`
-verbatim (it names the height); never "absent". -/
-def historyRefusal (refusal : DurableHistory.Refusal) : Refusal :=
-  { reason := .operationRejected, detail := refusal.message }
-
-/-- The Reader of one loaded Store image: the Store's authenticated head and the
-verify-at-use reads under it. One per request. -/
-def historyReaderOfDurable (config : Config) (durable : Durable) :
-    IO (Except Refusal ((store : DurableHistory.StoreIdentity) ×
-      DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)) := do
-  match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes durable with
-  | .error message => return .error { reason := .operationRejected, detail := message }
-  | .ok reader => return .ok reader
-
-/-- The Reader of one opened image. -/
-def historyReader (config : Config) (opened : Opened config) :
-    IO (Except Refusal ((store : DurableHistory.StoreIdentity) ×
-      DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)) :=
-  historyReaderOfDurable config opened.durable
 
 /-- The receipt a verified record at `height` carries: its original accepted
 prefix (`height`, 1-based), the record's own transaction and event id, and the
