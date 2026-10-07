@@ -57,6 +57,7 @@ import Theory.CanonicalResourceKernel
 import Theory.AssertAxioms
 import Kernel.ObjectStateType
 import Compiler.ObjectiveInvocationClaim
+import Compiler.ObjectiveBendLawCodec
 
 namespace Minidregg.Kernel.ObjectRecord
 open Minidregg.Compiler
@@ -68,6 +69,7 @@ open Minidregg.Pred (Pred State Slot eval)
 open Minidregg.Theory.ObjectiveBendTypes (Ty)
 open Minidregg.Kernel.ObjectStateType (typedAt tyStream)
 open Minidregg.Compiler.ObjectiveInvocationClaim (Capacity capacityStream)
+open Minidregg.Compiler.ObjectiveBendLaw (LawExpr plainName packageLaw)
 set_option autoImplicit false
 
 /-! ## The record -/
@@ -94,6 +96,9 @@ structure Pending where
   /-- The old state's fields the migration drops on purpose (linearity, trap 3). -/
   dropped : List String
   law : Pred
+  /-- The next package's enforced laws: the laws its artifact (named by `pin`) carries, read by
+  ADOPT from the package cell, never from the request. -/
+  packageLaws : List (String × LawExpr)
   upgrade : UpgradePolicy
   /-- The activities chosen at ADOPT to be ended and re-born on the next package. -/
   rebirth : List Digest
@@ -121,6 +126,10 @@ structure ObjectRecord where
   stateType : Ty
   schemaVersion : Nat
   law : Pred
+  /-- The pinned package's enforced laws (`law NAME: EXPR` of its source): exactly the laws the
+  artifact named by `pin` carries, which its identity commits. The creation and MIGRATE set
+  them from the package cell, never from a request; no other turn changes them. -/
+  packageLaws : List (String × LawExpr)
   upgrade : UpgradePolicy
   continuity : Nat
   payer : Minidregg.Theory.CanonicalResourceKernel.AccountId
@@ -224,6 +233,11 @@ theorem bump_keeps (record : ObjectRecord) (f : Nat → Nat) (c : LiveClass) :
   cases c <;> simp only [ObjectRecord.bump] <;> (try split) <;>
     simp_all [ObjectRecord.activePin]
 
+/-- A bump keeps the package's laws. -/
+theorem bump_packageLaws (record : ObjectRecord) (f : Nat → Nat) (c : LiveClass) :
+    (record.bump f c).packageLaws = record.packageLaws := by
+  cases c <;> simp only [ObjectRecord.bump] <;> (try split) <;> simp_all
+
 /-- A bump keeps the pins. -/
 theorem bump_pins (record : ObjectRecord) (f : Nat → Nat) (c : LiveClass) :
     (record.bump f c).pins = record.pins := by
@@ -274,23 +288,25 @@ not a stored field a creator or a later turn could omit or rewrite, it is a func
 record's `pin`, and the judge (`admitWrite`) reads only this. A refusal by the pin is the
 leaf at path `[0]` (`unpinned_write_names_pin`). -/
 def ObjectRecord.effectiveLaw (record : ObjectRecord) : Pred :=
-  Pred.all [Minidregg.Pred.objectivePin record.pins, record.law]
+  Pred.all [Minidregg.Pred.objectivePin record.pins, packageLaw record.packageLaws, record.law]
 
 /-- The effective law leads with the pin clause of exactly the pinned packages
 (`pins`: the pin; while draining also the next pin). -/
 theorem effectiveLaw_leads_with_pin (record : ObjectRecord) :
-    record.effectiveLaw = Pred.all (Minidregg.Pred.objectivePin record.pins :: [record.law]) := rfl
+    record.effectiveLaw =
+      Pred.all (Minidregg.Pred.objectivePin record.pins :: [packageLaw record.packageLaws, record.law]) := rfl
 
 /-- Steady, the clause is exactly `pinClause record.pin`. -/
 theorem effectiveLaw_steady (record : ObjectRecord) (steady : record.phase = .steady) :
-    record.effectiveLaw = Pred.all [pinClause record.pin, record.law] := by
+    record.effectiveLaw = Pred.all [pinClause record.pin, packageLaw record.packageLaws, record.law] := by
   simp [ObjectRecord.effectiveLaw, ObjectRecord.pins, steady, pinClause]
 
 /-- **No creator law removes the pin**: whatever `law` an object is created with, a view
 the effective law accepts is one the pin clause accepts (and the creator's law accepts). -/
 theorem effectiveLaw_accepts_iff (record : ObjectRecord) (old new : State) :
     eval record.effectiveLaw old new = true ↔
-      eval (Minidregg.Pred.objectivePin record.pins) old new = true ∧ eval record.law old new = true := by
+      eval (Minidregg.Pred.objectivePin record.pins) old new = true ∧
+        eval (packageLaw record.packageLaws) old new = true ∧ eval record.law old new = true := by
   unfold ObjectRecord.effectiveLaw
   rw [Minidregg.Pred.eval_all]
   simp
@@ -347,11 +363,6 @@ theorem permits_tightens (authority authority' : Pred) (floors floors' : List Pr
   exact ⟨allowed.1, strengthens_sound authority authority' allowed.2⟩
 
 /-! ## Law views -/
-
-/-- A field or variant name that cannot alias another path. Stated over `toList`, so the
-kernel evaluates it (`String.all` does not reduce in the kernel) and proofs read its characters. -/
-def plainName (name : String) : Bool :=
-  !name.toList.isEmpty && name.toList.all (fun c => c != '.' && c != '@' && c != '/')
 
 mutual
 /-- The scalar slots of a state value at `path`; `none` if a name is not plain. -/
@@ -481,12 +492,17 @@ def admitWrite (record : ObjectRecord) (facts : Facts) (old : Option Data) (new 
   | .error reason => .error reason
   | .ok () => if typedAt record.stateType new then .ok () else .error .illTyped
 
+/-- The law an object's INITIAL state is judged by: the package's laws (path `[0]`), then the
+creator's (path `[1]`); no pin clause, since no package has run. -/
+def ObjectRecord.seedLaw (record : ObjectRecord) : Pred :=
+  Pred.all [packageLaw record.packageLaws, record.law]
+
 /-- The judgment of an object's INITIAL state, at its creation: the creator's law alone. The pin
 governs the writes after the object exists; at creation no package has run, so the pin clause
 would refuse every seed. The seed is judged over `old = none`, so an object cannot be born
 violating its own state clauses; and it is typed at the declared state type. -/
 def admitSeed (record : ObjectRecord) (facts : Facts) (seed : Data) : Except WriteRefusal Unit :=
-  match judgeLaw record.law facts none seed with
+  match judgeLaw record.seedLaw facts none seed with
   | .error reason => .error reason
   | .ok () => if typedAt record.stateType seed then .ok () else .error .illTyped
 
@@ -564,26 +580,26 @@ theorem admitWrite_lawDenied_fails (record : ObjectRecord) (facts : Facts) (old 
     simp only at refused
     split at refused <;> cases refused
 
-/-- **A seed is admitted exactly when the CREATOR'S law accepts its views** (no pin clause:
-nothing has run yet) and it is typed at the declared state type. -/
+/-- **A seed is admitted exactly when the seed law (the package's laws, then the creator's)
+accepts its views** (no pin clause: nothing has run yet) and it is typed at the declared state type. -/
 theorem admitSeed_ok_iff (record : ObjectRecord) (facts : Facts) (seed : Data) :
     admitSeed record facts seed = .ok () ↔
-      (∃ before after, views facts none seed = some (before, after) ∧ eval record.law before after = true) ∧
+      (∃ before after, views facts none seed = some (before, after) ∧ eval record.seedLaw before after = true) ∧
         typedAt record.stateType seed = true := by
   unfold admitSeed
   rw [typedAfter_ok, judgeLaw_ok_iff]
 
-/-- **A refused seed names the creator's clause that is false on the seed's views.** -/
+/-- **A refused seed names the clause of the seed law that is false on the seed's views.** -/
 theorem admitSeed_lawDenied_fails (record : ObjectRecord) (facts : Facts) (seed : Data) (leaf : LawLeaf)
     (refused : admitSeed record facts seed = .error (.lawDenied leaf)) :
     ∃ before after, views facts none seed = some (before, after) ∧
-      record.law.subterm leaf.path = some leaf.clause ∧ eval leaf.clause before after = false := by
+      record.seedLaw.subterm leaf.path = some leaf.clause ∧ eval leaf.clause before after = false := by
   unfold admitSeed at refused
-  cases judged : judgeLaw record.law facts none seed with
+  cases judged : judgeLaw record.seedLaw facts none seed with
   | error reason =>
     rw [judged] at refused
     cases refused
-    exact judgeLaw_lawDenied_fails record.law facts none seed leaf judged
+    exact judgeLaw_lawDenied_fails record.seedLaw facts none seed leaf judged
   | ok u =>
     cases u
     rw [judged] at refused
@@ -595,13 +611,13 @@ theorem admitWrite_typed {record : ObjectRecord} {facts : Facts} {old : Option D
     (admitted : admitWrite record facts old new = .ok ()) : typedAt record.stateType new = true :=
   ((admitWrite_ok_iff record facts old new).mp admitted).2
 
-/-- The judgment reads the law, the pins and the state type only: counters and the payer
+/-- The judgment reads the law, the package's laws, the pins and the state type only: counters and the payer
 are not read. -/
 theorem admitWrite_bump (record : ObjectRecord) (f : Nat → Nat) (c : LiveClass) (facts : Facts)
     (old : Option Data) (new : Data) :
     admitWrite (record.bump f c) facts old new = admitWrite record facts old new := by
   obtain ⟨_, law, stateType, _⟩ := bump_keeps record f c
-  simp only [admitWrite, ObjectRecord.effectiveLaw, bump_pins, law, stateType]
+  simp only [admitWrite, ObjectRecord.effectiveLaw, bump_pins, law, stateType, bump_packageLaws]
 
 /-- **The payer is not authority**: the judgment does not read it. -/
 theorem admitWrite_payer_irrelevant (record : ObjectRecord) (payer : Minidregg.Theory.CanonicalResourceKernel.AccountId)
@@ -701,7 +717,7 @@ theorem unpinned_write_names_pin (record : ObjectRecord) (facts : Facts) (old : 
     rw [slotAfter]; simp [Facts.artifactValue, unpinned]
   have named : LawLeaf.of record.effectiveLaw before after =
       some ⟨[0], Minidregg.Pred.objectivePin record.pins, before.get Minidregg.Pred.objectiveArtifactSlot, some (-1)⟩ :=
-    all_pin_names_pin record.pins [record.law] before after unclaimed
+    all_pin_names_pin record.pins [packageLaw record.packageLaws, record.law] before after unclaimed
   simp only [admitWrite, judgeLaw, viewed, named]
 
 /-- A write no package code made is never admitted, for every object and value. -/
@@ -718,7 +734,7 @@ theorem unpinned_write_refused (record : ObjectRecord) (facts : Facts) (old : Op
 An object pinned to package 7 whose creator's law is the empty conjunction (the most
 permissive law there is). `leafOf` / `accepted` read the verdict of `admitWrite`. -/
 
-def teethRecord : ObjectRecord := ⟨⟨1⟩, ⟨7⟩, .natural, 1, Pred.all [], .frozen, 0, 0, 0, 0, .steady⟩
+def teethRecord : ObjectRecord := ⟨⟨1⟩, ⟨7⟩, .natural, 1, Pred.all [], [], .frozen, 0, 0, 0, 0, .steady⟩
 
 def teethFacts (artifact : Option Nat) : Facts := ⟨some ⟨40⟩, 5, 1, 3, none, artifact⟩
 
@@ -753,8 +769,22 @@ theorem seed_teeth :
       accepted (admitWrite teethRecord (teethFacts none) none (.natural 1)) = false ∧
       accepted (admitSeed teethSeedRecord (teethFacts none) (.natural 5)) = true ∧
       leafOf (admitSeed teethSeedRecord (teethFacts none) (.natural 6)) =
-        some ⟨[], Pred.eq "state" 5, none, some 6⟩ := by
+        some ⟨[1], Pred.eq "state" 5, none, some 6⟩ := by
   decide +kernel
+
+/-! ## Package laws against the declared state type -/
+
+/-- `field` is a top-level natural or boolean field of the declared state type. -/
+def scalarField (stateType : Ty) (field : String) : Bool :=
+  match ObjectStateType.takeField stateType field with
+  | some (.natural, _) | some (.boolean, _) => true
+  | _ => false
+
+/-- **The first field a package law reads that the declared state type does not hold** as a
+top-level natural or boolean field (or that is not a plain name), or `none`. The creation and
+ADOPT refuse a package whose laws read such a field, naming it. -/
+def lawFieldIssue (stateType : Ty) (laws : List (String × LawExpr)) : Option String :=
+  (laws.flatMap (fun law => law.2.fields)).find? fun field => !(plainName field && scalarField stateType field)
 
 /-! ## The upgrade: the next record, the migration's facts, the drained judgment -/
 
@@ -768,6 +798,7 @@ def ObjectRecord.successor (record : ObjectRecord) (next : Pending) : ObjectReco
     stateType := next.stateType
     schemaVersion := record.schemaVersion + 1
     law := next.law
+    packageLaws := next.packageLaws
     upgrade := next.upgrade
     continuity := record.continuity + 1
     live := next.live
@@ -890,13 +921,14 @@ def pendingStream : StreamCodec Pending :=
     (StreamCodec.product digestStream (StreamCodec.product tyStream
       (StreamCodec.product (StreamCodec.option ObjectiveActivityWire.stringStream)
       (StreamCodec.product (StreamCodec.list ObjectiveActivityWire.stringStream)
-      (StreamCodec.product LawLeaf.predStream (StreamCodec.product upgradeStream
+      (StreamCodec.product LawLeaf.predStream (StreamCodec.product ObjectiveBendLawCodec.lawsStream
+      (StreamCodec.product upgradeStream
       (StreamCodec.product (StreamCodec.list digestStream) (StreamCodec.product capacityStream
-      (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))))))
-    (fun p => (p.pin, p.stateType, p.migration, p.dropped, p.law, p.upgrade, p.rebirth, p.envelope,
-      p.adoptedAt, p.live))
+      (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))))))
+    (fun p => (p.pin, p.stateType, p.migration, p.dropped, p.law, p.packageLaws, p.upgrade, p.rebirth,
+      p.envelope, p.adoptedAt, p.live))
     (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2.1, w.2.2.2.2.2.2.1,
-      w.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.2⟩)
+      w.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.2.2⟩)
     (by intro p; cases p; rfl)
 
 def phaseStream : StreamCodec UpgradePhase :=
@@ -915,19 +947,22 @@ def recordStream : StreamCodec ObjectRecord :=
     (StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product tyStream
       (StreamCodec.product StreamCodec.nat (StreamCodec.product LawLeaf.predStream
+      (StreamCodec.product ObjectiveBendLawCodec.lawsStream
       (StreamCodec.product upgradeStream (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product StreamCodec.nat phaseStream))))))))))
-    (fun r => (r.id, r.pin, r.stateType, r.schemaVersion, r.law, r.upgrade, r.continuity, r.payer,
-      r.live, r.rebirths, r.phase))
+      (StreamCodec.product StreamCodec.nat phaseStream)))))))))))
+    (fun r => (r.id, r.pin, r.stateType, r.schemaVersion, r.law, r.packageLaws, r.upgrade, r.continuity,
+      r.payer, r.live, r.rebirths, r.phase))
     (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2.1, w.2.2.2.2.2.2.1,
-      w.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.2.2⟩)
+      w.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.2.2.1,
+      w.2.2.2.2.2.2.2.2.2.2.2⟩)
     (by intro r; cases r; rfl)
 
-/-- v2: the record carries the declared state type, the live counters and the
-upgrade phase. A v1 record does not decode (its frame differs): `readObject`
-refuses it `objectCodec`, so a v1 world is re-genesised, never reinterpreted. -/
-def recordFrame : Bytes := "DREGG/OBJECTIVE/OBJECT-RECORD/v2".toUTF8.toList
+/-- v3: the record (and a pending upgrade) carries the pinned package's enforced laws (v2 added
+the declared state type, the live counters and the upgrade phase). An older record does not
+decode (its frame differs): `readObject` refuses it `objectCodec`, so an older world is
+re-genesised, never reinterpreted. -/
+def recordFrame : Bytes := "DREGG/OBJECTIVE/OBJECT-RECORD/v3".toUTF8.toList
 def recordCodec := framed recordFrame recordStream
 def encodeRecord (record : ObjectRecord) : Bytes := recordCodec.encode record
 def decodeRecord (bytes : Bytes) : Option ObjectRecord := recordCodec.decode bytes
@@ -963,6 +998,7 @@ theorem record_roundTrip (record : ObjectRecord) : decodeRecord (encodeRecord re
 #assert_axioms activePin_mem_pins
 #assert_axioms runs_mem_pins
 #assert_axioms effectiveLaw_steady
+#assert_axioms bump_packageLaws
 #assert_axioms admitWrite_bump
 #assert_axioms bump_pin
 #assert_axioms bump_classOf

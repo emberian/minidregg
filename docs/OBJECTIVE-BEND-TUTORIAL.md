@@ -951,7 +951,7 @@ result: 41
 $ bun docs/tutorial/run.ts docs/tutorial/ch6-reflection.obend interface
 status: finished
 type: String
-result: "{\"methods\":[{\"name\":\"n\",\"parameters\":[],\"qualifier\":\"primary\",\"resultType\":\"Nat\",\"span\":{\"end\":311,\"line\":11,\"start\":296}}],\"parents\":[],\"precedence\":[\"ch6_reflection.Start\"],\"requirements\":[],\"suffix\":false,\"targetType\":\"Tally\"}"
+result: "{\"methods\":[{\"name\":\"n\",\"parameters\":[],\"qualifier\":\"primary\",\"resultType\":\"Nat\",\"span\":{\"end\":313,\"line\":11,\"start\":298}}],\"parents\":[],\"precedence\":[\"ch6_reflection.Start\"],\"requirements\":[],\"suffix\":false,\"targetType\":\"Tally\"}"
 
 $ bun docs/tutorial/run.ts docs/tutorial/ch6-reflection.obend composedName
 status: finished
