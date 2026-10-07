@@ -23,7 +23,7 @@ open Minidregg.Kernel.ApplicationLifecycleClaimIngress
 
 set_option autoImplicit false
 
-open Minidregg.Compiler.ServedBasis (Ground)
+open Minidregg.Compiler.ServedBasis (Ground Grounded)
 open Minidregg.Compiler.DurableHistory (Head StoreIdentity)
 open Minidregg.Compiler.DurableHistoryReader (Reader)
 
@@ -39,8 +39,10 @@ structure Conditional (config : NativeHost.Config) {store : StoreIdentity} (head
 audit walk, the full shape); `reader` supplies the original BEGIN's record and
 prefix state. -/
 def prepare (config : NativeHost.Config) {store : StoreIdentity}
-    (reader : Reader ResourceBirthCodec.rootBytes store) (ground : Ground config.deployment)
-    (ingress : Ingress) : IO (Except String (Conditional config reader.head ground ingress)) := do
+    (reader : Reader ResourceBirthCodec.rootBytes store)
+    (grounded : Grounded config.deployment reader.head)
+    (ingress : Ingress) : IO (Except String (Conditional config reader.head grounded.ground ingress)) := do
+  let ground := grounded.ground
   let original ← match ← ApplicationLifecycleClaimHistory.admit config reader ground.height ingress.source with
     | .error detail => return .error detail
     | .ok original => pure original
