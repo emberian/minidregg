@@ -56,6 +56,7 @@ import argparse, json, pathlib, sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import activity_world as AW  # noqa: E402
 from activity_world import World, PERMIT_ALL, TICKS, nat, record, variant, eq, any_of, cap, op_id, price  # noqa: E402
 
 PLANTS = {'honest-thief': {'C5-dao'}, 'vault-permit-all': {'C6-authority'}, 'gate-open': {'C7-facet'},
@@ -163,6 +164,18 @@ try:
         three, _ = metered('c11-three-frames', 'relayA', 'twice', hop('counter', 1), False)
         w.check('c11-three-frames-draw-more', three[0] > one[0] and three[1] > one[1], [one, three])
         metered('c11-one-byte-short', 'relayA', 'twice', hop('counter', 1), True)
+        # An envelope covering EXACTLY one load (the root frame's: its entry replay and its method lowering, each
+        # the package's source bytes S; core declared at the ceiling so the source stage binds): the second
+        # frame's quote draw is refused `frontEndExhausted frontEnd S 0`, and the refusal reports what the turn
+        # drew at that point, the first load's source 2S (cv 01a117cd-857b, `invoke_refused_within`).
+        S = int(AW.FRONT['replayBytes'])
+        body = {'kind': 'invoke', 'object': O['relayA'], 'objectCapability': w.objects['relayA']['capability'],
+                'method': 'twice', 'args': hop('counter', 1), 'envelope': cap(TICKS), 'account': w.SPONSOR_ACCOUNT,
+                'accountCapability': w.SPONSOR_SPEND, 'opId': op_id(), 'frontEndAsWritten': True}
+        body['envelope']['replayBytes'] = str(2 * S)
+        body['envelope']['coreBytes'] = str(AW.MAXIMUM['coreBytes'])
+        w.turn('c11-exactly-one-load', w.sponsor, body, 'charged',
+               ['frontEndExhausted', 'Stage.frontEnd) ' + f'{S} 0', f'source := {2 * S},'])
 
     with w.group('C4-reentry'):
         before = snapshot_of(['counter', 'relayA', 'relayB'], 'c4-before')

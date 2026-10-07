@@ -21,10 +21,14 @@ MAXIMUM = {'typeFuel': 16384, 'sourceTicks': 200000, 'heap': 200000, 'stack': 20
            'outputBytes': 200000, 'extractTicks': 200000, 'inputBytes': 200000, 'scalarBits': 512, 'memoryTouches': 2000000,
            'proofWork': 900000, 'feeDebit': 1000000, 'turnBytes': 4000000, 'witnessBytes': 4000000,
            'storageBytes': 4000000, 'sideEffectCount': 16, 'networkBytes': 0, 'leaseByteBlocks': 0,
-           'incidences': 16, 'replayBytes': 262144, 'coreBytes': 262144, 'domainWork': 256}
+           'incidences': 16, 'replayBytes': 16 * 2 * 262144, 'coreBytes': 16 * 2 * 262144, 'domainWork': 256}
 # The policy's source bound (`sourceBytes`): the largest stored package (and so the largest typed core) a turn
 # replays. The front-end rates below are MEASURED against it and are valid only up to it.
 SOURCE_BYTES = 262144
+# GPT-6 row E: an envelope's `replayBytes`/`coreBytes` are the budget of the turn's ONE front-end meter, drawn by
+# every method load (the pinned entry's replay and the method's lowering, each its package's source bytes) and
+# every send's check. The policy's ceiling above admits 16 loads at the source bound (a call tree at the depth
+# bound plus a fan of sends), not one replay.
 # Tariff edition 4 (row E front-end rates; row A3 `domainWork`, priced 0 here). `replayBytes` and `coreBytes` are
 # priced in source ticks per byte, at the WORST
 # per-byte cost the front end showed for an input at this world's source bound (the front end is superlinear:
@@ -334,8 +338,8 @@ class World:
         """An invocation declares the front-end work its replays draw (GPT-6 row E: one meter over every frame's
         method load and every send's deliverable check, `Invocation.frontEnd_within`), and a postage that pays
         each send's delivery root load (`Deliverable.postagePays`). The client does not guess either: it PLANS the
-        invoke once with the deployment's largest covered front end (`MAXIMUM`, affordable to every payer these
-        worlds fund) in the envelope and the postage, and reads the plan's `frontEnd`: the bytes the turn's
+        invoke with a budget it can afford in the envelope and the postage (doubled while the plan runs out of it,
+        up to the policy's ceiling `MAXIMUM`), and reads the plan's `frontEnd`: the bytes the turn's
         replays drew, decided or refused (a refused plan reports the meter at its failure point, so the same
         refusal is reached again), and the largest root load any send's delivery replays. It declares exactly the
         first in the envelope and, in the postage, the second times `postageLoads` (default 1): the loads the
@@ -346,19 +350,32 @@ class World:
         loads = int(body.pop('postageLoads', 1))
         if body.pop('frontEndAsWritten', False):
             return
-        probe = json.loads(json.dumps(body))
-        for key in ('envelope', 'postage'):
-            if key in probe:
-                probe[key]['replayBytes'] = str(MAXIMUM['replayBytes'])
-                probe[key]['coreBytes'] = str(MAXIMUM['coreBytes'])
-        command = self.root / f'{label}.front-end-plan.json'
-        command.write_text(json.dumps(probe))
-        r = self.sh(f'{label}-front-end-plan', self.mini, 'activity', '--action', 'submit', '--workspace', workspace,
-                    '--command', command, '--out', self.attempts / f'{label}-front-end-plan', '--prepare-only', 'true',
-                    ok=(0, 1, 2))
-        planned = (self.last_json(r) or {}).get('frontEnd')
-        if not planned:
-            raise RuntimeError(f'{label}: the plan reported no front end: {r}')
+        # The probe's budget starts at four replays of the largest published package and doubles while the plan
+        # runs out of it (`frontEndExhausted` / `postageFrontEnd`), up to the policy's ceiling: so the probe is
+        # affordable to the payer and its plan decides the same turn the submission will.
+        budget = (4 * int(FRONT['replayBytes']), 4 * int(FRONT['coreBytes']))
+        attempt = 0
+        while True:
+            probe = json.loads(json.dumps(body))
+            for key in ('envelope', 'postage'):
+                if key in probe:
+                    probe[key]['replayBytes'] = str(budget[0])
+                    probe[key]['coreBytes'] = str(budget[1])
+            command = self.root / f'{label}.front-end-plan-{attempt}.json'
+            command.write_text(json.dumps(probe))
+            r = self.last_json(self.sh(f'{label}-front-end-plan-{attempt}', self.mini, 'activity', '--action', 'submit',
+                                       '--workspace', workspace, '--command', command,
+                                       '--out', self.attempts / f'{label}-front-end-plan-{attempt}',
+                                       '--prepare-only', 'true', ok=(0, 1, 2))) or {}
+            planned = r.get('frontEnd')
+            if not planned:
+                raise RuntimeError(f'{label}: the plan reported no front end: {r}')
+            short = any(n in str(r.get('verdict') or '') for n in ('frontEndExhausted', 'postageFrontEnd'))
+            ceiling = (int(MAXIMUM['replayBytes']), int(MAXIMUM['coreBytes']))
+            if not short or budget == ceiling:
+                break
+            budget = (min(2 * budget[0], ceiling[0]), min(2 * budget[1], ceiling[1]))
+            attempt += 1
         body['envelope']['replayBytes'] = str(planned['replayBytes'])
         body['envelope']['coreBytes'] = str(planned['coreBytes'])
         if 'postage' in body:

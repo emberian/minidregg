@@ -472,6 +472,77 @@ theorem loadMethod_reaches {config : Config} {target : Nat} {bytes : Bytes} {pin
           cases loaded
           exact .draw r1 (drawFrontEnd_ok hd)
 
+/-- The draw a pair's front-end quote makes (`drawQuote`): its (source, stored core), or none when the
+quote does not decode (and then the pair refuses, `loadMethod_unquoted_refused`). -/
+def quoteDraws (bytes : Bytes) : List (Nat × Nat) :=
+  match frontEndQuote bytes with
+  | some draw => [draw]
+  | none => []
+
+/-- **An admitted load draws exactly its work** (the lower half of the meter, beside the upper
+bound `Meter.Reaches.within`): its meter's draws are the given ones, then the pair's quote, then the
+method lowering's (package source bytes, generated core). A load that skipped a draw falsifies it. -/
+theorem loadMethod_draws {config : Config} {target : Nat} {bytes : Bytes} {pin : Digest} {method : String}
+    {view args : Data} {meter meter' : ObjectiveWorkAccount.Meter} {m : Method config pin method view args}
+    (loaded : loadMethod config target bytes pin method view args meter = .ok (m, meter')) :
+    meter'.draws = meter.draws ++ quoteDraws bytes ++
+      [(ObjectiveWorkAccount.sourceBytes m.definition.package, m.generatedCore)] := by
+  unfold loadMethod at loaded
+  split at loaded
+  · cases loaded
+  · split at loaded
+    · cases loaded
+    · rename_i quoted hq
+      have q : quoted.draws = meter.draws ++ quoteDraws bytes := by
+        unfold drawQuote at hq
+        unfold quoteDraws
+        split at hq
+        · rename_i source core hquote
+          rw [hquote]
+          exact (ObjectiveWorkAccount.Meter.draw_ok (drawFrontEnd_ok hq)).2.2.1
+        · rename_i hquote
+          cases hq; rw [hquote]; simp
+      split at loaded
+      · cases loaded
+      · split at loaded
+        · cases loaded
+        · rename_i drawn hd
+          cases loaded
+          rw [(ObjectiveWorkAccount.Meter.draw_ok (drawFrontEnd_ok hd)).2.2.1, q]
+
+/-- **A pair whose quote does not decode replays nothing**: `replayPackage` refuses it (an artifact
+or package that does not decode is refused before any replay), so `drawQuote`'s draw-nothing case is
+never a free replay. -/
+theorem replayPackage_unquoted_refused {config : Config} {bytes : Bytes} {stored : Stored} {pin : Digest}
+    (decoded : decodeStored bytes = some stored) (unquoted : frontEndQuote bytes = none) :
+    ∃ reason, replayPackage config stored pin = .error reason := by
+  unfold frontEndQuote at unquoted
+  rw [decoded] at unquoted
+  unfold replayPackage
+  cases ha : ObjectiveBendSourceArtifact.decode stored.artifact with
+  | none => split_ifs <;> exact ⟨_, rfl⟩
+  | some artifact =>
+    cases hp : ObjectiveSourcePackage.decode stored.package with
+    | none => dsimp only; split_ifs <;> exact ⟨_, rfl⟩
+    | some package => simp [ha, hp] at unquoted
+
+/-- **A load of an unquoted pair refuses and draws nothing.** -/
+theorem loadMethod_unquoted_refused {config : Config} {target : Nat} {bytes : Bytes} {pin : Digest}
+    {method : String} {view args : Data} {meter : ObjectiveWorkAccount.Meter}
+    (unquoted : frontEndQuote bytes = none) :
+    ∃ reason, loadMethod config target bytes pin method view args meter = .error (reason, meter) := by
+  unfold loadMethod
+  cases decoded : decodeStored bytes with
+  | none => exact ⟨_, rfl⟩
+  | some stored =>
+    have quoteNone : drawQuote meter bytes = .ok meter := by unfold drawQuote; rw [unquoted]
+    obtain ⟨reason, refused⟩ := replayPackage_unquoted_refused (config := config) (pin := pin) decoded unquoted
+    simp only [quoteNone]
+    have : methodOf config target stored pin method view args = .error (.kernel reason) := by
+      unfold methodOf; rw [refused]
+    rw [this]
+    exact ⟨_, rfl⟩
+
 /-- The method an admitted load returns is the pair's own (`methodOf`): the meter decides only
 WHETHER it loads. -/
 theorem loadMethod_method {config : Config} {target : Nat} {bytes : Bytes} {pin : Digest} {method : String}
@@ -1281,6 +1352,15 @@ def Deliverable.postageNeed {rootBytes : Bytes → Digest} {config : Config} {sn
 
 /-- The larger of two front ends, part by part. -/
 def maxFrontEnd (a b : Nat × Nat) : Nat × Nat := (max a.1 b.1, max a.2 b.2)
+
+/-- **A deliverable send draws exactly its target's root load** on the sender's meter (what its
+postage then pays, `Deliverable.postagePays`). -/
+theorem Deliverable.draws {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {target : Nat} {message : Inbox.Message} {meter : ObjectiveWorkAccount.Meter}
+    (d : Deliverable config snapshot target message meter) :
+    d.meterAfter.draws = meter.draws ++ quoteDraws (packageBytes config snapshot d.record.activePin) ++
+      [(ObjectiveWorkAccount.sourceBytes d.method.definition.package, d.method.generatedCore)] :=
+  loadMethod_draws d.methodExact
 
 /-- **Queue one message.** To an object: the target method must be `Deliverable` (decided
 before anything is escrowed: an object, with state, the method loads, its Plan within
@@ -3504,6 +3584,10 @@ theorem invocation_delegated_authority {rootBytes : Bytes → Digest} {config : 
 #assert_axioms invoke_refused_within
 #assert_axioms loadMethod_reaches
 #assert_axioms loadMethod_method
+#assert_axioms loadMethod_draws
+#assert_axioms Deliverable.draws
+#assert_axioms replayPackage_unquoted_refused
+#assert_axioms loadMethod_unquoted_refused
 #assert_axioms invocation_delegated_authority
 #assert_axioms controlInbox_spec
 #assert_axioms Mail.control_cases
