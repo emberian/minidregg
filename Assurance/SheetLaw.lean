@@ -24,6 +24,9 @@ closed, so a step without them (wave-c's shape, kept as the `…WaveC` poles):
 * clauses 25, 27, 28 and 29 state their timers positively (`leSlotsOff clock/now … NEG_…`), so a
   missing clock refuses them too: no death without the clock (`death_needs_clock`). On `1ee44ed`
   they wrapped the atom in `not`, which passed while the clock was absent.
+  Consequently no referee-paid raise of `bal` or `eq` without the clock (`bal_raise_needs_clock`,
+  `eq_raise_needs_clock`), and `alive` is constant over any accepted history that never exposes a
+  clock (`alive_constant_without_clock`).
 
 The slot-to-slot atoms (`eqSlots`, `leSlots`, `leSlotsOff`) are k-sloteq's and k-offset's; wave-c's
 atom set alone cannot express either law.
@@ -716,6 +719,105 @@ theorem death_needs_clock (p : Params) (o n : State) (verb : n.get "request/verb
   obtain ⟨x, y, hx, -⟩ := c
   cases hx
 
+/-! ## §4b. Clauses 28 and 29 need the clock; `alive` is constant on a clockless history
+
+Clauses 28 (bal-paid) and 29 (eq-paid) state their timer positively
+(`leSlotsOff clock/now … NEG_*`), so a step that exposes no `clock/now` slot cannot raise the
+referee-paid balance or equilibrium. These are the sibling theorems of `death_needs_clock` (clause 25). -/
+
+/-- **`bal_raise_needs_clock`** (clause 28 in its positive `leSlotsOff` form): with no `clock/now`
+slot, the referee's mutate that raises `bal` (`bal/delta = d > 0`) is refused. -/
+theorem bal_raise_needs_clock (p : Params) (o n : State) (verb : n.get "request/verb" = some 2)
+    (referee : n.get "request/subject" = some p.REF)
+    (noClock : n.get "clock/now" = none) (d : Int)
+    (delta : n.get "resource/field/3/delta" = some d) (raise : 0 < d) :
+    eval (sheetLaw p) o n = false := by
+  apply Bool.eq_false_iff.mpr
+  intro admitted
+  have c := sheet_clause admitted (q := sheetClause28 p) (by simp [sheetClauses])
+  unfold sheetClause28 at c
+  obtain ⟨q, hq, hev⟩ := ev_any.mp c
+  simp only [List.mem_cons, List.not_mem_nil, or_false] at hq
+  rcases hq with rfl | rfl | rfl | rfl
+  · exact (ev_not.mp hev) (ev_eq.mpr verb)
+  · exact (ev_not.mp hev) (ev_eq.mpr referee)
+  · have h := ev_eq.mp hev
+    rw [delta] at h
+    have h0 := Option.some.inj h
+    omega
+  · have h : eval (.leSlotsOff "clock/now" "resource/field/3/after" p.NEG_COST) o n = true :=
+      (ev_all.mp hev) _ (by simp)
+    obtain ⟨x, y, hx, -⟩ := ev_leSlotsOff.mp h
+    rw [noClock] at hx
+    cases hx
+
+/-- **`eq_raise_needs_clock`** (clause 29 in its positive `leSlotsOff` form): with no `clock/now`
+slot, the referee's mutate that raises `eq` (`eq/delta = d > 0`) is refused. -/
+theorem eq_raise_needs_clock (p : Params) (o n : State) (verb : n.get "request/verb" = some 2)
+    (referee : n.get "request/subject" = some p.REF)
+    (noClock : n.get "clock/now" = none) (d : Int)
+    (delta : n.get "resource/field/4/delta" = some d) (raise : 0 < d) :
+    eval (sheetLaw p) o n = false := by
+  apply Bool.eq_false_iff.mpr
+  intro admitted
+  have c := sheet_clause admitted (q := sheetClause29 p) (by simp [sheetClauses])
+  unfold sheetClause29 at c
+  obtain ⟨q, hq, hev⟩ := ev_any.mp c
+  simp only [List.mem_cons, List.not_mem_nil, or_false] at hq
+  rcases hq with rfl | rfl | rfl | rfl
+  · exact (ev_not.mp hev) (ev_eq.mpr verb)
+  · exact (ev_not.mp hev) (ev_eq.mpr referee)
+  · have h := ev_eq.mp hev
+    rw [delta] at h
+    have h0 := Option.some.inj h
+    omega
+  · have h : eval (.leSlotsOff "clock/now" "resource/field/4/after" p.NEG_ECOST) o n = true :=
+      (ev_all.mp hev) _ (by simp)
+    obtain ⟨x, y, hx, -⟩ := ev_leSlotsOff.mp h
+    rw [noClock] at hx
+    cases hx
+
+section HistoryClockless
+open Minidregg.Kernel.DeclaredResourceProjection (get)
+
+/-- **A live sheet stays live along any accepted history that never exposes a clock**
+(`death_needs_clock`, by induction over the log). -/
+theorem alive_stays_alive_without_clock (p : Params) :
+    ∀ (v : Values) (ts : List Turn), Accepted (sheetLaw p) v ts →
+      (∀ s ∈ stepsOf v ts, s.2.now = none) →
+      get v 5 = some 1 → get (final v ts) 5 = some 1
+  | v, [], _, _, h => h
+  | v, t :: ts, acc, noClock, alive => by
+    obtain ⟨verb, adm⟩ := acc.head
+    obtain ⟨x, hx, h01⟩ := alive_after_range p _ _ adm (by rw [get_verb, verb])
+    rw [show "resource/field/5/after" = fieldName 5 "after" from rfl, get_after] at hx
+    have tNone : t.now = none := noClock (v, t) (by simp [stepsOf])
+    have post1 : get t.post 5 = some 1 := by
+      rcases h01 with rfl | rfl
+      · exfalso
+        have refused := death_needs_clock p (view t v v) (view t v t.post)
+          (by rw [get_verb, verb]) (by rw [get_clock, tNone])
+          (by rw [show "resource/field/5/before" = fieldName 5 "before" from rfl, get_before, alive])
+          (by rw [show "resource/field/5/after" = fieldName 5 "after" from rfl, get_after]; exact hx)
+        have adm' : eval (sheetLaw p) (view t v v) (view t v t.post) = true := adm
+        rw [refused] at adm'
+        cases adm'
+      · exact hx
+    exact alive_stays_alive_without_clock p t.post ts acc.tail
+      (fun s hs => noClock s (by simp [stepsOf, hs])) post1
+
+/-- **`alive_constant_without_clock`**: along any accepted history that never exposes a clock, the
+`alive` field (when it starts at 0 or 1) is constant: a dead sheet stays dead
+(`dead_stays_dead_without_clock`) and a live sheet stays live (`alive_stays_alive_without_clock`). -/
+theorem alive_constant_without_clock (p : Params) (v : Values) (ts : List Turn)
+    (acc : Accepted (sheetLaw p) v ts) (noClock : ∀ s ∈ stepsOf v ts, s.2.now = none)
+    (h : get v 5 = some 0 ∨ get v 5 = some 1) : get (final v ts) 5 = get v 5 := by
+  rcases h with h | h
+  · rw [h]; exact dead_stays_dead_without_clock p v ts acc noClock h
+  · rw [h]; exact alive_stays_alive_without_clock p v ts acc noClock h
+
+end HistoryClockless
+
 /-! ## §5. The kernel: every admitted leg satisfies its installed law
 
 `CheckedLeg` is what `DeclaredResourceController.verifyAndAuthorizeLeg` returns and what every
@@ -947,6 +1049,68 @@ theorem death_is_reachable :
       n.get "resource/field/7/after" = some 0 :=
   ⟨death_reachable_by_strike, alive_raised_only_by_revive⟩
 
+/-- The owner has declared a strike (intent 1): the referee-paid `bal` of clause 28 is open. -/
+def casting : Values := sheet 101 3 0 0 1 0 2 5 0 0 0 0 0 1
+/-- `striking` after the referee raises `bal` by 5. -/
+def balRaised : Values := sheet 101 3 5 0 1 0 1 5 0 0 0 0 0 1
+/-- `casting` (intent 2) after the referee raises `eq` by 5. -/
+def eqRaised : Values := sheet 101 3 0 5 1 0 2 5 0 0 0 0 0 1
+/-- The referee raises `bal` by 5 to 5 at clock 2: `2 ≤ 5 + NEG_COST`. -/
+def balRaiseTurn : Turn := ⟨2, 3, some 2, [], balRaised⟩
+def balRaiseTurnNoClock : Turn := ⟨2, 3, none, [], balRaised⟩
+/-- The referee raises `eq` by 5 to 5 at clock 1: `1 ≤ 5 + NEG_ECOST`. -/
+def eqRaiseTurn : Turn := ⟨2, 3, some 1, [], eqRaised⟩
+def eqRaiseTurnNoClock : Turn := ⟨2, 3, none, [], eqRaised⟩
+
+set_option maxRecDepth 20000 in
+/-- **Poles for `bal_raise_needs_clock` / `eq_raise_needs_clock`.** Positive controls: the referee's
+raise WITH a clock is admitted. The same write without the clock is refused, and this refusal comes
+from the general theorems, whose premises (verb 2, subject the referee, no `clock/now`, delta 5 > 0)
+are checked on the very state the kernel hands the policy. -/
+theorem bal_eq_raise_poles :
+    admits (sheetLaw tidewrack) striking balRaiseTurn = true ∧
+    admits (sheetLaw tidewrack) casting eqRaiseTurn = true ∧
+    ((view balRaiseTurnNoClock striking balRaised).get "request/verb" = some 2 ∧
+      (view balRaiseTurnNoClock striking balRaised).get "request/subject" = some tidewrack.REF ∧
+      (view balRaiseTurnNoClock striking balRaised).get "clock/now" = none ∧
+      (view balRaiseTurnNoClock striking balRaised).get "resource/field/3/delta" = some 5) ∧
+    ((view eqRaiseTurnNoClock casting eqRaised).get "request/verb" = some 2 ∧
+      (view eqRaiseTurnNoClock casting eqRaised).get "request/subject" = some tidewrack.REF ∧
+      (view eqRaiseTurnNoClock casting eqRaised).get "clock/now" = none ∧
+      (view eqRaiseTurnNoClock casting eqRaised).get "resource/field/4/delta" = some 5) := by
+  decide
+
+/-- The refusals of `bal_eq_raise_poles`, derived from the general theorems (not by evaluation). -/
+theorem bal_eq_raise_refused_without_clock :
+    admits (sheetLaw tidewrack) striking balRaiseTurnNoClock = false ∧
+    admits (sheetLaw tidewrack) casting eqRaiseTurnNoClock = false :=
+  ⟨bal_raise_needs_clock tidewrack (view balRaiseTurnNoClock striking striking)
+      (view balRaiseTurnNoClock striking balRaised) (bal_eq_raise_poles.2.2.1.1)
+      (bal_eq_raise_poles.2.2.1.2.1) (bal_eq_raise_poles.2.2.1.2.2.1) 5
+      (bal_eq_raise_poles.2.2.1.2.2.2) (by decide),
+   eq_raise_needs_clock tidewrack (view eqRaiseTurnNoClock casting casting)
+      (view eqRaiseTurnNoClock casting eqRaised) (bal_eq_raise_poles.2.2.2.1)
+      (bal_eq_raise_poles.2.2.2.2.1) (bal_eq_raise_poles.2.2.2.2.2.1) 5
+      (bal_eq_raise_poles.2.2.2.2.2.2) (by decide)⟩
+
+set_option maxRecDepth 20000 in
+/-- **Poles for `alive_constant_without_clock`.** A clockless accepted history of a live sheet and
+one of a dead sheet exist (so the premises are inhabited), and the conclusion is not trivial: the
+clockless kill is not an accepted history, while with the clock the same kill is accepted and moves
+`alive` 1 → 0. -/
+theorem alive_constant_poles :
+    (Accepted (sheetLaw tidewrack) live [ownerAimTurn] ∧
+      (∀ s ∈ stepsOf live [ownerAimTurn], s.2.now = none) ∧
+      Minidregg.Kernel.DeclaredResourceProjection.get (final live [ownerAimTurn]) 5 = some 1) ∧
+    (Accepted (sheetLaw tidewrack) slain [prayTurn] ∧
+      (∀ s ∈ stepsOf slain [prayTurn], s.2.now = none) ∧
+      Minidregg.Kernel.DeclaredResourceProjection.get (final slain [prayTurn]) 5 = some 0) ∧
+    ¬ Accepted (sheetLaw tidewrack) live [strikeTurnWaveC] ∧
+    (Accepted (sheetLaw tidewrack) live [strikeTurn] ∧
+      Minidregg.Kernel.DeclaredResourceProjection.get (final live [strikeTurn]) 5 ≠
+        Minidregg.Kernel.DeclaredResourceProjection.get live 5) := by
+  decide
+
 end Poles
 
 /-! ## Axiom pins -/
@@ -1007,5 +1171,20 @@ end Poles
 #guard_msgs (whitespace := lax) in #print axioms a_life_accepted
 /-- info: 'Minidregg.Assurance.SheetLaw.owner_revive_history_refused' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms owner_revive_history_refused
+
+/-- info: 'Minidregg.Assurance.SheetLaw.bal_raise_needs_clock' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms bal_raise_needs_clock
+/-- info: 'Minidregg.Assurance.SheetLaw.eq_raise_needs_clock' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms eq_raise_needs_clock
+/-- info: 'Minidregg.Assurance.SheetLaw.alive_stays_alive_without_clock' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms alive_stays_alive_without_clock
+/-- info: 'Minidregg.Assurance.SheetLaw.alive_constant_without_clock' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms alive_constant_without_clock
+/-- info: 'Minidregg.Assurance.SheetLaw.bal_eq_raise_poles' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms bal_eq_raise_poles
+/-- info: 'Minidregg.Assurance.SheetLaw.bal_eq_raise_refused_without_clock' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms bal_eq_raise_refused_without_clock
+/-- info: 'Minidregg.Assurance.SheetLaw.alive_constant_poles' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms alive_constant_poles
 
 end Minidregg.Assurance.SheetLaw
