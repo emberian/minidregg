@@ -168,12 +168,15 @@ fn main() -> ExitCode {
 /// (`invoke`) in this process, so its files, stdout, stderr and exit code are
 /// exactly the one-shot invocation's. The reply frame carries those three.
 /// The Host starts this small process once; no request forks.
-/// Frames: request `u32 argc, (u32 len, bytes)*`; reply `u32 code,
-/// u64 len, stdout, u64 len, stderr`; integers big-endian. EOF ends it.
+/// Frames: request `u32 argc, (u32 len, bytes)*`; reply `REPLY_TAG`
+/// (`MDCOPRC1`), `u32 code, u64 len, stdout, u64 len, stderr`; integers
+/// big-endian. EOF ends it. The tag lets the Host refuse, by name, bytes
+/// that are not a reply (`NativeCoprocess.replyTag`).
 fn serve() -> ExitCode {
     use std::io::{BufReader, BufWriter, ErrorKind};
     use std::os::unix::ffi::OsStringExt;
     const MAX_ARGS: usize = 64;
+    const REPLY_TAG: &[u8; 8] = b"MDCOPRC1";
     const MAX_ARG_BYTES: usize = 64 * 1024;
     let mut input = BufReader::new(io::stdin().lock());
     let mut output = BufWriter::new(io::stdout().lock());
@@ -214,7 +217,8 @@ fn serve() -> ExitCode {
             .unwrap_or_else(|_| (101, Vec::new(), b"credential signature verifier: panicked\n".to_vec()));
         let result = Reply { code: u32::from(code), stdout, stderr };
         let written = output
-            .write_all(&result.code.to_be_bytes())
+            .write_all(REPLY_TAG)
+            .and_then(|()| output.write_all(&result.code.to_be_bytes()))
             .and_then(|()| output.write_all(&(result.stdout.len() as u64).to_be_bytes()))
             .and_then(|()| output.write_all(&result.stdout))
             .and_then(|()| output.write_all(&(result.stderr.len() as u64).to_be_bytes()))
