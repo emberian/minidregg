@@ -140,7 +140,7 @@ def seatBodyStream : StreamCodec SeatBody :=
 
 def instanceCodec := framed "DREGG/SEAT/INSTANCE/v1".toUTF8.toList instanceBodyStream
 def invitationCodec := framed "DREGG/SEAT/INVITATION/v1".toUTF8.toList invitationBodyStream
-def seatCodec := framed "DREGG/SEAT/SEAT/v1".toUTF8.toList seatBodyStream
+def seatCodec := framed "DREGG/SEAT/SEAT/v2".toUTF8.toList seatBodyStream
 def holdingsCodec := framed "DREGG/SEAT/HOLDINGS/v1".toUTF8.toList (StreamCodec.list StreamCodec.nat)
 
 /-! ## Cells: protected coordinates -/
