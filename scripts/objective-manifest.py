@@ -32,8 +32,13 @@ The ratchet, per key:
   rerendered  hashes and axioms same, text differs          passes; `pin` refreshes the text
 The ledger, scripts/gates/objective-contract-changes.txt, one admitted change per line:
   name <TAB> old contract <TAB> new contract (`-` if removed) <TAB> kind <TAB> commit <TAB> reason
-An entry admits exactly that (name, old, new, kind). `pin` writes nothing unless every change is
-admitted; it adds rows, applies admitted changes and removals, refreshes text, and nothing else.
+An entry admits exactly that (name, old, new, kind). A REMOVED row is admitted only when its reason
+says what replaces it (ROOT, 10-07, after b23 let `replay_changed_ingress_refused` go with no successor):
+  successor: <Full.Name>[, <Full.Name>...] [-- note]   every name a declaration of the fresh run
+  derivable: <how it follows from what remains>
+  obsolete: <why the claim no longer applies>
+The check runs when the removal is admitted (lines that admitted earlier removals are not re-read).
+`pin` writes nothing unless every change is admitted; it adds rows, applies admitted changes and removals, refreshes text, and nothing else.
 
 usage:
   objective-manifest.py check  --pins DIR --ledger FILE RUN...   ratchet; exit 1 on any red
@@ -237,7 +242,7 @@ def load_pins(d):
 
 
 def load_ledger(path):
-    admitted, problems = set(), []
+    admitted, problems = {}, []
     if not os.path.exists(path):
         return admitted, [f"no ledger {path}"]
     for n, line in enumerate(open(path, encoding="utf-8"), 1):
@@ -257,8 +262,34 @@ def load_ledger(path):
             problems.append(f"ledger:{n}: new contract must be `-` exactly when the kind is removed")
         if not commit.strip() or not reason.strip() or reason.strip() == "TODO":
             problems.append(f"ledger:{n}: a commit and a reason are required")
-        admitted.add((name, old, new, kind))
+        admitted[(name, old, new, kind)] = (n, reason.strip())
     return admitted, problems
+
+
+REMOVAL_REASON = re.compile(r"^(successor|derivable|obsolete):\s*(\S.*)$")
+
+
+def removal_refusal(reason, fresh):
+    """Why a removed row's ledger reason does not admit it, or None. `successor:` names must be
+    declarations of the fresh run (full names, comma- or space-separated, before an optional ` -- `)."""
+    m = REMOVAL_REASON.match(reason)
+    if not m:
+        return "a removal's reason must start with `successor:`, `derivable:` or `obsolete:`"
+    if m.group(1) != "successor":
+        return None
+    names = [x for x in re.split(r"[,\s]+", m.group(2).split(" -- ")[0]) if x]
+    if not names:
+        return "`successor:` names no declaration"
+    missing = [x for x in names if x not in fresh]
+    if missing:
+        return f"successor not a declaration of this run: {', '.join(missing)}"
+    return None
+
+
+def with_entry_reason(admitted, key, reason):
+    out = dict(admitted)
+    out[key] = (0, reason)
+    return out
 
 
 def classify(p, f):
@@ -297,6 +328,9 @@ def via(run, row, pins):
     return out
 
 
+REFUSALS = {}  # key -> why its removal entry did not admit it (for the report)
+
+
 def ratchet(pins, fresh, admitted, partial=False):
     """[(kind, key, old, new, row, run, ok)] for every key that is not `same`."""
     out = []
@@ -309,8 +343,15 @@ def ratchet(pins, fresh, admitted, partial=False):
             continue
         old = p.contract if p else "-"
         new = f.contract if f else "-"
-        ok = kind in ("added", "rerendered") or (k, old, new, kind) in admitted
+        entry = admitted.get((k, old, new, kind))
+        ok = kind in ("added", "rerendered") or entry is not None
+        why = None
+        if ok and kind == "removed":
+            why = removal_refusal(entry[1], fresh)
+            ok = why is None
         out.append((kind, k, old, new, f, run, ok))
+        if why:
+            REFUSALS[k] = f"ledger:{entry[0]}: {why}"
     return out
 
 
@@ -323,6 +364,8 @@ def report(changes, pins, label):
             continue
         tag = "admitted" if ok else "RED"
         line = f"{label}: {tag} {kind} {k} old={old} new={new}"
+        if not ok and k in REFUSALS:
+            line += f" ({REFUSALS[k]})"
         if kind == "redefined" and f is not None:
             v = via(run, f, pins)
             line += f" via {', '.join(v[:12]) + (' ...' if len(v) > 12 else '') if v else '(a generated or unpinned constant of its closure)'}"
@@ -432,14 +475,14 @@ def cmd_selftest(pins, fresh, admitted):
     def with_entry(mut, key):
         # only `key`'s verdict: the tree itself may carry other (real) changes
         ch = [c for c in ratchet(pins, mut, admitted) if c[1] == key][0]
-        adm = admitted | {(key, ch[2], ch[3], ch[0])}
+        adm = with_entry_reason(admitted, (key, ch[2], ch[3], ch[0]), "obsolete: selftest")
         good = verdict(mut, adm, key) == [True]
         bad = True
         if ch[3] != "-":
-            wrong = admitted | {(key, ch[2], "0" * 64, ch[0])}
+            wrong = with_entry_reason(admitted, (key, ch[2], "0" * 64, ch[0]), "obsolete: selftest")
             bad = verdict(mut, wrong, key) == [False]
         other = "restated" if ch[0] != "restated" else "redefined"
-        bad = bad and verdict(mut, admitted | {(key, ch[2], ch[3], other)}, key) == [False]
+        bad = bad and verdict(mut, with_entry_reason(admitted, (key, ch[2], ch[3], other), "obsolete: selftest"), key) == [False]
         return good, bad
 
     def mutated(field, value):
@@ -466,6 +509,19 @@ def cmd_selftest(pins, fresh, admitted):
             failures.append(f"{kind} of {thm}: the exact ledger entry did not admit it")
         if not bad:
             failures.append(f"{kind} of {thm}: a ledger entry with the wrong new hash or kind admitted it")
+    gone = {k: v for k, v in base.items() if k != thm}
+    rm = [c for c in ratchet(pins, gone, admitted) if c[1] == thm][0]
+    other = next(k for k in sorted(gone) if k != thm)
+    for reason, want in [("removed: module changed by a commit (attributed)", False),
+                         ("successor:", False),
+                         ("successor: Minidregg.ObjectiveManifest.NoSuchSuccessor", False),
+                         (f"successor: {thm} -- itself, which this removal deletes", False),
+                         (f"successor: {other} -- the selftest's stand-in", True),
+                         ("derivable: by the stand-in", True),
+                         ("obsolete: the claim no longer applies", True)]:
+        got = verdict(gone, with_entry_reason(admitted, (thm, rm[2], rm[3], "removed"), reason), thm)
+        if got != [want]:
+            failures.append(f"removal reason {reason!r}: {'admitted' if got == [True] else 'RED'}, expected {'admitted' if want else 'RED'}")
     r, run = base[thm]
     plant = Row("theorem", "Minidregg.ObjectiveManifest.Plant.selftest", r.stmt, r.closure, r.self16,
                 r.axioms, r.text, r.module)
@@ -476,7 +532,7 @@ def cmd_selftest(pins, fresh, admitted):
     for f in failures:
         print(f"selftest: FAIL {f}")
     print(f"selftest: removed/restated/redefined/axioms of {thm} RED, admitted by their exact ledger entry only "
-          f"(not a wrong new hash, not a wrong kind); an addition passes: {'PASS' if not failures else 'FAIL'}")
+          f"(not a wrong new hash, not a wrong kind); a removal only with successor/derivable/obsolete (a named successor must exist); an addition passes: {'PASS' if not failures else 'FAIL'}")
     return 1 if failures else 0
 
 
@@ -555,7 +611,8 @@ def cmd_attribute(a, pins, changes):
         cs = sorted({c for r, m in causes for c in commits_for(r, m)}, key=lambda c: pos.get(c, -1))
         if cs:
             commit = "+".join(c[:8] for c in cs)
-            reason = (f"{kind}: {', '.join(mods)} changed by "
+            reason = (("TODO successor:|derivable:|obsolete: -- " if kind == "removed" else "")
+                      + f"{kind}: {', '.join(mods)} changed by "
                       + "; ".join(f"{c[:8]} {subject[c][:90]}" for c in cs) + f" (attributed by module, {rng})")
         else:
             # nothing in the range touched the row's module or a pinned root: the cause is a generated
