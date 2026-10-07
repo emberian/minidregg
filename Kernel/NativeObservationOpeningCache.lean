@@ -68,7 +68,8 @@ def queryResultUsing {deployment : CanonicalCellRegistry.Deployment} {F : Type} 
     {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation genesisHeight intent)
-    (opening : OpeningProvider) : Except RefusalReason (List UInt8) := do
+    (opening : OpeningProvider) (history : Durable) (bound : context.sourceImage = some history.image) :
+    Except RefusalReason (List UInt8) := do
   let .query query := intent.purpose | throw .malformed
   match query.view with
   | .resource | .resourceScope =>
@@ -85,13 +86,14 @@ def queryResultUsing {deployment : CanonicalCellRegistry.Deployment} {F : Type} 
         else pure (resourceScopeViewCodec.encode
           (grant.kind, grant.capability.value, stored.head.scope.fields, view))
       else throw .malformed
-  | _ => accepted.queryResult
+  | _ => accepted.queryResult history bound
 
 theorem queryResultUsing_exact {deployment : CanonicalCellRegistry.Deployment} {F : Type} [Field F] [DecidableEq F]
     {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation genesisHeight intent)
-    (opening : OpeningProvider) : queryResultUsing accepted opening = accepted.queryResult := by
+    (opening : OpeningProvider) (history : Durable) (bound : context.sourceImage = some history.image) :
+    queryResultUsing accepted opening history bound = accepted.queryResult history bound := by
   cases purpose : intent.purpose with
   | prepare preparation => simp [queryResultUsing, AuthorizedIntent.queryResult, purpose]
   | query query =>

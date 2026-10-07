@@ -168,7 +168,7 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
     ⟨config.deployment.domain, profile.semantics,
       opened.durable.worldRoot, height,
       .birth finalized request.sourceCapabilities, branches ++ observations⟩
-  let context : ApplicationShareIssueDelegation.Context config.deployment opened.durable :=
+  let context : ApplicationShareIssueDelegation.Context config.deployment :=
     (Minidregg.Compiler.ServedBasis.Ground.full _ birth.prepared.pre.directory birth.prepared.pre.authority)
   let .ok app := ApplicationShareIssueDelegation.prepare context profile
       config.federation height request.spec source.birth

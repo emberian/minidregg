@@ -106,7 +106,7 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
       .birth (CanonicalCellRegistry.sourceEncoding.codec.encode prepared.descriptor)
         sourceCapabilities,
       factory :: authority :: allocations ++ sources⟩
-  let context : ApplicationShareIssueDelegation.Context config.deployment opened.durable :=
+  let context : ApplicationShareIssueDelegation.Context config.deployment :=
     (Minidregg.Compiler.ServedBasis.Ground.full _ prepared.prepared.directory prepared.prepared.authority)
   let .ok app := ApplicationShareIssueDelegation.prepare context profile
     config.federation height spec prepared.descriptor
