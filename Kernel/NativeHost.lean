@@ -2661,8 +2661,8 @@ def submitRevokeLight {F : Type} [Field F] [DecidableEq F] (transport : DurableR
   | .ok basis =>
       let ground : ServedBasis.Ground deployment := .ofBasis basis
       match CapabilityRevocationReceiver.replay domain semantics ground ingress with
-      | .undeclared => return refused .operationRejected "revoke"
-          s!"{repr CapabilityRevocationController.Reject.undeclaredTransaction}"
+      | .undeclared =>
+          return refused .operationRejected "revoke" s!"{repr CapabilityRevocationController.Reject.undeclaredTransaction}"
       | .original receipt => confirm .replayed receipt.transactionId receipt.eventId
       | .conflict => return refused .conflict "replay" "transaction identity conflict"
       | .fresh =>
@@ -2701,8 +2701,8 @@ def submitDelegateLight {F : Type} [Field F] [DecidableEq F] (transport : Durabl
   | .ok basis =>
       let ground : ServedBasis.Ground deployment := .ofBasis basis
       match CapabilityDelegationReceiver.replay domain semantics ground ingress with
-      | .undeclared => return refused .operationRejected "delegate"
-          s!"{repr CapabilityDelegationController.Reject.undeclaredTransaction}"
+      | .undeclared =>
+          return refused .operationRejected "delegate" s!"{repr CapabilityDelegationController.Reject.undeclaredTransaction}"
       | .original receipt => confirm .replayed receipt.transactionId receipt.eventId
       | .conflict => return refused .conflict "replay" "transaction identity conflict"
       | .fresh =>
