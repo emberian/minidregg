@@ -563,9 +563,9 @@ nothing older. What it establishes, each refused by name:
 * every entry after it: canonical record bytes (named by height), the chain over
   the stored bytes, its tag's MAC (`verifyTags`), the frontier its tag carries
   (`walkFrontier`), and the index root its tag carries, re-derived by inserting
-  the record's transaction id and nullifiers into the index at the
-  checkpoint's version (`DurableIndex.IndexRows.apply` refuses a key already present:
-  a transaction or nullifier accepted before the checkpoint);
+  the record's rows into the index at the checkpoint's version
+  (`DurableIndex.IndexRows.apply`: every family's rows, each prior verified; a
+  transaction or nullifier accepted before the checkpoint is refused);
 * the replay of those records from the checkpoint state through the executor;
 * the head: its tag's MAC under the Store's key (`Head.verify`) and the root it
   carries equal to the replayed world root.
@@ -604,22 +604,15 @@ private def decodeRecordsAt : Nat → List DurableReceiverIO.Entry → Except St
       return record :: (← decodeRecordsAt (height + 1) rest)
 
 /-- The index root after each record, re-derived from the trie at the base's
-version: each record's rows (`IndexRows.apply`) at its height; the root after
-each must be the one its (MAC-verified) tag carries. The rows each record writes
-are kept in a map (newest wins) laid over the Store's rows. -/
-private def checkIndex (rows : List Bool → Option DurableIndex.Row) :
-    Std.HashMap (List Bool) DurableIndex.Row → Digest → Nat → List (IntentRecord × Digest) →
-      Except String Unit
-  | _, _, _, [] => .ok ()
-  | written, root, height, (record, carried) :: rest => do
-      let current := fun path => (written.get? path).or (rows path)
-      let (next, writes) ← match DurableIndex.IndexRows.apply current root height record.transactionId
-          record.nullifiers with
-        | .ok result => pure result
-        | .error message => throw s!"durable log record at height {height}: {message}"
-      if next ≠ carried then
+version (`DurableReceiverIO.applyRecords`: each record's rows, `IndexRows.apply`,
+at its height, every record's reads read at the start height in one pass); the
+root after each must be the one its (MAC-verified) tag carries. -/
+private def checkIndex : Nat → List (Digest × Digest) → Except String Unit
+  | _, [] => .ok ()
+  | height, (reached, carried) :: rest => do
+      if reached ≠ carried then
         throw s!"the tag at height {height} carries an index root the log does not reach"
-      checkIndex rows (writes.foldl (fun map row => map.insert row.1 row.2) written) next (height + 1) rest
+      checkIndex (height + 1) rest
 
 /-- What an extension starts from: a verified state (bare snapshot, its
 enumeration, the fresh-cell bytes) at `height`, with the chain, accumulator
@@ -664,18 +657,14 @@ private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes 
   let carriedIndex ← match suffix.mapM fun entry => DurableHistory.trailerCarried entry.tag with
     | none => return .error "durable log tag malformed"
     | some carried => pure (carried.map (·.indexRoot))
-  let keys := records.flatMap fun record => DurableIndex.IndexRows.keys record.transactionId record.nullifiers
-  -- Rows down to 48 bits first; every prefix when what they open does not verify.
-  let shallow ← match ← DurableReceiverIO.indexRows transport start.height keys 48 with
+  let reached ← match ← DurableReceiverIO.applyRecords transport start.height start.indexRoot records with
     | .error message => return .error message
-    | .ok rows => pure rows
-  lap "index rows read"
-  if let .error _ := checkIndex shallow {} start.indexRoot (start.height + 1) (records.zip carriedIndex) then
-    let deep ← match ← DurableReceiverIO.indexRows transport start.height keys with
-      | .error message => return .error message
-      | .ok rows => pure rows
-    if let .error message := checkIndex deep {} start.indexRoot (start.height + 1) (records.zip carriedIndex) then
-      return .error message
+    | .ok results => pure (results.map (·.1))
+  lap "index rows read and applied"
+  if reached.length ≠ carriedIndex.length then
+    return .error "the index applied a different number of records than the log carries"
+  if let .error message := checkIndex (start.height + 1) (reached.zip carriedIndex) then
+    return .error message
   lap "index"
   let headChain := chains.getLast?.getD start.chain
   match replayed : replay rootBytes start.before records with
@@ -880,12 +869,11 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
       let record := IntentRecord.ofIntent intent
       let recordBytes := DurableCheckpointCodec.recordFrame.encode record
       let chain := DurableCheckpointCodec.chainStep served.chain record
-      -- The index after the head (MAC-verified, carried by the head's tag), this record's keys inserted.
-      let keys := DurableIndex.IndexRows.keys intent.transactionId intent.nullifiers
-      let (indexAfter, indexWrites) ← match ← DurableReceiverIO.withIndexRows transport served.height keys
-          (fun rows => DurableIndex.IndexRows.apply rows head.indexRoot height intent.transactionId
-            intent.nullifiers) with
-        | .ok result => pure result
+      -- The index after the head (MAC-verified, carried by the head's tag), this record's rows applied.
+      let (indexAfter, indexWrites) ←
+        match ← DurableReceiverIO.applyRecords transport served.height head.indexRoot [record] with
+        | .ok [result] => pure result
+        | .ok _ => return .unavailable "the index applied a different number of records than it was given"
         | .error message => return .unavailable message
       -- The root cache advanced by the record's slot writes.
       let roots := opening.rootsExact.advance (DurableReceiverIO.recordSlots height chain record)

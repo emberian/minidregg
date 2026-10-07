@@ -13,6 +13,7 @@ import Kernel.CapabilityDelegationReceiver
 import Kernel.CapabilityRevocationReceiver
 import Kernel.WorldRoot
 import Compiler.RefusalReason
+import Compiler.NativeHostFrame
 
 namespace Minidregg.Compiler.NativeHostCodec
 
@@ -120,25 +121,6 @@ theorem cell_opens (domain semantics : Digest) (image : DurableReceiver.Image)
     exact congrArg some (hall _ (List.getLast_mem hne))
   rw [hone] at opens
   simpa [leafRoot, worldRoot_eq_entryRoot, WorldRoot.entryRoot] using opens
-
-def framedRaw {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCodec α :=
-    { encode value := frame ++ stream.encode value
-      decode bytes := if bytes.take frame.length = frame then
-        stream.toLawful.decode (bytes.drop frame.length) else none
-      decode_encode := by
-        intro value
-        have exact := stream.toLawful.decode_encode value
-        change stream.toLawful.decode (stream.encode value) = some value at exact
-        simp [exact] }
-
-def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCodec α :=
-  ResourceBirthCodec.strictCodec (framedRaw frame stream)
-
-theorem framed_canonical {α : Type} (frame : List UInt8) (stream : StreamCodec α)
-    {bytes : List UInt8} {value : α}
-    (decoded : (framed frame stream).decode bytes = some value) :
-    (framed frame stream).encode value = bytes :=
-  ResourceBirthCodec.strictCodec_canonical (framedRaw frame stream) decoded
 
 def signedInvocationStream : StreamCodec DeclaredResourceController.SignedCommand :=
   StreamCodec.xmap (StreamCodec.product bytesStream
