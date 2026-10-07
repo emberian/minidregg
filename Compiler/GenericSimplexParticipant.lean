@@ -317,6 +317,7 @@ def applyNext {config : SourceConfig} (p : Participant config)
     return ({p with source := ⟨_,verified⟩},"applied")
   | .refused detail => return (p,detail)
   | .ordinary _ => reloadSource p
+  | .uncertain _ => reloadSource p
 
 def certificateSlice {config : SourceConfig} (p : Participant config) :
     IO (Participant config × List (Nat × Bytes) × String) := do
