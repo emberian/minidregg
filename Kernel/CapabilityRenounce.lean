@@ -23,6 +23,7 @@ nullifier, so an exact retry replays its receipt; a second renounce under a new
 nonce reaches the gate and is refused `alreadyRevoked`.
 -/
 import Kernel.CapabilityRevocationController
+import Compiler.ServedBasis
 import Theory.Renounce
 
 namespace Minidregg.Kernel.CapabilityRenounce
@@ -44,7 +45,7 @@ open Minidregg.Theory.TypedAuthorization
 set_option autoImplicit false
 
 abbrev Deployment := CanonicalCellRegistry.Deployment
-abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
+abbrev Ground := ServedBasis.Ground
 abbrev Snapshot := CredentialAuthorityDomain.Snapshot
 abbrev AuthorityMaterializer := CredentialAuthorityCell.materializer
 abbrev Ambient := CapabilityRevocationController.Ambient
@@ -179,6 +180,13 @@ def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 := ingressCodec
 
 inductive Reject where
   | malformedCommand | authorityUnavailable | replayedMarker
+  /-- The request did not declare the operation marker's replay nullifier, so its
+  ground has no answer for it (`ServedBasis.Ground.markerSpent`): refused first,
+  never read as unspent. -/
+  | undeclaredMarker
+  /-- The request did not declare the renounce's transaction id, so its ground has
+  no journal answer for it (`ServedBasis.Ground.replayOf`). -/
+  | undeclaredTransaction
   | signature (reason : CredentialSignatureAdmission.Reject)
   | signatureBinding
   | validation | physicalPreparation
@@ -188,67 +196,130 @@ def requireSome {A : Type} (reason : Reject) : Option A → Except Reject A
   | none => .error reason
   | some value => .ok value
 
-structure Prepared (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
-    (durable : Durable) (command : Command) where
+/-- A prepared renounce over the authority snapshot and the operation marker's
+spent answer it read: the answer is "declared, unspent". -/
+structure PreparedOn (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
+    (authority : Snapshot) (markerSpent : Option Bool) (command : Command) : Type where
   private mk ::
-  authority : Loaded deployment durable.snapshot
-  unspent : authority.snapshot.spent
-    (operationMarker authority.snapshot.domain semantics command) = false
+  answered : markerSpent = some false
+
+/-- The preparation over what it reads: the operation marker's spent answer
+(`none`: not declared by the request, refused first). Nothing of the named
+capability is read before the signature verifies. -/
+def prepareOn (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
+    (authority : Snapshot) (markerSpent : Option Bool) (command : Command) :
+    Except Reject (PreparedOn deployment semantics ambient authority markerSpent command) :=
+  match markerSpent with
+  | none => .error .undeclaredMarker
+  | some true => .error .replayedMarker
+  | some false => .ok ⟨rfl⟩
+
+/-- A prepared renounce over a ground (`ServedBasis.Ground`). -/
+abbrev Prepared (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
+    (ground : Ground deployment) (command : Command) :=
+  PreparedOn deployment semantics ambient ground.authority
+    (ground.markerSpent (operationMarker ground.authority.domain semantics command)) command
 
 def prepare (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
-    (durable : Durable) (command : Command) :
-    Except Reject (Prepared deployment semantics ambient durable command) := do
-  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
-  if unspent : authority.snapshot.spent (operationMarker authority.snapshot.domain semantics command) = false then
-    .ok ⟨authority, unspent⟩
-  else .error .replayedMarker
+    (ground : Ground deployment) (command : Command) :
+    Except Reject (Prepared deployment semantics ambient ground command) :=
+  prepareOn deployment semantics ambient ground.authority
+    (ground.markerSpent (operationMarker ground.authority.domain semantics command)) command
+
+/-- **A prepared renounce's marker is unspent** in the ground's authority (on the
+light route: the spent map's verified answer for the declared nullifier). -/
+theorem Prepared.unspent {deployment : Deployment} {semantics : Digest} {ambient : Ambient}
+    {ground : Ground deployment} {command : Command}
+    (prepared : Prepared deployment semantics ambient ground command) :
+    ground.authority.spent (operationMarker ground.authority.domain semantics command) = false :=
+  (ServedBasis.Ground.markerSpent_some ground prepared.answered).symm
+
+/-- The preparation's outcome is a function of the marker's answer alone. -/
+theorem prepareOn_map (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
+    (authority : Snapshot) (markerSpent : Option Bool) (command : Command) :
+    (prepareOn deployment semantics ambient authority markerSpent command).map (fun _ => ()) =
+      (match markerSpent with
+        | none => .error .undeclaredMarker
+        | some true => .error .replayedMarker
+        | some false => .ok ()) := by
+  cases markerSpent with
+  | none => rfl
+  | some spent => cases spent <;> rfl
+
+/-- **Agreement**: two grounds with the same answer for the marker prepare alike
+(the renounce reads nothing else before its signature verifies). -/
+theorem prepare_agrees (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
+    (light full : Ground deployment) (command : Command)
+    (markers : light.markerSpent (operationMarker light.authority.domain semantics command) =
+      full.markerSpent (operationMarker full.authority.domain semantics command)) :
+    (prepare deployment semantics ambient light command).map (fun _ => ()) =
+      (prepare deployment semantics ambient full command).map (fun _ => ()) := by
+  unfold prepare
+  rw [prepareOn_map, prepareOn_map, markers]
+
+/-- **An undeclared marker is refused by name**: the preparation's outcome is exactly the
+refusal `undeclaredMarker`, whatever the state (the prepared value is a proof-only record,
+so its outcome is all there is). -/
+theorem prepare_undeclared (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
+    {store : DurableHistory.StoreIdentity} (basis : ServedBasis.Basis deployment store) (command : Command)
+    (undeclared : CredentialAuthorityReplay.nullifier deployment.domain
+        (operationMarker (ServedBasis.Ground.ofBasis basis).authority.domain semantics command) ∉
+          basis.keys.nullifiers) :
+    (prepare deployment semantics ambient (ServedBasis.Ground.ofBasis basis) command).map (fun _ => ()) =
+      .error .undeclaredMarker := by
+  unfold prepare
+  rw [prepareOn_map, ServedBasis.Ground.markerSpent_undeclared basis _ undeclared]
+
+#assert_axioms Prepared.unspent
+#assert_axioms prepare_agrees
+#assert_axioms prepare_undeclared
 
 variable {deployment : Deployment} {semantics : Digest} {ambient : Ambient}
-  {durable : Durable} {command : Command}
+  {ground : Ground deployment} {command : Command}
 
-def Prepared.request (prepared : Prepared deployment semantics ambient durable command) :
+def Prepared.request (prepared : Prepared deployment semantics ambient ground command) :
     Request .program :=
-  CapabilityRenounce.request prepared.authority.snapshot semantics ambient command
+  CapabilityRenounce.request ground.authority semantics ambient command
 
-def Prepared.marker (prepared : Prepared deployment semantics ambient durable command) : Nat :=
-  operationMarker prepared.authority.snapshot.domain semantics command
+def Prepared.marker (prepared : Prepared deployment semantics ambient ground command) : Nat :=
+  operationMarker ground.authority.domain semantics command
 
-def Prepared.declaration (prepared : Prepared deployment semantics ambient durable command) :
+def Prepared.declaration (prepared : Prepared deployment semantics ambient ground command) :
     RevokeDeclaration :=
-  CapabilityRenounce.declaration prepared.authority.snapshot.domain semantics
-    prepared.authority.snapshot.cell.root command
+  CapabilityRenounce.declaration ground.authority.domain semantics
+    ground.authority.cell.root command
 
 /-! ## Admission: the signer, then the gate -/
 
-structure Accepted (prepared : Prepared deployment semantics ambient durable command)
+structure Accepted (prepared : Prepared deployment semantics ambient ground command)
     (envelope : List UInt8) where
   private mk ::
-  receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
+  receipt : CredentialSignatureAdmission.CheckedSignature ground.authority
   envelopeExact : receipt.envelopeBytes = envelope
-  bound : CredentialSignatureAdmission.verifySignature prepared.authority.snapshot prepared.marker
+  bound : CredentialSignatureAdmission.verifySignature ground.authority prepared.marker
     prepared.request receipt = true
   victim : Capability command.kind
-  gated : Renounce.gateAt prepared.authority.snapshot.cell command.kind command.capability
+  gated : Renounce.gateAt ground.authority.cell command.kind command.capability
     command.subject = .ok victim
-  validated : ValidatedPatch AuthorityMaterializer prepared.authority.snapshot.cell
-    prepared.authority.snapshot.cell.root (prepared.declaration.patch prepared.authority.snapshot.logical)
+  validated : ValidatedPatch AuthorityMaterializer ground.authority.cell
+    ground.authority.cell.root (prepared.declaration.patch ground.authority.logical)
 
 /-- A gate refusal carries the checked signature that preceded it. It is said
 only to the authenticated signer, and it is about the signer's own holding:
 `notHolder` (the signer holds no capability at that id), `unregistered`,
 `alreadyRevoked`. -/
-structure HolderRefusal (prepared : Prepared deployment semantics ambient durable command)
+structure HolderRefusal (prepared : Prepared deployment semantics ambient ground command)
     (envelope : List UInt8) where
   private mk ::
-  receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
+  receipt : CredentialSignatureAdmission.CheckedSignature ground.authority
   envelopeExact : receipt.envelopeBytes = envelope
-  bound : CredentialSignatureAdmission.verifySignature prepared.authority.snapshot prepared.marker
+  bound : CredentialSignatureAdmission.verifySignature ground.authority prepared.marker
     prepared.request receipt = true
   reason : Renounce.Reject
-  gated : Renounce.gateAt prepared.authority.snapshot.cell command.kind command.capability
+  gated : Renounce.gateAt ground.authority.cell command.kind command.capability
     command.subject = .error reason
 
-inductive Admission (prepared : Prepared deployment semantics ambient durable command)
+inductive Admission (prepared : Prepared deployment semantics ambient ground command)
     (envelope : List UInt8) where
   | accepted (accepted : Accepted prepared envelope)
   /-- After the signature verified: the gate refused, to the signer. -/
@@ -257,22 +328,22 @@ inductive Admission (prepared : Prepared deployment semantics ambient durable co
   | rejected (reason : Reject)
 
 def admitNative (native : CredentialSignatureIO.NativeConfig)
-    (prepared : Prepared deployment semantics ambient durable command) (envelope : List UInt8) :
+    (prepared : Prepared deployment semantics ambient ground command) (envelope : List UInt8) :
     IO (Admission prepared envelope) := do
-  match ← CredentialSignatureAdmission.verifyNative native prepared.authority.snapshot
+  match ← CredentialSignatureAdmission.verifyNative native ground.authority
       prepared.marker prepared.request envelope with
   | .error reason => return .rejected (.signature reason)
   | .ok receipt =>
     if same : receipt.envelopeBytes = envelope then
-      if bound : CredentialSignatureAdmission.verifySignature prepared.authority.snapshot prepared.marker
+      if bound : CredentialSignatureAdmission.verifySignature ground.authority prepared.marker
           prepared.request receipt = true then
-        match gated : Renounce.gateAt prepared.authority.snapshot.cell command.kind command.capability
+        match gated : Renounce.gateAt ground.authority.cell command.kind command.capability
             command.subject with
         | .error reason => return .refusedToHolder ⟨receipt, same, bound, reason, gated⟩
         | .ok victim =>
-          match validate AuthorityMaterializer prepared.authority.snapshot.cell
-              prepared.authority.snapshot.cell.root
-              (prepared.declaration.patch prepared.authority.snapshot.logical) with
+          match validate AuthorityMaterializer ground.authority.cell
+              ground.authority.cell.root
+              (prepared.declaration.patch ground.authority.logical) with
           | .rejected _ => return .rejected .validation
           | .accepted validated => return .accepted ⟨receipt, same, bound, victim, gated, validated⟩
       else return .rejected .signatureBinding
@@ -280,7 +351,7 @@ def admitNative (native : CredentialSignatureIO.NativeConfig)
 
 /-- The authority cell after the renounce: the validated revocation patch
 applied. It is the one authority write. -/
-def Accepted.authorityPost {prepared : Prepared deployment semantics ambient durable command}
+def Accepted.authorityPost {prepared : Prepared deployment semantics ambient ground command}
     {envelope : List UInt8} (accepted : Accepted prepared envelope) : CredentialAuthorityDomain.Cell :=
   accepted.validated.apply
 
@@ -302,57 +373,57 @@ def nullifier (domain semantics : Digest) (ingress : DecodedIngress) : StableNul
 
 variable {envelope : List UInt8}
 
-def writes {prepared : Prepared deployment semantics ambient durable command}
+def writes {prepared : Prepared deployment semantics ambient ground command}
     (accepted : Accepted prepared envelope) : List DataWrite :=
-  prepared.authority.writes accepted.authorityPost
+  ground.authorityWrites accepted.authorityPost
 
-def readGuards {prepared : Prepared deployment semantics ambient durable command}
+def readGuards {prepared : Prepared deployment semantics ambient ground command}
     (accepted : Accepted prepared envelope) : List ReadGuard :=
-  prepared.authority.readGuards.filter fun guard =>
+  ground.authorityReadGuards.filter fun guard =>
     guard.cellId ∉ (writes accepted).map DataWrite.cellId
 
-def PhysicalShape {prepared : Prepared deployment semantics ambient durable command}
+def PhysicalShape {prepared : Prepared deployment semantics ambient ground command}
     (accepted : Accepted prepared envelope) : Prop :=
   ((writes accepted).map DataWrite.cellId).Nodup ∧
-    (∀ write ∈ writes accepted, write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
+    (∀ write ∈ writes accepted, write.expectedPre = ground.view.model.roots write.cellId) ∧
     (∀ write ∈ writes accepted, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
-    (∀ guard ∈ readGuards accepted, guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
+    (∀ guard ∈ readGuards accepted, guard.expectedRoot = ground.view.model.roots guard.cellId)
 
-instance physicalShapeDecidable {prepared : Prepared deployment semantics ambient durable command}
+instance physicalShapeDecidable {prepared : Prepared deployment semantics ambient ground command}
     (accepted : Accepted prepared envelope) : Decidable (PhysicalShape accepted) := by
   unfold PhysicalShape
   infer_instance
 
-theorem writes_roots_bound {prepared : Prepared deployment semantics ambient durable command}
+theorem writes_roots_bound {prepared : Prepared deployment semantics ambient ground command}
     (accepted : Accepted prepared envelope) (write : DataWrite) (member : write ∈ writes accepted) :
     rootBytes write.canonicalPostBytes = write.exactPost := by
-  simp only [writes, Loaded.writes, List.mem_singleton] at member
+  simp only [writes, ServedBasis.Ground.authorityWrites, List.mem_singleton] at member
   subst write
-  exact prepared.authority.write_root_bound _
+  exact ground.authorityWrite_root_bound _
 
-theorem readGuards_readonly {prepared : Prepared deployment semantics ambient durable command}
+theorem readGuards_readonly {prepared : Prepared deployment semantics ambient ground command}
     (accepted : Accepted prepared envelope) (guard : ReadGuard) (member : guard ∈ readGuards accepted) :
     guard.cellId ∉ (writes accepted).map DataWrite.cellId := by
   simpa using (List.mem_filter.mp member).2
 
 structure AcceptedRenounce (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
-    (durable : Durable) (ingress : DecodedIngress) where
+    (ground : Ground deployment) (ingress : DecodedIngress) where
   private mk ::
-  prepared : Prepared deployment semantics ambient durable ingress.command
+  prepared : Prepared deployment semantics ambient ground ingress.command
   accepted : Accepted prepared ingress.ingress.envelopeBytes
   physical : PhysicalShape accepted
 
 inductive DecodedAdmission (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
-    (durable : Durable) (ingress : DecodedIngress) where
-  | accepted (accepted : AcceptedRenounce deployment semantics ambient durable ingress)
-  | refusedToHolder {prepared : Prepared deployment semantics ambient durable ingress.command}
+    (ground : Ground deployment) (ingress : DecodedIngress) where
+  | accepted (accepted : AcceptedRenounce deployment semantics ambient ground ingress)
+  | refusedToHolder {prepared : Prepared deployment semantics ambient ground ingress.command}
       (refusal : HolderRefusal prepared ingress.ingress.envelopeBytes)
   | rejected (reason : Reject)
 
 def admitDecodedNative (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
-    (durable : Durable) (native : CredentialSignatureIO.NativeConfig) (ingress : DecodedIngress) :
-    IO (DecodedAdmission deployment semantics ambient durable ingress) := do
-  match prepare deployment semantics ambient durable ingress.command with
+    (ground : Ground deployment) (native : CredentialSignatureIO.NativeConfig) (ingress : DecodedIngress) :
+    IO (DecodedAdmission deployment semantics ambient ground ingress) := do
+  match prepare deployment semantics ambient ground ingress.command with
   | .error reason => return .rejected reason
   | .ok prepared =>
     match ← admitNative native prepared ingress.ingress.envelopeBytes with
@@ -364,7 +435,7 @@ def admitDecodedNative (deployment : Deployment) (semantics : Digest) (ambient :
 
 variable {ingress : DecodedIngress}
 
-def charge (accepted : AcceptedRenounce deployment semantics ambient durable ingress) :
+def charge (accepted : AcceptedRenounce deployment semantics ambient ground ingress) :
     ResourceCost.Charge
   | .incidences => 1
   | .turnBytes => ingress.bytes.length
@@ -374,7 +445,7 @@ def charge (accepted : AcceptedRenounce deployment semantics ambient durable ing
   | .proofWork => 1
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
 
-def intent (accepted : AcceptedRenounce deployment semantics ambient durable ingress) :
+def intent (accepted : AcceptedRenounce deployment semantics ambient ground ingress) :
     DataIntent rootBytes where
   transactionId := transactionId deployment.domain semantics ingress
   writes := writes accepted.accepted
@@ -394,72 +465,51 @@ structure Receipt where
 def receipt (domain semantics : Digest) (ingress : DecodedIngress) : Receipt :=
   ⟨transactionId domain semantics ingress, (event domain semantics ingress).eventId⟩
 
-def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIngress) :
-    Option (Except Unit Receipt) :=
-  match DurableCommitProtocol.Snapshot.lookupRecorded (transactionId domain semantics ingress)
-      durable.snapshot.model.journal with
-  | none => none
-  | some recorded =>
-    if recorded.transactionId = transactionId domain semantics ingress ∧
-        recorded.event.event = event domain semantics ingress ∧
-        recorded.nullifiers = [nullifier domain semantics ingress] then
-      some (.ok (receipt domain semantics ingress))
-    else some (.error ())
+/-- The keys a renounce consults beyond the state: its transaction id (the replay
+lookup) and its marker's replay nullifier (the spent check). -/
+def keys (domain semantics : Digest) (ingress : DecodedIngress) : DurableView.Keys :=
+  ⟨[transactionId domain semantics ingress], [nullifier domain semantics ingress]⟩
+
+/-- The recorded intent under this renounce's transaction id is exactly its own. -/
+def exactRecord (domain semantics : Digest) (ingress : DecodedIngress)
+    (recorded : DurableCommitProtocol.Intent Digest Digest StableNullifier ReplayEnvelope) : Bool :=
+  decide (recorded.transactionId = transactionId domain semantics ingress ∧
+    recorded.event.event = event domain semantics ingress ∧
+    recorded.nullifiers = [nullifier domain semantics ingress])
+
+/-- The replay verdict on a ground, read only through its answer for the
+transaction id (`ServedBasis.Ground.replayOf`): an undeclared id is `undeclared`. -/
+def replay (domain semantics : Digest) (ground : Ground deployment) (ingress : DecodedIngress) :
+    ServedBasis.Ground.Replay Receipt :=
+  ground.replayOf (transactionId domain semantics ingress) (exactRecord domain semantics ingress)
+    (receipt domain semantics ingress)
 
 /-- An exact retry returns the original receipt and nothing else. -/
-theorem replay_only_original (domain semantics : Digest) (durable : Durable) (ingress : DecodedIngress)
-    (result : Receipt) (accepted : replay domain semantics durable ingress = some (.ok result)) :
+theorem replay_only_original (domain semantics : Digest) (ground : Ground deployment) (ingress : DecodedIngress)
+    (result : Receipt) (accepted : replay domain semantics ground ingress = .original result) :
     result = receipt domain semantics ingress ∧
       ∃ recorded,
         DurableCommitProtocol.Snapshot.lookupRecorded (transactionId domain semantics ingress)
-          durable.snapshot.model.journal = some recorded ∧
+          ground.view.model.journal = some recorded ∧
         recorded.event.event = event domain semantics ingress ∧
         recorded.nullifiers = [nullifier domain semantics ingress] := by
-  unfold replay at accepted
-  split at accepted
-  · cases accepted
-  · rename_i recorded found
-    split at accepted
-    · rename_i exactRecord
-      have same : receipt domain semantics ingress = result := by simpa using accepted
-      exact ⟨same.symm, recorded, found, exactRecord.2⟩
-    · cases accepted
+  obtain ⟨same, recorded, found, isExact⟩ := ServedBasis.Ground.replayOf_original ground _ _ _ result accepted
+  simp only [exactRecord, decide_eq_true_eq] at isExact
+  exact ⟨same, recorded, found, isExact.2⟩
 
-inductive Result where
-  | confirmed (kind : DurableReceiverIO.Confirmation) (receipt : Receipt)
-  | rejected (reason : Reject)
-  /-- The gate's refusal, after the signer's signature verified. -/
-  | refusedToHolder (reason : Renounce.Reject)
-  | transactionConflict
-  | durableRejected (reason : DurableDataIntent.RejectReason)
-  | contention
-  | unavailable (detail : String)
-  | uncertain (detail : String)
+/-- **An undeclared transaction id is refused by name**: never "not recorded". -/
+theorem replay_undeclared (domain semantics : Digest) {store : DurableHistory.StoreIdentity}
+    (basis : ServedBasis.Basis deployment store) (ingress : DecodedIngress)
+    (undeclared : transactionId domain semantics ingress ∉ basis.keys.transactions) :
+    replay domain semantics (ServedBasis.Ground.ofBasis basis) ingress = .undeclared :=
+  ServedBasis.Ground.replayOf_undeclared basis _ _ _ undeclared
 
-def receiveLoaded (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
-    (native : CredentialSignatureIO.NativeConfig) (transport : DurableReceiverIO.Transport)
-    (durable : Durable) (bytes : List UInt8) : IO Result := do
-  let some ingress := decodeIngress bytes
-    | return .rejected .malformedCommand
-  match replay deployment.domain semantics durable ingress with
-  | some (.ok prior) => return .confirmed .replayed prior
-  | some (.error _) => return .transactionConflict
-  | none =>
-    match ← admitDecodedNative deployment semantics ambient durable native ingress with
-    | .rejected reason => return .rejected reason
-    | .refusedToHolder refusal => return .refusedToHolder refusal.reason
-    | .accepted accepted =>
-      match ← DurableReceiverIO.receiveLoaded transport rootBytes durable (intent accepted) with
-      | .confirmed kind _ => return .confirmed kind (receipt deployment.domain semantics ingress)
-      | .rejected reason => return .durableRejected reason
-      | .contention => return .contention
-      | .unavailable detail => return .unavailable detail
-      | .uncertain detail => return .uncertain detail
+#assert_axioms replay_undeclared
 
 /-- A refusal disclosed to the holder was produced after a checked signature
 over exactly this renounce's request, whose subject is the command's signer. -/
 theorem HolderRefusal.signer_authenticated
-    {prepared : Prepared deployment semantics ambient durable command} {envelope : List UInt8}
+    {prepared : Prepared deployment semantics ambient ground command} {envelope : List UInt8}
     (refusal : HolderRefusal prepared envelope) :
     refusal.receipt.request = ⟨.program, prepared.request⟩ ∧
       prepared.request.subject = command.subject ∧ refusal.receipt.envelopeBytes = envelope :=
@@ -469,7 +519,6 @@ theorem HolderRefusal.signer_authenticated
 /-- info: 'Minidregg.Kernel.CapabilityRenounce.HolderRefusal.signer_authenticated' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms HolderRefusal.signer_authenticated
 
-/-- info: 'Minidregg.Kernel.CapabilityRenounce.replay_only_original' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms replay_only_original
+#assert_axioms replay_only_original
 
 end Minidregg.Kernel.CapabilityRenounce

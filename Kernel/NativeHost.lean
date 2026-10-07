@@ -188,6 +188,26 @@ def prepareDelegateOn (config : Config) (ground : ServedBasis.Ground config.depl
   let signature ← slot ground.authority marker 6 0 ⟨packed.1, wanted⟩
   pure ⟨config.deployment.domain, profile.semantics, ground.worldRoot, height, .delegate bytes, [signature]⟩
 
+/-- The keys a renounce draft consults beyond the state: its marker's transaction
+id and replay nullifier. -/
+def renounceKeys (config : Config) (bytes : List UInt8) : Option DurableView.Keys := do
+  let command ← CapabilityRenounce.commandCodec.decode bytes
+  let marker := CapabilityRenounce.operationMarker config.deployment.domain config.profile.semantics command
+  some ⟨[⟨marker⟩], [CredentialAuthorityReplay.nullifier config.deployment.domain marker]⟩
+
+/-- A renounce's signing plan on a ground. The plan reads nothing about the named
+capability: the signer's key record (public) and the marker's answer are the only
+state it consults. The gate runs at submission, after the signature verifies. -/
+def prepareRenounceOn (config : Config) (ground : ServedBasis.Ground config.deployment) (height : Nat)
+    (bytes : List UInt8) : Except String SigningPlan := do
+  let profile := config.profile
+  let command ← need "noncanonical renounce command" (CapabilityRenounce.commandCodec.decode bytes)
+  let ambient : CapabilityRenounce.Ambient := ⟨config.federation, height⟩
+  let prepared ← (CapabilityRenounce.prepare config.deployment profile.semantics ambient
+    ground command).mapError (fun reason => s!"renounce preparation: {repr reason}")
+  let signature ← slot ground.authority prepared.marker 9 0 ⟨.program, prepared.request⟩
+  pure ⟨config.deployment.domain, profile.semantics, ground.worldRoot, height, .renounce bytes, [signature]⟩
+
 /-- The keys an invocation draft consults beyond the state
 (`DeclaredResourceController.invocationKeys`). -/
 def invokeKeys (config : Config) (bytes : List UInt8) : Option DurableView.Keys := do
@@ -294,15 +314,10 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
         let plan ← prepareRevokeOn config opened.ground height bytes
         pure (plan.finalizedDraft, plan.slots)
     | .renounce bytes => do
-        -- The plan reads nothing about the named capability: the signer's key
-        -- record (public) is the only state it consults. The gate runs at
-        -- submission, after the signature verifies.
-        let command ← need "noncanonical renounce command" (CapabilityRenounce.commandCodec.decode bytes)
-        let ambient : CapabilityRenounce.Ambient := ⟨config.federation, height⟩
-        let prepared ← (CapabilityRenounce.prepare config.deployment profile.semantics ambient
-          opened.durable command).mapError (fun reason => s!"renounce preparation: {repr reason}")
-        let signature ← slot prepared.authority.snapshot prepared.marker 9 0 ⟨.program, prepared.request⟩
-        pure (.renounce bytes, [signature])
+        -- The full shape's plan (consent re-derivation); the served Host plans a renounce
+        -- on its light basis (`prepareAuthorizedLoaded`); `CapabilityRenounce.prepare_agrees`.
+        let plan ← prepareRenounceOn config opened.ground height bytes
+        pure (plan.finalizedDraft, plan.slots)
   pure ⟨config.deployment.domain, profile.semantics, opened.durable.worldRoot,
     height, finalized, slots⟩
 
@@ -785,6 +800,16 @@ def prepareAuthorizedLoaded (config : Config) (opened : Opened config) (light : 
                   | .ok basis =>
                       return ((prepareRevokeOn config (.ofBasis basis)
                           (config.genesisHeight + basis.height) revokeBytes).mapError
+                        fun detail => ⟨.operationRejected, detail, none⟩)
+              | .renounce renounceBytes =>
+                  -- The renounce's marker is read from the authenticated history (its basis).
+                  let some keys := renounceKeys config renounceBytes
+                    | return .error ⟨.operationRejected, "noncanonical renounce command", none⟩
+                  match ← light.basis keys with
+                  | .error detail => return .error ⟨.operationRejected, detail, none⟩
+                  | .ok basis =>
+                      return ((prepareRenounceOn config (.ofBasis basis)
+                          (config.genesisHeight + basis.height) renounceBytes).mapError
                         fun detail => ⟨.operationRejected, detail, none⟩)
               | .delegate delegateBytes =>
                   -- The delegation's marker is read from the authenticated history (its basis).
@@ -2543,30 +2568,47 @@ inductive Disclosure where
   | toSigner
   deriving DecidableEq, Repr
 
-def submitRenounceVia (transport : DurableReceiverIO.Transport) (config : Config)
-    (opened : Opened config) (bytes : List UInt8)
+/-- A renounce on the light route: its keys (its transaction id and marker nullifier)
+read from the authenticated history into a basis, the replay verdict and the admission
+on `Ground.ofBasis`, the commit by `DurableServed.receiveServed` on the light opening.
+The gate's refusal goes to the authenticated signer only (`.toSigner`). -/
+def submitRenounceLight (transport : DurableReceiverIO.Transport)
+    (deployment : CanonicalCellRegistry.Deployment) (semantics : Digest)
+    (federation : FederationId) (genesisHeight : Nat) (signature : CredentialSignatureIO.NativeConfig)
+    (opening : DurableServed.Opening ResourceBirthCodec.rootBytes)
+    (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis deployment opening.store)))
+    (bytes : List UInt8)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
     IO (Outcome × Disclosure) := do
-  let height := logicalHeight config opened.durable
-  match ← CapabilityRenounce.receiveLoaded config.deployment config.profile.semantics
-      ⟨config.federation, height⟩ config.signature transport opened.durable bytes with
-  | .confirmed kind receipt => return (← confirm kind receipt.transactionId receipt.eventId, .uniform)
-  | .refusedToHolder reason =>
-      return (refused .operationRejected "renounce" s!"{repr reason}", .toSigner)
-  | .rejected reason => return (refused .operationRejected "renounce" s!"{repr reason}", .uniform)
-  | .transactionConflict =>
-      return (refused .conflict "replay" "transaction identity conflict", .uniform)
-  | .durableRejected reason =>
-      return (refused .operationRejected "durable" s!"{repr reason}", .uniform)
-  | .contention => return (.contention, .uniform)
-  | .unavailable detail => return (.unavailable detail.toUTF8.toList, .uniform)
-  | .uncertain detail => return (.uncertain detail.toUTF8.toList, .uniform)
-
-/-- The served renounce: `submitRenounceVia` over the Store's own writer. -/
-def submitRenounceWith (config : Config) (opened : Opened config) (bytes : List UInt8)
-    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
-    IO (Outcome × Disclosure) :=
-  submitRenounceVia config.transport config opened bytes confirm
+  let domain := deployment.domain
+  let some ingress := CapabilityRenounce.decodeIngress bytes
+    | return (refused .operationRejected "renounce" s!"{repr CapabilityRenounce.Reject.malformedCommand}", .uniform)
+  match ← basisOf (CapabilityRenounce.keys domain semantics ingress) with
+  | .error detail => return (.unavailable detail.toUTF8.toList, .uniform)
+  | .ok basis =>
+      let ground : ServedBasis.Ground deployment := .ofBasis basis
+      match CapabilityRenounce.replay domain semantics ground ingress with
+      | .undeclared =>
+          return (refused .operationRejected "renounce"
+            s!"{repr CapabilityRenounce.Reject.undeclaredTransaction}", .uniform)
+      | .original receipt => return (← confirm .replayed receipt.transactionId receipt.eventId, .uniform)
+      | .conflict => return (refused .conflict "replay" "transaction identity conflict", .uniform)
+      | .fresh =>
+          match ← CapabilityRenounce.admitDecodedNative deployment semantics
+              ⟨federation, genesisHeight + basis.height⟩ ground signature ingress with
+          | .rejected reason => return (refused .operationRejected "renounce" s!"{repr reason}", .uniform)
+          | .refusedToHolder refusal =>
+              return (refused .operationRejected "renounce" s!"{repr refusal.reason}", .toSigner)
+          | .accepted accepted =>
+              let receipt := CapabilityRenounce.receipt domain semantics ingress
+              match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening
+                  (CapabilityRenounce.intent accepted) with
+              | .appended kind .. => return (← confirm kind receipt.transactionId receipt.eventId, .uniform)
+              | .replayed _ => return (← confirm .replayed receipt.transactionId receipt.eventId, .uniform)
+              | .rejected reason => return (durableRefusal reason, .uniform)
+              | .contention => return (.contention, .uniform)
+              | .unavailable detail => return (.unavailable detail.toUTF8.toList, .uniform)
+              | .uncertain detail => return (.uncertain detail.toUTF8.toList, .uniform)
 
 /-- The named reason of a refused invocation. The all-holder audience gate
 (`DeclaredResourceController.checkTargetAudience`: some holder of the target's
@@ -2772,7 +2814,9 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
   let height := logicalHeight config opened.durable
   match call with
-  | .renounce bytes => return (← submitRenounceVia transport config opened bytes confirm).1
+  | .renounce bytes =>
+      return (← submitRenounceLight transport config.deployment config.profile.semantics config.federation
+        config.genesisHeight config.signature light.opening (light.basisVia transport) bytes confirm).1
   | .revoke bytes =>
       submitRevokeLight transport config.deployment config.profile config.federation config.genesisHeight
         config.signature light.opening (light.basisVia transport) bytes confirm
@@ -2913,7 +2957,9 @@ def submitDisclosedWith (config : Config) (opened : Opened config) (light : Nati
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
     IO (Outcome × Disclosure) := do
   match call with
-  | .renounce bytes => submitRenounceWith config opened bytes confirm
+  | .renounce bytes =>
+      submitRenounceLight config.transport config.deployment config.profile.semantics config.federation
+        config.genesisHeight config.signature light.opening light.basis bytes confirm
   | .invoke _ => return invokeDisclosure (← submitLoadedWith config opened light call confirm)
   | _ => return (← submitLoadedWith config opened light call confirm, .uniform)
 
@@ -2942,10 +2988,11 @@ def lookupLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
       | none => refused .malformed "renounce" "noncanonical ingress"
       | some ingress =>
           match CapabilityRenounce.replay config.deployment.domain config.profile.semantics
-              opened.durable ingress with
-          | none => .absent
-          | some (.error _) => refused .conflict "replay" "transaction identity conflict"
-          | some (.ok receipt) => finish receipt.transactionId receipt.eventId
+              opened.ground ingress with
+          | .fresh => .absent
+          | .undeclared => refused .operationRejected "replay" "transaction identity undeclared"
+          | .conflict => refused .conflict "replay" "transaction identity conflict"
+          | .original receipt => finish receipt.transactionId receipt.eventId
   | .revoke bytes =>
       match CapabilityRevocationReceiver.decodeIngress bytes with
       | none => refused .malformed "revoke" "noncanonical ingress"
