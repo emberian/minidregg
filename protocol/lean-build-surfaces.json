@@ -7033,7 +7033,7 @@
     {
       "module": "Kernel.ObjectiveCall",
       "path": "Kernel/ObjectiveCall.lean",
-      "sha256": "3851738fc62ed0850a1bfd08862da587ad67afed2cfa62ce6c984c57966587ee",
+      "sha256": "d77326a90f639d49a09c5d90d10cf954c5057ee5ed9258d5d02cd4a5ec2360b5",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7054,14 +7054,14 @@
     {
       "module": "Kernel.ObjectiveResumeContract",
       "path": "Kernel/ObjectiveResumeContract.lean",
-      "sha256": "c0ed59c1da8b072e6f7cfd504e8987da2e15571ff604c1f4fd6b994f21c89564",
+      "sha256": "0dd1e809ff52f2c7dc5836277558720c8e5050e593e3aac3047e850fcf276315",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.ObjectiveSend",
       "path": "Kernel/ObjectiveSend.lean",
-      "sha256": "799991791218a98bff16c05a9ad93d780cfb8c58e2286870384e758ac71fecc9",
+      "sha256": "83d0c545928eb6c68c3ff174ccd8f54e9a12ad7399576151b7c1b4aad49ef876",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -8013,7 +8013,7 @@
     {
       "module": "ObjectiveProofs",
       "path": "ObjectiveProofs.lean",
-      "sha256": "79eef4ae9cc2510736b56fbeeac2cb5fc05943b8c07dea2ac6b94f7e6c108ade",
+      "sha256": "05fc29cfcfc4f3af8990b944c05b87ff8b9d77e4d91ba419b6dbf2d1e869fcd9",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -9957,9 +9957,23 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Theory.ObjectiveBendDemandForcingBack",
+      "path": "Theory/ObjectiveBendDemandForcingBack.lean",
+      "sha256": "8ceb448210282f8b0b1ee071fcefb2e89c1c8e5911d9c7924f9e36a55fdefccb",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
       "module": "Theory.ObjectiveBendDemandForcingChain",
       "path": "Theory/ObjectiveBendDemandForcingChain.lean",
       "sha256": "a04432f439e353c5983eedba0182023789be11d61cfb6728e12e974bfbfb6dff",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Theory.ObjectiveBendDemandForcingConverse",
+      "path": "Theory/ObjectiveBendDemandForcingConverse.lean",
+      "sha256": "9cf5d7ee8cbfe74aad675887cd6d7059d6cc5acce4af97968eb1314f98c5557a",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -10123,6 +10137,13 @@
       "sha256": "82923d3a743f463381cb212da96e2889fc5148d6db2c492a797463f5909a5f63",
       "surface": "default",
       "ownerReportedStatus": "ACTUAL_SCOPED_PASS"
+    },
+    {
+      "module": "Theory.ObjectiveBendInteraction",
+      "path": "Theory/ObjectiveBendInteraction.lean",
+      "sha256": "ca755af8c85c7fbff366cd6cf3e519a4b6c8fffe9fd264f0910231c5d0d22d60",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Theory.ObjectiveBendLedgerPoles",
