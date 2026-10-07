@@ -55,7 +55,12 @@ private def auditWithTiming (config : Config) (timing : AuditTiming.Handle) :
       (DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes) with
   | .error detail => return .error detail
   | .ok durable =>
-      match ← NativeHostReplay.verifyLoaded config durable timing with
+      -- The walk reads lifecycle history through the Store's own verified Reader.
+      let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport
+          ResourceBirthCodec.rootBytes durable with
+        | .error detail => return .error s!"audit history reader: {detail}"
+        | .ok sealed => pure sealed
+      match ← NativeHostReplay.verifyLoaded config reader durable timing with
       | .error failure =>
           return .error s!"audit refused history at entry {failure.index}: {failure.detail}"
       | .ok verified => return .ok (verified.receipts, verified.opened.durable.index,
@@ -469,7 +474,7 @@ def provisionAssemble (plan : ParticipantFactoryProvisioning.SigningPlan)
   pure (ParticipantFactoryProvisioning.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
 def observationContext (config : Config) (opened : Opened config) :
-    NativeObservationController.Context config.deployment opened.durable :=
+    NativeObservationController.Context config.deployment :=
   (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority)
 
 /-- The answer to an observation request, given the subject's selected key and the native
@@ -792,7 +797,8 @@ def queryLoaded (config : Config) (opened : Opened config)
       config.profile config.federation config.genesisHeight signed with
   | .error refusal => return .error refusal
   | .ok token =>
-      match token.queryResult with
+      -- History queries read the opening's own image (the context's source image).
+      match token.queryResult opened.durable rfl with
       | .ok view => return .ok view
       | .error reason => return .error (.of reason)
 
@@ -2912,7 +2918,7 @@ def lookupLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
       | none => refused .malformed "invoke" "noncanonical command"
       | some command =>
           match DeclaredResourceController.recordedInvocation config.deployment.domain config.profile.semantics
-              command signed opened.durable with
+              command signed opened.ground with
           | .error _ => refused .conflict "replay" "transaction identity conflict"
           | .ok none => .absent
           | .ok (some record) => finish record.transactionId record.event.event.eventId
