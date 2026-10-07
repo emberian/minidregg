@@ -52,6 +52,8 @@ Theory/Channel/Trace.lean
 Verify/NativeJointSourceFixture.lean
 scripts/durable-receiver.lean
 scripts/kn2/history-tamper.lean
+# PROBE (KN2-TRIE, kn2-trie-a): the executed index-tamper plant boots a native Store through the full open and tampers its index rows
+scripts/kn2/index-tamper.lean
 # PROBE (KN2-NEUTRAL-BIRTHS): the executed neutral-birth plant boots a native Store through the full open; the birth receiver it drives is still full-shaped (cv 01a1163e-62a7)
 scripts/kn2/neutral-birth.lean
 # PROBE (KN2-NEUTRAL-BIRTHS cluster 4): boots a native Store through the full open, then installs through the light submit path
