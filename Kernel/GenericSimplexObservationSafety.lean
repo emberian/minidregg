@@ -10,6 +10,7 @@ open Minidregg.Kernel.GenericSimplexStructure
 open Minidregg.Kernel.GenericSimplexGlobalReceive
 open Minidregg.Kernel.GenericSimplexEngineSafety
 open Minidregg.Kernel.GenericSimplexOutputHistory
+open Minidregg.Kernel.GenericSimplexLocal (AuditExtension)
 set_option autoImplicit false
 
 theorem reachable_output_history {c : Config} {faulty : Finset Nat}
@@ -80,8 +81,9 @@ theorem actual_delivered_blocks_compatible {c : Config} {faulty : Finset Nat}
 
 `AuditRefinement`, `LocalFaithful`, `LocalCommitOutputAttestations` and `AuditExtension`
 are premises of the refinement chain.  The satisfying instances below are at the REAL
-engine (`start`/`step`/`initial`, `n = 3f+1` with `f = 1`) and are obtained from the
-general reachability theorems, not hand-built; the refuting instances are concrete
+engine (`start`/`step`/`advance`, `n = 3f+1` with `f = 1`, party 3 faulty and silent) on a
+run that commits a block at all three honest replicas, obtained from the general
+reachability theorems (not hand-built); the refuting instances are concrete
 networks and traces that violate exactly one field each. -/
 
 /-- The smallest real committee: four parties, one fault. -/
@@ -91,26 +93,143 @@ theorem poleConfig_size : poleConfig.parties = 3 * poleConfig.faults + 1 := by d
 
 theorem poleConfig_wellFormed : poleConfig.wellFormed = true := by decide
 
-/-- Source checking never succeeds: reachability holds for this one as for any other. -/
-def poleChecked : Network → Nat → Block → Prop := fun _ _ _ => False
+/-- Source checking is unconstrained for the pole run: every block is eligible. -/
+def poleChecked : Network → Nat → Block → Prop := fun _ _ _ => True
 
-theorem poleInitial_reachable :
-    Reachable poleConfig ∅ poleChecked 0 (initial poleConfig 0) := .initial
+/-- Party 3 is the one tolerated fault and stays silent; parties 0, 1, 2 run honestly. -/
+def poleFaulty : Finset Nat := {3}
+
+theorem poleFaulty_bound : poleFaulty.card ≤ poleConfig.faults := by decide
+
+/-- Executable check of one input against `AllowedInput` (with `poleChecked`). -/
+def allowedB (c : Config) (faulty : Finset Nat) (net : Network) (receiver : Nat)
+    (input : Input) : Bool :=
+  decide (receiver < c.parties) && decide (receiver ∉ faulty) &&
+  match input with
+  | .delivery m | .deliveryAt _ m =>
+      decide (m.sender < c.parties) &&
+        (decide (m.sender ∈ faulty) ||
+          decide (Minidregg.Kernel.GenericSimplex.AuditEvent.send m ∈
+            (net.localState m.sender).audit))
+  | .tick _ | .checked _ | .offer _ | .poll => true
+
+theorem allowedB_sound {c : Config} {faulty : Finset Nat} {net : Network} {receiver : Nat}
+    {input : Input} (ok : allowedB c faulty net receiver input = true) :
+    AllowedInput c faulty poleChecked net receiver input := by
+  cases input <;>
+    simp_all [allowedB, AllowedInput, authenticDelivery, poleChecked]
+
+/-- Run a schedule of inputs through the REAL `advance`, refusing at the first input
+`AllowedInput` would not admit. -/
+def runChecked (c : Config) (faulty : Finset Nat) :
+    Network → List (Nat × Input) → Option Network
+  | net, [] => some net
+  | net, (receiver, input) :: rest =>
+      if allowedB c faulty net receiver input then
+        runChecked c faulty (advance c faulty net receiver input) rest
+      else none
+
+theorem runChecked_reachable {c : Config} {faulty : Finset Nat} {time : Nat} :
+    ∀ (schedule : List (Nat × Input)) (net result : Network),
+      Reachable c faulty poleChecked time net →
+      runChecked c faulty net schedule = some result →
+      Reachable c faulty poleChecked time result
+  | [], net, result, reachable, run => by
+      simp only [runChecked, Option.some.injEq] at run
+      exact run ▸ reachable
+  | (receiver, input) :: rest, net, result, reachable, run => by
+      unfold runChecked at run
+      split at run
+      · next ok =>
+        exact runChecked_reachable rest _ result
+          (.next reachable receiver input (allowedB_sound ok)) run
+      · simp at run
+
+/-- The pole schedule: the leader (party 0) is offered and checks a block, parties 1 and 2
+check it; then every honest message is delivered to every other honest party. -/
+def dl (receiver sender : Nat) (kind : Kind) : Nat × Input :=
+  (receiver, .delivery ⟨sender, 1, kind, some [[1]]⟩)
+
+def poleSchedule : List (Nat × Input) :=
+  [(0, .offer [1]), (0, .checked [[1]]), (1, .checked [[1]]), (2, .checked [[1]]),
+   dl 1 0 .propose, dl 2 0 .propose, dl 1 0 .vote, dl 2 0 .vote, dl 0 1 .vote,
+   dl 2 1 .vote, dl 0 1 .candidate, dl 2 1 .candidate, dl 0 2 .vote, dl 1 2 .vote,
+   dl 0 2 .candidate, dl 1 2 .candidate, dl 0 2 .commit, dl 1 2 .commit,
+   dl 1 0 .candidate, dl 2 0 .candidate, dl 1 0 .commit, dl 2 0 .commit,
+   dl 1 0 .ready, dl 2 0 .ready, dl 0 1 .commit, dl 2 1 .commit, dl 0 1 .ready,
+   dl 2 1 .ready, dl 0 2 .ready, dl 1 2 .ready]
+
+/-- The network reached from the real start by the schedule. -/
+def poleNet : Network :=
+  (runChecked poleConfig poleFaulty (initial poleConfig 0) poleSchedule).getD
+    (initial poleConfig 0)
+
+theorem poleRun_admitted :
+    (runChecked poleConfig poleFaulty (initial poleConfig 0) poleSchedule).isSome = true := by
+  decide +kernel
+
+theorem poleNet_reachable : Reachable poleConfig poleFaulty poleChecked 0 poleNet := by
+  unfold poleNet
+  rcases hrun : runChecked poleConfig poleFaulty (initial poleConfig 0) poleSchedule with _ | net
+  · have admitted := poleRun_admitted
+    rw [hrun] at admitted
+    simp at admitted
+  · exact runChecked_reachable poleSchedule _ net .initial hrun
+
+/-- The run really commits: party 0's view 1 holds a committed block. -/
+theorem poleNet_commits :
+    (viewAt (poleNet.localState 0) 1).committed = some [[1]] := by
+  decide +kernel
+
+theorem poleNet_delivers : [[1]] ∈ (poleNet.localState 0).delivered := by
+  decide +kernel
 
 /-- The actual engine step extends the retained audit, at a real started replica. -/
 theorem auditExtension_real_step :
     AuditExtension (start poleConfig 0 0) (step poleConfig (start poleConfig 0 0) (.tick 1)) :=
   (structuralAuditLaws poleConfig).stepExtension _ _
 
-/-- `AuditRefinement` holds at the real initial network of the real engine. -/
-theorem auditRefinement_initial : AuditRefinement poleConfig ∅ (initial poleConfig 0) :=
-  actual_audit_refinement poleInitial_reachable poleConfig_size
+/-- `AuditRefinement` holds at a network reached by real `step`s in which a block IS
+committed and delivered (so its two observation clauses are exercised, not vacuous). -/
+theorem auditRefinement_committed_run : AuditRefinement poleConfig poleFaulty poleNet :=
+  actual_audit_refinement poleNet_reachable poleConfig_size
 
-/-- `LocalFaithful` holds on the real initial audit trace. -/
-theorem localFaithful_initial :
-    LocalFaithful (auditTrace (initial poleConfig 0)) (Finset.range poleConfig.parties) ∅
+/-- `LocalFaithful` holds on the audit trace of that same run. -/
+theorem localFaithful_committed_run :
+    LocalFaithful (auditTrace poleNet) (Finset.range poleConfig.parties) poleFaulty
       poleConfig.faults :=
-  actual_local_faithful poleInitial_reachable poleConfig_size
+  actual_local_faithful poleNet_reachable poleConfig_size
+
+/-- The refinement's commit clause turns the reported commit into an honest commit
+output at view 1 (the genesis disjunct is false there). -/
+theorem poleNet_commit_attested : CommittedAt (auditTrace poleNet) poleFaulty 1 [[1]] :=
+  auditRefinement_committed_run.commits 0 1 [[1]] (by decide) (by decide) poleNet_commits
+
+/-- A consumer using the satisfying instance: two honest replicas' commits are
+prefix-compatible. -/
+theorem poleNet_commits_compatible :
+    ([[1]] : Block).IsPrefix [[1]] ∨ ([[1]] : Block).IsPrefix [[1]] :=
+  refined_engine_commits_compatible auditRefinement_committed_run poleConfig_size
+    poleFaulty_bound (p := 0) (q := 0) (v := 1) (w := 1) (by decide) (by decide)
+    (by decide) (by decide) poleNet_commits poleNet_commits
+
+/-- `LocalCommitOutputAttestations` on the real trace: honest parties 0, 1, 2 each retain
+a commit output for `[[1]]` at view 1 (`2f+1 = 3`). -/
+theorem localCommitAttestations_committed_run :
+    LocalCommitOutputAttestations (auditTrace poleNet) (Finset.range 4) poleFaulty 1 1
+      [[1]] := by
+  refine ⟨{0, 1, 2}, ?_, by decide, ?_⟩
+  · intro party member
+    simp at member ⊢
+    omega
+  · intro party member _
+    have honest : party = 0 ∨ party = 1 ∨ party = 2 := by
+      simp at member
+      omega
+    have mem : Minidregg.Kernel.GenericSimplex.AuditEvent.commit party 1 [[1]] ∈ poleNet.audit := by
+      rcases honest with rfl | rfl | rfl <;> decide +kernel
+    obtain ⟨index, found⟩ := List.mem_iff_getElem?.mp mem
+    exact ⟨index, by simp [auditTrace, found]⟩
 
 /-- A replica that reports a commit in view 1 while no commit output was ever retained
 in the audit: the observation clause of `AuditRefinement` fails. -/
@@ -123,7 +242,7 @@ theorem not_auditRefinement_forged_commit :
     ¬ AuditRefinement poleConfig ∅ poleForged := by
   intro refinement
   have reported : (viewAt (poleForged.localState 0) 1).committed = some [] := by
-    first | decide | simp [poleForged, poleForgedState, viewAt]
+    decide
   have committed := refinement.commits 0 1 [] (by decide) (by simp) reported
   rcases committed with ⟨view, _⟩ | ⟨time, party, _, output⟩
   · simp at view
@@ -139,8 +258,8 @@ theorem not_localFaithful_equivocation :
     ¬ LocalFaithful poleEquivocate (Finset.range 4) ∅ 1 := by
   intro rules
   have same := rules.voteOnce 0 1 0 1 [] [[]] (by simp)
-    (by first | exact rfl | simp [Sent, poleEquivocate])
-    (by first | exact rfl | simp [Sent, poleEquivocate])
+    rfl
+    rfl
   simp at same
 
 /-- Honest party 0 sends COMMIT in view 1 with no vote quorum behind it:
@@ -152,7 +271,7 @@ theorem not_localFaithful_unsupported_commit :
     ¬ LocalFaithful poleUnsupportedCommit (Finset.range 4) ∅ 1 := by
   intro rules
   obtain ⟨voters, _, count, sends⟩ := rules.commitSend 0 0 1 [] (by simp)
-    (by first | exact rfl | simp [Sent, poleUnsupportedCommit])
+    rfl
   obtain ⟨party, member⟩ := Finset.card_pos.mp (by omega : 0 < voters.card)
   obtain ⟨sentTime, early, _⟩ := sends party member
   omega
@@ -168,7 +287,7 @@ theorem localCommitAttestations_three_signers :
   · intro party member
     simp at member ⊢
     omega
-  · first | decide | simp
+  · decide
   · intro party member _
     have below : party < 3 := by
       simp at member
@@ -188,15 +307,24 @@ theorem not_localCommitAttestations_two_signers :
       omega
     · simp [poleCommitTrace, below] at output
   have bound := Finset.card_le_card inside
-  have two : ({0, 1} : Finset Nat).card = 2 := by first | decide | simp
+  have two : ({0, 1} : Finset Nat).card = 2 := by decide
   omega
 
 #assert_axioms poleConfig_size
 #assert_axioms poleConfig_wellFormed
-#assert_axioms poleInitial_reachable
+#assert_axioms poleFaulty_bound
+#assert_axioms allowedB_sound
+#assert_axioms runChecked_reachable
+#assert_axioms poleRun_admitted
+#assert_axioms poleNet_reachable
+#assert_axioms poleNet_commits
+#assert_axioms poleNet_delivers
+#assert_axioms poleNet_commit_attested
+#assert_axioms poleNet_commits_compatible
+#assert_axioms localCommitAttestations_committed_run
 #assert_axioms auditExtension_real_step
-#assert_axioms auditRefinement_initial
-#assert_axioms localFaithful_initial
+#assert_axioms auditRefinement_committed_run
+#assert_axioms localFaithful_committed_run
 #assert_axioms not_auditRefinement_forged_commit
 #assert_axioms not_localFaithful_equivocation
 #assert_axioms not_localFaithful_unsupported_commit
