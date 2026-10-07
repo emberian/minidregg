@@ -185,7 +185,7 @@ Minidregg.Kernel.CapabilityRenounce.Accepted.mk | Kernel.CapabilityRenounce | ev
 Minidregg.Kernel.CapabilityRenounce.AcceptedRenounce.mk | Kernel.CapabilityRenounce | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.CapabilityRenounce.DecodedIngress.mk | Kernel.CapabilityRenounce | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.CapabilityRenounce.HolderRefusal.mk | Kernel.CapabilityRenounce | evidence | L2 | 3 proof / 2 data fields; layer-1 review pending
-Minidregg.Kernel.CapabilityRenounce.Prepared.mk | Kernel.CapabilityRenounce | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
+Minidregg.Kernel.CapabilityRenounce.PreparedOn.mk | Kernel.CapabilityRenounce | evidence | L2 | 1 proof / 0 data fields; layer-1 review pending
 Minidregg.Kernel.CapabilityRevocationController.Accepted.mk | Kernel.CapabilityRevocationController | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.CapabilityRevocationController.PreparedOn.mk | Kernel.CapabilityRevocationController | evidence | L2 | a prepared revocation over the directory and authority it read (renamed from Prepared on next); victim/identity/policy exactness are proof fields; layer-1 review pending
 Minidregg.Kernel.CapabilityRevocationReceiver.AcceptedRevocation.mk | Kernel.CapabilityRevocationReceiver | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
