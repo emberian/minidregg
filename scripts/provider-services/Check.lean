@@ -39,7 +39,7 @@ private def call (targets : List Nat) : List UInt8 := Id.run do
        schemaVersion := 1, expectedTargetRoot := ⟨2⟩,
        payload := .scalar [] } : DeclaredResourceController.Target)
   let command : DeclaredResourceController.Command :=
-    { subject := ⟨3⟩, expectedAuthorityRoot := ⟨4⟩,
+    { subject := ⟨3⟩,
       nonce := 5, targets := targets.map target }
   let signed : DeclaredResourceController.SignedCommand :=
     { commandBytes := DeclaredResourceController.commandCodec.encode command,

@@ -9,5 +9,4 @@ scripts/kn2/neutral-birth.lean	unbuilt	DEPUTY-KERNEL	-	imports Verify.ResourceRe
 scripts/NativeTranscripts.lean	stale	DEPUTY-KERNEL	-	census RED on main: Transcript.mk inside a non-Transcript constant (local-gates native-transcripts, no merge-gate row)
 scripts/report-simplex-qualification.lean	unbuilt	DEPUTY-KERNEL	-	unknown module prefix SimplexQualification: build it or delete the report
 scripts/probe-grain-birth-factory-law.lean	stale	DEPUTY-KERNEL	-	#guard_msgs docstring no longer matches (births changed)
-scripts/probe-stack-safe-codecs.lean	stale	DEPUTY-KERNEL	-	DeclaredResourceController.Command.expectedAuthorityRoot removed (b21)
-scripts/provider-services/Check.lean	stale	DEPUTY-KERNEL	-	DeclaredResourceController.Command.expectedAuthorityRoot removed (b21)
+scripts/provider-services/Check.lean	stale	DEPUTY-PLATFORM	-	provider API moved: ProviderMeteringSettings tariff shape; ProviderUsage.quotePayloadV2 removed (97644f8f)
