@@ -28,6 +28,10 @@ open Minidregg.Kernel.NativeHost
 
 set_option autoImplicit false
 
+open Minidregg.Compiler.ServedBasis (Ground)
+open Minidregg.Compiler.DurableHistory (Head StoreIdentity)
+open Minidregg.Compiler.DurableHistoryReader (Reader)
+
 def appState (app : Nat) (cell : PackedCell CanonicalCellRegistry.registry) :
     Option ApplicationGrain.State :=
   ApplicationLifecycleClaimCurrent.appState app cell
@@ -36,12 +40,12 @@ def currentCell {F : Type} [Field F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : DeclaredResourceController.Ambient}
-    {durable : DeclaredResourceController.Durable}
+    {ground : Ground deployment}
     {command : DeclaredResourceController.Command}
     (prepared : DeclaredResourceController.PreparedInvocation deployment profile
-      ambient durable command) (resource : Nat) :
+      ambient ground command) (resource : Nat) :
     Option (PackedCell CanonicalCellRegistry.registry) :=
-  match prepared.directory.directory.slots resource with
+  match ground.directory.slots resource with
   | .absent => none
   | .present cell => some cell
 
@@ -76,10 +80,36 @@ def packageMatches (deployment : CanonicalCellRegistry.Deployment)
 /-- A successful first-create report may install the created-volume marker
 only after the one-shot claim consumed its attempt marker. A duplicate report
 cannot install the marker again. The historical completion certificate needed
-for later continue is checked separately by Verified. -/
-def creationMarkersCurrent (config : Config) (opened : Opened config)
+for later continue is checked separately by Verified. A marker the ground
+did not declare refuses (`creationMarkersDeclared`). -/
+/- The nullifiers the creation-marker check reads from the spent map. -/
+def creationNullifiers (ingress : ApplicationLifecycleRetryCompletionV4Ingress.Ingress) : List StableNullifier :=
+  [ApplicationFailedCreateRetryEvidence.retryToken ingress.source.originalBegin.retry] ++
+  match ingress.creationMarker with
+  | none => []
+  | some created =>
+      match ingress.source.originalBegin.start with
+      | none => []
+      | some binding =>
+          [ApplicationLifecycleClaimV3Ingress.firstAttemptNullifier ingress.domain binding, created]
+
+/-- Every key the current part of this admission reads: the DRC invocation's
+transaction id and operation marker, and the creation markers. -/
+def keys (config : Config) (ingress : ApplicationLifecycleRetryCompletionV4Ingress.Ingress) : DurableView.Keys :=
+  let base := DeclaredResourceController.invocationKeys config.deployment.domain
+    config.profile.semantics (ingress.source.command config.deployment.domain config.profile.semantics)
+  ⟨base.transactions, base.nullifiers ++ creationNullifiers ingress⟩
+
+/-- The ground answers every marker read (an undeclared marker is never read as
+unconsumed). -/
+def creationMarkersDeclared {deployment : CanonicalCellRegistry.Deployment}
+    (ground : Ground deployment) (ingress : ApplicationLifecycleRetryCompletionV4Ingress.Ingress) : Bool :=
+  (creationNullifiers ingress).all ground.declaresNullifier
+
+def creationMarkersCurrent (config : Config) (ground : Ground config.deployment)
     (ingress : ApplicationLifecycleRetryCompletionV4Ingress.Ingress) : Bool :=
-  opened.durable.snapshot.model.consumed
+  creationMarkersDeclared ground ingress &&
+  ground.view.model.consumed
       (ApplicationFailedCreateRetryEvidence.retryToken ingress.source.originalBegin.retry) &&
   match ingress.creationMarker with
   | none => true
@@ -87,21 +117,21 @@ def creationMarkersCurrent (config : Config) (opened : Opened config)
       match ingress.source.originalBegin.start with
       | none => false
       | some binding =>
-          opened.durable.snapshot.model.consumed
+          ground.view.model.consumed
               (ApplicationLifecycleClaimV3Ingress.firstAttemptNullifier
                 ingress.domain binding) &&
-            !opened.durable.snapshot.model.consumed created
+            !ground.view.model.consumed created
 
 def linkedCurrentPolicies {F : Type} [Field F]
     (deployment : CanonicalCellRegistry.Deployment)
     (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : DeclaredResourceController.Ambient)
-    (durable : DeclaredResourceController.Durable)
+    (ground : Ground deployment)
     (source : ApplicationLifecycleRetryCompletionV4Source.Source)
     (prepared : DeclaredResourceController.PreparedInvocation deployment profile
-      ambient durable (source.command deployment.domain profile.semantics)) : Bool :=
-  let auth := prepared.authority.snapshot.logical
-  let directory := prepared.directory.directory
+      ambient ground (source.command deployment.domain profile.semantics)) : Bool :=
+  let auth := ground.authority.logical
+  let directory := ground.directory
   let load := fun id => do
     let head ← CredentialAuthorityDomain.headAt auth ⟨id⟩
     let policy ← CanonicalCellRegistry.loadPolicySource deployment.domain directory head.address
@@ -125,18 +155,18 @@ private def requirePresent {α : Type} (value : Option α) (detail : String) :
   | none => .error detail
   | some selected => .ok ⟨selected, rfl⟩
 
-def packageRequest (config : Config) (opened : Opened config)
+def packageRequest (config : Config) (ground : Ground config.deployment)
     (source : ApplicationLifecycleRetryCompletionV4Source.Source)
     (prepared : DeclaredResourceController.PreparedInvocation config.deployment
-      config.profile ⟨config.federation, logicalHeight config opened.durable⟩
-      opened.durable (source.command config.deployment.domain config.profile.semantics)) :
+      config.profile ⟨config.federation, config.genesisHeight + ground.height⟩
+      ground (source.command config.deployment.domain config.profile.semantics)) :
     Request .object :=
   let target : DeclaredResourceController.Target :=
     ⟨.object, source.originalBegin.base.source.packageManifest,
       source.packageObserveCapability, ContentResource.commandVersion,
       source.currentPackageRoot, .content ⟨[]⟩, none, none, none⟩
-  { DeclaredResourceController.requestFor prepared.authority.snapshot
-      config.profile.semantics ⟨config.federation, logicalHeight config opened.durable⟩
+  { DeclaredResourceController.requestFor ground.authority
+      config.profile.semantics ⟨config.federation, config.genesisHeight + ground.height⟩
       (source.command config.deployment.domain config.profile.semantics)
       target source.currentPackageRoot with
     verb := .observeObject }
@@ -144,16 +174,16 @@ def packageRequest (config : Config) (opened : Opened config)
 /-- A separately signed package read is required for every completion.
 Install/upgrade also have DRC's joint-target observation; start/stop use this
 read to pin the foreign package cell and add its physical CAS guard. -/
-structure PackageRead (config : Config) (opened : Opened config)
+structure PackageRead (config : Config) (ground : Ground config.deployment)
     (source : ApplicationLifecycleRetryCompletionV4Source.Source)
     (prepared : DeclaredResourceController.PreparedInvocation config.deployment
-      config.profile ⟨config.federation, logicalHeight config opened.durable⟩
-      opened.durable (source.command config.deployment.domain config.profile.semantics))
+      config.profile ⟨config.federation, config.genesisHeight + ground.height⟩
+      ground (source.command config.deployment.domain config.profile.semantics))
     (cell : PackedCell CanonicalCellRegistry.registry) (envelope : List UInt8) where
   private mk ::
   selected : ResourceObservationAdmission.Prepared
     (DeclaredResourceController.readContext prepared) config.profile
-    (packageRequest config opened source prepared)
+    (packageRequest config ground source prepared)
     (DeclaredResourceController.operationMarker config.deployment.domain
       config.profile.semantics
       (source.command config.deployment.domain config.profile.semantics))
@@ -163,22 +193,22 @@ structure PackageRead (config : Config) (opened : Opened config)
   physicalCurrent :
     (ApplicationLifecycleClaimCurrent.observationGuard
       source.originalBegin.base.source.packageManifest cell).expectedRoot =
-      opened.durable.snapshot.model.roots
+      ground.view.model.roots
         (ApplicationLifecycleClaimCurrent.observationGuard
           source.originalBegin.base.source.packageManifest cell).cellId
 
-def checkPackage (config : Config) (opened : Opened config)
+def checkPackage (config : Config) (ground : Ground config.deployment)
     (source : ApplicationLifecycleRetryCompletionV4Source.Source)
     (prepared : DeclaredResourceController.PreparedInvocation config.deployment
-      config.profile ⟨config.federation, logicalHeight config opened.durable⟩
-      opened.durable (source.command config.deployment.domain config.profile.semantics))
+      config.profile ⟨config.federation, config.genesisHeight + ground.height⟩
+      ground (source.command config.deployment.domain config.profile.semantics))
     (cell : PackedCell CanonicalCellRegistry.registry) (envelope : List UInt8) :
-    IO (Except String (PackageRead config opened source prepared cell envelope)) := do
+    IO (Except String (PackageRead config ground source prepared cell envelope)) := do
   let context := DeclaredResourceController.readContext prepared
   let marker := DeclaredResourceController.operationMarker config.deployment.domain
     config.profile.semantics
     (source.command config.deployment.domain config.profile.semantics)
-  let wanted := packageRequest config opened source prepared
+  let wanted := packageRequest config ground source prepared
   match ResourceObservationAdmission.prepare context config.profile wanted marker
       source.packageObserveCapability source.canonicalBytes with
   | .error _ => return .error "current package observation refused"
@@ -190,8 +220,7 @@ def checkPackage (config : Config) (opened : Opened config)
               selected.observed.before = CanonicalCellRegistry.cellCodec.encode cell then
             have observedExact : selected.observed.before = cell :=
               (lawful_encode_injective CanonicalCellRegistry.cellCodec) observedBytes
-            have physicalCurrent := PhysicalResourceReadGuard.current
-              context.directory source.originalBegin.base.source.packageManifest
+            have physicalCurrent := Ground.physicalCurrent context source.originalBegin.base.source.packageManifest
               selected.observed.before selected.observed.present
             return .ok ⟨selected, checked, observedExact,
               by simpa only [observedExact] using physicalCurrent⟩
@@ -202,7 +231,8 @@ re-admits the exact claim at a structural prefix of the same Store, uses the cus
 pinned into today's NativeHost profile, checks current app/package content,
 and admits the source-derived management command under current signatures.
 Only Replay may bind its structural historical prefix to an admitted walk. -/
-structure Candidate (config : Config) (opened : Opened config)
+structure Candidate (config : Config) {store : StoreIdentity} (head : Head store)
+    (ground : Ground config.deployment)
     (ingress : ApplicationLifecycleRetryCompletionV4Ingress.Ingress) where
   private mk ::
   profileExact : ingress.domain = config.deployment.domain ∧
@@ -213,16 +243,15 @@ structure Candidate (config : Config) (opened : Opened config)
   physical : ApplicationLifecycleRetryCompletionV4Report.Checked
     config.deployment.domain config.profile.semantics key
     ingress.source.originalBegin
-  historical : ApplicationLifecycleRetryCompletionV4History.Candidate config
-    opened ingress.source
+  historical : ApplicationLifecycleRetryCompletionV4History.Candidate config head ingress.source
   prepared : DeclaredResourceController.PreparedInvocation
     config.deployment config.profile
-    ⟨config.federation, logicalHeight config opened.durable⟩
-    opened.durable
+    ⟨config.federation, config.genesisHeight + ground.height⟩
+    ground
     (ingress.source.command config.deployment.domain config.profile.semantics)
   linked : linkedCurrentPolicies config.deployment config.profile
-    ⟨config.federation, logicalHeight config opened.durable⟩
-    opened.durable ingress.source prepared = true
+    ⟨config.federation, config.genesisHeight + ground.height⟩
+    ground ingress.source prepared = true
   shape : DeclaredResourceController.PhysicalShape prepared
   appCell : PackedCell CanonicalCellRegistry.registry
   appCurrent : currentCell prepared ingress.source.app = some appCell
@@ -234,8 +263,8 @@ structure Candidate (config : Config) (opened : Opened config)
     ingress.source.originalBegin.base.source.packageManifest
     ingress.source.app packageCell = some ingress.source.packageAtomBefore
   installed : packageMatches config.deployment ingress.source packageCell = true
-  creationMarkers : creationMarkersCurrent config opened ingress = true
-  packageRead : PackageRead config opened ingress.source prepared packageCell
+  creationMarkers : creationMarkersCurrent config ground ingress = true
+  packageRead : PackageRead config ground ingress.source prepared packageCell
     ingress.packageObservationEnvelope
   packageGuardReadOnly : ingress.source.needsPackageWrite = false →
     (ApplicationLifecycleClaimCurrent.observationGuard
@@ -244,9 +273,10 @@ structure Candidate (config : Config) (opened : Opened config)
   invocation : ApplicationLifecycleRetryCompletionV4Policy.Accepted prepared
     ingress.signed physical
 
-def prepareConditional (config : Config) (opened : Opened config)
+def prepareConditional (config : Config) {store : StoreIdentity}
+    (reader : Reader ResourceBirthCodec.rootBytes store) (ground : Ground config.deployment)
     (ingress : ApplicationLifecycleRetryCompletionV4Ingress.Ingress) :
-    IO (Except String (Candidate config opened ingress)) := do
+    IO (Except String (Candidate config reader.head ground ingress)) := do
   if profileExact : ingress.domain = config.deployment.domain ∧
       ingress.semantics = config.profile.semantics then
     if sourceValid : ingress.source.valid = true then
@@ -261,19 +291,18 @@ def prepareConditional (config : Config) (opened : Opened config)
           ingress.source.originalBegin ingress.source.physical with
         | .error detail => return .error detail
         | .ok checked => pure checked
-      let historical ← match ← ApplicationLifecycleRetryCompletionV4History.select config
-          opened ingress.source with
+      let historical ← match ← ApplicationLifecycleRetryCompletionV4History.select config reader ground.height ingress.source with
         | .error detail => return .error detail
         | .ok selected => pure selected
       let ambient : DeclaredResourceController.Ambient :=
-        ⟨config.federation, logicalHeight config opened.durable⟩
+        ⟨config.federation, config.genesisHeight + ground.height⟩
       let command := ingress.source.command config.deployment.domain config.profile.semantics
       let prepared ← match DeclaredResourceController.prepare config.deployment
-          config.profile ambient opened.durable command with
+          config.profile ambient ground command with
         | .error _ => return .error "completion current transaction preparation refused"
         | .ok selected => pure selected
       if linked : linkedCurrentPolicies config.deployment config.profile ambient
-          opened.durable ingress.source prepared = true then
+          ground ingress.source prepared = true then
         if shape : DeclaredResourceController.PhysicalShape prepared then
           let appSelected ← match requirePresent
               (currentCell prepared ingress.source.app) "current claimed app cell absent" with
@@ -295,8 +324,8 @@ def prepareConditional (config : Config) (opened : Opened config)
             if packageAtomExact : packageAtom config.deployment.domain resource
                 ingress.source.app packageCell = some ingress.source.packageAtomBefore then
               if installed : packageMatches config.deployment ingress.source packageCell = true then
-                if markers : creationMarkersCurrent config opened ingress = true then
-                  let packageRead ← match ← checkPackage config opened ingress.source
+                if markers : creationMarkersCurrent config ground ingress = true then
+                  let packageRead ← match ← checkPackage config ground ingress.source
                       prepared packageCell ingress.packageObservationEnvelope with
                     | .error detail => return .error detail
                     | .ok selected => pure selected

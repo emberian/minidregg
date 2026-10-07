@@ -24,6 +24,8 @@ open Minidregg.Kernel.MultiCellHyperedge
 open Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report
 
 set_option autoImplicit false
+
+open Minidregg.Compiler.ServedBasis (Ground)
 set_option maxHeartbeats 800000
 
 /-- The checked completion slot is visible to every incidence whose policy
@@ -66,10 +68,10 @@ def step {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : DeclaredResourceController.Ambient}
-    {durable : DeclaredResourceController.Durable}
+    {ground : Ground deployment}
     {command : DeclaredResourceController.Command}
     (prepared : DeclaredResourceController.PreparedInvocation
-      deployment profile ambient durable command)
+      deployment profile ambient ground command)
     (tuple : PreparedTuple
       (DeclaredResourceController.plan prepared))
     (incidence : DeclaredResourceController.Incidence command)
@@ -91,10 +93,10 @@ def policyConfig {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : DeclaredResourceController.Ambient}
-    {durable : DeclaredResourceController.Durable}
+    {ground : Ground deployment}
     {command : DeclaredResourceController.Command}
     (prepared : DeclaredResourceController.PreparedInvocation
-      deployment profile ambient durable command)
+      deployment profile ambient ground command)
     (tuple : PreparedTuple (DeclaredResourceController.plan prepared))
     (incidence : DeclaredResourceController.Incidence command)
     {domain semantics : Digest} {publicKey : List UInt8}
@@ -108,10 +110,10 @@ def portals {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : DeclaredResourceController.Ambient}
-    {durable : DeclaredResourceController.Durable}
+    {ground : Ground deployment}
     {command : DeclaredResourceController.Command}
     (prepared : DeclaredResourceController.PreparedInvocation
-      deployment profile ambient durable command)
+      deployment profile ambient ground command)
     (tuple : PreparedTuple (DeclaredResourceController.plan prepared))
     {domain semantics : Digest} {publicKey : List UInt8}
     {begin : ApplicationLifecycleRetryBeginV4Ingress.Ingress}
@@ -125,19 +127,19 @@ def authorizeLeg {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : DeclaredResourceController.Ambient}
-    {durable : DeclaredResourceController.Durable}
+    {ground : Ground deployment}
     {command : DeclaredResourceController.Command}
     (prepared : DeclaredResourceController.PreparedInvocation
-      deployment profile ambient durable command)
+      deployment profile ambient ground command)
     (tuple : PreparedTuple (DeclaredResourceController.plan prepared))
     (incidence : DeclaredResourceController.Incidence command)
     {domain semantics : Digest} {publicKey : List UInt8}
     {begin : ApplicationLifecycleRetryBeginV4Ingress.Ingress}
     (checked : Checked domain semantics publicKey begin)
-    (signature : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot) :
+    (signature : CredentialSignatureAdmission.CheckedSignature ground.authority) :
     Except DeclaredResourceController.Reject
       (Authorized (portals prepared tuple checked incidence)
-        prepared.authority.snapshot.authState (tuple.request incidence).2) := do
+        ground.authority.authState (tuple.request incidence).2) := do
   let wanted := (tuple.request incidence).2
   let context := step prepared tuple incidence checked
   let config := policyConfig prepared tuple incidence checked
@@ -168,10 +170,10 @@ structure CheckedLeg {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : DeclaredResourceController.Ambient}
-    {durable : DeclaredResourceController.Durable}
+    {ground : Ground deployment}
     {command : DeclaredResourceController.Command}
     (prepared : DeclaredResourceController.PreparedInvocation
-      deployment profile ambient durable command)
+      deployment profile ambient ground command)
     (tuple : PreparedTuple (DeclaredResourceController.plan prepared))
     {domain semantics : Digest} {publicKey : List UInt8}
     {begin : ApplicationLifecycleRetryBeginV4Ingress.Ingress}
@@ -179,21 +181,21 @@ structure CheckedLeg {F : Type} [Field F] [DecidableEq F]
     (incidence : DeclaredResourceController.Incidence command)
     (envelope : List UInt8) where
   private mk ::
-  receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
+  receipt : CredentialSignatureAdmission.CheckedSignature ground.authority
   envelopeExact : receipt.envelopeBytes = envelope
   authorization : Authorized (portals prepared tuple physical incidence)
-    prepared.authority.snapshot.authState (tuple.request incidence).2
+    ground.authority.authState (tuple.request incidence).2
   admitted : authorizeLeg prepared tuple incidence physical receipt = .ok authorization
 
 def verifyLeg {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : DeclaredResourceController.Ambient}
-    {durable : DeclaredResourceController.Durable}
+    {ground : Ground deployment}
     {command : DeclaredResourceController.Command}
     (native : CredentialSignatureIO.NativeConfig)
     (prepared : DeclaredResourceController.PreparedInvocation
-      deployment profile ambient durable command)
+      deployment profile ambient ground command)
     (tuple : PreparedTuple (DeclaredResourceController.plan prepared))
     {domain semantics : Digest} {publicKey : List UInt8}
     {begin : ApplicationLifecycleRetryBeginV4Ingress.Ingress}
@@ -202,9 +204,9 @@ def verifyLeg {F : Type} [Field F] [DecidableEq F]
     (envelope : List UInt8) :
     IO (Except DeclaredResourceController.Reject
       (CheckedLeg prepared tuple physical incidence envelope)) := do
-  match ← CredentialSignatureAdmission.verifyNative native prepared.authority.snapshot
+  match ← CredentialSignatureAdmission.verifyNative native ground.authority
       (DeclaredResourceController.operationMarker
-        prepared.authority.snapshot.domain profile.semantics command)
+        ground.authority.domain profile.semantics command)
       (tuple.request incidence).2 envelope with
   | .error reason => return .error (.legSignature reason)
   | .ok signature =>
@@ -222,10 +224,10 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : DeclaredResourceController.Ambient}
-    {durable : DeclaredResourceController.Durable}
+    {ground : Ground deployment}
     {command : DeclaredResourceController.Command}
     (prepared : DeclaredResourceController.PreparedInvocation
-      deployment profile ambient durable command)
+      deployment profile ambient ground command)
     (signed : DeclaredResourceController.SignedCommand)
     {domain semantics : Digest} {publicKey : List UInt8}
     {begin : ApplicationLifecycleRetryBeginV4Ingress.Ingress}
@@ -251,11 +253,11 @@ def admit {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : DeclaredResourceController.Ambient}
-    {durable : DeclaredResourceController.Durable}
+    {ground : Ground deployment}
     {command : DeclaredResourceController.Command}
     (native : CredentialSignatureIO.NativeConfig)
     (prepared : DeclaredResourceController.PreparedInvocation
-      deployment profile ambient durable command)
+      deployment profile ambient ground command)
     (signed : DeclaredResourceController.SignedCommand)
     {domain semantics : Digest} {publicKey : List UInt8}
     {begin : ApplicationLifecycleRetryBeginV4Ingress.Ingress}

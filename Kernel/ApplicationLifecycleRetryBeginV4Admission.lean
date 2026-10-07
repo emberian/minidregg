@@ -13,31 +13,44 @@ open Minidregg.Kernel.DurableDataIntent
 
 set_option autoImplicit false
 
-structure Accepted (config : Config) (opened : Opened config)
+open Minidregg.Compiler.ServedBasis (Ground)
+open Minidregg.Compiler.DurableHistory (Head StoreIdentity)
+open Minidregg.Compiler.DurableHistoryReader (Reader)
+
+/-- Every key the current part of a retry BEGIN reads: the base BEGIN's and the
+retry markers'. -/
+def keys (ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress) : DurableView.Keys :=
+  let base := ApplicationLifecycleBeginReceiver.keys ingress.begin.base
+  let retry := ApplicationFailedCreateRetryEvidence.keys ingress.retry
+  ⟨base.transactions ++ retry.transactions, base.nullifiers ++ retry.nullifiers⟩
+
+structure Accepted (config : Config) {store : StoreIdentity} (head : Head store)
+    (ground : Ground config.deployment)
     (ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress) where
   private mk ::
   base : ApplicationLifecycleBeginReceiver.Accepted config.deployment config.profile
-    ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress.begin.base
+    ⟨config.federation, (config.genesisHeight + ground.height)⟩ ground ingress.begin.base
   shape : ingress.shape = true
   installed : ApplicationLifecycleBeginV3Admission.installedExact config.deployment
     ingress.begin base.selected.observed.before = true
-  evidence : ApplicationFailedCreateRetryEvidence.Conditional config opened
+  evidence : ApplicationFailedCreateRetryEvidence.Conditional config head ground
     ingress.retry ingress.begin
 
-def admitNative (config : Config) (opened : Opened config)
+def admitNative (config : Config) {store : StoreIdentity}
+    (reader : Reader ResourceBirthCodec.rootBytes store) (ground : Ground config.deployment)
     (ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress) :
-    IO (Except String (Accepted config opened ingress)) := do
+    IO (Except String (Accepted config reader.head ground ingress)) := do
   let base ← match ← ApplicationLifecycleBeginReceiver.admitLoaded
       config.deployment config.profile
-      ⟨config.federation, logicalHeight config opened.durable⟩
-      config.signature opened.durable ingress.begin.base with
+      ⟨config.federation, (config.genesisHeight + ground.height)⟩
+      config.signature ground ingress.begin.base with
     | .error detail => return .error detail
     | .ok base => pure base
   if shape : ingress.shape = true then
     if installed : ApplicationLifecycleBeginV3Admission.installedExact config.deployment
         ingress.begin base.selected.observed.before = true then
       let evidence ← match ← ApplicationFailedCreateRetryEvidence.prepare
-          config opened ingress.retry ingress.begin with
+          config reader ground ingress.retry ingress.begin with
         | .error detail => return .error detail
         | .ok evidence => pure evidence
       return .ok ⟨base, shape, installed, evidence⟩
@@ -55,9 +68,9 @@ def event
     ingress.canonicalBytes).digest
   canonicalBytes := ingress.canonicalBytes
 
-def Accepted.intent {config : Config} {opened : Opened config}
+def Accepted.intent {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress}
-    (accepted : Accepted config opened ingress) : DataIntent rootBytes :=
+    (accepted : Accepted config head ground ingress) : DataIntent rootBytes :=
   let legacy := accepted.base.intent
   let ordinary := accepted.base.invocation.dataIntent accepted.base.shape
   { legacy with
@@ -70,14 +83,14 @@ def Accepted.intent {config : Config} {opened : Opened config}
       | other => legacy.exactCharge other
     event := event ingress }
 
-theorem Accepted.intent_no_retry_consumption {config : Config} {opened : Opened config}
+theorem Accepted.intent_no_retry_consumption {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress}
-    (accepted : Accepted config opened ingress) :
+    (accepted : Accepted config head ground ingress) :
     accepted.intent.nullifiers = accepted.base.intent.nullifiers := rfl
 
-theorem Accepted.intent_writes {config : Config} {opened : Opened config}
+theorem Accepted.intent_writes {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress}
-    (accepted : Accepted config opened ingress) :
+    (accepted : Accepted config head ground ingress) :
     accepted.intent.writes = accepted.base.intent.writes := rfl
 
 end Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Admission

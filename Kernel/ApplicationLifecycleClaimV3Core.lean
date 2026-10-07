@@ -22,7 +22,31 @@ open Minidregg.Kernel.ApplicationLifecycleClaimV3Ingress
 
 set_option autoImplicit false
 
-def markersCurrent {config : Config} (opened : Opened config) (ingress : Ingress) : Bool :=
+open Minidregg.Compiler.ServedBasis (Ground)
+open Minidregg.Compiler.DurableHistory (Head StoreIdentity)
+open Minidregg.Compiler.DurableHistoryReader (Reader)
+
+/-- The nullifiers the claim reads from the spent map on the current ground. -/
+def markerNullifiers (ingress : Ingress) : List StableNullifier :=
+  match ingress.originalBegin.start with
+  | none => []
+  | some binding =>
+      [firstAttemptNullifier ingress.base.domain binding,
+        ApplicationLifecycleClaimV3Ingress.createdNullifier ingress.base.domain binding]
+
+/-- Every key the current part of a v3 claim reads. -/
+def keys (ingress : Ingress) : DurableView.Keys :=
+  let current := ApplicationLifecycleClaimCurrent.keys ingress.base
+  ⟨current.transactions, current.nullifiers ++ markerNullifiers ingress⟩
+
+/-- The ground answers every marker the claim reads. -/
+def markersDeclared {deployment : CanonicalCellRegistry.Deployment} (ground : Ground deployment)
+    (ingress : Ingress) : Bool :=
+  (markerNullifiers ingress).all ground.declaresNullifier
+
+def markersCurrent {deployment : CanonicalCellRegistry.Deployment} (ground : Ground deployment)
+    (ingress : Ingress) : Bool :=
+  markersDeclared ground ingress &&
   match ingress.originalBegin.start with
   | none => true
   | some binding =>
@@ -31,58 +55,76 @@ def markersCurrent {config : Config} (opened : Opened config) (ingress : Ingress
         ingress.base.domain binding
       match binding.choice with
       | .create _ =>
-          !opened.durable.snapshot.model.consumed attempt &&
-            !opened.durable.snapshot.model.consumed created
-      | .continue => opened.durable.snapshot.model.consumed created
+          !ground.view.model.consumed attempt &&
+            !ground.view.model.consumed created
+      | .continue => ground.view.model.consumed created
 
-theorem consumed_first_attempt_refuses_create {config : Config}
-    (opened : Opened config) (ingress : Ingress)
+theorem consumed_first_attempt_refuses_create {deployment : CanonicalCellRegistry.Deployment}
+    (ground : Ground deployment) (ingress : Ingress)
     (binding : ApplicationLifecycleLaunchBinding.Binding) (index : Nat)
     (selected : ingress.originalBegin.start = some binding)
     (choice : binding.choice = .create index)
-    (consumed : opened.durable.snapshot.model.consumed
+    (consumed : ground.view.model.consumed
       (ApplicationLifecycleClaimV3Ingress.firstAttemptNullifier
         ingress.base.domain binding) = true) :
-    markersCurrent opened ingress = false := by
+    markersCurrent ground ingress = false := by
   simp [markersCurrent, selected, choice, consumed]
 
-structure Conditional (config : Config) (opened : Opened config)
-    (ingress : Ingress) where
+/-- **An undeclared claim marker refuses** (the pole of a silent "unconsumed"). -/
+theorem undeclared_marker_refuses {deployment : CanonicalCellRegistry.Deployment}
+    (ground : Ground deployment) (ingress : Ingress)
+    (marker : StableNullifier) (member : marker ∈ markerNullifiers ingress)
+    (undeclared : ground.declaresNullifier marker = false) :
+    markersCurrent ground ingress = false := by
+  have : markersDeclared ground ingress = false := by
+    unfold markersDeclared
+    exact List.all_eq_false.mpr ⟨marker, member, by simp [undeclared]⟩
+  simp [markersCurrent, this]
+
+structure Conditional (config : Config) {store : StoreIdentity} (head : Head store)
+    (ground : Ground config.deployment) (ingress : Ingress) where
   private mk ::
   sourceExact : ingress.originalExact = true
-  original : NativeHistorySelection.Candidate config opened
+  original : NativeHistorySelection.Candidate config head
     ingress.base.source.originalIndex
   originalAccepted : ApplicationLifecycleBeginV3Admission.Accepted
     config.deployment config.profile
-    ⟨config.federation, logicalHeight config original.prior.durable⟩
-    original.prior.durable ingress.originalBegin
+    ⟨config.federation, config.genesisHeight + original.ground.height⟩
+    original.ground ingress.originalBegin
   originalMatch : NativeHistorySelection.Matched original originalAccepted.intent
   current : ApplicationLifecycleClaimCurrent.Accepted config.deployment config.profile
-    ⟨config.federation, logicalHeight config opened.durable⟩
-    opened.durable ingress.base
+    ⟨config.federation, config.genesisHeight + ground.height⟩
+    ground ingress.base
   currentInstalled : ApplicationLifecycleBeginV3Admission.installedExact
     config.deployment ingress.originalBegin
     current.packageRead.selected.observed.before = true
-  markers : markersCurrent opened ingress = true
+  markers : markersCurrent ground ingress = true
 
-theorem Conditional.original_record_exact {config : Config} {opened : Opened config}
-    {ingress : Ingress} (conditional : Conditional config opened ingress) :
+theorem Conditional.original_record_exact {config : Config} {store : StoreIdentity}
+    {head : Head store} {ground : Ground config.deployment}
+    {ingress : Ingress} (conditional : Conditional config head ground ingress) :
     conditional.original.record =
       DurableReceiver.IntentRecord.ofIntent conditional.originalAccepted.intent := by
   exact conditional.originalMatch.selected.symm.trans conditional.originalMatch.exact
 
-def prepare (config : Config) (opened : Opened config) (ingress : Ingress) :
-    IO (Except String (Conditional config opened ingress)) := do
+/-- The keys the historical (original) BEGIN reads on its prior state. -/
+def originalKeys (ingress : Ingress) : DurableView.Keys :=
+  ApplicationLifecycleBeginV3Admission.keys ingress.originalBegin
+
+def prepare (config : Config) {store : StoreIdentity}
+    (reader : Reader ResourceBirthCodec.rootBytes store) (ground : Ground config.deployment)
+    (ingress : Ingress) :
+    IO (Except String (Conditional config reader.head ground ingress)) := do
   if sourceExact : ingress.originalExact = true then
-    let original ← match ← NativeHistorySelection.selectIO config opened
-        ingress.base.source.originalIndex with
+    let original ← match ← NativeHistorySelection.select config reader ground.height
+        ingress.base.source.originalIndex (originalKeys ingress) with
       | .error detail => return .error detail
       | .ok original => pure original
     let originalAmbient : DeclaredResourceController.Ambient :=
-      ⟨config.federation, logicalHeight config original.prior.durable⟩
+      ⟨config.federation, config.genesisHeight + original.ground.height⟩
     let originalAccepted ← match ← ApplicationLifecycleBeginV3Admission.admitNative
         config.deployment config.profile originalAmbient config.signature
-        original.prior.durable ingress.originalBegin with
+        original.ground ingress.originalBegin with
       | .error detail => return .error s!"original v3 lifecycle begin refused: {detail}"
       | .ok accepted => pure accepted
     let originalMatch ← match NativeHistorySelection.matchIntent original
@@ -90,24 +132,26 @@ def prepare (config : Config) (opened : Opened config) (ingress : Ingress) :
       | .error detail => return .error detail
       | .ok matched => pure matched
     let ambient : DeclaredResourceController.Ambient :=
-      ⟨config.federation, logicalHeight config opened.durable⟩
+      ⟨config.federation, config.genesisHeight + ground.height⟩
     let current ← match ← ApplicationLifecycleClaimCurrent.admitLoaded
-        config.deployment config.profile ambient config.signature opened.durable
+        config.deployment config.profile ambient config.signature ground
         ingress.base with
       | .error detail => return .error detail
       | .ok current => pure current
     if installed : ApplicationLifecycleBeginV3Admission.installedExact
         config.deployment ingress.originalBegin
         current.packageRead.selected.observed.before = true then
-      if markerReady : markersCurrent opened ingress = true then
-        return .ok ⟨sourceExact, original, originalAccepted,
-          originalMatch, current, installed, markerReady⟩
-      else return .error "v3 claim first-attempt/created marker state refused"
+      if _declared : markersDeclared ground ingress = true then
+        if markerReady : markersCurrent ground ingress = true then
+          return .ok ⟨sourceExact, original, originalAccepted,
+            originalMatch, current, installed, markerReady⟩
+        else return .error "v3 claim first-attempt/created marker state refused"
+      else return .error "v3 claim launch marker undeclared"
     else return .error "current package differs from original signed launch descriptor"
   else return .error "v3 claim original BEGIN projection differs"
 
-def Conditional.intent {config : Config} {opened : Opened config}
-    {ingress : Ingress} (conditional : Conditional config opened ingress) :
+def Conditional.intent {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
+    {ingress : Ingress} (conditional : Conditional config head ground ingress) :
     DataIntent ResourceBirthCodec.rootBytes :=
   let ordinary := ApplicationLifecycleClaimCore.intentFromCurrent conditional.current
     (event ingress) ingress.canonicalBytes.length
@@ -121,14 +165,14 @@ def Conditional.intent {config : Config} {opened : Opened config}
               marker.canonicalBytes.length
           | other => ordinary.exactCharge other }
 
-theorem Conditional.intent_event {config : Config} {opened : Opened config}
-    {ingress : Ingress} (conditional : Conditional config opened ingress) :
+theorem Conditional.intent_event {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
+    {ingress : Ingress} (conditional : Conditional config head ground ingress) :
     conditional.intent.event = event ingress := by
   unfold Conditional.intent
   split <;> rfl
 
-theorem Conditional.create_intent_has_attempt {config : Config} {opened : Opened config}
-    {ingress : Ingress} (conditional : Conditional config opened ingress)
+theorem Conditional.create_intent_has_attempt {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
+    {ingress : Ingress} (conditional : Conditional config head ground ingress)
     (marker : StableNullifier) (selected : ingress.createAttempt = some marker) :
     marker ∈ conditional.intent.nullifiers := by
   simp [Conditional.intent, selected]

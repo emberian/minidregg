@@ -1,8 +1,8 @@
 /-
 Conditional preparation of one current one-shot lifecycle claim. Historical
-BEGIN admission is re-derived at the exact prior prefix and compared to the
-full selected stored intent. Current app, package, mutation and management
-authority are checked on the same loaded image. This module emits a DataIntent
+BEGIN admission is re-derived on the prior state read from the authenticated
+history and compared to the full selected stored intent. Current app, package,
+mutation and management authority are checked on the current ground. This module emits a DataIntent
 but never commits it or grants a host launch; a verified-history adapter must
 bind this conditional result to NativeHostReplay.Verified first.
 -/
@@ -23,25 +23,37 @@ open Minidregg.Kernel.ApplicationLifecycleClaimIngress
 
 set_option autoImplicit false
 
-structure Conditional (config : NativeHost.Config) (opened : NativeHost.Opened config)
-    (ingress : Ingress) where
-  private mk ::
-  original : ApplicationLifecycleClaimHistory.Conditional config opened ingress.source
-  current : ApplicationLifecycleClaimCurrent.Accepted config.deployment config.profile
-    ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-    opened.durable ingress
+open Minidregg.Compiler.ServedBasis (Ground)
+open Minidregg.Compiler.DurableHistory (Head StoreIdentity)
+open Minidregg.Compiler.DurableHistoryReader (Reader)
 
-def prepare (config : NativeHost.Config) (opened : NativeHost.Opened config)
-    (ingress : Ingress) : IO (Except String (Conditional config opened ingress)) := do
-  let original ← match ← ApplicationLifecycleClaimHistory.admit config opened ingress.source with
+structure Conditional (config : NativeHost.Config) {store : StoreIdentity} (head : Head store)
+    (ground : Ground config.deployment) (ingress : Ingress) where
+  private mk ::
+  original : ApplicationLifecycleClaimHistory.Conditional config head ingress.source
+  current : ApplicationLifecycleClaimCurrent.Accepted config.deployment config.profile
+    ⟨config.federation, config.genesisHeight + ground.height⟩
+    ground ingress
+
+/-- `current` is the ground the claim is checked on (the light basis or, for the
+audit walk, the full shape); `reader` supplies the original BEGIN's record and
+prefix state. -/
+def prepare (config : NativeHost.Config) {store : StoreIdentity}
+    (reader : Reader ResourceBirthCodec.rootBytes store) (ground : Ground config.deployment)
+    (ingress : Ingress) : IO (Except String (Conditional config reader.head ground ingress)) := do
+  let original ← match ← ApplicationLifecycleClaimHistory.admit config reader ground.height ingress.source with
     | .error detail => return .error detail
     | .ok original => pure original
   let ambient : DeclaredResourceController.Ambient :=
-    ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
+    ⟨config.federation, config.genesisHeight + ground.height⟩
   match ← ApplicationLifecycleClaimCurrent.admitLoaded config.deployment config.profile
-      ambient config.signature opened.durable ingress with
+      ambient config.signature ground ingress with
   | .error detail => return .error detail
   | .ok current => return .ok ⟨original, current⟩
+
+/-- Every key the current part of a claim reads. -/
+def keys (ingress : Ingress) : DurableView.Keys :=
+  ApplicationLifecycleClaimCurrent.keys ingress
 
 def packageGuard (source : Source)
     (before : PackedCell CanonicalCellRegistry.registry) : ReadGuard :=
@@ -52,11 +64,11 @@ def packageGuard (source : Source)
 independent package observation contributes a new read-only guard. Both native
 observation signatures are separately checked by `current`. The event and
 canonical byte count come from an admitted versioned outer ingress. -/
-def intentFromCurrent {config : NativeHost.Config} {opened : NativeHost.Opened config}
+def intentFromCurrent {config : NativeHost.Config} {ground : Ground config.deployment}
     {ingress : Ingress}
     (current : ApplicationLifecycleClaimCurrent.Accepted config.deployment config.profile
-      ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.durable ingress)
+      ⟨config.federation, config.genesisHeight + ground.height⟩
+      ground ingress)
     (wireEvent : StableEvent) (wireBytes : Nat) :
     DataIntent rootBytes := by
   let ordinary := current.invocation.dataIntent current.shape
@@ -92,28 +104,29 @@ def intentFromCurrent {config : NativeHost.Config} {opened : NativeHost.Opened c
       postRootsBound := ordinary.postRootsBound
       guardsReadOnly := guarded }
 
-def Conditional.intent {config : NativeHost.Config} {opened : NativeHost.Opened config}
-    {ingress : Ingress} (conditional : Conditional config opened ingress) :
+def Conditional.intent {config : NativeHost.Config} {store : StoreIdentity} {head : Head store}
+    {ground : Ground config.deployment} {ingress : Ingress}
+    (conditional : Conditional config head ground ingress) :
     DataIntent rootBytes :=
   intentFromCurrent conditional.current (event ingress) ingress.canonicalBytes.length
 
-theorem Conditional.intent_event {config : NativeHost.Config} {opened : NativeHost.Opened config}
-    {ingress : Ingress} (conditional : Conditional config opened ingress) :
+theorem Conditional.intent_event {config : NativeHost.Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
+    {ingress : Ingress} (conditional : Conditional config head ground ingress) :
     conditional.intent.event = event ingress := rfl
 
-theorem Conditional.intent_writes {config : NativeHost.Config}
-    {opened : NativeHost.Opened config} {ingress : Ingress}
-    (conditional : Conditional config opened ingress) :
+theorem Conditional.intent_writes {config : NativeHost.Config} {store : StoreIdentity} {head : Head store}
+    {ground : Ground config.deployment} {ingress : Ingress}
+    (conditional : Conditional config head ground ingress) :
     conditional.intent.writes =
       (conditional.current.invocation.dataIntent conditional.current.shape).writes := rfl
 
-theorem Conditional.intent_package_guard {config : NativeHost.Config}
-    {opened : NativeHost.Opened config} {ingress : Ingress}
-    (conditional : Conditional config opened ingress) :
+theorem Conditional.intent_package_guard {config : NativeHost.Config} {store : StoreIdentity} {head : Head store}
+    {ground : Ground config.deployment} {ingress : Ingress}
+    (conditional : Conditional config head ground ingress) :
     packageGuard ingress.source conditional.current.packageRead.selected.observed.before ∈
       conditional.intent.readGuards ∧
       (packageGuard ingress.source conditional.current.packageRead.selected.observed.before).expectedRoot =
-        opened.durable.snapshot.model.roots
+        ground.view.model.roots
           (packageGuard ingress.source conditional.current.packageRead.selected.observed.before).cellId := by
   constructor
   · change packageGuard ingress.source conditional.current.packageRead.selected.observed.before ∈

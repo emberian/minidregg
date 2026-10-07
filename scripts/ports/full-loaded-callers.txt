@@ -25,12 +25,6 @@ Host/SourceAgreementReader.lean
 Kernel/ApplicationAgentLifetimeGrantLookup.lean
 Kernel/ApplicationAgentLifetimeGrantReceiver.lean
 Kernel/ApplicationAgentLifetimeGrantSource.lean
-Kernel/ApplicationFailedStartRecoveryHistory.lean
-Kernel/ApplicationLifecycleCompletionHistory.lean
-Kernel/ApplicationLifecycleCompletionV2History.lean
-Kernel/ApplicationLifecycleCreatedHistory.lean
-Kernel/ApplicationLifecycleRetryCompletionV4CreatedHistory.lean
-Kernel/ApplicationLifecycleRetryCompletionV4History.lean
 Kernel/ApplicationShareIssueSource.lean
 Kernel/CapabilityDelegationReceiver.lean
 Kernel/CarriedSegment.lean
@@ -48,7 +42,6 @@ Kernel/GrainResourceBirthReceiver.lean
 Kernel/JointControlBootstrapBundle.lean
 Kernel/JointSourcePrefixValidation.lean
 Kernel/NativeCurrentMemberKeyIO.lean
-Kernel/NativeHistorySelection.lean
 Kernel/NativeHost.lean
 Kernel/NativeHostKeyCommitmentAdoption.lean
 Kernel/NativeHostReplay.lean
