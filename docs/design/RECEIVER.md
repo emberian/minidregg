@@ -297,7 +297,7 @@ After:
    theorem host_submit_is_step (F : Family) (H) {config} {opened : Opened config}
        {ingress} {admission : F.receiver.Admitted (envOf config) opened.durable ingress}
        {witness : Receiving.Appended opened.durable (F.receiver.intent admission.accepted)}
-       {w} (represents : DeployedRepresents opened.durable w) (honest : BaseHonest opened.durable) :
+       {w} (represents : DeployedRepresents opened.durable w) :
        ∃ w', World.admit H w (Turn.ofAccepted bridge H w admission) = .ok w' ∧
          DeployedRepresents witness.appended.next w' ∧
          ∃ cs, F.claims (envOf config) opened.durable ingress = .ok cs ∧

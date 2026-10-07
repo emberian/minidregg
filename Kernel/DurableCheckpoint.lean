@@ -57,16 +57,19 @@ theorem IntentRecord.erase_bind {rootBytes : List UInt8 → Digest} {record : In
   subst exact
   rfl
 
-/-- The materialized state at a checkpoint height. -/
+/-- The materialized state at a checkpoint height: the cells and the
+remaining allowance. The consumed nullifiers are NOT state: like the journal and
+the history they are a function of the accepted prefix (`State.snapshot`), so a
+checkpoint never carries them (KN2-STORE-OPEN: they were most of a checkpoint's
+bytes) and nothing unverified can supply them. -/
 structure State where
   absentBytes : List UInt8
   cells : List (CellId × List UInt8)
-  consumed : List StableNullifier
   available : Charge
 
-/-- The genesis state: the seed, nothing consumed. -/
+/-- The genesis state: the seed. -/
 def State.ofSeed (seed : Seed) : State :=
-  ⟨seed.absentBytes, seed.cells, [], seed.available⟩
+  ⟨seed.absentBytes, seed.cells, seed.available⟩
 
 /-- Root table computed once per materialization; each entry's root is the
 root function of its own bytes, by construction. -/
@@ -99,12 +102,13 @@ def State.snapshot (rootBytes : List UInt8 → Digest) (state : State)
     (prefixRecords : List IntentRecord) : DataSnapshot rootBytes :=
   let table := rootTable rootBytes state.cells
   let absentRoot := rootBytes state.absentBytes
+  let spent := prefixRecords.flatMap IntentRecord.nullifiers
   { model :=
       { roots := fun cellId =>
           match tableLookup cellId table with
           | some entry => entry.2
           | none => absentRoot
-        consumed := fun nullifier => decide (nullifier ∈ state.consumed)
+        consumed := fun nullifier => decide (nullifier ∈ spent)
         available := state.available
         history := prefixRecords.map fun record => (IntentRecord.erase record).event
         journal := (prefixRecords.map fun record =>
@@ -280,7 +284,6 @@ def State.ofSnapshot {rootBytes : List UInt8 → Digest} (image : Image)
     (snapshot : DataSnapshot rootBytes) : State :=
   ⟨image.seed.absentBytes,
     image.cellIds.map fun cellId => (cellId, snapshot.canonicalBytes cellId),
-    image.accepted.flatMap IntentRecord.nullifiers,
     snapshot.model.available⟩
 
 /-- `eraseDups` leaves no duplicates. -/
@@ -315,14 +318,14 @@ open DurableReceiver.Witness
 def grown : Image := image.append intent
 
 def honestState : State :=
-  ⟨[], [(readCell, [1, 2, 3]), (writeCell, write.canonicalPostBytes)], [nullifier],
+  ⟨[], [(readCell, [1, 2, 3]), (writeCell, write.canonicalPostBytes)],
     fun lane => 10 - intent.exactCharge lane⟩
 
 /-- A checkpoint whose state is not the prefix replay: the written cell is
 rolled back to its seed bytes (same length, so the witness's length root
 cannot tell them apart). -/
 def rolledBackState : State :=
-  ⟨[], [(readCell, [1, 2, 3]), (writeCell, [4, 5])], [nullifier],
+  ⟨[], [(readCell, [1, 2, 3]), (writeCell, [4, 5])],
     fun lane => 10 - intent.exactCharge lane⟩
 
 /-- Satisfiable pole: an honest checkpoint at height 1 resumes to the same
