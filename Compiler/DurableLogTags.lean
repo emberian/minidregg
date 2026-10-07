@@ -139,6 +139,25 @@ theorem chainPrefixes_getElem? (start : Digest) :
       have rest := chainPrefixes_getElem? (chainStep start record) records i (by simpa using within)
       simpa [chainPrefixes, chainAfter, List.scanl_cons] using rest
 
+/-- The chain prefixes over STORED record bytes (`chainStepStored`). -/
+def chainPrefixesStored (start : Digest) (stored : List (List UInt8)) : List Digest :=
+  stored.scanl chainStepStored start
+
+/-- **The open's stored-bytes chain is the specification chain** over the
+records the bytes decode to. -/
+theorem chainPrefixesStored_eq (start : Digest) :
+    ∀ (stored : List (List UInt8)) (records : List IntentRecord),
+      List.Forall₂ (fun bytes record => recordFrame.decode bytes = some record) stored records →
+        chainPrefixesStored start stored = chainPrefixes start records
+  | [], [], .nil => rfl
+  | bytes :: stored, record :: records, .cons decoded rest => by
+      have tail := chainPrefixesStored_eq (chainStepStored start bytes) stored records rest
+      rw [chainStepStored_eq decoded] at tail
+      simp only [chainPrefixesStored, chainPrefixes, List.scanl_cons] at tail ⊢
+      rw [chainStepStored_eq decoded, tail]
+
+#assert_axioms chainPrefixesStored_eq
+
 /-- The last prefix is the head chain, so `load` hashes the log once, not twice. -/
 theorem chainPrefixes_getLast? (start : Digest) (records : List IntentRecord) :
     (chainPrefixes start records).getLast?.getD start = chainAfter start records := by

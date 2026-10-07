@@ -907,6 +907,28 @@ private def decodeRecordsFrom : Nat → List Entry → Except String (List Inten
         | throw s!"noncanonical durable log record at height {height}"
       return record :: (← decodeRecordsFrom (height + 1) rest)
 
+/-- Every record the open decodes is what its stored bytes decode to. -/
+private theorem decodeRecordsFrom_forall₂ :
+    ∀ (height : Nat) (entries : List Entry) (records : List IntentRecord),
+      decodeRecordsFrom height entries = .ok records →
+        List.Forall₂ (fun bytes record => recordFrame.decode bytes = some record)
+          (entries.map (·.record)) records
+  | _, [], records, decoded => by
+      simp only [decodeRecordsFrom, Except.ok.injEq] at decoded
+      subst decoded; exact .nil
+  | height, entry :: rest, records, decoded => by
+      simp only [decodeRecordsFrom] at decoded
+      cases found : recordFrame.decode entry.record with
+      | none => simp [found] at decoded
+      | some record =>
+          simp only [found] at decoded
+          cases tail : decodeRecordsFrom (height + 1) rest with
+          | error message => simp [tail] at decoded
+          | ok more =>
+              simp [tail] at decoded
+              subst decoded
+              exact .cons found (decodeRecordsFrom_forall₂ (height + 1) rest more tail)
+
 /-- Advance the accumulator frontier over stored entries `height + 1, …`
 (each with the chain after it), checking that every tag carries the frontier
 digest the accumulator reaches there. The tags' MACs are verified separately
@@ -947,11 +969,18 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
       if let some refusal := (SeedEpoch.ofBytes seedBytes).refusal then
         return .error s!"durable store refused: {refusal}"
       let some seed := seedFrame.decode seedBytes | return .error "noncanonical durable seed"
-      let records ← match decodeRecordsFrom 1 stored.entries with
+      let ⟨records, decoded⟩ ← match found : decodeRecordsFrom 1 stored.entries with
         | .error message => return .error message
-        | .ok records => pure records
+        | .ok records => pure (⟨records, decodeRecordsFrom_forall₂ 1 _ _ found⟩ :
+            {records : List IntentRecord // List.Forall₂
+              (fun bytes record => recordFrame.decode bytes = some record)
+              (stored.entries.map (·.record)) records})
       let logStart := transport.logStart seed
-      let chains := chainPrefixes logStart records
+      -- The chain over the STORED bytes (no re-encode), equal to the
+      -- specification chain over the decoded records (`chainPrefixesStored_eq`).
+      let chains := DurableLogTags.chainPrefixesStored logStart (stored.entries.map (·.record))
+      have chainsEq : chains = chainPrefixes logStart records :=
+        DurableLogTags.chainPrefixesStored_eq logStart _ _ decoded
       let headChain := chains.getLast?.getD logStart
       let (baseHeight, base, baseFrontier, baseSpent) ← match stored.checkpoint with
         | none => pure (0, State.ofSeed seed, [], DurableSpent.emptyDigest)
@@ -995,7 +1024,8 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
         | some snapshot =>
             let loaded : Loaded rootBytes :=
               ⟨image, baseHeight, base, snapshot, within, resumed, logStart, headChain,
-              DurableLogTags.chainPrefixes_getLast? logStart records,
+              (by show chains.getLast?.getD logStart = _; rw [chainsEq]
+                  exact DurableLogTags.chainPrefixes_getLast? logStart records),
               RootCache.ofEntries (entriesOf image snapshot headChain),
               RootsExact.ofEntries (entriesOf image snapshot headChain),
               PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl,
@@ -1011,7 +1041,7 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
                 if stored ≠ loaded.worldRoot then
                   return .error "durable log head root differs from the replayed root"
             | _ => pure ()
-            return .ok ⟨loaded, chains, rfl⟩
+            return .ok ⟨loaded, chains, chainsEq⟩
       else return .error "checkpoint beyond the log head"
 
 /-- The open path (`loadChained` without the chain prefixes). -/
