@@ -419,7 +419,7 @@ raw outsider carl "reads sa with bob's capability number" "no-grant" "$MINI" wor
 declare_for carl lab
 # The generation a wrap is addressed to is the key epoch of the recipient's signed record (an enrolled key starts at 1).
 CGEN=$(jq -r .keyEpoch "$H/alice/requests/decl-lab-carl.json")
-CWRAP=$(echo "2^96 + $CGEN * 2^64 + $C" | BC_LINE_LENGTH=0 bc)
+CWRAP=$(python3 -c "import sys; print(2**96 + int(sys.argv[1]) * 2**64 + int(sys.argv[2]))" "$CGEN" "$C")
 operator keyslaw "bob imports the keys cell by his room grant (the grant under lab that covers it)" "$MINI" workspace --action import \
   --dir "$WS/bob" --name lab-keys --kind object --target "$KEYS" --observe-capability "$(jq -r .observeCapability "$WS/bob/refs/lab.json")"
 raw keyslaw bob "invites carl himself (room-key --op invite): his CLIENT refuses, he is not the founder-key chain's tip" "current founder key" \
@@ -560,7 +560,7 @@ check rotkey "alice now pins carl's NEW signing key for pc" \
 ok rotkey alice "room rotate r-pc pc"
 # the rotation is two turns: r-pc-bind (release records) then r-pc-wraps (the wraps)
 # pc's epoch 1 for carl at generation 2 (his key epoch): (1 + 1) * 2^96 + 2 * 2^64 + carl.
-RK_ID=$(echo "2 * 2^96 + 2 * 2^64 + $C" | BC_LINE_LENGTH=0 bc)
+RK_ID=$(python3 -c "import sys; print(2 * 2**96 + 2 * 2**64 + int(sys.argv[1]))" "$C")
 check rotkey "the rotation wrapped pc's new epoch to carl's RECORD (generation = his key epoch 2, his new key)" \
   jq -e --arg id "$RK_ID" --arg k "$ENC_NEW" '[.purpose.draft.command.targets[0].payload.actions[] | select(.atom == $id and (.payload | startswith($k)))] | length == 1' \
     "$WS/alice/proposals/r-pc-wraps/intent.json"

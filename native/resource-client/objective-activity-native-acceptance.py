@@ -246,6 +246,12 @@ def judge(label, value, expect, detail):
         ok = kind == 'prepared'
     elif expect == 'conflict':
         ok = kind == 'refused' and reason == 'conflict'
+    elif expect == 'installed-or-requote':
+        # the record's size depends on digests derived from the transaction id (base-255 Nat codec: a
+        # digest is 32 or 33 bytes), so a quote taken in one transaction can be one byte short in the
+        # next: the answer is installed, or underfunded (the caller re-quotes from the refusal)
+        ok = (kind == 'confirmed' and value.get('confirmation') == 'installed') or \
+             (kind == 'refused' and 'Refusal.underfunded' in text)
     else:
         ok = kind == 'refused' or 'refused' in str(value.get('error', ''))
     if ok and detail is not None:
@@ -499,7 +505,19 @@ quote = re.search(r'underfunded (\d+) (\d+)', unhex(LAST['value'].get('detail', 
 NEED = int(quote.group(2)) if quote else 0
 check('deposit-reserves-pair-and-storage', quote is not None and int(quote.group(1)) == PAIR and NEED > PAIR,
       {'pair': PAIR, 'quote': quote.groups() if quote else None})
-tx3 = birth('birth-exact-deposit', sponsor, 'tally-three', NEED, 'installed')
+# The quote came from one transaction and the record's size depends on digests derived from the
+# transaction id (measured: 16 identical quote turns answered 8456 x12, 8457 x3, 8458 x1), so the exact
+# deposit is re-quoted from each underfunded answer until a turn installs (each retry is a new transaction).
+tx3 = None
+for attempt in range(1, 9):
+    label = 'birth-exact-deposit' if attempt == 1 else f'birth-exact-deposit-retry{attempt}'
+    birth(label, sponsor, 'tally-three', NEED, 'installed-or-requote'); value = LAST['value']
+    if value.get('type') == 'confirmed':
+        tx3 = value.get('transaction')
+        break
+    requote = re.search(r'underfunded (\d+) (\d+)', unhex(LAST['value'].get('detail', '')))
+    NEED = int(requote.group(2)) if requote else NEED
+check('exact-deposit-installed-within-requotes', tx3 is not None, {'attempts': attempt, 'deposit': NEED})
 f1 = state('tally-three', 'funding-born', tx3)
 REC3 = f1['recordCell']
 turn('funding-resolve', second, {'kind': 'resolve', 'slot': await_of(f1)['source']['slot'],
