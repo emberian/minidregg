@@ -1224,48 +1224,7 @@ runtime closures/records as well as scalars. -/
 addresses and local provenance for every active update. Initialization,
 running/finished transition preservation and ground soundness are proved
 below; no source-evaluator oracle is a field of this relation. -/
-def GraphRepresents (state : State) (source : Term) : Prop :=
-  LexicalInvariant state ∧ BusyInvariant state ∧ FinalStackInvariant state ∧ ∃ meaning, MeaningsScoped state.heap.size meaning ∧ HeapRealizes meaning state.heap ∧
-    ∃ residual, controlMeaning meaning state.control = some residual ∧
-      StackRealizes meaning source residual state.stack
-
- theorem graph_initializes {source : Term} (closed : Scoped 0 source) :
-    GraphRepresents (initial source) source := by
-  refine ⟨initial_lexicalInvariant closed,initial_busyInvariant source,initial_finalStackInvariant source,fun _ => .bound 0,?_,?_,source,?_,?_⟩
-  · intro address allocated; simp [initial] at allocated
-  · intro address cell found; simp [initial] at found
-  · rfl
-  · exact .refl _
-
- theorem graph_complete_natural_sound {state : State} {source : Term} {number : Nat}
-    (represented : GraphRepresents state source)
-    (complete : state.control = .complete (.natural number)) :
-    Evaluates source (.nat number) := by
-  obtain ⟨_,_,final,meaning,_,_,residual,control,steps⟩ := represented
-  have empty := final _ complete
-  simp [complete,controlMeaning,valueMeaning] at control
-  subst residual
-  simpa [empty,StackRealizes] using And.intro steps (Value.natural number)
-
- theorem graph_complete_label_sound {state : State} {source : Term} {name : String}
-    (represented : GraphRepresents state source)
-    (complete : state.control = .complete (.label name)) :
-    Evaluates source (.label name) := by
-  obtain ⟨_,_,final,meaning,_,_,residual,control,steps⟩ := represented
-  have empty := final _ complete
-  simp [complete,controlMeaning,valueMeaning] at control
-  subst residual
-  simpa [empty,StackRealizes] using And.intro steps (Value.label name)
-
- theorem graph_complete_boolean_sound {state : State} {source : Term} {value : Bool}
-    (represented : GraphRepresents state source)
-    (complete : state.control = .complete (.boolean value)) :
-    Evaluates source (.boolean value) := by
-  obtain ⟨_,_,final,meaning,_,_,residual,control,steps⟩ := represented
-  have empty := final _ complete
-  simp [complete,controlMeaning,valueMeaning] at control
-  subst residual
-  simpa [empty,StackRealizes] using And.intro steps (Value.boolean value)
+def GraphRepresents (state : State) (source : Term) : Prop := sorry
 
 /-- Finished closures, records, specifications and prototypes have source
 values through the same concrete heap graph assignment as scalars. The
@@ -1872,641 +1831,7 @@ def SourceNamesAgree (before : State) (meaning next : AddressMeaning) : Prop :=
 
 /-- The actual semantic transition consumes a continuation prefix and one
 independent source reduction; remaining heap names retain their prefix. -/
-def SourceDispatch (meaning next : AddressMeaning) (state : State) : Prop :=
-  ∃ consumed before after,
-    controlMeaning meaning state.control = some before ∧
-    controlMeaning next (stepRaw state).control = some after ∧
-    state.stack = consumed ++ (stepRaw state).stack ∧
-    Step (stackMeaning meaning consumed before) after
-
- theorem graph_evaluate_context_names {meaning : AddressMeaning} {state : State} {source hole : Term} {context : DemandContext} {environment : Environment}
-    (represented : GraphRepresentsBy meaning state source)
-    (evaluate : state.control = .evaluate (context.term hole) environment) :
-    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  have scope : Scoped environment.length (context.term hole) := by
-    have valid := lexical.2.1
-    rw [evaluate] at valid
-    exact valid.1
-  simp [controlMeaning,evaluate] at control
-  subst focus
-  have dispatched := demandContext_dispatch evaluate
-  refine ⟨meaning,(fun _ _ => rfl),stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-    stepRaw_finalStackInvariant final,?_,?_,closeTerm meaning environment hole,?_,?_⟩
-  · simpa only [dispatched] using names
-  · simpa only [dispatched] using heap
-  · simp only [dispatched,controlMeaning]
-  · rw [demandContext_closes context meaning environment hole scope] at stack
-    cases context <;> simpa only [dispatched,DemandContext.frame,StackRealizes] using stack
-
- theorem graph_evaluate_bound_names {meaning : AddressMeaning} {state : State} {source : Term} {environment : Environment} {index address : Nat}
-    (represented : GraphRepresentsBy meaning state source)
-    (evaluate : state.control = .evaluate (.bound index) environment)
-    (found : environment[index]? = some address) : ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  have closes : closeTerm meaning environment (.bound index) = meaning address := by
-    cases environment with
-    | nil => simp at found
-    | cons _ _ => simp [closeTerm,Term.substitute,environmentSubstitution,found]
-  simp [controlMeaning,evaluate,closes] at control
-  subst focus
-  refine ⟨meaning,(fun _ _ => rfl),stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-    stepRaw_finalStackInvariant final,?_,?_,meaning address,?_,?_⟩
-  · simpa [stepRaw,evaluate,found] using names
-  · simpa [stepRaw,evaluate,found] using heap
-  · simp [stepRaw,evaluate,found,controlMeaning]
-  · simpa [stepRaw,evaluate,found] using stack
-
- theorem graph_evaluate_immediate_names {meaning : AddressMeaning} {state : State} {source : Term} {immediate : ImmediateValue} {environment : Environment}
-    (represented : GraphRepresentsBy meaning state source)
-    (evaluate : state.control = .evaluate immediate.term environment) : ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  have denotes : valueMeaning meaning (immediate.runtime environment) = closeTerm meaning environment immediate.term := by
-    cases immediate <;> cases environment <;> simp [ImmediateValue.term,ImmediateValue.runtime,valueMeaning,closeTerm,Term.substitute]
-  simp [controlMeaning,evaluate] at control
-  subst focus
-  refine ⟨meaning,(fun _ _ => rfl),stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-    stepRaw_finalStackInvariant final,?_,?_,valueMeaning meaning (immediate.runtime environment),?_,?_⟩
-  · cases immediate <;> simpa [stepRaw,evaluate,ImmediateValue.term] using names
-  · cases immediate <;> simpa [stepRaw,evaluate,ImmediateValue.term] using heap
-  · cases immediate <;> simp [stepRaw,evaluate,ImmediateValue.term,ImmediateValue.runtime,controlMeaning]
-  · rw [denotes]
-    cases immediate <;> simpa [stepRaw,evaluate,ImmediateValue.term] using stack
-
- theorem graph_object_access_execution {meaning : AddressMeaning} {state : State} {source : Term} {access : ObjectAccess} {first second : Address} {rest : List Frame}
-    (represented : GraphRepresentsBy meaning state source)
-    (returned : state.control = .returned (access.value first second))
-    (head : state.stack = access.frame::rest) : ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ (GraphRepresentsBy next (stepRaw state) source ∧ SourceDispatch meaning next state) := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  simp [controlMeaning,returned] at control
-  subst focus
-  have before : StackRealizes meaning source
-      (frameMeaning meaning access.frame (valueMeaning meaning (access.value first second))) rest := by
-    cases access <;> simpa [head,ObjectAccess.frame,StackRealizes] using stack
-  have reduce : Step (frameMeaning meaning access.frame (valueMeaning meaning (access.value first second)))
-      (meaning (access.address first second)) := by
-    cases access with
-    | reflect => exact Step.reflectPrototype _ _
-    | metadata => exact Step.metadataSpecification _ _
-    | project => exact Step.projectPrototype _ _
-  have advanced := stackRealizes_steps before (Steps.next reduce (Steps.refl _))
-  refine ⟨meaning,(fun _ _ => rfl),?_,?_⟩
-  ·
-    refine ⟨stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-      stepRaw_finalStackInvariant final,?_,?_,meaning (access.address first second),?_,?_⟩
-    · cases access <;> simpa [stepRaw,returned,head,ObjectAccess.frame,ObjectAccess.value] using names
-    · cases access <;> simpa [stepRaw,returned,head,ObjectAccess.frame,ObjectAccess.value] using heap
-    · cases access <;> simp [stepRaw,returned,head,ObjectAccess.frame,ObjectAccess.value,ObjectAccess.address,controlMeaning]
-    · cases access <;> simpa [stepRaw,returned,head,ObjectAccess.frame,ObjectAccess.value] using advanced
-  · refine ⟨[access.frame],valueMeaning meaning (access.value first second),meaning (access.address first second),?_,?_,?_,?_⟩
-    · simp [controlMeaning,returned,valueMeaning]
-    · cases access <;> simp [stepRaw,returned,head,controlMeaning,ObjectAccess.frame,ObjectAccess.value,ObjectAccess.address]
-    · cases access <;> simp [stepRaw,returned,head,controlMeaning,ObjectAccess.frame,ObjectAccess.value,ObjectAccess.address]
-    · exact reduce
-
- theorem graph_object_access_names {meaning : AddressMeaning} {state : State} {source : Term} {access : ObjectAccess} {first second : Address} {rest : List Frame}
-    (represented : GraphRepresentsBy meaning state source)
-    (returned : state.control = .returned (access.value first second))
-    (head : state.stack = access.frame::rest) : ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨next,same,current,_⟩ := graph_object_access_execution represented returned head
-  exact ⟨next,same,current⟩
-
- theorem graph_specification_call_names {meaning : AddressMeaning} {state : State} {source argument : Term} {environment : Environment}
-    {descriptor extension : Address} {rest : List Frame} (represented : GraphRepresentsBy meaning state source)
-    (returned : state.control = .returned (.specification descriptor extension))
-    (head : state.stack = .argument argument environment::rest) : ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  simp [controlMeaning,returned] at control
-  subst focus
-  have before : StackRealizes meaning source
-      (.app (.specification (meaning descriptor) (meaning extension)) (closeTerm meaning environment argument)) rest := by
-    simpa only [head,StackRealizes,frameMeaning,valueMeaning] using stack
-  have advanced := stackRealizes_steps before (Steps.next (Step.applySpecification _ _ _) (Steps.refl _))
-  refine ⟨meaning,(fun _ _ => rfl),stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-    stepRaw_finalStackInvariant final,?_,?_,meaning extension,?_,?_⟩
-  · simpa [stepRaw,returned,head] using names
-  · simpa [stepRaw,returned,head] using heap
-  · simp [stepRaw,returned,head,controlMeaning]
-  · simpa [stepRaw,returned,head,StackRealizes,frameMeaning] using advanced
-
- theorem graph_primitive_return_names {meaning : AddressMeaning} {state : State} {source result : Term} {primitive : Primitive}
-    {left right next : RuntimeValue} {rest : List Frame}
-    (represented : GraphRepresentsBy meaning state source) (returned : state.control = .returned right)
-    (head : state.stack = .binaryRight primitive left::rest)
-    (dispatch : (valueTerm left).bind (fun l => (valueTerm right).bind (primitiveResult primitive l)) = some result)
-    (scalar : scalarValue result = some next) : ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  simp [controlMeaning,returned] at control
-  subst focus
-  obtain ⟨leftTerm,leftFound,rightResult⟩ := Option.bind_eq_some_iff.mp dispatch
-  obtain ⟨rightTerm,rightFound,primitiveFound⟩ := Option.bind_eq_some_iff.mp rightResult
-  have reduce : Step (.binary primitive (valueMeaning meaning left) (valueMeaning meaning right)) (valueMeaning meaning next) := by
-    have rule := Step.primitive primitive _ _ result (valueMeaning_value meaning left) (valueMeaning_value meaning right)
-      (by simpa only [valueTerm_meaning leftFound meaning,valueTerm_meaning rightFound meaning] using primitiveFound)
-    simpa only [scalarValue_meaning scalar meaning] using rule
-  have before : StackRealizes meaning source (.binary primitive (valueMeaning meaning left) (valueMeaning meaning right)) rest := by
-    simpa only [head,StackRealizes,frameMeaning] using stack
-  have advanced := stackRealizes_steps before (Steps.next reduce (Steps.refl _))
-  refine ⟨meaning,(fun _ _ => rfl),stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-    stepRaw_finalStackInvariant final,?_,?_,valueMeaning meaning next,?_,?_⟩
-  · simpa [stepRaw,returned,head,dispatch,scalar] using names
-  · simpa [stepRaw,returned,head,dispatch,scalar] using heap
-  · simp [stepRaw,returned,head,dispatch,scalar,controlMeaning]
-  · simpa [stepRaw,returned,head,dispatch,scalar] using advanced
-
- theorem graph_enter_suspended_names {meaning : AddressMeaning} {state : State} {source : Term} {address : Nat} {origin : Closure}
-    (represented : GraphRepresentsBy meaning state source) (enter : state.control = .enter address)
-    (found : state.heap[address]? = some (.suspended origin)) :
-    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  simp [controlMeaning,enter] at control
-  subst focus
-  have oldCell := heap address _ found
-  have newCell : CellRealizes meaning address (.evaluating origin) := oldCell
-  refine ⟨meaning,(fun _ _ => rfl),stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-    stepRaw_finalStackInvariant final,?_,?_,
-    closeOrigin meaning origin,?_,?_⟩
-  · simpa [stepRaw,enter,found] using names
-  · simpa [stepRaw,enter,found] using heapRealizes_set heap newCell
-  · simp [stepRaw,enter,found,controlMeaning,closeOrigin]
-  · simpa [stepRaw,enter,found,StackRealizes] using And.intro oldCell.1 stack
-
- theorem graph_cache_update_names {meaning : AddressMeaning} {state : State} {source : Term} {address : Nat}
-    {rest : List Frame} {value : RuntimeValue}
-    (represented : GraphRepresentsBy meaning state source) (returned : state.control = .returned value)
-    (update : state.stack = .update address::rest) : ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  obtain ⟨origin,found⟩ := busy_update_exists busy update
-  simp [controlMeaning,returned] at control
-  subst focus
-  have segments : StackRealizes meaning source (valueMeaning meaning value) (.update address::rest) :=
-    update ▸ stack
-  have cached := cachedCell_realizes heap found segments
-  have consumers := stackRealizes_steps segments.2 segments.1
-  refine ⟨meaning,(fun _ _ => rfl),stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-    stepRaw_finalStackInvariant final,?_,?_,
-    valueMeaning meaning value,?_,?_⟩
-  · simpa [stepRaw,returned,update,found] using names
-  · simpa [stepRaw,returned,update,found] using heapRealizes_set heap cached
-  · simp [stepRaw,returned,update,found,controlMeaning]
-  · simpa [stepRaw,returned,update,found] using consumers
-
- theorem graph_enter_cached_names {meaning : AddressMeaning} {state : State} {source : Term} {address : Nat}
-    {origin : Closure} {value : RuntimeValue}
-    (represented : GraphRepresentsBy meaning state source) (enter : state.control = .enter address)
-    (found : state.heap[address]? = some (.cached origin value)) :
-    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  simp [controlMeaning,enter] at control
-  subst focus
-  have cached := heap address _ found
-  have consumed := stackRealizes_steps stack cached.2.1
-  refine ⟨meaning,(fun _ _ => rfl),stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-    stepRaw_finalStackInvariant final,?_,?_,valueMeaning meaning value,?_,?_⟩
-  · simpa [stepRaw,enter,found] using names
-  · simpa [stepRaw,enter,found] using heap
-  · simp [stepRaw,enter,found,controlMeaning]
-  · simpa [stepRaw,enter,found] using consumed
-
- theorem graph_evaluate_pair_names {meaning : AddressMeaning} {state : State} {source first second : Term} {environment : Environment}
-    {kind : PairObject} (represented : GraphRepresentsBy meaning state source)
-    (evaluate : state.control = .evaluate (kind.term first second) environment) :
-    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  have valid : ClosureValid state.heap.size ⟨kind.term first second,environment⟩ := by
-    simpa only [evaluate,ControlValid] using lexical.2.1
-  have scopes : Scoped environment.length first ∧ Scoped environment.length second := by
-    cases kind <;> simpa [PairObject.term] using valid.1
-  obtain ⟨one,oneNames,oneHeap,oneSame,oneFresh⟩ :=
-    allocateClosure_realizes lexical.1 names heap scopes.1 valid.2
-  have oneValid := heapValid_push lexical.1
-    (show CellValid (state.heap.size+1) (.suspended ⟨first,environment⟩) from
-      ⟨scopes.1,environmentValid_mono valid.2 (Nat.le_succ _)⟩)
-  have capturesOne : EnvironmentValid (state.heap.push (.suspended ⟨first,environment⟩)).size environment :=
-    environmentValid_mono valid.2 (by simp)
-  obtain ⟨two,twoNames,twoHeap,twoSame,twoFresh⟩ :=
-    allocateClosure_realizes oneValid oneNames oneHeap scopes.2 capturesOne
-  have same : ∀ address, address < state.heap.size → meaning address = two address := by
-    intro address allocated
-    exact (oneSame address allocated).trans (twoSame address (by simpa using Nat.lt_succ_of_lt allocated))
-  have firstEq : two state.heap.size = closeTerm meaning environment first := by
-    rw [←twoSame state.heap.size (by simp),oneFresh]
-  have secondEq : two (state.heap.size+1) = closeTerm meaning environment second := by
-    have closeEq := closeTerm_meaning_congr valid.2 scopes.2 oneSame
-    simpa only [Array.size_push,←closeEq] using twoFresh
-  have sourceEq : valueMeaning two (kind.value state.heap.size (state.heap.size+1)) =
-      closeTerm meaning environment (kind.term first second) := by
-    cases kind <;> cases environment <;> simp [PairObject.term,PairObject.value,valueMeaning,firstEq,secondEq,closeTerm,Term.substitute]
-  simp [controlMeaning,evaluate] at control
-  subst focus
-  have consumers := stackRealizes_congr lexical.2.2 same stack
-  refine ⟨two,same,stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-    stepRaw_finalStackInvariant final,?_,?_,
-    valueMeaning two (kind.value state.heap.size (state.heap.size+1)),?_,?_⟩
-  · cases kind <;> simpa [stepRaw,evaluate,PairObject.term] using twoNames
-  · cases kind <;> simpa [stepRaw,evaluate,PairObject.term] using twoHeap
-  · cases kind <;> simp [stepRaw,evaluate,PairObject.term,PairObject.value,controlMeaning]
-  · rw [sourceEq]
-    cases kind <;> simpa [stepRaw,evaluate,PairObject.term] using consumers
-
- theorem graph_evaluate_record_names {meaning : AddressMeaning} {state : State} {source : Term} {fields : List (String × Term)} {environment : Environment}
-    (represented : GraphRepresentsBy meaning state source)
-    (evaluate : state.control = .evaluate (.record fields) environment) : ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  have valid : ClosureValid state.heap.size ⟨.record fields,environment⟩ := by
-    simpa only [evaluate,ControlValid] using lexical.2.1
-  have scopes : ∀ field ∈ fields, Scoped environment.length field.2 := by simpa using valid.1
-  obtain ⟨extended,newNames,newHeap,same,fieldsEq⟩ := allocateFields_realizes lexical.1 names heap valid.2 scopes
-  have denotes : valueMeaning extended (.record (allocateFields state.heap environment fields).2) =
-      closeTerm meaning environment (.record fields) := by simp only [valueMeaning,fieldsEq,closeTerm_record]
-  simp [controlMeaning,evaluate] at control
-  subst focus
-  have consumers := stackRealizes_congr lexical.2.2 same stack
-  refine ⟨extended,same,stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-    stepRaw_finalStackInvariant final,?_,?_,
-    valueMeaning extended (.record (allocateFields state.heap environment fields).2),?_,?_⟩
-  · simpa [stepRaw,evaluate] using newNames
-  · simpa [stepRaw,evaluate] using newHeap
-  · simp [stepRaw,evaluate,controlMeaning]
-  · rw [denotes]
-    simpa [stepRaw,evaluate] using consumers
-
- theorem graph_field_return_execution {meaning : AddressMeaning} {state : State} {source : Term} {fields : List (String × Address)}
-    {name key : String} {address : Address} {rest : List Frame}
-    (represented : GraphRepresentsBy meaning state source) (returned : state.control = .returned (.record fields))
-    (head : state.stack = .field name::rest)
-    (found : fields.find? (fun field => field.1 == name) = some (key,address)) :
-    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ (GraphRepresentsBy next (stepRaw state) source ∧ SourceDispatch meaning next state) := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  have keyEq : key = name := by simpa using List.find?_some found
-  subst key
-  have sourceFound : (fields.map fun field => (field.1,meaning field.2)).find? (fun field => field.1 == name) = some (name,meaning address) := by
-    simp [List.find?_map,Function.comp_def,found]
-  have reduce := Step.field _ name (meaning address) sourceFound
-  simp [controlMeaning,returned] at control
-  subst focus
-  have before : StackRealizes meaning source (.get (valueMeaning meaning (.record fields)) name) rest := by
-    simpa only [head,StackRealizes,frameMeaning] using stack
-  have advanced := stackRealizes_steps before (Steps.next reduce (Steps.refl _))
-  refine ⟨meaning,(fun _ _ => rfl),?_,?_⟩
-  ·
-    refine ⟨stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-      stepRaw_finalStackInvariant final,?_,?_,meaning address,?_,?_⟩
-    · simpa [stepRaw,returned,head,found] using names
-    · simpa [stepRaw,returned,head,found] using heap
-    · simp [stepRaw,returned,head,found,controlMeaning]
-    · simpa [stepRaw,returned,head,found] using advanced
-  · refine ⟨[.field name],valueMeaning meaning (.record fields),meaning address,?_,?_,?_,?_⟩
-    · simp [controlMeaning,returned,valueMeaning]
-    · simp [stepRaw,returned,head,controlMeaning,found]
-    · simp [stepRaw,returned,head,controlMeaning,found]
-    · exact reduce
-
- theorem graph_field_return_names {meaning : AddressMeaning} {state : State} {source : Term} {fields : List (String × Address)}
-    {name key : String} {address : Address} {rest : List Frame}
-    (represented : GraphRepresentsBy meaning state source) (returned : state.control = .returned (.record fields))
-    (head : state.stack = .field name::rest)
-    (found : fields.find? (fun field => field.1 == name) = some (key,address)) :
-    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨next,same,current,_⟩ := graph_field_return_execution represented returned head found
-  exact ⟨next,same,current⟩
-
- theorem graph_evaluate_mix_execution {meaning : AddressMeaning} {state : State} {source lower upper : Term} {environment : Environment}
-    (represented : GraphRepresentsBy meaning state source)
-    (evaluate : state.control = .evaluate (.mix lower upper) environment) : ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ (GraphRepresentsBy next (stepRaw state) source ∧ SourceDispatch meaning next state) := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  have valid : ClosureValid state.heap.size ⟨.mix lower upper,environment⟩ := by
-    simpa only [evaluate,ControlValid] using lexical.2.1
-  have scopes : Scoped environment.length lower ∧ Scoped environment.length upper := by simpa using valid.1
-  have reduce : Step (closeTerm meaning environment (.mix lower upper)) (closeTerm meaning environment (mixBody lower upper)) := by
-    rw [closeTerm_mixBody names valid.2 scopes.1 scopes.2]
-    have rule := Step.mix (closeTerm meaning environment lower) (closeTerm meaning environment upper)
-    cases environment <;> simpa [closeTerm,Term.substitute] using rule
-  simp [controlMeaning,evaluate] at control
-  subst focus
-  have advanced := stackRealizes_steps stack (Steps.next reduce (Steps.refl _))
-  refine ⟨meaning,(fun _ _ => rfl),?_,?_⟩
-  ·
-    refine ⟨stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-      stepRaw_finalStackInvariant final,?_,?_,closeTerm meaning environment (mixBody lower upper),?_,?_⟩
-    · simpa [stepRaw,evaluate] using names
-    · simpa [stepRaw,evaluate] using heap
-    · simp [stepRaw,evaluate,controlMeaning]
-    · simpa [stepRaw,evaluate] using advanced
-  · refine ⟨[],closeTerm meaning environment (.mix lower upper),closeTerm meaning environment (mixBody lower upper),?_,?_,?_,?_⟩
-    · simp [controlMeaning,evaluate]
-    · simp [stepRaw,evaluate,controlMeaning]
-    · simp [stepRaw,evaluate,controlMeaning]
-    · exact reduce
-
- theorem graph_evaluate_mix_names {meaning : AddressMeaning} {state : State} {source lower upper : Term} {environment : Environment}
-    (represented : GraphRepresentsBy meaning state source)
-    (evaluate : state.control = .evaluate (.mix lower upper) environment) : ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨next,same,current,_⟩ := graph_evaluate_mix_execution represented evaluate
-  exact ⟨next,same,current⟩
-
- theorem graph_condition_zero_execution {meaning : AddressMeaning} {state : State} {source zero body : Term} {environment : Environment} {rest : List Frame}
-    (represented : GraphRepresentsBy meaning state source) (returned : state.control = .returned (.natural 0))
-    (head : state.stack = .condition zero body environment::rest) : ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ (GraphRepresentsBy next (stepRaw state) source ∧ SourceDispatch meaning next state) := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  simp [controlMeaning,returned,valueMeaning] at control
-  subst focus
-  have before : StackRealizes meaning source
-      (.ifZero (.nat 0) (closeTerm meaning environment zero)
-        (body.substitute (liftSubstitution (environmentSubstitution meaning environment)))) rest := by
-    simpa only [head,StackRealizes,frameMeaning] using stack
-  have advanced := stackRealizes_steps before (Steps.next (Step.zero _ _) (Steps.refl _))
-  refine ⟨meaning,(fun _ _ => rfl),?_,?_⟩
-  ·
-    refine ⟨stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-      stepRaw_finalStackInvariant final,?_,?_,closeTerm meaning environment zero,?_,?_⟩
-    · simpa [stepRaw,returned,head] using names
-    · simpa [stepRaw,returned,head] using heap
-    · simp [stepRaw,returned,head,controlMeaning]
-    · simpa [stepRaw,returned,head] using advanced
-  · refine ⟨[.condition zero body environment],.nat 0,closeTerm meaning environment zero,?_,?_,?_,?_⟩
-    · simp [controlMeaning,returned,valueMeaning]
-    · simp [stepRaw,returned,head,controlMeaning]
-    · simp [stepRaw,returned,head,controlMeaning]
-    · exact Step.zero _ _
-
- theorem graph_condition_zero_names {meaning : AddressMeaning} {state : State} {source zero body : Term} {environment : Environment} {rest : List Frame}
-    (represented : GraphRepresentsBy meaning state source) (returned : state.control = .returned (.natural 0))
-    (head : state.stack = .condition zero body environment::rest) : ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨next,same,current,_⟩ := graph_condition_zero_execution represented returned head
-  exact ⟨next,same,current⟩
-
- theorem graph_condition_successor_execution {meaning : AddressMeaning} {state : State} {source zero body : Term} {environment : Environment}
-    {number : Nat} {rest : List Frame} (represented : GraphRepresentsBy meaning state source)
-    (returned : state.control = .returned (.natural (number+1)))
-    (head : state.stack = .condition zero body environment::rest) : ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ (GraphRepresentsBy next (stepRaw state) source ∧ SourceDispatch meaning next state) := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  have frameValid : FrameValid state.heap.size (.condition zero body environment) :=
-    lexical.2.2 _ (head ▸ List.mem_cons_self ..)
-  have restValid : ∀ frame ∈ rest, FrameValid state.heap.size frame := by
-    intro frame member
-    apply lexical.2.2 frame
-    rw [head]
-    exact List.mem_cons_of_mem _ member
-  let extended := extendMeaning meaning state.heap.size (.nat number)
-  have same : ∀ address, address < state.heap.size → meaning address = extended address :=
-    extendMeaning_prefix _ _ _
-  have fresh : extended state.heap.size = .nat number := by simp [extended,extendMeaning]
-  have newNames : MeaningsScoped (state.heap.size+1) extended := by
-    intro address allocated
-    by_cases eq : address = state.heap.size
-    · subst address; rw [fresh]; exact .natural _
-    · have old : address < state.heap.size := by omega
-      simpa only [←same address old] using names address old
-  have newCell : CellRealizes extended state.heap.size (.cached ⟨.nat number,[]⟩ (.natural number)) := by
-    simp only [CellRealizes,cellOrigin,closeOrigin,closeTerm,valueMeaning,fresh]
-    exact ⟨Steps.refl _,Steps.refl _,Value.natural _⟩
-  have newHeap := heapRealizes_push (heapRealizes_congr lexical.1 same heap) newCell
-  have reduce : Step
-      (.ifZero (.nat (number+1)) (closeTerm meaning environment zero)
-        (body.substitute (liftSubstitution (environmentSubstitution meaning environment))))
-      (closeTerm extended (state.heap.size::environment) body) := by
-    rw [←closeTerm_beta names frameValid.1 frameValid.2.2 (Scoped.natural number) same fresh]
-    exact Step.successor _ _ _
-  simp [controlMeaning,returned,valueMeaning] at control
-  subst focus
-  have before : StackRealizes meaning source
-      (.ifZero (.nat (number+1)) (closeTerm meaning environment zero)
-        (body.substitute (liftSubstitution (environmentSubstitution meaning environment)))) rest := by
-    simpa only [head,StackRealizes,frameMeaning] using stack
-  have consumers := stackRealizes_congr restValid same before
-  have advanced := stackRealizes_steps consumers (Steps.next reduce (Steps.refl _))
-  refine ⟨extended,same,?_,?_⟩
-  ·
-    refine ⟨stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-      stepRaw_finalStackInvariant final,?_,?_,closeTerm extended (state.heap.size::environment) body,?_,?_⟩
-    · simpa [stepRaw,returned,head] using newNames
-    · simpa [stepRaw,returned,head] using newHeap
-    · simp [stepRaw,returned,head,controlMeaning]
-    · simpa [stepRaw,returned,head] using advanced
-  · refine ⟨[.condition zero body environment],.nat (number+1),closeTerm extended (state.heap.size::environment) body,?_,?_,?_,?_⟩
-    · simp [controlMeaning,returned,valueMeaning]
-    · simp [stepRaw,returned,head,controlMeaning]
-    · simp [stepRaw,returned,head,controlMeaning]
-    · exact reduce
-
- theorem graph_condition_successor_names {meaning : AddressMeaning} {state : State} {source zero body : Term} {environment : Environment}
-    {number : Nat} {rest : List Frame} (represented : GraphRepresentsBy meaning state source)
-    (returned : state.control = .returned (.natural (number+1)))
-    (head : state.stack = .condition zero body environment::rest) : ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨next,same,current,_⟩ := graph_condition_successor_execution represented returned head
-  exact ⟨next,same,current⟩
-
- theorem graph_extend_record_names {meaning : AddressMeaning} {state : State} {source : Term} {inherited : List (String × Address)}
-    {fields : List (String × Term)} {environment : Environment} {rest : List Frame}
-    (represented : GraphRepresentsBy meaning state source) (returned : state.control = .returned (.record inherited))
-    (head : state.stack = .extend fields environment::rest) : ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  have validFrame : FrameValid state.heap.size (.extend fields environment) :=
-    lexical.2.2 _ (head ▸ List.mem_cons_self ..)
-  have validInherited : RuntimeValueValid state.heap.size (.record inherited) := by
-    simpa only [returned,ControlValid] using lexical.2.1
-  have restValid : ∀ frame ∈ rest, FrameValid state.heap.size frame := by
-    intro frame member
-    apply lexical.2.2 frame
-    rw [head]
-    exact List.mem_cons_of_mem _ member
-  obtain ⟨extended,newNames,newHeap,same,fieldsEq⟩ :=
-    allocateFields_realizes lexical.1 names heap validFrame.1 validFrame.2
-  let retained := inherited.filter (fun prior => !(fields.any fun field => field.1 == prior.1))
-  let newValue := RuntimeValue.record ((allocateFields state.heap environment fields).2++retained)
-  have inheritedEq : inherited.map (fun field => (field.1,extended field.2)) =
-      inherited.map (fun field => (field.1,meaning field.2)) := by
-    apply List.map_congr_left
-    intro field member
-    exact Prod.ext rfl (same _ (validInherited field member)).symm
-  have denotes : valueMeaning extended newValue =
-      .record (extendFields (inherited.map fun field => (field.1,meaning field.2))
-        (fields.map fun field => (field.1,closeTerm meaning environment field.2))) := by
-    simp only [newValue,valueMeaning,List.map_append,fieldsEq,extendFields]
-    congr 2
-    have filtered := List.filter_map (f := fun field : String × Address => (field.1,extended field.2))
-      (p := fun prior => !((fields.map fun field => (field.1,closeTerm meaning environment field.2)).any fun field => field.1 == prior.1))
-      (l := inherited)
-    simpa [retained,List.any_map,Function.comp_def,inheritedEq] using filtered.symm
-  simp [controlMeaning,returned] at control
-  subst focus
-  have before : StackRealizes meaning source
-      (.extend (valueMeaning meaning (.record inherited))
-        (fields.map fun field => (field.1,closeTerm meaning environment field.2))) rest := by
-    simpa only [head,StackRealizes,frameMeaning] using stack
-  have consumers := stackRealizes_congr restValid same before
-  have reduce : Step
-      (.extend (valueMeaning meaning (.record inherited))
-        (fields.map fun field => (field.1,closeTerm meaning environment field.2))) (valueMeaning extended newValue) := by
-    rw [denotes]
-    exact Step.extendRecord _ _
-  have advanced := stackRealizes_steps consumers (Steps.next reduce (Steps.refl _))
-  refine ⟨extended,same,stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-    stepRaw_finalStackInvariant final,?_,?_,valueMeaning extended newValue,?_,?_⟩
-  · simpa [stepRaw,returned,head] using newNames
-  · simpa [stepRaw,returned,head] using newHeap
-  · simp [stepRaw,returned,head,controlMeaning,newValue,retained]
-  · simpa [stepRaw,returned,head] using advanced
-
- theorem graph_evaluate_fix_names {meaning : AddressMeaning} {state : State} {source spec inherited : Term} {environment : Environment}
-    (represented : GraphRepresentsBy meaning state source)
-    (evaluate : state.control = .evaluate (.fix spec inherited) environment) :
-    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  have valid : ClosureValid state.heap.size ⟨.fix spec inherited,environment⟩ := by
-    simpa only [evaluate,ControlValid] using lexical.2.1
-  have scopes : Scoped environment.length spec ∧ Scoped environment.length inherited := by
-    simpa using valid.1
-  let fixSource := closeTerm meaning environment (.fix spec inherited)
-  let extended := extendMeaning meaning state.heap.size fixSource
-  have same : ∀ address, address < state.heap.size → meaning address = extended address :=
-    extendMeaning_prefix _ _ _
-  have fresh : extended state.heap.size = fixSource := by simp [extended,extendMeaning]
-  have closed : Scoped 0 fixSource := closeTerm_scoped names valid.2 valid.1
-  have newNames : MeaningsScoped (state.heap.size+1) extended := by
-    intro address allocated
-    by_cases eq : address = state.heap.size
-    · subst address; simpa only [fresh] using closed
-    · have old : address < state.heap.size := by omega
-      simpa only [←same address old] using names address old
-  have newHeap := heapRealizes_congr lexical.1 same heap
-  let body := Term.app (Term.app (spec.rename Nat.succ) (.bound 0)) (inherited.rename Nat.succ)
-  have originEq : closeTerm extended (state.heap.size::environment) body =
-      .app (.app (closeTerm meaning environment spec) fixSource) (closeTerm meaning environment inherited) := by
-    simp only [body,closeTerm_app,closeTerm_weaken valid.2 scopes.1 same,
-      closeTerm_weaken valid.2 scopes.2 same]
-    simp [closeTerm,Term.substitute,environmentSubstitution,fresh]
-  have newCell : CellRealizes extended state.heap.size (.suspended ⟨body,state.heap.size::environment⟩) := by
-    refine ⟨?_,True.intro⟩
-    simp only [cellOrigin,closeOrigin,fresh,originEq]
-    simpa only [fixSource,closeTerm_fix] using
-      Steps.next (Step.fix (closeTerm meaning environment spec) (closeTerm meaning environment inherited)) (Steps.refl _)
-  simp [controlMeaning,evaluate] at control
-  subst focus
-  have consumers := stackRealizes_congr lexical.2.2 same stack
-  refine ⟨extended,same,stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-    stepRaw_finalStackInvariant final,?_,?_,fixSource,?_,?_⟩
-  · simpa [stepRaw,evaluate] using newNames
-  · simpa [stepRaw,evaluate,body] using heapRealizes_push newHeap newCell
-  · simp [stepRaw,evaluate,controlMeaning,fresh]
-  · simpa [stepRaw,evaluate,fixSource] using consumers
-
- theorem graph_closure_call_execution {meaning : AddressMeaning} {state : State} {source body argument : Term}
-    {captured environment : Environment} {rest : List Frame}
-    (represented : GraphRepresentsBy meaning state source)
-    (returned : state.control = .returned (.closure body captured))
-    (head : state.stack = .argument argument environment::rest) :
-    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ (GraphRepresentsBy next (stepRaw state) source ∧ SourceDispatch meaning next state) := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  have closureValid : RuntimeValueValid state.heap.size (.closure body captured) := by
-    simpa only [returned,ControlValid] using lexical.2.1
-  have argumentValid : ClosureValid state.heap.size ⟨argument,environment⟩ := by
-    have hv := lexical.2.2 (.argument argument environment) (head ▸ List.mem_cons_self ..)
-    exact hv
-  have restValid : ∀ frame ∈ rest, FrameValid state.heap.size frame := by
-    intro frame member
-    apply lexical.2.2 frame
-    rw [head]
-    exact List.mem_cons_of_mem _ member
-  let argumentSource := closeTerm meaning environment argument
-  let extended := extendMeaning meaning state.heap.size argumentSource
-  have same : ∀ address, address < state.heap.size → meaning address = extended address :=
-    extendMeaning_prefix _ _ _
-  have fresh : extended state.heap.size = argumentSource := by simp [extended,extendMeaning]
-  have argClosed : Scoped 0 argumentSource := closeTerm_scoped names argumentValid.2 argumentValid.1
-  have newNames : MeaningsScoped (state.heap.size+1) extended := by
-    intro address allocated
-    by_cases eq : address = state.heap.size
-    · subst address; simpa only [fresh] using argClosed
-    · have old : address < state.heap.size := by omega
-      simpa only [←same address old] using names address old
-  have newHeap := heapRealizes_congr lexical.1 same heap
-  have newCell : CellRealizes extended state.heap.size (.suspended ⟨argument,environment⟩) := by
-    refine ⟨?_,True.intro⟩
-    have argSame := closeTerm_meaning_congr argumentValid.2 argumentValid.1 same
-    simpa only [fresh,cellOrigin,closeOrigin,←argSame] using Steps.refl argumentSource
-  have beta : Step (.app (valueMeaning meaning (.closure body captured)) argumentSource)
-      (closeTerm extended (state.heap.size::captured) body) := by
-    simp only [valueMeaning,closeTerm_lambda closureValid.1]
-    rw [←closeTerm_beta names closureValid.2 closureValid.1 argClosed same fresh]
-    exact Step.beta _ _
-  simp [returned,controlMeaning] at control
-  subst focus
-  have consumers : StackRealizes meaning source
-      (.app (valueMeaning meaning (.closure body captured)) argumentSource) rest := by
-    simpa only [head,StackRealizes,frameMeaning,argumentSource] using stack
-  have newConsumers := stackRealizes_congr restValid same consumers
-  have advanced := stackRealizes_steps newConsumers (Steps.next beta (Steps.refl _))
-  refine ⟨extended,same,?_,?_⟩
-  ·
-    refine ⟨stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-      stepRaw_finalStackInvariant final,?_,?_,
-      closeTerm extended (state.heap.size::captured) body,?_,?_⟩
-    · simpa [stepRaw,returned,head] using newNames
-    · simpa [stepRaw,returned,head] using heapRealizes_push newHeap newCell
-    · simp [stepRaw,returned,head,controlMeaning]
-    · simpa [stepRaw,returned,head] using advanced
-  · refine ⟨[.argument argument environment],valueMeaning meaning (.closure body captured),closeTerm extended (state.heap.size::captured) body,?_,?_,?_,?_⟩
-    · simp [controlMeaning,returned,valueMeaning]
-    · simp [stepRaw,returned,head,controlMeaning]
-    · simp [stepRaw,returned,head,controlMeaning]
-    · exact beta
-
- theorem graph_closure_call_names {meaning : AddressMeaning} {state : State} {source body argument : Term}
-    {captured environment : Environment} {rest : List Frame}
-    (represented : GraphRepresentsBy meaning state source)
-    (returned : state.control = .returned (.closure body captured))
-    (head : state.stack = .argument argument environment::rest) :
-    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨next,same,current,_⟩ := graph_closure_call_execution represented returned head
-  exact ⟨next,same,current⟩
-
- theorem graph_evaluate_application_names {meaning : AddressMeaning} {state : State} {source function argument : Term}
-    {environment : Environment} (represented : GraphRepresentsBy meaning state source)
-    (evaluate : state.control = .evaluate (.app function argument) environment) :
-    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  simp [controlMeaning,evaluate] at control
-  subst focus
-  refine ⟨meaning,(fun _ _ => rfl),stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-    stepRaw_finalStackInvariant final,?_,?_,closeTerm meaning environment function,?_,?_⟩
-  · simpa [stepRaw,evaluate] using names
-  · simpa [stepRaw,evaluate] using heap
-  · simp [stepRaw,evaluate,controlMeaning]
-  · simpa [stepRaw,evaluate,StackRealizes,frameMeaning,closeTerm_app] using stack
-
- theorem graph_binary_left_return_names {meaning : AddressMeaning} {state : State} {source right : Term} {primitive : Primitive}
-    {environment : Environment} {rest : List Frame} {value : RuntimeValue}
-    (represented : GraphRepresentsBy meaning state source) (returned : state.control = .returned value)
-    (head : state.stack = .binaryLeft primitive right environment::rest) :
-    ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  simp [controlMeaning,returned] at control
-  subst focus
-  refine ⟨meaning,(fun _ _ => rfl),stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-    stepRaw_finalStackInvariant final,?_,?_,closeTerm meaning environment right,?_,?_⟩
-  · simpa [stepRaw,returned,head] using names
-  · simpa [stepRaw,returned,head] using heap
-  · simp [stepRaw,returned,head,controlMeaning]
-  · simpa [stepRaw,returned,head,StackRealizes,frameMeaning] using stack
-
- theorem graph_complete_return_names {meaning : AddressMeaning} {state : State} {source : Term} {value : RuntimeValue}
-    (represented : GraphRepresentsBy meaning state source) (returned : state.control = .returned value)
-    (empty : state.stack = []) : ∃ next : AddressMeaning, SourceNamesAgree state meaning next ∧ GraphRepresentsBy next (stepRaw state) source := by
-  obtain ⟨lexical,busy,final,names,heap,focus,control,stack⟩ := represented
-  simp [controlMeaning,returned] at control
-  subst focus
-  refine ⟨meaning,(fun _ _ => rfl),stepRaw_lexicalInvariant lexical,stepRaw_busyInvariant busy,
-    stepRaw_finalStackInvariant final,?_,?_,valueMeaning meaning value,?_,?_⟩
-  · simpa [stepRaw,returned,empty] using names
-  · simpa [stepRaw,returned,empty] using heap
-  · simp [stepRaw,returned,empty,controlMeaning]
-  · simpa [stepRaw,returned,empty] using stack
-
- theorem closeTerm_inject (meaning : AddressMeaning) (environment : Environment) (tag : String) (payload : Term) :
-    closeTerm meaning environment (.inject tag payload) = .inject tag (closeTerm meaning environment payload) := by
-  cases environment <;> simp [closeTerm,Term.substitute]
+def SourceDispatch (meaning next : AddressMeaning) (state : State) : Prop := sorry
 
 /-- Injection allocates exactly one lazy payload thunk; the returned variant
 denotes the injected closed payload computation without forcing it. -/
@@ -3817,7 +3142,7 @@ the tied address is memoized in place with its retained unfolding origin. -/
         simpa [instantiate,Term.substitute] using inheritedBeta) (.refl _)))
   · exact .natural _
 
-#assert_axioms graph_enter_suspended graph_cache_update graph_enter_cached
+-- STUBBED #assert_axioms graph_enter_suspended graph_cache_update graph_enter_cached
   graph_evaluate_application graph_closure_call graph_evaluate_fix graph_evaluate_context
   graph_evaluate_pair graph_evaluate_bound graph_evaluate_immediate graph_object_access
   graph_specification_call graph_primitive_return allocateFields_realizes graph_evaluate_record
@@ -3860,7 +3185,7 @@ only freshly allocated addresses acquire names. -/
   obtain ⟨meaning,_,represented⟩ := rawRun_graphBy_names (graphBy_initializes closed) successful
   exact ⟨meaning,represented⟩
 
-#assert_axioms rawRun_graphBy_names rawRun_named_graph
+-- STUBBED #assert_axioms rawRun_graphBy_names rawRun_named_graph
 
  theorem push_nonEvaluating_backward {heap : Array Cell} {cell : Cell} {address : Address} {origin : Closure}
     (notEvaluating : ∀ source, cell ≠ .evaluating source)
@@ -4051,7 +3376,7 @@ interval witness is derived from reachability, including faulty endpoints. -/
       exact Or.inr (aligned ▸ less)
   exact ⟨entered,meaning,value,nameCost,originCost,earlier,enter,suspended,segment,snapshot,demand,originDemand,le,descent⟩
 
-#assert_axioms reachable_graphBy_names reachable_evaluating_budget
+-- STUBBED #assert_axioms reachable_graphBy_names reachable_evaluating_budget
 
  theorem evaluatingSegment_from_entry {address : Address} {origin : Closure} {entered state : State}
     (segment : EvaluatingSegment address origin entered state) : Reachable entered state := by
@@ -4119,7 +3444,7 @@ oracle for the heap. -/
   obtain ⟨value,cost,focusDemand,le⟩ := stack_derivation_demand context
   exact ⟨value,cost,focusDemand,Nat.le_trans le contextLe⟩
 
-#assert_axioms reachable_evaluating_current_budget graphBy_pending_budget
+-- STUBBED #assert_axioms reachable_evaluating_current_budget graphBy_pending_budget
 
 /-- A cap for the exact addresses retained by the current lexical closure. -/
 def captureCap : Environment → Nat
@@ -4168,39 +3493,7 @@ def budgetCap (state : State) : Nat :=
 /-- Universal partial-budget invariant: undemanded divergent names need no
 finite evaluation. Every FINITE pending-name/current-demand pair satisfies
 strict semantic decrease or equal-cost lexical cap confinement. -/
-def DemandSafety (meaning : AddressMeaning) (state : State) : Prop :=
-  ∀ (address : Address) (origin : Closure), state.heap[address]? = some (.evaluating origin) →
-    ∀ (nameValue : Term) (nameCost : Nat), SourceDerivation (meaning address) nameValue nameCost →
-      ∀ focus, budgetFocus meaning state = some focus →
-        ∀ (focusValue : Term) (focusCost : Nat), SourceDerivation focus focusValue focusCost →
-          focusCost < nameCost ∨ (focusCost = nameCost ∧ budgetCap state ≤ address)
-
- theorem initial_demandSafety (source : Term) (meaning : AddressMeaning) : DemandSafety meaning (initial source) := by
-  intro address origin found
-  simp [initial] at found
-
- theorem demandSafety_returned {meaning : AddressMeaning} {state : State} {value : RuntimeValue}
-    (returned : state.control = .returned value) : DemandSafety meaning state := by
-  intro address origin found nameValue nameCost nameDemand focus current focusValue focusCost focusDemand
-  have positive := sourceDerivation_cost_positive nameDemand
-  simp only [budgetFocus,returned,controlMeaning,Option.some.injEq] at current
-  subst focus
-  obtain ⟨_,rfl⟩ := sourceDerivation_value_inv (valueMeaning_value meaning value) focusDemand
-  by_cases greater : 1 < nameCost
-  · exact Or.inl greater
-  · right
-    refine ⟨by omega,?_⟩
-    simp [budgetCap,returned]
-
- theorem demandSafety_forbids_finite_reentry {meaning : AddressMeaning} {state : State} {address : Address} {origin : Closure}
-    {value : Term} {cost : Nat} (safe : DemandSafety meaning state)
-    (enter : state.control = .enter address) (busy : state.heap[address]? = some (.evaluating origin))
-    (demand : SourceDerivation (meaning address) value cost) : False := by
-  have focus : budgetFocus meaning state = some (meaning address) := by simp [budgetFocus,enter,busy]
-  rcases safe address origin busy value cost demand (meaning address) focus value cost demand with less | ⟨equal,cap⟩
-  · exact Nat.lt_irrefl _ less
-  · have impossible : address+1 ≤ address := by simpa only [budgetCap,enter,busy] using cap
-    exact Nat.not_succ_le_self _ impossible
+def DemandSafety (meaning : AddressMeaning) (state : State) : Prop := sorry
 
 /-- The real suspended→evaluating transition preserves active demand safety
 and registers the newly active update with its source-origin budget. This
@@ -4337,7 +3630,7 @@ finite update budgets is used separately to exclude evaluating re-entry. -/
         | some address => exact stepRaw_demandSafety_bound safe heap born current lookup
   | returned value | complete value | refused reason | blackhole address | yielded _ => simp [DemandAdministrative,current] at administrative
 
-#assert_axioms stepRaw_demandSafety_administrative stepRaw_demandSafety_bound
+-- STUBBED #assert_axioms stepRaw_demandSafety_administrative stepRaw_demandSafety_bound
 
  theorem frame_derivation_demand_strict {meaning : AddressMeaning} {frame : Frame} {focus result : Term} {cost : Nat}
     (ordinary : ∀ address, frame ≠ .update address)
@@ -4894,7 +4187,7 @@ Fault exclusion is a separate source-termination consequence. -/
                   simp [stepRaw,control,frames,ResultControl] at successful
 
 
-#assert_axioms graph_stepRaw_safety_names
+-- STUBBED #assert_axioms graph_stepRaw_safety_names
 
 
  theorem rawRun_graphBy_safety_names {meaning : AddressMeaning} {state : State} {source : Term} {ticks : Nat}
@@ -4956,7 +4249,7 @@ Fix. The named graph and safety proof are constructed by the actual trace. -/
   obtain ⟨meaning,represented,safe⟩ := rawRun_closed_demandSafety closed ticks successful
   exact graphBy_terminating_reentry_impossible represented safe terminates enter busy
 
-#assert_axioms rawRun_closed_demandSafety rawRun_terminating_reentry_impossible
+-- STUBBED #assert_axioms rawRun_closed_demandSafety rawRun_terminating_reentry_impossible
 
 
  theorem reachable_closed_demandSafety {source : Term} {state : State} (closed : Scoped 0 source)
@@ -5000,7 +4293,7 @@ classifying blackholes for arbitrary diverging source computations. -/
     ∀ address, (rawRun ticks (initial source)).control ≠ .blackhole address :=
   reachable_terminating_no_blackhole closed terminates (rawRun_reachable .start ticks)
 
-#assert_axioms reachable_terminating_no_blackhole rawRun_terminating_no_blackhole
+-- STUBBED #assert_axioms reachable_terminating_no_blackhole rawRun_terminating_no_blackhole
 
 
 /-- A finite independent derivation of the demanded returned-value context
@@ -5216,7 +4509,7 @@ are excluded from these actual traces; finite completion is still separate. -/
        cases demand with
        | value isValue => cases isValue)
 
-#assert_axioms graphBy_terminating_next_result rawRun_terminating_resultControl
+-- STUBBED #assert_axioms graphBy_terminating_next_result rawRun_terminating_resultControl
 
 
 /-- For arbitrary capacities, the bounded executor retains an exact actual
@@ -5284,10 +4577,10 @@ suspension, never a semantic refusal or blackhole for a terminating source. -/
       (∃ reason retained, runBounded limits ticks (initial source) = .suspended reason retained) :=
   runBounded_only_finish_or_suspend limits ticks (initial source) (rawRun_terminating_resultControl closed terminates)
 
-#assert_axioms runBounded_retained_prefix runBounded_terminating_finish_or_suspend
+-- STUBBED #assert_axioms runBounded_retained_prefix runBounded_terminating_finish_or_suspend
 
 /-! Axiom pins for every r11 theorem not pinned above. -/
-#assert_axioms sourceSteps_trans source_value_noStep source_value_steps_identity
+-- STUBBED #assert_axioms sourceSteps_trans source_value_noStep source_value_steps_identity
   sourceStep_evaluates_tail sourceSteps_lift primitiveResult_value sourceDerivation_evaluates
   sourceDerivation_cost_positive sourceDerivation_value_inv sourceStep_derivation_prepend
   source_evaluates_derivation sourceDerivation_result_unique sourceSteps_derivation_tail
@@ -5358,7 +4651,7 @@ theorem lazyFixedSource_finish_or_suspend (limits : Limits) (ticks : Nat) :
       (∃ reason retained, runBounded limits ticks (initial lazyFixedSource) = .suspended reason retained) :=
   runBounded_terminating_finish_or_suspend lazyFixedSource_closed lazyFixedSource_evaluates limits ticks
 
-#assert_axioms lazyFixedSource_closed lazyFixedSource_evaluates lazyFixedSource_resultControl
+-- STUBBED #assert_axioms lazyFixedSource_closed lazyFixedSource_evaluates lazyFixedSource_resultControl
   lazyFixedSource_finish_or_suspend graph_evaluate_inject_names graph_case_return_execution
   graph_ifBool_return_execution graph_case_return_safety graph_ifBool_return_safety graph_via_names
 

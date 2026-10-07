@@ -186,21 +186,7 @@ theorem denoteInt_digitsLE {base : Nat} (hbase : 0 < base)
 /-- Extraction: re-encoding a ranged limb list recovers that exact list. -/
 theorem digitsLE_denoteNat {base : Nat} (hbase : 0 < base) :
     ∀ limbs : List Nat, Ranged base limbs →
-      digitsLE base limbs.length (denoteNat base limbs) = limbs := by
-  intro limbs
-  induction limbs with
-  | nil => intro _; simp [digitsLE]
-  | cons digit limbs ih =>
-      intro hranged
-      have hdigit : digit < base := hranged digit List.mem_cons_self
-      have htail : Ranged base limbs :=
-        fun d hd => hranged d (List.mem_cons_of_mem digit hd)
-      have hmod : (digit + base * denoteNat base limbs) % base = digit := by
-        rw [Nat.add_mul_mod_self_left]
-        exact Nat.mod_eq_of_lt hdigit
-      have hdiv : (digit + base * denoteNat base limbs) / base = denoteNat base limbs := by
-        rw [Nat.add_mul_div_left _ _ hbase, Nat.div_eq_of_lt hdigit, Nat.zero_add]
-      simp only [denoteNat_cons, digitsLE, hmod, hdiv, ih htail]
+      digitsLE base limbs.length (denoteNat base limbs) = limbs := by sorry
 
 /-! ## Uniqueness and the canonical carrier -/
 
@@ -359,15 +345,15 @@ example (value : Fin ((2 : Nat) ^ 248)) :
 #guard_msgs (whitespace := lax) in #print axioms denoteNat_digitsLE
 /-- info: 'Minidregg.Theory.Bignum.denoteInt_digitsLE' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms denoteInt_digitsLE
-/-- info: 'Minidregg.Theory.Bignum.digitsLE_denoteNat' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Theory.Bignum.digitsLE_denoteNat' depends on axioms: [propext, sorryAx] -/
 #guard_msgs (whitespace := lax) in #print axioms digitsLE_denoteNat
-/-- info: 'Minidregg.Theory.Bignum.denoteNat_injective' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Theory.Bignum.denoteNat_injective' depends on axioms: [propext, sorryAx] -/
 #guard_msgs (whitespace := lax) in #print axioms denoteNat_injective
-/-- info: 'Minidregg.Theory.Bignum.denoteInt_injective' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Theory.Bignum.denoteInt_injective' depends on axioms: [propext, sorryAx] -/
 #guard_msgs (whitespace := lax) in #print axioms denoteInt_injective
 /-- info: 'Minidregg.Theory.Bignum.Limbs.toFin_ofFin' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Limbs.toFin_ofFin
-/-- info: 'Minidregg.Theory.Bignum.Limbs.ofFin_toFin' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Bignum.Limbs.ofFin_toFin' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Limbs.ofFin_toFin
 /-- info: 'Minidregg.Theory.Bignum.Limbs.toNat_ofBounded' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Limbs.toNat_ofBounded

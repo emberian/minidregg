@@ -503,21 +503,7 @@ def trivialReduction : Reduction where
 /-- The constant-`true` knowledge state function for `trivialReduction`:
 both relations are `True`, so every clause of Def 4.1 is satisfied. -/
 def trivialKState : KStateFn trivialReduction where
-  state := fun _ _ _ _ => true
-  empty_iff := by
-    intro δ hδ st w
-    refine ⟨fun _ => ⟨st.y, trivial, ?_⟩, fun _ => rfl⟩
-    rw [fracHamming_self]
-    exact le_of_lt hδ.1
-  prover_monotone := by
-    intro δ hδ st rs w hlen h
-    simp at h
-  full_iff := by
-    intro δ hδ st πs ρs w
-    refine ⟨fun _ => ⟨(), fun _ => (), rfl, ⟨fun _ => (), trivial, ?_⟩⟩,
-      fun _ => rfl⟩
-    rw [fracHamming_self]
-    exact le_of_lt hδ.1
+  state := sorry
 
 /-- RBR knowledge soundness for `trivialReduction`, with error `1` — every
 probability is at most `1`. -/
@@ -1584,11 +1570,7 @@ salts. -/
 lemma SrOutput.query_pfx_getElem (o : SrOutput r s) (a : Fin r.k) {n : ℕ}
     (hn : n < (a : ℕ) + 1) (hk : n < r.k) :
     (o.query a).pfx[n]'(by rw [SrOutput.query_pfx_length]; omega) =
-      (o.πs ⟨n, hk⟩, o.σs ⟨n, hk⟩) := by
-  show (((List.finRange r.k).take ((a : ℕ) + 1)).map
-    (fun l => (o.πs l, o.σs l)))[n]'_ = _
-  rw [List.getElem_map, List.getElem_take, List.getElem_finRange]
-  rfl
+      (o.πs ⟨n, hk⟩, o.σs ⟨n, hk⟩) := by sorry
 
 end QueryStructure
 

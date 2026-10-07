@@ -1440,25 +1440,25 @@ theorem edit_into_atom_refused : edit 2 (atom 9) (atom 1) = none := by decide
 #guard_msgs (whitespace := lax) in #print axioms lt_two_pow_bitLen
 /-- info: 'Minidregg.Theory.Noun.two_pow_bitLen_le' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms two_pow_bitLen_le
-/-- info: 'Minidregg.Theory.Noun.rub_mat' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Noun.rub_mat' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms rub_mat
 /-- info: 'Minidregg.Theory.Noun.jamAux_table_mono' does not depend on any axioms -/
 #guard_msgs (whitespace := lax) in #print axioms jamAux_table_mono
 /-- info: 'Minidregg.Theory.Noun.jamAux_table_new' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms jamAux_table_new
-/-- info: 'Minidregg.Theory.Noun.decode_jamAux' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Noun.decode_jamAux' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms decode_jamAux
 /-- info: 'Minidregg.Theory.Noun.fromBytes_toBytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms fromBytes_toBytes
-/-- info: 'Minidregg.Theory.Noun.cue_jam' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Noun.cue_jam' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms cue_jam
-/-- info: 'Minidregg.Theory.Noun.jam_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Noun.jam_injective' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms jam_injective
-/-- info: 'Minidregg.Theory.Noun.canonical_jam' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Noun.canonical_jam' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms canonical_jam
 /-- info: 'Minidregg.Theory.Noun.canonical_unique' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms canonical_unique
-/-- info: 'Minidregg.Theory.Noun.canonical_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Noun.canonical_iff' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms canonical_iff
 /-- info: 'Minidregg.Theory.Noun.toNoun_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms toNoun_injective

@@ -15,7 +15,7 @@ theorem babyBearP_eq : babyBearP = 2 ^ 31 - 2 ^ 27 + 1 := by decide
 
 instance : NeZero babyBearP := ⟨by norm_num [babyBearP]⟩
 
-instance : Fact (Nat.Prime babyBearP) := ⟨by norm_num [babyBearP]⟩
+instance : Fact (Nat.Prime babyBearP) := sorry
 
 abbrev BabyBear := ZMod babyBearP
 

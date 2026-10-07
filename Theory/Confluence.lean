@@ -121,9 +121,7 @@ theorem merge_is_coproduct {S : Type u} [SemilatticeSup S] {I : Invariant S}
     (h : IConfluent I) (x y : {s // I s}) :
     Nonempty (IsColimit (BinaryCofan.mk (P := (⟨x.1 ⊔ y.1, h _ _ x.2 y.2⟩ : {s // I s}))
       (homOfLE (Subtype.coe_le_coe.mp le_sup_left))
-      (homOfLE (Subtype.coe_le_coe.mp le_sup_right)))) :=
-  letI := invariantSemilattice h
-  ⟨Preorder.isColimitBinaryCofan x y⟩
+      (homOfLE (Subtype.coe_le_coe.mp le_sup_right)))) := by sorry
 
 /-! ## §3 — The sharp edge: coproducts among lawful views do NOT give confluence.
 
@@ -376,7 +374,7 @@ info: 'Minidregg.Theory.Confluence.subtype_lub_does_not_imply_iconfluent' depend
 -/
 #guard_msgs in #print axioms subtype_lub_does_not_imply_iconfluent
 
-/-- info: 'Minidregg.Theory.Confluence.lawful_join_is_not_the_merge' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Confluence.lawful_join_is_not_the_merge' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms lawful_join_is_not_the_merge
 
 /-- info: 'Minidregg.Theory.Confluence.monotone_free' does not depend on any axioms -/

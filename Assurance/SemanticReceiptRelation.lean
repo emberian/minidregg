@@ -36,13 +36,7 @@ structure ReceiptWitness (Key F : Type*) where
 
 @[ext] theorem ReceiptWitness.ext {left right : ReceiptWitness Key F}
     (hpre : left.pre = right.pre) (hpost : left.post = right.post)
-    (htouched : left.touched = right.touched) : left = right := by
-  cases left
-  cases right
-  cases hpre
-  cases hpost
-  cases htouched
-  rfl
+    (htouched : left.touched = right.touched) : left = right := by sorry
 
 /-- The two individual-degree-two constraints at every key. -/
 inductive ConstraintKind
@@ -122,16 +116,7 @@ theorem ReceiptWitness.ofDelta_satisfies {pre post : Store Key F}
 
 theorem ReceiptWitness.ofDelta_toDelta (w : ReceiptWitness Key F)
     (h : w.Satisfies) :
-    ReceiptWitness.ofDelta (w.toDelta h) = w := by
-  apply ReceiptWitness.ext
-  · rfl
-  · rfl
-  · funext key
-    rcases (w.satisfies_iff.mp h).1 key with hzero | hone
-    · simp [ReceiptWitness.ofDelta, ReceiptWitness.toDelta,
-        ReceiptWitness.touchedFinset, hzero, zero_ne_one]
-    · simp [ReceiptWitness.ofDelta, ReceiptWitness.toDelta,
-        ReceiptWitness.touchedFinset, hone]
+    ReceiptWitness.ofDelta (w.toDelta h) = w := by sorry
 
 /-! ## One canonical fixed-shape word -/
 

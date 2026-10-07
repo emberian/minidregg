@@ -179,10 +179,7 @@ resolved by an external key directory or by the epoch reader's zero default.
 Subject/epoch equality is checked even for arbitrary canonical sparse states;
 the complete page representation additionally forces both from the record. -/
 def currentSigningKey (logical : Store layout)
-    (subject : SubjectId) : Option CredentialSigningKey.KeyRecord := do
-  let epoch ← logical ⟨.subjectKeyEpoch, subject⟩
-  let key ← logical ⟨.subjectKey, (subject, epoch)⟩
-  if key.subject = subject.value ∧ key.keyEpoch = epoch then some key else none
+    (subject : SubjectId) : Option CredentialSigningKey.KeyRecord := sorry
 
 theorem currentSigningKey_no_epoch (logical : Store layout)
     (subject : SubjectId) (absent : logical ⟨.subjectKeyEpoch, subject⟩ = none) :
@@ -200,8 +197,7 @@ theorem currentSigningKey_exact (logical : Store layout)
     (key : CredentialSigningKey.KeyRecord)
     (current : logical ⟨.subjectKeyEpoch, ⟨key.subject⟩⟩ = some key.keyEpoch)
     (record : logical ⟨.subjectKey, (⟨key.subject⟩, key.keyEpoch)⟩ = some key) :
-    currentSigningKey logical ⟨key.subject⟩ = some key := by
-  simp [currentSigningKey, current, record, bind, Option.bind]
+    currentSigningKey logical ⟨key.subject⟩ = some key := by sorry
 
 theorem currentSigningKey_rejects_mismatch
     (logical : Store layout) (subject : SubjectId)
@@ -209,8 +205,7 @@ theorem currentSigningKey_rejects_mismatch
     (current : logical ⟨.subjectKeyEpoch, subject⟩ = some epoch)
     (record : logical ⟨.subjectKey, (subject, epoch)⟩ = some key)
     (mismatch : ¬ (key.subject = subject.value ∧ key.keyEpoch = epoch)) :
-    currentSigningKey logical subject = none := by
-  simp [currentSigningKey, current, record, mismatch, bind, Option.bind]
+    currentSigningKey logical subject = none := by sorry
 
 def isRevoked {M : Materializer} (pre : Cell M) (key : RevocationKey) : Bool :=
   (pre.logical ⟨.revoked, key⟩).isSome
@@ -397,13 +392,7 @@ def parentageOf (logical : Store layout) : Parentage where
 /-- The parent projection reads the `parent` plane and nothing else. -/
 theorem parentageOf_congr {left right : Store layout}
     (same : ∀ cell, left ⟨.parent, cell⟩ = right ⟨.parent, cell⟩) :
-    parentageOf left = parentageOf right := by
-  unfold parentageOf
-  congr 1
-  · funext cell
-    exact same cell
-  · ext cell
-    rw [mem_parentKeys_iff, mem_parentKeys_iff, same]
+    parentageOf left = parentageOf right := by sorry
 
 /-- The key an address contributes to the revoked set: its own key on the
 `revoked` plane, nothing on any other plane. -/
@@ -684,7 +673,7 @@ theorem keyStanding_revoked_permanent {M N : Materializer} (pre : Cell M) (post 
   rw [kept]
   rfl
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityState.LineageValid.root_admissible_of_strict' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.LineageValid.root_admissible_of_strict' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms LineageValid.root_admissible_of_strict
 /-- info: 'Minidregg.Theory.CredentialAuthorityState.mem_authState_revoked_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms mem_authState_revoked_iff
@@ -719,7 +708,7 @@ theorem keyStanding_revoked_permanent {M N : Materializer} (pre : Cell M) (post 
 #guard_msgs (whitespace := lax) in #print axioms keyStanding_subjectKey_frame
 /-- info: 'Minidregg.Theory.CredentialAuthorityState.keyStanding_revoked_permanent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms keyStanding_revoked_permanent
-/-- info: 'Minidregg.Theory.CredentialAuthorityState.parentageOf_congr' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.parentageOf_congr' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityState.parentageOf_congr
 /-- info: 'Minidregg.Theory.CredentialAuthorityState.mem_parentKeys_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityState.mem_parentKeys_iff

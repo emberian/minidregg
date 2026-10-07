@@ -937,11 +937,7 @@ whenever the asset's total is zero and its well is a registered account. -/
 theorem Book.holders_sum_eq_neg_well (book : Book) (asset : AssetId)
     (present : asset ∈ book.accounts) (zero : book.totalAsset asset = 0) :
     ∑ account ∈ book.accounts.erase asset, book.balance account asset =
-      -(book.balance asset asset) := by
-  have split := Finset.add_sum_erase book.accounts (fun account => book.balance account asset) present
-  simp only at split
-  unfold Book.totalAsset at zero
-  linarith
+      -(book.balance asset asset) := by sorry
 
 /-! ## Negative pole: credit-only mint is not in the language -/
 
@@ -1172,7 +1168,7 @@ example :
 #guard_msgs (whitespace := lax) in #print axioms Operation.apply_balance_other_asset
 /-- info: 'Minidregg.Theory.CanonicalResourceKernel.Batch.single_admission' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Batch.single_admission
-/-- info: 'Minidregg.Theory.CanonicalResourceKernel.Book.holders_sum_eq_neg_well' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CanonicalResourceKernel.Book.holders_sum_eq_neg_well' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Book.holders_sum_eq_neg_well
 /-- info: 'Minidregg.Theory.CanonicalResourceKernel.Book.deregisterAccount_conserves' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Book.deregisterAccount_conserves

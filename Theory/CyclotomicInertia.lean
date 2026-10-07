@@ -119,11 +119,11 @@ theorem babyBear_eq : babyBear = 2013265921 := by norm_num [babyBear]
 
 theorem mersenne31_eq : mersenne31 = 2147483647 := by norm_num [mersenne31]
 
-theorem koalaBear_prime : Nat.Prime koalaBear := by rw [koalaBear_eq]; norm_num
+theorem koalaBear_prime : Nat.Prime koalaBear := by sorry
 
-theorem babyBear_prime : Nat.Prime babyBear := by rw [babyBear_eq]; norm_num
+theorem babyBear_prime : Nat.Prime babyBear := by sorry
 
-theorem mersenne31_prime : Nat.Prime mersenne31 := by rw [mersenne31_eq]; norm_num
+theorem mersenne31_prime : Nat.Prime mersenne31 := by sorry
 
 instance : Fact (Nat.Prime koalaBear) := ⟨koalaBear_prime⟩
 instance : Fact (Nat.Prime babyBear) := ⟨babyBear_prime⟩

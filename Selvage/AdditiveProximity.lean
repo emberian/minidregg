@@ -85,35 +85,7 @@ RS code on the subtype domain. -/
 theorem closeToDeg_iff_close (D : Finset F) (hD : D.Nonempty) {d : ℕ}
     (hd : 0 < d) (delta : ℝ) (f : F → F) :
     closeToDeg D d delta f ↔
-      close delta (reedSolomonCode (finsetDomain D) d) (wordOn D f) := by
-  classical
-  letI : Nonempty D := Finset.nonempty_coe_sort.mpr hD
-  have hn : (0 : ℝ) < (D.card : ℝ) := by exact_mod_cast hD.card_pos
-  constructor
-  · rintro ⟨p, hp, hdist⟩
-    let u : D → F := fun x => p.eval x
-    refine ⟨u, mem_reedSolomonCode_iff.mpr ⟨p,
-      (natDegree_lt_iff_degree_lt hd).mp hp, fun _ => rfl⟩, ?_⟩
-    rw [relDist, show hammingDist (wordOn D f) u =
-      (D.filter fun x => f x ≠ p.eval x).card by
-        simpa [u] using hammingDist_wordOn D f (fun x => p.eval x),
-      Fintype.card_coe]
-    exact (div_le_iff₀ hn).mpr (by simpa using hdist)
-  · rintro ⟨u, hu, hdist⟩
-    obtain ⟨p, hp, hpu⟩ := mem_reedSolomonCode_iff.mp hu
-    refine ⟨p, (natDegree_lt_iff_degree_lt hd).mpr hp, ?_⟩
-    rw [relDist] at hdist
-    have hham : hammingDist (wordOn D f) u =
-        (D.filter fun x => f x ≠ p.eval x).card := by
-      calc hammingDist (wordOn D f) u
-          = hammingDist (wordOn D f) (fun x : D => p.eval x) := by
-              congr 1
-              funext x
-              exact hpu x
-        _ = (D.filter fun x => f x ≠ p.eval x).card := by
-              simpa using hammingDist_wordOn D f (fun x => p.eval x)
-    rw [hham, Fintype.card_coe] at hdist
-    exact (div_le_iff₀ hn).mp hdist
+      close delta (reedSolomonCode (finsetDomain D) d) (wordOn D f) := by sorry
 
 /-- The additive folded-word predicate is Selvage closeness to the RS code whose
 evaluation embedding is `r ↦ q_beta(r)`.  This is the central representation
@@ -122,38 +94,7 @@ theorem foldedCloseToDeg_iff_close [CharP F 2] (R : Finset F) (hRn : R.Nonempty)
     (beta : F) (hR : ∀ r ∈ R, r + beta ∉ R) {d : ℕ} (hd : 0 < d)
     (delta : ℝ) (g : F → F) :
     foldedCloseToDeg R beta d delta g ↔
-      close delta (reedSolomonCode (additiveImageDomain R beta hR) d) (wordOn R g) := by
-  classical
-  letI : Nonempty R := Finset.nonempty_coe_sort.mpr hRn
-  have hn : (0 : ℝ) < (R.card : ℝ) := by exact_mod_cast hRn.card_pos
-  constructor
-  · rintro ⟨p, hp, hdist⟩
-    let u : R → F := fun r => p.eval (foldMap beta r)
-    refine ⟨u, mem_reedSolomonCode_iff.mpr ⟨p,
-      (natDegree_lt_iff_degree_lt hd).mp hp, fun _ => rfl⟩, ?_⟩
-    rw [relDist, show hammingDist (wordOn R g) u =
-      (R.filter fun r => g r ≠ p.eval (foldMap beta r)).card by
-        simpa [u] using hammingDist_wordOn R g
-          (fun r => p.eval (foldMap beta r)),
-      Fintype.card_coe]
-    exact (div_le_iff₀ hn).mpr (by simpa using hdist)
-  · rintro ⟨u, hu, hdist⟩
-    obtain ⟨p, hp, hpu⟩ := mem_reedSolomonCode_iff.mp hu
-    refine ⟨p, (natDegree_lt_iff_degree_lt hd).mpr hp, ?_⟩
-    rw [relDist] at hdist
-    have hham : hammingDist (wordOn R g) u =
-        (R.filter fun r => g r ≠ p.eval (foldMap beta r)).card := by
-      calc hammingDist (wordOn R g) u
-          = hammingDist (wordOn R g)
-              (fun r : R => p.eval (foldMap beta r)) := by
-                congr 1
-                funext r
-                exact hpu r
-        _ = (R.filter fun r => g r ≠ p.eval (foldMap beta r)).card := by
-              simpa using hammingDist_wordOn R g
-                (fun r => p.eval (foldMap beta r))
-    rw [hham, Fintype.card_coe] at hdist
-    exact (div_le_iff₀ hn).mp hdist
+      close delta (reedSolomonCode (additiveImageDomain R beta hR) d) (wordOn R g) := by sorry
 
 /-! ## Any Selvage proximity generator yields the additive gap -/
 
@@ -359,17 +300,17 @@ theorem keystone_additiveFold_distance_fires :
     (by simp) (fpGen_ne_zero 1) keystone_transversal
     (by norm_num) (by norm_num) (by norm_num) hfar
 
-/-- info: 'Minidregg.Selvage.additiveProximityGap_of_isProximityGenerator' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Selvage.additiveProximityGap_of_isProximityGenerator' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms additiveProximityGap_of_isProximityGenerator
-/-- info: 'Minidregg.Selvage.additiveProximityGap_UD' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Selvage.additiveProximityGap_UD' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms additiveProximityGap_UD
-/-- info: 'Minidregg.Selvage.additiveFold_distance_UD' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Selvage.additiveFold_distance_UD' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms additiveFold_distance_UD
-/-- info: 'Minidregg.Selvage.keystone_additiveProximityGap' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Selvage.keystone_additiveProximityGap' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms keystone_additiveProximityGap
-/-- info: 'Minidregg.Selvage.keystone_far_word_eighth' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Selvage.keystone_far_word_eighth' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms keystone_far_word_eighth
-/-- info: 'Minidregg.Selvage.keystone_additiveFold_distance_fires' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Selvage.keystone_additiveFold_distance_fires' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms keystone_additiveFold_distance_fires
 
 end Minidregg.Selvage

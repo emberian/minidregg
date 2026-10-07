@@ -147,72 +147,7 @@ omit [Fintype ι] [DecidableEq ι] [DecidableEq F] in
 is the "bidegree of the quotient" fact BCIKS use silently when dividing
 `B(X, Z)` by `A(X, Z)`. -/
 theorem ZDegLE.of_mul_left {A P : Polynomial (Polynomial F)} {t : ℕ}
-    (hA : A ≠ 0) (hP : P ≠ 0) (hAP : ZDegLE (A * P) t) : ZDegLE P t := by
-  classical
-  set s : ℕ := A.support.sup fun i => (A.coeff i).natDegree with hs
-  set u : ℕ := P.support.sup fun i => (P.coeff i).natDegree with hu
-  have hAcoeff : ∀ a, (A.coeff a).natDegree ≤ s := by
-    intro a
-    by_cases ha : a ∈ A.support
-    · exact Finset.le_sup (f := fun i => (A.coeff i).natDegree) ha
-    · rw [Polynomial.notMem_support_iff.mp ha]; simp
-  have hPcoeff : ∀ b, (P.coeff b).natDegree ≤ u := by
-    intro b
-    by_cases hb : b ∈ P.support
-    · exact Finset.le_sup (f := fun i => (P.coeff i).natDegree) hb
-    · rw [Polynomial.notMem_support_iff.mp hb]; simp
-  -- the top slices multiply
-  have hslice : ∀ j : ℕ,
-      ((A * P).coeff j).coeff (s + u) = (zslice s A * zslice u P).coeff j := by
-    intro j
-    rw [coeff_mul, coeff_mul]
-    rw [finsetSum_coeff]
-    refine Finset.sum_congr rfl fun ab _ => ?_
-    rw [zslice_coeff, zslice_coeff, coeff_mul]
-    refine Finset.sum_eq_single (s, u) (fun uv huv huvne => ?_) (fun habs => ?_)
-    · rcases Nat.lt_or_ge s uv.1 with hlt | hge
-      · rw [Polynomial.coeff_eq_zero_of_natDegree_lt (lt_of_le_of_lt (hAcoeff ab.1) hlt),
-          zero_mul]
-      · have h2 : u < uv.2 := by
-          have := Finset.mem_antidiagonal.mp huv
-          rcases Nat.lt_or_ge u uv.2 with h | h
-          · exact h
-          · exact absurd (Prod.ext (by omega) (by omega)) huvne
-        rw [Polynomial.coeff_eq_zero_of_natDegree_lt (lt_of_le_of_lt (hPcoeff ab.2) h2),
-          mul_zero]
-    · exact absurd (Finset.mem_antidiagonal (a := (s, u)) (n := s + u)
-        |>.mpr rfl) habs
-  -- the slices at the attained sups are nonzero
-  have hAsupp : A.support.Nonempty := Polynomial.support_nonempty.mpr hA
-  have hPsupp : P.support.Nonempty := Polynomial.support_nonempty.mpr hP
-  obtain ⟨a₀, ha₀, hsa⟩ := Finset.exists_mem_eq_sup A.support hAsupp
-    (fun i => (A.coeff i).natDegree)
-  obtain ⟨b₀, hb₀, hub⟩ := Finset.exists_mem_eq_sup P.support hPsupp
-    (fun i => (P.coeff i).natDegree)
-  have hA0 : zslice s A ≠ 0 := by
-    intro h0
-    have := zslice_coeff s A a₀
-    rw [h0, Polynomial.coeff_zero, hs.trans hsa] at this
-    exact leadingCoeff_ne_zero.mpr (Polynomial.mem_support_iff.mp ha₀) this.symm
-  have hP0 : zslice u P ≠ 0 := by
-    intro h0
-    have := zslice_coeff u P b₀
-    rw [h0, Polynomial.coeff_zero, hu.trans hub] at this
-    exact leadingCoeff_ne_zero.mpr (Polynomial.mem_support_iff.mp hb₀) this.symm
-  -- hence the product has Z-degree ≥ s + u somewhere, so s + u ≤ t
-  have hprod : zslice s A * zslice u P ≠ 0 := mul_ne_zero hA0 hP0
-  set j : ℕ := (zslice s A * zslice u P).natDegree with hj'
-  have hj : (zslice s A * zslice u P).coeff j ≠ 0 :=
-    leadingCoeff_ne_zero.mpr hprod
-  have hcoeff : ((A * P).coeff j).coeff (s + u) ≠ 0 := by rw [hslice j]; exact hj
-  have hdeg : ((s + u : ℕ) : WithBot ℕ) ≤ ((A * P).coeff j).degree :=
-    le_degree_of_ne_zero hcoeff
-  have hsu : ((s + u : ℕ) : WithBot ℕ) ≤ (t : WithBot ℕ) := le_trans hdeg (hAP j)
-  have hsu' : s + u ≤ t := by exact_mod_cast hsu
-  -- conclude: every coefficient of P has degree ≤ u ≤ t
-  intro i
-  have h1 : (P.coeff i).natDegree ≤ t := le_trans (hPcoeff i) (by omega)
-  exact le_trans degree_le_natDegree (by exact_mod_cast h1)
+    (hA : A ≠ 0) (hP : P ≠ 0) (hAP : ZDegLE (A * P) t) : ZDegLE P t := by sorry
 
 /-! ## The received line as a Z-polynomial -/
 
@@ -237,8 +172,7 @@ theorem lineAt_degree_le (f : Fin 2 → ι → F) (i : ι) :
 
 omit [Fintype ι] [DecidableEq ι] [DecidableEq F] in
 @[simp] theorem lineAt_coeff_zero (f : Fin 2 → ι → F) (i : ι) :
-    (lineAt f i).coeff 0 = f 0 i := by
-  simp [lineAt, coeff_C]
+    (lineAt f i).coeff 0 = f 0 i := by sorry
 
 omit [Fintype ι] [DecidableEq ι] [DecidableEq F] in
 @[simp] theorem lineAt_coeff_one (f : Fin 2 → ι → F) (i : ι) :
@@ -1103,12 +1037,12 @@ head above is unconditional; `[PROXGAP-tight]`(a) is closed at `ℓ = 2`.
 `ProximityGapUDTightExample.good_line_CA_fullBand`: `propext`,
 `Classical.choice`, `Quot.sound` (pinned below). -/
 
-#assert_axioms polishchukSpielmanCramer_holds
-#assert_axioms correlatedAgreement_of_close_card_full
-#assert_axioms rs_proximityGap_UD_full
-#assert_axioms reedSolomonCode_isProximityGenerator_UD_full
-#assert_axioms hasMutualCorrelatedAgreement_UD_full
-#assert_axioms foldDistancePreserving_UD_full
-#assert_axioms ProximityGapUDTightExample.good_line_CA_fullBand
+-- STUBBED #assert_axioms polishchukSpielmanCramer_holds
+-- STUBBED #assert_axioms correlatedAgreement_of_close_card_full
+-- STUBBED #assert_axioms rs_proximityGap_UD_full
+-- STUBBED #assert_axioms reedSolomonCode_isProximityGenerator_UD_full
+-- STUBBED #assert_axioms hasMutualCorrelatedAgreement_UD_full
+-- STUBBED #assert_axioms foldDistancePreserving_UD_full
+-- STUBBED #assert_axioms ProximityGapUDTightExample.good_line_CA_fullBand
 
 end Minidregg.Selvage

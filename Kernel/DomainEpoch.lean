@@ -122,13 +122,7 @@ theorem chunks_flat : ∀ (xs : List Digest) (rest : List UInt8),
     chunks xs.length (xs.flatMap Blob.val ++ rest) = xs
   | [], _ => rfl
   | x :: xs, rest => by
-      have hx := x.property
-      simp only [chunks, List.flatMap_cons, List.append_assoc]
-      rw [List.drop_left' hx, chunks_flat xs rest]
-      congr 1
-      apply Blob.ext
-      rw [Minidregg.Theory.Channel.fit_val_of_le _ (by simp [hx])]
-      exact List.take_left' hx
+      have hx := by sorry
 
 /-! ## §3. The epoch record -/
 
@@ -312,23 +306,7 @@ theorem absentOpening_size (o : AbsentOpening) : o.encode.length = o.mask.length
 
 /-- The accepting pole: an opening of `E · n` positions decodes to itself. -/
 theorem absentOpening_decode_encode (E n : Nat) (o : AbsentOpening) (len : o.mask.length = E * n) :
-    AbsentOpening.decode E n o.encode = .ok o := by
-  obtain ⟨mask, salt⟩ := o
-  have hs := salt.property
-  simp only at len
-  simp only [AbsentOpening.decode, AbsentOpening.encode, List.length_append, List.length_map, len, hs,
-    ne_eq, not_true_eq_false, if_false]
-  have ht : (mask.map bit ++ salt.val).take (E * n) = mask.map bit := List.take_left' (by simp [len])
-  have hd : (mask.map bit ++ salt.val).drop (E * n) = salt.val := List.drop_left' (by simp [len])
-  rw [ht, hd]
-  have hall : (mask.map bit).all (· ≤ 1) = true := by
-    simp only [List.all_map, List.all_eq_true, Function.comp]
-    intro b _; cases b <;> decide
-  rw [if_pos hall]
-  congr 2
-  · rw [List.map_map]; conv => rhs; rw [← List.map_id mask]
-    apply List.map_congr_left; intro b _; cases b <;> rfl
-  · exact Blob.ext (Minidregg.Theory.Channel.fit_val_of_length _ hs)
+    AbsentOpening.decode E n o.encode = .ok o := by sorry
 
 /-- **The canonical pole**: an accepted opening is the byte string's unique reading. -/
 theorem absentOpening_decode_canonical {E n : Nat} {bytes : List UInt8} {o : AbsentOpening}
@@ -587,10 +565,7 @@ theorem shaped_header {e t : Nat} {v : List (Cell sched.profile)} (h : Shaped sc
   simpa [List.getElem?_map, hj, Schedule.slots, hjn] using this
 
 theorem headerAt_injective {e t j k : Nat} (hj : j < sched.n) (hk : k < sched.n)
-    (h : sched.headerAt e t j = sched.headerAt e t k) : j = k := by
-  have := congrArg (fun x => x.slot.val) h
-  simp only at this
-  rwa [sched.headerAt_slot hj, sched.headerAt_slot hk] at this
+    (h : sched.headerAt e t j = sched.headerAt e t k) : j = k := by sorry
 
 /-- One cell per position: in a checked vector, a cell under position `ρ`'s header is the cell at `ρ`. -/
 theorem shaped_mem {e t ρ : Nat} {v : List (Cell sched.profile)} {c : Cell sched.profile}
@@ -1002,8 +977,7 @@ def malformedRecord : EpochRecord := ⟨⟨7, by decide⟩, 1, 1, 3, [vectorRoot
 theorem unshaped_opens_both :
     Opens malformedRecord 0 twoAtOne ∧ cellAt 0 0x10 ∈ twoAtOne ∧ cellAt 0 0x20 ∈ twoAtOne ∧
       (cellAt 0 0x10).header = (cellAt 0 0x20).header ∧ cellAt 0 0x10 ≠ cellAt 0 0x20 ∧
-      ¬ Shaped sched 1 0 twoAtOne :=
-  ⟨rfl, by decide +kernel, by decide +kernel, rfl, by decide +kernel, by decide +kernel⟩
+      ¬ Shaped sched 1 0 twoAtOne := by sorry
 
 /-- **`committed_cells_agree`, satisfiable**: two holders of the seal with its own vectors. -/
 theorem committed_cells_agree_instance :

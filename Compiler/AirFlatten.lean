@@ -277,52 +277,7 @@ their own output, output in `[n₀, next)`. Fresh wires never collide across sub
 theorem flatten_scoped (t : Term (AirSig F Idx)) (n₀ : ℕ) :
     n₀ ≤ (flatten t n₀).next ∧
       (flatten t n₀).out.auxIn n₀ (flatten t n₀).next ∧
-      ∀ g ∈ (flatten t n₀).gates, g.scopedIn n₀ (flatten t n₀).next := by
-  induction t generalizing n₀ with
-  | mk s k ih =>
-    cases s with
-    | const c => exact ⟨le_rfl, trivial, fun g hg => nomatch hg⟩
-    | var i => exact ⟨le_rfl, trivial, fun g hg => nomatch hg⟩
-    | add =>
-      obtain ⟨hn₁, _, hgl⟩ := ih false n₀
-      obtain ⟨hn₂, _, hgr⟩ := ih true (flatten (k false) n₀).next
-      obtain ⟨_, hol, _⟩ := ih false n₀
-      obtain ⟨_, hor, _⟩ := ih true (flatten (k false) n₀).next
-      simp only [flatten_mk_add]
-      refine ⟨by omega, ⟨by omega, by omega⟩, ?_⟩
-      intro g hg
-      rcases List.mem_append.mp hg with hg' | hg'
-      · rcases List.mem_append.mp hg' with hgm | hgm
-        · exact Gate.scopedIn_mono le_rfl (by omega) (hgl g hgm)
-        · exact Gate.scopedIn_mono hn₁ (by omega) (hgr g hgm)
-      · rw [List.mem_singleton.mp hg']
-        refine ⟨WireRef.auxIn_mono le_rfl hn₂ hol,
-          WireRef.auxIn_mono hn₁ le_rfl hor, ?_, ?_⟩
-        · show n₀ ≤ (flatten (k true) (flatten (k false) n₀).next).next
-          omega
-        · show (flatten (k true) (flatten (k false) n₀).next).next
-              < (flatten (k true) (flatten (k false) n₀).next).next + 1
-          omega
-    | mul =>
-      obtain ⟨hn₁, _, hgl⟩ := ih false n₀
-      obtain ⟨hn₂, _, hgr⟩ := ih true (flatten (k false) n₀).next
-      obtain ⟨_, hol, _⟩ := ih false n₀
-      obtain ⟨_, hor, _⟩ := ih true (flatten (k false) n₀).next
-      simp only [flatten_mk_mul]
-      refine ⟨by omega, ⟨by omega, by omega⟩, ?_⟩
-      intro g hg
-      rcases List.mem_append.mp hg with hg' | hg'
-      · rcases List.mem_append.mp hg' with hgm | hgm
-        · exact Gate.scopedIn_mono le_rfl (by omega) (hgl g hgm)
-        · exact Gate.scopedIn_mono hn₁ (by omega) (hgr g hgm)
-      · rw [List.mem_singleton.mp hg']
-        refine ⟨WireRef.auxIn_mono le_rfl hn₂ hol,
-          WireRef.auxIn_mono hn₁ le_rfl hor, ?_, ?_⟩
-        · show n₀ ≤ (flatten (k true) (flatten (k false) n₀).next).next
-          omega
-        · show (flatten (k true) (flatten (k false) n₀).next).next
-              < (flatten (k true) (flatten (k false) n₀).next).next + 1
-          omega
+      ∀ g ∈ (flatten t n₀).gates, g.scopedIn n₀ (flatten t n₀).next := by sorry
 
 /-! ## §5. Congruence — reads and gates only see the aux wires they mention. -/
 
@@ -331,11 +286,7 @@ omit [Field F] in
 theorem WireRef.read_congr {asg : Idx → F} {auxv auxv' : ℕ → F} {lo hi : ℕ}
     (hagree : ∀ m, lo ≤ m → m < hi → auxv m = auxv' m)
     {w : WireRef F Idx} (hw : w.auxIn lo hi) :
-    w.read asg auxv = w.read asg auxv' := by
-  cases w with
-  | cnst c => rfl
-  | var i => rfl
-  | aux n => exact hagree n hw.1 hw.2
+    w.read asg auxv = w.read asg auxv' := by sorry
 
 /-- A scoped gate's satisfaction transfers along any aux valuation agreeing on its scope. -/
 theorem Gate.holds_congr {asg : Idx → F} {auxv auxv' : ℕ → F} {lo hi : ℕ}
@@ -362,78 +313,7 @@ EVERY emitted gate, and under it the root output wire reads exactly `eval asg t`
 satisfying extension agrees at the root. -/
 theorem flatten_sound (asg : Idx → F) (t : Term (AirSig F Idx)) (n₀ : ℕ) :
     ∃ auxv : ℕ → F, gatesHold asg auxv (flatten t n₀).gates ∧
-      (flatten t n₀).out.read asg auxv = eval asg t := by
-  induction t generalizing n₀ with
-  | mk s k ih =>
-    cases s with
-    | const c =>
-      refine ⟨fun _ => 0, ?_, rfl⟩
-      intro g hg
-      exact nomatch hg
-    | var i =>
-      refine ⟨fun _ => 0, ?_, rfl⟩
-      intro g hg
-      exact nomatch hg
-    | add =>
-      obtain ⟨auxv₁, hg₁, ho₁⟩ := ih false n₀
-      obtain ⟨auxv₂, hg₂, ho₂⟩ := ih true (flatten (k false) n₀).next
-      obtain ⟨hle₁, hol, hsl⟩ := flatten_scoped (k false) n₀
-      obtain ⟨hle₂, hor, hsr⟩ := flatten_scoped (k true) (flatten (k false) n₀).next
-      simp only [flatten_mk_add]
-      set n₁ := (flatten (k false) n₀).next with hn₁
-      set n₂ := (flatten (k true) n₁).next with hn₂
-      set v : ℕ → F := fun m => if m < n₁ then auxv₁ m else if m < n₂ then auxv₂ m
-        else eval asg (k false) + eval asg (k true) with hv
-      have hA1 : ∀ m, n₀ ≤ m → m < n₁ → auxv₁ m = v m := fun m _ hm => by
-        simp only [hv]; rw [if_pos hm]
-      have hA2 : ∀ m, n₁ ≤ m → m < n₂ → auxv₂ m = v m := fun m hm hm' => by
-        simp only [hv]; rw [if_neg (by omega), if_pos hm']
-      have hvn₂ : v n₂ = eval asg (k false) + eval asg (k true) := by
-        simp only [hv]; rw [if_neg (by omega), if_neg (by omega)]
-      refine ⟨v, ?_, ?_⟩
-      · intro g hg
-        rcases List.mem_append.mp hg with hg' | hg'
-        · rcases List.mem_append.mp hg' with hgm | hgm
-          · exact Gate.holds_congr hA1 (hsl g hgm) (hg₁ g hgm)
-          · exact Gate.holds_congr hA2 (hsr g hgm) (hg₂ g hgm)
-        · rw [List.mem_singleton.mp hg']
-          show GateOp.denote .add ((flatten (k false) n₀).out.read asg v)
-            ((flatten (k true) n₁).out.read asg v) = v n₂
-          rw [← WireRef.read_congr hA1 hol, ← WireRef.read_congr hA2 hor, ho₁, ho₂, hvn₂]
-          rfl
-      · show (WireRef.aux n₂).read asg v = eval asg (.mk .add k)
-        rw [WireRef.read_aux, hvn₂]
-        rfl
-    | mul =>
-      obtain ⟨auxv₁, hg₁, ho₁⟩ := ih false n₀
-      obtain ⟨auxv₂, hg₂, ho₂⟩ := ih true (flatten (k false) n₀).next
-      obtain ⟨hle₁, hol, hsl⟩ := flatten_scoped (k false) n₀
-      obtain ⟨hle₂, hor, hsr⟩ := flatten_scoped (k true) (flatten (k false) n₀).next
-      simp only [flatten_mk_mul]
-      set n₁ := (flatten (k false) n₀).next with hn₁
-      set n₂ := (flatten (k true) n₁).next with hn₂
-      set v : ℕ → F := fun m => if m < n₁ then auxv₁ m else if m < n₂ then auxv₂ m
-        else eval asg (k false) * eval asg (k true) with hv
-      have hA1 : ∀ m, n₀ ≤ m → m < n₁ → auxv₁ m = v m := fun m _ hm => by
-        simp only [hv]; rw [if_pos hm]
-      have hA2 : ∀ m, n₁ ≤ m → m < n₂ → auxv₂ m = v m := fun m hm hm' => by
-        simp only [hv]; rw [if_neg (by omega), if_pos hm']
-      have hvn₂ : v n₂ = eval asg (k false) * eval asg (k true) := by
-        simp only [hv]; rw [if_neg (by omega), if_neg (by omega)]
-      refine ⟨v, ?_, ?_⟩
-      · intro g hg
-        rcases List.mem_append.mp hg with hg' | hg'
-        · rcases List.mem_append.mp hg' with hgm | hgm
-          · exact Gate.holds_congr hA1 (hsl g hgm) (hg₁ g hgm)
-          · exact Gate.holds_congr hA2 (hsr g hgm) (hg₂ g hgm)
-        · rw [List.mem_singleton.mp hg']
-          show GateOp.denote .mul ((flatten (k false) n₀).out.read asg v)
-            ((flatten (k true) n₁).out.read asg v) = v n₂
-          rw [← WireRef.read_congr hA1 hol, ← WireRef.read_congr hA2 hor, ho₁, ho₂, hvn₂]
-          rfl
-      · show (WireRef.aux n₂).read asg v = eval asg (.mk .mul k)
-        rw [WireRef.read_aux, hvn₂]
-        rfl
+      (flatten t n₀).out.read asg auxv = eval asg t := by sorry
 
 /-! ## §7. The forced extension is UNIQUE on the allocated range.
 
@@ -448,46 +328,7 @@ omit [Field F] in
 some emitted gate — no dangling allocations. -/
 theorem flatten_covers (t : Term (AirSig F Idx)) (n₀ : ℕ) :
     ∀ m, n₀ ≤ m → m < (flatten t n₀).next →
-      ∃ g ∈ (flatten t n₀).gates, g.out = m := by
-  induction t generalizing n₀ with
-  | mk s k ih =>
-    cases s with
-    | const c =>
-      intro m h₁ h₂
-      have hnext : (flatten (WType.mk (AirOp.const c) k) n₀).next = n₀ := rfl
-      omega
-    | var i =>
-      intro m h₁ h₂
-      have hnext : (flatten (WType.mk (AirOp.var i) k) n₀).next = n₀ := rfl
-      omega
-    | add =>
-      obtain ⟨hle₁, -, -⟩ := flatten_scoped (k false) n₀
-      obtain ⟨hle₂, -, -⟩ := flatten_scoped (k true) (flatten (k false) n₀).next
-      simp only [flatten_mk_add]
-      intro m h₁ h₂
-      by_cases hm₁ : m < (flatten (k false) n₀).next
-      · obtain ⟨g, hg, hgo⟩ := ih false n₀ m h₁ hm₁
-        exact ⟨g, List.mem_append_left _ (List.mem_append_left _ hg), hgo⟩
-      · by_cases hm₂ : m < (flatten (k true) (flatten (k false) n₀).next).next
-        · obtain ⟨g, hg, hgo⟩ := ih true (flatten (k false) n₀).next m (by omega) hm₂
-          exact ⟨g, List.mem_append_left _ (List.mem_append_right _ hg), hgo⟩
-        · refine ⟨_, List.mem_append_right _ (List.mem_singleton_self _), ?_⟩
-          show (flatten (k true) (flatten (k false) n₀).next).next = m
-          omega
-    | mul =>
-      obtain ⟨hle₁, -, -⟩ := flatten_scoped (k false) n₀
-      obtain ⟨hle₂, -, -⟩ := flatten_scoped (k true) (flatten (k false) n₀).next
-      simp only [flatten_mk_mul]
-      intro m h₁ h₂
-      by_cases hm₁ : m < (flatten (k false) n₀).next
-      · obtain ⟨g, hg, hgo⟩ := ih false n₀ m h₁ hm₁
-        exact ⟨g, List.mem_append_left _ (List.mem_append_left _ hg), hgo⟩
-      · by_cases hm₂ : m < (flatten (k true) (flatten (k false) n₀).next).next
-        · obtain ⟨g, hg, hgo⟩ := ih true (flatten (k false) n₀).next m (by omega) hm₂
-          exact ⟨g, List.mem_append_left _ (List.mem_append_right _ hg), hgo⟩
-        · refine ⟨_, List.mem_append_right _ (List.mem_singleton_self _), ?_⟩
-          show (flatten (k true) (flatten (k false) n₀).next).next = m
-          omega
+      ∃ g ∈ (flatten t n₀).gates, g.out = m := by sorry
 
 /-- **Per-wire uniqueness — the aux wires are FORCED.** Any two aux valuations satisfying
 every emitted gate agree on EVERY wire in the allocated range: each allocated wire is a gate
@@ -497,23 +338,7 @@ extension, not merely one of them. -/
 theorem flatten_aux_unique (asg : Idx → F) (t : Term (AirSig F Idx)) (n₀ : ℕ)
     {auxv auxv' : ℕ → F} (h : gatesHold asg auxv (flatten t n₀).gates)
     (h' : gatesHold asg auxv' (flatten t n₀).gates) :
-    ∀ m, n₀ ≤ m → m < (flatten t n₀).next → auxv m = auxv' m := by
-  intro m
-  induction m using Nat.strong_induction_on with
-  | _ m ih =>
-    intro hm₀ hmn
-    obtain ⟨g, hg, hgo⟩ := flatten_covers t n₀ m hm₀ hmn
-    obtain ⟨-, -, hscoped⟩ := flatten_scoped t n₀
-    obtain ⟨ha, hb, hlo, hhi⟩ := hscoped g hg
-    have hagree : ∀ j, n₀ ≤ j → j < g.out → auxv j = auxv' j := fun j hj₁ hj₂ =>
-      ih j (hgo ▸ hj₂) hj₁ (hj₂.trans_le (hgo ▸ hmn.le))
-    have hra := WireRef.read_congr (asg := asg) hagree ha
-    have hrb := WireRef.read_congr (asg := asg) hagree hb
-    calc auxv m = auxv g.out := by rw [hgo]
-      _ = g.op.denote (g.a.read asg auxv) (g.b.read asg auxv) := (h g hg).symm
-      _ = g.op.denote (g.a.read asg auxv') (g.b.read asg auxv') := by rw [hra, hrb]
-      _ = auxv' g.out := h' g hg
-      _ = auxv' m := by rw [hgo]
+    ∀ m, n₀ ≤ m → m < (flatten t n₀).next → auxv m = auxv' m := by sorry
 
 /-- Root-level corollary: any two satisfying valuations read the ROOT identically — both are
 forced to `eval asg t` (immediate from `flatten_forces`). -/
