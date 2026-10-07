@@ -280,7 +280,10 @@ verdict is the configured verifier's, and the receipt keeps that config
 (`verifier`): the pinned native process, or -- only in a Lean fixture that evaluates
 a real admission -- a recorded run of that process
 (`CredentialSignatureIO.Transcript`), which `scripts/check-native-transcripts.sh`
-re-submits to it. -/
+re-submits to it.  **Layer 2**: the verdict is the oracle's, a runtime fact; `private
+mk` stops names but not `by constructor`, so the guarantee that only `verifyNative`
+and `ofReceiverClaim` mint a receipt is `TokenCensus` (no foreign mint, a planted
+forgery detected). -/
 structure CheckedSignature (snapshot : Snapshot) where
   private mk ::
   /-- The oracle that answered the signature check: the pinned process, or (only
@@ -351,7 +354,7 @@ structure Received where
 /-- A signature the Receiver's verifier accepted before `prepare` ran: the
 exact claim, and the oracle that answered (`Source.receiver`).  The constructor
 is private; the only producers read a voucher (`Received.find?`,
-`Received.signed?`).  It is a `Type`-level value a `Prepared` record can hold,
+`Received.signed?`).  **Layer 2**, protected by `TokenCensus`.  It is a `Type`-level value a `Prepared` record can hold,
 where the `Received` bundle (indexed by the oracle's monad) cannot be. -/
 structure ReceiverSignature where
   private mk ::

@@ -88,7 +88,10 @@ def need {ε α : Type} (reason : ε) : Option α → Except ε α
 Indexed by the verifier: a value minted under one verifier is not a value of
 another's type.  The constructor is private to this module and its only use is
 `Receiver.admitVia`, after `verify` answered `true` on each claim
-(`Receiver.verifyAll`); `Vouchers.empty` vouches for nothing. -/
+(`Receiver.verifyAll`); `Vouchers.empty` vouches for nothing.  **Layer 2** (an
+oracle verdict no proof expresses): `private mk` stops names, not `by
+constructor`, so the guarantee is `TokenCensus` (no constant outside this module
+that can carry a value mentions the constructor; a planted forgery is detected). -/
 structure Vouchers {m : Type → Type} (verify : SigQuery → m (Except String Bool)) where
   private mk ::
   verified : List SigQuery
@@ -234,7 +237,8 @@ section Generic
 variable {m : Type → Type} {verify : SigQuery → m (Except String Bool)}
 variable (R : Receiver J verify)
 
-/-- An admitted ingress: only `admit` constructs one. -/
+/-- An admitted ingress: only `admit` constructs one.  **Layer 2** until it carries
+its admission as a proof field: `TokenCensus` refuses a foreign mint. -/
 structure Accepted (env : R.Env) (state : J.State) (ingress : R.Ingress) where
   private mk ::
   prepared : R.Prepared env state (R.command ingress)

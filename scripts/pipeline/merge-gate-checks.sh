@@ -66,6 +66,10 @@ run axiom-census    $LAKE_WRAP lake build AxiomCensus
 # commit as the implementation, and only with an Authority-Change trailer; every generated fixture has
 # a row in scripts/pipeline/fixture-authorities.txt (cv 01a1147b-103d).
 run fixture-authority bash scripts/pipeline/check-fixture-authority.sh "$FROM..$TO"
+# Every private constructor is listed in TokenCensus/Table.lean and minted only in its home
+# module (a `private mk` stops names, not `by constructor`); a planted forgery per row must be
+# detected. Elaborates TokenCensus over the research umbrella.
+run token-census    $LAKE_WRAP lake build TokenCensus
 run objective-proofs bash scripts/check-objective-proofs.sh proofs
 # The hypothesis ledger over AxiomCensusResearch. Its [RED] families on main are a known
 # baseline (hyp-ledger-baseline.txt next to this script, ROOT 10-05: six toothless rows red on

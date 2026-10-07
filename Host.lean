@@ -14,7 +14,6 @@ import Host.ProviderUsageAudit
 
 import Host.KeyRotationInspectionChecks
 import Host.ReceiptContinuityCheck
-import Host.ReceiverTokenAudit  -- receiver tokens (Vouchers, ReceiverSignature, CheckedSignature) minted only in their home modules
 
 import Host.ApplicationManagedPolicyAuthoringCheck
 
