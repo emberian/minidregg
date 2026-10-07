@@ -26,7 +26,7 @@ import Compiler.DurableCheckpointCodec
 import Compiler.NativeCoprocess
 import Compiler.DurableLogTags
 import Compiler.DurableHistory
-import Compiler.DurableIndex
+import Compiler.DurableIndexFamilies
 import Std.Data.HashMap
 import Std.Data.HashSet
 import Kernel.PresenceIndex
@@ -1547,36 +1547,44 @@ def Loaded.headIndexRoot {rootBytes : List UInt8 → Digest} (transport : Transp
   | .ok head => return .ok head.indexRoot
   | .error refusal => return .error refusal.message
 
-/-- The index rows on the paths of `keys` and beside them (each prefix's
-sibling, which a delete's collapse reads), at or below `height`, down to `depth`
-bits (520: every prefix). Untrusted: every opening or reveal built from them is
-verified against the authenticated index root, so a path cut short opens to
-nothing and refuses (`withIndexRows` then reads every prefix). -/
-def indexRows (transport : Transport) (height : Nat) (keys : List DurableIndex.IndexKey)
-    (depth : Nat := 520) : IO (Except String (List Bool → Option DurableIndex.Row)) := do
+/-- Read index rows by prefix at or below `height`, in chunks (the Store answers
+at most 65536 node keys per request); undecodable rows are dropped (untrusted
+anyway: every use is verified against the root). -/
+def readIndexRows (transport : Transport) (height : Nat) (paths : List (List Bool)) :
+    IO (Except String (Std.HashMap (List Bool) DurableIndex.Row)) := do
   let mut seen : Std.HashSet (List UInt8) := {}
   let mut requested : Array (Nat × List UInt8) := #[]
-  for k in keys do
-    for path in DurableIndex.readPrefixes k depth do
-      let rowKey := DurableIndex.rowKey path
-      unless seen.contains rowKey do
-        seen := seen.insert rowKey
-        requested := requested.push (DurableIndex.indexSpace, rowKey)
-  -- The Store answers at most 65536 node keys per request: read in chunks.
-  let mut found : Std.HashMap (List UInt8) DurableIndex.Row := {}
+  let mut byKey : Std.HashMap (List UInt8) (List Bool) := {}
+  for path in paths do
+    let rowKey := DurableIndex.rowKey path
+    unless seen.contains rowKey do
+      seen := seen.insert rowKey
+      byKey := byKey.insert rowKey path
+      requested := requested.push (DurableIndex.indexSpace, rowKey)
+  let mut found : Std.HashMap (List Bool) DurableIndex.Row := {}
   for chunk in requested.toList.toChunks 60000 do
     match ← transport.history ⟨height, [], chunk⟩ with
     | .error message => return .error message
     | .ok read =>
         found := read.nodes.foldl (init := found) fun map node =>
-          match node.2.2 with
-          | none => map
-          | some (_, value) =>
+          match node.2.2, byKey.get? node.2.1 with
+          | some (_, value), some path =>
               match DurableIndex.rowStream.toLawful.decode value with
-              | some row => map.insert node.2.1 row
+              | some row => map.insert path row
               | none => map
-  let rows := found
-  return .ok fun path => rows.get? (DurableIndex.rowKey path)
+          | _, _ => map
+  return .ok found
+
+/-- The index rows on the paths of `keys` and beside them (each prefix's
+sibling, which a delete's collapse reads), at or below `height`, down to `depth`
+bits (520: every prefix). Untrusted: every opening built from them is verified
+against the authenticated index root, so a path cut short opens to nothing and
+refuses. -/
+def indexRows (transport : Transport) (height : Nat) (keys : List DurableIndex.IndexKey)
+    (depth : Nat := 520) : IO (Except String (List Bool → Option DurableIndex.Row)) := do
+  match ← readIndexRows transport height (keys.flatMap fun k => DurableIndex.readPrefixes k depth) with
+  | .error message => return .error message
+  | .ok rows => return .ok fun path => rows.get? path
 
 /-- Use the index rows of `keys`: first down to 48 bits (the family byte, then a
 compressed trie over far fewer than 2^40 keys of a family rarely reaches
@@ -1593,6 +1601,113 @@ def withIndexRows {α : Type} (transport : Transport) (height : Nat) (keys : Lis
           match ← indexRows transport height keys with
           | .error message => return .error message
           | .ok rows => return use rows
+
+/-- The most subtree rows a prefix read takes before it refuses by name. -/
+def subtreeRowsMax : Nat := 1 <<< 16
+
+/-- The subtrees below `frontier`, level by level: the children of every branch
+row at this level (one Store request), then theirs; `taken` counts the subtree
+rows read so far, refused by name past `subtreeRowsMax`. `levels` bounds the
+depth: what is left of the 520-bit key path below the prefixes. -/
+def readSubtrees (transport : Transport) (height : Nat) :
+    Nat → List (List Bool) → Std.HashMap (List Bool) DurableIndex.Row → Nat →
+      IO (Except String (Std.HashMap (List Bool) DurableIndex.Row))
+  | 0, _, found, _ => return .ok found
+  | levels + 1, frontier, found, taken => do
+      let children := frontier.flatMap fun here =>
+        match found.get? here with
+        | some (.branch left right) =>
+            (if left = DurableIndex.emptyDigest then [] else [here ++ [false]]) ++
+              (if right = DurableIndex.emptyDigest then [] else [here ++ [true]])
+        | _ => []
+      if children.isEmpty then return .ok found
+      if taken + children.length > subtreeRowsMax then
+        return .error s!"index subtree over {subtreeRowsMax} rows: refused"
+      match ← readIndexRows transport height children with
+      | .error message => return .error message
+      | .ok level =>
+          readSubtrees transport height levels children
+            (level.fold (init := found) fun map path row => map.insert path row) (taken + children.length)
+
+/-- The subtree read reaches the Store only through `history`: two transports
+that read alike read the same subtrees. -/
+theorem readSubtrees_history {t t' : Transport} (same : t.history = t'.history) :
+    readSubtrees t = readSubtrees t' := by
+  have rows : readIndexRows t = readIndexRows t' := by
+    funext height paths; unfold readIndexRows; rw [same]
+  funext height levels
+  induction levels with
+  | zero => rfl
+  | succ levels ih =>
+      funext frontier found taken
+      simp only [readSubtrees, rows, ih]
+
+/-- The rows of `keys` (paths down to `depth`) and of `prefixes`: every prefix of
+each one's path with its sibling, then the subtree BELOW it, level by level
+(`readSubtrees`: one Store request per level). More than `subtreeRowsMax` subtree
+rows is refused by name. Untrusted: reveals built from them are verified
+against the root. -/
+def indexRowsFor (transport : Transport) (height : Nat) (keys : List DurableIndex.IndexKey)
+    (prefixes : List (List Bool)) (depth : Nat := 520) :
+    IO (Except String (List Bool → Option DurableIndex.Row)) := do
+  let paths := keys.flatMap (fun k => DurableIndex.readPrefixes k depth) ++
+    prefixes.flatMap fun p => DurableIndex.pathPrefixes p p.length
+  let pathRows ← match ← readIndexRows transport height paths with
+    | .error message => return .error message
+    | .ok rows => pure rows
+  -- A key path is 520 bits: below the shortest prefix there are at most 520 minus its length levels.
+  let levels := 520 - (prefixes.map List.length).foldl min 520
+  match ← readSubtrees transport height levels prefixes pathRows 0 with
+  | .error message => return .error message
+  | .ok rows => return .ok fun path => rows.get? path
+
+/-- **The index rows of a batch of records**, applied in order from `root` (the
+index after height `readHeight`, the record at position `i` taking height
+`readHeight + 1 + i`): each record's `IndexRows.apply` over the Store's rows at
+`readHeight` with every earlier record's written rows laid over them. The rows
+are read in two passes: the reads of every record (its family-0/1 and payer keys,
+the family-4 prefix of each cell it writes, with the subtree below), then the
+paths of the keys the changes may touch (`IndexRows.plannedKeys`, planned from
+the verified start members). Point paths are read down to 48 bits first (the
+family byte, then a compressed trie over far fewer than 2^40 keys of a family
+rarely reaches deeper), and every prefix when that does not verify. -/
+def applyRecords (transport : Transport) (readHeight : Nat) (root : Digest)
+    (records : List IntentRecord) :
+    IO (Except String (List (Digest × List (List Bool × DurableIndex.Row)))) := do
+  let reads := records.map DurableIndex.IndexRows.reads
+  let points := reads.flatMap (·.1)
+  let prefixes := (reads.flatMap (·.2)).dedup
+  let attempt (depth : Nat) : IO (Except String (List (Digest × List (List Bool × DurableIndex.Row)))) := do
+    let first ← match ← indexRowsFor transport readHeight points prefixes depth with
+      | .error message => return .error message
+      | .ok rows => pure rows
+    let mut startMembers : List (List Bool × List (DurableIndex.IndexKey × List UInt8)) := []
+    for p in prefixes do
+      match DurableIndex.revealRows first root p with
+      | .error message => return .error s!"index rows at height {readHeight}: {message}"
+      | .ok revealed => startMembers := (p, revealed.members) :: startMembers
+    let members := fun p => ((startMembers.find? (·.1 = p)).map (·.2)).getD []
+    let planned := DurableIndex.IndexRows.plannedKeys readHeight records members
+    let second ← match ← indexRows transport readHeight planned depth with
+      | .error message => return .error message
+      | .ok rows => pure rows
+    let stored := fun path => (first path).or (second path)
+    let mut written : Std.HashMap (List Bool) DurableIndex.Row := {}
+    let mut current := root
+    let mut results : Array (Digest × List (List Bool × DurableIndex.Row)) := #[]
+    for (record, height) in records.zipIdx (readHeight + 1) do
+      let overlaid := written
+      let rows := fun path => (overlaid.get? path).or (stored path)
+      match DurableIndex.IndexRows.apply rows current height record with
+      | .error message => return .error s!"durable log record at height {height}: {message}"
+      | .ok (next, writes) =>
+          written := writes.foldl (fun map row => map.insert row.1 row.2) written
+          current := next
+          results := results.push (next, writes)
+    return .ok results.toList
+  match ← attempt 48 with
+  | .ok results => return .ok results
+  | .error _ => attempt 520
 
 /-- The node rows an append writes: the accumulator nodes it completes
 (space 1) and the index rows its changes write (space 3). -/
@@ -1628,11 +1743,10 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
   let indexBefore ← match ← loaded.headIndexRoot transport key with
     | .ok root => pure root
     | .error message => return .error message
-  let keys := DurableIndex.IndexRows.keys intent.transactionId intent.nullifiers
-  let (indexAfter, indexWrites) ← match ← withIndexRows transport loaded.image.accepted.length keys
-      (fun rows => DurableIndex.IndexRows.apply rows indexBefore height intent.transactionId
-        intent.nullifiers) with
-    | .ok result => pure result
+  let (indexAfter, indexWrites) ←
+    match ← applyRecords transport loaded.image.accepted.length indexBefore [IntentRecord.ofIntent intent] with
+    | .ok [result] => pure result
+    | .ok _ => return .error "the index applied a different number of records than it was given"
     | .error message => return .error message
   -- The tag keeps this record's receipt root, the root the extended image
   -- serves, the accumulator frontier after it and the index root after it.

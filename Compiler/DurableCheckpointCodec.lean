@@ -135,8 +135,10 @@ structure StoreEpoch where
   logTag : String
   /-- The history accumulator and the index trie (`Compiler.DurableHistory`,
   `Compiler.DurableIndex`, KN2-STORE-OPEN). `index/trie-v1` replaced the separate
-  spent map (`spent/trie-v1`): a Store born with it is refused naming this
-  component. A three-component label (an epoch
+  spent map (`spent/trie-v1`); `index/trie-v2` adds the presence, link, backlink,
+  payer and incoming families (`Compiler.DurableIndexFamilies`), so every index
+  root of a log with a subject, a link or a fleet turn differs: a Store born with
+  either older one is refused naming this component. A three-component label (an epoch
   born before it) reads as `none` and is refused by naming this component. -/
   accumulator : String
   /-- The command codecs of the log records. `commands/v2`: the delegation
@@ -154,7 +156,7 @@ either moves without this value. A change to any component changes the seed
 frame and refuses every older Store by name. -/
 def StoreEpoch.current : StoreEpoch :=
   ⟨"state-key/tagged-v4", "schema-refs/v5", logTagLabel,
-    "history/mmr-v1;index/trie-v1;checkpoint/v4", "commands/v2"⟩
+    "history/mmr-v1;index/trie-v2;checkpoint/v4", "commands/v2"⟩
 
 /-- The label carried in the seed frame: every component, `;`-separated (the
 accumulator is itself two parts, `history/…;spent/…`). -/
@@ -375,7 +377,7 @@ theorem seedEpoch_commandsV1_refused (rest : List UInt8) :
 
 theorem seedEpoch_noAccumulator_refused (rest : List UInt8) :
     (SeedEpoch.ofBytes (bytesStream.encode (labelledFrame labelWithoutAccumulator) ++ rest)).refusal =
-      some "this Store was born in another epoch (history accumulator: Store none, this Host history/mmr-v1;index/trie-v1;checkpoint/v4); re-genesis the world" := by
+      some "this Store was born in another epoch (history accumulator: Store none, this Host history/mmr-v1;index/trie-v2;checkpoint/v4); re-genesis the world" := by
   rw [seedEpoch_ofBytes_labelled]
   native_decide
 
@@ -387,11 +389,25 @@ def labelSpentMap : String :=
 accumulator), never read as this Host's. -/
 theorem seedEpoch_spentMap_refused (rest : List UInt8) :
     (SeedEpoch.ofBytes (bytesStream.encode (labelledFrame labelSpentMap) ++ rest)).refusal =
-      some "this Store was born in another epoch (log tags: Store DREGG/NATIVE-HOST/LOG-TAG/v3, this Host DREGG/NATIVE-HOST/LOG-TAG/v4; history accumulator: Store history/mmr-v1;spent/trie-v1;checkpoint/v3, this Host history/mmr-v1;index/trie-v1;checkpoint/v4); re-genesis the world" := by
+      some "this Store was born in another epoch (log tags: Store DREGG/NATIVE-HOST/LOG-TAG/v3, this Host DREGG/NATIVE-HOST/LOG-TAG/v4; history accumulator: Store history/mmr-v1;spent/trie-v1;checkpoint/v3, this Host history/mmr-v1;index/trie-v2;checkpoint/v4); re-genesis the world" := by
+  rw [seedEpoch_ofBytes_labelled]
+  native_decide
+
+/-- The label of the epoch whose index held families 0 and 1 only (KN2 trie sub-range A). -/
+def labelTrieV1 : String :=
+  "state-key/tagged-v4;schema-refs/v5;DREGG/NATIVE-HOST/LOG-TAG/v4;history/mmr-v1;index/trie-v1;checkpoint/v4;commands/v2"
+
+/-- **A Store of the two-family index (`index/trie-v1`) is refused by name**, never
+opened as this Host's: its index roots lack every presence, link, backlink, payer
+and incoming row. -/
+theorem seedEpoch_trieV1_refused (rest : List UInt8) :
+    (SeedEpoch.ofBytes (bytesStream.encode (labelledFrame labelTrieV1) ++ rest)).refusal =
+      some "this Store was born in another epoch (history accumulator: Store history/mmr-v1;index/trie-v1;checkpoint/v4, this Host history/mmr-v1;index/trie-v2;checkpoint/v4); re-genesis the world" := by
   rw [seedEpoch_ofBytes_labelled]
   native_decide
 
 #assert_compiled seedEpoch_spentMap_refused
+#assert_compiled seedEpoch_trieV1_refused
 #assert_axioms StoreEpoch.differing_accumulator
 #assert_axioms StoreEpoch.differing_commands
 #assert_axioms seedEpoch_ofBytes_labelled

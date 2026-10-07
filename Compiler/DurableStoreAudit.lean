@@ -11,7 +11,7 @@ seed, everything the Store holds:
    every stored accumulator node row (space 1) against the honest node;
 3. the index trie: the root after every record (each tag's carried index root)
    and every stored row (space 3, newest version at the head), by applying each
-   record's rows (`IndexRows.apply`) in order over an in-memory row map — a row
+   record's rows (`IndexRows.apply`, every family) in order over an in-memory row map — a row
    missing from the Store, or a different one, is refused naming its prefix;
 4. every retained checkpoint: its body equals the genesis replay at its height
    (state, chain, frontier, index root);
@@ -111,28 +111,28 @@ def honestNodes (entries : List Entry) (chains : List Digest) : List ((Nat × Na
           go (height + 1) (DurableHistory.Frontier.push frontier leaf) rest
   go 0 [] (entries.zip (chains.drop 1))
 
-/-- Apply every record's rows from the empty trie, checking each tag's carried
-index root; the final rows (newest version per prefix) and the key count. -/
+/-- Apply every record's rows from the empty trie — through `IndexRows.apply`,
+the one function every append and every open runs, never a second copy — checking
+each tag's carried index root; the final rows (newest version per prefix) and
+the number of keys the final trie holds. -/
 def rebuildIndex (records : List IntentRecord) (entries : List Entry) :
     Except String (List (List Bool × DurableIndex.Row) × Nat) := do
-  let mut rows : List (List Bool × DurableIndex.Row) := []
+  let mut rows : Std.HashMap (List Bool) DurableIndex.Row := {}
   let mut root := DurableIndex.emptyDigest
-  let mut keys := 0
   for (height, record, entry) in (List.range' 1 records.length).zip (records.zip entries) do
-    let recordKeys := DurableIndex.IndexRows.keys record.transactionId record.nullifiers
-    let store := DurableIndex.overlay (fun _ => none) rows
-    let (root', written) ← (DurableIndex.IndexRows.apply store root height record.transactionId
-        record.nullifiers).mapError
+    let current := rows
+    let (root', written) ← (DurableIndex.IndexRows.apply (fun path => current.get? path) root height
+        record).mapError
       fun message => s!"store audit refused: index at height {height}: {message}"
-    rows := written ++ rows.filter fun row => !written.any (·.1 = row.1)
+    rows := written.foldl (fun map row => map.insert row.1 row.2) rows
     root := root'
-    keys := keys + recordKeys.length
     match trailerCarried entry.tag with
     | some carried =>
         if carried.indexRoot ≠ root then
           throw s!"store audit refused: the tag at height {height} carries an index root the log does not reach"
     | none => throw s!"store audit refused: the tag at height {height} is not a v4 trailer"
-  return (rows, keys)
+  let final := rows
+  return (rows.toList, (DurableIndex.collect (fun path => final.get? path) 521 [] root).length)
 
 /-- Every retained checkpoint, oldest first (walked down from the head). -/
 def retainedCheckpoints (transport : Transport) (head : Nat) :

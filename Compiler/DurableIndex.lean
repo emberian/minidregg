@@ -189,10 +189,14 @@ end Family
 
 def keyCustomization : List UInt8 := "DREGG/NATIVE-HOST/INDEX-KEY/v1".toUTF8.toList
 
-/-- The 32-octet primary (or secondary) of `bytes` in `family`. -/
-def primaryOf (family : UInt8) (bytes : List UInt8) : Digest256 :=
-  ⟨(Sp800185Cshake256.hash keyCustomization (family :: bytes)).digest.value % 256 ^ 32,
-    Nat.mod_lt _ (by decide)⟩
+/-- The key hash: the 32 octets of cSHAKE256 under `keyCustomization`. Every
+primary and secondary of every family is `keyHash` of a family-tagged input
+(`Compiler.DurableIndexFamilies.KeysDistinct` names the inputs of a log). -/
+def keyHash (input : List UInt8) : Digest256 :=
+  ⟨(Sp800185Cshake256.hash keyCustomization input).digest.value % 256 ^ 32, Nat.mod_lt _ (by decide)⟩
+
+/-- The 32-octet primary of `bytes` in `family`. -/
+def primaryOf (family : UInt8) (bytes : List UInt8) : Digest256 := keyHash (family :: bytes)
 
 /-- The key of a consumed nullifier (family 0). -/
 def nullifierKey (nullifier : Kernel.DurableDataIntent.StableNullifier) : IndexKey :=
@@ -468,13 +472,14 @@ def setAll (store : List Bool → Option Row) (root : Digest) :
 
 /-- The prefixes a set or lookup of `k` reads down to `depth` bits: every prefix
 of its path and each one's sibling. -/
-def readPrefixes (k : IndexKey) (depth : Nat) : List (List Bool) :=
-  let bits := bitsOf k
-  (List.range (min depth 520 + 1)).flatMap fun i =>
+def pathPrefixes (bits : List Bool) (depth : Nat) : List (List Bool) :=
+  (List.range (min depth bits.length + 1)).flatMap fun i =>
     let here := bits.take i
     match bits[i]? with
     | some bit => [here, bits.take i ++ [!bit]]
     | none => [here]
+
+def readPrefixes (k : IndexKey) (depth : Nat) : List (List Bool) := pathPrefixes (bitsOf k) depth
 
 /-! ## Reveals over rows -/
 
@@ -521,17 +526,10 @@ def revealRows (rows : List Bool → Option Row) (root : Digest) (p : List Bool)
   if ok : Theory.AuthTrie.revealVerify dig bitsOf 520 root p reveal = true then .ok ⟨reveal, ok⟩
   else .error "index reveal does not reach the authenticated index root (a member is missing or forged)"
 
-/-! ## The rows of a record (families 0 and 1)
+/-! ## The logical map
 
-What an append changes is a pure function of the appended record: its
-transaction id and each nullifier it consumes map to the record's height
-(`IndexRows.changes`). `IndexRows.apply` performs them on the Store's rows, and
-refuses a key the trie already holds (the executor never accepts a transaction
-id twice or consumes a nullifier twice; a disagreement is a refusal, not an
-overwrite). `IndexRows.changes_exact` is the model theorem: over the logical map,
-the map after the append is the map before updated by the record's changes, where
-"the map" of a history is defined without the trie — a key ↦ the height of the
-first record that carries it (`IndexRows.declared`). -/
+`modelSet`/`modelApply` are the trie's logical map under a change list; the rows
+of a record and their model theorem are in `Compiler.DurableIndexFamilies`. -/
 
 /-- The logical map after setting `k` (`none` deletes). -/
 def modelSet (m : List (IndexKey × List UInt8)) (k : IndexKey) (value : Option (List UInt8)) :
@@ -546,96 +544,6 @@ def mapLookup (m : List (IndexKey × List UInt8)) (k : IndexKey) : Option (List 
 def modelApply (m : List (IndexKey × List UInt8)) (changes : List (IndexKey × Option (List UInt8))) :
     List (IndexKey × List UInt8) :=
   changes.foldl (fun acc change => modelSet acc change.1 change.2) m
-
-namespace IndexRows
-
-open Minidregg.Kernel.DurableDataIntent (TransactionId StableNullifier)
-
-/-- The keys a record inserts: its transaction id, then its nullifiers. -/
-def keys (transactionId : TransactionId) (nullifiers : List StableNullifier) : List IndexKey :=
-  transactionKey transactionId :: nullifiers.map nullifierKey
-
-/-- **The rows of a record**: each of its keys ↦ its height. -/
-def changes (height : Nat) (transactionId : TransactionId) (nullifiers : List StableNullifier) :
-    List (IndexKey × Option (List UInt8)) :=
-  (keys transactionId nullifiers).map fun k => (k, some (heightValue height))
-
-/-- The families-0/1 map of a history, defined without the trie: a key ↦ the
-height of the first record that carries it. -/
-def declared (records : List Kernel.DurableReceiver.IntentRecord) (k : IndexKey) : Option (List UInt8) :=
-  ((records.zipIdx 1).find? fun entry => k ∈ keys entry.1.transactionId entry.1.nullifiers).map
-    fun entry => heightValue entry.2
-
-theorem mapLookup_modelSet_some (m : List (IndexKey × List UInt8)) (k k' : IndexKey) (v : List UInt8) :
-    mapLookup (modelSet m k' (some v)) k = if k = k' then some v else mapLookup m k := by
-  unfold mapLookup modelSet
-  induction m with
-  | nil => by_cases h : k = k' <;> simp [h, eq_comm]
-  | cons e rest ih =>
-      by_cases h : k = k'
-      · subst h
-        by_cases he : e.1 = k <;> simp [he, List.filter_cons] at ih ⊢ <;> exact ih
-      · have h' : k' ≠ k := Ne.symm h
-        by_cases he : e.1 = k
-        · have hne : e.1 ≠ k' := he ▸ h
-          simp [h, he, hne, List.filter_cons]
-        · by_cases he' : e.1 = k' <;> simp [h, h', he, he', List.filter_cons, List.find?_cons] at ih ⊢ <;> exact ih
-
-theorem mapLookup_modelApply_same (v : List UInt8) :
-    ∀ (ks : List IndexKey) (m : List (IndexKey × List UInt8)) (k : IndexKey),
-      mapLookup (modelApply m (ks.map fun k => (k, some v))) k =
-        if k ∈ ks then some v else mapLookup m k
-  | [], m, k => by simp [modelApply]
-  | k' :: rest, m, k => by
-      have step := mapLookup_modelApply_same v rest (modelSet m k' (some v)) k
-      simp only [modelApply, List.map_cons, List.foldl_cons] at step ⊢
-      rw [step, mapLookup_modelSet_some]
-      by_cases inRest : k ∈ rest
-      · simp [inRest]
-      · by_cases same : k = k' <;> simp [inRest, same]
-
-/-- **The model theorem.** If the map before the append is the history's map,
-and the record's keys are fresh in it (the executor's guarantee, and what
-`apply` refuses otherwise), then the map before updated by the record's rows is
-the map of the history with the record appended. -/
-theorem changes_exact (records : List Kernel.DurableReceiver.IntentRecord)
-    (record : Kernel.DurableReceiver.IntentRecord) (m : List (IndexKey × List UInt8))
-    (before : ∀ k, mapLookup m k = declared records k)
-    (fresh : ∀ k ∈ keys record.transactionId record.nullifiers, declared records k = none) (k : IndexKey) :
-    mapLookup (modelApply m (changes (records.length + 1) record.transactionId record.nullifiers)) k =
-      declared (records ++ [record]) k := by
-  rw [changes, mapLookup_modelApply_same]
-  unfold declared
-  rw [List.zipIdx_append, List.find?_append]
-  by_cases mem : k ∈ keys record.transactionId record.nullifiers
-  · have none : declared records k = none := fresh k mem
-    unfold declared at none
-    rw [Option.map_eq_none_iff] at none
-    simp [mem, none, Nat.add_comm]
-  · rw [if_neg mem, before]
-    unfold declared
-    cases hfind : (records.zipIdx 1).find? (fun entry => k ∈ keys entry.1.transactionId entry.1.nullifiers) with
-    | some found => simp
-    | none => simp [mem]
-
-/-- Insert the record's keys at `height` on the Store's rows, against `root`:
-the new root and the rows to write. A key already present is refused. -/
-def apply (store : List Bool → Option Row) (root : Digest) (height : Nat)
-    (transactionId : TransactionId) (nullifiers : List StableNullifier) :
-    Except String (Digest × List (List Bool × Row)) :=
-  let rec insert (store : List Bool → Option Row) (root : Digest) :
-      List IndexKey → Except String (Digest × List (List Bool × Row))
-    | [] => .ok (root, [])
-    | k :: rest => do
-        let answer ← lookupRows store root k
-        if answer.value.isSome then
-          throw "the index already holds a key this record inserts (it disagrees with the executor)"
-        let (root', rows) ← set store root k (some (heightValue height))
-        let (finalRoot, later) ← insert (overlay store rows) root' rest
-        return (finalRoot, later ++ rows.filter fun row => !later.any (·.1 = row.1))
-  insert store root (keys transactionId nullifiers)
-
-end IndexRows
 
 /-! ## The incremental set against the canonical root (executed probe)
 
@@ -716,8 +624,6 @@ end Probe
 #assert_axioms Answer.sound
 #assert_axioms empty_absent
 #assert_axioms empty_present_refused
-#assert_axioms IndexRows.mapLookup_modelSet_some
-#assert_axioms IndexRows.changes_exact
 #assert_compiled Probe.incremental_matches_canonical
 #assert_compiled Probe.wrong_root_refused
 

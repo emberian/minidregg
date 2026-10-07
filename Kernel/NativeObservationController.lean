@@ -20,6 +20,7 @@ import Compiler.StoreHiding
 import Kernel.CapabilityRenounce
 import Kernel.StreamWrite
 import Kernel.RunComputeView
+import Compiler.DurableIndexFamilies
 
 namespace Minidregg.Kernel.NativeObservationController
 
@@ -32,6 +33,7 @@ open Minidregg.Theory
 open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.CellState
 open Minidregg.Theory.TypedAuthorization
+open Minidregg.Compiler.DurableIndex (LinkRow LinkRow.of linkRowStream)
 
 set_option autoImplicit false
 
@@ -1462,38 +1464,11 @@ theorem readable_sound {context : Context deployment} {reader : SubjectId} {heig
     exact ⟨named, stored, found, holds.1, holds.2⟩
   · cases holds
 
-/-- One link row: source cell, link id, the source range's start atom, the
-link's revision (the operation that wrote it), the absolute height from which
-it has been live, the target's kind and id, and the relation. -/
-structure LinkRow where
-  source : Nat
-  link : Nat
-  anchor : Option Nat
-  revision : Nat
-  height : Nat
-  kind : Nat
-  target : Nat
-  relation : Nat
-  deriving DecidableEq, Repr
-
+/-- One link row as the view renders it (`DurableIndex.LinkRow`, the family-5
+value): the index keeps the RELATIVE live-since height, the row shows the
+absolute one. -/
 def linkRow (genesisHeight : Nat) (pair : DurableDataIntent.CellId × LinkIndex.Entry) : LinkRow :=
-  ⟨pair.1.value, pair.2.link.digest.value,
-    (pair.2.record.source.bind fun range => range.start.neighbor).map (·.digest.value),
-    pair.2.record.operation.digest.value, genesisHeight + pair.2.height,
-    LinkIndex.targetKind pair.2.record.target, LinkIndex.targetId pair.2.record.target,
-    pair.2.record.relation.value⟩
-
-def linkRowStream : StreamCodec LinkRow :=
-  StreamCodec.xmap
-    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product (StreamCodec.option StreamCodec.nat) (StreamCodec.product StreamCodec.nat
-        (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-          (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))))
-    (fun row => (row.source, row.link, row.anchor, row.revision, row.height, row.kind, row.target,
-      row.relation))
-    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1, wire.2.2.2.2.1, wire.2.2.2.2.2.1,
-      wire.2.2.2.2.2.2.1, wire.2.2.2.2.2.2.2⟩)
-    (by intro row; cases row; rfl)
+  LinkRow.of pair.1 pair.2.link pair.2.record (genesisHeight + pair.2.height)
 
 def linkViewFrame : List UInt8 := "DREGG/NATIVE-HOST/LINK-VIEW/v1".toUTF8.toList
 
