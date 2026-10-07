@@ -272,6 +272,8 @@ def AdmittedTurn.finalIntent {rootBytes : Bytes → Digest} {config : Config} {s
   | .registerDomain request registered =>
       intentOf rootBytes (ObjectiveActivity.registerTransaction request) posts
         (registered.guards ++ extra) [] sealing
+  | .failed request _ =>
+      intentOf rootBytes request.transaction posts extra [] sealing
 
 /-- A cell an intent GUARDS: a read guard on it at the snapshot's root, or the intent writes it. -/
 def Guarded {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (intent : DataIntent rootBytes)
