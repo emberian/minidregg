@@ -60,21 +60,23 @@ def expectRefused (label : String) (needle : String)
 /-- The first write of the first record whose post bytes can be altered. -/
 def alter (record : IntentRecord) : IntentRecord :=
   match record.writes with
-  | write :: rest => { record with writes := { write with canonicalPostBytes := 7 :: write.canonicalPostBytes } :: rest }
+  | write :: rest =>
+      let changed : DataWrite := { write with canonicalPostBytes := 7 :: write.canonicalPostBytes }
+      { record with writes := changed :: rest }
   | [] => record
 
 def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
-  let storeAt (name : String) : NativeHost.Config :=
-    config { binary := binary, root := directory / name / "store", key := directory / name / "key",
-      checkpointEvery := 2 }
-  for name in ["a", "b", "c"] do IO.FS.createDirAll (directory / name)
+  let base := config { binary := binary, root := directory / "unused", key := directory / "unused-key", checkpointEvery := 2 }
+  let a ← base.scratch (directory / "a")
+  let b ← base.scratch (directory / "b")
+  let c ← base.scratch (directory / "c")
   let rootBytes := ResourceBirthCodec.rootBytes
   let some seed := seedFrame.decode (hexBytes seedHex)
     | throw (IO.userError "FAIL the fixture seed no longer decodes")
   let some records := recordHexes.mapM fun record => recordFrame.decode (hexBytes record)
     | throw (IO.userError "FAIL the fixture records no longer decode")
   let image : Image := ⟨seed, records⟩
-  let cfg := storeAt "a"
+  let cfg := a
   let logStart := cfg.logStart seed
   -- control
   match ← DurableHistoryStore.scratchReader cfg.physicalTransport rootBytes image logStart with
@@ -93,7 +95,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
       IO.println s!"control: a Reader at height {reader.head.height}, every record verified and exact, stateAt the head"
   -- plant 1: another log start
   expectRefused "another log start" "log start"
-    (← DurableHistoryStore.scratchReader (storeAt "b").physicalTransport rootBytes image ⟨logStart.value + 1⟩)
+    (← DurableHistoryStore.scratchReader b.physicalTransport rootBytes image ⟨logStart.value + 1⟩)
   -- plant 2: the Store is not empty (store a holds the image)
   expectRefused "a non-empty Store" "scratch Store"
     (← DurableHistoryStore.scratchReader cfg.physicalTransport rootBytes image logStart)
@@ -101,7 +103,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   let altered : Image := ⟨seed, records.map alter⟩
   require "the plant alters the first record" (records.head?.map (·.writes.length) != some 0)
   expectRefused "an altered record" "record 1 does not bind"
-    (← DurableHistoryStore.scratchReader (storeAt "c").physicalTransport rootBytes altered logStart)
+    (← DurableHistoryStore.scratchReader c.physicalTransport rootBytes altered logStart)
   IO.println "PASS scratch reader: a portable image is a real Store's Reader; another log start, a non-empty Store and an altered record are each refused by name"
 
 end ScratchReader
