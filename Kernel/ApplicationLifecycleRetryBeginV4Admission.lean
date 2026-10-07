@@ -13,7 +13,7 @@ open Minidregg.Kernel.DurableDataIntent
 
 set_option autoImplicit false
 
-open Minidregg.Compiler.ServedBasis (Ground)
+open Minidregg.Compiler.ServedBasis (Ground Grounded)
 open Minidregg.Compiler.DurableHistory (Head StoreIdentity)
 open Minidregg.Compiler.DurableHistoryReader (Reader)
 
@@ -37,9 +37,11 @@ structure Accepted (config : Config) {store : StoreIdentity} (head : Head store)
     ingress.retry ingress.begin
 
 def admitNative (config : Config) {store : StoreIdentity}
-    (reader : Reader ResourceBirthCodec.rootBytes store) (ground : Ground config.deployment)
+    (reader : Reader ResourceBirthCodec.rootBytes store)
+    (grounded : Grounded config.deployment reader.head)
     (ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress) :
-    IO (Except String (Accepted config reader.head ground ingress)) := do
+    IO (Except String (Accepted config reader.head grounded.ground ingress)) := do
+  let ground := grounded.ground
   let base ← match ← ApplicationLifecycleBeginReceiver.admitLoaded
       config.deployment config.profile
       ⟨config.federation, (config.genesisHeight + ground.height)⟩
@@ -50,7 +52,7 @@ def admitNative (config : Config) {store : StoreIdentity}
     if installed : ApplicationLifecycleBeginV3Admission.installedExact config.deployment
         ingress.begin base.selected.observed.before = true then
       let evidence ← match ← ApplicationFailedCreateRetryEvidence.prepare
-          config reader ground ingress.retry ingress.begin with
+          config reader grounded ingress.retry ingress.begin with
         | .error detail => return .error detail
         | .ok evidence => pure evidence
       return .ok ⟨base, shape, installed, evidence⟩

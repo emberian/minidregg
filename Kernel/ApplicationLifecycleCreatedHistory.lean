@@ -115,7 +115,7 @@ def select (config : Config) {store : StoreIdentity}
         (ApplicationLifecycleCompletionV2Ingress.decoded_canonical
           ingressSelected.property).symm
       let accepted ← match ← ApplicationLifecycleCompletionV2Admission.prepareConditional
-          config reader selected.ground ingress with
+          config reader selected.grounded ingress with
         | .error detail => return .error s!"original create completion refused: {detail}"
         | .ok accepted => pure accepted
       if matched : NativeHistorySelection.recordMatches selected.record

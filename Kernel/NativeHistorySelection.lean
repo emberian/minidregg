@@ -23,7 +23,7 @@ open Minidregg.Kernel.NativeHost
 open Minidregg.Theory.TypedAuthorization (Digest)
 open Minidregg.Compiler.DurableHistory (Head StoreIdentity)
 open Minidregg.Compiler.DurableHistoryReader (Reader Record StateAt)
-open Minidregg.Compiler.ServedBasis (Basis Ground)
+open Minidregg.Compiler.ServedBasis (Basis Ground Grounded)
 open Minidregg.Compiler.DurableServed (Served)
 open Minidregg.Kernel.NativeHostServed (OpenedServed validateServed validateServed_served)
 
@@ -46,13 +46,16 @@ structure Candidate (config : Config) {store : StoreIdentity} (head : Head store
   recordExact : read.record = record
   priorHeight : prior.height = index
   priorHead : prior.head = head
+  /-- The prior as a ground at the history head (its light ground is the basis). -/
+  grounded : Grounded config.deployment head
+  groundedLight : grounded.ground = .light prior
   priorPast : ∃ (seed : DurableReceiver.Seed) (state : StateAt rootBytes seed head index),
     prior.served = Served.ofStateAt state
 
 /-- The ground a historical admission re-runs on: the prior basis. -/
 def Candidate.ground {config : Config} {store : StoreIdentity} {head : Head store} {index : Nat}
     (candidate : Candidate config head index) : Ground config.deployment :=
-  .ofBasis candidate.prior
+  candidate.grounded.ground
 
 /-- Select the record at 0-based `index` and the state before it. `keys` are the
 transaction ids and nullifiers the historical admission reads at the prior state;
@@ -80,7 +83,8 @@ def select (config : Config) {store : StoreIdentity}
                       rw [served]
                       exact Nat.le_trans (Nat.le_succ index) below) footprint
                     return .ok ⟨basis, bound, indexBelow, read.record, read, rfl,
-                      (by show opened.served.height = index; rw [served]; rfl), rfl, ⟨_, state, served⟩⟩
+                      (by show opened.served.height = index; rw [served]; rfl), rfl,
+                      ⟨.light basis, Ground.At.light basis⟩, rfl, ⟨_, state, served⟩⟩
    else return .error "historical record index unavailable"
   else return .error "historical record index unavailable"
 

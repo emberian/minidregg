@@ -22,7 +22,7 @@ open Minidregg.Kernel.ApplicationLifecycleClaimV3Ingress
 
 set_option autoImplicit false
 
-open Minidregg.Compiler.ServedBasis (Ground)
+open Minidregg.Compiler.ServedBasis (Ground Grounded)
 open Minidregg.Compiler.DurableHistory (Head StoreIdentity)
 open Minidregg.Compiler.DurableHistoryReader (Reader)
 
@@ -104,9 +104,11 @@ def originalKeys (ingress : Ingress) : DurableView.Keys :=
   ApplicationLifecycleBeginV3Admission.keys ingress.originalBegin
 
 def prepare (config : Config) {store : StoreIdentity}
-    (reader : Reader ResourceBirthCodec.rootBytes store) (ground : Ground config.deployment)
+    (reader : Reader ResourceBirthCodec.rootBytes store)
+    (grounded : Grounded config.deployment reader.head)
     (ingress : Ingress) :
-    IO (Except String (Conditional config reader.head ground ingress)) := do
+    IO (Except String (Conditional config reader.head grounded.ground ingress)) := do
+  let ground := grounded.ground
   if sourceExact : ingress.originalExact = true then
     let original ← match ← NativeHistorySelection.select config reader ground.height
         ingress.base.source.originalIndex (originalKeys ingress) with

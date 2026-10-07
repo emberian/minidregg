@@ -17,7 +17,7 @@ open Minidregg.Kernel.NativeHost
 
 set_option autoImplicit false
 
-open Minidregg.Compiler.ServedBasis (Ground)
+open Minidregg.Compiler.ServedBasis (Ground Grounded)
 open Minidregg.Compiler.DurableHistory (Head StoreIdentity)
 open Minidregg.Compiler.DurableHistoryReader (Reader)
 
@@ -133,15 +133,17 @@ structure Conditional (config : Config) {store : StoreIdentity} (head : Head sto
   markersExact : markersCurrent config ground selector = true
 
 def prepare (config : Config) {store : StoreIdentity}
-    (reader : Reader ResourceBirthCodec.rootBytes store) (ground : Ground config.deployment)
+    (reader : Reader ResourceBirthCodec.rootBytes store)
+    (grounded : Grounded config.deployment reader.head)
     (selector : Selector) (begin : ApplicationLifecycleBeginV3Ingress.Ingress) :
-    IO (Except String (Conditional config reader.head ground selector begin)) := do
+    IO (Except String (Conditional config reader.head grounded.ground selector begin)) := do
+  let ground := grounded.ground
   let selected ← match ← NativeHistorySelection.select config reader ground.height
       selector.recoveryIndex (ApplicationFailedStartRecoveryAdmission.keys config selector.recovery) with
     | .error detail => return .error detail
     | .ok selected => pure selected
   let recovered ← match ← ApplicationFailedStartRecoveryAdmission.prepareConditional
-      config reader selected.ground selector.recovery with
+      config reader selected.grounded selector.recovery with
     | .error detail => return .error s!"failed-create retry recovery refused: {detail}"
     | .ok admitted => pure admitted
   let matched ← match NativeHistorySelection.matchIntent selected

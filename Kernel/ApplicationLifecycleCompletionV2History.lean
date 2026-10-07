@@ -79,7 +79,7 @@ def select (config : Config) {store : StoreIdentity}
     if claimBytes : selected.record.event.canonicalBytes =
         source.originalClaim.canonicalBytes then
       let accepted ← match ← ApplicationLifecycleClaimV3Core.prepare config reader
-          selected.ground source.originalClaim with
+          selected.grounded source.originalClaim with
         | .error _ => return .error "selected claim source refused at its original prefix"
         | .ok accepted => pure accepted
       if matched : NativeHistorySelection.recordMatches selected.record accepted.intent = true then
