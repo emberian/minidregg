@@ -48,7 +48,7 @@ done
 [ -n "$builder" ] || pipeline_die "no builder with the fixed build root next to $here"
 mkdir -p "$ARTIFACT_ROOT/.work"
 exec 8>"$ARTIFACT_ROOT/.work/$tip.lock"
-flock -n 8 || { pipeline_log "$tip is being published by another run"; exit 0; }
+flock -n 8 || { pipeline_log "$tip is being published by another run"; exit 75; }   # 75: in progress, not a result
 if [ -f "$out/READY" ]; then
   for l in $labels; do pipeline_label "$l" "$tip"; done; pipeline_log "$tip already READY; labelled $label"; exit 0
 fi
@@ -56,7 +56,7 @@ t0=$(date +%s)
 from=$(pipeline_find_tree "$tip" "$tree")
 moved=""
 if [ -z "$from" ]; then
-  from=$(CDPATH='' cd -- /srv/warm-base/src && pwd -P)
+  from=$(CDPATH='' cd -- "$PIPELINE_WARM_BASE/src" && pwd -P)
   moved=" (warm base $(git -C "$from" rev-parse --short=12 HEAD) moved to the tip; Lean delta compiled here)"
 fi
 W=$ARTIFACT_ROOT/.work/$tip

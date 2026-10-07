@@ -23,6 +23,8 @@ PIPELINE_MIRRORS=${PIPELINE_MIRRORS:-}
 # The build slots a lane may take on this box (flock files, one Lean build each). The merge gate's
 # own slots are never in this list; the keeper sets PIPELINE_SLOTS to its slot explicitly.
 PIPELINE_SLOTS=${PIPELINE_SLOTS:-/srv/build-slot-1 /srv/build-slot-2}
+# The box's warm base (a built, read-only clone at the newest gated tip): the publisher's fallback tree.
+PIPELINE_WARM_BASE=${PIPELINE_WARM_BASE:-/srv/warm-base}
 
 pipeline_die() { printf '%s: %s\n' "${PIPELINE_PROG:-$(basename -- "$0")}" "$*" >&2; exit 1; }
 pipeline_log() { printf '%s %s: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${PIPELINE_PROG:-$(basename -- "$0")}" "$*"; }
@@ -45,13 +47,14 @@ pipeline_verify_set() {
 # pipeline_slot CMD...: run CMD holding one of the box's lane build slots ($PIPELINE_SLOTS).
 # Takes the first free slot; when all are held, waits on whichever frees first (polling, so a
 # long build in one slot never blocks a waiter while another slot is free). A FAILING CMD is not
-# re-run: only flock's own conflict code 75 moves on to the next slot.
+# re-run: only flock's own conflict code (-E 253, so a CMD's own exit 75 is never read as busy)
+# moves on to the next slot.
 pipeline_slot() {
   local rc s told=0
   while :; do
     for s in $PIPELINE_SLOTS; do
-      rc=0; flock -n -E 75 "$s" "$@" || rc=$?
-      [ "$rc" = 75 ] || return "$rc"
+      rc=0; flock -n -E 253 "$s" "$@" || rc=$?
+      [ "$rc" = 253 ] || return "$rc"
     done
     if [ "$told" = 0 ]; then told=1
       pipeline_log "all lane slots of $(hostname) are held; waiting for the first to free. \`$(dirname -- "${BASH_SOURCE[0]}")/slots\` shows holders here and the free slots of ${PIPELINE_PEER:-the sibling box} (a lane can move there: mk-lane on it, then git fetch from this box)" >&2
@@ -74,8 +77,8 @@ pipeline_build_slot() {
     pipeline_log "small rebuild ($n stale modules): small-check slot, ${PIPELINE_SMALL_THREADS:-2} threads" >&2
     while :; do
       for s in $PIPELINE_SMALL_SLOTS; do
-        rc=0; flock -n -E 75 "$s" env LEAN_NUM_THREADS="${PIPELINE_SMALL_THREADS:-2}" "$@" || rc=$?
-        [ "$rc" = 75 ] || return "$rc"
+        rc=0; flock -n -E 253 "$s" env LEAN_NUM_THREADS="${PIPELINE_SMALL_THREADS:-2}" "$@" || rc=$?
+        [ "$rc" = 253 ] || return "$rc"
       done
       sleep 2
     done
@@ -89,7 +92,7 @@ pipeline_build_slot() {
 # (VERIFY-ONCE 3), so the hint may have moved: look where it goes.
 pipeline_find_tree() {
   local tip=$1 hint=${2:-} d
-  for d in "$hint" /srv/warm-base/src /srv/next-base/src /srv/warm-base/src.prev-*; do
+  for d in "$hint" "$PIPELINE_WARM_BASE/src" /srv/next-base/src "$PIPELINE_WARM_BASE"/src.prev-*; do
     [ -n "$d" ] && [ -d "$d/.git" ] && [ -d "$d/.lake/build" ] || continue
     [ "$(git -C "$d" rev-parse HEAD 2>/dev/null)" = "$tip" ] || continue
     [ -z "$(git -C "$d" status --porcelain --untracked-files=no)" ] || continue

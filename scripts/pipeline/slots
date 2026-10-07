@@ -133,6 +133,12 @@ def peer_status():
             return None
 
 def show(rows, peer):
+    try:
+        alerts = open(os.environ.get("ARTIFACT_ROOT", "/srv/artifacts") + "/ALERTS").read().splitlines()[-3:]
+    except OSError:
+        alerts = []
+    for a in alerts:
+        print("ALERT " + a[:200])
     lanes_slots = os.environ.get("PIPELINE_SLOTS", "").split()
     free = [r["slot"] for r in rows if r["state"] == "free" and r["slot"] in lanes_slots]
     print(f"{os.uname().nodename}  {time.strftime('%H:%M:%SZ', time.gmtime())}  load {open('/proc/loadavg').read().split()[0]}"

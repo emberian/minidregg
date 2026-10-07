@@ -18,7 +18,7 @@
   Common: --tree DIR (default: the git toplevel of $PWD), --json, --timeout SEC (default 900).
 
 One daemon per tree (logs in TREE/.lake/lean-ask/, socket in $XDG_RUNTIME_DIR/lean-ask-UID/), started on first use under swarm-build
-(memory-capped, SWARM_MEM_MAX default 16G), exits after LEAN_ASK_IDLE seconds idle (default 7200).
+(memory-capped, SWARM_MEM_MAX default 32G (LEAN_ASK_MEM_MAX; 16G OOM-killed six daemons on burst2 10-07, one worker at 15 GB on Host/SeatJson)), exits after LEAN_ASK_IDLE seconds idle (default 7200).
 It holds a `lake serve` (for check/goals: the server re-elaborates only from the first changed
 command) and one leanprover-community/repl process per environment (for eval: imports loaded once).
 
@@ -550,7 +550,7 @@ def call(tree_root, req, start=True, _retry=False):
             if attempt == 0:
                 os.makedirs(os.path.join(tree_root, ".lake", "lean-ask"), exist_ok=True)
                 logp = os.path.join(tree_root, ".lake", "lean-ask", "daemon.out")
-                env = dict(os.environ, SWARM_MEM_MAX=os.environ.get("LEAN_ASK_MEM_MAX", "16G"))
+                env = dict(os.environ, SWARM_MEM_MAX=os.environ.get("LEAN_ASK_MEM_MAX", "32G"))
                 wrap = ["swarm-build"] if subprocess.run(["sh", "-c", "command -v swarm-build"],
                                                           capture_output=True).returncode == 0 else []
                 subprocess.Popen(wrap + [sys.executable, os.path.realpath(__file__), "_serve", tree_root],
