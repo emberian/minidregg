@@ -1255,7 +1255,8 @@ if [[ -n "$companion_output" ]]; then
   : > "$companion_check"
   while IFS= read -r module; do
     stem=${module//./\/}
-    if grep -qE "^[[:xdigit:]]{64}  $stem\.lean\$" "$companion_output/source-sha256.txt"; then
+    if grep -qE "^[[:xdigit:]]{64}  $stem\.lean\$" "$companion_output/source-sha256.txt" &&
+       grep -qE "^[[:xdigit:]]{64}  \.lake/build/lib/lean/$stem\.olean\$" "$companion_output/reusable-artifact-sha256.txt"; then
       grep -E "^[[:xdigit:]]{64}  $stem\.lean\$" "$companion_output/source-sha256.txt" >> "$companion_check"
       for path in ".lake/build/lib/lean/$stem.olean" ".lake/build/lib/lean/$stem.ilean" \
           ".lake/build/ir/$stem.c" ".lake/build/ir/$stem.c.o.export"; do
