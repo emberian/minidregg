@@ -55,12 +55,12 @@ def event (deployment : Deployment) (source : Ingress) : StableEvent :=
 
 variable {F : Type} [Field F] [DecidableEq F]
   {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-  {ambient : Ambient} {durable : Durable} {command : Command}
-  {prepared : PreparedInvocation deployment profile ambient durable command}
+  {ambient : Ambient} {ground : Ground deployment} {command : Command}
+  {prepared : PreparedInvocation deployment profile ambient ground command}
   {signed : SignedCommand} {shape : PhysicalShape prepared}
 
 structure Draft (genesisHeight : Nat)
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (signed : SignedCommand) (shape : PhysicalShape prepared)
     (accepted : AcceptedInvocation prepared signed) (source : Ingress) where
   private mk ::
@@ -81,7 +81,7 @@ structure Draft (genesisHeight : Nat)
   preservesCharge : ∀ lane, (accepted.dataIntent shape).exactCharge lane ≤ intent.exactCharge lane
 
 def build (native : CredentialSignatureIO.NativeConfig) (genesisHeight : Nat)
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (signed : SignedCommand) (shape : PhysicalShape prepared)
     (accepted : AcceptedInvocation prepared signed) (source : Ingress) :
     IO (Except String (Draft genesisHeight prepared signed shape accepted source)) := do
@@ -99,7 +99,7 @@ def build (native : CredentialSignatureIO.NativeConfig) (genesisHeight : Nat)
         let some methodGuards := RoomReleaseAuthority.lawReadGuards method
           | return .error "current release law dependencies unavailable"
         let dependencies := methodGuards ++ RoomReleaseCurrent.dependencies genesisHeight prepared source.body recipients
-        if roots : ∀ guard ∈ dependencies, guard.expectedRoot = durable.snapshot.model.roots guard.cellId then
+        if roots : ∀ guard ∈ dependencies, guard.expectedRoot = ground.view.model.roots guard.cellId then
           if discharge : ∀ guard ∈ dependencies, ∀ write ∈ ordinary.writes,
               guard.cellId = write.cellId → guard.expectedRoot = write.expectedPre then
             let extra := dependencies.filter (fun guard =>
@@ -121,7 +121,7 @@ def build (native : CredentialSignatureIO.NativeConfig) (genesisHeight : Nat)
                   · exact ordinary.guardsReadOnly guard old
                   · have selected := (List.mem_filter.mp added).2
                     simpa using selected }
-            if preflight : intent.preflight durable.snapshot = .ok () then
+            if preflight : intent.preflight ground.view = .ok () then
               let retained : ∀ guard ∈ dependencies, RoomReleaseCurrent.guardHeld intent guard := by
                 intro guard member
                 by_cases written : guard.cellId ∈ ordinary.writes.map DataWrite.cellId

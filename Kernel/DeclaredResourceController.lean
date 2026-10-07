@@ -2403,7 +2403,6 @@ inductive ReceiveResult where
   | rejected (reason : Reject)
   | transactionConflict
   | unavailable (detail : String)
-  | settlement (result : DurableReceiverIO.Result ResourceBirthCodec.rootBytes)
 
 /-- The continuation receives the very object admitted for this signed call on
 this ground. A ground that does not answer the call's transaction id (a light

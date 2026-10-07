@@ -32,7 +32,7 @@ private def observationRequest (config : Config) (opened : Opened config)
     { kind := .object, target := resource, capability := capability,
       observeCapability := none, schemaVersion := ContentResource.commandVersion, expectedTargetRoot := root,
       payload := .content ⟨[]⟩ }
-  { DeclaredResourceController.requestFor prepared.authority.snapshot
+  { DeclaredResourceController.requestFor ground.authority
       config.profile.semantics
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
       command target root with verb := .observeObject }

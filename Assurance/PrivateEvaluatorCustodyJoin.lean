@@ -15,8 +15,8 @@ set_option autoImplicit false
 
 variable {F : Type} [Field F] [DecidableEq F]
   {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-  {ambient : Ambient} {durable : Durable} {command : Command}
-  {prepared : PreparedInvocation deployment profile ambient durable command}
+  {ambient : Ambient} {ground : Ground deployment} {command : Command}
+  {prepared : PreparedInvocation deployment profile ambient ground command}
   {signed : SignedCommand}
 
 /-- Holder-private material belongs to the full native intent. Caller-supplied

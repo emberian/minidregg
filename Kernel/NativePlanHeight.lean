@@ -141,22 +141,24 @@ theorem recorded_replay_before_deadline {F : Type} [Field F] [DecidableEq F] {R 
     (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : DeclaredResourceController.Ambient)
     (native : CredentialSignatureIO.NativeConfig)
-    (durable : DeclaredResourceController.Durable)
-    (directory : Option (CredentialAuthorityDomainReceiver.LoadedDirectory durable))
+    (ground : DeclaredResourceController.Ground deployment)
     (signed : DeclaredResourceController.SignedCommand)
     (command : DeclaredResourceController.Command)
     (record : DurableCommitProtocol.Intent Digest Digest StableNullifier ReplayEnvelope)
     (acceptedResult : {command : DeclaredResourceController.Command} →
-      (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable command) →
+      (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground command) →
       (shape : DeclaredResourceController.PhysicalShape prepared) →
       DeclaredResourceController.AcceptedInvocation prepared signed → IO R)
     (ordinaryResult : DeclaredResourceController.ReceiveResult → IO R)
     (decoded : DeclaredResourceController.commandCodec.decode signed.commandBytes = some command)
+    (declared : ground.declaresTransaction
+      (DeclaredResourceController.transactionId deployment.domain profile.semantics command) = true)
     (recorded : DeclaredResourceController.recordedInvocation deployment.domain profile.semantics
-      command signed durable = .ok (some record)) :
-    DeclaredResourceController.withAcceptedLoadedFrom deployment profile ambient native durable
-      directory signed acceptedResult ordinaryResult = ordinaryResult (.replayed record) := by
-  simp only [DeclaredResourceController.withAcceptedLoadedFrom, decoded, recorded]
+      command signed ground = .ok (some record)) :
+    DeclaredResourceController.withAcceptedOn deployment profile ambient native ground
+      signed acceptedResult ordinaryResult = ordinaryResult (.replayed record) := by
+  simp only [DeclaredResourceController.withAcceptedOn, decoded, declared, recorded]
+  rfl
 
 /-!
 Retiring an old *pending settlement attempt* needs more than native contention.

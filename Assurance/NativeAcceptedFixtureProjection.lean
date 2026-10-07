@@ -70,13 +70,13 @@ section Receipts
 open Minidregg.Kernel.DeclaredResourceController
 
 variable {F : Type} [Field F] [DecidableEq F] {deployment : CanonicalCellRegistry.Deployment}
-  {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+  {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {ground : Ground deployment}
   {command : Command}
 
 /-- The subject each of an accepted invocation's signature checks was for: the
 authority leg, then each target leg (its ordinary leg's receipt, or an observe-only
 read target's `ReadLeg`'s: `AcceptedInvocation.receipt`). -/
-def receiptSubjects {prepared : PreparedInvocation deployment profile ambient durable command}
+def receiptSubjects {prepared : PreparedInvocation deployment profile ambient ground command}
     {signed : SignedCommand} (accepted : AcceptedInvocation prepared signed) : List Nat :=
   (accepted.receipt none :: (List.finRange command.targets.length).map fun i =>
     accepted.receipt (some i)).map fun receipt => receipt.request.2.subject.value

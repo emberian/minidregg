@@ -19,30 +19,30 @@ set_option autoImplicit false
 
 variable {F : Type} [Field F] [DecidableEq F]
   {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-  {ambient : Ambient} {durable : Durable} {command : Command}
+  {ambient : Ambient} {ground : Ground deployment} {command : Command}
 
 def marker (request : RoomKeyReleaseCodec.Request) : Nat :=
   (Sp800185Cshake256.hash "DREGG.PRIVATE.ROOM.RELEASE.CONTEXT/v1".toUTF8.toList
     (RoomKeyReleaseCodec.encode request)).digest.value
 
-def context (prepared : PreparedInvocation deployment profile ambient durable command) :
+def context (prepared : PreparedInvocation deployment profile ambient ground command) :
     ResourceObservationAdmission.Context deployment :=
   ⟨prepared.directory,prepared.authority⟩
 
-def roomRoot (prepared : PreparedInvocation deployment profile ambient durable command)
+def roomRoot (prepared : PreparedInvocation deployment profile ambient ground command)
     (request : RoomKeyReleaseCodec.Request) : Option Digest :=
-  match prepared.directory.directory.slots request.room with
+  match ground.directory.slots request.room with
   | .absent => none
   | .present cell => some cell.payload.root
 
-def wanted (prepared : PreparedInvocation deployment profile ambient durable command)
+def wanted (prepared : PreparedInvocation deployment profile ambient ground command)
     (request : RoomKeyReleaseCodec.Request) (delivery : RoomKeyReleaseCodec.Delivery)
     (root : Digest) : Request .object where
   domain := deployment.domain
   semantics := profile.semantics
   federation := ambient.federation
   subject := ⟨delivery.member⟩
-  subjectKeyEpoch := prepared.authority.snapshot.authState.subjectKeyEpoch ⟨delivery.member⟩
+  subjectKeyEpoch := ground.authority.authState.subjectKeyEpoch ⟨delivery.member⟩
   target := ⟨request.room⟩
   verb := .observeObject
   argsDigest := ⟨marker request⟩
@@ -51,8 +51,8 @@ def wanted (prepared : PreparedInvocation deployment profile ambient durable com
   height := ambient.height
   preStateRoot := root
   policyId := ⟨request.room⟩
-  policyEpoch := prepared.authority.snapshot.authState.policyEpoch ⟨request.room⟩
-  policyRevision := prepared.authority.snapshot.authState.policyRevision ⟨request.room⟩
+  policyEpoch := ground.authority.authState.policyEpoch ⟨request.room⟩
+  policyRevision := ground.authority.authState.policyRevision ⟨request.room⟩
   cost := (RoomKeyReleaseCodec.encode request).length
 
 def entry (request : RoomKeyReleaseCodec.Request) (delivery : RoomKeyReleaseCodec.Delivery)
@@ -60,7 +60,7 @@ def entry (request : RoomKeyReleaseCodec.Request) (delivery : RoomKeyReleaseCode
   ⟨delivery.member,delivery.roomCapability,request.keysCell,claim.epoch,0⟩
 
 structure Recipient (genesisHeight : Nat)
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (request : RoomKeyReleaseCodec.Request) (delivery : RoomKeyReleaseCodec.Delivery) where
   private mk ::
   claim : CurrentRecipientRecord.Claim
@@ -79,7 +79,7 @@ structure Recipient (genesisHeight : Nat)
   offline : delivery.entitlementEnvelope = []
 
 def checkRecipient (native : CredentialSignatureIO.NativeConfig) (genesisHeight : Nat)
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (request : RoomKeyReleaseCodec.Request) (delivery : RoomKeyReleaseCodec.Delivery) :
     IO (Except String (Recipient genesisHeight prepared request delivery)) := do
   if offline : delivery.entitlementEnvelope = [] then
@@ -107,7 +107,7 @@ def checkRecipient (native : CredentialSignatureIO.NativeConfig) (genesisHeight 
   else return .error "unsupported live entitlement envelope"
 
 def checkRecipients (native : CredentialSignatureIO.NativeConfig) (genesisHeight : Nat)
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (request : RoomKeyReleaseCodec.Request) :
     IO (Except String ((i : Fin request.deliveries.length) →
       Recipient genesisHeight prepared request request.deliveries[i])) :=
@@ -115,7 +115,7 @@ def checkRecipients (native : CredentialSignatureIO.NativeConfig) (genesisHeight
     checkRecipient native genesisHeight prepared request request.deliveries[i])
 
 def dependencies (genesisHeight : Nat)
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (request : RoomKeyReleaseCodec.Request)
     (recipients : (i : Fin request.deliveries.length) →
       Recipient genesisHeight prepared request request.deliveries[i]) : List ReadGuard :=
@@ -129,7 +129,7 @@ instance (intent : DataIntent ResourceBirthCodec.rootBytes) (guard : ReadGuard) 
     Decidable (guardHeld intent guard) := by unfold guardHeld; infer_instance
 
 structure Bound (genesisHeight : Nat)
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (request : RoomKeyReleaseCodec.Request) (signed : SignedCommand)
     (shape : PhysicalShape prepared) (accepted : AcceptedInvocation prepared signed) where
   private mk ::
@@ -145,7 +145,7 @@ dependency. The next event67 builder may retain extra read-only dependencies;
 this entry point accepts only when the one actual native intent already holds
 them (by read guard or by a write checking the identical physical pre-root). -/
 def bind (native : CredentialSignatureIO.NativeConfig) (genesisHeight : Nat)
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (request : RoomKeyReleaseCodec.Request) (signed : SignedCommand)
     (shape : PhysicalShape prepared) (accepted : AcceptedInvocation prepared signed) :
     IO (Except String (Bound genesisHeight prepared request signed shape accepted)) := do
@@ -162,15 +162,15 @@ def bind (native : CredentialSignatureIO.NativeConfig) (genesisHeight : Nat)
     else return .error "room release authority root is stale"
 
 theorem recipient_current (genesisHeight : Nat)
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (request : RoomKeyReleaseCodec.Request) (delivery : RoomKeyReleaseCodec.Delivery)
     (recipient : Recipient genesisHeight prepared request delivery) :
-    CredentialAuthorityState.currentSigningKey prepared.authority.snapshot.logical
+    CredentialAuthorityState.currentSigningKey ground.authority.logical
       recipient.claim.member = some recipient.recordSignature.selected.key :=
   recipient.recordSignature.selected.current
 
 theorem all_recipient_dependencies_retained (genesisHeight : Nat)
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (request : RoomKeyReleaseCodec.Request) (signed : SignedCommand)
     (shape : PhysicalShape prepared) (accepted : AcceptedInvocation prepared signed)
     (bound : Bound genesisHeight prepared request signed shape accepted)

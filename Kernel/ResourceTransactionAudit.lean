@@ -12,7 +12,7 @@ set_option autoImplicit false
 
 variable {F : Type} [Field F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient}
-  {durable : Durable} {command : Command}
+  {ground : Ground deployment} {command : Command}
 
 theorem empty_targets_refused (subject : SubjectId) (nonce : Nat) :
     prepare deployment profile ambient durable { subject := subject, nonce := nonce, targets := [] } =
@@ -24,14 +24,14 @@ theorem duplicate_targets_refused (nonempty : command.targets ≠ [])
     prepare deployment profile ambient durable command = .error .duplicateTargets := by
   simp [prepare, prepareFrom, nonempty, duplicate]
 
-theorem prepared_targets_valid (prepared : PreparedInvocation deployment profile ambient durable command) :
+theorem prepared_targets_valid (prepared : PreparedInvocation deployment profile ambient ground command) :
     command.targetsWellFormed = true :=
   (Command.targetsWellFormed_iff command).mpr ⟨prepared.nonempty, prepared.distinct⟩
 
 /-- A mutation-only participant cannot be exposed to a foreign resource law,
 even if every ordinary mutation signature and predicate would otherwise pass. -/
 theorem no_joint_acceptance_without_read_capability [DecidableEq F]
-    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    {prepared : PreparedInvocation deployment profile ambient ground command} {signed : SignedCommand}
     (multiple : 1 < command.targets.length) (i : TargetIndex command)
     (missing : command.targets[i].observeCapability = none) :
     ¬ Nonempty (AcceptedInvocation prepared signed) := by
@@ -44,17 +44,17 @@ theorem no_joint_acceptance_without_read_capability [DecidableEq F]
 
 /-- Native mode evidence states actual source computation, not a Boolean
 assertion or an arbitrary proposed post beside the authored command. -/
-theorem prepared_computation_exact (prepared : PreparedInvocation deployment profile ambient durable command)
+theorem prepared_computation_exact (prepared : PreparedInvocation deployment profile ambient ground command)
     (i : TargetIndex command) :
-    computeTarget prepared.authority.snapshot profile.semantics ambient command
+    computeTarget ground.authority profile.semantics ambient command
       command.targets[i] (prepared.targets i).pre = .ok (prepared.targets i).post :=
   (prepared.targets i).candidate.modeEvidence.down
 
 /-- Refusing even one authored target prevents a complete transaction from
 existing. Successful earlier computations do not become accepted sub-turns. -/
-theorem failed_target_cannot_prepare (prepared : PreparedInvocation deployment profile ambient durable command)
+theorem failed_target_cannot_prepare (prepared : PreparedInvocation deployment profile ambient ground command)
     (i : TargetIndex command) (reason : Reject)
-    (failed : computeTarget prepared.authority.snapshot profile.semantics ambient command
+    (failed : computeTarget ground.authority profile.semantics ambient command
       command.targets[i] (prepared.targets i).pre = .error reason) : False := by
   rw [prepared_computation_exact prepared i] at failed
   cases failed
@@ -62,7 +62,7 @@ theorem failed_target_cannot_prepare (prepared : PreparedInvocation deployment p
 /-- Both local and neighboring policy observations equal the exact final
 states eventually carried by the accepted multi-cell declaration. -/
 theorem accepted_joint_projection_exact [DecidableEq F]
-    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    {prepared : PreparedInvocation deployment profile ambient ground command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) (i : TargetIndex command) :
     project prepared (some i) accepted.tuple.source
       (fun incidence => (accepted.declaration.post accepted.legs incidence).logical) =
@@ -70,7 +70,7 @@ theorem accepted_joint_projection_exact [DecidableEq F]
   accepted.policy_view_exact (some i)
 
 def acceptedTargetPost [DecidableEq F]
-    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    {prepared : PreparedInvocation deployment profile ambient ground command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) (i : TargetIndex command) :
     TargetCell command.targets[i] := by
   change Materialized ((layout prepared).materializer (some i))
@@ -79,7 +79,7 @@ def acceptedTargetPost [DecidableEq F]
 /-- The physical registry law holds on the actual accepted target post,
 not merely a different local candidate that happened to pass earlier. -/
 theorem accepted_target_final_law [DecidableEq F]
-    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    {prepared : PreparedInvocation deployment profile ambient ground command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) (i : TargetIndex command) :
     CanonicalCellRegistry.FinalPostLaw deployment command.targets[i].target (prepared.targets i).before
       (packTarget command.targets[i] (acceptedTargetPost accepted i)) := by
@@ -109,11 +109,11 @@ theorem unequal_commands_have_unequal_bytes (left right : Command) (different : 
 /-- Every finite transaction publishes one replay nullifier, independent of
 the number of participants or physical authority pages touched. -/
 theorem accepted_exactly_one_nullifier [DecidableEq F]
-    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    {prepared : PreparedInvocation deployment profile ambient ground command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
     (accepted.dataIntent shape).nullifiers =
-      [invocationNullifier prepared.authority.snapshot.domain
-        (operationMarker prepared.authority.snapshot.domain profile.semantics command)] := rfl
+      [invocationNullifier ground.authority.domain
+        (operationMarker ground.authority.domain profile.semantics command)] := rfl
 
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.empty_targets_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in

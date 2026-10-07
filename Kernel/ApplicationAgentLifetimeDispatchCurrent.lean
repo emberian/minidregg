@@ -68,7 +68,7 @@ structure Checked {F : Type} [Field F] [DecidableEq F]
   parentCurrent : currentParentMatches ingress grant = true
   commandExact : signedCommand = command ingress.dispatch.dispatch
     selection ingress.dispatch.parent
-  prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+  prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
     (command ingress.dispatch.dispatch selection ingress.dispatch.parent)
   shape : DeclaredResourceController.PhysicalShape prepared
   linked : linkedCurrentPolicies deployment profile ambient durable

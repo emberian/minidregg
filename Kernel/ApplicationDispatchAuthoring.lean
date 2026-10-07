@@ -126,7 +126,7 @@ def prepareObservationSlot (config : Config) (opened : Opened config)
     config.profile ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
     opened.durable ingress selection prepared resource capability root
   let header ← (CredentialSignatureAdmission.signingHeader
-    prepared.authority.snapshot
+    ground.authority
     (ApplicationDispatchAdmission.observationMarker ingress selection)
     (⟨.object, wanted⟩ : PackedEffectRequest)).mapError
       (fun _ => "dispatch observation signing key unavailable")

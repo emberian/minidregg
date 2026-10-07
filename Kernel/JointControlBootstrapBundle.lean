@@ -138,9 +138,9 @@ def admit (config : Config) (opened : Opened config) (source : Source) :
                   signedBytes config.deployment.domain config.profile.semantics signed then
                 let some command := commandCodec.decode signed.commandBytes
                   | return .error "bootstrap initializer command is noncanonical"
-                match prepareFrom config.deployment config.profile
+                match prepare config.deployment config.profile
                     ⟨config.federation,logicalHeight config predicted.durable⟩
-                    predicted.durable (some predicted.directory) command with
+                    predicted.ground command with
                 | .error reason => return .error s!"bootstrap initializer preparation refused: {repr reason}"
                 | .ok prepared =>
                   if shape : PhysicalShape prepared then

@@ -98,14 +98,14 @@ private def observationSlot (config : Config) (opened : Opened config)
       observeCapability := none, schemaVersion := ContentResource.commandVersion, expectedTargetRoot := root,
       payload := .content ⟨[]⟩ }
   let wanted : Request .object :=
-    { DeclaredResourceController.requestFor prepared.authority.snapshot
+    { DeclaredResourceController.requestFor ground.authority
         config.profile.semantics
         ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
         command probe root with verb := .observeObject }
   let marker := DeclaredResourceController.operationMarker
     config.deployment.domain config.profile.semantics command
   let header ← (CredentialSignatureAdmission.signingHeader
-      prepared.authority.snapshot marker (⟨.object, wanted⟩ : PackedEffectRequest)).mapError
+      ground.authority marker (⟨.object, wanted⟩ : PackedEffectRequest)).mapError
       (fun _ => "enrollment observation signing key unavailable")
   pure ⟨9, index, CredentialSignedEnvelopeController.headerCodec.encode header⟩
 

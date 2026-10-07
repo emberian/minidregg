@@ -83,7 +83,7 @@ def admit (config : Config) (opened : Opened config) (bytes : List UInt8) :
     let some command := commandCodec.decode selected.commandBytes
       | return .error "invalid selected command"
     let ambient := ⟨config.federation,logicalHeight config opened.durable⟩
-    match prepareFrom config.deployment config.profile ambient opened.durable (some opened.directory) command with
+    match prepare config.deployment config.profile ambient opened.ground command with
     | .error reason => return .error s!"selected preparation refused: {repr reason}"
     | .ok prepared =>
       if shape : PhysicalShape prepared then
@@ -99,7 +99,7 @@ def admit (config : Config) (opened : Opened config) (bytes : List UInt8) :
             return .error "control source scope mismatch"
           let some controlCommand := commandCodec.decode controlSigned.commandBytes
             | return .error "invalid control command"
-          match prepareFrom config.deployment config.profile ambient opened.durable (some opened.directory) controlCommand with
+          match prepare config.deployment config.profile ambient opened.ground controlCommand with
           | .error reason => return .error s!"control preparation refused: {repr reason}"
           | .ok controlPrepared =>
             if controlShape : PhysicalShape controlPrepared then

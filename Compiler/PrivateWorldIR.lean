@@ -19,16 +19,16 @@ set_option autoImplicit false
 
 variable {F : Type} [Field F] [DecidableEq F]
   {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-  {ambient : Ambient} {durable : Durable} {command : Command}
+  {ambient : Ambient} {ground : Ground deployment} {command : Command}
 
 /-- The physical/native snapshot supplies every preimage, target ID, absent
 slot, funding exclusion and context. A client-provided sample is never used. -/
-def nativeRead (prepared : PreparedInvocation deployment profile ambient durable command) :
+def nativeRead (prepared : PreparedInvocation deployment profile ambient ground command) :
     Nat → String → Option Int :=
   programSampleRead command (fun i => (prepared.targets i).pre.logical)
     (computeFundingIndex prepared.compute)
 
-def lower (M : Machine) (prepared : PreparedInvocation deployment profile ambient durable command)
+def lower (M : Machine) (prepared : PreparedInvocation deployment profile ambient ground command)
     (working : Capacity) (keys : List Key) (fuel : Nat) (params : M.Params)
     (code : M.Code) (libraries : List M.Code) (abi : Abi) (world : List Entry) :
     Result M.Output :=
@@ -39,7 +39,7 @@ def lower (M : Machine) (prepared : PreparedInvocation deployment profile ambien
 oracle result, including sample refusal, native crash/exhaustion, output and
 metered count. Overflow never substitutes a partial result. -/
 theorem lower_native_exact (M : Machine)
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
     (worldCapacity working : Capacity) (keys : List Key) (fuel : Nat)
     (params : M.Params) (code : M.Code) (libraries : List M.Code) (abi : Abi)
     (world : WorldProjection worldCapacity abi (nativeRead prepared))
@@ -56,7 +56,7 @@ theorem lower_native_exact (M : Machine)
 /-- Admission produces the source-owned typed effects and complete dependency
 trace consumed by agreement/custody. Input lowering never invents an effect,
 releases private data, or manufactures a second charge. -/
-def retained (prepared : PreparedInvocation deployment profile ambient durable command)
+def retained (prepared : PreparedInvocation deployment profile ambient ground command)
     {signed : SignedCommand} (accepted : AcceptedInvocation prepared signed) :
     WorldMethodTrace.Trace := WorldMethodTrace.ofAccepted prepared accepted
 

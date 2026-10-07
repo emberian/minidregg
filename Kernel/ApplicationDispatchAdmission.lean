@@ -273,12 +273,12 @@ def observationRequest {F : Type} [Field F]
     (ambient : Ambient) (durable : Durable)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (selection : Selection)
-    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
       (command ingress.dispatch selection ingress.parent))
     (resource : Nat) (capability : CapabilityId) (root : Digest) : Request .object :=
   let target : DeclaredResourceController.Target :=
     ⟨.object, resource, capability, 1, root, .content ⟨[]⟩, none, none, none⟩
-  { DeclaredResourceController.requestFor prepared.authority.snapshot profile.semantics
+  { DeclaredResourceController.requestFor ground.authority profile.semantics
       ambient (command ingress.dispatch selection ingress.parent) target root with
     verb := .observeObject }
 
@@ -287,12 +287,12 @@ def observationGuard (resource : Nat) (root : Digest) : ReadGuard :=
 
 /-- A signed observation names the inner payload root. A durable CAS guard
 protects the complete encoded physical cell, whose root is generally distinct. -/
-theorem observedPhysicalRoot_current {deployment : Deployment} {durable : Durable}
+theorem observedPhysicalRoot_current {deployment : Deployment} {ground : Ground deployment}
     (context : ResourceObservationAdmission.Context deployment)
     (resource : Nat) (packed : PackedCell CanonicalCellRegistry.registry)
     (present : context.directory.slots resource = .present packed) :
     ResourceBirthCodec.physicalRoot (.live packed) =
-      durable.snapshot.model.roots ⟨resource⟩ :=
+      ground.view.model.roots ⟨resource⟩ :=
   PhysicalResourceReadGuard.current context.directory resource packed present
 
 /-- Native observation signatures bind the base signed request and the
@@ -322,7 +322,7 @@ structure CheckedRead {F : Type} [Field F] [DecidableEq F]
     (ambient : Ambient) (durable : Durable)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (selection : Selection)
-    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
       (command ingress.dispatch selection ingress.parent))
     (resource : Nat) (capability : CapabilityId) (root : Digest)
     (envelope : List UInt8) where
@@ -334,7 +334,7 @@ structure CheckedRead {F : Type} [Field F] [DecidableEq F]
     (observationMarker ingress selection) capability (observationContext ingress)
   checked : ResourceObservationAdmission.Checked selected envelope
   current : ResourceBirthCodec.physicalRoot (.live selected.observed.before) =
-    durable.snapshot.model.roots ⟨resource⟩
+    ground.view.model.roots ⟨resource⟩
   readonly : (observationGuard resource
     (ResourceBirthCodec.physicalRoot (.live selected.observed.before))).cellId ∉
     (DeclaredResourceController.writes prepared).map DataWrite.cellId
@@ -343,10 +343,10 @@ structure CheckedRead {F : Type} [Field F] [DecidableEq F]
 substituted for the physical root used by the later CAS read guard. -/
 theorem CheckedRead.signedInnerRoot {F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-    {ambient : Ambient} {durable : Durable}
+    {ambient : Ambient} {ground : Ground deployment}
     {ingress : ApplicationDispatchAdmissionIngress.Ingress}
     {selection : Selection}
-    {prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+    {prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
       (command ingress.dispatch selection ingress.parent)}
     {resource : Nat} {capability : CapabilityId} {root : Digest}
     {envelope : List UInt8}
@@ -360,7 +360,7 @@ def checkRead {F : Type} [Field F] [DecidableEq F]
     (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
     (durable : Durable) (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (selection : Selection)
-    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
       (command ingress.dispatch selection ingress.parent))
     (resource : Nat) (capability : CapabilityId) (root : Digest)
     (envelope : List UInt8) :
@@ -432,10 +432,10 @@ def linkedCurrentPolicies {F : Type} [Field F]
     (ambient : Ambient) (durable : Durable)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (spec : Spec) (selection : Selection)
-    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
       (command ingress.dispatch selection ingress.parent)) : Bool :=
-  let auth := prepared.authority.snapshot.logical
-  let directory := prepared.directory.directory
+  let auth := ground.authority.logical
+  let directory := ground.directory
   let policyAt := fun target => do
     let head ← CredentialAuthorityDomain.headAt auth ⟨target⟩
     let policy ← CanonicalCellRegistry.loadPolicySource deployment.domain directory head.address
@@ -480,9 +480,9 @@ def issuerLineageCurrentFromSourceBytes {F : Type} [Field F]
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (spec : Spec) (selection : Selection)
     (originalSourceBytes : List UInt8)
-    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
       (command ingress.dispatch selection ingress.parent)) : Bool :=
-  let snapshot := prepared.authority.snapshot
+  let snapshot := ground.authority
   let request := ApplicationShareIssueSource.appRequestFromSourceBytes deployment.domain profile.semantics
     ambient.federation snapshot.authState ambient.height ingress.dispatch.appRoot spec originalSourceBytes
   match CredentialAuthorityState.readCapability snapshot.cell .object spec.appDelegateCapability with
@@ -499,7 +499,7 @@ def issuerLineageCurrent {F : Type} [Field F]
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (spec : Spec) (selection : Selection)
     (descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry)
-    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
       (command ingress.dispatch selection ingress.parent)) : Bool :=
   issuerLineageCurrentFromSourceBytes deployment profile ambient durable ingress spec selection
     (ApplicationShareIssueSource.sourceBytes spec descriptor) prepared
@@ -524,7 +524,7 @@ structure CheckedCurrentForSourceBytes {F : Type} [Field F] [DecidableEq F]
   decodedCommand : DeclaredResourceController.commandCodec.decode
     ingress.dispatch.signed.commandBytes = some signedCommand
   commandExact : matchesCommand ingress.dispatch selection ingress.parent signedCommand = true
-  prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+  prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
     (command ingress.dispatch selection ingress.parent)
   shape : DeclaredResourceController.PhysicalShape prepared
   linked : linkedCurrentPolicies deployment profile ambient durable ingress spec selection prepared = true
@@ -771,7 +771,7 @@ theorem sessionFingerprint_ingress_workflow_invariant (authorityRoot : Digest) (
 /-- This is a cache invalidation key, never an external delivery permit. -/
 def CheckedCurrentForSourceBytes.sessionFingerprint {F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-    {ambient : Ambient} {durable : Durable}
+    {ambient : Ambient} {ground : Ground deployment}
     {ingress : ApplicationDispatchAdmissionIngress.Ingress}
     {spec : Spec} {originalSourceBytes : List UInt8}
     (checked : CheckedCurrentForSourceBytes deployment profile ambient durable ingress spec originalSourceBytes) : Digest :=
@@ -781,7 +781,7 @@ def CheckedCurrentForSourceBytes.sessionFingerprint {F : Type} [Field F] [Decida
 
 def CheckedCurrent.sessionFingerprint {F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-    {ambient : Ambient} {durable : Durable}
+    {ambient : Ambient} {ground : Ground deployment}
     {ingress : ApplicationDispatchAdmissionIngress.Ingress}
     {spec : Spec} {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
     (checked : CheckedCurrent deployment profile ambient durable ingress spec descriptor) : Digest :=

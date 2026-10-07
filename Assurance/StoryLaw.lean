@@ -552,11 +552,11 @@ open Minidregg.Compiler
 
 variable {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient}
-  {durable : Durable} {command : Command}
+  {ground : Ground deployment} {command : Command}
 
 /-- The authenticated effective closure includes the sealed story law of `t` for player `S` as an active component. -/
 def StoryInstalled (t : Table) (S : Int)
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Prop :=
   Minidregg.Kernel.LawHistory.ActiveComponent
     (policyConfig prepared tuple incidence) (law t S)
@@ -564,7 +564,7 @@ def StoryInstalled (t : Table) (S : Int)
 /-- Derive the installed-law assurance premise from the receiver's cached,
 authenticated effective graph; no caller assertion or second resolver is used. -/
 def checkInstalled (t : Table) (S : Int)
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
     (resolved : Minidregg.Compiler.ComposedPolicyAdmission.PreparedLaw
       (policyConfig prepared tuple incidence)) :
@@ -574,7 +574,7 @@ def checkInstalled (t : Table) (S : Int)
 /-- **Kernel form.** Every write leg the controller admitted on a player's cell under the sealed
 story law is the player's, one turn on, and a stay or a table edge. -/
 theorem kernel_story_step (t : Table) (S : Int)
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command} {envelope : List UInt8}
     (leg : CheckedLeg prepared tuple incidence envelope) (installed : StoryInstalled t S tuple incidence)
     (w : (step prepared tuple incidence).newState.get "request/verb" = some 2) :
