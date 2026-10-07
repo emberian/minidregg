@@ -984,9 +984,9 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (ParticipantKeyEnrollmentReceiver.intent accepted)
   | subjectKeyRotation {ingress : SubjectKeyRotation.DecodedIngress}
-      (admission : (SubjectKeyRotation.receiver (receivingLaws config)).Admitted (rotationEnv config)
+      (admission : (SubjectKeyRotation.receiver (receivingLaws config) (.live config.signature)).Admitted (rotationEnv config)
         opened.durable ingress) :
-      NativeAdmission config opened ((SubjectKeyRotation.receiver (receivingLaws config)).intent
+      NativeAdmission config opened ((SubjectKeyRotation.receiver (receivingLaws config) (.live config.signature)).intent
         admission.accepted)
   | subjectKeyCommitmentAdoption {ingress : SubjectKeyCommitmentAdoption.DecodedIngress}
       (accepted : SubjectKeyCommitmentAdoption.AcceptedAdoption config.deployment config.profile.semantics
@@ -2151,7 +2151,7 @@ private def derive (config : Config) (opened : Opened config)
         config.signature (rotationEnv config) opened.durable ingress with
     | .error reason => return .error s!"subject key rotation refused: {repr reason}"
     | .ok admission =>
-        return .ok ⟨(SubjectKeyRotation.receiver (receivingLaws config)).intent admission.accepted,
+        return .ok ⟨(SubjectKeyRotation.receiver (receivingLaws config) (.live config.signature)).intent admission.accepted,
           .subjectKeyRotation admission, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := SubjectKeyCommitmentAdoption.decodeIngress bytes then
     match ← SubjectKeyCommitmentAdoption.admitDecodedNative config.deployment config.profile.semantics

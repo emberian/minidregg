@@ -24,6 +24,7 @@ import Compiler.CredentialAuthorityDomain
 import Compiler.TypedAuthorizationRequestCodec
 import Compiler.ResourceBirthCodec
 import Compiler.PlanFootprintCodec
+import Theory.Receiving
 
 namespace Minidregg.Compiler.CredentialSignatureAdmission
 
@@ -101,6 +102,9 @@ inductive Reject where
   | footprintStale (address : List UInt8)
   /-- The admission height is past the plan's signed `validUntil`. -/
   | expired (height validUntil : Nat)
+  /-- The Receiver issued no voucher for the claim the envelope admission
+  selected (`CheckedSignature.ofReceiverClaim`): that signature was not verified. -/
+  | unvouched
   deriving DecidableEq, Repr
 
 /-- Selection is a read of the canonical authority schema, never a host key
@@ -309,6 +313,176 @@ def verifyNative {m : Type → Type} [Monad m] (config : CredentialSignatureIO.O
               return .ok ⟨config.source, ⟨kind, request⟩, nullifier, envelopeBytes,
                 prepared, preparation, admission, admitted⟩
 
+/-! ## The Receiver's verdict as a receipt
+
+A `Kernel.Receiving` family's signature claims are verified by the Receiver
+BEFORE its `prepare` runs (`Theory.Receiving.Receiver.admitVia`); `prepare`
+receives the accepted claims as `Theory.Receiving.Vouchers` of the Receiver's
+verifier.  `receiverVerify` is that verifier over a `CredentialSignatureIO.Oracle`
+-- the same closed family of oracles `verifyNative` takes, so at `IO` the
+verdict is the pinned process's (`Oracle.io_process`).  `ReceiverSignature` and
+`CheckedSignature.ofReceiverClaim` turn a voucher into a value a gate can hold;
+neither can be built without one. -/
+
+open Minidregg.Theory.Receiving (SigQuery Vouchers)
+
+/-- **The Receiver's verifier over one oracle**: the oracle's verdict on the
+claim's exact key, message and signature, its error printed. -/
+def receiverVerify : {m : Type → Type} → CredentialSignatureIO.Oracle m → SigQuery →
+    m (Except String Bool)
+  | _, .live config, claim => do
+      match ← CredentialSignatureIO.verify config claim.publicKey claim.message claim.signature with
+      | .error reason => pure (.error s!"{repr reason}")
+      | .ok verdict => pure (.ok verdict)
+  | _, .recorded transcript, claim =>
+      (match CredentialSignatureIO.recordedVerdict transcript claim.publicKey claim.message
+          claim.signature with
+        | .error reason => .error s!"{repr reason}"
+        | .ok verdict => .ok verdict : Except String Bool)
+
+/-- **What a family's `prepare` receives from the Receiver**: the oracle that
+answered and the vouchers of the claims it accepted, typed by that oracle's
+verifier. -/
+structure Received where
+  {m : Type → Type}
+  oracle : CredentialSignatureIO.Oracle m
+  vouchers : Vouchers (receiverVerify oracle)
+
+/-- A signature the Receiver's verifier accepted before `prepare` ran: the
+exact claim, and the oracle that answered (`Source.receiver`).  The constructor
+is private; the only producers read a voucher (`Received.find?`,
+`Received.signed?`).  It is a `Type`-level value a `Prepared` record can hold,
+where the `Received` bundle (indexed by the oracle's monad) cannot be. -/
+structure ReceiverSignature where
+  private mk ::
+  source : CredentialSignatureIO.Source
+  claim : SigQuery
+
+namespace Received
+
+/-- The Receiver's signature for exactly `claim`, if it vouched for it. -/
+def find? (received : Received) (claim : SigQuery) : Option ReceiverSignature :=
+  if received.vouchers.vouches claim then some ⟨.receiver received.oracle.source, claim⟩ else none
+
+/-- The Receiver's signature by `publicKey` over `message`, if it vouched for one. -/
+def signed? (received : Received) (publicKey message : List UInt8) : Option ReceiverSignature :=
+  (received.vouchers.signed? publicKey message).map fun claim =>
+    ⟨.receiver received.oracle.source, claim⟩
+
+theorem find?_some {received : Received} {claim : SigQuery} {signature : ReceiverSignature}
+    (found : received.find? claim = some signature) :
+    claim ∈ received.vouchers.verified ∧ signature.claim = claim ∧
+      signature.source = .receiver received.oracle.source := by
+  unfold find? at found
+  split at found
+  · rename_i vouched
+    cases found
+    exact ⟨(Vouchers.vouches_iff _ _).1 vouched, rfl, rfl⟩
+  · cases found
+
+theorem signed?_some {received : Received} {publicKey message : List UInt8}
+    {signature : ReceiverSignature} (found : received.signed? publicKey message = some signature) :
+    signature.claim ∈ received.vouchers.verified ∧ signature.claim.publicKey = publicKey ∧
+      signature.claim.message = message ∧ signature.source = .receiver received.oracle.source := by
+  unfold signed? at found
+  cases vouched : received.vouchers.signed? publicKey message with
+  | none => rw [vouched] at found; cases found
+  | some claim =>
+      rw [vouched] at found
+      cases found
+      obtain ⟨member, key, frame⟩ := Vouchers.signed?_some vouched
+      exact ⟨member, key, frame, rfl⟩
+
+end Received
+
+/-- The claim the envelope admission's native check is about: the selected key,
+the controller's frame (the encoded signed header) and the envelope's signature
+-- exactly what `verifyNative` hands the oracle. -/
+def controllerClaim (controller : CredentialSignedEnvelopeController.Prepared) : SigQuery :=
+  ⟨controller.key.publicKey, controller.frame, controller.envelope.signature⟩
+
+/-- **The claim the Receiver verifies for a signed envelope by `subject`**,
+before any preparation: the subject's current key (a key lookup), the envelope's
+own header frame and its signature.  It reads no plan and re-executes nothing.
+`ofReceiverClaim` later looks up `controllerClaim` of the envelope admission,
+which selects the same current key and decodes the same envelope; if the two
+ever differ, the lookup misses and the receipt is refused (`unvouched`). -/
+def envelopeClaim (snapshot : Snapshot) (subject : SubjectId) (envelopeBytes : List UInt8) :
+    Except Reject SigQuery :=
+  match CredentialAuthorityState.currentSigningKey snapshot.logical subject with
+  | none => .error .missingCurrentKey
+  | some key =>
+      match CredentialSignedEnvelopeController.envelopeCodec.decode envelopeBytes with
+      | none => .error (.envelope .malformedEnvelope)
+      | some envelope => .ok ⟨key.publicKey, envelope.frame, envelope.signature⟩
+
+/-- **A checked signature from the Receiver's verdict.**  The envelope admission
+runs exactly as in `verifyNative` (`prepare`: key selection, footprint, the
+controller's framing, staleness and replay checks, the source binding); the
+native call is replaced by the Receiver's voucher for exactly the claim that call
+would make (`controllerClaim`).  No voucher, no receipt: `unvouched`. -/
+def CheckedSignature.ofReceiverClaim (received : Received) (snapshot : Snapshot) (nullifier : Nat)
+    {kind : ResourceKind} (request : Request kind) (envelopeBytes : List UInt8) :
+    Except Reject (CheckedSignature snapshot) :=
+  match preparation : prepare snapshot nullifier ⟨kind, request⟩ envelopeBytes with
+  | .error reason => .error reason
+  | .ok prepared =>
+      match received.find? (controllerClaim prepared.controller) with
+      | none => .error .unvouched
+      | some signature =>
+          match admitted : CredentialSignedEnvelopeController.finish prepared.controller
+              (Except.ok true : Except CredentialSignatureIO.Error Bool) with
+          | .error reason => .error (.envelope reason)
+          | .ok admission =>
+              .ok ⟨signature.source, ⟨kind, request⟩, nullifier, envelopeBytes, prepared,
+                preparation, admission, admitted⟩
+
+/-- **A receipt from the Receiver is a vouched one**: the claim its envelope
+admission checked is among the Receiver's vouchers, and the receipt records that
+the Receiver's oracle answered it. -/
+theorem CheckedSignature.ofReceiverClaim_vouched {received : Received} {snapshot : Snapshot}
+    {nullifier : Nat} {kind : ResourceKind} {request : Request kind} {envelopeBytes : List UInt8}
+    {receipt : CheckedSignature snapshot}
+    (checked : CheckedSignature.ofReceiverClaim received snapshot nullifier request envelopeBytes =
+      .ok receipt) :
+    controllerClaim receipt.prepared.controller ∈ received.vouchers.verified ∧
+      receipt.source = .receiver received.oracle.source ∧
+      receipt.request = ⟨kind, request⟩ ∧ receipt.nullifier = nullifier ∧
+      receipt.envelopeBytes = envelopeBytes := by
+  unfold CheckedSignature.ofReceiverClaim at checked
+  split at checked
+  · cases checked
+  · rename_i prepared _
+    split at checked
+    · cases checked
+    · rename_i signature found
+      split at checked
+      · cases checked
+      · cases checked
+        obtain ⟨member, -, source⟩ := Received.find?_some found
+        exact ⟨member, source, rfl, rfl, rfl⟩
+
+/-- **No voucher, no receipt**: if the Receiver did not vouch for the claim the
+envelope admission selected, `ofReceiverClaim` refuses. -/
+theorem CheckedSignature.ofReceiverClaim_unvouched {received : Received} {snapshot : Snapshot}
+    {nullifier : Nat} {kind : ResourceKind} {request : Request kind} {envelopeBytes : List UInt8}
+    {prepared : Prepared snapshot nullifier ⟨kind, request⟩}
+    (preparation : prepare snapshot nullifier ⟨kind, request⟩ envelopeBytes = .ok prepared)
+    (missing : controllerClaim prepared.controller ∉ received.vouchers.verified) :
+    CheckedSignature.ofReceiverClaim received snapshot nullifier request envelopeBytes =
+      .error .unvouched := by
+  have none_ : received.find? (controllerClaim prepared.controller) = none := by
+    unfold Received.find?
+    rw [if_neg (by rw [Vouchers.vouches_iff]; exact missing)]
+  unfold CheckedSignature.ofReceiverClaim
+  split
+  · rename_i reason failed
+    rw [preparation] at failed; cases failed
+  · rename_i prepared' found
+    rw [preparation] at found
+    cases found
+    rw [none_]
+
 /-- The pure portal can use a native receipt only for its exact complete
 request and the same operation marker. Snapshot selection is a type index. -/
 def verifySignature (snapshot : Snapshot) (expectedNullifier : Nat)
@@ -425,6 +599,11 @@ theorem checked_signer_live (snapshot : Snapshot) (receipt : CheckedSignature sn
         (CredentialAuthorityState.signingKeyRevocation receipt.prepared.controller.key) = false := by
   rw [receipt.prepared.keyExact]
   exact (CredentialAuthorityState.keyStanding_live_iff _ _).mp receipt.prepared.source.standing
+
+#assert_axioms Received.find?_some
+#assert_axioms Received.signed?_some
+#assert_axioms CheckedSignature.ofReceiverClaim_vouched
+#assert_axioms CheckedSignature.ofReceiverClaim_unvouched
 
 /-- info: 'Minidregg.Compiler.CredentialSignatureAdmission.select_unregistered_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms select_unregistered_refused

@@ -12,11 +12,15 @@ The family declares:
 * one signature claim (`claim`): the new key, the possession frame, the
   presented signature -- computed from the decoded ingress and the deployment
   alone, so `Kernel.Receiving` verifies it before `prepare` runs;
-* the gate (`prepare`): `KeyPreRotation.gate` at the loaded authority cell,
-  instantiated with `nextKeyDigest` (cSHAKE256 under `DREGG.SIGNING-KEY.NEXT/v1`)
-  and the oracle of the claim (`assumed`; `admitted_gate` re-derives it under
-  the verifier's actual verdict), a fresh public key, an Ed25519 key shape, an
-  unspent marker, and the validated patch;
+* the gate (`prepare`): the Receiver's possession signature (`Prepared.possession`,
+  a `ReceiverSignature` read from the Receiver's vouchers: the new key over this
+  command's possession frame), then `KeyPreRotation.gate` at the loaded authority
+  cell, instantiated with `nextKeyDigest` (cSHAKE256 under
+  `DREGG.SIGNING-KEY.NEXT/v1`) and the oracle that vouches for exactly the key the
+  possession signature is by (`Prepared.gated_by_possession`), a fresh public key,
+  an Ed25519 key shape, an unspent marker, and the validated patch.  The gate's
+  signature premise is a value the Receiver handed over, not an assumption a
+  theorem re-derives afterwards;
 * the patch (`writes`): `KeyPreRotation.patch`, the subject's key rows only,
   as the authority cell's one write.  The authority cell is `kernelOnly` in
   the registry with this family among its writers, so the Receiver's law
@@ -148,9 +152,6 @@ for no other key. -/
 def presented (command : Command) (verified : Bool) : List UInt8 → Bool :=
   fun publicKey => decide (publicKey = command.key.publicKey) && verified
 
-/-- The oracle a plan assumes: the possession signature, once made, verifies. -/
-def assumed (command : Command) : List UInt8 → Bool := presented command true
-
 /-! ## The signature claim -/
 
 /-- The deployment a rotation is admitted under. -/
@@ -170,14 +171,21 @@ inductive Reject where
   | authorityUnavailable
   | gate (reason : KeyPreRotation.Reject)
   | publicKeyExists | malformedKey | replayedMarker | validation
+  /-- The Receiver vouched for no signature by the new key over the possession
+  frame (unreachable through `admitVia`, whose claim is exactly that one). -/
+  | unvouched
   deriving Repr
 
-structure Prepared (env : Env) (durable : Durable) (command : Command) where
+/-- Everything the gate checks of a rotation on the loaded authority cell, given
+that the new key signed: the plan path runs this before any signature exists
+(`NativeHost.rotationPlanLoaded`); admission runs it inside `prepare`, behind
+the Receiver's possession signature. -/
+structure Checked (env : Env) (durable : Durable) (command : Command) where
   private mk ::
   authority : Loaded env.deployment durable.snapshot
   current : KeyRecord
   gated : KeyPreRotation.gate nextKeyDigest authority.snapshot.logical command.rotation
-    (assumed command) = .ok current
+    (presented command true) = .ok current
   publicKeyFresh : ParticipantKeyEnrollment.allKeys authority.snapshot.logical
     (fun key => key.publicKey != command.key.publicKey) = true
   keyShape : command.key.algorithm = CredentialSignatureAdmission.ed25519Algorithm ∧
@@ -189,14 +197,13 @@ structure Prepared (env : Env) (durable : Durable) (command : Command) where
     authority.snapshot.cell.root
     (KeyPreRotation.patch authority.snapshot.logical current command.rotation)
 
-/-- The gate.  It runs only after `claim` verified (`Kernel.Receiving`), and,
-signature-free, behind the host's rotation plan (`NativeHost.rotationPlanLoaded`). -/
-def prepare (env : Env) (durable : Durable) (command : Command) :
-    Except Reject (Prepared env durable command) := do
+/-- The gate's checks given the new key's signature. -/
+def check (env : Env) (durable : Durable) (command : Command) :
+    Except Reject (Checked env durable command) := do
   let authority ← need .authorityUnavailable (loadDeployment env.deployment durable.snapshot)
   let snapshot := authority.snapshot
   match gated : KeyPreRotation.gate nextKeyDigest snapshot.logical command.rotation
-      (assumed command) with
+      (presented command true) with
   | .error reason => throw (.gate reason)
   | .ok current =>
     if publicKeyFresh : ParticipantKeyEnrollment.allKeys snapshot.logical
@@ -215,7 +222,70 @@ def prepare (env : Env) (durable : Durable) (command : Command) :
       else throw .malformedKey
     else throw .publicKeyExists
 
+/-- A prepared rotation: the Receiver's signature by the new key over this
+command's possession frame, and the gate's checks. -/
+structure Prepared (env : Env) (durable : Durable) (command : Command) where
+  private mk ::
+  /-- The Receiver's verdict, as a value: the signature `claim` named, verified
+  before `prepare` ran. -/
+  possession : CredentialSignatureAdmission.ReceiverSignature
+  possessionKey : possession.claim.publicKey = command.key.publicKey
+  possessionMessage : possession.claim.message =
+    possessionFrame env.deployment.domain env.semantics command
+  checked : Checked env durable command
+
+/-- The gate.  It reads the new key's possession signature from the Receiver's
+vouchers (`Kernel.Receiving` verified `claim` before calling it), then runs the
+gate's checks. -/
+def prepare (received : CredentialSignatureAdmission.Received) (env : Env) (durable : Durable)
+    (command : Command) : Except Reject (Prepared env durable command) :=
+  match found : received.signed? command.key.publicKey
+      (possessionFrame env.deployment.domain env.semantics command) with
+  | none => .error .unvouched
+  | some possession =>
+      match check env durable command with
+      | .error reason => .error reason
+      | .ok checked =>
+          have signed := CredentialSignatureAdmission.Received.signed?_some found
+          .ok ⟨possession, signed.2.1, signed.2.2.1, checked⟩
+
 variable {env : Env} {durable : Durable} {command : Command}
+
+def Prepared.authority (prepared : Prepared env durable command) :
+    Loaded env.deployment durable.snapshot :=
+  prepared.checked.authority
+
+def Prepared.current (prepared : Prepared env durable command) : KeyRecord :=
+  prepared.checked.current
+
+theorem Prepared.gated (prepared : Prepared env durable command) :
+    KeyPreRotation.gate nextKeyDigest prepared.authority.snapshot.logical command.rotation
+      (presented command true) = .ok prepared.current :=
+  prepared.checked.gated
+
+def Prepared.validated (prepared : Prepared env durable command) :
+    CellState.ValidatedPatch AuthorityMaterializer prepared.authority.snapshot.cell
+      prepared.authority.snapshot.cell.root
+      (KeyPreRotation.patch prepared.authority.snapshot.logical prepared.current command.rotation) :=
+  prepared.checked.validated
+
+/-- **The gate ran under the Receiver's verdict.**  A prepared rotation passes
+`KeyPreRotation.gate` with the oracle that vouches for exactly the key the
+Receiver's possession signature is by -- a value `prepare` holds, over this
+command's possession frame. -/
+theorem Prepared.gated_by_possession (prepared : Prepared env durable command) :
+    KeyPreRotation.gate nextKeyDigest prepared.authority.snapshot.logical command.rotation
+        (fun publicKey => decide (publicKey = prepared.possession.claim.publicKey)) =
+      .ok prepared.current ∧
+      prepared.possession.claim.message =
+        possessionFrame env.deployment.domain env.semantics command := by
+  refine ⟨?_, prepared.possessionMessage⟩
+  have oracle : (fun publicKey => decide (publicKey = prepared.possession.claim.publicKey)) =
+      presented command true := by
+    funext publicKey
+    simp only [presented, prepared.possessionKey, Bool.and_true]
+  rw [oracle]
+  exact prepared.gated
 
 /-- The authority cell after rotation: the validated patch applied. -/
 def Prepared.authorityPost (prepared : Prepared env durable command) :
@@ -286,7 +356,8 @@ def family : Receiving.Family where
   subject := fun ingress => some ingress.command.subject
   witnessBytes := fun ingress => ingress.ingress.possessionSignature.length
 
-abbrev receiver (laws : ReceivingLaw.Laws Durable) := family.receiver laws
+abbrev receiver (laws : ReceivingLaw.Laws Durable) {m : Type → Type}
+    (oracle : CredentialSignatureIO.Oracle m) := family.receiver laws oracle
 
 /-- **The law judgement leaves the rotation's intent as it was.**  The one write
 is to the kernel-only authority cell with no step, so whatever laws the Receiver
@@ -308,41 +379,45 @@ theorem readGuards_unjudged (laws : ReceivingLaw.Laws Durable)
 
 /-! ## What an admission means here -/
 
-variable {ingress : DecodedIngress} {laws : ReceivingLaw.Laws Durable}
+variable {ingress : DecodedIngress} {laws : ReceivingLaw.Laws Durable} {m : Type → Type}
+  {oracle : CredentialSignatureIO.Oracle m}
 
 /-- **An admitted rotation's possession signature was vouched for**: the
-verdict oracle of the admission accepts the new key's signature over this
-command's possession frame. -/
-theorem admitted_possession (admission : (receiver laws).Admitted env durable ingress) :
-    admission.ok (claim env ingress) = true := by
-  obtain ⟨claims, resolved, vouched, -, -, -⟩ :=
-    ((receiver laws).admit_ok_iff admission.accepted).1 admission.admitted
+Receiver's vouchers of the admission hold the new key's signature over this
+command's possession frame, and the rotation was prepared under them. -/
+theorem admitted_possession (admission : (receiver laws oracle).Admitted env durable ingress) :
+    claim env ingress ∈ admission.vouchers.verified := by
+  obtain ⟨-, claims, resolved, vouched⟩ := admission.prepared
   cases resolved
   exact vouched _ (List.mem_singleton_self _)
 
-/-- **The gate under the verifier's verdict.**  An admitted rotation passes
-`KeyPreRotation.gate` with the oracle that vouches for the new key exactly when
-the verifier accepted its possession signature (`presented`). -/
-theorem admitted_gate (admission : (receiver laws).Admitted env durable ingress) :
-    let prepared : Prepared env durable ingress.command := admission.accepted.prepared
-    KeyPreRotation.gate nextKeyDigest prepared.authority.snapshot.logical
-        ingress.command.rotation (presented ingress.command (admission.ok (claim env ingress))) =
-      .ok prepared.current := by
-  intro prepared
-  rw [admitted_possession admission]
-  exact prepared.gated
+/-- **Signature first, here**: under a recorded oracle (any `Id` evaluation), a
+rotation whose possession signature the oracle does not accept is refused --
+`verifier` or `unauthenticated` -- before the gate runs. -/
+theorem refused_possession_before_gate {transcript : CredentialSignatureIO.Transcript}
+    (refused : CredentialSignatureAdmission.receiverVerify (.recorded transcript) (claim env ingress) ≠
+      pure (.ok true)) :
+    (∃ detail, (receiver laws (.recorded transcript)).admitVia env durable ingress =
+        (pure (.error (.verifier detail)) : Id _)) ∨
+      ∃ selected ∈ [claim env ingress],
+        (receiver laws (.recorded transcript)).admitVia env durable ingress =
+          (pure (.error (.unauthenticated selected)) : Id _) :=
+  (receiver laws (.recorded transcript)).admitVia_refused_before_prepare (claims := [claim env ingress])
+    rfl (List.mem_singleton_self _) refused
 
-/-- **Signature first, here**: a rotation whose possession signature the
-verifier refuses is refused `unauthenticated` before the gate runs. -/
-theorem refused_possession_unauthenticated (v : SigQuery → Bool)
-    (refused : v (claim env ingress) = false) :
-    (receiver laws).admitVia (Minidregg.Theory.Receiving.Receiver.pureVerifier v) env durable ingress =
-      (pure (.error (.unauthenticated (claim env ingress))) : Id _) := by
-  obtain ⟨selected, member, admitted⟩ :=
-    (receiver laws).admitVia_unauthenticated v (claims := [claim env ingress]) rfl
-      (List.mem_singleton_self _) refused
-  rw [List.mem_singleton.mp member] at admitted
-  exact admitted
+/-- **No voucher, no rotation**: `prepare` handed vouchers that hold no
+signature by the new key over the possession frame refuses `unvouched`, whatever
+the authority cell holds. -/
+theorem prepare_unvouched (received : CredentialSignatureAdmission.Received)
+    (missing : received.signed? command.key.publicKey
+      (possessionFrame env.deployment.domain env.semantics command) = none) :
+    prepare received env durable command = .error .unvouched := by
+  unfold prepare
+  split
+  · rfl
+  · rename_i possession found
+    rw [missing] at found
+    cases found
 
 /-! ## Plan and status (no secret, no signature) -/
 
@@ -388,8 +463,10 @@ def status (logical : Store CredentialAuthorityState.layout) (subject : SubjectI
 #assert_axioms Prepared.precommitted
 #assert_axioms readGuards_unjudged
 #assert_axioms writes_roots_bound
+#assert_axioms Prepared.gated
+#assert_axioms Prepared.gated_by_possession
 #assert_axioms admitted_possession
-#assert_axioms admitted_gate
-#assert_axioms refused_possession_unauthenticated
+#assert_axioms refused_possession_before_gate
+#assert_axioms prepare_unvouched
 
 end Minidregg.Kernel.SubjectKeyRotation

@@ -9,30 +9,43 @@ compare-and-swap.  Until this module each receiving family retyped that skeleton
 `readGuards_readonly`, `requireSome`), and most of them prepared -- re-executed
 -- before they verified a signature (`docs/design/RECEIVER.md`, the census).
 
-Here the skeleton is one definition over an abstract journal (`Journal`) and an
-arbitrary monad.  `Kernel.Receiving` instantiates the journal with the deployed
-durable layer and runs `receive` in `IO`; the theorems below are about that same
-definition, read at `Id` where a statement needs the verifier's verdicts.
+Here the skeleton is one definition over an abstract journal (`Journal`), an
+arbitrary monad and the receiver's verifier.  `Kernel.Receiving` instantiates
+the journal with the deployed durable layer and the verifier with the pinned
+native oracle, and runs `receive` in `IO`; the theorems below are about that
+same definition, read at `Id` where a statement needs the verifier's verdicts.
+
+**The verifier's verdicts reach `prepare` as a token** (`Vouchers`).  A
+receiver is indexed by its verifier; `admitVia` runs the verifier on every claim
+before `prepare` and hands `prepare` the claims it accepted, as a `Vouchers`
+value of that verifier.  `Vouchers` has a private constructor: no family can
+build one, and one minted under another verifier has another type.  So a gate
+that needs "this key signed this message" (a capability-mode authorization, a
+key rotation's possession proof) reads it from the Receiver's verdict, as a
+value, instead of assuming it and having a theorem re-derive it afterwards.
 
 * `admit_signature_first` -- an ingress one of whose signature claims the
-  verdict oracle refuses is refused `unauthenticated`, with a refusal computed
-  from the claims and the verdicts alone: neither `prepare` (the gate, the
+  vouchers do not cover is refused `unauthenticated`, with a refusal computed
+  from the claims and the vouchers alone: neither `prepare` (the gate, the
   re-execution) nor the shape check is consulted.  Every receiver, any `prepare`.
 * `admit_ok_iff` -- admission is exactly: the claims resolve, every claim is
-  vouched for, preparation succeeds, the shape check passes, and the written
-  cells' laws raise no fault.
-* `admitVia_vouches_only_verified`, `admitVia_claims_verified` -- the oracle
-  `admitVia` builds vouches only for claims the verifier accepted, so an
-  admitted ingress had every claim verified; `admitVia_unauthenticated` -- a
-  claim the verifier refuses refuses the ingress before preparation.
+  vouched for, preparation (given those vouchers) succeeds, the shape check
+  passes, and the written cells' laws raise no fault.
+* `admitVia_vouchers_verified`, `admitVia_claims_verified` -- the vouchers
+  `admitVia` mints hold only claims the verifier accepted, so an admitted
+  ingress had every claim verified; `admitVia_unauthenticated` -- a claim the
+  verifier refuses refuses the ingress before preparation.
+* `receive_committed_prepared_verified` -- the `prepare` call behind a committed
+  outcome was handed vouchers every claim of which the verifier accepted: a gate
+  never holds a token the verifier did not issue.
 * `guardsOff_readonly`, `guardsOff_complete` -- read guards are never on a
   written cell, and no guard on an unwritten cell is dropped.
 * `replay_only_original`, `replay_after_install` -- a retry is confirmed only by
   the journal record of the same transaction with the same event and
   nullifiers, and the record live admission installs is exactly one replay
   confirms (replay = live admission).
-* `receive_committed_admitted` -- a committed outcome of `receive` is an
-  admission by `admitVia` over the same verifier, followed by the append.
+* `receive_committed` -- a committed outcome of `receive` is an admission by
+  `admitVia` over the receiver's verifier, followed by the append.
 -/
 import Theory.AssertAxioms
 
@@ -68,6 +81,47 @@ theorem firstRefused_some {ok : SigQuery → Bool} {claims : List SigQuery} {cla
 def need {ε α : Type} (reason : ε) : Option α → Except ε α
   | none => .error reason
   | some value => .ok value
+
+/-! ## The verifier's token -/
+
+/-- **The claims a receiver's verifier accepted**, as `prepare` receives them.
+Indexed by the verifier: a value minted under one verifier is not a value of
+another's type.  The constructor is private to this module and its only use is
+`Receiver.admitVia`, after `verify` answered `true` on each claim
+(`Receiver.verifyAll`); `Vouchers.empty` vouches for nothing. -/
+structure Vouchers {m : Type → Type} (verify : SigQuery → m (Except String Bool)) where
+  private mk ::
+  verified : List SigQuery
+
+namespace Vouchers
+
+variable {m : Type → Type} {verify : SigQuery → m (Except String Bool)}
+
+/-- No claim vouched for: what an ingress with no claims is prepared under
+(reducible: it is the value `admitVia` mints for an empty claim list). -/
+abbrev empty : Vouchers verify := ⟨[]⟩
+
+/-- The oracle a voucher set answers: exactly its claims. -/
+def vouches (vouchers : Vouchers verify) (claim : SigQuery) : Bool := decide (claim ∈ vouchers.verified)
+
+theorem vouches_iff (vouchers : Vouchers verify) (claim : SigQuery) :
+    vouchers.vouches claim = true ↔ claim ∈ vouchers.verified := by
+  simp [vouches]
+
+/-- The vouched claim with this key and message, if any: a gate that needs
+"this key signed this message" asks for it without naming the signature bytes. -/
+def signed? (vouchers : Vouchers verify) (publicKey message : List UInt8) : Option SigQuery :=
+  vouchers.verified.find? fun claim => claim.publicKey == publicKey && claim.message == message
+
+theorem signed?_some {vouchers : Vouchers verify} {publicKey message : List UInt8}
+    {claim : SigQuery} (found : vouchers.signed? publicKey message = some claim) :
+    claim ∈ vouchers.verified ∧ claim.publicKey = publicKey ∧ claim.message = message := by
+  refine ⟨List.mem_of_find?_eq_some found, ?_⟩
+  simpa using List.find?_some found
+
+theorem empty_verified : (empty : Vouchers verify).verified = [] := rfl
+
+end Vouchers
 
 /-! ## The journal a receiver commits through -/
 
@@ -106,12 +160,12 @@ instance (J : Journal) : DecidableEq J.Nullifier := J.nullifierDecEq
 
 /-! ## The receiver declaration -/
 
-/-- One receiving family: its codec, its command, the signature claims it
-makes, its gate and per-cell patch (`prepare`, `payload`), its shape check, and
-its journal identity (`txId`, `event`, `nullifiers`).  Everything else -- the
-order of the steps, the refusal type, the accepted object, replay, the outcome
--- is defined once below. -/
-structure Receiver (J : Journal) where
+/-- One receiving family under the verifier `verify`: its codec, its command,
+the signature claims it makes, its gate and per-cell patch (`prepare`, given the
+verifier's vouchers; `payload`), its shape check, and its journal identity
+(`txId`, `event`, `nullifiers`).  Everything else -- the order of the steps, the
+refusal type, the accepted object, replay, the outcome -- is defined once below. -/
+structure Receiver (J : Journal) {m : Type → Type} (verify : SigQuery → m (Except String Bool)) where
   Env : Type
   Ingress : Type
   Command : Type
@@ -121,8 +175,9 @@ structure Receiver (J : Journal) where
   command : Ingress → Command
   /-- The signature claims: from the decoded ingress and a key lookup. -/
   claims : Env → J.State → Ingress → Except Reject (List SigQuery)
-  /-- The gate and the patch: the only step that may re-execute anything. -/
-  prepare : (env : Env) → (state : J.State) → (command : Command) →
+  /-- The gate and the patch: the only step that may re-execute anything.  It
+  receives the claims the verifier accepted, and nothing else about signatures. -/
+  prepare : Vouchers verify → (env : Env) → (state : J.State) → (command : Command) →
     Except Reject (Prepared env state command)
   shape : {env : Env} → {state : J.State} → {command : Command} →
     Prepared env state command → Bool
@@ -154,25 +209,48 @@ inductive Refusal (Reject Fault : Type) where
 
 namespace Receiver
 
-variable (R : Receiver J)
+/-! ## The verifier -/
+
+/-- Verify the claims in order, stopping at the first refusal; the result is
+the claims the verifier accepted (a prefix of `claims`). -/
+def verifyAll {n : Type → Type} [Monad n] (check : SigQuery → n (Except String Bool)) :
+    List SigQuery → n (Except String (List SigQuery))
+  | [] => pure (.ok [])
+  | claim :: rest => do
+      match ← check claim with
+      | .error detail => pure (.error detail)
+      | .ok false => pure (.ok [])
+      | .ok true =>
+          match ← verifyAll check rest with
+          | .error detail => pure (.error detail)
+          | .ok verified => pure (.ok (claim :: verified))
+
+/-- The verifier that answers `v`, at `Id`. -/
+def pureVerifier (v : SigQuery → Bool) : SigQuery → Id (Except String Bool) :=
+  fun claim => pure (.ok (v claim))
+
+section Generic
+
+variable {m : Type → Type} {verify : SigQuery → m (Except String Bool)}
+variable (R : Receiver J verify)
 
 /-- An admitted ingress: only `admit` constructs one. -/
 structure Accepted (env : R.Env) (state : J.State) (ingress : R.Ingress) where
   private mk ::
   prepared : R.Prepared env state (R.command ingress)
 
-/-- Admission over a verdict oracle: authenticate every claim, then prepare,
-then check the physical shape, then the written cells' laws.  The order is the
-content of `admit_signature_first`. -/
-def admit (env : R.Env) (state : J.State) (ingress : R.Ingress) (ok : SigQuery → Bool) :
+/-- Admission under a voucher set: every claim must be vouched for, then
+prepare (given the vouchers), then check the physical shape, then the written
+cells' laws.  The order is the content of `admit_signature_first`. -/
+def admit (env : R.Env) (state : J.State) (ingress : R.Ingress) (vouchers : Vouchers verify) :
     Except (Refusal R.Reject R.Fault) (R.Accepted env state ingress) :=
   match R.claims env state ingress with
   | .error reason => .error (.family reason)
   | .ok claims =>
-      match firstRefused ok claims with
+      match firstRefused vouchers.vouches claims with
       | some claim => .error (.unauthenticated claim)
       | none =>
-          match R.prepare env state (R.command ingress) with
+          match R.prepare vouchers env state (R.command ingress) with
           | .error reason => .error (.family reason)
           | .ok prepared =>
               if R.shape prepared then
@@ -181,24 +259,24 @@ def admit (env : R.Env) (state : J.State) (ingress : R.Ingress) (ok : SigQuery �
                 | some fault => .error (.law fault)
               else .error .shape
 
-/-- **Signature before any re-execution.**  When a claim is refused, admission
-is the `unauthenticated` refusal of the first refused claim -- a value fixed by
-the claims and the oracle alone.  The statement holds for every receiver, so
-for every `prepare` and `shape`: neither is consulted. -/
+/-- **Signature before any re-execution.**  When a claim is not vouched for,
+admission is the `unauthenticated` refusal of the first such claim -- a value
+fixed by the claims and the vouchers alone.  The statement holds for every
+receiver, so for every `prepare` and `shape`: neither is consulted. -/
 theorem admit_signature_first {env : R.Env} {state : J.State} {ingress : R.Ingress}
-    {ok : SigQuery → Bool} {claims : List SigQuery} {claim : SigQuery}
+    {vouchers : Vouchers verify} {claims : List SigQuery} {claim : SigQuery}
     (resolved : R.claims env state ingress = .ok claims)
-    (refused : firstRefused ok claims = some claim) :
-    R.admit env state ingress ok = .error (.unauthenticated claim) := by
+    (refused : firstRefused vouchers.vouches claims = some claim) :
+    R.admit env state ingress vouchers = .error (.unauthenticated claim) := by
   simp [admit, resolved, refused]
 
 /-- **Admission, exactly.** -/
 theorem admit_ok_iff {env : R.Env} {state : J.State} {ingress : R.Ingress}
-    {ok : SigQuery → Bool} (accepted : R.Accepted env state ingress) :
-    R.admit env state ingress ok = .ok accepted ↔
+    {vouchers : Vouchers verify} (accepted : R.Accepted env state ingress) :
+    R.admit env state ingress vouchers = .ok accepted ↔
       ∃ claims, R.claims env state ingress = .ok claims ∧
-        (∀ claim ∈ claims, ok claim = true) ∧
-        R.prepare env state (R.command ingress) = .ok accepted.prepared ∧
+        (∀ claim ∈ claims, vouchers.vouches claim = true) ∧
+        R.prepare vouchers env state (R.command ingress) = .ok accepted.prepared ∧
         R.shape accepted.prepared = true ∧ R.lawFault accepted.prepared = none := by
   obtain ⟨prepared⟩ := accepted
   unfold admit
@@ -218,64 +296,57 @@ theorem admit_ok_iff {env : R.Env} {state : J.State} {ingress : R.Ingress}
             split at admitted
             · rename_i lawful
               cases admitted
-              exact ⟨claims, resolved, (firstRefused_none_iff ok claims).1 none_refused,
+              exact ⟨claims, resolved, (firstRefused_none_iff _ claims).1 none_refused,
                 preparedEq, shaped, lawful⟩
             · cases admitted
           · cases admitted
   · rintro ⟨claims, resolved, verified, preparedEq, shaped, lawful⟩
-    simp only [resolved, (firstRefused_none_iff ok claims).2 verified, preparedEq, shaped,
+    simp only [resolved, (firstRefused_none_iff _ claims).2 verified, preparedEq, shaped,
       lawful, if_true]
 
 /-- **A law fault refuses**, naming the fault: a patch that prepares and passes
 the physical shape but whose laws raise `fault` is refused `law fault`. -/
 theorem admit_law_refused {env : R.Env} {state : J.State} {ingress : R.Ingress}
-    {ok : SigQuery → Bool} {claims : List SigQuery}
+    {vouchers : Vouchers verify} {claims : List SigQuery}
     {prepared : R.Prepared env state (R.command ingress)} {fault : R.Fault}
     (resolved : R.claims env state ingress = .ok claims)
-    (verified : ∀ claim ∈ claims, ok claim = true)
-    (preparedEq : R.prepare env state (R.command ingress) = .ok prepared)
+    (verified : ∀ claim ∈ claims, vouchers.vouches claim = true)
+    (preparedEq : R.prepare vouchers env state (R.command ingress) = .ok prepared)
     (shaped : R.shape prepared = true) (faulted : R.lawFault prepared = some fault) :
-    R.admit env state ingress ok = .error (.law fault) := by
-  simp [admit, resolved, (firstRefused_none_iff ok claims).2 verified, preparedEq, shaped, faulted]
+    R.admit env state ingress vouchers = .error (.law fault) := by
+  simp [admit, resolved, (firstRefused_none_iff _ claims).2 verified, preparedEq, shaped, faulted]
 
-/-! ## The verifier, and admission through it -/
-
-/-- Verify the claims in order, stopping at the first refusal; the result is
-the claims the verifier accepted (a prefix of `claims`). -/
-def verifyAll {m : Type → Type} [Monad m] (verify : SigQuery → m (Except String Bool)) :
-    List SigQuery → m (Except String (List SigQuery))
-  | [] => pure (.ok [])
-  | claim :: rest => do
-      match ← verify claim with
-      | .error detail => pure (.error detail)
-      | .ok false => pure (.ok [])
-      | .ok true =>
-          match ← verifyAll verify rest with
-          | .error detail => pure (.error detail)
-          | .ok verified => pure (.ok (claim :: verified))
-
-/-- The oracle of a verified list: it vouches for exactly those claims. -/
-def vouches (verified : List SigQuery) (claim : SigQuery) : Bool := decide (claim ∈ verified)
-
-/-- An admission together with the oracle it was made under. -/
+/-- An admission together with the vouchers it was made under. -/
 structure Admitted (env : R.Env) (state : J.State) (ingress : R.Ingress) where
-  ok : SigQuery → Bool
+  vouchers : Vouchers verify
   accepted : R.Accepted env state ingress
-  admitted : R.admit env state ingress ok = .ok accepted
+  admitted : R.admit env state ingress vouchers = .ok accepted
 
 /-- **Every admission is lawful**: its prepared patch passed the physical shape
 and its laws raised no fault. -/
-theorem Admitted.lawful {R : Receiver J} {env : R.Env} {state : J.State} {ingress : R.Ingress}
-    (admission : R.Admitted env state ingress) :
+theorem Admitted.lawful {R : Receiver J verify} {env : R.Env} {state : J.State}
+    {ingress : R.Ingress} (admission : R.Admitted env state ingress) :
     R.shape admission.accepted.prepared = true ∧ R.lawFault admission.accepted.prepared = none := by
   obtain ⟨-, -, -, -, shaped, lawful⟩ := (R.admit_ok_iff admission.accepted).1 admission.admitted
   exact ⟨shaped, lawful⟩
 
-/-- The one admission path: resolve claims, verify them, admit.  The live
-receiver and the audit walk both call this, so the walk's re-admission is the
-live admission. -/
-def admitVia {m : Type → Type} [Monad m] (verify : SigQuery → m (Except String Bool))
-    (env : R.Env) (state : J.State) (ingress : R.Ingress) :
+/-- **Every admission was prepared under its own vouchers**, and each of its
+claims is among them. -/
+theorem Admitted.prepared {R : Receiver J verify} {env : R.Env} {state : J.State}
+    {ingress : R.Ingress} (admission : R.Admitted env state ingress) :
+    R.prepare admission.vouchers env state (R.command ingress) = .ok admission.accepted.prepared ∧
+      ∃ claims, R.claims env state ingress = .ok claims ∧
+        ∀ claim ∈ claims, claim ∈ admission.vouchers.verified := by
+  obtain ⟨claims, resolved, vouched, preparedEq, -, -⟩ :=
+    (R.admit_ok_iff admission.accepted).1 admission.admitted
+  exact ⟨preparedEq, claims, resolved, fun claim member =>
+    (Vouchers.vouches_iff _ _).1 (vouched claim member)⟩
+
+/-- The one admission path: resolve claims, verify them with the receiver's
+verifier, mint the vouchers of the accepted claims, admit.  The live receiver
+and the audit walk both call this, so the walk's re-admission is the live
+admission.  This is the only place a `Vouchers` value is constructed. -/
+def admitVia [Monad m] (env : R.Env) (state : J.State) (ingress : R.Ingress) :
     m (Except (Refusal R.Reject R.Fault) (R.Admitted env state ingress)) := do
   match R.claims env state ingress with
   | .error reason => pure (.error (.family reason))
@@ -283,9 +354,9 @@ def admitVia {m : Type → Type} [Monad m] (verify : SigQuery → m (Except Stri
       match ← verifyAll verify claims with
       | .error detail => pure (.error (.verifier detail))
       | .ok verified =>
-          match admitted : R.admit env state ingress (vouches verified) with
+          match admitted : R.admit env state ingress ⟨verified⟩ with
           | .error reason => pure (.error reason)
-          | .ok accepted => pure (.ok ⟨vouches verified, accepted, admitted⟩)
+          | .ok accepted => pure (.ok ⟨⟨verified⟩, accepted, admitted⟩)
 
 /-! ## Read guards -/
 
@@ -359,12 +430,6 @@ theorem replay_after_install {env : R.Env} {state : J.State} {ingress : R.Ingres
   rw [installed, intent, J.lookup_install]
   simp
 
-/-- One append attempt: the store's evidence that exactly this intent was
-appended, or any other settlement. -/
-inductive Commit (Exact : Type) (Other : Type) where
-  | exact (witness : Exact)
-  | other (outcome : Other)
-
 /-- What one receipt attempt produced. -/
 inductive Outcome (env : R.Env) (state : J.State)
     (Exact : J.State → J.Intent → Type) (Other : Type) where
@@ -375,10 +440,23 @@ inductive Outcome (env : R.Env) (state : J.State)
       (witness : Exact state (R.intent admission.accepted))
   | durable (ingress : R.Ingress) (outcome : Other)
 
+end Generic
+
+/-- One append attempt: the store's evidence that exactly this intent was
+appended, or any other settlement. -/
+inductive Commit (Exact : Type) (Other : Type) where
+  | exact (witness : Exact)
+  | other (outcome : Other)
+
+section Pipeline
+
+variable {m : Type → Type} {verify : SigQuery → m (Except String Bool)}
+variable (R : Receiver J verify)
+
 /-- **The receiving pipeline**, the one copy: decode, exact retry, admission
-(`admitVia`: claims, verification, then preparation), append. -/
-def receive {m : Type → Type} [Monad m] {Exact : J.State → J.Intent → Type} {Other : Type}
-    (verify : SigQuery → m (Except String Bool))
+(`admitVia`: claims, the receiver's verifier, then preparation under the
+vouchers), append. -/
+def receive [Monad m] {Exact : J.State → J.Intent → Type} {Other : Type}
     (append : (state : J.State) → (intent : J.Intent) → m (Commit (Exact state intent) Other))
     (env : R.Env) (state : J.State) (bytes : List UInt8) :
     m (R.Outcome env state Exact Other) := do
@@ -389,122 +467,32 @@ def receive {m : Type → Type} [Monad m] {Exact : J.State → J.Intent → Type
       | some (.ok selected) => pure (.replayed selected)
       | some (.error ()) => pure .conflict
       | none =>
-          match ← R.admitVia verify env state ingress with
+          match ← R.admitVia env state ingress with
           | .error reason => pure (.refused reason)
           | .ok admission =>
               match ← append state (R.intent admission.accepted) with
               | .exact witness => pure (.committed ingress admission witness)
               | .other outcome => pure (.durable ingress outcome)
 
+end Pipeline
+
 /-! ## The verifier's verdicts, read at `Id` -/
 
-section Verdicts
+section AtId
 
-variable (v : SigQuery → Bool)
-
-/-- The verifier that answers `v`. -/
-def pureVerifier : SigQuery → Id (Except String Bool) := fun claim => pure (.ok (v claim))
-
-/-- At `Id`, the verifier accepts exactly the longest prefix it vouches for. -/
-theorem verifyAll_pure :
-    ∀ claims : List SigQuery,
-      verifyAll (pureVerifier v) claims = (pure (.ok (claims.takeWhile v)) : Id _)
-  | [] => rfl
-  | claim :: rest => by
-      cases accepted : v claim
-      · simp [verifyAll, pureVerifier, accepted]
-      · have tail := verifyAll_pure rest
-        simp only [verifyAll, pureVerifier, bind, pure] at tail ⊢
-        simp [accepted, tail]
-
-theorem takeWhile_vouched :
-    ∀ {claims : List SigQuery} {claim : SigQuery}, claim ∈ claims.takeWhile v → v claim = true
-  | [], _, member => by simp at member
-  | head :: rest, claim, member => by
-      cases verdict : v head
-      · simp [verdict] at member
-      · simp only [List.takeWhile_cons, verdict] at member
-        rcases List.mem_cons.mp member with same | later
-        · exact same ▸ verdict
-        · exact takeWhile_vouched later
-
-theorem vouches_takeWhile {claims : List SigQuery} {claim : SigQuery}
-    (vouched : vouches (claims.takeWhile v) claim = true) : v claim = true := by
-  simp only [vouches, decide_eq_true_eq] at vouched
-  exact takeWhile_vouched v vouched
-
-/-- **The oracle vouches only for verified claims.** -/
-theorem admitVia_vouches_only_verified {env : R.Env} {state : J.State} {ingress : R.Ingress}
-    {admission : R.Admitted env state ingress}
-    (admitted : R.admitVia (pureVerifier v) env state ingress = (pure (.ok admission) : Id _)) :
-    ∀ claim, admission.ok claim = true → v claim = true := by
-  unfold admitVia at admitted
-  split at admitted
-  · cases admitted
-  · rename_i claims _
-    rw [show (verifyAll (pureVerifier v) claims >>= _) = _ from
-      congrArg (· >>= _) (verifyAll_pure v claims)] at admitted
-    simp only [bind, pure] at admitted
-    split at admitted
-    · cases admitted
-    · cases admitted
-      intro claim vouched
-      exact vouches_takeWhile v vouched
-
-/-- **An admitted ingress had every claim verified.** -/
-theorem admitVia_claims_verified {env : R.Env} {state : J.State} {ingress : R.Ingress}
-    {admission : R.Admitted env state ingress}
-    (admitted : R.admitVia (pureVerifier v) env state ingress = (pure (.ok admission) : Id _)) :
-    ∃ claims, R.claims env state ingress = .ok claims ∧ ∀ claim ∈ claims, v claim = true := by
-  obtain ⟨claims, resolved, vouched, -, -, -⟩ := (R.admit_ok_iff admission.accepted).1 admission.admitted
-  exact ⟨claims, resolved, fun claim member =>
-    R.admitVia_vouches_only_verified v admitted claim (vouched claim member)⟩
-
-/-- **A refused signature refuses before preparation**, through the live path:
-if the verifier refuses one of the claims, `admitVia` returns an
-`unauthenticated` refusal naming one of the claims -- never an admission, and
-never a `family` refusal that `prepare` could have produced. -/
-theorem admitVia_unauthenticated {env : R.Env} {state : J.State} {ingress : R.Ingress}
-    {claims : List SigQuery} {bad : SigQuery}
-    (resolved : R.claims env state ingress = .ok claims)
-    (member : bad ∈ claims) (refused : v bad = false) :
-    ∃ claim, claim ∈ claims ∧
-      R.admitVia (pureVerifier v) env state ingress =
-        (pure (.error (.unauthenticated claim)) : Id _) := by
-  have notNone : firstRefused (vouches (claims.takeWhile v)) claims ≠ none := by
-    intro none_refused
-    have := (firstRefused_none_iff _ claims).1 none_refused bad member
-    rw [vouches_takeWhile v this] at refused
-    cases refused
-  obtain ⟨claim, found⟩ := Option.ne_none_iff_exists'.1 notNone
-  obtain ⟨claimMember, -⟩ := firstRefused_some found
-  refine ⟨claim, claimMember, ?_⟩
-  unfold admitVia
-  simp only [resolved]
-  rw [show (verifyAll (pureVerifier v) claims >>= _) = _ from
-    congrArg (· >>= _) (verifyAll_pure v claims)]
-  simp only [bind, pure]
-  split
-  · rename_i reason refusedEq
-    rw [R.admit_signature_first resolved found] at refusedEq
-    cases refusedEq
-    rfl
-  · rename_i accepted admittedEq
-    rw [R.admit_signature_first resolved found] at admittedEq
-    cases admittedEq
+variable {verify : SigQuery → Id (Except String Bool)} (R : Receiver J verify)
 
 /-- **A committed outcome is a fresh, admitted, appended ingress**: the bytes
 decoded, the journal did not hold the transaction, `admitVia` (claims, the
 verifier, then preparation) admitted it, and the append returned exactly the
 witness the outcome carries. -/
-theorem receive_committed {verify : SigQuery → Id (Except String Bool)}
-    {Exact : J.State → J.Intent → Type} {Other : Type}
+theorem receive_committed {Exact : J.State → J.Intent → Type} {Other : Type}
     {append : (state : J.State) → (intent : J.Intent) → Id (Commit (Exact state intent) Other)}
     {env : R.Env} {state : J.State} {bytes : List UInt8} {ingress : R.Ingress}
     {admission : R.Admitted env state ingress} {witness : Exact state (R.intent admission.accepted)}
-    (committed : R.receive verify append env state bytes = pure (.committed ingress admission witness)) :
+    (committed : R.receive append env state bytes = pure (.committed ingress admission witness)) :
     R.decode bytes = some ingress ∧ R.replay env state ingress = none ∧
-      R.admitVia verify env state ingress = pure (.ok admission) ∧
+      R.admitVia env state ingress = pure (.ok admission) ∧
       append state (R.intent admission.accepted) = pure (.exact witness) := by
   unfold receive at committed
   split at committed
@@ -524,29 +512,197 @@ theorem receive_committed {verify : SigQuery → Id (Except String Bool)}
           exact ⟨decodedEq, fresh, admittedEq, appendedEq⟩
         · cases committed
 
-/-- At the pure verifier: a committed ingress had every claim verified. -/
-theorem receive_committed_verified (v : SigQuery → Bool)
-    {Exact : J.State → J.Intent → Type} {Other : Type}
-    {append : (state : J.State) → (intent : J.Intent) → Id (Commit (Exact state intent) Other)}
-    {env : R.Env} {state : J.State} {bytes : List UInt8} {ingress : R.Ingress}
-    {admission : R.Admitted env state ingress} {witness : Exact state (R.intent admission.accepted)}
-    (committed : R.receive (pureVerifier v) append env state bytes =
-      pure (.committed ingress admission witness)) :
-    ∃ claims, R.claims env state ingress = .ok claims ∧ ∀ claim ∈ claims, v claim = true :=
-  R.admitVia_claims_verified v (R.receive_committed committed).2.2.1
-
 /-- **A committed ingress is lawful**: the admission a committed outcome carries
 passed the physical shape and raised no law fault. -/
-theorem receive_committed_lawFault {verify : SigQuery → Id (Except String Bool)}
-    {Exact : J.State → J.Intent → Type} {Other : Type}
+theorem receive_committed_lawFault {Exact : J.State → J.Intent → Type} {Other : Type}
     {append : (state : J.State) → (intent : J.Intent) → Id (Commit (Exact state intent) Other)}
     {env : R.Env} {state : J.State} {bytes : List UInt8} {ingress : R.Ingress}
     {admission : R.Admitted env state ingress} {witness : Exact state (R.intent admission.accepted)}
-    (_committed : R.receive verify append env state bytes = pure (.committed ingress admission witness)) :
+    (_committed : R.receive append env state bytes = pure (.committed ingress admission witness)) :
     R.shape admission.accepted.prepared = true ∧ R.lawFault admission.accepted.prepared = none :=
   admission.lawful
 
-end Verdicts
+/-- At `Id`, the verifier's accepted list holds only claims it answered `true` on. -/
+theorem verifyAll_sound (verify : SigQuery → Id (Except String Bool)) :
+    ∀ {claims verified : List SigQuery}, verifyAll verify claims = (pure (.ok verified) : Id _) →
+      ∀ claim ∈ verified, verify claim = pure (.ok true)
+  | [], verified, ran => by
+      intro claim member
+      have empty : (Except.ok [] : Except String (List SigQuery)) = .ok verified := ran
+      cases empty
+      cases member
+  | head :: rest, verified, ran => by
+      intro claim member
+      cases verdict : verify head with
+      | error detail =>
+          simp [verifyAll, verdict, bind, pure] at ran
+      | ok accepted =>
+          cases accepted with
+          | false =>
+              simp [verifyAll, verdict, bind, pure] at ran
+              cases ran
+              cases member
+          | true =>
+              cases tail : verifyAll verify rest with
+              | error detail => simp [verifyAll, verdict, tail, bind, pure] at ran
+              | ok verifiedRest =>
+                  simp [verifyAll, verdict, tail, bind, pure] at ran
+                  cases ran
+                  rcases List.mem_cons.mp member with same | later
+                  · subst same
+                    exact verdict
+                  · exact verifyAll_sound verify tail claim later
+
+/-- **A claim the verifier does not accept refuses before preparation**, under
+any `Id` verifier (a recorded transcript answers an unrecorded claim with an
+error, never `false`): `admitVia` returns a `verifier` or an `unauthenticated`
+refusal -- never an admission, and never a refusal `prepare` produced. -/
+theorem admitVia_refused_before_prepare {env : R.Env} {state : J.State} {ingress : R.Ingress}
+    {claims : List SigQuery} {bad : SigQuery}
+    (resolved : R.claims env state ingress = .ok claims) (member : bad ∈ claims)
+    (notAccepted : verify bad ≠ pure (.ok true)) :
+    (∃ detail, R.admitVia env state ingress = (pure (.error (.verifier detail)) : Id _)) ∨
+      ∃ claim ∈ claims,
+        R.admitVia env state ingress = (pure (.error (.unauthenticated claim)) : Id _) := by
+  unfold admitVia
+  simp only [resolved]
+  cases ran : verifyAll verify claims with
+  | error detail => exact Or.inl ⟨detail, rfl⟩
+  | ok verified =>
+      have notIn : bad ∉ verified := fun mem => notAccepted (verifyAll_sound verify ran bad mem)
+      have notNone : firstRefused (Vouchers.vouches (⟨verified⟩ : Vouchers verify)) claims ≠ none := by
+        intro none_refused
+        exact notIn ((Vouchers.vouches_iff _ _).1
+          ((firstRefused_none_iff _ claims).1 none_refused bad member))
+      obtain ⟨claim, found⟩ := Option.ne_none_iff_exists'.1 notNone
+      obtain ⟨claimMember, -⟩ := firstRefused_some found
+      refine Or.inr ⟨claim, claimMember, ?_⟩
+      simp only [bind, pure]
+      split
+      · rename_i reason refusedEq
+        rw [R.admit_signature_first resolved found] at refusedEq
+        cases refusedEq
+        rfl
+      · rename_i accepted admittedEq
+        rw [R.admit_signature_first resolved found] at admittedEq
+        cases admittedEq
+
+end AtId
+
+section PureVerdicts
+
+variable {v : SigQuery → Bool} (R : Receiver J (pureVerifier v))
+
+/-- At `Id`, the verifier accepts exactly the longest prefix it vouches for. -/
+theorem verifyAll_pure (v : SigQuery → Bool) :
+    ∀ claims : List SigQuery,
+      verifyAll (pureVerifier v) claims = (pure (.ok (claims.takeWhile v)) : Id _)
+  | [] => rfl
+  | claim :: rest => by
+      cases accepted : v claim
+      · simp [verifyAll, pureVerifier, accepted]
+      · have tail := verifyAll_pure v rest
+        simp only [verifyAll, pureVerifier, bind, pure] at tail ⊢
+        simp [accepted, tail]
+
+theorem takeWhile_vouched (v : SigQuery → Bool) :
+    ∀ {claims : List SigQuery} {claim : SigQuery}, claim ∈ claims.takeWhile v → v claim = true
+  | [], _, member => by simp at member
+  | head :: rest, claim, member => by
+      cases verdict : v head
+      · simp [verdict] at member
+      · simp only [List.takeWhile_cons, verdict] at member
+        rcases List.mem_cons.mp member with same | later
+        · exact same ▸ verdict
+        · exact takeWhile_vouched v later
+
+/-- **The vouchers hold only verified claims**: every claim in the vouchers of
+an admission `admitVia` made is one the verifier accepted. -/
+theorem admitVia_vouchers_verified {env : R.Env} {state : J.State} {ingress : R.Ingress}
+    {admission : R.Admitted env state ingress}
+    (admitted : R.admitVia env state ingress = (pure (.ok admission) : Id _)) :
+    ∀ claim ∈ admission.vouchers.verified, v claim = true := by
+  unfold admitVia at admitted
+  split at admitted
+  · cases admitted
+  · rename_i claims _
+    rw [show (verifyAll (pureVerifier v) claims >>= _) = _ from
+      congrArg (· >>= _) (verifyAll_pure v claims)] at admitted
+    simp only [bind, pure] at admitted
+    split at admitted
+    · cases admitted
+    · cases admitted
+      intro claim member
+      exact takeWhile_vouched v member
+
+/-- **An admitted ingress had every claim verified.** -/
+theorem admitVia_claims_verified {env : R.Env} {state : J.State} {ingress : R.Ingress}
+    {admission : R.Admitted env state ingress}
+    (admitted : R.admitVia env state ingress = (pure (.ok admission) : Id _)) :
+    ∃ claims, R.claims env state ingress = .ok claims ∧ ∀ claim ∈ claims, v claim = true := by
+  obtain ⟨-, claims, resolved, vouched⟩ := admission.prepared
+  exact ⟨claims, resolved, fun claim member =>
+    R.admitVia_vouchers_verified admitted claim (vouched claim member)⟩
+
+/-- **A refused signature refuses before preparation**, through the live path:
+if the verifier refuses one of the claims, `admitVia` returns an
+`unauthenticated` refusal naming one of the claims -- never an admission, and
+never a `family` refusal that `prepare` could have produced. -/
+theorem admitVia_unauthenticated {env : R.Env} {state : J.State} {ingress : R.Ingress}
+    {claims : List SigQuery} {bad : SigQuery}
+    (resolved : R.claims env state ingress = .ok claims)
+    (member : bad ∈ claims) (refused : v bad = false) :
+    ∃ claim, claim ∈ claims ∧
+      R.admitVia env state ingress = (pure (.error (.unauthenticated claim)) : Id _) := by
+  have notNone : firstRefused
+      (Vouchers.vouches (⟨claims.takeWhile v⟩ : Vouchers (pureVerifier v))) claims ≠ none := by
+    intro none_refused
+    have vouched := (firstRefused_none_iff _ claims).1 none_refused bad member
+    have := takeWhile_vouched v ((Vouchers.vouches_iff _ _).1 vouched)
+    rw [this] at refused
+    cases refused
+  obtain ⟨claim, found⟩ := Option.ne_none_iff_exists'.1 notNone
+  obtain ⟨claimMember, -⟩ := firstRefused_some found
+  refine ⟨claim, claimMember, ?_⟩
+  unfold admitVia
+  simp only [resolved]
+  rw [show (verifyAll (pureVerifier v) claims >>= _) = _ from
+    congrArg (· >>= _) (verifyAll_pure v claims)]
+  simp only [bind, pure]
+  split
+  · rename_i reason refusedEq
+    rw [R.admit_signature_first resolved found] at refusedEq
+    cases refusedEq
+    rfl
+  · rename_i accepted admittedEq
+    rw [R.admit_signature_first resolved found] at admittedEq
+    cases admittedEq
+
+/-- At the pure verifier: a committed ingress had every claim verified. -/
+theorem receive_committed_verified {Exact : J.State → J.Intent → Type} {Other : Type}
+    {append : (state : J.State) → (intent : J.Intent) → Id (Commit (Exact state intent) Other)}
+    {env : R.Env} {state : J.State} {bytes : List UInt8} {ingress : R.Ingress}
+    {admission : R.Admitted env state ingress} {witness : Exact state (R.intent admission.accepted)}
+    (committed : R.receive append env state bytes = pure (.committed ingress admission witness)) :
+    ∃ claims, R.claims env state ingress = .ok claims ∧ ∀ claim ∈ claims, v claim = true :=
+  R.admitVia_claims_verified (R.receive_committed committed).2.2.1
+
+/-- **`prepare` holds only what the verifier issued.**  The `prepare` call
+behind a committed outcome was handed exactly the admission's vouchers, and every
+claim in them is one the verifier accepted.  With `Vouchers`' private
+constructor, this is the whole of how a gate can come to hold a signature
+verdict. -/
+theorem receive_committed_prepared_verified {Exact : J.State → J.Intent → Type} {Other : Type}
+    {append : (state : J.State) → (intent : J.Intent) → Id (Commit (Exact state intent) Other)}
+    {env : R.Env} {state : J.State} {bytes : List UInt8} {ingress : R.Ingress}
+    {admission : R.Admitted env state ingress} {witness : Exact state (R.intent admission.accepted)}
+    (committed : R.receive append env state bytes = pure (.committed ingress admission witness)) :
+    R.prepare admission.vouchers env state (R.command ingress) = .ok admission.accepted.prepared ∧
+      ∀ claim ∈ admission.vouchers.verified, v claim = true :=
+  ⟨admission.prepared.1,
+    R.admitVia_vouchers_verified (R.receive_committed committed).2.2.1⟩
+
+end PureVerdicts
 
 end Receiver
 
@@ -554,8 +710,11 @@ end Receiver
 
 A two-line journal and receiver on which `receive` reaches both `committed`
 and `unauthenticated`, so the premises of `receive_committed`,
-`receive_committed_verified` and `admitVia_unauthenticated` are inhabited.  The
-deployed inhabitant is `Kernel.Receivers.SubjectKeyRotation.receiver`. -/
+`receive_committed_verified`, `receive_committed_prepared_verified` and
+`admitVia_unauthenticated` are inhabited.  Its `prepare` refuses unless the
+vouchers it is handed hold its one claim: the committed outcome is reached only
+through a voucher the verifier issued.  The deployed inhabitant is
+`Kernel.Receivers.SubjectKeyRotation.family`. -/
 namespace Fixture
 
 def journal : Journal where
@@ -577,7 +736,7 @@ def journal : Journal where
 
 def key : SigQuery := ⟨[1], [2], [3]⟩
 
-def receiver : Receiver journal where
+def receiver (v : SigQuery → Bool) : Receiver journal (Receiver.pureVerifier v) where
   Env := Unit
   Ingress := Nat
   Command := Nat
@@ -586,7 +745,10 @@ def receiver : Receiver journal where
   decode := fun bytes => bytes.head?.map UInt8.toNat
   command := id
   claims := fun _ _ _ => .ok [key]
-  prepare := fun _ _ _ => .ok ()
+  prepare := fun vouchers _ _ _ =>
+    match vouchers.signed? key.publicKey key.message with
+    | some _ => .ok ()
+    | none => .error ()
   shape := fun _ => true
   Fault := Empty
   lawFault := fun _ => none
@@ -604,25 +766,32 @@ def append : (state : journal.State) → (intent : journal.Intent) →
 
 theorem committed_reachable :
     ∃ ingress admission witness,
-      receiver.receive (Exact := Exact) (Other := Unit)
-          (Receiver.pureVerifier fun _ => true) append () [] [7] =
+      (receiver fun _ => true).receive (Exact := Exact) (Other := Unit) append () [] [7] =
         pure (.committed ingress admission witness) :=
   ⟨_, _, _, rfl⟩
 
 theorem unauthenticated_reachable :
-    receiver.receive (Exact := Exact) (Other := Unit)
-        (Receiver.pureVerifier fun _ => false) append () [] [7] =
+    (receiver fun _ => false).receive (Exact := Exact) (Other := Unit) append () [] [7] =
       pure (.refused (.unauthenticated key)) :=
+  rfl
+
+/-- The fixture's `prepare` refuses under the empty vouchers: the gate's
+"signed" branch is reachable only through `admitVia`. -/
+theorem prepare_unvouched_refused (v : SigQuery → Bool) :
+    (receiver v).prepare Vouchers.empty () [] (7 : Nat) = .error () :=
   rfl
 
 end Fixture
 
 #assert_axioms firstRefused_none_iff
 #assert_axioms firstRefused_some
+#assert_axioms Vouchers.vouches_iff
+#assert_axioms Vouchers.signed?_some
 #assert_axioms Receiver.admit_signature_first
 #assert_axioms Receiver.admit_ok_iff
 #assert_axioms Receiver.admit_law_refused
 #assert_axioms Receiver.Admitted.lawful
+#assert_axioms Receiver.Admitted.prepared
 #assert_axioms Receiver.receive_committed_lawFault
 #assert_axioms Receiver.guardsOff_readonly
 #assert_axioms Receiver.guardsOff_complete
@@ -630,13 +799,16 @@ end Fixture
 #assert_axioms Receiver.replay_after_install
 #assert_axioms Receiver.verifyAll_pure
 #assert_axioms Receiver.takeWhile_vouched
-#assert_axioms Receiver.vouches_takeWhile
-#assert_axioms Receiver.admitVia_vouches_only_verified
+#assert_axioms Receiver.admitVia_vouchers_verified
 #assert_axioms Receiver.admitVia_claims_verified
 #assert_axioms Receiver.admitVia_unauthenticated
 #assert_axioms Receiver.receive_committed
+#assert_axioms Receiver.verifyAll_sound
+#assert_axioms Receiver.admitVia_refused_before_prepare
 #assert_axioms Receiver.receive_committed_verified
+#assert_axioms Receiver.receive_committed_prepared_verified
 #assert_axioms Fixture.committed_reachable
 #assert_axioms Fixture.unauthenticated_reachable
+#assert_axioms Fixture.prepare_unvouched_refused
 
 end Minidregg.Theory.Receiving

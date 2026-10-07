@@ -341,14 +341,15 @@ key.  So plan, assembly, submit, lookup and status are open to the friend who
 holds only the next key. -/
 
 /-- Host-authored rotation plan: the exact possession frame the new key signs.
-It prepares the rotation first, assuming that signature, so a rotation the gate
-refuses (a key whose digest is not the commitment, a subject without one) is
-refused here by name. -/
+It runs the gate's checks first (`SubjectKeyRotation.check`, given that the new
+key will sign; nothing is admitted here), so a rotation the gate refuses (a key
+whose digest is not the commitment, a subject without one) is refused here by
+name. -/
 def rotationPlanLoaded (config : Config) (opened : Opened config)
     (commandBytes : List UInt8) : Except String SubjectKeyRotation.SigningPlan := do
   let command ← need "noncanonical subject key rotation command"
     (SubjectKeyRotation.commandCodec.decode commandBytes)
-  let _ ← (SubjectKeyRotation.prepare (NativeHostReplay.rotationEnv config)
+  let _ ← (SubjectKeyRotation.check (NativeHostReplay.rotationEnv config)
     opened.durable command).mapError (fun reason => s!"rotation preparation: {repr reason}")
   pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
     SubjectKeyRotation.possessionFrame config.deployment.domain config.profile.semantics command⟩
@@ -1110,8 +1111,9 @@ def enrollmentLookup (config : Config) (bytes : List UInt8) : IO Outcome := do
 /-- The Host settlement of every `Kernel.Receiving` family, one copy: a
 confirmed outcome is sealed against its original accepted prefix. -/
 def receivingOutcome (config : Config) (family : Receiving.Family) (label : String)
-    {laws : ReceivingLaw.Laws Durable} {env : family.Env} {durable : Durable} :
-    family.Outcome laws env durable → IO Outcome
+    {laws : ReceivingLaw.Laws Durable} {native : CredentialSignatureIO.NativeConfig}
+    {env : family.Env} {durable : Durable} :
+    family.Outcome laws native env durable → IO Outcome
   | .replayed (transactionId, (event : DurableDataIntent.StableEvent)) =>
       confirmed config .replayed transactionId event.eventId
   | .conflict => return refused .conflict "replay" "transaction identity conflict"
@@ -1815,6 +1817,8 @@ def payObservationAssemble (plan : PayCellDomain.SigningPlan) (signature : List 
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
   pure (PayObservation.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
+/-- Fresh submission of a report: the `Kernel.Receiving` family, verified by the
+pinned process, judged by the deployment's laws. -/
 def payObservationSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome := do
   match ← PayObservationReceiver.receiveLoaded config.deployment config.profile

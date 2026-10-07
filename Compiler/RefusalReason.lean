@@ -192,7 +192,8 @@ authority cell) are `unknownKey`: the subject has no usable current key. A
 moved subject-key epoch, a signed footprint whose authority read has changed,
 and a plan past its signed `validUntil` height are `staleRoot`: the signed plan
 no longer describes the current state. A footprint that does not decode is
-`malformed`; every envelope and binding failure is `badSignature`. -/
+`malformed`; every envelope and binding failure is `badSignature`, as is a
+signature the Receiver did not vouch for (`unvouched`). -/
 def ofSignature : CredentialSignatureAdmission.Reject → RefusalReason
   | .wrongDomain => .malformed
   | .missingCurrentKey => .unknownKey
@@ -206,6 +207,7 @@ def ofSignature : CredentialSignatureAdmission.Reject → RefusalReason
   | .malformedFootprint => .malformed
   | .footprintStale _ => .staleRoot
   | .expired _ _ => .staleRoot
+  | .unvouched => .badSignature
 
 theorem ofSignature_missingCurrentKey :
     ofSignature .missingCurrentKey = .unknownKey := rfl
