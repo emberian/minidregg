@@ -771,6 +771,26 @@ check('reopen-view-identical', {k: reopened.get(k) for k in ['height', 'record',
       {k: final.get(k) for k in ['height', 'record', 'state', 'total']},
       {'before': final.get('height'), 'after': reopened.get('height')})
 
+# --- DEPOSIT-FIXPOINT executed (cv 01a114fd-b96a): quote -> submit, fifty rounds ----------------
+# Each round learns the deposit from the Host's own underfunded refusal and submits exactly it. The
+# charged record spells digests and heights at fixed width (record frame v6), so the quote is the
+# same every round (each birth joins with `keep`: a set on existing state would be a blind write) and no submission is refused underfunded. Rounds are bounded by what the sponsor
+# can pay, so a short purse never reads as the defect.
+spare = balance(view('fixpoint-sponsor', {'accounts': [SPONSOR_ACCOUNT]}), SPONSOR_ACCOUNT)
+rounds = min(50, spare // (NEED + 2 * PRICE))
+underfunded, quotes = 0, set()
+for i in range(rounds):
+    birth(f'fixpoint-quote-{i}', sponsor, 'tally-three', PAIR, 'refused', 'underfunded',
+          init=variant('keep', record()))
+    q = re.search(r'underfunded (\d+) (\d+)', unhex(LAST['value'].get('detail', '')))
+    need = int(q.group(2)) if q else 0
+    quotes.add(need)
+    QUOTED[f'fixpoint-submit-{i}'] = need
+    birth(f'fixpoint-submit-{i}', sponsor, 'tally-three', need, 'installed', init=variant('keep', record()))
+    underfunded += 0 if results[-1]['ok'] else 1
+check('fixpoint-quote-submit-rounds', rounds == 50 and underfunded == 0 and len(quotes) == 1 and 0 not in quotes,
+      {'rounds': rounds, 'underfunded': underfunded, 'quotes': sorted(quotes)})
+
 checkpoints = [s1, s2, s3]
 (root / 'results.json').write_text(json.dumps({
     'rows': results, 'totals': totals, 'pin': PIN, 'objects': objects,
