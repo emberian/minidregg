@@ -207,6 +207,7 @@ class World:
         self.groups = []
         self.current = None
         self.totals = []
+        self.front_end_quoted = set()  # the opIds whose invoke declares its planned front end
         self.SECOND = second_subject
         self.SECOND_SPEND = '4002'
         self.attempts = self.root / 'attempts'
@@ -316,6 +317,8 @@ class World:
         resubmits the same body (a retry of the same operation) reuses it."""
         if body.get('kind') == 'invoke' and 'opId' not in body:
             body['opId'] = op_id()
+        if body.get('kind') == 'invoke' and body['opId'] not in self.front_end_quoted:
+            self.quote_front_end(label, workspace, body)
         out = self.attempts / label
         command = self.root / f'{label}.turn.json'
         command.write_text(json.dumps(body))
@@ -323,6 +326,43 @@ class World:
         if prepare:
             args += ['--prepare-only', 'true']
         return self.last_json(self.sh(label, self.mini, *args, ok=(0, 1, 2)))
+
+    # A planning envelope's front end: generous enough for any call tree a journey builds (it is only planned,
+    # never signed into a submission), so the plan reports the work the turn's replays actually draw.
+    PLAN_FRONT_END = 1 << 30
+    REFUSED_LOADS = 8
+
+    def quote_front_end(self, label, workspace, body):
+        """An invocation declares the front-end work its replays draw (GPT-6 row E: one meter over every frame's
+        method load and every send's deliverable check, `Invocation.frontEnd_within`). The client does not guess
+        it: it plans the invoke over a generous front end, reads the plan's `frontEnd`, and declares exactly that
+        in the envelope and in the postage (each send's delivery replays a load the invocation's meter drew, so
+        the total bounds it). Once per operation, so a retry resubmits the same body. A body whose envelope is
+        written by hand (a journey row that under-declares on purpose) sets `frontEndAsWritten` instead."""
+        self.front_end_quoted.add(body['opId'])
+        if body.pop('frontEndAsWritten', False):
+            return
+        probe = json.loads(json.dumps(body))
+        for key in ('envelope', 'postage'):
+            if key in probe:
+                probe[key]['replayBytes'] = str(self.PLAN_FRONT_END)
+                probe[key]['coreBytes'] = str(self.PLAN_FRONT_END)
+        command = self.root / f'{label}.front-end-plan.json'
+        command.write_text(json.dumps(probe))
+        r = self.sh(f'{label}-front-end-plan', self.mini, 'activity', '--action', 'submit', '--workspace', workspace,
+                    '--command', command, '--out', self.attempts / f'{label}-front-end-plan', '--prepare-only', 'true',
+                    ok=(0, 1, 2))
+        planned = (self.last_json(r) or {}).get('frontEnd')
+        if not planned or int(planned['replayBytes']) == 0:
+            # The plan decided no turn (it refuses): it reports no draws. The row judges that refusal, so the
+            # envelope must not run out first: declare room for REFUSED_LOADS loads of the largest published
+            # package (its source; its stored core plus a method core of at most twice that), affordable.
+            planned = {'replayBytes': self.REFUSED_LOADS * int(FRONT['replayBytes']),
+                       'coreBytes': self.REFUSED_LOADS * 3 * int(FRONT['coreBytes'])}
+        for key in ('envelope', 'postage'):
+            if key in body:
+                body[key]['replayBytes'] = str(planned['replayBytes'])
+                body[key]['coreBytes'] = str(planned['coreBytes'])
 
     def payer_of(self, workspace):
         """The submitter's own (account, spend capability): the sponsor's, or the enrolled second subject's."""

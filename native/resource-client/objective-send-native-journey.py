@@ -218,6 +218,15 @@ try:
 
     with w.group('S1-send'):
         before = inbox('poster', 'counter', 's1-before')
+        # GPT-6 row E (D6): a message's postage pays the front end its delivery's root frame replays; a send
+        # whose postage declares none of it is refused at the send, by name.
+        body = {'kind': 'invoke', 'object': O['poster'], 'objectCapability': w.objects['poster']['capability'],
+                'method': 'post', 'args': post('counter', 4), 'envelope': cap(TICKS), 'account': w.SPONSOR_ACCOUNT,
+                'accountCapability': w.SPONSOR_SPEND, 'opId': op_id(), 'postage': cap(TICKS)}
+        w.quote_front_end('s1-postage-short-quote', w.sponsor, body)
+        body['postage']['replayBytes'] = '0'
+        body['postage']['coreBytes'] = '0'
+        w.turn('s1-postage-short', w.sponsor, body, 'charged', ['postageFrontEnd', str(O['counter'])])
         out = invoke('s1-post', 'poster', 'post', post('counter', 4), 'installed')
         m1 = reported(out)
         after = inbox('poster', 'counter', 's1-after')
