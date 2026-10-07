@@ -103,9 +103,8 @@ def decode (capacity : ObjectiveBendDemandCapacity.Profile) : Data → Option Na
         ← ObjectiveBendPlanAdapter.records (effect capacity) effects⟩
   | _ => none
 
-structure BoundEffect {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+structure BoundEffect (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (command : Command) (source : Effect) where
   private mk ::
   index : Fin command.targets.length
@@ -117,16 +116,14 @@ structure BoundEffect {durable : DurableReceiverIO.Loaded ResourceBirthCodec.roo
   pre : TargetCell command.targets[index]
   selected : selectTarget deployment command.targets[index] read.packed = some pre
 
-def BoundEffect.native {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {deployment : CanonicalCellRegistry.Deployment}
-    {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+def BoundEffect.native {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
     {command : Command} {source : Effect}
     (bound : BoundEffect deployment loaded command source) : BendWorldPlan.Effect :=
   ⟨bound.index.val,source.payload⟩
 
-def bindEffect {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+def bindEffect (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (command : Command) (source : Effect) : Option (BoundEffect deployment loaded command source) := do
   match indexExact : indexOf command source.ref.resourceID with
   | none => none
@@ -143,9 +140,8 @@ def bindEffect {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
       else none
     else none
 
-inductive Ordered {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+inductive Ordered (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (command : Command) : List Effect → List BendWorldPlan.Effect → Type where
   | nil : Ordered deployment loaded command [] []
   | cons {source : Effect} {rest : List Effect} {effects : List BendWorldPlan.Effect}
@@ -153,9 +149,8 @@ inductive Ordered {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootByt
       (tail : Ordered deployment loaded command rest effects) :
       Ordered deployment loaded command (source::rest) (bound.native::effects)
 
-def bindOrdered {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+def bindOrdered (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (command : Command) : (effects : List Effect) →
     Option (Sigma fun native => Ordered deployment loaded command effects native)
   | [] => some ⟨[],.nil⟩

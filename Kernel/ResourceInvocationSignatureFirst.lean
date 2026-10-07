@@ -20,19 +20,17 @@ set_option autoImplicit false
 
 def authenticate (native : CredentialSignatureIO.NativeConfig)
     (deployment : Deployment) (semantics : Digest)
-    (ambient : Ambient) (durable : Durable) (command : Command)
+    (ambient : Ambient) (ground : Ground deployment) (command : Command)
     (authorityEnvelope : List UInt8) : IO (Except Reject Unit) := do
   if command.targets.isEmpty then
     return .error .emptyTargets
-  match loadDeployment deployment durable.snapshot with
-  | none => return .error .authorityUnavailable
-  | some loaded =>
-      match ← CredentialSignatureAdmission.verifyNative native loaded.snapshot
-          (operationMarker loaded.snapshot.domain semantics command)
-          (request loaded.snapshot semantics ambient command loaded.snapshot.cell.root)
-          authorityEnvelope with
-      | .error reason => return .error (.authoritySignature reason)
-      | .ok _ => return .ok ()
+  let snapshot := ground.authority
+  match ← CredentialSignatureAdmission.verifyNative native snapshot
+      (operationMarker snapshot.domain semantics command)
+      (request snapshot semantics ambient command snapshot.cell.root)
+      authorityEnvelope with
+  | .error reason => return .error (.authoritySignature reason)
+  | .ok _ => return .ok ()
 
 /-- The expensive continuation is selected only after authentication succeeds.
 No positive result here bypasses the continuation's full native admission. -/

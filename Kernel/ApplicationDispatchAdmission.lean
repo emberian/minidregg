@@ -288,9 +288,9 @@ def observationGuard (resource : Nat) (root : Digest) : ReadGuard :=
 /-- A signed observation names the inner payload root. A durable CAS guard
 protects the complete encoded physical cell, whose root is generally distinct. -/
 theorem observedPhysicalRoot_current {deployment : Deployment} {durable : Durable}
-    (context : ResourceObservationAdmission.Context deployment durable)
+    (context : ResourceObservationAdmission.Context deployment)
     (resource : Nat) (packed : PackedCell CanonicalCellRegistry.registry)
-    (present : context.directory.directory.slots resource = .present packed) :
+    (present : context.directory.slots resource = .present packed) :
     ResourceBirthCodec.physicalRoot (.live packed) =
       durable.snapshot.model.roots ⟨resource⟩ :=
   PhysicalResourceReadGuard.current context.directory resource packed present

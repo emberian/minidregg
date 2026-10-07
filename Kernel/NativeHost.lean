@@ -315,7 +315,7 @@ def enrollmentPlanAuthorizedLoaded (config : Config) (opened : Opened config)
         return .error (.of .malformed)
   | .prepare _ => return .error (.of .malformed)
   match ← NativeObservationController.authorize config.signature
-      ⟨opened.directory, opened.authority⟩ config.profile config.federation
+      (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority) config.profile config.federation
       config.genesisHeight signed with
   | .error refusal => return .error refusal
   | .ok _ => return ((enrollmentPlanLoaded config opened commandBytes).mapError
@@ -432,7 +432,7 @@ def provisionPlanAuthorizedLoaded (config : Config) (opened : Opened config)
         return .error (.of .malformed)
   | .prepare _ => return .error (.of .malformed)
   match ← NativeObservationController.authorize config.signature
-      ⟨opened.directory, opened.authority⟩ config.profile config.federation
+      (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority) config.profile config.federation
       config.genesisHeight signed with
   | .error refusal => return .error refusal
   | .ok _ => return ((provisionPlanLoaded config opened commandBytes).mapError
@@ -453,7 +453,7 @@ def provisionAssemble (plan : ParticipantFactoryProvisioning.SigningPlan)
 
 def observationContext (config : Config) (opened : Opened config) :
     NativeObservationController.Context config.deployment opened.durable :=
-  ⟨opened.directory, opened.authority⟩
+  (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority)
 
 /-- The answer to an observation request, given the subject's selected key and the native
 verdict on its intent signature. Only an authenticated request reaches the challenge, which
@@ -1239,7 +1239,7 @@ def fleetObservedAccount (config : Config) (opened : Opened config)
       if query.kind != .account || query.view != .resource then
         return .error (.of .malformed)
       match ← NativeObservationController.authorize config.signature
-          ⟨opened.directory, opened.authority⟩ config.profile config.federation
+          (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority) config.profile config.federation
           config.genesisHeight signed with
       | .error refusal => return .error refusal
       | .ok _ => return .ok (signed.challenge.intent.subject, query.target)
