@@ -1,0 +1,14 @@
+edition ObjectiveBend 1
+# Super is abstract (GPT-6 row D): Keep returns `super` where a value of its Super bound ROW
+# {x: Nat} is declared. Super ranges over every row beneath that HAS x, so a value of type Super
+# is not a value of {x: Nat}: refused at the declaration by name (super-rigid), as self-rigid
+# refuses the same use of self. It is never instantiated here, so only the template judges it.
+
+record X:
+  x: Nat
+
+extension Keep[Self has {}, Super has {x: Nat}](self: Self, super: Super) -> {x: Nat}:
+  super
+
+def xOfFive() -> Nat:
+  ({x: 5n}).x
