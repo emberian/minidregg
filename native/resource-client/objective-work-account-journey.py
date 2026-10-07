@@ -24,7 +24,8 @@ import argparse, json, os, pathlib, re, sys, time
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from activity_world import World, PAIR, cap, record, variant, nat  # noqa: E402
+import activity_world as AW  # noqa: E402
+from activity_world import World, cap, record, variant, nat  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--bin', required=True)
@@ -107,7 +108,7 @@ try:
         for i in range(a.repeat):
             _, t1 = birth(f'cost-before-{i}', 'padded', BIG, 10 ** 5, envelope(3000, SOURCE - 1, CORE), full, full,
                           'refused', 'workUncovered', init=variant('keep', record()))
-            _, t2 = birth(f'cost-after-{i}', 'padded', BIG, PAIR - 1, full, full, full, 'refused', 'underfunded',
+            _, t2 = birth(f'cost-after-{i}', 'padded', BIG, AW.PAIR - 1, full, full, full, 'refused', 'underfunded',
                           init=variant('keep', record()))
             timings.append((f'refused-before-replay-{i}', t1))
             timings.append((f'refused-after-replay-{i}', t2))

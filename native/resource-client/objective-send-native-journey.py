@@ -105,7 +105,8 @@ import argparse, json, pathlib, sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from activity_world import World, PERMIT_ALL, TICKS, PRICE, nat, record, eq, any_of, cap  # noqa: E402
+import activity_world as AW  # noqa: E402
+from activity_world import World, PERMIT_ALL, TICKS, nat, record, eq, any_of, cap, price  # noqa: E402
 
 
 def label(text):
@@ -135,6 +136,8 @@ try:
     w.PIN, ARTIFACT = w.publication('publication', [SENDS], '0', 'deposit')
     w.turn('publish', w.sponsor, dict(ARTIFACT, kind='publish', payer=w.SPONSOR_ACCOUNT,
                                       payerCapability=w.SPONSOR_SPEND), 'installed')
+    # The price of a full envelope, learned with the front end's quote of the published package.
+    PRICE = AW.PRICE
     O = {n: w.objects[n]['object'] for n in NAMES}
 
     VAULT = PERMIT_ALL if 'vault-open' in plants else any_of(eq('request/subject', SPONSOR))
@@ -297,8 +300,8 @@ try:
         after = inbox('poster', 'dir', 's6-after')
         d6 = decision(slot(look, 's6-slot'))
         w.check('s6-slot-broken', d6.get('kind') == 'broken', d6)
-        w.check('s6-refunded', after['purse'] == 0 and after['sponsor'] - before['sponsor'] == 1 + small + dL + dQ
-                and after['collector'] - before['collector'] == 1 + small,
+        w.check('s6-refunded', after['purse'] == 0 and after['sponsor'] - before['sponsor'] == price(cap(small)) + dL + dQ
+                and after['collector'] - before['collector'] == price(cap(small)),
                 {'refund': after['sponsor'] - before['sponsor'], 'fee': after['collector'] - before['collector']})
         w.check('s6-counter-kept', total('counter', 's6-c1') == c0, None)
         out = invoke('s6-pipe-none', 'poster', 'pipe', record(via=nat(O['nodir']), amount=nat(7)), 'installed')
