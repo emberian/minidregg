@@ -1944,7 +1944,7 @@
     {
       "module": "Compiler.FnWireGrammar",
       "path": "Compiler/FnWireGrammar.lean",
-      "sha256": "638285f07791089765d129c16ba4432da81b122f22dd935cbd361530ceb312c8",
+      "sha256": "f8ca7ad6e5c5289480b6aace5ba9b200fe5517dae7396de223059fd46dc5e05a",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -1958,7 +1958,7 @@
     {
       "module": "Compiler.FnWirePinned",
       "path": "Compiler/FnWirePinned.lean",
-      "sha256": "0804bf25b67e5334032caa2639179bed4f32dd7723b7debc4921e43665417954",
+      "sha256": "8399cf0b79754cdee3a3f9765fe8da5737b421f9dfc6bbb7b96deb54a077edf1",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
