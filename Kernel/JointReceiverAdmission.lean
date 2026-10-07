@@ -67,7 +67,7 @@ Native state-transition capability. The token is not a raw IntentRecord.
 Its permission provenance is retained through the single physical append. -/
 structure Reserved {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (ambient : Ambient) (durable : Durable) where
+    (ambient : Ambient) (ground : Ground deployment) where
   private mk ::
   intent : DataIntent ResourceBirthCodec.rootBytes
   original : DataIntent ResourceBirthCodec.rootBytes
@@ -82,7 +82,8 @@ structure Reserved {F : Type} [Field F] [DecidableEq F]
   before : Control
   after : Control
   source : ReserveSource
-  sourceCurrent : source.promise.declaration.sourceImageBytes = DurableReceiverCodec.imageStream.encode durable.image
+  sourceCurrent : ground.sourceImage.map DurableReceiverCodec.imageStream.encode =
+    some source.promise.declaration.sourceImageBytes
   selectedExact : reservation.intent = IntentRecord.ofIntent selected
   allDependencies : ∀ g ∈ dependencies selected, g ∈ intent.readGuards
   beforeExact : JointControlFrame.readControl pin (ground.view.canonicalBytes pin.cell) = some before
@@ -107,7 +108,7 @@ def buildReserve (codec : StreamCodec Custody) (pin : JointControlFrame.Pin)
     (epoch : Nat) (plan : Plan Custody) (i : Fin plan.candidate.participants.length)
     (accepted : JointPromiseAuthorization.Accepted prepared selected promise)
     (controlShape : PhysicalShape controlPrepared)
-    (controlAccepted : AcceptedInvocation controlPrepared controlSigned) : Option (Reserved deployment profile ambient durable) := do
+    (controlAccepted : AcceptedInvocation controlPrepared controlSigned) : Option (Reserved deployment profile ambient ground) := do
   let p := plan.candidate.participants[i]
   let exact := (candidateStream codec).encode plan.candidate
   let effect := accepted.ordinary.dataIntent accepted.shape
@@ -203,11 +204,11 @@ def buildReserve (codec : StreamCodec Custody) (pin : JointControlFrame.Pin)
 /-- Every selected write pre-root and every actual retained source-law,
 authority, clock, negative-predicate and audience guard belongs to the atomic
 reservation record. This does not rely on digest injectivity. -/
-theorem reserve_retains_dependencies (durable : Durable) (r : Reserved deployment profile ambient durable)
+theorem reserve_retains_dependencies (r : Reserved deployment profile ambient ground)
     (guard : ReadGuard) (member : guard ∈ dependencies r.selected) : guard ∈ r.intent.readGuards :=
   r.allDependencies guard member
 
-theorem reserve_has_one_control_commit (durable : Durable) (r : Reserved deployment profile ambient durable) :
+theorem reserve_has_one_control_commit (r : Reserved deployment profile ambient ground) :
     ∃ w ∈ r.intent.writes, w.cellId = r.pin.cell ∧
       JointControlFrame.readControl r.pin w.canonicalPostBytes = some r.after := r.controlWrite
 

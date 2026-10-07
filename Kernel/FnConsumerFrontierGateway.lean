@@ -88,7 +88,7 @@ theorem gatewayRequest_subject (federation : FederationId) (authority : AuthStat
     (height : Nat) (proposal : Proposal) :
     (gatewayRequest federation authority height proposal).subject = proposal.subject := rfl
 
-variable {deployment : Deployment} {durable : Durable}
+variable {deployment : Deployment}
 variable {F : Type} [Field F] [DecidableEq F]
 
 structure Prepared (context : Context deployment)
@@ -99,7 +99,7 @@ structure Prepared (context : Context deployment)
     .object proposal.target proposal.expectedTargetRoot
   contentKind : observed.before.kind = .content
   physicalCurrent : ResourceBirthCodec.physicalRoot (.live observed.before) =
-    durable.snapshot.model.roots ⟨proposal.target⟩
+    context.view.model.roots ⟨proposal.target⟩
   domainExact : proposal.domain = deployment.domain
   semanticsExact : proposal.semantics = profile.semantics
   pinExact : proposal.matchesPin pin = true
@@ -118,7 +118,7 @@ def prepare (context : Context deployment)
       | none => .error "fn consumer gateway testimony refused"
       | some observed =>
           if contentKind : observed.before.kind = .content then
-            let physicalCurrent := PhysicalResourceReadGuard.current context.directory
+            let physicalCurrent := ServedBasis.Ground.physicalCurrent context
               proposal.target observed.before observed.present
             if domainExact : proposal.domain = deployment.domain then
               if semanticsExact : proposal.semantics = profile.semantics then
@@ -238,7 +238,7 @@ omit [DecidableEq F] in
 theorem readGuard_current
     (prepared : Prepared context profile federation height pin proposal) :
     (readGuard prepared).expectedRoot =
-      durable.snapshot.model.roots (readGuard prepared).cellId :=
+      context.view.model.roots (readGuard prepared).cellId :=
   prepared.physicalCurrent
 
 /-- Shared lower current-law check used by historical Replay and live verified

@@ -27,7 +27,7 @@ abbrev Durable := ResourceObservationAdmission.Durable
 abbrev Context := ResourceObservationAdmission.Context
 
 variable {F : Type} [Field F] [DecidableEq F]
-  {deployment : Deployment} {durable : Durable}
+  {deployment : Deployment}
 
 /-- A read-only app cell selected from the exact loaded directory. No public
 constructor accepts an asserted policy result, owner, or capability value. -/
@@ -41,7 +41,7 @@ structure Prepared (context : Context deployment)
     .object spec.ticket.scope.app root
   declared : observed.before.kind = .declaredObject
   physicalCurrent : ResourceBirthCodec.physicalRoot (.live observed.before) =
-    durable.snapshot.model.roots ⟨spec.ticket.scope.app⟩
+    context.view.model.roots ⟨spec.ticket.scope.app⟩
   epochCurrent :
     (appRequest deployment.domain profile.semantics federation
       context.authority.authState height root spec descriptor).policyEpoch =
@@ -75,7 +75,7 @@ def prepare (context : Context deployment)
       | some observed =>
           if declared : observed.before.kind = .declaredObject then
             .ok ⟨packed.payload.root, observed, declared,
-              PhysicalResourceReadGuard.current context.directory
+              ServedBasis.Ground.physicalCurrent context
                 spec.ticket.scope.app observed.before observed.present,
               rfl, rfl⟩
           else .error refused
@@ -152,7 +152,7 @@ structure Checked (prepared : Prepared context profile federation height spec de
   authorized : authorize prepared signature = some authorization
   guardsPresent : (lawReadGuards prepared).isSome = true
   guardsCurrent : ∀ guard ∈ readGuards prepared,
-    guard.expectedRoot = durable.snapshot.model.roots guard.cellId
+    guard.expectedRoot = context.view.model.roots guard.cellId
 
 def check (native : CredentialSignatureIO.NativeConfig)
     (prepared : Prepared context profile federation height spec descriptor)
@@ -167,7 +167,7 @@ def check (native : CredentialSignatureIO.NativeConfig)
         | some authorization =>
           if guardsPresent : (lawReadGuards prepared).isSome = true then
             if guardsCurrent : ∀ guard ∈ readGuards prepared,
-                guard.expectedRoot = durable.snapshot.model.roots guard.cellId then
+                guard.expectedRoot = context.view.model.roots guard.cellId then
               return .ok ⟨signature, exact, authorization, authorized, guardsPresent, guardsCurrent⟩
             else return .error refused
           else return .error refused
@@ -180,7 +180,7 @@ def readGuard (prepared : Prepared context profile federation height spec descri
 
 theorem readGuard_current (prepared : Prepared context profile federation height spec descriptor) :
     (readGuard prepared).expectedRoot =
-      durable.snapshot.model.roots (readGuard prepared).cellId :=
+      context.view.model.roots (readGuard prepared).cellId :=
   prepared.physicalCurrent
 
 end Minidregg.Kernel.ApplicationShareIssueDelegation

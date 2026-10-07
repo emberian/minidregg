@@ -8,6 +8,7 @@ transition and physical receiver are connected.
 -/
 import Kernel.FnSelectiveReleaseIngress
 import Compiler.CredentialAuthorityPolicyRegistry
+import Kernel.NativeHostServed
 
 namespace Minidregg.Kernel.FnSelectiveReleaseAdmission
 
@@ -25,15 +26,14 @@ set_option autoImplicit false
 set_option maxHeartbeats 1000000
 attribute [local irreducible] NativeHost.Config.profile CanonicalRuntimeProfile.Profile.compilerProfile
 
-/-- Fresh preparation is performed against exactly the durable image that
-was replay-verified into `opened`. Both authority views are loads of the one
-pinned cell from that image, so they are the same snapshot
-(`Loaded.snapshot_unique`); no runtime comparison is needed. -/
+/-- Fresh preparation is performed on the ground of the opening that was
+replay-verified into `opened` (`Opened.ground`): the operation reads exactly the
+opening's authority snapshot and directory, with no second load to compare. -/
 structure Prepared (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (ingress : FnSelectiveReleaseIngress.Ingress) where
   operation : DeclaredResourceController.PreparedInvocation config.deployment
     config.profile ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-    opened.durable (FnSelectiveReleaseIngress.command ingress)
+    opened.ground (FnSelectiveReleaseIngress.command ingress)
 
 inductive PrepareReject where
   | ordinary (reason : DeclaredResourceController.Reject)
@@ -42,22 +42,9 @@ def prepare (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (ingress : FnSelectiveReleaseIngress.Ingress) :
     Except PrepareReject (Prepared config opened ingress) := do
   let operation ← (DeclaredResourceController.prepare config.deployment config.profile
-      ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩ opened.durable
+      ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩ opened.ground
       (FnSelectiveReleaseIngress.command ingress)).mapError .ordinary
   .ok ⟨operation⟩
-
-theorem Prepared.snapshotExact (config : NativeHost.Config)
-    (opened : NativeHost.Opened config) (ingress : FnSelectiveReleaseIngress.Ingress)
-    (prepared : Prepared config opened ingress) :
-    prepared.operation.authority.snapshot = opened.authority.snapshot :=
-  CredentialAuthorityDomainReceiver.Loaded.snapshot_unique _ _
-
-theorem Prepared.logicalExact (config : NativeHost.Config)
-    (opened : NativeHost.Opened config) (ingress : FnSelectiveReleaseIngress.Ingress)
-    (prepared : Prepared config opened ingress) :
-    prepared.operation.authority.snapshot.logical =
-      opened.authority.snapshot.logical := by
-  rw [prepared.snapshotExact]
 
 /-- The expected request must be the actual source-derived incidence request
 of the owner packet's content command. The outer capability/root selectors
