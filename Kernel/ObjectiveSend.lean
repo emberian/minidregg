@@ -354,6 +354,41 @@ theorem MessageDelivery.failed_delivery_pops {rootBytes : Bytes → Digest} {con
   rw [← sameMail]
   exact delivered.seedExact.1
 
+/-- **Every frame write of a delivered message's call tree is made under the pin of its own
+object**: the facts it was judged under name the package that object's record pins, so the
+object's pin clause accepts it (`ObjectRecord.pinClause_accepts_run`). -/
+theorem runMessage_writes_pinned {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height target : Nat} {message : Inbox.Message} {result : Data} {journal : Journal}
+    (ran : runMessage config snapshot height target message = .replied result journal) :
+    ∀ w ∈ journal.writes, w.facts.artifact = some w.record.pin.value := by
+  unfold runMessage at ran
+  split at ran
+  · cases ran
+  · split at ran
+    · cases ran
+    · rename_i execExact
+      split at ran
+      · cases ran
+        obtain ⟨_, _, ⟨new, writes, fresh⟩, _⟩ :=
+          exec_invariant config snapshot height _ _ _ [] _ _ _ _ _ _ execExact
+            (by simp) (by intro _ _ h; cases h) (by intro _ h; cases h)
+        intro w member
+        rw [writes] at member
+        simp only [Journal.start, List.nil_append] at member
+        exact (fresh w member).2.2
+      · cases ran
+
+/-- The admitted delivery's own outcome, read through `runMessage_writes_pinned`. -/
+theorem MessageDelivery.writes_pinned {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : MessageRequest}
+    (delivered : MessageDelivery config snapshot height request) {result : Data} {journal : Journal}
+    (replied : delivered.outcome = .replied result journal) :
+    ∀ w ∈ journal.writes, w.facts.artifact = some w.record.pin.value :=
+  runMessage_writes_pinned (delivered.outcomeExact.trans replied)
+
+#assert_axioms runMessage_writes_pinned
+#assert_axioms MessageDelivery.writes_pinned
+
 /-! ## Retention: what a send and a delivery pay, and what they leave behind (OB8)
 
 The activity turns retain their cells against a payer (`Birth.retention_cells_have_payer`,

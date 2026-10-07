@@ -431,7 +431,21 @@ structure Ctx where
   assumptions : Assumptions
   responseType : Ty
   view : ObjectState
-  facts : Facts
+  /-- The subject whose authority the frame's write carries (`Facts.subject`). -/
+  subject : Option SubjectId
+  height : Nat
+  /-- `request/caller` (`callerOf`). -/
+  caller : Option Nat
+
+/-- **The request facts a frame's write is judged under**, derived from the frame itself:
+the frame is for `ctx.object` and runs `ctx.method` of the package its record pins
+(`loadMethod` on `record.pin`), so the artifact slot reads that pin and nothing else. The
+facts are not a field: no frame can be built that claims another package. -/
+def Ctx.facts (ctx : Ctx) : Facts :=
+  ⟨ctx.subject, ctx.height, ctx.object.value, callTurn, ctx.caller, some ctx.record.pin.value⟩
+
+/-- A frame's write is made by its object's pinned package: the slot names it. -/
+theorem Ctx.facts_artifact (ctx : Ctx) : ctx.facts.artifact = some ctx.record.pin.value := rfl
 
 /-- `request/caller` of a frame entered on `stack`: the calling frame's object,
 or the root's origin. -/
@@ -506,7 +520,7 @@ def exec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot r
     | .error reason => .error reason
     | .ok program =>
     let ctx : Ctx := ⟨call.target, call.method, entry.record, program.applied.assumptions, program.responseType,
-      view, ⟨subject, height, call.target.value, callTurn, callerOf authority stack⟩⟩
+      view, subject, height, callerOf authority stack⟩
     let journal : Journal := ⟨journal.entries, grants,
       journal.frames ++ [call.target.value :: stack.map (·.object.value)], journal.writes, journal.outbox⟩
     exec config snapshot height authority turn fuel (ctx :: stack) (.run (initial program.applied.erase)) journal ticks
@@ -1063,7 +1077,8 @@ theorem exec_invariant {rootBytes : Bytes → Digest} (config : Config) (snapsho
     (∀ ctx ∈ task.below stack,
         journal'.lookup ctx.object = journal.lookup ctx.object) ∧
       (∃ new, journal'.writes = journal.writes ++ new ∧ ∀ w ∈ new, w.before = w.viewed ∧
-        admitWrite w.record w.facts (some w.before.value) w.after.value = .ok ()) ∧
+        admitWrite w.record w.facts (some w.before.value) w.after.value = .ok () ∧
+        w.facts.artifact = some w.record.pin.value) ∧
       (∃ new, journal'.frames = journal.frames ++ new ∧ ∀ frame ∈ new, frame.Nodup) := by
   intro fuel
   induction fuel with
@@ -1096,8 +1111,8 @@ theorem exec_invariant {rootBytes : Bytes → Digest} (config : Config) (snapsho
                     apply free
                     exact List.any_eq_true.mpr ⟨ctx, member, by simp [same]⟩
                   have distinct' : ((⟨call.target, call.method, entry.record, program.applied.assumptions,
-                      program.responseType, view, ⟨subject, height, call.target.value, callTurn,
-                      callerOf authority stack⟩⟩ : Ctx) :: stack).map (·.object) |>.Nodup := by
+                      program.responseType, view, subject, height,
+                      callerOf authority stack⟩ : Ctx) :: stack).map (·.object) |>.Nodup := by
                     simp only [List.map_cons, List.nodup_cons, List.mem_map]
                     exact ⟨fun ⟨ctx, member, same⟩ => notOn ctx member same, distinct⟩
                   obtain ⟨read', kept, ⟨new, writes', fresh⟩, ⟨frames, frames', nodupFrames⟩⟩ :=
@@ -1207,10 +1222,11 @@ theorem exec_invariant {rootBytes : Bytes → Digest} (config : Config) (snapsho
                   simp only [Task.below, List.tail_cons] at member
                   exact others c.object (distinctCons.1 c member)
                 · intro w member
-                  obtain ⟨found, viewedEq, _, _, _, admitted⟩ := each w member
+                  obtain ⟨found, viewedEq, _, recordEq, factsEq, admitted⟩ := each w member
                   rw [viewed] at found
                   simp only [Option.some.injEq] at found
-                  exact ⟨by rw [viewedEq, found], admitted⟩
+                  refine ⟨by rw [viewedEq, found], admitted, ?_⟩
+                  simpa [factsEq, recordEq] using ctx.facts_artifact
         · cases ran
         · cases ran
         · cases ran
@@ -1243,7 +1259,23 @@ theorem invocation_writes_from_view {rootBytes : Bytes → Digest} {config : Con
   intro w member
   rw [writes] at member
   simp only [Journal.start, List.nil_append] at member
-  exact fresh w member
+  exact ⟨(fresh w member).1, (fresh w member).2.1⟩
+
+/-- **Every frame write of an admitted invocation is made under the pin of its own object**:
+the facts it was judged under name the package the written object's record pins, so the
+object's pin clause (`ObjectRecord.pinClause`) accepts it (`pinClause_accepts_run`), and a
+frame of another package would be refused there. The artifact is derived from the frame
+(`Ctx.facts`), carried through the executor by `exec_invariant`. -/
+theorem invocation_writes_pinned {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : InvokeRequest} (invoked : Invocation config snapshot height request) :
+    ∀ w ∈ invoked.journal.writes, w.facts.artifact = some w.record.pin.value := by
+  obtain ⟨_, _, ⟨new, writes, fresh⟩, _⟩ :=
+    exec_invariant config snapshot height request.authority (invokeTransaction request) _ [] _ _ _ _ _ _ invoked.execExact (by simp)
+      (by intro _ _ h; cases h) (by intro _ h; cases h)
+  intro w member
+  rw [writes] at member
+  simp only [Journal.start, List.nil_append] at member
+  exact (fresh w member).2.2
 
 /-- **Every post of a journal is the state image of an object the journal holds**:
 the state cell of one of its entries, at that entry's own coordinate. -/
@@ -1306,6 +1338,8 @@ theorem Invocation.posts_shape {rootBytes : Bytes → Digest} {config : Config} 
 #assert_axioms exec_invariant
 #assert_axioms invocation_reentry_free
 #assert_axioms invocation_writes_from_view
+#assert_axioms invocation_writes_pinned
+#assert_axioms Ctx.facts_artifact
 #assert_axioms Invocation.conserves
 #assert_axioms Mail.posts_shape
 #assert_axioms Mail.inboxes_lawful

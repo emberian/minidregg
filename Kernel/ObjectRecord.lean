@@ -9,7 +9,10 @@ capabilities on; never a package hash). Its record names:
 * `schemaVersion`: the version of the declared-state schema, bumped only by a
   migration (it is not the write counter of the state cell);
 * `law`: the decidable predicate (`Pred`) that judges every write of the
-  declared state, over the projected old and new views plus the request facts;
+  declared state, over the projected old and new views plus the request facts.
+  The judged law is `ObjectRecord.effectiveLaw`: `all [pinClause pin, law]`, the
+  kernel's package pin FIRST, which the creator's `law` can neither omit nor
+  loosen (the clause is not stored, it is derived from `pin`);
 * `upgrade`: who may re-pin the object, as a policy that may only tighten;
 * `continuity`: bumped by every re-pin and every law change;
 * `payer`: the Book account that funds the record and the state cell. The payer
@@ -68,6 +71,36 @@ structure ObjectRecord where
   continuity : Nat
   payer : Minidregg.Theory.CanonicalResourceKernel.AccountId
   deriving DecidableEq, Repr
+
+/-! ## The package pin: a kernel clause no creator law can remove -/
+
+/-- **The kernel's package-pin clause for an object pinned to `pin`**: the write is made
+by code of exactly that package (`objectivePin` over the one identity `pin.value`; `-1`,
+the slot of a write no package made, never passes). The ONE construction of the clause:
+the creation judges with it and the upgrade turns re-pin through it. -/
+def pinClause (pin : Digest) : Pred :=
+  Minidregg.Pred.objectivePin [pin.value]
+
+/-- **The law that judges every write of an object's declared state**: the kernel's pin
+clause FIRST, then the creator's law. Removal is impossible by construction: the clause is
+not a stored field a creator or a later turn could omit or rewrite, it is a function of the
+record's `pin`, and the judge (`admitWrite`) reads only this. A refusal by the pin is the
+leaf at path `[0]` (`unpinned_write_names_pin`). -/
+def ObjectRecord.effectiveLaw (record : ObjectRecord) : Pred :=
+  Pred.all [pinClause record.pin, record.law]
+
+/-- The effective law leads with the pin clause of exactly the pinned package. -/
+theorem effectiveLaw_leads_with_pin (record : ObjectRecord) :
+    record.effectiveLaw = Pred.all (pinClause record.pin :: [record.law]) := rfl
+
+/-- **No creator law removes the pin**: whatever `law` an object is created with, a view
+the effective law accepts is one the pin clause accepts (and the creator's law accepts). -/
+theorem effectiveLaw_accepts_iff (record : ObjectRecord) (old new : State) :
+    eval record.effectiveLaw old new = true ↔
+      eval (pinClause record.pin) old new = true ∧ eval record.law old new = true := by
+  unfold ObjectRecord.effectiveLaw
+  rw [Minidregg.Pred.eval_all]
+  simp
 
 /-! ## Upgrade policy: it may only tighten -/
 
@@ -181,14 +214,32 @@ structure Facts where
   (slot absent) when the write is not a nested call frame's. A callee's law
   names the callers it admits with this slot: an object's facet, as a clause. -/
   caller : Option Nat
+  /-- The identity (`ObjectiveBendSourceArtifact.identity`, the value of an object's
+  `pin`) of the Objective package whose code is making the write: a birth, a
+  delivery, a call frame and a delivered message run the package their object or
+  activity pins, and say so here. `none` for a write no package code made (the
+  direct holder write, `turn` 3): the slot then reads `-1`, never an identity. -/
+  artifact : Option Nat
   deriving DecidableEq, Repr
 
+/-- The value of `Pred.objectiveArtifactSlot`: the writing package's identity, or `-1`
+(never an identity, which is a natural number) when no package code writes. The same
+encoding as `Kernel.DeclaredResourceController.objectiveArtifactValue`. -/
+def Facts.artifactValue (facts : Facts) : Int :=
+  match facts.artifact with
+  | some artifact => Int.ofNat artifact
+  | none => -1
+
+/-- The request slots of a write. `objective/artifact` is the FIRST block, so no later
+projection (a `state/` slot, a `request/` slot) can shadow it (`State.get` reads the first
+match), exactly as in the resource route's law states (`objectiveSlots`). -/
 def Facts.slots (facts : Facts) : List (Slot × Int) :=
-  (facts.subject.map (fun subject => ("request/subject", Int.ofNat subject.value))).toList ++
+  (Minidregg.Pred.objectiveArtifactSlot, facts.artifactValue) ::
+  ((facts.subject.map (fun subject => ("request/subject", Int.ofNat subject.value))).toList ++
   [("request/height", Int.ofNat facts.height),
    ("request/target", Int.ofNat facts.target),
    ("request/turn", Int.ofNat facts.turn)] ++
-  (facts.caller.map (fun caller => ("request/caller", Int.ofNat caller))).toList
+  (facts.caller.map (fun caller => ("request/caller", Int.ofNat caller))).toList)
 
 /-- The (old, new) views a write is judged on. A first write has no old state:
 its old view holds the request facts only. -/
@@ -214,27 +265,29 @@ def admitWrite (record : ObjectRecord) (facts : Facts) (old : Option Data) (new 
   match views facts old new with
   | none => .error .unprojectable
   | some (before, after) =>
-      match LawLeaf.of record.law before after with
+      match LawLeaf.of record.effectiveLaw before after with
       | none => .ok ()
       | some leaf => .error (.lawDenied leaf)
 
-/-- **A write is admitted exactly when the law accepts its views.** -/
+/-- **A write is admitted exactly when the effective law (the pin clause, then the
+creator's law) accepts its views.** -/
 theorem admitWrite_ok_iff (record : ObjectRecord) (facts : Facts) (old : Option Data) (new : Data) :
     admitWrite record facts old new = .ok () ↔
-      ∃ before after, views facts old new = some (before, after) ∧ eval record.law before after = true := by
+      ∃ before after, views facts old new = some (before, after) ∧
+        eval record.effectiveLaw before after = true := by
   unfold admitWrite
   cases viewed : views facts old new with
   | none => simp
   | some pair =>
       obtain ⟨before, after⟩ := pair
-      cases named : LawLeaf.of record.law before after with
+      cases named : LawLeaf.of record.effectiveLaw before after with
       | none =>
-          have accepts := (LawLeaf.of_none_iff record.law before after).mp named
+          have accepts := (LawLeaf.of_none_iff record.effectiveLaw before after).mp named
           simp [named, accepts]
       | some leaf =>
-          have rejects : eval record.law before after ≠ true := by
+          have rejects : eval record.effectiveLaw before after ≠ true := by
             intro accepts
-            have := (LawLeaf.of_none_iff record.law before after).mpr accepts
+            have := (LawLeaf.of_none_iff record.effectiveLaw before after).mpr accepts
             rw [named] at this; cases this
           simp [named, rejects]
 
@@ -242,25 +295,131 @@ theorem admitWrite_ok_iff (record : ObjectRecord) (facts : Facts) (old : Option 
 theorem admitWrite_lawDenied_fails (record : ObjectRecord) (facts : Facts) (old : Option Data) (new : Data)
     (leaf : LawLeaf) (refused : admitWrite record facts old new = .error (.lawDenied leaf)) :
     ∃ before after, views facts old new = some (before, after) ∧
-      record.law.subterm leaf.path = some leaf.clause ∧ eval leaf.clause before after = false := by
+      record.effectiveLaw.subterm leaf.path = some leaf.clause ∧ eval leaf.clause before after = false := by
   unfold admitWrite at refused
   cases viewed : views facts old new with
   | none => simp [viewed] at refused
   | some pair =>
       obtain ⟨before, after⟩ := pair
       rw [viewed] at refused
-      cases named : LawLeaf.of record.law before after with
+      cases named : LawLeaf.of record.effectiveLaw before after with
       | none => simp [named] at refused
       | some found =>
           simp only [named, Except.error.injEq, WriteRefusal.lawDenied.injEq] at refused
           subst refused
-          obtain ⟨at_, _, fails⟩ := LawLeaf.of_fails record.law before after found named
+          obtain ⟨at_, _, fails⟩ := LawLeaf.of_fails record.effectiveLaw before after found named
           exact ⟨before, after, rfl, at_, fails⟩
 
 /-- **The payer is not authority**: the judgment does not read it. -/
 theorem admitWrite_payer_irrelevant (record : ObjectRecord) (payer : Minidregg.Theory.CanonicalResourceKernel.AccountId)
     (facts : Facts) (old : Option Data) (new : Data) :
     admitWrite { record with payer := payer } facts old new = admitWrite record facts old new := rfl
+
+/-! ## The pin in the views -/
+
+/-- The shape of a write's views: the request slots first, then the state slots. -/
+theorem views_shape (facts : Facts) (old : Option Data) (new : Data) (before after : State)
+    (viewed : views facts old new = some (before, after)) :
+    ∃ b a, before = ⟨facts.slots ++ b⟩ ∧ after = ⟨facts.slots ++ a⟩ := by
+  unfold views at viewed
+  simp only [Option.bind_eq_bind, Option.pure_def, Option.bind_eq_some_iff, Option.some.injEq,
+    Prod.mk.injEq] at viewed
+  obtain ⟨b, -, a, -, hb, ha⟩ := viewed
+  exact ⟨b, a, hb.symm, ha.symm⟩
+
+/-- **The artifact slot is exact**: in both views of every write, `objective/artifact`
+reads the writing package's identity, or `-1` when no package code writes, whatever the
+state slots are (it is the first block, and no `state/` or `request/` slot shares its name). -/
+theorem views_artifact_slot (facts : Facts) (old : Option Data) (new : Data) (before after : State)
+    (viewed : views facts old new = some (before, after)) :
+    before.get Minidregg.Pred.objectiveArtifactSlot = some facts.artifactValue ∧
+      after.get Minidregg.Pred.objectiveArtifactSlot = some facts.artifactValue := by
+  obtain ⟨b, a, rfl, rfl⟩ := views_shape facts old new before after viewed
+  simp [State.get, Facts.slots]
+
+/-- **A write made by the pinned package passes the pin.** Its artifact is the pin's
+identity, so the clause accepts every view of it: the pin never refuses the package it pins. -/
+theorem pinClause_accepts_run (pin : Digest) (facts : Facts) (old : Option Data) (new : Data)
+    (ran : facts.artifact = some pin.value) (before after : State)
+    (viewed : views facts old new = some (before, after)) :
+    eval (pinClause pin) before after = true := by
+  obtain ⟨_, slotAfter⟩ := views_artifact_slot facts old new before after viewed
+  unfold pinClause
+  rw [Minidregg.Pred.eval_objectivePin]
+  exact ⟨pin.value, List.mem_singleton_self _, by rw [slotAfter]; simp [Facts.artifactValue, ran]⟩
+
+/-- A pin clause leading an `all` names itself, at path `[0]`, when the step reads `-1`. -/
+theorem all_pin_names_pin (artifacts : List Nat) (rest : List Pred) (old new : State)
+    (unclaimed : new.get Minidregg.Pred.objectiveArtifactSlot = some (-1)) :
+    LawLeaf.of (Pred.all (Minidregg.Pred.objectivePin artifacts :: rest)) old new =
+      some ⟨[0], Minidregg.Pred.objectivePin artifacts, old.get Minidregg.Pred.objectiveArtifactSlot,
+        some (-1)⟩ := by
+  have refused := Minidregg.Pred.objectivePin_refuses_unclaimed artifacts old new unclaimed
+  have leaf : Minidregg.Pred.firstFailingLeaf (Pred.all (Minidregg.Pred.objectivePin artifacts :: rest))
+      old new = some [0] := by
+    unfold Minidregg.Pred.eval at refused
+    unfold Minidregg.Pred.objectivePin at refused ⊢
+    simp only [Minidregg.Pred.firstFailingLeaf, Minidregg.Pred.Pred.all, Minidregg.Pred.PredList.ofList,
+      Minidregg.Pred.leafWith, Minidregg.Pred.leafWithAll, refused]
+    rfl
+  simp only [LawLeaf.of, leaf, Option.bind_eq_bind, Option.bind_some, Option.pure_def]
+  unfold Minidregg.Pred.objectivePin
+  simp [Minidregg.Pred.Pred.subterm, Minidregg.Pred.PredList.subterm, Minidregg.Pred.Pred.all,
+    Minidregg.Pred.PredList.ofList, LawLeaf.explained, LawLeaf.slotOf, unclaimed]
+
+/-- **An ordinary write is refused, naming the pin.** A write no package code made
+(`artifact = none`: the slot reads `-1`) to ANY object is refused at the clause
+`pinClause pin`, path `[0]`, whatever the creator's law, the old state and the new value
+(when they project at all; otherwise `unprojectable` refuses it). -/
+theorem unpinned_write_names_pin (record : ObjectRecord) (facts : Facts) (old : Option Data) (new : Data)
+    (unpinned : facts.artifact = none) (before after : State)
+    (viewed : views facts old new = some (before, after)) :
+    admitWrite record facts old new = .error (.lawDenied
+      ⟨[0], pinClause record.pin, before.get Minidregg.Pred.objectiveArtifactSlot, some (-1)⟩) := by
+  obtain ⟨_, slotAfter⟩ := views_artifact_slot facts old new before after viewed
+  have unclaimed : after.get Minidregg.Pred.objectiveArtifactSlot = some (-1) := by
+    rw [slotAfter]; simp [Facts.artifactValue, unpinned]
+  have named : LawLeaf.of record.effectiveLaw before after =
+      some ⟨[0], pinClause record.pin, before.get Minidregg.Pred.objectiveArtifactSlot, some (-1)⟩ :=
+    all_pin_names_pin [record.pin.value] [record.law] before after unclaimed
+  simp only [admitWrite, viewed, named]
+
+/-- A write no package code made is never admitted, for every object and value. -/
+theorem unpinned_write_refused (record : ObjectRecord) (facts : Facts) (old : Option Data) (new : Data)
+    (unpinned : facts.artifact = none) : admitWrite record facts old new ≠ .ok () := by
+  intro admitted
+  obtain ⟨before, after, viewed, _⟩ := (admitWrite_ok_iff record facts old new).mp admitted
+  have named := unpinned_write_names_pin record facts old new unpinned before after viewed
+  rw [named] at admitted
+  cases admitted
+
+/-! ### Teeth (kernel-decided, not evaluated by the compiler)
+
+An object pinned to package 7 whose creator's law is the empty conjunction (the most
+permissive law there is). `leafOf` / `accepted` read the verdict of `admitWrite`. -/
+
+def teethRecord : ObjectRecord := ⟨⟨1⟩, ⟨7⟩, 1, Pred.all [], .frozen, 0, 0⟩
+
+def teethFacts (artifact : Option Nat) : Facts := ⟨some ⟨40⟩, 5, 1, 3, none, artifact⟩
+
+def leafOf : Except WriteRefusal Unit → Option LawLeaf
+  | .error (.lawDenied leaf) => some leaf
+  | _ => none
+
+def accepted : Except WriteRefusal Unit → Bool
+  | .ok () => true
+  | _ => false
+
+/-- Under a permit-all creator law: a write no package made is refused at the pin
+(path `[0]`, the slot reading `-1`); a write by the wrong package is refused at the pin
+(reading 8); a write by package 7 is admitted. -/
+theorem pin_teeth :
+    leafOf (admitWrite teethRecord (teethFacts none) none (.natural 1)) =
+        some ⟨[0], pinClause ⟨7⟩, some (-1), some (-1)⟩ ∧
+      leafOf (admitWrite teethRecord (teethFacts (some 8)) none (.natural 1)) =
+        some ⟨[0], pinClause ⟨7⟩, some 8, some 8⟩ ∧
+      accepted (admitWrite teethRecord (teethFacts (some 7)) none (.natural 1)) = true := by
+  decide +kernel
 
 /-! ## The record's bytes -/
 
@@ -299,5 +458,14 @@ theorem record_roundTrip (record : ObjectRecord) : decodeRecord (encodeRecord re
 #assert_axioms admitWrite_ok_iff
 #assert_axioms admitWrite_lawDenied_fails
 #assert_axioms admitWrite_payer_irrelevant
+#assert_axioms effectiveLaw_leads_with_pin
+#assert_axioms effectiveLaw_accepts_iff
+#assert_axioms views_shape
+#assert_axioms views_artifact_slot
+#assert_axioms pinClause_accepts_run
+#assert_axioms all_pin_names_pin
+#assert_axioms unpinned_write_names_pin
+#assert_axioms unpinned_write_refused
+#assert_axioms pin_teeth
 #assert_axioms record_roundTrip
 end Minidregg.Kernel.ObjectRecord

@@ -85,9 +85,12 @@ intent writing such a cell (`ordinaryGate_refuses`, `forged_protected_write_refu
 `ObjectRecord`: id, package `pin`, `schemaVersion`, `law`, `upgrade` policy, `continuity`,
 `payer`; installed by `create`. The declared state cell holds `ObjectState {version, value}`;
 each committed write installs the next version. Every declared-state write (a birth's or
-delivery's yield, or a direct `writeState`) is judged by the object's law over the old and new
-state and the request facts (`admitWrite`; facts `subject`, `height`, `target`, `turn`,
-`caller`), with the record read in the same turn. A delivery's write is judged with the
+delivery's yield, a call frame's, a delivered message's, or a direct `writeState`) is judged by
+the object's effective law (`ObjectRecord.effectiveLaw`: the kernel pin clause for the record's
+`pin` first, then the creator's `law`) over the old and new state and the request facts
+(`admitWrite`; facts `objective/artifact` (first: the pinned package's identity, `-1` for the
+direct write), `subject`, `height`, `target`, `turn`, `caller`), with the record read in the
+same turn. A delivery's write is judged with the
 activity's principal as subject, never the deliverer. A law refusal refuses the whole turn and
 names the clause. Theorems: `Birth.write_judged`, `Delivery.write_judged`,
 `StateWrite.write_judged`, `writeState_refuses_lawless`, `birth_refuses_non_object`,
@@ -153,7 +156,7 @@ view; `mini activity`):
 | `exhaust` | anyone | commits an attempt that ran out of its declared envelope as a paid turn |
 | `abandon` | anyone, after deadline plus grace | disposes of an await nobody ended |
 | `topUp` | anyone | funds an activity's purse |
-| `writeState` | an object holder | writes the declared state directly, judged by the law |
+| `writeState` | an object holder | asks to write the declared state directly; refused at the pin clause on every created object (no package code makes it) |
 | `invoke` | a capability holder with an account | a synchronous call tree (below) |
 | `deliverMessage` | anyone | delivers the head of an inbox (below) |
 
@@ -298,9 +301,9 @@ row of `scripts/pipeline/journey-rows` runs them.
   and `Kernel/ObjectStateType` (a strict `Ty` codec, `typedAt`, `stateSubtype`) is consumed by
   no turn.
 - A storage charge for packages, records, state cells, inboxes and decided slots.
-- The package pin as an object's law: `Pred.objectivePin` exists, but no turn installs it and
-  the object law view carries no `objective/artifact` slot
-  ([overview](OBJECTIVE-BEND.md#native-admission-by-re-execution)).
+- A package pin that follows an upgrade: the pin clause is `ObjectRecord.pinClause record.pin`,
+  so the future upgrade turn re-pins by rewriting `pin` (and every activity of the old pin is
+  then refused at the clause until migrated).
 - A guardedness check; the stored-checkpoint comparison under the kernel's own heap limits
   (it is proved with headroom of the forced state's size).
 

@@ -386,6 +386,14 @@ The kernel runs activities on objects. Detail, with every turn and theorem, is i
   Its declared state is an `ObjectState {version, value}`. **Every declared-state write is
   judged by the object's law** over the old and new state and the request facts
   (`admitWrite`; `Birth.write_judged`, `Delivery.write_judged`, `StateWrite.write_judged`).
+  The judged law is `ObjectRecord.effectiveLaw`: the kernel's package-pin clause
+  (`ObjectRecord.pinClause`, `objectivePin` over the record's `pin`) first, then the creator's
+  law; the clause is derived from the record, never stored, so no creator law omits it
+  (`create_installs_pin`, `pin_in_every_judged_law`). A direct `writeState` is made by no
+  package code and is refused at the pin on every created object
+  (`ordinary_write_to_object_refused`); a birth, a delivery, a call frame and a delivered
+  message are made under the pinned package and pass it (`Birth.write_passes_pin`,
+  `Delivery.write_passes_pin`, `invocation_writes_pinned`, `MessageDelivery.writes_pinned`).
   A birth must run the pinned package (`birth_refuses_non_object`,
   `birth_refuses_other_pin`, `native_birth_on_pinned_object`). The kernel's cells sit at
   reserved coordinates (≥ 2^256) that the ordinary route cannot write
@@ -538,9 +546,10 @@ capacities). An accepted receipt reaches these through
 Every cell law sees, first in its state, the slot `objective/artifact`: the claimed method
 artifact's identity, or `-1` for a command with no Objective claim
 (`objective_artifact_slot_exact`). `Pred.objectivePin` is the package pin as a law clause
-(`ordinary_objectivePin_refused`, `pinned_objectivePin_accepts`). No turn installs it, and
-the object kernel's law view (`ObjectRecord.views`) carries no `objective/artifact` slot, so
-an object's law cannot yet use it.
+(`ordinary_objectivePin_refused`, `pinned_objectivePin_accepts`). The object kernel's law
+view (`ObjectRecord.views`) carries the same slot, first, and every object's judged law leads
+with the clause for its pinned package (`ObjectRecord.effectiveLaw`; see the object bullet
+above), so the creator's own law can read `objective/artifact` too.
 
 ## Three things called "law" or "requires"
 
