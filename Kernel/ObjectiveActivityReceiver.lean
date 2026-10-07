@@ -193,9 +193,10 @@ inductive Turn where
   | rebirth (record : Digest) (await : Digest) (envelope : Capacity)
   /-- Register an invariant domain (`ObjectiveDomain.register`): the `members` (each with a
   capability the signer holds on it; each member's upgrade policy must consent), their joint
-  `law` (which must hold now), funded by `payer`. -/
+  `law` (which must hold now), funded by `payer`, which pays the public price of `envelope` (whose
+  `domainWork` must cover the turn end's judgment of the new domain). -/
   | registerDomain (members : List (Nat × CapabilityId)) (law : Minidregg.Pred.Pred) (payer : Nat)
-      (payerCapability : CapabilityId)
+      (payerCapability : CapabilityId) (envelope : Capacity)
   deriving DecidableEq, Repr
 
 abbrev CreateWire :=
@@ -212,7 +213,7 @@ abbrev AdoptWire :=
   Nat × CapabilityId × Digest × Minidregg.Theory.ObjectiveBendTypes.Ty × Option String × List String ×
     Minidregg.Pred.Pred × ObjectRecord.UpgradePolicy × List Digest × Capacity × Nat × Nat × CapabilityId
 
-abbrev RegisterWire := List (Nat × CapabilityId) × Minidregg.Pred.Pred × Nat × CapabilityId
+abbrev RegisterWire := List (Nat × CapabilityId) × Minidregg.Pred.Pred × Nat × CapabilityId × Capacity
 
 abbrev TurnWire :=
   Sum PublishWire (Sum CreateWire (Sum BirthWire (Sum (Digest × AnswerWire) (Sum EndWire
@@ -240,7 +241,7 @@ def Turn.toWire : Turn → TurnWire
   | .migrate o a ac => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (o, a, ac))))))))))))
   | .abortDrained record await extra a ac => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (record, await, extra, a, ac)))))))))))))
   | .rebirth record await envelope => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (record, await, envelope))))))))))))))
-  | .registerDomain members law p pc => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr ((members, law, p, pc)))))))))))))))
+  | .registerDomain members law p pc envelope => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr ((members, law, p, pc, envelope)))))))))))))))
 
 def Turn.ofWire : TurnWire → Turn
   | .inl (artifact, package, p, pc) => .publish artifact package p pc
@@ -262,7 +263,7 @@ def Turn.ofWire : TurnWire → Turn
   | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (o, a, ac)))))))))))) => .migrate o a ac
   | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (record, await, extra, a, ac))))))))))))) => .abortDrained record await extra a ac
   | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (record, await, envelope)))))))))))))) => .rebirth record await envelope
-  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr ((members, law, p, pc))))))))))))))) => .registerDomain members law p pc
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr ((members, law, p, pc, envelope))))))))))))))) => .registerDomain members law p pc envelope
 
 def createStream : StreamCodec CreateWire :=
   StreamCodec.product StreamCodec.nat (StreamCodec.product capabilityIdStream
@@ -303,7 +304,8 @@ def adoptStream : StreamCodec AdoptWire :=
 
 def registerStream : StreamCodec RegisterWire :=
   StreamCodec.product (StreamCodec.list (StreamCodec.product StreamCodec.nat capabilityIdStream))
-    (StreamCodec.product LawLeaf.predStream (StreamCodec.product StreamCodec.nat capabilityIdStream))
+    (StreamCodec.product LawLeaf.predStream (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product capabilityIdStream capacityStream)))
 
 def turnStream : StreamCodec Turn :=
   StreamCodec.xmap
@@ -345,7 +347,9 @@ v7: envelopes carry the extraction tick lane (`Capacity.extractTicks`); v6: the 
 state type (`ObjectStateType.tyStream`); v5: `create` carries an optional initial declared state,
 and the turn sum has no `writeState`; v9 (and older) commands refuse to decode. -/
 -- v11: envelopes carry `replayBytes`, `coreBytes` (GPT-6 row E work account); a v10 command does not decode.
-def commandFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/COMMAND/v11".toUTF8.toList
+-- v12: envelopes carry `domainWork`, and `registerDomain` carries its envelope and the paying
+-- account and capability (A3 domain pricing); a v11 command does not decode.
+def commandFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/COMMAND/v12".toUTF8.toList
 
 def commandCodec : LawfulCodec Command := ObjectiveActivityWire.framed commandFrame commandStream
 
@@ -453,8 +457,8 @@ def adoptRequest (command : Command) (object : Nat) (pin : Digest) (stateType : 
     command.nonce⟩
 
 def registerRequest (command : Command) (members : List (Nat × CapabilityId)) (law : Minidregg.Pred.Pred)
-    (payer : Nat) : ObjectiveActivity.RegisterRequest :=
-  ⟨command.subject, members.map fun (member, _) => ⟨member⟩, law, payer, command.nonce⟩
+    (payer : Nat) (envelope : Capacity) : ObjectiveActivity.RegisterRequest :=
+  ⟨command.subject, members.map fun (member, _) => ⟨member⟩, law, payer, envelope, command.nonce⟩
 
 def migrateRequest (command : Command) (object account : Nat) : ObjectiveActivity.MigrateRequest :=
   ⟨command.subject, ⟨object⟩, account, command.nonce⟩
@@ -497,8 +501,8 @@ def transactionOf (command : Command) : Option TransactionId :=
   | .migrate object account _ => some (ObjectiveActivity.migrateTransaction (migrateRequest command object account))
   | .abortDrained _ await _ _ _ => some (ObjectiveActivity.abortTransaction await)
   | .rebirth _ await _ => some (ObjectiveActivity.rebirthTransaction await)
-  | .registerDomain members law payer _ =>
-      some (ObjectiveActivity.registerTransaction (registerRequest command members law payer))
+  | .registerDomain members law payer _ envelope =>
+      some (ObjectiveActivity.registerTransaction (registerRequest command members law payer envelope))
 
 /-- Refusals of this receiver: the kernel's, the authority's, the ingress's. -/
 inductive Reject where
@@ -588,8 +592,8 @@ def decideTurn {rootBytes : List UInt8 → Digest} (config : Config) (snapshot :
       let reborn ← kernel (ObjectiveActivity.rebirth config snapshot height request)
       if reborn.await.id ≠ await then throw .staleAwait
       pure (.rebirth request reborn)
-  | .registerDomain members law payer _ => do
-      let request := registerRequest command members law payer
+  | .registerDomain members law payer _ envelope => do
+      let request := registerRequest command members law payer envelope
       pure (.registerDomain request (← kernel (ObjectiveActivity.register config snapshot height request)))
 
 def postStream : StreamCodec Post :=
@@ -645,7 +649,7 @@ def signedTarget (domain : Digest) (command : Command) : ResourceKind × Nat :=
   | .migrate object _ _ => (.object, object)
   | .abortDrained record _ _ _ _ => (.object, record.value)
   | .rebirth record _ _ => (.object, record.value)
-  | .registerDomain members law _ _ =>
+  | .registerDomain members law _ _ _ =>
       (.object, (ObjectiveActivity.domainCell domain
         (ObjectiveActivity.domainId (members.map fun (member, _) => ⟨member⟩) law)).value)
 
@@ -731,7 +735,7 @@ def authorized (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (c
       if extra = zeroCapacity then .ok () else account a ac
   | .topUp _ a ac _ => account a ac
   | .invoke o oc _ _ _ _ _ _ a ac => do object o oc; account a ac
-  | .registerDomain members _ p pc => do
+  | .registerDomain members _ p pc _ => do
       members.forM fun (o, oc) => object o oc
       account p pc
 
@@ -1063,7 +1067,7 @@ theorem native_end_closes_held_seats (accepted : Accepted deployment profile amb
   have finished : ActivitySeatEnd.finish accepted.prepared.config durable.snapshot ambient.height
       accepted.prepared.decided = .ok (accepted.prepared.final.1, accepted.prepared.final.2) :=
     accepted.prepared.finalExact
-  obtain ⟨seats, _, final, _, _⟩ := ActivitySeatEnd.finish_finalize finished
+  obtain ⟨seats, _, _, final, _, _, _⟩ := ActivitySeatEnd.finish_finalize finished
   unfold ActivitySeatEnd.finalize at final
   rw [ends] at final
   simp only at final

@@ -182,9 +182,39 @@ def finalize {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsh
     | .ok none => .ok (turn.posts, [])
     | .ok (some joined) => .ok (joined.rewrite turn.posts, joined.held.guards)
 
+/-- The units of domain judgment a turn's charged envelope declares (`Capacity.domainWork`):
+the envelope whose public price (`Tariff.workOf`) the turn, or the turn that escrowed for it,
+was charged. No wildcard: a new turn says what it paid for.
+* `invoke`, `birth`, `adopt`, `rebirth`, `registerDomain`: the request's envelope (its fee is
+  charged in the turn; a rebirth's from the old purse);
+* `deliver`, `exhaust`, `abortDrained`: the turn's envelope (the escrowed envelope plus `extra`,
+  each paid: the escrow at the yield, `extra` in the turn);
+* `deliverMessage`: the message's envelope (paid as postage by the sending invocation);
+* `migrate`: the adopted envelope when the migration runs a term (`migrateFee` charges it),
+  else nothing;
+* `publish`, `create`, `resolve`, `topUp`, `abandon`: nothing (no envelope is charged). -/
+def AdmittedTurn.domainAllowance {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} : AdmittedTurn config snapshot height → Nat
+  | .publish _ _ => 0
+  | .create _ _ => 0
+  | .birth request _ _ => request.envelope.domainWork
+  | .resolve _ _ => 0
+  | .deliver _ delivery => delivery.envelope.domainWork
+  | .topUp _ _ => 0
+  | .exhaust _ exhausted => exhausted.envelope.domainWork
+  | .abandon _ _ => 0
+  | .invoke request _ => request.envelope.domainWork
+  | .deliverMessage _ delivered => delivered.message.envelope.domainWork
+  | .adopt request _ => request.envelope.domainWork
+  | .migrate _ migrated => if migrated.next.migration.isSome then migrated.next.envelope.domainWork else 0
+  | .abortDrained _ aborted => aborted.envelope.domainWork
+  | .rebirth request _ => request.envelope.domainWork
+  | .registerDomain request _ => request.envelope.domainWork
+
 /-- **A turn's end**: the seat join (`finalize`), then the invariant-domain judgment on the
 final posts (`ObjectiveActivity.judgeDomains`): every domain of every object whose state the
-turn writes must hold on the members' final states. The domain judgment adds read guards and
+turn writes must hold on the members' final states, and the judgment's units of work must fit
+the turn's declared allowance (`domainUncovered`). The domain judgment adds read guards and
 never changes the posts. -/
 inductive EndRefusal where
   | seats (reason : SeatStore.Refusal)
@@ -199,23 +229,29 @@ def finish {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
   | .ok (posts, extra) =>
     match ObjectiveActivity.judgeDomains config snapshot posts with
     | .error reason => .error (.kernel reason)
-    | .ok guards => .ok (posts, extra ++ guards)
+    | .ok (guards, units) =>
+      if units ≤ (AdmittedTurn.domainAllowance turn) then .ok (posts, extra ++ guards)
+      else .error (.kernel (.domainUncovered units (AdmittedTurn.domainAllowance turn)))
 
 theorem finish_finalize {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {turn : AdmittedTurn config snapshot height} {posts : List Post} {extra : List ReadGuard}
     (finished : finish config snapshot height turn = .ok (posts, extra)) :
-    ∃ seats domains, finalize config snapshot height turn = .ok (posts, seats) ∧
-      ObjectiveActivity.judgeDomains config snapshot posts = .ok domains ∧ extra = seats ++ domains := by
+    ∃ seats domains units, finalize config snapshot height turn = .ok (posts, seats) ∧
+      ObjectiveActivity.judgeDomains config snapshot posts = .ok (domains, units) ∧
+      units ≤ (AdmittedTurn.domainAllowance turn) ∧ extra = seats ++ domains := by
   unfold finish at finished
   split at finished
   · cases finished
   · rename_i final_ seats final
     split at finished
     · cases finished
-    · rename_i domains judged
-      simp only [Except.ok.injEq, Prod.mk.injEq] at finished
-      obtain ⟨rfl, rfl⟩ := finished
-      exact ⟨seats, domains, final, judged, rfl⟩
+    · rename_i domains units judged
+      split at finished
+      · rename_i covered
+        simp only [Except.ok.injEq, Prod.mk.injEq] at finished
+        obtain ⟨rfl, rfl⟩ := finished
+        exact ⟨seats, domains, units, final, judged, covered, rfl⟩
+      · cases finished
 
 /-- The intent of an admitted turn over final posts and extra guards: the turn's own
 transaction, guards and claims, with the extra guards (an ending turn's seat cells, the domain
@@ -320,7 +356,7 @@ theorem finish_domains {rootBytes : Bytes → Digest} {config : Config} {snapsho
             (ObjectiveActivity.domainCell config.domain id) ∧
           ∀ member ∈ domain.members, Guarded snapshot (AdmittedTurn.finalIntent sealing posts extra turn)
             (ObjectiveActivity.stateCell config.domain member) := by
-  obtain ⟨seats, domains, _, judged, rfl⟩ := finish_finalize finished
+  obtain ⟨seats, domains, _, _, judged, _, rfl⟩ := finish_finalize finished
   have reach : ∀ cell, ObjectiveActivity.guardAt snapshot cell ∈ domains →
       Guarded snapshot (AdmittedTurn.finalIntent sealing posts (seats ++ domains) turn) cell := fun cell inDomains =>
     finalIntent_guards sealing posts (seats ++ domains) turn _ (List.mem_append_right _ inDomains)
@@ -337,6 +373,28 @@ theorem finish_domains {rootBytes : Bytes → Digest} {config : Config} {snapsho
     holds, reach _ guardDomain,
     fun member inMembers => reach _ (guardStates member inMembers)⟩
 
+/-- **A finished turn paid for its domain judgment.** For every domain the turn end judged
+(named by a written object's final record, or posted), the turn's declared allowance covers
+that domain's `|members| + 1` reads, and the envelope's public price includes the domain rate on
+the whole allowance (`Tariff.workOf_domainWork`): the payer of the charged envelope paid at least
+`tariff.domainWork * (|members| + 1)` for it. -/
+theorem finish_domain_covered {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {turn : AdmittedTurn config snapshot height} {posts : List Post} {extra : List ReadGuard}
+    (finished : finish config snapshot height turn = .ok (posts, extra)) :
+    ∀ id, ((∃ object ∈ ObjectiveActivity.writtenObjects snapshot posts, ∃ record,
+        ObjectiveActivity.finalRecord config snapshot posts object = .ok (some record) ∧ id ∈ record.domains) ∨
+        id ∈ ObjectiveActivity.postedDomains snapshot posts) →
+      ∃ domain, ObjectiveActivity.finalDomain config snapshot posts id = .ok (some domain) ∧
+        domain.members.length + 1 ≤ (AdmittedTurn.domainAllowance turn) ∧
+        config.tariff.domainWork * (domain.members.length + 1) ≤
+          config.tariff.domainWork * (AdmittedTurn.domainAllowance turn) := by
+  obtain ⟨_, _, units, _, judged, covered, _⟩ := finish_finalize finished
+  intro id which
+  obtain ⟨domain, found, counted⟩ := ObjectiveActivity.judgeDomains_units judged id which
+  exact ⟨domain, found, Nat.le_trans counted covered,
+    Nat.mul_le_mul_left _ (Nat.le_trans counted covered)⟩
+
+#assert_axioms finish_domain_covered
 #assert_axioms joint_admission Joined.conserves Joined.closes Joined.deregisters Joined.retires join_none finish_finalize finalIntent_guards finish_domains
 
 end Minidregg.Kernel.ActivitySeatEnd

@@ -33,6 +33,15 @@ the END of every turn that writes a member's declared state, on every member's F
   D5 keep       y (in the bank) joins a second domain {y, w}: the registration rewrites y's record, keeping the
                 bank (`keepsDomains`): it installs, y's record names both, and y.deposit(1) is still refused by
                 the bank's law.
+  D6 priced     the domain judgment is paid work (`Capacity.domainWork`, rate 1 in this world): a transfer
+                y -> v declaring NO domain work is refused `domainUncovered <units> 0`, naming the units the
+                judgment needs (the DISTINCT domains of y and v: the bank (3+1) and {y, w} (2+1) = 7 reads); declaring
+                units - 1 is refused `domainUncovered <units> <units-1>`; declaring exactly the units installs.
+                The same transfer back declaring 20 more units costs the sponsor exactly 20 more (the fee is
+                the envelope's public price, `Tariff.workOf`), and the bank still balances.
+
+Every turn here declares DOMAIN units of domain work (registration: its envelope's `domainWork`, which
+must cover judging and indexing the new domain, 2 * members + 1).
 
 PLANTS (self-test; `--plant` prints `PLANT-RESULT red GROUPS` and exits 1 when exactly the planted rows went red,
 `PLANT-RESULT blind ...` and exits 3 when a planted row stayed green):
@@ -43,6 +52,8 @@ PLANTS (self-test; `--plant` prints `PLANT-RESULT red GROUPS` and exits 1 when e
   member-permit     the members' upgrade authority admits nobody's subject but a stranger's -> D1 red
   joined-drops      a HOST plant (scripts/plants/joined-drops.py: registration writes each member's record with
                     only the new domain) -> D5 red: the honest turn-end rule refuses it `domainsDropped`
+  judge-free        a HOST plant (scripts/plants/judge-free.py: `judgeDomains` reports 0 units) -> D6 red: the
+                    transfer declaring no domain work commits
   joined-drops,keep-blind
                     both HOST plants (keep-blind: `keepsDomains` admits every post) -> D5 red the other way: the
                     dropping registration commits, y leaves the bank, and y.deposit(1) commits
@@ -53,10 +64,15 @@ import argparse, pathlib, sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from activity_world import World, PERMIT_ALL, TICKS, nat, record, eq, any_of, eq_slots, cap  # noqa: E402
+import re  # noqa: E402
+import activity_world  # noqa: E402
+from activity_world import World, PERMIT_ALL, TICKS, nat, record, eq, any_of, eq_slots, cap, unhex, op_id  # noqa: E402
 
-PLANTS = {'domain-blind': {'D1-joint', 'D3-stale', 'D4-bank', 'D5-keep'}, 'member-permit': {'D1-joint'},
-          'joined-drops': {'D5-keep'}, 'keep-blind': {'D5-keep'}}
+PLANTS = {'domain-blind': {'D1-joint', 'D3-stale', 'D4-bank', 'D5-keep', 'D6-priced'}, 'member-permit': {'D1-joint'},
+          'joined-drops': {'D5-keep'}, 'keep-blind': {'D5-keep'}, 'judge-free': {'D6-priced'}}
+# This world prices domain work (rate 1 per unit) so the judgment's fee is visible in a balance.
+activity_world.TARIFF['domainWork'] = '1'
+DOMAIN = 64
 ap = argparse.ArgumentParser()
 ap.add_argument('--bin', required=True)
 ap.add_argument('--root', required=True)
@@ -93,17 +109,18 @@ try:
     def total(name, label):
         return w.total_of(w.state(name, label))
 
-    def invoke(label, name, method, args, expect, detail=None, prepare=False):
+    def invoke(label, name, method, args, expect, detail=None, prepare=False, domain=DOMAIN):
         body = {'kind': 'invoke', 'object': O[name], 'objectCapability': w.objects[name]['capability'],
-                'method': method, 'args': args, 'envelope': cap(TICKS), 'account': w.SPONSOR_ACCOUNT,
-                'accountCapability': w.SPONSOR_SPEND}
+                'method': method, 'args': args, 'envelope': cap(TICKS, domain=domain), 'account': w.SPONSOR_ACCOUNT,
+                'accountCapability': w.SPONSOR_SPEND, 'opId': op_id()}
         return w.turn(label, w.sponsor, body, expect, detail, prepare=prepare)
 
     def register(label, names, law, expect, detail=None, workspace=None, caps=None):
         body = {'kind': 'registerDomain',
                 'members': [{'object': O[n], 'capability': (caps or {}).get(n, w.objects[n]['capability'])}
                             for n in names],
-                'law': law, 'payer': w.SPONSOR_ACCOUNT, 'payerCapability': w.SPONSOR_SPEND}
+                'law': law, 'payer': w.SPONSOR_ACCOUNT, 'payerCapability': w.SPONSOR_SPEND,
+                'envelope': cap(0, full=False, domain=DOMAIN)}
         return w.turn(label, workspace or w.sponsor, body, expect, detail)
 
     def hop(target, amount):
@@ -169,6 +186,31 @@ try:
         w.check('d5-y-names-both', ry is not None and len(ry) == 2, ry)
         invoke('d5-mint-still-refused', 'y', 'deposit', nat(1), 'refused', ['domainLawDenied', 'sumEq'])
         w.check('d5-bank-11-4-7', bank() == [11, 4, 7], None)
+
+    with w.group('D6-priced'):
+        def transfer(label, frm, to, domain, expect, detail=None):
+            pay = record(to=nat(O[to]), bank=nat(O[frm]), amount=nat(1), hook={'tag': 'label', 'value': 'receive'})
+            return invoke(label, frm, 'withdraw', pay, expect, detail, domain=domain)
+
+        def sponsor(label):
+            return w.balance(w.view(label, {'accounts': [w.SPONSOR_ACCOUNT]}), w.SPONSOR_ACCOUNT)
+        refused = transfer('d6-undeclared-refused', 'y', 'v', 0, 'refused', 'domainUncovered')
+        named = re.search(r'domainUncovered (\d+) (\d+)', ' '.join(str(unhex(refused.get('detail', ''))).split()))
+        units = int(named.group(1)) if named else None
+        # Honest world: y names the bank and {y, w}, v the bank; each distinct domain once: (3+1) + (2+1) = 7. Under a plant
+        # that changes the memberships (joined-drops) the count differs; the refusal still names it.
+        w.check('d6-units-named', named is not None and named.group(2) == '0' and units > 0 and
+                (units == 7 or bool(plants)), named and named.group(0))
+        w.check('d6-bank-unchanged', bank() == [11, 4, 7], None)
+        if units:
+            transfer('d6-one-short-refused', 'y', 'v', units - 1, 'refused', f'domainUncovered {units} {units - 1}')
+            before = sponsor('d6-before')
+            transfer('d6-exact-installs', 'y', 'v', units, 'installed')
+            mid = sponsor('d6-mid')
+            transfer('d6-back-20-more', 'v', 'y', units + 20, 'installed')
+            after = sponsor('d6-after')
+            w.check('d6-20-more-units-cost-20-more', (mid - after) - (before - mid) == 20, [before, mid, after])
+            w.check('d6-bank-11-4-7', bank() == [11, 4, 7], None)
 
 finally:
     w.stop()

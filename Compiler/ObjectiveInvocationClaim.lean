@@ -45,6 +45,10 @@ structure Capacity where
   /-- The front end's output: the bytes of the typed core the replay generates and the receiver
   compares with the artifact's. Declared and priced (`workUncovered .core`). -/
   coreBytes : Nat
+  /-- Declared units of invariant-domain judgment (`Kernel.ObjectiveDomain`): a judged domain
+  costs one unit per member read and one for its law; indexing a touched domain one per member.
+  Priced by `Tariff.domainWork`; a turn end whose judgment needs more refuses `domainUncovered`. -/
+  domainWork : Nat
   deriving DecidableEq, Repr
 
 /-- Exact signed observation selector, independent of generated effect targets. -/
@@ -92,12 +96,12 @@ def capacityStream : StreamCodec Capacity :=
       (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))))))
+      (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))))))
     (fun c => ((c.typeFuel,c.sourceTicks,c.heap,c.stack,c.outputNodes,c.outputBytes,c.extractTicks,
       c.inputBytes,c.scalarBits,c.memoryTouches,c.proofWork,c.feeDebit),
       (c.turnBytes,c.witnessBytes,c.storageBytes,c.sideEffectCount,c.networkBytes,c.leaseByteBlocks,c.incidences,
-       c.replayBytes,c.coreBytes)))
-    (fun ((t,s,h,k,n,b,z,i,w,m,p,f),(u,v,x,e,y,l,j,r,c)) => ⟨t,s,h,k,n,b,z,i,w,m,p,f,u,v,x,e,y,l,j,r,c⟩)
+       c.replayBytes,c.coreBytes,c.domainWork)))
+    (fun ((t,s,h,k,n,b,z,i,w,m,p,f),(u,v,x,e,y,l,j,r,c,d)) => ⟨t,s,h,k,n,b,z,i,w,m,p,f,u,v,x,e,y,l,j,r,c,d⟩)
     (by intro c; cases c; rfl)
 
 def stream : StreamCodec Claim :=
@@ -111,9 +115,10 @@ def stream : StreamCodec Claim :=
       c.inputRefs,c.inputEnvelopes,c.expectedInput,c.capacity))
     (fun (s,v,a,c,o,b,r,q,e,p) => ⟨s,v,a,c,o,b,r,q,e,p⟩) (by intro c; cases c; rfl)
 
-/-- v6: the envelope declares the front end's work (`replayBytes`, `coreBytes`); a v5 claim does
+/-- v7: the envelope declares invariant-domain judgment units (`domainWork`); a v6 claim does not
+decode. v6: the envelope declares the front end's work (`replayBytes`, `coreBytes`); a v5 claim does
 not decode. -/
-def frame : List UInt8 := "DREGG/OBJECTIVE/INVOCATION-CLAIM/v6".toUTF8.toList
+def frame : List UInt8 := "DREGG/OBJECTIVE/INVOCATION-CLAIM/v7".toUTF8.toList
 
 def rawCodec : LawfulCodec Claim where
   encode claim := frame ++ stream.encode claim

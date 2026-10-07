@@ -223,7 +223,7 @@ theorem mapM_finalState {rootBytes : Bytes → Digest} {config : Config} {snapsh
 section Judged
 
 variable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-  {posts : List Post} {guards : List ReadGuard}
+  {posts : List Post} {guards : List ReadGuard} {units : Nat}
 
 /-- A judged domain holds on the states the posts leave. -/
 theorem judged_holds {id : Digest} {here : List ReadGuard} {domain : Domain}
@@ -237,7 +237,7 @@ theorem judged_holds {id : Digest} {here : List ReadGuard} {domain : Domain}
   exact judgeJoint_holds holds
 
 /-- A record a post rewrites keeps every domain it named. -/
-theorem records_keep (judged : judgeDomains config snapshot posts = .ok guards) {object : CellId}
+theorem records_keep (judged : judgeDomains config snapshot posts = .ok (guards, units)) {object : CellId}
     {record : ObjectRecord}
     (held : objectView object (payloads snapshot.canonicalBytes (objectCell config.domain object)) = some record) :
     ∀ id ∈ record.domains, ∃ after,
@@ -303,7 +303,7 @@ theorem changed_written {object : CellId}
 
 /-- **The turn-end judgment keeps every domain**: posts it admits leave every domain satisfied
 and indexed. -/
-theorem judged_preserves (judged : judgeDomains config snapshot posts = .ok guards)
+theorem judged_preserves (judged : judgeDomains config snapshot posts = .ok (guards, units))
     (holds : DomainsHold config (payloads snapshot.canonicalBytes)) :
     DomainsHold config (payloads (afterPosts snapshot posts)) := by
   obtain ⟨_, judgedAll, indexedAll, _⟩ := judgeDomains_parts judged
@@ -385,7 +385,7 @@ theorem Step.domainsHold {rootBytes : Bytes → Digest} {config : Config} {befor
     rcases execute_no_partial_data_commit schedule _
       (ActivitySeatEnd.AdmittedTurn.finalIntent sealing posts extra turn) with same | installed
     · rw [same]; exact holds
-    · obtain ⟨_, _, _, judged, _⟩ := ActivitySeatEnd.finish_finalize final
+    · obtain ⟨_, _, _, _, judged, _, _⟩ := ActivitySeatEnd.finish_finalize final
       rw [installed, install_payloads _ (finalIntent_writes sealing)]
       exact judged_preserves judged holds
   | inert intent posts writes inert schedule =>

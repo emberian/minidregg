@@ -736,7 +736,7 @@ theorem mapM_zip {α β ε : Type} {f : α → Except ε β} :
         · exact fx
         · exact mapM_zip rest pair inRest
 
-/-- A registration writes the fresh domain cell and the records of its members. -/
+/-- A registration writes the fresh domain cell, the records of its members and the Book (its fee). -/
 theorem registration_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : RegisterRequest} (registered : Registration config snapshot height request) :
     ∀ post ∈ registered.posts, PostSafe config snapshot post := by
@@ -746,6 +746,7 @@ theorem registration_safe {rootBytes : Bytes → Digest} {config : Config} {snap
   · subst head
     exact postSafe_inert (bodyOf_of_payload_none (readDomain_none_payload registered.absent))
       (recordIn_image_other _ _ (by decide))
+  rcases List.mem_append.mp tail with tail | isBook
   · obtain ⟨⟨object, record⟩, inZip, rfl⟩ := List.mem_map.mp tail
     have read := mapM_zip registered.recordsExact _ inZip
     simp only [readMember] at read
@@ -755,6 +756,9 @@ theorem registration_safe {rootBytes : Bytes → Digest} {config : Config} {snap
     · rename_i found
       cases read
       exact postSafe_inert (readObject_package found) (recordIn_image_other _ _ (by decide))
+  · simp only [List.mem_singleton] at isBook
+    subst isBook
+    exact book_post_safe registered.bookExact registered.posted
 
 /-- An invocation writes only the Book and the state cells of objects its call
 tree read: no record or package cell. -/
@@ -1240,8 +1244,12 @@ theorem registration_quiet {rootBytes : Bytes → Digest} {config : Config} {sna
   intro post member
   rcases List.mem_cons.mp member with head | tail
   · subst head; exact quiet_image (role := .domain) rfl (by decide) (by decide)
+  rcases List.mem_append.mp tail with tail | isBook
   · obtain ⟨_, _, rfl⟩ := List.mem_map.mp tail
     exact quiet_image (role := .object) rfl (by decide) (by decide)
+  · simp only [List.mem_singleton] at isBook
+    subst isBook
+    exact quiet_of_payload_none (Postings.write_payload config snapshot registered.posted)
 
 theorem adoption_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : AdoptRequest} (adopted : Adoption config snapshot height request) :
@@ -1698,7 +1706,7 @@ theorem Step.preserves {rootBytes : Bytes → Digest} {config : Config} {before 
     RecordCellsTyped config after := by
   cases step with
   | turn turn sealing posts extra final schedule =>
-    obtain ⟨_, _, final, _, _⟩ := ActivitySeatEnd.finish_finalize final
+    obtain ⟨_, _, _, final, _, _, _⟩ := ActivitySeatEnd.finish_finalize final
     exact execute_preserves typed (finalIntent_writes sealing) (finalize_safe typed turn final) schedule
   | inert intent posts writes inert schedule => exact execute_preserves typed writes (inert_safe inert) schedule
   | foreign intent admitted schedule => exact foreign_preserves typed admitted schedule

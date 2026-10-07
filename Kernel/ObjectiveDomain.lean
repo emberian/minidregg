@@ -32,7 +32,8 @@ open Minidregg.Theory.TypedAuthorization (Digest SubjectId)
 open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Kernel.ObjectiveActivityWire
 open Minidregg.Kernel.ObjectRecord (ObjectRecord Facts stateSlots)
-open Minidregg.Theory.CanonicalResourceKernel (AccountId)
+open Minidregg.Theory.CanonicalResourceKernel (AccountId Batch)
+open Minidregg.Compiler.ObjectiveInvocationClaim (Capacity)
 
 set_option autoImplicit false
 
@@ -250,9 +251,17 @@ def indexEach {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snaps
 3. every domain whose cell the posts touch is named by each member's final record
    (`domainUnindexed`).
 The read guards it returns go into the turn's intent (`ActivitySeatEnd.AdmittedTurn.finalIntent`);
-what it reads at a posted cell is pinned by that post's own `pre`. -/
+what it reads at a posted cell is pinned by that post's own `pre`.
+
+It also returns its UNITS of work (`Capacity.domainWork`, priced by `Tariff.domainWork`): one per
+cell it reads for a domain and guards. Each DISTINCT domain is judged once (a state post names its
+object twice, by the payload it writes and the one its cell holds, and two written objects may share a
+domain: the list is deduplicated, `eraseDups`). Judging a domain reads its cell and every member's
+state (`|members| + 1`, `judgeDomain_length`; the `+ 1` is the law's evaluation); indexing a posted
+domain reads every member's record (`|members|`). `ActivitySeatEnd.finish` refuses a turn whose declared
+allowance is below the units (`domainUncovered`). -/
 def judgeDomains {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
-    (posts : List Post) : Except Refusal (List ReadGuard) :=
+    (posts : List Post) : Except Refusal (List ReadGuard × Nat) :=
   match keepAll snapshot posts with
   | .error reason => .error reason
   | .ok () =>
@@ -261,13 +270,14 @@ def judgeDomains {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sn
     match touchedDomains config snapshot posts written with
     | .error reason => .error reason
     | .ok ids =>
-      match judgeEach config snapshot posts (ids ++ posted) with
+      match judgeEach config snapshot posts (ids ++ posted).eraseDups with
       | .error reason => .error reason
       | .ok guards =>
-        match indexEach config snapshot posts posted with
+        match indexEach config snapshot posts posted.eraseDups with
         | .error reason => .error reason
         | .ok index =>
-          .ok (guards ++ index ++ written.map fun object => guardAt snapshot (objectCell config.domain object))
+          .ok (guards ++ index ++ written.map fun object => guardAt snapshot (objectCell config.domain object),
+            guards.length + index.length)
 
 /-! ## The judgment is sound: what an admitted turn end guarantees -/
 
@@ -478,7 +488,8 @@ domain cell and every member's state cell guarded; every domain whose cell a pos
 named by each member's final record, with the member's record cell guarded; every written
 object's record cell is guarded. -/
 theorem judgeDomains_parts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {posts : List Post} {guards : List ReadGuard} (judged : judgeDomains config snapshot posts = .ok guards) :
+    {posts : List Post} {guards : List ReadGuard} {units : Nat}
+    (judged : judgeDomains config snapshot posts = .ok (guards, units)) :
     (∀ post ∈ posts, keepsDomains snapshot post = .ok ()) ∧
     (∀ id, ((∃ object ∈ writtenObjects snapshot posts, ∃ record,
         finalRecord config snapshot posts object = .ok (some record) ∧ id ∈ record.domains) ∨
@@ -498,17 +509,17 @@ theorem judgeDomains_parts {rootBytes : Bytes → Digest} {config : Config} {sna
     | ok ids =>
       rw [ht] at judged
       simp only at judged
-      cases he : judgeEach config snapshot posts (ids ++ postedDomains snapshot posts) with
+      cases he : judgeEach config snapshot posts (ids ++ postedDomains snapshot posts).eraseDups with
       | error reason => rw [he] at judged; cases judged
       | ok domainGuards =>
         rw [he] at judged
         simp only at judged
-        cases hx : indexEach config snapshot posts (postedDomains snapshot posts) with
+        cases hx : indexEach config snapshot posts (postedDomains snapshot posts).eraseDups with
         | error reason => rw [hx] at judged; cases judged
         | ok index =>
           rw [hx] at judged
-          simp only [Except.ok.injEq] at judged
-          subst judged
+          simp only [Except.ok.injEq, Prod.mk.injEq] at judged
+          obtain ⟨rfl, -⟩ := judged
           refine ⟨keepAll_mem hk, ?_, ?_, fun object written =>
             List.mem_append_right _ (List.mem_map_of_mem written)⟩
           · intro id which
@@ -516,11 +527,11 @@ theorem judgeDomains_parts {rootBytes : Bytes → Digest} {config : Config} {sna
               rcases which with ⟨object, written, record, found, named⟩ | posted
               · exact List.mem_append_left _ (touchedDomains_mem ht object written record found id named)
               · exact List.mem_append_right _ posted
-            obtain ⟨here, judgedHere, within⟩ := judgeEach_mem he id inIds
+            obtain ⟨here, judgedHere, within⟩ := judgeEach_mem he id (List.mem_eraseDups.mpr inIds)
             exact ⟨here, judgedHere, fun g inHere =>
               List.mem_append_left _ (List.mem_append_left _ (within g inHere))⟩
           · intro id posted
-            obtain ⟨here, indexedHere, within⟩ := indexEach_mem hx id posted
+            obtain ⟨here, indexedHere, within⟩ := indexEach_mem hx id (List.mem_eraseDups.mpr posted)
             exact ⟨here, indexedHere, fun g inHere =>
               List.mem_append_left _ (List.mem_append_right _ (within g inHere))⟩
 
@@ -530,7 +541,8 @@ leaves it) names exists, and its law holds on ALL its members' final states (the
 posted, the others as they stand); and the judgment's guards cover every cell it read: the
 domain cell, every member's state cell, and every written object's record cell. -/
 theorem judgeDomains_sound {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {posts : List Post} {guards : List ReadGuard} (judged : judgeDomains config snapshot posts = .ok guards) :
+    {posts : List Post} {guards : List ReadGuard} {units : Nat}
+    (judged : judgeDomains config snapshot posts = .ok (guards, units)) :
     ∀ object ∈ writtenObjects snapshot posts,
       guardAt snapshot (objectCell config.domain object) ∈ guards ∧
       ∀ record, finalRecord config snapshot posts object = .ok (some record) →
@@ -547,14 +559,115 @@ theorem judgeDomains_sound {rootBytes : Bytes → Digest} {config : Config} {sna
   exact ⟨domain, states, read, mapped, judgeJoint_holds holds, within _ guardDomain,
     fun member inMembers => within _ (guardStates member inMembers)⟩
 
+/-! ## The judgment's units of work -/
+
+/-- Judging a domain reads (and guards) its cell and every member's state: `|members| + 1` reads. -/
+theorem judgeDomain_length {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {posts : List Post} {id : Digest} {here : List ReadGuard}
+    (judged : judgeDomain config snapshot posts id = .ok here) :
+    ∃ domain, finalDomain config snapshot posts id = .ok (some domain) ∧
+      here.length = domain.members.length + 1 := by
+  unfold judgeDomain at judged
+  cases hr : finalDomain config snapshot posts id with
+  | error reason => rw [hr] at judged; cases judged
+  | ok found =>
+    cases found with
+    | none => rw [hr] at judged; cases judged
+    | some domain =>
+      rw [hr] at judged
+      simp only at judged
+      cases hs : domain.members.mapM (finalState config snapshot posts) with
+      | error reason => rw [hs] at judged; cases judged
+      | ok states =>
+        rw [hs] at judged
+        simp only at judged
+        cases hj : judgeJoint domain.law id states with
+        | error reason => rw [hj] at judged; cases judged
+        | ok u =>
+          rw [hj] at judged
+          simp only [Except.ok.injEq] at judged
+          subst judged
+          exact ⟨domain, rfl, by simp⟩
+
+theorem judgeEach_length {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {posts : List Post} {ids : List Digest} {guards : List ReadGuard}
+    (judged : judgeEach config snapshot posts ids = .ok guards) :
+    ∀ want ∈ ids, ∃ here, judgeDomain config snapshot posts want = .ok here ∧ here.length ≤ guards.length := by
+  induction ids generalizing guards with
+  | nil => intro want member; cases member
+  | cons first rest ih =>
+    intro want member
+    unfold judgeEach at judged
+    cases hd : judgeDomain config snapshot posts first with
+    | error reason => rw [hd] at judged; cases judged
+    | ok here =>
+      cases he : judgeEach config snapshot posts rest with
+      | error reason => rw [hd, he] at judged; cases judged
+      | ok later =>
+        rw [hd, he] at judged
+        simp only [Except.ok.injEq] at judged
+        subst judged
+        rcases List.mem_cons.mp member with rfl | inRest
+        · exact ⟨here, hd, by simp⟩
+        · obtain ⟨found, judgedHere, short⟩ := ih he want inRest
+          exact ⟨found, judgedHere, by simp; omega⟩
+
+/-- **The judgment counts every domain it judges at its reads.** When it admits, every domain
+it must judge (named by a written object's final record, or posted) exists as the turn leaves
+it, and the units it reports are at least that domain's `|members| + 1`. (`ActivitySeatEnd`:
+a finished turn's declared allowance covers the units, so the payer paid for them.) -/
+theorem judgeDomains_units {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {posts : List Post} {guards : List ReadGuard} {units : Nat}
+    (judged : judgeDomains config snapshot posts = .ok (guards, units)) :
+    ∀ id, ((∃ object ∈ writtenObjects snapshot posts, ∃ record,
+        finalRecord config snapshot posts object = .ok (some record) ∧ id ∈ record.domains) ∨
+        id ∈ postedDomains snapshot posts) →
+      ∃ domain, finalDomain config snapshot posts id = .ok (some domain) ∧
+        domain.members.length + 1 ≤ units := by
+  unfold judgeDomains at judged
+  cases hk : keepAll snapshot posts with
+  | error reason => rw [hk] at judged; cases judged
+  | ok u =>
+    rw [hk] at judged
+    simp only at judged
+    cases ht : touchedDomains config snapshot posts (writtenObjects snapshot posts) with
+    | error reason => rw [ht] at judged; cases judged
+    | ok ids =>
+      rw [ht] at judged
+      simp only at judged
+      cases he : judgeEach config snapshot posts (ids ++ postedDomains snapshot posts).eraseDups with
+      | error reason => rw [he] at judged; cases judged
+      | ok domainGuards =>
+        rw [he] at judged
+        simp only at judged
+        cases hx : indexEach config snapshot posts (postedDomains snapshot posts).eraseDups with
+        | error reason => rw [hx] at judged; cases judged
+        | ok index =>
+          rw [hx] at judged
+          simp only [Except.ok.injEq, Prod.mk.injEq] at judged
+          obtain ⟨-, rfl⟩ := judged
+          intro id which
+          have inIds : id ∈ ids ++ postedDomains snapshot posts := by
+            rcases which with ⟨object, written, record, found, named⟩ | posted
+            · exact List.mem_append_left _ (touchedDomains_mem ht object written record found id named)
+            · exact List.mem_append_right _ posted
+          obtain ⟨here, judgedHere, short⟩ := judgeEach_length he id (List.mem_eraseDups.mpr inIds)
+          obtain ⟨domain, found, length⟩ := judgeDomain_length judgedHere
+          exact ⟨domain, found, by omega⟩
+
 /-! ## Registration -/
 
 structure RegisterRequest where
   subject : SubjectId
   members : List CellId
   law : Minidregg.Pred.Pred
-  /-- The Book account that funds the domain cell's retention; never authority. -/
+  /-- The Book account that funds the domain cell's retention and pays the registration's fee;
+  never authority. -/
   payer : AccountId
+  /-- The declared envelope of the registration turn: its public price (`Tariff.workOf`) is the
+  fee `payer` pays (`registerBatch`), and its `domainWork` is the allowance the turn end's
+  judgment of the new domain must fit (`ActivitySeatEnd.AdmittedTurn.domainAllowance`). -/
+  envelope : Capacity
   nonce : Nat
 
 def RegisterRequest.id (request : RegisterRequest) : Digest := domainId request.members request.law
@@ -598,6 +711,10 @@ def joined (record : ObjectRecord) (id : Digest) : ObjectRecord := { record with
 
 def RegisterRequest.domain (request : RegisterRequest) : Domain := ⟨request.members, request.law, request.payer⟩
 
+/-- The registration's fee: the public price of its declared envelope, from the payer's account. -/
+def registerBatch (config : Config) (request : RegisterRequest) : Batch :=
+  ⟨[], [.fee request.payer config.collector config.asset (config.tariff.workOf request.envelope)], []⟩
+
 structure Registration {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : RegisterRequest) where
   private mk ::
@@ -610,10 +727,15 @@ structure Registration {rootBytes : Bytes → Digest} (config : Config) (snapsho
   statesExact : request.members.mapM (readState config snapshot) = .ok states
   /-- The law holds on the members' current states. -/
   judged : judgeJoint request.law request.id states = .ok ()
+  book : BookCell
+  bookExact : loadBook config snapshot = .ok book
+  posted : Postings book
+  postedBatch : posted.batch = registerBatch config request
   posts : List Post
   postsExact : posts = postAt snapshot (domainCell config.domain request.id) (domainImage request.id request.domain) ::
-    (request.members.zip records).map fun (member, record) =>
-      postAt snapshot (objectCell config.domain member) (objectImage member (joined record request.id))
+    ((request.members.zip records).map (fun (member, record) =>
+      postAt snapshot (objectCell config.domain member) (objectImage member (joined record request.id))) ++
+      [posted.write config snapshot])
 
 def register {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (height : Nat)
     (request : RegisterRequest) : Except Refusal (Registration config snapshot height request) :=
@@ -633,7 +755,14 @@ def register {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsh
     | .ok states =>
     match judged : judgeJoint request.law request.id states with
     | .error reason => .error reason
-    | .ok () => .ok ⟨shape, absent, records, recordsExact, consented, states, statesExact, judged, _, rfl⟩
+    | .ok () =>
+    match bookExact : loadBook config snapshot with
+    | .error reason => .error reason
+    | .ok book =>
+    match postedExact : postings book (registerBatch config request) with
+    | .error reason => .error reason
+    | .ok posted => .ok ⟨shape, absent, records, recordsExact, consented, states, statesExact, judged, book,
+        bookExact, posted, postings_batch postedExact, _, rfl⟩
   else .error (.domainShape "members must be 1..16 distinct objects")
 
 /-- A registration reads every member's state: it conflicts with a concurrent write of any. -/
@@ -648,6 +777,6 @@ def Registration.intent {rootBytes : Bytes → Digest} {config : Config} {snapsh
   intentOf rootBytes (registerTransaction request) registered.posts registered.guards [] sealing
 
 #assert_axioms domain_roundTrip judgeJoint_holds finalState_after finalRecord_after finalDomain_after judgeDomains_parts
-  judgeDomains_sound
+  judgeDomains_sound judgeDomain_length judgeEach_length judgeDomains_units
 
 end Minidregg.Kernel.ObjectiveActivity
