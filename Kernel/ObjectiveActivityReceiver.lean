@@ -189,6 +189,11 @@ inductive Turn where
   /-- Re-birth the activity at `record` (left on the old package by a migration) on the
   object's package from its stored input (anyone; paid from its own purse). -/
   | rebirth (record : Digest) (await : Digest) (envelope : Capacity)
+  /-- Register an invariant domain (`ObjectiveDomain.register`): the `members` (each with a
+  capability the signer holds on it; each member's upgrade policy must consent), their joint
+  `law` (which must hold now), funded by `payer`. -/
+  | registerDomain (members : List (Nat × CapabilityId)) (law : Minidregg.Pred.Pred) (payer : Nat)
+      (payerCapability : CapabilityId)
   deriving DecidableEq, Repr
 
 abbrev CreateWire :=
@@ -204,11 +209,13 @@ abbrev AdoptWire :=
   Nat × CapabilityId × Digest × Minidregg.Theory.ObjectiveBendTypes.Ty × Option String × List String ×
     Minidregg.Pred.Pred × ObjectRecord.UpgradePolicy × List Digest × Capacity × Nat × Nat × CapabilityId
 
+abbrev RegisterWire := List (Nat × CapabilityId) × Minidregg.Pred.Pred × Nat × CapabilityId
+
 abbrev TurnWire :=
   Sum PublishWire (Sum CreateWire (Sum BirthWire (Sum (Digest × AnswerWire) (Sum EndWire
     (Sum (Digest × Nat × CapabilityId × Nat)
       (Sum EndWire (Sum (Digest × Digest) (Sum InvokeWire (Sum (Nat × Nat × Digest)
-        (Sum AdoptWire (Sum (Nat × Nat × CapabilityId) (Sum EndWire (Digest × Digest × Capacity)))))))))))))
+        (Sum AdoptWire (Sum (Nat × Nat × CapabilityId) (Sum EndWire (Sum (Digest × Digest × Capacity) RegisterWire)))))))))))))
 
 def Turn.toWire : Turn → TurnWire
   | .publish artifact package p pc => .inl (artifact, package, p, pc)
@@ -228,7 +235,8 @@ def Turn.toWire : Turn → TurnWire
       .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (o, oc, pin, st, mig, dropped, law, upgrade, chosen, envelope, patience, a, ac)))))))))))
   | .migrate o a ac => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (o, a, ac))))))))))))
   | .abortDrained record await extra a ac => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (record, await, extra, a, ac)))))))))))))
-  | .rebirth record await envelope => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr ((record, await, envelope))))))))))))))
+  | .rebirth record await envelope => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (record, await, envelope))))))))))))))
+  | .registerDomain members law p pc => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr ((members, law, p, pc)))))))))))))))
 
 def Turn.ofWire : TurnWire → Turn
   | .inl (artifact, package, p, pc) => .publish artifact package p pc
@@ -248,7 +256,8 @@ def Turn.ofWire : TurnWire → Turn
       .adopt o oc pin st mig dropped law upgrade chosen envelope patience a ac
   | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (o, a, ac)))))))))))) => .migrate o a ac
   | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (record, await, extra, a, ac))))))))))))) => .abortDrained record await extra a ac
-  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr ((record, await, envelope)))))))))))))) => .rebirth record await envelope
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (record, await, envelope)))))))))))))) => .rebirth record await envelope
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr ((members, law, p, pc))))))))))))))) => .registerDomain members law p pc
 
 def createStream : StreamCodec CreateWire :=
   StreamCodec.product StreamCodec.nat (StreamCodec.product capabilityIdStream
@@ -286,6 +295,10 @@ def adoptStream : StreamCodec AdoptWire :=
           (StreamCodec.product (StreamCodec.list digestStream) (StreamCodec.product capacityStream
             (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat capabilityIdStream)))))))))))
 
+def registerStream : StreamCodec RegisterWire :=
+  StreamCodec.product (StreamCodec.list (StreamCodec.product StreamCodec.nat capabilityIdStream))
+    (StreamCodec.product LawLeaf.predStream (StreamCodec.product StreamCodec.nat capabilityIdStream))
+
 def turnStream : StreamCodec Turn :=
   StreamCodec.xmap
     (StreamCodec.sum publishStream (StreamCodec.sum createStream (StreamCodec.sum birthStream
@@ -300,7 +313,8 @@ def turnStream : StreamCodec Turn :=
                   (StreamCodec.sum (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
                       capabilityIdStream))
                     (StreamCodec.sum endStream
-                      (StreamCodec.product digestStream (StreamCodec.product digestStream capacityStream)))))))))))))))
+                      (StreamCodec.sum (StreamCodec.product digestStream (StreamCodec.product digestStream capacityStream))
+                        registerStream))))))))))))))
     Turn.toWire Turn.ofWire (by intro turn; cases turn <;> rfl)
 
 structure Command where
@@ -318,12 +332,12 @@ def commandStream : StreamCodec Command :=
     (fun (subject, nonce, root, turn) => ⟨subject, nonce, root, turn⟩)
     (by intro c; cases c; rfl)
 
-/-- v8: an `invoke`'s grants are v2 (`ObjectiveCall.grantStream`: code, arguments bound, caller);
+/-- v9: the turn sum ends with `registerDomain` (`ObjectiveDomain`); v8: an `invoke`'s grants are v2 (`ObjectiveCall.grantStream`: code, arguments bound, caller);
 v7: envelopes carry the extraction tick lane (`Capacity.extractTicks`); v6: the upgrade turns
 (`adopt`, `migrate`, `abortDrained`, `rebirth`) join the sum, and `create` declares the object's
 state type (`ObjectStateType.tyStream`); v5: `create` carries an optional initial declared state,
-and the turn sum has no `writeState`; v7 (and older) commands refuse to decode. -/
-def commandFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/COMMAND/v8".toUTF8.toList
+and the turn sum has no `writeState`; v8 (and older) commands refuse to decode. -/
+def commandFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/COMMAND/v9".toUTF8.toList
 
 def commandCodec : LawfulCodec Command := ObjectiveActivityWire.framed commandFrame commandStream
 
@@ -416,6 +430,10 @@ def adoptRequest (command : Command) (object : Nat) (pin : Digest) (stateType : 
   ⟨command.subject, ⟨object⟩, pin, stateType, migration, dropped, law, upgrade, rebirth, envelope, patience, account,
     command.nonce⟩
 
+def registerRequest (command : Command) (members : List (Nat × CapabilityId)) (law : Minidregg.Pred.Pred)
+    (payer : Nat) : ObjectiveActivity.RegisterRequest :=
+  ⟨command.subject, members.map fun (member, _) => ⟨member⟩, law, payer, command.nonce⟩
+
 def migrateRequest (command : Command) (object account : Nat) : ObjectiveActivity.MigrateRequest :=
   ⟨command.subject, ⟨object⟩, account, command.nonce⟩
 
@@ -456,6 +474,8 @@ def transactionOf (command : Command) : Option TransactionId :=
   | .migrate object account _ => some (ObjectiveActivity.migrateTransaction (migrateRequest command object account))
   | .abortDrained _ await _ _ _ => some (ObjectiveActivity.abortTransaction await)
   | .rebirth _ await _ => some (ObjectiveActivity.rebirthTransaction await)
+  | .registerDomain members law payer _ =>
+      some (ObjectiveActivity.registerTransaction (registerRequest command members law payer))
 
 /-- Refusals of this receiver: the kernel's, the authority's, the ingress's. -/
 inductive Reject where
@@ -545,6 +565,9 @@ def decideTurn {rootBytes : List UInt8 → Digest} (config : Config) (snapshot :
       let reborn ← kernel (ObjectiveActivity.rebirth config snapshot height request)
       if reborn.await.id ≠ await then throw .staleAwait
       pure (.rebirth request reborn)
+  | .registerDomain members law payer _ => do
+      let request := registerRequest command members law payer
+      pure (.registerDomain request (← kernel (ObjectiveActivity.register config snapshot height request)))
 
 def postStream : StreamCodec Post :=
   StreamCodec.xmap (StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream))
@@ -599,6 +622,9 @@ def signedTarget (domain : Digest) (command : Command) : ResourceKind × Nat :=
   | .migrate object _ _ => (.object, object)
   | .abortDrained record _ _ _ _ => (.object, record.value)
   | .rebirth record _ _ => (.object, record.value)
+  | .registerDomain members law _ _ =>
+      (.object, (ObjectiveActivity.domainCell domain
+        (ObjectiveActivity.domainId (members.map fun (member, _) => ⟨member⟩) law)).value)
 
 def verbFor : (kind : ResourceKind) → Verb kind
   | .object => .mutateObject
@@ -682,6 +708,9 @@ def authorized (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (c
       if extra = zeroCapacity then .ok () else account a ac
   | .topUp _ a ac _ => account a ac
   | .invoke o oc _ _ _ _ _ a ac => do object o oc; account a ac
+  | .registerDomain members _ p pc => do
+      members.forM fun (o, oc) => object o oc
+      account p pc
 
 /-! ## Preparation -/
 
@@ -702,7 +731,7 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   preRoot : Digest
   preRootExact : preRoot = durable.snapshot.model.roots ⟨(signedTarget deployment.domain command).2⟩
   final : List Post × List ReadGuard
-  finalExact : ActivitySeatEnd.finalize config durable.snapshot ambient.height decided = .ok final
+  finalExact : ActivitySeatEnd.finish config durable.snapshot ambient.height decided = .ok final
   outcome : Digest
   outcomeExact : outcome = outcomeDigest final.1
   authorizedExact : authorized authority.snapshot profile.semantics ambient command preRoot outcome = .ok ()
@@ -721,8 +750,9 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
     match decidedExact : decideTurn config durable.snapshot ambient.height command with
     | .error reason => throw reason
     | .ok decided =>
-      match finalExact : ActivitySeatEnd.finalize config durable.snapshot ambient.height decided with
-      | .error reason => throw (.seats reason)
+      match finalExact : ActivitySeatEnd.finish config durable.snapshot ambient.height decided with
+      | .error (.seats reason) => throw (.seats reason)
+      | .error (.kernel reason) => throw (.kernel reason)
       | .ok final =>
       let preRoot := durable.snapshot.model.roots ⟨(signedTarget deployment.domain command).2⟩
       let outcome := outcomeDigest final.1
@@ -992,7 +1022,10 @@ theorem native_end_closes_held_seats (accepted : Accepted deployment profile amb
         ∀ after ∈ joined.held.next.seats, after.account ≠ seat.account) ∧
       Seats.Posts (Theory.CanonicalResourceKernel.logicalBook pre.logical)
         (Seats.seqBatch posted.batch joined.held.batch) joined.held.next.book := by
-  have final := accepted.prepared.finalExact
+  have finished : ActivitySeatEnd.finish accepted.prepared.config durable.snapshot ambient.height
+      accepted.prepared.decided = .ok (accepted.prepared.final.1, accepted.prepared.final.2) :=
+    accepted.prepared.finalExact
+  obtain ⟨seats, _, final, _, _⟩ := ActivitySeatEnd.finish_finalize finished
   unfold ActivitySeatEnd.finalize at final
   rw [ends] at final
   simp only at final
@@ -1001,8 +1034,8 @@ theorem native_end_closes_held_seats (accepted : Accepted deployment profile amb
   · rename_i none_
     exact absurd (ActivitySeatEnd.join_none none_) holds
   · rename_i joined _
-    have same := (Except.ok.inj final).symm
-    exact ⟨joined, by rw [same], joined.closes.1, joined.closes.2.1⟩
+    have same := congrArg Prod.fst (Except.ok.inj final).symm
+    exact ⟨joined, same, joined.closes.1, joined.closes.2.1⟩
 
 /-- **The native delivery's fields bind the stored checkpoint** (the kernel's
 projection `delivery_fields_bind_checkpoint`, at the Host's own snapshot). -/
@@ -1086,7 +1119,7 @@ def signingHeader (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
     | .error "authority unavailable"
   let outcome := match configOf deployment profile ambient with
     | .ok config => match decideTurn config durable.snapshot ambient.height command with
-      | .ok decided => match ActivitySeatEnd.finalize config durable.snapshot ambient.height decided with
+      | .ok decided => match ActivitySeatEnd.finish config durable.snapshot ambient.height decided with
         | .ok final => outcomeDigest final.1
         | .error _ => outcomeDigest []
       | .error _ => outcomeDigest []

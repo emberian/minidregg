@@ -3,7 +3,7 @@
 module (in the `ObjectiveActivity` namespace, names unchanged) because the call
 kernel builds on the activity kernel and the turn sum must name both. -/
 import Kernel.ObjectiveSend
-import Kernel.ObjectiveActivityUpgrade
+import Kernel.ObjectiveDomain
 
 namespace Minidregg.Kernel.ObjectiveActivity
 open Minidregg.Theory Minidregg.Compiler
@@ -41,6 +41,8 @@ inductive AdmittedTurn {rootBytes : Bytes → Digest} (config : Config) (snapsho
   | migrate (request : MigrateRequest) (migrated : Migrated config snapshot height request)
   | abortDrained (request : AbortRequest) (aborted : Abort config snapshot height request)
   | rebirth (request : RebirthRequest) (reborn : Rebirth config snapshot height request)
+  /-- Register an invariant domain over member objects (`Kernel.ObjectiveDomain`). -/
+  | registerDomain (request : RegisterRequest) (registered : Registration config snapshot height request)
 
 /-- The posts a turn commits. -/
 def AdmittedTurn.posts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -59,6 +61,7 @@ def AdmittedTurn.posts {rootBytes : Bytes → Digest} {config : Config} {snapsho
   | .migrate _ migrated => migrated.posts
   | .abortDrained _ aborted => aborted.posts
   | .rebirth _ reborn => reborn.posts
+  | .registerDomain _ registered => registered.posts
 
 /-- The one intent a turn commits under a receiver's sealing. -/
 def AdmittedTurn.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -77,6 +80,7 @@ def AdmittedTurn.intent {rootBytes : Bytes → Digest} {config : Config} {snapsh
   | .migrate _ migrated => migrated.intent sealing
   | .abortDrained _ aborted => aborted.intent sealing
   | .rebirth _ reborn => reborn.intent sealing
+  | .registerDomain _ registered => registered.intent sealing
 
 /-- Every turn's intent is `intentOf` its posts: its writes are exactly the
 post images, nothing else. -/

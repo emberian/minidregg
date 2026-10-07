@@ -700,6 +700,62 @@ theorem creation_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot
       subst tail
       exact state_post_safe (created.stateFresh seed seeded) _
 
+theorem readDomain_none_payload {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {id : Digest} (read : readDomain config snapshot id = .ok none) :
+    payloadOf (snapshot.canonicalBytes (domainCell config.domain id)) = none := by
+  unfold readDomain domainFor at read
+  cases present : payloadOf (snapshot.canonicalBytes (domainCell config.domain id)) with
+  | none => rfl
+  | some payload =>
+    rw [present] at read
+    simp only at read
+    split at read
+    · split at read <;> cases read
+    · cases read
+
+/-- What `mapM` returned is what each element gave. -/
+theorem mapM_zip {α β ε : Type} {f : α → Except ε β} :
+    ∀ {xs : List α} {ys : List β}, xs.mapM f = .ok ys → ∀ pair ∈ xs.zip ys, f pair.1 = .ok pair.2
+  | [], ys, _ => by simp
+  | x :: xs, ys, done => by
+    simp only [List.mapM_cons, bind, Except.bind, pure, Except.pure] at done
+    cases fx : f x with
+    | error e => rw [fx] at done; cases done
+    | ok y =>
+      rw [fx] at done
+      simp only at done
+      cases rest : xs.mapM f with
+      | error e => rw [rest] at done; cases done
+      | ok ys' =>
+        rw [rest] at done
+        simp only [Except.ok.injEq] at done
+        subst done
+        intro pair member
+        simp only [List.zip_cons_cons, List.mem_cons] at member
+        rcases member with rfl | inRest
+        · exact fx
+        · exact mapM_zip rest pair inRest
+
+/-- A registration writes the fresh domain cell and the records of its members. -/
+theorem registration_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : RegisterRequest} (registered : Registration config snapshot height request) :
+    ∀ post ∈ registered.posts, PostSafe config snapshot post := by
+  rw [registered.postsExact]
+  intro post member
+  rcases List.mem_cons.mp member with head | tail
+  · subst head
+    exact postSafe_inert (bodyOf_of_payload_none (readDomain_none_payload registered.absent))
+      (recordIn_image_other _ _ (by decide))
+  · obtain ⟨⟨object, record⟩, inZip, rfl⟩ := List.mem_map.mp tail
+    have read := mapM_zip registered.recordsExact _ inZip
+    simp only [readMember] at read
+    split at read
+    · cases read
+    · cases read
+    · rename_i found
+      cases read
+      exact postSafe_inert (readObject_package found) (recordIn_image_other _ _ (by decide))
+
 /-- An invocation writes only the Book and the state cells of objects its call
 tree read: no record or package cell. -/
 theorem invocation_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -866,6 +922,7 @@ theorem AdmittedTurn.safe {rootBytes : Bytes → Digest} {config : Config} {snap
   | migrate _ migrated => exact migration_safe migrated
   | abortDrained _ aborted => exact abort_safe aborted
   | rebirth _ reborn => exact rebirth_safe reborn
+  | registerDomain _ registered => exact registration_safe registered
 
 /-! ## An ending turn's final posts are safe
 
@@ -879,24 +936,9 @@ check). -/
 /-- The writes of an admitted turn's final intent are exactly its final posts. -/
 theorem finalIntent_writes {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} (sealing : Seal) {turn : AdmittedTurn config snapshot height} {posts : List Post}
-    {extra : List ReadGuard} (final : ActivitySeatEnd.finalize config snapshot height turn = .ok (posts, extra)) :
+    {extra : List ReadGuard} :
     (ActivitySeatEnd.AdmittedTurn.finalIntent sealing posts extra turn).writes = posts.map (Post.write rootBytes) := by
-  cases turn with
-  | birth _ _ _ => rfl
-  | deliver _ _ => rfl
-  | abandon _ _ => rfl
-  | publish _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
-  | create _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
-  | resolve _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
-  | topUp _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
-  | exhaust _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
-  | invoke _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
-  | deliverMessage _ _ =>
-    simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
-  | adopt _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
-  | migrate _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
-  | abortDrained _ _ => rfl
-  | rebirth _ _ => rfl
+  cases turn <;> rfl
 
 /-- **Posts the seat kernel checked inert are safe**: they sit on no package and
 write no record. -/
@@ -1189,6 +1231,16 @@ theorem creation_quiet {rootBytes : Bytes → Digest} {config : Config} {snapsho
       subst tail
       exact quiet_image (role := .state) rfl (by decide) (by decide)
 
+theorem registration_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : RegisterRequest} (registered : Registration config snapshot height request) :
+    ∀ post ∈ registered.posts, Quiet post.bytes := by
+  rw [registered.postsExact]
+  intro post member
+  rcases List.mem_cons.mp member with head | tail
+  · subst head; exact quiet_image (role := .domain) rfl (by decide) (by decide)
+  · obtain ⟨_, _, rfl⟩ := List.mem_map.mp tail
+    exact quiet_image (role := .object) rfl (by decide) (by decide)
+
 theorem adoption_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : AdoptRequest} (adopted : Adoption config snapshot height request) :
     ∀ post ∈ adopted.posts, Quiet post.bytes := by
@@ -1379,6 +1431,7 @@ def AdmittedTurn.Sends {rootBytes : Bytes → Digest} {config : Config} {snapsho
   | .migrate _ _ => False
   | .abortDrained _ _ => False
   | .rebirth _ _ => False
+  | .registerDomain _ _ => False
 
 /-- **The turn that may decide a delivery slot**: `deliverMessage`, and no other.
 Every constructor is listed. -/
@@ -1398,6 +1451,7 @@ def AdmittedTurn.DeliversMessage {rootBytes : Bytes → Digest} {config : Config
   | .migrate _ _ => False
   | .abortDrained _ _ => False
   | .rebirth _ _ => False
+  | .registerDomain _ _ => False
 
 /-- **The turn that may CANCEL a message**, deciding its delivery slot `cancelled`: an
 invocation whose call tree yielded a `cancel` (row F). Every constructor is listed. -/
@@ -1417,6 +1471,7 @@ def AdmittedTurn.CancelsMessage {rootBytes : Bytes → Digest} {config : Config}
   | .migrate _ _ => False
   | .abortDrained _ _ => False
   | .rebirth _ _ => False
+  | .registerDomain _ _ => False
 
 /-- Every turn but the sending ones posts no inbox: by cases over the whole sum. -/
 theorem AdmittedTurn.posts_hold_no_inbox {rootBytes : Bytes → Digest} {config : Config}
@@ -1443,6 +1498,7 @@ theorem AdmittedTurn.posts_hold_no_inbox {rootBytes : Bytes → Digest} {config 
   | migrate _ migrated => exact fun post member => (migration_quiet migrated post member).1
   | abortDrained _ aborted => exact fun post member => (abort_quiet aborted post member).1
   | rebirth _ reborn => exact fun post member => (rebirth_quiet reborn post member).1
+  | registerDomain _ registered => exact fun post member => (registration_quiet registered post member).1
 
 /-- Every turn but `deliverMessage` and a cancelling invocation decides no delivery slot: by
 cases over the whole sum. -/
@@ -1470,6 +1526,7 @@ theorem AdmittedTurn.posts_decide_no_delivery {rootBytes : Bytes → Digest} {co
   | migrate _ migrated => exact fun post member => (migration_quiet migrated post member).2
   | abortDrained _ aborted => exact fun post member => (abort_quiet aborted post member).2
   | rebirth _ reborn => exact fun post member => (rebirth_quiet reborn post member).2
+  | registerDomain _ registered => exact fun post member => (registration_quiet registered post member).2
 
 /-- **An ending turn's final posts are as quiet as its own** (a Book post or a seat
 closing post holds no activity payload). -/
@@ -1558,7 +1615,7 @@ theorem AdmittedTurn.final_writes_inbox_writers {rootBytes : Bytes → Digest} {
     ∀ w ∈ (ActivitySeatEnd.AdmittedTurn.finalIntent sealing posts extra turn).writes,
       HoldsInbox w.canonicalPostBytes → AdmittedTurn.Sends turn := by
   intro w member holds
-  rw [finalIntent_writes sealing final] at member
+  rw [finalIntent_writes sealing] at member
   obtain ⟨post, inPosts, rfl⟩ := List.mem_map.mp member
   exact AdmittedTurn.inbox_writers turn final post inPosts holds
 
@@ -1571,7 +1628,7 @@ theorem AdmittedTurn.final_writes_delivery_deciders {rootBytes : Bytes → Diges
       DecidesDelivery w.canonicalPostBytes →
         AdmittedTurn.DeliversMessage turn ∨ AdmittedTurn.CancelsMessage turn := by
   intro w member decides
-  rw [finalIntent_writes sealing final] at member
+  rw [finalIntent_writes sealing] at member
   obtain ⟨post, inPosts, rfl⟩ := List.mem_map.mp member
   exact AdmittedTurn.delivery_deciders turn final post inPosts decides
 
@@ -1595,7 +1652,7 @@ turn) any sealing. -/
 inductive Step {rootBytes : Bytes → Digest} (config : Config) : Snapshot rootBytes → Snapshot rootBytes → Prop
   | turn {snapshot : Snapshot rootBytes} {height : Nat} (turn : AdmittedTurn config snapshot height)
       (sealing : Seal) (posts : List Post) (extra : List ReadGuard)
-      (final : ActivitySeatEnd.finalize config snapshot height turn = .ok (posts, extra))
+      (final : ActivitySeatEnd.finish config snapshot height turn = .ok (posts, extra))
       (schedule : DurableCommitProtocol.Schedule) :
       Step config snapshot ((execute schedule snapshot
         (ActivitySeatEnd.AdmittedTurn.finalIntent sealing posts extra turn)).storeAfter snapshot)
@@ -1636,7 +1693,8 @@ theorem Step.preserves {rootBytes : Bytes → Digest} {config : Config} {before 
     RecordCellsTyped config after := by
   cases step with
   | turn turn sealing posts extra final schedule =>
-    exact execute_preserves typed (finalIntent_writes sealing final) (finalize_safe typed turn final) schedule
+    obtain ⟨_, _, final, _, _⟩ := ActivitySeatEnd.finish_finalize final
+    exact execute_preserves typed (finalIntent_writes sealing) (finalize_safe typed turn final) schedule
   | inert intent posts writes inert schedule => exact execute_preserves typed writes (inert_safe inert) schedule
   | foreign intent admitted schedule => exact foreign_preserves typed admitted schedule
 

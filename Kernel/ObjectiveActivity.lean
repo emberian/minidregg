@@ -755,6 +755,26 @@ inductive Refusal where
   | rebirthDisposition
   /-- A rebirth candidate that is not an awaiting activity of the object on its pin. -/
   | rebirthTarget (reason : String)
+  /-- The turn's final state of a member of the invariant domain `domain` is refused by the
+  domain's joint law (`ObjectiveDomain`, judged at turn end): its first failing clause. -/
+  | domainLawDenied (domain : Digest) (leaf : LawLeaf)
+  /-- A member's state does not project into the domain's joint view (a name that is not plain). -/
+  | domainUnprojectable (domain : Digest)
+  /-- A member's record names a domain whose cell holds none, or the cell holds anything else. -/
+  | domainMissing (domain : Digest)
+  | domainCodec (domain : Digest)
+  /-- A registration of a domain that exists (the same members and law). -/
+  | domainExists (domain : Digest)
+  /-- A registration whose members are empty, repeated, or more than `domainMemberCap`. -/
+  | domainShape (reason : String)
+  /-- A registration names a member that is not an object. -/
+  | domainMember (object : Nat)
+  /-- A member is `frozen`: joining a domain adds a law to it, which a frozen object refuses. -/
+  | memberFrozen (object : Nat)
+  /-- A member's upgrade authority does not admit the registration's facts. -/
+  | memberDenied (object : Nat)
+  /-- A member is already in `domainsPerObject` domains. -/
+  | memberDomainsFull (object : Nat)
   deriving Repr
 
 /-! ## Typing data against declared types
@@ -4547,6 +4567,28 @@ abandonment only the object record, whose route is its own payer). The Book side
 ending turn closes the purse it emptied (`Delivery.end_closes_purse`,
 `Abandonment.closes_purse`). -/
 
+/-! ### Invariant domains (`Kernel.ObjectiveDomain`): the record a domain cell holds -/
+
+/-- An invariant domain: its members (objects) and their joint law, funded by `payer`. -/
+structure Domain where
+  members : List CellId
+  law : Minidregg.Pred.Pred
+  payer : AccountId
+  deriving DecidableEq, Repr
+
+def domainStream : StreamCodec Domain :=
+  StreamCodec.xmap
+    (StreamCodec.product (StreamCodec.list digestStream) (StreamCodec.product LawLeaf.predStream StreamCodec.nat))
+    (fun d => (d.members, d.law, d.payer)) (fun w => ⟨w.1, w.2.1, w.2.2⟩) (by intro d; cases d; rfl)
+
+def domainFrame : Bytes := "DREGG/OBJECTIVE/DOMAIN/v1".toUTF8.toList
+def domainCodec := framed domainFrame domainStream
+def encodeDomain (domain : Domain) : Bytes := domainCodec.encode domain
+def decodeDomain (bytes : Bytes) : Option Domain := domainCodec.decode bytes
+
+theorem domain_roundTrip (domain : Domain) : decodeDomain (encodeDomain domain) = some domain :=
+  framed_roundTrip _ _ domain
+
 /-- Where a retained cell's payer is read from. -/
 inductive PayerRoute where
   | escrow
@@ -4556,6 +4598,8 @@ inductive PayerRoute where
   | stored
   /-- An inbox: its sender object's payer. -/
   | objectOfInbox
+  /-- An invariant domain: its own payer (`ObjectiveDomain.Domain.payer`). -/
+  | domainRecord
   deriving DecidableEq, Repr
 
 def payerRoute : Role → Option PayerRoute
@@ -4565,6 +4609,7 @@ def payerRoute : Role → Option PayerRoute
   | .package => some .stored
   | .object => some .objectRecord
   | .inbox => some .objectOfInbox
+  | .domain => some .domainRecord
 
 /-- A census of retained cell kinds: every kind listed, each with its payer route. -/
 structure RetentionCensus (Kind : Type) where
@@ -4581,7 +4626,7 @@ instance {Kind : Type} (census : RetentionCensus Kind) : Decidable census.Paid :
 
 /-- The activity registry's retained kinds: every activity role. -/
 def activityCensus : RetentionCensus Role where
-  kinds := [.record, .slot, .state, .package, .object, .inbox]
+  kinds := [.record, .slot, .state, .package, .object, .inbox, .domain]
   complete := by intro kind; cases kind <;> simp
   route := payerRoute
 
@@ -4629,6 +4674,7 @@ def routePayer (config : Config) (bytesAt : CellId → Bytes) (payload : Objecti
       (objectAt config bytesAt object).map ObjectRecord.payer
   | .objectRecord => (ObjectRecord.decodeRecord payload.body).map ObjectRecord.payer
   | .stored => (decodeStored payload.body).map Stored.payer
+  | .domainRecord => (decodeDomain payload.body).map Domain.payer
 
 /-- The payer of a cell's bytes: its payload's role's route. -/
 def payerOfBytes (config : Config) (bytesAt : CellId → Bytes) (bytes : Bytes) : Option AccountId := do
