@@ -22,16 +22,12 @@ the consumer poll paths collapsed every nonzero exit into one
 unknown code fails closed toward "may have acted", as fn's own
 `fn-outcome-code` fails closed toward the fence.
 
-`consumer status`, `position` and `ack` are run with `--frame` (fn `3f0309256`) and print the
-reply frame as hex, which `Compiler.FnWireConsumer` reads with the grammar interpreter at fn's
-exported families: an acknowledgement is durable-accepted exactly when the exit is 0 AND the
-frame is an `accepted` consumer reply (`ackStatus_durableAccepted_iff`), not when a text line
-spells it. `consumer poll` is still on fn's text line, `consumer STATUS[ DETAIL]` (fn
-`host/native/consumer-local.lisp` `fnn-consumer-say`), which `answerLine` splits. The pin now
-carries `fnct.consumer.poll-reply` and `Compiler.FnWireConsumer.decodePollReply` reads it, but
-fn's `--frame` covers status, position and ack only (`consumer --frame poll` is a usage refusal
-at fn 1e190ff19), so the poll paths, the only callers of `answerLine`, stay on the text line
-until fn's frame plan includes poll.
+Every consumer verb Mini runs (`status`, `position`, `ack`, `poll`) and `identity` is run with
+`--frame` (fn `3f0309256`; poll since fn `6679dae0e`) and prints the reply frame as hex, which
+`Compiler.FnWireConsumer` reads with the grammar interpreter at fn's exported families: an
+acknowledgement is durable-accepted exactly when the exit is 0 AND the frame is an `accepted`
+consumer reply (`ackStatus_durableAccepted_iff`), not when a text line spells it. Mini reads no
+fn answer text line; the former `consumer STATUS[ DETAIL]` splitter (`answerLine`) is deleted.
 -/
 import Theory.AxiomPin
 import Theory.AssertCompiled
@@ -91,12 +87,6 @@ theorem mayHaveActed_false_iff {code : Nat} :
   | none => simp
   | some c => cases c <;> simp [Class.mayHaveActed]
 
-/-- One answer line of `consumer poll`, `consumer STATUS[ DETAIL]` plus its newline, as bytes. -/
-structure Answer where
-  status : List UInt8
-  detail : List UInt8
-  deriving DecidableEq, Repr
-
 /-- Split on newlines, keeping empty lines. -/
 def splitOnLf : List UInt8 → List (List UInt8)
   | [] => [[]]
@@ -114,36 +104,6 @@ def splitOnSpace : List UInt8 → List (List UInt8)
       else match splitOnSpace rest with
         | w :: ws => (b :: w) :: ws
         | [] => [[b]]
-
-/-- `consumer` -/
-def consumerWord : List UInt8 := [99, 111, 110, 115, 117, 109, 101, 114]
-
-/-- Split fn's answer line. Refuses anything that is not one printable-ASCII
-line beginning `consumer ` and ending in one newline. -/
-def answerLine (stdout : List UInt8) : Option Answer :=
-  match stdout.reverse with
-  | last :: lineRev =>
-      let line := lineRev.reverse
-      if last = 10 ∧ line.all (fun b => 32 ≤ b.toNat && b.toNat ≤ 126) then
-        match splitOnSpace line with
-        | word :: status :: detail =>
-            if word = consumerWord ∧ status ≠ [] then
-              some ⟨status, [32].intercalate detail⟩
-            else none
-        | _ => none
-      else none
-  | [] => none
-
-def Answer.text (answer : Answer) : String :=
-  let bytes := if answer.detail.isEmpty then answer.status
-    else answer.status ++ 32 :: answer.detail
-  (String.fromUTF8? bytes.toByteArray).getD "non-UTF-8 answer"
-
-/-- The reason word of a poll's text answer line. -/
-def textReason (stdout : List UInt8) : String :=
-  match answerLine stdout with
-  | some answer => answer.text
-  | none => "no answer line"
 
 /-- The reason of a `--frame` answer: the outcome word of its consumer or status reply, with
 the reason word of a reasoned reply. -/
@@ -163,10 +123,18 @@ def frameReason (stdout : List UInt8) : String :=
     | .ok .uncertain => "uncertain"
     | .ok .fault => "fault"
     | .ok (.reasoned s r) => reasoned s r
-    | .error _ => "no readable frame"
+    | .error _ =>
+      -- A poll that is not accepted prints an eight-zero-octet arm; a bound of 64 octets
+      -- reads exactly those, and an accepted poll is never described as a refusal.
+      match FnWire.readPollReply 64 stdout with
+      | .ok (.accepted ..) => "accepted"
+      | .ok .refused => "refused"
+      | .ok .uncertain => "uncertain"
+      | .ok .fault => "fault"
+      | .error _ => "no readable frame"
 
-/-- A diagnostic naming the class and fn's own reason word (`reason`: `textReason` for a
-poll, `frameReason` for the `--frame` verbs). -/
+/-- A diagnostic naming the class and fn's own reason word (`reason`: `frameReason` for the
+`--frame` verbs). -/
 def describe (verb : String) (code : Nat) (reason : String) : String :=
   match classify code with
   | some .refused => s!"fn {verb} refused ({reason}); fn did not act"
@@ -180,8 +148,8 @@ def describe (verb : String) (code : Nat) (reason : String) : String :=
 
 /-- `hybrid-author`'s answer: the last non-empty line fn writes to stderr,
 `CLASS hybrid-author WORD` (fn `host/native/hybrid-control.lisp`
-`fnn-command-hybrid-author`, the status word upper-cased). CLI text, as
-`answerLine` is; it goes when M5 exports the status words. -/
+`fnn-command-hybrid-author`, the status word upper-cased). CLI text; it goes when M5 exports
+the status words. -/
 def authorAnswer (stderr : List UInt8) : Option (List UInt8 × List UInt8) :=
   let lines := (splitOnLf stderr).filter (· ≠ [])
   match lines.getLast? with
@@ -292,18 +260,9 @@ theorem ackStatus_refuses_unframed_acceptance :
     ackStatus 0 (acceptedFrame.toUTF8.toList) = .transportFault ∧
     ackStatus 0 [] = .transportFault := by native_decide
 
-theorem answerLine_refused_busy :
-    answerLine "consumer refused busy\n".toUTF8.toList =
-      some ⟨"refused".toUTF8.toList, "busy".toUTF8.toList⟩ := by decide +kernel
-
-theorem answerLine_refuses_other_verbs :
-    answerLine "operator refused busy\n".toUTF8.toList = none ∧
-    answerLine "consumer refused busy".toUTF8.toList = none := by decide +kernel
-
 #assert_axioms classify_code classify_two mayHaveActed_false_iff
   ackStatus_refused_iff ackStatus_uncertain_iff classify_eq_some ackStatus_durableAccepted_iff
-  answerLine_refused_busy
-  answerLine_refuses_other_verbs authorAnswer_samples
+  authorAnswer_samples
 #assert_compiled ackStatus_samples
 #assert_compiled ackStatus_refuses_unframed_acceptance
 

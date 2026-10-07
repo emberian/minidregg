@@ -1,7 +1,7 @@
 /-
 # Compiler.FnWireConsumer — fn's consumer and store-identity reply frames, read by the interpreter
 
-`fn consumer --frame status|position|ack` and `fn identity --frame CONTROL` print the reply
+`fn consumer --frame status|position|ack|poll` and `fn identity --frame CONTROL` print the reply
 frame their one exchange read as lowercase hex and one newline, in place of the text line
 (fn `3f0309256`); the exit class is the same. This module reads those frames with Mini's ONE
 grammar interpreter (`Compiler.FnWireGrammar`), over the families of fn's exported file that
@@ -229,10 +229,11 @@ def decodeIdentityReply (frame : List UInt8) : Except Refusal IdentityReply :=
 /-! ### Poll replies (`fnct.consumer.poll-reply`, kind 6)
 
 The family is in the pinned file since fn `1e190ff19`; `pollReplyGrammar` (`FnWireSized`) is
-proved equal to it by `FnWirePinned.pollReply_is_pinned`. fn's `--frame` plan covers `status`,
-`position` and `ack` only (`fn-ncr-frame-plan`, books/consumer-reason.lisp): `consumer --frame
-poll` is a usage refusal today, so the Host's poll still reads fn's text line and the cursor and
-report files, and nothing here is called from it yet. -/
+proved equal to it by `FnWirePinned.pollReply_is_pinned`. `fn consumer --frame poll` (fn
+`6679dae0e`) prints it, and the Host's poll reads it with `readPollReply`. fn still writes the
+report file and then the cursor file; fn proves the cursor file is the frame's sized cursor field
+and the report file its record for every frame its encoder produces
+(`fn-wf-cs-poll-cursor-file-is-the-frames-sized-field`), and the Host checks both on every poll. -/
 
 /-- A poll reply: an accepted poll carries its cursor (behind a `sized` length) and the record
 (the report), the other outcomes carry nothing. -/
@@ -275,6 +276,13 @@ def readStatusReply (stdout : List UInt8) : Except Refusal StatusReply :=
 def readIdentityReply (stdout : List UInt8) : Except Refusal IdentityReply :=
   match frameOfStdout stdout with
   | some f => decodeIdentityReply f
+  | none => .error .malformed
+
+/-- The poll reply `consumer --frame poll` printed: hex, one newline, then the frame's reading
+within `limit` octets. -/
+def readPollReply (limit : Nat) (stdout : List UInt8) : Except Refusal PollReply :=
+  match frameOfStdout stdout with
+  | some f => decodePollReply limit f
   | none => .error .malformed
 
 /-- The longest line a `--frame` command prints: two hex digits per octet and the newline. -/

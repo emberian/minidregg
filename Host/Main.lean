@@ -3337,13 +3337,9 @@ def runFnLocal (fnBinary : String) (args : Array String) (stdoutBound : Nat) :
     | .error error => throw error
   return (exitCode.toNat, output, stderrBytes)
 
-/-- The refusal names fn's outcome class and reason word (`Host.FnOutcome`):
-refused, uncertain, fault, usage and the transport classes stay distinct. -/
-def fnLocalRefusal (verb : String) (exitCode : Nat) (output : List UInt8)
-    (stderrBytes : ByteArray) : IO.Error :=
-  IO.userError s!"{FnOutcome.describe verb exitCode (FnOutcome.textReason output)} (stderrPrefixBytes={stderrBytes.size})"
-
-/-- As `fnLocalRefusal`, for a `--frame` verb: the reason is read from the printed frame. -/
+/-- The refusal of a `--frame` verb names fn's outcome class and the reason read from the printed
+frame (`Host.FnOutcome`): refused, uncertain, fault, usage and the transport classes stay
+distinct. -/
 def fnLocalFrameRefusal (verb : String) (exitCode : Nat) (output : List UInt8)
     (stderrBytes : ByteArray) : IO.Error :=
   IO.userError s!"{FnOutcome.describe verb exitCode (FnOutcome.frameReason output)} (stderrPrefixBytes={stderrBytes.size})"
@@ -3441,9 +3437,50 @@ def queryFnConsumerPosition (fnBinary : String) (scope : FnPollScopePin)
       throw (IO.userError "fn current position exceeds fenced durable ACK")
     return (position, status)
 
+/-- The longest stdout of `consumer --frame poll`: an accepted reply's cursor (behind its 4-octet
+length), its record (behind its 4-octet length, at most the bounded Store poll event) and the
+frame header, as hex plus the newline. -/
+def fnPollFramePayloadMax : Nat :=
+  8 + FnWire.maxCursorOctets + FnEvidenceCodec.maxStorePollEventBytes
+
+/-- `fn consumer --frame poll`: fn prints its `fnct.consumer.poll-reply` and still writes the report
+file and then the cursor file. An accepted poll is admitted only when the frame's cursor is the
+cursor file's (scope and position, each read by the pinned interpreter; an accepted cursor is
+canonical, `FnWire.decodeCursor_canonical`) and the frame's record is the report file's octets.
+fn proves that agreement for the frames its encoder produces; it is checked here on every poll
+(fn's proof for arbitrary decoded octets is owed, PROOF-OWED-POLL-REPLY-DECODE-AGREES), and a
+difference is refused by name, never resolved toward either side. Returns the cursor and report
+octets. -/
+def runFnConsumerPollFrame (fnBinary : String) (scope : FnPollScopePin)
+    (controlPath cursorPath reportPath : String) : IO (List UInt8 × List UInt8) := do
+  verifyFnIdentity fnBinary scope controlPath
+  let consumer ← fnConsumerAscii scope
+  let (exitCode, output, stderrBytes) ← runFnLocal fnBinary
+    #["--fn", "consumer", "--frame", "poll", controlPath, consumer, cursorPath, reportPath]
+    (FnWire.maxFrameLine fnPollFramePayloadMax)
+  let (frameCursor, record) ← match FnWire.readPollReply (FnWire.frameBound fnPollFramePayloadMax) output with
+    | .ok (.accepted cursor record) =>
+        unless exitCode == 0 do
+          throw (IO.userError s!"fn poll answered an accepted frame with exit {exitCode}")
+        pure (cursor, record)
+    | .ok _ => throw (fnLocalFrameRefusal "authenticated local consumer poll" exitCode output stderrBytes)
+    | .error refusal =>
+        throw (IO.userError s!"fn poll frame refused: {refusal.fnWord} (exit {exitCode}, stderrPrefixBytes={stderrBytes.size})")
+  let cursor ← readBoundedBytes cursorPath FnWire.maxCursorOctets
+  let event ← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes
+  unless !cursor.isEmpty do
+    throw (IO.userError "accepted fn poll did not produce a cursor")
+  let fileCursor ← inspectFnConsumerCursor cursorPath
+  unless fileCursor == frameCursor do
+    throw (IO.userError "fn poll frame cursor differs from the cursor file")
+  unless record == event do
+    throw (IO.userError "fn poll frame record differs from the report file")
+  return (cursor, event)
+
 /-- One authenticated local poll, before choosing the article or empty-page
-branch. The cursor is written last by fn; requiring both files and the exact
-accepted line excludes partial or uncertain output from progress admission. -/
+branch. The cursor is written last by fn; requiring both files, an accepted poll-reply frame and
+their agreement (`runFnConsumerPollFrame`) excludes partial or uncertain output from progress
+admission. -/
 def invokeFnConsumerPollRaw (fnBinary : String) (scope : FnPollScopePin)
     (controlPath cursorPath reportPath : String) : IO (List UInt8 × List UInt8) := do
   unless [controlPath, cursorPath, reportPath].all (·.startsWith "/") &&
@@ -3452,17 +3489,7 @@ def invokeFnConsumerPollRaw (fnBinary : String) (scope : FnPollScopePin)
   for path in [cursorPath, reportPath] do
     if ← (System.FilePath.mk path).pathExists then
       throw (IO.userError "fn poll output path already exists")
-  verifyFnIdentity fnBinary scope controlPath
-  let consumer ← fnConsumerAscii scope
-  let (exitCode, output, stderrBytes) ← runFnLocal fnBinary
-    #["--fn", "consumer", "poll", controlPath, consumer, cursorPath, reportPath] 512
-  unless exitCode == 0 && output == "consumer accepted\n".toUTF8.toList do
-    throw (fnLocalRefusal "authenticated local consumer poll" exitCode output stderrBytes)
-  let cursor ← readBoundedBytes cursorPath 346
-  let event ← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes
-  unless !cursor.isEmpty do
-    throw (IO.userError "accepted fn poll did not produce a cursor")
-  return (cursor, event)
+  runFnConsumerPollFrame fnBinary scope controlPath cursorPath reportPath
 
 /-- `none` is genuine idle at the current frontier; `some` is an observed
 bounded empty page that can be recorded and ACKed after Mini admission. -/
@@ -3510,12 +3537,7 @@ def invokeFnConsumerPoll (fnBinary : String) (scope : FnPollScopePin)
   for path in [cursorPath, reportPath, carrierPath] do
     if ← (System.FilePath.mk path).pathExists then
       throw (IO.userError "fn poll output path already exists")
-  verifyFnIdentity fnBinary scope controlPath
-  let consumer ← fnConsumerAscii scope
-  let (exitCode, output, stderrBytes) ← runFnLocal fnBinary
-    #["--fn", "consumer", "poll", controlPath, consumer, cursorPath, reportPath] 512
-  unless exitCode == 0 && output == "consumer accepted\n".toUTF8.toList do
-    throw (fnLocalRefusal "authenticated local consumer poll" exitCode output stderrBytes)
+  discard <| runFnConsumerPollFrame fnBinary scope controlPath cursorPath reportPath
   let (cursor, event, projected) ←
     projectFnPoll fnBinary scope cursorPath reportPath
   IO.FS.writeBinFile carrierPath projected.received.toByteArray
@@ -6571,7 +6593,7 @@ def run (arguments : List String) : IO UInt32 := do
                   #["--fn", "hybrid-sign", keys.principal, keys.edPublic, keys.edSecret,
                     keys.mlPublic, keys.mlSecret, sourcePath] 7000
                 unless code == 0 && output.all (fun b => b.toNat < 128) do
-                  throw (fnLocalRefusal "hybrid-sign" code output stderrBytes)
+                  throw (IO.userError s!"{FnOutcome.describe "hybrid-sign" code "no ASCII signature line"} (stderrPrefixBytes={stderrBytes.size})")
                 IO.ofExcept (parseFnHybridSignLine (String.fromUTF8! output.toByteArray))
               verifySource := fun carrierPath => do
                 let (_, verified) ← verifyFnCarrierUnclaimed pin carrierPath
