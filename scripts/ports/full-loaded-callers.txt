@@ -37,7 +37,6 @@ Kernel/FnEmptyPollReceiverV2.lean
 Kernel/FnEvidence.lean
 Kernel/FnSelectedPollReceiver.lean
 Kernel/GrainResourceBirthReceiver.lean
-Kernel/JointControlBootstrapBundle.lean
 Kernel/JointSourcePrefixValidation.lean
 Kernel/NativeCurrentMemberKeyIO.lean
 Kernel/NativeHost.lean
