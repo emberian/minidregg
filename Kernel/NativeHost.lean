@@ -130,6 +130,17 @@ private def birthRejection : ResourceBirthReceiver.Reject → String
   | .durable (.tailBound head certified bound) => s!"head {head} certified {certified} bound {bound}"
   | .durable reason => s!"durable: {repr reason}"
 
+/-- The named reason of a grain-backed birth refusal (the operator log and the signed
+requester's channel; the public frame stays uniform, `publicSubmissionOutcome`). -/
+private def grainBirthRejection : GrainResourceBirthReceiver.Reject → String
+  | .admission reason => s!"admission: {repr reason}"
+  | .birthPreparation reason => s!"birth preparation: {repr reason}"
+  | .malformedIngress => "malformed ingress"
+  | .transactionConflict => "transaction identity conflict"
+  | .tariffUnavailable => "grain birth tariff unavailable"
+  | .grainPreparation _ => "grain preparation refused"
+  | .durable _ => "durable refused"
+
 private def birthReason : ResourceBirthReceiver.Reject → RefusalReason
   | .malformedIngress => .malformed
   | .transactionConflict => .conflict
@@ -3006,7 +3017,7 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
             opened.durable bytes with
         | .historical receipt => return ← confirm .replayed receipt.transactionId receipt.eventId
         | .confirmed kind receipt => return ← confirm kind receipt.transactionId receipt.eventId
-        | .rejected _ => return refused .operationRejected "grain-birth" "request refused"
+        | .rejected reason => return refused .operationRejected "grain-birth" (grainBirthRejection reason)
         | .contention => return .contention
         | .unavailable detail => return .unavailable detail.toUTF8.toList
         | .uncertain detail => return .uncertain detail.toUTF8.toList

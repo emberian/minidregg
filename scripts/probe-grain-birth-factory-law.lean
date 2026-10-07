@@ -1,4 +1,5 @@
 import Pred.Core
+import Theory.AxiomPin
 
 namespace Minidregg.GrainBirthFactoryLawProbe
 
@@ -38,11 +39,7 @@ theorem worker_grain_backed_factory_allowed (old new : Minidregg.Pred.State)
   simp [fixtureFactoryLaw, Minidregg.Pred.eval, Minidregg.Pred.evalWith,
     subject, mode]
 
-/-- info: 'Minidregg.GrainBirthFactoryLawProbe.worker_bare_factory_mutation_refused' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms worker_bare_factory_mutation_refused
-/-- info: 'Minidregg.GrainBirthFactoryLawProbe.owner_factory_allowed' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms owner_factory_allowed
-/-- info: 'Minidregg.GrainBirthFactoryLawProbe.worker_grain_backed_factory_allowed' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms worker_grain_backed_factory_allowed
+
+#assert_axioms worker_bare_factory_mutation_refused owner_factory_allowed worker_grain_backed_factory_allowed
 
 end Minidregg.GrainBirthFactoryLawProbe
