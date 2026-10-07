@@ -124,6 +124,9 @@ theorem exec_run_reference {rootBytes : Bytes → Digest} {config : Config} {sna
     · rename_i address yielded left1 counted
       split at ran
       · cases ran
+      try dsimp only at ran
+      split at ran
+      · cases ran
       · rename_i extracted found
         split at ran
         · cases ran
@@ -145,7 +148,7 @@ theorem exec_run_reference {rootBytes : Bytes → Digest} {config : Config} {sna
                   · exact each r there
                 · rw [← observed, List.append_assoc, List.singleton_append]
         · rename_i send decoded
-          dsimp only at ran
+          try dsimp only at ran
           split at ran
           · cases ran
           · split at ran
@@ -161,6 +164,9 @@ theorem exec_run_reference {rootBytes : Bytes → Digest} {config : Config} {sna
                 · exact each r there
               · rw [← observed, List.append_assoc, List.singleton_append]
     · rename_i value finished left1 counted
+      split at ran
+      · cases ran
+      try dsimp only at ran
       split at ran
       · cases ran
       · rename_i out completed
