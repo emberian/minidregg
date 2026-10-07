@@ -113,6 +113,8 @@ partial def grammarOfJson (j : Json) : Except String Grammar := do
   | [.str "frame", magic, version, kind, max, g] =>
       return .frame (← ofHex "frame magic" (← jStr "frame" magic)) (← octet "frame version" version)
         (← octet "frame kind" kind) (← jNat "frame" max) (← grammarOfJson g)
+  | [.str "sized", w, lo, hi, g] =>
+      return .sized (← jNat "sized" w) (← jNat "sized" lo) (← jNat "sized" hi) (← grammarOfJson g)
   | _ => throw s!"unknown grammar node {j.compress}"
 
 partial def seqOfJson : List Json → Except String Grammar
@@ -167,6 +169,7 @@ def valueOfJson : Grammar → Json → Except String Value
       | _ => .error "maybe value"
   | .where_ g _, j => valueOfJson g j
   | .frame _ _ _ _ g, j => valueOfJson g j
+  | .sized _ _ _ g, j => valueOfJson g j
   | _, j => .error s!"value does not fit its grammar: {j.compress}"
 
 def hexOf (b : List UInt8) : String := Blake3.toHex b

@@ -1118,7 +1118,7 @@
     {
       "module": "Compiler",
       "path": "Compiler.lean",
-      "sha256": "06c4f0c75e4e308cb8722b2a3d141378e279be6b26a846bcaacac5bfb6d9a3da",
+      "sha256": "8540b5c58824154186a58c9ba7a7a080481835fb0a184d78bf6b9c546ce1eec9",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -1944,28 +1944,35 @@
     {
       "module": "Compiler.FnWireGrammar",
       "path": "Compiler/FnWireGrammar.lean",
-      "sha256": "f8ca7ad6e5c5289480b6aace5ba9b200fe5517dae7396de223059fd46dc5e05a",
+      "sha256": "14d741674a05418bf13822f4f8749befc98948e021614747c61b85558a543501",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.FnWireJson",
       "path": "Compiler/FnWireJson.lean",
-      "sha256": "ae0178d744b5c28c25f6cb4504c185c1ff79d58cba4bb9c5f5a25b3f7a42785e",
+      "sha256": "30c08a9f7ef644a86293941dec5a2484661a58d3070fcba4578d14d787a3739b",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.FnWirePinned",
       "path": "Compiler/FnWirePinned.lean",
-      "sha256": "8399cf0b79754cdee3a3f9765fe8da5737b421f9dfc6bbb7b96deb54a077edf1",
+      "sha256": "931ff704d317ac2b2c60c814eda7f1cd140d3e63ae9c152434d97a66cfcd2acc",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Compiler.FnWireRoundTrip",
       "path": "Compiler/FnWireRoundTrip.lean",
-      "sha256": "ebf35616b1d33e358afbfc71f3d290bf1415ca111a8005bc2736ef3d4b19a722",
+      "sha256": "2ee6bc30aeb07727912d624cdf55159d5fa0ca7fdc61e65a62e3072d1f8c4100",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Compiler.FnWireSized",
+      "path": "Compiler/FnWireSized.lean",
+      "sha256": "178d58ddc7fe528018c286a389b87417981fac5eb1df0a4e19c471794c89075f",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },

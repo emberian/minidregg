@@ -345,6 +345,22 @@ theorem encode_frame {magic : List UInt8} {version kind : UInt8} {max : Nat} {g 
       · rintro ⟨q, hq, h, -⟩; cases hq; exact absurd h hc
   | error e => simp
 
+theorem encode_sized {w lo hi : Nat} {g : Grammar} {v : Value} {b : List UInt8} :
+    encode (.sized w lo hi g) v = .ok b ↔
+      ∃ p, encode g v = .ok p ∧ lo ≤ p.length ∧ p.length ≤ hi ∧
+        b = beBytes w p.length ++ p := by
+  simp only [encode]
+  cases he : encode g v with
+  | ok p =>
+    by_cases hc : lo ≤ p.length ∧ p.length ≤ hi
+    · simp only [hc, and_self, if_true]; constructor
+      · intro h; cases h; exact ⟨p, rfl, hc.1, hc.2, rfl⟩
+      · rintro ⟨q, hq, -, -, rfl⟩; cases hq; rfl
+    · simp only [hc, if_false]; constructor
+      · intro h; cases h
+      · rintro ⟨q, hq, h1, h2, -⟩; cases hq; exact absurd ⟨h1, h2⟩ hc
+  | error e => simp
+
 /-! ## Static facts -/
 
 theorem widthOk_pos {w : Nat} (h : widthOk w = true) : 0 < w := by
@@ -460,6 +476,12 @@ theorem encode_ne_nil : ∀ (g : Grammar) (v : Value) (b : List UInt8),
     intro v b _ _ he
     obtain ⟨p, -, -, rfl⟩ := encode_frame.mp he
     simp [framePrefix]
+  | sized w lo hi g _ =>
+    intro v b hwf _ he
+    obtain ⟨p, -, -, -, rfl⟩ := encode_sized.mp he
+    simp only [Grammar.wf, Bool.and_eq_true, decide_eq_true_eq] at hwf
+    have := widthOk_pos hwf.1.1.1
+    intro h; have := congrArg List.length h; simp [length_beBytes] at this; omega
 
 /-! ## dec ∘ enc -/
 
@@ -634,6 +656,19 @@ theorem decode_encode : ∀ (g : Grammar) (v : Value) (b r : List UInt8),
     simp only [decode, hv0, List.take_left, List.drop_left, take_of_append hD,
       drop_of_append hD, hp']
     rw [if_pos (by simp [hmax, hD]), if_pos hDeq]
+  | sized w lo hi g ih =>
+    intro v b r hwf he _
+    obtain ⟨p, hp, h1, h2, rfl⟩ := encode_sized.mp he
+    simp only [Grammar.wf, Bool.and_eq_true, decide_eq_true_eq] at hwf
+    obtain ⟨⟨⟨hw, hlh⟩, hhi⟩, hwg⟩ := hwf
+    have hlen := length_beBytes w p.length
+    have hv : beValue (beBytes w p.length) = p.length := beValue_beBytes (by omega)
+    have hp' := ih v p [] hwg hp (Or.inr rfl)
+    rw [List.append_nil] at hp'
+    rw [List.append_assoc]
+    simp only [decode, take_of_append hlen, drop_of_append hlen, hv, List.take_left,
+      List.drop_left, hp']
+    rw [if_pos (by simp [hlen]; omega)]
 
 /-! ## enc ∘ dec -/
 
@@ -841,6 +876,30 @@ theorem encode_decode : ∀ (g : Grammar) (xs : List UInt8) (v : Value) (r : Lis
         · cases hd
       · cases hd
     · cases hd
+  | sized w lo hi g ih =>
+    intro xs v r hwf hd
+    simp only [Grammar.wf, Bool.and_eq_true] at hwf
+    simp only [decode] at hd
+    split at hd
+    · rename_i h
+      cases hx : decode g ((xs.drop w).take (beValue (xs.take w))) with
+      | error e => rw [hx] at hd; cases hd
+      | ok q =>
+        obtain ⟨x, r'⟩ := q
+        rw [hx] at hd
+        cases r' with
+        | cons _ _ => cases hd
+        | nil =>
+          obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj hd)
+          obtain ⟨p, hp, hpe⟩ := ih _ x [] hwf.2 hx
+          rw [List.append_nil] at hpe
+          obtain ⟨h0, h1, h2, h3⟩ := h
+          have hpl : p.length = beValue (xs.take w) := by
+            rw [hpe, List.length_take]; omega
+          refine ⟨_, encode_sized.mpr ⟨p, hp, by omega, by omega, rfl⟩, ?_⟩
+          rw [hpl, beBytes_take h0, hpe, List.append_assoc, List.take_append_drop,
+            List.take_append_drop]
+    · cases hd
 
 /-! ## Whole messages -/
 
@@ -931,6 +990,15 @@ theorem decode_refusal_mem : ∀ (g : Grammar) (xs : List UInt8) (e : Refusal),
         · cases hd; simp [fnRefusals]
       · cases hd; simp [fnRefusals]
     · cases hd; simp [fnRefusals]
+  | sized w lo hi g ih =>
+    intro xs e hd
+    simp only [decode] at hd
+    split at hd
+    · split at hd
+      · cases hd
+      · cases hd; simp [fnRefusals]
+      · rename_i heq; cases hd; exact ih _ _ heq
+    · cases hd; simp [fnRefusals]
   | base64Lines width lo hi =>
     intro xs e hd
     simp only [decode] at hd
@@ -996,6 +1064,15 @@ theorem decode_rest_suffix : ∀ (g : Grammar) (xs : List UInt8) (v : Value) (r 
     intro xs v r hd; simp only [decode] at hd
     split at hd
     · cases hd; exact List.drop_suffix _ _
+    · cases hd
+  | sized w lo hi g ih =>
+    intro xs v r hd; simp only [decode] at hd
+    split at hd
+    · split at hd
+      · obtain ⟨-, rfl⟩ := Prod.mk.inj (Except.ok.inj hd)
+        exact (List.drop_suffix _ _).trans (List.drop_suffix _ _)
+      · cases hd
+      · cases hd
     · cases hd
   | seqNil => intro xs v r hd; simp only [decode] at hd; cases hd; exact List.suffix_refl _
   | seqCons h t ihh iht =>
