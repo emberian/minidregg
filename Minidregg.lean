@@ -30,7 +30,6 @@ import Compiler.PredCompileSlotWitness
 import Compiler.PredOrderGadgetWitness
 import Compiler.ZkmlEltwiseAir
 import Compiler.ZkmlTraceCheck
-import Kernel.ApplicationDispatchUpper
 import Kernel.ApplicationGrainLaws
 import Kernel.ApplicationLifecycleBeginCheck
 import Kernel.ApplicationLifecycleClaimPolicyCheck

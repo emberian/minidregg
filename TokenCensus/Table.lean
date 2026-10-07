@@ -108,7 +108,6 @@ Minidregg.Kernel.ApplicationDispatchHistoricalCore.IssuedEvidence.mk | Kernel.Ap
 Minidregg.Kernel.ApplicationDispatchReceiver.Committed.mk | Kernel.ApplicationDispatchReceiver | evidence | L2 | 1 proof / 7 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationDispatchReceiver.Permit.mk | Kernel.ApplicationDispatchReceiver | evidence | L2 | 2 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationDispatchReceiver.RefusalAtTip.mk | Kernel.ApplicationDispatchReceiver | evidence | L2 | 2 proof / 1 data fields; layer-1 review pending
-Minidregg.Kernel.ApplicationDispatchUpper.Accepted.mk | Kernel.ApplicationDispatchUpper | evidence | L2 | 0 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationFailedCreateRetryEvidence.Conditional.mk | Kernel.ApplicationFailedCreateRetryEvidence | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationFailedStartRecoveryAdmission.Candidate.mk | Kernel.ApplicationFailedStartRecoveryAdmission | evidence | L2 | 12 proof / 8 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationFailedStartRecoveryAdmission.PackageRead.mk | Kernel.ApplicationFailedStartRecoveryAdmission | evidence | L2 | 2 proof / 2 data fields; layer-1 review pending
@@ -250,6 +249,7 @@ Minidregg.Kernel.JointPromiseAuthorization.Accepted.mk | Kernel.JointPromiseAuth
 Minidregg.Kernel.JointReceiver.Ordered.mk | Kernel.JointReceiver | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.JointReceiver.Pending.mk | Kernel.JointReceiver | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.JointReceiverAdmission.Reserved.mk | Kernel.JointReceiverAdmission | evidence | L2 | 12 proof / 8 data fields; layer-1 review pending
+Minidregg.Kernel.NativeHistorySelection.After.mk | Kernel.NativeHistorySelection | evidence | L2 | 2 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.NativeHistorySelection.Candidate.mk | Kernel.NativeHistorySelection | evidence | L2 | 2 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.NativeHistorySelection.Matched.mk | Kernel.NativeHistorySelection | evidence | L2 | 2 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.NativeHost.Opened.mk | Kernel.NativeHostContext | evidence | L2 | 1 proof / 4 data fields; layer-1 review pending

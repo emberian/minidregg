@@ -249,6 +249,14 @@ abbrev Session (config : NativeHost.Config) := Sigma (ConsentAnchor.Basis config
 /-- The full re-admission, for consent that selects from chronology. -/
 abbrev FullSession (config : NativeHost.Config) := Sigma (NativeHostReplay.Verified config)
 
+/-- The Reader of the Store the consent provider opened, at `target`'s head: the
+replay walk reads lifecycle history through it. -/
+def storeReader (config : NativeHost.Config) (target : NativeHost.Durable) :
+    IO ((store : DurableHistory.StoreIdentity) × DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) := do
+  match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes target with
+  | .ok sealed => pure sealed
+  | .error detail => throw (IO.userError s!"consent history reader: {detail}")
+
 /-- First admission. A retained anchor the Store contradicts (another genesis
 log, a rolled-back head, a rewritten prefix, another root at the anchor)
 refuses and terminates the provider. A suffix whose admission fails after the
@@ -257,12 +265,13 @@ def verifyInitial (config : NativeHost.Config) (retained : Option ConsentAnchor.
     IO (Session config) := do
   let ⟨target, chains, chainsExact⟩ ← IO.ofExcept
     (← DurableReceiverIO.loadChained config.transport ResourceBirthCodec.rootBytes)
+  let ⟨_, reader⟩ ← storeReader config target
   if let some anchor := retained then
-    match ← ConsentAnchor.resume config anchor target chains chainsExact with
+    match ← ConsentAnchor.resume config reader anchor target chains chainsExact with
     | .ok anchored => return ⟨target, .anchored anchored⟩
     | .error (.contradicted detail) => throw (IO.userError s!"consent refused: {detail}")
     | .error (.suffix _) => pure ()
-  match ← NativeHostReplay.verifyLoaded config target with
+  match ← NativeHostReplay.verifyLoaded config reader target with
   | .error failure => throw (IO.userError s!"consent prefix refused at {failure.index}: {failure.detail}")
   | .ok verified => pure ⟨target, .full verified⟩
 
@@ -273,13 +282,14 @@ def refresh (config : NativeHost.Config) (old : Session config) : IO (Session co
   let ⟨target, seedExact, acceptedExact, logStartExact⟩ ← IO.ofExcept
     (← DurableReceiverIO.extendFrom config.transport ResourceBirthCodec.rootBytes old.1)
   if target.height = old.1.image.accepted.length then return old
-  match ← old.2.extendAppended config target seedExact acceptedExact logStartExact with
+  let ⟨_, reader⟩ ← storeReader config target
+  match ← old.2.extendAppended config reader target seedExact acceptedExact logStartExact with
   | .ok basis => pure ⟨target, basis⟩
   | .error failure =>
       match old.2 with
       | .full _ => throw (IO.userError s!"consent extension refused at {failure.index}: {failure.detail}")
       | .anchored _ =>
-          match ← NativeHostReplay.verifyLoaded config target with
+          match ← NativeHostReplay.verifyLoaded config reader target with
           | .error failure =>
               throw (IO.userError s!"consent extension refused at {failure.index}: {failure.detail}")
           | .ok verified => pure ⟨target, .full verified⟩
@@ -288,7 +298,8 @@ def refresh (config : NativeHost.Config) (old : Session config) : IO (Session co
 re-admitted from genesis once and then held in full. -/
 def upgrade (config : NativeHost.Config) (session : Session config) :
     IO (FullSession config × Session config) := do
-  match ← session.2.full? config with
+  let ⟨_, reader⟩ ← storeReader config session.1
+  match ← session.2.full? config reader with
   | .error failure =>
       throw (IO.userError s!"consent prefix refused at {failure.index}: {failure.detail}")
   | .ok verified => pure (⟨session.1, verified⟩, ⟨session.1, .full verified⟩)
