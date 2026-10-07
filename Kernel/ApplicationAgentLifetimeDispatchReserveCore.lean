@@ -32,12 +32,12 @@ structure ReservedEvidence (config : Config) where
   capability : CapabilityId
   observe : CapabilityId
   sourceExact :
-    ∃ (original : Durable)
+    ∃ (original : DeclaredResourceController.Ground config.deployment)
       (command : DeclaredResourceController.Command)
       (signed : DeclaredResourceController.SignedCommand)
       (prepared : DeclaredResourceController.PreparedInvocation
         config.deployment config.profile
-        ⟨config.federation, logicalHeight config original⟩ original command)
+        ⟨config.federation, config.genesisHeight + original.height⟩ original command)
       (shape : DeclaredResourceController.PhysicalShape prepared)
       (accepted : DeclaredResourceController.AcceptedInvocation prepared signed),
       command.subject = context.base.payerSubject ∧
@@ -71,12 +71,12 @@ def bindContext {config : Config}
                 if chargeBound : context.base.maximumCharge ≤ context.base.reserveAmount then
                   if allowance : context.base.reserveAmount ≤ raw.beforeState.remaining then
                     let sourceExact :
-                        ∃ (original : Durable)
+                        ∃ (original : DeclaredResourceController.Ground config.deployment)
                           (command : DeclaredResourceController.Command)
                           (signed : DeclaredResourceController.SignedCommand)
                           (prepared : DeclaredResourceController.PreparedInvocation
                             config.deployment config.profile
-                            ⟨config.federation, logicalHeight config original⟩
+                            ⟨config.federation, config.genesisHeight + original.height⟩
                             original command)
                           (shape : DeclaredResourceController.PhysicalShape prepared)
                           (accepted : DeclaredResourceController.AcceptedInvocation prepared signed),
