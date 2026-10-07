@@ -199,7 +199,7 @@ def requireSome {A : Type} (reason : Reject) : Option A → Except Reject A
 /-- A prepared renounce over the authority snapshot and the operation marker's
 spent answer it read: the answer is "declared, unspent". -/
 structure PreparedOn (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
-    (authority : Snapshot) (markerSpent : Option Bool) (command : Command) : Prop where
+    (authority : Snapshot) (markerSpent : Option Bool) (command : Command) where
   private mk ::
   answered : markerSpent = some false
 
@@ -234,8 +234,20 @@ theorem Prepared.unspent {deployment : Deployment} {semantics : Digest} {ambient
     ground.authority.spent (operationMarker ground.authority.domain semantics command) = false :=
   (ServedBasis.Ground.markerSpent_some ground prepared.answered).symm
 
-/-- **Agreement**: two grounds with the same authority snapshot and the same answer
-for the marker prepare alike. -/
+/-- The preparation's outcome is a function of the marker's answer alone. -/
+theorem prepareOn_map (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
+    (authority : Snapshot) (markerSpent : Option Bool) (command : Command) :
+    (prepareOn deployment semantics ambient authority markerSpent command).map (fun _ => ()) =
+      (match markerSpent with
+        | none => .error .undeclaredMarker
+        | some true => .error .replayedMarker
+        | some false => .ok ()) := by
+  cases markerSpent with
+  | none => rfl
+  | some spent => cases spent <;> rfl
+
+/-- **Agreement**: two grounds with the same answer for the marker prepare alike
+(the renounce reads nothing else before its signature verifies). -/
 theorem prepare_agrees (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
     (light full : Ground deployment) (command : Command)
     (markers : light.markerSpent (operationMarker light.authority.domain semantics command) =
@@ -243,7 +255,7 @@ theorem prepare_agrees (deployment : Deployment) (semantics : Digest) (ambient :
     (prepare deployment semantics ambient light command).map (fun _ => ()) =
       (prepare deployment semantics ambient full command).map (fun _ => ()) := by
   unfold prepare
-  rw [markers]
+  rw [prepareOn_map, prepareOn_map, markers]
 
 /-- **An undeclared marker is refused by name**, exactly, whatever the state. -/
 theorem prepare_undeclared (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
