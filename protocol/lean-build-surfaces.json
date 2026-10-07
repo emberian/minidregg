@@ -1118,7 +1118,7 @@
     {
       "module": "Compiler",
       "path": "Compiler.lean",
-      "sha256": "8540b5c58824154186a58c9ba7a7a080481835fb0a184d78bf6b9c546ce1eec9",
+      "sha256": "0cca83ab9f03abb26fbe69dbb144c3d7a98bc7c5a580120d643d22e2629cbfc3",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -1935,6 +1935,13 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Compiler.FnWireConsumer",
+      "path": "Compiler/FnWireConsumer.lean",
+      "sha256": "e175d204d80df75fa09f509caabb52488ea32b5f1c71e9e9ade2069e4589132c",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
       "module": "Compiler.FnWireFncu",
       "path": "Compiler/FnWireFncu.lean",
       "sha256": "3b174318156cb9fc06076271c118da4f54551badb66ecbf359b0d28278c441b1",
@@ -1958,7 +1965,7 @@
     {
       "module": "Compiler.FnWirePinned",
       "path": "Compiler/FnWirePinned.lean",
-      "sha256": "931ff704d317ac2b2c60c814eda7f1cd140d3e63ae9c152434d97a66cfcd2acc",
+      "sha256": "c9f7531b5cfc0982b8625efdedaeb3d5ea7e6182c166aa6b1cce1c8025fa2aff",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -3806,7 +3813,7 @@
     {
       "module": "Host.FnOutcome",
       "path": "Host/FnOutcome.lean",
-      "sha256": "380fe183524fdd9f953074586a2cc62aab64a6826e0e13fcb47a1373f62a309e",
+      "sha256": "79f75fc71025dadebf029bac6db3341a5065f4cca1d61e07387db4dabbc8393e",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -3918,7 +3925,7 @@
     {
       "module": "Host.Main",
       "path": "Host/Main.lean",
-      "sha256": "8904a09d0d6b6737c0aefde48a14dcf7828065ddb732396880f6ec95998cce4a",
+      "sha256": "f176786a12af3d55a772e68f0f855d14e587f9260095d70c85a0a92c6e90663e",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
