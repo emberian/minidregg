@@ -102,7 +102,7 @@ def runMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
   | none => .failed "the arguments do not decode"
   | some args =>
     match exec config snapshot height ⟨none, some message.sender⟩ (messageTransaction message.id)
-        (callFuel message.envelope) [] (.enter ⟨⟨target⟩, message.method, args⟩) (Journal.start [] message.envelope.extractTicks)
+        (callFuel message.envelope) [] (.enter ⟨⟨target⟩, message.method, args⟩) (Journal.start [] message.envelope)
         message.envelope.sourceTicks with
     | .error reason => .failed (reprStr reason)
     | .ok (result, journal, _) =>
@@ -160,7 +160,8 @@ def continueMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot :
     match onwardRefusal config message journal.outbox with
     | some refusal => (.failed (reprStr refusal), seed, 0)
     | none =>
-      match postMail config snapshot message.envelope message.refund (message.depth + 1) seed journal.outbox with
+      match postMail config snapshot message.envelope message.refund (message.depth + 1) { seed with meter := journal.meter }
+          journal.outbox with
       | .error reason => (.failed (reprStr reason), seed, 0)
       | .ok mail => (.replied result journal, mail, onwardEscrow config message journal.outbox)
 
@@ -173,7 +174,7 @@ theorem continueMessage_cases {rootBytes : Bytes → Digest} {config : Config} {
     (∃ result journal, run = .replied result journal ∧ outcome = run ∧ journal.outbox ≠ [] ∧
       message.depth < Inbox.continuationDepth ∧ journal.outbox.length ≤ Inbox.fanOut ∧
       spent = onwardEscrow config message journal.outbox ∧ spent ≤ message.allowance ∧
-      postMail config snapshot message.envelope message.refund (message.depth + 1) seed journal.outbox = .ok mail) := by
+      postMail config snapshot message.envelope message.refund (message.depth + 1) { seed with meter := journal.meter } journal.outbox = .ok mail) := by
   cases run with
   | failed reason =>
     simp only [continueMessage, Prod.mk.injEq] at continued
@@ -351,7 +352,8 @@ def seedMail {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsh
   have step := (Inbox.pop_step popped).1
   have keeps := step.keeps
   ⟨[⟨sender, target, some inbox, readExact, clean, remaining, .step step (.refl _),
-      ⟨keeps.1.trans ends.1, keeps.2.1.trans ends.2⟩⟩], [], [], [], [], []⟩
+      ⟨keeps.1.trans ends.1, keeps.2.1.trans ends.2⟩⟩], [], [], [], [], [],
+    ObjectiveWorkAccount.Meter.start message.envelope⟩
 
 /-- **A message to a draining object waits.** The target object drains toward an
 upgrade that admits no new frame (`ObjectRecord.admitsNew`): delivering now would

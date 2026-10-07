@@ -198,6 +198,14 @@ inductive CallRefusal where
   | depth (limit : Nat)
   /-- The target cell has no object record. -/
   | notAnObject (target : Nat)
+  /-- The turn's front-end budget (its paying envelope's `replayBytes`/`coreBytes`,
+  `ObjectiveWorkAccount.Meter`) has `left` of `stage` and a replay needs `needed`: refused before
+  that replay parses (`frontEnd`, and the stored core it must generate), or right after a lowering
+  whose generated core does not fit (GPT-6 row E). -/
+  | frontEndExhausted (stage : ObjectiveWorkAccount.Stage) (needed left : Nat)
+  /-- A send to `target` whose postage envelope does not declare the front-end work its delivery's
+  root frame must replay (measured at the send, by the same load): refused at the send. -/
+  | postageFrontEnd (target : Nat) (stage : ObjectiveWorkAccount.Stage) (needed declared : Nat)
   /-- The target object has no declared state to show the callee. -/
   | stateMissing (target : Nat)
   /-- The declaration is not a call method of the pinned package (it does not
@@ -320,17 +328,49 @@ structure Method (config : Config) (pin : Digest) (method : String) (view args :
   callsOnly : labelsWithin applied.assumptions planType framePlans = true
   returnsOnly : labelsWithin applied.assumptions responseType frameResponses = true
 
+/-- Draw a replay's work from the turn's meter, refused by name. -/
+def drawFrontEnd (meter : ObjectiveWorkAccount.Meter) (source core : Nat) :
+    Except CallRefusal ObjectiveWorkAccount.Meter :=
+  match meter.draw source core with
+  | .error (stage, needed, left) => .error (.frontEndExhausted stage needed left)
+  | .ok meter => .ok meter
+
+theorem drawFrontEnd_ok {meter meter' : ObjectiveWorkAccount.Meter} {source core : Nat}
+    (drawn : drawFrontEnd meter source core = .ok meter') : meter.draw source core = .ok meter' := by
+  unfold drawFrontEnd at drawn
+  split at drawn
+  · cases drawn
+  · rename_i h; cases drawn; exact h
+
+/-- **Load a method, metered.** The pinned package's front-end quote (its source bytes, the
+stored typed core its replay must generate) is drawn from the turn's meter BEFORE anything is
+replayed; the package is parsed ONCE (`ObjectiveBendPublication.parsePackage`, inside
+`replayPackage`'s replay of the pinned entry) and the method is lowered from that parse
+(`replay_select`), its generated core drawn as soon as it exists. A replay the meter cannot
+pay for is refused `frontEndExhausted`. -/
 def loadMethod (config : Config) (target : Nat) (bytes : Bytes) (pin : Digest) (method : String)
-    (view args : Data) : Except CallRefusal (Method config pin method view args) :=
+    (view args : Data) (meter : ObjectiveWorkAccount.Meter) :
+    Except CallRefusal (Method config pin method view args × ObjectiveWorkAccount.Meter) :=
   match decodeStored bytes with
   | none => .error (.kernel .packageMissing)
   | some stored =>
+  -- A pair whose quote does not decode is refused by `replayPackage` before any replay.
+  match (match frontEndQuote bytes with
+      | some (source, core) => drawFrontEnd meter source core
+      | none => .ok meter) with
+  | .error reason => .error reason
+  | .ok meter =>
   match replayPackage config stored pin with
   | .error reason => .error (.kernel reason)
   | .ok definition =>
-  match replayExact : ObjectiveBendPublication.replay (methodPackage definition.package method) with
+  match lowered : ObjectiveBendPublication.lowerParsed definition.replayed.parsed definition.package.entryModule method with
   | .error d => .error (.notCallable target method d.message)
   | .ok lowering =>
+  match drawFrontEnd meter 0 lowering.packet.compress.toUTF8.toList.length with
+  | .error reason => .error reason
+  | .ok meter =>
+  have replayExact : ObjectiveBendPublication.replay (methodPackage definition.package method) = .ok lowering :=
+    (ObjectiveBendPublication.replay_select definition.replayed.parseExact method).trans lowered
   match ObjectiveBendFrontEnd.accept lowering with
   | .error d => .error (.notCallable target method d.message)
   | .ok accepted =>
@@ -352,14 +392,43 @@ def loadMethod (config : Config) (target : Nat) (bytes : Bytes) (pin : Digest) (
         | .computation planType responseType resultType =>
           if callsOnly : labelsWithin applied.assumptions planType framePlans = true then
             if returnsOnly : labelsWithin applied.assumptions responseType frameResponses = true then
-              .ok ⟨definition, lowering, replayExact, accepted, fuelWithin, applied, checked, planType,
-                responseType, resultType, typeExact, callsOnly, returnsOnly⟩
+              .ok (⟨definition, lowering, replayExact, accepted, fuelWithin, applied, checked, planType,
+                responseType, resultType, typeExact, callsOnly, returnsOnly⟩, meter)
             else .error (.notCallable target method "its response type is not within `returned | queued | acked`")
           else .error (.notCallable target method
             "its Plan type is not within `call | send | stop | cancel`: a method that awaits is not callable")
         | _ => .error (.notCallable target method "it does not return an Activity")
     | _ => .error (.notCallable target method "it does not take a view and arguments")
   else .error (.notCallable target method "typed core checker fuel exceeds the kernel's capacity")
+
+/-- **A loaded method's front end was drawn**: an admitted load reaches its result meter from the
+meter it was given by admitted draws (`ObjectiveWorkAccount.Meter.Reaches`), so a turn whose loads
+start from its envelope's meter stays within it, summed over every load. -/
+theorem loadMethod_reaches {config : Config} {target : Nat} {bytes : Bytes} {pin : Digest} {method : String}
+    {view args : Data} {meter meter' : ObjectiveWorkAccount.Meter} {m : Method config pin method view args}
+    (loaded : loadMethod config target bytes pin method view args meter = .ok (m, meter')) :
+    ∀ start, ObjectiveWorkAccount.Meter.Reaches start meter → ObjectiveWorkAccount.Meter.Reaches start meter' := by
+  intro start reached
+  unfold loadMethod at loaded
+  split at loaded
+  · cases loaded
+  · split at loaded
+    · cases loaded
+    · rename_i mid quoted
+      have r1 : ObjectiveWorkAccount.Meter.Reaches start mid := by
+        split at quoted
+        · exact .draw reached (drawFrontEnd_ok quoted)
+        · cases quoted; exact reached
+      split at loaded
+      · cases loaded
+      · split at loaded
+        · cases loaded
+        · split at loaded
+          · cases loaded
+          · rename_i last drawn
+            have r2 := ObjectiveWorkAccount.Meter.Reaches.draw r1 (drawFrontEnd_ok drawn)
+            repeat (first | (split at loaded) | skip)
+            all_goals first | (cases loaded; done) | (cases loaded; exact r2) | skip
 
 /-! ## Plans, returns, grants -/
 
@@ -672,8 +741,14 @@ structure Journal where
   ALL the turn's sends (`postControls` after `postMail`), so a turn may cancel a message it
   sent itself. -/
   controls : List Control
+  /-- The turn's front-end meter: every method a frame loads draws its replay's work from it
+  (`loadMethod`), refused by name when the paying envelope's budget is short. -/
+  meter : ObjectiveWorkAccount.Meter
 
-def Journal.start (grants : List Grant) (extracts : Nat) : Journal := ⟨[], grants, [], [], [], [], extracts, []⟩
+/-- A fresh journal: the turn's grants, its extraction allowance, and the front-end meter of the
+envelope that pays for its replays. -/
+def Journal.start (grants : List Grant) (envelope : Capacity) : Journal :=
+  ⟨[], grants, [], [], [], [], envelope.extractTicks, [], ObjectiveWorkAccount.Meter.start envelope⟩
 
 /-- **Debit an extraction's actual tick spend** from the turn's allowance, refused by name when
 the allowance left is below it. The spend is deterministic (the extraction's own tick count),
@@ -853,14 +928,14 @@ def exec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot r
     | .error reason => .error reason
     | .ok (subject, delegation) =>
     match loadMethod config call.target.value (packageBytes config snapshot entry.record.activePin) entry.record.activePin
-        call.method (viewData view) call.args with
+        call.method (viewData view) call.args journal.meter with
     | .error reason => .error reason
-    | .ok program =>
+    | .ok (program, meter) =>
     let ctx : Ctx := ⟨call.target, call.method, entry.record, program.applied.assumptions, program.responseType,
       view, subject, height, callerOf authority stack, call.args, delegation⟩
     let journal : Journal := ⟨journal.entries, journal.grants, journal.delegations ++ delegation.toList,
       journal.frames ++ [call.target.value :: stack.map (·.object.value)], journal.writes, journal.outbox,
-      journal.extracts, journal.controls⟩
+      journal.extracts, journal.controls, meter⟩
     exec config snapshot height authority turn fuel (ctx :: stack) (.run (initial program.applied.erase)) journal ticks
   | _ + 1, [], .run _, _, _ => .error .exhausted
   | fuel + 1, ctx :: rest, .run state, journal, ticks =>
@@ -992,9 +1067,13 @@ structure Mail {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
   closed : List (ClosedSlot config snapshot)
   /-- The escrow this turn's controls return, in order. -/
   refunds : List Refund
+  /-- The turn's front-end meter: each send to an object loads the target's method (`Deliverable`)
+  and draws that replay's work from it. -/
+  meter : ObjectiveWorkAccount.Meter
 
-def Mail.empty {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes} :
-    Mail config snapshot := ⟨[], [], [], [], [], []⟩
+/-- The mail of a turn before any send, over the turn's front-end meter. -/
+def Mail.start {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (meter : ObjectiveWorkAccount.Meter) : Mail config snapshot := ⟨[], [], [], [], [], [], meter⟩
 
 /-- The inbox of (sender, target): the one this turn holds, else read from the
 snapshot. Returns it and the other held inboxes. -/
@@ -1068,7 +1147,7 @@ method loads exactly as its delivery's root frame will (`loadMethod` on the reco
 `activePin`, applied to the object's view and the arguments: the same front end, the same
 type check), and its Plan type is within `deliveredPlans message`. -/
 structure Deliverable {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
-    (target : Nat) (message : Inbox.Message) where
+    (target : Nat) (message : Inbox.Message) (meter : ObjectiveWorkAccount.Meter) where
   private mk ::
   record : ObjectRecord
   recordExact : readObject config snapshot ⟨target⟩ = .ok (some record)
@@ -1077,9 +1156,14 @@ structure Deliverable {rootBytes : Bytes → Digest} (config : Config) (snapshot
   args : Data
   argsExact : decodeDataBytes message.args = some args
   method : Method config record.activePin message.method (viewData view) args
+  /-- The sending turn's meter after the load: the load's replay is drawn from the SENDER's turn. -/
+  meterAfter : ObjectiveWorkAccount.Meter
   methodExact : loadMethod config target (packageBytes config snapshot record.activePin) record.activePin
-    message.method (viewData view) args = .ok method
+    message.method (viewData view) args meter = .ok (method, meterAfter)
   callsOnly : labelsWithin method.applied.assumptions method.planType (deliveredPlans message) = true
+  /-- The message's postage pays the front end its delivery's root frame replays: the same draws,
+  replayed on a fresh meter over the postage envelope (GPT-6 row E). -/
+  postagePays : ((ObjectiveWorkAccount.Meter.start message.envelope).drawAll (meterAfter.since meter)).toBool = true
 
 /-- Decide `Deliverable`, refusing by name: `notAnObject`, `stateMissing` (an object with no
 declared state: its delivery could not enter it), `argumentType` (arguments that do not
@@ -1088,7 +1172,8 @@ awaits), `continuationDepth` (a sending method, the message at the depth bound),
 `notDeliverable` (a sending method and an allowance that covers no onward send, or a Plan
 that admits `stop`/`cancel`). -/
 def deliverable {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
-    (target : Nat) (message : Inbox.Message) : Except CallRefusal (Deliverable config snapshot target message) :=
+    (target : Nat) (message : Inbox.Message) (meter : ObjectiveWorkAccount.Meter) :
+    Except CallRefusal (Deliverable config snapshot target message meter) :=
   match recordExact : readObject config snapshot ⟨target⟩ with
   | .error reason => .error (.kernel reason)
   | .ok none => .error (.notAnObject target)
@@ -1101,11 +1186,15 @@ def deliverable {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
   | none => .error (.argumentType target message.method)
   | some args =>
   match methodExact : loadMethod config target (packageBytes config snapshot record.activePin) record.activePin
-      message.method (viewData view) args with
+      message.method (viewData view) args meter with
   | .error reason => .error reason
-  | .ok method =>
+  | .ok (method, meterAfter) =>
     if callsOnly : labelsWithin method.applied.assumptions method.planType (deliveredPlans message) = true then
-      .ok ⟨record, recordExact, view, viewExact, args, argsExact, method, methodExact, callsOnly⟩
+      match paid : (ObjectiveWorkAccount.Meter.start message.envelope).drawAll (meterAfter.since meter) with
+      | .error (stage, needed, left) => .error (.postageFrontEnd target stage needed left)
+      | .ok _ =>
+        .ok ⟨record, recordExact, view, viewExact, args, argsExact, method, meterAfter, methodExact, callsOnly,
+          by rw [paid]; rfl⟩
     else if !labelsWithin method.applied.assumptions method.planType ["call", "send"] then
       .error (.notDeliverable target message.method "its Plan admits stop or cancel: a delivered method controls nothing")
     else if Inbox.continuationDepth ≤ message.depth then .error (.continuationDepth Inbox.continuationDepth)
@@ -1125,9 +1214,9 @@ def Mail.send {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snaps
     (mail : Mail config snapshot) (message : Inbox.Message) :
     Destination → Except CallRefusal (Mail config snapshot)
   | .object target =>
-    match deliverable config snapshot target message with
+    match deliverable config snapshot target message mail.meter with
     | .error reason => .error reason
-    | .ok _ =>
+    | .ok d =>
     match holdInbox config snapshot mail message.sender target with
     | .error reason => .error reason
     | .ok (held, others) =>
@@ -1145,7 +1234,8 @@ def Mail.send {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snaps
         inboxes := others ++ [updated]
         slots := mail.slots ++ [slot]
         credits := mail.credits ++ [(held.cell.value, message.escrow)]
-        targets := mail.targets ++ [target] }
+        targets := mail.targets ++ [target]
+        meter := d.meterAfter }
   | .slot name =>
     match holdSlot config snapshot mail name with
     | .error reason => .error reason
@@ -1912,7 +2002,7 @@ structure Invocation {rootBytes : Bytes → Digest} (config : Config) (snapshot 
   journal : Journal
   left : Nat
   execExact : exec config snapshot height request.authority (invokeTransaction request) (callFuel request.envelope) []
-    (.enter (rootCall request)) (Journal.start request.grants request.envelope.extractTicks) request.envelope.sourceTicks =
+    (.enter (rootCall request)) (Journal.start request.grants request.envelope) request.envelope.sourceTicks =
       .ok (result, journal, left)
   /-- A turn that sends declares a postage envelope the deployment covers. -/
   postageCovered : journal.outbox ≠ [] → config.covers request.postage = true
@@ -1922,7 +2012,7 @@ structure Invocation {rootBytes : Bytes → Digest} (config : Config) (snapshot 
   allowanceCovered : outboxAllowance journal.outbox ≤ request.allowance
   /-- The mail of the turn's sends (each at depth 0). -/
   sent : Mail config snapshot
-  sentExact : postMail config snapshot request.postage request.account 0 Mail.empty journal.outbox = .ok sent
+  sentExact : postMail config snapshot request.postage request.account 0 (Mail.start journal.meter) journal.outbox = .ok sent
   /-- That mail after the turn's controls. -/
   mail : Mail config snapshot
   mailExact : postControls config snapshot height sent journal.controls = .ok mail
@@ -1936,23 +2026,17 @@ structure Invocation {rootBytes : Bytes → Digest} (config : Config) (snapshot 
 def invoke {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : InvokeRequest) : Except CallRefusal (Invocation config snapshot height request) :=
   if covered : config.covers request.envelope = true then
-    -- The root frame's front-end work account (GPT-6 row E), judged from the stored pair of the
-    -- package the root frame will load, before any frame replays it. Nested frames and the root's
-    -- second (method) replay are not yet in the account (cv task 01a11636-201e).
-    match (match readObject config snapshot request.object with
-        | .ok (some record) => frontEndPaid config (packageBytes config snapshot record.activePin) [request.envelope]
-        | _ => .ok ()) with
-    | .error reason => .error (.kernel reason)
-    | .ok () =>
+    -- Every frame's load and every send's deliverable check draws its replay from the turn's one
+    -- front-end meter, started over the envelope (`Journal.start`, `Mail.start`; GPT-6 row E).
     match execExact : exec config snapshot height request.authority (invokeTransaction request)
-        (callFuel request.envelope) [] (.enter (rootCall request)) (Journal.start request.grants request.envelope.extractTicks)
+        (callFuel request.envelope) [] (.enter (rootCall request)) (Journal.start request.grants request.envelope)
         request.envelope.sourceTicks with
     | .error reason => .error reason
     | .ok (result, journal, left) =>
       if postageCovered : journal.outbox ≠ [] → config.covers request.postage = true then
       if drainedOk : journal.drained = true then
       if allowanceCovered : outboxAllowance journal.outbox ≤ request.allowance then
-      match sentExact : postMail config snapshot request.postage request.account 0 Mail.empty journal.outbox with
+      match sentExact : postMail config snapshot request.postage request.account 0 (Mail.start journal.meter) journal.outbox with
       | .error reason => .error reason
       | .ok sent =>
       match mailExact : postControls config snapshot height sent journal.controls with
