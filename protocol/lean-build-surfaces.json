@@ -4058,7 +4058,7 @@
     {
       "module": "Host.ObjectiveActivityJson",
       "path": "Host/ObjectiveActivityJson.lean",
-      "sha256": "25ebab75418483f49ce2ca95029b9b602f782f99cb1dd0d8c5e2753b3270c00a",
+      "sha256": "9985de85576d86825ba3911b31d3d817459245a6b93c26be2b884b554ecb75b4",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4275,7 +4275,7 @@
     {
       "module": "Kernel.ActivitySeatEnd",
       "path": "Kernel/ActivitySeatEnd.lean",
-      "sha256": "122e0a15261e86d2e53f5c7c8ed548936a3a8a16b93d2b8c65e892537c174f23",
+      "sha256": "56b009e00ba0405d1d2e26c96ab3b67d613224f32c66490ef0aa1da52eeeed4a",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6760,7 +6760,7 @@
     {
       "module": "Kernel.NativeHost",
       "path": "Kernel/NativeHost.lean",
-      "sha256": "f70f8c177d441f2bbe826b7119aac88c540a181db32dae74797d3f21935dba2c",
+      "sha256": "4df0df14023b88a01a8738e9597a5e8580fd5e054b9c0ad348b411ccb0157d60",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6991,7 +6991,7 @@
     {
       "module": "Kernel.ObjectiveActivity",
       "path": "Kernel/ObjectiveActivity.lean",
-      "sha256": "79d1d8668907f4529a103633edde1e46cf40c2ae587bbcafc701941dfad9f575",
+      "sha256": "66f781f85e023ccc8e14a7e6b86388a9108ccf0312141bde442789250615a771",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7019,7 +7019,7 @@
     {
       "module": "Kernel.ObjectiveActivityReceiver",
       "path": "Kernel/ObjectiveActivityReceiver.lean",
-      "sha256": "e207e741f0fbd0cf22ed77965be4a9038c48e6579eb33753deb60b732d0c446a",
+      "sha256": "2fa510903c55767b82f0e9c675bfeb545d39284c082a7e8e1e32059254a8bd7c",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7117,7 +7117,14 @@
     {
       "module": "Kernel.ObjectiveDomain",
       "path": "Kernel/ObjectiveDomain.lean",
-      "sha256": "23edd215e740b9c4e677b75036a6c666535365849293326b9add952f962e1ad0",
+      "sha256": "889c20918fd4534662515b8c1ad1bad6a25d394adaff55fb4919cb26a3d9206c",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Kernel.ObjectiveDomainInvariant",
+      "path": "Kernel/ObjectiveDomainInvariant.lean",
+      "sha256": "b36144c6543c0790dd9cdd02580d1b9d8d4718f51eefd205540ff394d5b58d4d",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -8104,7 +8111,7 @@
     {
       "module": "ObjectiveProofs",
       "path": "ObjectiveProofs.lean",
-      "sha256": "c17d8ba9859d0aa8eb7a8a8b526a7e8d4c6eb3cdce9f05b65f5305d62c1047bc",
+      "sha256": "8dfa4262d7244543a995056b4168436409d2f3f9f6f42f9bef2669d9f82c35bf",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
