@@ -97,6 +97,8 @@ Profiles live under `MINI_FLEET_HOME/profiles/NAME` (key, enrollment,
 workspace). The journey is
 [`native/resource-client/fleet-sign-journey.sh`](../native/resource-client/fleet-sign-journey.sh);
 growth is measured by `fleet-sign-growth.sh`.
+What to change in a harness, the env/flag rewrite table and the replay of Pug's own
+calls: [`FLEET-MIGRATION.md`](FLEET-MIGRATION.md).
 
 **Why a signer, not a gateway for Bread's signed bytes.** A Bread client
 signs `Turn::hash` (`dregg-turn-v3`: BLAKE3 over Bread's agent cell, nonce,
