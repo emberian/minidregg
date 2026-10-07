@@ -4,10 +4,11 @@ The remote endpoint proposes bytes; it never chooses what custody signs. Every
 header is reconstructed by the SAME observation/planning implementation used by
 the native Host, under the caller's pinned configuration and retained intent.
 
-This is the full-peer producer. It is not a thin-client state-opening verifier,
-not a permission to copy protected source state to a client, and not a new
-admission bypass. A selective-witness producer must establish the same derivation
-before it can replace this one. Signature validity remains the native verifier's
+This is the full-peer producer. It is not a permission to copy protected source
+state to a client, and not a new admission bypass. The thin producer
+(`Kernel.NativeThinConsent`) does not re-derive the plan: it checks what is
+signed against the member's own command and the served target views, and
+proves that what it shows is what commits. Signature validity remains the native verifier's
 existing assumption. Keeping a verified prefix warm is a caller responsibility;
 this module does not replay history for each signature. The prefix is a
 `ConsentAnchor.Basis`: the full re-admission from genesis, or native admission

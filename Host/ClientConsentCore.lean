@@ -5,10 +5,13 @@ when custody offers its retained anchor (frame 228) first, natively after that
 anchor once the Store is shown to extend it (`Kernel.ConsentAnchor`). Later
 frames admit only the exact new suffix (`DurableReceiverIO.extendFrom`). Frame
 229 returns the anchor of what this provider admitted, for custody to retain.
-No protected Store is transmitted by this process. Thin peers need a separate
-selective authenticated witness producer; this executable is not that producer.
+No protected Store is transmitted by this process. Frames 230-232 are thin
+consent (`Kernel.NativeThinConsent`): they read no Store and check what custody
+signs against its own command and the target views the Host served under the
+member's observe grants.
 -/
 import Kernel.NativeClientConsent
+import Kernel.NativeThinConsent
 import Kernel.ConsentAnchor
 import Kernel.NativeSpecializedConsent
 import Kernel.NativeHostGenesis
@@ -379,6 +382,55 @@ def consent (config : NativeHost.Config) (session : Session config) (operation :
       selectedHeaders config session wanted headers
   | _ => throw (IO.userError "unsupported consent operation")
 
+/-- Thin consent frames (230 intent, 231 observation, 232 plan): answered from
+local custody alone, with no Store and no replay (`Kernel.NativeThinConsent`).
+A refusal names what thin consent cannot show; nothing falls back to a replay
+or to signing what was not checked. -/
+def thinRefusal (refusal : NativeThinConsent.Refusal) : String :=
+  match refusal with
+  | .unsupportedPayload target what =>
+      s!"thin consent cannot display this turn: target {target}: {what} unsigned"
+  | other => s!"thin consent refused: {repr other}"
+
+def displayJson (display : NativeThinConsent.Display) : Json :=
+  match display.post with
+  | none => Json.mkObj [("target", toJson (toString display.target)), ("read", true)]
+  | some (bytes, root) => Json.mkObj [("target", toJson (toString display.target)),
+      ("postRoot", toJson (toString root.value)),
+      ("postBytes", toJson (SourceAgreementJson.encodeHex bytes))]
+
+def thin (config : NativeHost.Config) (operation : UInt8) (payload : List UInt8) : IO (List UInt8) := do
+  let (intentBytes, rest) ← splitPair payload
+  let some wanted := NativeObservationCodec.intentCodec.decode intentBytes
+    | throw (IO.userError "noncanonical retained local intent")
+  unless NativeObservationCodec.intentCodec.encode wanted == intentBytes do
+    throw (IO.userError "noncanonical retained local intent")
+  let (signer, rest) ← splitPair rest
+  unless signer.length == 32 do throw (IO.userError "custody signer is not an Ed25519 key")
+  let semantics := config.profile.semantics
+  match operation with
+  | 230 =>
+      unless rest.isEmpty do throw (IO.userError "intent consent has unexpected trailing bytes")
+      pure intentBytes
+  | 231 =>
+      let (signature, candidate) ← splitPair rest
+      match NativeThinConsent.checkObservationThin config.deployment semantics config.federation
+          wanted signature candidate with
+      | .error refusal => throw (IO.userError (thinRefusal refusal))
+      | .ok headers => pure (headersBytes headers)
+  | 232 =>
+      let (planBytes, viewsBytes) ← splitPair rest
+      let viewsCodec := ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful
+      let some views := viewsCodec.decode viewsBytes
+        | throw (IO.userError "noncanonical served view list")
+      match NativeThinConsent.checkPlanThin config.deployment semantics config.federation
+          wanted planBytes views with
+      | .error refusal => throw (IO.userError (thinRefusal refusal))
+      | .ok (headers, displays) =>
+          pure (Json.mkObj [("headers", toJson (headers.map SourceAgreementJson.encodeHex)),
+            ("display", Json.arr (displays.map displayJson).toArray)]).compress.toUTF8.toList
+  | _ => throw (IO.userError "unsupported thin consent operation")
+
 /-- Entry adapters (lifecycle families) select from the admitted chronology,
 so they receive the full re-admission (`upgrade`). -/
 abbrev ExtraExpected := (settings : Settings) → (config : NativeHost.Config) →
@@ -469,7 +521,7 @@ def objectiveHeaders (extraObjective : ExtraObjective) (settings : Settings)
 
 /-- Frame 228 offers custody's retained anchor before the first admission;
 frame 229 returns the anchor of the current admission. Pure codec frames
-(7–11) admit nothing. Every other frame first admits the Store (`verifyInitial`
+(7–11) and thin consent frames (230–232) admit nothing. Every other frame first admits the Store (`verifyInitial`
 once, then `refresh`); a failed admission terminates the provider, so no cached
 success survives an observed rollback, rewritten prefix, or failed suffix. -/
 partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjective) (settings : Settings)
@@ -485,6 +537,11 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
   let payload := body.toList.drop 1
   if operation ≥ 7 && operation ≤ 11 then
     let answer ← try pure (operation, ← codec config operation payload)
+      catch error => pure (255, error.toString.toUTF8.toList)
+    writeSessionFrame output answer.1 answer.2
+    serve extraExpected extraObjective settings config retained held input output
+  else if operation ≥ 230 && operation ≤ 232 then
+    let answer ← try pure (operation, ← thin config operation payload)
       catch error => pure (255, error.toString.toUTF8.toList)
     writeSessionFrame output answer.1 answer.2
     serve extraExpected extraObjective settings config retained held input output

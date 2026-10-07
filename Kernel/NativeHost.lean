@@ -2357,6 +2357,50 @@ theorem invokeRejection_eq_audienceTransition (reason : DeclaredResourceControll
   unfold invokeRejection
   split <;> simp_all
 
+/-- Whether an invocation refusal is a moved target: the executor's
+`computeTarget` (`staleTarget`) or the scalar leg's `prepareCell`. -/
+def isStaleTarget : DeclaredResourceController.Reject → Bool
+  | .staleTarget => true
+  | .scalar .staleTarget => true
+  | _ => false
+
+/-- The first target of `command` whose loaded cell's logical root is no longer
+the root the signed command names, and over which the signer holds a standing
+whole-cell observe grant (`NativeObservationController.observesWhole`). -/
+def staleObservableTarget (config : Config) (opened : Opened config)
+    (command : DeclaredResourceController.Command) : Option Nat :=
+  let context := observationContext config opened
+  let height := logicalHeight config opened.durable
+  (command.targets.find? fun target =>
+    (match opened.directory.directory.slots target.target with
+      | .present packed =>
+          match DeclaredResourceController.selectTarget config.deployment target packed with
+          | some pre => decide (pre.root ≠ target.expectedTargetRoot)
+          | none => false
+      | .absent => false) &&
+    NativeObservationController.observesWhole context target.kind command.subject
+      target.target height).map (·.target)
+
+/-- The phase of a named moved-target refusal. The signed-submission path
+discloses exactly this phase to its authenticated signer (`invokeDisclosure`). -/
+def stalePhase : String := "stale-target"
+
+/-- A refused invocation. A moved target is named, to the signer only, when it
+is observable (`staleObservableTarget`); every other refusal, and a moved target
+the signer cannot observe, is the ordinary refusal that the public path makes
+uniform. A stale-target refusal arises only after the signer's authority
+envelope authenticated (`withAcceptedLoadedFrom`: `authenticate` precedes
+`prepareFrom`). -/
+def staleOutcome (config : Config) (opened : Opened config)
+    (command : DeclaredResourceController.Command) (reason : DeclaredResourceController.Reject) :
+    Outcome :=
+  if isStaleTarget reason then
+    match staleObservableTarget config opened command with
+    | some target => refused .operationRejected stalePhase
+        s!"target {target} moved since the plan was signed"
+    | none => refused (invokeRejection reason) "invoke" s!"{repr reason}"
+  else refused (invokeRejection reason) "invoke" s!"{repr reason}"
+
 /-- The submission path, over the Store writer it is handed. The served path
 passes `config.transport` (`submitLoadedWith`); the dry run (`Host.DryRun`,
 op 130) passes a writer that never appends, so both run this one program. -/
@@ -2433,7 +2477,7 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
                   transport ResourceBirthCodec.rootBytes opened.durable intent))
               pure ObjectiveBendAuthenticatedInputs.oracle with
           | .replayed record => confirm .replayed record.transactionId record.event.event.eventId
-          | .rejected reason => return refused (invokeRejection reason) "invoke" s!"{repr reason}"
+          | .rejected reason => return staleOutcome config opened command reason
           | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
           | .unavailable detail => return .unavailable detail.toUTF8.toList
           | .settlement result =>
@@ -2515,6 +2559,33 @@ def disclose : Outcome × Disclosure → Outcome
 theorem disclose_uniform (result : Outcome) :
     disclose (result, .uniform) = publicSubmissionOutcome result := rfl
 
+/-- **Unobservable stays undisclosed.** A refusal for a signer that observes no
+target whole is the ordinary one, and its public frame is the uniform one. -/
+theorem staleOutcome_unobservable (config : Config) (opened : Opened config)
+    (command : DeclaredResourceController.Command) (reason : DeclaredResourceController.Reject)
+    (unobservable : staleObservableTarget config opened command = none) :
+    staleOutcome config opened command reason = refused (invokeRejection reason) "invoke" s!"{repr reason}" ∧
+      publicSubmissionOutcome (staleOutcome config opened command reason) =
+        refused .undisclosed "admission" "request refused" := by
+  have plain : staleOutcome config opened command reason =
+      refused (invokeRejection reason) "invoke" s!"{repr reason}" := by
+    unfold staleOutcome
+    split <;> simp [unobservable]
+  refine ⟨plain, ?_⟩
+  rw [plain]
+  exact public_refusal_uniform _ _ _ none (by unfold invokeRejection; split <;> decide)
+
+#assert_axioms staleOutcome_unobservable
+
+/-- An invocation's outcome goes to its signer named only when it is the
+moved-target refusal (`staleOutcome`), which names a target only when the
+signer observes it whole; every other outcome is uniform. -/
+def invokeDisclosure : Outcome → Outcome × Disclosure
+  | .refused .operationRejected phase detail leaf =>
+      if phase = stalePhase.toUTF8.toList then (.refused .operationRejected phase detail leaf, .toSigner)
+      else (.refused .operationRejected phase detail leaf, .uniform)
+  | result => (result, .uniform)
+
 /-- The one signed-submission path: a renounce is disclosed by its own rule,
 every other call uniformly. -/
 def submitDisclosedWith (config : Config) (opened : Opened config) (call : SignedCall)
@@ -2522,6 +2593,7 @@ def submitDisclosedWith (config : Config) (opened : Opened config) (call : Signe
     IO (Outcome × Disclosure) := do
   match call with
   | .renounce bytes => submitRenounceWith config opened bytes confirm
+  | .invoke _ => return invokeDisclosure (← submitLoadedWith config opened call confirm)
   | _ => return (← submitLoadedWith config opened call confirm, .uniform)
 
 def submit (config : Config) (bytes : List UInt8) : IO Outcome := do
