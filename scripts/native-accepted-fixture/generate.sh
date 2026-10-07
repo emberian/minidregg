@@ -64,7 +64,8 @@ import json, pathlib, sqlite3, sys, hashlib
 world, first, refused, work, out, verifier = sys.argv[1:7]
 world, work = pathlib.Path(world), pathlib.Path(work)
 meta = json.loads((work / "meta.json").read_text())
-fo = (work / "first.out").read_text().split()
+first_lines = (work / "first.out").read_text().splitlines()
+fo = first_lines[0].split()
 assert fo[:2] == ["ACCEPTED", "record=same"], f"first: the Lean admission's record is not the Host's: {fo}"
 assert fo[2] == f"root={meta['worldRoot']}", f"first: world root {fo[2]} != Host {meta['worldRoot']}"
 host_reason = None
@@ -72,7 +73,31 @@ for r in (world / "results").glob("*.json"):
     d = json.loads(r.read_text())
     if str(d.get("attempt", "")).endswith("/" + refused) and d.get("refused"):
         host_reason = d.get("detail")
-ro = (work / "refused.out").read_text().split()
+refused_lines = (work / "refused.out").read_text().splitlines()
+ro = refused_lines[0].split()
+# The semantic projection of the re-run (replay.lean prints Assurance.NativeAcceptedFixtureProjection,
+# the definition the fixture checks) must be the hand-written authority. This script never writes the
+# authority; a difference refuses, field by field, before any data is written.
+def parse(text):
+    out = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"): continue
+        parts = line.split(" = ")
+        out.append((parts[0].strip(), parts[1].strip()) if len(parts) == 2 else ("malformed", line))
+    return out
+authority_path = pathlib.Path(out).with_name("NativeAcceptedFixtureAuthority.lean")
+authority_module = authority_path.read_text()
+authority = parse(authority_module[authority_module.index('def text : String := "') + len('def text : String := "'):authority_module.rindex('"')])
+projection = [tuple(l[len("PROJECTION "):].split(" = ", 1)) for l in first_lines + refused_lines if l.startswith("PROJECTION ")]
+keys = list(dict.fromkeys([k for k, _ in authority] + [k for k, _ in projection]))
+a, p = dict(authority), dict(projection)
+diff = [f"  {k}: authority {a.get(k, '(absent)')}, run {p.get(k, '(absent)')}" for k in keys if a.get(k) != p.get(k)]
+if diff or len(projection) != len(authority):
+    print(f"generate: REFUSED: the run's projection differs from the authority {authority_path}:", file=sys.stderr)
+    print("\n".join(diff), file=sys.stderr)
+    print("Fix the implementation, or change the authority in its own reviewed commit (Authority-Change: <reason>).", file=sys.stderr)
+    sys.exit(1)
 assert ro[0] == "REFUSED", f"refused call was not refused in Lean: {ro}"
 assert host_reason and host_reason.endswith("Reject." + ro[1].split(".")[-1]), f"Lean reason {ro[1]} != Host reason {host_reason}"
 triples, seen = [], set()

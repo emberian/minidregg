@@ -26,6 +26,12 @@ or the deployed hash -- only the compiled evaluator runs them):
 * `first_accepted`: the admission accepts, and the record of the accepted intent is
   byte for byte the record the native Host appended (`Accepted.journalExact`), and
   the world root after it is the root the Host reported (`Accepted.rootExact`);
+* `first_projection`: the re-run's SEMANTIC PROJECTION (who signed, which cells it
+  writes by kind and role, what it guards and spends, what it is charged, and the
+  refused call's verdict and reason) is the hand-written authority
+  `Assurance.NativeAcceptedFixtureAuthority`, read from the acceptance driver's intent.  The
+  bytes above are regenerated from a run; this is what a regeneration cannot move
+  without an authority change (`Assurance.NativeAcceptedFixtureProjection`);
 * `refused_admission`: the same admission refuses the dishonest call `r01`
   (a validly signed command naming the package as its source) with
   `objectiveSource`, the Host's own refusal, on the image right after `first`.
@@ -43,6 +49,8 @@ on a fresh world with this tree's binaries.
 -/
 import Assurance.PrivateEvaluatorCustodyJoin
 import Assurance.NativeAcceptedFixtureData
+import Assurance.NativeAcceptedFixtureProjection
+import Assurance.NativeAcceptedFixtureAuthority
 import Kernel.NativeHostContext
 import Kernel.ObjectiveBendAuthenticatedInputs
 import Compiler.NativeHostCodec
@@ -223,6 +231,32 @@ def isObjectiveSource : Option Reject → Bool
   | some .objectiveSource => true
   | _ => false
 
+/-! ## The authority -/
+
+open Minidregg.Assurance.NativeAcceptedFixtureProjection in
+/-- The authority: hand-written, read from the acceptance driver's intent; no
+generator writes it. -/
+def authority : List NativeAcceptedFixtureProjection.Line :=
+  parseAuthority NativeAcceptedFixtureAuthority.text
+
+open Minidregg.Assurance.NativeAcceptedFixtureProjection in
+/-- The re-run's projection: the accepted call's record and receipts, then the
+refused call's verdict. -/
+def projectionRun : Option (List NativeAcceptedFixtureProjection.Line) := do
+  let ⟨_, run⟩ ← firstRun
+  let reason ← refusedRun
+  pure (projectAccepted config.deployment run.command
+      (IntentRecord.ofIntent (run.accepted.dataIntent run.shape)) (receiptSubjects run.accepted) ++
+    projectRefused (reasonName (reprStr reason)))
+
+/-- **The re-run means what the driver asked for.**  The projection of the
+accepted call's record (signer, signature checks, written cells by kind and role,
+guards, nullifiers, every charge lane) and of the refused call's verdict is
+exactly the hand-written authority.  A regeneration that changes what the
+invocation records turns this red until the authority is changed in its own
+reviewed commit. -/
+theorem first_projection : projectionRun = some authority := by native_decide
+
 /-- **The same admission refuses `r01` with the Host's reason.** -/
 theorem refused_admission : isObjectiveSource refusedRun = true := by native_decide
 
@@ -279,6 +313,8 @@ set_option maxHeartbeats 4000000 in
 #assert_axioms rekeyed_commandBytes
 set_option maxHeartbeats 4000000 in
 #assert_compiled refused_admission
+set_option maxHeartbeats 4000000 in
+#assert_compiled first_projection
 set_option maxHeartbeats 4000000 in
 #assert_compiled refused_command_differs
 set_option maxHeartbeats 4000000 in
