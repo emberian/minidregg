@@ -177,7 +177,7 @@ theorem methodSemanticId_provenance_free {a b : ObjectiveBendSourceArtifact.Arti
 inhabited: two artifacts that differ only in their package. -/
 theorem methodSemanticId_provenance_free_inhabited (core : List UInt8) (input output : Digest)
     (p q : Digest) (declaration : String) :
-    methodSemanticId ⟨p,declaration,core,input,output⟩ = methodSemanticId ⟨q,declaration,core,input,output⟩ :=
+    methodSemanticId ⟨p,declaration,core,input,output,[]⟩ = methodSemanticId ⟨q,declaration,core,input,output,[]⟩ :=
   methodSemanticId_provenance_free rfl rfl rfl
 
 def limits (c : ObjectiveInvocationClaim.Capacity) : Limits := ⟨c.heap,c.stack⟩
@@ -392,7 +392,8 @@ structure SourceSelection {F : Type} [Field F] [DecidableEq F] {deployment : Dep
   /-- ... and the receiver re-ran it: the artifact's typed core is exactly the rendering of
   that front end's lowering of the package's sources, which the checker accepted. The
   receiver types and runs `replayed.accepted.source`, never a parse of the core bytes. -/
-  replayed : ObjectiveBendPublication.Replayed package.package loaded.artifact.typedCore claim.capacity.typeFuel
+  replayed : ObjectiveBendPublication.Replayed package.package loaded.artifact.typedCore loaded.artifact.laws
+    claim.capacity.typeFuel
   inputCodecExact : loaded.artifact.inputCodec = ObjectiveBendNativeInput.codecId
   claimInputExact : claim.inputCodec = loaded.artifact.inputCodec
   outputCodecExact : claim.outputCodec = loaded.artifact.outputCodec
@@ -416,7 +417,7 @@ private def selectSource {F : Type} [Field F] [DecidableEq F] {deployment : Depl
                   if registered : loaded.artifact.outputCodec ∈ policy.outputs then
                     -- The replay (parse, elaborate, check) runs last, after every cheap refusal.
                     match ObjectiveBendPublication.replayAccept package.package loaded.artifact.typedCore
-                        claim.capacity.typeFuel with
+                        loaded.artifact.laws claim.capacity.typeFuel with
                     | .error _ => none
                     | .ok replayed =>
                       some ⟨full,payload,observed,loaded,package,declaration,frontEnd,own,replayed,input,

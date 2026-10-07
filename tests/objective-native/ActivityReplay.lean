@@ -49,7 +49,8 @@ def main (args : List String) : IO UInt32 := do
     | .error d => return ← fail ("publishedCore: " ++ d.message)
   let artifactOf (p : Compiler.ObjectiveSourcePackage.Package) (core : List UInt8) :
       Compiler.ObjectiveBendSourceArtifact.Artifact :=
-    ⟨Compiler.ObjectiveSourcePackage.identity p, declaration, core, Kernel.ObjectiveBendNativeInput.codecId, codecId⟩
+    ⟨Compiler.ObjectiveSourcePackage.identity p, declaration, core, Kernel.ObjectiveBendNativeInput.codecId, codecId,
+      ((Compiler.ObjectiveBendPublication.publishedLaws p).toOption.getD [])⟩
   let pairOf (p : Compiler.ObjectiveSourcePackage.Package) (a : Compiler.ObjectiveBendSourceArtifact.Artifact) : Stored :=
     ⟨Compiler.ObjectiveBendSourceArtifact.encode a, Compiler.ObjectiveSourcePackage.encode p, 9⟩
   let refuses (label kind : String) (stored : Stored) (a : Compiler.ObjectiveBendSourceArtifact.Artifact) :

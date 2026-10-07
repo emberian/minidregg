@@ -4,6 +4,7 @@ Checking establishes typed core only; a captured-source elaboration witness and
 current source-read/authority remain receiving obligations. -/
 import Compiler.NativeInvocationStatement
 import Compiler.PolicyRecordCodec
+import Compiler.ObjectiveBendLawCodec
 import Theory.ObjectiveBendTyping
 import Theory.AssertAxioms
 
@@ -23,17 +24,24 @@ structure Artifact where
   typedCore : List UInt8
   inputCodec : Digest
   outputCodec : Digest
+  /-- The package's enforced laws (`law NAME: EXPR` of the entry module), by name. The identity
+  commits them, so the pin of every object made from the package does; the receiver recomputes
+  them from the package source (`ObjectiveBendPublication.replayAccept`), and the kernel installs
+  them on every object pinned to this artifact. -/
+  laws : List (String × ObjectiveBendLaw.LawExpr)
   deriving DecidableEq, Repr
 
 def stream : StreamCodec Artifact :=
   StreamCodec.xmap (StreamCodec.product digestStream
     (StreamCodec.product PolicyRecordCodec.stringStream
-    (StreamCodec.product bytesStream (StreamCodec.product digestStream digestStream))))
-    (fun a => (a.package,a.declaration,a.typedCore,a.inputCodec,a.outputCodec))
-    (fun a => ⟨a.1,a.2.1,a.2.2.1,a.2.2.2.1,a.2.2.2.2⟩)
+    (StreamCodec.product bytesStream (StreamCodec.product digestStream
+    (StreamCodec.product digestStream ObjectiveBendLawCodec.lawsStream)))))
+    (fun a => (a.package,a.declaration,a.typedCore,a.inputCodec,a.outputCodec,a.laws))
+    (fun a => ⟨a.1,a.2.1,a.2.2.1,a.2.2.2.1,a.2.2.2.2.1,a.2.2.2.2.2⟩)
     (by intro a; cases a; rfl)
 
-def frame : List UInt8 := "DREGG/OBJECTIVE-BEND/SOURCE-ARTIFACT".toUTF8.toList ++ [1]
+/-- Version 2: the artifact carries the package's enforced laws; a version-1 artifact refuses. -/
+def frame : List UInt8 := "DREGG/OBJECTIVE-BEND/SOURCE-ARTIFACT".toUTF8.toList ++ [2]
 def rawCodec : LawfulCodec Artifact where
   encode a := frame ++ stream.encode a
   decode bytes := if bytes.take frame.length = frame then
@@ -48,10 +56,10 @@ abbrev encode := codec.encode
 abbrev decode := codec.decode
 
 def identity (a : Artifact) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.SOURCE-ARTIFACT/v1".toUTF8.toList (encode a)).digest
+  (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.SOURCE-ARTIFACT/v2".toUTF8.toList (encode a)).digest
 
 def schema : Digest :=
-  (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.SOURCE-ARTIFACT-SCHEMA/v1".toUTF8.toList frame).digest
+  (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.SOURCE-ARTIFACT-SCHEMA/v2".toUTF8.toList frame).digest
 
 /-- The complete packet byte cap precedes UTF8/JSON/natural construction. This
 bounds decoding input size; native scalar-bit and graph-work caps are separate. -/

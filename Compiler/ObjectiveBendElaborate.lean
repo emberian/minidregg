@@ -10,6 +10,7 @@ surface semantics, which does not exist. All recursion is fuel-bounded; running
 out of fuel is a refusal, never a guess. -/
 import Lean
 import Compiler.ObjectiveBendParse
+import Compiler.ObjectiveBendLaw
 import Std.Data.HashMap
 import Theory.ObjectiveBendOpenRecursion
 import Compiler.ObjectiveBendC4
@@ -116,6 +117,9 @@ structure Module where
   /-- (alias, imported module name) in source order. -/
   imports : List (String × String)
   decls : List Decl
+  /-- The module's top-level enforced laws (`law NAME: EXPR`), in source order. They are not
+  terms: the elaborator never sees them; the front end hands the entry module's to the artifact. -/
+  laws : List (String × ObjectiveBendLaw.LawExpr) := []
   deriving Inhabited
 
 /-! ## Decoding the TS parser's AST JSON -/
@@ -232,8 +236,15 @@ def decodeDecl (j : Json) : Except String Decl := do
 /-- `{name, imports:[{alias, moduleName}], ast}` as the TS elaborator receives it. -/
 def decodeModule (j : Json) : Except String Module := do
   let ast ← j.getObjVal? "ast"
+  let mut decls : List Decl := []
+  let mut laws : List (String × ObjectiveBendLaw.LawExpr) := []
+  for d in ← arr ast "declarations" do
+    if (str d "kind").toOption == some "law" then
+      laws := laws ++ [(← str d "name", ← ObjectiveBendLaw.parse (← str d "source"))]
+    else decls := decls ++ [← decodeDecl d]
+  ObjectiveBendLaw.checkNames laws
   return ⟨← str j "name", ← (← arr j "imports").mapM (fun i => do return (← str i "alias", ← str i "moduleName")),
-    ← (← arr ast "declarations").mapM decodeDecl⟩
+    decls, laws⟩
 
 /-! ## Proposal types (the `Ty` JSON wire of Theory.ObjectiveBendTyping.typeJson, plus `variant`) -/
 
