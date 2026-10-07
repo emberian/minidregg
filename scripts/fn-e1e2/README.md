@@ -213,10 +213,10 @@ Stores, so its gateway resource starts at accepted count 1. Run
 direct cap-63 mutation is refused at observation with unchanged Store height
 and target root. That CLI refusal does not itself establish the receiver's
 signed-call policy rejection; the source-owned
-`probe_gateway_direct_submit.sh SETUP_DIRECTORY` prepares and signs an exact
-call against the scratch Store and requires receiver `policyRejected` with no
-journal growth. Run it with a source-matched current host build after setup.
-On the fresh subject-7/ordinary-8 fixture, that source-owned probe passed:
+`probe_gateway_direct_submit.sh SETUP_DIRECTORY` (deleted 10-07, scripts-elab:
+it built the call against command shapes that no longer exist; history before
+10-07 holds it) prepared and signed an exact call against the scratch Store and
+required receiver `policyRejected` with no journal growth. On the fresh subject-7/ordinary-8 fixture, that source-owned probe passed:
 the signed ordinary subject-8 call used its valid cap 63, the native receiver
 returned `policyRejected`, and accepted history stayed unchanged. The public
 CLI probe separately refused at observation. The private probe log SHA-256 is

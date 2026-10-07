@@ -51,8 +51,6 @@ Theory/CellSlot.lean
 Theory/Channel/Trace.lean
 Verify/NativeJointSourceFixture.lean
 scripts/durable-receiver.lean
-scripts/fn-b3/forge_history.lean
-scripts/fn-e1e2/probe_gateway_direct_submit.lean
 scripts/kn2/history-tamper.lean
 # PROBE (KN2-NEUTRAL-BIRTHS): the executed neutral-birth plant boots a native Store through the full open; the birth receiver it drives is still full-shaped (cv 01a1163e-62a7)
 scripts/kn2/neutral-birth.lean
@@ -60,9 +58,5 @@ scripts/kn2/port-b-tamper.lean
 scripts/kn2/receipt-tamper.lean
 scripts/native-accepted-fixture/replay.lean
 scripts/probe-canonical-cell-registry.lean
-scripts/probe-exact-readback-receiver.lean
-scripts/probe-fn-accepted-history-selectors.lean
-scripts/probe-fn-accepted-skip.lean
 scripts/probe-native-host-genesis.lean
-scripts/probe-participant-key-enrollment.lean
 scripts/probe-policy-source-cell.lean
