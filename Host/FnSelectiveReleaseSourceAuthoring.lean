@@ -33,8 +33,9 @@ def planLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config)
   let spec : Spec := ⟨packet, delegateCapability⟩
   let context : ResourceObservationAdmission.Context config.deployment :=
     (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority)
-  let prepared ← FnSelectiveReleaseSourceAuthority.prepare context config.profile
-    config.federation (NativeHost.logicalHeight config opened.durable) spec
+  let prepared ← (FnSelectiveReleaseSourceAuthority.prepare context config.profile
+    config.federation (NativeHost.logicalHeight config opened.durable) spec).mapError
+      FnSelectiveReleaseSourceAuthority.PrepareRefusal.describe
   let header ← (CredentialSignatureAdmission.signingHeader
     opened.authority.snapshot (marker spec) ⟨.object, prepared.wanted⟩).mapError
       (fun _ => "selected source signer refused")
