@@ -1941,6 +1941,64 @@ def authorHost (config : NativeHost.Config)
     ApplicationStreamContinuityInspection.authorRequest source
   else Minidregg.Host.Json.author kind source (some config) providerRoutes
 
+/-- The inspect kinds that read the admitted history (`sessionWalked`): session
+frames, never codec frames. -/
+def sessionInspectKind (kind : String) : Bool :=
+  kind == "object-audience" || kind == "object-audience-roster"
+
+/-- The pure codec frames: 7 author, 8 inspect, 9 signatures, 10 observation
+assembly, 11 plan assembly. Each is a function of the frame and the
+configuration and reads no Store. This is the ONE implementation: the Host
+session answers these frames with it, and so does the storeless `codec` loop
+(`serveCodec`), which is every client's local codec authority. -/
+def pureCodec (config : NativeHost.Config)
+    (providerRoutes : List (Nat × Kernel.ProviderMetering.Schedule))
+    (operation : UInt8) (payload : List UInt8) : IO (UInt8 × List UInt8) := do
+  match operation with
+  | 7 =>
+      let (kind, source) ← splitKind payload
+      let some text := String.fromUTF8? source.toByteArray
+        | throw (RequestRefusal.malformed "native host author source is not UTF-8")
+      let value ← RequestRefusal.clientBytes (Minidregg.Host.Json.parse text)
+      if kind == "pay-claim-rotation" then
+        unless source.length ≤ 4096 do throw (RequestRefusal.malformed "claim rotation JSON exceeds bound")
+        return (7, ← RequestRefusal.clientBytes (Minidregg.Host.PayClaims.authorRotation value))
+      return (7, ← RequestRefusal.clientBytes (authorHost config providerRoutes kind value))
+  | 8 =>
+      let (kind, source) ← splitKind payload
+      if sessionInspectKind kind then
+        throw (RequestRefusal.malformed s!"inspect {kind} reads the admitted history; it is a session frame, not a codec frame")
+      else if kind == "object-roster-inspect" then
+        let value ← RequestRefusal.clientBytes (objectRosterJson source)
+        return (8, value.compress.toUTF8.toList)
+      else
+        let value ← RequestRefusal.clientBytes (if kind == "pay-claim-plan" then
+          Minidregg.Host.PayClaims.claimPlanJson source
+          else if kind == "pay-claim-command" then Minidregg.Host.PayClaims.claimCommandJson source
+          else if kind == "pay-claim-ingress" then Minidregg.Host.PayClaims.claimIngressJson config source
+          else inspectHost config kind source)
+        return (8, value.compress.toUTF8.toList)
+  | 9 =>
+      let some text := String.fromUTF8? payload.toByteArray
+        | throw (RequestRefusal.malformed "native host signatures source is not UTF-8")
+      let value ← RequestRefusal.clientBytes (Minidregg.Host.Json.parse text)
+      return (9, ← RequestRefusal.clientBytes (Minidregg.Host.Json.signatures value))
+  | 10 =>
+      let (challengeBytes, signaturesBytes) ← splitPair payload
+      let some challenge := NativeObservationCodec.challengeCodec.decode challengeBytes
+        | throw (RequestRefusal.malformed "noncanonical observation challenge")
+      let signatures ← decodeSignatures signaturesBytes
+      let signed ← RequestRefusal.clientBytes (NativeObservationCodec.assemble challenge signatures)
+      return (10, NativeObservationCodec.signedCodec.encode signed)
+  | 11 =>
+      let (planBytes, signaturesBytes) ← splitPair payload
+      let some plan := signingPlanCodec.decode planBytes
+        | throw (RequestRefusal.malformed "noncanonical signing plan")
+      let signatures ← decodeSignatures signaturesBytes
+      let call ← RequestRefusal.clientBytes (NativeHost.assemble plan signatures)
+      return (11, callCodec.encode call)
+  | _ => throw (RequestRefusal.malformed "not a pure codec operation")
+
 /-- The live protocol keeps exact source-owned authoring and inspection in
 memory, while every state-dependent operation refreshes the verified tip. -/
 def dispatchSession (config : NativeHost.Config)
@@ -1980,15 +2038,7 @@ def dispatchSession (config : NativeHost.Config)
   | 6 =>
       unless payload.isEmpty do throw (RequestRefusal.malformed "profile does not accept a payload")
       return (6, meteringProfile.compress.toUTF8.toList)
-  | 7 =>
-      let (kind, source) ← splitKind payload
-      let some text := String.fromUTF8? source.toByteArray
-        | throw (RequestRefusal.malformed "native host author source is not UTF-8")
-      let value ← RequestRefusal.clientBytes (Minidregg.Host.Json.parse text)
-      if kind == "pay-claim-rotation" then
-        unless source.length ≤ 4096 do throw (RequestRefusal.malformed "claim rotation JSON exceeds bound")
-        return (7, ← RequestRefusal.clientBytes (Minidregg.Host.PayClaims.authorRotation value))
-      return (7, ← RequestRefusal.clientBytes (authorHost config providerRoutes kind value))
+  | 7 | 9 | 10 | 11 => pureCodec config providerRoutes operation payload
   | 8 =>
       let (kind, source) ← splitKind payload
       if kind == "object-audience" then
@@ -1996,9 +2046,6 @@ def dispatchSession (config : NativeHost.Config)
         match ← NativeHost.objectAudienceLoaded config walked.target walked.verified source with
         | .ok view => return (8, (objectAudienceJson view).compress.toUTF8.toList)
         | .error reason => return (255, refusalFrame "object-audience" reason)
-      else if kind == "object-roster-inspect" then
-        let value ← RequestRefusal.clientBytes (objectRosterJson source)
-        return (8, value.compress.toUTF8.toList)
       else if kind == "object-audience-roster" then
         -- Fixed nested pairs carry bytes only, never service-side file paths.
         let (sourceObservation, rest) ← splitPair source
@@ -2012,32 +2059,7 @@ def dispatchSession (config : NativeHost.Config)
         let (audience, roster) ← IO.ofExcept (← NativeHost.objectAudienceRosterLoaded config
           walked.target walked.verified sourceObservation catalogObservation rosterBytes planned)
         return (8, (checkedObjectRosterJson audience roster rosterBytes).compress.toUTF8.toList)
-      else
-        let value ← RequestRefusal.clientBytes (if kind == "pay-claim-plan" then
-          Minidregg.Host.PayClaims.claimPlanJson source
-          else if kind == "pay-claim-command" then Minidregg.Host.PayClaims.claimCommandJson source
-          else if kind == "pay-claim-ingress" then Minidregg.Host.PayClaims.claimIngressJson config source
-          else inspectHost config kind source)
-        return (8, value.compress.toUTF8.toList)
-  | 9 =>
-      let some text := String.fromUTF8? payload.toByteArray
-        | throw (RequestRefusal.malformed "native host signatures source is not UTF-8")
-      let value ← RequestRefusal.clientBytes (Minidregg.Host.Json.parse text)
-      return (9, ← RequestRefusal.clientBytes (Minidregg.Host.Json.signatures value))
-  | 10 =>
-      let (challengeBytes, signaturesBytes) ← splitPair payload
-      let some challenge := NativeObservationCodec.challengeCodec.decode challengeBytes
-        | throw (RequestRefusal.malformed "noncanonical observation challenge")
-      let signatures ← decodeSignatures signaturesBytes
-      let signed ← RequestRefusal.clientBytes (NativeObservationCodec.assemble challenge signatures)
-      return (10, NativeObservationCodec.signedCodec.encode signed)
-  | 11 =>
-      let (planBytes, signaturesBytes) ← splitPair payload
-      let some plan := signingPlanCodec.decode planBytes
-        | throw (RequestRefusal.malformed "noncanonical signing plan")
-      let signatures ← decodeSignatures signaturesBytes
-      let call ← RequestRefusal.clientBytes (NativeHost.assemble plan signatures)
-      return (11, callCodec.encode call)
+      else pureCodec config providerRoutes 8 payload
   | 130 =>
       -- Dry run (P-AFFORDANCES): plan as op 1, assemble as op 11, submit as op 2
       -- over a Store writer that never appends (`Host.DryRun`). Commits nothing.
@@ -2618,6 +2640,32 @@ partial def serveSession (config : NativeHost.Config)
       let payload ← readExactly input (length - 1)
       serveFrame config state meteringProfile providerRoutes fnDispatch applicationDispatch operation payload.toList output
   serveSession config state meteringProfile providerRoutes fnDispatch applicationDispatch input output
+
+/-- The storeless codec loop (`minidregg-host CONFIG codec`): answers only the
+pure codec frames (`pureCodec`) and never opens, admits or reads a Store. A
+client without a Store (a member's own machine reaching the Host through
+`mini --remote`) and a client with one use it alike. Any other frame refuses. -/
+partial def serveCodec (config : NativeHost.Config)
+    (providerRoutes : List (Nat × Kernel.ProviderMetering.Schedule))
+    (input output : IO.FS.Stream) : IO Unit := do
+  let first ← input.read 1
+  if first.isEmpty then return
+  let lengthWire ← readExactly input 4 first
+  let length := frameLength lengthWire
+  if length == 0 then
+    writeSessionFrame output 255 (RequestRefusal.frame 255
+      (RequestRefusal.malformed "empty native codec frame"))
+  else if length > maxFrame then
+    discardExactly input length
+    writeSessionFrame output 255 (RequestRefusal.frame 255
+      (RequestRefusal.malformed "native codec frame exceeds frame bound"))
+  else
+    let body ← readExactly input length
+    let operation := body[0]!
+    let answer ← try pureCodec config providerRoutes operation (body.toList.drop 1)
+      catch error => pure (255, RequestRefusal.frame operation error)
+    writeSessionFrame output answer.1 answer.2
+  serveCodec config providerRoutes input output
 
 /-- Execute from one private copy throughout this stdio process. The copy is
 the pinned launch artifact; the originally configured pathname may later be
@@ -6408,6 +6456,9 @@ def run (arguments : List String) : IO UInt32 := do
                 let (_, verified) ← verifyFnCarrierUnclaimed pin carrierPath
                 pure verified.source }
           FnArchivePublisher.run config ops archiveArgs
+      | "codec", [] =>
+          serveCodec config (← IO.ofExcept settings.providerRoutes) (← IO.getStdin) (← IO.getStdout)
+          pure 0
       | "stdio", [] =>
           withPinnedSignature config fun pinnedConfig => do
             withFnPollService settings fun service => do
