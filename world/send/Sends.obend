@@ -82,6 +82,7 @@ record Hop:
   target: Nat
   price: Nat
   allowance: Nat
+  reserve: Nat
 record SendH:
   to: To
   method: String
@@ -182,8 +183,9 @@ def bounce5(view: View, n: Nat) -> Activity<PlanS, Queued, Return>:
                 case queued(d):
                   match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
                     case queued(e): {result: e.slot, write: {total: EditNat.keep()}}
-# A continuation chain: sends `hop` to `target` carrying all but one `price` of its own
-# allowance (its escrow is then exactly that allowance), counting itself.
+# A continuation chain: sends `hop` to `target` carrying all but one `price` and one `reserve`
+# of its own allowance, counting itself. The reserve pays the onward message's storage deposit
+# (its escrow is postage + allowance + deposit); what it does not use is refunded.
 def hop(view: View, h: Hop) -> Activity<PlanH, Queued, Return>:
-  match perform(PlanH.send({to: To.object(h.target), method: "hop", args: {target: h.target, price: h.price, allowance: h.allowance - h.price}, allowance: h.allowance - h.price})):
+  match perform(PlanH.send({to: To.object(h.target), method: "hop", args: {target: h.target, price: h.price, allowance: h.allowance - h.price - h.reserve, reserve: h.reserve}, allowance: h.allowance - h.price - h.reserve})):
     case queued(q): {result: q.slot, write: {total: EditNat.add(1n)}}
