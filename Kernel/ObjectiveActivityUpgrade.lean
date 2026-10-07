@@ -66,6 +66,7 @@ open Minidregg.Kernel.ObjectRecord (ObjectRecord Pending UpgradePhase UpgradePol
   migrateFacts)
 open Minidregg.Kernel.ObjectStateType (typedAt stateSubtype)
 open Minidregg.Kernel.ObjectiveTariff (addCapacity)
+open Minidregg.Kernel.DurableDataIntent (DataIntent)
 open Minidregg.Compiler.ObjectiveInvocationClaim (Capacity)
 set_option autoImplicit false
 
@@ -774,5 +775,419 @@ def Rebirth.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : 
     {height : Nat} {request : RebirthRequest} (reborn : Rebirth config snapshot height request) (sealing : Seal) :
     DataIntent rootBytes :=
   intentOf rootBytes (rebirthTransaction reborn.await.id) reborn.posts reborn.born.guards reborn.claims sealing
+
+/-! ## The theorems (brief §2), on the admitting functions -/
+
+/-- **Theorem 1, `adopt_requires_authority`.** An admitted ADOPT was on a governed
+object whose authority predicate holds of the request's facts, and whose policy the
+next one only tightens. -/
+theorem adopt_requires_authority {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : AdoptRequest} {adopted : Adoption config snapshot height request}
+    (_admitted : adopt config snapshot height request = .ok adopted) :
+    ∃ record authority floors, readObject config snapshot request.object = .ok (some record) ∧
+      record.upgrade = .governed authority floors ∧
+      Minidregg.Pred.eval authority (factsState (adoptFacts request height)) (factsState (adoptFacts request height)) =
+        true ∧
+      UpgradePolicy.permits record.upgrade request.upgrade = true := by
+  obtain ⟨authority, floors, governed, authorized, permitted, _⟩ := adoptPolicy_ok adopted.policy
+  exact ⟨adopted.record, authority, floors, adopted.recordExact, governed, authorized, permitted⟩
+
+/-- **Theorem 2, `frozen_never_adopts`.** On a `frozen` object an ADOPT is refused
+`frozen`, whatever it asks (the policy is the first thing judged). With
+`ObjectRecord.frozen_absorbing`, no policy a frozen object could ever be given is
+anything but frozen. -/
+theorem frozen_never_adopts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : AdoptRequest} {record : ObjectRecord}
+    (found : readObject config snapshot request.object = .ok (some record)) (frozen : record.upgrade = .frozen) :
+    adopt config snapshot height request = .error .frozen := by
+  have refused : adoptPolicy record.upgrade (adoptFacts request height) request = .error .frozen := by
+    simp [adoptPolicy, frozen]
+  unfold adopt
+  split
+  · rename_i reason found'; rw [found] at found'; cases found'
+  · rename_i found'; rw [found] at found'; cases found'
+  · rename_i record' found'
+    rw [found] at found'
+    cases found'
+    split
+    · rename_i reason policy
+      rw [refused] at policy
+      cases policy
+      rfl
+    · rename_i policy
+      rw [refused] at policy
+      cases policy
+
+/-- **Theorem 3, `adopt_floors_entailed`.** An admitted ADOPT's next law entails
+every floor of the object's policy, on every step: the certificate decision
+(`floorEntailed`, through `Pred.Sat.certificate_unsat`). -/
+theorem adopt_floors_entailed {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : AdoptRequest} {adopted : Adoption config snapshot height request}
+    (_admitted : adopt config snapshot height request = .ok adopted) :
+    ∀ authority floors, adopted.record.upgrade = .governed authority floors →
+      ∀ floor ∈ floors, ∀ old new, Minidregg.Pred.eval request.law old new = true →
+        Minidregg.Pred.eval floor old new = true := by
+  intro authority floors governed floor member old new holds
+  obtain ⟨authority', floors', governed', _, _, entailed⟩ := adoptPolicy_ok adopted.policy
+  rw [governed] at governed'
+  cases governed'
+  exact floorEntailed_sound (entailed floor member) old new holds
+
+/-- The drained judgment of a state, unfolded: the migration produced `migrated`, and
+the next record admits it under the migration's facts. -/
+theorem judgeMigrated_ok {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {record : ObjectRecord} {object : CellId} {next : Pending} {value migrated : Data}
+    (ok : judgeMigrated config snapshot record object next value = .ok migrated) :
+    migrateValue config (packageBytes config snapshot next.pin) next value = .ok migrated ∧
+      admitWrite (record.successor next) (migrateFacts object.value next) (some migrated) migrated = .ok () := by
+  unfold judgeMigrated at ok
+  split at ok
+  · cases ok
+  · rename_i result ran
+    split at ok
+    · rename_i admitted
+      cases ok
+      exact ⟨ran, admitted⟩
+    · cases ok
+
+theorem judgeDrained_draining {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {record : ObjectRecord} {object : CellId} {next : Pending} {deadline : Nat}
+    (draining : record.phase = .draining next deadline) {written : StateWritten}
+    (ok : judgeDrained config snapshot record object (some written) = .ok ()) :
+    ∃ migrated, judgeMigrated config snapshot record object next written.after.value = .ok migrated := by
+  unfold judgeDrained at ok
+  rw [draining] at ok
+  simp only at ok
+  split at ok
+  · rename_i migrated judged
+    exact ⟨migrated, judged⟩
+  · cases ok
+
+/-- **Theorem 5, `drained_write_migratable`.** A delivery admitted while its object
+drains, whose segment wrote, was judged twice in its one turn: by the object's own
+effective law (`judgeWritten`: the old law, under the pin clause of the pins the
+draining object runs, the activity writing as its own pinned package), and its
+written state, migrated, is typed at the next state type and admitted by the record
+MIGRATE will install (the next law, under the NEXT pin's clause, with the
+migration's facts). -/
+theorem drained_write_migratable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} {delivery : Delivery config snapshot height request}
+    (_admitted : deliver config snapshot height request = .ok delivery)
+    {next : Pending} {deadline : Nat} (draining : delivery.object.phase = .draining next deadline)
+    {written : StateWritten} (wrote : delivery.yielded.bind YieldCommit.written = some written) :
+    admitWrite delivery.object (factsOf delivery.record.escrow.payer height delivery.record.object 2
+        (some delivery.record.pin)) (written.before.map ObjectState.value) written.after.value = .ok () ∧
+    ∃ migrated, migrateValue config (packageBytes config snapshot next.pin) next written.after.value = .ok migrated ∧
+      typedAt next.stateType migrated = true ∧
+      admitWrite (delivery.object.successor next) (migrateFacts delivery.record.object.value next)
+        (some migrated) migrated = .ok () := by
+  refine ⟨judgeWritten_ok delivery.judged written wrote, ?_⟩
+  have drained := delivery.drained
+  rw [wrote] at drained
+  obtain ⟨migrated, judged⟩ := judgeDrained_draining draining drained
+  obtain ⟨ran, admitted⟩ := judgeMigrated_ok judged
+  exact ⟨migrated, ran, ObjectRecord.admitWrite_typed admitted, admitted⟩
+
+/-- The same for a birth on a draining object (an identity-migration birth). -/
+theorem Birth.drained_write_migratable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request)
+    {next : Pending} {deadline : Nat} (draining : born.object.phase = .draining next deadline)
+    {written : StateWritten} (wrote : born.yielded.bind YieldCommit.written = some written) :
+    ∃ migrated, migrateValue config (packageBytes config snapshot next.pin) next written.after.value = .ok migrated ∧
+      admitWrite (born.object.successor next) (migrateFacts request.object.value next) (some migrated) migrated =
+        .ok () := by
+  have drained := born.drained
+  rw [wrote] at drained
+  obtain ⟨migrated, judged⟩ := judgeDrained_draining draining drained
+  obtain ⟨ran, admitted⟩ := judgeMigrated_ok judged
+  exact ⟨migrated, ran, admitted⟩
+
+/-- An ADOPT leaves a state MIGRATE admits: the current state, migrated, passed the
+next record's judgment in the ADOPT turn itself. -/
+theorem Adoption.migratable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : AdoptRequest} (adopted : Adoption config snapshot height request)
+    {state : ObjectState} (current : adopted.current = some state) :
+    ∃ migrated, judgeMigrated config snapshot adopted.record request.object (request.pending height) state.value =
+      .ok migrated := by
+  have exact := adopted.migratedExact
+  rw [current] at exact
+  obtain ⟨value, _, judged⟩ := migrateCurrent_some exact
+  exact ⟨value, judged⟩
+
+/-- **Theorem 6, `migrate_cannot_fail`.** On a draining object with no old activity
+left outside the rebirth set (`live = 0`) whose current state passes the drained
+judgment (as every write since the ADOPT did, theorem 5, and the ADOPT's own state,
+`Adoption.migratable`), MIGRATE is admitted whenever the Book admits its declared
+fee: the migration and the next record's judgment it reruns are the same
+deterministic function of the same bytes, so they cannot now refuse. -/
+theorem migrate_cannot_fail {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : MigrateRequest} {record : ObjectRecord} {next : Pending} {deadline : Nat}
+    (found : readObject config snapshot request.object = .ok (some record))
+    (draining : record.phase = .draining next deadline)
+    (drained : record.live = 0)
+    {current : Option ObjectState} (state : readState config snapshot request.object = .ok current)
+    (migratable : ∀ s, current = some s →
+      ∃ migrated, judgeMigrated config snapshot record request.object next s.value = .ok migrated)
+    {book : BookCell} (loaded : loadBook config snapshot = .ok book)
+    (payable : ∃ posted, postings book (migrateBatch config request next) = .ok posted) :
+    ∃ migrated, migrate config snapshot height request = .ok migrated := by
+  have migratedCurrent : ∃ migrated, migrateCurrent config snapshot record request.object next current = .ok migrated := by
+    cases current with
+    | none => exact ⟨none, rfl⟩
+    | some s =>
+      obtain ⟨m, ok⟩ := migratable s rfl
+      exact ⟨some m, by simp [migrateCurrent, ok]⟩
+  obtain ⟨migratedValue, migratedOk⟩ := migratedCurrent
+  obtain ⟨posted, postedOk⟩ := payable
+  cases result : migrate config snapshot height request with
+  | ok m => exact ⟨m, rfl⟩
+  | error reason =>
+    exfalso
+    unfold migrate at result
+    split at result
+    · rename_i r found'; rw [found] at found'; cases found'
+    · rename_i found'; rw [found] at found'; cases found'
+    · rename_i record' found'
+      rw [found] at found'
+      cases found'
+      split at result
+      · rename_i steady; rw [draining] at steady; cases steady
+      · rename_i next' deadline' draining'
+        rw [draining] at draining'
+        cases draining'
+        split at result
+        · split at result
+          · rename_i r st; rw [state] at st; cases st
+          · rename_i current' st
+            rw [state] at st
+            cases st
+            split at result
+            · rename_i r mig; rw [migratedOk] at mig; cases mig
+            · split at result
+              · rename_i r lb; rw [loaded] at lb; cases lb
+              · rename_i book' lb
+                rw [loaded] at lb
+                cases lb
+                split at result
+                · rename_i r pe; rw [postedOk] at pe; cases pe
+                · cases result
+        · rename_i notDrained; exact notDrained drained
+
+/-- **Theorem 7, `migrate_judged`.** An admitted MIGRATE posts the migrated state
+(version one higher) only after the next record admitted it (the next law under the
+next pin's clause, typed at the next state type), and posts the next record: schema
+version and continuity each one higher, the next pin and law, steady. -/
+theorem migrate_judged {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : MigrateRequest} {migrated : Migrated config snapshot height request}
+    (_admitted : migrate config snapshot height request = .ok migrated) :
+    (∀ state, migrated.current = some state → ∃ value, migrated.migrated = some value ∧
+      admitWrite (migrated.record.successor migrated.next) (migrateFacts request.object.value migrated.next)
+        (some value) value = .ok () ∧
+      postAt snapshot (stateCell config.domain request.object)
+        (stateImage request.object ⟨state.version + 1, value⟩) ∈ migrated.posts) ∧
+    (migrated.record.successor migrated.next).schemaVersion = migrated.record.schemaVersion + 1 ∧
+    (migrated.record.successor migrated.next).continuity = migrated.record.continuity + 1 ∧
+    (migrated.record.successor migrated.next).phase = .steady ∧
+    (migrated.record.successor migrated.next).pin = migrated.next.pin ∧
+    (migrated.record.successor migrated.next).law = migrated.next.law ∧
+    postAt snapshot (objectCell config.domain request.object)
+      (objectImage request.object (migrated.record.successor migrated.next)) ∈ migrated.posts := by
+  refine ⟨?_, rfl, rfl, rfl, rfl, rfl, by rw [migrated.postsExact]; exact List.mem_cons_self ..⟩
+  intro state current
+  have exact := migrated.migratedExact
+  rw [current] at exact
+  obtain ⟨value, isValue, judged⟩ := migrateCurrent_some exact
+  refine ⟨value, isValue, (judgeMigrated_ok judged).2, ?_⟩
+  rw [migrated.postsExact, current, isValue]
+  simp [migratedStatePosts]
+
+/-- **Theorem 8, `abort_after_deadline_exclusive`.** An admitted abort is at or after
+the drain deadline, resumed the activity with `upgraded` (on the unmigrated state),
+and spends the await's claim: once it installs, no turn that ends the same await (a
+delivery, an abandonment, another abort) is ever accepted. -/
+theorem abort_after_deadline_exclusive {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot next : Snapshot rootBytes} {height : Nat} {request : AbortRequest}
+    {aborted : Abort config snapshot height request}
+    (_admitted : abortDrained config snapshot height request = .ok aborted) (sealing : Seal)
+    (installed : DurableDataIntent.execute .complete snapshot (aborted.intent sealing) = .accepted next)
+    (later : DataIntent rootBytes) (again : awaitClaim aborted.await.id ∈ later.nullifiers)
+    (schedule : DurableCommitProtocol.Schedule) (after : Snapshot rootBytes) :
+    aborted.deadline ≤ height ∧
+      resume (responseData .upgraded aborted.view).term aborted.state = some aborted.resumed ∧
+      awaitClaim aborted.await.id ∈ aborted.claims ∧
+      DurableDataIntent.execute schedule next later ≠ .accepted after := by
+  have spends : awaitClaim aborted.await.id ∈ (aborted.intent sealing).nullifiers := by
+    simp [Abort.intent, aborted.claimsExact]
+  exact ⟨aborted.due, aborted.resumeExact, by rw [aborted.claimsExact]; exact List.mem_cons_self ..,
+    spent_claim_never_accepted spends installed later again schedule after⟩
+
+theorem nextRecord_shape (base : Record) (generation : Nat) (segment : Segment) (yielded : Option YieldCommit) :
+    (nextRecord base generation segment yielded).input = base.input ∧
+      (nextRecord base generation segment yielded).pin = base.pin ∧
+      (nextRecord base generation segment yielded).generation = generation := by
+  cases segment <;> cases yielded <;> exact ⟨rfl, rfl, rfl⟩
+
+/-- **Theorem 9, `rebirth_from_stored_input`.** An admitted rebirth's new record
+holds exactly the old activity's stored input, pins the object's (migrated) package,
+starts at generation 0, and its first segment never writes blind: if it yields a
+write that `set`s a field, the object had no state. -/
+theorem rebirth_from_stored_input {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : RebirthRequest} {reborn : Rebirth config snapshot height request}
+    (_admitted : rebirth config snapshot height request = .ok reborn) :
+    reborn.born.record.input = reborn.old.input ∧ reborn.born.record.pin = reborn.object.pin ∧
+      reborn.born.record.generation = 0 ∧
+      ∀ state plan, reborn.born.segment = .yielded state plan →
+        ∀ edits, decodeWrite plan.write = .ok edits → edits.any (fun edit => edit.2.isSet) = true →
+          reborn.born.current = none := by
+  obtain ⟨input, pin, generation⟩ := nextRecord_shape _ 0 reborn.born.segment reborn.born.yielded
+  refine ⟨?_, ?_, ?_, ?_⟩
+  · rw [reborn.born.recordExact, input]
+    exact decodeDataBytes_canonical reborn.inputExact
+  · rw [reborn.born.recordExact, pin]; rfl
+  · rw [reborn.born.recordExact, generation]
+  · intro state plan yields edits decoded sets
+    cases current : reborn.born.current with
+    | none => rfl
+    | some present =>
+      exfalso
+      have commit := reborn.born.yieldedExact
+      rw [yields, current] at commit
+      simp only [segmentCommit, bind, Except.bind] at commit
+      split at commit
+      · cases commit
+      · rename_i committed ok
+        have wrote := (commitYield_spec ok).1
+        rw [stateWrite_unviewed_never_sets decoded sets] at wrote
+        cases wrote
+
+/-- **Theorem 10, `upgrade_payer_irrelevant`.** The upgrade's judgments never read the
+payer: the policy decision (a function of the policy alone, by its signature), the
+migration check, the drained judgment, the write judgment and the call frames'
+judgment are each the same for a record that differs only in its payer. -/
+theorem upgrade_payer_irrelevant {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (record : ObjectRecord) (payer : AccountId) :
+    (∀ facts request, adoptPolicy ({ record with payer := payer } : ObjectRecord).upgrade facts request =
+      adoptPolicy record.upgrade facts request) ∧
+    (∀ next, migrationCheck config snapshot { record with payer := payer } next =
+      migrationCheck config snapshot record next) ∧
+    (∀ object next value, judgeMigrated config snapshot { record with payer := payer } object next value =
+      judgeMigrated config snapshot record object next value) ∧
+    (∀ facts old new, admitWrite { record with payer := payer } facts old new = admitWrite record facts old new) ∧
+    (∀ facts old new, ({ record with payer := payer } : ObjectRecord).judge facts old new =
+      record.judge facts old new) :=
+  ⟨fun _ _ => rfl, fun _ => rfl, fun _ _ _ => rfl, fun _ _ _ => rfl, fun _ _ _ => rfl⟩
+
+#assert_axioms floorEntailed_sound
+#assert_axioms firstUnentailed_none
+#assert_axioms adoptPolicy_ok
+#assert_axioms migrateCurrent_some
+#assert_axioms postings_batch
+#assert_axioms abortSegment_ends
+#assert_axioms adopt_requires_authority
+#assert_axioms frozen_never_adopts
+#assert_axioms adopt_floors_entailed
+#assert_axioms judgeMigrated_ok
+#assert_axioms judgeDrained_draining
+#assert_axioms drained_write_migratable
+#assert_axioms Birth.drained_write_migratable
+#assert_axioms Adoption.migratable
+#assert_axioms migrate_cannot_fail
+#assert_axioms migrate_judged
+#assert_axioms abort_after_deadline_exclusive
+#assert_axioms nextRecord_shape
+#assert_axioms rebirth_from_stored_input
+#assert_axioms upgrade_payer_irrelevant
+
+/-! ## Teeth (brief §4), each a theorem on the admitting function -/
+
+/-- **An ADOPT signed outside the authority is refused** `notUpgradeAuthority`. -/
+theorem adopt_outside_authority_refused {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : AdoptRequest} {record : ObjectRecord}
+    {authority : Minidregg.Pred.Pred} {floors : List Minidregg.Pred.Pred}
+    (found : readObject config snapshot request.object = .ok (some record))
+    (governed : record.upgrade = .governed authority floors)
+    (outside : Minidregg.Pred.eval authority (factsState (adoptFacts request height))
+      (factsState (adoptFacts request height)) = false) :
+    adopt config snapshot height request = .error .notUpgradeAuthority := by
+  have refused : adoptPolicy record.upgrade (adoptFacts request height) request = .error .notUpgradeAuthority := by
+    simp [adoptPolicy, governed, outside]
+  unfold adopt
+  split
+  · rename_i reason found'; rw [found] at found'; cases found'
+  · rename_i found'; rw [found] at found'; cases found'
+  · rename_i record' found'
+    rw [found] at found'
+    cases found'
+    split
+    · rename_i reason policy
+      rw [refused] at policy
+      cases policy
+      rfl
+    · rename_i policy
+      rw [refused] at policy
+      cases policy
+
+/-- **A floor the next law does not provably entail refuses the ADOPT, naming it.** -/
+theorem adopt_unentailed_floor_refused {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : AdoptRequest} {record : ObjectRecord}
+    {authority : Minidregg.Pred.Pred} {floors : List Minidregg.Pred.Pred} {index : Nat}
+    (found : readObject config snapshot request.object = .ok (some record))
+    (governed : record.upgrade = .governed authority floors)
+    (inside : Minidregg.Pred.eval authority (factsState (adoptFacts request height))
+      (factsState (adoptFacts request height)) = true)
+    (tightens : UpgradePolicy.permits (.governed authority floors) request.upgrade = true)
+    (unentailed : firstUnentailed request.law 0 floors = some index) :
+    adopt config snapshot height request = .error (.floorNotEntailed index) := by
+  have refused : adoptPolicy record.upgrade (adoptFacts request height) request = .error (.floorNotEntailed index) := by
+    simp [adoptPolicy, governed, inside, tightens, unentailed]
+  unfold adopt
+  split
+  · rename_i reason found'; rw [found] at found'; cases found'
+  · rename_i found'; rw [found] at found'; cases found'
+  · rename_i record' found'
+    rw [found] at found'
+    cases found'
+    split
+    · rename_i reason policy
+      rw [refused] at policy
+      cases policy
+      rfl
+    · rename_i policy
+      rw [refused] at policy
+      cases policy
+
+/-- The decision has teeth both ways: `total ≤ 5` entails the floor `total ≤ 10`, and
+`total ≤ 10` does not entail the floor `total ≤ 5`. -/
+theorem floor_teeth :
+    floorEntailed (.le "state/total" 5) (.le "state/total" 10) = true ∧
+      floorEntailed (.le "state/total" 10) (.le "state/total" 5) = false := by
+  decide +kernel
+
+/-- **A drained write the next record refuses is refused `upgradeConflict`**, naming
+the next record's refusal (the clause, or the type). -/
+theorem drained_conflict_refused {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {record : ObjectRecord} {object : CellId} {next : Pending} {deadline : Nat}
+    (draining : record.phase = .draining next deadline) {written : StateWritten} {migrated : Data}
+    (ran : migrateValue config (packageBytes config snapshot next.pin) next written.after.value = .ok migrated)
+    {reason : WriteRefusal}
+    (conflict : admitWrite (record.successor next) (migrateFacts object.value next) (some migrated) migrated =
+      .error reason) :
+    judgeDrained config snapshot record object (some written) = .error (.objectWrite (.upgradeConflict reason)) := by
+  simp [judgeDrained, draining, judgeMigrated, ran, conflict]
+
+/-- **After MIGRATE the object runs the new package for new births**: the record it
+installs is steady on the next pin, so a birth naming the old pin is refused
+`pinMismatch` (`birth_refuses_other_pin`). -/
+theorem migrate_runs_next_pin {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : MigrateRequest} {migrated : Migrated config snapshot height request}
+    (_admitted : migrate config snapshot height request = .ok migrated) :
+    (migrated.record.successor migrated.next).activePin = migrated.next.pin ∧
+      (migrated.record.successor migrated.next).admitsNew = true := ⟨rfl, rfl⟩
+
+#assert_axioms adopt_outside_authority_refused
+#assert_axioms adopt_unentailed_floor_refused
+#assert_axioms floor_teeth
+#assert_axioms drained_conflict_refused
+#assert_axioms migrate_runs_next_pin
 
 end Minidregg.Kernel.ObjectiveActivity
