@@ -37,7 +37,7 @@ done < "$L"
 # scripts/lean-build-surfaces.py reads; report-simplex-qualification.lean imports it; Verify: the
 # qualification fixtures, e.g. Verify.ResourceReserveBirthFixture that scripts/kn2/neutral-birth.lean
 # imports). A root that does not build is RED by name, not a cascade of per-script failures.
-for t in ${SCRIPTS_ELAB_ROOTS:-SimplexQualification Verify}; do
+for t in ${SCRIPTS_ELAB_ROOTS:-SimplexQualification Compiler.QualificationReport Verify}; do
   if ! lake build "$t" >"$out/root-$t.log" 2>&1; then
     echo "scripts-elab: RED library root $t does not build: $(grep -m1 'error' "$out/root-$t.log" | cut -c1-220)"; red=1
   fi

@@ -397,4 +397,49 @@ end Poles
 #assert_axioms Poles.present_verified
 #assert_axioms Poles.present_wrong_value_refused
 
+
+/-! ### `Collision` has teeth
+
+`Collision dig` is the floor every soundness theorem here ends in (`verify_sound`,
+`reveal_sound`, and the deployed instance `Compiler.DurableIndex.collision_is_cshake`).
+It is a real floor: some digest collides and some digest does not. -/
+namespace CollisionTeeth
+
+/-- A constant digest collides (`empty` and `leaf () ()` share it). -/
+def constant : NodeIn Unit Unit Unit → Unit := fun _ => ()
+
+theorem constant_collides : Collision constant :=
+  ⟨.empty, .leaf () (), by decide, rfl⟩
+
+/-- A digest that writes its input out (a tag, then the left digest's length, then both
+digests) is injective, so it has no collision. -/
+def spelled : NodeIn Unit Unit (List Nat) → List Nat
+  | .empty => [0]
+  | .leaf _ _ => [1]
+  | .branch l r => 2 :: l.length :: (l ++ r)
+
+theorem spelled_injective (a b : NodeIn Unit Unit (List Nat)) (same : spelled a = spelled b) :
+    a = b := by
+  cases a with
+  | empty => cases b <;> simp_all [spelled]
+  | leaf k v => cases b <;> simp_all [spelled]
+  | branch l r =>
+    cases b with
+    | empty => simp [spelled] at same
+    | leaf k v => simp [spelled] at same
+    | branch l' r' =>
+      simp only [spelled, List.cons.injEq] at same
+      obtain ⟨-, len, app⟩ := same
+      obtain ⟨h1, h2⟩ := List.append_inj app len
+      subst h1; subst h2; rfl
+
+theorem spelled_no_collision : ¬ Collision spelled := by
+  rintro ⟨a, b, different, same⟩
+  exact different (spelled_injective a b same)
+
+end CollisionTeeth
+
+#assert_axioms CollisionTeeth.constant_collides
+#assert_axioms CollisionTeeth.spelled_no_collision
+
 end Minidregg.Theory.AuthTrie
