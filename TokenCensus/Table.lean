@@ -54,7 +54,7 @@ Minidregg.Compiler.CredentialSignatureAdmission.ReceiverSignature.mk | Compiler.
 Minidregg.Compiler.DurableHistory.Head.mk | Compiler.DurableHistory | evidence | L2 | a verified history head of an opened Store; a genesis head asserts every nullifier and tx id absent; mints: Head.genesis
 Minidregg.Compiler.DurableHistory.RawEntry.mk | Compiler.DurableHistory | encapsulation | L2 | a raw history entry as stored; trusted only after Head.verify checks it at use (kn2-store-open)
 Minidregg.Compiler.DurableHistory.RawNode.mk | Compiler.DurableHistory | encapsulation | L2 | a raw accumulator node as stored; trusted only after Head.verify checks it at use (kn2-store-open)
-Minidregg.Compiler.DurableHistory.StoreIdentity.mk | Compiler.DurableHistory | evidence | L2 | the identity of an opened Store; minted only by the open (kn2-store-open); mints: StoreIdentity.ofOpen
+Minidregg.Compiler.DurableHistory.StoreIdentity.mk | Compiler.DurableHistory | evidence | L2 | the identity of an opened Store (origin deployment) or of a scratch Store holding a portable image (origin scratch); mints: StoreIdentity.ofOpen, StoreIdentity.ofScratch
 Minidregg.Compiler.DurableServed.Served.mk | Compiler.DurableServed | evidence | L2 | the served Store open (kn2-store-open ii); layer-1 review pending
 Minidregg.Compiler.DurableServed.Start.mk | Compiler.DurableServed | evidence | L2 | the served Store open's start state (kn2-store-open ii); layer-1 review pending
 Minidregg.Compiler.GenericSimplexIO.VerifiedCommit.mk | Compiler.GenericSimplexIO | evidence | L2 | 4 proof / 1 data fields; layer-1 review pending
@@ -425,6 +425,7 @@ Minidregg.Theory.Receiving.Receiver.Accepted.mk | Theory.Receiving | evidence | 
 Minidregg.Theory.Receiving.Vouchers.mk | Theory.Receiving | evidence | L2 | the claims the Receiver's verifier answered true on, and its true/false answers on the receiver's OBSERVED signatures (admitVia_observed); an oracle (IO) verdict no proof expresses; minted only by Receiver.admitVia; mints: Vouchers.empty (vouches for nothing)
 restrict | Minidregg.Compiler.DurableHistory.Head.genesis | Compiler.DurableHistoryStore, Compiler.DurableReceiverIO, Compiler.DurableServed | a genesis head for a non-empty Store is a replay bypass: only the open mints one
 restrict | Minidregg.Compiler.DurableHistory.StoreIdentity.ofOpen | Compiler.DurableHistoryStore, Compiler.DurableReceiverIO, Compiler.DurableServed | a Store identity comes only from the open
+restrict | Minidregg.Compiler.DurableHistory.StoreIdentity.ofScratch | Compiler.DurableHistoryStore | a scratch Store identity comes only from scratchReader, after the image is checked against its carried commitment
 "
 
 end Minidregg.TokenCensus

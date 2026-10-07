@@ -172,15 +172,17 @@ def stateAt (transport : Transport) (rootBytes : List UInt8 → Digest) (seed : 
 identity (its key, its genesis log start) and the head: `Head.verify` of the
 head entry's tag (read with the image, or from the Store) under that key, for
 the opening's chain and accumulator frontier; `Head.genesis` only when the
-image is empty. -/
-def readerOf (transport : Transport) (rootBytes : List UInt8 → Digest) (loaded : Loaded rootBytes) :
+image is empty. `mint` is the identity's minter: the open's (`readerOf`) or a
+scratch Store's (`scratchReader`), and nothing else (private). -/
+private def readerWith (mint : DurableCheckpointCodec.MacKey → Digest → StoreIdentity)
+    (transport : Transport) (rootBytes : List UInt8 → Digest) (loaded : Loaded rootBytes) :
     IO (Except String ((store : StoreIdentity) × Reader rootBytes store)) := do
   let key ← match ← transport.key with
     | .error message => return .error message
     | .ok key => pure key
   let some frontier := loaded.frontier
     | return .error "this opening carries no accumulator frontier (it was not read from the Store)"
-  let store := StoreIdentity.ofOpen key loaded.logStart
+  let store := mint key loaded.logStart
   let height := loaded.image.accepted.length
   let head ← if height = 0 then pure (Head.genesis store loaded.worldRoot) else do
     let tag ← match loaded.headTag with
@@ -203,5 +205,50 @@ def readerOf (transport : Transport) (rootBytes : List UInt8 → Digest) (loaded
       spent := spent transport head
       range := range transport head
       stateAt := stateAt transport rootBytes loaded.image.seed head }⟩
+
+/-- The Reader of the deployment's opened Store at its head (`StoreIdentity.ofOpen`). -/
+def readerOf (transport : Transport) (rootBytes : List UInt8 → Digest) (loaded : Loaded rootBytes) :
+    IO (Except String ((store : StoreIdentity) × Reader rootBytes store)) :=
+  readerWith StoreIdentity.ofOpen transport rootBytes loaded
+
+/-- What a portable image is checked against: the height and world root its
+evidence carries (an original receipt's `acceptedCount` and `worldRoot`), and the
+deployment's world-root function of an image. -/
+structure Commitment where
+  height : Nat
+  worldRoot : Digest
+  rootOf : Minidregg.Kernel.DurableReceiver.Image → Digest
+
+/-- **A Reader of a portable image** (a foreign accepted prefix that arrives as
+bytes, with no Store of its own). The image is written into the EMPTY Store
+`transport` names (`DurableReceiverIO.writeImage`: its seed, then each record
+appended through the one receive path and read back) and read back as a Reader of
+a SCRATCH Store (`StoreIdentity.ofScratch`: never equal to an opened Store,
+`StoreIdentity.ofScratch_ne_ofOpen`; never an `Opening`, `Opening.not_scratch`).
+
+What its head is bound to: the chain recomputed from the image's own bytes (each
+append advances it from the deployment's log start), MAC'd under the scratch
+Store's fresh key, and nothing else. That MAC authenticates NOTHING about the
+foreign data: the key was made here, for this copy. The image is authenticated
+only by the commitment check below (and by whatever re-admission its caller runs
+over the Reader); never read the scratch Store's MAC as evidence. So before any Reader is returned the image is
+checked against the commitment its evidence carries: the image's height and its
+world root (`commitment.rootOf`) must be the carried ones, else it is refused by
+name; and the written Store's log start must be `logStart` (the deployment's, for
+this image's seed). The caller owns the Store's directory and its lifetime (the
+Reader reads it on every query). -/
+def scratchReader (transport : Transport) (rootBytes : List UInt8 → Digest)
+    (image : Minidregg.Kernel.DurableReceiver.Image) (logStart : Digest) (commitment : Commitment) :
+    IO (Except String ((store : StoreIdentity) × Reader rootBytes store)) := do
+  if image.accepted.length ≠ commitment.height then
+    return .error s!"scratch Store: the image's height {image.accepted.length} is not the carried height {commitment.height}"
+  if commitment.rootOf image ≠ commitment.worldRoot then
+    return .error s!"scratch Store: the image's world root at height {commitment.height} is not the carried commitment"
+  match ← DurableReceiverIO.writeImage transport rootBytes image with
+  | .error detail => return .error detail
+  | .ok written =>
+      if written.logStart ≠ logStart then
+        return .error "scratch Store: its log start is not the image's (another deployment's transport)"
+      readerWith StoreIdentity.ofScratch transport rootBytes written
 
 end Minidregg.Compiler.DurableHistoryStore

@@ -324,13 +324,45 @@ Which tag: the helper serves durable reads only under the MINIANC2 head anchor
 (`docs/DURABLE-STORE.md`), so the tag the open passes is the anchor-fixed head
 entry's. -/
 
+/-- Where a Store identity comes from: the deployment's own Store, minted by the
+open (`StoreIdentity.ofOpen`), or a scratch Store a portable foreign image was
+written into (`StoreIdentity.ofScratch`, `DurableHistoryStore.scratchReader`). A
+scratch Store's head is bound only to the chain recomputed from that image's bytes
+and the commitment its caller checked. It reads history (the walk re-admits the
+foreign prefix through it) but is never a light opening of the deployment: an
+`Opening`, the write path's state, carries `live : store.origin = .deployment`. -/
+inductive StoreOrigin where
+  | deployment
+  | scratch
+  deriving DecidableEq, Repr
+
 structure StoreIdentity where
   private mk ::
+  origin : StoreOrigin
   key : MacKey
   logStart : Digest
 
-/-- LAYER 2: minted only by the open (token audit list). -/
-def StoreIdentity.ofOpen (key : MacKey) (logStart : Digest) : StoreIdentity := ⟨key, logStart⟩
+/-- LAYER 2: the deployment's Store, minted only by the open (token audit list). -/
+def StoreIdentity.ofOpen (key : MacKey) (logStart : Digest) : StoreIdentity := ⟨.deployment, key, logStart⟩
+
+/-- LAYER 2: a scratch Store holding a portable foreign image, minted only by
+`DurableHistoryStore.scratchReader` (token audit list). -/
+def StoreIdentity.ofScratch (key : MacKey) (logStart : Digest) : StoreIdentity := ⟨.scratch, key, logStart⟩
+
+@[simp] theorem StoreIdentity.ofOpen_origin (key : MacKey) (logStart : Digest) :
+    (StoreIdentity.ofOpen key logStart).origin = .deployment := rfl
+
+@[simp] theorem StoreIdentity.ofScratch_origin (key : MacKey) (logStart : Digest) :
+    (StoreIdentity.ofScratch key logStart).origin = .scratch := rfl
+
+/-- **A scratch Store is never the deployment's**: no scratch identity equals an
+opened one, whatever the key and log start, so a scratch Store's `Head` (and every
+answer indexed by it) does not typecheck where an opened Store's is expected. -/
+theorem StoreIdentity.ofScratch_ne_ofOpen (key key' : MacKey) (logStart logStart' : Digest) :
+    StoreIdentity.ofScratch key logStart ≠ StoreIdentity.ofOpen key' logStart' := by
+  intro same
+  have := congrArg StoreIdentity.origin same
+  simp at this
 
 structure Head (store : StoreIdentity) where
   private mk ::
