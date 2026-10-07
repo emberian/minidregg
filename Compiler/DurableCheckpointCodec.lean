@@ -126,15 +126,17 @@ reads as `"none"` and is refused naming that component, and a component of
 another version is refused naming it. -/
 
 /-- The log-tag MAC customization; `entryTag` uses exactly this label. -/
-def logTagLabel : String := "DREGG/NATIVE-HOST/LOG-TAG/v3"
+def logTagLabel : String := "DREGG/NATIVE-HOST/LOG-TAG/v4"
 
 /-- One Store epoch: the format components its bytes commit to. -/
 structure StoreEpoch where
   stateKey : String
   schemaRefs : String
   logTag : String
-  /-- The history accumulator and spent map (`Compiler.DurableHistory`,
-  `Compiler.DurableSpent`, KN2-STORE-OPEN). A three-component label (an epoch
+  /-- The history accumulator and the index trie (`Compiler.DurableHistory`,
+  `Compiler.DurableIndex`, KN2-STORE-OPEN). `index/trie-v1` replaced the separate
+  spent map (`spent/trie-v1`): a Store born with it is refused naming this
+  component. A three-component label (an epoch
   born before it) reads as `none` and is refused by naming this component. -/
   accumulator : String
   /-- The command codecs of the log records. `commands/v2`: the delegation
@@ -152,7 +154,7 @@ either moves without this value. A change to any component changes the seed
 frame and refuses every older Store by name. -/
 def StoreEpoch.current : StoreEpoch :=
   ⟨"state-key/tagged-v4", "schema-refs/v5", logTagLabel,
-    "history/mmr-v1;spent/trie-v1;checkpoint/v3", "commands/v2"⟩
+    "history/mmr-v1;index/trie-v1;checkpoint/v4", "commands/v2"⟩
 
 /-- The label carried in the seed frame: every component, `;`-separated (the
 accumulator is itself two parts, `history/…;spent/…`). -/
@@ -160,13 +162,16 @@ def StoreEpoch.label (epoch : StoreEpoch) : String :=
   s!"{epoch.stateKey};{epoch.schemaRefs};{epoch.logTag};{epoch.accumulator};{epoch.commands}"
 
 /-- A label part's name: everything before its last `/`
-(`DREGG/NATIVE-HOST/LOG-TAG/v3` is named `DREGG/NATIVE-HOST/LOG-TAG`). -/
+(`DREGG/NATIVE-HOST/LOG-TAG/v4` is named `DREGG/NATIVE-HOST/LOG-TAG`). -/
 def StoreEpoch.partName (part : String) : String :=
   "/".intercalate (part.splitOn "/").dropLast
 
 /-- The accumulator's own parts, in label order (`Compiler.DurableHistory`,
-`Compiler.DurableSpent`, and the checkpoint shape of KN2-STORE-OPEN). -/
-def StoreEpoch.accumulatorParts : List String := ["history", "spent", "checkpoint"]
+the retired spent map, `Compiler.DurableIndex`, and the checkpoint shape of
+KN2-STORE-OPEN). `spent` stays a KNOWN name so that a Store born with the
+retired spent map parses and is refused naming the accumulator, rather than
+failing as an unreadable label. -/
+def StoreEpoch.accumulatorParts : List String := ["history", "spent", "index", "checkpoint"]
 
 /-- Every part name a label may carry, in label order. -/
 def StoreEpoch.partNames : List String :=
@@ -370,10 +375,23 @@ theorem seedEpoch_commandsV1_refused (rest : List UInt8) :
 
 theorem seedEpoch_noAccumulator_refused (rest : List UInt8) :
     (SeedEpoch.ofBytes (bytesStream.encode (labelledFrame labelWithoutAccumulator) ++ rest)).refusal =
-      some "this Store was born in another epoch (history accumulator: Store none, this Host history/mmr-v1;spent/trie-v1;checkpoint/v3); re-genesis the world" := by
+      some "this Store was born in another epoch (history accumulator: Store none, this Host history/mmr-v1;index/trie-v1;checkpoint/v4); re-genesis the world" := by
   rw [seedEpoch_ofBytes_labelled]
   native_decide
 
+/-- The label of the epoch before the unified index (separate spent map, v3 tags, checkpoint v3). -/
+def labelSpentMap : String :=
+  "state-key/tagged-v4;schema-refs/v5;DREGG/NATIVE-HOST/LOG-TAG/v3;history/mmr-v1;spent/trie-v1;checkpoint/v3;commands/v2"
+
+/-- **A Store of the separate spent map is refused by name** (log tags and the
+accumulator), never read as this Host's. -/
+theorem seedEpoch_spentMap_refused (rest : List UInt8) :
+    (SeedEpoch.ofBytes (bytesStream.encode (labelledFrame labelSpentMap) ++ rest)).refusal =
+      some "this Store was born in another epoch (log tags: Store DREGG/NATIVE-HOST/LOG-TAG/v3, this Host DREGG/NATIVE-HOST/LOG-TAG/v4; history accumulator: Store history/mmr-v1;spent/trie-v1;checkpoint/v3, this Host history/mmr-v1;index/trie-v1;checkpoint/v4); re-genesis the world" := by
+  rw [seedEpoch_ofBytes_labelled]
+  native_decide
+
+#assert_compiled seedEpoch_spentMap_refused
 #assert_axioms StoreEpoch.differing_accumulator
 #assert_axioms StoreEpoch.differing_commands
 #assert_axioms seedEpoch_ofBytes_labelled
@@ -489,8 +507,8 @@ structure Body where
   chain : Digest
   /-- The log accumulator's peaks after `height` leaves (`DurableHistory`). -/
   frontier : List (Nat × Digest)
-  /-- The spent map's root after `height` records (`DurableSpent`). -/
-  spentRoot : Digest
+  /-- The index trie's root after `height` records (`DurableIndex`). -/
+  indexRoot : Digest
   state : State
 
 def frontierStream : StreamCodec (List (Nat × Digest)) :=
@@ -501,7 +519,7 @@ def bodyStream : StreamCodec Body :=
     (StreamCodec.product bytesStream
       (StreamCodec.product StreamCodec.nat (StreamCodec.product digestStream
         (StreamCodec.product frontierStream (StreamCodec.product digestStream stateStream)))))
-    (fun body => (body.keyId, body.height, body.chain, body.frontier, body.spentRoot, body.state))
+    (fun body => (body.keyId, body.height, body.chain, body.frontier, body.indexRoot, body.state))
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1, tuple.2.2.2.2.1, tuple.2.2.2.2.2⟩)
     (by intro value; cases value; rfl)
 
@@ -550,24 +568,24 @@ def checkpointMac (key : MacKey) (body : Body) (root : Digest) : List UInt8 :=
 cached root (`DurableReceiverIO.sealCheckpoint_uses_cached_root`); `openSealed`
 recomputes it from the body and refuses any other. -/
 def sealAt (key : MacKey) (height : Nat) (chain : Digest) (frontier : List (Nat × Digest))
-    (spentRoot : Digest) (state : State) (root : Digest) : Sealed :=
-  let body : Body := ⟨key.id, height, chain, frontier, spentRoot, state⟩
+    (indexRoot : Digest) (state : State) (root : Digest) : Sealed :=
+  let body : Body := ⟨key.id, height, chain, frontier, indexRoot, state⟩
   ⟨body, root, checkpointMac key body root⟩
 
 /-- The specification seal: the root evaluated in full from the body. -/
 def sealCheckpoint (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat) (chain : Digest)
-    (frontier : List (Nat × Digest)) (spentRoot : Digest) (state : State) : Sealed :=
-  sealAt key height chain frontier spentRoot state
-    (worldRoot rootBytes ⟨key.id, height, chain, frontier, spentRoot, state⟩)
+    (frontier : List (Nat × Digest)) (indexRoot : Digest) (state : State) : Sealed :=
+  sealAt key height chain frontier indexRoot state
+    (worldRoot rootBytes ⟨key.id, height, chain, frontier, indexRoot, state⟩)
 
 /-- Sealing under any root equal to the body's world root is the
 specification seal, byte for byte. -/
 theorem sealAt_eq_sealCheckpoint (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat)
-    (chain : Digest) (frontier : List (Nat × Digest)) (spentRoot : Digest) (state : State)
+    (chain : Digest) (frontier : List (Nat × Digest)) (indexRoot : Digest) (state : State)
     {root : Digest}
-    (exact : root = worldRoot rootBytes ⟨key.id, height, chain, frontier, spentRoot, state⟩) :
-    sealAt key height chain frontier spentRoot state root =
-      sealCheckpoint key rootBytes height chain frontier spentRoot state := by
+    (exact : root = worldRoot rootBytes ⟨key.id, height, chain, frontier, indexRoot, state⟩) :
+    sealAt key height chain frontier indexRoot state root =
+      sealCheckpoint key rootBytes height chain frontier indexRoot state := by
   subst exact
   rfl
 
@@ -590,10 +608,10 @@ def openSealed (key : MacKey) (rootBytes : List UInt8 → Digest) (bytes : List 
 
 /-- Satisfiable pole: what the host seals, it opens, exactly. -/
 theorem openSealed_seal (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat)
-    (chain : Digest) (frontier : List (Nat × Digest)) (spentRoot : Digest) (state : State) :
+    (chain : Digest) (frontier : List (Nat × Digest)) (indexRoot : Digest) (state : State) :
     openSealed key rootBytes (checkpointFrame.encode
-        (sealCheckpoint key rootBytes height chain frontier spentRoot state)) =
-      .ok ⟨key.id, height, chain, frontier, spentRoot, state⟩ := by
+        (sealCheckpoint key rootBytes height chain frontier indexRoot state)) =
+      .ok ⟨key.id, height, chain, frontier, indexRoot, state⟩ := by
   simp [openSealed, Framed.decode_encode, sealCheckpoint, sealAt]
   rfl
 
@@ -629,10 +647,10 @@ theorem empty_mac_forged (key : MacKey) (body : Body) (root : Digest) :
 /-- A checkpoint sealed under one key and opened under a key with a different
 id refuses. -/
 theorem openSealed_foreign_key (key other : MacKey) (rootBytes : List UInt8 → Digest)
-    (height : Nat) (chain : Digest) (frontier : List (Nat × Digest)) (spentRoot : Digest)
+    (height : Nat) (chain : Digest) (frontier : List (Nat × Digest)) (indexRoot : Digest)
     (state : State) (distinct : other.id ≠ key.id) :
     openSealed key rootBytes (checkpointFrame.encode
-        (sealCheckpoint other rootBytes height chain frontier spentRoot state)) =
+        (sealCheckpoint other rootBytes height chain frontier indexRoot state)) =
       .error .foreignKey := by
   simp [openSealed, Framed.decode_encode, sealCheckpoint, sealAt, distinct]
   rfl

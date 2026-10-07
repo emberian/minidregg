@@ -171,7 +171,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   | .replayed _ => pure ()
   | _ => throw (IO.userError "FAIL light receive: a repeated transaction was not replayed")
   -- A new transaction spending nullifier 5 (consumed at height 5, below the checkpoint at 32): the
-  -- spent map answers it consumed; the light receive refuses it (no silent "absent").
+  -- index answers it consumed; the light receive refuses it (no silent "absent").
   let reuse : DataIntent rootBytes := { step 43 with nullifiers := [nullifier 5] }
   match ← DurableServed.receiveServed transport rootBytes next reuse with
   | .rejected reason =>
@@ -213,25 +213,25 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   -- TAMPER 2: an accumulator node on height 19's path (the leaf node at level 0, end 20).
   sql database "UPDATE durable_node SET value = zeroblob(length(value)) WHERE space = 1 AND height = 20"
   expectRefusedAt "tampered accumulator node beside height 19" 19 (← reader.atHeight 19)
-  -- TAMPER 3a: the spent-map rows record 34 wrote (after the checkpoint). A spent read at use
-  -- refuses; the light open never trusts those rows (it re-derives every spent root after its
+  -- TAMPER 3a: the index rows record 34 wrote (after the checkpoint). A spent read at use
+  -- refuses; the light open never trusts those rows (it re-derives every index root after its
   -- checkpoint from the checkpoint's version and the records) and still opens.
-  sql database "UPDATE durable_node SET value = zeroblob(length(value)) WHERE space = 2 AND height = 34"
+  sql database "UPDATE durable_node SET value = zeroblob(length(value)) WHERE space = 3 AND height = 34"
   match ← reader.spent (nullifier 34) with
   | .ok _ => throw (IO.userError "FAIL a spent read through a forged row at 34 verified")
   | .error refusal => IO.println s!"refused as expected (spent read through a forged row at 34): {refusal.message}"
   match ← DurableServed.openHead transport rootBytes with
   | .ok _ => IO.println "light open: rows written after its checkpoint are re-derived, not trusted"
   | .error detail => throw (IO.userError s!"FAIL light open trusted a row written after its checkpoint: {detail}")
-  -- TAMPER 3b: the spent map's rows at the checkpoint's version (written by record 32): the
+  -- TAMPER 3b: the index rows at the checkpoint's version (written by record 32): the
   -- light open's re-derivation starts from them and refuses at the first record after it.
-  sql database "UPDATE durable_node SET value = zeroblob(length(value)) WHERE space = 2 AND height = 32"
+  sql database "UPDATE durable_node SET value = zeroblob(length(value)) WHERE space = 3 AND height = 32"
   match ← DurableServed.openHead transport rootBytes with
   | .ok _ => throw (IO.userError "FAIL light open accepted forged spent rows at its checkpoint")
   | .error detail =>
       IO.println s!"light open refused the forged checkpoint-version spent rows: {detail}"
       require "light open names height 33" ((detail.splitOn "height 33").length > 1)
-  sql database "DELETE FROM durable_node WHERE space = 2 AND (height = 32 OR height = 34)"
+  sql database "DELETE FROM durable_node WHERE space = 3 AND (height = 32 OR height = 34)"
   -- TAMPER 4: one byte of the record at height 37 (after the checkpoint): refused at open by name.
   sql database "UPDATE durable_log SET record = CAST(substr(record,1,length(record)-1) || X'FF' AS BLOB) WHERE height = 37"
   match ← DurableServed.openHead transport rootBytes with
@@ -239,10 +239,10 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   | .error detail =>
       IO.println s!"light open refused the tampered suffix record: {detail}"
       require "light open names height 37" ((detail.splitOn "height 37").length > 1)
-  -- EPOCH: a Store born with the previous accumulator component (checkpoint v2,
-  -- before the consumed list left the checkpoint) is refused at open, by name.
+  -- EPOCH: a Store born with the previous accumulator component (the separate
+  -- index, before the unified index) is refused at open, by name.
   let olderLabel := "state-key/tagged-v4;schema-refs/v5;" ++ DurableCheckpointCodec.logTagLabel ++
-    ";history/mmr-v1;spent/trie-v1"
+    ";history/mmr-v1;spent/trie-v1;checkpoint/v3;commands/v2"
   let olderFrame := DurableCheckpointCodec.seedFrameName ++ [2] ++ olderLabel.toUTF8.toList
   let olderSeed := (Tower256ConcreteBackend.StreamCodec.product Tower256ConcreteBackend.bytesStream
     DurableReceiverCodec.seedStream).encode (olderFrame, seed)
@@ -255,7 +255,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   | .error detail =>
       IO.println s!"older epoch refused: {detail}"
       require "the refusal names the accumulator component"
-        ((detail.splitOn "history accumulator: Store history/mmr-v1;spent/trie-v1").length > 1)
+        ((detail.splitOn "history accumulator: Store history/mmr-v1;spent/trie-v1;checkpoint/v3").length > 1)
   IO.println "PASS history tamper: a non-head record and an accumulator node, each refused by name at use"
 
 end HistoryTamper

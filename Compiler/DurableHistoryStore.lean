@@ -4,8 +4,8 @@
 The implementation of `Compiler.DurableHistoryReader.Reader` over a durable
 transport (`durable-history`, `durable-checkpoint-at`). Every value it returns
 was produced by a check: records by `DurableHistory.verifyAt` against the
-MAC-bound `Head`, spent answers by `DurableSpent.lookupRows` against the head's
-spent root, states by `openSealed` + verified records + `replay`. The types
+MAC-bound `Head`, spent answers by `DurableIndex.lookupRows` against the head's
+index root, states by `openSealed` + verified records + `replay`. The types
 make anything else unrepresentable; this module only does the IO.
 -/
 import Compiler.DurableHistoryReader
@@ -20,7 +20,7 @@ open Minidregg.Kernel.DurableReceiver (IntentRecord Seed replay)
 open Minidregg.Kernel.DurableCheckpoint (State)
 open Minidregg.Compiler.DurableHistory
 open Minidregg.Compiler.DurableHistoryReader
-open Minidregg.Compiler.DurableReceiverIO (Transport Loaded spentRows)
+open Minidregg.Compiler.DurableReceiverIO (Transport Loaded indexRows)
 open Minidregg.Compiler.DurableCheckpointCodec (recordFrame chainAfter openSealed MacKey)
 
 set_option autoImplicit false
@@ -60,7 +60,7 @@ def fetch (transport : Transport) {store : StoreIdentity} (head : Head store) (h
     if height = 0 ∨ height > head.height then return .error (.beyondHead height head.height)
   let keys := (heights.flatMap (pathOf head)).eraseDups
   match ← transport.history ⟨head.height, heights,
-      keys.map fun key => (DurableSpent.accumulatorSpace, nodeKey key.1 key.2)⟩ with
+      keys.map fun key => (DurableIndex.accumulatorSpace, nodeKey key.1 key.2)⟩ with
   | .error message => return .error (.unavailable (heights.headD 0) message)
   | .ok read =>
       if read.head < head.height then
@@ -80,31 +80,40 @@ def atHeight (transport : Transport) {store : StoreIdentity} (head : Head store)
           else return .error (.wrongHeight height found)
       | _ => return .error (.unavailable height "one record requested, another count returned")
 
-/-- A spent-map answer for one key, verified against the head's spent root. -/
-def spentAnswer (transport : Transport) {store : StoreIdentity} (head : Head store) (key : Digest) :
-    IO (Except String (DurableSpent.Answer head.spentRoot key)) := do
-  DurableReceiverIO.withSpentRows transport head.height [key] fun rows =>
-    DurableSpent.lookupRows rows head.spentRoot key
+/-- An index answer for one key, verified against the head's index root. -/
+def indexAnswer (transport : Transport) {store : StoreIdentity} (head : Head store) (key : DurableIndex.IndexKey) :
+    IO (Except String (DurableIndex.Answer head.indexRoot key)) := do
+  DurableReceiverIO.withIndexRows transport head.height [key] fun rows =>
+    DurableIndex.lookupRows rows head.indexRoot key
 
 def spent (transport : Transport) {store : StoreIdentity} (head : Head store) (nullifier : StableNullifier) :
     IO (Except Refusal (Spent head nullifier)) := do
-  match ← spentAnswer transport head (DurableSpent.nullifierKey nullifier) with
+  match ← indexAnswer transport head (DurableIndex.nullifierKey nullifier) with
   | .error message => return .error (.unavailable 0 message)
-  | .ok answer => return .ok answer
+  | .ok ⟨none, opens⟩ => return .ok ⟨none, opens⟩
+  | .ok ⟨some value, opens⟩ =>
+      match decoded : DurableIndex.heightOf value with
+      | none => return .error (.unavailable 0 "the index holds a spent row that is not a height")
+      | some height =>
+          return .ok ⟨some height, by rw [DurableIndex.heightOf_some decoded] at opens; exact opens⟩
 
 def byTx (transport : Transport) {store : StoreIdentity} (head : Head store) (transactionId : TransactionId) :
     IO (Except Refusal (TxAnswer head transactionId)) := do
-  match ← spentAnswer transport head (DurableSpent.transactionKey transactionId) with
+  match ← indexAnswer transport head (DurableIndex.transactionKey transactionId) with
   | .error message => return .error (.unavailable 0 message)
   | .ok ⟨none, opens⟩ => return .ok (.absent opens)
-  | .ok ⟨some height, opens⟩ =>
-      match ← atHeight transport head height with
-      | .error refusal => return .error refusal
-      | .ok read =>
-          if carries : read.record.transactionId = transactionId then
-            return .ok (.present ⟨height, opens, read, carries⟩)
-          else return .error (.unavailable height
-            "the spent map names a height whose record carries another transaction")
+  | .ok ⟨some value, opens⟩ =>
+      match decoded : DurableIndex.heightOf value with
+      | none => return .error (.unavailable 0 "the index holds a transaction row that is not a height")
+      | some height =>
+          match ← atHeight transport head height with
+          | .error refusal => return .error refusal
+          | .ok read =>
+              if carries : read.record.transactionId = transactionId then
+                return .ok (.present ⟨height, by rw [DurableIndex.heightOf_some decoded] at opens; exact opens,
+                  read, carries⟩)
+              else return .error (.unavailable height
+                "the index names a height whose record carries another transaction")
 
 def range (transport : Transport) {store : StoreIdentity} (head : Head store) (first last : Nat) :
     IO (Except Refusal (List ((at_ : Nat) × Record head at_))) :=
