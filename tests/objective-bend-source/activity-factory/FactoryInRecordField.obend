@@ -1,0 +1,20 @@
+edition ObjectiveBend 1
+# GPT-6 row B acceptance: a stored Nat -> Activity factory (record-field) invoked on 1n and on 2n.
+record Ask:
+  n: Nat
+sum Plan:
+  ask: Ask
+sum Response:
+  ok: {}
+  no: {}
+
+record Holder:
+  mk: Nat -> Activity<Plan, Response, Response>
+def run(x: Nat) -> Activity<Plan, Response, Nat>:
+  let h = {mk: fn(n: Nat) -> Activity<Plan, Response, Response>: perform(Plan.ask({n: n}))}
+  match h.mk(1n):
+    case ok(_):
+      match h.mk(2n):
+        case ok(_): 12n
+        case no(_): 10n
+    case no(_): 0n
