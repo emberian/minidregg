@@ -142,14 +142,20 @@ theorem submit_storage_irrelevant (t : DurableReceiverIO.Transport)
     NativeHost.submitLoadedVia t { config with storage } (opened.restorage storage)
         (light.restorage storage) call confirm =
       NativeHost.submitLoadedVia t config opened light call confirm := by
+  -- The light-route arms (revoke, invoke, ...) read their basis through `basisVia`,
+  -- which does not depend on the Store paths (`Light.basisVia_restorage`).
+  have same : (light.restorage storage).basisVia t = light.basisVia t :=
+    funext (NativeHostLight.Light.basisVia_restorage t light storage)
   cases call
-  case revoke bytes =>
-    have same : (light.restorage storage).basisVia t = light.basisVia t :=
-      funext (NativeHostLight.Light.basisVia_restorage t light storage)
+  case invoke signed =>
+    have stale : NativeHost.staleOutcome { config with storage } (opened.restorage storage) =
+        NativeHost.staleOutcome config opened := funext fun _ => funext fun _ => rfl
     simp only [NativeHost.submitLoadedVia]
-    rw [same]
+    rw [same, stale]
     rfl
-  all_goals rfl
+  all_goals first
+    | rfl
+    | (simp only [NativeHost.submitLoadedVia]; rw [same]; rfl)
 
 /-- **The served submission and the dry run are one program.** Op 2 runs
 `submitLoadedWith`, which is `submitLoadedVia` over the Store's transport; the dry

@@ -118,15 +118,15 @@ def prepareObservationSlot (config : Config) (opened : Opened config)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (selection : Selection)
     (prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
-      ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩ opened.durable
+      ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩ opened.ground
       (command ingress.dispatch selection ingress.parent))
     (index resource : Nat) (capability : CapabilityId) (root : Digest) :
     Except String SigningSlot := do
   let wanted := ApplicationDispatchAdmission.observationRequest config.deployment
     config.profile ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-    opened.durable ingress selection prepared resource capability root
+    opened.ground ingress selection prepared resource capability root
   let header ← (CredentialSignatureAdmission.signingHeader
-    ground.authority
+    opened.ground.authority
     (ApplicationDispatchAdmission.observationMarker ingress selection)
     (⟨.object, wanted⟩ : PackedEffectRequest)).mapError
       (fun _ => "dispatch observation signing key unavailable")
@@ -225,18 +225,18 @@ private def prepareForIssue (config : Config) (opened : Opened config)
   let command := ApplicationDispatchCommand.command base selection parent
   let .ok prepared := DeclaredResourceController.prepare config.deployment config.profile
     ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-    opened.durable command
+    opened.ground command
     | throw "current dispatch invocation preparation refused"
   if ApplicationDispatchAdmission.selectedMeaning unsigned spec actualApp manifest
       enrollment currentTicket != some requested then
     throw "current app, ticket, enrollment or permission meaning differs"
   if !ApplicationDispatchAdmission.linkedCurrentPolicies config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.durable unsigned spec selection prepared then
+      opened.ground unsigned spec selection prepared then
     throw "current app/session/ticket policy linkage refused"
   if !ApplicationDispatchAdmission.issuerLineageCurrentFromSourceBytes config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.durable unsigned spec selection originalSourceBytes prepared then
+      opened.ground unsigned spec selection originalSourceBytes prepared then
     throw "current issuer delegation lineage refused"
   let invocation ← NativeHost.prepareLoaded config opened
     (.invoke (DeclaredResourceController.commandCodec.encode command))
