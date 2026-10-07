@@ -56,6 +56,8 @@ scripts/kn2/history-tamper.lean
 scripts/kn2/neutral-birth.lean
 # PROBE (KN2-NEUTRAL-BIRTHS cluster 4): boots a native Store through the full open, then installs through the light submit path
 scripts/kn2/neutral-birth-install.lean
+# PROBE (KN2-NEUTRAL-BIRTHS cluster 5): the reserve-method birth probe; boots its Store through the full open
+scripts/kn2/neutral-birth-reserve.lean
 scripts/kn2/port-b-tamper.lean
 scripts/kn2/receipt-tamper.lean
 scripts/native-accepted-fixture/replay.lean
