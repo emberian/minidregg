@@ -463,6 +463,8 @@ must stay where it was when `init` ran (or re-run `init` on a new Store).
 
 ## 9. What the operator decides
 
+- **fn image.** Mini at or after `fn frames!` (lane/plat-fn-frames) requires an fn with `--frame` on identity, status, position, ack and poll, and refuses an fn without it by name ("this fn has no --frame"). Production deploy waits for fn's converged image; until then the production fn pin is d420a2b5 and the `--frame` build (fn 6679dae0e) is the journeys' and pipeline's DEV pin. Both are recorded in `protocol/fn/images.json`.
+
 1. **Placement and paths**: which machine and Unix account hold the candidate,
    each Store's state directory (at most 90 bytes, for the socket), and the
    sponsor key. All scripts take them as
