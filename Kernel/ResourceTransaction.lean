@@ -1441,14 +1441,21 @@ structure PreparedOn {F : Type} [Field F]
     ambient command (fun i => (targets i).pre.logical) (computeFundingIndex compute) = .ok run
   computeRunExact : computeExecutionMatches command compute run = true
 
+/-- Whether a ground answers an invocation's operation marker replay nullifier.
+Irreducible: its argument is a cSHAKE256 digest, which elaboration must never
+reduce while checking a type that mentions a preparation; proofs unfold it. -/
+@[irreducible] def markerDeclaredOn {deployment : Deployment} (ground : Ground deployment)
+    (domain semantics : Digest) (command : Command) : Bool :=
+  ground.declaresNullifier (CredentialAuthorityReplay.nullifier domain
+    (operationMarker ground.authority.domain semantics command))
+
 /-- The declared-resource preparation on a ground: `PreparedOn` at the ground's
 directory, authority, cell state and its answer for the operation marker. -/
 abbrev PreparedInvocation {F : Type} [Field F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (ground : Ground deployment) (command : Command) :=
   PreparedOn deployment profile ambient ground.directory ground.authority ground.cells
-    (ground.declaresNullifier (CredentialAuthorityReplay.nullifier deployment.domain
-      (operationMarker ground.authority.domain profile.semantics command))) command
+    (markerDeclaredOn ground deployment.domain profile.semantics command) command
 
 /-- The accounting plan's amount is tied to the actual accepted oracle count. -/
 theorem PreparedInvocation.compute_steps_exact {F : Type} [Field F]
@@ -1507,8 +1514,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
     (ground : Ground deployment) (command : Command) :
     Except Reject (PreparedInvocation deployment profile ambient ground command) :=
   prepareOn deployment profile ambient ground.directory ground.authority ground.cells
-    (ground.declaresNullifier (CredentialAuthorityReplay.nullifier deployment.domain
-      (operationMarker ground.authority.domain profile.semantics command))) command
+    (markerDeclaredOn ground deployment.domain profile.semantics command) command
 
 /-- **Agreement: a ground reaches a preparation only through its reads.** Two
 grounds with the same decoded directory, the same authority snapshot, the same
@@ -1537,7 +1543,7 @@ theorem prepare_agrees {F : Type} [Field F] (deployment : Deployment)
     intro _ _ _ _ _ _ _ _ hd ha hc hm
     subst hd ha hc hm
     rfl
-  exact congr _ _ _ _ _ _ _ _ directory authority cells marker
+  exact congr _ _ _ _ _ _ _ _ directory authority cells (by unfold markerDeclaredOn; exact marker)
 
 /-- **Light = full on the same state.** A light basis whose served state is the full
 materialization's, with the same decoded directory and authority, that declares the
@@ -1576,6 +1582,7 @@ theorem PreparedInvocation.markerSpent_false {F : Type} [Field F] {deployment : 
     ground.markerSpent (operationMarker ground.authority.domain profile.semantics command) = some false := by
   have unused := prepared.marker.unused
   have declared := prepared.markerDeclared
+  unfold markerDeclaredOn at declared
   rw [ground.authorityDomain] at unused declared ⊢
   simp only [Minidregg.Compiler.ServedBasis.Ground.markerSpent, declared, if_true, unused]
 
@@ -1593,10 +1600,9 @@ theorem prepare_undeclared {F : Type} [Field F] (deployment : Deployment)
     prepare deployment profile ambient (Minidregg.Compiler.ServedBasis.Ground.ofBasis basis) command =
       .error .undeclaredMarker := by
   have dom := (Minidregg.Compiler.ServedBasis.Ground.ofBasis basis).authorityDomain
-  have notDeclared : ¬ (Minidregg.Compiler.ServedBasis.Ground.ofBasis basis).declaresNullifier
-      (CredentialAuthorityReplay.nullifier deployment.domain
-        (operationMarker (Minidregg.Compiler.ServedBasis.Ground.ofBasis basis).authority.domain
-          profile.semantics command)) = true := by
+  have notDeclared : ¬ markerDeclaredOn (Minidregg.Compiler.ServedBasis.Ground.ofBasis basis)
+      deployment.domain profile.semantics command = true := by
+    unfold markerDeclaredOn
     rw [dom]; simpa [Minidregg.Compiler.ServedBasis.Ground.declaresNullifier] using undeclared
   unfold prepare prepareOn
   rw [dif_pos nonempty, dif_pos distinct, dif_pos writes, dif_neg notDeclared]
