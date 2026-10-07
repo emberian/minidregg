@@ -16,6 +16,9 @@ import Theory.ObjectiveBendTemplates
 import Theory.ObjectiveBendCheckpointRoundTrip
 import Kernel.ObjectiveBendAdmissionSemantics
 import Theory.ObjectiveBendDemandForcingExtract
+import Theory.ObjectiveBendDemandForcingBack
+import Theory.ObjectiveBendDemandForcingConverse
+import Theory.ObjectiveBendInteraction
 import Kernel.ObjectiveResumeContract
 import Kernel.ObjectiveCheckpointInvariant
 import Kernel.ObjectiveUpgradeInvariant

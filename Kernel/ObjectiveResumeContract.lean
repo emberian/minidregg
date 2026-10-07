@@ -51,6 +51,7 @@ import Theory.ObjectiveBendCheckpointRoundTrip
 import Theory.ObjectiveBendDemandForceProofs
 import Theory.AssertCompiled
 import Theory.ObjectiveBendDemandForcingExtract
+import Theory.ObjectiveBendInteraction
 
 namespace Minidregg.Kernel.ObjectiveResumeContract
 open Minidregg.Theory Minidregg.Compiler
@@ -202,6 +203,12 @@ def Segment.Agrees : Segment → Segment → Prop
   | .finished result, .finished result' => result = result'
   | .faulted reason, .faulted reason' => reason = reason'
   | _, _ => False
+
+theorem Segment.Agrees.symm {a b : Segment} (agree : Segment.Agrees a b) : Segment.Agrees b a := by
+  cases a <;> cases b <;> simp only [Segment.Agrees] at agree ⊢
+  · exact ⟨agree.1.symm, agree.2.1.symm, agree.2.2.symm⟩
+  · exact agree.symm
+  · exact agree.symm
 
 theorem Segment.Agrees.trans {a b c : Segment} (one : Segment.Agrees a b) (two : Segment.Agrees b c) :
     Segment.Agrees a c := by
@@ -806,6 +813,311 @@ theorem lazy_extraction_failure_commits_as_fault (config : Config) (envelope : N
       Except ObjectiveActivity.Refusal (Segment × Option YieldCommit)) =
       .ok (.faulted s!"result extraction: {reason}", none) := rfl
 
+/-! ### The difference is resources only
+
+The converse instances above are resource refusals of the program's own run. Every case is
+one: whenever resuming the stored checkpoint commits a segment, resuming the program's own
+yield commits a segment that agrees, under every resource vector above a threshold
+(`runSegment_stored_converse`): heap room past the segment's start, stack, ticks, extraction
+ticks, and NOT more output nodes or bytes, which stay the deployment's
+(`Config.withResources`). With `runSegment_stored_complete` (the lazy commits ⇒ the stored
+commits alike, under the kernel's own limits), the stored checkpoint introduces no behaviour
+of its own: it changes only what the run costs.
+
+The proof is backward simulation along the normalization (`ObjectiveBendDemandForcingBack`,
+`ObjectiveBendDemandForcingConverse`): the stored checkpoint is in a `Chain` with the yield
+(forcing, settling, collection), a forced run that halts has a lazy run that halts (the lazy
+run does the closed demands the extraction cached, each known to finish), and the extraction
+transfers back above a threshold. -/
+
+open Minidregg.Theory.ObjectiveBendDemandForcing (Chain Ending endsWith EndsAbove LimitsLe)
+
+/-- The deployment with another resource vector: heap room past a segment's start, stack,
+and extraction ticks (segment ticks are `runSegment`'s own argument). Every other field, the
+output sizes (`planBudget.nodes`, `planBudget.bytes`) among them, is the deployment's. -/
+def _root_.Minidregg.Kernel.ObjectiveActivity.Config.withResources (config : Config) (heap stack extractTicks : Nat) : Config :=
+  {config with limits := ⟨heap, stack⟩, planBudget := {config.planBudget with ticks := extractTicks}}
+
+/-- The kernel segment an ending commits (its Plan decoded; the stored state is free). -/
+def Segment.OfEnding : Ending → Segment → Prop
+  | .yielded d, .yielded _ plan => decodePlan d = .ok plan
+  | .finished d, .finished result => result = d
+  | .divergent, .faulted reason => reason = "divergent"
+  | .refused r, .faulted reason => reason = reprStr r
+  | _, _ => False
+
+/-- A committed segment ends with an ending. -/
+theorem runSegment_ends {config : Config} {ticks : Nat} {start : State} {segment : Segment}
+    (ran : runSegment config ticks start = .ok segment) :
+    ∃ e y, endsWith (segmentLimits config start) ticks config.planBudget start = some (e, y) ∧
+      Segment.OfEnding e segment := by
+  unfold runSegment at ran
+  split at ran
+  · rename_i address yielded equation
+    split at ran
+    · rename_i extracted extractedExact
+      simp only [bind, Except.bind] at ran
+      split at ran
+      · cases ran
+      · rename_i plan decoded
+        cases ran
+        exact ⟨.yielded extracted.value, yielded, by simp [endsWith, equation, extractedExact], decoded⟩
+    · cases ran
+  · rename_i value finished equation
+    split at ran
+    · rename_i result resultExact
+      cases ran
+      exact ⟨.finished result.value, finished, by simp [endsWith, equation, resultExact], rfl⟩
+    · cases ran
+  · rename_i address y equation
+    cases ran
+    exact ⟨.divergent, y, by simp [endsWith, equation], rfl⟩
+  · rename_i reason y equation
+    cases ran
+    exact ⟨.refused reason, y, by simp [endsWith, equation], rfl⟩
+  · cases ran
+
+/-- An ending commits a segment that agrees with every segment it commits. -/
+theorem runSegment_of_ends {config : Config} {ticks : Nat} {start : State} {e : Ending} {y : State}
+    (ran : endsWith (segmentLimits config start) ticks config.planBudget start = some (e, y))
+    {other : Segment} (of : Segment.OfEnding e other) :
+    ∃ segment, runSegment config ticks start = .ok segment ∧ Segment.Agrees segment other := by
+  unfold endsWith at ran
+  unfold runSegment
+  split at ran
+  · rename_i address yy equation
+    rw [equation]
+    split at ran
+    · rename_i r found
+      simp only [Option.some.injEq, Prod.mk.injEq] at ran
+      obtain ⟨rfl, rfl⟩ := ran
+      cases other with
+      | yielded c plan =>
+        simp only [Segment.OfEnding] at of
+        exact ⟨.yielded (checkpoint r.state) plan, by simp [found, of, bind, Except.bind, pure, Except.pure], rfl, rfl, rfl⟩
+      | _ => simp [Segment.OfEnding] at of
+    · cases ran
+  · rename_i value yy equation
+    rw [equation]
+    split at ran
+    · rename_i r found
+      simp only [Option.some.injEq, Prod.mk.injEq] at ran
+      obtain ⟨rfl, rfl⟩ := ran
+      cases other with
+      | finished result =>
+        simp only [Segment.OfEnding] at of
+        exact ⟨.finished r.value, by simp [found], of.symm⟩
+      | _ => simp [Segment.OfEnding] at of
+    · cases ran
+  · rename_i address yy equation
+    rw [equation]
+    simp only [Option.some.injEq, Prod.mk.injEq] at ran
+    obtain ⟨rfl, rfl⟩ := ran
+    cases other with
+    | faulted reason => simp only [Segment.OfEnding] at of; exact ⟨_, rfl, of.symm⟩
+    | _ => simp [Segment.OfEnding] at of
+  · rename_i reason yy equation
+    rw [equation]
+    simp only [Option.some.injEq, Prod.mk.injEq] at ran
+    obtain ⟨rfl, rfl⟩ := ran
+    cases other with
+    | faulted r => simp only [Segment.OfEnding] at of; exact ⟨_, rfl, of.symm⟩
+    | _ => simp [Segment.OfEnding] at of
+  · cases ran
+
+/-- Above a threshold of an `EndsAbove`, the kernel's own segment (under `withResources`)
+commits what the ending commits. -/
+theorem runSegment_above {config : Config} {start : State} {e : Ending} {y : State}
+    {L0 : Minidregg.Theory.ObjectiveBendDemandMachine.Limits} {T0 E0 : Nat}
+    (above : ∀ (L : Minidregg.Theory.ObjectiveBendDemandMachine.Limits) (T k : Nat), LimitsLe L0 L → T0 ≤ T →
+      endsWith L T ⟨config.planBudget.nodes, E0 + k, config.planBudget.bytes⟩ start = some (e, y))
+    {other : Segment} (of : Segment.OfEnding e other) (heap stack ticks extract : Nat)
+    (heapEnough : L0.heap ≤ heap) (stackEnough : L0.stack ≤ stack) (ticksEnough : T0 ≤ ticks)
+    (extractEnough : E0 ≤ extract) :
+    ∃ segment, runSegment (config.withResources heap stack extract) ticks start = .ok segment ∧
+      Segment.Agrees segment other := by
+  have lim : LimitsLe L0 (segmentLimits (config.withResources heap stack extract) start) := by
+    refine ⟨?_, stackEnough⟩
+    show L0.heap ≤ start.heap.size + heap
+    omega
+  have run := above _ ticks (extract - E0) lim ticksEnough
+  have budgetEq : (config.withResources heap stack extract).planBudget =
+      ⟨config.planBudget.nodes, E0 + (extract - E0), config.planBudget.bytes⟩ := by
+    simp only [Config.withResources]
+    congr 1
+    omega
+  rw [← budgetEq] at run
+  exact runSegment_of_ends run of
+
+/-- **The converse of `runSegment_stored_complete`: the difference is resources only.**
+Whenever resuming the checkpoint the kernel stores from a lexically valid yield commits a
+segment (under any config and ticks), resuming the program's OWN yield commits a segment that
+agrees (the same Plan, result or fault) under every resource vector above a threshold, with
+the deployment's output sizes. (It is not "the same budget, the same result":
+`stored_commits_where_lazy_exhausts` and `stored_commits_where_lazy_extraction_fails` are
+that refuted.) -/
+theorem runSegment_stored_converse {config : Config} {limits : Minidregg.Theory.ObjectiveBendDemandMachine.Limits}
+    {budget : ObjectiveBendDemandData.Budget} {ticks : Nat} {yielded resumed stored : State} {response : Term}
+    {extracted : ObjectiveBendDemandData.Result}
+    (found : ObjectiveBendDemandData.yieldedPlan limits budget yielded = .ok extracted)
+    (valid : ObjectiveBendDemandInvariant.LexicalInvariant yielded)
+    (resumedExact : resume response yielded = some resumed)
+    (storedExact : resume response (checkpoint extracted.state) = some stored) {segment : Segment}
+    (ran : runSegment config ticks stored = .ok segment) :
+    ∃ (heap0 stack0 ticks0 extract0 : Nat), ∀ (heap stack ticks' extract : Nat), heap0 ≤ heap → stack0 ≤ stack →
+      ticks0 ≤ ticks' → extract0 ≤ extract →
+      ∃ segment', runSegment (config.withResources heap stack extract) ticks' resumed = .ok segment' ∧
+        Segment.Agrees segment' segment := by
+  have chain := ObjectiveBendDemandForcing.chain_checkpoint
+    (ObjectiveBendDemandForcing.addrValid_of_lexical valid) found
+  obtain ⟨t0, again, chain0⟩ := chain.resume response resumedExact
+  rw [storedExact] at again
+  cases again
+  obtain ⟨e, y', ends, of⟩ := runSegment_ends ran
+  obtain ⟨y, _, L0, T0, E0, above⟩ := chain0.back ends
+  exact ⟨L0.heap, L0.stack, T0, E0, fun heap stack ticks' extract h s t x =>
+    runSegment_above above of heap stack ticks' extract h s t x⟩
+
+/-- **The continuation states, not only the Plans.** When the stored run yields and stores
+`next`, the program's own run yields the same Plan Data above a threshold, and the program's
+OWN yielded state is in a `Chain` with `next`, so every later response resumes the two to a
+chain again (`Chain.resume`, `Chain.resume_back`) and the converse holds again at the next
+segment. The premise names the stored run's own retained yield (`runSegment_yielded`): it is
+lexically valid (every kernel run of a typed state is). -/
+theorem runSegment_stored_next {config : Config} {limits : Minidregg.Theory.ObjectiveBendDemandMachine.Limits}
+    {budget : ObjectiveBendDemandData.Budget} {ticks : Nat} {yielded resumed stored next : State} {response : Term}
+    {extracted : ObjectiveBendDemandData.Result} {plan : PlanAwait}
+    (found : ObjectiveBendDemandData.yieldedPlan limits budget yielded = .ok extracted)
+    (valid : ObjectiveBendDemandInvariant.LexicalInvariant yielded)
+    (resumedExact : resume response yielded = some resumed)
+    (storedExact : resume response (checkpoint extracted.state) = some stored)
+    (ran : runSegment config ticks stored = .ok (.yielded next plan))
+    (validNext : ∀ address retained, runBounded (segmentLimits config stored) ticks stored = .yielded address retained →
+      ObjectiveBendDemandInvariant.LexicalInvariant retained) :
+    ∃ (d : ObjectiveBendDemandData.Data) (own : State), decodePlan d = .ok plan ∧
+      EndsAbove resumed config.planBudget (.yielded d) own ∧ Chain own next := by
+  have chain := ObjectiveBendDemandForcing.chain_checkpoint
+    (ObjectiveBendDemandForcing.addrValid_of_lexical valid) found
+  obtain ⟨t0, again, chain0⟩ := chain.resume response resumedExact
+  rw [storedExact] at again
+  cases again
+  obtain ⟨address, retained, extracted', executed, extractedExact, nextExact⟩ := runSegment_yielded ran
+  have ends : endsWith (segmentLimits config stored) ticks config.planBudget stored =
+      some (.yielded extracted'.value, retained) := by
+    simp [endsWith, executed, extractedExact]
+  obtain ⟨own, above, c⟩ := chain0.next ends
+    (ObjectiveBendDemandForcing.addrValid_of_lexical (validNext address retained executed)) extractedExact
+  obtain ⟨e, y', ends', of⟩ := runSegment_ends ran
+  rw [ends] at ends'
+  simp only [Option.some.injEq, Prod.mk.injEq] at ends'
+  obtain ⟨rfl, rfl⟩ := ends'
+  subst nextExact
+  exact ⟨extracted'.value, own, of, above, c⟩
+
+/-- The converse's premise is inhabited, at the very point where the same budget fails
+(`stored_commits_where_lazy_exhausts`): `largerYield` is lexically valid, its Plan extracts,
+both resumptions exist, and the stored run commits. -/
+theorem stored_converse_inhabited :
+    ∃ (extracted : ObjectiveBendDemandData.Result) (resumed stored : State) (segment : Segment),
+      ObjectiveBendDemandData.yieldedPlan ObjectiveBendDemandCollect.largerLimits
+        ObjectiveBendDemandCollect.largerBudget ObjectiveBendDemandCollect.largerYield = .ok extracted ∧
+      ObjectiveBendDemandInvariant.LexicalInvariant ObjectiveBendDemandCollect.largerYield ∧
+      resume readResponse ObjectiveBendDemandCollect.largerYield = some resumed ∧
+      resume readResponse (checkpoint extracted.state) = some stored ∧
+      runSegment largerConfig 12 stored = .ok segment ∧
+      runSegment largerConfig 12 resumed = .error .exhausted := by
+  have extracts : (match ObjectiveBendDemandData.yieldedPlan ObjectiveBendDemandCollect.largerLimits
+      ObjectiveBendDemandCollect.largerBudget ObjectiveBendDemandCollect.largerYield with
+      | .ok _ => true | .error _ => false) = true := by decide +kernel
+  cases found : ObjectiveBendDemandData.yieldedPlan ObjectiveBendDemandCollect.largerLimits
+      ObjectiveBendDemandCollect.largerBudget ObjectiveBendDemandCollect.largerYield with
+  | error _ => rw [found] at extracts; cases extracts
+  | ok extracted =>
+    have stored_def : largerStored = checkpoint extracted.state := by
+      unfold largerStored; rw [found]
+    obtain ⟨s0, t0, segment, hs, ht, lazy, storedRun⟩ := stored_commits_where_lazy_exhausts
+    rw [stored_def] at ht
+    exact ⟨extracted, s0, t0, segment, rfl, lexicalInvariant_largerYield, hs, ht, storedRun, lazy⟩
+
+/-- **"The difference is resources only"**, as a property of a pair of resumed states: every
+segment `stored` commits (under `config` and any ticks), `resumed` commits alike under every
+resource vector above a threshold. `runSegment_stored_converse` is this property at every
+checkpoint the kernel stores from a lexically valid yield; `not_resourcesOnly_lostStack` is a
+planted fault (a "checkpoint" that lost its continuation) at which it is false. -/
+def ResourcesOnly (config : Config) (resumed stored : State) : Prop :=
+  ∀ (ticks : Nat) (segment : Segment), runSegment config ticks stored = .ok segment →
+    ∃ (heap0 stack0 ticks0 extract0 : Nat), ∀ (heap stack ticks' extract : Nat), heap0 ≤ heap → stack0 ≤ stack →
+      ticks0 ≤ ticks' → extract0 ≤ extract →
+      ∃ segment', runSegment (config.withResources heap stack extract) ticks' resumed = .ok segment' ∧
+        Segment.Agrees segment' segment
+
+theorem resourcesOnly_of_yieldedPlan {config : Config} {limits : Minidregg.Theory.ObjectiveBendDemandMachine.Limits}
+    {budget : ObjectiveBendDemandData.Budget} {yielded resumed stored : State} {response : Term}
+    {extracted : ObjectiveBendDemandData.Result}
+    (found : ObjectiveBendDemandData.yieldedPlan limits budget yielded = .ok extracted)
+    (valid : ObjectiveBendDemandInvariant.LexicalInvariant yielded)
+    (resumedExact : resume response yielded = some resumed)
+    (storedExact : resume response (checkpoint extracted.state) = some stored) :
+    ResourcesOnly config resumed stored :=
+  fun _ _ ran => runSegment_stored_converse found valid resumedExact storedExact ran
+
+/-- A segment a state commits under one resource vector, it commits above a threshold (the
+state is in a chain with itself). -/
+theorem runSegment_self_above {config : Config} {ticks : Nat} {start : State} {segment : Segment}
+    (ran : runSegment config ticks start = .ok segment) :
+    ∃ (heap0 stack0 ticks0 extract0 : Nat), ∀ (heap stack ticks' extract : Nat), heap0 ≤ heap → stack0 ≤ stack →
+      ticks0 ≤ ticks' → extract0 ≤ extract →
+      ∃ segment', runSegment (config.withResources heap stack extract) ticks' start = .ok segment' ∧
+        Segment.Agrees segment' segment := by
+  obtain ⟨e, y, ends, of⟩ := runSegment_ends ran
+  obtain ⟨_, _, L0, T0, E0, above⟩ := (Chain.settles (ObjectiveBendDemandCollect.Agree.refl start)).back ends
+  exact ⟨L0.heap, L0.stack, T0, E0, fun heap stack ticks' extract h s t x =>
+    runSegment_above above of heap stack ticks' extract h s t x⟩
+
+/-- Two segments that agree with segments that do not agree cannot come from one run. -/
+theorem not_resourcesOnly_of_disagree {config : Config} {resumed stored : State} {ticks : Nat}
+    {lazy forced : Segment} (lazyRan : runSegment config ticks resumed = .ok lazy)
+    (storedRan : runSegment config ticks stored = .ok forced) (differ : ¬ Segment.Agrees lazy forced) :
+    ¬ ResourcesOnly config resumed stored := by
+  intro only
+  obtain ⟨h1, s1, t1, x1, conv⟩ := only ticks forced storedRan
+  obtain ⟨h2, s2, t2, x2, self⟩ := runSegment_self_above lazyRan
+  obtain ⟨seg1, ran1, agree1⟩ := conv (h1 + h2) (s1 + s2) (t1 + t2) (x1 + x2) (by omega) (by omega) (by omega) (by omega)
+  obtain ⟨seg2, ran2, agree2⟩ := self (h1 + h2) (s1 + s2) (t1 + t2) (x1 + x2) (by omega) (by omega) (by omega) (by omega)
+  rw [ran1] at ran2
+  cases ran2
+  exact differ (agree2.symm.trans agree1)
+
+/-- The lazy and the lost-stack runs commit, and do not agree. -/
+def lostStackCheck : Bool :=
+  match resume tallyReply tallyYield, resume tallyReply {tallyForced with stack := []} with
+  | some s0, some t0 =>
+    match runSegment tallyConfig 200000 s0, runSegment tallyConfig 200000 t0 with
+    | .ok lazy, .ok forced => !Segment.agreesB lazy forced
+    | _, _ => false
+  | _, _ => false
+
+theorem lostStack_checked : lostStackCheck = true := by native_decide
+
+/-- **Planted fault**: a "checkpoint" that lost its continuation (Tally's forced first yield
+with an empty stack) is not resources-only: resumed, it finishes where the program's own yield
+yields again, and no resources reconcile them. -/
+theorem not_resourcesOnly_lostStack :
+    ∃ s0 t0, resume tallyReply tallyYield = some s0 ∧ resume tallyReply {tallyForced with stack := []} = some t0 ∧
+      ¬ ResourcesOnly tallyConfig s0 t0 := by
+  have checked := lostStack_checked
+  unfold lostStackCheck at checked
+  split at checked
+  · rename_i s0 t0 hs ht
+    split at checked
+    · rename_i lazy forced r1 r2
+      refine ⟨s0, t0, hs, ht, not_resourcesOnly_of_disagree r1 r2 ?_⟩
+      intro agree
+      rw [← Segment.agreesB_iff] at agree
+      simp [agree] at checked
+    · cases checked
+  · cases checked
+
 /-! ### Growth is paid by the delivery that runs it
 
 A resumed segment's limits are counted from its checkpoint's heap, so a checkpoint may grow
@@ -1010,6 +1322,7 @@ theorem forcingTransparent_not_of_extraction :
 #assert_axioms segmentCommit_yielded
 #assert_axioms birth_checkpoint_typed
 #assert_axioms delivery_checkpoint_typed
+#assert_axioms Segment.Agrees.symm
 #assert_axioms Segment.Agrees.trans
 #assert_axioms segmentLimits_of_size
 #assert_axioms runSegment_transfer
@@ -1035,6 +1348,16 @@ theorem forcingTransparent_not_of_extraction :
 #assert_axioms stored_commits_where_lazy_exhausts
 #assert_axioms stored_commits_where_lazy_extraction_fails
 #assert_axioms lazy_extraction_failure_commits_as_fault
+#assert_axioms runSegment_ends
+#assert_axioms runSegment_of_ends
+#assert_axioms runSegment_above
+#assert_axioms runSegment_stored_converse
+#assert_axioms runSegment_stored_next
+#assert_axioms stored_converse_inhabited
+#assert_axioms resourcesOnly_of_yieldedPlan
+#assert_axioms runSegment_self_above
+#assert_axioms not_resourcesOnly_of_disagree
+#assert_compiled lostStack_checked
 #assert_axioms tariff_heap_le_workOf
 #assert_axioms Delivery.heap_priced
 #assert_axioms Exhaustion.heap_priced
