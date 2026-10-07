@@ -63,18 +63,41 @@ structure Prepared (context : Context deployment)
   sourceRoot : spec.packet.release.source.parent = root
   selectedExact : currentContent context spec = some (root, spec.packet.release.content)
 
+/-- Why a selected source publication is not prepared. The receiver answers every one of these with
+the single undisclosed `"selected source publication refused"` (`undisclosed`), so a submitter
+learns nothing about the Store from a refusal; the source's own operator, authoring the
+publication locally (`Host.FnSelectiveReleaseSourceAuthoring`), is told which one (`describe`). -/
+inductive PrepareRefusal where
+  | packetShape | sourceAbsent | sourceUnobserved | notContent | foreignDomain
+  | foreignSemantics | staleParent | selectedNotCurrent
+  deriving DecidableEq, Repr
+
+def PrepareRefusal.undisclosed (_ : PrepareRefusal) : String :=
+  "selected source publication refused"
+
+def PrepareRefusal.describe : PrepareRefusal → String
+  | .packetShape => "selected source publication refused: the packet is not a 64-octet-signed, bounded, public-peerable release"
+  | .sourceAbsent => "selected source publication refused: the source resource has no slot in this Store"
+  | .sourceUnobserved => "selected source publication refused: the source resource cannot be observed at its current root"
+  | .notContent => "selected source publication refused: the source resource is not a content resource"
+  | .foreignDomain => "selected source publication refused: the release names another domain"
+  | .foreignSemantics => "selected source publication refused: the release names other semantics"
+  | .staleParent => "selected source publication refused: the release's parent root is not the source's current root"
+  | .selectedNotCurrent => "selected source publication refused: the selected atom's current payload differs from the release content (or the atom is absent or tombstoned)"
+
 def prepare (context : Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
-    (height : Nat) (spec : Spec) : Except String (Prepared context profile federation height spec) :=
+    (height : Nat) (spec : Spec) :
+    Except PrepareRefusal (Prepared context profile federation height spec) :=
   if spec.packet.signature.length != 64 || !spec.packet.release.bounded ||
       spec.packet.release.destination.audience.visibility != .publicPeerable then
-    .error "selected source publication refused"
+    .error .packetShape
   else match context.directory.slots spec.packet.release.source.resource with
-  | .absent => .error "selected source publication refused"
+  | .absent => .error .sourceAbsent
   | .present packed =>
       match ResourceTargetAdmission.observe deployment context.directory
           .object spec.packet.release.source.resource packed.payload.root with
-      | none => .error "selected source publication refused"
+      | none => .error .sourceUnobserved
       | some observed =>
           if contentKind : observed.before.kind = .content then
             let physicalCurrent := ServedBasis.Ground.physicalCurrent context
@@ -86,11 +109,11 @@ def prepare (context : Context deployment)
                       some (packed.payload.root, spec.packet.release.content) then
                     .ok ⟨packed.payload.root, observed, contentKind, physicalCurrent,
                       sourceDomain, sourceSemantics, sourceRoot, selectedExact⟩
-                  else .error "selected source publication refused"
-                else .error "selected source publication refused"
-              else .error "selected source publication refused"
-            else .error "selected source publication refused"
-          else .error "selected source publication refused"
+                  else .error .selectedNotCurrent
+                else .error .staleParent
+              else .error .foreignSemantics
+            else .error .foreignDomain
+          else .error .notContent
 
 variable {context : Context deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
