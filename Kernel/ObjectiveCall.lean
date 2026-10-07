@@ -1310,6 +1310,24 @@ theorem invocation_writes_from_view {rootBytes : Bytes → Digest} {config : Con
   simp only [Journal.start, List.nil_append] at member
   exact ⟨(fresh w member).1, (fresh w member).2.1⟩
 
+/-- **Active-frame view stability** (GPT-6 row A). A call subtree entered from any stack leaves
+the state of every object on that stack exactly as it was, and every write a frame returns is
+applied to exactly the state that frame was shown at its entry. So between a frame's entry and its
+`frameReturn`, no descendant changes the frame's own object's state. `frameReturn` applies edits to
+the CURRENT state, so it is the re-entry guard that buys this: no descendant may be a frame of an
+object on the stack. Remove the guard and this theorem goes red (the DAO mutant: bank 40 / thief 60,
+journey C5). -/
+theorem active_frame_view_stability {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (authority : Authority) (turn : TransactionId) {fuel : Nat} {stack : List Ctx} {call : CallPlan}
+    {journal journal' : Journal} {ticks left : Nat} {result : Data}
+    (ran : exec config snapshot height authority turn fuel stack (.enter call) journal ticks = .ok (result, journal', left))
+    (distinct : (stack.map (·.object)).Nodup) (read : ObjectsRead config snapshot journal) :
+    (∀ ctx ∈ stack, journal'.lookup ctx.object = journal.lookup ctx.object) ∧
+    ∃ new, journal'.writes = journal.writes ++ new ∧ ∀ w ∈ new, w.before = w.viewed := by
+  obtain ⟨_, kept, ⟨new, writes, fresh⟩, _⟩ := exec_invariant config snapshot height authority turn fuel stack _
+    journal ticks result journal' left ran distinct (by intro _ _ h; cases h) read
+  exact ⟨fun ctx member => kept ctx member, new, writes, fun w member => (fresh w member).1⟩
+
 /-- **Every frame write of an admitted invocation is made under the pin of its own object**:
 the facts it was judged under name the package the written object's record pins, so the
 object's pin clause (`ObjectRecord.pinClause`) accepts it (`pinClause_accepts_run`), and a
@@ -1387,6 +1405,7 @@ theorem Invocation.posts_shape {rootBytes : Bytes → Digest} {config : Config} 
 #assert_axioms exec_invariant
 #assert_axioms invocation_reentry_free
 #assert_axioms invocation_writes_from_view
+#assert_axioms active_frame_view_stability
 #assert_axioms invocation_writes_pinned
 #assert_axioms Ctx.facts_artifact
 #assert_axioms Invocation.conserves
