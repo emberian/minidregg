@@ -52,7 +52,11 @@ run objective-proofs bash scripts/check-objective-proofs.sh proofs
 # self-test, or an instrument that did not run. KNOWN-RED is reported and does not count.
 ledger() {
   local log="$L/gate-$TAG-hyp-ledger.log" s=$(date +%s) rc reds new st
-  ${LAKE_WRAP:-nice -n 10} lake build AxiomCensusResearch > "$L/gate-$TAG-hyp-ledger-build.log" 2>&1 \
+  # the ledger's own imports too: scripts/HypothesisLedger.lean may import a module outside the
+  # AxiomCensusResearch closure (kn2-hyp-ledger: Kernel.GenericSimplexObservationSafety), and the
+  # ledger refuses to run on an absent olean
+  local imports; imports=$(sed -n 's/^import \([A-Za-z0-9_.]*\).*/\1/p' scripts/HypothesisLedger.lean | tr '\n' ' ')
+  ${LAKE_WRAP:-nice -n 10} lake build AxiomCensusResearch $imports > "$L/gate-$TAG-hyp-ledger-build.log" 2>&1 \
     || { echo "hyp-ledger RED (AxiomCensusResearch did not build)" | tee -a "$S"; red=$((red+1)); return; }
   bash scripts/check-hypothesis-ledger.sh > "$log" 2>&1; rc=$?
   reds=$(grep -aE '^[A-Za-z0-9_.]+ [|] [A-Z]+ [|] [A-Z]+ \[RED\]' "$log" | cut -d' ' -f1 | sort -u)
