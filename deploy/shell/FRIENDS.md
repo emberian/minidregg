@@ -545,6 +545,15 @@ mini join --wait --host HOST --config PINNED-CONFIG.json --socket SOCKET --dir J
   address differs from the box's book row at the enrollment index, and refuses the unset
   placeholder `EMBER_ENROL_ADDRESS`. `deploy/pay/render-enrol` writes it from
   `enrol-terms.json`.
+- **the ssh key must be a plain `ssh-ed25519` key.** a FIDO / security-key ssh key
+  (`ed25519-sk`, public line `sk-ssh-ed25519@openssh.com ...`, made with `ssh-keygen -t ed25519-sk`
+  or kept on a YubiKey) is refused by name, `fidoKeyRefused`, and so are RSA and ECDSA keys
+  (`notEd25519`). the refusal comes from `mini join --solana` on your machine, before it prints
+  an address or an amount, so nothing is paid. the reason is the signature: a security key signs
+  a different structure (flags and a counter) than the enrollment memo's possession proof
+  carries, so a payment naming one could not enrol you and would only be journalled for ember
+  to settle by hand. make a separate key for this (`ssh-keygen -t ed25519 -f ~/.mini/mini-ssh`)
+  and pass it as `--ssh-key`; your security key keeps working for everything else.
 - once the Host has seen your payment, the roster sync (every 60 seconds) gives you a
   *proxy* line (self-enrollment is proxy only), so you then need proxy mode, with the signing
   limits above. the line lapses when your lease ends: your subject, credit, grants and
