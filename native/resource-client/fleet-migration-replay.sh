@@ -125,7 +125,7 @@ call T03-send-unfunded 'OBSERVED chat.py:1413' 'refuse:bookRefused\|not admitted
 # T04 funding is a transfer from a funded profile (INFERRED: Bread's `transfer` verb, Pug-authored aeca5dea1)
 call T04-transfer-fund-seat INFERRED 'ok:.transferred and .committed and .amount == 2000 and .to == "'"$CODEX"'"' "$OPERATOR_ENV" -- transfer --profile lead --to "$CODEX" --amount 2000
 # T05 helm's chat send: `send --profile SEAT --to OWN_CELL --topic helm.chat PAYLOAD`, payload one argv word
-call T05-send-chat 'OBSERVED chat.py:1412-1414' 'ok:.sent and .agent_cell == "'"$CODEX"'" and .to == "'"$CODEX"'" and .topic == "helm.chat" and .payload == "'"$CHAT_PAYLOAD"'" and .sequence == 1 and .finality == "accepted" and (.turn_hash | test("^[0-9]+$")) and (.chain_index | type == "number")' "$SEAT_ENV" -- send --profile codex --to "$CODEX" --topic "$TOPIC_CHAT" "$CHAT_PAYLOAD"
+call T05-send-chat 'OBSERVED chat.py:1412-1414' 'ok:.sent and .agent_cell == "'"$CODEX"'" and .to == "'"$CODEX"'" and .topic == "helm.chat" and .payload == "'"$CHAT_PAYLOAD"'" and .sequence == 1 and .finality == "accepted" and (.turn_hash | test("^[0-9a-f]{64}$")) and (.receipt_hash | test("^[0-9a-f]{64}$")) and (.chain_index | type == "number")' "$SEAT_ENV" -- send --profile codex --to "$CODEX" --topic "$TOPIC_CHAT" "$CHAT_PAYLOAD"
 # T06 the same call on the land topic (chat.emit_coordination_turn, landreq.py:1232)
 call T06-send-land 'OBSERVED landreq.py:1232 via chat.py:1413' 'ok:.sent and .topic == "helm.land" and .sequence == 1' "$SEAT_ENV" -- send --profile codex --to "$CODEX" --topic "$TOPIC_LAND" "$LAND_PAYLOAD"
 # T07 helm's second attempt (chat.py:1411 loop) is a fresh send, not a retry: a second event, sequence 2
@@ -178,7 +178,19 @@ if [ -n "${HELM_SRC:-}" ]; then
   PYTHONDONTWRITEBYTECODE=1 python3 "$HERE/fleet-migration-helm-probe.py" "$HELM_SRC" "$SHIM" "$OPERATOR_HOME" probe "$MINI" \
     >"$OUT/helm-probe.json" 2>"$OUT/helm-probe.err" || PROBE_RC=$?
   printf '%s\n' "$PROBE_RC" >"$OUT/helm-probe.rc"
-  call Z2-probe-turns-landed INFERRED 'ok:.head.turns' "MINI_FLEET_HOME=$OPERATOR_HOME" -- receipt --profile probe --head
+  # helm must conclude SUCCESS on its first attempt, and exactly ONE turn must land
+  # (cv 01a11476-1c59: without receipt_hash helm judged the send failed, re-sent, and two committed).
+  N=$((N + 1))
+  if [ "$PROBE_RC" -eq 0 ] && jq -e '.diag == null and .info.sent == true and (.info.receipt_hash | test("^[0-9a-f]{64}$"))' \
+      "$OUT/helm-probe.json" >/dev/null 2>&1; then
+    printf '%s\tPASS\t%s\n' Z2a-helm-concludes-sent 'helm _sign_send returns info, no diag' >>"$OUT/results.tsv"
+  else
+    printf '%s\tRED\t%s\n' Z2a-helm-concludes-sent 'helm _sign_send returns info, no diag' >>"$OUT/results.tsv"
+    echo "REPLAY RED at Z2a: helm did not conclude sent: $(cat "$OUT/helm-probe.json")" >&2
+    RED=1
+  fi
+  call Z2-probe-turns-landed INFERRED 'ok:.head.turns == "1"' "MINI_FLEET_HOME=$OPERATOR_HOME" -- receipt --profile probe --head
+  [ -z "${RED:-}" ] || exit 1
 fi
 stop_server
 

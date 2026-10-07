@@ -104,7 +104,8 @@ step send send -- $FS send --profile alpha --topic client-sign hello from alpha
 one_object "$OUT/send.json"
 jq -e --arg a "$A" --arg fee "$FEE" '.sent and .agent_cell == $a and .payload == "hello from alpha"
   and .sequence == 1 and (.fee | tostring) == $fee and .finality == "accepted"
-  and (.turn_hash | test("^[0-9]+$"))' "$OUT/send.json" >/dev/null
+  and (.turn_hash | test("^[0-9a-f]{64}$")) and (.receipt_hash | test("^[0-9a-f]{64}$"))
+  and (.operation | test("^[0-9a-f]{64}$"))' "$OUT/send.json" >/dev/null
 
 # --- J3 transfer
 step transfer transfer -- $FS transfer --profile alpha --to "$B" --amount 25
@@ -123,7 +124,9 @@ jq -e --slurpfile t "$OUT/transfer.json" '.head.turns == "2" and .head.head == $
   "$OUT/receipt-head.json" >/dev/null
 
 # --- refusals, each naming its reason
-refuse unknown-tx receipt 'no accepted transaction' -- $FS receipt --profile alpha --turn-hash 1
+refuse unknown-tx receipt 'no accepted transaction' -- $FS receipt --profile alpha \
+  --turn-hash "$(printf '0%.0s' $(seq 63))1"
+refuse decimal-turn-hash receipt '64 hex digits' -- $FS receipt --profile alpha --turn-hash 1
 refuse self-transfer transfer 'own account' -- $FS transfer --profile alpha --to "$A" --amount 1
 refuse overdraw transfer 'bookRefused\|not admitted' -- $FS transfer --profile bravo --to "$A" --amount 100000
 refuse bread-cell-id transfer 'Bread cell id' -- $FS transfer --profile alpha \
@@ -154,6 +157,31 @@ jq -e '.balance == 525' "$OUT/balance-bravo.json" >/dev/null   # 500 + 25 once, 
 step balance-alpha join -- $FS join --profile alpha --fund 0
 EXPECT_A=$((1000 - 25 - 3 * FEE))
 jq -e --argjson v "$EXPECT_A" '.balance == $v' "$OUT/balance-alpha.json" >/dev/null
+
+# --- J5b one operation, at most one commit (cv 01a11476-1c59: helm retries a send it judged
+# failed). The state a fleet-sign process leaves when it dies after its turn reached the Host
+# and before its answer was printed is its operation record plus the journal of its live
+# attempt; it is written here from a completed send (same files, same contents), and the SAME
+# call again must answer that turn's receipt (`replayed`) and commit nothing.
+step once-send send -- $FS send --profile alpha --topic once one operation
+TURNS_ONCE=$(jq -er .chain_index "$OUT/once-send.json")
+jq -n --arg op "$(jq -er .operation "$OUT/once-send.json")" \
+  '{format:"minidregg-fleet-sign-operation-v1", operation:$op, verb:"send"}' \
+  >"$MINI_FLEET_HOME/profiles/alpha/operation.json"
+jq -er .attempt "$OUT/once-send.json" >"$MINI_FLEET_HOME/profiles/alpha/operation-attempts"
+step once-send-again send -- $FS send --profile alpha --topic once one operation
+one_object "$OUT/once-send-again.json"
+jq -e --slurpfile o "$OUT/once-send.json" '.replayed == true and .turn_hash == $o[0].turn_hash
+  and .receipt_hash == $o[0].receipt_hash and .receipt == $o[0].receipt' "$OUT/once-send-again.json" >/dev/null
+[ ! -e "$MINI_FLEET_HOME/profiles/alpha/operation.json" ] || { echo 'J5b: the answered operation is still recorded' >&2; exit 1; }
+step once-head receipt -- $FS receipt --profile alpha --head
+jq -e --slurpfile o "$OUT/once-send.json" '.head.head == $o[0].receipt' "$OUT/once-head.json" >/dev/null
+# a finished call repeated is a NEW operation: a deliberate repeat still commits
+step once-send-repeat send -- $FS send --profile alpha --topic once one operation
+jq -e --slurpfile o "$OUT/once-send.json" '(.replayed | not) and .turn_hash != $o[0].turn_hash
+  and .chain_index > $o[0].chain_index' "$OUT/once-send-repeat.json" >/dev/null
+printf 'once	J5b	%s	ok
+' "$TURNS_ONCE" >>"$TIMES"
 
 # --- J6 interleaved: TURNS turns from three keys at once (sends and transfers)
 INTER="$OUT/interleaved.tsv"
@@ -197,7 +225,7 @@ for p in alpha bravo charlie; do
   step "final-$p" join -- $FS join --profile "$p" --fund 0
 done
 SUM=$(jq -s 'map(.balance) | add' "$OUT/final-alpha.json" "$OUT/final-bravo.json" "$OUT/final-charlie.json")
-TOTAL_TURNS=$(( ADMITTED + 3 ))          # send, transfer, the unix-url send
+TOTAL_TURNS=$(( ADMITTED + 5 ))          # send, transfer, the unix-url send, J5b's two commits
 EXPECT_SUM=$(( 2000 - FEE * TOTAL_TURNS ))
 [ "$SUM" -eq "$EXPECT_SUM" ] || { echo "conservation: sum $SUM, expected $EXPECT_SUM" >&2; exit 1; }
 stop_server
