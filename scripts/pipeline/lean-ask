@@ -1,0 +1,689 @@
+#!/usr/bin/env python3
+"""scripts/pipeline/lean-ask -- a resident Lean session per lane tree (interactive inner loop).
+
+  lean-ask check FILE[:FROM_LINE]        re-elaborate FILE incrementally (language server) and print
+                                         its errors/warnings (from FROM_LINE on, if given)
+  lean-ask goals FILE:LINE[:COL]         proof state at LINE (default COL: end of the line's text)
+  lean-ask eval 'CMDS' [ENV]             run Lean commands against a loaded environment, print messages
+                                         and the goal at every `sorry`. ENV is one of
+                                           --file F       F's imports (default: the umbrella `Minidregg`)
+                                           --after F      at the end of F (all of F's declarations,
+                                                          via the language server; incremental)
+                                           --imports A,B  these modules
+                                           --env-pickle P a pickled environment (see --pickle-to)
+                                         --pickle-to P  save the resulting environment to P (+ P.fp);
+                                                        a pickle carries declarations, not compiled
+                                                        code: #eval of a pickled def panics (REPL limit)
+  lean-ask status | stop | restart       the session of this tree
+  Common: --tree DIR (default: the git toplevel of $PWD), --json, --timeout SEC (default 900).
+
+One daemon per tree (logs in TREE/.lake/lean-ask/, socket in $XDG_RUNTIME_DIR/lean-ask-UID/), started on first use under swarm-build
+(memory-capped, SWARM_MEM_MAX default 16G), exits after LEAN_ASK_IDLE seconds idle (default 7200).
+It holds a `lake serve` (for check/goals: the server re-elaborates only from the first changed
+command) and one leanprover-community/repl process per environment (for eval: imports loaded once).
+
+STALENESS (the bare `lake env lean` false-green): every answer is preceded by a fingerprint of the
+loaded environment's local import closure (each module's source and .olean: inode, size, mtime;
+plus lake-manifest.json and lean-toolchain). If anything changed since the session loaded it, the
+answer is REFUSED (exit 3) and names what changed. `--reload` (or `restart`) then makes the
+imports current the same way scripts/pipeline/lane-check does (`lake build --no-build`, else a
+build in a slot under swarm-build) and loads them again. A session never loads an environment
+whose imports Lake reports out of date. The language server is opened with
+dependencyBuildMode=never, so it never builds outside a slot.
+
+Exit codes: 0 no errors; 1 Lean reported errors; 2 usage/infra failure; 3 refused (stale).
+"""
+import hashlib, json, os, re, select, shlex, socket, subprocess, sys, threading, time, traceback
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+REPL_BIN = os.environ.get("LEAN_ASK_REPL", "/srv/pipeline/repl/.lake/build/bin/repl")
+IDLE = int(os.environ.get("LEAN_ASK_IDLE", "7200"))
+UMBRELLA = os.environ.get("LEAN_ASK_DEFAULT_IMPORTS", "Minidregg")
+MAX_REPLS = int(os.environ.get("LEAN_ASK_MAX_ENVS", "3"))
+IMPORT_RE = re.compile(r"^(?:public\s+|private\s+)?(?:meta\s+)?import\s+(?:all\s+)?(.+)$")
+
+
+# ---------------------------------------------------------------- tree / imports / fingerprint
+def sock_path_for(root):
+    """AF_UNIX paths are capped at ~104 bytes: the socket lives in the runtime dir, keyed by the tree."""
+    base = os.environ.get("XDG_RUNTIME_DIR") or os.environ.get("TMPDIR") or "/tmp"
+    d = os.path.join(base, "lean-ask-%d" % os.getuid())
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    return os.path.join(d, hashlib.sha256(root.encode()).hexdigest()[:16] + ".sock")
+
+
+def git_top(path):
+    r = subprocess.run(["git", "-C", path, "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    if r.returncode != 0:
+        die("not inside a git clone (use --tree)")
+    return r.stdout.strip()
+
+
+def header_imports(text):
+    """Module names imported by a Lean header (stops at the first non-header command)."""
+    mods, in_comment = [], False
+    for line in text.splitlines():
+        s = line.strip()
+        if in_comment:
+            if "-/" in s:
+                in_comment = False
+            continue
+        if not s or s.startswith("--") or s in ("module", "prelude") or s.startswith("module "):
+            continue
+        if s.startswith("/-"):
+            in_comment = "-/" not in s[2:]
+            continue
+        m = IMPORT_RE.match(s)
+        if not m:
+            break
+        mods += [t for t in m.group(1).split("--")[0].split() if t]
+    return mods
+
+
+class Tree:
+    def __init__(self, root):
+        self.root = root
+        self.build = os.path.join(root, ".lake", "build", "lib", "lean")
+
+    def src(self, mod):
+        p = os.path.join(self.root, *mod.split(".")) + ".lean"
+        return p if os.path.isfile(p) else None
+
+    def closure(self, mods):
+        """Local (in-tree) transitive import closure of mods, mods included if local."""
+        seen, stack = set(), [m for m in mods if self.src(m)]
+        while stack:
+            m = stack.pop()
+            if m in seen:
+                continue
+            seen.add(m)
+            try:
+                txt = open(self.src(m), encoding="utf-8", errors="replace").read()
+            except OSError:
+                continue
+            stack += [d for d in header_imports(txt) if self.src(d) and d not in seen]
+        return sorted(seen)
+
+    def fingerprint(self, mods):
+        """{path: (ino, size, mtime_ns)} over the closure's sources + oleans + workspace pins."""
+        fp = {}
+        paths = [os.path.join(self.root, "lake-manifest.json"), os.path.join(self.root, "lean-toolchain"),
+                 os.path.join(self.root, "lakefile.toml")]
+        for m in self.closure(mods):
+            paths.append(self.src(m))
+            paths.append(os.path.join(self.build, *m.split(".")) + ".olean")
+        for p in paths:
+            try:
+                st = os.stat(p)
+                fp[p] = (st.st_ino, st.st_size, st.st_mtime_ns)
+            except OSError:
+                fp[p] = None
+        return fp
+
+    @staticmethod
+    def diff(old, new):
+        return sorted(p for p in set(old) | set(new) if old.get(p) != new.get(p))
+
+
+def lake(tree, args, **kw):
+    return subprocess.run(["lake"] + args, cwd=tree.root, capture_output=True, text=True, **kw)
+
+
+def make_current(tree, mods, log):
+    """lane-check's rule: ask Lake; if out of date, build the imports in a build slot. Returns rebuilt count."""
+    local = [m for m in mods if tree.src(m)]
+    if not local:
+        return 0
+    r = lake(tree, ["build", "--no-build"] + local)
+    if r.returncode == 0:
+        return 0
+    out = r.stdout + r.stderr
+    if "out-of-date" not in out:
+        raise Infra("lake could not resolve the imports:\n" + out[-3000:])
+    log(f"imports out of date; building {' '.join(local)} in a build slot")
+    cmd = ("set -o pipefail; . %s/lib.sh; LEAN_NUM_THREADS=${LEAN_NUM_THREADS:-4} SWARM_MEM_MAX=${SWARM_MEM_MAX_BUILD:-24G} "
+           "pipeline_slot swarm-build lake build %s" % (shlex.quote(HERE), " ".join(map(shlex.quote, local))))
+    r = subprocess.run(["bash", "-c", cmd], cwd=tree.root, capture_output=True, text=True)
+    out = r.stdout + r.stderr
+    if r.returncode != 0:
+        errs = "\n".join(l for l in out.splitlines() if l.startswith("error") or "✖" in l)[:4000]
+        raise Infra("an import does not build:\n" + errs)
+    return out.count("] Built ")
+
+
+class Infra(Exception):
+    pass
+
+
+class Stale(Exception):
+    pass
+
+
+# ---------------------------------------------------------------- language server client
+class LSP:
+    def __init__(self, tree, log):
+        self.tree, self.log = tree, log
+        self.proc = subprocess.Popen(["lake", "serve"], cwd=tree.root, stdin=subprocess.PIPE,
+                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.nid, self.lock = 0, threading.Lock()
+        self.pending, self.diags, self.docs = {}, {}, {}  # docs: uri -> {version, text, mods, fp}
+        self.cv = threading.Condition()
+        threading.Thread(target=self._reader, daemon=True).start()
+        self.request("initialize", {"processId": os.getpid(), "rootUri": "file://" + tree.root,
+                                    "capabilities": {"textDocument": {"publishDiagnostics": {}}}})
+        self.notify("initialized", {})
+
+    def _send(self, msg):
+        body = json.dumps(msg).encode()
+        self.proc.stdin.write(b"Content-Length: %d\r\n\r\n" % len(body) + body)
+        self.proc.stdin.flush()
+
+    def _reader(self):
+        f = self.proc.stdout
+        while True:
+            n = None
+            while True:
+                line = f.readline()
+                if not line:
+                    with self.cv:
+                        self.dead = True
+                        self.cv.notify_all()
+                    return
+                line = line.strip()
+                if not line:
+                    break
+                if line.lower().startswith(b"content-length:"):
+                    n = int(line.split(b":")[1])
+            msg = json.loads(f.read(n))
+            with self.cv:
+                if "id" in msg and "method" not in msg:
+                    self.pending[msg["id"]] = msg
+                elif msg.get("method") == "textDocument/publishDiagnostics":
+                    p = msg["params"]
+                    self.diags[p["uri"]] = (p.get("version"), p["diagnostics"])
+                elif "id" in msg and "method" in msg:  # server->client request: ack with null
+                    self._send({"jsonrpc": "2.0", "id": msg["id"], "result": None})
+                self.cv.notify_all()
+
+    dead = False
+
+    def notify(self, method, params):
+        with self.lock:
+            self._send({"jsonrpc": "2.0", "method": method, "params": params})
+
+    def request(self, method, params, timeout=900):
+        with self.lock:
+            self.nid += 1
+            i = self.nid
+            self._send({"jsonrpc": "2.0", "id": i, "method": method, "params": params})
+        end = time.time() + timeout
+        with self.cv:
+            while i not in self.pending:
+                if self.dead:
+                    raise Infra("language server exited")
+                if not self.cv.wait(timeout=max(0.0, end - time.time())) and time.time() >= end:
+                    raise Infra(f"{method}: timed out after {timeout}s")
+            msg = self.pending.pop(i)
+        if "error" in msg:
+            raise Infra(f"{method}: {msg['error'].get('message')}")
+        return msg.get("result")
+
+    def sync(self, path, reload, timeout, uri=None, text=None):
+        """Open or update the document; refuse if its imports changed since it was opened."""
+        uri = uri or "file://" + path
+        if text is None:
+            text = open(path, encoding="utf-8").read()
+        mods = header_imports(text)
+        d = self.docs.get(uri)
+        if d is not None:
+            changed = Tree.diff(d["fp"], self.tree.fingerprint(d["mods"]))
+            if changed or mods != d["mods"]:
+                if not reload:
+                    raise Stale(changed or ["(the header of %s changed)" % path])
+                self.notify("textDocument/didClose", {"textDocument": {"uri": uri}})
+                del self.docs[uri]
+                d = None
+        rebuilt = 0
+        if d is None:
+            rebuilt = make_current(self.tree, mods, self.log)
+            fp = self.tree.fingerprint(mods)
+            d = self.docs[uri] = {"version": 1, "text": text, "mods": mods, "fp": fp}
+            self.notify("textDocument/didOpen", {"textDocument": {"uri": uri, "languageId": "lean4", "version": 1,
+                                                                  "text": text}, "dependencyBuildMode": "never"})
+        elif text != d["text"]:
+            d["version"] += 1
+            d["text"] = text
+            self.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": d["version"]},
+                                                   "contentChanges": [{"text": text}]})
+        self.request("textDocument/waitForDiagnostics", {"uri": uri, "version": d["version"]}, timeout)
+        return uri, d, rebuilt
+
+    def check(self, path, from_line, reload, timeout):
+        uri, d, rebuilt = self.sync(path, reload, timeout)
+        with self.cv:
+            _, ds = self.diags.get(uri, (None, []))
+        out = []
+        for x in ds:
+            ln = x["range"]["start"]["line"] + 1
+            if from_line and ln < from_line:
+                continue
+            sev = {1: "error", 2: "warning", 3: "info", 4: "hint"}.get(x.get("severity", 1), "info")
+            out.append({"line": ln, "col": x["range"]["start"]["character"], "severity": sev, "message": x["message"]})
+        return {"file": path, "version": d["version"], "rebuilt_imports": rebuilt, "messages": out,
+                "errors": sum(1 for m in out if m["severity"] == "error")}
+
+    def eval_after(self, path, code, reload, timeout):
+        """CODE elaborated at the end of FILE: a virtual sibling document (never written to disk) holding
+        FILE's text + CODE, so the server reuses FILE's snapshots and elaborates only what changed."""
+        base = open(path, encoding="utf-8").read()
+        if not base.endswith("\n"):
+            base += "\n"
+        offset = base.count("\n") + 1
+        uri = "file://" + os.path.join(os.path.dirname(path), ".lean-ask-after-" + os.path.basename(path))
+        uri, d, rebuilt = self.sync(path, reload, timeout, uri=uri, text=base + "\n" + code + "\n")
+        with self.cv:
+            _, ds = self.diags.get(uri, (None, []))
+        msgs, file_errors = [], 0
+        for x in ds:
+            ln = x["range"]["start"]["line"] + 1
+            sev = {1: "error", 2: "warning", 3: "info", 4: "hint"}.get(x.get("severity", 1), "info")
+            if ln <= offset:
+                file_errors += sev == "error"
+                continue
+            msgs.append({"pos": {"line": ln - offset, "column": x["range"]["start"]["character"]},
+                         "severity": sev, "data": x["message"]})
+        if file_errors:
+            msgs.insert(0, {"pos": {"line": 0, "column": 0}, "severity": "error",
+                            "data": f"{path} itself has {file_errors} error(s); its later declarations may be missing"})
+        return {"env": None, "messages": msgs, "sorries": [], "loaded": False, "rebuilt_imports": rebuilt,
+                "errors": sum(1 for m in msgs if m["severity"] == "error")}
+
+    def goals(self, path, line, col, reload, timeout):
+        uri, d, rebuilt = self.sync(path, reload, timeout)
+        lines = d["text"].splitlines()
+        if not 1 <= line <= len(lines):
+            raise Infra(f"{path} has {len(lines)} lines")
+        if col is None:
+            col = len(lines[line - 1].rstrip())
+        pos = {"textDocument": {"uri": uri}, "position": {"line": line - 1, "character": col}}
+        g = self.request("$/lean/plainGoal", pos, timeout)
+        t = None if g else self.request("$/lean/plainTermGoal", pos, timeout)
+        return {"file": path, "line": line, "col": col, "goals": (g or {}).get("goals"),
+                "rendered": (g or {}).get("rendered"), "term_goal": (t or {}).get("goal"), "errors": 0}
+
+    def close(self):
+        try:
+            self.proc.terminate()
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------- REPL client (eval)
+class Repl:
+    def __init__(self, tree, mods, log):
+        if not os.access(REPL_BIN, os.X_OK):
+            raise Infra(f"REPL binary missing: {REPL_BIN} (scripts/pipeline/lean-ask-install-repl)")
+        self.tree, self.mods = tree, mods
+        self.lock = threading.Lock()
+        self.rebuilt = make_current(tree, mods, log)
+        self.fp = tree.fingerprint(mods)
+        self.proc = subprocess.Popen(["lake", "env", REPL_BIN], cwd=tree.root, stdin=subprocess.PIPE,
+                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        t0 = time.time()
+        r = self.send({"cmd": "".join(f"import {m}\n" for m in mods)})
+        if "env" not in r:
+            raise Infra("REPL failed to load the environment: " + json.dumps(r)[:3000])
+        errs = [m for m in r.get("messages", []) if m.get("severity") == "error"]
+        if errs:
+            raise Infra("loading the environment reported errors: " + json.dumps(errs)[:3000])
+        self.base = r["env"]
+        self.load_s = round(time.time() - t0, 2)
+
+    def send(self, obj):
+        self.proc.stdin.write(json.dumps(obj) + "\n\n")
+        self.proc.stdin.flush()
+        buf = []
+        while True:
+            line = self.proc.stdout.readline()
+            if not line:
+                raise Infra("REPL exited")
+            if not line.strip():
+                if buf:
+                    break
+                continue
+            buf.append(line)
+        return json.loads("".join(buf))
+
+    def stale(self):
+        return Tree.diff(self.fp, self.tree.fingerprint(self.mods))
+
+    def eval(self, code, env, pickle_to):
+        with self.lock:
+            r = self.send({"cmd": code, "env": self.base if env is None else env})
+            if pickle_to and "env" in r:
+                p = self.send({"pickleTo": pickle_to, "env": r["env"]})
+                r["pickled"] = pickle_to if "message" not in p or "error" not in p.get("message", "") else p
+            return r
+
+    def close(self):
+        try:
+            self.proc.terminate()
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------- daemon
+class Daemon:
+    def __init__(self, tree):
+        self.tree = tree
+        self.dir = os.path.join(tree.root, ".lake", "lean-ask")
+        os.makedirs(self.dir, exist_ok=True)
+        self.logf = open(os.path.join(self.dir, "daemon.log"), "a", buffering=1)
+        self.lsp, self.repls, self.last = None, {}, time.time()
+        self.glock = threading.Lock()
+
+    def log(self, s):
+        self.logf.write(time.strftime("%Y-%m-%dT%H:%M:%SZ ", time.gmtime()) + s + "\n")
+
+    def get_lsp(self):
+        with self.glock:
+            if self.lsp is None or self.lsp.dead:
+                self.lsp = LSP(self.tree, self.log)
+            return self.lsp
+
+    def get_repl(self, key, mods, reload):
+        with self.glock:
+            r = self.repls.get(key)
+            if r is not None:
+                changed = r.stale()
+                if changed:
+                    if not reload:
+                        raise Stale(changed)
+                    r.close()
+                    del self.repls[key]
+                    r = None
+            if r is None:
+                while len(self.repls) >= MAX_REPLS:
+                    k, old = min(self.repls.items(), key=lambda kv: kv[1].used)
+                    old.close()
+                    del self.repls[k]
+                r = self.repls[key] = Repl(self.tree, mods, self.log)
+                r.fresh = True
+            else:
+                r.fresh = False
+            r.used = time.time()
+            return r
+
+    def handle(self, req):
+        op, t0 = req["op"], time.time()
+        reload, timeout = req.get("reload", False), req.get("timeout", 900)
+        try:
+            if op == "check":
+                res = self.get_lsp().check(req["file"], req.get("from_line"), reload, timeout)
+            elif op == "goals":
+                res = self.get_lsp().goals(req["file"], req["line"], req.get("col"), reload, timeout)
+            elif op == "eval":
+                after, mods = req.get("after"), req.get("imports")
+                if req.get("env_pickle"):
+                    p = req["env_pickle"]
+                    meta = json.load(open(p + ".fp"))
+                    key = ("pickle", tuple(meta["mods"]))
+                    r = self.get_repl(key, meta["mods"], reload)
+                    changed = Tree.diff({k: tuple(v) if v else None for k, v in meta["fp"].items()},
+                                        self.tree.fingerprint(meta["mods"]))
+                    if changed:
+                        raise Stale(["(pickle %s was taken against other imports)" % p] + changed)
+                    with r.lock:
+                        u = r.send({"unpickleEnvFrom": p})
+                    env = u.get("env")
+                elif after:
+                    if req.get("pickle_to"):
+                        raise Infra("--pickle-to is not available with --after (use --file F or --imports)")
+                    res = self.get_lsp().eval_after(after, req["code"], reload, timeout)
+                    res["ok"] = True
+                    res["elapsed_s"] = round(time.time() - t0, 3)
+                    self.log(f"eval --after {after} -> ok=True {res['elapsed_s']}s")
+                    return res
+                else:
+                    r = self.get_repl(("imports", tuple(mods)), mods, reload)
+                    env = None
+                out = r.eval(req["code"], env, req.get("pickle_to"))
+                if req.get("pickle_to") and "env" in out:
+                    with open(req["pickle_to"] + ".fp", "w") as f:
+                        json.dump({"mods": r.mods, "fp": r.fp}, f)
+                msgs = out.get("messages", [])
+                res = {"env": out.get("env"), "messages": msgs, "sorries": out.get("sorries", []),
+                       "loaded": r.fresh, "load_s": r.load_s if r.fresh else 0, "rebuilt_imports": r.rebuilt if r.fresh else 0,
+                       "errors": sum(1 for m in msgs if m.get("severity") == "error")}
+                if "pickled" in out:
+                    res["pickled"] = out["pickled"]
+                if "message" in out and "env" not in out:
+                    raise Infra(out["message"])
+            elif op == "status":
+                res = {"tree": self.tree.root, "pid": os.getpid(), "lsp_docs": list(self.lsp.docs) if self.lsp else [],
+                       "envs": [list(k) for k in self.repls], "idle_s": round(time.time() - self.last)}
+            else:
+                raise Infra("unknown op " + op)
+            res["ok"] = True
+        except Stale as e:
+            res = {"ok": False, "stale": True, "changed": e.args[0]}
+        except Infra as e:
+            res = {"ok": False, "error": str(e)}
+        except Exception:
+            res = {"ok": False, "error": traceback.format_exc()[-3000:]}
+        res["elapsed_s"] = round(time.time() - t0, 3)
+        self.log(f"{op} {req.get('file') or ''} -> ok={res['ok']} {res['elapsed_s']}s")
+        return res
+
+    def serve(self):
+        sock_path = sock_path_for(self.tree.root)
+        try:
+            os.unlink(sock_path)
+        except FileNotFoundError:
+            pass
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.bind(sock_path)
+        s.listen(16)
+        with open(os.path.join(self.dir, "pid"), "w") as f:
+            f.write(str(os.getpid()))
+        self.log(f"serving {self.tree.root}")
+        stop = threading.Event()
+
+        def conn(c):
+            with c:
+                data = b""
+                while not data.endswith(b"\n"):
+                    chunk = c.recv(1 << 20)
+                    if not chunk:
+                        return
+                    data += chunk
+                req = json.loads(data)
+                self.last = time.time()
+                if req["op"] == "stop":
+                    # release the socket before replying, so a following start cannot reach this daemon
+                    try:
+                        os.unlink(sock_path)
+                    except FileNotFoundError:
+                        pass
+                    if self.lsp:
+                        self.lsp.close()
+                    for r in self.repls.values():
+                        r.close()
+                    self.log("stopped")
+                    c.sendall(b'{"ok": true, "stopped": true}\n')
+                    c.close()
+                    os._exit(0)
+                c.sendall((json.dumps(self.handle(req)) + "\n").encode())
+                self.last = time.time()
+
+        s.settimeout(30)
+        while not stop.is_set() and time.time() - self.last < IDLE:
+            try:
+                c, _ = s.accept()
+            except socket.timeout:
+                continue
+            threading.Thread(target=conn, args=(c,), daemon=True).start()
+        if self.lsp:
+            self.lsp.close()
+        for r in self.repls.values():
+            r.close()
+        os.unlink(sock_path)
+        self.log("exit")
+
+
+# ---------------------------------------------------------------- client
+def die(msg, code=2):
+    print("lean-ask: " + msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def call(tree_root, req, start=True, _retry=False):
+    sock_path = sock_path_for(tree_root)
+    for attempt in range(600):
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.connect(sock_path)
+            break
+        except (FileNotFoundError, ConnectionRefusedError):
+            if not start:
+                return None
+            if attempt == 0:
+                os.makedirs(os.path.join(tree_root, ".lake", "lean-ask"), exist_ok=True)
+                logp = os.path.join(tree_root, ".lake", "lean-ask", "daemon.out")
+                env = dict(os.environ, SWARM_MEM_MAX=os.environ.get("LEAN_ASK_MEM_MAX", "16G"))
+                wrap = ["swarm-build"] if subprocess.run(["sh", "-c", "command -v swarm-build"],
+                                                          capture_output=True).returncode == 0 else []
+                subprocess.Popen(wrap + [sys.executable, os.path.realpath(__file__), "_serve", tree_root],
+                                 cwd=tree_root, env=env, stdin=subprocess.DEVNULL,
+                                 stdout=open(logp, "a"), stderr=subprocess.STDOUT, start_new_session=True)
+            time.sleep(0.1)
+    else:
+        die("daemon did not start; see " + os.path.join(tree_root, ".lake", "lean-ask", "daemon.out"))
+    s.sendall((json.dumps(req) + "\n").encode())
+    data = b""
+    while True:
+        chunk = s.recv(1 << 20)
+        if not chunk:
+            break
+        data += chunk
+    if not data:  # the daemon exited under us (a concurrent stop or idle exit): start a fresh one, once
+        if start and not _retry:
+            time.sleep(0.5)
+            return call(tree_root, req, start, _retry=True)
+        die("the session exited without answering; see " + os.path.join(tree_root, ".lake", "lean-ask", "daemon.log"))
+    return json.loads(data)
+
+
+def render(res, as_json):
+    if as_json:
+        print(json.dumps(res, indent=1))
+    elif res.get("stale"):
+        print("lean-ask: REFUSED: the loaded environment is stale; changed since it was loaded:", file=sys.stderr)
+        for p in res["changed"][:30]:
+            print("  " + p, file=sys.stderr)
+        print("re-run with --reload (makes the imports current in a build slot, then reloads)", file=sys.stderr)
+    elif not res.get("ok"):
+        print("lean-ask: " + res.get("error", "?"), file=sys.stderr)
+    else:
+        for m in res.get("messages", []):
+            if "line" in m:
+                print(f"{res['file']}:{m['line']}:{m['col']}: {m['severity']}: {m['message']}")
+            else:
+                p = m.get("pos", {})
+                data = m.get("data") or ""
+                if len(data) > 4000:
+                    data = data[:4000] + f"\n... ({len(data)} chars; --json for all)"
+                print(f"<eval>:{p.get('line')}:{p.get('column')}: {m.get('severity')}: {data}")
+        for so in res.get("sorries", []):
+            print(f"<eval>:{so['pos']['line']}:{so['pos']['column']}: sorry goal:\n{so.get('goal')}")
+        if "goals" in res:
+            if res.get("goals") is not None:
+                print(res["rendered"] if res["goals"] else "no goals")
+            elif res.get("term_goal"):
+                print(res["term_goal"])
+            else:
+                print("(no proof state at this position)")
+        if res.get("pickled"):
+            print(f"pickled: {res['pickled']}")
+        extra = ""
+        if res.get("rebuilt_imports"):
+            extra += f", rebuilt {res['rebuilt_imports']} import(s)"
+        if res.get("loaded"):
+            extra += f", loaded env in {res['load_s']}s"
+        sys.stdout.flush()
+        print(f"lean-ask: {res.get('errors', 0)} error(s) in {res['elapsed_s']}s{extra}", file=sys.stderr)
+    if res.get("stale"):
+        return 3
+    if not res.get("ok"):
+        return 2
+    return 1 if res.get("errors") else 0
+
+
+def main(argv):
+    if argv[:1] == ["_serve"]:
+        Daemon(Tree(argv[1])).serve()
+        return 0
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(__doc__)
+        return 0
+    op, rest = argv[0], argv[1:]
+    opts = {"json": False, "reload": False, "timeout": 900, "tree": None}
+    pos, i = [], 0
+    while i < len(rest):
+        a = rest[i]
+        if a in ("--json", "--reload"):
+            opts[a[2:]] = True
+        elif a in ("--tree", "--timeout", "--file", "--after", "--imports", "--env-pickle", "--pickle-to"):
+            i += 1
+            opts[a[2:].replace("-", "_")] = rest[i]
+        else:
+            pos.append(a)
+        i += 1
+    root = os.path.realpath(opts["tree"]) if opts["tree"] else git_top(os.getcwd())
+    tree = Tree(root)
+    absf = lambda f: os.path.realpath(f if os.path.isabs(f) else os.path.join(os.getcwd(), f))
+    req = {"op": op, "reload": opts["reload"], "timeout": int(opts["timeout"])}
+    if op == "check":
+        if len(pos) != 1:
+            die("usage: lean-ask check FILE[:FROM_LINE]")
+        f, _, ln = pos[0].partition(":")
+        req.update(file=absf(f), from_line=int(ln) if ln else None)
+    elif op == "goals":
+        parts = pos[0].split(":") if len(pos) == 1 else []
+        if len(parts) not in (2, 3):
+            die("usage: lean-ask goals FILE:LINE[:COL]")
+        req.update(file=absf(parts[0]), line=int(parts[1]), col=int(parts[2]) if len(parts) == 3 else None)
+    elif op == "eval":
+        if len(pos) != 1:
+            die("usage: lean-ask eval 'CMDS' [--file F | --after F | --imports A,B | --env-pickle P] [--pickle-to P]")
+        code = sys.stdin.read() if pos[0] == "-" else pos[0]
+        req.update(code=code)
+        if opts.get("env_pickle"):
+            req["env_pickle"] = absf(opts["env_pickle"])
+        elif opts.get("after"):
+            req["after"] = absf(opts["after"])
+        elif opts.get("imports"):
+            req["imports"] = [m for m in re.split(r"[,\s]+", opts["imports"]) if m]
+        elif opts.get("file"):
+            req["imports"] = header_imports(open(absf(opts["file"]), encoding="utf-8").read())
+        else:
+            req["imports"] = UMBRELLA.split()
+        if opts.get("pickle_to"):
+            req["pickle_to"] = absf(opts["pickle_to"])
+    elif op == "status":
+        res = call(root, {"op": "status"}, start=False)
+        print(json.dumps(res, indent=1) if res else "lean-ask: no session for " + root)
+        return 0
+    elif op in ("stop", "restart"):
+        call(root, {"op": "stop"}, start=False)
+        if op == "stop":
+            return 0
+        print(json.dumps(call(root, {"op": "status"}), indent=1))
+        return 0
+    else:
+        die("unknown command " + op + " (see lean-ask --help)")
+    return render(call(root, req), opts["json"])
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

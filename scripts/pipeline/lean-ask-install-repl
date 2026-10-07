@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# scripts/pipeline/lean-ask-install-repl -- build the pinned leanprover-community/repl that `lean-ask eval` drives.
+#
+#   scripts/pipeline/lean-ask-install-repl [DEST]        (default: $PIPELINE_ROOT/repl)
+#
+# The REPL's tag must equal this tree's lean-toolchain (its .olean format is the toolchain's); the
+# rev is pinned below by commit id, not by tag name. The REPL has no dependencies; it builds in ~1 min
+# and needs no build slot. lean-ask runs it as `lake env <repl>` inside a lane, so it sees the lane's oleans.
+set -euo pipefail
+PIPELINE_PROG=lean-ask-install-repl
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+. "$here/lib.sh"
+top=$(git rev-parse --show-toplevel 2>/dev/null || { CDPATH='' cd -- "$here/../.." && pwd; })   # the clone you run it from
+[ -f "$top/lean-toolchain" ] || pipeline_die "run from inside a Mini clone (no lean-toolchain at $top)"
+tc=$(cat "$top/lean-toolchain")
+case "$tc" in
+  leanprover/lean4:v4.30.0) rev=dde7dd4397951755f1f6c2b4b3a83a26911d63ad ;;   # repl tag v4.30.0
+  *) pipeline_die "no pinned REPL revision for $tc: add the repl tag's commit id here" ;;
+esac
+dest=${1:-$PIPELINE_ROOT/repl}
+if [ ! -d "$dest/.git" ]; then git clone -q https://github.com/leanprover-community/repl "$dest"; fi
+git -C "$dest" fetch -q origin "$rev" 2>/dev/null || git -C "$dest" fetch -q origin --tags
+git -C "$dest" -c advice.detachedHead=false checkout -q "$rev"
+[ "$(cat "$dest/lean-toolchain")" = "$tc" ] || pipeline_die "REPL $rev is for $(cat "$dest/lean-toolchain"), tree is $tc"
+(cd "$dest" && lake build repl >/dev/null)
+echo "lean-ask-install-repl: $dest/.lake/build/bin/repl ($tc, repl $rev)"
