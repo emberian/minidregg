@@ -19,6 +19,7 @@ Usage: lake env lean --run scripts/kn2/port-b-tamper.lean STORE-HELPER -/
 import Compiler.DurableStoreAudit
 import Compiler.ReceiptContinuityIO
 import Kernel.NativeHistorySelection
+import Compiler.ServedBasis
 import Compiler.Sp800185Cshake256
 
 open Minidregg.Theory.TypedAuthorization
@@ -125,6 +126,25 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   | .error detail =>
       IO.println s!"refused as expected (select index 25 under bound 25): {detail}"
       require "bound refusal names the unavailable record" (mentions detail "unavailable")
+  -- A full ground at a past height (`Grounded.pastWitness`): honest, another Store, a wrong chain, past the head.
+  let chainAt (height : Nat) : Digest :=
+    DurableCheckpointCodec.chainAfter loaded.logStart (loaded.prefixImage height).accepted
+  match ← ServedBasis.Grounded.pastWitness reader loaded.logStart 30 (chainAt 30) with
+  | .error detail => throw (IO.userError s!"FAIL honest past ground at 30: {detail}")
+  | .ok _ => IO.println "honest: the opening at 30 is a ground of the history at 30"
+  match ← ServedBasis.Grounded.pastWitness reader (chainAt 30) 30 (chainAt 30) with
+  | .ok _ => throw (IO.userError "FAIL a ground of another Store was accepted")
+  | .error detail =>
+      IO.println s!"refused as expected (another Store's start): {detail}"
+      require "another Store named" (mentions detail "Store")
+  match ← ServedBasis.Grounded.pastWitness reader loaded.logStart 30 (chainAt 29) with
+  | .ok _ => throw (IO.userError "FAIL a ground with another chain was accepted")
+  | .error detail =>
+      IO.println s!"refused as expected (a chain that differs at 30): {detail}"
+      require "chain mismatch names height 30" (mentions detail "chain is not the history's at height 30")
+  match ← ServedBasis.Grounded.pastWitness reader loaded.logStart 42 (chainAt 41) with
+  | .ok _ => throw (IO.userError "FAIL a ground past the head was accepted")
+  | .error detail => IO.println s!"refused as expected (height 42 past the head 41): {detail}"
   let database := directory / "store" / "forward-link.sqlite3"
   -- PLANT 1: the record at height 20.
   sql database "UPDATE durable_log SET record = CAST(substr(record,1,length(record)-1) || X'FF' AS BLOB) WHERE height = 20"
@@ -139,6 +159,11 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   | .error detail =>
       IO.println s!"refused as expected (select 25 over the tampered record at 20): {detail}"
       require "select names height 20" (mentions detail "height 20")
+  match ← ServedBasis.Grounded.pastWitness reader loaded.logStart 30 (chainAt 30) with
+  | .ok _ => throw (IO.userError "FAIL a ground was certified over the tampered record at 20")
+  | .error detail =>
+      IO.println s!"refused as expected (past ground at 30 over the tampered record at 20): {detail}"
+      require "past ground names height 20" (mentions detail "height 20")
   -- PLANT 2: the checkpoint at 32 (stateAt 41 resumes from it).
   sql database "UPDATE durable_checkpoint SET bytes = CAST(substr(bytes,1,length(bytes)-1) || X'FF' AS BLOB) WHERE height = 32"
   match ← reader.stateAt 41 with
