@@ -40,7 +40,7 @@ def Reservation.receipt {config : Config} (reservation : Reservation config) :
     reservation.readback.derived reservation.readback.ready
   ⟨reservation.readback.derived.intent.transactionId,
     reservation.readback.derived.intent.event.eventId,
-    old.opened.durable.image.accepted.length + 1,
+    old.opened.durable.height + 1,
     candidate.worldRoot⟩
 
 theorem Reservation.receipt_in_verified {config : Config}
@@ -92,7 +92,7 @@ def Reservation.withFreshTip {config : Config} {α : Type}
     (reservation : Reservation config) (handoff : List UInt8 → IO α) :
     IO (Except String α) := do
   let .ok current ← DurableReceiverIO.tipIs config.transport
-      reservation.readback.appended.next.image.accepted.length reservation.readback.appended.entry
+      reservation.readback.appended.next.height reservation.readback.appended.entry
     | return .error "lifecycle claim physical tip unavailable before handoff"
   if current then
     return .ok (← handoff reservation.projection.canonicalBytes)

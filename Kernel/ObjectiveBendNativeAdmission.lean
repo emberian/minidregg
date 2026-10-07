@@ -636,9 +636,9 @@ def select {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
   | .error reason => return .error reason
   | .ok none => return .error .bendExecution
   | .ok (some claim) =>
-    if bounded : durable.image.accepted.length ≤ ambient.height then
-      let genesisHeight := ambient.height - durable.image.accepted.length
-      let heightExact : genesisHeight + durable.image.accepted.length = ambient.height := Nat.sub_add_cancel bounded
+    if bounded : durable.height ≤ ambient.height then
+      let genesisHeight := ambient.height - durable.height
+      let heightExact : genesisHeight + durable.height = ambient.height := Nat.sub_add_cancel bounded
       match ← prepareCore native oracle (environment prepared genesisHeight) profile claim with
       | .error reason => return .error reason
       | .ok core => return .ok ⟨claim,selected,genesisHeight,heightExact,core⟩

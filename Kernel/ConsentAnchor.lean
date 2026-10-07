@@ -84,7 +84,7 @@ theorem decode_encode (anchor : Anchor) : decode (encode anchor) = .ok anchor :=
 
 /-- The anchor of a validated opening. -/
 def Anchor.ofOpened {config : Config} (opened : Opened config) : Anchor :=
-  ⟨opened.durable.image.accepted.length, opened.durable.logStart, opened.durable.chain,
+  ⟨opened.durable.height, opened.durable.logStart, opened.durable.chain,
     opened.durable.worldRoot⟩
 
 /-- The physical comparisons an anchor makes against a full open of the
@@ -92,8 +92,8 @@ Store, before any image is cut or record admitted. -/
 def checkStore (anchor : Anchor) (loaded : Durable) (chains : List Digest) : Except String Unit :=
   if loaded.logStart ≠ anchor.logStart then
     .error "the Store's genesis log differs from the retained consent anchor's"
-  else if loaded.image.accepted.length < anchor.height then
-    .error s!"the Store's head {loaded.image.accepted.length} is below the retained consent anchor at {anchor.height}: the accepted history was rolled back"
+  else if loaded.height < anchor.height then
+    .error s!"the Store's head {loaded.height} is below the retained consent anchor at {anchor.height}: the accepted history was rolled back"
   else if chains[anchor.height]? ≠ some anchor.chain then
     .error s!"the Store's accepted history up to height {anchor.height} differs from the retained consent anchor: the prefix this client admitted was rewritten"
   else .ok ()
@@ -190,12 +190,12 @@ def resume (config : Config) (anchor : Anchor) (target : Durable) (chains : List
       if exact : Anchor.ofOpened start = anchor then
         have wraps := validateLoaded_durable validated
         have seedExact : target.image.seed = start.durable.image.seed := by rw [wraps, imaged]
-        have anchorWithin : start.durable.image.accepted.length ≤ target.image.accepted.length := by
+        have anchorWithin : start.durable.height ≤ target.height := by
           rw [wraps, imaged]
           show (target.image.accepted.take anchor.height).length ≤ _
           rw [List.length_take]
           exact Nat.min_le_right _ _
-        have prefixExact : target.image.accepted.take start.durable.image.accepted.length =
+        have prefixExact : target.image.accepted.take start.durable.height =
             start.durable.image.accepted := by
           rw [wraps, imaged]
           exact take_length_take _ _
@@ -250,7 +250,7 @@ def Basis.extendAppended (config : Config) {oldTarget : Durable}
       return (← NativeHostReplay.extendVerifiedAppended config verified target seedExact
         acceptedExact).map .full
   | .anchored held =>
-      have within : oldTarget.image.accepted.length ≤ target.image.accepted.length := by
+      have within : oldTarget.image.accepted.length ≤ target.height := by
         rw [acceptedExact, List.length_append]
         exact Nat.le_add_right _ _
       have prefixExact : target.image.accepted.take oldTarget.image.accepted.length =

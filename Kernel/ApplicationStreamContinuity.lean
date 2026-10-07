@@ -145,7 +145,7 @@ def bindingFor {config : Config} {opened : Opened config}
 
 def tipFor {config : Config} {target : Durable}
     (old : NativeHostReplay.Verified config target) : Tip :=
-  ⟨old.opened.durable.image.accepted.length, old.opened.durable.chain,
+  ⟨old.opened.durable.height, old.opened.durable.chain,
     old.opened.durable.worldRoot⟩
 
 def minimumCurrent (challenge : Challenge) (tip : Tip) : Bool :=
@@ -210,7 +210,7 @@ def withOpenedFreshTip {config : Config} {α : Type}
   let entry : DurableReceiverIO.Entry :=
     ⟨DurableCheckpointCodec.recordFrame.encode record, tag⟩
   let .ok current ← DurableReceiverIO.tipIs config.transport
-      durable.image.accepted.length entry
+      durable.height entry
     | return .error "authority physical tip unavailable"
   if current then return .ok (← handoff)
   else return .error "authority physical tip changed before handoff"

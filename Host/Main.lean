@@ -965,7 +965,7 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
     return result
   let durable ← timed "load" do
     IO.ofExcept (← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes)
-  IO.println s!"records {durable.image.accepted.length} base {durable.baseHeight} cells {durable.image.cellIds.length}"
+  IO.println s!"records {durable.height} base {durable.baseHeight} cells {durable.image.cellIds.length}"
   let lanes : List (String × Minidregg.Theory.ResourceCost.Lane) :=
     [("incidences", .incidences), ("turnBytes", .turnBytes), ("memoryTouches", .memoryTouches),
      ("witnessBytes", .witnessBytes), ("proofWork", .proofWork), ("storageBytes", .storageBytes),
@@ -1036,7 +1036,7 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
   let timedPure {α : Type} (label : String) (value : Unit → α) : IO α :=
     timed label (IO.lazyPure value)
   let key ← IO.ofExcept (← config.transport.key)
-  let height := durable.image.accepted.length
+  let height := durable.height
   let stored ← timed "open: read the Store" do
     match ← config.transport.read 1 true with
     | .ok (some stored) => pure stored
@@ -1102,7 +1102,7 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
     let mut n := 0
     for _ in [0:10] do n := n + durable.cellIds.length
     pure n
-  let middle := durable.image.accepted[durable.image.accepted.length / 2]?
+  let middle := durable.image.accepted[durable.height / 2]?
   discard <| timed "middle transaction index (cached) x1000" do
     let mut n := 0
     if let some r := middle then
@@ -1139,14 +1139,14 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
   -- The specification root of the same prefix, evaluated in full: what every
   -- non-head receipt paid before the log kept its roots.
   discard <| timedPure "middle receipt root, specification (prefix evaluated) x1" fun _ =>
-    (NativeHost.receiptRootSpec config durable (durable.image.accepted.length / 2)).value % 7
+    (NativeHost.receiptRootSpec config durable (durable.height / 2)).value % 7
   -- Control: every kept root against its prefix's specification root, at
   -- STORE_BENCH_ROOT_STRIDE spaced heights (0 = skip).
   let stride := ((← IO.getEnv "STORE_BENCH_ROOT_STRIDE").bind String.toNat?).getD 0
   if stride > 0 then
     let mut checked := 0
     let mut differ := 0
-    let heights := durable.image.accepted.length
+    let heights := durable.height
     for i in (List.range ((heights + stride - 1) / stride)).map (· * stride) do
       if let some (some kept) := durable.rootLog[i]? then
         let spec := NativeHost.worldRoot config ⟨durable.image.seed, durable.image.accepted.take (i + 1)⟩
@@ -5440,7 +5440,7 @@ def runProviderContinuitySession (config : NativeHost.Config)
   let current ← sessionWalked config state
   let providerCell : DurableDataIntent.CellId := ⟨providerResourceId⟩
   let checkedWorldRoot := (current.target.worldRoot).value
-  let checkedCount := current.target.image.accepted.length
+  let checkedCount := current.target.height
   let continuity : Except String Unit := match allowedFence with
     | none => (NativeReserveContinuity.check current anchor reserveCall providerCell).map (fun _ => ())
     | some (fenceCall, fenceReceipt) =>
@@ -7971,7 +7971,7 @@ def run (arguments : List String) : IO UInt32 := do
               [("type", toJson "application-lifecycle-completion-diagnostic-v1"),
                ("status", toJson status),
                ("detail", toJson detail),
-               ("acceptedCount", toJson (toString session.verified.opened.durable.image.accepted.length))])
+               ("acceptedCount", toJson (toString session.verified.opened.durable.height))])
             pure 0
       | "selected-source-publication-submit", [input, output] =>
           withPinnedSignature config fun pinnedConfig => do

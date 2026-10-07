@@ -49,7 +49,7 @@ def Committed.receipt {config : Config} (permit : Committed config) : NativeHost
   let candidate := NativeHostReplay.exactCandidate old permit.readback.derived permit.readback.ready
   ⟨permit.readback.derived.intent.transactionId,
     permit.readback.derived.intent.event.eventId,
-    old.opened.durable.image.accepted.length + 1,
+    old.opened.durable.height + 1,
     candidate.worldRoot⟩
 
 theorem Committed.receipt_in_verified {config : Config} (permit : Committed config) :
@@ -127,7 +127,7 @@ def Permit.withFreshTip {config : Config} {α : Type} (permit : Permit config)
   unless permit.freshCasWinner && permit.confirmation == .installed do
     return .error "dispatch attempt did not freshly win physical CAS"
   let .ok current ← DurableReceiverIO.tipIs config.transport
-      permit.readback.appended.next.image.accepted.length permit.readback.appended.entry
+      permit.readback.appended.next.height permit.readback.appended.entry
     | return .error "dispatch physical tip unavailable before handoff"
   if current then
     return .ok (← handoff permit.canonicalBytes)

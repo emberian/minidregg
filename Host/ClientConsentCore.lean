@@ -272,7 +272,7 @@ basis whose suffix admission fails is re-admitted from genesis. -/
 def refresh (config : NativeHost.Config) (old : Session config) : IO (Session config) := do
   let ⟨target, seedExact, acceptedExact, logStartExact⟩ ← IO.ofExcept
     (← DurableReceiverIO.extendFrom config.transport ResourceBirthCodec.rootBytes old.1)
-  if target.image.accepted.length = old.1.image.accepted.length then return old
+  if target.height = old.1.image.accepted.length then return old
   match ← old.2.extendAppended config target seedExact acceptedExact logStartExact with
   | .ok basis => pure ⟨target, basis⟩
   | .error failure =>

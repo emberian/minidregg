@@ -326,7 +326,7 @@ def prepareSuffix (config : Config) {anchor : Opened config} {target : Durable}
     (verified : NativeHostReplay.SuffixVerified config anchor target) (request : Request) :
     Except String Plan := do
   let (spec, issueBytes, originalSourceBytes) ←
-    if request.issueIndex < anchor.durable.image.accepted.length then do
+    if request.issueIndex < anchor.durable.height then do
       let some origin := verified.origin
         | throw "old dispatch issue lacks authenticated carried origin"
       let custody ← origin.rebindChecked verified.opened.durable

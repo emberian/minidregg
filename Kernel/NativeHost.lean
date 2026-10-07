@@ -886,7 +886,7 @@ def assemble (plan : SigningPlan) (signatures : List (List UInt8)) : Except Stri
 /-- The specification of a receipt root: the world root of the accepted prefix
 through record `index` (at the head, the served root). -/
 def receiptRootSpec (config : Config) (durable : Durable) (index : Nat) : Digest :=
-  if index + 1 = durable.image.accepted.length then durable.worldRoot
+  if index + 1 = durable.height then durable.worldRoot
   else worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
 
 /-- The world root after accepted record `index`: at the head the served
@@ -894,7 +894,7 @@ image's cached root; below it the root the record's log entry kept at append
 (`Loaded.rootLog`, read from the verified tag); only a prefix whose root this
 image never saw (an in-memory genesis replay) is evaluated in full. -/
 def receiptRoot (config : Config) (durable : Durable) (index : Nat) : Digest :=
-  if index + 1 = durable.image.accepted.length then durable.worldRoot
+  if index + 1 = durable.height then durable.worldRoot
   else match durable.rootLog[index]? with
     | some (some root) => root
     | _ => worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩

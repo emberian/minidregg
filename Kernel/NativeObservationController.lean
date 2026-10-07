@@ -261,7 +261,7 @@ private def requestAt (context : Context deployment durable) (worldRoot semantic
   argsDigest := intentIdentity intent
   effectsDigest := effectIdentityAt deployment worldRoot semantics intent grant
   nonce := intent.nonce
-  height := genesisHeight + durable.image.accepted.length
+  height := genesisHeight + durable.height
   preStateRoot := preRoot
   policyId := ⟨grant.target⟩
   policyEpoch := context.authority.snapshot.authState.policyEpoch ⟨grant.target⟩
@@ -530,7 +530,7 @@ def challengeAt (context : Context deployment durable) (profile : CanonicalRunti
     pure (CredentialSignedEnvelopeController.headerCodec.encode value)
   pure ⟨intent, deployment.domain, profile.semantics, federation,
     worldRoot, context.authority.snapshot.cell.root,
-    genesisHeight + durable.image.accepted.length, clock.now, clock.slot, headers, intentSignature⟩
+    genesisHeight + durable.height, clock.now, clock.slot, headers, intentSignature⟩
 
 /-- The success payload contains no field values, balances or policy source.
 The selected public KeyRecord is reversibly encoded in the existing registry

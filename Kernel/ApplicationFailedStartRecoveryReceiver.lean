@@ -33,7 +33,7 @@ def Confirmed.receipt {config : Config} (confirmed : Confirmed config) :
     confirmed.readback.derived confirmed.readback.ready
   ⟨confirmed.readback.derived.intent.transactionId,
     confirmed.readback.derived.intent.event.eventId,
-    old.opened.durable.image.accepted.length + 1,
+    old.opened.durable.height + 1,
     candidate.worldRoot⟩
 
 theorem Confirmed.event_exact {config : Config} (confirmed : Confirmed config) :

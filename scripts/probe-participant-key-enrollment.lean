@@ -234,17 +234,17 @@ def run (verifier signer storeBinary : System.FilePath) : IO Unit := do
     let current ← match ← DurableReceiverIO.load transport ResourceBirthCodec.rootBytes with
       | .error reason => throw (IO.userError s!"native current load: {reason}")
       | .ok value => pure value
-    require "one retained enrollment record" (current.image.accepted.length == 1)
+    require "one retained enrollment record" (current.height == 1)
     let opened ← match ← NativeHost.openExisting host with
       | .error reason => throw (IO.userError s!"full native historical replay: {reason}")
       | .ok value => pure value
-    require "full host replay retained enrollment" (opened.durable.image.accepted.length == 1)
+    require "full host replay retained enrollment" (opened.durable.height == 1)
     let (fourthPublic, _) ← sign signer 9 []
     let nextKey : KeyRecord := ⟨7009, 2, 1, 9, fourthPublic, 0, 100, none⟩
     let nextCommand : ParticipantKeyEnrollment.Command :=
       ⟨⟨8⟩, ⟨46⟩, 72, factory.payload.root, opened.authority.snapshot.cell.root, nextKey⟩
     let nextAmbient : ParticipantKeyEnrollment.Ambient :=
-      ⟨cfg.federation, cfg.genesisHeight + opened.durable.image.accepted.length⟩
+      ⟨cfg.federation, cfg.genesisHeight + opened.durable.height⟩
     let nextHeader ← match CredentialSignatureAdmission.signingHeader
         opened.authority.snapshot
         (ParticipantKeyEnrollment.marker cfg.deployment.domain profile.semantics nextCommand)

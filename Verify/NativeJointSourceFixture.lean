@@ -237,7 +237,7 @@ def lookupAllCall (root : System.FilePath) (helpers : Helpers)
       require (GenericSimplexOperatorBridge.receiptPrefix replica ingress == some acceptedPrefix)
         "source prefixes through original call differ"
     writePrivate outputFile (NativeHostCodec.outcomeCodec.encode (.confirmed .replayed receipt)).toByteArray
-    let counts := replicas.toList.map fun r => r.participant.source.verified.opened.durable.image.accepted.length
+    let counts := replicas.toList.map fun r => r.participant.source.verified.opened.durable.height
     IO.println s!"LOOKUP-ALL exact original receipt and complete prefix on four reopened stores; accepted records per store {counts}; call at height {acceptedPrefix.length}"
 
 /-- `serve-replica`: one standing replica process. The replica index is the

@@ -334,7 +334,7 @@ theorem Config.kernelTransport_systemCell (config : Config) :
   config.transport_systemCell
 
 def logicalHeight (config : Config) (durable : Durable) : Height :=
-  config.genesisHeight + durable.image.accepted.length
+  config.genesisHeight + durable.height
 
 theorem logicalHeight_exact (config : Config) (durable : Durable) :
     logicalHeight config durable = config.genesisHeight + durable.image.accepted.length := rfl

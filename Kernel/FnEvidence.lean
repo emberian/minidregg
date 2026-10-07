@@ -35,7 +35,7 @@ def exportPackage (config : Config) (signedCall : List UInt8)
   let .confirmed .replayed receipt := NativeHost.lookupLoaded config opened call
     | return .error "exact signed call is absent or conflicts with source history"
   unless 1 ≤ receipt.acceptedCount &&
-      receipt.acceptedCount ≤ opened.durable.image.accepted.length do
+      receipt.acceptedCount ≤ opened.durable.height do
     return .error "original receipt is outside accepted history"
   let image : DurableReceiver.Image :=
     ⟨opened.durable.image.seed, opened.durable.image.accepted.take receipt.acceptedCount⟩
@@ -56,7 +56,7 @@ def verify (config : Config) (bytes : List UInt8)
   match ← NativeHostReplay.verifyBytes config package.acceptedPrefix with
   | .error failure => return .error s!"native prefix refused at {failure.index}: {failure.detail}"
   | .ok ⟨target, verified⟩ =>
-      unless target.image.accepted.length == package.originalReceipt.acceptedCount do
+      unless target.height == package.originalReceipt.acceptedCount do
         return .error "package carries a later or shorter accepted prefix"
       unless verified.receipts.getLast? == some package.originalReceipt do
         return .error "original accepted-prefix receipt mismatch"

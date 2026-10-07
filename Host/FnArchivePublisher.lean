@@ -482,7 +482,7 @@ def publish (config : NativeHost.Config) (ops : Ops) (archivePath firstText fina
   let some first := firstText.toNat? | throw (IO.userError "FIRST must be a decimal height")
   let finalized := if finalizedText == "-" then none else finalizedText.toNat?
   let opened ← IO.ofExcept (← NativeHost.openExisting config)
-  let committed := opened.durable.image.accepted.length
+  let committed := opened.durable.height
   let last ← IO.ofExcept (gate archive.profile committed config.jointConsensus.isSome finalized first)
   let bundle ← IO.ofExcept (bundleAt config opened first last)
   let source ← match render archive.profile bundle with

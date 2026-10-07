@@ -119,8 +119,8 @@ def run : IO Unit := do
   unless decide (reopened.durable.bytes.toByteArray =
       opened.durable.bytes.toByteArray) do
     throw (IO.userError s!"refused ordinary call changed canonical durable image \
-      (accepted count {opened.durable.image.accepted.length} → \
-      {reopened.durable.image.accepted.length})")
+      (accepted count {opened.durable.height} → \
+      {reopened.durable.height})")
   IO.println "PASS native receiver refused valid-grant ordinary subject at gateway policy"
 
 end FnGatewayDirectSubmitProbe

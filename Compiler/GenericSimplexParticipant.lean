@@ -304,7 +304,7 @@ Return "applied" only after the receiver's opaque Applied token exists. -/
 def applyNext {config : SourceConfig} (p : Participant config)
     (certificate : VerifiedCommit p.runtime.context) : IO (Participant config × String) := do
   let records := applicationHistory certificate.block
-  let index := p.source.verified.opened.durable.image.accepted.length
+  let index := p.source.verified.opened.durable.height
   let some bytes := records[index]? | return (p,"source already caught up")
   let some record := Minidregg.Compiler.DurableCheckpointCodec.recordFrame.decode bytes
     | return (p,"certificate payload is not a source record")
@@ -346,7 +346,7 @@ def candidateSlice {config : SourceConfig} (p : Participant config) :
     IO (Participant config × List (Nat × Bytes)) := do
   let some prior ← p.runtime.current | return (p,[])
   let state := prior.state
-  let height := p.source.verified.opened.durable.image.accepted.length
+  let height := p.source.verified.opened.durable.height
   let some block := state.checked.find? (fun block => height < (applicationHistory block).length)
     | return (p,[])
   let length := (applicationHistory block).length
