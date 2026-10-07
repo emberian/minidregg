@@ -2350,10 +2350,8 @@ def activityPlanLoaded (config : Config) (opened : Opened config) (commandBytes 
       opened.durable command,
     (ObjectiveActivityReceiver.planVerdict config.deployment config.profile (activityAmbient config opened)
       opened.durable command).toUTF8.toList,
-    (ObjectiveActivityReceiver.planFrontEnd config.deployment config.profile (activityAmbient config opened)
-      opened.durable command).1,
-    (ObjectiveActivityReceiver.planFrontEnd config.deployment config.profile (activityAmbient config opened)
-      opened.durable command).2⟩
+    ObjectiveActivityReceiver.planFrontEnd config.deployment config.profile (activityAmbient config opened)
+      opened.durable command⟩
 
 def activityAssemble (plan : ObjectiveActivityReceiver.SigningPlan) (signature : List UInt8) :
     Except String (List UInt8) := do

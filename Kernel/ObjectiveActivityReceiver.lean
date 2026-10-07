@@ -520,8 +520,9 @@ inductive Reject where
   | kernel (reason : ObjectiveActivity.Refusal)
   /-- The ending activity's held seats could not be closed (`ActivitySeatEnd.join`). -/
   | seats (reason : SeatStore.Refusal)
-  /-- The call tree of an `invoke` was refused (re-entry, a law, a grant, a fault). -/
-  | call (reason : ObjectiveCall.CallRefusal)
+  /-- The call tree of an `invoke` was refused (re-entry, a law, a grant, a fault), with the front
+  end the turn had drawn at the failure point (cv 01a117cd-857b): the budget that reaches it. -/
+  | call (reason : ObjectiveCall.CallRefusal) (drawn : ObjectiveCall.FrontEnd)
   /-- A message delivery was refused (no inbox, an empty or moved head, its reply slot). -/
   | message (reason : ObjectiveSend.MessageRefusal)
   /-- The command's await is not the one the record awaits now. -/
@@ -582,7 +583,7 @@ def decideTurn {rootBytes : List UInt8 → Digest} (config : Config) (snapshot :
       let request := invokeRequest command object method value grants envelope postage allowance account
       match ObjectiveCall.invoke config snapshot height request with
       | .ok invoked => pure (.invoke request invoked)
-      | .error reason => throw (.call reason)
+      | .error (reason, drawn) => throw (.call reason drawn)
   | .deliverMessage sender target message => do
       let request := messageRequest command sender target message
       match ObjectiveSend.deliverMessage config snapshot height request with
@@ -955,7 +956,7 @@ and an outcome other than the signed one (`outcomeMoved`, a stale plan: like a r
 Every other refusal is decided cheaply and charges nothing. -/
 def chargedCause : Reject → Bool
   | .kernel reason => reason.afterWork
-  | .call reason => callAfterWork reason
+  | .call reason _ => callAfterWork reason
   | .seats _ => true
   | .outcomeMoved _ _ => true
   -- decided before anything runs (decoding, authority, capabilities, the signature)
@@ -1594,24 +1595,27 @@ def planReport (deployment : Deployment) (profile : CanonicalRuntimeProfile.Prof
     | .error _ => []
   | .error _ => []
 
-/-- The front-end work a decided turn drew from its meter, summed over every replay (source bytes,
-typed-core bytes): what an invocation's envelope must declare (`Invocation.frontEnd_within`), and a
-bound on what its postage must (each send's delivery replays a load the invocation's meter drew).
+/-- The front-end work a decided turn drew from its meter (`ObjectiveCall.FrontEnd`): summed over
+every replay, what an invocation's envelope must declare (`Invocation.frontEnd_within`), and the
+largest delivery root load among its sends, what its postage must (`Deliverable.postagePays`).
 Zero for a turn that replays nothing through a meter. -/
 def Decided.frontEnd {rootBytes : List UInt8 → Digest} {config : Config} {snapshot : DataSnapshot rootBytes}
-    {height : Nat} {command : Command} : Decided config snapshot height command → Nat × Nat
-  | .invoke _ invoked => (invoked.sent.meter.source, invoked.sent.meter.core)
-  | _ => (0, 0)
+    {height : Nat} {command : Command} : Decided config snapshot height command → ObjectiveCall.FrontEnd
+  | .invoke _ invoked => invoked.frontEnd
+  | _ => ⟨0, 0, 0, 0⟩
 
-/-- The front-end work a command drew at a durable snapshot, when it is decided (`Decided.frontEnd`):
-a signer plans once over a generous envelope, declares exactly this, and plans again. -/
+/-- The front-end work a command drew at a durable snapshot: the decided turn's
+(`Decided.frontEnd`), or, for a refused call tree, what it had drawn at its failure point
+(`Reject.call`). A signer plans once over a generous affordable envelope, declares exactly this,
+and plans again. -/
 def planFrontEnd (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (ambient : Ambient) (durable : Durable) (command : Command) : Nat × Nat :=
+    (ambient : Ambient) (durable : Durable) (command : Command) : ObjectiveCall.FrontEnd :=
   match configOf deployment profile ambient with
   | .ok config => match decideTurn config durable.snapshot ambient.height command with
     | .ok decided => decided.frontEnd
-    | .error _ => (0, 0)
-  | .error _ => (0, 0)
+    | .error (.call _ drawn) => drawn
+    | .error _ => ⟨0, 0, 0, 0⟩
+  | .error _ => ⟨0, 0, 0, 0⟩
 
 structure SigningPlan where
   domain : Digest
@@ -1625,23 +1629,24 @@ structure SigningPlan where
   outcome : Digest
   /-- `planVerdict` (UTF-8): empty, `charged failure: ...` or `refused: ...`. -/
   verdict : List UInt8
-  /-- `planFrontEnd`: the source and typed-core bytes the decided turn's replays drew. -/
-  frontEndSource : Nat
-  frontEndCore : Nat
+  /-- `planFrontEnd`: the source and typed-core bytes the turn's replays drew, and the largest
+  delivery root load among its sends (what the postage declares). -/
+  frontEnd : ObjectiveCall.FrontEnd
   deriving DecidableEq, Repr
 
 def signingPlanStream : StreamCodec SigningPlan :=
   StreamCodec.xmap (StreamCodec.product digestStream
     (StreamCodec.product digestStream (StreamCodec.product bytesStream (StreamCodec.product bytesStream
       (StreamCodec.product bytesStream (StreamCodec.product digestStream (StreamCodec.product bytesStream
-        (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))))
+        (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+          (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))))))
     (fun plan => (plan.domain, plan.semantics, plan.commandBytes, plan.header, plan.report, plan.outcome, plan.verdict,
-      plan.frontEndSource, plan.frontEndCore))
-    (fun (domain, semantics, command, header, report, outcome, verdict, source, core) =>
-      ⟨domain, semantics, command, header, report, outcome, verdict, source, core⟩)
+      plan.frontEnd.source, plan.frontEnd.core, plan.frontEnd.postageSource, plan.frontEnd.postageCore))
+    (fun (domain, semantics, command, header, report, outcome, verdict, source, core, postageSource, postageCore) =>
+      ⟨domain, semantics, command, header, report, outcome, verdict, ⟨source, core, postageSource, postageCore⟩⟩)
     (by intro plan; cases plan; rfl)
 
-/-- v4 carries the front-end work the decided turn drew (GPT-6 row E, the turn's meter); v3 carried
+/-- v4 carries the front-end work the turn drew, decided or refused (GPT-6 row E, the turn's meter); v3 carried
 the signed outcome and the verdict; an earlier plan refuses to decode. -/
 def signingPlanCodec : LawfulCodec SigningPlan :=
   ObjectiveActivityWire.framed "DREGG/OBJECTIVE/ACTIVITY/PLAN/v4".toUTF8.toList signingPlanStream

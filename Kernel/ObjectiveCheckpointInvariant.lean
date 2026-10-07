@@ -1333,7 +1333,7 @@ theorem invocation_mail_silent {rootBytes : Bytes → Digest} {config : Config} 
     invoked.mail.inboxes = [] ∧ ∀ closed ∈ invoked.mail.closed, closed.decided = none := by
   have sent := invoked.sentExact
   rw [silent] at sent
-  have same : (Except.ok (ObjectiveCall.Mail.start invoked.journal.meter) : Except ObjectiveCall.CallRefusal (ObjectiveCall.Mail config snapshot)) =
+  have same : (Except.ok (ObjectiveCall.Mail.start invoked.journal.meter) : Except (ObjectiveCall.CallRefusal × ObjectiveCall.FrontEnd) (ObjectiveCall.Mail config snapshot)) =
       Except.ok invoked.sent :=
     (show ObjectiveCall.postMail config snapshot request.postage request.account 0 (ObjectiveCall.Mail.start invoked.journal.meter) [] =
       .ok (ObjectiveCall.Mail.start invoked.journal.meter) from rfl).symm.trans sent
@@ -1350,7 +1350,7 @@ theorem invocation_mail_nil {rootBytes : Bytes → Digest} {config : Config} {sn
     (silent : invoked.journal.outbox = []) (still : invoked.journal.controls = []) : invoked.mail.posts = [] := by
   have sent := invoked.sentExact
   rw [silent] at sent
-  have same : (Except.ok (ObjectiveCall.Mail.start invoked.journal.meter) : Except ObjectiveCall.CallRefusal (ObjectiveCall.Mail config snapshot)) =
+  have same : (Except.ok (ObjectiveCall.Mail.start invoked.journal.meter) : Except (ObjectiveCall.CallRefusal × ObjectiveCall.FrontEnd) (ObjectiveCall.Mail config snapshot)) =
       Except.ok invoked.sent :=
     (show ObjectiveCall.postMail config snapshot request.postage request.account 0 (ObjectiveCall.Mail.start invoked.journal.meter) [] =
       .ok (ObjectiveCall.Mail.start invoked.journal.meter) from rfl).symm.trans sent
