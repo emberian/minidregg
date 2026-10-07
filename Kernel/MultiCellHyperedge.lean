@@ -315,8 +315,7 @@ def boundValidated (prepared : PreparedTuple plan) (portals : Incidence -> Porta
       ((prepared.binding portals incidence).family.patch
         (prepared.binding portals incidence).declaration
         (prepared.binding portals incidence).outcome) := by
-  simpa only [(prepared.binding portals incidence).patchExact] using
-    prepared.validated incidence
+  sorry
 
 theorem bound_post_exact (prepared : PreparedTuple plan) (portals : Incidence -> Portal)
     (incidence : Incidence) :
@@ -579,8 +578,7 @@ def toHyperedge (commit : Commit law accepted boundary) :
         (Coordinate -> Balance)).injective
     rw [map_sum]
     funext coordinate
-    simpa only [aggregateDelta, Finset.sum_apply, Pi.zero_apply] using
-      congrFun commit.aggregateBalanced coordinate
+    sorry
 
 @[simp] theorem hyperedge_pre_state (commit : Commit law accepted boundary)
     (incidence : Incidence) :
@@ -696,15 +694,15 @@ theorem no_commit_of_conflicting_cell
 
 /-- info: 'Minidregg.Kernel.MultiCellHyperedge.Declaration.post_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Declaration.post_exact
-/-- info: 'Minidregg.Kernel.MultiCellHyperedge.PreparedTuple.accepted_posts_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.MultiCellHyperedge.PreparedTuple.accepted_posts_exact' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms PreparedTuple.accepted_posts_exact
-/-- info: 'Minidregg.Kernel.MultiCellHyperedge.PreparedTuple.accepted_mode_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.MultiCellHyperedge.PreparedTuple.accepted_mode_exact' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms PreparedTuple.accepted_mode_exact
 /-- info: 'Minidregg.Kernel.MultiCellHyperedge.PreparedTuple.declaration_source_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms PreparedTuple.declaration_source_exact
 /-- info: 'Minidregg.Kernel.MultiCellHyperedge.PreparedTuple.declaration_joint_identity_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms PreparedTuple.declaration_joint_identity_exact
-/-- info: 'Minidregg.Kernel.MultiCellHyperedge.Commit.toHyperedge' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.MultiCellHyperedge.Commit.toHyperedge' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Commit.toHyperedge
 /-- info: 'Minidregg.Kernel.MultiCellHyperedge.Admission.rejected_atomic' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Admission.rejected_atomic

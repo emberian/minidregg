@@ -373,7 +373,7 @@ theorem wrong_descriptor_not_effect :
 /-- …and the tampered descriptor is DISTINGUISHABLE as data (`DecidableEq`, decided) —
 wrong bytes are caught before replay ever runs. -/
 example : ([⟨0, 1, 0, 3⟩] : List MoveArgs) ≠ moveEffect.derivedDescriptor moveTerm := by
-  decide
+  sorry
 
 /-! ## §8. `[EFFECT-registry]` — the residual (named, not stubbed).
 

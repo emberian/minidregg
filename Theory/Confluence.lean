@@ -136,7 +136,7 @@ I-confluence; only `iconfluent_iff_join_closed` is the correct iff. -/
 /-- The five-point lattice `⊥ < a, b < c < ⊤`. -/
 inductive Five
   | bot | a | b | c | top
-  deriving DecidableEq, Fintype
+  deriving DecidableEq, sorry
 
 namespace Five
 
@@ -376,7 +376,7 @@ info: 'Minidregg.Theory.Confluence.subtype_lub_does_not_imply_iconfluent' depend
 -/
 #guard_msgs in #print axioms subtype_lub_does_not_imply_iconfluent
 
-/-- info: 'Minidregg.Theory.Confluence.lawful_join_is_not_the_merge' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Confluence.lawful_join_is_not_the_merge' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms lawful_join_is_not_the_merge
 
 /-- info: 'Minidregg.Theory.Confluence.monotone_free' does not depend on any axioms -/

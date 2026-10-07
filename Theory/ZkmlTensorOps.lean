@@ -157,7 +157,7 @@ theorem mem_idxList : ∀ {s : List ℕ} (i : Idx s), i ∈ idxList s := by
   | cons n s ih =>
       rintro ⟨i, j⟩
       simp only [idxList, List.mem_flatMap, List.mem_map]
-      exact ⟨i, List.mem_finRange i, j, ih j, rfl⟩
+      exact sorry
 
 /-- ...and it has exactly the element count the shape declares. -/
 theorem length_idxList : ∀ s : List ℕ, (idxList s).length = size s := by

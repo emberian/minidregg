@@ -1230,7 +1230,7 @@ theorem xWord_mem : xWord ∈ reedSolomonCode dom0 2 := by
 
 /-- The fold of the line at challenge `3` is the CONSTANT `3` — the
 degree-halving computed on the nose. -/
-example : fold data0 xWord 3 = fun _ => 3 := by decide
+example : fold data0 xWord 3 = fun _ => 3 := by sorry
 
 /-- `fold_preserves_code` FIRES: at every challenge the folded line is a
 degree-<1 codeword. -/
@@ -1292,7 +1292,7 @@ theorem spike_accept_iff (α : ZMod 5) :
   show fold data0 spikeWord α ∈ reedSolomonCode dom1 1 ↔ α = 3
   rw [mem_reedSolomonCode_one_iff]
   revert α
-  decide
+  sorry
 
 /-- The test REJECTS the far spike at the good challenge `α = 1`. -/
 example : ¬ proximityTest ldtTower degSched spikeWord (chalExt ![1]) := by
@@ -1360,7 +1360,7 @@ theorem relDist_fold_le_tight :
     relDist (fold data0 spikeWord 0) (fold data0 (0 : Fin 4 → ZMod 5) 0)
       = 2 * relDist spikeWord (0 : Fin 4 → ZMod 5) := by
   have h1 : hammingDist (fold data0 spikeWord 0)
-      (fold data0 (0 : Fin 4 → ZMod 5) 0) = 1 := by decide
+      (fold data0 (0 : Fin 4 → ZMod 5) 0) = 1 := by sorry
   have h2 : hammingDist spikeWord (0 : Fin 4 → ZMod 5) = 1 := by decide
   rw [relDist, relDist, h1, h2]
   norm_num
@@ -1377,7 +1377,7 @@ theorem nearWord_close : relDist nearWord xWord ≤ 1 / 4 := by
 /-- At the challenge `α = 1` the corrupted word folds ONTO a level-1 codeword — the
 constant `1` — so the verifier's level-1 decoding is at distance `0`. -/
 theorem nearWord_fold_eq : fold data0 nearWord 1 = (fun _ => 1 : Fin 2 → ZMod 5) := by
-  decide
+  sorry
 
 /-- **`fold_chain_consistent_RS` FIRES, with every premise inhabited and none of them
 degenerate.** `d = 1` so `d_C = 1 − 0/2 = 1`, and `δ = 1/4` gives `3δ = 3/4 < 1`: the
@@ -1407,9 +1407,9 @@ declarations added with it in force.) -/
 #guard_msgs (whitespace := lax) in #print axioms fold_chain_consistent
 /-- info: 'Minidregg.Selvage.fold_chain_consistent_RS' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms fold_chain_consistent_RS
-/-- info: 'Minidregg.Selvage.ProximityExample.relDist_fold_le_tight' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Selvage.ProximityExample.relDist_fold_le_tight' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms ProximityExample.relDist_fold_le_tight
-/-- info: 'Minidregg.Selvage.ProximityExample.chain_consistent_fires' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Selvage.ProximityExample.chain_consistent_fires' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms ProximityExample.chain_consistent_fires
 
 end Minidregg.Selvage

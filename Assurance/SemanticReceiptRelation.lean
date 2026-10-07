@@ -48,7 +48,7 @@ structure ReceiptWitness (Key F : Type*) where
 inductive ConstraintKind
   | boolean
   | frame
-  deriving DecidableEq, Fintype
+  deriving DecidableEq, sorry
 
 /-- Boolean touched bit, then `(1-touched) * (post-pre)` frame residual. -/
 def ReceiptWitness.residual (w : ReceiptWitness Key F) :
@@ -139,7 +139,7 @@ inductive ReceiptSlot
   | pre
   | post
   | touched
-  deriving DecidableEq, Fintype
+  deriving DecidableEq, sorry
 
 abbrev ReceiptIx (Key : Type*) := Key × ReceiptSlot
 

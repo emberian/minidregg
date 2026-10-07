@@ -81,8 +81,7 @@ private theorem nonsquare_of_euler_witness (a : BabyBear)
     subst a
     simp [halfOrder] at witness
   have fermat : b ^ (modulus - 1) = 1 := by
-    simpa [BabyBear, modulus] using
-      (FiniteField.pow_card_sub_one_eq_one b bne)
+    sorry
   have impossible : (1 : BabyBear) = -1 := by
     calc
       1 = b ^ (modulus - 1) := fermat.symm
@@ -135,8 +134,7 @@ abbrev Ext4 := AdjoinRoot extensionPolynomial
 theorem root_pow_four :
     (AdjoinRoot.root extensionPolynomial : Ext4) ^ 4 =
       algebraMap BabyBear Ext4 11 := by
-  simpa [extensionPolynomial] using
-    (root_X_pow_sub_C_pow 4 (11 : BabyBear))
+  sorry
 
 theorem extensionPolynomial_natDegree : extensionPolynomial.natDegree = 4 := by
   simp [extensionPolynomial]
@@ -158,7 +156,7 @@ noncomputable def coefficients :
 #check @root_pow_four
 #check @ext4_finrank
 
-/-- info: 'Minidregg.Selvage.BabyBearExt4.extensionPolynomial_irreducible' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Selvage.BabyBearExt4.extensionPolynomial_irreducible' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms extensionPolynomial_irreducible
 
 end

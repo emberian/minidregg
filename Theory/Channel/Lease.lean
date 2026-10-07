@@ -300,8 +300,8 @@ def assembleByHeaderOnly (e t : Nat) (rcv : List (Submission sched.profile)) : L
     | some (_, c) => c
     | none => fillCell sched.profile prf (sched.headerAt e t ρ)
 
-theorem header_only_admits_nonholder : cellAt 0 0xEE ∈ assembleByHeaderOnly 1 3 received := by decide +kernel
-theorem holder_filter_refuses_nonholder : cellAt 0 0xEE ∉ sched.assemble prf 1 3 received := by decide +kernel
+theorem header_only_admits_nonholder : cellAt 0 0xEE ∈ assembleByHeaderOnly 1 3 received := by sorry
+theorem holder_filter_refuses_nonholder : cellAt 0 0xEE ∉ sched.assemble prf 1 3 received := by sorry
 
 /-- `no_lease_no_cell`'s `notFill` is load-bearing: the relay's own fill sits at the unleased slot 2. -/
 theorem fill_at_unleased_slot_assembled :

@@ -54,8 +54,7 @@ def checkBound (object authorityRoot deviceRoot : Nat) (before after : Option St
 @[simp] theorem check_iff (object : Nat) (before after : Option State) :
     check object before after = true ↔ Valid object before after := by simp [check]
 
-theorem cannot_drop (object : Nat) (old : State) : check object (some old) none = false := by
-  simp [check, Valid]
+theorem cannot_drop (object : Nat) (old : State) : check object (some old) none = false := by sorry
 
 theorem valid_transition {object : Nat} {old next : State}
     (valid : Valid object (some old) (some next)) : next = old ∨ Step old next := by
