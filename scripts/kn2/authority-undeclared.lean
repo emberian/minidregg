@@ -15,7 +15,13 @@ need to decode: every refusal below happens before any state is consulted.
      the refusal is a state one, never `undeclaredMarker`;
  revoke:
   3. a basis without the transaction id: `CapabilityRevocationReceiver.replay` is
-     `undeclared`; with it: `fresh`.
+     `undeclared`; with it: `fresh`;
+ renounce:
+  4. a basis without the transaction id: `CapabilityRenounce.replay` is `undeclared`;
+     with it: `fresh`;
+  5. a basis without the marker's nullifier: `CapabilityRenounce.prepare` refuses exactly
+     `undeclaredMarker`; with it, it prepares (the renounce reads nothing else before
+     its signature).
 The positive control end to end is the journeys (J3 delegates, JPRIV1 kicks = revokes)
 on this tree's Host.
 
@@ -24,6 +30,7 @@ import Assurance.NativeAcceptedFixtureData
 import Kernel.NativeHostLight
 import Kernel.CapabilityDelegationReceiver
 import Kernel.CapabilityRevocationReceiver
+import Kernel.CapabilityRenounce
 import Kernel.ObjectiveBendNativeAdmission
 
 open Minidregg.Theory.TypedAuthorization
@@ -102,6 +109,12 @@ def revokeCommand : CapabilityRevocationController.Command .object where
   expectedTargetRoot := ⟨0⟩
   expectedAuthorityRoot := ⟨0⟩
 
+def renounceCommand : CapabilityRenounce.Command where
+  subject := ⟨1⟩
+  nonce := 7
+  kind := .object
+  capability := ⟨900⟩
+
 def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   IO.FS.writeBinFile (directory / "key") ((List.range 32).map (fun i => UInt8.ofNat (i * 7 + 3))).toByteArray
   let cfg := config { binary := binary, root := directory / "store", key := directory / "key", checkpointEvery := 16 }
@@ -157,7 +170,29 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   let rFresh := verdict (CapabilityRevocationReceiver.replay domain semantics rAll revocation)
   require s!"a declared, unrecorded revocation is `fresh` (got {rFresh})" (rFresh == "fresh")
   IO.println s!"control (revoke, declared transaction): replay {rFresh}"
-  IO.println "PASS authority undeclared: delegate (transaction id, marker) and revoke (transaction id) each refused by name"
+  -- renounce
+  let some renunciation := CapabilityRenounce.decodeIngress
+      (CapabilityRenounce.ingressCodec.encode ⟨CapabilityRenounce.commandCodec.encode renounceCommand, envelope⟩)
+    | throw (IO.userError "FAIL the renounce ingress does not decode")
+  let nKeys := CapabilityRenounce.keys domain semantics renunciation
+  let nAll ← groundOf nKeys "renounce"
+  let nNoTx ← groundOf ⟨[], nKeys.nullifiers⟩ "renounce without its transaction id"
+  let nNoMarker ← groundOf ⟨nKeys.transactions, []⟩ "renounce without its marker"
+  let nReplay := verdict (CapabilityRenounce.replay domain semantics nNoTx renunciation)
+  require s!"an undeclared renounce transaction id is `undeclared` (got {nReplay})" (nReplay == "undeclared")
+  IO.println s!"refused as expected (renounce, undeclared transaction): replay {nReplay}"
+  let nFresh := verdict (CapabilityRenounce.replay domain semantics nAll renunciation)
+  require s!"a declared, unrecorded renounce is `fresh` (got {nFresh})" (nFresh == "fresh")
+  IO.println s!"control (renounce, declared transaction): replay {nFresh}"
+  let nAmbient : CapabilityRenounce.Ambient := ⟨cfg.federation, cfg.genesisHeight + nAll.height⟩
+  match CapabilityRenounce.prepare cfg.deployment semantics nAmbient nNoMarker renunciation.command with
+  | .error .undeclaredMarker => IO.println "refused as expected (renounce, undeclared marker): undeclaredMarker"
+  | .error other => throw (IO.userError s!"FAIL a marker-less renounce refused otherwise: {repr other}")
+  | .ok _ => throw (IO.userError "FAIL an undeclared renounce marker prepared")
+  match CapabilityRenounce.prepare cfg.deployment semantics nAmbient nAll renunciation.command with
+  | .error other => throw (IO.userError s!"FAIL a declared renounce refused: {repr other}")
+  | .ok _ => IO.println "control (renounce, declared marker): prepares"
+  IO.println "PASS authority undeclared: delegate (transaction id, marker), revoke (transaction id) and renounce (transaction id, marker) each refused by name"
 
 end AuthorityUndeclared
 
