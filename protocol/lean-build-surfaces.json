@@ -3120,7 +3120,7 @@
     {
       "module": "Compiler.ServedBasis",
       "path": "Compiler/ServedBasis.lean",
-      "sha256": "c9f4dc8bedbcad7c2aaa4521945a38f39edd2094d293e1c701ecbe65f0e91e36",
+      "sha256": "7cbeb22fe438138edeb225b7d663f1a378d75de07526ae084e785f72912ec7b9",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -5437,14 +5437,14 @@
     {
       "module": "Kernel.CapabilityDelegationReceiver",
       "path": "Kernel/CapabilityDelegationReceiver.lean",
-      "sha256": "4be0b3725b469105a64b4815cd5ebcb7297a16dbcee437bb43fd14858fc81edf",
+      "sha256": "b45ea66aac72a5ecf762ea6a67b170723b3741a509ebd66b4fa48ceb1efeee0c",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.CapabilityRenounce",
       "path": "Kernel/CapabilityRenounce.lean",
-      "sha256": "cbf3fd030bab9b2f7e1f2ee0dbf5f9cba101ce95271227c98d4fd6276828fa04",
+      "sha256": "ade6aa5aac24605cb91c948bc728539bedffae68d86ffe00dacb2a56f54c0a63",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -5458,7 +5458,7 @@
     {
       "module": "Kernel.CapabilityRevocationReceiver",
       "path": "Kernel/CapabilityRevocationReceiver.lean",
-      "sha256": "9fe8eb3f09eb660e5f7fdd1a644e22a9ae9b5a7cf6bcb92b8aa2a73ce9f1ad54",
+      "sha256": "65ab280f5e4c7c1e480d3ab0b3ec8c6ff25f3edf686824cf8c9feec84c6b53e0",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6760,7 +6760,7 @@
     {
       "module": "Kernel.NativeHost",
       "path": "Kernel/NativeHost.lean",
-      "sha256": "ddbd2c1c43ad974444f62e3a07d6050b5099f8dc1eab4ce6e9e2ed700118f6cc",
+      "sha256": "9b46a48e579836aa2f7eeff0094ad406e08d6771796bfe7e6130bf41dd7f2e7a",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7460,7 +7460,7 @@
     {
       "module": "Kernel.PolicyInstallReceiver",
       "path": "Kernel/PolicyInstallReceiver.lean",
-      "sha256": "deb28f76c21dc2fdb85ea51ef8b07184c6bdcbf5ccf7868c103f27f602504c32",
+      "sha256": "61803063124483fa96ad9ce1a02dfd59ad309fc9a502a6ff21b1ced3d0130630",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
