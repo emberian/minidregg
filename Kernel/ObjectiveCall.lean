@@ -398,10 +398,16 @@ def drawQuote (meter : ObjectiveWorkAccount.Meter) (bytes : Bytes) : Except Call
   | some (source, core) => drawFrontEnd meter source core
   | none => .ok meter
 
-/-- **Load a method, metered.** The pinned package's front-end quote is drawn from the turn's meter
-BEFORE anything is replayed; the package is parsed once and the method lowered from that parse
-(`methodOf`); the method's generated core is drawn right after (an overshoot is the turn's own
-`frontEndExhausted`, a charged call-tree refusal, bounded by the front end's fixed limits). -/
+/-- **Load a method, metered.** Two lowerings of one parse, each drawn from the turn's meter:
+* the pinned entry's replay (`replayPackage`: parse, lower, compare with the stored core), drawn from
+  the pair's quote (its source bytes, the stored core it must generate) BEFORE anything is replayed;
+* the method's lowering from that parse (`methodOf`, `replay_select`), drawn as the package's source
+  bytes again (the elaborator's lowering cost grows with the whole source, not only the selected
+  declaration: measured, lowering a 335 KB module of unused records costs 1.92 us/B against its
+  parse's 0.54 us/B) and the core the lowering generated, right after it exists. An overshoot is the
+  turn's own `frontEndExhausted`, a charged call-tree refusal; until the elaborator is metered before
+  it renders (cv 01a11636-203c) the work before that refusal is bounded only by the front end's fixed
+  limits (`ObjectiveBendPublication.limits`, the checker's `typeFuel`, `maxArtifactBytes` of source). -/
 def loadMethod (config : Config) (target : Nat) (bytes : Bytes) (pin : Digest) (method : String)
     (view args : Data) (meter : ObjectiveWorkAccount.Meter) :
     Except CallRefusal (Method config pin method view args × ObjectiveWorkAccount.Meter) :=
@@ -414,7 +420,7 @@ def loadMethod (config : Config) (target : Nat) (bytes : Bytes) (pin : Digest) (
   match methodOf config target stored pin method view args with
   | .error reason => .error reason
   | .ok m =>
-  match drawFrontEnd quoted 0 m.generatedCore with
+  match drawFrontEnd quoted (ObjectiveWorkAccount.sourceBytes m.definition.package) m.generatedCore with
   | .error reason => .error reason
   | .ok drawn => .ok (m, drawn)
 
