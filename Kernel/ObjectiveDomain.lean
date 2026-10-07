@@ -32,7 +32,8 @@ open Minidregg.Theory.TypedAuthorization (Digest SubjectId)
 open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Kernel.ObjectiveActivityWire
 open Minidregg.Kernel.ObjectRecord (ObjectRecord Facts stateSlots)
-open Minidregg.Theory.CanonicalResourceKernel (AccountId)
+open Minidregg.Theory.CanonicalResourceKernel (AccountId Batch)
+open Minidregg.Compiler.ObjectiveInvocationClaim (Capacity)
 
 set_option autoImplicit false
 
