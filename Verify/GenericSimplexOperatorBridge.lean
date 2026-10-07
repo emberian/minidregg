@@ -1,4 +1,5 @@
 import Verify.GenericSimplexSourceHarness
+import Kernel.NativeHost
 
 namespace Minidregg.Verify.GenericSimplexOperatorBridge
 open Minidregg.Compiler
@@ -10,13 +11,19 @@ open Minidregg.Verify.GenericSimplexSourceHarness
 set_option autoImplicit false
 
 /-- Recover the exact certified record already installed at any participant.
-This searches native verified history, never an operator-supplied record. -/
-def retainedPayload (replicas : Array Replica) (ingress : Bytes) : Option Bytes :=
-  replicas.toList.findSome? fun replica =>
-    replica.participant.source.verified.opened.durable.image.accepted.findSome? fun record =>
-      if record.event.canonicalBytes == ingress then
-        some (DurableCheckpointCodec.recordFrame.encode record)
-      else none
+This searches native verified history, never an operator-supplied record: each
+participant's accepted log is read in verified `Reader.range` windows
+(`NativeHost.operatorAcceptedLog`, an operator tool, not a request path). -/
+def retainedPayload (replicas : Array Replica) (ingress : Bytes) : IO (Option Bytes) := do
+  for replica in replicas do
+    let log ← Minidregg.Kernel.NativeHost.operatorAcceptedLog replica.config
+      replica.participant.source.verified.opened
+    if let some payload := log.findSome? fun record =>
+        if record.event.canonicalBytes == ingress then
+          some (DurableCheckpointCodec.recordFrame.encode record)
+        else none then
+      return some payload
+  return none
 
 /-- Recover an offered complete source record from the actual durable engine
 journal. Only exact canonical source-record bytes containing this original
@@ -41,6 +48,15 @@ def receiptPrefix (replica : Replica) (ingress : Bytes) : Option (List Bytes) :=
   let records := replica.participant.source.verified.opened.durable.image.accepted
   let index ← records.findIdx? (fun record => record.event.canonicalBytes == ingress)
   return (records.take (index + 1)).map DurableCheckpointCodec.recordFrame.encode
+
+/-- `receiptPrefix` over the Reader's verified windows (the pure form above is kept
+only for `Verify.NativeJointSourceFixture` until its lane ports it). -/
+def receiptPrefixVerified (replica : Replica) (ingress : Bytes) : IO (Option (List Bytes)) := do
+  let records ← Minidregg.Kernel.NativeHost.operatorAcceptedLog replica.config
+    replica.participant.source.verified.opened
+  return do
+    let index ← records.findIdx? (fun record => record.event.canonicalBytes == ingress)
+    pure ((records.take (index + 1)).map DurableCheckpointCodec.recordFrame.encode)
 
 def reload (replicas : Array Replica) : IO (Array Replica) := do
   let mut result := #[]
@@ -67,7 +83,7 @@ def submit (fuel : Nat) (replicas : Array Replica) (callBytes : Bytes) :
       require (replica.participant.runtime.context == first.participant.runtime.context)
         "operator participants differ in consensus context"
     let ingress ← IO.ofExcept (sourceIngressOfCall first.config callBytes)
-    let previous := retainedPayload current ingress
+    let previous ← retainedPayload current ingress
     let pending ← if previous.isSome then pure none else retainedOfferedPayload current ingress
     let finished ← match previous.orElse (fun _ => pending) with
       | some payload => drive fuel current payload []
@@ -75,14 +91,14 @@ def submit (fuel : Nat) (replicas : Array Replica) (callBytes : Bytes) :
     let some first := finished[0]? | throw (IO.userError "missing finished source participant")
     let some receipt := completedCall first.participant callBytes
       | throw (IO.userError "source agreement lacks original-call receipt")
-    let some expectedPrefix := receiptPrefix first ingress
+    let some expectedPrefix ← receiptPrefixVerified first ingress
       | throw (IO.userError "source agreement lacks original-call prefix")
     for replica in finished do
       let some other := completedCall replica.participant callBytes
         | throw (IO.userError "source participant has no original-call receipt")
       require (receiptStream.encode other == receiptStream.encode receipt)
         "source participants disagree on exact receipt"
-      require (receiptPrefix replica ingress == some expectedPrefix)
+      require ((← receiptPrefixVerified replica ingress) == some expectedPrefix)
         "source participants disagree on the exact prefix through this call"
     let kind := if previous.isSome then DurableReceiverIO.Confirmation.replayed
       else DurableReceiverIO.Confirmation.installed

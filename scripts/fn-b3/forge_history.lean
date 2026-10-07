@@ -14,10 +14,10 @@ def forgeHistory : IO Unit := do
     | throw (IO.userError "MINI_B3_FORGE_OUTPUT must select a fresh scratch output")
   let settings ← loadSettings configPath
   let config := settings.config
-  let durable ← IO.ofExcept (← DurableReceiverIO.load config.storage.transport ResourceBirthCodec.rootBytes)
-  let first :: rest := durable.image.accepted
+  let opened ← IO.ofExcept (← NativeHost.openExisting config)
+  let first :: rest ← NativeHost.operatorAcceptedLog config opened
     | throw (IO.userError "expected accepted history")
-  let forged := { durable.image with accepted :=
+  let forged := { opened.durable.image with accepted :=
     { first with event := { first.event with canonicalBytes := [255] } } :: rest }
   unless forged.restore ResourceBirthCodec.rootBytes |>.isSome do
     throw (IO.userError "forged image is not physically replayable")

@@ -29,7 +29,7 @@ def acceptedSkipProbe : IO Unit := do
   let opened ← IO.ofExcept (← NativeHost.openExisting config)
   let mut prior : Nat := 0
   let mut count : Nat := 0
-  for record in opened.durable.image.accepted do
+  for record in (← NativeHost.operatorAcceptedLog config opened) do
     if let some skip := FnConsumerProgress.originalSkip gateway scope
         config.deployment.domain config.profile.semantics record then
       unless skip.fromPosition == prior &&

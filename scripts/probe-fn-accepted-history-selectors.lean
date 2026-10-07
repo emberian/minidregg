@@ -22,7 +22,7 @@ def acceptedHistorySelectorsProbe : IO Unit := do
   let bOpened ← IO.ofExcept (← NativeHost.openExisting bConfig)
   let some bPin := bConfig.fnGateway
     | throw (IO.userError "B has no independent gateway pin")
-  let bMatches := bOpened.durable.image.accepted.filter fun record =>
+  let bMatches := (← NativeHost.operatorAcceptedLog bConfig bOpened).filter fun record =>
     (FnConsumerOperation.originalBindingWithInbox bPin
       bConfig.deployment.domain bConfig.profile.semantics record).isSome
   unless bMatches.length == 1 do
@@ -32,7 +32,7 @@ def acceptedHistorySelectorsProbe : IO Unit := do
   let aOpened ← IO.ofExcept (← NativeHost.openExisting aConfig)
   let some aPin := aConfig.fnGateway
     | throw (IO.userError "A has no independent gateway pin")
-  let aMatches := aOpened.durable.image.accepted.filter fun record =>
+  let aMatches := (← NativeHost.operatorAcceptedLog aConfig aOpened).filter fun record =>
     (FnReplyConsumption.originalResult aPin
       aConfig.deployment.domain aConfig.profile.semantics record).isSome
   unless aMatches.length == 1 do
@@ -45,7 +45,7 @@ def acceptedHistorySelectorsProbe : IO Unit := do
       let revokedOpened ← IO.ofExcept (← NativeHost.openExisting revokedConfig)
       let some revokedPin := revokedConfig.fnGateway
         | throw (IO.userError "revoked B has no independent gateway pin")
-      let revokedMatches := revokedOpened.durable.image.accepted.filter fun record =>
+      let revokedMatches := (← NativeHost.operatorAcceptedLog revokedConfig revokedOpened).filter fun record =>
         (FnConsumerOperation.originalBindingWithInbox revokedPin
           revokedConfig.deployment.domain revokedConfig.profile.semantics record).isSome
       unless revokedMatches.length == 1 do
