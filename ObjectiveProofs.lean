@@ -18,6 +18,7 @@ import Kernel.ObjectiveBendAdmissionSemantics
 import Theory.ObjectiveBendDemandForcingExtract
 import Kernel.ObjectiveResumeContract
 import Kernel.ObjectiveCheckpointInvariant
+import Kernel.ObjectiveUpgradeInvariant
 import Kernel.ObjectiveActivityGateRoute
 import Compiler.ObjectiveBendFrontEndAdequacy
 import Compiler.ObjectiveBendSpecificationClosure
