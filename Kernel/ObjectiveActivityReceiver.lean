@@ -895,7 +895,7 @@ theorem native_end_closes_held_seats (accepted : Accepted deployment profile amb
     ∃ joined : ActivitySeatEnd.Joined accepted.prepared.config durable.snapshot ambient.height record posted,
       accepted.prepared.final.1 = joined.rewrite accepted.prepared.decided.posts ∧
       (∀ seat ∈ Seats.heldOpen (joined.held.loaded.world
-          (posted.batch.apply (Theory.CanonicalResourceKernel.logicalBook pre.logical))) record,
+          (posted.batch.apply (Theory.CanonicalResourceKernel.logicalBook pre.logical))) ambient.height record,
         ∀ after ∈ joined.held.next.seats, after.account ≠ seat.account) ∧
       Seats.Posts (Theory.CanonicalResourceKernel.logicalBook pre.logical)
         (Seats.seqBatch posted.batch joined.held.batch) joined.held.next.book := by

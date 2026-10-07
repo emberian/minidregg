@@ -92,7 +92,7 @@ admitted together on the loaded Book. -/
 theorem Joined.closes {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height record : Nat} {pre : BookCell} {posted : Postings pre}
     (joined : Joined config snapshot height record posted) :
-    (∀ seat ∈ heldOpen (joined.held.loaded.world (posted.batch.apply (logicalBook pre.logical))) record,
+    (∀ seat ∈ heldOpen (joined.held.loaded.world (posted.batch.apply (logicalBook pre.logical))) height record,
         ∀ after ∈ joined.held.next.seats, after.account ≠ seat.account) ∧
       Posts (logicalBook pre.logical) (seqBatch posted.batch joined.held.batch) joined.held.next.book ∧
       logicalBook joined.accepted.post.logical = joined.held.next.book := by
@@ -107,7 +107,7 @@ batch no closed seat's account is a Book account. -/
 theorem Joined.deregisters {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height record : Nat} {pre : BookCell} {posted : Postings pre}
     (joined : Joined config snapshot height record posted) :
-    ∀ seat ∈ heldOpen (joined.held.loaded.world (posted.batch.apply (logicalBook pre.logical))) record,
+    ∀ seat ∈ heldOpen (joined.held.loaded.world (posted.batch.apply (logicalBook pre.logical))) height record,
       seat.account ∉ (logicalBook joined.accepted.post.logical).accounts := by
   obtain ⟨_, gone, _⟩ := joined.held.closes
   obtain ⟨_, _, equal⟩ := joined.closes
@@ -120,7 +120,7 @@ closed seat's cell at the retired image. -/
 theorem Joined.retires {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height record : Nat} {pre : BookCell} {posted : Postings pre}
     (joined : Joined config snapshot height record posted) (posts : List Post) :
-    ∀ seat ∈ heldOpen (joined.held.loaded.world (posted.batch.apply (logicalBook pre.logical))) record,
+    ∀ seat ∈ heldOpen (joined.held.loaded.world (posted.batch.apply (logicalBook pre.logical))) height record,
       postAt snapshot (SeatStore.seatCell seat.account) ObjectiveActivity.retiredImage ∈ joined.rewrite posts := by
   intro seat member
   exact List.mem_append_right _ (joined.held.retires seat member)
