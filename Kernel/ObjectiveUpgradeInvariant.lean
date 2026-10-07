@@ -734,14 +734,14 @@ theorem recordImage_role (record : Record) : OfRole .record (payloadOf (recordIm
 
 /-- The awaiting view of a cell holding a record image at the record's own coordinate. -/
 theorem awaiting_recordImage (config : Config) (P : Payloads) (cell : CellId) (record : Record)
-    (holds : P cell = payloadOf (recordImage record)) (located : cell = recordCell config.domain record.object record.activity) :
+    (fits : record.Fits) (holds : P cell = payloadOf (recordImage record)) (located : cell = recordCell config.domain record.object record.activity) :
     awaitingView config P cell = if record.phase.awaits then some record else none := by
   unfold awaitingView recordView
   rw [holds]
   unfold recordImage
   cases phase : record.phase with
   | awaiting await =>
-    simp [phase, ObjectiveActivity.payloadOf_image, record_roundTrip, located, Phase.awaits]
+    simp [phase, ObjectiveActivity.payloadOf_image, record_roundTrip record fits, located, Phase.awaits]
   | done result => simp [phase, payloadOf_retired, Phase.awaits]
   | faulted reason => simp [phase, payloadOf_retired, Phase.awaits]
 
@@ -860,7 +860,7 @@ theorem Exhaustion.upgradable {rootBytes : Bytes → Digest} {config : Config} {
     · subst at_
       have before := awaiting_readRecord config snapshot exhausted.recordExact exhausted.located
       have after := awaiting_recordImage config (payloads (afterPosts snapshot exhausted.posts)) request.record
-        exhausted.next (by rw [exhausted.postsExact]; exact head_payload snapshot _ _)
+        exhausted.next exhausted.next_fits (by rw [exhausted.postsExact]; exact head_payload snapshot _ _)
         (by rw [nextExact]; exact exhausted.located)
       rw [before, after, nextExact]
       simp [exhausted.awaiting, Phase.awaits, recordKey']
@@ -1586,28 +1586,30 @@ theorem commitYield_posts_shape {rootBytes : Bytes → Digest} {config : Config}
   · cases ok
   · split at ok
     · cases ok
-    · rename_i written wrote
-      split at ok
-      · split at ok
-        · cases ok
-        · rename_i fresh
-          simp only [Except.ok.injEq] at ok
-          subst ok
-          intro post member
-          simp only [List.mem_append, List.mem_singleton] at member
-          rcases member with inState | isSlot
-          · exact .inl (stateShape _ post inState)
-          · subst isSlot
-            refine .inr ⟨?_, payloadOf_image_role _ _ _⟩
-            have both := fresh
-            simp only [Bool.or_eq_true, not_or, Option.isSome_iff_ne_none, ne_eq, not_not] at both
-            exact both.1
-      · split at ok
-        · cases ok
-        · simp only [Except.ok.injEq] at ok
-          subst ok
-          intro post member
-          exact .inl (stateShape _ post member)
+    · split at ok
+      · cases ok
+      · rename_i written wrote
+        split at ok
+        · split at ok
+          · cases ok
+          · rename_i fresh
+            simp only [Except.ok.injEq] at ok
+            subst ok
+            intro post member
+            simp only [List.mem_append, List.mem_singleton] at member
+            rcases member with inState | isSlot
+            · exact .inl (stateShape _ post inState)
+            · subst isSlot
+              refine .inr ⟨?_, payloadOf_image_role _ _ _⟩
+              have both := fresh
+              simp only [Bool.or_eq_true, not_or, Option.isSome_iff_ne_none, ne_eq, not_not] at both
+              exact both.1
+        · split at ok
+          · cases ok
+          · simp only [Except.ok.injEq] at ok
+            subst ok
+            intro post member
+            exact .inl (stateShape _ post member)
 
 /-- A state write's post is the next version of the object's state, at its state cell. -/
 theorem stateWrite_post {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -1710,7 +1712,8 @@ theorem yield_upgradable {rootBytes : Bytes → Digest} {config : Config} {snaps
     (oldAwaits : old.phase.awaits = true) (newAwaits : new.phase.awaits = true)
     (sameKey : recordKey' new = recordKey' old)
     (restOk : ∀ p ∈ rest, StatePostOk config snapshot p)
-    (holds : Upgradable config (payloads snapshot.canonicalBytes)) :
+    (holds : Upgradable config (payloads snapshot.canonicalBytes))
+    (newFits : new.Fits) :
     Upgradable config (payloads (afterPosts snapshot posts)) := by
   have headKinded : Kinded snapshot .record (postAt snapshot cell (recordImage new)) :=
     ⟨readRecord_role recordExact, recordImage_role _⟩
@@ -1733,7 +1736,7 @@ theorem yield_upgradable {rootBytes : Bytes → Digest} {config : Config} {snaps
     by_cases at_ : c = cell
     · subst at_
       rw [awaiting_readRecord config snapshot recordExact located,
-        awaiting_recordImage config _ c new (by rw [postsIs]; exact head_payload_at snapshot c _ rest)
+        awaiting_recordImage config _ c new newFits (by rw [postsIs]; exact head_payload_at snapshot c _ rest)
           (by rw [keysNew.1, keysNew.2.2]; exact located)]
       simp [oldAwaits, newAwaits, sameKey]
     · rw [awaiting_after_kinded config snapshot posts c (fun p member pat => by
@@ -1802,6 +1805,7 @@ theorem Delivery.upgradable {rootBytes : Bytes → Digest} {config : Config} {sn
   by_cases newAwaits : delivery.next.phase.awaits = true
   · apply yield_upgradable (rest := delivery.settlement.posts ++ (delivery.yielded.map YieldCommit.posts).getD [] ++
         [delivery.posted.write config snapshot]) (old := delivery.record) (new := delivery.next)
+        (newFits := delivery.next_fits)
         (cell := request.record) _ delivery.recordExact delivery.located oldAwaits newAwaits _ _ holds
     · rw [delivery.postsExact]
       simp [countPosts, newAwaits, recordPost]
@@ -1920,7 +1924,8 @@ theorem starting_upgradable {rootBytes : Bytes → Digest} {config : Config} {sn
     (postsIs : posts = postAt snapshot cell (recordImage record) :: (rest ++ [bookPost] ++
       objectPost config snapshot record.object object
         (recount object record.pin record.activity false record.phase.awaits)))
-    (holds : Upgradable config (payloads snapshot.canonicalBytes)) :
+    (holds : Upgradable config (payloads snapshot.canonicalBytes))
+    (recordFits : record.Fits) :
     Upgradable config (payloads (afterPosts snapshot posts)) := by
   set posted := recount object record.pin record.activity false record.phase.awaits with postedIs
   have heldObject := readObject_some objectExact
@@ -1985,7 +1990,7 @@ theorem starting_upgradable {rootBytes : Bytes → Digest} {config : Config} {sn
     simp [payloads, fresh, recordView]
   have after : awaitingView config (payloads (afterPosts snapshot posts)) cell =
       if record.phase.awaits then some record else none :=
-    awaiting_recordImage config _ cell record (by rw [postsIs]; exact head_payload_at snapshot cell _ _) located
+    awaiting_recordImage config _ cell record recordFits (by rw [postsIs]; exact head_payload_at snapshot cell _ _) located
   have elsewhere : ∀ other, other ≠ cell →
       awaitingView config (payloads (afterPosts snapshot posts)) other =
         awaitingView config (payloads snapshot.canonicalBytes) other := by
@@ -2130,6 +2135,7 @@ theorem Birth.upgradable {rootBytes : Bytes → Digest} {config : Config} {snaps
   obtain ⟨isObject, isActivity, isPin⟩ := Birth.record_names born
   apply starting_upgradable (cell := born.cell) (record := born.record) (object := born.object)
     (rest := (born.yielded.map YieldCommit.posts).getD []) (bookPost := born.posted.write config snapshot)
+    (recordFits := born.record_fits)
     born.fresh (by rw [born.cellExact, isObject, isActivity]) (by rw [isObject]; exact born.objectExact)
     (segmentCommit_posts_ok born.yieldedExact ⟨_, born.currentExact⟩
       (drained_stateJudged born.objectExact born.drained))
@@ -2220,7 +2226,8 @@ theorem rebirth_upgradable {rootBytes : Bytes → Digest} {config : Config} {sna
       objectPost config snapshot record.object object
         (recount (object.release old.pin old.activity) record.pin record.activity false record.phase.awaits)) ++
       (postAt snapshot oldCell retiredImage :: slotPosts))
-    (holds : Upgradable config (payloads snapshot.canonicalBytes)) :
+    (holds : Upgradable config (payloads snapshot.canonicalBytes))
+    (recordFits : record.Fits) :
     Upgradable config (payloads (afterPosts snapshot posts)) := by
   set posted := recount (object.release old.pin old.activity) record.pin record.activity false record.phase.awaits
     with postedIs
@@ -2281,7 +2288,7 @@ theorem rebirth_upgradable {rootBytes : Bytes → Digest} {config : Config} {sna
       · left; rw [postsIs]; simp [objectPost, unchanged])
   have newAfter : awaitingView config (payloads (afterPosts snapshot posts)) cell =
       if record.phase.awaits then some record else none :=
-    awaiting_recordImage config _ cell record (by rw [postsIs]; exact head_payload_at snapshot cell _ _) located
+    awaiting_recordImage config _ cell record recordFits (by rw [postsIs]; exact head_payload_at snapshot cell _ _) located
   have newBefore : awaitingView config (payloads snapshot.canonicalBytes) cell = none := by
     apply awaitingView_of_recordView
     simp [payloads, fresh, recordView]
@@ -2448,7 +2455,7 @@ theorem Rebirth.upgradable {rootBytes : Bytes → Digest} {config : Config} {sna
   apply rebirth_upgradable (cell := reborn.born.cell) (record := reborn.born.record) (old := reborn.old)
     (object := reborn.born.object) (oldCell := request.record)
     (rest := (reborn.born.yielded.map YieldCommit.posts).getD []) (slotPosts := reborn.slotPosts)
-    (bookPost := reborn.born.posted.write config snapshot)
+    (bookPost := reborn.born.posted.write config snapshot) (recordFits := reborn.born.record_fits)
     reborn.born.fresh (by rw [reborn.born.cellExact, isObject, isActivity]) reborn.oldExact reborn.located
     (by rw [reborn.awaiting]; rfl) objectIs.symm (by rw [isObject]; exact reborn.born.objectExact)
     (segmentCommit_posts_ok reborn.born.yieldedExact ⟨_, reborn.born.currentExact⟩

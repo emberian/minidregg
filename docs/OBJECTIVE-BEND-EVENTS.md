@@ -97,10 +97,12 @@ names the clause. Theorems: `Birth.write_judged`, `Delivery.write_judged`,
 
 ### Records, checkpoints and awaits
 
-- **Record** (frame `ACTIVITY-RECORD/v5`): object, activity id, package `pin`, input,
+- **Record** (frame `ACTIVITY-RECORD/v6`): object, activity id, package `pin`, input,
   `generation`, checkpoint bytes and digest, escrow (payer, purse account, declared resume and
   timeout envelopes and their fees), `tried` (the largest envelope an exhausted attempt at the
-  current await ran under), and phase `awaiting await | done result | faulted reason`.
+  current await ran under), and phase `awaiting await | done result | faulted reason`. Its digests are
+  exactly 32 octets and its heights exactly 8 (the record's length is charged, so it must not depend
+  on them: `encodeRecord_length_mask`).
 - **Checkpoint**: `collect (settle forced)` of the state the Plan extraction left
   (`ObjectiveBendDemandCollect.checkpoint`), as `encodeState` tokens. `settle` makes a forced
   cell stop retaining the closure it came from; `collect` keeps only what the Plan and stack

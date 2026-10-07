@@ -207,13 +207,13 @@ theorem recordIn_retired : recordIn retiredImage = none := by
 
 /-- The only record a record post holds is the record it posts, and only while it awaits:
 an ended record is the retired image, which holds none. -/
-theorem recordIn_recordImage {record found : Record}
+theorem recordIn_recordImage {record found : Record} (fits : record.Fits)
     (read : recordIn (recordImage record) = some found) :
     found = record ∧ ∃ await, record.phase = .awaiting await := by
   unfold recordImage at read
   split at read
   · rename_i await awaiting
-    simp only [recordIn, bodyOf_image, Option.bind_some, record_roundTrip, Option.some.injEq] at read
+    simp only [recordIn, bodyOf_image, Option.bind_some, record_roundTrip record fits, Option.some.injEq] at read
     exact ⟨read.symm, await, awaiting⟩
   · rw [recordIn_retired] at read; cases read
   · rw [recordIn_retired] at read; cases read
@@ -403,37 +403,39 @@ theorem commitYield_safe {rootBytes : Bytes → Digest} {config : Config} {snaps
   · cases ok
   · split at ok
     · cases ok
-    · rename_i written wrote
-      have stateSafe : ∀ post ∈ (written.map StateWritten.post).toList, PostSafe config snapshot post := by
-        intro post member
-        cases written with
-        | none => simp at member
-        | some one =>
-          simp only [Option.map_some, Option.toList_some, List.mem_singleton] at member
-          subst member
-          obtain ⟨_, _, _, _, exact⟩ := stateWrite_spec wrote
-          rw [exact]
-          exact state_post_safe read _
-      split at ok
-      · split at ok
-        · cases ok
-        · rename_i fresh
-          simp only [Except.ok.injEq] at ok
-          subst ok
+    · split at ok
+      · cases ok
+      · rename_i written wrote
+        have stateSafe : ∀ post ∈ (written.map StateWritten.post).toList, PostSafe config snapshot post := by
           intro post member
-          simp only [List.mem_append, List.mem_singleton] at member
-          rcases member with inState | isSlot
-          · exact stateSafe post inState
-          · subst isSlot
-            refine slot_post_safe (bodyOf_of_payload_none ?_) _
-            have both := fresh
-            simp only [Bool.or_eq_true, not_or, Option.isSome_iff_ne_none, ne_eq, not_not] at both
-            exact both.1
-      · split at ok
-        · cases ok
-        · simp only [Except.ok.injEq] at ok
-          subst ok
-          exact stateSafe
+          cases written with
+          | none => simp at member
+          | some one =>
+            simp only [Option.map_some, Option.toList_some, List.mem_singleton] at member
+            subst member
+            obtain ⟨_, _, _, _, exact⟩ := stateWrite_spec wrote
+            rw [exact]
+            exact state_post_safe read _
+        split at ok
+        · split at ok
+          · cases ok
+          · rename_i fresh
+            simp only [Except.ok.injEq] at ok
+            subst ok
+            intro post member
+            simp only [List.mem_append, List.mem_singleton] at member
+            rcases member with inState | isSlot
+            · exact stateSafe post inState
+            · subst isSlot
+              refine slot_post_safe (bodyOf_of_payload_none ?_) _
+              have both := fresh
+              simp only [Bool.or_eq_true, not_or, Option.isSome_iff_ne_none, ne_eq, not_not] at both
+              exact both.1
+        · split at ok
+          · cases ok
+          · simp only [Except.ok.injEq] at ok
+            subst ok
+            exact stateSafe
 
 theorem segmentCommit_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat}
@@ -561,7 +563,7 @@ theorem birth_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : 
   rcases member with isRecord | ((inYield | isBook) | inCount)
   · subst isRecord
     refine ⟨bodyOf_of_payload_none born.fresh, fun found read _ => ?_⟩
-    obtain ⟨same, await, awaiting⟩ := recordIn_recordImage read
+    obtain ⟨same, await, awaiting⟩ := recordIn_recordImage born.record_fits read
     subst same
     obtain ⟨state, plan, committed, yieldedSegment, _⟩ :=
       nextRecord_awaiting (born.recordExact ▸ awaiting)
@@ -598,7 +600,7 @@ theorem delivery_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot
   rcases member with isRecord | (((inSettlement | inYield) | isBook) | inCount)
   · subst isRecord
     refine ⟨readRecord_package delivery.recordExact, fun found read _ => ?_⟩
-    obtain ⟨same, await, awaiting⟩ := recordIn_recordImage read
+    obtain ⟨same, await, awaiting⟩ := recordIn_recordImage delivery.next_fits read
     subst same
     obtain ⟨state, plan, committed, yieldedSegment, _⟩ :=
       nextRecord_awaiting (delivery.nextExact ▸ awaiting)
@@ -638,7 +640,7 @@ theorem exhaustion_safe {rootBytes : Bytes → Digest} {config : Config} {snapsh
   rcases member with isRecord | isBook
   · subst isRecord
     refine ⟨readRecord_package exhausted.recordExact, fun found read _ => ?_⟩
-    obtain ⟨same, _, _⟩ := recordIn_recordImage read
+    obtain ⟨same, _, _⟩ := recordIn_recordImage exhausted.next_fits read
     subst same
     rw [exhausted.nextExact]
     exact recordTyped

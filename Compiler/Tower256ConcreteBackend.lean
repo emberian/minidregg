@@ -20,6 +20,8 @@ semantics.
 import Compiler.BinaryTower256Profile
 import Compiler.Sp800185Cshake256
 import Compiler.NatDigits255Fast
+import Theory.Bignum
+import Theory.AssertAxioms
 
 namespace Minidregg.Compiler.Tower256ConcreteBackend
 
@@ -254,6 +256,147 @@ def digestStream : StreamCodec Digest :=
   StreamCodec.xmap StreamCodec.nat (fun digest => digest.value)
     Digest.mk (by intro digest; cases digest; rfl)
 
+/-! ### Fixed-width streams
+
+`StreamCodec.nat` is a variable-length base-255 number, so a 256-bit value is 32
+OR 33 octets: the length of a record that carries digests depends on their
+values. A record whose length is CHARGED must not have that property
+(`Kernel.ObjectiveActivity.storageDeposit`), so its digests and heights go
+through these: exactly `width` octets, little-endian, always. A value is a
+`Fin (256 ^ width)`, so the codec is total and lawful on its own type and no
+out-of-range value exists to be encoded. -/
+
+/-- The low `width` octets of `value`, little-endian. Always exactly `width` long. -/
+def fixedOctets (width value : Nat) : List UInt8 :=
+  (Minidregg.Theory.Bignum.digitsLE 256 width value).map UInt8.ofNat
+
+@[simp] theorem fixedOctets_length (width value : Nat) :
+    (fixedOctets width value).length = width := by
+  simp [fixedOctets]
+
+/-- The number `octets` spell, little-endian. -/
+def fixedValue (octets : List UInt8) : Nat :=
+  Minidregg.Theory.Bignum.denoteNat 256 (octets.map UInt8.toNat)
+
+theorem fixedValue_lt (octets : List UInt8) : fixedValue octets < 256 ^ octets.length := by
+  have bound := Minidregg.Theory.Bignum.denoteNat_lt_pow (octets.map UInt8.toNat)
+    (by
+      intro digit member
+      rcases List.mem_map.mp member with ⟨byte, _, rfl⟩
+      exact byte.toNat_lt)
+  simpa [fixedValue] using bound
+
+theorem fixedValue_fixedOctets (width value : Nat) (fits : value < 256 ^ width) :
+    fixedValue (fixedOctets width value) = value := by
+  unfold fixedValue fixedOctets
+  have same : (Minidregg.Theory.Bignum.digitsLE 256 width value).map (fun digit => (UInt8.ofNat digit).toNat) =
+      Minidregg.Theory.Bignum.digitsLE 256 width value := by
+    have congr := List.map_congr_left (l := Minidregg.Theory.Bignum.digitsLE 256 width value)
+      (f := fun digit => (UInt8.ofNat digit).toNat) (g := id)
+      (fun digit member => UInt8.toNat_ofNat_of_lt
+        (Minidregg.Theory.Bignum.digitsLE_ranged (by decide) width value digit member))
+    simpa only [List.map_id, id_eq] using congr
+  rw [List.map_map]
+  change Minidregg.Theory.Bignum.denoteNat 256 ((Minidregg.Theory.Bignum.digitsLE 256 width value).map
+    (fun digit => (UInt8.ofNat digit).toNat)) = value
+  rw [same]
+  exact Minidregg.Theory.Bignum.denoteNat_digitsLE (by decide) width value fits
+
+/-- Exactly `width` octets, strict: a shorter input is refused, and every input of
+at least `width` octets spells exactly one value. -/
+def fixedStream (width : Nat) : StreamCodec (Fin (256 ^ width)) where
+  encode value := fixedOctets width value.val
+  decodePrefix octets :=
+    if enough : width ≤ octets.length then
+      some (⟨fixedValue (octets.take width), by
+        have bound := fixedValue_lt (octets.take width)
+        simpa [List.length_take, Nat.min_eq_left enough] using bound⟩, octets.drop width)
+    else none
+  decodePrefix_encode := by
+    intro value suffix
+    have enough : width ≤ (fixedOctets width value.val ++ suffix).length := by
+      simp
+    have taken : (fixedOctets width value.val ++ suffix).take width = fixedOctets width value.val :=
+      List.take_left' (fixedOctets_length _ _)
+    have dropped : (fixedOctets width value.val ++ suffix).drop width = suffix :=
+      List.drop_left' (fixedOctets_length _ _)
+    simp only [enough, dif_pos, taken, dropped]
+    exact congrArg (fun v : Fin (256 ^ width) => some (v, suffix)) (Fin.ext (fixedValue_fixedOctets width value.val value.isLt))
+
+theorem fixedStream_encode_length (width : Nat) (value : Fin (256 ^ width)) :
+    ((fixedStream width).encode value).length = width := fixedOctets_length _ _
+
+/-- A short input is refused, by name: the decoder never pads. -/
+theorem fixedStream_refuses_short (width : Nat) (octets : List UInt8)
+    (short : octets.length < width) : (fixedStream width).decodePrefix octets = none := by
+  simp [fixedStream, Nat.not_le.mpr short]
+
+/-- A 256-bit digest: exactly 32 octets (the cSHAKE output width). -/
+abbrev Digest256 := Fin (256 ^ 32)
+
+/-- A height: exactly 8 octets. -/
+abbrev Height64 := Fin (256 ^ 8)
+
+def digest256Stream : StreamCodec Digest256 := fixedStream 32
+
+def height64Stream : StreamCodec Height64 := fixedStream 8
+
+/-- A digest below `256 ^ 32` as a 256-bit value. The bound is an argument: a wider digest has
+no such view (nothing is reduced). Every hash output is below it
+(`Kernel.ObjectiveActivityWire.tagged_lt`). -/
+def toDigest256 (digest : Digest) (fits : digest.value < 256 ^ 32) : Digest256 := ⟨digest.value, fits⟩
+
+def ofDigest256 (value : Digest256) : Digest := ⟨value.val⟩
+
+theorem ofDigest256_toDigest256 (digest : Digest) (fits : digest.value < 256 ^ 32) :
+    ofDigest256 (toDigest256 digest fits) = digest := by
+  cases digest; rfl
+
+theorem toDigest256_ofDigest256 (value : Digest256) :
+    toDigest256 (ofDigest256 value) value.isLt = value := rfl
+
+theorem ofDigest256_lt (value : Digest256) : (ofDigest256 value).value < 256 ^ 32 := value.isLt
+
+/-- A height below `256 ^ 8` as an 8-octet value; the bound is an argument (nothing is reduced). -/
+def toHeight64 (height : Nat) (fits : height < 256 ^ 8) : Height64 := ⟨height, fits⟩
+
+theorem toHeight64_val (height : Nat) (fits : height < 256 ^ 8) : (toHeight64 height fits).val = height := rfl
+
+/-- The defect, witnessed on the VARIABLE codec: a 256-bit value and a 240-bit one are spelled in
+different numbers of octets, so a record carrying them has a length that depends on the value. -/
+theorem nat_width_varies :
+    (StreamCodec.nat.encode (2 ^ 256 - 1)).length ≠ (StreamCodec.nat.encode (2 ^ 240)).length := by
+  decide +kernel
+
+/-- The fixed codec spells the same two values in the same 32 octets. -/
+theorem digest256_width_constant (digest digest' : Digest256) :
+    (digest256Stream.encode digest).length = (digest256Stream.encode digest').length := by
+  unfold digest256Stream
+  rw [fixedStream_encode_length, fixedStream_encode_length]
+
+/-- A short input is refused by name: `digest256Stream` never pads and never reads a 33rd octet. -/
+theorem digest256_refuses_short (octets : List UInt8) (short : octets.length < 32) :
+    digest256Stream.decodePrefix octets = none := fixedStream_refuses_short 32 octets short
+
+/-- Every digest the decoder yields consumed exactly 32 octets. -/
+theorem digest256_consumes_32 (octets : List UInt8) (digest : Digest256) (rest : List UInt8)
+    (decoded : digest256Stream.decodePrefix octets = some (digest, rest)) :
+    rest = octets.drop 32 := by
+  unfold digest256Stream fixedStream at decoded
+  simp only at decoded
+  split at decoded
+  · simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+    exact decoded.2.symm
+  · cases decoded
+
+#assert_axioms fixedStream_encode_length
+#assert_axioms fixedStream_refuses_short
+#assert_axioms nat_width_varies
+#assert_axioms digest256_width_constant
+#assert_axioms digest256_refuses_short
+#assert_axioms digest256_consumes_32
+#assert_axioms toDigest256_ofDigest256
+#assert_axioms ofDigest256_toDigest256
 /-- The byte specialization of `StreamCodec.encodeMany` has no per-byte
 framing. Keep this equality explicit so the faster implementation below stays
 on the existing wire format. -/
