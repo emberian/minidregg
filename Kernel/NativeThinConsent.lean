@@ -656,21 +656,21 @@ built by `prepare` from the loaded authority cell at admission):
 * the child's revocation key is registered;
 * every other authority address is exactly the pre-state's. -/
 theorem delegate_display_is_commit {ambient : CapabilityDelegationController.Ambient}
-    {durable : CapabilityDelegationController.Durable} {kind : ResourceKind}
+    {ground : CapabilityDelegationController.Ground deployment} {kind : ResourceKind}
     {command : CapabilityDelegationController.Command kind}
-    (prepared : CapabilityDelegationController.Prepared deployment profile ambient durable command) :
+    (prepared : CapabilityDelegationController.Prepared deployment profile ambient ground command) :
     readCapability prepared.authorityPost kind command.declaration.child.id =
         some (delegatedCapability command.declaration.child prepared.parent
-          (CapabilityDelegationController.request prepared.authority.snapshot profile.semantics
+          (CapabilityDelegationController.request ground.authority profile.semantics
             ambient command)) ∧
-      readCapability prepared.authority.snapshot.cell kind command.declaration.parentId =
+      readCapability ground.authority.cell kind command.declaration.parentId =
         some prepared.parent ∧
       isRegistered prepared.authorityPost (.capability command.declaration.child.id) = true ∧
       ∀ address, address ∉ delegateFootprint (kind := kind) command.declaration.child.id →
-        prepared.authorityPost.logical address = prepared.authority.snapshot.cell.logical address := by
+        prepared.authorityPost.logical address = ground.authority.cell.logical address := by
   have entryWritten := apply_creation_member prepared.validated rfl
     (command.declaration.capabilityEntry prepared.parent
-      (CapabilityDelegationController.request prepared.authority.snapshot profile.semantics ambient command))
+      (CapabilityDelegationController.request ground.authority profile.semantics ambient command))
     (by simp)
   have registrationWritten := apply_creation_member prepared.validated rfl
     (registrationEntry (.capability command.declaration.child.id)) (by simp)
@@ -683,15 +683,15 @@ theorem delegate_display_is_commit {ambient : CapabilityDelegationController.Amb
     change prepared.validated.apply.logical address = _
     rw [CellState.ValidatedPatch.apply_logical]
     unfold DelegateDeclaration.patch
-    change Patch.run prepared.authority.snapshot.cell.logical
-      (CredentialAuthorityEffects.assignAll prepared.authority.snapshot.cell.logical _) address = _
+    change Patch.run ground.authority.cell.logical
+      (CredentialAuthorityEffects.assignAll ground.authority.cell.logical _) address = _
     rw [run_assignAll]
     exact setAll_frame _ _ address (by
       simpa [DelegateDeclaration.entries, DelegateDeclaration.capabilityEntry, registrationEntry,
         delegateFootprint] using outside)
 
 /-- **Gates refuse only.** Two executor preparations of the same signed
-delegation, over ANY two loaded states and admission heights (any nullifier set,
+delegation, over ANY two grounds and admission heights (any nullifier set,
 parent lineage, revocation and registration planes, issuer and policy epochs,
 policy revision, target root and law), write the same shown effect: the same
 child head at the same address, the same registration, and nothing else. Each
@@ -705,17 +705,17 @@ the parent the signer holds, `Accepted.parent_authorized`). A failing gate makes
 `prepare` or `authorize` refuse; none feeds the shown effect. Only the
 kernel-owned lineage may differ: each is the copy of its own state's parent. -/
 theorem delegate_gate_refuse_only {ambient₁ ambient₂ : CapabilityDelegationController.Ambient}
-    {durable₁ durable₂ : CapabilityDelegationController.Durable} {kind : ResourceKind}
+    {ground₁ ground₂ : CapabilityDelegationController.Ground deployment} {kind : ResourceKind}
     {command : CapabilityDelegationController.Command kind}
-    (one : CapabilityDelegationController.Prepared deployment profile ambient₁ durable₁ command)
-    (two : CapabilityDelegationController.Prepared deployment profile ambient₂ durable₂ command) :
+    (one : CapabilityDelegationController.Prepared deployment profile ambient₁ ground₁ command)
+    (two : CapabilityDelegationController.Prepared deployment profile ambient₂ ground₂ command) :
     (readCapability one.authorityPost kind command.declaration.child.id).map StoredCapability.head =
         (readCapability two.authorityPost kind command.declaration.child.id).map StoredCapability.head ∧
       isRegistered one.authorityPost (.capability command.declaration.child.id) =
         isRegistered two.authorityPost (.capability command.declaration.child.id) ∧
       (∀ address, address ∉ delegateFootprint (kind := kind) command.declaration.child.id →
-        one.authorityPost.logical address = one.authority.snapshot.cell.logical address ∧
-        two.authorityPost.logical address = two.authority.snapshot.cell.logical address) := by
+        one.authorityPost.logical address = ground₁.authority.cell.logical address ∧
+        two.authorityPost.logical address = ground₂.authority.cell.logical address) := by
   obtain ⟨written₁, _, registered₁, frame₁⟩ := delegate_display_is_commit one
   obtain ⟨written₂, _, registered₂, frame₂⟩ := delegate_display_is_commit two
   refine ⟨?_, by rw [registered₁, registered₂], fun address outside =>
