@@ -312,6 +312,7 @@ Minidregg.Kernel.ObjectiveActivity.Postings.mk | Kernel.ObjectiveActivity | evid
 Minidregg.Kernel.ObjectiveActivity.Program.mk | Kernel.ObjectiveActivity | evidence | L2 | 3 proof / 8 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Publication.mk | Kernel.ObjectiveActivity | evidence | L2 | 5 proof / 5 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Rebirth.mk | Kernel.ObjectiveActivityUpgrade | evidence | L2 | upgrade-turns (DEPUTY-OB-ENG): proof fields mirror the admitting checks per its audit; L1 theorem pending from OB-ENG
+Minidregg.Kernel.ObjectiveActivity.Registration.mk | Kernel.ObjectiveDomain | evidence | L2 | 7 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Replay.mk | Kernel.ObjectiveActivity | evidence | L2 | 4 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Resolution.mk | Kernel.ObjectiveActivity | evidence | L2 | 5 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.ResumeHead.mk | Kernel.ObjectiveActivity | evidence | L2 | DEPUTY-OB-ENG type; layer-1 review pending (OB-ENG)
