@@ -524,11 +524,13 @@ The kernel runs activities on objects. Detail, with every turn and theorem, is i
   `exhaust`, `abandon`, `topUp`, `invoke`, `deliverMessage`, `adopt`, `migrate`, `abortDrained`,
   `rebirth`, `registerDomain`. The receiver writes only kernel cells and the Book
   (`intent_writes_activity_or_book`). Proofs that classify every turn (`AdmittedTurn`, no
-  wildcard) break when a turn is added, by design. **Executed on scratch worlds**: the pipeline
-  journey rows `activity`, `objectrecord`, `call`, `send`, `seats`, `bounty`; the domain journey
-  (`objective-domain-native-journey.py`, D1-D4) runs from its driver but is not a pipeline row.
-  **No executed row** drives the upgrade turns (`world/activity/TallyV2.obend` lowers and is
-  checked; cv 01a1141b-d4f6).
+  wildcard) break when a turn is added, by design. **Executed on scratch worlds** after every
+  landing, by the pipeline journey rows: `activity`, `objectrecord`, `call`, `send`, `seats`,
+  `bounty`, `domain` (D1-D4; D5 arrives with row-a3b-2) and `upgrade` (`objective-upgrade-native-journey.py`, U1-U5: ADOPT to
+  `world/activity/TallyV2.obend` with a migration, a drained write the next law refuses refused
+  `upgradeConflict`, `abortDrained` before and at the deadline, MIGRATE, REBIRTH). A Host built
+  without the drained judgment (`scripts/plants/drain-blind.py`) commits that write and then
+  cannot MIGRATE, the failure `migrate_cannot_fail` rules out.
 
 ## Calls and sends
 
@@ -578,7 +580,13 @@ purse of the queue holding it (`uncovered` otherwise; `Invocation.escrows_every_
   same way when the reply resolves to an object; otherwise it is refunded.
 - **Inboxes** are per-(sender, target) FIFO queues of at most 16 (`queueFull`). The queue
   discipline is push, pop or withdraw, nothing else (`Inbox.Lawful`, `lawful_fifo`;
-  `reorder_unlawful` is the tooth). `deliverMessage` (anyone) pops the head, checks that the reply
+  `reorder_unlawful` is the tooth). A queued message pays a **storage deposit**, the rate per octet
+  of its widest spelling (`Inbox.storageDeposit`, `chargedBytes_covers`; a message that does not fit
+  that spelling is refused `messageWide`), escrowed with its postage and returned whenever it leaves
+  the queue. An inbox left EMPTY is retired (it retains nothing) and its purse closed in the same
+  batch when the Book admits closing it (`Mail.empty_inbox_retired`, `Mail.deregistrations_admitted`);
+  the next send to the pair opens it afresh. A reply slot names the object that sent its message, which
+  pays for it and controls it after it is decided, whether or not the inbox still exists. `deliverMessage` (anyone) pops the head, checks that the reply
   slot answers to that inbox, and runs the target's method with `request/caller` the sender and no
   subject, paid from the inbox purse only (`debits_only_purse`). A failed delivery pops, decides
   `broken` naming the reason and commits no write (`failed_delivery_pops`).
@@ -591,7 +599,7 @@ purse of the queue holding it (`uncovered` otherwise; `Invocation.escrows_every_
   it does not spend returns to the payer. `escrow_conservation` proves, over the committed batch's
   own postings, that a send credits exactly its escrow, a delivery pays out exactly the popped
   escrow plus what was pipelined on its slot (with spent ≤ allowance), and a cancel refunds exactly
-  what it withdrew. `MessageDelivery.onward_bounded` and `chain_total` bound what one message's
+  what it withdrew (every escrow is postage + allowance + deposit). `MessageDelivery.onward_bounded` and `chain_total` bound what one message's
   chain can post.
 - **The sender controls its own speech.** A frame of the SENDING object may yield `stop {slot}`
   (stop waiting: pipelined sends refunded, the slot unwatched and retired when decided; the
@@ -809,10 +817,9 @@ records that a value came from the call that produced it.
 - **Machine**: a resource bound for completeness (completion is finite, not bounded); use
   counts at run time (quantities are static); `stepRaw` linear in the heap.
 - **Kernel**: upgrade is single-turn MIGRATE only (no multi-turn `migrating` phase, cv
-  01a1141b-d4b5), has no interface-compatibility check (no facet table, cv 01a1141b-d4d6) and no
-  executed journey row (cv 01a1141b-d4f6); domains cannot be left or changed (cv 01a115c9-d990)
+  01a1141b-d4b5) and has no interface-compatibility check (no facet table, cv 01a1141b-d4d6); domains cannot be left or changed (cv 01a115c9-d990)
   and their judgment is not priced (cv 01a115c9-d9b7); a storage charge for packages, object
-  records and state cells (an activity's record carries a refundable deposit); activities that call, send or await a message (above); objects holding capabilities.
+  records and state cells (an activity's record and a queued message carry refundable deposits); activities that call, send or await a message (above); objects holding capabilities.
 - **Language** (OB3, OB6): a digest primitive callable from source (`Theory/ObjectiveBendDigest`
   exists; Core4 has no digest term); sum-typed entry arguments and unary `!`; `before` and
   `after` methods; sealing, `final`, field enumeration.

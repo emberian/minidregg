@@ -92,7 +92,7 @@ def cap(ticks, full=True):
 # `{needed, escrow}` from the very prefix and `ResumeTail.needed` that the turns' `heapUncovered` refusal
 # uses (Kernel/ObjectiveActivity `resumeQuote`). A quote the Host refuses (retired record, other await) leaves
 # the command as it is, so the turn's own refusal is what gets judged.
-RESUME_KINDS = ('deliver', 'exhaust')
+RESUME_KINDS = ('deliver', 'exhaust', 'abortDrained')  # abortDrained resumes one segment too
 
 
 def quote_request(body):

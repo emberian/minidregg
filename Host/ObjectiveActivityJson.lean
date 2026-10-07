@@ -463,7 +463,14 @@ def cellJson (domain : Digest) (cell : Nat) (root : Digest) (bytes : List UInt8)
             ("effectiveLaw", toJson (reprStr record.effectiveLaw)),
             ("upgrade", upgradeJson record.upgrade), ("continuity", decimal record.continuity),
             ("payer", decimal record.payer),
-            ("domains", .arr (record.domains.map fun id => decimal id.value).toArray)]
+            ("domains", .arr (record.domains.map fun id => decimal id.value).toArray),
+            ("live", decimal record.live), ("rebirths", decimal record.rebirths),
+            ("phase", match record.phase with
+              | .steady => .mkObj [("steady", .mkObj [])]
+              | .draining next deadline => .mkObj [("draining", .mkObj [("pin", decimal next.pin.value),
+                  ("deadline", decimal deadline), ("live", decimal next.live),
+                  ("migration", match next.migration with | some m => toJson m | none => .null),
+                  ("rebirth", .arr (next.rebirth.map fun d => decimal d.value).toArray)])])]
         | none => [("kind", "object-undecodable")]
       | .inbox => match Inbox.decode payload.body with
         | some inbox => [("kind", "inbox"), ("inbox", inboxJson inbox), ("purseAccount", decimal cell)]

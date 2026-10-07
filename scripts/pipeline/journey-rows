@@ -12,7 +12,7 @@
 # OUT/subrows.tsv (ID<TAB>STATUS<TAB>WALL_S<TAB>DETAIL) to report one table row per step; the
 # last stderr line is the row's detail. Rows generate their own test keys inside RUN; no secret
 # ever reaches the box. OWNER hints: OUT/owner (a lane name) when the row can tell.
-JOURNEY_ROWS=(journey objective rooms activity seats bounty call send objectrecord welcomecontinuity sshe2e)
+JOURNEY_ROWS=(journey objective rooms activity seats bounty call send domain upgrade objectrecord welcomecontinuity sshe2e)
 
 # J0-J8 + the rotation rows (JROT, JROTL, and JRLANE, JAUDIT and any *SEAT* step when the tip's journey.sh
 # has them), one fresh Store, through native/resource-client/journey.sh.
@@ -126,6 +126,38 @@ row_send() {
   cp "$RUN/s/groups.tsv" "$OUT/subrows.tsv" 2>/dev/null
   cp -r "$RUN/s/transcript" "$OUT/" 2>/dev/null
   tail -1 "$OUT/send.out" >&2
+  return $rc
+}
+
+# Registered invariant domains (GPT-6 row A, A3; Kernel/ObjectiveDomain): D1-D4 on a fresh native world (a joint
+# law refuses a write each object's own law admits; registration refusals; a stale plan re-judged on a member's
+# new state; the bank reserve = sum of balances). Plants via JOURNEY_PLANT_DOMAIN (member-permit; domain-blind
+# needs a Host built from a tree patched by scripts/plants/domain-blind.py), as row_call.
+row_domain() {
+  local d=$SRC/native/resource-client/objective-domain-native-journey.py
+  [ -f "$d" ] || return 99
+  (cd "$SRC" && python3 "$d" --bin "$BIN" --root "$RUN/d" ${JOURNEY_PLANT_DOMAIN:+--plant "$JOURNEY_PLANT_DOMAIN"}) >"$OUT/domain.out" 2>"$OUT/domain.err"
+  local rc=$?
+  cp "$RUN/d/results.json" "$OUT/" 2>/dev/null
+  cp "$RUN/d/groups.tsv" "$OUT/subrows.tsv" 2>/dev/null
+  cp -r "$RUN/d/transcript" "$OUT/" 2>/dev/null
+  tail -1 "$OUT/domain.out" >&2
+  return $rc
+}
+
+# The governed upgrade (Kernel/ObjectiveActivityUpgrade): U1-U5 on a fresh native world -- ADOPT to TallyV2 with a
+# migration, the drain (an old activity's write judged by the old law and, migrated, by the new), abortDrained
+# after the deadline, MIGRATE, REBIRTH of a chosen activity on the new package. Plants via JOURNEY_PLANT_UPGRADE
+# (drain-blind needs a Host built from a tree patched by scripts/plants/drain-blind.py).
+row_upgrade() {
+  local d=$SRC/native/resource-client/objective-upgrade-native-journey.py
+  [ -f "$d" ] || return 99
+  (cd "$SRC" && python3 "$d" --bin "$BIN" --root "$RUN/u" ${JOURNEY_PLANT_UPGRADE:+--plant "$JOURNEY_PLANT_UPGRADE"}) >"$OUT/upgrade.out" 2>"$OUT/upgrade.err"
+  local rc=$?
+  cp "$RUN/u/results.json" "$OUT/" 2>/dev/null
+  cp "$RUN/u/groups.tsv" "$OUT/subrows.tsv" 2>/dev/null
+  cp -r "$RUN/u/transcript" "$OUT/" 2>/dev/null
+  tail -1 "$OUT/upgrade.out" >&2
   return $rc
 }
 
