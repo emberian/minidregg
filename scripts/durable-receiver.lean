@@ -292,14 +292,16 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
     (DurableCheckpoint.State.ofSeed seed)
   let .ok () ← secondTransport.putCheckpoint 1 (checkpointFrame.encode rolledBack)
     | throw (IO.userError "FAIL store")
-  let resumedRollback ← loadExact secondTransport
-  require "a key-holder's dishonest checkpoint is trusted on open (Q1): it resumes the rolled-back cell"
-    (resumedRollback.snapshot.canonicalBytes ⟨1⟩ == [1])
+  -- A key-holder's dishonest checkpoint AT THE HEAD no longer resumes silently:
+  -- the head entry's MAC'd tag carries the root after the head, and the open
+  -- refuses a replayed root that differs from it.
+  expectOpenRefused "a dishonest checkpoint at the head (its root differs from the head tag's)"
+    secondTransport
   let .ok () ← secondTransport.putCheckpoint 1 (checkpointFrame.encode honest)
     | throw (IO.userError "FAIL store")
   require "the honest checkpoint resumes the committed cell"
     ((← loadExact secondTransport).snapshot.canonicalBytes ⟨1⟩ == [11])
-  IO.println s!"PASS durable receiver: Lean codec/executor + SQLite log, two-cell repeated commit, replay/conflict/read/write/nullifier/budget refusal, process-exit rollback, lost-response readback, concurrent guard move, pinned admission refuses journal-only race, exact entry under a later commit, checkpoint at height {checkpoint.height} resumes to the genesis replay, a past read at each of heights 0..{head} equals the genesis fold of its prefix, forged tag and forged checkpoint MAC refuse to open; {head} commits"
+  IO.println s!"PASS durable receiver: Lean codec/executor + SQLite log, two-cell repeated commit, replay/conflict/read/write/nullifier/budget refusal, process-exit rollback, lost-response readback, concurrent guard move, pinned admission refuses journal-only race, exact entry under a later commit, checkpoint at height {checkpoint.height} resumes to the genesis replay, a past read at each of heights 0..{head} equals the genesis fold of its prefix, forged tag, forged checkpoint MAC and a dishonest checkpoint at the head refuse to open; {head} commits"
 
 end DurableReceiverProbe
 
