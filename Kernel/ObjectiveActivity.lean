@@ -173,23 +173,87 @@ structure Record where
   phase : Phase
   deriving DecidableEq, Repr
 
-def sourceStream : StreamCodec Source :=
-  StreamCodec.xmap (StreamCodec.sum (StreamCodec.product digestStream subjectStream) StreamCodec.nat)
-    (fun source => match source with
-      | .reply slot decider => .inl (slot, decider)
-      | .height due => .inr due)
-    (fun wire => match wire with
-      | .inl (slot, decider) => .reply slot decider
-      | .inr due => .height due)
-    (by intro source; cases source <;> rfl)
+/-! ### The record's wire is fixed-width where it is charged
 
-def awaitStream : StreamCodec Await :=
-  StreamCodec.xmap
-    (StreamCodec.product digestStream (StreamCodec.product sourceStream
-      (StreamCodec.product StreamCodec.nat StreamCodec.nat)))
-    (fun a => (a.id, a.source, a.deadline, a.yieldedAt))
-    (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2⟩)
-    (by intro a; cases a; rfl)
+Every octet of the record is charged (`storageDeposit`), and the deposit is inside
+the transaction that stores the record, so the record's length must not depend on
+anything a quote and the submission it prices do not share. What they do not
+share is the transaction (its nonce, hence every digest derived from it) and the
+height. So the record's digests are exactly 32 octets and its heights exactly 8
+(`digest256Stream`, `height64Stream`), never the variable base-255 `StreamCodec.nat`
+that wrote a 256-bit value as 32 or 33 octets. Every other number in the record
+(the escrow's account, capacities and fees, the generation, `tried`, length
+prefixes) is a function of the request and the program alone: identical at the
+quote and at the submission. The deposit itself is not in the record.
+
+The record type is unchanged and unbounded (`Digest` is, by design: the Theory's
+binding models need it); `Record.Fits` says the six digests are below `256 ^ 32`
+and the heights below `256 ^ 8`, and every admitted record fits
+(`Birth.record_fits`, `Delivery.next_fits`, `Exhaustion.next_fits`). -/
+
+def Source.Fits : Source → Prop
+  | .reply slot _ => slot.value < 256 ^ 32
+  | .height due => due < 256 ^ 8
+
+def Await.Fits (await : Await) : Prop :=
+  await.id.value < 256 ^ 32 ∧ await.source.Fits ∧ await.deadline < 256 ^ 8 ∧ await.yieldedAt < 256 ^ 8
+
+def Phase.Fits : Phase → Prop
+  | .awaiting await => await.Fits
+  | .done _ => True
+  | .faulted _ => True
+
+/-- The four digests of a record are 256-bit. -/
+def Record.DigestsFit (record : Record) : Prop :=
+  record.object.value < 256 ^ 32 ∧ record.activity.value < 256 ^ 32 ∧ record.pin.value < 256 ^ 32 ∧
+    record.checkpointDigest.value < 256 ^ 32
+
+def Record.Fits (record : Record) : Prop := record.DigestsFit ∧ record.phase.Fits
+
+abbrev SourceWire := (Digest256 × SubjectId) ⊕ Height64
+abbrev AwaitWire := Digest256 × (SourceWire × (Height64 × Height64))
+abbrev PhaseWire := AwaitWire ⊕ (Bytes ⊕ String)
+abbrev RecordWire := Digest256 × (Digest256 × (Digest256 × (Bytes × (Nat × (Bytes × (Digest256 ×
+  (Escrow × (Nat × PhaseWire))))))))
+
+def Source.toWire : Source → SourceWire
+  | .reply slot decider => .inl (toDigest256 slot, decider)
+  | .height due => .inr (toHeight64 due)
+
+def Source.ofWire : SourceWire → Source
+  | .inl (slot, decider) => .reply (ofDigest256 slot) decider
+  | .inr due => .height due.val
+
+def Await.toWire (await : Await) : AwaitWire :=
+  (toDigest256 await.id, await.source.toWire, toHeight64 await.deadline, toHeight64 await.yieldedAt)
+
+def Await.ofWire (wire : AwaitWire) : Await :=
+  ⟨ofDigest256 wire.1, Source.ofWire wire.2.1, wire.2.2.1.val, wire.2.2.2.val⟩
+
+def Phase.toWire : Phase → PhaseWire
+  | .awaiting await => .inl await.toWire
+  | .done result => .inr (.inl result)
+  | .faulted reason => .inr (.inr reason)
+
+def Phase.ofWire : PhaseWire → Phase
+  | .inl await => .awaiting (Await.ofWire await)
+  | .inr (.inl result) => .done result
+  | .inr (.inr reason) => .faulted reason
+
+def Record.toWire (r : Record) : RecordWire :=
+  (toDigest256 r.object, toDigest256 r.activity, toDigest256 r.pin, r.input, r.generation, r.checkpoint,
+    toDigest256 r.checkpointDigest, r.escrow, r.tried, r.phase.toWire)
+
+def Record.ofWire (w : RecordWire) : Record :=
+  ⟨ofDigest256 w.1, ofDigest256 w.2.1, ofDigest256 w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2.1,
+    ofDigest256 w.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.1, Phase.ofWire w.2.2.2.2.2.2.2.2.2⟩
+
+def sourceWire : StreamCodec SourceWire :=
+  StreamCodec.sum (StreamCodec.product digest256Stream subjectStream) height64Stream
+
+def awaitWire : StreamCodec AwaitWire :=
+  StreamCodec.product digest256Stream (StreamCodec.product sourceWire
+    (StreamCodec.product height64Stream height64Stream))
 
 def escrowStream : StreamCodec Escrow :=
   StreamCodec.xmap
@@ -200,41 +264,149 @@ def escrowStream : StreamCodec Escrow :=
     (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2⟩)
     (by intro e; cases e; rfl)
 
-def phaseStream : StreamCodec Phase :=
-  StreamCodec.xmap (StreamCodec.sum awaitStream (StreamCodec.sum bytesStream stringStream))
-    (fun phase => match phase with
-      | .awaiting a => .inl a
-      | .done result => .inr (.inl result)
-      | .faulted reason => .inr (.inr reason))
-    (fun wire => match wire with
-      | .inl a => .awaiting a
-      | .inr (.inl result) => .done result
-      | .inr (.inr reason) => .faulted reason)
-    (by intro phase; cases phase <;> rfl)
+def phaseWire : StreamCodec PhaseWire :=
+  StreamCodec.sum awaitWire (StreamCodec.sum bytesStream stringStream)
 
-def recordStream : StreamCodec Record :=
-  StreamCodec.xmap
-    (StreamCodec.product digestStream (StreamCodec.product digestStream
-      (StreamCodec.product digestStream (StreamCodec.product bytesStream
-      (StreamCodec.product StreamCodec.nat (StreamCodec.product bytesStream
-      (StreamCodec.product digestStream
-      (StreamCodec.product escrowStream (StreamCodec.product StreamCodec.nat phaseStream)))))))))
-    (fun r => (r.object, r.activity, r.pin, r.input, r.generation, r.checkpoint, r.checkpointDigest,
-      r.escrow, r.tried, r.phase))
-    (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2.1, w.2.2.2.2.2.2.1,
-      w.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.2⟩)
-    (by intro r; cases r; rfl)
+def recordWire : StreamCodec RecordWire :=
+  StreamCodec.product digest256Stream (StreamCodec.product digest256Stream
+    (StreamCodec.product digest256Stream (StreamCodec.product bytesStream
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product bytesStream
+    (StreamCodec.product digest256Stream
+    (StreamCodec.product escrowStream (StreamCodec.product StreamCodec.nat phaseWire))))))))
 
-/-- v5: the escrow holds declared envelopes (`Capacity`), not tick counts; v4: the record carries `tried` (the envelope its exhausted attempts at the
+/-- v6: the record is FIXED-WIDTH where it is charged (digests 32 octets, heights 8:
+`digest256Stream`, `height64Stream`), so `|encodeRecord|`, hence the storage deposit,
+does not depend on the digests or heights (`encodeRecord_length_mask`); v5: the escrow holds declared envelopes (`Capacity`), not tick counts; v4: the record carries `tried` (the envelope its exhausted attempts at the
 current await reached); v3: no recorded reads (resume with view reads the state
 in the resuming turn); v2: the escrow names the payer's Book account. -/
-def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v5".toUTF8.toList
-def recordCodec := framed recordFrame recordStream
-def encodeRecord (record : Record) : Bytes := recordCodec.encode record
-def decodeRecord (bytes : Bytes) : Option Record := recordCodec.decode bytes
+def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v6".toUTF8.toList
 
-theorem record_roundTrip (record : Record) : decodeRecord (encodeRecord record) = some record :=
-  framed_roundTrip _ _ record
+/-- The record's bytes: the frame, then the fixed-width wire. TOTAL, and the identity
+on a fitting record's value (`record_roundTrip`); a record that does not fit is never
+admitted, so is never encoded for storage. -/
+def encodeRecord (record : Record) : Bytes := recordFrame ++ recordWire.encode record.toWire
+
+/-- Strict: the frame, a wire that decodes, and the record re-encoding to exactly the
+input bytes (no second spelling of a number or a string). -/
+def decodeRecord (bytes : Bytes) : Option Record :=
+  if bytes.take recordFrame.length = recordFrame then
+    match recordWire.toLawful.decode (bytes.drop recordFrame.length) with
+    | some wire => if encodeRecord (Record.ofWire wire) = bytes then some (Record.ofWire wire) else none
+    | none => none
+  else none
+
+theorem Source.ofWire_toWire (source : Source) (fits : source.Fits) :
+    Source.ofWire source.toWire = source := by
+  cases source with
+  | reply slot decider =>
+      simp only [Source.toWire, Source.ofWire]
+      rw [ofDigest256_toDigest256 slot fits]
+  | height due =>
+      simp only [Source.toWire, Source.ofWire]
+      rw [toHeight64_val due fits]
+
+theorem Await.ofWire_toWire (await : Await) (fits : await.Fits) : Await.ofWire await.toWire = await := by
+  obtain ⟨id, source, deadline, yieldedAt⟩ := await
+  obtain ⟨hid, hsource, hdeadline, hyielded⟩ := fits
+  simp only [Await.toWire, Await.ofWire, ofDigest256_toDigest256 id hid,
+    Source.ofWire_toWire source hsource, toHeight64_val _ hdeadline, toHeight64_val _ hyielded]
+
+theorem Phase.ofWire_toWire (phase : Phase) (fits : phase.Fits) : Phase.ofWire phase.toWire = phase := by
+  cases phase with
+  | awaiting await => simp only [Phase.toWire, Phase.ofWire, Await.ofWire_toWire await fits]
+  | done result => rfl
+  | faulted reason => rfl
+
+theorem Record.ofWire_toWire (record : Record) (fits : record.Fits) : Record.ofWire record.toWire = record := by
+  obtain ⟨object, activity, pin, input, generation, checkpoint, checkpointDigest, escrow, tried, phase⟩ := record
+  obtain ⟨⟨hobject, hactivity, hpin, hcheckpoint⟩, hphase⟩ := fits
+  simp only [Record.toWire, Record.ofWire, ofDigest256_toDigest256 object hobject,
+    ofDigest256_toDigest256 activity hactivity, ofDigest256_toDigest256 pin hpin,
+    ofDigest256_toDigest256 checkpointDigest hcheckpoint, Phase.ofWire_toWire phase hphase]
+
+theorem Source.ofWire_fits (wire : SourceWire) : (Source.ofWire wire).Fits := by
+  cases wire with
+  | inl pair => exact ofDigest256_lt pair.1
+  | inr due => exact due.isLt
+
+theorem Await.ofWire_fits (wire : AwaitWire) : (Await.ofWire wire).Fits :=
+  ⟨ofDigest256_lt _, Source.ofWire_fits _, wire.2.2.1.isLt, wire.2.2.2.isLt⟩
+
+theorem Phase.ofWire_fits (wire : PhaseWire) : (Phase.ofWire wire).Fits := by
+  cases wire with
+  | inl await => exact Await.ofWire_fits await
+  | inr rest => cases rest <;> trivial
+
+theorem Record.ofWire_fits (wire : RecordWire) : (Record.ofWire wire).Fits :=
+  ⟨⟨ofDigest256_lt _, ofDigest256_lt _, ofDigest256_lt _, ofDigest256_lt _⟩, Phase.ofWire_fits _⟩
+
+/-- **A fitting record round-trips.** -/
+theorem record_roundTrip (record : Record) (fits : record.Fits) :
+    decodeRecord (encodeRecord record) = some record := by
+  have taken : (encodeRecord record).take recordFrame.length = recordFrame := List.take_left' rfl
+  have dropped : (encodeRecord record).drop recordFrame.length = recordWire.encode record.toWire :=
+    List.drop_left' rfl
+  have wire : recordWire.toLawful.decode (recordWire.encode record.toWire) = some record.toWire :=
+    recordWire.toLawful.decode_encode record.toWire
+  have back := Record.ofWire_toWire record fits
+  unfold decodeRecord
+  rw [taken, if_pos rfl, dropped, wire]
+  simp only [back, if_true]
+
+/-- A decoded record is exactly the one whose encoding it was read from, and fits. -/
+theorem decodeRecord_some {bytes : Bytes} {record : Record} (decoded : decodeRecord bytes = some record) :
+    encodeRecord record = bytes ∧ record.Fits := by
+  unfold decodeRecord at decoded
+  split at decoded
+  · split at decoded
+    · rename_i wire _
+      split at decoded
+      · rename_i same
+        cases decoded
+        exact ⟨same, Record.ofWire_fits wire⟩
+      · cases decoded
+    · cases decoded
+  · cases decoded
+
+/-! ### The fixed point: the encoding's length does not depend on digests or heights -/
+
+def Source.mask : Source → Source
+  | .reply _ decider => .reply ⟨0⟩ decider
+  | .height _ => .height 0
+
+def Await.mask (await : Await) : Await := ⟨⟨0⟩, await.source.mask, 0, 0⟩
+
+def Phase.mask : Phase → Phase
+  | .awaiting await => .awaiting await.mask
+  | .done result => .done result
+  | .faulted reason => .faulted reason
+
+/-- The record with every digest and every height replaced by zero. -/
+def Record.mask (record : Record) : Record :=
+  { record with object := ⟨0⟩, activity := ⟨0⟩, pin := ⟨0⟩, checkpointDigest := ⟨0⟩, phase := record.phase.mask }
+
+/-- **The charged length is a function of the record's shape**: replacing every digest and
+every height by zero leaves `|encodeRecord|` unchanged, for EVERY record. A quote taken at
+one nonce and one height (whose digests and heights differ from the submission's) is the
+same size as the submission. -/
+theorem encodeRecord_length_mask (record : Record) :
+    (encodeRecord record.mask).length = (encodeRecord record).length := by
+  have phase : ∀ p : Phase, (phaseWire.encode p.mask.toWire).length = (phaseWire.encode p.toWire).length := by
+    intro p
+    cases p with
+    | awaiting await =>
+        obtain ⟨id, source, deadline, yieldedAt⟩ := await
+        cases source <;>
+          simp [Phase.mask, Await.mask, Source.mask, Phase.toWire, Await.toWire, Source.toWire,
+            phaseWire, awaitWire, sourceWire, StreamCodec.sum, StreamCodec.product,
+            digest256Stream, height64Stream, fixedStream_encode_length]
+    | done _ => rfl
+    | faulted _ => rfl
+  unfold encodeRecord
+  simp only [List.length_append]
+  congr 1
+  simp [recordWire, Record.toWire, Record.mask, StreamCodec.product, phase, digest256Stream,
+    fixedStream_encode_length]
 
 /-! ## Cells: protected coordinates
 
@@ -405,6 +577,13 @@ inductive Refusal where
   coordinate holds the registry's retired image; it is never read or reborn. -/
   | recordRetired
   | patience (patience maximum : Nat)
+  /-- A birth names an object or a package whose id is not a 256-bit digest: the charged
+  record has one fixed-width spelling of a digest (`digest256Stream`), so a wider one is
+  refused rather than truncated. -/
+  | digestWide (object pin : Digest)
+  /-- An await's deadline (the yield height plus its patience) does not fit the record's
+  8-octet height. -/
+  | heightWide (height patience : Nat)
   /-- A declared envelope does not cover the turn (`Config.covers`). -/
   | uncovered (envelope : Capacity)
   | plan (reason : String) | messageAwaitNeedsInbox
@@ -1178,6 +1357,7 @@ def commitYield {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
     Except Refusal YieldCommit :=
   if plan.patience = 0 ∨ config.maxPatience < plan.patience then
     .error (.patience plan.patience config.maxPatience) else
+  if 256 ^ 8 ≤ height + plan.patience then .error (.heightWide height plan.patience) else
   match stateWrite config snapshot object current viewed plan.write with
   | .error reason => .error reason
   | .ok written =>
@@ -1551,74 +1731,79 @@ structure Birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
   funded : ¬ (segment.yields ∧ request.deposit <
     (escrowOf config.tariff request.subject request.account request.resume request.timeout).pair +
       storageDeposit config record)
+  /-- The request's object and package ids are 256-bit digests: the charged record spells a
+  digest in exactly 32 octets (`digestWide` refuses a wider one). -/
+  narrow : request.object.value < 256 ^ 32 ∧ request.pin.value < 256 ^ 32
 
 def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : BirthRequest) : Except Refusal (Birth config snapshot height request) := do
-  match objectExact : readObject config snapshot request.object with
-  | .error reason => throw reason
-  | .ok none => throw .notAnObject
-  | .ok (some object) =>
-    if pinned : object.pin = request.pin then
-      if !config.covers request.envelope then throw (.uncovered request.envelope)
-      if !config.covers request.resume then throw (.uncovered request.resume)
-      if !config.covers request.timeout then throw (.uncovered request.timeout)
-      match programExact : loadProgram config (packageBytes config snapshot request.pin) request.pin request.input with
-      | .error reason => throw reason
-      | .ok program =>
-        outcomeProtocol program
-        let transaction := birthTransaction request
-        let activity := activityId request.object transaction
-        let cell := recordCell config.domain request.object activity
-        if isRetired (snapshot.canonicalBytes cell) then throw .recordRetired
-        match fresh : payloadOf (snapshot.canonicalBytes cell) with
-        | some _ => throw .recordExists
-        | none =>
-        let held := heldAccount cell
-        if request.account = config.asset ∨ request.account = config.collector ∨ request.account = held then
-          throw .payerInvalid
-        match bookExact : loadBook config snapshot with
+  if narrow : request.object.value < 256 ^ 32 ∧ request.pin.value < 256 ^ 32 then
+    match objectExact : readObject config snapshot request.object with
+    | .error reason => throw reason
+    | .ok none => throw .notAnObject
+    | .ok (some object) =>
+      if pinned : object.pin = request.pin then
+        if !config.covers request.envelope then throw (.uncovered request.envelope)
+        if !config.covers request.resume then throw (.uncovered request.resume)
+        if !config.covers request.timeout then throw (.uncovered request.timeout)
+        match programExact : loadProgram config (packageBytes config snapshot request.pin) request.pin request.input with
         | .error reason => throw reason
-        | .ok book =>
-          if held ∈ (logicalBook book.logical).accounts then throw .purseTaken
-          match currentExact : readState config snapshot request.object with
+        | .ok program =>
+          outcomeProtocol program
+          let transaction := birthTransaction request
+          let activity := activityId request.object transaction
+          let cell := recordCell config.domain request.object activity
+          if isRetired (snapshot.canonicalBytes cell) then throw .recordRetired
+          match fresh : payloadOf (snapshot.canonicalBytes cell) with
+          | some _ => throw .recordExists
+          | none =>
+          let held := heldAccount cell
+          if request.account = config.asset ∨ request.account = config.collector ∨ request.account = held then
+            throw .payerInvalid
+          match bookExact : loadBook config snapshot with
           | .error reason => throw reason
-          | .ok current =>
-          match segmentExact : runSegment config request.envelope.sourceTicks (initial program.applied.erase) with
-          | .error reason => throw reason
-          | .ok segment =>
-            match yieldedExact : segmentCommit config snapshot height transaction cell request.object 0
-                current false segment with
+          | .ok book =>
+            if held ∈ (logicalBook book.logical).accounts then throw .purseTaken
+            match currentExact : readState config snapshot request.object with
             | .error reason => throw reason
-            | .ok yielded =>
-              match judged : judgeWritten object (factsOf request.subject height request.object 1)
-                  (yielded.bind YieldCommit.written) with
+            | .ok current =>
+            match segmentExact : runSegment config request.envelope.sourceTicks (initial program.applied.erase) with
+            | .error reason => throw reason
+            | .ok segment =>
+              match yieldedExact : segmentCommit config snapshot height transaction cell request.object 0
+                  current false segment with
               | .error reason => throw reason
-              | .ok () =>
-                match yielded with
-                | some committed =>
-                  match (committed.written.map StateWritten.after).orElse (fun _ => current) with
-                  | some view => viewProtocol program view
-                  | none => throw .stateMissing
-                | none => pure ()
-                let escrow := escrowOf config.tariff request.subject request.account request.resume request.timeout
-                let base : Record := ⟨request.object, activity, request.pin, dataBytes request.input, 0, [],
-                  checkpointDigest [], escrow, 0, .faulted "unborn"⟩
-                let record := nextRecord base 0 segment yielded
-                if short : segment.yields ∧ request.deposit < escrow.pair + storageDeposit config record then
-                  throw (.underfunded request.deposit (escrow.pair + storageDeposit config record))
-                else
-                  let batch ← birthBatch config (logicalBook book.logical) held request escrow
-                    (storageDeposit config record) segment
-                  let posted ← postings book batch
-                  let posts := recordPost config snapshot cell record ::
-                    ((yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
-                  pure ⟨program, programExact, cell, rfl, fresh, current, currentExact, segment, segmentExact, yielded,
-                    yieldedExact, record, rfl, book, bookExact, posted, posts, rfl, rfl,
-                    [guardAt snapshot (objectCell config.domain request.object),
-                      guardAt snapshot (packageCell config.domain request.pin),
-                      guardAt snapshot (stateCell config.domain request.object)], rfl,
-                    object, objectExact, pinned, judged, short⟩
-    else throw (.pinMismatch object.pin request.pin)
+              | .ok yielded =>
+                match judged : judgeWritten object (factsOf request.subject height request.object 1)
+                    (yielded.bind YieldCommit.written) with
+                | .error reason => throw reason
+                | .ok () =>
+                  match yielded with
+                  | some committed =>
+                    match (committed.written.map StateWritten.after).orElse (fun _ => current) with
+                    | some view => viewProtocol program view
+                    | none => throw .stateMissing
+                  | none => pure ()
+                  let escrow := escrowOf config.tariff request.subject request.account request.resume request.timeout
+                  let base : Record := ⟨request.object, activity, request.pin, dataBytes request.input, 0, [],
+                    checkpointDigest [], escrow, 0, .faulted "unborn"⟩
+                  let record := nextRecord base 0 segment yielded
+                  if short : segment.yields ∧ request.deposit < escrow.pair + storageDeposit config record then
+                    throw (.underfunded request.deposit (escrow.pair + storageDeposit config record))
+                  else
+                    let batch ← birthBatch config (logicalBook book.logical) held request escrow
+                      (storageDeposit config record) segment
+                    let posted ← postings book batch
+                    let posts := recordPost config snapshot cell record ::
+                      ((yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot])
+                    pure ⟨program, programExact, cell, rfl, fresh, current, currentExact, segment, segmentExact, yielded,
+                      yieldedExact, record, rfl, book, bookExact, posted, posts, rfl, rfl,
+                      [guardAt snapshot (objectCell config.domain request.object),
+                        guardAt snapshot (packageCell config.domain request.pin),
+                        guardAt snapshot (stateCell config.domain request.object)], rfl,
+                      object, objectExact, pinned, judged, short, narrow⟩
+      else throw (.pinMismatch object.pin request.pin)
+  else throw (.digestWide request.object request.pin)
 
 def Birth.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request) (sealing : Seal) :
@@ -2504,34 +2689,77 @@ theorem commitYield_spec {rootBytes : Bytes → Digest} {config : Config} {snaps
   · cases ok
   · split at ok
     · cases ok
-    · rename_i written wrote
-      have stateCurrent : PostsCurrent snapshot (written.map StateWritten.post).toList := by
-        intro post member
-        cases written with
-        | none => simp at member
-        | some one =>
-          simp only [Option.map_some, Option.toList_some, List.mem_singleton] at member
-          subst member
-          obtain ⟨_, _, _, _, exact⟩ := stateWrite_spec wrote
-          simp only [exact, postAt]
+    · split at ok
+      · cases ok
+      · rename_i written wrote
+        have stateCurrent : PostsCurrent snapshot (written.map StateWritten.post).toList := by
+          intro post member
+          cases written with
+          | none => simp at member
+          | some one =>
+            simp only [Option.map_some, Option.toList_some, List.mem_singleton] at member
+            subst member
+            obtain ⟨_, _, _, _, exact⟩ := stateWrite_spec wrote
+            simp only [exact, postAt]
+        split at ok
+        · split at ok
+          · cases ok
+          · simp only [Except.ok.injEq] at ok
+            subst ok
+            refine ⟨wrote, ?_, ?_⟩
+            · intro one some; subst some; simp
+            · intro post member
+              simp only [List.mem_append, List.mem_singleton] at member
+              rcases member with inState | isSlot
+              · exact stateCurrent post inState
+              · subst isSlot; simp only [slotPost, postAt]
+        · split at ok
+          · cases ok
+          · simp only [Except.ok.injEq] at ok
+            subst ok
+            refine ⟨wrote, ?_, stateCurrent⟩
+            intro one some; subst some; simp
+
+
+theorem awaitId_lt (cell : CellId) (generation : Nat) (checkpoint : Digest) :
+    (awaitId cell generation checkpoint).value < 256 ^ 32 := tagged_lt _ _
+
+/-- **A committed yield's await fits the charged record**: its id and its reply slot are
+hash outputs, and its yield height and deadline were checked below `256 ^ 8`. -/
+theorem commitYield_fits {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat} {checkpoint : Digest}
+    {current : Option ObjectState} {viewed : Bool} {plan : PlanAwait} {committed : YieldCommit}
+    (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan =
+      .ok committed) :
+    committed.await.Fits := by
+  by_cases patient : plan.patience = 0 ∨ config.maxPatience < plan.patience
+  · unfold commitYield at ok
+    rw [if_pos patient] at ok
+    cases ok
+  by_cases wide : 256 ^ 8 ≤ height + plan.patience
+  · unfold commitYield at ok
+    rw [if_neg patient, if_pos wide] at ok
+    cases ok
+  have narrow : height + plan.patience < 256 ^ 8 := Nat.lt_of_not_le wide
+  unfold commitYield at ok
+  rw [if_neg patient, if_neg wide] at ok
+  split at ok
+  · cases ok
+  · rename_i written wrote
+    split at ok
+    · rename_i decider _
       split at ok
-      · split at ok
-        · cases ok
-        · simp only [Except.ok.injEq] at ok
-          subst ok
-          refine ⟨wrote, ?_, ?_⟩
-          · intro one some; subst some; simp
-          · intro post member
-            simp only [List.mem_append, List.mem_singleton] at member
-            rcases member with inState | isSlot
-            · exact stateCurrent post inState
-            · subst isSlot; simp only [slotPost, postAt]
-      · split at ok
-        · cases ok
-        · simp only [Except.ok.injEq] at ok
-          subst ok
-          refine ⟨wrote, ?_, stateCurrent⟩
-          intro one some; subst some; simp
+      · cases ok
+      · simp only [Except.ok.injEq] at ok
+        subst ok
+        exact ⟨awaitId_lt _ _ _, tagged_lt _ _, narrow, show height < 256 ^ 8 by omega⟩
+    · rename_i due _
+      split at ok
+      · cases ok
+      · simp only [Except.ok.injEq] at ok
+        subst ok
+        rename_i inTime
+        exact ⟨awaitId_lt _ _ _, show due < 256 ^ 8 by omega, narrow, show height < 256 ^ 8 by omega⟩
 
 theorem segmentCommit_spec {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat}
@@ -2552,6 +2780,24 @@ theorem segmentCommit_spec {rootBytes : Bytes → Digest} {config : Config} {sna
       exact ⟨state, plan, rfl, equation⟩
   | finished result => simp [segmentCommit, pure, Except.pure] at ok
   | faulted reason => simp [segmentCommit, pure, Except.pure] at ok
+
+theorem segmentCommit_fits {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat}
+    {current : Option ObjectState} {viewed : Bool} {segment : Segment} {committed : YieldCommit}
+    (ok : segmentCommit config snapshot height transaction cell object generation current viewed segment =
+      .ok (some committed)) :
+    committed.await.Fits := by
+  obtain ⟨_, _, _, commit⟩ := segmentCommit_spec ok
+  exact commitYield_fits commit
+
+theorem resumedSegment_fits {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {transaction : TransactionId} {cell object : CellId}
+    {generation envelope : Nat} {view : ObjectState} {start : State} {segment : Segment}
+    {committed : YieldCommit}
+    (ran : resumedSegment config snapshot height transaction cell object generation envelope view start =
+      .ok (segment, some committed)) :
+    committed.await.Fits :=
+  segmentCommit_fits (resumedSegment_committed ran).2
 
 /-- Every post a delivery commits is current at the delivering snapshot. -/
 theorem Delivery.posts_current {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -3071,6 +3317,180 @@ theorem storageDeposit_ended (config : Config) (record : Record) (ended : ∀ aw
   | done _ => rfl
   | faulted _ => rfl
 
+/-! ### The quote is a fixed point
+
+The deposit is a function of the record the birth would store, and the record's digests
+(`activity`, the await's id and slot) are derived from the transaction, hence from the nonce,
+and its heights from the submission height. A quote and the submission it prices differ in
+exactly those; `encodeRecord_length_mask` says the charged length does not depend on them. -/
+
+/-- **The storage deposit does not depend on any digest or height.** -/
+theorem storageDeposit_mask (config : Config) (record : Record) :
+    storageDeposit config record.mask = storageDeposit config record := by
+  have len := encodeRecord_length_mask record
+  unfold storageDeposit
+  rcases hp : record.phase with await | result | reason
+  · have hm : record.mask.phase = .awaiting await.mask := by simp [Record.mask, hp, Phase.mask]
+    simp [hp, hm, len]
+  · have hm : record.mask.phase = .done result := by simp [Record.mask, hp, Phase.mask]
+    simp [hp, hm]
+  · have hm : record.mask.phase = .faulted reason := by simp [Record.mask, hp, Phase.mask]
+    simp [hp, hm]
+
+/-- What a plan's await looks like with every digest and height zeroed: only the decider (or
+nothing) remains. -/
+def PlanSource.maskedAwait : PlanSource → Await
+  | .reply decider => ⟨⟨0⟩, .reply ⟨0⟩ decider, 0, 0⟩
+  | .height _ => ⟨⟨0⟩, .height 0, 0, 0⟩
+
+/-- A committed yield's await, masked, is a function of the plan's source alone: not of the
+height, the transaction, the record cell, the generation or the checkpoint. -/
+theorem commitYield_await_mask {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat} {checkpoint : Digest}
+    {current : Option ObjectState} {viewed : Bool} {plan : PlanAwait} {committed : YieldCommit}
+    (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan =
+      .ok committed) :
+    committed.await.mask = plan.source.maskedAwait := by
+  unfold commitYield at ok
+  split at ok
+  · cases ok
+  · split at ok
+    · cases ok
+    · split at ok
+      · cases ok
+      · split at ok
+        · rename_i decider hsource
+          split at ok
+          · cases ok
+          · simp only [Except.ok.injEq] at ok
+            subst ok
+            rw [hsource]
+            rfl
+        · rename_i due hsource
+          split at ok
+          · cases ok
+          · simp only [Except.ok.injEq] at ok
+            subst ok
+            rw [hsource]
+            rfl
+
+theorem segmentCommit_await_mask {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height height' : Nat} {transaction transaction' : TransactionId} {cell cell' object object' : CellId}
+    {generation : Nat} {current current' : Option ObjectState} {viewed viewed' : Bool} {segment : Segment}
+    {yielded yielded' : Option YieldCommit}
+    (one : segmentCommit config snapshot height transaction cell object generation current viewed segment =
+      .ok yielded)
+    (two : segmentCommit config snapshot height' transaction' cell' object' generation current' viewed' segment =
+      .ok yielded') :
+    yielded.map (fun committed => committed.await.mask) = yielded'.map (fun committed => committed.await.mask) := by
+  cases segment with
+  | yielded state plan =>
+      obtain ⟨c, hc⟩ : ∃ c, yielded = some c := by
+        simp only [segmentCommit, bind, Except.bind] at one
+        split at one
+        · cases one
+        · simp only [pure, Except.pure] at one
+          exact ⟨_, (Except.ok.inj one).symm⟩
+      obtain ⟨c', hc'⟩ : ∃ c, yielded' = some c := by
+        simp only [segmentCommit, bind, Except.bind] at two
+        split at two
+        · cases two
+        · simp only [pure, Except.pure] at two
+          exact ⟨_, (Except.ok.inj two).symm⟩
+      rw [hc] at one
+      rw [hc'] at two
+      obtain ⟨_, _, hs, commit⟩ := segmentCommit_spec one
+      obtain ⟨_, _, hs', commit'⟩ := segmentCommit_spec two
+      cases hs
+      cases hs'
+      rw [hc, hc']
+      simp only [Option.map_some, Option.some.injEq]
+      rw [commitYield_await_mask commit, commitYield_await_mask commit']
+  | finished result =>
+      simp [segmentCommit, pure, Except.pure] at one two
+      subst one; subst two; rfl
+  | faulted reason =>
+      simp [segmentCommit, pure, Except.pure] at one two
+      subst one; subst two; rfl
+
+theorem nextRecord_mask (base base' : Record) (generation : Nat) (segment : Segment)
+    (yielded yielded' : Option YieldCommit) (bases : base.mask = base'.mask)
+    (yields : yielded.map (fun committed => committed.await.mask) =
+      yielded'.map (fun committed => committed.await.mask)) :
+    (nextRecord base generation segment yielded).mask = (nextRecord base' generation segment yielded').mask := by
+  obtain ⟨o, a, p, i, g, c, d, e, t, ph⟩ := base
+  obtain ⟨o', a', p', i', g', c', d', e', t', ph'⟩ := base'
+  simp only [Record.mask, Record.mk.injEq] at bases
+  cases segment with
+  | yielded state plan =>
+      cases yielded with
+      | none =>
+          cases yielded' with
+          | none => simp_all [nextRecord, Record.mask, Phase.mask]
+          | some c' => simp at yields
+      | some c =>
+          cases yielded' with
+          | none => simp at yields
+          | some c' => simp_all [nextRecord, Record.mask, Phase.mask]
+  | finished result => simp_all [nextRecord, Record.mask, Phase.mask]
+  | faulted reason => simp_all [nextRecord, Record.mask, Phase.mask]
+
+/-- **THE QUOTE IS A FIXED POINT: the deposit a birth demands does not depend on its nonce,
+its deposit or its height.** Two admitted births of requests that differ only in `nonce` and
+`deposit` (so in every digest derived from the transaction), at two heights, store records of
+the same shape, so reserve the same storage deposit. A client that reads the reserve from a
+refusal of the request at one nonce and pays it at another is never `underfunded` for want of a
+digit (the defect: a 256-bit value spelled in 32 or 33 octets made the deposit 8456, 8457 or
+8458 for identical requests). Over the real `encodeRecord`, and with no premise that the
+records fit: `encodeRecord_length_mask` holds for every record. -/
+theorem Birth.deposit_stable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height height' : Nat} {request : BirthRequest} {nonce deposit : Nat}
+    (one : Birth config snapshot height request)
+    (two : Birth config snapshot height' { request with nonce := nonce, deposit := deposit }) :
+    storageDeposit config two.record = storageDeposit config one.record := by
+  have program : one.program = two.program := Except.ok.inj (one.programExact.symm.trans two.programExact)
+  have ran := two.segmentExact
+  rw [← program] at ran
+  have segment : one.segment = two.segment := Except.ok.inj (one.segmentExact.symm.trans ran)
+  have commit := two.yieldedExact
+  rw [← segment] at commit
+  have yields := segmentCommit_await_mask one.yieldedExact commit
+  have masks : two.record.mask = one.record.mask := by
+    rw [one.recordExact, two.recordExact, ← segment]
+    exact nextRecord_mask _ _ _ _ _ _ (by simp only [Record.mask]) yields.symm
+  calc storageDeposit config two.record = storageDeposit config two.record.mask := (storageDeposit_mask _ _).symm
+    _ = storageDeposit config one.record.mask := by rw [masks]
+    _ = storageDeposit config one.record := storageDeposit_mask _ _
+
+/-- What an admitted birth demands of its deposit: the first await's fee pair and the storage
+deposit of the record it stores (`Birth.funded` is exactly `demand ≤ deposit`). -/
+def Birth.demand {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request) : Nat :=
+  (escrowOf config.tariff request.subject request.account request.resume request.timeout).pair +
+    storageDeposit config born.record
+
+/-- **QUOTE -> SUBMIT.** The deposit one admitted birth demands is the deposit every other admitted
+birth of the same request demands, whatever its nonce, deposit and height. A client that quotes at
+one nonce and submits `demand` at another therefore meets exactly the funding it was quoted:
+`funded` holds with equality, never one digit short. -/
+theorem Birth.quote_submit {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height height' : Nat} {request : BirthRequest} {nonce : Nat}
+    (quoted : Birth config snapshot height request)
+    (submitted : Birth config snapshot height' { request with nonce := nonce, deposit := quoted.demand }) :
+    submitted.demand = quoted.demand := by
+  unfold Birth.demand
+  rw [Birth.deposit_stable quoted submitted]
+
+/-- A yielding birth admitted at the quoted deposit paid exactly the quote or more: the funding
+check is `demand ≤ deposit`. -/
+theorem Birth.demand_le_deposit {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request)
+    (yields : born.segment.yields = true) : born.demand ≤ request.deposit := by
+  have funded := born.funded
+  unfold Birth.demand
+  exact Nat.le_of_not_lt (fun short => funded ⟨yields, short⟩)
+
+
 
 
 /-! ## Metering and disposal (ACTIVITY-METERING-DISPOSAL) -/
@@ -3389,6 +3809,21 @@ theorem abandon_delivery_exclusive {rootBytes : Bytes → Digest} {config : Conf
 
 
 #assert_axioms record_roundTrip
+#assert_axioms decodeRecord_some
+#assert_axioms Record.ofWire_toWire
+#assert_axioms Record.ofWire_fits
+#assert_axioms encodeRecord_length_mask
+#assert_axioms commitYield_fits
+#assert_axioms segmentCommit_fits
+#assert_axioms resumedSegment_fits
+#assert_axioms storageDeposit_mask
+#assert_axioms commitYield_await_mask
+#assert_axioms segmentCommit_await_mask
+#assert_axioms nextRecord_mask
+#assert_axioms Birth.deposit_stable
+#assert_axioms Birth.quote_submit
+#assert_axioms Birth.demand_le_deposit
+#assert_axioms awaitId_lt
 #assert_axioms TypedData.typed
 #assert_axioms Postings.conserves
 #assert_axioms Birth.conserves
@@ -3431,20 +3866,35 @@ theorem StateWrite.write_judged {rootBytes : Bytes → Digest} {config : Config}
 
 /-- **A cell without an object record admits no birth**, refused by name. -/
 theorem birth_refuses_non_object {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {height : Nat} {request : BirthRequest} (absent : readObject config snapshot request.object = .ok none) :
+    {height : Nat} {request : BirthRequest} (narrow : request.object.value < 256 ^ 32 ∧ request.pin.value < 256 ^ 32)
+    (absent : readObject config snapshot request.object = .ok none) :
     birth config snapshot height request = .error .notAnObject := by
   unfold birth
+  rw [dif_pos narrow]
   split
   · rename_i reason found; rw [absent] at found; cases found
   · rfl
   · rename_i object found; rw [absent] at found; cases found
 
+/-- **A birth whose object or package id is not a 256-bit digest is refused by name**, before
+anything is read: the charged record has one fixed-width spelling of a digest, so a wider id
+is refused rather than truncated. Inhabited by any request naming the id `2 ^ 256`. -/
+theorem birth_refuses_wide_digest {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest}
+    (wide : ¬ (request.object.value < 256 ^ 32 ∧ request.pin.value < 256 ^ 32)) :
+    birth config snapshot height request = .error (.digestWide request.object request.pin) := by
+  unfold birth
+  rw [dif_neg wide]
+  rfl
+
 /-- **A birth runs only the package the object pins**, refused by name otherwise. -/
 theorem birth_refuses_other_pin {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : BirthRequest} {object : ObjectRecord}
+    (narrow : request.object.value < 256 ^ 32 ∧ request.pin.value < 256 ^ 32)
     (found : readObject config snapshot request.object = .ok (some object)) (other : object.pin ≠ request.pin) :
     birth config snapshot height request = .error (.pinMismatch object.pin request.pin) := by
   unfold birth
+  rw [dif_pos narrow]
   split
   · rename_i reason found'; rw [found] at found'; cases found'
   · rename_i found'; rw [found] at found'; cases found'
@@ -3576,6 +4026,7 @@ theorem create_refuses_existing {rootBytes : Bytes → Digest} {config : Config}
 #assert_axioms Delivery.write_judged
 #assert_axioms StateWrite.write_judged
 #assert_axioms birth_refuses_non_object
+#assert_axioms birth_refuses_wide_digest
 #assert_axioms birth_refuses_other_pin
 #assert_axioms writeState_refuses_lawless
 #assert_axioms create_refuses_existing
@@ -3806,11 +4257,70 @@ theorem objectAt_of_read {rootBytes : Bytes → Digest} {config : Config} {snaps
     | none => rw [hd] at read; cases read
     | some found => rw [hd] at read; cases read; simp [hd]
 
+theorem readRecord_fits {rootBytes : Bytes → Digest} {snapshot : Snapshot rootBytes} {cell : CellId}
+    {record : Record} (read : readRecord snapshot cell = some record) : record.Fits := by
+  unfold readRecord at read
+  cases body : bodyOf .record (snapshot.canonicalBytes cell) with
+  | none => rw [body] at read; cases read
+  | some bytes =>
+    rw [body] at read
+    exact (decodeRecord_some read).2
+
+theorem checkpointDigest_fits_of (base : Record) (generation : Nat) (segment : Segment)
+    (yielded : Option YieldCommit) (base_fits : base.DigestsFit)
+    (await_fits : ∀ committed, yielded = some committed → committed.await.Fits) :
+    (nextRecord base generation segment yielded).Fits := by
+  obtain ⟨hobject, hactivity, hpin, hcheckpoint⟩ := base_fits
+  cases segment with
+  | yielded state plan =>
+    cases yielded with
+    | none => exact ⟨⟨hobject, hactivity, hpin, hcheckpoint⟩, trivial⟩
+    | some committed =>
+      exact ⟨⟨hobject, hactivity, hpin, checkpointDigest_lt _⟩, await_fits committed rfl⟩
+  | finished result =>
+    exact ⟨⟨hobject, hactivity, hpin, checkpointDigest_lt _⟩, trivial⟩
+  | faulted reason =>
+    exact ⟨⟨hobject, hactivity, hpin, checkpointDigest_lt _⟩, trivial⟩
+
+theorem activityId_lt (object : CellId) (birth : TransactionId) : (activityId object birth).value < 256 ^ 32 :=
+  tagged_lt _ _
+
+/-- **A birth's record fits the charged wire.** -/
+theorem Birth.record_fits {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request) :
+    born.record.Fits := by
+  rw [born.recordExact]
+  refine checkpointDigest_fits_of _ _ _ _ ⟨born.narrow.1, activityId_lt _ _, born.narrow.2, checkpointDigest_lt _⟩ ?_
+  intro committed isSome
+  have commit := born.yieldedExact
+  rw [isSome] at commit
+  exact segmentCommit_fits commit
+
+/-- **A delivery's next record fits the charged wire.** -/
+theorem Delivery.next_fits {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) :
+    delivery.next.Fits := by
+  have base := readRecord_fits delivery.recordExact
+  rw [delivery.nextExact]
+  refine checkpointDigest_fits_of _ _ _ _ base.1 ?_
+  intro committed isSome
+  have ended := delivery.endExact
+  rw [isSome] at ended
+  exact resumedSegment_fits ended
+
+/-- **An exhaustion's next record fits the charged wire** (it changes only `tried`). -/
+theorem Exhaustion.next_fits {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : ExhaustRequest} (ex : Exhaustion config snapshot height request) :
+    ex.next.Fits := by
+  have base := readRecord_fits ex.recordExact
+  rw [ex.nextExact]
+  exact base
+
 /-- The payer of a record image: its escrow's account. -/
 theorem payer_record_image (config : Config) (bytesAt : CellId → Bytes) (record : Record) (await : Await)
-    (awaiting : record.phase = .awaiting await) :
+    (fits : record.Fits) (awaiting : record.phase = .awaiting await) :
     payerOfBytes config bytesAt (recordImage record) = some record.escrow.account := by
-  simp [recordImage, awaiting, payerOfBytes, payloadOf_image, payerRoute, routePayer, record_roundTrip]
+  simp [recordImage, awaiting, payerOfBytes, payloadOf_image, payerRoute, routePayer, record_roundTrip record fits]
 
 theorem payloadOf_recordImage_live (record : Record) (live : (payloadOf (recordImage record)).isSome = true) :
     ∃ await, record.phase = .awaiting await := by
@@ -3836,9 +4346,9 @@ theorem payer_state_image (config : Config) (bytesAt : CellId → Bytes) (object
   simp [payerOfBytes, stateImage, payloadOf_image, payerRoute, routePayer, key, held]
 
 theorem recordAt_recordImage (bytesAt : CellId → Bytes) (cell : CellId) (record : Record) (await : Await)
-    (awaiting : record.phase = .awaiting await) (holds : bytesAt cell = recordImage record) :
+    (fits : record.Fits) (awaiting : record.phase = .awaiting await) (holds : bytesAt cell = recordImage record) :
     recordAt bytesAt cell = some record := by
-  simp [recordAt, holds, recordImage, awaiting, bodyOf_image, record_roundTrip]
+  simp [recordAt, holds, recordImage, awaiting, bodyOf_image, record_roundTrip record fits]
 
 /-- What a yield commit posts: the declared-state write (a state image of the
 object) and, for a reply await, the slot it opens for this record cell, OPEN
@@ -3868,24 +4378,26 @@ theorem commitYield_posts {rootBytes : Bytes → Digest} {config : Config} {snap
   · cases ok
   · split at ok
     · cases ok
-    · rename_i written wrote
-      split at ok
-      · split at ok
-        · cases ok
-        · simp only [Except.ok.injEq] at ok
-          subst ok
-          intro post member
-          simp only [List.mem_append, List.mem_singleton] at member
-          rcases member with inState | isSlot
-          · exact .inl (stateShape _ wrote post inState)
-          · subst isSlot
-            exact .inr ⟨_, rfl, rfl, rfl⟩
-      · split at ok
-        · cases ok
-        · simp only [Except.ok.injEq] at ok
-          subst ok
-          intro post member
-          exact .inl (stateShape _ wrote post member)
+    · split at ok
+      · cases ok
+      · rename_i written wrote
+        split at ok
+        · split at ok
+          · cases ok
+          · simp only [Except.ok.injEq] at ok
+            subst ok
+            intro post member
+            simp only [List.mem_append, List.mem_singleton] at member
+            rcases member with inState | isSlot
+            · exact .inl (stateShape _ wrote post inState)
+            · subst isSlot
+              exact .inr ⟨_, rfl, rfl, rfl⟩
+        · split at ok
+          · cases ok
+          · simp only [Except.ok.injEq] at ok
+            subst ok
+            intro post member
+            exact .inl (stateShape _ wrote post member)
 
 /-- The record a yielding segment commits is awaiting. -/
 theorem nextRecord_yielded_awaiting (base : Record) (generation : Nat) (segment : Segment)
@@ -3915,7 +4427,7 @@ the rest are the yield's state images (of `object`) and slot images (for this
 record cell), retired images, or the Book; a slot is opened only beside an
 awaiting record; the object's record is read under a cell no post writes. -/
 theorem recordFirst_cells_paid {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
-    (cell object : CellId) (record : Record) (objectRecord : ObjectRecord)
+    (cell object : CellId) (record : Record) (recordFits : record.Fits) (objectRecord : ObjectRecord)
     (objectRead : readObject config snapshot object = .ok (some objectRecord))
     (rest : List Post) (shape : ∀ post ∈ rest, CensusPost object cell post)
     (slotsNeedRecord : (∃ post ∈ rest, ∃ slot : AnswerSlot.Slot, slot.activity = cell ∧
@@ -3939,14 +4451,14 @@ theorem recordFirst_cells_paid {rootBytes : Bytes → Digest} (config : Config) 
   · subst head
     obtain ⟨await, awaiting⟩ := payloadOf_recordImage_live record live
     show (payerOfBytes config _ (recordImage record)).isSome = true
-    rw [payer_record_image config _ record await awaiting]
+    rw [payer_record_image config _ record await recordFits awaiting]
     rfl
   · rcases shape post inRest with ⟨state, isState⟩ | ⟨slot, activity, isSlot⟩ | retired | none
     · rw [isState, payer_state_image config _ object state objectRecord objectHeld]
       rfl
     · obtain ⟨await, awaiting⟩ := slotsNeedRecord ⟨post, inRest, slot, activity, isSlot⟩
       have held := recordAt_recordImage (afterPosts snapshot (recordPost config snapshot cell record :: rest))
-        slot.activity record await awaiting (by rw [activity]; exact headBytes)
+        slot.activity record await recordFits awaiting (by rw [activity]; exact headBytes)
       rw [isSlot, payer_slot_image config _ slot record held]
       rfl
     · rw [retired, payloadOf_retired] at live; cases live
@@ -3997,7 +4509,7 @@ theorem Birth.retention_cells_have_payer {rootBytes : Bytes → Digest} {config 
     CellsPaid config (afterPosts snapshot born.posts) (born.posts.map Post.cell) := by
   have commits := segmentCommit_census born.yieldedExact
   rw [born.postsExact] at objectUnwritten ⊢
-  apply recordFirst_cells_paid config snapshot born.cell request.object born.record born.object born.objectExact
+  apply recordFirst_cells_paid config snapshot born.cell request.object born.record born.record_fits born.object born.objectExact
   · intro post member
     rcases List.mem_append.mp member with inYield | isBook
     · exact commits post inYield
@@ -4048,7 +4560,7 @@ theorem Delivery.retention_cells_have_payer {rootBytes : Bytes → Digest} {conf
   have commits := segmentCommit_census (resumedSegment_commit delivery.endExact)
   have retired := settle_posts_retired delivery.settled
   rw [delivery.postsExact] at objectUnwritten ⊢
-  apply recordFirst_cells_paid config snapshot request.record delivery.record.object delivery.next delivery.object
+  apply recordFirst_cells_paid config snapshot request.record delivery.record.object delivery.next delivery.next_fits delivery.object
     delivery.objectExact
   · intro post member
     rcases List.mem_append.mp member with inFront | isBook
@@ -4085,7 +4597,7 @@ theorem Exhaustion.retention_cells_have_payer {rootBytes : Bytes → Digest} {co
   · subst isRecord
     have awaiting : ex.next.phase = .awaiting ex.await := by rw [ex.nextExact]; exact ex.awaiting
     show (payerOfBytes config _ (recordImage ex.next)).isSome = true
-    rw [payer_record_image config _ ex.next ex.await awaiting]; rfl
+    rw [payer_record_image config _ ex.next ex.await ex.next_fits awaiting]; rfl
   · subst isBook
     rw [Postings.write_payload] at live; cases live
 
@@ -4195,5 +4707,12 @@ theorem Resolution.retention_cells_have_payer {rootBytes : Bytes → Digest} {co
 #assert_axioms Creation.retention_cells_have_payer
 #assert_axioms StateWrite.retention_cells_have_payer
 #assert_axioms Resolution.retention_cells_have_payer
+
+#assert_axioms readRecord_fits
+#assert_axioms checkpointDigest_fits_of
+#assert_axioms Birth.record_fits
+#assert_axioms Delivery.next_fits
+#assert_axioms Exhaustion.next_fits
+#assert_axioms activityId_lt
 
 end Minidregg.Kernel.ObjectiveActivity

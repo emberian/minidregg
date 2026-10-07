@@ -666,7 +666,7 @@ theorem Delivery.installed_record {rootBytes : Bytes → Digest} {config : Confi
   unfold readRecord
   rw [execute_accepted_install installed, DataSnapshot.install_canonicalBytes]
   simp [Delivery.intent, intentOf, delivery.postsExact, DataSnapshot.lookupPostBytes, Post.write,
-    recordPost, postAt, recordImage, awaiting, bodyOf_image, record_roundTrip]
+    recordPost, postAt, recordImage, awaiting, bodyOf_image, record_roundTrip _ delivery.next_fits]
 
 /-- **After a delivery that ENDS the activity installs, its record cell is
 retired**: it holds the retired image and no record (disposal,
