@@ -164,7 +164,7 @@ def bypass (id : FamilyId) (cells : List Nat) (stepFor : Nat → Option PolicySt
 
 /-- The fixture's oracle: an empty transcript (the fixture families make no
 signature claims, so it is never consulted). -/
-def oracle : CredentialSignatureIO.Oracle Id := .recorded ⟨[]⟩
+def oracle : CredentialSignatureIO.Oracle Id := .recorded CredentialSignatureIO.Transcript.empty
 
 /-- The fixture family's receiver, judged by the fixture laws. -/
 abbrev judged (F : Family) := F.receiver laws oracle

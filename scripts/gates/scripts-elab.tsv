@@ -4,4 +4,3 @@ scripts/HypothesisLedger.lean	covered	MERGE-KEEPER	-	run over the research umbre
 scripts/ObjectiveManifest.lean	covered	MERGE-KEEPER	-	needs OBJECTIVE_MANIFEST_OUT; run by scripts/check-objective-proofs.sh (gate row objective-proofs)
 scripts/ObjectiveManifestMathlib.lean	covered	MERGE-KEEPER	-	needs OBJECTIVE_MANIFEST_OUT; run by scripts/check-objective-proofs.sh (gate row objective-proofs)
 scripts/kn2/planted-api-faults.lean	covered	DEPUTY-KERNEL	-	every definition must FAIL to elaborate; run by scripts/kn2/check-planted-api-faults.sh (gate row api-faults), which requires each fault refused by its own guard (its -- EXPECT: text)
-scripts/NativeTranscripts.lean	stale	DEPUTY-KERNEL	-	census RED on main: Transcript.mk inside a non-Transcript constant (local-gates native-transcripts, no merge-gate row)
