@@ -2398,6 +2398,26 @@ def recordedInvocation (domain semantics : Digest) (command : Command) (signed :
         .ok (some recorded)
       else .error ()
 
+/-- **Replay agreement over the declared transaction id.** Two grounds that give the
+same answer for the invocation's transaction id (on the light route: the verified
+journal answer for a declared id, `Ground.recorded_light_some` / `_none`) detect the
+replay alike; nothing else of either journal is read. -/
+theorem recordedInvocation_agrees (domain semantics : Digest) (command : Command)
+    (signed : SignedCommand) (first second : Ground deployment)
+    (declared : first.declaresTransaction (transactionId domain semantics command) = true)
+    (answers : first.recorded (transactionId domain semantics command) =
+      second.recorded (transactionId domain semantics command)) :
+    recordedInvocation domain semantics command signed first =
+      recordedInvocation domain semantics command signed second := by
+  unfold Minidregg.Compiler.ServedBasis.Ground.recorded at answers
+  rw [if_pos declared] at answers
+  split at answers
+  · unfold recordedInvocation
+    rw [Option.some.inj answers]
+  · cases answers
+
+#assert_axioms recordedInvocation_agrees
+
 inductive ReceiveResult where
   | replayed (recorded : DurableCommitProtocol.Intent Digest Digest StableNullifier ReplayEnvelope)
   | rejected (reason : Reject)

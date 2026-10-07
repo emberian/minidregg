@@ -49,7 +49,7 @@ def readOf (environment : Environment deployment ground)
       signed.challenge.intent.grants = [⟨ref.kind,ref.resource,ref.capability⟩])
     let index : Fin signed.challenge.intent.grants.length := ⟨0,by simp [components.2.2.2]⟩
     let admitted := authorized.grants index
-    let funded : Option (RunComputeBudgetDomain.Prepared deployment ground.view signed.challenge.intent.subject) :=
+    let funded : Option (RunComputeBudgetDomain.Prepared deployment ground.cells signed.challenge.intent.subject) :=
       components.1.symm ▸ environment.compute
     some (ObjectiveBendNativeInput.admitRead environment.subject admitted.preparation admitted.checked
       (by change signed.challenge.intent.subject = environment.subject; exact components.1) funded)

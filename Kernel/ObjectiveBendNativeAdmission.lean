@@ -285,7 +285,7 @@ structure Environment (deployment : Deployment) (ground : Ground deployment) whe
   genesisHeight : Nat
   subject : TypedAuthorization.SubjectId
   nonce : Nat
-  compute : Option (RunComputeBudgetDomain.Prepared deployment ground.view subject)
+  compute : Option (RunComputeBudgetDomain.Prepared deployment ground.cells subject)
 
 /-- The environment of a final command's admission. -/
 def environment {F : Type} [Field F] {deployment : Deployment}
@@ -465,9 +465,9 @@ private def selectSource {F : Type} [Field F] [DecidableEq F] {deployment : Depl
   else none
 
 private def checkedFunding {deployment : Deployment} {ground : Ground deployment} {subject : TypedAuthorization.SubjectId}
-    (compute : Option (RunComputeBudgetDomain.Prepared deployment ground.view subject))
+    (compute : Option (RunComputeBudgetDomain.Prepared deployment ground.cells subject))
     (claim : ObjectiveInvocationClaim.Claim) :
-    Option {funded : RunComputeBudgetDomain.Prepared deployment ground.view subject //
+    Option {funded : RunComputeBudgetDomain.Prepared deployment ground.cells subject //
       compute = some funded ∧ funded.steps = claim.capacity.proofWork ∧ funded.credits = claim.capacity.feeDebit} :=
   match selected : compute with
   | none => none

@@ -48,9 +48,9 @@ index is a position in a command that does not exist yet; budget and Book
 preparation do not read it (`Prepared.relocate_budget_exact`). -/
 def environmentOf (config : Config) (opened : Opened config) (request : Request) :
     Except String (ObjectiveBendNativeAdmission.Environment config.deployment opened.ground) := do
-  let some clock := ClockCellDomain.load config.deployment opened.durable.snapshot
+  let some clock := ClockCellDomain.load config.deployment opened.ground.cells
     | throw "clock unavailable"
-  let compute ← (RunComputeBudgetDomain.prepare config.deployment opened.durable.snapshot clock.clock
+  let compute ← (RunComputeBudgetDomain.prepare config.deployment opened.ground.cells clock.clock
       request.subject request.capacity.proofWork (request.funding.map fun funding => funding.input 0)).mapError
     fun _ => "compute funding refused"
   pure ⟨config.federation,config.genesisHeight,request.subject,
