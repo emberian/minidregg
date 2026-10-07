@@ -282,7 +282,11 @@ class World:
         return v
 
     def submit(self, label, workspace, body, prepare=False):
-        """One signed command, unjudged: the Host's outcome value."""
+        """One signed command, unjudged: the Host's outcome value. An `invoke` without an operation id gets
+        one minted HERE, written into the caller's body, so no driver can forget it and a driver that
+        resubmits the same body (a retry of the same operation) reuses it."""
+        if body.get('kind') == 'invoke' and 'opId' not in body:
+            body['opId'] = op_id()
         out = self.attempts / label
         command = self.root / f'{label}.turn.json'
         command.write_text(json.dumps(body))
