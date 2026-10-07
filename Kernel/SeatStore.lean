@@ -327,9 +327,33 @@ theorem seatView_shows_disclosed_payee (seat : Seat) (disclosed : seat.proposal.
 def sortSeats (seats : List SeatBody) : List SeatBody :=
   seats.mergeSort fun a b => decide (a.seat.account ≤ b.seat.account)
 
-def callData (input : Data) (height : Nat) (book : Book) (seats : List SeatBody) : Data :=
-  .record [("input", input), ("height", .natural height),
+/-- What a seat contract's method is called with: the input, the height, the invoker as it chose to
+be shown (`shownNat discloseInvoker subject`: `hidden` unless it opted in), and the open seats. -/
+def callData (input : Data) (height : Nat) (book : Book) (seats : List SeatBody) (invoker : Data) : Data :=
+  .record [("input", input), ("height", .natural height), ("invoker", invoker),
     ("seats", listData ((sortSeats seats).map (seatView book)))]
+
+/-- The call an `invoke` makes: the invoker shown only if it opted in (`discloseInvoker`). -/
+def invocationCall (input : Data) (height : Nat) (book : Book) (seats : List SeatBody) (discloseInvoker : Bool)
+    (invoker : Nat) : Data :=
+  callData input height book seats (shownNat discloseInvoker (some invoker))
+
+/-- **The invoker is identity-blind by default** (GPT-6 row G): an invocation that does not opt in
+calls the method with the same data whoever signs it, so a contract cannot read, branch on or leak
+the invoker. -/
+theorem callData_invoker_blind (input : Data) (height : Nat) (book : Book) (seats : List SeatBody)
+    (a b : Nat) :
+    invocationCall input height book seats false a = invocationCall input height book seats false b := rfl
+
+/-- The opt-in is real: a disclosing invoker IS shown, so distinct invokers are told apart. -/
+theorem callData_invoker_shown (input : Data) (height : Nat) (book : Book) (seats : List SeatBody)
+    {a b : Nat} (distinct : a ≠ b) :
+    invocationCall input height book seats true a ≠ invocationCall input height book seats true b := by
+  intro same
+  simp [invocationCall, callData, shownNat] at same
+  exact distinct same
+
+#assert_axioms callData_invoker_blind callData_invoker_shown
 
 def natField (fields : List (String × Data)) (name : String) : Option Nat :=
   match ObjectiveActivity.fieldOf fields name with
@@ -542,14 +566,16 @@ inductive Turn where
   | handOver (id : InvitationId) (recipient : SubjectId)
   | offer (id : InvitationId) (expect : Expectation) (funding payee : AccountId) (proposal : Proposal)
       (holder : Option Nat)
-  | invoke (inst : InstanceId) (input : Bytes) (envelope : Capacity) (account : AccountId)
+  /-- `discloseInvoker`: the invoker opts in to show its subject to the contract's method (GPT-6 row G);
+  false (the default) keeps the call input identity-blind. -/
+  | invoke (inst : InstanceId) (input : Bytes) (envelope : Capacity) (account : AccountId) (discloseInvoker : Bool)
   | exit (seat : AccountId)
   deriving DecidableEq, Repr
 
 abbrev TurnWire :=
   Sum Bytes (Sum (Nat × Digest × Pred) (Sum (Nat × SubjectId)
     (Sum (Nat × (Nat × Digest × String) × Nat × Nat × Proposal × Option Nat)
-      (Sum (Nat × Bytes × Capacity × Nat) Nat))))
+      (Sum (Nat × Bytes × Capacity × Nat × Bool) Nat))))
 
 def Turn.toWire : Turn → TurnWire
   | .publish artifact => .inl artifact
@@ -557,7 +583,7 @@ def Turn.toWire : Turn → TurnWire
   | .handOver invitation recipient => .inr (.inr (.inl (invitation, recipient)))
   | .offer invitation expect funding payee proposal holder =>
       .inr (.inr (.inr (.inl (invitation, (expect.inst, expect.package, expect.role), funding, payee, proposal, holder))))
-  | .invoke inst input envelope account => .inr (.inr (.inr (.inr (.inl (inst, input, envelope, account)))))
+  | .invoke inst input envelope account disclose => .inr (.inr (.inr (.inr (.inl (inst, input, envelope, account, disclose)))))
   | .exit seat => .inr (.inr (.inr (.inr (.inr seat))))
 
 def Turn.ofWire : TurnWire → Turn
@@ -566,7 +592,7 @@ def Turn.ofWire : TurnWire → Turn
   | .inr (.inr (.inl (invitation, recipient))) => .handOver invitation recipient
   | .inr (.inr (.inr (.inl (invitation, (i, p, r), funding, payee, proposal, holder)))) =>
       .offer invitation ⟨i, p, r⟩ funding payee proposal holder
-  | .inr (.inr (.inr (.inr (.inl (inst, input, envelope, account))))) => .invoke inst input envelope account
+  | .inr (.inr (.inr (.inr (.inl (inst, input, envelope, account, disclose))))) => .invoke inst input envelope account disclose
   | .inr (.inr (.inr (.inr (.inr seat)))) => .exit seat
 
 def turnStream : StreamCodec Turn :=
@@ -581,7 +607,7 @@ def turnStream : StreamCodec Turn :=
                   (StreamCodec.product proposalStream (StreamCodec.option StreamCodec.nat))))))
             (StreamCodec.sum
               (StreamCodec.product StreamCodec.nat (StreamCodec.product bytesStream
-                (StreamCodec.product capacityStream StreamCodec.nat)))
+                (StreamCodec.product capacityStream (StreamCodec.product StreamCodec.nat StreamCodec.bool))))
               StreamCodec.nat)))))
     Turn.toWire Turn.ofWire (by intro turn; cases turn <;> rfl)
 
@@ -631,7 +657,7 @@ def Turn.kernelAction (domain : Digest) (transaction : TransactionId) (subject :
   | .offer invitation expect funding payee proposal holder =>
       some (.subject subject, .offer invitation expect (seatAccount domain transaction) funding payee proposal holder)
   | .exit seat => some (.subject subject, .exit seat)
-  | .publish _ | .invoke _ _ _ _ => none
+  | .publish _ | .invoke _ _ _ _ _ => none
 
 /-- The claims a turn consumes: an offer spends its invitation's. -/
 def Turn.claims : Turn → List StableNullifier
@@ -889,13 +915,13 @@ def decideTurn {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
               obtain ⟨rfl, rfl⟩ := h; exact ran)
     | .offer invitation expect funding payee proposal holder =>
       decideOffer config snapshot height request book bookExact invitation expect funding payee proposal holder hturn
-    | .invoke inst inputBytes envelope account => do
+    | .invoke inst inputBytes envelope account discloseInvoker => do
       let some input := decodeDataBytes inputBytes | throw .inputUndecodable
       let some body ← loadInstance snapshot domain inst | throw (.instanceMissing inst)
       if body.retired then throw (.instanceMissing inst)
       if reservedBase ≤ account ∨ account = config.collector ∨ account = config.asset then throw (.payerInvalid account)
       let seats ← body.seats.mapM (requireSeat snapshot)
-      let call := callData input height logical seats
+      let call := invocationCall input height logical seats discloseInvoker request.subject.value
       let result ← runMethod config (packageBytes domain snapshot body.inst.package) body.inst.package call envelope
       let plan ← decodePlan (config.planBudget.nodes + 1) result
       let ids := plan.zipIdx.filterMap fun (member, index) => match member with

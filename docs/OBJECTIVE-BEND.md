@@ -521,6 +521,8 @@ safety is a law judged on every reallocation, with an exit no clause can forbid
 A contract's method is shown each open seat identity-blind: coordinate, role, terms, proposal
 and allocation, and a principal (offerer, payee, holding activity) only if the offerer's
 proposal discloses it (`Proposal.disclose`, default none; `SeatStore.seatView_identity_blind`).
+The invoker is hidden the same way unless its `invoke` sets `discloseInvoker` (the call record's
+`invoker` field; `SeatStore.callData_invoker_blind`).
 Seats have a signed native route (`Kernel/SeatReceiver.lean`, Host operations 215-219,
 `mini seat`; journey row `seats`), an activity may hold a seat, and an ending activity closes
 the seats it holds in the same Book batch (`Kernel/ActivitySeatEnd.lean`).
