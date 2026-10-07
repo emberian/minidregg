@@ -119,15 +119,50 @@ def postage (path : String) (json : Json) : Result Capacity :=
   | .ok value => capacity (path ++ ".postage") value
   | .error _ => .ok ObjectiveTariff.zeroCapacity
 
-/-- An invocation's scoped grants: `[{object, method, uses}]` (absent: none). -/
+/-- An optional decimal (absent or null: none). -/
+def optDecimal (path : String) (json : Json) (name : String) : Result (Option Nat) :=
+  match json.getObjVal? name with
+  | .error _ => .ok none
+  | .ok .null => .ok none
+  | .ok _ => do pure (some (← nat path json name))
+
+/-- A path into a call's arguments: `path` (an array of field names; absent: the arguments). -/
+def argsPath (path : String) (json : Json) : Result (List String) := strings path json "path"
+
+/-- A cumulative cap: `{path, limit}`. -/
+def grantCap (path : String) (json : Json) : Result (List String × Nat) := do
+  pure (← argsPath path json, ← nat path json "limit")
+
+/-- What a grant admits of the arguments: `{exact: DATA}` (its canonical digest), `{exactDigest}`,
+`{recipient: {path, value: DATA}, cap?: {path, limit}}` or `{cap: {path, limit}}`. Nothing else:
+no bound admits every argument. -/
+def argsBound (path : String) (json : Json) : Result ObjectiveCall.ArgsBound := do
+  match json.getObjVal? "exact", json.getObjVal? "exactDigest", json.getObjVal? "recipient",
+      json.getObjVal? "cap" with
+  | .ok value, .error _, .error _, .error _ =>
+    pure (.exact (ObjectiveCall.argsDigest (← ObjectiveBendDataWire.decodeData 64 value)))
+  | .error _, .ok _, .error _, .error _ => pure (.exact ⟨← nat path json "exactDigest"⟩)
+  | .error _, .error _, .ok recipient, cap =>
+    let cap ← match cap with
+      | .ok value => do pure (some (← grantCap (path ++ ".cap") value))
+      | .error _ => pure none
+    pure (.recipient (← argsPath (path ++ ".recipient") recipient) (← data (path ++ ".recipient") recipient "value") cap)
+  | .error _, .error _, .error _, .ok value => do
+    let (at_, limit) ← grantCap (path ++ ".cap") value
+    pure (.capped at_ limit)
+  | _, _, _, _ => throw (path ++ " must hold exactly one of exact, exactDigest, recipient (with an optional cap), cap")
+
+/-- An invocation's scoped grants (v2): `[{object, method, code, args, caller?, uses}]` (absent:
+none). `code` is the package the target must run (its active pin). -/
 def grants (path : String) (json : Json) : Result (List ObjectiveCall.Grant) :=
   match json.getObjVal? "grants" with
   | .error _ => .ok []
   | .ok value => match value.getArr? with
     | .error _ => .error s!"{path}.grants must be an array"
     | .ok items => items.toList.mapM fun item => do
-      pure ⟨← nat (path ++ ".grants") item "object", ← str (path ++ ".grants") item "method",
-        ← nat (path ++ ".grants") item "uses"⟩
+      let p := path ++ ".grants"
+      pure ⟨← nat p item "object", ← str p item "method", ⟨← nat p item "code"⟩,
+        ← argsBound (p ++ ".args") (← field p item "args"), ← optDecimal p item "caller", ← nat p item "uses"⟩
 
 /-- A declared Core4 type, in the checker's own type JSON
 (`ObjectiveBendTyping.decodeType`, no table). -/
@@ -191,6 +226,17 @@ def dataOf (bytes : List UInt8) : Json :=
   | some value => dataJson value
   | none => .mkObj [("undecodable", toJson (hex bytes))]
 
+def argsBoundJson : ObjectiveCall.ArgsBound → Json
+  | .exact digest => .mkObj [("exactDigest", decimal digest.value)]
+  | .recipient path value cap => .mkObj ([("recipient", .mkObj [("path", toJson path), ("value", dataOf value)])] ++
+      (cap.map fun (at_, limit) => ("cap", .mkObj [("path", toJson at_), ("limit", decimal limit)])).toList)
+  | .capped path limit => .mkObj [("cap", .mkObj [("path", toJson path), ("limit", decimal limit)])]
+
+def grantJson (grant : ObjectiveCall.Grant) : Json :=
+  .mkObj ([("object", decimal grant.object), ("method", toJson grant.method), ("code", decimal grant.code.value),
+    ("args", argsBoundJson grant.args)] ++ (grant.caller.map fun c => ("caller", decimal c)).toList ++
+    [("uses", decimal grant.uses)])
+
 def answerJson : AnswerWire → Json
   | .reply value => .mkObj [("reply", dataOf value)]
   | .refused reason => .mkObj [("refused", toJson reason)]
@@ -232,8 +278,7 @@ def turnJson : Turn → Json
   | .invoke object oc method args grants envelope postage account ac => .mkObj
       [("kind", "invoke"), ("object", decimal object), ("objectCapability", decimal oc.value),
        ("method", toJson method), ("args", dataOf args),
-       ("grants", .arr (grants.map fun grant => .mkObj [("object", decimal grant.object),
-         ("method", toJson grant.method), ("uses", decimal grant.uses)]).toArray),
+       ("grants", .arr (grants.map grantJson).toArray),
        ("envelope", capacityJson envelope), ("postage", capacityJson postage), ("account", decimal account),
        ("accountCapability", decimal ac.value)]
   | .deliverMessage sender target message => .mkObj
