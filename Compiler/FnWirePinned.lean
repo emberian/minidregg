@@ -2,7 +2,7 @@
 # Compiler.FnWirePinned — fn's exported wire grammar at a pinned revision
 
 `protocol/fn/wire-grammar.json` is fn's `specs/wire-grammar.json` at the commit
-`pinnedRevision` (fn `lane/mini-contract`), vendored byte for byte. Its BLAKE3-256 is
+`pinnedRevision` (fn `d420a2b5`, mini-contract-3 slice 2), vendored byte for byte. Its BLAKE3-256 is
 `pinnedDigest`: the digest fn's running owner reports as `grammar-digest` in its
 `fnct.store-identity.reply`, so the file Mini interprets and the image fn runs can be
 compared by one value.
@@ -10,7 +10,7 @@ compared by one value.
 What this module establishes, at build time, against the vendored bytes:
 
 * `pinned_digest` — the file's BLAKE3-256 (computed by `Compiler.Blake3`) is `pinnedDigest`;
-* `pinned_vectors` — `checkDoc` passes on the file: every one of its 249 vectors gets exactly
+* `pinned_vectors` — `checkDoc` passes on the file: every one of its 1028 vectors gets exactly
   the decoder answer the file prints, and the coverage fn §3 promises is present;
 * `fncuCursor_is_pinned` — the `fncu.cursor` grammar Mini runs (`cursorGrammar`) is the
   file's family of that name;
@@ -32,10 +32,10 @@ import Theory.AssertCompiled
 namespace Minidregg.Compiler.FnWire
 
 /-- fn's commit the vendored file is taken from. -/
-def pinnedRevision : String := "930c67414ab9f866fd918465dcedeaeb9640437f"
+def pinnedRevision : String := "d420a2b5e2b3db18be134ba5a503160da84a31c3"
 
 /-- BLAKE3-256 of the vendored file. -/
-def pinnedDigest : String := "d5f516610458cfa0b3d001a5cfba983482ef9520bbcc5445dc0afc849c745454"
+def pinnedDigest : String := "d00558d008108f98b0fcbc96c0ead68e3fc2c92076974f17f1c00463cf9324a5"
 
 /-- The vendored file. -/
 def pinnedText : String := include_str "../protocol/fn/wire-grammar.json"
@@ -44,11 +44,11 @@ def pinnedText : String := include_str "../protocol/fn/wire-grammar.json"
 theorem pinned_digest : Blake3.toHex (Blake3.hash pinnedText.toUTF8.toList) = pinnedDigest := by
   native_decide
 
-theorem pinned_length : pinnedText.utf8ByteSize = 64056 := by native_decide
+theorem pinned_length : pinnedText.utf8ByteSize = 211503 := by native_decide
 
-/-- Every vector of the pinned file: 6 families (three on a wire, three `conformance.*`),
-356 vectors, 60 accepted answers and 296 refusals. -/
-theorem pinned_vectors : checkPasses pinnedText ⟨6, 60, 296⟩ = true := by native_decide
+/-- Every vector of the pinned file: 12 families, 1028 vectors, 109 accepted answers and 919
+refusals (counts from `checkDoc`, run on the vendored bytes). -/
+theorem pinned_vectors : checkPasses pinnedText ⟨12, 109, 919⟩ = true := by native_decide
 
 theorem fncuCursor_is_pinned : familyIs pinnedText "fncu.cursor" cursorGrammar = true := by
   native_decide
