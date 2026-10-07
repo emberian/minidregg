@@ -576,6 +576,8 @@ verifies every one, for its ratchet-listed callers. -/
 
 structure Opening (rootBytes : List UInt8 → Digest) where
   store : StoreIdentity
+  /-- An opening is of the deployment's own Store (never a scratch Store). -/
+  live : store.origin = .deployment
   head : Head store
   served : Served rootBytes store
   heightExact : served.height = head.height
@@ -586,6 +588,13 @@ structure Opening (rootBytes : List UInt8 → Digest) where
     (Served.entriesOf served.roots served.cellIds served.height served.chain)
   /-- The height of the checkpoint the opening resumed from (the cadence). -/
   baseHeight : Nat
+
+/-- **An opening is never of a scratch Store** (`StoreIdentity.ofScratch`): the
+light write path commits only into the deployment's own Store. -/
+theorem Opening.not_scratch {rootBytes : List UInt8 → Digest} (opening : Opening rootBytes) :
+    opening.store.origin ≠ .scratch := by
+  rw [opening.live]
+  decide
 
 private def decodeRecordsAt : Nat → List DurableReceiverIO.Entry → Except String (List IntentRecord)
   | _, [] => .ok []
@@ -637,7 +646,8 @@ start's version: a key already present refuses) — then the replay from the
 start's state, the head tag's MAC and its carried root against the replayed
 world root. -/
 private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 → Digest)
-    (store : StoreIdentity) (start : Start rootBytes) (suffix : List DurableReceiverIO.Entry)
+    (store : StoreIdentity) (live : store.origin = .deployment) (start : Start rootBytes)
+    (suffix : List DurableReceiverIO.Entry)
     (lap : String → IO Unit) : IO (Except String (Opening rootBytes)) := do
   let key := store.key
   let headHeight := start.height + suffix.length
@@ -683,7 +693,7 @@ private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes 
       if zero : headHeight = 0 then
         if genesisChain : headChain = store.logStart then
           let head := Head.genesis store worldRoot
-          return .ok ⟨store, head, served, zero.trans (Head.genesis_fields store worldRoot).1.symm,
+          return .ok ⟨store, live, head, served, zero.trans (Head.genesis_fields store worldRoot).1.symm,
             genesisChain.trans (Head.genesis_fields store worldRoot).2.1.symm, roots, rootsExact,
             start.checkpoint⟩
         else return .error "an empty durable log's chain is not its genesis log start"
@@ -696,7 +706,7 @@ private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes 
             if head.root ≠ worldRoot then
               return .error "durable log head root differs from the replayed root"
             have fields := Head.verify_fields verified
-            return .ok ⟨store, head, served, fields.1.symm, fields.2.1.symm, roots, rootsExact,
+            return .ok ⟨store, live, head, served, fields.1.symm, fields.2.1.symm, roots, rootsExact,
               start.checkpoint⟩
 
 /-- The light opening of an opened Store's head: its checkpoint (or the seed),
@@ -754,7 +764,7 @@ def openHead (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 �
   lap "checkpoint"
   if !((base.cells.map Prod.fst).Nodup ∧ base.absentBytes = seed.absentBytes) then
     return .error "checkpoint state is not admissible for this Store's seed"
-  extendVerified transport rootBytes store
+  extendVerified transport rootBytes store rfl
     ⟨seed, base.absentBytes, base.cells.map Prod.fst, base.snapshot rootBytes [], Served.state_snapshot_outside base,
       baseHeight, baseChain, baseFrontier, baseSpent, baseTag, baseHeight⟩ suffix lap
 
@@ -774,7 +784,7 @@ def Opening.extend (transport : DurableReceiverIO.Transport) (rootBytes : List U
       if stored.entries.length ≠ stored.head - height then
         return .error "durable log head does not match its entries"
       let served := opening.served
-      extendVerified transport rootBytes opening.store
+      extendVerified transport rootBytes opening.store opening.live
         ⟨served.seed, served.absentBytes, served.cellIds, served.state,
           fun cellId missing => served.outsideAbsent cellId missing, height, opening.head.chain,
           opening.head.frontier, opening.head.spentRoot, none, opening.baseHeight⟩
@@ -913,7 +923,7 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
                         | .error _ => pure opening.baseHeight
                       else pure opening.baseHeight
                     return .appended kind
-                      ⟨opening.store, head', served', fields.1.symm, fields.2.1.symm, roots.1, roots.2, sealedAt⟩
+                      ⟨opening.store, opening.live, head', served', fields.1.symm, fields.2.1.symm, roots.1, roots.2, sealedAt⟩
                       (by rw [fields.1, ← opening.heightExact]) entry rfl
       match ← transport.append height entry nodes with
       | .installed => confirm .installed

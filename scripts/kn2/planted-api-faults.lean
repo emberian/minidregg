@@ -61,3 +61,9 @@ def fault9 {deployment : Minidregg.Compiler.CanonicalCellRegistry.Deployment} {s
 def fault10 {deployment : Minidregg.Compiler.CanonicalCellRegistry.Deployment} {store : StoreIdentity}
     (basis : ServedBasis.Basis deployment store) (head : Head store) : ServedBasis.Grounded deployment head :=
   ⟨.light basis, .light basis⟩
+
+-- FAULT-11 (a scratch Store on the live write path): an `Opening` (the state the light route
+-- commits into) needs `live : store.origin = .deployment`; a scratch identity cannot meet it.
+def fault11 (key : DurableCheckpointCodec.MacKey) (logStart : Digest) :
+    (StoreIdentity.ofScratch key logStart).origin = .deployment :=
+  rfl
