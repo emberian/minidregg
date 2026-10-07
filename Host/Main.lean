@@ -1273,7 +1273,7 @@ def sessionConfirmed (config : NativeHost.Config)
     let opened ← sessionOpened config state
     phaseTrace "confirm refresh" t0
     match ← NativeHost.historicalReceiptVia config opened transactionId eventId with
-    | .error refusal => return .uncertain refusal.detail.toUTF8.toList
+    | .error refusal => return .unavailable refusal.detail.toUTF8.toList
     | .ok none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
     | .ok (some receipt) => return .confirmed kind receipt
   catch error => return .uncertain s!"receipt readback: {error}".toUTF8.toList
@@ -3712,7 +3712,10 @@ def exportConsumerInbox (config : NativeHost.Config) (transactionId : Nat) :
   let opened ← match ← NativeHost.openExisting config with
     | .ok opened => pure opened
     | .error detail => return .error detail
-  let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
+  let found ← match ← NativeHost.acceptedRecordE config opened ⟨transactionId⟩ with
+    | .error refusal => return .error refusal.detail
+    | .ok found => pure found
+  let some record := found
     | return .error "exact Mini consumer transaction is absent"
   match FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain
       config.profile.semantics record with
@@ -3744,7 +3747,10 @@ def exportConsumerPoll (config : NativeHost.Config) (transactionId : Nat) :
   let opened ← match ← NativeHost.openExisting config with
     | .ok opened => pure opened
     | .error detail => return .error detail
-  let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
+  let found ← match ← NativeHost.acceptedRecordE config opened ⟨transactionId⟩ with
+    | .error refusal => return .error refusal.detail
+    | .ok found => pure found
+  let some record := found
     | return .error "exact Mini consumer transaction is absent"
   match FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain
       config.profile.semantics record with
@@ -5374,14 +5380,17 @@ def runFnOriginOutboxExportSession (config : NativeHost.Config)
     ((18 : UInt8), (Lean.Json.mkObj
       [("type", toJson "fn-a-origin-outbox-export-v1"),
        ("status", toJson "refused"), ("reason", toJson reason)]).compress.toUTF8.toList)
-  let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
+  let found ← match ← NativeHost.acceptedRecordE config opened ⟨transactionId⟩ with
+    | .error refusal => return refused refusal.detail
+    | .ok found => pure found
+  let some record := found
     | return refused "prepared R transaction is absent"
   let some prepared := FnOriginOutbox.originalPrepared gateway
       config.deployment.domain config.profile.semantics record
     | return refused "transaction is not an accepted prepared R outbox"
   let outboxReceipt ← match ← NativeHost.historicalReceiptVia config opened
       record.transactionId record.event.eventId with
-    | .error refusal => throw (IO.userError refusal.detail)
+    | .error refusal => return refused refusal.detail
     | .ok receipt => pure receipt
   let some outboxReceipt := outboxReceipt
     | return refused "prepared R original receipt is unavailable"
