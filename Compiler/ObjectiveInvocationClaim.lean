@@ -115,9 +115,10 @@ def stream : StreamCodec Claim :=
       c.inputRefs,c.inputEnvelopes,c.expectedInput,c.capacity))
     (fun (s,v,a,c,o,b,r,q,e,p) => ⟨s,v,a,c,o,b,r,q,e,p⟩) (by intro c; cases c; rfl)
 
-/-- v6: the envelope declares the front end's work (`replayBytes`, `coreBytes`); a v5 claim does
+/-- v7: the envelope declares invariant-domain judgment units (`domainWork`); a v6 claim does not
+decode. v6: the envelope declares the front end's work (`replayBytes`, `coreBytes`); a v5 claim does
 not decode. -/
-def frame : List UInt8 := "DREGG/OBJECTIVE/INVOCATION-CLAIM/v6".toUTF8.toList
+def frame : List UInt8 := "DREGG/OBJECTIVE/INVOCATION-CLAIM/v7".toUTF8.toList
 
 def rawCodec : LawfulCodec Claim where
   encode claim := frame ++ stream.encode claim

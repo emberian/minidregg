@@ -345,7 +345,9 @@ v7: envelopes carry the extraction tick lane (`Capacity.extractTicks`); v6: the 
 state type (`ObjectStateType.tyStream`); v5: `create` carries an optional initial declared state,
 and the turn sum has no `writeState`; v9 (and older) commands refuse to decode. -/
 -- v11: envelopes carry `replayBytes`, `coreBytes` (GPT-6 row E work account); a v10 command does not decode.
-def commandFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/COMMAND/v11".toUTF8.toList
+-- v12: envelopes carry `domainWork`, and `registerDomain` carries its envelope and the paying
+-- account and capability (A3 domain pricing); a v11 command does not decode.
+def commandFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/COMMAND/v12".toUTF8.toList
 
 def commandCodec : LawfulCodec Command := ObjectiveActivityWire.framed commandFrame commandStream
 

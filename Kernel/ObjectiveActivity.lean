@@ -303,13 +303,14 @@ def recordWire : StreamCodec RecordWire :=
     (StreamCodec.product digest256Stream
     (StreamCodec.product escrowStream (StreamCodec.product StreamCodec.nat phaseWire))))))))
 
-/-- v7: the escrowed envelopes carry the front end's work (`replayBytes`, `coreBytes`, GPT-6 row E);
+/-- v8: the escrowed envelopes carry `domainWork` (A3 domain pricing);
+v7: the escrowed envelopes carry the front end's work (`replayBytes`, `coreBytes`, GPT-6 row E);
 v6: the record is FIXED-WIDTH where it is charged (digests 32 octets, heights 8:
 `digest256Stream`, `height64Stream`), so `|encodeRecord|`, hence the storage deposit,
 does not depend on the digests or heights (`encodeRecord_length_mask`); v5: the escrow holds declared envelopes (`Capacity`), not tick counts; v4: the record carries `tried` (the envelope its exhausted attempts at the
 current await reached); v3: no recorded reads (resume with view reads the state
 in the resuming turn); v2: the escrow names the payer's Book account. -/
-def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v7".toUTF8.toList
+def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v8".toUTF8.toList
 
 /-- The record's bytes: the frame, then the fixed-width wire. A record that does not fit has NO
 encoding (`[]`, which `decodeRecord` refuses): nothing is reduced into a different record. `[]` is
