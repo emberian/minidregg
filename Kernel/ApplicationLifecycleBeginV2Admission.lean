@@ -20,6 +20,8 @@ open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Kernel.ApplicationLifecycleBeginV2Ingress
 
 set_option autoImplicit false
+
+open Minidregg.Compiler.ServedBasis (Ground)
 set_option maxHeartbeats 1000000
 
 /-- Start/stop must see the exact already installed manifest in the same
@@ -41,14 +43,18 @@ def installedExact (deployment : CanonicalCellRegistry.Deployment)
     | _ => false
   else true
 
+/-- The keys a v2 BEGIN reads: its base BEGIN's. -/
+def keys (ingress : Ingress) : DurableView.Keys :=
+  ApplicationLifecycleBeginReceiver.keys ingress.base
+
 structure Accepted {F : Type} [Field F] [DecidableEq F]
     (deployment : CanonicalCellRegistry.Deployment)
     (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : DeclaredResourceController.Ambient)
-    (durable : DeclaredResourceController.Durable)
+    (ground : Ground deployment)
     (ingress : Ingress) where
   private mk ::
-  base : ApplicationLifecycleBeginReceiver.Accepted deployment profile ambient durable
+  base : ApplicationLifecycleBeginReceiver.Accepted deployment profile ambient ground
     ingress.base
   descriptorBound : ApplicationLifecycleBeginV2Ingress.descriptorBound ingress = true
   installed : installedExact deployment ingress base.selected.observed.before = true
@@ -58,10 +64,10 @@ def admitNative {F : Type} [Field F] [DecidableEq F]
     (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : DeclaredResourceController.Ambient)
     (native : CredentialSignatureIO.NativeConfig)
-    (durable : DeclaredResourceController.Durable)
-    (ingress : Ingress) : IO (Except String (Accepted deployment profile ambient durable ingress)) := do
+    (ground : Ground deployment)
+    (ingress : Ingress) : IO (Except String (Accepted deployment profile ambient ground ingress)) := do
   let .ok base ← ApplicationLifecycleBeginReceiver.admitLoaded
-      deployment profile ambient native durable ingress.base
+      deployment profile ambient native ground ingress.base
     | return .error "v2 lifecycle BEGIN base authority refused"
   if bound : ApplicationLifecycleBeginV2Ingress.descriptorBound ingress = true then
     if installed : installedExact deployment ingress base.selected.observed.before = true then
@@ -76,9 +82,9 @@ def Accepted.intent {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : DeclaredResourceController.Ambient}
-    {durable : DeclaredResourceController.Durable}
+    {ground : Ground deployment}
     {ingress : Ingress}
-    (accepted : Accepted deployment profile ambient durable ingress) :
+    (accepted : Accepted deployment profile ambient ground ingress) :
     DataIntent ResourceBirthCodec.rootBytes :=
   let legacy := accepted.base.intent
   let ordinary := accepted.base.invocation.dataIntent accepted.base.shape
@@ -97,18 +103,18 @@ theorem Accepted.intent_event {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : DeclaredResourceController.Ambient}
-    {durable : DeclaredResourceController.Durable}
+    {ground : Ground deployment}
     {ingress : Ingress}
-    (accepted : Accepted deployment profile ambient durable ingress) :
+    (accepted : Accepted deployment profile ambient ground ingress) :
     accepted.intent.event = event ingress := rfl
 
 theorem Accepted.intent_writes {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : DeclaredResourceController.Ambient}
-    {durable : DeclaredResourceController.Durable}
+    {ground : Ground deployment}
     {ingress : Ingress}
-    (accepted : Accepted deployment profile ambient durable ingress) :
+    (accepted : Accepted deployment profile ambient ground ingress) :
     accepted.intent.writes = accepted.base.intent.writes := rfl
 
 end Minidregg.Kernel.ApplicationLifecycleBeginV2Admission

@@ -26,7 +26,8 @@ open Minidregg.Kernel.ApplicationLifecycleBeginIngress
 
 set_option autoImplicit false
 
-abbrev Durable := DeclaredResourceController.Durable
+open Minidregg.Compiler.ServedBasis (Ground)
+
 abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Ambient := DeclaredResourceController.Ambient
 
@@ -68,20 +69,30 @@ private instance (ingress : Ingress)
   infer_instance
 
 /-- An ordinary DRC event under the same marker is a conflict. Historical
-replay does not ask today's policy or host pin to approve yesterday's event. -/
-def replay (durable : Durable) (ingress : Ingress) : Option (Except String Receipt) :=
-  match Snapshot.lookupRecorded ingress.transactionId durable.snapshot.model.journal with
-  | none => none
-  | some recorded =>
+replay does not ask today's policy or host pin to approve yesterday's event.
+A transaction id the ground did not declare is refused by name, never read as
+"not recorded". -/
+def replay {deployment : Deployment} (ground : Ground deployment) (ingress : Ingress) :
+    Option (Except String Receipt) :=
+  match ground.recorded ingress.transactionId with
+  | none => some (.error "lifecycle begin transaction identity undeclared")
+  | some none => none
+  | some (some recorded) =>
       if exactRecorded ingress recorded then
         some (.ok (receipt ingress))
       else some (.error "lifecycle begin transaction identity conflict")
 
-theorem replay_only_exact (durable : Durable) (ingress : Ingress) (result : Receipt)
-    (accepted : replay durable ingress = some (.ok result)) :
+/-- The keys a BEGIN reads beyond the state: its transaction id (replay and the
+DRC journal check) and its operation marker's replay nullifier. -/
+def keys (ingress : Ingress) : DurableView.Keys :=
+  DeclaredResourceController.invocationKeys ingress.domain ingress.semantics
+    (command ingress.domain ingress.semantics ingress.source)
+
+theorem replay_only_exact {deployment : Deployment} (ground : Ground deployment) (ingress : Ingress)
+    (result : Receipt) (accepted : replay ground ingress = some (.ok result)) :
     result = receipt ingress ∧
       ∃ recorded,
-        Snapshot.lookupRecorded ingress.transactionId durable.snapshot.model.journal =
+        Snapshot.lookupRecorded ingress.transactionId ground.view.model.journal =
           some recorded ∧ recorded.transactionId = ingress.transactionId ∧
           recorded.event.event = event ingress ∧
         recorded.nullifiers =
@@ -92,11 +103,17 @@ theorem replay_only_exact (durable : Durable) (ingress : Ingress) (result : Rece
   unfold replay at accepted
   split at accepted
   · cases accepted
+  · cases accepted
   · rename_i recorded found
+    have found' : Snapshot.lookupRecorded ingress.transactionId ground.view.model.journal = some recorded := by
+      unfold Ground.recorded at found
+      split at found
+      · exact Option.some.inj found
+      · cases found
     split at accepted
     · rename_i exact
       have equal : receipt ingress = result := by simpa using accepted
-      exact ⟨equal.symm, recorded, found, (show exactRecorded ingress recorded from exact)⟩
+      exact ⟨equal.symm, recorded, found', (show exactRecorded ingress recorded from exact)⟩
     · cases accepted
 
 /-- Exact source restriction for the first implementation. A future source-
@@ -122,11 +139,11 @@ theorem appPolicyMatches_current (packageTarget snapshotTarget : Nat)
 
 def linkedCurrentPolicy {F : Type} [Field F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (ambient : Ambient) (durable : Durable) (source : Source)
-    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+    (ambient : Ambient) (ground : Ground deployment) (source : Source)
+    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
       (command deployment.domain profile.semantics source)) : Bool :=
-  let auth := prepared.authority.snapshot.logical
-  let directory := prepared.directory.directory
+  let auth := ground.authority.logical
+  let directory := ground.directory
   let appPolicy := do
     let head ← CredentialAuthorityDomain.headAt auth ⟨source.app⟩
     let policy ← CanonicalCellRegistry.loadPolicySource deployment.domain directory head.address
@@ -157,13 +174,13 @@ policy epoch/revision as the mutation. It is not satisfied by the app's
 mutation capability alone. -/
 def packageRequest {F : Type} [Field F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (ambient : Ambient) (durable : Durable) (source : Source)
-    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+    (ambient : Ambient) (ground : Ground deployment) (source : Source)
+    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
       (command deployment.domain profile.semantics source)) :=
   let target : DeclaredResourceController.Target :=
     ⟨.object, source.packageManifest, source.packageObserveCapability, 1,
       source.packageRoot, .content ⟨[]⟩, none, none, none⟩
-  { DeclaredResourceController.requestFor prepared.authority.snapshot profile.semantics
+  { DeclaredResourceController.requestFor ground.authority profile.semantics
       ambient (command deployment.domain profile.semantics source) target source.packageRoot with
     verb := .observeObject }
 
@@ -186,9 +203,9 @@ claim to measure every physical journal byte. No external physical effect is
 charged, because none has occurred. -/
 def intent {F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-    {ambient : Ambient} {durable : Durable}
+    {ambient : Ambient} {ground : Ground deployment}
     {source : Source} {ingress : Ingress}
-    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
       (command deployment.domain profile.semantics source))
     (shape : DeclaredResourceController.PhysicalShape prepared)
     (accepted : DeclaredResourceController.AcceptedInvocation prepared ingress.signed)
@@ -196,7 +213,7 @@ def intent {F : Type} [Field F] [DecidableEq F]
     (_sourceExact : ingress.domain = deployment.domain ∧
       ingress.semantics = profile.semantics ∧ ingress.source = source)
     (_guardCurrent : (packageGuard source packageBefore).expectedRoot =
-      durable.snapshot.model.roots (packageGuard source packageBefore).cellId)
+      ground.view.model.roots (packageGuard source packageBefore).cellId)
     (guardReadOnly : (packageGuard source packageBefore).cellId ∉
       (DeclaredResourceController.writes prepared).map DataWrite.cellId) :
     DataIntent rootBytes := by
@@ -259,16 +276,16 @@ admission checks both current policy links and current native signatures.
 No operator-supplied Boolean is interpreted as physical completion. -/
 structure Accepted {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (ambient : Ambient) (durable : Durable) (ingress : Ingress) where
+    (ambient : Ambient) (ground : Ground deployment) (ingress : Ingress) where
   profileExact : ingress.domain = deployment.domain ∧ ingress.semantics = profile.semantics
   sourceValid : ingress.source.valid = true
-  prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+  prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
     (command deployment.domain profile.semantics ingress.source)
-  linked : linkedCurrentPolicy deployment profile ambient durable ingress.source prepared = true
+  linked : linkedCurrentPolicy deployment profile ambient ground ingress.source prepared = true
   shape : DeclaredResourceController.PhysicalShape prepared
   selected : ResourceObservationAdmission.Prepared
     (DeclaredResourceController.readContext prepared) profile
-    (packageRequest deployment profile ambient durable ingress.source prepared)
+    (packageRequest deployment profile ambient ground ingress.source prepared)
     (DeclaredResourceController.operationMarker deployment.domain profile.semantics
       (command deployment.domain profile.semantics ingress.source))
     ingress.source.packageObserveCapability ingress.source.canonicalBytes
@@ -276,7 +293,7 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
   installed : installedPackageMatches deployment ingress.source selected.observed.before = true
   observed : ResourceObservationAdmission.Checked selected ingress.packageObservationEnvelope
   guardCurrent : (packageGuard ingress.source selected.observed.before).expectedRoot =
-    durable.snapshot.model.roots
+    ground.view.model.roots
       (packageGuard ingress.source selected.observed.before).cellId
   guardReadOnly : (packageGuard ingress.source selected.observed.before).cellId ∉
     (DeclaredResourceController.writes prepared).map DataWrite.cellId
@@ -284,8 +301,8 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
 
 def Accepted.intent {F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-    {ambient : Ambient} {durable : Durable} {ingress : Ingress}
-    (accepted : Accepted deployment profile ambient durable ingress) : DataIntent rootBytes :=
+    {ambient : Ambient} {ground : Ground deployment} {ingress : Ingress}
+    (accepted : Accepted deployment profile ambient ground ingress) : DataIntent rootBytes :=
   ApplicationLifecycleBeginReceiver.intent accepted.prepared accepted.shape accepted.invocation
     accepted.selected.observed.before
     ⟨accepted.profileExact.1, accepted.profileExact.2, rfl⟩
@@ -295,15 +312,15 @@ def Accepted.intent {F : Type} [Field F] [DecidableEq F]
 ordinary DRC event that would accompany the same admitted state transition. -/
 theorem Accepted.intent_event {F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-    {ambient : Ambient} {durable : Durable} {ingress : Ingress}
-    (accepted : Accepted deployment profile ambient durable ingress) :
+    {ambient : Ambient} {ground : Ground deployment} {ingress : Ingress}
+    (accepted : Accepted deployment profile ambient ground ingress) :
     accepted.intent.event = event ingress := rfl
 
 /-- The special receiver retains every DRC-admitted write unchanged. -/
 theorem Accepted.intent_writes {F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-    {ambient : Ambient} {durable : Durable} {ingress : Ingress}
-    (accepted : Accepted deployment profile ambient durable ingress) :
+    {ambient : Ambient} {ground : Ground deployment} {ingress : Ingress}
+    (accepted : Accepted deployment profile ambient ground ingress) :
     accepted.intent.writes =
       (accepted.invocation.dataIntent accepted.shape).writes := rfl
 
@@ -311,11 +328,11 @@ theorem Accepted.intent_writes {F : Type} [Field F] [DecidableEq F]
 and pinned to the same durable old image used for DRC admission. -/
 theorem Accepted.intent_package_guard {F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-    {ambient : Ambient} {durable : Durable} {ingress : Ingress}
-    (accepted : Accepted deployment profile ambient durable ingress) :
+    {ambient : Ambient} {ground : Ground deployment} {ingress : Ingress}
+    (accepted : Accepted deployment profile ambient ground ingress) :
     packageGuard ingress.source accepted.selected.observed.before ∈ accepted.intent.readGuards ∧
       (packageGuard ingress.source accepted.selected.observed.before).expectedRoot =
-        durable.snapshot.model.roots
+        ground.view.model.roots
           (packageGuard ingress.source accepted.selected.observed.before).cellId := by
   constructor
   · change packageGuard ingress.source accepted.selected.observed.before ∈
@@ -326,26 +343,26 @@ theorem Accepted.intent_package_guard {F : Type} [Field F] [DecidableEq F]
 
 theorem stale_package_root_has_no_admission {F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-    {ambient : Ambient} {durable : Durable} {ingress : Ingress}
+    {ambient : Ambient} {ground : Ground deployment} {ingress : Ingress}
     (stale : ∀ before : PackedCell CanonicalCellRegistry.registry,
       ingress.source.packageRoot = before.payload.root →
       (packageGuard ingress.source before).expectedRoot ≠
-        durable.snapshot.model.roots
+        ground.view.model.roots
           (packageGuard ingress.source before).cellId) :
-    ¬ Nonempty (Accepted deployment profile ambient durable ingress) := by
+    ¬ Nonempty (Accepted deployment profile ambient ground ingress) := by
   rintro ⟨accepted⟩
   exact stale accepted.selected.observed.before
     accepted.selected.observed.rootExact accepted.guardCurrent
 
 theorem package_write_overlap_has_no_admission {F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-    {ambient : Ambient} {durable : Durable} {ingress : Ingress}
+    {ambient : Ambient} {ground : Ground deployment} {ingress : Ingress}
     (overlap : ∀ prepared : DeclaredResourceController.PreparedInvocation deployment
-      profile ambient durable
+      profile ambient ground
       (command deployment.domain profile.semantics ingress.source),
       ⟨ingress.source.packageManifest⟩ ∈
         (DeclaredResourceController.writes prepared).map DataWrite.cellId) :
-    ¬ Nonempty (Accepted deployment profile ambient durable ingress) := by
+    ¬ Nonempty (Accepted deployment profile ambient ground ingress) := by
   rintro ⟨accepted⟩
   exact accepted.guardReadOnly (overlap accepted.prepared)
 
@@ -355,8 +372,8 @@ and their physical guards come from this one supplied loaded image. -/
 def admitLoaded {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
-    (durable : Durable) (ingress : Ingress) :
-    IO (Except String (Accepted deployment profile ambient durable ingress)) := do
+    (ground : Ground deployment) (ingress : Ingress) :
+    IO (Except String (Accepted deployment profile ambient ground ingress)) := do
   let source := ingress.source
   if sourceValid : source.valid = true then
     if profileExact : ingress.domain = deployment.domain ∧ ingress.semantics = profile.semantics then
@@ -364,14 +381,14 @@ def admitLoaded {F : Type} [Field F] [DecidableEq F]
       unless ingress.signed.commandBytes == DeclaredResourceController.commandCodec.encode expected do
         return .error "signed lifecycle begin command differs from source"
       match ← DeclaredResourceController.prepareAuthenticated deployment profile ambient native
-          durable expected ingress.signed.authorityEnvelope with
+          ground expected ingress.signed.authorityEnvelope with
       | .error _ => return .error "lifecycle begin preparation refused"
       | .ok prepared =>
-          if linked : linkedCurrentPolicy deployment profile ambient durable source prepared = true then
+          if linked : linkedCurrentPolicy deployment profile ambient ground source prepared = true then
             if shape : DeclaredResourceController.PhysicalShape prepared then
               let marker := DeclaredResourceController.operationMarker deployment.domain
                 profile.semantics expected
-              let wanted := packageRequest deployment profile ambient durable source prepared
+              let wanted := packageRequest deployment profile ambient ground source prepared
               let context := DeclaredResourceController.readContext prepared
               match ResourceObservationAdmission.prepare context profile wanted marker
                   source.packageObserveCapability source.canonicalBytes with
@@ -385,10 +402,9 @@ def admitLoaded {F : Type} [Field F] [DecidableEq F]
                       | .ok observed =>
                           have guardCurrent :
                               (packageGuard source selected.observed.before).expectedRoot =
-                                durable.snapshot.model.roots
+                                ground.view.model.roots
                                   (packageGuard source selected.observed.before).cellId :=
-                            PhysicalResourceReadGuard.current context.directory
-                              source.packageManifest selected.observed.before
+                            Ground.physicalCurrent context source.packageManifest selected.observed.before
                               selected.observed.present
                           if guardReadOnly :
                               (packageGuard source selected.observed.before).cellId ∉
@@ -406,26 +422,5 @@ def admitLoaded {F : Type} [Field F] [DecidableEq F]
           else return .error "current app/package policy linkage refused"
     else return .error "lifecycle begin domain or semantics differs from current deployment"
   else return .error "invalid lifecycle begin source"
-
-def receiveLoaded {F : Type} [Field F] [DecidableEq F]
-    (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
-    (transport : DurableReceiverIO.Transport) (durable : Durable)
-    (bytes : List UInt8) : IO Result := do
-  let some ingress := codec.decode bytes
-    | return .rejected "noncanonical lifecycle begin ingress"
-  match replay durable ingress with
-  | some (.ok original) => return .historical original
-  | some (.error detail) => return .rejected detail
-  | none => pure ()
-  match ← admitLoaded deployment profile ambient native durable ingress with
-  | .error detail => return .rejected detail
-  | .ok accepted =>
-      match ← DurableReceiverIO.receiveLoaded transport rootBytes durable accepted.intent with
-      | .confirmed kind _ => return .confirmed kind (receipt ingress)
-      | .rejected _ => return .rejected "durable lifecycle begin refused"
-      | .contention => return .contention
-      | .unavailable detail => return .unavailable detail
-      | .uncertain detail => return .uncertain detail
 
 end Minidregg.Kernel.ApplicationLifecycleBeginReceiver
