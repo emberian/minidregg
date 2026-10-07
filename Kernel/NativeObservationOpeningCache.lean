@@ -188,7 +188,7 @@ def queryLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config)
               let packed := (token.grants ⟨0, present⟩).selected.packed
               cache.modify (fun old => retain old packed)
       | _ => pure ()
-      match queryResultUsing token (provider (← cache.get)) with
+      match queryResultUsing token (provider (← cache.get)) opened.durable rfl with
       | .ok view => return .ok view
       | .error reason => return .error (.of reason)
 
