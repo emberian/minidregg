@@ -81,47 +81,47 @@ def nullifier (domain semantics : Digest) (ingress : DecodedIngress) : StableNul
   CredentialAuthorityReplay.nullifier domain (operationMarker domain semantics ingress.command.2)
 
 variable {F : Type} [Field F] {deployment : Deployment}
-  {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+  {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {ground : Ground deployment}
   {kind : ResourceKind} {command : Command kind}
 
-def writes (prepared : Prepared deployment profile ambient durable command) : List DataWrite :=
-  prepared.authority.writes prepared.authorityPost
+def writes (prepared : Prepared deployment profile ambient ground command) : List DataWrite :=
+  ground.authorityWrites prepared.authorityPost
 
-def resourceGuard (prepared : Prepared deployment profile ambient durable command) : ReadGuard :=
+def resourceGuard (prepared : Prepared deployment profile ambient ground command) : ReadGuard :=
   ⟨⟨command.declaration.target.value⟩,
     rootBytes (LifecycleImage.bytes Registry (.live prepared.target.before))⟩
 
-def policyGuard (prepared : Prepared deployment profile ambient durable command) : ReadGuard :=
+def policyGuard (prepared : Prepared deployment profile ambient ground command) : ReadGuard :=
   ⟨⟨prepared.source.readGuard.1⟩, prepared.source.readGuard.2⟩
 
-def readGuards (prepared : Prepared deployment profile ambient durable command) : List ReadGuard :=
+def readGuards (prepared : Prepared deployment profile ambient ground command) : List ReadGuard :=
   resourceGuard prepared :: policyGuard prepared ::
-    (prepared.authority.readGuards ++
+    (ground.authorityReadGuards ++
       ((lawReadGuards prepared).getD []).map (fun (cellIdValue, root) => (⟨⟨cellIdValue⟩, root⟩ : Minidregg.Kernel.DurableDataIntent.ReadGuard))).filter
       fun guard => guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
-def PhysicalShape (prepared : Prepared deployment profile ambient durable command) : Prop :=
+def PhysicalShape (prepared : Prepared deployment profile ambient ground command) : Prop :=
   ((writes prepared).map DataWrite.cellId).Nodup ∧
-    (∀ write ∈ writes prepared, write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
+    (∀ write ∈ writes prepared, write.expectedPre = ground.view.model.roots write.cellId) ∧
     (∀ write ∈ writes prepared, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
     (resourceGuard prepared).cellId ∉ (writes prepared).map DataWrite.cellId ∧
     (policyGuard prepared).cellId ∉ (writes prepared).map DataWrite.cellId ∧
-    (∀ guard ∈ readGuards prepared, guard.expectedRoot = durable.snapshot.model.roots guard.cellId) ∧
+    (∀ guard ∈ readGuards prepared, guard.expectedRoot = ground.view.model.roots guard.cellId) ∧
     (lawReadGuards prepared).isSome = true
 
-instance physicalShapeDecidable (prepared : Prepared deployment profile ambient durable command) :
+instance physicalShapeDecidable (prepared : Prepared deployment profile ambient ground command) :
     Decidable (PhysicalShape prepared) := by
   unfold PhysicalShape
   infer_instance
 
-theorem writes_roots_bound (prepared : Prepared deployment profile ambient durable command)
+theorem writes_roots_bound (prepared : Prepared deployment profile ambient ground command)
     (write : DataWrite) (member : write ∈ writes prepared) :
     rootBytes write.canonicalPostBytes = write.exactPost := by
-  simp only [writes, Loaded.writes, List.mem_singleton] at member
+  simp only [writes, ServedBasis.Ground.authorityWrites, List.mem_singleton] at member
   subst write
-  exact prepared.authority.write_root_bound _
+  exact ground.authorityWrite_root_bound _
 
-theorem readGuards_readonly (prepared : Prepared deployment profile ambient durable command)
+theorem readGuards_readonly (prepared : Prepared deployment profile ambient ground command)
     (shape : PhysicalShape prepared) (guard : ReadGuard) (member : guard ∈ readGuards prepared) :
     guard.cellId ∉ (writes prepared).map DataWrite.cellId := by
   rcases List.mem_cons.mp member with rfl | rest
@@ -131,18 +131,18 @@ theorem readGuards_readonly (prepared : Prepared deployment profile ambient dura
     · simpa using (List.mem_filter.mp authority).2
 
 structure AcceptedDelegation [DecidableEq F] (deployment : Deployment)
-    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (ground : Ground deployment)
     (ingress : DecodedIngress) where
   private mk ::
-  prepared : Prepared deployment profile ambient durable ingress.command.2
+  prepared : Prepared deployment profile ambient ground ingress.command.2
   accepted : Accepted prepared ingress.ingress.envelopeBytes
   physical : PhysicalShape prepared
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
-    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (ground : Ground deployment)
     (native : CredentialSignatureIO.NativeConfig) (ingress : DecodedIngress) :
-    IO (Except Reject (AcceptedDelegation deployment profile ambient durable ingress)) := do
-  match prepare deployment profile ambient durable ingress.command.2 with
+    IO (Except Reject (AcceptedDelegation deployment profile ambient ground ingress)) := do
+  match prepare deployment profile ambient ground ingress.command.2 with
   | .error reason => return .error reason
   | .ok prepared =>
     if physical : PhysicalShape prepared then
@@ -153,7 +153,7 @@ def admitDecodedNative [DecidableEq F] (deployment : Deployment)
 
 variable [DecidableEq F] {ingress : DecodedIngress}
 
-def charge (accepted : AcceptedDelegation deployment profile ambient durable ingress) : ResourceCost.Charge
+def charge (accepted : AcceptedDelegation deployment profile ambient ground ingress) : ResourceCost.Charge
   | .incidences => 1
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
@@ -162,7 +162,7 @@ def charge (accepted : AcceptedDelegation deployment profile ambient durable ing
   | .proofWork => 3
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
 
-def intent (accepted : AcceptedDelegation deployment profile ambient durable ingress) : DataIntent rootBytes where
+def intent (accepted : AcceptedDelegation deployment profile ambient ground ingress) : DataIntent rootBytes where
   transactionId := transactionId deployment.domain profile.semantics ingress
   writes := writes accepted.prepared
   readGuards := readGuards accepted.prepared
@@ -176,42 +176,42 @@ def intent (accepted : AcceptedDelegation deployment profile ambient durable ing
 /-- The marker installed by the semantic authority family is exactly the
 caller-scoped transaction coordinate retained by the durable receiving journal. -/
 theorem intent_authority_marker
-    (accepted : AcceptedDelegation deployment profile ambient durable ingress) :
+    (accepted : AcceptedDelegation deployment profile ambient ground ingress) :
     ingress.command.2.declaration.operationNullifier =
       (transactionId deployment.domain profile.semantics ingress).value := by
   have identity := accepted.prepared.identity
-  rw [accepted.prepared.authority.domainExact] at identity
+  rw [ground.authorityDomain] at identity
   exact identity
 
-theorem accepted_authority_post (accepted : AcceptedDelegation deployment profile ambient durable ingress) :
+theorem accepted_authority_post (accepted : AcceptedDelegation deployment profile ambient ground ingress) :
     (accepted.accepted.declaration.post accepted.accepted.legs ()).logical =
       accepted.prepared.authorityPost.logical :=
   accepted.accepted.post_exact
 
 /-- Every source-owned write has its exact bytes in the complete installed
 snapshot. The accepted physical shape supplies global, not per-page uniqueness. -/
-theorem installed_write_bytes (accepted : AcceptedDelegation deployment profile ambient durable ingress)
+theorem installed_write_bytes (accepted : AcceptedDelegation deployment profile ambient ground ingress)
     (write : DataWrite) (member : write ∈ writes accepted.prepared) :
-    (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes write.cellId =
+    (DataSnapshot.install ground.view (intent accepted)).canonicalBytes write.cellId =
       write.canonicalPostBytes :=
-  DataSnapshot.install_canonicalBytes_of_member durable.snapshot (intent accepted)
+  DataSnapshot.install_canonicalBytes_of_member ground.view (intent accepted)
     accepted.physical.1 write member
 
 /-- The installed image holds exactly the post authority cell at the pinned
 identifier. There is one authority write and no shard or catalogue. -/
-theorem installed_authority_cell (accepted : AcceptedDelegation deployment profile ambient durable ingress) :
-    (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes (cellIdOf deployment) =
+theorem installed_authority_cell (accepted : AcceptedDelegation deployment profile ambient ground ingress) :
+    (DataSnapshot.install ground.view (intent accepted)).canonicalBytes (cellIdOf deployment) =
       cellBytes accepted.prepared.authorityPost :=
-  installed_write_bytes accepted (accepted.prepared.authority.write accepted.prepared.authorityPost)
+  installed_write_bytes accepted (ground.authorityWrite accepted.prepared.authorityPost)
     (List.mem_singleton.mpr rfl)
 
 /-- Delegation publishes authority only; the resource whose policy authorized
 it retains its exact complete old payload, not merely an equal root. -/
 theorem installed_target_unchanged
-    (accepted : AcceptedDelegation deployment profile ambient durable ingress) :
-    (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes
+    (accepted : AcceptedDelegation deployment profile ambient ground ingress) :
+    (DataSnapshot.install ground.view (intent accepted)).canonicalBytes
         ⟨ingress.command.2.declaration.target.value⟩ =
-      durable.snapshot.canonicalBytes ⟨ingress.command.2.declaration.target.value⟩ := by
+      ground.view.canonicalBytes ⟨ingress.command.2.declaration.target.value⟩ := by
   change (DataSnapshot.lookupPostBytes _ (writes accepted.prepared)).getD _ = _
   have frame := accepted.physical.2.2.2.1
   change (⟨ingress.command.2.declaration.target.value⟩ : Digest) ∉
@@ -222,10 +222,10 @@ theorem installed_target_unchanged
 /-- The immutable source evaluated on the complete pre/post authority tuple is
 also framed exactly through the installation. -/
 theorem installed_source_unchanged
-    (accepted : AcceptedDelegation deployment profile ambient durable ingress) :
-    (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes
+    (accepted : AcceptedDelegation deployment profile ambient ground ingress) :
+    (DataSnapshot.install ground.view (intent accepted)).canonicalBytes
         ⟨accepted.prepared.source.readGuard.1⟩ =
-      durable.snapshot.canonicalBytes ⟨accepted.prepared.source.readGuard.1⟩ := by
+      ground.view.canonicalBytes ⟨accepted.prepared.source.readGuard.1⟩ := by
   change (DataSnapshot.lookupPostBytes _ (writes accepted.prepared)).getD _ = _
   have frame := accepted.physical.2.2.2.2.1
   change (⟨accepted.prepared.source.readGuard.1⟩ : Digest) ∉
@@ -233,12 +233,12 @@ theorem installed_source_unchanged
   rw [DurableReceiver.lookupPostBytes_missing _ _ frame]
   rfl
 
-theorem no_partial_commit (accepted : AcceptedDelegation deployment profile ambient durable ingress)
+theorem no_partial_commit (accepted : AcceptedDelegation deployment profile ambient ground ingress)
     (schedule : Minidregg.Kernel.DurableCommitProtocol.Schedule) :
-    (DurableDataIntent.execute schedule durable.snapshot (intent accepted)).storeAfter durable.snapshot = durable.snapshot ∨
-      (DurableDataIntent.execute schedule durable.snapshot (intent accepted)).storeAfter durable.snapshot =
-        DataSnapshot.install durable.snapshot (intent accepted) :=
-  execute_no_partial_data_commit schedule durable.snapshot (intent accepted)
+    (DurableDataIntent.execute schedule ground.view (intent accepted)).storeAfter ground.view = ground.view ∨
+      (DurableDataIntent.execute schedule ground.view (intent accepted)).storeAfter ground.view =
+        DataSnapshot.install ground.view (intent accepted) :=
+  execute_no_partial_data_commit schedule ground.view (intent accepted)
 
 structure Receipt where
   transactionId : Digest
@@ -248,69 +248,47 @@ structure Receipt where
 def receipt (domain semantics : Digest) (ingress : DecodedIngress) : Receipt :=
   ⟨transactionId domain semantics ingress, (event domain semantics ingress).eventId⟩
 
-def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIngress) :
-    Option (Except Unit Receipt) :=
-  match DurableCommitProtocol.Snapshot.lookupRecorded (transactionId domain semantics ingress) durable.snapshot.model.journal with
-  | none => none
-  | some recorded =>
-    if recorded.transactionId = transactionId domain semantics ingress ∧
-        recorded.event.event = event domain semantics ingress ∧
-        recorded.nullifiers = [nullifier domain semantics ingress] then
-      some (.ok (receipt domain semantics ingress))
-    else some (.error ())
+/-- The keys a delegation consults beyond the state: its transaction id (the
+replay lookup) and its marker's replay nullifier (the spent check). -/
+def keys (domain semantics : Digest) (ingress : DecodedIngress) : DurableView.Keys :=
+  ⟨[transactionId domain semantics ingress], [nullifier domain semantics ingress]⟩
 
-theorem replay_only_original (domain semantics : Digest) (durable : Durable) (ingress : DecodedIngress)
-    (result : Receipt) (accepted : replay domain semantics durable ingress = some (.ok result)) :
+/-- The recorded intent under this delegation's transaction id is exactly its own. -/
+def exactRecord (domain semantics : Digest) (ingress : DecodedIngress)
+    (recorded : DurableCommitProtocol.Intent Digest Digest StableNullifier ReplayEnvelope) : Bool :=
+  decide (recorded.transactionId = transactionId domain semantics ingress ∧
+    recorded.event.event = event domain semantics ingress ∧
+    recorded.nullifiers = [nullifier domain semantics ingress])
+
+/-- The replay verdict on a ground, read only through its answer for the
+transaction id (`ServedBasis.Ground.replayOf`): an undeclared id is `undeclared`. -/
+def replay (domain semantics : Digest) (ground : Ground deployment) (ingress : DecodedIngress) :
+    ServedBasis.Ground.Replay Receipt :=
+  ground.replayOf (transactionId domain semantics ingress) (exactRecord domain semantics ingress)
+    (receipt domain semantics ingress)
+
+theorem replay_only_original (domain semantics : Digest) (ground : Ground deployment) (ingress : DecodedIngress)
+    (result : Receipt) (accepted : replay domain semantics ground ingress = .original result) :
     result = receipt domain semantics ingress ∧
       ∃ recorded,
-        DurableCommitProtocol.Snapshot.lookupRecorded (transactionId domain semantics ingress) durable.snapshot.model.journal = some recorded ∧
+        DurableCommitProtocol.Snapshot.lookupRecorded (transactionId domain semantics ingress) ground.view.model.journal = some recorded ∧
         recorded.event.event = event domain semantics ingress ∧
         recorded.nullifiers = [nullifier domain semantics ingress] := by
-  unfold replay at accepted
-  split at accepted
-  · cases accepted
-  · rename_i recorded found
-    split at accepted
-    · rename_i exactRecord
-      have same : receipt domain semantics ingress = result := by simpa using accepted
-      exact ⟨same.symm, recorded, found, exactRecord.2⟩
-    · cases accepted
+  obtain ⟨same, recorded, found, isExact⟩ := ServedBasis.Ground.replayOf_original ground _ _ _ result accepted
+  simp only [exactRecord, decide_eq_true_eq] at isExact
+  exact ⟨same, recorded, found, isExact.2⟩
 
-inductive Result where
-  | confirmed (kind : DurableReceiverIO.Confirmation) (receipt : Receipt)
-  | rejected (reason : Reject)
-  | transactionConflict
-  | durableRejected (reason : DurableDataIntent.RejectReason)
-  | contention
-  | unavailable (detail : String)
-  | uncertain (detail : String)
+/-- **An undeclared transaction id is refused by name** (the plant's pole): on a
+light basis that did not declare it, the verdict is `undeclared`, never "not
+recorded". -/
+theorem replay_undeclared (domain semantics : Digest) {store : DurableHistory.StoreIdentity}
+    (basis : ServedBasis.Basis deployment store) (ingress : DecodedIngress)
+    (undeclared : transactionId domain semantics ingress ∉ basis.keys.transactions) :
+    replay domain semantics (ServedBasis.Ground.ofBasis basis) ingress = .undeclared :=
+  ServedBasis.Ground.replayOf_undeclared basis _ _ _ undeclared
 
-def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
-    (transport : DurableReceiverIO.Transport) (durable : Durable) (bytes : List UInt8) : IO Result := do
-  match decodeIngress bytes with
-  | none => return .rejected .malformedCommand
-  | some ingress =>
-    match replay deployment.domain profile.semantics durable ingress with
-    | some (.ok receipt) => return .confirmed .replayed receipt
-    | some (.error _) => return .transactionConflict
-    | none =>
-      match ← admitDecodedNative deployment profile ambient durable native ingress with
-      | .error reason => return .rejected reason
-      | .ok accepted =>
-        match ← DurableReceiverIO.receiveLoaded transport rootBytes durable (intent accepted) with
-        | .confirmed kind _ => return .confirmed kind (receipt deployment.domain profile.semantics ingress)
-        | .rejected reason => return .durableRejected reason
-        | .contention => return .contention
-        | .unavailable detail => return .unavailable detail
-        | .uncertain detail => return .uncertain detail
-
-def receive (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
-    (transport : DurableReceiverIO.Transport) (bytes : List UInt8) : IO Result := do
-  match ← DurableReceiverIO.load transport rootBytes with
-  | .error detail => return .unavailable detail
-  | .ok durable => receiveLoaded deployment profile ambient native transport durable bytes
+#assert_axioms replay_only_original
+#assert_axioms replay_undeclared
 
 /-- info: 'Minidregg.Kernel.CapabilityDelegationReceiver.installed_authority_cell' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms installed_authority_cell

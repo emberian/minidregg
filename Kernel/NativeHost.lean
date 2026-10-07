@@ -165,6 +165,29 @@ def prepareRevokeOn (config : Config) (ground : ServedBasis.Ground config.deploy
   let signature ← slot ground.authority marker 7 0 ⟨.program, wanted⟩
   pure ⟨config.deployment.domain, profile.semantics, ground.worldRoot, height, .revoke bytes, [signature]⟩
 
+/-- The keys a delegation draft consults beyond the state: its marker's
+transaction id and replay nullifier. -/
+def delegateKeys (config : Config) (bytes : List UInt8) : Option DurableView.Keys := do
+  let packed ← CapabilityDelegationController.commandCodec.decode bytes
+  let marker := CapabilityDelegationController.operationMarker config.deployment.domain
+    config.profile.semantics packed.2
+  some ⟨[⟨marker⟩], [CredentialAuthorityReplay.nullifier config.deployment.domain marker]⟩
+
+/-- A delegation's signing plan on a ground (`ServedBasis.Ground`): on the served
+path, the light basis of the request with its marker declared. -/
+def prepareDelegateOn (config : Config) (ground : ServedBasis.Ground config.deployment) (height : Nat)
+    (bytes : List UInt8) : Except String SigningPlan := do
+  let profile := config.profile
+  let packed ← need (CapabilityDelegationController.undecodable bytes)
+    (CapabilityDelegationController.commandCodec.decode bytes)
+  let ambient : CapabilityDelegationController.Ambient := ⟨config.federation, height⟩
+  let _prepared ← (CapabilityDelegationController.prepare config.deployment profile ambient
+    ground packed.2).mapError (fun reason => s!"delegation preparation: {repr reason}")
+  let wanted := CapabilityDelegationController.request ground.authority profile.semantics ambient packed.2
+  let marker := CapabilityDelegationController.operationMarker config.deployment.domain profile.semantics packed.2
+  let signature ← slot ground.authority marker 6 0 ⟨packed.1, wanted⟩
+  pure ⟨config.deployment.domain, profile.semantics, ground.worldRoot, height, .delegate bytes, [signature]⟩
+
 /-- The keys an invocation draft consults beyond the state
 (`DeclaredResourceController.invocationKeys`). -/
 def invokeKeys (config : Config) (bytes : List UInt8) : Option DurableView.Keys := do
@@ -259,14 +282,11 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
         let signature ← slot opened.authority.snapshot marker 5 0 ⟨.program, request⟩
         pure (.installWithRoster subject control bytes rosterBytes, [signature])
     | .delegate bytes => do
-        let packed ← need (CapabilityDelegationController.undecodable bytes) (CapabilityDelegationController.commandCodec.decode bytes)
-        let ambient : CapabilityDelegationController.Ambient := ⟨config.federation, height⟩
-        let prepared ← (CapabilityDelegationController.prepare config.deployment profile ambient
-          opened.durable packed.2).mapError (fun reason => s!"delegation preparation: {repr reason}")
-        let wanted := CapabilityDelegationController.request prepared.authority.snapshot profile.semantics ambient packed.2
-        let marker := CapabilityDelegationController.operationMarker config.deployment.domain profile.semantics packed.2
-        let signature ← slot prepared.authority.snapshot marker 6 0 ⟨packed.1, wanted⟩
-        pure (.delegate bytes, [signature])
+        -- The full shape's plan (the consent provider's local re-derivation); the served
+        -- Host plans a delegation on its light basis (`prepareAuthorizedLoaded`);
+        -- `CapabilityDelegationController.prepare_agrees`: the two agree on the same state.
+        let plan ← prepareDelegateOn config opened.ground height bytes
+        pure (plan.finalizedDraft, plan.slots)
     | .revoke bytes => do
         -- The full shape's plan (a ratchet-listed caller: the consent provider's local
         -- re-derivation over its own anchored copy). The served Host plans a revocation on its
@@ -765,6 +785,16 @@ def prepareAuthorizedLoaded (config : Config) (opened : Opened config) (light : 
                   | .ok basis =>
                       return ((prepareRevokeOn config (.ofBasis basis)
                           (config.genesisHeight + basis.height) revokeBytes).mapError
+                        fun detail => ⟨.operationRejected, detail, none⟩)
+              | .delegate delegateBytes =>
+                  -- The delegation's marker is read from the authenticated history (its basis).
+                  let some keys := delegateKeys config delegateBytes
+                    | return .error ⟨.operationRejected, CapabilityDelegationController.undecodable delegateBytes, none⟩
+                  match ← light.basis keys with
+                  | .error detail => return .error ⟨.operationRejected, detail, none⟩
+                  | .ok basis =>
+                      return ((prepareDelegateOn config (.ofBasis basis)
+                          (config.genesisHeight + basis.height) delegateBytes).mapError
                         fun detail => ⟨.operationRejected, detail, none⟩)
               | .invoke invokeBytes =>
                   -- The invocation's transaction id and marker are read from the authenticated
@@ -2623,9 +2653,11 @@ def submitRevokeLight {F : Type} [Field F] [DecidableEq F] (transport : DurableR
   | .ok basis =>
       let ground : ServedBasis.Ground deployment := .ofBasis basis
       match CapabilityRevocationReceiver.replay domain semantics ground ingress with
-      | some (.ok receipt) => confirm .replayed receipt.transactionId receipt.eventId
-      | some (.error _) => return refused .conflict "replay" "transaction identity conflict"
-      | none =>
+      | .undeclared =>
+          return refused .operationRejected "revoke" s!"{repr CapabilityRevocationController.Reject.undeclaredTransaction}"
+      | .original receipt => confirm .replayed receipt.transactionId receipt.eventId
+      | .conflict => return refused .conflict "replay" "transaction identity conflict"
+      | .fresh =>
           match ← CapabilityRevocationReceiver.admitDecodedNative deployment profile
               ⟨federation, genesisHeight + basis.height⟩ ground signature ingress with
           | .error reason => return refused .operationRejected "revoke" s!"{repr reason}"
@@ -2633,6 +2665,46 @@ def submitRevokeLight {F : Type} [Field F] [DecidableEq F] (transport : DurableR
               let receipt := CapabilityRevocationReceiver.receipt domain semantics ingress
               match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening
                   (CapabilityRevocationReceiver.intent accepted) with
+              | .appended kind .. => confirm kind receipt.transactionId receipt.eventId
+              | .replayed _ => confirm .replayed receipt.transactionId receipt.eventId
+              | .rejected reason => return durableRefusal reason
+              | .contention => return .contention
+              | .unavailable detail => return .unavailable detail.toUTF8.toList
+              | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- A delegation on the light route: its keys (its transaction id and marker
+nullifier) read from the authenticated history into a basis, the replay check
+and the admission on `Ground.ofBasis`, the commit by `DurableServed.receiveServed`
+on the light opening. -/
+def submitDelegateLight {F : Type} [Field F] [DecidableEq F] (transport : DurableReceiverIO.Transport)
+    (deployment : CanonicalCellRegistry.Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (signature : CredentialSignatureIO.NativeConfig)
+    (opening : DurableServed.Opening ResourceBirthCodec.rootBytes)
+    (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis deployment opening.store)))
+    (bytes : List UInt8)
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
+  let domain := deployment.domain
+  let semantics := profile.semantics
+  let some ingress := CapabilityDelegationReceiver.decodeIngress bytes
+    | return refused .operationRejected "delegate"
+        s!"{repr CapabilityDelegationController.Reject.malformedCommand}"
+  match ← basisOf (CapabilityDelegationReceiver.keys domain semantics ingress) with
+  | .error detail => return .unavailable detail.toUTF8.toList
+  | .ok basis =>
+      let ground : ServedBasis.Ground deployment := .ofBasis basis
+      match CapabilityDelegationReceiver.replay domain semantics ground ingress with
+      | .undeclared =>
+          return refused .operationRejected "delegate" s!"{repr CapabilityDelegationController.Reject.undeclaredTransaction}"
+      | .original receipt => confirm .replayed receipt.transactionId receipt.eventId
+      | .conflict => return refused .conflict "replay" "transaction identity conflict"
+      | .fresh =>
+          match ← CapabilityDelegationReceiver.admitDecodedNative deployment profile
+              ⟨federation, genesisHeight + basis.height⟩ ground signature ingress with
+          | .error reason => return refused .operationRejected "delegate" s!"{repr reason}"
+          | .ok accepted =>
+              let receipt := CapabilityDelegationReceiver.receipt domain semantics ingress
+              match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening
+                  (CapabilityDelegationReceiver.intent accepted) with
               | .appended kind .. => confirm kind receipt.transactionId receipt.eventId
               | .replayed _ => confirm .replayed receipt.transactionId receipt.eventId
               | .rejected reason => return durableRefusal reason
@@ -2705,15 +2777,8 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
       submitRevokeLight transport config.deployment config.profile config.federation config.genesisHeight
         config.signature light.opening (light.basisVia transport) bytes confirm
   | .delegate bytes =>
-      match ← CapabilityDelegationReceiver.receiveLoaded config.deployment config.profile
-          ⟨config.federation, height⟩ config.signature transport opened.durable bytes with
-      | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
-      | .rejected reason => return refused .operationRejected "delegate" s!"{repr reason}"
-      | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-      | .durableRejected reason => return durableRefusal reason
-      | .contention => return .contention
-      | .unavailable detail => return .unavailable detail.toUTF8.toList
-      | .uncertain detail => return .uncertain detail.toUTF8.toList
+      submitDelegateLight transport config.deployment config.profile config.federation config.genesisHeight
+        config.signature light.opening (light.basisVia transport) bytes confirm
   | .birth bytes =>
       if (GrainResourceBirthPolicyController.decodeIngress bytes).isSome then
         let tariff := config.grainBirthTariffValue.toOption
@@ -2886,17 +2951,19 @@ def lookupLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
       | none => refused .malformed "revoke" "noncanonical ingress"
       | some ingress =>
           match CapabilityRevocationReceiver.replay config.deployment.domain config.profile.semantics opened.ground ingress with
-          | none => .absent
-          | some (.error _) => refused .conflict "replay" "transaction identity conflict"
-          | some (.ok receipt) => finish receipt.transactionId receipt.eventId
+          | .fresh => .absent
+          | .undeclared => refused .operationRejected "replay" "transaction identity undeclared"
+          | .conflict => refused .conflict "replay" "transaction identity conflict"
+          | .original receipt => finish receipt.transactionId receipt.eventId
   | .delegate bytes =>
       match CapabilityDelegationReceiver.decodeIngress bytes with
       | none => refused .malformed "delegate" "noncanonical ingress"
       | some ingress =>
-          match CapabilityDelegationReceiver.replay config.deployment.domain config.profile.semantics opened.durable ingress with
-          | none => .absent
-          | some (.error _) => refused .conflict "replay" "transaction identity conflict"
-          | some (.ok receipt) => finish receipt.transactionId receipt.eventId
+          match CapabilityDelegationReceiver.replay config.deployment.domain config.profile.semantics opened.ground ingress with
+          | .fresh => .absent
+          | .undeclared => refused .operationRejected "replay" "transaction identity undeclared"
+          | .conflict => refused .conflict "replay" "transaction identity conflict"
+          | .original receipt => finish receipt.transactionId receipt.eventId
   | .birth bytes =>
       match GrainResourceBirthPolicyController.decodeIngress bytes with
       | some ingress =>

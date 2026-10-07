@@ -1010,7 +1010,7 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened (PolicyInstallReceiver.intent accepted)
   | delegate {ingress : CapabilityDelegationReceiver.DecodedIngress}
       (accepted : CapabilityDelegationReceiver.AcceptedDelegation config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress) :
       NativeAdmission config opened (CapabilityDelegationReceiver.intent accepted)
   | revoke {ingress : CapabilityRevocationReceiver.DecodedIngress}
       (accepted : CapabilityRevocationReceiver.AcceptedRevocation config.deployment config.profile
@@ -2563,7 +2563,7 @@ private def derive (config : Config) (opened : Opened config)
       match CapabilityDelegationReceiver.decodeIngress bytes with
       | some ingress =>
           match ← CapabilityDelegationReceiver.admitDecodedNative config.deployment config.profile
-              ⟨config.federation, height⟩ opened.durable config.signature ingress with
+              ⟨config.federation, height⟩ opened.ground config.signature ingress with
           | .error reason => return .error s!"delegation refused: {repr reason}"
           | .ok accepted => return .ok ⟨CapabilityDelegationReceiver.intent accepted, .delegate accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
       | none =>
