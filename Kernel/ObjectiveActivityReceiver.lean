@@ -1467,7 +1467,7 @@ def verifyRetry (deployment : Deployment) (profile : CanonicalRuntimeProfile.Pro
   let preRoot := durable.snapshot.model.roots ⟨(signedTarget deployment.domain command).2⟩
   -- the outcome the signer signed travels with the ingress (row E): the retry is checked over exactly it
   let ⟨_, request⟩ := signedRequest authority.snapshot profile.semantics ambient command preRoot
-    ingress.ingress.outcome
+    (planOutcome deployment profile ambient durable command)
   match ← CredentialSignatureAdmission.verifyNative native (retrySnapshot authority.snapshot claimed) claimed
       request ingress.ingress.envelope with
   | .error reason => return .error (.signature reason)
