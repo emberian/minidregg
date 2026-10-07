@@ -6258,7 +6258,9 @@ A Minidregg.Kernel.ActivitySeatEnd.Joined.accepted : Classical.choice, Quot.soun
 A Minidregg.Kernel.ActivitySeatEnd.Joined.bookPost : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ActivitySeatEnd.Joined.closes : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ActivitySeatEnd.Joined.conserves : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ActivitySeatEnd.Joined.deregisters : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ActivitySeatEnd.Joined.held : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ActivitySeatEnd.Joined.retires : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ActivitySeatEnd.Joined.rewrite : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ActivitySeatEnd.Snapshot : -
 A Minidregg.Kernel.ActivitySeatEnd.finalize : Classical.choice, Quot.sound, propext
@@ -14766,6 +14768,8 @@ A Minidregg.Kernel.ObjectAudienceInstall.Reject.ofNat_ctorIdx : -
 A Minidregg.Kernel.ObjectAudienceInstall.SupportedObject : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectAudienceInstall.objectMetadataRequired : -
 A Minidregg.Kernel.ObjectAudienceInstall.prepare : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectRecord.Facts.artifact : -
+A Minidregg.Kernel.ObjectRecord.Facts.artifactValue : -
 A Minidregg.Kernel.ObjectRecord.Facts.caller : -
 A Minidregg.Kernel.ObjectRecord.Facts.height : -
 A Minidregg.Kernel.ObjectRecord.Facts.slots : -
@@ -14773,6 +14777,7 @@ A Minidregg.Kernel.ObjectRecord.Facts.subject : -
 A Minidregg.Kernel.ObjectRecord.Facts.target : -
 A Minidregg.Kernel.ObjectRecord.Facts.turn : -
 A Minidregg.Kernel.ObjectRecord.ObjectRecord.continuity : -
+A Minidregg.Kernel.ObjectRecord.ObjectRecord.effectiveLaw : -
 A Minidregg.Kernel.ObjectRecord.ObjectRecord.id : -
 A Minidregg.Kernel.ObjectRecord.ObjectRecord.law : -
 A Minidregg.Kernel.ObjectRecord.ObjectRecord.payer : -
@@ -14784,27 +14789,49 @@ A Minidregg.Kernel.ObjectRecord.UpgradePolicy.governed.elim : -
 A Minidregg.Kernel.ObjectRecord.UpgradePolicy.permits : propext
 A Minidregg.Kernel.ObjectRecord.WriteRefusal.lawDenied.elim : -
 A Minidregg.Kernel.ObjectRecord.WriteRefusal.unprojectable.elim : -
+A Minidregg.Kernel.ObjectRecord.accepted : propext
+A Minidregg.Kernel.ObjectRecord.admitSeed : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectRecord.admitSeed_lawDenied_fails : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectRecord.admitSeed_ok_iff : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectRecord.admitWrite : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectRecord.admitWrite_lawDenied_fails : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectRecord.admitWrite_ok_iff : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectRecord.admitWrite_payer_irrelevant : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectRecord.all_pin_names_pin : Quot.sound, propext
 A Minidregg.Kernel.ObjectRecord.decodeRecord : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectRecord.effectiveLaw_accepts_iff : Quot.sound, propext
+A Minidregg.Kernel.ObjectRecord.effectiveLaw_leads_with_pin : -
 A Minidregg.Kernel.ObjectRecord.encodeRecord : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectRecord.fieldSlots : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectRecord.frozen_absorbing : propext
+A Minidregg.Kernel.ObjectRecord.judgeLaw : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectRecord.judgeLaw_lawDenied_fails : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectRecord.judgeLaw_ok_iff : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectRecord.leafOf : propext
 A Minidregg.Kernel.ObjectRecord.permits_tightens : Quot.sound, propext
+A Minidregg.Kernel.ObjectRecord.pinClause : -
+A Minidregg.Kernel.ObjectRecord.pinClause_accepts_run : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectRecord.pin_teeth : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectRecord.plainName : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectRecord.recordCodec : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectRecord.recordFrame : propext
 A Minidregg.Kernel.ObjectRecord.recordStream : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectRecord.record_roundTrip : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectRecord.seed_teeth : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectRecord.slotsOf : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectRecord.stateSlots : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectRecord.stateSlots.fieldSlotsTop : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectRecord.strengthens : propext
 A Minidregg.Kernel.ObjectRecord.strengthens_sound : Quot.sound, propext
+A Minidregg.Kernel.ObjectRecord.teethFacts : -
+A Minidregg.Kernel.ObjectRecord.teethRecord : -
+A Minidregg.Kernel.ObjectRecord.teethSeedRecord : -
+A Minidregg.Kernel.ObjectRecord.unpinned_write_names_pin : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectRecord.unpinned_write_refused : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectRecord.upgradeStream : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectRecord.views : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectRecord.views_artifact_slot : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectRecord.views_shape : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectState.decodeObjectState : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectState.decodeObjectState_canonical : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectState.encodeObjectState : Classical.choice, Quot.sound, propext
@@ -14851,7 +14878,6 @@ A Minidregg.Kernel.ObjectiveActivity.AdmittedTurn.posts : Classical.choice, Quot
 A Minidregg.Kernel.ObjectiveActivity.AdmittedTurn.publish.elim : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.AdmittedTurn.resolve.elim : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.AdmittedTurn.topUp.elim : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.ObjectiveActivity.AdmittedTurn.writeState.elim : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Answer.broken.elim : -
 A Minidregg.Kernel.ObjectiveActivity.Answer.decision : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Answer.refused.elim : -
@@ -14893,10 +14919,12 @@ A Minidregg.Kernel.ObjectiveActivity.Birth.programExact : Classical.choice, Quot
 A Minidregg.Kernel.ObjectiveActivity.Birth.record : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Birth.recordExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Birth.recordFirst : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivity.Birth.record_pin : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Birth.retention_cells_have_payer : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Birth.segment : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Birth.segmentExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Birth.write_judged : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivity.Birth.write_passes_pin : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Birth.yield_reserves_deposit : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Birth.yielded : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Birth.yieldedExact : Classical.choice, Quot.sound, propext
@@ -14933,14 +14961,18 @@ A Minidregg.Kernel.ObjectiveActivity.CreateRequest.object : -
 A Minidregg.Kernel.ObjectiveActivity.CreateRequest.payer : -
 A Minidregg.Kernel.ObjectiveActivity.CreateRequest.pin : -
 A Minidregg.Kernel.ObjectiveActivity.CreateRequest.record : -
+A Minidregg.Kernel.ObjectiveActivity.CreateRequest.seed : -
 A Minidregg.Kernel.ObjectiveActivity.CreateRequest.subject : -
 A Minidregg.Kernel.ObjectiveActivity.CreateRequest.upgrade : -
 A Minidregg.Kernel.ObjectiveActivity.Creation.absent : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Creation.intent : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivity.Creation.object_installed : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Creation.posts : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Creation.postsExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Creation.published : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Creation.retention_cells_have_payer : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivity.Creation.seedJudged : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivity.Creation.stateFresh : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.DeliverRequest.account : -
 A Minidregg.Kernel.ObjectiveActivity.DeliverRequest.extra : -
 A Minidregg.Kernel.ObjectiveActivity.DeliverRequest.record : -
@@ -14994,6 +15026,7 @@ A Minidregg.Kernel.ObjectiveActivity.Delivery.stateExact : Classical.choice, Quo
 A Minidregg.Kernel.ObjectiveActivity.Delivery.view : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Delivery.viewExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Delivery.write_judged : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivity.Delivery.write_passes_pin : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Delivery.yield_reserves_deposit : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Delivery.yielded : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.Edit.add.elim : -
@@ -15168,6 +15201,7 @@ A Minidregg.Kernel.ObjectiveActivity.Refusal.slotMismatch.elim : -
 A Minidregg.Kernel.ObjectiveActivity.Refusal.slotMissing.elim : -
 A Minidregg.Kernel.ObjectiveActivity.Refusal.slotRetired.elim : -
 A Minidregg.Kernel.ObjectiveActivity.Refusal.stateCodec.elim : -
+A Minidregg.Kernel.ObjectiveActivity.Refusal.stateExists.elim : -
 A Minidregg.Kernel.ObjectiveActivity.Refusal.stateMissing.elim : -
 A Minidregg.Kernel.ObjectiveActivity.Refusal.uncovered.elim : -
 A Minidregg.Kernel.ObjectiveActivity.Refusal.underfunded.elim : -
@@ -15211,20 +15245,6 @@ A Minidregg.Kernel.ObjectiveActivity.Settlement.posts : -
 A Minidregg.Kernel.ObjectiveActivity.Snapshot : -
 A Minidregg.Kernel.ObjectiveActivity.Source.height.elim : -
 A Minidregg.Kernel.ObjectiveActivity.Source.reply.elim : -
-A Minidregg.Kernel.ObjectiveActivity.StateWrite.current : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.ObjectiveActivity.StateWrite.currentExact : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.ObjectiveActivity.StateWrite.intent : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.ObjectiveActivity.StateWrite.judged : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.ObjectiveActivity.StateWrite.object : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.ObjectiveActivity.StateWrite.objectExact : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.ObjectiveActivity.StateWrite.posts : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.ObjectiveActivity.StateWrite.postsExact : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.ObjectiveActivity.StateWrite.retention_cells_have_payer : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.ObjectiveActivity.StateWrite.write_judged : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.ObjectiveActivity.StateWriteRequest.nonce : -
-A Minidregg.Kernel.ObjectiveActivity.StateWriteRequest.object : -
-A Minidregg.Kernel.ObjectiveActivity.StateWriteRequest.subject : -
-A Minidregg.Kernel.ObjectiveActivity.StateWriteRequest.value : -
 A Minidregg.Kernel.ObjectiveActivity.StateWritten.after : -
 A Minidregg.Kernel.ObjectiveActivity.StateWritten.before : -
 A Minidregg.Kernel.ObjectiveActivity.StateWritten.post : -
@@ -15293,7 +15313,10 @@ A Minidregg.Kernel.ObjectiveActivity.commitYield_posts : Classical.choice, Quot.
 A Minidregg.Kernel.ObjectiveActivity.commitYield_spec : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.create : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.createTransaction : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivity.create_installs_pin : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.create_refuses_existing : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivity.create_seed_judged : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivity.create_seed_refused_names_clause : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.dataAnnotations : propext
 A Minidregg.Kernel.ObjectiveActivity.dataSource : propext
 A Minidregg.Kernel.ObjectiveActivity.decide_activity : propext
@@ -15362,6 +15385,7 @@ A Minidregg.Kernel.ObjectiveActivity.moved_state_refuses : Classical.choice, Quo
 A Minidregg.Kernel.ObjectiveActivity.nextRecord : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.nextRecord_ended : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.nextRecord_names : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivity.nextRecord_pin : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.nextRecord_yielded_awaiting : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.objectAt : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.objectAt_of_read : Classical.choice, Quot.sound, propext
@@ -15386,6 +15410,8 @@ A Minidregg.Kernel.ObjectiveActivity.payloadOf_of_retired : Classical.choice, Qu
 A Minidregg.Kernel.ObjectiveActivity.payloadOf_recordImage_live : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.payloadOf_retired : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.phaseStream : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivity.pin_in_every_judged_law : Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivity.pin_not_removable : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.plan_fault_commits : propext
 A Minidregg.Kernel.ObjectiveActivity.plantedCensus : Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.planted_census_unpaid : Quot.sound, propext
@@ -15439,6 +15465,8 @@ A Minidregg.Kernel.ObjectiveActivity.retention_census_paid : propext
 A Minidregg.Kernel.ObjectiveActivity.retiredImage : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.routePayer : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.runSegment : Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivity.seedFacts : -
+A Minidregg.Kernel.ObjectiveActivity.seedPost : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.segmentCommit : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.segmentCommit_awaiting : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.segmentCommit_census : Classical.choice, Quot.sound, propext
@@ -15462,7 +15490,6 @@ A Minidregg.Kernel.ObjectiveActivity.spent_claim_never_accepted : Quot.sound, pr
 A Minidregg.Kernel.ObjectiveActivity.stateCell : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.stateImage : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.stateKey : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.ObjectiveActivity.stateTransaction : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.stateWrite : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.stateWrite_spec : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.stateWrite_unviewed_never_sets : Classical.choice, Quot.sound, propext
@@ -15484,8 +15511,6 @@ A Minidregg.Kernel.ObjectiveActivity.typeResponse : Classical.choice, Quot.sound
 A Minidregg.Kernel.ObjectiveActivity.unalias : propext
 A Minidregg.Kernel.ObjectiveActivity.viewData : -
 A Minidregg.Kernel.ObjectiveActivity.viewProtocol : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.ObjectiveActivity.writeState : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.ObjectiveActivity.writeState_refuses_lawless : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.yield_reserves_pair : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.yield_short_parks : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivity.yield_write_from_current_read : Classical.choice, Quot.sound, propext
@@ -15626,7 +15651,6 @@ A Minidregg.Kernel.ObjectiveActivityReceiver.Turn.publish.elim : -
 A Minidregg.Kernel.ObjectiveActivityReceiver.Turn.resolve.elim : -
 A Minidregg.Kernel.ObjectiveActivityReceiver.Turn.toWire : -
 A Minidregg.Kernel.ObjectiveActivityReceiver.Turn.topUp.elim : -
-A Minidregg.Kernel.ObjectiveActivityReceiver.Turn.writeState.elim : -
 A Minidregg.Kernel.ObjectiveActivityReceiver.TurnWire : -
 A Minidregg.Kernel.ObjectiveActivityReceiver.accountHolder : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivityReceiver.activityCellAt : Classical.choice, Quot.sound, propext
@@ -15653,6 +15677,7 @@ A Minidregg.Kernel.ObjectiveActivityReceiver.decideTurn : Classical.choice, Quot
 A Minidregg.Kernel.ObjectiveActivityReceiver.declarationCodec : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivityReceiver.declarationStream : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivityReceiver.decodeIngress : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveActivityReceiver.decodeSeed : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivityReceiver.effectDigest : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivityReceiver.endStream : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivityReceiver.event : Classical.choice, Quot.sound, propext
@@ -15696,7 +15721,6 @@ A Minidregg.Kernel.ObjectiveActivityReceiver.transactionId : Classical.choice, Q
 A Minidregg.Kernel.ObjectiveActivityReceiver.transactionOf : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivityReceiver.turnStream : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivityReceiver.verbFor : -
-A Minidregg.Kernel.ObjectiveActivityReceiver.writeState_requires_object_holder : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveActivityWire.Bytes : -
 A Minidregg.Kernel.ObjectiveActivityWire.Post.bytes : -
 A Minidregg.Kernel.ObjectiveActivityWire.Post.cell : -
@@ -15985,11 +16009,15 @@ A Minidregg.Kernel.ObjectiveCall.CallRefusal.slotQueueFull.elim : -
 A Minidregg.Kernel.ObjectiveCall.CallRefusal.slotTaken.elim : -
 A Minidregg.Kernel.ObjectiveCall.CallRefusal.stateMissing.elim : -
 A Minidregg.Kernel.ObjectiveCall.Ctx.assumptions : -
+A Minidregg.Kernel.ObjectiveCall.Ctx.caller : -
 A Minidregg.Kernel.ObjectiveCall.Ctx.facts : -
+A Minidregg.Kernel.ObjectiveCall.Ctx.facts_artifact : -
+A Minidregg.Kernel.ObjectiveCall.Ctx.height : -
 A Minidregg.Kernel.ObjectiveCall.Ctx.method : -
 A Minidregg.Kernel.ObjectiveCall.Ctx.object : -
 A Minidregg.Kernel.ObjectiveCall.Ctx.record : -
 A Minidregg.Kernel.ObjectiveCall.Ctx.responseType : -
+A Minidregg.Kernel.ObjectiveCall.Ctx.subject : -
 A Minidregg.Kernel.ObjectiveCall.Ctx.view : -
 A Minidregg.Kernel.ObjectiveCall.Destination.object.elim : -
 A Minidregg.Kernel.ObjectiveCall.Destination.slot.elim : -
@@ -16120,6 +16148,7 @@ A Minidregg.Kernel.ObjectiveCall.holdSlot : Classical.choice, Quot.sound, propex
 A Minidregg.Kernel.ObjectiveCall.install_read : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.invocation_reentry_free : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.invocation_writes_from_view : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveCall.invocation_writes_pinned : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.invoke : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.invokeBatch : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCall.invokeTransaction : Classical.choice, Quot.sound, propext
@@ -16240,8 +16269,6 @@ A Minidregg.Kernel.ObjectiveCheckpointInvariant.segmentCommit_safe : Classical.c
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.settle_safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.slot_post_safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.slot_retire_safe : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.ObjectiveCheckpointInvariant.stateWrite_quiet : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.ObjectiveCheckpointInvariant.stateWrite_safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.state_post_safe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.stored_checkpoints_typed : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveCheckpointInvariant.yielded_posts_quiet : Classical.choice, Quot.sound, propext
@@ -16358,6 +16385,7 @@ A Minidregg.Kernel.ObjectiveSend.MessageDelivery.seedExact : Classical.choice, Q
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.slot : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.slotExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageDelivery.slotNamed : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.MessageDelivery.writes_pinned : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.MessageRefusal.empty.elim : -
 A Minidregg.Kernel.ObjectiveSend.MessageRefusal.kernel.elim : -
 A Minidregg.Kernel.ObjectiveSend.MessageRefusal.noInbox.elim : -
@@ -16397,6 +16425,7 @@ A Minidregg.Kernel.ObjectiveSend.postMail_credits : Classical.choice, Quot.sound
 A Minidregg.Kernel.ObjectiveSend.referenceOf : propext
 A Minidregg.Kernel.ObjectiveSend.runMessage : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.runMessage_read : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ObjectiveSend.runMessage_writes_pinned : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveSend.seedMail : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ObjectiveTariff.Tariff.base : -
 A Minidregg.Kernel.ObjectiveTariff.Tariff.heap : -
@@ -20771,6 +20800,7 @@ A Minidregg.Kernel.SeatStore.Decided.book : Classical.choice, Quot.sound, propex
 A Minidregg.Kernel.SeatStore.Decided.bookExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.Decided.book_post : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.Decided.conserves : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.SeatStore.Decided.exit_retires_cell : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.Decided.extra : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.Decided.fees : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.Decided.feesNone : Classical.choice, Quot.sound, propext
@@ -20785,6 +20815,7 @@ A Minidregg.Kernel.SeatStore.Decided.nullifiers : Classical.choice, Quot.sound, 
 A Minidregg.Kernel.SeatStore.Decided.nullifiersExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.Decided.posts : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.Decided.postsExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.SeatStore.Decided.retires_closed : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.Decided.run : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.Decided.stepExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.Decided.world : Classical.choice, Quot.sound, propext
@@ -20802,6 +20833,7 @@ A Minidregg.Kernel.SeatStore.HeldEnd.loaded : Classical.choice, Quot.sound, prop
 A Minidregg.Kernel.SeatStore.HeldEnd.next : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.HeldEnd.posts : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.HeldEnd.postsExact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.SeatStore.HeldEnd.retires : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.Inert : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.InstanceBody.inst : -
 A Minidregg.Kernel.SeatStore.InstanceBody.retired : -
@@ -20832,6 +20864,8 @@ A Minidregg.Kernel.SeatStore.Refusal.packageMissing.elim : -
 A Minidregg.Kernel.SeatStore.Refusal.payerInvalid.elim : -
 A Minidregg.Kernel.SeatStore.Refusal.plan.elim : -
 A Minidregg.Kernel.SeatStore.Refusal.program.elim : -
+A Minidregg.Kernel.SeatStore.Refusal.seatExists.elim : -
+A Minidregg.Kernel.SeatStore.Refusal.seatRetired.elim : -
 A Minidregg.Kernel.SeatStore.Refusal.uncovered.elim : -
 A Minidregg.Kernel.SeatStore.Request.nonce : -
 A Minidregg.Kernel.SeatStore.Request.subject : -
@@ -20858,6 +20892,7 @@ A Minidregg.Kernel.SeatStore.callData : Quot.sound, propext
 A Minidregg.Kernel.SeatStore.changed : -
 A Minidregg.Kernel.SeatStore.checkInert : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.contractCodecId : Quot.sound, propext
+A Minidregg.Kernel.SeatStore.decideOffer : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.decideTurn : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.decodeAction : propext
 A Minidregg.Kernel.SeatStore.decodeList : propext
@@ -20895,6 +20930,7 @@ A Minidregg.Kernel.SeatStore.loadSeat : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.loadedCells : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.mintId : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.natField : propext
+A Minidregg.Kernel.SeatStore.offer_refuses_taken_cell : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.openIndex : -
 A Minidregg.Kernel.SeatStore.packageBytes : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.packageCell : Classical.choice, Quot.sound, propext
@@ -20921,6 +20957,7 @@ A Minidregg.Kernel.SeatStore.seatStream : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.seatView : Quot.sound, propext
 A Minidregg.Kernel.SeatStore.sortSeats : Quot.sound, propext
 A Minidregg.Kernel.SeatStore.statePosts : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.SeatStore.statePosts_retires : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.termsData : -
 A Minidregg.Kernel.SeatStore.termsStream : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.touchesActivity : Classical.choice, Quot.sound, propext
@@ -20947,17 +20984,27 @@ A Minidregg.Kernel.Seats.Example.Entry.run : Classical.choice, Quot.sound, prope
 A Minidregg.Kernel.Seats.Example.Entry.signed.elim : -
 A Minidregg.Kernel.Seats.Example.X : -
 A Minidregg.Kernel.Seats.Example.Y : -
+A Minidregg.Kernel.Seats.Example.Z : -
 A Minidregg.Kernel.Seats.Example.absent_slot_reads_as_met : Quot.sound, propext
+A Minidregg.Kernel.Seats.Example.activity_end_leaves_deadline_seat_open : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.Example.activity_end_pays_deadline_seat_after_due : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Example.activity_end_pays_held_seat : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Example.alice : -
 A Minidregg.Kernel.Seats.Example.aliceAccount : -
 A Minidregg.Kernel.Seats.Example.aliceSeat : propext
 A Minidregg.Kernel.Seats.Example.another_activity_ends_nothing : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.Example.anyone_exits_deadline_seat_after_due : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Example.assay_refused : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Example.balances : Quot.sound, propext
 A Minidregg.Kernel.Seats.Example.bob : -
 A Minidregg.Kernel.Seats.Example.bobAccount : -
 A Minidregg.Kernel.Seats.Example.bobSeat : propext
+A Minidregg.Kernel.Seats.Example.closed_seat_refuses_top_up : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.Example.credited : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.Example.deadlineHeldOpening : propext
+A Minidregg.Kernel.Seats.Example.empty_want_unmarked_refused : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.Example.exit_deregisters_example : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.Example.exit_sweeps_unnamed_asset : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Example.genesis : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Example.genesisBook : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Example.giftOpening : propext
@@ -20968,32 +21015,41 @@ A Minidregg.Kernel.Seats.Example.lockedInstance : -
 A Minidregg.Kernel.Seats.Example.lockedOpening : propext
 A Minidregg.Kernel.Seats.Example.locked_contract_cannot_stop_exit : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Example.locked_contract_refuses_reallocation : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.Example.marked_donation_with_want_refused : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.Example.marked_empty_want_accepted : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Example.mintIds : -
 A Minidregg.Kernel.Seats.Example.natPredecessorAtLeast : propext
 A Minidregg.Kernel.Seats.Example.nat_predecessor_encoding_refuses_zero_want : Quot.sound, propext
 A Minidregg.Kernel.Seats.Example.opening : propext
 A Minidregg.Kernel.Seats.Example.package : -
 A Minidregg.Kernel.Seats.Example.raid_refused : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.Example.replayed_exit_refused : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Example.run : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Example.run_reachable : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Example.settlement : propext
 A Minidregg.Kernel.Seats.Example.stranger_cannot_exit : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.Example.stranger_cannot_exit_deadline_seat_early : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.Example.strayGenesis : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Example.swapInstance : -
 A Minidregg.Kernel.Seats.Example.swap_opening_reachable : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Example.swap_opening_two_seats : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Example.swap_settles_after_price_move : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.Example.unmarked_gift_refused : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Example.unprotected_seat_refused : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Example.zero_want_gift_admitted : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Example.zero_want_satisfied : Quot.sound, propext
 A Minidregg.Kernel.Seats.ExitRule.afterDeadline.elim : -
 A Minidregg.Kernel.Seats.ExitRule.onDemand.elim : -
-A Minidregg.Kernel.Seats.Inv.distinct : Quot.sound, propext
-A Minidregg.Kernel.Seats.Inv.genesis : Quot.sound, propext
-A Minidregg.Kernel.Seats.Inv.member : Quot.sound, propext
-A Minidregg.Kernel.Seats.Inv.nonneg : Quot.sound, propext
-A Minidregg.Kernel.Seats.Inv.payeeOther : Quot.sound, propext
-A Minidregg.Kernel.Seats.Inv.protect : Quot.sound, propext
-A Minidregg.Kernel.Seats.Inv.safe : Quot.sound, propext
+A Minidregg.Kernel.Seats.Inv.distinct : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.Inv.genesis : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.Inv.leases : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.Inv.member : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.Inv.nonneg : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.Inv.payeeOther : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.Inv.protect : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.Inv.safe : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.LeaseFree : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.LeaseFree.of_eq : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Operation.apply_balance_other : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Operation.apply_balances : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Operation.apply_deregisterAccount : Classical.choice, Quot.sound, propext
@@ -21010,11 +21066,15 @@ A Minidregg.Kernel.Seats.Posts.accounts : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Posts.conserves : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Posts.seq : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.Proposal.assets : -
+A Minidregg.Kernel.Seats.Proposal.donate : -
 A Minidregg.Kernel.Seats.Proposal.exit : -
 A Minidregg.Kernel.Seats.Proposal.give : -
 A Minidregg.Kernel.Seats.Proposal.want : -
+A Minidregg.Kernel.Seats.Proposal.wantsNothing : -
 A Minidregg.Kernel.Seats.Refusal.book.elim : -
 A Minidregg.Kernel.Seats.Refusal.contractClauseRefused.elim : -
+A Minidregg.Kernel.Seats.Refusal.donationMarkedWithWant.elim : -
+A Minidregg.Kernel.Seats.Refusal.donationUnmarked.elim : -
 A Minidregg.Kernel.Seats.Refusal.exitNotAuthorized.elim : -
 A Minidregg.Kernel.Seats.Refusal.fundingProtected.elim : -
 A Minidregg.Kernel.Seats.Refusal.instanceExists.elim : -
@@ -21026,13 +21086,12 @@ A Minidregg.Kernel.Seats.Refusal.offerUnsafe.elim : -
 A Minidregg.Kernel.Seats.Refusal.outsideSeats.elim : -
 A Minidregg.Kernel.Seats.Refusal.payeeMissing.elim : -
 A Minidregg.Kernel.Seats.Refusal.payeeProtected.elim : -
-A Minidregg.Kernel.Seats.Refusal.seatClosed.elim : -
+A Minidregg.Kernel.Seats.Refusal.seatLeased.elim : -
 A Minidregg.Kernel.Seats.Refusal.seatMissing.elim : -
 A Minidregg.Kernel.Seats.Refusal.seatNotProtected.elim : -
 A Minidregg.Kernel.Seats.Seat.account : -
 A Minidregg.Kernel.Seats.Seat.holder : -
 A Minidregg.Kernel.Seats.Seat.inst : -
-A Minidregg.Kernel.Seats.Seat.isOpen : -
 A Minidregg.Kernel.Seats.Seat.offerer : -
 A Minidregg.Kernel.Seats.Seat.payee : -
 A Minidregg.Kernel.Seats.Seat.proposal : -
@@ -21045,6 +21104,7 @@ A Minidregg.Kernel.Seats.World.book : Quot.sound, propext
 A Minidregg.Kernel.Seats.World.registry : Quot.sound, propext
 A Minidregg.Kernel.Seats.World.seat? : Quot.sound, propext
 A Minidregg.Kernel.Seats.World.seats : Quot.sound, propext
+A Minidregg.Kernel.Seats.absent_not_named : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.activity_end_closes_seats : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.addressed : Quot.sound, propext
 A Minidregg.Kernel.Seats.admit : Classical.choice, Quot.sound, propext
@@ -21059,11 +21119,14 @@ A Minidregg.Kernel.Seats.atLeast_mono : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.balance_op : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.closeAll : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.closeAll_credit_only : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.closeAll_deregisters : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.closeAll_deregistrations : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.closeAll_inv : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.closeAll_posts : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.Seats.closeBatch : Quot.sound, propext
+A Minidregg.Kernel.Seats.closeBatch : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.closeBatch_admitted : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.Seats.closeBatch_pays : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.closeBatch_balance : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.closeDeregistration : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.closeHeld : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.closeHeld_reachable : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.closeSeat : Classical.choice, Quot.sound, propext
@@ -21071,12 +21134,11 @@ A Minidregg.Kernel.Seats.closeSeat_book : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.closeSeat_inv : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.closeSeat_seats : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.closeSeat_spec : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.Seats.closeSeats : -
-A Minidregg.Kernel.Seats.closeSeats_closed : Quot.sound, propext
-A Minidregg.Kernel.Seats.closeSeats_keeps_closed : Quot.sound, propext
-A Minidregg.Kernel.Seats.closeSeats_map_account : Quot.sound, propext
+A Minidregg.Kernel.Seats.close_accounts : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.closed_seat_posting_refused : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.contractAdmits : Quot.sound, propext
 A Minidregg.Kernel.Seats.deregisterAccounts_append : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.deregisterAccounts_balance : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.deregisterAccounts_leaseRecords : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.deregistrationAdmission_apply : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.deregistrationsAdmitted_afterOperations : Classical.choice, Quot.sound, propext
@@ -21084,41 +21146,59 @@ A Minidregg.Kernel.Seats.deregistrationsAdmitted_append : Classical.choice, Quot
 A Minidregg.Kernel.Seats.deregistrationsAdmitted_apply : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.diagnose : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.diagnoseOps : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.empty_want_list_requires_marker : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.empty_want_requires_marker : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.exitAuthorized : -
 A Minidregg.Kernel.Seats.exitEach : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.exitEach_closes : Classical.choice, Quot.sound, propext
-A Minidregg.Kernel.Seats.exitEach_keeps_closed : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.exitEach_deregistrations : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.exitEach_posts : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.exitEach_sub : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.exit_admitted : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.exit_after_deadline : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.exit_by_holder : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.exit_deregisters : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.exit_enabled : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.exit_pays_allocation : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.exit_removes_seat : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.exit_spec : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.exit_step_authorized : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.firstUnsafe : Quot.sound, propext
 A Minidregg.Kernel.Seats.giveTransfers : -
+A Minidregg.Kernel.Seats.heldAssets : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.heldAssets_nodup : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.heldOpen : Quot.sound, propext
-A Minidregg.Kernel.Seats.mem_closeSeats : Quot.sound, propext
+A Minidregg.Kernel.Seats.holder_respects_deadline : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.marked_offer_has_empty_want : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.mem_heldAssets : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.mem_of_mem_deregisterAccounts : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.mem_removeSeat : Quot.sound, propext
 A Minidregg.Kernel.Seats.noPostings : -
 A Minidregg.Kernel.Seats.offerBatch : -
 A Minidregg.Kernel.Seats.offerSafe : propext
+A Minidregg.Kernel.Seats.offer_donation : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.offer_inv : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.openSeatsOf : Quot.sound, propext
+A Minidregg.Kernel.Seats.openSeatsOf_sub : Quot.sound, propext
 A Minidregg.Kernel.Seats.opsOf : -
 A Minidregg.Kernel.Seats.ops_credit_only : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.ops_leaseRecords : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.ops_nonneg : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.ops_other_asset : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.ops_untouched : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.ordinary_ne_protected : propext
 A Minidregg.Kernel.Seats.payoutTransfers : Quot.sound, propext
 A Minidregg.Kernel.Seats.payout_admitted_from : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.payout_all_exact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.payout_credit_only : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.payout_exact_from : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.payout_sources : Quot.sound, propext
 A Minidregg.Kernel.Seats.posts_none : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.reachable_inv : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.reallocate_inv : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.registerAccounts_not_mem : Quot.sound, propext
+A Minidregg.Kernel.Seats.removeSeat : -
+A Minidregg.Kernel.Seats.removeSeat_map_nodup : propext
 A Minidregg.Kernel.Seats.requestState : -
 A Minidregg.Kernel.Seats.reservedBase : propext
 A Minidregg.Kernel.Seats.retireInstance : -
@@ -21134,10 +21214,14 @@ A Minidregg.Kernel.Seats.seat_debit_authorized : Classical.choice, Quot.sound, p
 A Minidregg.Kernel.Seats.seat_offer_safe_forever : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.seqBatch : -
 A Minidregg.Kernel.Seats.single_at : Quot.sound, propext
+A Minidregg.Kernel.Seats.sortedNats : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.sortedNats_eq : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.step : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.step_exit_closes : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.step_exit_deregistrations : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.step_inv : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.step_posts : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.Seats.terminate_deregisters : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.Seats.touches : -
 A Minidregg.Kernel.Seats.view : Quot.sound, propext
 A Minidregg.Kernel.Seats.view_get : Quot.sound, propext
