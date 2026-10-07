@@ -42,14 +42,18 @@ def installedExact (deployment : CanonicalCellRegistry.Deployment)
     | _ => false
   else true
 
-/-- The nullifiers a v3 BEGIN reads from the spent map: the first-attempt and
-created markers of its launch binding. A light basis must declare them. -/
-def markerNullifiers (ingress : Ingress) : List StableNullifier :=
-  match ingress.start with
+/-- The nullifiers a launch binding's markers read from the spent map: the
+first-attempt and created markers. A light basis must declare them. -/
+def markerNullifiersOf (domain : Digest) (start : Option ApplicationLifecycleLaunchBinding.Binding) :
+    List StableNullifier :=
+  match start with
   | none => []
   | some binding =>
-      [ApplicationLifecycleClaimV3Ingress.firstAttemptNullifier ingress.base.domain binding,
-        ApplicationLifecycleClaimV3Ingress.createdNullifier ingress.base.domain binding]
+      [ApplicationLifecycleClaimV3Ingress.firstAttemptNullifier domain binding,
+        ApplicationLifecycleClaimV3Ingress.createdNullifier domain binding]
+
+def markerNullifiers (ingress : Ingress) : List StableNullifier :=
+  markerNullifiersOf ingress.base.domain ingress.start
 
 /-- Every key a v3 BEGIN reads: the base BEGIN's (transaction id and operation
 marker) and its launch markers. -/
@@ -57,29 +61,36 @@ def keys (ingress : Ingress) : DurableView.Keys :=
   let base := ApplicationLifecycleBeginReceiver.keys ingress.base
   ⟨base.transactions, base.nullifiers ++ markerNullifiers ingress⟩
 
-/-- The ground answers every marker the BEGIN reads (an undeclared marker is
+/-- The ground answers every marker the binding reads (an undeclared marker is
 never read as unconsumed). -/
-def markersDeclared {deployment : CanonicalCellRegistry.Deployment} (ground : Ground deployment) (ingress : Ingress) : Bool :=
-  (markerNullifiers ingress).all ground.declaresNullifier
+def markersDeclaredOf {deployment : CanonicalCellRegistry.Deployment} (ground : Ground deployment)
+    (domain : Digest) (start : Option ApplicationLifecycleLaunchBinding.Binding) : Bool :=
+  (markerNullifiersOf domain start).all ground.declaresNullifier
+
+def markersDeclared {deployment : CanonicalCellRegistry.Deployment} (ground : Ground deployment)
+    (ingress : Ingress) : Bool :=
+  markersDeclaredOf ground ingress.base.domain ingress.start
 
 /-- The current nullifier image prevents rearming a first create and excludes
 continue before a completed create. Verified additionally selects the exact
 successful completion certificate; marker presence is never that certificate.
-A marker the ground did not declare refuses (`markersDeclared`). -/
-def markersCurrent {deployment : CanonicalCellRegistry.Deployment} (ground : Ground deployment)
-    (ingress : Ingress) : Bool :=
-  markersDeclared ground ingress &&
-  match ingress.start with
+A marker the ground did not declare refuses (`markersDeclaredOf`). -/
+def markersCurrentOf {deployment : CanonicalCellRegistry.Deployment} (ground : Ground deployment)
+    (domain : Digest) (start : Option ApplicationLifecycleLaunchBinding.Binding) : Bool :=
+  markersDeclaredOf ground domain start &&
+  match start with
   | none => true
   | some binding =>
-      let first := ApplicationLifecycleClaimV3Ingress.firstAttemptNullifier
-        ingress.base.domain binding
-      let created := ApplicationLifecycleClaimV3Ingress.createdNullifier
-        ingress.base.domain binding
+      let first := ApplicationLifecycleClaimV3Ingress.firstAttemptNullifier domain binding
+      let created := ApplicationLifecycleClaimV3Ingress.createdNullifier domain binding
       match binding.choice with
       | .create _ => !ground.view.model.consumed first &&
           !ground.view.model.consumed created
       | .continue => ground.view.model.consumed created
+
+def markersCurrent {deployment : CanonicalCellRegistry.Deployment} (ground : Ground deployment)
+    (ingress : Ingress) : Bool :=
+  markersCurrentOf ground ingress.base.domain ingress.start
 
 theorem consumed_first_attempt_refuses_create
     {deployment : CanonicalCellRegistry.Deployment} (ground : Ground deployment) (ingress : Ingress)
@@ -90,7 +101,7 @@ theorem consumed_first_attempt_refuses_create
       (ApplicationLifecycleClaimV3Ingress.firstAttemptNullifier
         ingress.base.domain binding) = true) :
     markersCurrent ground ingress = false := by
-  simp [markersCurrent, selected, choice, consumed]
+  simp [markersCurrent, markersCurrentOf, selected, choice, consumed]
 
 theorem missing_created_refuses_continue
     {deployment : CanonicalCellRegistry.Deployment} (ground : Ground deployment) (ingress : Ingress)
@@ -101,7 +112,7 @@ theorem missing_created_refuses_continue
       (ApplicationLifecycleClaimV3Ingress.createdNullifier
         ingress.base.domain binding) = false) :
     markersCurrent ground ingress = false := by
-  simp [markersCurrent, selected, choice, missing]
+  simp [markersCurrent, markersCurrentOf, selected, choice, missing]
 
 /-- **An undeclared launch marker refuses** (the pole of a silent "unconsumed"). -/
 theorem undeclared_marker_refuses
@@ -110,9 +121,10 @@ theorem undeclared_marker_refuses
     (undeclared : ground.declaresNullifier marker = false) :
     markersCurrent ground ingress = false := by
   have : markersDeclared ground ingress = false := by
-    unfold markersDeclared
+    unfold markersDeclared markersDeclaredOf
     exact List.all_eq_false.mpr ⟨marker, member, by simp [undeclared]⟩
-  simp [markersCurrent, this]
+  simp [markersCurrent, markersCurrentOf, markersDeclared] at this ⊢
+  simp [this]
 
 structure Accepted {F : Type} [Field F] [DecidableEq F]
     (deployment : CanonicalCellRegistry.Deployment)
