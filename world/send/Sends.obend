@@ -66,6 +66,29 @@ record Relay:
   target: Nat
   method: String
   amount: Nat
+record SendA:
+  to: To
+  method: String
+  args: Nat
+  allowance: Nat
+sum PlanA:
+  send: SendA
+record RelayA:
+  target: Nat
+  method: String
+  amount: Nat
+  allowance: Nat
+record Hop:
+  target: Nat
+  price: Nat
+  allowance: Nat
+record SendH:
+  to: To
+  method: String
+  args: Hop
+  allowance: Nat
+sum PlanH:
+  send: SendH
 # A leaf: adds `amount` and returns the new total.
 def deposit(view: View, amount: Nat) -> Activity<PlanN, Returned, Return>:
   {result: view.state.total + amount, write: {total: EditNat.add(amount)}}
@@ -125,3 +148,42 @@ def cancelOf(view: View, n: Nat) -> Activity<PlanC, Acked, Return>:
 def stopOf(view: View, n: Nat) -> Activity<PlanT, Acked, Return>:
   match perform(PlanT.stop({slot: n})):
     case acked(a): {result: a.slot, write: {total: EditNat.keep()}}
+# Row F, the prepaid continuation allowance: a send may carry an `allowance`, escrowed with
+# its postage; only then may its delivered method send onward, out of that allowance alone
+# (at most 4 onward sends, at most 3 hops deep), the rest returning to the payer.
+def relayA(view: View, r: RelayA) -> Activity<PlanA, Queued, Return>:
+  match perform(PlanA.send({to: To.object(r.target), method: r.method, args: r.amount, allowance: r.allowance})):
+    case queued(q): {result: q.slot, write: {total: EditNat.keep()}}
+# Two onward sends: `deposit(n)` to object n, twice.
+def bounce2(view: View, n: Nat) -> Activity<PlanS, Queued, Return>:
+  match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+    case queued(a):
+      match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+        case queued(b): {result: b.slot, write: {total: EditNat.keep()}}
+# Four onward sends (the fan-out bound).
+def bounce4(view: View, n: Nat) -> Activity<PlanS, Queued, Return>:
+  match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+    case queued(a):
+      match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+        case queued(b):
+          match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+            case queued(c):
+              match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+                case queued(d): {result: d.slot, write: {total: EditNat.keep()}}
+# Five onward sends: one over the fan-out bound.
+def bounce5(view: View, n: Nat) -> Activity<PlanS, Queued, Return>:
+  match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+    case queued(a):
+      match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+        case queued(b):
+          match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+            case queued(c):
+              match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+                case queued(d):
+                  match perform(PlanS.send({to: To.object(n), method: "deposit", args: n})):
+                    case queued(e): {result: e.slot, write: {total: EditNat.keep()}}
+# A continuation chain: sends `hop` to `target` carrying all but one `price` of its own
+# allowance (its escrow is then exactly that allowance), counting itself.
+def hop(view: View, h: Hop) -> Activity<PlanH, Queued, Return>:
+  match perform(PlanH.send({to: To.object(h.target), method: "hop", args: {target: h.target, price: h.price, allowance: h.allowance - h.price}, allowance: h.allowance - h.price})):
+    case queued(q): {result: q.slot, write: {total: EditNat.add(1n)}}
