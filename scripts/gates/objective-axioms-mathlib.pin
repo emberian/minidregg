@@ -3312,6 +3312,9 @@ A Minidregg.Compiler.ObjectiveBendElaborate.Body.brecOn_2.go : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Body.cases.elim : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Body.expr.elim : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Body.letB.elim : -
+A Minidregg.Compiler.ObjectiveBendElaborate.Claim.body : -
+A Minidregg.Compiler.ObjectiveBendElaborate.Claim.name : -
+A Minidregg.Compiler.ObjectiveBendElaborate.Claim.params : -
 A Minidregg.Compiler.ObjectiveBendElaborate.CorePrimitive : -
 A Minidregg.Compiler.ObjectiveBendElaborate.CoreTerm : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Ctx.decls : Classical.choice, Quot.sound, propext
@@ -3355,9 +3358,6 @@ A Minidregg.Compiler.ObjectiveBendElaborate.Expr.var.elim : -
 A Minidregg.Compiler.ObjectiveBendElaborate.InternM : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Interner.seen : Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendElaborate.Interner.table : Classical.choice, Quot.sound, propext
-A Minidregg.Compiler.ObjectiveBendElaborate.Law.body : -
-A Minidregg.Compiler.ObjectiveBendElaborate.Law.name : -
-A Minidregg.Compiler.ObjectiveBendElaborate.Law.params : -
 A Minidregg.Compiler.ObjectiveBendElaborate.M : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Method.body : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendElaborate.Method.name : Classical.choice, Quot.sound, propext
@@ -3408,7 +3408,7 @@ A Minidregg.Compiler.ObjectiveBendElaborate.Signature.name : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Signature.params : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Signature.resultType : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Spec.binders : Classical.choice, Quot.sound, propext
-A Minidregg.Compiler.ObjectiveBendElaborate.Spec.laws : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.ObjectiveBendElaborate.Spec.claims : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendElaborate.Spec.methods : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendElaborate.Spec.name : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendElaborate.Spec.parents : Classical.choice, Quot.sound, propext
@@ -3527,8 +3527,8 @@ A Minidregg.Compiler.ObjectiveBendElaborate.shiftRef : propext
 A Minidregg.Compiler.ObjectiveBendElaborate.signatureText : propext
 A Minidregg.Compiler.ObjectiveBendElaborate.signatureTy : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendElaborate.sourceType : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.ObjectiveBendElaborate.specClaimsName : -
 A Minidregg.Compiler.ObjectiveBendElaborate.specKey : Classical.choice, Quot.sound, propext
-A Minidregg.Compiler.ObjectiveBendElaborate.specLawsName : -
 A Minidregg.Compiler.ObjectiveBendElaborate.specMetaName : -
 A Minidregg.Compiler.ObjectiveBendElaborate.specOf : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendElaborate.specProvided : Classical.choice, Quot.sound, propext
@@ -3738,6 +3738,7 @@ A Minidregg.Compiler.ObjectiveBendParse.body : Classical.choice, Quot.sound, pro
 A Minidregg.Compiler.ObjectiveBendParse.cap : propext
 A Minidregg.Compiler.ObjectiveBendParse.capture : propext
 A Minidregg.Compiler.ObjectiveBendParse.caseRe : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.ObjectiveBendParse.claimRe : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendParse.declarations : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendParse.decodeSource : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendParse.endsWith : Classical.choice, Quot.sound, propext
@@ -3760,7 +3761,6 @@ A Minidregg.Compiler.ObjectiveBendParse.jsTrimStart : -
 A Minidregg.Compiler.ObjectiveBendParse.jsonStringLiteral : propext
 A Minidregg.Compiler.ObjectiveBendParse.kindOf : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendParse.lastIndexOf : -
-A Minidregg.Compiler.ObjectiveBendParse.lawRe : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendParse.letRe : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendParse.liftAt : -
 A Minidregg.Compiler.ObjectiveBendParse.liftBare : -
@@ -3902,9 +3902,12 @@ A Minidregg.Compiler.ObjectiveBendSourceArtifact.schema : Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendSourceArtifact.selected_core_exact : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendSourceArtifact.stream : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.acceptsSource : Classical.choice, Quot.sound, propext
-A Minidregg.Compiler.ObjectiveBendSpecificationClosure.badLawSource : propext
+A Minidregg.Compiler.ObjectiveBendSpecificationClosure.badClaimSource : propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.binary_self_accepted : Classical.choice, Minidregg.Compiler.ObjectiveBendSpecificationClosure.binary_self_accepted._native.native_decide.ax_1_1, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.builtin_parses : Classical.choice, Minidregg.Compiler.ObjectiveBendSpecificationClosure.builtin_parses._native.native_decide.ax_1_1, Quot.sound, propext
+A Minidregg.Compiler.ObjectiveBendSpecificationClosure.claimSpecSource : propext
+A Minidregg.Compiler.ObjectiveBendSpecificationClosure.claim_spec_accepted : Classical.choice, Minidregg.Compiler.ObjectiveBendSpecificationClosure.claim_spec_accepted._native.native_decide.ax_1_1, Quot.sound, propext
+A Minidregg.Compiler.ObjectiveBendSpecificationClosure.claimsVariable : -
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.composeTy_closed : Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.composeTy_fold_closed : Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.composeWrapper : -
@@ -3917,14 +3920,13 @@ A Minidregg.Compiler.ObjectiveBendSpecificationClosure.f_bound_mismatch_refused 
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.fourthFieldSource : propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.heavierSpec : propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.inherited_unprovided_refused : Classical.choice, Minidregg.Compiler.ObjectiveBendSpecificationClosure.inherited_unprovided_refused._native.native_decide.ax_1_1, Quot.sound, propext
-A Minidregg.Compiler.ObjectiveBendSpecificationClosure.lawSpecSource : propext
-A Minidregg.Compiler.ObjectiveBendSpecificationClosure.law_spec_accepted : Classical.choice, Minidregg.Compiler.ObjectiveBendSpecificationClosure.law_spec_accepted._native.native_decide.ax_1_1, Quot.sound, propext
-A Minidregg.Compiler.ObjectiveBendSpecificationClosure.lawsVariable : -
+A Minidregg.Compiler.ObjectiveBendSpecificationClosure.lawKeywordSource : propext
+A Minidregg.Compiler.ObjectiveBendSpecificationClosure.law_keyword_refused : Classical.choice, Minidregg.Compiler.ObjectiveBendSpecificationClosure.law_keyword_refused._native.native_decide.ax_1_1, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.metaAssumptions : -
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.metaAssumptions_valid : propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.metaVariable : -
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.meta_conversion : Classical.choice, Quot.sound, propext
-A Minidregg.Compiler.ObjectiveBendSpecificationClosure.non_boolean_law_refused : Classical.choice, Minidregg.Compiler.ObjectiveBendSpecificationClosure.non_boolean_law_refused._native.native_decide.ax_1_1, Quot.sound, propext
+A Minidregg.Compiler.ObjectiveBendSpecificationClosure.non_boolean_claim_refused : Classical.choice, Minidregg.Compiler.ObjectiveBendSpecificationClosure.non_boolean_claim_refused._native.native_decide.ax_1_1, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.open_extension_reused_accepted : Classical.choice, Minidregg.Compiler.ObjectiveBendSpecificationClosure.open_extension_reused_accepted._native.native_decide.ax_1_1, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.operandTy : -
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.operand_callable : propext
@@ -3934,7 +3936,7 @@ A Minidregg.Compiler.ObjectiveBendSpecificationClosure.provenance_typed : Classi
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.requires_signature_refused : Classical.choice, Minidregg.Compiler.ObjectiveBendSpecificationClosure.requires_signature_refused._native.native_decide.ax_1_1, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.reviewSpecs : propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.shareableUnder_of_shareable : propext
-A Minidregg.Compiler.ObjectiveBendSpecificationClosure.specLawsRow : -
+A Minidregg.Compiler.ObjectiveBendSpecificationClosure.specClaimsRow : -
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.specMetaRow : -
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.specTy : -
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.twiceSource : propext
@@ -21010,6 +21012,7 @@ A Minidregg.Kernel.SeatStore.Decided.stepExact : Classical.choice, Quot.sound, p
 A Minidregg.Kernel.SeatStore.Decided.world : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.Decided.worldExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.Fresh.key : -
+A Minidregg.Kernel.SeatStore.Fresh.opened : -
 A Minidregg.Kernel.SeatStore.Fresh.role : -
 A Minidregg.Kernel.SeatStore.Fresh.terms : -
 A Minidregg.Kernel.SeatStore.HeldEnd.batch : Classical.choice, Quot.sound, propext
@@ -21059,6 +21062,7 @@ A Minidregg.Kernel.SeatStore.Refusal.uncovered.elim : -
 A Minidregg.Kernel.SeatStore.Request.nonce : -
 A Minidregg.Kernel.SeatStore.Request.subject : -
 A Minidregg.Kernel.SeatStore.Request.turn : -
+A Minidregg.Kernel.SeatStore.SeatBody.opened : -
 A Minidregg.Kernel.SeatStore.SeatBody.role : -
 A Minidregg.Kernel.SeatStore.SeatBody.seat : -
 A Minidregg.Kernel.SeatStore.SeatBody.terms : -
@@ -21090,6 +21094,7 @@ A Minidregg.Kernel.SeatStore.decodeTerm : propext
 A Minidregg.Kernel.SeatStore.decodeTransfer : propext
 A Minidregg.Kernel.SeatStore.domain : Quot.sound, propext
 A Minidregg.Kernel.SeatStore.endHeld : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.SeatStore.exitData : -
 A Minidregg.Kernel.SeatStore.finish : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.holdingsCell : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.SeatStore.holdingsCodec : Classical.choice, Quot.sound, propext

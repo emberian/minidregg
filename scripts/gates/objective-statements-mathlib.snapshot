@@ -3957,6 +3957,11 @@ S ctor Minidregg.Compiler.ObjectiveBendElaborate.Body.expr : Minidregg.Compiler.
 S def Minidregg.Compiler.ObjectiveBendElaborate.Body.expr.elim : {motive_1 : Minidregg.Compiler.ObjectiveBendElaborate.Body → Sort u} → (t : Minidregg.Compiler.ObjectiveBendElaborate.Body) → t.ctorIdx = 0 → ((e : Minidregg.Compiler.ObjectiveBendElaborate.Expr) → motive_1 (Minidregg.Compiler.ObjectiveBendElaborate.Body.expr e)) → motive_1 t #1993059326
 S ctor Minidregg.Compiler.ObjectiveBendElaborate.Body.letB : String → String → Minidregg.Compiler.ObjectiveBendElaborate.Expr → Minidregg.Compiler.ObjectiveBendElaborate.Body → Minidregg.Compiler.ObjectiveBendElaborate.Body
 S def Minidregg.Compiler.ObjectiveBendElaborate.Body.letB.elim : {motive_1 : Minidregg.Compiler.ObjectiveBendElaborate.Body → Sort u} → (t : Minidregg.Compiler.ObjectiveBendElaborate.Body) → t.ctorIdx = 2 → ((name type : String) → (value : Minidregg.Compiler.ObjectiveBendElaborate.Expr) → (body : Minidregg.Compiler.ObjectiveBendElaborate.Body) → motive_1 (Minidregg.Compiler.ObjectiveBendElaborate.Body.letB name type value body)) → motive_1 t #1986269831
+S inductive Minidregg.Compiler.ObjectiveBendElaborate.Claim : Type
+S def Minidregg.Compiler.ObjectiveBendElaborate.Claim.body : Minidregg.Compiler.ObjectiveBendElaborate.Claim → Minidregg.Compiler.ObjectiveBendElaborate.Expr #2144468669
+S ctor Minidregg.Compiler.ObjectiveBendElaborate.Claim.mk : String → List Minidregg.Compiler.ObjectiveBendElaborate.Param → Minidregg.Compiler.ObjectiveBendElaborate.Expr → Minidregg.Compiler.ObjectiveBendElaborate.Claim
+S def Minidregg.Compiler.ObjectiveBendElaborate.Claim.name : Minidregg.Compiler.ObjectiveBendElaborate.Claim → String #376182297
+S def Minidregg.Compiler.ObjectiveBendElaborate.Claim.params : Minidregg.Compiler.ObjectiveBendElaborate.Claim → List Minidregg.Compiler.ObjectiveBendElaborate.Param #1206287970
 S def Minidregg.Compiler.ObjectiveBendElaborate.CorePrimitive : Type #100542633
 S def Minidregg.Compiler.ObjectiveBendElaborate.CoreTerm : Type #3502726918
 S inductive Minidregg.Compiler.ObjectiveBendElaborate.Ctx : Type
@@ -4026,11 +4031,6 @@ S inductive Minidregg.Compiler.ObjectiveBendElaborate.Interner : Type
 S ctor Minidregg.Compiler.ObjectiveBendElaborate.Interner.mk : Array Lean.Json → Std.HashMap String ℕ → Minidregg.Compiler.ObjectiveBendElaborate.Interner
 S def Minidregg.Compiler.ObjectiveBendElaborate.Interner.seen : Minidregg.Compiler.ObjectiveBendElaborate.Interner → Std.HashMap String ℕ #149221966
 S def Minidregg.Compiler.ObjectiveBendElaborate.Interner.table : Minidregg.Compiler.ObjectiveBendElaborate.Interner → Array Lean.Json #498411890
-S inductive Minidregg.Compiler.ObjectiveBendElaborate.Law : Type
-S def Minidregg.Compiler.ObjectiveBendElaborate.Law.body : Minidregg.Compiler.ObjectiveBendElaborate.Law → Minidregg.Compiler.ObjectiveBendElaborate.Expr #954778422
-S ctor Minidregg.Compiler.ObjectiveBendElaborate.Law.mk : String → List Minidregg.Compiler.ObjectiveBendElaborate.Param → Minidregg.Compiler.ObjectiveBendElaborate.Expr → Minidregg.Compiler.ObjectiveBendElaborate.Law
-S def Minidregg.Compiler.ObjectiveBendElaborate.Law.name : Minidregg.Compiler.ObjectiveBendElaborate.Law → String #194063770
-S def Minidregg.Compiler.ObjectiveBendElaborate.Law.params : Minidregg.Compiler.ObjectiveBendElaborate.Law → List Minidregg.Compiler.ObjectiveBendElaborate.Param #3024397685
 S def Minidregg.Compiler.ObjectiveBendElaborate.M : Type → Type #2144821578
 S inductive Minidregg.Compiler.ObjectiveBendElaborate.Method : Type
 S def Minidregg.Compiler.ObjectiveBendElaborate.Method.body : Minidregg.Compiler.ObjectiveBendElaborate.Method → Minidregg.Compiler.ObjectiveBendElaborate.Body #2314379527
@@ -4114,9 +4114,9 @@ S def Minidregg.Compiler.ObjectiveBendElaborate.Signature.params : Minidregg.Com
 S def Minidregg.Compiler.ObjectiveBendElaborate.Signature.resultType : Minidregg.Compiler.ObjectiveBendElaborate.Signature → String #1399647044
 S inductive Minidregg.Compiler.ObjectiveBendElaborate.Spec : Type
 S def Minidregg.Compiler.ObjectiveBendElaborate.Spec.binders : Minidregg.Compiler.ObjectiveBendElaborate.Spec → String #1836869811
-S def Minidregg.Compiler.ObjectiveBendElaborate.Spec.laws : Minidregg.Compiler.ObjectiveBendElaborate.Spec → List Minidregg.Compiler.ObjectiveBendElaborate.Law #3610773651
+S def Minidregg.Compiler.ObjectiveBendElaborate.Spec.claims : Minidregg.Compiler.ObjectiveBendElaborate.Spec → List Minidregg.Compiler.ObjectiveBendElaborate.Claim #3610773651
 S def Minidregg.Compiler.ObjectiveBendElaborate.Spec.methods : Minidregg.Compiler.ObjectiveBendElaborate.Spec → List Minidregg.Compiler.ObjectiveBendElaborate.Method #1804665717
-S ctor Minidregg.Compiler.ObjectiveBendElaborate.Spec.mk : String → Bool → List String → String → Lean.Json → List Minidregg.Compiler.ObjectiveBendElaborate.Method → List Minidregg.Compiler.ObjectiveBendElaborate.Law → String → Minidregg.Compiler.ObjectiveBendElaborate.Spec
+S ctor Minidregg.Compiler.ObjectiveBendElaborate.Spec.mk : String → Bool → List String → String → Lean.Json → List Minidregg.Compiler.ObjectiveBendElaborate.Method → List Minidregg.Compiler.ObjectiveBendElaborate.Claim → String → Minidregg.Compiler.ObjectiveBendElaborate.Spec
 S def Minidregg.Compiler.ObjectiveBendElaborate.Spec.name : Minidregg.Compiler.ObjectiveBendElaborate.Spec → String #2657981758
 S def Minidregg.Compiler.ObjectiveBendElaborate.Spec.parents : Minidregg.Compiler.ObjectiveBendElaborate.Spec → List String #2951704226
 S def Minidregg.Compiler.ObjectiveBendElaborate.Spec.requirements : Minidregg.Compiler.ObjectiveBendElaborate.Spec → Lean.Json #2249189193
@@ -4152,8 +4152,8 @@ S def Minidregg.Compiler.ObjectiveBendElaborate.body : Minidregg.Compiler.Object
 S def Minidregg.Compiler.ObjectiveBendElaborate.boundsAt : Minidregg.Compiler.ObjectiveBendElaborate.Ctx → ℕ → String → List Minidregg.Compiler.ObjectiveBendElaborate.Signature → String → Minidregg.Compiler.ObjectiveBendElaborate.PTy → Minidregg.Compiler.ObjectiveBendElaborate.M (Option (Minidregg.Compiler.ObjectiveBendElaborate.PTy × Minidregg.Compiler.ObjectiveBendElaborate.PTy)) #3642653780
 S def Minidregg.Compiler.ObjectiveBendElaborate.builtinModule : Except String Minidregg.Compiler.ObjectiveBendElaborate.Module #3099167227
 S def Minidregg.Compiler.ObjectiveBendElaborate.builtinModuleName : String #3458781812
-S def Minidregg.Compiler.ObjectiveBendElaborate.builtinSource : String #722762913
-S def Minidregg.Compiler.ObjectiveBendElaborate.builtinTypeNames : List String #4272012376
+S def Minidregg.Compiler.ObjectiveBendElaborate.builtinSource : String #2322187198
+S def Minidregg.Compiler.ObjectiveBendElaborate.builtinTypeNames : List String #3484716150
 S def Minidregg.Compiler.ObjectiveBendElaborate.callable : Option Minidregg.Compiler.ObjectiveBendElaborate.PTy → Option Minidregg.Compiler.ObjectiveBendElaborate.PTy #1748594418
 S def Minidregg.Compiler.ObjectiveBendElaborate.chainFix : Minidregg.Compiler.ObjectiveBendElaborate.Ctx → ℕ → List (String × Minidregg.Compiler.ObjectiveBendElaborate.Decl × Minidregg.Compiler.ObjectiveBendElaborate.Module) → Minidregg.Compiler.ObjectiveBendElaborate.Expr → Option Minidregg.Compiler.ObjectiveBendElaborate.PTy → List Minidregg.Compiler.ObjectiveBendElaborate.Binding → Minidregg.Compiler.ObjectiveBendElaborate.Module → Minidregg.Compiler.ObjectiveBendElaborate.M (Option Minidregg.Compiler.ObjectiveBendElaborate.ATerm) #4179731957
 S def Minidregg.Compiler.ObjectiveBendElaborate.chainOp : Minidregg.Compiler.ObjectiveBendElaborate.Ctx → Minidregg.Compiler.ObjectiveBendElaborate.Expr → List Minidregg.Compiler.ObjectiveBendElaborate.Binding → Minidregg.Compiler.ObjectiveBendElaborate.Module → Option (String × Minidregg.Compiler.ObjectiveBendElaborate.Decl × Minidregg.Compiler.ObjectiveBendElaborate.Module) #1586381709
@@ -4164,7 +4164,7 @@ S def Minidregg.Compiler.ObjectiveBendElaborate.composeTy : Minidregg.Compiler.O
 S def Minidregg.Compiler.ObjectiveBendElaborate.context : List Minidregg.Compiler.ObjectiveBendElaborate.Module → Except String Minidregg.Compiler.ObjectiveBendElaborate.Ctx #1727415466
 S def Minidregg.Compiler.ObjectiveBendElaborate.declOf : Minidregg.Compiler.ObjectiveBendElaborate.Ctx → String → Option (Minidregg.Compiler.ObjectiveBendElaborate.Decl × Minidregg.Compiler.ObjectiveBendElaborate.Module) #256290235
 S def Minidregg.Compiler.ObjectiveBendElaborate.decodeBody : ℕ → Lean.Json → Except String Minidregg.Compiler.ObjectiveBendElaborate.Body #1086434359
-S def Minidregg.Compiler.ObjectiveBendElaborate.decodeDecl : Lean.Json → Except String Minidregg.Compiler.ObjectiveBendElaborate.Decl #2363864781
+S def Minidregg.Compiler.ObjectiveBendElaborate.decodeDecl : Lean.Json → Except String Minidregg.Compiler.ObjectiveBendElaborate.Decl #36136956
 S def Minidregg.Compiler.ObjectiveBendElaborate.decodeExpr : ℕ → Lean.Json → Except String Minidregg.Compiler.ObjectiveBendElaborate.Expr #2109319954
 S def Minidregg.Compiler.ObjectiveBendElaborate.decodeModule : Lean.Json → Except String Minidregg.Compiler.ObjectiveBendElaborate.Module #210999394
 S def Minidregg.Compiler.ObjectiveBendElaborate.decodeParam : Lean.Json → Except String Minidregg.Compiler.ObjectiveBendElaborate.Param #1384647642
@@ -4183,7 +4183,7 @@ S def Minidregg.Compiler.ObjectiveBendElaborate.fail : {α : Type} → String �
 S def Minidregg.Compiler.ObjectiveBendElaborate.fieldsArray : List (String × Minidregg.Compiler.ObjectiveBendElaborate.ATerm) → List Lean.Json #276126565
 S def Minidregg.Compiler.ObjectiveBendElaborate.fieldsJson : List (String × Minidregg.Compiler.ObjectiveBendElaborate.ATerm) → Lean.Json #1147337918
 S def Minidregg.Compiler.ObjectiveBendElaborate.fieldsOf : Minidregg.Compiler.ObjectiveBendElaborate.Ctx → ℕ → List (String × Minidregg.Compiler.ObjectiveBendElaborate.Expr) → List Minidregg.Compiler.ObjectiveBendElaborate.Binding → Minidregg.Compiler.ObjectiveBendElaborate.Module → Minidregg.Compiler.ObjectiveBendElaborate.M (List (String × Minidregg.Compiler.ObjectiveBendElaborate.ATerm)) #1258415039
-S def Minidregg.Compiler.ObjectiveBendElaborate.finishSpecification : Minidregg.Compiler.ObjectiveBendElaborate.Ctx → ℕ → Minidregg.Compiler.ObjectiveBendElaborate.Spec → Minidregg.Compiler.ObjectiveBendElaborate.Module → String → List String → Minidregg.Compiler.ObjectiveBendElaborate.ATerm → Minidregg.Compiler.ObjectiveBendElaborate.M Minidregg.Compiler.ObjectiveBendElaborate.ATerm #1735221399
+S def Minidregg.Compiler.ObjectiveBendElaborate.finishSpecification : Minidregg.Compiler.ObjectiveBendElaborate.Ctx → ℕ → Minidregg.Compiler.ObjectiveBendElaborate.Spec → Minidregg.Compiler.ObjectiveBendElaborate.Module → String → List String → Minidregg.Compiler.ObjectiveBendElaborate.ATerm → Minidregg.Compiler.ObjectiveBendElaborate.M Minidregg.Compiler.ObjectiveBendElaborate.ATerm #3786208691
 S def Minidregg.Compiler.ObjectiveBendElaborate.fixChain : Minidregg.Compiler.ObjectiveBendElaborate.Ctx → Minidregg.Compiler.ObjectiveBendElaborate.Expr → List Minidregg.Compiler.ObjectiveBendElaborate.Binding → Minidregg.Compiler.ObjectiveBendElaborate.Module → Option (List (String × Minidregg.Compiler.ObjectiveBendElaborate.Decl × Minidregg.Compiler.ObjectiveBendElaborate.Module)) #4177705856
 S def Minidregg.Compiler.ObjectiveBendElaborate.globalRef : List Minidregg.Compiler.ObjectiveBendElaborate.Binding → String → Minidregg.Compiler.ObjectiveBendElaborate.M Minidregg.Compiler.ObjectiveBendElaborate.ATerm #2761011089
 S def Minidregg.Compiler.ObjectiveBendElaborate.globalType : Minidregg.Compiler.ObjectiveBendElaborate.Ctx → ℕ → String → Minidregg.Compiler.ObjectiveBendElaborate.M (Option Minidregg.Compiler.ObjectiveBendElaborate.PTy) #1137321794
@@ -4236,8 +4236,8 @@ S def Minidregg.Compiler.ObjectiveBendElaborate.shiftRef : Minidregg.Compiler.Ob
 S def Minidregg.Compiler.ObjectiveBendElaborate.signatureText : Minidregg.Compiler.ObjectiveBendElaborate.Signature → String #378053585
 S def Minidregg.Compiler.ObjectiveBendElaborate.signatureTy : Minidregg.Compiler.ObjectiveBendElaborate.Ctx → ℕ → List Minidregg.Compiler.ObjectiveBendElaborate.Param → Minidregg.Compiler.ObjectiveBendElaborate.ResultSpec → String → List String → Minidregg.Compiler.ObjectiveBendElaborate.M (Option Minidregg.Compiler.ObjectiveBendElaborate.PTy) #4025729975
 S def Minidregg.Compiler.ObjectiveBendElaborate.sourceType : Minidregg.Compiler.ObjectiveBendElaborate.Ctx → ℕ → String → String → List String → Minidregg.Compiler.ObjectiveBendElaborate.M (Option Minidregg.Compiler.ObjectiveBendElaborate.PTy) #3690281748
+S def Minidregg.Compiler.ObjectiveBendElaborate.specClaimsName : String #2053225159
 S def Minidregg.Compiler.ObjectiveBendElaborate.specKey : Minidregg.Compiler.ObjectiveBendElaborate.Ctx → String → Minidregg.Compiler.ObjectiveBendElaborate.Module → Minidregg.Compiler.ObjectiveBendElaborate.M String #4067627760
-S def Minidregg.Compiler.ObjectiveBendElaborate.specLawsName : String #2843118807
 S def Minidregg.Compiler.ObjectiveBendElaborate.specMetaName : String #2538136562
 S def Minidregg.Compiler.ObjectiveBendElaborate.specOf : Minidregg.Compiler.ObjectiveBendElaborate.Ctx → String → Option (Minidregg.Compiler.ObjectiveBendElaborate.Spec × Minidregg.Compiler.ObjectiveBendElaborate.Module) #464346821
 S def Minidregg.Compiler.ObjectiveBendElaborate.specProvided : Minidregg.Compiler.ObjectiveBendElaborate.Ctx → ℕ → Minidregg.Compiler.ObjectiveBendElaborate.Spec → String → Minidregg.Compiler.ObjectiveBendElaborate.PTy → Minidregg.Compiler.ObjectiveBendElaborate.M (Option Minidregg.Compiler.ObjectiveBendElaborate.PTy) #3794918225
@@ -4334,7 +4334,7 @@ S def Minidregg.Compiler.ObjectiveBendFrontEndAdequacy.example_package : Minidre
 S def Minidregg.Compiler.ObjectiveBendFrontEndAdequacy.example_source : String #1460852740
 S theorem Minidregg.Compiler.ObjectiveBendFrontEndAdequacy.replay_inhabited : (Minidregg.Compiler.ObjectiveBendPublication.replayAccept Minidregg.Compiler.ObjectiveBendFrontEndAdequacy.example_package ((Minidregg.Compiler.ObjectiveBendPublication.publishedCore Minidregg.Compiler.ObjectiveBendFrontEndAdequacy.example_package).toOption.getD []) 16384).toBool = Bool.true
 S def Minidregg.Compiler.ObjectiveBendFrontEndIdentity.identity : String #1693142312
-S def Minidregg.Compiler.ObjectiveBendFrontEndIdentity.manifest : String #2369342994
+S def Minidregg.Compiler.ObjectiveBendFrontEndIdentity.manifest : String #2352097003
 S def Minidregg.Compiler.ObjectiveBendFrontEndIdentity.manifestHeader : String #664441607
 S def Minidregg.Compiler.ObjectiveBendFrontEndIdentity.sources : List String #8188032
 S def Minidregg.Compiler.ObjectiveBendFrontEndIdentity.«termObjective_front_end_manifest%» : Lean.ParserDescr #3396093037
@@ -4488,7 +4488,8 @@ S def Minidregg.Compiler.ObjectiveBendParse.body : Array Minidregg.Compiler.Obje
 S def Minidregg.Compiler.ObjectiveBendParse.cap : List Char → Minidregg.Compiler.ObjectiveBendParse.Caps → ℕ → String #2650373981
 S def Minidregg.Compiler.ObjectiveBendParse.capture : List Char → Minidregg.Compiler.ObjectiveBendParse.Caps → ℕ → Option (List Char) #2729987315
 S def Minidregg.Compiler.ObjectiveBendParse.caseRe : Minidregg.Compiler.ObjectiveBendParse.Re #2046215009
-S def Minidregg.Compiler.ObjectiveBendParse.declarations : Array Minidregg.Compiler.ObjectiveBendParse.Line → Minidregg.Compiler.ObjectiveBendParse.PS (Array Lean.Json × Array Lean.Json) #163964929
+S def Minidregg.Compiler.ObjectiveBendParse.claimRe : Minidregg.Compiler.ObjectiveBendParse.Re #1408980796
+S def Minidregg.Compiler.ObjectiveBendParse.declarations : Array Minidregg.Compiler.ObjectiveBendParse.Line → Minidregg.Compiler.ObjectiveBendParse.PS (Array Lean.Json × Array Lean.Json) #1928218261
 S def Minidregg.Compiler.ObjectiveBendParse.decodeSource : ByteArray → Option String #1209118362
 S def Minidregg.Compiler.ObjectiveBendParse.endsWith : List Char → String → Bool #3289548250
 S def Minidregg.Compiler.ObjectiveBendParse.expression : List Char → ℕ → ℕ → Except String Lean.Json #1954191500
@@ -4510,7 +4511,6 @@ S def Minidregg.Compiler.ObjectiveBendParse.jsTrimStart : List Char → List Cha
 S def Minidregg.Compiler.ObjectiveBendParse.jsonStringLiteral : List Char → Except String String #2348204435
 S def Minidregg.Compiler.ObjectiveBendParse.kindOf : Lean.Json → String #2425780446
 S def Minidregg.Compiler.ObjectiveBendParse.lastIndexOf : List Char → List Char → ℕ #1838963305
-S def Minidregg.Compiler.ObjectiveBendParse.lawRe : Minidregg.Compiler.ObjectiveBendParse.Re #4040083520
 S def Minidregg.Compiler.ObjectiveBendParse.letRe : Minidregg.Compiler.ObjectiveBendParse.Re #846917659
 S def Minidregg.Compiler.ObjectiveBendParse.liftAt : {α : Type} → Minidregg.Compiler.ObjectiveBendParse.Line → Except String α → Minidregg.Compiler.ObjectiveBendParse.PS α #89737747
 S def Minidregg.Compiler.ObjectiveBendParse.liftBare : {α : Type} → Except String α → Minidregg.Compiler.ObjectiveBendParse.PS α #1084252843
@@ -4665,9 +4665,12 @@ S def Minidregg.Compiler.ObjectiveBendSourceArtifact.schema : Minidregg.Theory.T
 S theorem Minidregg.Compiler.ObjectiveBendSourceArtifact.selected_core_exact : ∀ {a : Minidregg.Compiler.ObjectiveBendSourceArtifact.Artifact} {maxBytes : ℕ} (checked : Minidregg.Compiler.ObjectiveBendSourceArtifact.Checked a maxBytes), Minidregg.Theory.ObjectiveBendTyping.decodePacket checked.packetJson = Except.ok checked.packet
 S def Minidregg.Compiler.ObjectiveBendSourceArtifact.stream : Minidregg.Compiler.Tower256ConcreteBackend.StreamCodec Minidregg.Compiler.ObjectiveBendSourceArtifact.Artifact #2099535361
 S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.acceptsSource : String → String → Bool #3643261768
-S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.badLawSource : String #638182394
+S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.badClaimSource : String #2890005614
 S theorem Minidregg.Compiler.ObjectiveBendSpecificationClosure.binary_self_accepted : Minidregg.Compiler.ObjectiveBendSpecificationClosure.acceptsSource ("edition ObjectiveBend 1\nrecord Node:\n weight: Nat\n heavier(other: Node) -> Node\n" ++ Minidregg.Compiler.ObjectiveBendSpecificationClosure.heavierSpec ++ "def node(n: Nat) -> Node:\n fix(Heavier, {weight: n})\n") "node" = Bool.true
 S theorem Minidregg.Compiler.ObjectiveBendSpecificationClosure.builtin_parses : Minidregg.Compiler.ObjectiveBendElaborate.builtinModule.toBool = Bool.true
+S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.claimSpecSource : String #3165727458
+S theorem Minidregg.Compiler.ObjectiveBendSpecificationClosure.claim_spec_accepted : Minidregg.Compiler.ObjectiveBendSpecificationClosure.acceptsSource Minidregg.Compiler.ObjectiveBendSpecificationClosure.claimSpecSource "asSpecification" = Bool.true
+S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.claimsVariable : ℕ #3973288277
 S theorem Minidregg.Compiler.ObjectiveBendSpecificationClosure.composeTy_closed : ∀ (metaTy T : Minidregg.Compiler.ObjectiveBendElaborate.PTy) (left right : Bool), Minidregg.Compiler.ObjectiveBendElaborate.composeTy metaTy (Option.some (Minidregg.Compiler.ObjectiveBendSpecificationClosure.operandTy metaTy T left)) (Option.some (Minidregg.Compiler.ObjectiveBendSpecificationClosure.operandTy metaTy T right)) = Option.some (metaTy.specification (Minidregg.Compiler.ObjectiveBendElaborate.extensionTy T))
 S theorem Minidregg.Compiler.ObjectiveBendSpecificationClosure.composeTy_fold_closed : ∀ (metaTy T : Minidregg.Compiler.ObjectiveBendElaborate.PTy) (first : Bool) (rest : List Bool), List.foldl (fun acc next => Minidregg.Compiler.ObjectiveBendElaborate.composeTy metaTy acc (Option.some (Minidregg.Compiler.ObjectiveBendSpecificationClosure.operandTy metaTy T next))) (Option.some (Minidregg.Compiler.ObjectiveBendSpecificationClosure.operandTy metaTy T first)) rest = if rest.isEmpty = Bool.true then Option.some (Minidregg.Compiler.ObjectiveBendSpecificationClosure.operandTy metaTy T first) else Option.some (metaTy.specification (Minidregg.Compiler.ObjectiveBendElaborate.extensionTy T))
 S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.composeWrapper : Minidregg.Theory.ObjectiveBendTypes.Ty → Bool → Bool → Minidregg.Theory.ObjectiveBendTyping.AnnotatedTerm #2462023089
@@ -4680,14 +4683,13 @@ S theorem Minidregg.Compiler.ObjectiveBendSpecificationClosure.f_bound_mismatch_
 S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.fourthFieldSource : String #3042456679
 S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.heavierSpec : String #474861804
 S theorem Minidregg.Compiler.ObjectiveBendSpecificationClosure.inherited_unprovided_refused : Minidregg.Compiler.ObjectiveBendSpecificationClosure.acceptsSource (Minidregg.Compiler.ObjectiveBendSpecificationClosure.reviewSpecs ++ "def run() -> Nat:\n fix(compose(Augmented, Base, Twice), {}).twice(3n)\n") "run" = Bool.false
-S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.lawSpecSource : String #1704970086
-S theorem Minidregg.Compiler.ObjectiveBendSpecificationClosure.law_spec_accepted : Minidregg.Compiler.ObjectiveBendSpecificationClosure.acceptsSource Minidregg.Compiler.ObjectiveBendSpecificationClosure.lawSpecSource "asSpecification" = Bool.true
-S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.lawsVariable : ℕ #3973288277
-S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.metaAssumptions : Minidregg.Theory.ObjectiveBendTyping.Assumptions #3600347038
+S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.lawKeywordSource : String #1704970086
+S theorem Minidregg.Compiler.ObjectiveBendSpecificationClosure.law_keyword_refused : Minidregg.Compiler.ObjectiveBendSpecificationClosure.acceptsSource Minidregg.Compiler.ObjectiveBendSpecificationClosure.lawKeywordSource "asSpecification" = Bool.false
+S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.metaAssumptions : Minidregg.Theory.ObjectiveBendTyping.Assumptions #3329010205
 S theorem Minidregg.Compiler.ObjectiveBendSpecificationClosure.metaAssumptions_valid : Minidregg.Compiler.ObjectiveBendSpecificationClosure.metaAssumptions.valid = Bool.true
 S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.metaVariable : ℕ #3825659865
 S theorem Minidregg.Compiler.ObjectiveBendSpecificationClosure.meta_conversion : Minidregg.Theory.ObjectiveBendTyping.sameType Minidregg.Compiler.ObjectiveBendSpecificationClosure.metaAssumptions Minidregg.Compiler.ObjectiveBendSpecificationClosure.specMetaRow.variant (Minidregg.Theory.ObjectiveBendTypes.Ty.variable Minidregg.Compiler.ObjectiveBendSpecificationClosure.metaVariable) = Bool.true
-S theorem Minidregg.Compiler.ObjectiveBendSpecificationClosure.non_boolean_law_refused : Minidregg.Compiler.ObjectiveBendSpecificationClosure.acceptsSource Minidregg.Compiler.ObjectiveBendSpecificationClosure.badLawSource "asSpecification" = Bool.false
+S theorem Minidregg.Compiler.ObjectiveBendSpecificationClosure.non_boolean_claim_refused : Minidregg.Compiler.ObjectiveBendSpecificationClosure.acceptsSource Minidregg.Compiler.ObjectiveBendSpecificationClosure.badClaimSource "asSpecification" = Bool.false
 S theorem Minidregg.Compiler.ObjectiveBendSpecificationClosure.open_extension_reused_accepted : Minidregg.Compiler.ObjectiveBendSpecificationClosure.acceptsSource Minidregg.Compiler.ObjectiveBendSpecificationClosure.fourthFieldSource "run" = Bool.true
 S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.operandTy : Minidregg.Compiler.ObjectiveBendElaborate.PTy → Minidregg.Compiler.ObjectiveBendElaborate.PTy → Bool → Minidregg.Compiler.ObjectiveBendElaborate.PTy #1667273967
 S theorem Minidregg.Compiler.ObjectiveBendSpecificationClosure.operand_callable : ∀ (T : Minidregg.Theory.ObjectiveBendTypes.Ty) (b : Bool), Minidregg.Theory.ObjectiveBendTyping.callable (Minidregg.Compiler.ObjectiveBendSpecificationClosure.coreOperandTy T b) = Minidregg.Theory.ObjectiveBendTypes.Ty.arrow Minidregg.Theory.ObjectiveBendTypes.Reuse.reusable Minidregg.Theory.ObjectiveBendTypes.Quantity.unrestricted T (Minidregg.Theory.ObjectiveBendTypes.Ty.arrow Minidregg.Theory.ObjectiveBendTypes.Reuse.reusable Minidregg.Theory.ObjectiveBendTypes.Quantity.unrestricted T T)
@@ -4697,8 +4699,8 @@ S theorem Minidregg.Compiler.ObjectiveBendSpecificationClosure.provenance_typed 
 S theorem Minidregg.Compiler.ObjectiveBendSpecificationClosure.requires_signature_refused : Minidregg.Compiler.ObjectiveBendSpecificationClosure.acceptsSource ("edition ObjectiveBend 1\nrecord R:\n review(value: Nat) -> Nat\n" ++ "spec S for R:\n requires review(value: String) -> Nat\n def review(value: Nat) -> Nat:\n value\n" ++ "def run() -> Nat:\n fix(S, {}).review(1n)\n") "run" = Bool.false
 S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.reviewSpecs : String #1995698270
 S theorem Minidregg.Compiler.ObjectiveBendSpecificationClosure.shareableUnder_of_shareable : ∀ (vars : List ℕ) (type : Minidregg.Theory.ObjectiveBendTypes.Ty), type.shareable = Bool.true → Minidregg.Theory.ObjectiveBendTypes.Ty.shareableUnder vars type = Bool.true
-S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.specLawsRow : Minidregg.Theory.ObjectiveBendTypes.Ty #1170738659
-S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.specMetaRow : Minidregg.Theory.ObjectiveBendTypes.Ty #1742024157
+S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.specClaimsRow : Minidregg.Theory.ObjectiveBendTypes.Ty #3958674567
+S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.specMetaRow : Minidregg.Theory.ObjectiveBendTypes.Ty #737158980
 S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.specTy : Minidregg.Theory.ObjectiveBendTypes.Ty → Minidregg.Theory.ObjectiveBendTypes.Ty #2408563304
 S def Minidregg.Compiler.ObjectiveBendSpecificationClosure.twiceSource : String #3295191505
 S theorem Minidregg.Compiler.ObjectiveBendSpecificationClosure.twice_accepted : Minidregg.Compiler.ObjectiveBendSpecificationClosure.acceptsSource Minidregg.Compiler.ObjectiveBendSpecificationClosure.twiceSource "twice" = Bool.true
@@ -25395,7 +25397,8 @@ S def Minidregg.Kernel.SeatStore.Decided.world : {rootBytes : Minidregg.Kernel.O
 S theorem Minidregg.Kernel.SeatStore.Decided.worldExact : ∀ {rootBytes : Minidregg.Kernel.ObjectiveActivityWire.Bytes → Minidregg.Theory.TypedAuthorization.Digest} {config : Minidregg.Kernel.ObjectiveActivity.Config} {snapshot : Minidregg.Kernel.SeatStore.Snapshot rootBytes} {height : ℕ} {request : Minidregg.Kernel.SeatStore.Request} (self : Minidregg.Kernel.SeatStore.Decided config snapshot height request), self.world = self.loaded.world (Minidregg.Theory.CanonicalResourceKernel.logicalBook self.book.logical)
 S inductive Minidregg.Kernel.SeatStore.Fresh : Type
 S def Minidregg.Kernel.SeatStore.Fresh.key : Minidregg.Kernel.SeatStore.Fresh → Minidregg.Kernel.ObjectiveActivityWire.Bytes #3994770206
-S ctor Minidregg.Kernel.SeatStore.Fresh.mk : Minidregg.Kernel.ObjectiveActivityWire.Bytes → String → List (String × ℕ) → Minidregg.Kernel.SeatStore.Fresh
+S ctor Minidregg.Kernel.SeatStore.Fresh.mk : Minidregg.Kernel.ObjectiveActivityWire.Bytes → String → List (String × ℕ) → ℕ → Minidregg.Kernel.SeatStore.Fresh
+S def Minidregg.Kernel.SeatStore.Fresh.opened : Minidregg.Kernel.SeatStore.Fresh → ℕ #845531420
 S def Minidregg.Kernel.SeatStore.Fresh.role : Minidregg.Kernel.SeatStore.Fresh → String #2375804903
 S def Minidregg.Kernel.SeatStore.Fresh.terms : Minidregg.Kernel.SeatStore.Fresh → List (String × ℕ) #4290801210
 S inductive Minidregg.Kernel.SeatStore.HeldEnd : {rootBytes : Minidregg.Kernel.ObjectiveActivityWire.Bytes → Minidregg.Theory.TypedAuthorization.Digest} → Minidregg.Theory.TypedAuthorization.Digest → Minidregg.Kernel.SeatStore.Snapshot rootBytes → ℕ → ℕ → Minidregg.Theory.CanonicalResourceKernel.Book → Type
@@ -25479,7 +25482,8 @@ S def Minidregg.Kernel.SeatStore.Request.nonce : Minidregg.Kernel.SeatStore.Requ
 S def Minidregg.Kernel.SeatStore.Request.subject : Minidregg.Kernel.SeatStore.Request → Minidregg.Theory.TypedAuthorization.SubjectId #449151685
 S def Minidregg.Kernel.SeatStore.Request.turn : Minidregg.Kernel.SeatStore.Request → Minidregg.Kernel.SeatStore.Turn #488694623
 S inductive Minidregg.Kernel.SeatStore.SeatBody : Type
-S ctor Minidregg.Kernel.SeatStore.SeatBody.mk : Minidregg.Kernel.Seats.Seat → String → List (String × ℕ) → Minidregg.Kernel.SeatStore.SeatBody
+S ctor Minidregg.Kernel.SeatStore.SeatBody.mk : Minidregg.Kernel.Seats.Seat → String → List (String × ℕ) → ℕ → Minidregg.Kernel.SeatStore.SeatBody
+S def Minidregg.Kernel.SeatStore.SeatBody.opened : Minidregg.Kernel.SeatStore.SeatBody → ℕ #3881089596
 S def Minidregg.Kernel.SeatStore.SeatBody.role : Minidregg.Kernel.SeatStore.SeatBody → String #3126106044
 S def Minidregg.Kernel.SeatStore.SeatBody.seat : Minidregg.Kernel.SeatStore.SeatBody → Minidregg.Kernel.Seats.Seat #3235987738
 S def Minidregg.Kernel.SeatStore.SeatBody.terms : Minidregg.Kernel.SeatStore.SeatBody → List (String × ℕ) #4154320790
@@ -25509,7 +25513,7 @@ S def Minidregg.Kernel.SeatStore.callData : Minidregg.Theory.ObjectiveBendDemand
 S def Minidregg.Kernel.SeatStore.changed : {rootBytes : Minidregg.Kernel.ObjectiveActivityWire.Bytes → Minidregg.Theory.TypedAuthorization.Digest} → Minidregg.Kernel.SeatStore.Snapshot rootBytes → Minidregg.Kernel.DurableDataIntent.CellId → Minidregg.Kernel.ObjectiveActivityWire.Bytes → Option Minidregg.Kernel.ObjectiveActivityWire.Post #1712438299
 S def Minidregg.Kernel.SeatStore.checkInert : {rootBytes : Minidregg.Kernel.ObjectiveActivityWire.Bytes → Minidregg.Theory.TypedAuthorization.Digest} → (snapshot : Minidregg.Kernel.SeatStore.Snapshot rootBytes) → (posts : List Minidregg.Kernel.ObjectiveActivityWire.Post) → Except Minidregg.Kernel.SeatStore.Refusal (PLift (Minidregg.Kernel.SeatStore.Inert snapshot posts)) #886241598
 S def Minidregg.Kernel.SeatStore.contractCodecId : Minidregg.Theory.TypedAuthorization.Digest #1974173218
-S def Minidregg.Kernel.SeatStore.decideOffer : {rootBytes : Minidregg.Kernel.ObjectiveActivityWire.Bytes → Minidregg.Theory.TypedAuthorization.Digest} → (config : Minidregg.Kernel.ObjectiveActivity.Config) → (snapshot : Minidregg.Kernel.SeatStore.Snapshot rootBytes) → (height : ℕ) → (request : Minidregg.Kernel.SeatStore.Request) → (book : Minidregg.Kernel.ObjectiveActivity.BookCell) → Minidregg.Kernel.ObjectiveActivity.loadBook config snapshot = Except.ok book → (invitation : Minidregg.Kernel.Invitations.InvitationId) → (expect : Minidregg.Kernel.Invitations.Expectation) → (funding payee : Minidregg.Theory.CanonicalResourceKernel.AccountId) → (proposal : Minidregg.Kernel.Seats.Proposal) → (holder : Option ℕ) → request.turn = Minidregg.Kernel.SeatStore.Turn.offer invitation expect funding payee proposal holder → Except Minidregg.Kernel.SeatStore.Refusal (Minidregg.Kernel.SeatStore.Decided config snapshot height request) #1350058630
+S def Minidregg.Kernel.SeatStore.decideOffer : {rootBytes : Minidregg.Kernel.ObjectiveActivityWire.Bytes → Minidregg.Theory.TypedAuthorization.Digest} → (config : Minidregg.Kernel.ObjectiveActivity.Config) → (snapshot : Minidregg.Kernel.SeatStore.Snapshot rootBytes) → (height : ℕ) → (request : Minidregg.Kernel.SeatStore.Request) → (book : Minidregg.Kernel.ObjectiveActivity.BookCell) → Minidregg.Kernel.ObjectiveActivity.loadBook config snapshot = Except.ok book → (invitation : Minidregg.Kernel.Invitations.InvitationId) → (expect : Minidregg.Kernel.Invitations.Expectation) → (funding payee : Minidregg.Theory.CanonicalResourceKernel.AccountId) → (proposal : Minidregg.Kernel.Seats.Proposal) → (holder : Option ℕ) → request.turn = Minidregg.Kernel.SeatStore.Turn.offer invitation expect funding payee proposal holder → Except Minidregg.Kernel.SeatStore.Refusal (Minidregg.Kernel.SeatStore.Decided config snapshot height request) #3569350978
 S def Minidregg.Kernel.SeatStore.decideTurn : {rootBytes : Minidregg.Kernel.ObjectiveActivityWire.Bytes → Minidregg.Theory.TypedAuthorization.Digest} → (config : Minidregg.Kernel.ObjectiveActivity.Config) → (snapshot : Minidregg.Kernel.SeatStore.Snapshot rootBytes) → (height : ℕ) → (request : Minidregg.Kernel.SeatStore.Request) → Except Minidregg.Kernel.SeatStore.Refusal (Minidregg.Kernel.SeatStore.Decided config snapshot height request) #157368940
 S def Minidregg.Kernel.SeatStore.decodeAction : ℕ → Minidregg.Theory.ObjectiveBendDemandData.Data → Option Minidregg.Kernel.Seats.PlanAction #45114258
 S def Minidregg.Kernel.SeatStore.decodeList : {α : Type} → (Minidregg.Theory.ObjectiveBendDemandData.Data → Option α) → ℕ → Minidregg.Theory.ObjectiveBendDemandData.Data → Option (List α) #3707467738
@@ -25518,6 +25522,7 @@ S def Minidregg.Kernel.SeatStore.decodeTerm : Minidregg.Theory.ObjectiveBendDema
 S def Minidregg.Kernel.SeatStore.decodeTransfer : Minidregg.Theory.ObjectiveBendDemandData.Data → Option Minidregg.Kernel.Seats.Transfer #3047445708
 S def Minidregg.Kernel.SeatStore.domain : Minidregg.Theory.TypedAuthorization.Digest #2458201141
 S def Minidregg.Kernel.SeatStore.endHeld : {rootBytes : Minidregg.Kernel.ObjectiveActivityWire.Bytes → Minidregg.Theory.TypedAuthorization.Digest} → (domain : Minidregg.Theory.TypedAuthorization.Digest) → (snapshot : Minidregg.Kernel.SeatStore.Snapshot rootBytes) → (height record : ℕ) → (book : Minidregg.Theory.CanonicalResourceKernel.Book) → Except Minidregg.Kernel.SeatStore.Refusal (Minidregg.Kernel.SeatStore.HeldEnd domain snapshot height record book) #3716876731
+S def Minidregg.Kernel.SeatStore.exitData : Minidregg.Kernel.Seats.ExitRule → Minidregg.Theory.ObjectiveBendDemandData.Data #1714260485
 S def Minidregg.Kernel.SeatStore.finish : {rootBytes : Minidregg.Kernel.ObjectiveActivityWire.Bytes → Minidregg.Theory.TypedAuthorization.Digest} → (config : Minidregg.Kernel.ObjectiveActivity.Config) → (snapshot : Minidregg.Kernel.SeatStore.Snapshot rootBytes) → (height : ℕ) → (request : Minidregg.Kernel.SeatStore.Request) → (loaded : Minidregg.Kernel.SeatStore.Loaded) → (book : Minidregg.Kernel.ObjectiveActivity.BookCell) → Minidregg.Kernel.ObjectiveActivity.loadBook config snapshot = Except.ok book → (next : Minidregg.Kernel.Seats.World) → (batch : Minidregg.Theory.CanonicalResourceKernel.Batch) → Minidregg.Kernel.SeatStore.KernelRun height (loaded.world (Minidregg.Theory.CanonicalResourceKernel.logicalBook book.logical)) next batch → (fees : Minidregg.Theory.CanonicalResourceKernel.Batch) → fees.registrations = [] → Option Minidregg.Kernel.SeatStore.Fresh → List Minidregg.Kernel.ObjectiveActivityWire.Post → List Minidregg.Kernel.DurableDataIntent.CellId → (nullifiers : List Minidregg.Kernel.DurableDataIntent.StableNullifier) → nullifiers = request.turn.claims → (∀ (actor : Minidregg.Kernel.Seats.Actor) (action : Minidregg.Kernel.Seats.Action), Minidregg.Kernel.SeatStore.Turn.kernelAction config.domain (Minidregg.Kernel.SeatStore.transactionOf request) request.subject request.turn = Option.some (actor, action) → Minidregg.Kernel.Seats.step (loaded.world (Minidregg.Theory.CanonicalResourceKernel.logicalBook book.logical)) height actor action = Except.ok (next, batch)) → Except Minidregg.Kernel.SeatStore.Refusal (Minidregg.Kernel.SeatStore.Decided config snapshot height request) #493334595
 S def Minidregg.Kernel.SeatStore.holdingsCell : Minidregg.Theory.TypedAuthorization.Digest → ℕ → Minidregg.Kernel.DurableDataIntent.CellId #1536641754
 S def Minidregg.Kernel.SeatStore.holdingsCodec : Minidregg.Theory.IndexedProgram.LawfulCodec (List ℕ) #1251423513
@@ -25565,15 +25570,15 @@ S def Minidregg.Kernel.SeatStore.requireSeat : {rootBytes : Minidregg.Kernel.Obj
 S def Minidregg.Kernel.SeatStore.runMethod : Minidregg.Kernel.ObjectiveActivity.Config → Minidregg.Kernel.ObjectiveActivityWire.Bytes → Minidregg.Theory.TypedAuthorization.Digest → Minidregg.Theory.ObjectiveBendDemandData.Data → Minidregg.Compiler.ObjectiveInvocationClaim.Capacity → Except Minidregg.Kernel.SeatStore.Refusal Minidregg.Theory.ObjectiveBendDemandData.Data #2796302018
 S def Minidregg.Kernel.SeatStore.seatAccount : Minidregg.Theory.TypedAuthorization.Digest → Minidregg.Kernel.DurableDataIntent.TransactionId → Minidregg.Theory.CanonicalResourceKernel.AccountId #681560310
 S theorem Minidregg.Kernel.SeatStore.seatAccount_protected : ∀ (domain : Minidregg.Theory.TypedAuthorization.Digest) (transaction : Minidregg.Kernel.DurableDataIntent.TransactionId), Minidregg.Kernel.Seats.reservedBase ≤ Minidregg.Kernel.SeatStore.seatAccount domain transaction
-S def Minidregg.Kernel.SeatStore.seatBodyStream : Minidregg.Compiler.Tower256ConcreteBackend.StreamCodec Minidregg.Kernel.SeatStore.SeatBody #105358332
+S def Minidregg.Kernel.SeatStore.seatBodyStream : Minidregg.Compiler.Tower256ConcreteBackend.StreamCodec Minidregg.Kernel.SeatStore.SeatBody #3213182530
 S def Minidregg.Kernel.SeatStore.seatCell : Minidregg.Theory.CanonicalResourceKernel.AccountId → Minidregg.Kernel.DurableDataIntent.CellId #2680879745
-S def Minidregg.Kernel.SeatStore.seatCodec : Minidregg.Theory.IndexedProgram.LawfulCodec Minidregg.Kernel.SeatStore.SeatBody #1460645088
+S def Minidregg.Kernel.SeatStore.seatCodec : Minidregg.Theory.IndexedProgram.LawfulCodec Minidregg.Kernel.SeatStore.SeatBody #1458572666
 S def Minidregg.Kernel.SeatStore.seatImage : Minidregg.Kernel.ObjectiveActivityWire.Bytes → Minidregg.Kernel.SeatStore.SeatBody → Minidregg.Kernel.ObjectiveActivityWire.Bytes #117207855
 S def Minidregg.Kernel.SeatStore.seatKey : Minidregg.Kernel.DurableDataIntent.TransactionId → Minidregg.Kernel.ObjectiveActivityWire.Bytes #1329481888
 S def Minidregg.Kernel.SeatStore.seatStream : Minidregg.Compiler.Tower256ConcreteBackend.StreamCodec Minidregg.Kernel.Seats.Seat #1009823775
-S def Minidregg.Kernel.SeatStore.seatView : Minidregg.Theory.CanonicalResourceKernel.Book → Minidregg.Kernel.SeatStore.SeatBody → Minidregg.Theory.ObjectiveBendDemandData.Data #3942578323
+S def Minidregg.Kernel.SeatStore.seatView : Minidregg.Theory.CanonicalResourceKernel.Book → Minidregg.Kernel.SeatStore.SeatBody → Minidregg.Theory.ObjectiveBendDemandData.Data #2985633287
 S def Minidregg.Kernel.SeatStore.sortSeats : List Minidregg.Kernel.SeatStore.SeatBody → List Minidregg.Kernel.SeatStore.SeatBody #3147480890
-S def Minidregg.Kernel.SeatStore.statePosts : {rootBytes : Minidregg.Kernel.ObjectiveActivityWire.Bytes → Minidregg.Theory.TypedAuthorization.Digest} → Minidregg.Theory.TypedAuthorization.Digest → Minidregg.Kernel.SeatStore.Snapshot rootBytes → Minidregg.Kernel.SeatStore.Loaded → Option Minidregg.Kernel.SeatStore.Fresh → Minidregg.Kernel.Seats.World → List Minidregg.Kernel.ObjectiveActivityWire.Post #766383714
+S def Minidregg.Kernel.SeatStore.statePosts : {rootBytes : Minidregg.Kernel.ObjectiveActivityWire.Bytes → Minidregg.Theory.TypedAuthorization.Digest} → Minidregg.Theory.TypedAuthorization.Digest → Minidregg.Kernel.SeatStore.Snapshot rootBytes → Minidregg.Kernel.SeatStore.Loaded → Option Minidregg.Kernel.SeatStore.Fresh → Minidregg.Kernel.Seats.World → List Minidregg.Kernel.ObjectiveActivityWire.Post #1170075289
 S theorem Minidregg.Kernel.SeatStore.statePosts_retires : ∀ {rootBytes : Minidregg.Kernel.ObjectiveActivityWire.Bytes → Minidregg.Theory.TypedAuthorization.Digest} {domain : Minidregg.Theory.TypedAuthorization.Digest} {snapshot : Minidregg.Kernel.SeatStore.Snapshot rootBytes} {loaded : Minidregg.Kernel.SeatStore.Loaded} {fresh : Option Minidregg.Kernel.SeatStore.Fresh} {next : Minidregg.Kernel.Seats.World} {body : Minidregg.Kernel.SeatStore.SeatBody}, body ∈ loaded.seats → (∀ seat ∈ next.seats, seat.account ≠ body.seat.account) → Minidregg.Kernel.ObjectiveActivity.postAt snapshot (Minidregg.Kernel.SeatStore.seatCell body.seat.account) Minidregg.Kernel.ObjectiveActivity.retiredImage ∈ Minidregg.Kernel.SeatStore.statePosts domain snapshot loaded fresh next
 S def Minidregg.Kernel.SeatStore.termsData : List (String × ℕ) → Minidregg.Theory.ObjectiveBendDemandData.Data #3517988259
 S def Minidregg.Kernel.SeatStore.termsStream : Minidregg.Compiler.Tower256ConcreteBackend.StreamCodec (List (String × ℕ)) #2312621188
