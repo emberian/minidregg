@@ -150,10 +150,10 @@ MAXIMUM = {'typeFuel': 16384, 'sourceTicks': 200000, 'heap': 200000, 'stack': 20
            'outputBytes': 200000, 'extractTicks': 200000, 'inputBytes': 200000, 'scalarBits': 512, 'memoryTouches': 2000000,
            'proofWork': 900000, 'feeDebit': 1000000, 'turnBytes': 4000000, 'witnessBytes': 4000000,
            'storageBytes': 4000000, 'sideEffectCount': 16, 'networkBytes': 0, 'leaseByteBlocks': 0,
-           'incidences': 16, 'replayBytes': 4194304, 'coreBytes': 4194304}
-tariff = {'version': '3', 'base': '1', 'typeFuel': '0', 'sourceTicks': '1', 'heap': '0', 'stack': '0',
+           'incidences': 16, 'replayBytes': 4194304, 'coreBytes': 4194304, 'domainWork': 256}
+tariff = {'version': '4', 'base': '1', 'typeFuel': '0', 'sourceTicks': '1', 'heap': '0', 'stack': '0',
           'outputNodes': '0', 'outputBytes': '0', 'extractTicks': '0', 'inputBytes': '0',
-          'replayBytes': '0', 'coreBytes': '0'}
+          'replayBytes': '0', 'coreBytes': '0', 'domainWork': '0'}
 # A delivery or exhaustion whose escrowed envelope does not cover the checkpoint's heap adds the missing
 # cells as `extra`, and its submitter pays the extra's price (workOf: base + sourceTicks*0 + heap*0 here),
 # so a submitter that declares only heap pays the tariff's base alone.
