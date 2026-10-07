@@ -63,7 +63,7 @@ def declarations(lines):
 
 # NativeHostReplay's computational declarations carry proof terms (`have ... := by simp [...]`)
 # that the rewrite would break; its 50 R1 sites are left to the walk-family lane (PORT-C).
-NO_REWRITE = ('Kernel/NativeHostReplay.lean',)
+NO_REWRITE = ('Kernel/NativeHostReplay.lean', 'Kernel/ConsentAnchor.lean')
 SKIP = ('Compiler/DurableReceiverIO.lean', 'Compiler/DurableHistory.lean', 'Compiler/DurableHistoryReader.lean',
         'Compiler/DurableHistoryStore.lean', 'Kernel/DurableView.lean', 'Kernel/DurableCommitProtocol.lean',
         'Kernel/DurableDataIntent.lean', 'Kernel/DurableCheckpoint.lean', 'Kernel/DurableReceiver.lean')
