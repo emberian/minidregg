@@ -82,6 +82,16 @@ def replay {deployment : Deployment} (ground : Ground deployment) (ingress : Ing
         some (.ok (receipt ingress))
       else some (.error "lifecycle begin transaction identity conflict")
 
+/-- **A transaction the light basis did not declare is refused by name**, never replayed as
+"not recorded" (the plant's pole for this module). -/
+theorem replay_undeclared {deployment : Deployment} {store : Minidregg.Compiler.DurableHistory.StoreIdentity}
+    (basis : ServedBasis.Basis deployment store) (ingress : Ingress)
+    (undeclared : ingress.transactionId ∉ basis.keys.transactions) :
+    replay (Ground.ofBasis basis) ingress =
+      some (.error "lifecycle begin transaction identity undeclared") := by
+  unfold replay
+  rw [Ground.recorded_undeclared basis _ undeclared]
+
 /-- The keys a BEGIN reads beyond the state: its transaction id (replay and the
 DRC journal check) and its operation marker's replay nullifier. -/
 def keys (ingress : Ingress) : DurableView.Keys :=
