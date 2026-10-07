@@ -405,7 +405,7 @@ Minidregg.Theory.ObjectiveBendDemandData.ExecutionWith.mk | Theory.ObjectiveBend
 Minidregg.Theory.ObjectiveBendDemandData.ExtractionWith.mk | Theory.ObjectiveBendDemandData | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
 Minidregg.Theory.ReactiveCellTransition.Accepted.mk | Theory.ReactiveCellTransition | evidence | L2 | 2 proof / 1 data fields; layer-1 review pending
 Minidregg.Theory.ReceiptEvent.mk | Theory.AcceptedCellEffect | evidence | L2 | 5 proof / 10 data fields; layer-1 review pending
-Minidregg.Theory.Receiving.Receiver.Accepted.mk | Theory.Receiving | evidence | L1 Minidregg.Theory.Receiving.Receiver.Accepted.sound | carries `admits`: prepared under covering vouchers, shape and laws passed; the vouchers are L2
+Minidregg.Theory.Receiving.Receiver.Accepted.mk | Theory.Receiving | evidence | L1 Minidregg.Theory.Receiving.Receiver.Accepted.admits | carries `admits`: prepared under covering vouchers, shape and laws passed; the vouchers are L2
 Minidregg.Theory.Receiving.Vouchers.mk | Theory.Receiving | evidence | L2 | the claims the Receiver's verifier answered true on; an oracle (IO) verdict no proof expresses; minted only by Receiver.admitVia; mints: Vouchers.empty (vouches for nothing)
 Minidregg.Compiler.DurableHistory.StoreIdentity.mk | Compiler.DurableHistory | evidence | L2 | the identity of an opened Store; minted only by the open (kn2-store-open); mints: StoreIdentity.ofOpen
 Minidregg.Compiler.DurableHistory.Head.mk | Compiler.DurableHistory | evidence | L2 | a verified history head of an opened Store; a genesis head asserts every nullifier and tx id absent; mints: Head.genesis

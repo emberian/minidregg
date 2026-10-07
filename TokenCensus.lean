@@ -23,9 +23,10 @@ ELABORATED TERM of every constant:
 2. **No silent omission.**  Every private constructor of a package type is a row of
    `TokenCensus.Table.table`, and every row names a constructor that exists, with
    its home module.  A new private-mk type fails the build until it is classified.
-3. **Layer-1 rows are backed.**  A row marked `L1 <theorem>` (the type carries the
-   proposition it asserts, and the named theorem states the guarantee for every
-   inhabitant) names a theorem that exists.
+3. **Layer-1 rows are backed.**  A row marked `L1 <witness>` names either a PROOF
+   FIELD of the type (the type carries the proposition it asserts) or a theorem that
+   states the guarantee for every inhabitant; a theorem whose body is a bare
+   projection (a field renamed) is refused, and so is a data field.
 5. **No mint that does not name the constructor**, for an `L2` evidence type: no instance of
    a value-producing class (`Inhabited`, `Nonempty`, `Zero`, `One`, `OfNat`,
    `EmptyCollection`) whose conclusion is about the type (a foreign module could mint
@@ -214,8 +215,19 @@ elab "#assert_token_census " table:ident : command => do
       match row.layer.splitOn " " with
       | ["L2"] => pure ()
       | ["L1", thm] =>
-          unless (← getEnv).contains thm.toName do
-            faults := faults.push s!"{row.ctor}: L1 theorem {thm} does not exist"
+          match (← getEnv).find? thm.toName with
+          | none => faults := faults.push s!"{row.ctor}: L1 witness {thm} does not exist"
+          | some info =>
+              -- a PROOF FIELD of the type is the witness itself (the type carries the
+              -- proposition); a theorem must not be a renamed projection of one
+              if (← getEnv).getProjectionFnInfo? thm.toName |>.isSome then
+                let proofField ← forallTelescopeReducing info.type fun _ body => isProp body
+                unless proofField do
+                  faults := faults.push s!"{row.ctor}: L1 witness {thm} is a data field, not a proof field"
+              else if let some value := info.value? then
+                if let some head := value.getAppFn.constName? then
+                  if (← getEnv).getProjectionFnInfo? head |>.isSome then
+                    faults := faults.push s!"{row.ctor}: L1 theorem {thm} is a renamed projection ({head}); name the proof field instead"
       | _ => faults := faults.push s!"{row.ctor}: layer must be `L2` or `L1 <theorem>`, not `{row.layer}`"
     -- 1. no foreign mint
     let mut homeUses : NameSet := {}
