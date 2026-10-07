@@ -23,7 +23,7 @@ restoreAllArtifacts = true
 [[require]]
 name = "mathlib"
 git = "https://github.com/leanprover-community/mathlib4"
-rev = "1c2b90b13009c65b090d95a83c98e248deafb6f1"
+rev = "d13f23b723b8a846827a245b89c10fc7d3f11612"
 
 # Stable root library. Additional qualification roots and opt-in source-first
 # research coverage are declared below; see docs/LEAN-QUALIFICATION.md.
