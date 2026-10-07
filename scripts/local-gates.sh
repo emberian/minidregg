@@ -25,12 +25,12 @@
 #                  with) is still the pinned verifier's answer: scripts/check-native-transcripts.sh
 #                  lists them all from AxiomCensusResearch and re-submits each triple (verified; a
 #                  flipped signature byte must read invalid)
-#   objective-proofs   ObjectiveProofs built; every statement and exact axiom set of every
-#                  repository module in its import closure equals the pins: Theory/ObjectiveBend*
-#                  in scripts/gates/objective-{statements.snapshot,axioms.pin} (no Mathlib in the
-#                  environment), the rest in scripts/gates/objective-{statements-mathlib.snapshot,
-#                  axioms-mathlib.pin} (scripts/check-objective-proofs.sh proofs; self-tests its
-#                  instrument each run, incl. a planted `(_vacuous : False)` premise it must see)
+#   objective-proofs   ObjectiveProofs built; every declaration of every repository module in its
+#                  import closure ratcheted against scripts/gates/objective-manifest/<Module>.tsv
+#                  (statement, definition-closure hash, exact axiom set): a removed, restated,
+#                  redefined or re-axiomed row is red unless scripts/gates/objective-contract-changes.txt
+#                  admits it (scripts/check-objective-proofs.sh proofs; self-tests its instrument each
+#                  run, incl. a planted `(_vacuous : False)` premise and a planted `Evaluates := True`)
 #   objective-c    the C backend differential against runBounded, State bytes included
 #                  (scripts/check-objective-proofs.sh c; needs bun)
 #   objective-cgen the same differential over 1000 GENERATED well-typed Core4 programs (fixed seeds), with two

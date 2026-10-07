@@ -1,0 +1,17 @@
+# scripts/gates/objective-contract-changes.txt -- the reviewed ledger of Objective contract changes.
+#
+# scripts/check-objective-proofs.sh proofs ratchets every declaration of the ObjectiveProofs closure
+# against its row in scripts/gates/objective-manifest/<Module>.tsv (scripts/objective-manifest.py).
+# A removed row, a restated statement, a redefined definition closure or a changed axiom set is RED
+# unless a line below admits exactly that change. Additions need no line.
+#
+# One line per change, six TAB-separated fields:
+#   name    the row's key (the declaration's full name; `private <name> @<Module>` for a private one)
+#   old     the pinned contract hash (column 3 of the row)
+#   new     the new contract hash, `-` for removed
+#   kind    removed | restated | redefined | axioms   (the gate's own classification)
+#   commit  the commit or lane that makes the change
+#   reason  why the contract may change (TODO is refused)
+# `scripts/check-objective-proofs.sh proofs --draft` prints the lines for the current changes with
+# reason TODO; a human reviews each, writes the reason, and appends it. Then `proofs --pin` writes the
+# manifests. Lines stay as the record; an entry admits only its exact (name, old, new, kind).

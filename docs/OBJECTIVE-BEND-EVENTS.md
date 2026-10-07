@@ -3,9 +3,8 @@
 Reference for activities: the language construct, its semantics and typing, and the kernel
 that persists activities on objects, delivers their responses, and runs calls and sends
 between objects. The overview is [OBJECTIVE-BEND.md](OBJECTIVE-BEND.md); the original design
-record is [EVENTS-DESIGN.txt](../EVENTS-DESIGN.txt). Theorems are cited by name; each is in
-`scripts/gates/objective-statements.snapshot` (Core4) or
-`scripts/gates/objective-statements-mathlib.snapshot` (kernel).
+record is [EVENTS-DESIGN.txt](../EVENTS-DESIGN.txt). Theorems are cited by name; each is pinned in its module's contract manifest,
+`scripts/gates/objective-manifest/<Module>.tsv`.
 
 ## The construct
 
@@ -345,6 +344,6 @@ a program, snapshot and rewind.
 
 ```text
 bash scripts/check-objective-frontend.sh             # front end, incl. activity-replay
-bash scripts/check-objective-proofs.sh proofs        # ObjectiveProofs + statement/axiom snapshots
+bash scripts/check-objective-proofs.sh proofs        # ObjectiveProofs + contract manifests (statement, definition closure, axioms)
 bash scripts/check-objective-proofs.sh transparency  # stored checkpoint vs the machine's own yield
 ```

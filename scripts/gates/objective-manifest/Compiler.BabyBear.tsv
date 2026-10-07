@@ -1,0 +1,5 @@
+# Compiler.BabyBear: Objective contract manifest. Written by `scripts/check-objective-proofs.sh proofs --pin`;
+# a removed or changed row needs a line in scripts/gates/objective-contract-changes.txt.
+def	Minidregg.Compiler.BabyBear	485e1ad9b7a23f9a769e8e56adbce6730778d4cdc1a5dc24260292ea401be07f	89855d392aa192071e8a2b2230d30ecae8fc9de0c15fa6a53f6209226829292a	d67c9b56f7993617daf1102fa8fccf874aca3258bffe72f493a8c696fe15f482	6de6fa3789925fc9	-	Type
+def	Minidregg.Compiler.babyBearP	0b6d1af5e299c2be98f687e71e4f27138cf8280a9c5e0f290e55986a13d4ef1f	262031efa78118253ab59dd88036fcb9d33881bac4c94e8c1214aa7cc21b5d15	41de1afc6d9211f0c7e73456389eff2ce8a72572c1b3444a7ef03447606b99d0	8742789d8d728c13	-	ℕ
+theorem	Minidregg.Compiler.babyBearP_eq	6889b4a7407253ce0490da8fa88c94a848d2cb61c537220184420f4d32786e94	343ec27f15060b3f2c17047b99f63d07418b082ef81d1f3c9f3bb689f58526b9	bf24ef056e06fc961e3fa2de0bdff149836a44cd920da673139d1010a5427936	45bdafeb782b1a8d	propext	Minidregg.Compiler.babyBearP = 2 ^ 31 - 2 ^ 27 + 1
