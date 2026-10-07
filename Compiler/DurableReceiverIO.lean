@@ -1850,4 +1850,39 @@ def bootstrap (transport : Transport) (rootBytes : List UInt8 → Digest)
       else return .error s!"bootstrap did not install exact seed: {repr observation}"
   | .error message => return .error s!"bootstrap outcome uncertain: {message}"
 
+/-- Write an accepted image into an EMPTY Store through `transport`: its seed
+bootstrapped, then each record bound (`IntentRecord.bind?`) and appended in order
+through the one receive path (`receiveLoadedDetailed`), each read back exactly, the
+opening advanced by the appended entry (no re-open per record). The result is the
+Store's opening at the image's height, so a history `Reader` of a portable image
+(a foreign accepted prefix) is a Reader of a real Store, never an in-memory one.
+Refuses, naming the height, a record that does not bind, does not re-encode to
+itself, or is not appended exactly; and a Store whose final image is not `image`. -/
+def writeImage (transport : Transport) (rootBytes : List UInt8 → Digest) (image : Image) :
+    IO (Except String (Loaded rootBytes)) := do
+  match ← bootstrap transport rootBytes image.seed with
+  | .error detail => return .error s!"scratch Store: {detail}"
+  | .ok () => pure ()
+  let genesis ← match ← load transport rootBytes with
+    | .ok loaded => pure loaded
+    | .error detail => return .error s!"scratch Store: genesis open: {detail}"
+  let rec go (height : Nat) (loaded : Loaded rootBytes) :
+      List IntentRecord → IO (Except String (Loaded rootBytes))
+    | [] => return .ok loaded
+    | record :: rest => do
+        let some intent := record.bind? rootBytes
+          | return .error s!"scratch Store: record {height + 1} does not bind its roots"
+        if recordFrame.encode (IntentRecord.ofIntent intent) != recordFrame.encode record then
+          return .error s!"scratch Store: record {height + 1} does not re-encode to itself"
+        match ← receiveLoadedDetailed transport rootBytes loaded intent with
+        | .exact _ appended => go (height + 1) appended.next rest
+        | .ordinary _ => return .error s!"scratch Store: record {height + 1} was not appended exactly"
+  match ← go 0 genesis image.accepted with
+  | .error detail => return .error detail
+  | .ok loaded =>
+      if (loaded.image.accepted.map fun record => recordFrame.encode record) =
+          image.accepted.map (fun record => recordFrame.encode record) then
+        return .ok loaded
+      else return .error "scratch Store: the written image is not the image"
+
 end Minidregg.Compiler.DurableReceiverIO
