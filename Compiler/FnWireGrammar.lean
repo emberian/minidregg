@@ -82,11 +82,14 @@ inductive Grammar where
   | maybe (g : Grammar)
   | where_ (g : Grammar) (checks : List Check)
   | frame (magic : List UInt8) (version kind : UInt8) (max : Nat) (payload : Grammar)
+  /-- A `w`-octet big-endian length `L` with `lo ≤ L ≤ hi`, then exactly `L` octets that
+  `inner` decodes and consumes entirely (fn `(:sized W LO HI G)`). -/
+  | sized (w lo hi : Nat) (inner : Grammar)
   deriving DecidableEq, Repr
 
 /-- A value. `const` ↦ `null`, `uint` ↦ `nat`, `bytes`/`rest`/`line`/`base64Lines` ↦
 `octets`, `enum` ↦ `name`, `seq` ↦ `list`, `maybe` ↦ `list []` or `list [v]`,
-`tag` ↦ `tagged`, `where`/`frame` ↦ their inner value (fn §2 "Value JSON"). -/
+`tag` ↦ `tagged`, `where`/`frame`/`sized` ↦ their inner value (fn §2 "Value JSON"). -/
 inductive Value where
   | null
   | nat (n : Nat)
@@ -285,7 +288,7 @@ def Grammar.tagNames : Grammar → List String
 /-- Every encoding is followed by nothing the decoder reads: the decoder stops at the end
 of the encoding whatever follows. -/
 def Grammar.delimited : Grammar → Bool
-  | .const _ | .uint _ _ _ | .bytes _ _ _ _ | .line _ _ _ | .enum _ _ _ | .frame _ _ _ _ _ => true
+  | .const _ | .uint _ _ _ | .bytes _ _ _ _ | .line _ _ _ | .enum _ _ _ | .frame _ _ _ _ _ | .sized _ _ _ _ => true
   | .rest _ _ _ | .base64Lines _ _ _ | .maybe _ => false
   | .seqNil | .tagNil _ => true
   | .seqCons h t => h.delimited && t.delimited
@@ -295,7 +298,8 @@ def Grammar.delimited : Grammar → Bool
 /-- No value encodes to no octets. -/
 def Grammar.nonempty : Grammar → Bool
   | .const o => !o.isEmpty
-  | .uint _ _ _ | .bytes _ _ _ _ | .line _ _ _ | .enum _ _ _ | .frame _ _ _ _ _ => true
+  | .uint _ _ _ | .bytes _ _ _ _ | .line _ _ _ | .enum _ _ _ | .frame _ _ _ _ _
+  | .sized _ _ _ _ => true
   | .tagNil _ | .tagArm _ _ _ _ _ => true
   | .rest lo _ _ => 0 < lo
   | .base64Lines _ lo _ => 0 < lo
@@ -327,6 +331,7 @@ def Grammar.wf : Grammar → Bool
   | .maybe g => g.wf && g.nonempty
   | .where_ g _ => g.isSeq && g.wf
   | .frame magic _ _ max g => magic.length == 4 && decide (max < 2 ^ 32) && g.wf
+  | .sized w lo hi g => widthOk w && decide (lo ≤ hi) && decide (hi < 256 ^ w) && g.wf
 
 /-! ## The encoder -/
 
@@ -374,6 +379,12 @@ def encode : Grammar → Value → Except Refusal (List UInt8)
       | .ok p =>
           if p.length ≤ max then
             .ok (framePrefix magic version kind p ++ Blake3.hash (framePrefix magic version kind p))
+          else .error .malformed
+      | .error e => .error e
+  | .sized w lo hi g, v =>
+      match encode g v with
+      | .ok b =>
+          if lo ≤ b.length ∧ b.length ≤ hi then .ok (beBytes w b.length ++ b)
           else .error .malformed
       | .error e => .error e
   | _, _ => .error .malformed
@@ -457,6 +468,14 @@ def decode : Grammar → List UInt8 → Except Refusal (Value × List UInt8)
             else .error .trailer
           else .error .malformed
       | _ => .error .malformed
+  | .sized w lo hi g, xs =>
+      if w ≤ xs.length ∧ lo ≤ beValue (xs.take w) ∧ beValue (xs.take w) ≤ hi ∧
+          beValue (xs.take w) ≤ (xs.drop w).length then
+        match decode g ((xs.drop w).take (beValue (xs.take w))) with
+        | .ok (v, []) => .ok (v, (xs.drop w).drop (beValue (xs.take w)))
+        | .ok _ => .error .malformed
+        | .error e => .error e
+      else .error .malformed
 
 /-- A whole message: one value and nothing left over. -/
 def decodeAll (g : Grammar) (xs : List UInt8) : Except Refusal Value :=

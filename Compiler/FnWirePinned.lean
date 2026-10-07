@@ -27,6 +27,7 @@ TRUST CLASS: compiled evaluation (`native_decide` + `#assert_compiled`) over a f
 -/
 import Compiler.FnWireJson
 import Compiler.FnWireFncu
+import Compiler.FnWireSized
 import Theory.AssertCompiled
 
 namespace Minidregg.Compiler.FnWire
@@ -127,5 +128,46 @@ theorem fn_written_cursor_mutants :
 
 #assert_compiled fn_written_cursor
 #assert_compiled fn_written_cursor_mutants
+
+/-! ## A poll reply built from fn's own cursor
+
+`pollReplyAccepted` (`(:seq (:sized 4 31 346 <fncu cursor>) (:bytes 4 0 max :any))`) over a
+local sample: the 108-octet cursor fn wrote, behind its 4-octet length, then a 3-octet record
+behind its 4-octet length. This is a SAMPLE built here from the cursor above, not an octet
+string fn printed; fn's own `fnct.consumer.poll-reply` vectors arrive with the re-pin. -/
+
+def pollSample : List UInt8 :=
+  beBytes 4 fnWrittenCursor.length ++ fnWrittenCursor ++ beBytes 4 3 ++ [1, 2, 3]
+
+def pollAcceptedIs (xs : List UInt8) (pos : Nat) (record : List UInt8) : Bool :=
+  match decodeAll pollReplyAccepted xs with
+  | .ok (.list [c, .octets t]) => (cursorOfValue c).map (·.2) == some pos && t == record
+  | _ => false
+
+/-- The sample reads as the cursor at position 6 and the record 01 02 03, and its octets are
+canonical: re-encoding the decoded value gives them back. -/
+theorem poll_sample_accepts :
+    pollAcceptedIs pollSample 6 [1, 2, 3] = true ∧
+      (match decodeAll pollReplyAccepted pollSample with
+        | .ok v => encode pollReplyAccepted v == .ok pollSample
+        | .error _ => false) = true := by
+  native_decide
+
+/-- Teeth: a cursor length one short (the cursor loses its last octet inside the sized
+region), one long (the sized region swallows an octet of the record's length), and a sample
+cut inside the cursor are each refused `malformed`. -/
+def pollMalformed (xs : List UInt8) : Bool :=
+  match decodeAll pollReplyAccepted xs with
+  | .error .malformed => true
+  | _ => false
+
+theorem poll_sample_refuses :
+    pollMalformed (beBytes 4 107 ++ fnWrittenCursor ++ beBytes 4 3 ++ [1, 2, 3]) = true ∧
+      pollMalformed (beBytes 4 109 ++ fnWrittenCursor ++ beBytes 4 3 ++ [1, 2, 3]) = true ∧
+      pollMalformed (pollSample.take 50) = true := by
+  native_decide
+
+#assert_compiled poll_sample_accepts
+#assert_compiled poll_sample_refuses
 
 end Minidregg.Compiler.FnWire
