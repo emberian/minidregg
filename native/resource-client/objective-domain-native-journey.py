@@ -116,13 +116,13 @@ try:
         ra = (w.state('a', 'd1-a-record').get('objectRecord') or {}).get('domains')
         rb = (w.state('b', 'd1-b-record').get('objectRecord') or {}).get('domains')
         w.check('d1-both-records-name-the-domain', ra is not None and len(ra) == 1 and ra == rb, [ra, rb])
-        invoke('d1-a-alone-refused', 'a', 'deposit', nat(1), 'refused', ['domainLawDenied', 'member/1/state/total'])
+        invoke('d1-a-alone-refused', 'a', 'deposit', nat(1), 'charged', ['domainLawDenied', 'member/1/state/total'])
         w.check('d1-unchanged-5-5', [total('a', 'd1-a1'), total('b', 'd1-b1')] == [5, 5], None)
         invoke('d1-twin-installs', 't', 'deposit', nat(1), 'installed')
         w.check('d1-twin-6', total('t', 'd1-t') == 6, None)
         invoke('d1-both-move', 'a', 'forward', hop('b', 1), 'installed')
         w.check('d1-6-6', [total('a', 'd1-a2'), total('b', 'd1-b2')] == [6, 6], None)
-        invoke('d1-uneven-refused', 'b', 'forward', hop('a', 2), 'refused', 'domainLawDenied')
+        invoke('d1-uneven-refused', 'b', 'forward', hop('a', 2), 'charged', 'domainLawDenied')
         w.check('d1-still-6-6', [total('a', 'd1-a3'), total('b', 'd1-b3')] == [6, 6], None)
 
     with w.group('D2-register'):
@@ -142,7 +142,7 @@ try:
         pay = record(to=nat(O['r']), bank=nat(O['q']), amount=nat(1), hook={'tag': 'label', 'value': 'receive'})
         invoke('d3-q-withdraws', 'q', 'withdraw', pay, 'installed')
         w.check('d3-p5-q5-r1', [total('p', 'd3-p0'), total('q', 'd3-q0'), total('r', 'd3-r0')] == [5, 5, 1], None)
-        w.resubmit('d3-stale-refused', w.attempts / 'd3-prepared' / 'ingress.bin', 'refused',
+        w.resubmit('d3-stale-refused', w.attempts / 'd3-prepared' / 'ingress.bin', 'charged',
                    ['domainLawDenied', 'leSlots'])
         w.check('d3-p-still-5', total('p', 'd3-p1') == 5, None)
 
@@ -157,8 +157,8 @@ try:
         transfer = record(to=nat(O['v']), bank=nat(O['y']), amount=nat(1), hook={'tag': 'label', 'value': 'receive'})
         invoke('d4-transfer-installs', 'y', 'withdraw', transfer, 'installed')
         w.check('d4-10-3-7', bank() == [10, 3, 7], None)
-        invoke('d4-mint-refused', 'y', 'deposit', nat(1), 'refused', ['domainLawDenied', 'sumEq'])
-        invoke('d4-reserve-alone-refused', 'x', 'deposit', nat(1), 'refused', ['domainLawDenied', 'sumEq'])
+        invoke('d4-mint-refused', 'y', 'deposit', nat(1), 'charged', ['domainLawDenied', 'sumEq'])
+        invoke('d4-reserve-alone-refused', 'x', 'deposit', nat(1), 'charged', ['domainLawDenied', 'sumEq'])
         w.check('d4-still-10-3-7', bank() == [10, 3, 7], None)
         invoke('d4-backed-mint-installs', 'x', 'forward', hop('y', 1), 'installed')
         w.check('d4-11-4-7', bank() == [11, 4, 7], None)

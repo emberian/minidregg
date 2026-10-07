@@ -35,6 +35,7 @@ import argparse, pathlib, sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import activity_world as AW  # noqa: E402
 from activity_world import World, PERMIT_ALL, TICKS, nat, record, eq, le, any_of, cap, variant  # noqa: E402
 
 PLANTS = {'drain-blind': {'U2-drain', 'U3-abort', 'U4-migrate', 'U5-rebirth'},
@@ -74,7 +75,7 @@ try:
 
     def born(label):
         # A deposit that also covers the drained writes' migration runs (each charges the upgrade's envelope).
-        tx = w.birth(label, w.sponsor, 't', 60000, 'installed', init=KEEP)
+        tx = w.birth(label, w.sponsor, 't', 30 * AW.PRICE, 'installed', init=KEEP)
         return tx
 
     tx1, tx2, tx3 = born('birth-a1'), born('birth-a2'), born('birth-a3')
@@ -101,7 +102,9 @@ try:
         return w.turn(label, workspace, body, expect, detail)
 
     with w.group('U1-adopt'):
-        adopt('adopt-by-stranger-refused', w.second, PIN2, 'refused', 'notUpgradeAuthority')
+        # The stranger holds no capability on the object: since row E the capability gate runs BEFORE the turn is
+        # decided, so it is refused there (notObjectHolder), before the kernel's upgrade-authority judgment runs.
+        adopt('adopt-by-stranger-refused', w.second, PIN2, 'refused', 'notObjectHolder')
         adopt('adopt-same-pin-refused', w.sponsor, w.PIN, 'refused', 'samePin')
         adopt('adopt', w.sponsor, PIN2, 'installed')
         rec, total, _ = record_of('adopted')
@@ -111,7 +114,7 @@ try:
                 {'phase': phase, 'pin': rec.get('pin'), 'total': total})
 
     with w.group('U2-drain'):
-        w.birth('birth-while-draining-refused', w.sponsor, 't', 20000, 'refused', None, init=KEEP)
+        w.birth('birth-while-draining-refused', w.sponsor, 't', 7 * AW.PRICE, 'refused', None, init=KEEP)
         resolve('a1-reply-5', s1, {'reply': record(amount=nat(5))})
         w.turn('a1-deliver-5', w.sponsor, deliver_body(s1), 'installed')
         a1 = w.state('t', 'a1-after-5', tx1)
@@ -131,7 +134,7 @@ try:
         w.turn('abort-before-deadline-refused', w.second, abort, 'refused', 'notYetDeadline')
         i = 0
         while int(w.view(f'height-{i}', {'accounts': []}).get('height', '0')) < deadline and i < 20:
-            w.birth(f'filler-{i}', w.sponsor, 'filler', 20000, 'installed', init=KEEP)
+            w.birth(f'filler-{i}', w.sponsor, 'filler', 7 * AW.PRICE, 'installed', init=KEEP)
             i += 1
         w.turn('abort-a2', w.second, abort, 'installed')
         a2 = w.state('t', 'a2-aborted', tx2)
