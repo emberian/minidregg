@@ -113,6 +113,9 @@ pub enum StoreError {
     /// The Store holds the retired single whole-image record. It is never
     /// reinterpreted as a durable log; the deployment must re-genesis.
     RetiredImage,
+    /// A seeded durable Store of an older schema (no history accumulator node
+    /// table). Never upgraded in place; the deployment must re-genesis.
+    RetiredSchema(i32),
     InvalidRoot(PathBuf),
     InvalidPath,
     Sqlite {
@@ -135,6 +138,10 @@ impl fmt::Display for StoreError {
             }
             Self::RetiredImage => formatter
                 .write_str("store holds a retired whole-image record; re-genesis (no migration)"),
+            Self::RetiredSchema(version) => write!(
+                formatter,
+                "store schema v{version} predates the durable history accumulator (schema v5: durable_node); re-genesis (no migration)"
+            ),
             Self::InvalidRoot(path) => {
                 write!(
                     formatter,
@@ -493,13 +500,19 @@ impl SqliteByteStore {
                 self.database
                     .exec(b"ALTER TABLE opaque_record_v2 RENAME TO opaque_record\0")?;
                 Self::create_durable_tables(&self.database)?;
-                self.database.exec(b"PRAGMA user_version=4\0")?;
+                self.database.exec(b"PRAGMA user_version=5\0")?;
             }
-            2 | 3 => {
+            // A v2-v4 Store that holds a durable seed was written without the
+            // history accumulator; it refuses by name. An unseeded one (a link
+            // store only) gains the durable tables.
+            2 | 3 | 4 => {
+                if self.holds_durable_seed()? {
+                    return Err(StoreError::RetiredSchema(version));
+                }
                 Self::create_durable_tables(&self.database)?;
-                self.database.exec(b"PRAGMA user_version=4\0")?;
+                self.database.exec(b"PRAGMA user_version=5\0")?;
             }
-            4 => {}
+            5 => {}
             _ => {
                 return Err(StoreError::Sqlite {
                     code: version,
@@ -510,7 +523,26 @@ impl SqliteByteStore {
         transaction.commit()
     }
 
+    fn holds_durable_seed(&self) -> Result<bool, StoreError> {
+        let statement = self.database.prepare(
+            b"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='durable_seed'\0",
+        )?;
+        if statement.step()? != SQLITE_ROW {
+            return Err(self.database.error(SQLITE_DONE));
+        }
+        if statement.column_int64(0) == 0 {
+            return Ok(false);
+        }
+        drop(statement);
+        Ok(self.durable_seed()?.is_some())
+    }
+
     fn create_durable_tables(database: &Database) -> Result<(), StoreError> {
+        // Accumulator nodes (Lean `Compiler.DurableHistory`): opaque, versioned
+        // by the height whose append wrote them, written in the same
+        // transaction as that entry and never rewritten. Lean verifies every
+        // node it reads against its authenticated frontier.
+        database.exec(b"CREATE TABLE IF NOT EXISTS durable_node (space INTEGER NOT NULL CHECK(space>=0), key BLOB NOT NULL CHECK(length(key)<=4096), height INTEGER NOT NULL CHECK(height>=1), value BLOB NOT NULL CHECK(length(value)<=4096), PRIMARY KEY(space, key, height)) WITHOUT ROWID\0")?;
         database.exec(b"CREATE TABLE IF NOT EXISTS durable_seed (slot INTEGER PRIMARY KEY CHECK(slot=1), bytes BLOB NOT NULL CHECK(length(bytes)<=67108864)) WITHOUT ROWID\0")?;
         database.exec(b"CREATE TABLE IF NOT EXISTS durable_log (height INTEGER PRIMARY KEY CHECK(height>=1), record BLOB NOT NULL CHECK(length(record)<=67108864), tag BLOB NOT NULL CHECK(length(tag)<=4096))\0")?;
         database.exec(b"CREATE TABLE IF NOT EXISTS durable_checkpoint (height INTEGER PRIMARY KEY CHECK(height>=1), bytes BLOB NOT NULL CHECK(length(bytes)<=67108864))\0")?;
@@ -643,6 +675,23 @@ pub struct DurableRead {
     pub head: u64,
     pub base: Option<(Vec<u8>, Option<(u64, Vec<u8>)>)>,
     pub entries: Vec<DurableEntry>,
+}
+
+/// One opaque accumulator node written beside a durable log entry.
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+pub struct DurableNode {
+    pub space: u64,
+    pub key: Vec<u8>,
+    pub value: Vec<u8>,
+}
+
+/// An at-use history read: the head, the requested entries that exist, and
+/// for each requested node key its latest version at or below `at`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HistoryRead {
+    pub head: u64,
+    pub entries: Vec<DurableEntry>,
+    pub nodes: Vec<(u64, Vec<u8>, Option<(u64, Vec<u8>)>)>,
 }
 
 const CHECKPOINTS_RETAINED: i64 = 2;
@@ -848,6 +897,22 @@ impl SqliteByteStore {
     /// One consistent read: the head, optionally the seed and the latest
     /// checkpoint, and every entry at `from` or above.
     pub fn durable_read(&self, from: u64, with_base: bool) -> Result<DurableRead, StoreError> {
+        self.durable_read_mode(from, with_base, false)
+    }
+
+    /// The open's read: the seed, the latest checkpoint at `c`, and the
+    /// entries from `c` (from 1 without a checkpoint) to the head. Entry `c`
+    /// is included so its tag binds the checkpoint to the anchored log.
+    pub fn durable_read_from_checkpoint(&self) -> Result<DurableRead, StoreError> {
+        self.durable_read_mode(1, true, true)
+    }
+
+    fn durable_read_mode(
+        &self,
+        from: u64,
+        with_base: bool,
+        from_checkpoint: bool,
+    ) -> Result<DurableRead, StoreError> {
         let guard = anchor::Guard::lock(&self.root)?;
         self.database.exec(b"BEGIN DEFERRED\0")?;
         let transaction = Transaction {
@@ -878,6 +943,10 @@ impl SqliteByteStore {
             let statement = self.database.prepare(
                 b"SELECT height, record, tag FROM durable_log WHERE height>=?1 ORDER BY height\0",
             )?;
+            let from = match (&base, from_checkpoint) {
+                (Some((_, Some((height, _)))), true) => *height,
+                _ => from,
+            };
             statement.bind_int64(1, from.max(1) as i64)?;
             while statement.step()? == SQLITE_ROW {
                 entries.push(DurableEntry {
@@ -896,6 +965,57 @@ impl SqliteByteStore {
         })
     }
 
+    /// An at-use history read under the head anchor: the named entries that
+    /// exist, and each named node's latest version at or below `at`. Nothing
+    /// here is accepted; Lean verifies every byte against its frontier.
+    pub fn durable_history(
+        &self,
+        at: u64,
+        heights: &[u64],
+        nodes: &[(u64, Vec<u8>)],
+    ) -> Result<HistoryRead, StoreError> {
+        let guard = anchor::Guard::lock(&self.root)?;
+        self.database.exec(b"BEGIN DEFERRED\0")?;
+        let transaction = Transaction {
+            store: self,
+            active: true,
+        };
+        self.refuse_retired_image()?;
+        let seed = self.durable_seed()?.ok_or(StoreError::Missing)?;
+        let anchor_head = self.anchor_head(&guard, &seed)?;
+        let head = self.durable_head()?;
+        let mut entries = Vec::new();
+        for height in heights {
+            if let Some(entry) = self.durable_entry(*height)? {
+                entries.push(entry);
+            }
+        }
+        let mut found = Vec::new();
+        for (space, key) in nodes {
+            let statement = self.database.prepare(
+                b"SELECT height, value FROM durable_node WHERE space=?1 AND key=?2 AND height<=?3 ORDER BY height DESC LIMIT 1\0",
+            )?;
+            statement.bind_int64(1, (*space).min(i64::MAX as u64) as i64)?;
+            statement.bind_blob_at(2, key)?;
+            statement.bind_int64(3, at.min(i64::MAX as u64) as i64)?;
+            let version = match statement.step()? {
+                SQLITE_ROW => Some((
+                    statement.column_int64(0) as u64,
+                    statement.column_blob_at(1)?,
+                )),
+                _ => None,
+            };
+            found.push((*space, key.clone(), version));
+        }
+        transaction.commit()?;
+        guard.publish(&anchor_head)?;
+        Ok(HistoryRead {
+            head,
+            entries,
+            nodes: found,
+        })
+    }
+
     /// Append entry `height` iff the head is `height - 1`. The identical entry
     /// already at `height` is `AlreadyPresent`; anything else is a conflict.
     pub fn durable_append(
@@ -903,22 +1023,52 @@ impl SqliteByteStore {
         height: u64,
         record: &[u8],
         tag: &[u8],
+        nodes: &[DurableNode],
     ) -> Result<PublishStatus, StoreError> {
-        self.durable_append_with_hook(height, record, tag, |_| {})
+        self.durable_append_with_hook(height, record, tag, nodes, |_| {})
     }
 
+    fn durable_nodes_at(&self, height: u64) -> Result<Vec<DurableNode>, StoreError> {
+        let statement = self.database.prepare(
+            b"SELECT space, key, value FROM durable_node WHERE height=?1 ORDER BY space, key\0",
+        )?;
+        statement.bind_int64(1, height as i64)?;
+        let mut nodes = Vec::new();
+        while statement.step()? == SQLITE_ROW {
+            nodes.push(DurableNode {
+                space: statement.column_int64(0) as u64,
+                key: statement.column_blob_at(1)?,
+                value: statement.column_blob_at(2)?,
+            });
+        }
+        Ok(nodes)
+    }
+
+    /// Append entry `height` and the accumulator nodes its append completes,
+    /// in one transaction. The identical entry with the identical node set is
+    /// `AlreadyPresent`; anything else at `height` is a conflict.
     pub fn durable_append_with_hook<F>(
         &self,
         height: u64,
         record: &[u8],
         tag: &[u8],
+        nodes: &[DurableNode],
         mut hook: F,
     ) -> Result<PublishStatus, StoreError>
     where
         F: FnMut(PublishPhase),
     {
         Self::validate_bound(record)?;
-        if height == 0 || tag.len() > 4096 {
+        if height == 0
+            || tag.len() > 4096
+            || nodes.len() > 4096
+            || nodes.iter().any(|node| node.key.len() > 4096 || node.value.len() > 4096 || node.space > i64::MAX as u64)
+        {
+            return Err(StoreError::Conflict);
+        }
+        let mut proposed_nodes = nodes.to_vec();
+        proposed_nodes.sort();
+        if proposed_nodes.windows(2).any(|pair| pair[0].space == pair[1].space && pair[0].key == pair[1].key) {
             return Err(StoreError::Conflict);
         }
         let guard = anchor::Guard::lock(&self.root)?;
@@ -932,7 +1082,10 @@ impl SqliteByteStore {
         let seed = self.durable_seed()?.ok_or(StoreError::Missing)?;
         let current_head = self.anchor_head(&guard, &seed)?;
         if let Some(existing) = self.durable_entry(height)? {
-            if existing.record == record && existing.tag == tag {
+            if existing.record == record
+                && existing.tag == tag
+                && self.durable_nodes_at(height)? == proposed_nodes
+            {
                 transaction.commit()?;
                 hook(PublishPhase::Committed);
                 guard.publish_with_hook(&current_head, &mut hook)?;
@@ -954,6 +1107,18 @@ impl SqliteByteStore {
             return Err(self.database.error(SQLITE_DONE));
         }
         drop(statement);
+        for node in &proposed_nodes {
+            let insert = self.database.prepare(
+                b"INSERT INTO durable_node(space,key,height,value) VALUES(?1,?2,?3,?4)\0",
+            )?;
+            insert.bind_int64(1, node.space as i64)?;
+            insert.bind_blob_at(2, &node.key)?;
+            insert.bind_int64(3, height as i64)?;
+            insert.bind_blob_at(4, &node.value)?;
+            if insert.step()? != SQLITE_DONE {
+                return Err(self.database.error(SQLITE_DONE));
+            }
+        }
         hook(PublishPhase::Inserted);
         transaction.commit()?;
         hook(PublishPhase::Committed);
@@ -1163,6 +1328,119 @@ pub fn encode_durable_read(read: &DurableRead) -> Vec<u8> {
     out
 }
 
+/// The history read file Lean parses: u64 head; u64 entry count; per entry
+/// u64 height, record blob, tag blob; u64 node count; per requested node u64
+/// space, key blob, u64 flag (0 absent, 1 present) and when present u64
+/// version height and value blob.
+pub fn encode_history_read(read: &HistoryRead) -> Vec<u8> {
+    fn blob(out: &mut Vec<u8>, bytes: &[u8]) {
+        out.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+        out.extend_from_slice(bytes);
+    }
+    let mut out = Vec::new();
+    out.extend_from_slice(&read.head.to_be_bytes());
+    out.extend_from_slice(&(read.entries.len() as u64).to_be_bytes());
+    for entry in &read.entries {
+        out.extend_from_slice(&entry.height.to_be_bytes());
+        blob(&mut out, &entry.record);
+        blob(&mut out, &entry.tag);
+    }
+    out.extend_from_slice(&(read.nodes.len() as u64).to_be_bytes());
+    for (space, key, version) in &read.nodes {
+        out.extend_from_slice(&space.to_be_bytes());
+        blob(&mut out, key);
+        match version {
+            None => out.extend_from_slice(&0u64.to_be_bytes()),
+            Some((height, value)) => {
+                out.extend_from_slice(&1u64.to_be_bytes());
+                out.extend_from_slice(&height.to_be_bytes());
+                blob(&mut out, value);
+            }
+        }
+    }
+    out
+}
+
+/// Parse a node list file (append) or a history request: big-endian u64
+/// fields and u64-length blobs, nothing trailing.
+pub struct Reader<'a> {
+    bytes: &'a [u8],
+    position: usize,
+}
+
+impl<'a> Reader<'a> {
+    pub fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, position: 0 }
+    }
+    pub fn u64(&mut self) -> Result<u64, StoreError> {
+        let end = self.position.checked_add(8).ok_or(StoreError::InvalidPath)?;
+        let slice = self.bytes.get(self.position..end).ok_or(StoreError::InvalidPath)?;
+        self.position = end;
+        Ok(u64::from_be_bytes(slice.try_into().map_err(|_| StoreError::InvalidPath)?))
+    }
+    pub fn blob(&mut self) -> Result<Vec<u8>, StoreError> {
+        let length = usize::try_from(self.u64()?).map_err(|_| StoreError::InvalidPath)?;
+        if length > 4096 {
+            return Err(StoreError::InvalidPath);
+        }
+        let end = self.position.checked_add(length).ok_or(StoreError::InvalidPath)?;
+        let slice = self.bytes.get(self.position..end).ok_or(StoreError::InvalidPath)?;
+        self.position = end;
+        Ok(slice.to_vec())
+    }
+    pub fn finish(self) -> Result<(), StoreError> {
+        if self.position == self.bytes.len() {
+            Ok(())
+        } else {
+            Err(StoreError::InvalidPath)
+        }
+    }
+}
+
+/// NODES file: u64 count, then per node u64 space, key blob, value blob.
+pub fn decode_nodes(bytes: &[u8]) -> Result<Vec<DurableNode>, StoreError> {
+    let mut reader = Reader::new(bytes);
+    let count = reader.u64()?;
+    if count > 4096 {
+        return Err(StoreError::InvalidPath);
+    }
+    let mut nodes = Vec::new();
+    for _ in 0..count {
+        let space = reader.u64()?;
+        let key = reader.blob()?;
+        let value = reader.blob()?;
+        nodes.push(DurableNode { space, key, value });
+    }
+    reader.finish()?;
+    Ok(nodes)
+}
+
+/// REQUEST file: u64 at; u64 height count, heights; u64 node count, per node
+/// u64 space and key blob.
+pub fn decode_history_request(bytes: &[u8]) -> Result<(u64, Vec<u64>, Vec<(u64, Vec<u8>)>), StoreError> {
+    let mut reader = Reader::new(bytes);
+    let at = reader.u64()?;
+    let count = reader.u64()?;
+    if count > 4096 {
+        return Err(StoreError::InvalidPath);
+    }
+    let mut heights = Vec::new();
+    for _ in 0..count {
+        heights.push(reader.u64()?);
+    }
+    let count = reader.u64()?;
+    if count > 65536 {
+        return Err(StoreError::InvalidPath);
+    }
+    let mut nodes = Vec::new();
+    for _ in 0..count {
+        let space = reader.u64()?;
+        nodes.push((space, reader.blob()?));
+    }
+    reader.finish()?;
+    Ok((at, heights, nodes))
+}
+
 /// The journal read file Lean parses: big-endian u64 head; u64 entry count;
 /// per entry u64 seq, record blob, tag blob (u64 length and bytes).
 pub fn encode_journal_read(read: &JournalRead) -> Vec<u8> {
@@ -1253,7 +1531,7 @@ mod tests {
         assert_eq!(store.journal_append(1, b"j1", b"t1").unwrap(), PublishStatus::AlreadyPresent);
         assert!(matches!(store.journal_append(1, b"jX", b"t1"), Err(StoreError::Conflict)));
         // The two logs advance independently; each append re-anchors both heads.
-        store.durable_append(1, b"r1", b"t1").unwrap();
+        store.durable_append(1, b"r1", b"t1", &[]).unwrap();
         assert_eq!(store.journal_append(2, b"j2", b"t2").unwrap(), PublishStatus::Installed);
         let read = store.journal_read(1).unwrap();
         assert_eq!(read.head, 2);
@@ -1310,7 +1588,7 @@ mod tests {
         let root = fresh_root("append");
         let store = SqliteByteStore::open(&root).unwrap();
         assert!(matches!(
-            store.durable_append(1, b"r", b"t"),
+            store.durable_append(1, b"r", b"t", &[]),
             Err(StoreError::Missing)
         ));
         assert_eq!(
@@ -1326,23 +1604,23 @@ mod tests {
             Err(StoreError::Conflict)
         ));
         assert!(matches!(
-            store.durable_append(2, b"r", b"t"),
+            store.durable_append(2, b"r", b"t", &[]),
             Err(StoreError::Conflict)
         ));
         assert_eq!(
-            store.durable_append(1, b"r1", b"t1").unwrap(),
+            store.durable_append(1, b"r1", b"t1", &[]).unwrap(),
             PublishStatus::Installed
         );
         assert_eq!(
-            store.durable_append(1, b"r1", b"t1").unwrap(),
+            store.durable_append(1, b"r1", b"t1", &[]).unwrap(),
             PublishStatus::AlreadyPresent
         );
         assert!(matches!(
-            store.durable_append(1, b"r1", b"tX"),
+            store.durable_append(1, b"r1", b"tX", &[]),
             Err(StoreError::Conflict)
         ));
         assert_eq!(
-            store.durable_append(2, b"r2", b"t2").unwrap(),
+            store.durable_append(2, b"r2", b"t2", &[]).unwrap(),
             PublishStatus::Installed
         );
         assert!(matches!(
@@ -1351,7 +1629,7 @@ mod tests {
         ));
         store.durable_checkpoint(1, b"c1").unwrap();
         store.durable_checkpoint(2, b"c2").unwrap();
-        store.durable_append(3, b"r3", b"t3").unwrap();
+        store.durable_append(3, b"r3", b"t3", &[]).unwrap();
         store.durable_checkpoint(3, b"c3").unwrap();
         let read = store.durable_read(2, true).unwrap();
         assert_eq!(read.head, 3);
@@ -1383,7 +1661,7 @@ mod tests {
             Err(StoreError::RetiredImage)
         ));
         assert!(matches!(
-            store.durable_append(1, b"r", b"t"),
+            store.durable_append(1, b"r", b"t", &[]),
             Err(StoreError::RetiredImage)
         ));
         drop(store);
@@ -1406,9 +1684,9 @@ mod anchor_tests {
         ));
         let store = SqliteByteStore::open(path.join("store")).unwrap();
         store.durable_init(b"domain-and-genesis").unwrap();
-        store.durable_append(1, b"one", b"tag-one").unwrap();
+        store.durable_append(1, b"one", b"tag-one", &[]).unwrap();
         store.durable_checkpoint(1, b"checkpoint-one").unwrap();
-        store.durable_append(2, b"two", b"tag-two").unwrap();
+        store.durable_append(2, b"two", b"tag-two", &[]).unwrap();
         store
     }
     /// A read of a Store whose anchor is current changes no byte of the anchor, the lock or the
@@ -1485,7 +1763,7 @@ mod anchor_tests {
             Err(StoreError::Anchor("Store is behind retained head"))
         ));
         assert!(matches!(
-            s.durable_append(2, b"other", b"tag-other"),
+            s.durable_append(2, b"other", b"tag-other", &[]),
             Err(StoreError::Anchor(_))
         ));
         assert!(matches!(
@@ -1520,7 +1798,7 @@ mod anchor_tests {
     fn anchor_loss_refuses_until_explicit_enrollment_and_foreign_anchor_refuses() {
         let a = store();
         let b = store();
-        b.durable_append(3, b"third", b"tag-three").unwrap();
+        b.durable_append(3, b"third", b"tag-three", &[]).unwrap();
         fs::copy(anchor::path(b.root()), anchor::path(a.root())).unwrap();
         assert!(matches!(
             a.durable_read(1, true),
@@ -1590,7 +1868,7 @@ mod anchor_tests {
         let anchor_path = anchor::path(s.root());
         let directory = anchor_path.parent().unwrap().to_owned();
         let older = fs::read(&anchor_path).unwrap();
-        s.durable_append(3, b"third", b"tag-three").unwrap();
+        s.durable_append(3, b"third", b"tag-three", &[]).unwrap();
         // The session account's attempt: write the older head in place, else
         // rename a forged copy over the anchor. Prints what happened.
         let attempt = |label: &str| -> String {
@@ -1620,14 +1898,14 @@ mod anchor_tests {
             Err(StoreError::Anchor("anchor is not owned by the Store's user"))
         ));
         assert!(s.durable_read(1, true).is_err());
-        assert!(s.durable_append(4, b"four", b"tag-four").is_err());
+        assert!(s.durable_append(4, b"four", b"tag-four", &[]).is_err());
     }
     #[test]
     fn whole_database_replacement_is_detected_by_sibling_anchor() {
         let s = store();
         let backup = s.root().join("earlier.sqlite3");
         fs::copy(s.database_path(), &backup).unwrap();
-        s.durable_append(3, b"third", b"tag-three").unwrap();
+        s.durable_append(3, b"third", b"tag-three", &[]).unwrap();
         let root = s.root().to_owned();
         let database = s.database_path().to_owned();
         drop(s);
@@ -1637,5 +1915,89 @@ mod anchor_tests {
             reopened.durable_read(1, true),
             Err(StoreError::Anchor(_))
         ));
+    }
+
+    fn kn2_root(label: &str) -> std::path::PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("dregg-kn2-{label}-{}-{nonce}", std::process::id()))
+    }
+
+    fn node(space: u64, key: &[u8], value: &[u8]) -> DurableNode {
+        DurableNode { space, key: key.to_vec(), value: value.to_vec() }
+    }
+
+    /// KN2-STORE-OPEN: an append writes its accumulator nodes in the same
+    /// transaction; a retry must carry the identical node set; a history read
+    /// returns each node's latest version at or below `at`.
+    #[test]
+    fn durable_nodes_are_written_with_their_entry_and_read_by_version() {
+        let root = kn2_root("nodes");
+        let store = SqliteByteStore::open(&root).unwrap();
+        store.durable_init(b"seed").unwrap();
+        let first = [node(1, b"leaf-1", b"d1"), node(2, b"path", b"v1")];
+        assert_eq!(store.durable_append(1, b"r1", b"t1", &first).unwrap(), PublishStatus::Installed);
+        assert_eq!(store.durable_append(1, b"r1", b"t1", &first).unwrap(), PublishStatus::AlreadyPresent);
+        assert!(matches!(
+            store.durable_append(1, b"r1", b"t1", &[node(1, b"leaf-1", b"forged")]),
+            Err(StoreError::Conflict)
+        ));
+        assert!(matches!(
+            store.durable_append(2, b"r2", b"t2", &[node(2, b"k", b"a"), node(2, b"k", b"b")]),
+            Err(StoreError::Conflict)
+        ));
+        store.durable_append(2, b"r2", b"t2", &[node(2, b"path", b"v2")]).unwrap();
+        let request = vec![(1, b"leaf-1".to_vec()), (2, b"path".to_vec()), (2, b"absent".to_vec())];
+        let at1 = store.durable_history(1, &[1], &request).unwrap();
+        assert_eq!(at1.head, 2);
+        assert_eq!(at1.entries.len(), 1);
+        assert_eq!(at1.nodes[0].2, Some((1, b"d1".to_vec())));
+        assert_eq!(at1.nodes[1].2, Some((1, b"v1".to_vec())));
+        assert_eq!(at1.nodes[2].2, None);
+        let at2 = store.durable_history(2, &[1, 2, 9], &request).unwrap();
+        assert_eq!(at2.entries.iter().map(|e| e.height).collect::<Vec<_>>(), vec![1, 2]);
+        assert_eq!(at2.nodes[1].2, Some((2, b"v2".to_vec())));
+        let encoded = encode_history_read(&at2);
+        assert_eq!(&encoded[..8], &2u64.to_be_bytes());
+        drop(store);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The open reads from the latest checkpoint, not from genesis.
+    #[test]
+    fn durable_read_from_checkpoint_starts_at_the_checkpoint() {
+        let root = kn2_root("from-checkpoint");
+        let store = SqliteByteStore::open(&root).unwrap();
+        store.durable_init(b"seed").unwrap();
+        assert_eq!(store.durable_read_from_checkpoint().unwrap().entries.len(), 0);
+        for h in 1..=5u64 {
+            store.durable_append(h, &[h as u8], b"t", &[]).unwrap();
+        }
+        assert_eq!(store.durable_read_from_checkpoint().unwrap().entries.len(), 5);
+        store.durable_checkpoint(3, b"c3").unwrap();
+        let read = store.durable_read_from_checkpoint().unwrap();
+        assert_eq!(read.head, 5);
+        assert_eq!(read.entries.iter().map(|e| e.height).collect::<Vec<_>>(), vec![3, 4, 5]);
+        assert_eq!(read.base.unwrap().1, Some((3, b"c3".to_vec())));
+        drop(store);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A seeded v4 Store (no accumulator) refuses by name; it is never upgraded.
+    #[test]
+    fn seeded_schema_v4_store_refuses_by_name() {
+        let root = kn2_root("v4");
+        let store = SqliteByteStore::open(&root).unwrap();
+        store.durable_init(b"seed").unwrap();
+        store.database.exec(b"DROP TABLE durable_node\0").unwrap();
+        store.database.exec(b"PRAGMA user_version=4\0").unwrap();
+        drop(store);
+        let refused = SqliteByteStore::open(&root);
+        assert!(matches!(refused, Err(StoreError::RetiredSchema(4))));
+        let message = format!("{}", refused.err().unwrap());
+        assert!(message.contains("schema v4") && message.contains("re-genesis"), "{message}");
+        fs::remove_dir_all(root).unwrap();
     }
 }
