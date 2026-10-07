@@ -185,7 +185,7 @@ structure Prepared (deployment : Deployment) (profile : CanonicalRuntimeProfile.
       (patchOf command decision legs)) pay.cell (declarationOf command decision legs) ()
   /-- The clock's own committed law admits the advance (no fault). -/
   clockJudged : ReceivingLaw.judgeWrite (PayObservationReceiver.laws deployment profile) .payEnrolV2
-    durable (clock.write clockValid.apply)
+    durable [] (clock.write clockValid.apply)
     (some (clockStepOf deployment profile ambient command directory.directory authority.snapshot
       pay.cell clock.cell clock.clock (declarationOf command decision legs) clockValid)) = none
   source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
@@ -245,7 +245,7 @@ def prepare (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile
                     | .rejected _ => throw .validation
                     | .accepted validated =>
                      match clockJudged : ReceivingLaw.judgeWrite
-                         (PayObservationReceiver.laws deployment profile) .payEnrolV2 durable
+                         (PayObservationReceiver.laws deployment profile) .payEnrolV2 durable []
                          (clock.write clockValid.apply)
                          (some (clockStepOf deployment profile ambient command directory.directory
                            snapshot pay.cell clock.cell clock.clock (declarationOf command decision legs)
@@ -441,15 +441,15 @@ deployed laws, the conclusion `Receiving.Family.shape_lawful` gives a migrated
 family per write). -/
 theorem Prepared.clock_lawful
     (prepared : Prepared deployment profile ambient durable command memo verified) :
-    ReceivingLaw.Lawful (PayObservationReceiver.laws deployment profile) .payEnrolV2 durable
+    ReceivingLaw.Lawful (PayObservationReceiver.laws deployment profile) .payEnrolV2 durable []
       (clockWrite prepared) (some prepared.clockStep) :=
-  (ReceivingLaw.judgeWrite_none_iff _ _ _ _ _).1 prepared.clockJudged
+  (ReceivingLaw.judgeWrite_none_iff _ _ _ _ _ _).1 prepared.clockJudged
 
 /-- The cells the clock law's resolution read: a concurrent change of the
 clock's law conflicts with the enrollment. -/
 def clockLawGuards (prepared : Prepared deployment profile ambient durable command memo verified) :
     List ReadGuard :=
-  ReceivingLaw.writeGuards (PayObservationReceiver.laws deployment profile) durable
+  ReceivingLaw.writeGuards (PayObservationReceiver.laws deployment profile) durable []
     (clockWrite prepared) (some prepared.clockStep)
 
 /-- The pay cell, the clock cell, then the decision's other cells. -/
