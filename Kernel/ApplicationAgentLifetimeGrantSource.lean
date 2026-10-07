@@ -197,10 +197,6 @@ structure Ready (domain : Digest) (spec : Spec) (operation : Nat) where
   valid : spec.valid
   page : ContentResource.ContentStore
   pageExact : grantPage domain spec operation = .ok page
-  payloadAtLeast :
-    (PackedCell.bytes CanonicalCellRegistry.registry
-      (bornCell ContentResource.initialStore)).length ≤
-    (PackedCell.bytes CanonicalCellRegistry.registry (bornCell page)).length
 
 def prepare {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F)
@@ -214,51 +210,29 @@ def prepare {F : Type} [Field F]
   if valid : spec.valid then
     match exact : grantPage config.deployment.domain spec operation with
     | .error detail => .error detail
-    | .ok page =>
-      if size : (PackedCell.bytes CanonicalCellRegistry.registry
-          (bornCell ContentResource.initialStore)).length ≤
-          (PackedCell.bytes CanonicalCellRegistry.registry (bornCell page)).length then
-        .ok ⟨valid, page, exact, size⟩
-      else .error "lifetime grant final payload shorter than empty birth"
+    | .ok page => .ok ⟨valid, page, exact⟩
   else .error "lifetime grant issuance selectors invalid"
 
 variable {domain : Digest} {spec : Spec} {operation : Nat}
 
-def Ready.birth (_ready : Ready domain spec operation) :
-    BirthItem CanonicalCellRegistry.registry :=
-  ⟨⟨spec.grant.source.resource, CellSlot.root CanonicalCellRegistry.registry .absent,
-      bornCell ContentResource.initialStore⟩,
-    .object, spec.grant.approval.issuer, none, none⟩
-
+/-- The grant's one cell, born with its source-derived page: the first atom is
+in the descriptor the factory judges, so the factory step names the whole grant
+(`ResourceBirthController.Concrete.newbornSlots`).  Nothing substitutes a post
+after admission. -/
 def Ready.initializedCell (ready : Ready domain spec operation) :
     PackedCell CanonicalCellRegistry.registry := bornCell ready.page
 
-def Ready.emptyPayloadBytes (ready : Ready domain spec operation) : Nat :=
-  (PackedCell.bytes CanonicalCellRegistry.registry ready.birth.create.cell).length
+def Ready.birth (ready : Ready domain spec operation) :
+    BirthItem CanonicalCellRegistry.registry :=
+  ⟨⟨spec.grant.source.resource, CellSlot.root CanonicalCellRegistry.registry .absent,
+      ready.initializedCell⟩,
+    .object, spec.grant.approval.issuer, none, none⟩
 
-def Ready.finalPayloadBytes (ready : Ready domain spec operation) : Nat :=
-  (PackedCell.bytes CanonicalCellRegistry.registry ready.initializedCell).length
-
-theorem Ready.empty_le_final (ready : Ready domain spec operation) :
-    ready.emptyPayloadBytes ≤ ready.finalPayloadBytes := ready.payloadAtLeast
-
-def Ready.effectiveTariff (ready : Ready domain spec operation)
-    (tariff : CreationTariff) : CreationTariff :=
-  { tariff with base := tariff.base + tariff.perInitialPayloadByte *
-      (ready.finalPayloadBytes - ready.emptyPayloadBytes) }
-
-theorem Ready.effective_payload_quote (ready : Ready domain spec operation)
-    (tariff : CreationTariff) :
-    (ready.effectiveTariff tariff).base +
-      tariff.perInitialPayloadByte * ready.emptyPayloadBytes =
-      tariff.base + tariff.perInitialPayloadByte * ready.finalPayloadBytes := by
-  simp only [Ready.effectiveTariff]
-  rw [Nat.add_assoc, ← Nat.mul_add]
-  rw [Nat.sub_add_cancel ready.empty_le_final]
-
-def Ready.effectivePins (ready : Ready domain spec operation)
-    (pins : FactoryPins) : FactoryPins :=
-  { pins with tariff := ready.effectiveTariff pins.tariff }
+/-- The one initial cell the special receiver sources beyond the user shapes
+(`ResourceBirthController.Concrete.SourcedInitial`): the grant at its id. -/
+def Ready.sourced (ready : Ready domain spec operation) :
+    List (Nat × PackedCell CanonicalCellRegistry.registry) :=
+  [(spec.grant.source.resource, ready.initializedCell)]
 
 def Ready.births (ready : Ready domain spec operation) :
     List (BirthItem CanonicalCellRegistry.registry) := [ready.birth]
@@ -350,10 +324,11 @@ def Ready.initialPolicies {F : Type} [Field F]
   [⟨record.policyId, PolicyRecordCodec.digest record,
     PolicyRecordCodec.encode record⟩]
 
-/-- The factory/Book descriptor is fixed by issuer, nonce, one empty content
-birth, three source-derived capabilities and the pinned final-payload tariff.
-The later event27 admission must compare the complete decoded descriptor and
-install `initializedCell` only after the current app delegation check. -/
+/-- The factory/Book descriptor is fixed by issuer, nonce, one content birth
+carrying its source-derived first atom, three source-derived capabilities and
+the pinned tariff on that whole payload.  The event27 admission compares the
+complete decoded descriptor and checks the current app delegation before the
+birth commits. -/
 def Ready.descriptor {F : Type} [Field F]
     (ready : Ready domain spec operation)
     (profile : CanonicalRuntimeProfile.Profile F) (config : NativeHost.Config)
@@ -380,7 +355,7 @@ def Ready.descriptor {F : Type} [Field F]
       funding := funding,
       fee := ⟨payer, config.tariff.collector, config.tariff.asset, 0⟩ }
   { draft with fee := { draft.fee with amount :=
-      (draft.quotedFee (ready.effectiveTariff config.tariff)) } }
+      (draft.quotedFee config.tariff) } }
 
 def Ready.expectedDescriptor {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F)

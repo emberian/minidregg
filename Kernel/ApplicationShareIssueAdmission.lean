@@ -6,7 +6,6 @@ intent or implement replay; callers must not treat Accepted as a receipt.
 -/
 import Kernel.ApplicationShareIssueDelegation
 import Kernel.ResourceBirthReceiver
-import Kernel.ApplicationShareIssueAtomicBirth
 
 namespace Minidregg.Kernel.ApplicationShareIssueAdmission
 open Minidregg.Compiler
@@ -24,6 +23,12 @@ variable {profile : CanonicalRuntimeProfile.Profile F}
 variable {config : NativeHost.Config} {pins : FactoryPins}
 variable {durable : ResourceBirthController.Concrete.Durable} {height : Height}
 
+/-- **The writes the issue commits**: the admitted birth's own, untransformed.
+The issue's naming check (`Accepted.named`) runs over exactly these. -/
+def finalWrites (birth : AcceptedBirth profile config.deployment pins durable height) :
+    List DurableDataIntent.DataWrite :=
+  birth.prepared.writes
+
 /-- All components are minted by native verification on one `durable` and one
 authority directory. The source descriptor equation rules out a bare birth of
 caller-chosen ticket-looking bytes. A separate receiver must install a distinct
@@ -37,9 +42,7 @@ structure Accepted (profile : CanonicalRuntimeProfile.Profile F)
     (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
       config.deployment ingress.spec.issuer ingress.spec.ticket.issueNonce).value
   baseTariff : pins.tariff = config.tariff
-  specialPins : FactoryPins
-  specialPinsExact : specialPins = sourceReady.effectivePins pins
-  birth : AcceptedBirth profile config.deployment specialPins durable height
+  birth : AcceptedBirth profile config.deployment pins durable height
   birthBytes : birth.ingress.bytes = ingress.birthIngress
   sourceDescriptor : birth.descriptor =
     { sourceReady.expectedDescriptor profile config
@@ -52,8 +55,8 @@ structure Accepted (profile : CanonicalRuntimeProfile.Profile F)
   appChecked : ApplicationShareIssueDelegation.Checked appPrepared ingress.appEnvelope
   appReadOnly : ∀ guard ∈ ApplicationShareIssueDelegation.readGuards appPrepared, guard.cellId ∉
     birth.prepared.writes.map DurableDataIntent.DataWrite.cellId
-  atomic : ApplicationShareIssueAtomicBirth.Checked sourceReady config.deployment
-    birth.prepared.writes
+  /-- Every birth write the issue commits is named by the admitted factory step. -/
+  named : ResourceBirthController.Concrete.Named birth.factoryStep (finalWrites birth)
 
 private def refused : String := "app share issue refused"
 
@@ -76,11 +79,10 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
     | return .error refused
   let .ok ready := prepare profile config ingress.spec | return .error refused
   if baseTariff : pins.tariff = config.tariff then
-    let specialPins := ready.effectivePins pins
     let some decoded := ResourceBirthPolicyController.Concrete.decodeIngress
         ingress.birthIngress | return .error refused
     let .ok birth ← ResourceBirthPolicyController.Concrete.admitDecodedNative
-        profile config.deployment specialPins native durable height decoded
+        profile config.deployment pins native durable height decoded ready.sourced
         | return .error refused
     if birthBytes : birth.ingress.bytes = ingress.birthIngress then
       if sourceDescriptorBytes :
@@ -105,14 +107,13 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
           ingress.appEnvelope | return .error refused
         if appReadOnly : ∀ guard ∈ ApplicationShareIssueDelegation.readGuards appPrepared, guard.cellId ∉
             birth.prepared.writes.map DurableDataIntent.DataWrite.cellId then
-          match ApplicationShareIssueAtomicBirth.check ready config.deployment
-              birth.prepared.writes with
-          | some atomic =>
+          match ResourceBirthController.Concrete.checkNamed birth.factoryStep (finalWrites birth) with
+          | .error cell => return .error s!"{refused}: neutralBirthUnjudged {cell}"
+          | .ok named =>
             return .ok ⟨ingress,
-              ⟨ready, baseTariff, specialPins, rfl, birth, birthBytes,
+              ⟨ready, baseTariff, birth, birthBytes,
                 sourceDescriptor, appPrepared,
-                appChecked, appReadOnly, atomic⟩⟩
-          | none => return .error refused
+                appChecked, appReadOnly, named.down⟩⟩
         else return .error refused
       else return .error refused
     else return .error refused
@@ -123,20 +124,25 @@ theorem Accepted.same_loaded_image {ingress : ApplicationShareIssueSource.Ingres
     accepted.appPrepared.observed.before.payload.root = accepted.appPrepared.root :=
   accepted.appPrepared.observed.rootExact.symm
 
-/-- The ordinary factory checker and Book batch use the same signed fee,
-quoted under the uniquely source-derived composite tariff. No caller can
-replace the tariff or the final ticket cell after admission. -/
-theorem Accepted.special_fee_bound {ingress : ApplicationShareIssueSource.Ingress}
+/-- The ordinary factory checker and Book batch use the same signed fee, quoted
+under the pinned tariff on the whole ticket cell the factory judged. -/
+theorem Accepted.special_fee_bound {ingress}
     (accepted : Accepted profile config pins durable height ingress) :
     accepted.birth.descriptor.fee.amount =
-      accepted.birth.descriptor.quotedFee
-        (accepted.sourceReady.effectiveTariff config.tariff) := by
+      accepted.birth.descriptor.quotedFee config.tariff := by
   have bound := accepted.birth.pending.checked.feeBound.1
-  have tariffExact : accepted.specialPins.tariff =
-      accepted.sourceReady.effectiveTariff pins.tariff := by
-    exact congrArg FactoryPins.tariff accepted.specialPinsExact
-  rw [tariffExact] at bound
   rw [accepted.baseTariff] at bound
   exact bound
+
+/-- **The issue's committed births are named**: every write of `finalWrites` that
+creates its cell -- the ticket included, with its whole initialized content -- is
+named by the step the factory law admitted. -/
+theorem Accepted.births_named {ingress}
+    (accepted : Accepted profile config pins durable height ingress) :
+    ∀ write ∈ finalWrites accepted.birth, ResourceBirthController.Concrete.bornIn write = true →
+      ReceivingLaw.namesBirth accepted.birth.factoryStep write = true :=
+  accepted.named
+
+#assert_axioms Accepted.special_fee_bound Accepted.births_named
 
 end Minidregg.Kernel.ApplicationShareIssueAdmission

@@ -61,6 +61,10 @@ inductive Reject where
   for a root birth; for a birth under a room, the creator's presented placing
   capability and that capability's own ancestors (`BornLineage`). -/
   | roomLineage
+  /-- A birth write the receiver would commit that the admitted factory step does
+  not name (`ReceivingLaw.namesBirth`): an extra birth, a substituted post, or a
+  create the step left out. -/
+  | neutralBirthUnjudged (cell : Nat)
   deriving DecidableEq, Repr
 
 /-- The checkable part of the existing factory authorization. All fields
@@ -1137,7 +1141,8 @@ def projectForRequest (prepared : PreparedBirth profile.compilerProfile deployme
     , ("birth/count", Int.ofNat source.val.births.length)
     , ("fee/amount", Int.ofNat source.val.fee.amount) ]
   ⟨header ++ bytesSlots "command/bytes" 0 (userCommandBytes source.val) ++
-    policyResourceSlots prepared wanted logical⟩
+    policyResourceSlots prepared wanted logical ++
+    ResourceBirthController.Concrete.newbornSlots source.val⟩
 
 /-- Holding the signed request and user command fixed, arbitrary changes to
 every other account, authority entry, factory field, or allocation cannot
@@ -1645,6 +1650,35 @@ def Pending.admitBranch [DecidableEq F]
     else .error .policyUnavailable
   else .error .policyUnavailable
 
+/-- **An admitted branch's law accepts that branch's own step.**  The committed
+law of the branch's governing target, resolved from the branch configuration's
+snapshot, evaluates true on `pending.branchStep branch`: the step whose new
+state carries the newborn slots (`ResourceBirthController.Concrete.newbornSlots`).
+So the factory law of an accepted birth had every `birth/<id>` in front of it. -/
+theorem BranchAccepted.law_admits_step [DecidableEq F]
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} {pending : Pending prepared height} {branch : Branch descriptor}
+    (accepted : BranchAccepted pending branch) :
+    ∃ graph : PolicyComponentResolution.LoadedGraph (pending.branchConfig branch).snapshot
+        (pending.branchConfig branch).store (pending.branchConfig branch).profile.semantics
+        (pending.branchConfig branch).target (pending.branchConfig branch).additional,
+      PolicyComponentResolution.loadTarget (pending.branchConfig branch).snapshot (pending.branchConfig branch).store
+          (pending.branchConfig branch).profile.semantics (pending.branchConfig branch).target
+          (pending.branchConfig branch).resolutionBudget (pending.branchConfig branch).additional = .ok graph ∧
+      Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
+        (pending.branchStep branch).oldState (pending.branchStep branch).newState = true := by
+  have verified := accepted.authorization.policyVerified
+  obtain ⟨exactRequest, inner⟩ := pending.dispatched_request_exact _ _ _ verified
+  have same : accepted.authorization.policyWitness.1 = branch := by
+    apply pending.requestsDistinct
+    simp only [branchIdentity]
+    rw [← exactRequest]
+  rw [same] at inner
+  have checks := Bool.and_eq_true_iff.mp inner
+  obtain ⟨graph, loaded, _, _, _, _, law⟩ :=
+    ComposedPolicyAdmission.verifies_sound _ _ _ checks.2
+  exact ⟨graph, loaded, law⟩
+
 def Pending.admitBranchNative [DecidableEq F]
     {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor)
@@ -2051,6 +2085,9 @@ structure AcceptedBirth [DecidableEq F]
   methodExact : pending.method = ingress.method
   ownerConsents : OwnerConsents prepared height ingress.ownerConsentEnvelopes
   admitted : AdmittedBundle pending ingress.ingress.credentials
+  /-- Every birth write the receiver commits (`prepared.writes`) is named by the
+  admitted factory branch's step. -/
+  named : ResourceBirthController.Concrete.Named (pending.branchStep .factory) prepared.writes
 
 /-- A replay-aware durable endpoint calls this only after comparing canonical
 `ingress.bytes` with any recorded transaction. Fresh-state admission itself
@@ -2058,10 +2095,11 @@ has no replay bypass or source-state reconstruction from a historical receipt. -
 def admitDecodedNative [DecidableEq F]
     (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment) (pins : FactoryPins)
     (native : CredentialSignatureIO.NativeConfig) (durable : Durable) (height : Height)
-    (ingress : DecodedIngress) : IO (Except Reject (AcceptedBirth profile deployment pins durable height)) := do
+    (ingress : DecodedIngress) (sourced : List (Nat × PackedCell Registry) := []) :
+    IO (Except Reject (AcceptedBirth profile deployment pins durable height)) := do
   match ResourceBirthController.Concrete.prepareBirth profile.compilerProfile
       profile.disabledEvaluators deployment pins
-      durable ingress.descriptor height with
+      durable ingress.descriptor height sourced with
   | .error reason => return .error (.preparation reason)
   | .ok prepared =>
       match preparePending prepared height ingress.method with
@@ -2076,7 +2114,12 @@ def admitDecodedNative [DecidableEq F]
                   match ← pending.admitBundleNative native ingress.ingress.credentials with
                   | .error reason => return .error reason
                   | .ok branches =>
-                      return .ok ⟨ingress, prepared, pending, methodExact.down, owners, branches⟩
+                      match ResourceBirthController.Concrete.checkNamed (pending.branchStep .factory)
+                          prepared.writes with
+                      | .error cell => return .error (.neutralBirthUnjudged cell)
+                      | .ok named =>
+                          return .ok ⟨ingress, prepared, pending, methodExact.down, owners, branches,
+                            named.down⟩
 
 def admitNative [DecidableEq F]
     (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment) (pins : FactoryPins)
@@ -2103,6 +2146,37 @@ theorem AcceptedBirth.native_ingress_exact {height : Height}
       (accepted.branches branch).receipt.envelopeBytes = credential.envelope :=
   ⟨(accepted.branches branch).credential, accepted.admitted.inputsExact branch,
     (accepted.branches branch).envelopeExact⟩
+
+/-- The admitted factory branch's step: the step the factory law judged, whose
+new state names every newborn of the descriptor. -/
+def AcceptedBirth.factoryStep {height : Height}
+    (accepted : AcceptedBirth profile deployment pins durable height) :
+    CanonicalPolicyAdmission.PolicyStepContext :=
+  accepted.pending.branchStep .factory
+
+/-- **Neutral births named.**  Every birth write of the patch an accepted birth
+commits is named, `birth/<id>` ↦ its exact post root, by the factory step, and
+the factory's committed law, resolved at the loaded snapshot, accepts that very
+step.  A newborn with no export root is admitted by no other law, so this is its
+judgement: an authorizer that read its id and its whole post image. -/
+theorem AcceptedBirth.births_named {height : Height}
+    (accepted : AcceptedBirth profile deployment pins durable height) :
+    (∀ write ∈ accepted.prepared.writes, ResourceBirthController.Concrete.bornIn write = true →
+        ReceivingLaw.namesBirth accepted.factoryStep write = true) ∧
+      ∃ graph : PolicyComponentResolution.LoadedGraph (accepted.pending.branchConfig .factory).snapshot
+          (accepted.pending.branchConfig .factory).store
+          (accepted.pending.branchConfig .factory).profile.semantics
+          (accepted.pending.branchConfig .factory).target
+          (accepted.pending.branchConfig .factory).additional,
+        PolicyComponentResolution.loadTarget (accepted.pending.branchConfig .factory).snapshot
+            (accepted.pending.branchConfig .factory).store
+            (accepted.pending.branchConfig .factory).profile.semantics
+            (accepted.pending.branchConfig .factory).target
+            (accepted.pending.branchConfig .factory).resolutionBudget
+            (accepted.pending.branchConfig .factory).additional = .ok graph ∧
+        Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
+          accepted.factoryStep.oldState accepted.factoryStep.newState = true :=
+  ⟨accepted.named, (accepted.admitted.branches .factory).law_admits_step⟩
 
 def AcceptedBirth.descriptor {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height) := accepted.ingress.descriptor
@@ -2203,6 +2277,8 @@ def AcceptedBirth.sourceReadGuards {height : Height}
     accepted.descriptor.resourceBatch.operations.length).flatMap fun branch =>
       (accepted.branches branch).lawGuards
 
+
+#assert_axioms BranchAccepted.law_admits_step AcceptedBirth.births_named
 
 end Concrete
 

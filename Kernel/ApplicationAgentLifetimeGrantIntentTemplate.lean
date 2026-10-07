@@ -18,7 +18,6 @@ open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Kernel.DurableCommitProtocol
 open Minidregg.Kernel.ApplicationAgentLifetimeGrantSource
 open Minidregg.Kernel.ApplicationAgentLifetimeGrantAdmission
-open Minidregg.Kernel.ApplicationAgentLifetimeGrantAtomicBirth
 set_option autoImplicit false
 
 variable {F : Type} [Field F] [DecidableEq F]
@@ -50,42 +49,41 @@ theorem readGuards_exact (accepted : Accepted profile config pins durable height
   · exact ResourceBirthReceiver.readGuards_exact accepted.birth guard birth
   · exact accepted.appChecked.guardsCurrent guard app
 
+/-- The writes the issue commits: `finalWrites`, the admitted birth's own; its
+naming check ran over exactly these (`Accepted.births_named`). -/
 def writes (accepted : Accepted profile config pins durable height ingress) :
-    List DataWrite := accepted.atomic.writes
+    List DataWrite := finalWrites accepted.birth
 
 theorem writes_unique (accepted : Accepted profile config pins durable height ingress) :
     ((writes accepted).map DataWrite.cellId).Nodup :=
-  accepted.atomic.unique accepted.birth.prepared.writesUnique
+  accepted.birth.prepared.writesUnique
 
 theorem compositeGuards_readonly
     (accepted : Accepted profile config pins durable height ingress)
     (guard : ReadGuard) (member : guard ∈ readGuards accepted) :
     guard.cellId ∉ (writes accepted).map DataWrite.cellId :=
-  accepted.atomic.readonly guard (readGuards_readonly accepted guard member)
+  readGuards_readonly accepted guard member
 
 theorem composite_roots_bound
     (accepted : Accepted profile config pins durable height ingress)
     (write : DataWrite) (member : write ∈ writes accepted) :
     ResourceBirthCodec.rootBytes write.canonicalPostBytes = write.exactPost :=
-  accepted.atomic.roots_bound accepted.birth.prepared.write_roots_bound write member
+  accepted.birth.prepared.write_roots_bound write member
 
-/-- Charge includes the original empty resource birth, the full initialized
-grant post bytes, the extra signed app authority check, complete outer
-ingress, and app read guard. Counting the entire final post is conservative;
-the accepted birth fee remains the only Book debit. -/
+/-- Charge: the resource birth's own (its descriptor carries the whole initialized
+grant cell, so turn and storage bytes count it), the extra signed app authority
+check, the complete outer ingress and the app read guard.  The accepted birth fee
+remains the only Book debit. -/
 def charge (accepted : Accepted profile config pins durable height ingress) : Charge
   | .incidences => ResourceBirthReceiver.charge accepted.birth .incidences + 1
   | .turnBytes => ResourceBirthReceiver.charge accepted.birth .turnBytes +
-      (ingressCodec.encode ingress).length +
-      (initializedWrite accepted.sourceReady).canonicalPostBytes.length
+      (ingressCodec.encode ingress).length
   | .memoryTouches => ResourceBirthReceiver.charge accepted.birth .memoryTouches + 1
   | .witnessBytes => ResourceBirthReceiver.charge accepted.birth .witnessBytes +
-      ingress.appEnvelope.length +
-      (initializedWrite accepted.sourceReady).canonicalPostBytes.length
+      ingress.appEnvelope.length
   | .proofWork => ResourceBirthReceiver.charge accepted.birth .proofWork + 1
   | .storageBytes => ResourceBirthReceiver.charge accepted.birth .storageBytes +
-      (ingressCodec.encode ingress).length +
-      (initializedWrite accepted.sourceReady).canonicalPostBytes.length
+      (ingressCodec.encode ingress).length
   | .sideEffectCount => ResourceBirthReceiver.charge accepted.birth .sideEffectCount + 1
   | .feeDebit => ResourceBirthReceiver.charge accepted.birth .feeDebit
   | .networkBytes | .leaseByteBlocks => 0
@@ -94,8 +92,7 @@ theorem charge_fee_exact (accepted : Accepted profile config pins durable height
     charge accepted .feeDebit = accepted.birth.descriptor.fee.amount := rfl
 
 theorem charge_fee_source_quoted (accepted : Accepted profile config pins durable height ingress) :
-    charge accepted .feeDebit = accepted.birth.descriptor.quotedFee
-      (accepted.sourceReady.effectiveTariff config.tariff) := by
+    charge accepted .feeDebit = accepted.birth.descriptor.quotedFee config.tariff := by
   rw [charge_fee_exact]
   exact accepted.special_fee_bound
 
@@ -119,6 +116,16 @@ def template (accepted : Accepted profile config pins durable height ingress) :
   subject := some accepted.birth.descriptor.creator
   postRootsBound := composite_roots_bound accepted
   guardsReadOnly := compositeGuards_readonly accepted
+
+/-- **The committed births are named**: every write of the intent that creates
+its cell -- the initialized content cell included -- is named by the step the
+factory law admitted.  The intent commits exactly `finalWrites`. -/
+theorem template_births_named (accepted : Accepted profile config pins durable height ingress) :
+    ∀ write ∈ (template accepted).writes, ResourceBirthController.Concrete.bornIn write = true →
+      ReceivingLaw.namesBirth accepted.birth.factoryStep write = true :=
+  accepted.births_named
+
+#assert_axioms template_births_named
 
 theorem template_event_version (accepted : Accepted profile config pins durable height ingress) :
     (template accepted).event.codecVersion = 27 := rfl

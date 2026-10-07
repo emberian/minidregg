@@ -8,6 +8,7 @@ import Kernel.WorldKindProjection
 import Kernel.ContentResource
 import Kernel.DeclaredResourceProjection
 import Kernel.ClockCellDomain
+import Theory.AxiomPin
 
 namespace Minidregg.Kernel.BirthExportAdmission
 
@@ -63,6 +64,27 @@ def view (pins : FactoryPins) (oldAuthority : AuthState) (factoryRoot : Digest)
       (if after then item.create.cell.payload.bytes else []) ++
     initialEffect descriptor.creator item.create.cellId item.create.cell.kind
       item.create.cell.payload.logical⟩
+
+/-- A birth item is NEUTRAL when its exact source-derived export roots are empty:
+no room parent and no kind export.  A neutral item carries no law of its own.
+The export check carries it unevaluated, and the receiver admits it only when
+its admitted factory step names it (`ResourceBirthController.Concrete.Named`).
+An item whose dependencies do not load is not neutral, so the evaluated branch
+refuses it. -/
+def isNeutral (deployment : Deployment) (directory : CellRegistry.Directory Nat Registry)
+    (item : BirthItem Registry) : Bool :=
+  match WorldKindLawDependencies.loadBirth deployment directory item with
+  | some dependencies => (roots item dependencies).isEmpty
+  | none => false
+
+/-- The items an export law judges: every item that is not neutral. -/
+def rootedItems (deployment : Deployment) (directory : CellRegistry.Directory Nat Registry)
+    (items : List (BirthItem Registry)) : List (BirthItem Registry) :=
+  items.filter fun item => !isNeutral deployment directory item
+
+def neutralItems (deployment : Deployment) (directory : CellRegistry.Directory Nat Registry)
+    (items : List (BirthItem Registry)) : List (BirthItem Registry) :=
+  items.filter (isNeutral deployment directory)
 
 variable {F : Type} [Field F]
 
@@ -173,7 +195,8 @@ structure Evaluated (profile : PolicyCompilerProfile F) (deployment : Deployment
     (factoryRoot : Digest) (height : Height) (descriptor : Descriptor Registry) where
   private mk ::
   clock : ClockCellDomain.Loaded deployment durable.snapshot
-  items : ItemsChecked profile deployment pins durable directory authority factoryRoot height descriptor clock.clock descriptor.births
+  items : ItemsChecked profile deployment pins durable directory authority factoryRoot height descriptor clock.clock
+    (rootedItems deployment directory.directory descriptor.births)
   guardsExact : ∀ guard ∈ clock.readGuard :: items.guards,
     guard.expectedRoot = durable.snapshot.model.roots guard.cellId
 
@@ -192,14 +215,15 @@ def checkEvaluated [DecidableEq F] (profile : PolicyCompilerProfile F) (deployme
     (factoryRoot : Digest) (height : Height) (descriptor : Descriptor Registry) :
     Option (Evaluated profile deployment pins durable directory authority factoryRoot height descriptor) := do
   let clock ← ClockCellDomain.load deployment durable.snapshot
-  let items ← checkItems profile deployment pins durable directory authority factoryRoot height descriptor clock.clock descriptor.births
+  let items ← checkItems profile deployment pins durable directory authority factoryRoot height descriptor clock.clock
+    (rootedItems deployment directory.directory descriptor.births)
   if exact : ∀ guard ∈ clock.readGuard :: items.guards,
       guard.expectedRoot = durable.snapshot.model.roots guard.cellId then
     some ⟨clock, items, exact⟩
   else none
 
-/-- A clockless neutral birth is justified by actual structural resolution,
-not by guessing that a missing export body or inaccessible source means true. -/
+/-- A neutral item is justified by actual structural resolution, not by
+guessing that a missing export body or inaccessible source means true. -/
 structure NeutralItem (deployment : Deployment)
     (directory : CellRegistry.Directory Nat Registry) (item : BirthItem Registry) where
   private mk ::
@@ -231,44 +255,33 @@ def NeutralItems.guards {deployment : Deployment} {directory : CellRegistry.Dire
   | .cons head tail =>
       (head.dependencies.readGuards.map fun pair => ⟨⟨pair.1⟩, pair.2⟩) ++ tail.guards
 
-structure Neutral (deployment : Deployment) (durable : Durable)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (descriptor : Descriptor Registry) where
-  private mk ::
-  items : NeutralItems deployment directory.directory descriptor.births
-  guardsExact : ∀ guard ∈ items.guards,
-    guard.expectedRoot = durable.snapshot.model.roots guard.cellId
-
-def checkNeutral (deployment : Deployment) (durable : Durable)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (descriptor : Descriptor Registry) : Option (Neutral deployment durable directory descriptor) := do
-  let items ← checkNeutralItems deployment directory.directory descriptor.births
-  if exact : ∀ guard ∈ items.guards,
-      guard.expectedRoot = durable.snapshot.model.roots guard.cellId then
-    some ⟨items, exact⟩
-  else none
-
-/-- The empty-root branch preserves clockless bootstrap. Any actual root,
-including a neutral local export whose ancestors still apply, takes the
-fully evaluated branch and therefore observes the deployment's actual clock. -/
-inductive Checked (profile : PolicyCompilerProfile F) (deployment : Deployment)
+/-- **The export check, item by item.** Every rooted item is evaluated under its
+export law (at the deployment's actual clock); every neutral item is carried with
+its structural read guards and NO law.  A neutral item is admitted by nothing
+here: the receiver requires the admitted factory step to name it.  There is no
+all-neutral branch and no neutral item evaluated against an empty root list. -/
+structure Checked (profile : PolicyCompilerProfile F) (deployment : Deployment)
     (pins : FactoryPins) (durable : Durable)
     (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
     (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
-    (factoryRoot : Digest) (height : Height) (descriptor : Descriptor Registry)
-  | neutral : Neutral deployment durable directory descriptor →
-      Checked profile deployment pins durable directory authority factoryRoot height descriptor
-  | evaluated : Evaluated profile deployment pins durable directory authority factoryRoot height descriptor →
-      Checked profile deployment pins durable directory authority factoryRoot height descriptor
+    (factoryRoot : Digest) (height : Height) (descriptor : Descriptor Registry) where
+  private mk ::
+  neutral : NeutralItems deployment directory.directory
+    (neutralItems deployment directory.directory descriptor.births)
+  neutralGuardsExact : ∀ guard ∈ neutral.guards,
+    guard.expectedRoot = durable.snapshot.model.roots guard.cellId
+  /-- `none` exactly when no item is rooted: a clockless all-neutral birth reads no clock. -/
+  rooted : Option (Evaluated profile deployment pins durable directory authority factoryRoot height descriptor)
+  rootedPresent : rooted.isSome = !(rootedItems deployment directory.directory descriptor.births).isEmpty
 
 def Checked.readGuards {profile : PolicyCompilerProfile F} {deployment : Deployment}
     {pins : FactoryPins} {durable : Durable}
     {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
     {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
-    {factoryRoot : Digest} {height : Height} {descriptor : Descriptor Registry} :
-    Checked profile deployment pins durable directory authority factoryRoot height descriptor → List ReadGuard
-  | .neutral checked => checked.items.guards
-  | .evaluated checked => checked.readGuards
+    {factoryRoot : Digest} {height : Height} {descriptor : Descriptor Registry}
+    (checked : Checked profile deployment pins durable directory authority factoryRoot height descriptor) :
+    List ReadGuard :=
+  checked.neutral.guards ++ (checked.rooted.map Evaluated.readGuards).getD []
 
 theorem Checked.guardsExact {profile : PolicyCompilerProfile F} {deployment : Deployment}
     {pins : FactoryPins} {durable : Durable}
@@ -278,32 +291,57 @@ theorem Checked.guardsExact {profile : PolicyCompilerProfile F} {deployment : De
     (checked : Checked profile deployment pins durable directory authority factoryRoot height descriptor)
     (guard : ReadGuard) (member : guard ∈ checked.readGuards) :
     guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
-  cases checked with
-  | neutral checked => exact checked.guardsExact guard member
-  | evaluated checked => exact checked.guardsExact guard member
+  rcases List.mem_append.mp member with neutral | rooted
+  · exact checked.neutralGuardsExact guard neutral
+  · cases present : checked.rooted with
+    | none => simp [present] at rooted
+    | some evaluated =>
+        simp only [present, Option.map_some, Option.getD_some] at rooted
+        exact evaluated.guardsExact guard rooted
 
 def check [DecidableEq F] (profile : PolicyCompilerProfile F) (deployment : Deployment)
     (pins : FactoryPins) (durable : Durable)
     (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
     (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
     (factoryRoot : Digest) (height : Height) (descriptor : Descriptor Registry) :
-    Option (Checked profile deployment pins durable directory authority factoryRoot height descriptor) :=
-  match checkNeutral deployment durable directory descriptor with
-  | some neutral => some (.neutral neutral)
-  | none => (checkEvaluated profile deployment pins durable directory authority factoryRoot height descriptor).map
-      Checked.evaluated
+    Option (Checked profile deployment pins durable directory authority factoryRoot height descriptor) := do
+  let neutral ← checkNeutralItems deployment directory.directory
+    (neutralItems deployment directory.directory descriptor.births)
+  if exact : ∀ guard ∈ neutral.guards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId then
+    if empty : (rootedItems deployment directory.directory descriptor.births).isEmpty then
+      some ⟨neutral, exact, none, by simp [empty]⟩
+    else
+      let evaluated ← checkEvaluated profile deployment pins durable directory authority factoryRoot
+        height descriptor
+      some ⟨neutral, exact, some evaluated, by simp [empty]⟩
+  else none
 
-/-- No clock premise is needed when the exact source-derived roots are empty. -/
-theorem check_of_neutral [DecidableEq F] (profile : PolicyCompilerProfile F) (deployment : Deployment)
-    (pins : FactoryPins) (durable : Durable)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
-    (factoryRoot : Digest) (height : Height) (descriptor : Descriptor Registry)
-    (neutral : Neutral deployment durable directory descriptor)
-    (found : checkNeutral deployment durable directory descriptor = some neutral) :
-    check profile deployment pins durable directory authority factoryRoot height descriptor =
-      some (.neutral neutral) := by
-  simp only [check, found]
+/-- **Every rooted item was judged by its export law**: an item of the signed
+descriptor that is not neutral has a checked compiled witness of its resolved
+export law, at the clock the check loaded. -/
+theorem Checked.rooted_judged {profile : PolicyCompilerProfile F} {deployment : Deployment}
+    {pins : FactoryPins} {durable : Durable}
+    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+    {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {factoryRoot : Digest} {height : Height} {descriptor : Descriptor Registry}
+    (checked : Checked profile deployment pins durable directory authority factoryRoot height descriptor)
+    {item : BirthItem Registry} (member : item ∈ descriptor.births)
+    (notNeutral : isNeutral deployment directory.directory item = false) :
+    ∃ clock : ClockCell.Clock,
+      Nonempty (ItemChecked profile deployment pins durable directory authority factoryRoot height
+        descriptor clock item) := by
+  have rootedMember : item ∈ rootedItems deployment directory.directory descriptor.births :=
+    List.mem_filter.mpr ⟨member, by simp [notNeutral]⟩
+  cases present : checked.rooted with
+  | none =>
+      have := checked.rootedPresent
+      rw [present] at this
+      have empty : (rootedItems deployment directory.directory descriptor.births).isEmpty = true := by
+        simpa using this.symm
+      simp [List.isEmpty_iff] at empty
+      rw [empty] at rootedMember
+      simp at rootedMember
+  | some evaluated => exact ⟨evaluated.clock.clock, evaluated.items.item rootedMember⟩
 
 /-- A containing room always supplies a root, even when its own export body
 is omitted. Its authenticated ancestor chain still has to be resolved. -/
@@ -328,5 +366,7 @@ theorem ItemChecked.effective_law {profile : PolicyCompilerProfile F} {deploymen
   letI : DecidableEq F := equality
   have sound := compiledLawAccepts_sound profile _ checked.witness accepted
   simpa only [checked.oldExact, checked.newExact] using sound
+
+#assert_axioms Checked.guardsExact Checked.rooted_judged
 
 end Minidregg.Kernel.BirthExportAdmission

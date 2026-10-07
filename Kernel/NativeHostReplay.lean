@@ -874,8 +874,8 @@ structure PriorLifetimeGrant (config : Config) where
   admitted : ∃ original : Opened config,
     ∃ accepted : LifetimeGrantIssueAt config original ingress,
       ticket = accepted.prior ∧
-      finalRoot = (ApplicationAgentLifetimeGrantAtomicBirth.initializedWrite
-        accepted.current.sourceReady).exactPost ∧
+      finalRoot = (ResourceBirthController.birthWrite
+        accepted.current.sourceReady.birth.create).exactPost ∧
       record = DurableReceiver.IntentRecord.ofIntent accepted.intent
 
 /-- The root offered to event26 is the exact post of a write in the admitted
@@ -884,10 +884,10 @@ theorem PriorLifetimeGrant.finalRoot_in_record {config : Config}
     (prior : PriorLifetimeGrant config) :
     ∃ write ∈ prior.record.writes, write.exactPost = prior.finalRoot := by
   rcases prior.admitted with ⟨original, accepted, _, rootExact, recordExact⟩
-  refine ⟨ApplicationAgentLifetimeGrantAtomicBirth.initializedWrite
-    accepted.current.sourceReady, ?_, rootExact.symm⟩
+  refine ⟨ResourceBirthController.birthWrite accepted.current.sourceReady.birth.create, ?_,
+    rootExact.symm⟩
   rw [recordExact]
-  exact accepted.current.atomic.initialized_present
+  exact accepted.current.grant_write_member
 
 theorem LifetimeGrantIssueAt.original_scope {config : Config} {opened : Opened config}
     {ingress : ApplicationAgentLifetimeGrantSource.Ingress}
@@ -2899,8 +2899,8 @@ private def grantsAfter (config : Config) (opened : Opened config)
           admitted.intent := by
         rw [← intentExact]
         exact (recordMatches_iff record derived.intent).mp matched
-      let finalRoot := (ApplicationAgentLifetimeGrantAtomicBirth.initializedWrite
-        admitted.current.sourceReady).exactPost
+      let finalRoot := (ResourceBirthController.birthWrite
+        admitted.current.sourceReady.birth.create).exactPost
       ⟨opened.durable.image.accepted.length, receipt, ingress, record,
         admitted.prior, finalRoot,
         ⟨opened, admitted, rfl, rfl, recordExact⟩⟩ :: grants

@@ -91,7 +91,6 @@ Minidregg.Kernel.ApplicationAgentLifetimeDispatchPayer.Checked.mk | Kernel.Appli
 Minidregg.Kernel.ApplicationAgentLifetimeDispatchReceiver.Permit.mk | Kernel.ApplicationAgentLifetimeDispatchReceiver | evidence | L2 | 2 proof / 8 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationAgentLifetimeDispatchReserveCore.ReservedEvidence.mk | Kernel.ApplicationAgentLifetimeDispatchReserveCore | evidence | L2 | 3 proof / 7 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationAgentLifetimeGrantAdmission.Accepted.mk | Kernel.ApplicationAgentLifetimeGrantAdmission | evidence | L2 | 5 proof / 6 data fields; layer-1 review pending
-Minidregg.Kernel.ApplicationAgentLifetimeGrantAtomicBirth.Checked.mk | Kernel.ApplicationAgentLifetimeGrantAtomicBirth | evidence | L2 | 2 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationAgentLifetimeGrantDelegation.Checked.mk | Kernel.ApplicationAgentLifetimeGrantDelegation | evidence | L2 | 4 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationAgentLifetimeGrantDelegation.Prepared.mk | Kernel.ApplicationAgentLifetimeGrantDelegation | evidence | L2 | 4 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationAgentLifetimeGrantSource.Ready.mk | Kernel.ApplicationAgentLifetimeGrantSource | evidence | L2 | 3 proof / 1 data fields; layer-1 review pending
@@ -163,7 +162,6 @@ Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Receiver.Confirmed.mk | Ke
 Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report.Checked.mk | Kernel.ApplicationLifecycleRetryCompletionV4Report | evidence | L2 | 3 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationRouteAdmission.Attestation.mk | Kernel.ApplicationRouteAdmission | evidence | L2 | 5 proof / 5 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationShareIssueAdmission.Accepted.mk | Kernel.ApplicationShareIssueAdmission | evidence | L2 | 5 proof / 6 data fields; layer-1 review pending
-Minidregg.Kernel.ApplicationShareIssueAtomicBirth.Checked.mk | Kernel.ApplicationShareIssueAtomicBirth | evidence | L2 | 2 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationShareIssueDelegation.Checked.mk | Kernel.ApplicationShareIssueDelegation | evidence | L2 | 4 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationShareIssueDelegation.Prepared.mk | Kernel.ApplicationShareIssueDelegation | evidence | L2 | 4 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.ApplicationShareIssueGrainAdmission.Accepted.mk | Kernel.ApplicationShareIssueGrainAdmission | evidence | L2 | 5 proof / 10 data fields; layer-1 review pending
@@ -175,7 +173,7 @@ Minidregg.Kernel.AudienceRosterBinding.CheckedBytes.mk | Kernel.AudienceRosterBi
 Minidregg.Kernel.BirthCandidateAdmission.Checked.mk | Kernel.BirthCandidateAdmission | evidence | L2 | 4 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.BirthExportAdmission.Evaluated.mk | Kernel.BirthExportAdmission | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.BirthExportAdmission.ItemChecked.mk | Kernel.BirthExportAdmission | evidence | L2 | 5 proof / 3 data fields; layer-1 review pending
-Minidregg.Kernel.BirthExportAdmission.Neutral.mk | Kernel.BirthExportAdmission | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
+Minidregg.Kernel.BirthExportAdmission.Checked.mk | Kernel.BirthExportAdmission | evidence | L2 | 2 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.BirthExportAdmission.NeutralItem.mk | Kernel.BirthExportAdmission | evidence | L2 | 2 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.CapabilityDelegationController.Accepted.mk | Kernel.CapabilityDelegationController | evidence | L2 | 2 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.CapabilityDelegationController.PreparedOn.mk | Kernel.CapabilityDelegationController | evidence | L2 | 4 proof / 4 data fields; layer-1 review pending

@@ -21,6 +21,7 @@ import Kernel.DurableDataIntent
 import Kernel.RoomBirthGate
 import Kernel.BirthExportAdmission
 import Kernel.BirthCandidateAdmission
+import Kernel.ReceivingLaw
 
 namespace Minidregg.Kernel.ResourceBirthController
 
@@ -312,6 +313,71 @@ def planWrites (deployment : Deployment) (descriptor : Descriptor Registry)
      packedWrite deployment.resourceBookId ⟨.resourceBook, bookBefore⟩
        ⟨.resourceBook, bookAfter⟩] ++ authorityWrites
 
+/-! ## Newborns named by the admitted factory step (`ReceivingLaw.namesBirth`)
+
+One rule for every birth family: a write that creates its cell is committed
+only when the step its authorizer's law admitted names it, `birth/<id>` ↦ the
+exact post root of the write the receiver commits.  The root is the root of
+the newborn's whole post image, so the name binds its id, kind and content
+(an initial policy source's law included).  The check runs over the FINAL
+writes a receiver commits, after every transformation, so a write the step
+did not name -- an extra birth, a substituted post, a create left out of the
+step -- refuses by name. -/
+
+/-- The fresh pre-root every birth write carries (`birthWrite`). -/
+def freshRoot : Digest := physicalRoot (LifecycleImage.fresh (registry := Registry))
+
+theorem birthWrite_pre (request : CreateRequest (CellId := Nat) Registry) :
+    (birthWrite request).expectedPre = freshRoot := rfl
+
+/-- A write of a final patch creates its cell: its expected pre-root is the fresh root. -/
+def bornIn (write : DataWrite) : Bool := write.expectedPre == freshRoot
+
+/-- **The newborns a factory step names**: every create request of the signed
+descriptor -- its births and its source-generated auxiliary creates -- as
+`birth/<id>` ↦ the exact post root of its birth write.  They are slots of the
+JUDGED state: the factory law reads them on its step and may refuse. -/
+def newbornSlots (descriptor : Descriptor Registry) : List (Minidregg.Pred.Slot × Int) :=
+  (allocationWrites descriptor).map fun write =>
+    (ReceivingLaw.birthSlot write.cellId.value, Int.ofNat write.exactPost.value)
+
+/-- The first birth write of a final patch that `step` does not name. -/
+def unnamedBirth (step : CanonicalPolicyAdmission.PolicyStepContext) (writes : List DataWrite) :
+    Option Nat :=
+  writes.findSome? fun write =>
+    if bornIn write && !ReceivingLaw.namesBirth step write then some write.cellId.value else none
+
+/-- Every birth write of `writes` is named by `step`. -/
+def Named (step : CanonicalPolicyAdmission.PolicyStepContext) (writes : List DataWrite) : Prop :=
+  ∀ write ∈ writes, bornIn write = true → ReceivingLaw.namesBirth step write = true
+
+theorem unnamedBirth_none_iff (step : CanonicalPolicyAdmission.PolicyStepContext)
+    (writes : List DataWrite) : unnamedBirth step writes = none ↔ Named step writes := by
+  unfold unnamedBirth Named
+  rw [List.findSome?_eq_none_iff]
+  apply forall_congr'
+  intro write
+  apply imp_congr_right
+  intro _
+  cases born : bornIn write <;> cases names : ReceivingLaw.namesBirth step write <;> simp
+
+/-- A refusal names a real birth write of the patch that the step does not name. -/
+theorem unnamedBirth_some {step : CanonicalPolicyAdmission.PolicyStepContext}
+    {writes : List DataWrite} {cell : Nat} (refused : unnamedBirth step writes = some cell) :
+    ∃ write ∈ writes, write.cellId.value = cell ∧ bornIn write = true ∧
+      ReceivingLaw.namesBirth step write = false := by
+  obtain ⟨write, member, found⟩ := List.exists_of_findSome?_eq_some refused
+  refine ⟨write, member, ?_⟩
+  cases born : bornIn write <;> cases names : ReceivingLaw.namesBirth step write <;>
+    simp_all
+
+/-- The naming check: the named refusal, or the proof. -/
+def checkNamed (step : CanonicalPolicyAdmission.PolicyStepContext) (writes : List DataWrite) :
+    Except Nat (PLift (Named step writes)) :=
+  match found : unnamedBirth step writes with
+  | some cell => .error cell
+  | none => .ok ⟨(unnamedBirth_none_iff step writes).mp found⟩
+
 /-- The law every physical post image obeys: a live cell obeys its registry
 kind's law at its id; the retired image is admitted only in the kernel's
 protected coordinate space (`ObjectiveActivityCell.reservedBase`), where the
@@ -497,6 +563,36 @@ instance kindsPresentDecidable (deployment : Deployment) (directory : Directory 
   unfold KindsPresent
   infer_instance
 
+/-- An initial cell the RECEIVING SOURCE derived itself, beyond the user shapes
+(`CanonicalCellRegistry.UserShape` admits only empty content): the exact cell a
+special receiver computes from its own signed source (a share ticket's page),
+lawful at its id and outside the protected coordinates.  The ordinary receiver
+sources nothing.  A sourced cell is born in the descriptor the factory judges,
+so the factory step names its whole content (`newbornSlots`); it is never
+substituted after admission. -/
+def SourcedInitial (deployment : Deployment) (sourced : List (Nat × PackedCell Registry))
+    (cellId : Nat) (cell : PackedCell Registry) : Prop :=
+  (cellId, cell) ∈ sourced ∧ cell.kind = .content ∧
+    CanonicalCellRegistry.CellLaw deployment cellId cell ∧ cellId < Kernel.ProtectedCell.reservedBase
+
+/-- Every birth item's initial cell is a user birth or one its receiver sourced. -/
+def InitialsAdmissible (deployment : Deployment) (sourced : List (Nat × PackedCell Registry))
+    (descriptor : Descriptor Registry) : Prop :=
+  ∀ item ∈ descriptor.births,
+    CanonicalCellRegistry.UserInitial deployment item.create.cellId item.create.cell ∨
+      SourcedInitial deployment sourced item.create.cellId item.create.cell
+
+instance initialsAdmissibleDecidable (deployment : Deployment)
+    (sourced : List (Nat × PackedCell Registry)) (descriptor : Descriptor Registry) :
+    Decidable (InitialsAdmissible deployment sourced descriptor) := by
+  unfold InitialsAdmissible SourcedInitial
+  infer_instance
+
+/-- With nothing sourced, the initials are exactly the user births. -/
+theorem initialsAdmissible_nil_iff (deployment : Deployment) (descriptor : Descriptor Registry) :
+    InitialsAdmissible deployment [] descriptor ↔ CanonicalCellRegistry.BirthsAdmissible deployment descriptor := by
+  simp [InitialsAdmissible, SourcedInitial, CanonicalCellRegistry.BirthsAdmissible]
+
 /-- Every component is obtained from this one restored image and the fixed
 production registry. The private constructor prevents a host from supplying
 an arbitrary authority snapshot, Book, allocation result or post-state.
@@ -514,7 +610,8 @@ structure PreparedBirth (profile : PolicyCompilerProfile F) (deployment : Deploy
   directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
   parentsPresent : ParentsPresent deployment directory.directory descriptor
   kindsPresent : KindsPresent deployment directory.directory descriptor
-  initials : CanonicalCellRegistry.BirthsAdmissible deployment descriptor
+  sourced : List (Nat × PackedCell Registry)
+  initials : InitialsAdmissible deployment sourced descriptor
   policiesBound : descriptor.InitialPoliciesBound
   factory : ObservedCell deployment directory.directory deployment.factoryId .declaredObject
   book : ObservedCell deployment directory.directory deployment.resourceBookId .resourceBook
@@ -568,7 +665,9 @@ structure PreparedPreAuthority (profile : PolicyCompilerProfile F)
   disabled : List Digest
   /-- Every program record born here names an evaluator this deployment runs (E3). -/
   evaluators : CanonicalCellRegistry.birthEvaluators disabled descriptor = .ok ()
-  initials : CanonicalCellRegistry.BirthsAdmissible deployment descriptor
+  /-- The initial cells this birth's receiver sourced (`SourcedInitial`); `[]` for the ordinary receiver. -/
+  sourced : List (Nat × PackedCell Registry)
+  initials : InitialsAdmissible deployment sourced descriptor
   policiesBound : descriptor.InitialPoliciesBound
   /-- Every Nock program born here names only program cells already present. -/
   librariesPresent : CanonicalCellRegistry.birthLibrariesPresent deployment.domain
@@ -592,7 +691,8 @@ def requireEvaluators (disabled : List Digest) (descriptor : Descriptor Registry
 
 def preparePreAuthority [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment)
-    (pins : FactoryPins) (durable : Durable) (descriptor : Descriptor Registry) (height : Height) :
+    (pins : FactoryPins) (durable : Durable) (descriptor : Descriptor Registry) (height : Height)
+    (sourced : List (Nat × PackedCell Registry) := []) :
     Except PreparationReject (PreparedPreAuthority profile deployment pins durable descriptor) := do
   let valid ← requirePreparation (deployment.Valid ∧ PinsBound deployment pins) .deployment
   let profileBound ← requirePreparation (ProfileBound profile pins) .compilerProfile
@@ -601,8 +701,7 @@ def preparePreAuthority [DecidableEq F] (profile : PolicyCompilerProfile F) (dis
   let parents ← requirePreparation (ParentsPresent deployment directory.directory descriptor) .parent
   let kinds ← requirePreparation (KindsPresent deployment directory.directory descriptor) .kindSource
   let evaluators ← requireEvaluators disabled descriptor
-  let initials ← requirePreparation
-    (CanonicalCellRegistry.BirthsAdmissible deployment descriptor) .initialPayload
+  let initials ← requirePreparation (InitialsAdmissible deployment sourced descriptor) .initialPayload
   let policiesBound ← requirePreparation descriptor.InitialPoliciesBound .initialPolicy
   let libraries ← requirePreparation
     (CanonicalCellRegistry.birthLibrariesPresent deployment.domain directory.directory descriptor =
@@ -619,7 +718,7 @@ def preparePreAuthority [DecidableEq F] (profile : PolicyCompilerProfile F) (dis
     (BirthExportAdmission.check profile deployment pins durable directory authority
       factory.payload.root height descriptor) .inheritedLaw
   .ok ⟨valid.down.1, valid.down.2, profileBound.down, identityBound.down, directory,
-    parents.down, kinds.down, disabled, evaluators.down, initials.down, policiesBound.down, libraries.down,
+    parents.down, kinds.down, disabled, evaluators.down, sourced, initials.down, policiesBound.down, libraries.down,
     factory, book, authority, height, rooms.down, exports⟩
 
 /-- Common post-authority physical checks. The authority route supplies only
@@ -668,9 +767,10 @@ list and every final payload are checked before policy evaluation. No step
 mutates the source image or installs a prefix of the birth. -/
 def prepareBirth [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment) (pins : FactoryPins)
-    (durable : Durable) (descriptor : Descriptor Registry) (height : Height) :
+    (durable : Durable) (descriptor : Descriptor Registry) (height : Height)
+    (sourced : List (Nat × PackedCell Registry) := []) :
     Except PreparationReject (PreparedBirth profile deployment pins durable descriptor) := do
-  let pre ← preparePreAuthority profile disabled deployment pins durable descriptor height
+  let pre ← preparePreAuthority profile disabled deployment pins durable descriptor height sourced
   let grants ← fromOption
     (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment
       pre.authority descriptor)
@@ -683,7 +783,7 @@ def prepareBirth [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled :
       grants.post grants.initialSources.records) .candidateLaw
   let post ← preparePostAuthority pre grants.writes
   .ok ⟨pre.deploymentValid, pre.pinsBound, pre.profileBound, pre.identityBound,
-    pre.directory, pre.parentsPresent, pre.kindsPresent, pre.initials, pre.policiesBound, pre.factory, pre.book, pre.authority,
+    pre.directory, pre.parentsPresent, pre.kindsPresent, pre.sourced, pre.initials, pre.policiesBound, pre.factory, pre.book, pre.authority,
     grants, (sameCreates_iff _ _).mp aux.down, post.allocated, post.resources,
     post.writesUnique, post.writePreExact, post.finalCells, pre.gateHeight, pre.rooms, pre.exports, candidates⟩
 
@@ -706,10 +806,10 @@ structure PreparedGrainBirth (profile : PolicyCompilerProfile F)
 def prepareGrainBirth [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment)
     (pins : FactoryPins) (durable : Durable) (descriptor : Descriptor Registry)
-    (operationMarker : Nat) (height : Height) :
+    (operationMarker : Nat) (height : Height) (sourced : List (Nat × PackedCell Registry) := []) :
     Except PreparationReject
       (PreparedGrainBirth profile deployment pins durable descriptor operationMarker) := do
-  let pre ← preparePreAuthority profile disabled deployment pins durable descriptor height
+  let pre ← preparePreAuthority profile disabled deployment pins durable descriptor height sourced
   let combined ← fromOption
     (GrainResourceBirthAuthority.prepare profile deployment pre.authority
       descriptor operationMarker) .authorityBatch
@@ -753,7 +853,7 @@ structure PreparedGrainDraft (profile : PolicyCompilerProfile F)
 def prepareGrainDraft [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment)
     (pins : FactoryPins) (durable : Durable) (draft : Descriptor Registry)
-    (operationMarker : Nat) (height : Height) :
+    (operationMarker : Nat) (height : Height) (sourced : List (Nat × PackedCell Registry) := []) :
     Except PreparationReject
       (PreparedGrainDraft profile deployment pins durable draft operationMarker) := do
   let empty ← requirePreparation (draft.auxiliaryCreates = []) .auxiliaryCreates
@@ -769,6 +869,7 @@ def prepareGrainDraft [DecidableEq F] (profile : PolicyCompilerProfile F) (disab
       draft operationMarker) .authorityBatch
   let descriptor := { draft with auxiliaryCreates := combined.auxiliaryCreates }
   let prepared ← prepareGrainBirth profile disabled deployment pins durable descriptor operationMarker height
+    sourced
   .ok ⟨empty.down, descriptor, rfl, prepared⟩
 
 def PreparedBirth.writes {deployment : Deployment} {pins : FactoryPins}
@@ -833,7 +934,8 @@ structure PreparedDraft (profile : PolicyCompilerProfile F) (deployment : Deploy
 
 def prepareDraft [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment) (pins : FactoryPins)
-    (durable : Durable) (draft : Descriptor Registry) (height : Height) :
+    (durable : Durable) (draft : Descriptor Registry) (height : Height)
+    (sourced : List (Nat × PackedCell Registry) := []) :
     Except PreparationReject (PreparedDraft profile deployment pins durable draft) := do
   let empty ← requirePreparation (draft.auxiliaryCreates = []) .auxiliaryCreates
   let authority ← fromOption
@@ -846,7 +948,7 @@ def prepareDraft [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled :
     (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment authority draft)
     .authorityBatch
   let descriptor := { draft with auxiliaryCreates := grants.auxiliaryCreates }
-  let prepared ← prepareBirth profile disabled deployment pins durable descriptor height
+  let prepared ← prepareBirth profile disabled deployment pins durable descriptor height sourced
   .ok ⟨empty.down, descriptor, rfl, prepared⟩
 
 theorem PreparedDraft.user_source_preserved {deployment : Deployment} {pins : FactoryPins}
@@ -1121,6 +1223,16 @@ theorem PreparedBirth.initial_source_write {deployment : Deployment} {pins : Fac
   apply List.mem_append_left
   exact List.mem_map.mpr ⟨_, prepared.initial_source_member record member, rfl⟩
 
+/-- Every birth item's own birth write is among the writes a prepared birth commits. -/
+theorem PreparedBirth.birth_write_member {deployment : Deployment} {pins : FactoryPins}
+    {durable : Durable} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    (item : BirthItem Registry) (member : item ∈ descriptor.births) :
+    birthWrite item.create ∈ prepared.writes := by
+  apply List.mem_append_left
+  apply List.mem_append_left
+  exact List.mem_map.mpr ⟨_, List.mem_append_left _ (List.mem_map.mpr ⟨item, member, rfl⟩), rfl⟩
+
 /-- Each submitted initial policy resolves to its exact checked source in
 the allocated result. The address equality is decoder evidence, not a free
 hash equality interpreted as equality of different source records. -/
@@ -1141,11 +1253,12 @@ theorem PreparedBirth.initial_policy_created {deployment : Deployment} {pins : F
   rw [facts.2.2.1] at created
   exact ⟨record, decoded, facts, created⟩
 
-theorem PreparedBirth.user_initial_law {deployment : Deployment} {pins : FactoryPins}
+theorem PreparedBirth.initial_law {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
     (prepared : PreparedBirth profile deployment pins durable descriptor)
     (item : BirthItem Registry) (member : item ∈ descriptor.births) :
-    CanonicalCellRegistry.UserInitial deployment item.create.cellId item.create.cell :=
+    CanonicalCellRegistry.UserInitial deployment item.create.cellId item.create.cell ∨
+      SourcedInitial deployment prepared.sourced item.create.cellId item.create.cell :=
   prepared.initials item member
 
 theorem PreparedBirth.conserves {deployment : Deployment} {pins : FactoryPins}
@@ -1161,12 +1274,14 @@ theorem PreparedBirth.no_user_book {deployment : Deployment} {pins : FactoryPins
     (item : BirthItem Registry) (member : item ∈ descriptor.births) :
     item.create.cell.kind ≠ .resourceBook := by
   intro forbidden
-  have initial := prepared.user_initial_law item member
-  cases packed : item.create.cell with
-  | mk kind payload =>
-      rw [packed] at forbidden initial
-      cases forbidden
-      exact CanonicalCellRegistry.no_user_book_birth deployment item.create.cellId payload initial
+  rcases prepared.initial_law item member with initial | ⟨_, content, _⟩
+  · cases packed : item.create.cell with
+    | mk kind payload =>
+        rw [packed] at forbidden initial
+        cases forbidden
+        exact CanonicalCellRegistry.no_user_book_birth deployment item.create.cellId payload initial
+  · rw [content] at forbidden
+    cases forbidden
 
 end Concrete
 
@@ -1221,4 +1336,6 @@ end Concrete
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.PhysicalPostLaw.declared_closed
 /-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.PhysicalPostLaw.account_closed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.PhysicalPostLaw.account_closed
+#assert_axioms Concrete.unnamedBirth_none_iff Concrete.unnamedBirth_some
+
 end Minidregg.Kernel.ResourceBirthController

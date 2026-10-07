@@ -53,7 +53,7 @@ def nullifiers (domain : Digest) (ingress : Ingress)
       (ApplicationShareIssueSource.issueMarker ingress.spec grain.source.birth)]
 
 def writes (accepted : Accepted profile config pins durable ambient ingress) :
-    List DataWrite := accepted.atomic.writes
+    List DataWrite := GrainResourceBirthTransaction.writes accepted.birth accepted.grain
 
 def readGuards (accepted : Accepted profile config pins durable ambient ingress) :
     List ReadGuard :=
@@ -65,9 +65,8 @@ theorem readGuards_readonly
     (guard : ReadGuard) (member : guard ∈ readGuards accepted) :
     guard.cellId ∉ (writes accepted).map DataWrite.cellId := by
   rcases List.mem_append.mp member with grain | app
-  · exact accepted.atomic.readonly guard
-      (accepted.grainAccepted.readGuards_readonly guard grain)
-  · exact accepted.atomic.readonly guard (accepted.appReadOnly guard app)
+  · exact accepted.grainAccepted.readGuards_readonly guard grain
+  · exact accepted.appReadOnly guard app
 
 theorem readGuards_exact
     (accepted : Accepted profile config pins durable ambient ingress)
@@ -81,30 +80,25 @@ theorem writes_roots_bound
     (accepted : Accepted profile config pins durable ambient ingress) :
     ∀ write ∈ writes accepted,
       rootBytes write.canonicalPostBytes = write.exactPost :=
-  accepted.atomic.roots_bound
-    (GrainResourceBirthTransaction.writes_roots_bound accepted.birth accepted.grain)
+  GrainResourceBirthTransaction.writes_roots_bound accepted.birth accepted.grain
 
 def charge (accepted : Accepted profile config pins durable ambient ingress) : Charge
   | .incidences => GrainResourceBirthReceiver.charge accepted.grainAccepted .incidences + 1
   | .turnBytes => GrainResourceBirthReceiver.charge accepted.grainAccepted .turnBytes +
-      ingress.canonicalBytes.length +
-      (ApplicationShareIssueAtomicBirth.initializedWrite accepted.sourceReady).canonicalPostBytes.length
+      ingress.canonicalBytes.length
   | .memoryTouches => GrainResourceBirthReceiver.charge accepted.grainAccepted .memoryTouches + 1
   | .witnessBytes => GrainResourceBirthReceiver.charge accepted.grainAccepted .witnessBytes +
-      ingress.appEnvelope.length +
-      (ApplicationShareIssueAtomicBirth.initializedWrite accepted.sourceReady).canonicalPostBytes.length
+      ingress.appEnvelope.length
   | .proofWork => GrainResourceBirthReceiver.charge accepted.grainAccepted .proofWork + 1
   | .storageBytes => GrainResourceBirthReceiver.charge accepted.grainAccepted .storageBytes +
-      ingress.canonicalBytes.length +
-      (ApplicationShareIssueAtomicBirth.initializedWrite accepted.sourceReady).canonicalPostBytes.length
+      ingress.canonicalBytes.length
   | .sideEffectCount => GrainResourceBirthReceiver.charge accepted.grainAccepted .sideEffectCount + 1
   | .feeDebit => GrainResourceBirthReceiver.charge accepted.grainAccepted .feeDebit
   | .networkBytes | .leaseByteBlocks => 0
 
 theorem charge_fee_source_quoted
     (accepted : Accepted profile config pins durable ambient ingress) :
-    charge accepted .feeDebit = accepted.decoded.source.birth.quotedFee
-      (accepted.sourceReady.effectiveTariff config.tariff) := by
+    charge accepted .feeDebit = accepted.decoded.source.birth.quotedFee config.tariff := by
   change accepted.decoded.source.birth.fee.amount = _
   exact accepted.special_fee_bound
 
