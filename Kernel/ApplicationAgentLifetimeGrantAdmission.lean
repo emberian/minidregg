@@ -96,7 +96,7 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
                 birth.descriptor.fee.payer birth.descriptor.funding with
               auxiliaryCreates := birth.prepared.grants.auxiliaryCreates } :=
           descriptorBytes_injective sourceDescriptorBytes
-        let context : ApplicationAgentLifetimeGrantDelegation.Context config.deployment durable :=
+        let context : ApplicationAgentLifetimeGrantDelegation.Context config.deployment :=
           (Minidregg.Compiler.ServedBasis.Ground.full _ birth.prepared.directory birth.prepared.authority)
         let .ok appPrepared := ApplicationAgentLifetimeGrantDelegation.prepare context
           profile config.federation height ingress.spec birth.descriptor

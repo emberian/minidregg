@@ -6,6 +6,7 @@ at precisely this source prefix. It never imports an old AcceptedInvocation.
 import Kernel.JointReceiverAdmission
 import Kernel.NativeHostContext
 import Compiler.PrivateSuccessorCustodyCodec
+import Kernel.NativeHostServed
 namespace Minidregg.Kernel.JointReserveIngress
 open Minidregg.Theory
 open Minidregg.Compiler
@@ -62,7 +63,7 @@ current authority directory and native signature helper. The packet supplies
 none of those verification policies. -/
 def admit (config : Config) (opened : Opened config) (bytes : List UInt8) :
     IO (Except String (Reserved config.deployment config.profile
-      ⟨config.federation,logicalHeight config opened.durable⟩ opened.durable)) := do
+      ⟨config.federation,logicalHeight config opened.durable⟩ opened.ground)) := do
   let some source := decodeSource bytes | return .error "noncanonical joint reserve source"
   let some pin := config.jointControl | return .error "joint source control not enabled"
   let some consensus := config.jointConsensus | return .error "joint source consensus not enabled"
