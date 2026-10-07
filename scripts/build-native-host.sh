@@ -13,10 +13,15 @@ export LC_ALL=C
 
 usage() {
   cat <<'EOF'
-usage: scripts/build-native-host.sh [--root MODULE --usage-prefix TEXT [--companion-of BUILD_OUTPUT]] [--umbrella] [--incremental-host-from SNAPSHOT BUILD_OUTPUT] [--incremental-suffix-from SNAPSHOT BUILD_OUTPUT MODULE [--allow-suffix-change MODULE ...] [--allow-inserted-module MODULE ...] [--allow-unchanged-restart]] [--checkpoint-resume | --resume-failed BUILD_OUTPUT | --resume-complete-lean BUILD_OUTPUT BUILDER_SHA256 | --reuse-success-prefix-from SNAPSHOT BUILD_OUTPUT] [--output DIR] [--binary PATH]
+usage: scripts/build-native-host.sh [--root MODULE --usage-prefix TEXT [--companion-of BUILD_OUTPUT]] [--umbrella [--umbrella-target MODULE]] [--incremental-host-from SNAPSHOT BUILD_OUTPUT] [--incremental-suffix-from SNAPSHOT BUILD_OUTPUT MODULE [--allow-suffix-change MODULE ...] [--allow-inserted-module MODULE ...] [--allow-unchanged-restart]] [--checkpoint-resume | --resume-failed BUILD_OUTPUT | --resume-complete-lean BUILD_OUTPUT BUILDER_SHA256 | --reuse-success-prefix-from SNAPSHOT BUILD_OUTPUT] [--output DIR] [--binary PATH]
 
   --umbrella  run the literal `lake build Minidregg` gate through a serialized
               Lean wrapper, build Host.Main leanArts, then link the native host
+  --umbrella-target MODULE
+              with --umbrella: the Lake target of that step instead of Minidregg (the
+              artifact publisher builds Host.Main: it links binaries of a tip the merge
+              gate already judged, and the gate's umbrella is not its business; recorded
+              as lake_gate= in the manifest)
   --incremental-host-from SNAPSHOT BUILD_OUTPUT
               compile only changed Host.Main after byte-checking every imported
               source, Lean artifact, and package artifact against a successful
@@ -81,6 +86,7 @@ EOF
 output_dir=""
 binary_path=""
 build_umbrella=0
+umbrella_target=Minidregg
 incremental_baseline_root=""
 incremental_baseline_output=""
 incremental_changed_module=""
@@ -104,6 +110,11 @@ while [[ $# -gt 0 ]]; do
     --umbrella)
       build_umbrella=1
       shift
+      ;;
+    --umbrella-target)
+      [[ $# -ge 2 && "$2" =~ ^[A-Z][A-Za-z0-9_.]*$ ]] || { usage >&2; exit 64; }
+      umbrella_target=$2
+      shift 2
       ;;
     --incremental-host-from)
       [[ $# -ge 3 ]] || { usage >&2; exit 64; }
@@ -417,7 +428,7 @@ build_modules="$output_dir/build-modules.txt"
 if [[ "$build_umbrella" == 1 ]]; then
   umbrella_closure="$output_dir/umbrella-transitive-imports.json"
   env LEAN_NUM_THREADS="$lean_threads" \
-    lake query +Minidregg:transImports --json \
+    lake query "+$umbrella_target:transImports" --json \
     > "$umbrella_closure" 2> "$output_dir/umbrella-transitive-imports.log"
   jq -e 'type == "array" and length > 0' "$umbrella_closure" >/dev/null
   umbrella_modules="$output_dir/umbrella-source-modules.txt"
@@ -425,7 +436,7 @@ if [[ "$build_umbrella" == 1 ]]; then
     relative=${module//./\/}.lean
     [[ -f "$relative" ]] && printf '%s\n' "$module"
   done > "$umbrella_modules"
-  grep -qxF Minidregg "$umbrella_modules" || printf '%s\n' Minidregg >> "$umbrella_modules"
+  grep -qxF "$umbrella_target" "$umbrella_modules" || printf '%s\n' "$umbrella_target" >> "$umbrella_modules"
   awk '!seen[$0]++' "$umbrella_modules" "$source_modules" > "$build_modules"
 else
   cp "$source_modules" "$build_modules"
@@ -723,17 +734,17 @@ if [[ "$checkpoint_resume" == 1 ]]; then
       stem=${module//./\/}
       checkpoint="$resume_complete_output/resume-checkpoints/$(printf '%04d' "$index")-${module//./_}.sha256"
       [[ -f "$checkpoint" ]] || exit 65
-      module_checkpoint_paths "$stem" | sed '/\.c\.o\.export$/d' \
+      module_checkpoint_paths "$stem" | sed -E '/\.c\.o\.(export|native)$/d' \
         > "$output_dir/post-lean-expected-paths.txt"
       sed -n 's/^[[:xdigit:]]\{64\}  //p' "$checkpoint" \
-        | sed '/\.c\.o\.export$/d' \
+        | sed -E '/\.c\.o\.(export|native)$/d' \
         > "$output_dir/post-lean-recorded-paths.txt"
       cmp -s "$output_dir/post-lean-expected-paths.txt" \
         "$output_dir/post-lean-recorded-paths.txt" || {
         printf 'build-native-host: post-Lean checkpoint path set changed: %s\n' "$module" >&2
         exit 65
       }
-      grep -vE '^[[:xdigit:]]{64}  .*\.c\.o\.export$' "$checkpoint" \
+      grep -vE '^[[:xdigit:]]{64}  .*\.c\.o\.(export|native)$' "$checkpoint" \
         | (cd "$root" && shasum -a 256 -c) \
         >> "$output_dir/post-lean-prefix-check.log" || {
         printf 'build-native-host: post-Lean source/OLean/C changed: %s\n' "$module" >&2
@@ -880,8 +891,8 @@ if [[ "$checkpoint_resume" == 1 ]]; then
     while IFS= read -r object; do
       package_root=${object%%/.lake/build/ir/*}
       package_module=${object#"$package_root/.lake/build/ir/"}
-      package_module=${package_module%.c.o.export}
-      for path in "$object" "${object%.o.export}" \
+      package_module=${package_module%.c.o.*}
+      for path in "$object" "${object%.o.*}" \
           "$package_root/.lake/build/lib/lean/$package_module.olean"; do
         if [[ ! -f "$success_baseline_root/$path" || ! -f "$path" ]] ||
             ! cmp -s "$success_baseline_root/$path" "$path"; then
@@ -1188,8 +1199,8 @@ if [[ -n "$incremental_baseline_root" ]]; then
   while IFS= read -r object; do
     package_root=${object%%/.lake/build/ir/*}
     package_module=${object#"$package_root/.lake/build/ir/"}
-    package_module=${package_module%.c.o.export}
-    for path in "$object" "${object%.o.export}" \
+    package_module=${package_module%.c.o.*}
+    for path in "$object" "${object%.o.*}" \
         "$package_root/.lake/build/lib/lean/$package_module.olean"; do
       if [[ ! -f "$incremental_baseline_root/$path" || ! -f "$path" ]] || \
           ! cmp -s "$incremental_baseline_root/$path" "$path"; then
@@ -1262,7 +1273,7 @@ if [[ -n "$companion_output" ]]; then
     if grep -qxF "$module" "$companion_output/source-modules.txt"; then
       grep -E "^[[:xdigit:]]{64}  $stem\.lean\$" "$companion_output/source-sha256.txt" >> "$companion_check"
       for path in ".lake/build/lib/lean/$stem.olean" ".lake/build/lib/lean/$stem.ilean" \
-          ".lake/build/ir/$stem.c" ".lake/build/ir/$stem.c.o.export"; do
+          ".lake/build/ir/$stem.c" ".lake/build/ir/$stem.c.o.native"; do
         grep -E "^[[:xdigit:]]{64}  $path\$" "$companion_output/reusable-artifact-sha256.txt" \
           >> "$companion_check" || {
           printf 'build-native-host: companion manifest lacks %s\n' "$path" >&2
@@ -1392,12 +1403,12 @@ EOF
   chmod +x "$wrapper_root/bin/lean"
   wrapper_log="$output_dir/lake-lean-wrapper.tsv"
   : > "$wrapper_log"
-  lake_gate_log="$output_dir/lake-build-Minidregg.log"
-  cat > "$output_dir/lake-build-Minidregg.command.txt" <<EOF
-LAKE_OVERRIDE_LEAN=true LEAN_SYSROOT=$wrapper_root LEAN_NUM_THREADS=$lean_threads lake build Minidregg
+  lake_gate_log="$output_dir/lake-build-$umbrella_target.log"
+  cat > "$output_dir/lake-build-$umbrella_target.command.txt" <<EOF
+LAKE_OVERRIDE_LEAN=true LEAN_SYSROOT=$wrapper_root LEAN_NUM_THREADS=$lean_threads lake build "$umbrella_target"
 EOF
   gate_start=$(date +%s)
-  printf 'lake-gate Minidregg start\n' | tee -a "$output_dir/build.log"
+  printf 'lake-gate %s start\n' "$umbrella_target" | tee -a "$output_dir/build.log"
   if env \
       LAKE_OVERRIDE_LEAN=true \
       LEAN_SYSROOT="$wrapper_root" \
@@ -1407,12 +1418,12 @@ EOF
       MINIDREGG_REAL_LEAN="$toolchain/bin/lean" \
       MINIDREGG_LEAN_LOCK="$wrapper_lock" \
       MINIDREGG_LEAN_WRAPPER_LOG="$wrapper_log" \
-      lake build Minidregg > "$lake_gate_log" 2>&1; then
-    printf 'lake-gate Minidregg PASS %ss\n' \
+      lake build "$umbrella_target" > "$lake_gate_log" 2>&1; then
+    printf 'lake-gate %s PASS %ss\n' "$umbrella_target" \
       "$(( $(date +%s) - gate_start ))" | tee -a "$output_dir/build.log"
   else
     code=$?
-    printf 'lake-gate Minidregg FAIL(%s) log=%s\n' \
+    printf 'lake-gate %s FAIL(%s) log=%s\n' "$umbrella_target" \
       "$code" "$lake_gate_log" | tee -a "$output_dir/build.log" >&2
     tail -100 "$lake_gate_log" >&2
     exit "$code"
@@ -1515,7 +1526,7 @@ if [[ -s "$project_c_modules" ]]; then
   module=$1
   stem=${module//./\/}
   c_path=".lake/build/ir/$stem.c"
-  object="$c_path.o.export"
+  object="$c_path.o.native"
   [[ -f "$c_path" ]] || { printf "missing generated C: %s\n" "$c_path" >&2; exit 66; }
   mkdir -p "$(dirname "$object")"
   "$toolchain/bin/clang" -c -o "$object" "$c_path" \
@@ -1527,19 +1538,29 @@ if [[ -s "$project_c_modules" ]]; then
 ' build-module < "$project_c_modules"
 fi
 
+# Objects THIS builder compiles are named *.c.o.native, never Lake's own *.c.o.export: Lake owns
+# that name under its unchanged traces, and overwriting it (hidden visibility, other flags) made a
+# later `lake build <exe>` in the same tree link these objects and fail on undefined lp_*/initialize_*
+# symbols (merge keeper, b5 gate clone, 10-07). A package module's object is ours when we compiled
+# one (*.c.o.native), else Lake's *.c.o.export, used read-only.
 make_package_index() {
-  find .lake/packages -type f -path '*/.lake/build/ir/*.c.o.export' -print | awk '
+  find .lake/packages -type f \( -path '*/.lake/build/ir/*.c.o.export' -o -path '*/.lake/build/ir/*.c.o.native' \) -print | awk '
     {
       path=$0
       marker="/.lake/build/ir/"
       pos=index(path, marker)
       if (!pos) next
       rel=substr(path, pos + length(marker))
-      sub(/\.c\.o\.export$/, "", rel)
+      native=(rel ~ /\.c\.o\.native$/)
+      sub(/\.c\.o\.(export|native)$/, "", rel)
+      dir=substr(path, 1, pos - 1)
       module=rel
       gsub(/\//, ".", module)
-      print module "\t" path
+      key=dir "\t" module
+      if (!(key in best) || native) best[key]=path
+      mod[key]=module
     }
+    END { for (k in best) print mod[k] "\t" best[k] }
   ' | sort -t $'\t' -k1,1 -k2,2
 }
 
@@ -1599,7 +1620,7 @@ if [[ -s "$missing_package_c" ]]; then
   xargs -0 -P "$native_jobs" -n 1 bash -c '
     set -euo pipefail
     c_path=$1
-    object="$c_path.o.export"
+    object="$c_path.o.native"
     module=${c_path#*/.lake/build/ir/}
     module=${module%.c}
     "$toolchain/bin/clang" -c -o "$object" "$c_path" \
@@ -1626,7 +1647,8 @@ grep -vF "$native_object_description" "$output_dir/package-object-types.txt" \
 while IFS=: read -r object _description; do
   object=${object%%[[:space:]]*}
   [[ -n "$object" ]] || continue
-  c_path=${object%.o.export}
+  c_path=${object%.o.*}
+  object="$c_path.o.native"
   [[ -f "$c_path" ]] || {
     printf 'build-native-host: wrong-architecture object has no generated C: %s\n' "$object" >&2
     exit 66
@@ -1637,6 +1659,12 @@ while IFS=: read -r object _description; do
     --sysroot "$toolchain" -nostdinc -isystem "$toolchain/include/clang" \
     -O3 -DNDEBUG -DLEAN_EXPORTING
 done < "$output_dir/wrong-architecture-package-objects.txt"
+if [[ -s "$output_dir/wrong-architecture-package-objects.txt" ]]; then
+  # the recompiled objects are *.c.o.native beside Lake's: resolve the package objects again
+  make_package_index > "$package_index"
+  join -t $'\t' -1 1 -2 1 "$package_required" "$package_index" > "$package_objects_tsv"
+  cut -f2 "$package_objects_tsv" > "$output_dir/package-objects.txt"
+fi
 file -f "$output_dir/package-objects.txt" > "$output_dir/package-object-types-final.txt"
 if grep -vF "$native_object_description" "$output_dir/package-object-types-final.txt" \
     > "$output_dir/wrong-architecture-package-objects-final.txt"; then
@@ -1649,7 +1677,7 @@ response="$output_dir/${binary##*/}.rsp"
 : > "$response"
 while IFS= read -r module; do
   stem=${module//./\/}
-  printf '%s\n' ".lake/build/ir/$stem.c.o.export" >> "$response"
+  printf '%s\n' ".lake/build/ir/$stem.c.o.native" >> "$response"
 done < "$source_modules"
 cat "$output_dir/package-objects.txt" >> "$response"
 
@@ -1683,7 +1711,7 @@ while IFS= read -r module; do
   for path in ".lake/build/lib/lean/$stem.olean" \
       ".lake/build/lib/lean/$stem.ilean" \
       ".lake/build/ir/$stem.c" \
-      ".lake/build/ir/$stem.c.o.export"; do
+      ".lake/build/ir/$stem.c.o.native"; do
     [[ -f "$path" ]] || { printf 'missing reusable project artifact: %s\n' "$path" >&2; exit 66; }
     printf '%s\0' "$path" >> "$reusable_paths"
   done
@@ -1691,8 +1719,8 @@ done < "$source_modules"
 while IFS= read -r object; do
   package_root=${object%%/.lake/build/ir/*}
   package_module=${object#"$package_root/.lake/build/ir/"}
-  package_module=${package_module%.c.o.export}
-  for path in "$object" "${object%.o.export}" \
+  package_module=${package_module%.c.o.*}
+  for path in "$object" "${object%.o.*}" \
       "$package_root/.lake/build/lib/lean/$package_module.olean"; do
     [[ -f "$path" ]] || { printf 'missing reusable package artifact: %s\n' "$path" >&2; exit 66; }
     printf '%s\0' "$path" >> "$reusable_paths"
@@ -1773,7 +1801,7 @@ fi
     printf 'reused_artifact_manifest=%s\n' "$output_dir/reused-artifact-sha256.txt"
   fi
   if [[ "$build_umbrella" == 1 ]]; then
-    printf 'lake_gate=lake build Minidregg\n'
+    printf 'lake_gate=lake build %s\n' "$umbrella_target"
     printf 'max_concurrent_real_lean=1\n'
     printf 'wrapper_invocations=%s\n' "$(grep -c '^START' "$wrapper_log")"
   fi

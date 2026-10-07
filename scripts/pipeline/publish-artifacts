@@ -9,8 +9,9 @@
 # newest warm base is copied and moved to TIP, and the Lean delta compiles here, once.
 #
 # Steps, all in a private copy (scripts/pipeline/clone-warm) so the keeper's tree is never written:
-#   host     deploy/candidate/lane-build.sh host --umbrella   (links minidregg-host; the umbrella
-#            replays on a gated tree: compiled_source_modules=0)
+#   host     deploy/candidate/lane-build.sh host --umbrella --umbrella-target Host.Main (links
+#            minidregg-host; Lake builds the Host closure, which replays on a gated tree:
+#            compiled_source_modules=0; the gate's own umbrella is the merge keeper's)
 #   consent  lane-build.sh consent                            (minidregg-client-consent)
 #   prime    scripts/pipeline/prime-cargo: the box's shared cargo cache gets every crate of the tip
 #            (online), so the offline candidate build and every lane's offline cargo never miss one
@@ -96,7 +97,12 @@ for step in host consent prime rust; do
   # a failed attempt's partial output (build-native-host refuses an existing output directory)
   case \$step in host) rm -rf "$W/native-out" ;; consent) rm -rf "$W/consent-out" ;; esac
   case \$step in
-    host) "$builder/lane-build.sh" host --umbrella ;;
+    # The publisher links binaries of a tip the merge gate already judged: its Lake step is the
+    # Host closure (Host.Main), not the gate's umbrella (a red Assurance fixture that can only be
+    # regenerated FROM these binaries must not block them). Older tips' builders lack the option.
+    host) if grep -q -- '--umbrella-target' scripts/build-native-host.sh; then
+            "$builder/lane-build.sh" host --umbrella --umbrella-target Host.Main
+          else "$builder/lane-build.sh" host --umbrella; fi ;;
     prime) "$here/prime-cargo" "$W/src" ;;
     *) "$builder/lane-build.sh" \$step ;;
   esac >"$W/logs/\$step.log" 2>&1
@@ -132,7 +138,7 @@ cp "$W/native-out/manifest.txt" "$out/logs/pipeline/host-build-manifest.txt"
 t_end=$(date +%s)
 { cat "$W/logs/timings.tsv"; printf 'pack\t%s\n' $((t_end - t_build)); } >"$out/timings.tsv"   # steps of every (resumed) attempt; wall_s = their sum
 rust=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
-printf 'tip=%s label=%s lean=%s rust=%s built_on=%s from=%s%s command="clone-warm + lane-build.sh host --umbrella, consent, rust (fixed build root, sccache), pack" compiled_source_modules=%s wall_s=%s finished=%s\n' \
+printf 'tip=%s label=%s lean=%s rust=%s built_on=%s from=%s%s command="clone-warm + lane-build.sh host --umbrella(-target Host.Main), consent, rust (fixed build root, sccache), pack" compiled_source_modules=%s wall_s=%s finished=%s\n' \
   "$tip" "$label" "$(cat lean-toolchain)" "$rust" "$(hostname)" "$from" "$moved" \
   "$(sed -n 's/^compiled_source_modules=//p' "$W/native-out/manifest.txt" "$W/logs/host.log" 2>/dev/null | head -1)" \
   "$(awk -F'\t' '{s+=$2} END {print s+0}' "$out/timings.tsv" | head -1)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$out/PROVENANCE"
