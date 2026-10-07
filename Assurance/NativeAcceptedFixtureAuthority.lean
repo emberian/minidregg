@@ -43,6 +43,15 @@ first.guards.authorityCell = true
 first.guards.writtenCells = false
 # one invocation marker spent
 first.nullifiers = 1
+# the pay cell's compute row for the subject holds the request's capacity proofWork (the compute it
+# bought): price(tariff, ENVELOPE) = 100001 steps, admitted on a fresh world's first invocation
+first.pay.computeSteps = 100001
+# the created atom: build_request's arguments {atom: <random label>, schema: digest_hex(4242), byte: 7};
+# the method (world/NativeReceipt.obend `note`) creates it as an inline object of that schema whose
+# bytes are [byte]
+first.created.requestedSchema = 4242
+first.created.requestedByte = 7
+first.created.atom = inlineObject=true payload=[7]
 # the charge is the request's capacity: the driver's ENVELOPE, with proofWork = price(tariff, ENVELOPE)
 # = base 1 + sourceTicks-tariff 1 * ENVELOPE.sourceTicks 100000 (world: --tariff-base/--tariff-tick
 # unset, so both 1; every other tariff key 0)
