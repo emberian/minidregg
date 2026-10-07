@@ -19,6 +19,7 @@ import Theory.ObjectiveBendDemandForcingExtract
 import Theory.ObjectiveBendDemandForcingBack
 import Theory.ObjectiveBendDemandForcingConverse
 import Theory.ObjectiveBendInteraction
+import Theory.ObjectiveBendDemandForcingBackFail
 import Kernel.ObjectiveResumeContract
 import Kernel.ObjectiveCheckpointInvariant
 import Kernel.ObjectiveUpgradeInvariant

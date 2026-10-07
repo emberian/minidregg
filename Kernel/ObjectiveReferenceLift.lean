@@ -23,9 +23,14 @@ module lifts that through the kernel's handlers:
   deliveries and exhaustions on the record the turn before wrote), every committed segment that
   is the run's own is the reference node `observe start responses` at the responses it ran
   after, with the `Chain` invariant (`History.Invariant`) at the record now held;
-  `History.spin`: where the reference spins, no committed segment is the run's own. -/
+  `History.spin`: where the reference spins, no committed segment is the run's own;
+* `delivery_refusal_reference`: what the other case (a refused run, committed as a program
+  fault) is against the reference: the envelope ran out, or an extraction failure that (but for
+  `suspended`) makes the reference node `malformed`, or a Plan the kernel does not perform,
+  the reference's own `vis d`. -/
 import Kernel.ObjectiveResumeContract
 import Kernel.ObjectiveCheckpointInvariant
+import Theory.ObjectiveBendDemandForcingBackFail
 
 namespace Minidregg.Kernel.ObjectiveReferenceLift
 open Minidregg.Theory Minidregg.Compiler
@@ -279,6 +284,73 @@ theorem first_delivery_chain {rootBytes : Bytes → Digest} {config : Config} {s
   cases read
   exact ⟨d, own, ended, chain⟩
 
+/-! ## What a refused run is, against the reference -/
+
+/-- **A segment's refusal, by cause.** A run that commits no segment either ran out of ticks
+or room (`exhausted`), or halted in a yield or a completion whose extraction failed with `f`
+(the refusal names `reprStr f`), or yielded Plan Data `d` the kernel does not perform
+(`decodePlan d` is the refusal). -/
+theorem runSegment_error_cases {config : Config} {ticks : Nat} {start : State} {refusal : ObjectiveActivity.Refusal}
+    (ran : runSegment config ticks start = .error refusal) :
+    (refusal = .exhausted ∧ ∃ r st, runBounded (segmentLimits config start) ticks start = .suspended r st) ∨
+    (∃ f : ObjectiveBendDemandData.Failure, (refusal = .planExtraction (reprStr f) ∨
+      refusal = .resultExtraction (reprStr f)) ∧ ObjectiveBendDemandForcing.failsWith (segmentLimits config start) ticks config.planBudget start = some f) ∨
+    (∃ d y, endsWith (segmentLimits config start) ticks config.planBudget start = some (.yielded d, y) ∧
+      decodePlan d = .error refusal) := by
+  unfold runSegment at ran
+  split at ran
+  · rename_i address yielded equation
+    split at ran
+    · rename_i extracted extractedExact
+      simp only [bind, Except.bind] at ran
+      split at ran
+      · rename_i reason decoded
+        cases ran
+        exact .inr (.inr ⟨extracted.value, yielded, by simp [endsWith, equation, extractedExact], decoded⟩)
+      · cases ran
+    · rename_i failure st found
+      cases ran
+      exact .inr (.inl ⟨failure, .inl rfl, by simp [ObjectiveBendDemandForcing.failsWith, equation, found]⟩)
+  · rename_i value finished equation
+    split at ran
+    · cases ran
+    · rename_i failure st found
+      cases ran
+      exact .inr (.inl ⟨failure, .inr rfl, by simp [ObjectiveBendDemandForcing.failsWith, equation, found]⟩)
+  · cases ran
+  · cases ran
+  · rename_i r st equation
+    cases ran
+    exact .inl ⟨rfl, r, st, equation⟩
+
+/-- **A delivery's refused run, against the reference.** `y` is a reference yield in a chain
+with the delivery's checkpoint, and the delivery's run refused (so its segment, if it
+committed, is the program fault `faulted`, `Delivery.ran_or_fault`). Then the reference
+resumes `y` with the same response to `next`, and the refusal is one of:
+* `exhausted`: the envelope ran out (a resource: the reference node is not determined by it);
+* an extraction failure `f`: if `f` is anything but `suspended`, the reference node at `next`
+  is `malformed` (the program's Plan or result is not Data within the output sizes, under any
+  resources); `suspended` is a resource failure (`suspended_is_resource`);
+* a Plan the kernel does not perform: the reference node is `vis d`, and `decodePlan d` is the
+  refusal. -/
+theorem delivery_refusal_reference {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request)
+    {y : State} (chain : Chain y delivery.state) {refusal : ObjectiveActivity.Refusal}
+    (ran : runSegment config delivery.envelope.sourceTicks delivery.resumed = .error refusal) :
+    ∃ next, resume delivery.responseTerm y = some next ∧
+      (refusal = .exhausted ∨
+       (∃ f : ObjectiveBendDemandData.Failure, (refusal = .planExtraction (reprStr f) ∨
+          refusal = .resultExtraction (reprStr f)) ∧ (f ≠ .suspended → node config.planBudget next = .malformed)) ∨
+       (∃ d, node config.planBudget next = .vis d ∧ decodePlan d = .error refusal)) := by
+  obtain ⟨next, resumed, chainNext⟩ := chain.resume_back _ delivery.resumeExact
+  refine ⟨next, resumed, ?_⟩
+  rcases runSegment_error_cases ran with ⟨exhausted, _⟩ | ⟨f, named, fails⟩ | ⟨d, y', ends, decoded⟩
+  · exact .inl exhausted
+  · exact .inr (.inl ⟨f, named, fun semantic =>
+      ObjectiveBendDemandForcing.node_malformed_of_chain chainNext fails semantic⟩)
+  · obtain ⟨_, _, above⟩ := chainNext.back ends
+    exact .inr (.inr ⟨d, node_of_above above, decoded⟩)
+
 /-! ## Exhaustion -/
 
 def _root_.Minidregg.Kernel.ObjectiveActivity.Exhaustion.responseTerm {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -449,6 +521,8 @@ theorem History.spin {config : Config} {start : State} {responses : List Objecti
 #assert_axioms delivery_observe
 #assert_axioms delivery_spin
 #assert_axioms first_delivery_chain
+#assert_axioms runSegment_error_cases
+#assert_axioms delivery_refusal_reference
 #assert_axioms exhaustion_reference
 #assert_axioms History.deliverReachable
 #assert_axioms History.reference
