@@ -381,7 +381,7 @@ def preparePaidVerified (config : Config) {target : Durable}
     unsigned.parent
   let .ok prepared := DeclaredResourceController.prepare config.deployment config.profile
     ⟨config.federation, NativeHost.logicalHeight config verified.opened.durable⟩
-    verified.opened.durable appCommand
+    verified.opened.ground appCommand
     | throw "lifetime paid app command preparation refused"
   let grantObservationSlot ← ApplicationDispatchAuthoring.prepareObservationSlot
     config verified.opened unsigned selection prepared 4 fixed.grantResource
