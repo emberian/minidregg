@@ -23,6 +23,7 @@ import Kernel.ObjectiveResumeContract
 import Kernel.ObjectiveCheckpointInvariant
 import Kernel.ObjectiveUpgradeInvariant
 import Kernel.ObjectiveReferenceLift
+import Kernel.ObjectiveCallReference
 import Kernel.ObjectiveActivityGateRoute
 import Compiler.ObjectiveBendFrontEndAdequacy
 import Compiler.ObjectiveBendSpecificationClosure
