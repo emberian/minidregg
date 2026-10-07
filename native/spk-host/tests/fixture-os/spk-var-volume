@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Fixture model of deploy/spk-host/spk-var-volume, for `fixture-os` journeys
+# only (copied into $MINI_FIXTURE_OS; the broker clears the environment, so the
+# model root is this file's directory). The image is a real ext4 filesystem
+# (mkfs.ext4 on a file); the loop mount is modeled: the mountpoint is a
+# directory registered in $MINI_FIXTURE_OS/mounts/<name> with the image size,
+# which src/fixture_os.rs answers as a separately mounted filesystem. The
+# registration and witness bytes are the real helper's, field for field.
+set -euo pipefail
+usage() { echo 'usage: spk-var-volume --root GRAINS_ROOT create STORE RESOURCE APP_UID SIZE_MIB VOLUME_HEX | attest STORE RESOURCE' >&2; exit 2; }
+fos=$(cd -- "$(dirname -- "$0")" && pwd)
+(( $# >= 5 )) && [[ $1 == --root ]] || usage
+root=$2
+shift 2
+action=$1 store=$2 resource=$3
+case $action in
+  create) (( $# == 6 )) || usage ;;
+  attest) (( $# == 3 )) || usage ;;
+  *) usage ;;
+esac
+[[ $store =~ ^[0-9a-f]{16}$ && $resource =~ ^[1-9][0-9]{0,17}$ ]] || usage
+name=$store-$resource
+image=$root/volumes/$name.ext4
+target=$root/vars/$name
+config=$root/volumes/$name.conf
+umask 077
+mkdir -p -m 700 "$root/volumes"
+mkdir -p -m 711 "$root/vars"
+mkdir -p -m 755 "$root/attest"
+mkdir -p -m 700 "$fos/mounts"
+mapfile -t identity_lines < "$fos/host-identity"
+deployment_id=${identity_lines[0]#deployment_id=}
+host_id=${identity_lines[1]#host_id=}
+if [[ $action == create ]]; then
+  app_uid=$4 size_mib=$5 volume_id=$6
+  [[ $app_uid =~ ^[1-9][0-9]{0,9}$ && $size_mib =~ ^[1-9][0-9]{0,5}$ && $volume_id =~ ^[0-9a-f]{64}$ ]] || usage
+  (( size_mib >= 64 && size_mib <= 16384 )) || usage
+  [[ ! -e $config && ! -e $image && ! -e $target ]] || { echo 'volume already exists' >&2; exit 1; }
+  bytes=$(( size_mib * 1024 * 1024 ))
+  truncate -s "$bytes" -- "$image"
+  chmod 600 -- "$image"
+  /usr/sbin/mkfs.ext4 -q -F -- "$image"
+  mkdir -m 700 -- "$target"
+  printf 'mount=%s\nbytes=%s\n' "$target" "$bytes" > "$fos/mounts/$name"
+  printf 'app_uid=%s\nsize_mib=%s\ndeployment_id=%s\nhost_id=%s\nvolume_id=%s\n' \
+    "$app_uid" "$size_mib" "$deployment_id" "$host_id" "$volume_id" > "$config"
+  chmod 600 -- "$config"
+fi
+mapfile -t config_lines < "$config"
+app_uid=${config_lines[0]#app_uid=}
+size_mib=${config_lines[1]#size_mib=}
+volume_id=${config_lines[4]#volume_id=}
+bytes=$(( size_mib * 1024 * 1024 ))
+if [[ $action == attest ]]; then
+  # The images directory may sit on tmpfs, which has no filesystem UUID: the
+  # model names the backing filesystem by one derived from the host identity.
+  u=$(printf 'fixture-backing-fs %s' "$host_id" | sha256sum | cut -c1-32)
+  backing_fs=ext4:${u:0:8}-${u:8:4}-${u:12:4}-${u:16:4}-${u:20:12}
+  image_uuid=$(/usr/sbin/blkid -p -s UUID -o value -- "$image")
+  witness=$(printf 'DREGG/SPK-VAR-CUSTODY/v1\ndeployment_id=%s\nhost_id=%s\nresource=%s\nvolume_id=%s\napp_uid=%s\nquota_bytes=%s\nbacking=%s\nbacking_fs=%s\nbacking_inode=%s\nbacking_size=%s\nimage_ext4_uuid=%s\nmount=%s' \
+    "$deployment_id" "$host_id" "$resource" "$volume_id" "$app_uid" "$bytes" "$image" \
+    "$backing_fs" "$(stat -c '%i' -- "$image")" "$(stat -c '%s' -- "$image")" "$image_uuid" "$target")
+  tmp=$(mktemp "$root/attest/.witness.XXXXXXXX")
+  printf '%s\n' "$witness" > "$tmp"
+  chmod 644 -- "$tmp"
+  mv -fT -- "$tmp" "$root/attest/$name.witness"
+fi
+echo "verified store=$store resource=$resource uid=$app_uid size_mib=$size_mib mount=$target"

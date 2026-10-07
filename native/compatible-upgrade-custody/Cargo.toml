@@ -5,6 +5,11 @@ edition = "2021"
 license = "AGPL-3.0-or-later"
 publish = false
 
+[features]
+# Disposable fixture builds only (native/spk-host feature `fixture-os`): the one
+# unprivileged fixture principal also stands in for root. Never in a release.
+fixture-os = []
+
 [dependencies]
 libc = "=0.2.189"
 serde = { version = "=1.0.229", features = ["derive"] }

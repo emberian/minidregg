@@ -629,9 +629,18 @@ pub(crate) fn submit_once(
         &request_path,
         &attempt_dir.join("request-inspection.json"),
     )?;
+    // Host/ApplicationLifecycleRetryBeginV4Inspection.lean `inspectRequest`:
+    // the request view, beside the descriptor it decoded and checked.
     let request_view: Value = serde_json::from_slice(&inspected)?;
+    if text(&request_view, "descriptorCanonicalHex")? != hex(&launch.descriptor().canonical)
+        || text(&request_view, "descriptorRoot")? != launch.descriptor().root
+    {
+        return Err(invalid("v4 retry BEGIN request descriptor differs from signed launch"));
+    }
     fixed.checked_request(
-        &request_view,
+        request_view
+            .get("request")
+            .ok_or_else(|| invalid("v4 retry inspected request absent"))?,
         &request,
         create_index,
         &client_operation_id,

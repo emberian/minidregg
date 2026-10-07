@@ -208,7 +208,7 @@ pub(crate) fn open_protected_directory(path: &Path, app_uid: u32, leaf_owned_by_
         }
         let leaf = index == parts.len() - 1;
         if leaf && leaf_owned_by_app {
-            if stat.st_uid != app_uid || stat.st_mode & 0o777 != 0o700 {
+            if !crate::os::app_owner(stat.st_uid, app_uid) || stat.st_mode & 0o777 != 0o700 {
                 return Err(invalid("persistent /var must be task-owned mode 0700"));
             }
         } else if stat.st_uid == app_uid || stat.st_mode & 0o022 != 0 {
@@ -248,14 +248,10 @@ pub(crate) fn verify_var_volume(path: &Path, var_fd: RawFd, max_bytes: u64, app_
     }
     let parent = path.parent().ok_or_else(|| invalid("persistent /var has no parent"))?;
     let parent_fd = open_protected_directory(parent, app_uid, false)?;
-    if stat_fd(parent_fd.as_raw_fd())?.st_dev == stat_fd(var_fd)?.st_dev {
+    let (separate, total) = crate::os::var_filesystem(path, parent_fd.as_raw_fd(), var_fd)?;
+    if !separate {
         return Err(invalid("persistent /var is not a separate mounted filesystem"));
     }
-    let mut volume = unsafe { std::mem::zeroed::<libc::statvfs>() };
-    if unsafe { libc::fstatvfs(var_fd, &mut volume) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let total = (volume.f_blocks as u128) * (volume.f_frsize as u128);
     if total == 0 || total > max_bytes as u128 {
         return Err(invalid("persistent /var filesystem exceeds configured cap"));
     }
