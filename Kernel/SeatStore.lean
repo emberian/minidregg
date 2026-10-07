@@ -114,12 +114,14 @@ structure InvitationBody where
   spent : Bool
   deriving DecidableEq, Repr
 
-/-- A seat cell: the kernel's seat and the role and terms of the invitation
-that made it (what the contract's method is shown). -/
+/-- A seat cell: the kernel's seat, the role and terms of the invitation
+that made it, and the height of the offer that opened it (what the contract's
+method is shown). -/
 structure SeatBody where
   seat : Seat
   role : String
   terms : List (String × Nat)
+  opened : Nat
   deriving DecidableEq, Repr
 
 def instanceBodyStream : StreamCodec InstanceBody :=
@@ -132,15 +134,17 @@ def invitationBodyStream : StreamCodec InvitationBody :=
     (fun b => (b.invitation, b.spent)) (fun w => ⟨w.1, w.2⟩) (by intro b; cases b; rfl)
 
 def seatBodyStream : StreamCodec SeatBody :=
-  StreamCodec.xmap (StreamCodec.product seatStream (StreamCodec.product stringStream termsStream))
-    (fun b => (b.seat, b.role, b.terms)) (fun w => ⟨w.1, w.2.1, w.2.2⟩) (by intro b; cases b; rfl)
+  StreamCodec.xmap (StreamCodec.product seatStream
+      (StreamCodec.product stringStream (StreamCodec.product termsStream StreamCodec.nat)))
+    (fun b => (b.seat, b.role, b.terms, b.opened)) (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2⟩)
+    (by intro b; cases b; rfl)
 
 def instanceCodec := framed "DREGG/SEAT/INSTANCE/v1".toUTF8.toList instanceBodyStream
 def invitationCodec := framed "DREGG/SEAT/INVITATION/v1".toUTF8.toList invitationBodyStream
 /-- Frame v3: a seat body no longer carries an open flag (a closed seat's cell is
 retired, never rewritten) and its proposal carries the donation marker; a v1 or v2 body refuses
 to decode. -/
-def seatCodec := framed "DREGG/SEAT/SEAT/v3".toUTF8.toList seatBodyStream
+def seatCodec := framed "DREGG/SEAT/SEAT/v4".toUTF8.toList seatBodyStream
 def holdingsCodec := framed "DREGG/SEAT/HOLDINGS/v1".toUTF8.toList (StreamCodec.list StreamCodec.nat)
 
 /-! ## Cells: protected coordinates -/
@@ -245,8 +249,11 @@ def program {α : Type} : Except ObjectiveActivity.Refusal α → Except Refusal
 
 The method's input is canonical and total: the caller's `input`, the height,
 and the instance's OPEN seats sorted by coordinate, each with its role, terms,
-proposal and its allocation over EVERY asset its proposal names (the total view,
-as the law reads it). The method never sees a funding account or anything
+proposal, its exit rule (`onDemand {}` | `afterDeadline h`: the rule the kernel
+judges `exitAuthorized` by), the height at which its offer opened it (`opened`, the
+height of the admitting turn, written once into the seat cell), and its
+allocation over EVERY asset its proposal names (the total view, as the law
+reads it). The method never sees a funding account or anything
 outside the instance's open seats, and `Seats.step` refuses any transfer outside
 them (`addressed`). Lists are `nil {}` / `cons {head, tail}` sums. -/
 
@@ -260,9 +267,14 @@ def amountsData (entries : List (AssetId × Nat)) : Data :=
 def termsData (terms : List (String × Nat)) : Data :=
   listData (terms.map fun term => .record [("name", .label term.1), ("value", .natural term.2)])
 
+def exitData : ExitRule → Data
+  | .onDemand => .variant "onDemand" (.record [])
+  | .afterDeadline due => .variant "afterDeadline" (.natural due)
+
 def seatView (book : Book) (body : SeatBody) : Data :=
   .record [("seat", .natural body.seat.account), ("role", .label body.role), ("terms", termsData body.terms),
     ("give", amountsData body.seat.proposal.give), ("want", amountsData body.seat.proposal.want),
+    ("exit", exitData body.seat.proposal.exit), ("opened", .natural body.opened),
     ("allocation", amountsData (body.seat.proposal.assets.map fun asset =>
       (asset, (book.balance body.seat.account asset).toNat)))]
 
@@ -385,6 +397,7 @@ structure Fresh where
   key : Bytes
   role : String
   terms : List (String × Nat)
+  opened : Nat
 
 /-- The posts that write the next world's changed cells: seats, invitations,
 instances, holdings. A cell whose body did not change is not written (it is
@@ -401,7 +414,7 @@ def statePosts {rootBytes : Bytes → Digest} (domain : Digest) (snapshot : Snap
   let opened := next.seats.filterMap fun seat =>
     if loaded.seats.any (fun body => body.seat.account == seat.account) then none
     else fresh.bind fun made =>
-        changed snapshot (seatCell seat.account) (seatImage made.key ⟨seat, made.role, made.terms⟩)
+        changed snapshot (seatCell seat.account) (seatImage made.key ⟨seat, made.role, made.terms, made.opened⟩)
   let invitations :=
     (next.registry.live.map fun invitation => (⟨invitation, false⟩ : InvitationBody)) ++
       loaded.invitations.filterMap fun body =>
@@ -767,7 +780,7 @@ def decideOffer {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
     | some record => [(record, readHoldings snapshot domain record)]
     | none => []
   let loaded : Loaded := { instances := inst.toList, invitations := found.toList, holdings := holdings }
-  let fresh : Option Fresh := found.map fun body => ⟨seatKey transaction, body.invitation.role, body.invitation.terms⟩
+  let fresh : Option Fresh := found.map fun body => ⟨seatKey transaction, body.invitation.role, body.invitation.terms, height⟩
   match ran : Seats.step (loaded.world logical) height (.subject request.subject)
       (.offer invitation expect account funding payee proposal holder) with
   | .error reason => throw (.kernel reason)

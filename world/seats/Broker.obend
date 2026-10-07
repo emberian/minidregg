@@ -19,12 +19,17 @@ record Term:
 sum Terms:
   nil: {}
   cons: {head: Term, tail: Terms}
+sum Exit:
+  onDemand: {}
+  afterDeadline: Nat
 record SeatView:
   seat: Nat
   role: String
   terms: Terms
   give: Amounts
   want: Amounts
+  exit: Exit
+  opened: Nat
   allocation: Amounts
 sum Seats:
   nil: {}
