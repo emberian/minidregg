@@ -372,7 +372,7 @@ def authorPolicy (json : Json) : Except String String := do
   let tariff : ObjectiveTariff.Tariff := ⟨← natOf tariff "version",← natOf tariff "base",
     ← natOf tariff "typeFuel",← natOf tariff "sourceTicks",← natOf tariff "heap",← natOf tariff "stack",
     ← natOf tariff "outputNodes",← natOf tariff "outputBytes",← natOf tariff "extractTicks",← natOf tariff "inputBytes",
-    ← natOf tariff "replayBytes",← natOf tariff "coreBytes"⟩
+    ← natOf tariff "replayBytes",← natOf tariff "coreBytes",← natOf tariff "domainWork"⟩
   if !tariff.valid then
     throw s!"tariff must be version {ObjectiveTariff.tariffVersion} with a positive base"
   let policy : ObjectiveBendNativeAdmission.Policy := ⟨ObjectiveBendNativeAdmission.semanticsId,← natOf json "sourceBytes",

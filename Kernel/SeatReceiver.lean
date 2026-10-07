@@ -112,7 +112,8 @@ def commandStream : StreamCodec Command :=
 
 /-- Frame v2: an offer's proposal carries the donation marker. -/
 -- v5: envelopes carry `replayBytes`, `coreBytes` (GPT-6 row E work account); a v4 command does not decode.
-def commandFrame : List UInt8 := "DREGG/SEAT/COMMAND/v5".toUTF8.toList
+-- v6: envelopes carry `domainWork` (A3 domain pricing); a v5 command does not decode.
+def commandFrame : List UInt8 := "DREGG/SEAT/COMMAND/v6".toUTF8.toList
 
 def commandCodec : LawfulCodec Command := ObjectiveActivityWire.framed commandFrame commandStream
 

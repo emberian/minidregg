@@ -102,7 +102,8 @@ def requestStream : StreamCodec Request := StreamCodec.xmap
   (by intro r; cases r; rfl)
 
 -- 3: the envelope carries `replayBytes`, `coreBytes` (GPT-6 row E work account).
-def frame : List UInt8 := "DREGG/OBJECTIVE-BEND/LOCAL-REQUEST".toUTF8.toList ++ [3]
+-- 4: the envelope carries `domainWork` (A3 domain pricing).
+def frame : List UInt8 := "DREGG/OBJECTIVE-BEND/LOCAL-REQUEST".toUTF8.toList ++ [4]
 def codec : LawfulCodec Request := NativeHostCodec.framed frame requestStream
 
 def queryFor (subject : SubjectId) (nonce : Nat) (ref : ObjectiveInvocationClaim.InputRef) : NativeObservationCodec.Intent :=

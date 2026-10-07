@@ -303,13 +303,14 @@ def recordWire : StreamCodec RecordWire :=
     (StreamCodec.product digest256Stream
     (StreamCodec.product escrowStream (StreamCodec.product StreamCodec.nat phaseWire))))))))
 
-/-- v7: the escrowed envelopes carry the front end's work (`replayBytes`, `coreBytes`, GPT-6 row E);
+/-- v8: the escrowed envelopes carry `domainWork` (A3 domain pricing);
+v7: the escrowed envelopes carry the front end's work (`replayBytes`, `coreBytes`, GPT-6 row E);
 v6: the record is FIXED-WIDTH where it is charged (digests 32 octets, heights 8:
 `digest256Stream`, `height64Stream`), so `|encodeRecord|`, hence the storage deposit,
 does not depend on the digests or heights (`encodeRecord_length_mask`); v5: the escrow holds declared envelopes (`Capacity`), not tick counts; v4: the record carries `tried` (the envelope its exhausted attempts at the
 current await reached); v3: no recorded reads (resume with view reads the state
 in the resuming turn); v2: the escrow names the payer's Book account. -/
-def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v7".toUTF8.toList
+def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v8".toUTF8.toList
 
 /-- The record's bytes: the frame, then the fixed-width wire. A record that does not fit has NO
 encoding (`[]`, which `decodeRecord` refuses): nothing is reduced into a different record. `[]` is
@@ -788,6 +789,9 @@ inductive Refusal where
   /-- A turn writes a domain's cell, and a member's record as the turn leaves it does not name
   the domain. -/
   | domainUnindexed (domain : Digest) (member : Nat)
+  /-- The turn end's domain judgment needs `units` of domain work (`Capacity.domainWork`) and the
+  envelope the turn is charged for declares only `allowance`. -/
+  | domainUncovered (units allowance : Nat)
   deriving Repr
 
 /-! ## Typing data against declared types
@@ -2448,7 +2452,9 @@ def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
 
 /-- What each stage of a birth may spend: the front end's input and output (the replayed
 package's source bytes, the generated typed core), the checker fuel, the run's tick budget, the
-extraction's tick budget and the extracted output's byte budget. -/
+extraction's tick budget and the extracted output's byte budget. The prefix runs no domain
+judgment (it runs at the turn's end, `ActivitySeatEnd.finish`, bounded there by the same
+envelope's `domainWork`: `finish_domain_covered`). -/
 def BirthPrefix.spent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : BirthRequest} (pre : BirthPrefix config snapshot height request) :
     ObjectiveWorkAccount.Stage → Nat
@@ -2458,6 +2464,7 @@ def BirthPrefix.spent {rootBytes : Bytes → Digest} {config : Config} {snapshot
   | .execution => request.envelope.sourceTicks
   | .extraction => config.planBudget.ticks
   | .output => config.planBudget.bytes
+  | .domain => 0
 
 /-- The run of an admitted birth is the bounded machine under exactly the declared tick budget
 (`segmentExact`); its extraction under the deployment's Plan budget. -/
@@ -2486,6 +2493,7 @@ theorem BirthPrefix.work_within {rootBytes : Bytes → Digest} {config : Config}
   | execution => exact Nat.le_refl _
   | extraction => exact pre.extractCovered
   | output => exact covers.1.2
+  | domain => exact Nat.zero_le _
 
 def Birth.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request) (sealing : Seal) :

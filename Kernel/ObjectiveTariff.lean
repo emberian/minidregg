@@ -37,25 +37,28 @@ structure Tariff where
   replayBytes : Nat
   /-- The rate per declared generated typed-core byte (`Capacity.coreBytes`). -/
   coreBytes : Nat
+  /-- The rate per declared unit of invariant-domain judgment (`Capacity.domainWork`). -/
+  domainWork : Nat
   deriving DecidableEq, Repr
 
 def tariffStream : StreamCodec Tariff := StreamCodec.xmap
-  (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))))))))
+  (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))))))))
   (fun t => (t.version,t.base,t.typeFuel,t.sourceTicks,t.heap,t.stack,t.outputNodes,t.outputBytes,t.extractTicks,
-    t.inputBytes,t.replayBytes,t.coreBytes))
-  (fun (v,b,f,s,h,k,n,o,x,i,r,c) => ⟨v,b,f,s,h,k,n,o,x,i,r,c⟩) (by intro t; cases t; rfl)
+    t.inputBytes,t.replayBytes,t.coreBytes,t.domainWork))
+  (fun (v,b,f,s,h,k,n,o,x,i,r,c,d) => ⟨v,b,f,s,h,k,n,o,x,i,r,c,d⟩) (by intro t; cases t; rfl)
 
-/-- The tariff edition this receiver prices with. Edition 3 prices the front end's work
-(`replayBytes`, `coreBytes`, `Kernel.ObjectiveWorkAccount`); edition 2 priced extraction ticks.
-A tariff of an earlier edition is refused (`Tariff.valid`). -/
-def tariffVersion : Nat := 3
+/-- The tariff edition this receiver prices with. Edition 4 prices invariant-domain judgment
+(`domainWork`); edition 3 priced the front end's work (`replayBytes`, `coreBytes`,
+`Kernel.ObjectiveWorkAccount`); edition 2 priced extraction ticks. A tariff of an earlier edition
+is refused (`Tariff.valid`). -/
+def tariffVersion : Nat := 4
 
 /-- The work units a declared envelope costs. -/
 def Tariff.workOf (t : Tariff) (c : ObjectiveInvocationClaim.Capacity) : Nat :=
   t.base + t.typeFuel * c.typeFuel + t.sourceTicks * c.sourceTicks + t.heap * c.heap +
     t.stack * c.stack + t.outputNodes * c.outputNodes + t.outputBytes * c.outputBytes +
     t.extractTicks * c.extractTicks + t.inputBytes * c.inputBytes +
-    t.replayBytes * c.replayBytes + t.coreBytes * c.coreBytes
+    t.replayBytes * c.replayBytes + t.coreBytes * c.coreBytes + t.domainWork * c.domainWork
 
 def Tariff.valid (t : Tariff) : Bool := t.version == tariffVersion && decide (0 < t.base)
 
@@ -72,7 +75,7 @@ theorem Tariff.workOf_mono (t : Tariff) {a b : ObjectiveInvocationClaim.Capacity
     (heap : a.heap ≤ b.heap) (stack : a.stack ≤ b.stack) (outputNodes : a.outputNodes ≤ b.outputNodes)
     (outputBytes : a.outputBytes ≤ b.outputBytes) (extractTicks : a.extractTicks ≤ b.extractTicks)
     (inputBytes : a.inputBytes ≤ b.inputBytes) (replayBytes : a.replayBytes ≤ b.replayBytes)
-    (coreBytes : a.coreBytes ≤ b.coreBytes) :
+    (coreBytes : a.coreBytes ≤ b.coreBytes) (domainWork : a.domainWork ≤ b.domainWork) :
     t.workOf a ≤ t.workOf b := by
   unfold Tariff.workOf
   have := Nat.mul_le_mul_left t.typeFuel typeFuel
@@ -85,16 +88,17 @@ theorem Tariff.workOf_mono (t : Tariff) {a b : ObjectiveInvocationClaim.Capacity
   have := Nat.mul_le_mul_left t.inputBytes inputBytes
   have := Nat.mul_le_mul_left t.replayBytes replayBytes
   have := Nat.mul_le_mul_left t.coreBytes coreBytes
+  have := Nat.mul_le_mul_left t.domainWork domainWork
   omega
 
 /-- An inhabitant of `Tariff.valid`: one work unit per call and per declared
 source tick (the premise of `workOf_pos` is satisfiable). -/
-def Tariff.unit : Tariff := ⟨tariffVersion,1,0,1,0,0,0,0,0,0,0,0⟩
+def Tariff.unit : Tariff := ⟨tariffVersion,1,0,1,0,0,0,0,0,0,0,0,1⟩
 theorem Tariff.unit_valid : Tariff.unit.valid = true := by decide
 
 open Minidregg.Compiler.ObjectiveInvocationClaim (Capacity) in
 /-- The empty envelope. -/
-def zeroCapacity : Capacity := ⟨0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0⟩
+def zeroCapacity : Capacity := ⟨0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0⟩
 
 open Minidregg.Compiler.ObjectiveInvocationClaim (Capacity) in
 /-- Two envelopes, field by field. -/
@@ -106,7 +110,14 @@ def addCapacity (a b : Capacity) : Capacity :=
     a.feeDebit + b.feeDebit, a.turnBytes + b.turnBytes, a.witnessBytes + b.witnessBytes,
     a.storageBytes + b.storageBytes, a.sideEffectCount + b.sideEffectCount, a.networkBytes + b.networkBytes,
     a.leaseByteBlocks + b.leaseByteBlocks, a.incidences + b.incidences,
-    a.replayBytes + b.replayBytes, a.coreBytes + b.coreBytes⟩
+    a.replayBytes + b.replayBytes, a.coreBytes + b.coreBytes, a.domainWork + b.domainWork⟩
+
+/-- **A declared envelope's price covers its domain units at the domain rate.** -/
+theorem Tariff.workOf_domainWork (t : Tariff) (c : ObjectiveInvocationClaim.Capacity) :
+    t.domainWork * c.domainWork ≤ t.workOf c := by
+  unfold Tariff.workOf; omega
+
+#assert_axioms Tariff.workOf_domainWork
 
 #assert_axioms Tariff.workOf_pos
 #assert_axioms Tariff.workOf_mono

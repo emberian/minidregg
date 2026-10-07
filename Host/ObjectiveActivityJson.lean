@@ -226,7 +226,7 @@ def turn (law : String → Json → Result Minidregg.Pred.Pred) (json : Json) : 
   | "rebirth" => pure (.rebirth ⟨← nat p json "record"⟩ ⟨← nat p json "await"⟩
       (← capacity (p ++ ".envelope") (← field p json "envelope")))
   | "registerDomain" => pure (.registerDomain (← members p json) (← law (p ++ ".law") (← field p json "law"))
-      (← nat p json "payer") ⟨← nat p json "payerCapability"⟩)
+      (← nat p json "payer") ⟨← nat p json "payerCapability"⟩ (← capacity (p ++ ".envelope") (← field p json "envelope")))
   | other => throw s!"$.turn.kind {other} is not publish, create, birth, resolve, deliver, topUp, \
       exhaust, abandon, invoke, deliverMessage, adopt, migrate, abortDrained, rebirth or registerDomain"
 
@@ -332,13 +332,13 @@ def turnJson : Turn → Json
   | .rebirth record await envelope => .mkObj
       [("kind", "rebirth"), ("record", decimal record.value), ("await", decimal await.value),
        ("envelope", capacityJson envelope)]
-  | .registerDomain members law payer pc => .mkObj
+  | .registerDomain members law payer pc envelope => .mkObj
       [("kind", "registerDomain"),
        ("members", .arr (members.map fun (object, c) =>
           Json.mkObj [("object", decimal object), ("capability", decimal c.value)]).toArray),
        ("law", toJson (reprStr law)),
        ("domain", decimal (ObjectiveActivity.domainId (members.map fun (object, _) => ⟨object⟩) law).value),
-       ("payer", decimal payer), ("payerCapability", decimal pc.value)]
+       ("payer", decimal payer), ("payerCapability", decimal pc.value), ("envelope", capacityJson envelope)]
 
 def commandJson (command : Command) : Json := .mkObj
   [("type", "objective-activity-command-v4"),

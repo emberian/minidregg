@@ -969,7 +969,8 @@ the declared state type, the live counters and the upgrade phase). An older reco
 decode (its frame differs): `readObject` refuses it `objectCodec`, so an older world is
 re-genesised, never reinterpreted. -/
 -- v5: the rebirth envelope carries `replayBytes`, `coreBytes` (GPT-6 row E); a v4 record does not decode.
-def recordFrame : Bytes := "DREGG/OBJECTIVE/OBJECT-RECORD/v5".toUTF8.toList
+-- v6: the rebirth envelope carries `domainWork` (A3 domain pricing); a v5 record does not decode.
+def recordFrame : Bytes := "DREGG/OBJECTIVE/OBJECT-RECORD/v6".toUTF8.toList
 def recordCodec := framed recordFrame recordStream
 def encodeRecord (record : ObjectRecord) : Bytes := recordCodec.encode record
 def decodeRecord (bytes : Bytes) : Option ObjectRecord := recordCodec.decode bytes
