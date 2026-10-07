@@ -1,0 +1,16 @@
+edition ObjectiveBend 1
+# Package C: integrates A and B without editing them and overrides price. A s total
+# and B s tax must both see C s price: 100 + 200 = 300 (A and B alone: 10 + 20 = 30).
+import ./Shop.obend as Shop
+import ./Pricing.obend as A
+import ./Taxes.obend as B
+
+spec Premium for Shop.Store:
+  def price(n: Nat) -> Nat:
+    n * 100n
+
+def integrated() -> Nat:
+  fix(compose(A.Pricing, B.Taxes, Premium), Shop.blank()).total(1n)
+
+def unintegrated() -> Nat:
+  fix(compose(A.Pricing, B.Taxes), Shop.blank()).total(1n)
