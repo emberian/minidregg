@@ -170,12 +170,12 @@ def firstAccepted := first.2.accepted
 def firstShape := first.2.shape
 
 /-- The sources that answered an accepted invocation's signature checks: one per
-incidence (the authority leg, then each target leg). -/
+incidence (the authority leg, then each target's authorizing signature). -/
 def sourcesOf {signed : SignedCommand} {record : List UInt8} {root : Nat}
     (accepted : Accepted signed record root) : List CredentialSignatureIO.Source :=
-  (accepted.accepted.checked none).receipt.source ::
+  (accepted.accepted.receipt none).source ::
     (List.finRange accepted.command.targets.length).map fun i =>
-      (accepted.accepted.checked (some i)).receipt.source
+      (accepted.accepted.receipt (some i)).source
 
 def recordedOnly (sources : List CredentialSignatureIO.Source) : Bool :=
   sources.all (· == .transcript transcript) && decide (sources.length ≥ 2)
