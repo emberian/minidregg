@@ -9,6 +9,7 @@ export GIT_COMMITTER_NAME="ember arlynx" GIT_COMMITTER_EMAIL=cmrx64@gmail.com
 H=$(cd "$(dirname "$0")" && pwd)
 gen='^(protocol/lean-build-surfaces\.json|scripts/gates/host-closure\.pin|ResearchWip\.lean)$'
 for c in "$@"; do
+  git cat-file -e "$c^{commit}" 2>/dev/null || { echo "STOP at $c: no such commit here (fetch it first)"; exit 1; }
   if git -c commit.gpgsign=false cherry-pick "$c" >/dev/null 2>&1; then echo "picked $c -> $(git rev-parse --short HEAD)"; continue; fi
   for f in $(git diff --name-only --diff-filter=U); do
     if [[ "$f" =~ $gen ]]; then git checkout --ours -- "$f" && git add "$f"
