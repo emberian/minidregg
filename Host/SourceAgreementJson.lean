@@ -218,6 +218,10 @@ partial def predicate (path : String) (json : Lean.Json) : Result Pred := do
       let right ← string (path ++ ".right") (← field path "right" obj)
       let offset ← int (path ++ ".offset") (← field path "offset" obj)
       pure (.leSlotsOff left right offset)
+  | "sumEq" =>
+      let obj ← exactObject path ["type", "left", "right"] json
+      pure (.sumEq (← list (path ++ ".left") string (← field path "left" obj))
+        (← list (path ++ ".right") string (← field path "right" obj)))
   | "witnessed" =>
       let obj ← exactObject path ["type", "identifier"] json
       pure (.witnessed ⟨← string (path ++ ".identifier") (← field path "identifier" obj)⟩)
@@ -255,6 +259,8 @@ private partial def predicateJson : Pred → Lean.Json
       ("right", .str right)]
   | .leSlotsOff left right offset => .mkObj [("type", "leSlotsOff"), ("left", .str left),
       ("right", .str right), ("offset", signedDecimal offset)]
+  | .sumEq left right => .mkObj [("type", "sumEq"), ("left", .arr (left.toArray.map .str)),
+      ("right", .arr (right.toArray.map .str))]
   | .witnessed identifier => .mkObj [("type", "witnessed"),
       ("identifier", .str identifier.id)]
   | .hashEq values blinder commit => .mkObj [("type", "hashEq"),

@@ -92,7 +92,7 @@ theorem inputsInRange_of_inBand {w : Nat} {B : Int} (hB : 3 * B ≤ (2 : Int) ^ 
       simp only [inputsInRange]
       exact inputsInRangeL_of_inBand hB hB0 hold hnew ps (by simpa [lits] using hl)
   | .eq _ _, _ | .memberOf _ _, _ | .writeOnce _, _ | .eqSlots _ _, _
-  | .witnessed _, _ | .hashEq _ _ _, _ | .ran _, _ => by simp [inputsInRange]
+  | .sumEq _ _, _ | .witnessed _, _ | .hashEq _ _ _, _ | .ran _, _ => by simp [inputsInRange]
 theorem inputsInRangeL_of_inBand {w : Nat} {B : Int} (hB : 3 * B ≤ (2 : Int) ^ w) (hB0 : 0 < B)
     {old new : State} (hold : ∀ x ∈ stateVals old, InBand B x)
     (hnew : ∀ x ∈ stateVals new, InBand B x) :

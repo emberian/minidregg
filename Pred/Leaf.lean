@@ -68,6 +68,7 @@ def leafWith (O : Oracle) (p : Pred) (old new : State) : Option (List Nat) :=
   | .eqSlots a b   => if evalWith O (.eqSlots a b) old new then none else some []
   | .leSlots a b   => if evalWith O (.leSlots a b) old new then none else some []
   | .leSlotsOff a b k => if evalWith O (.leSlotsOff a b k) old new then none else some []
+  | .sumEq l r     => if evalWith O (.sumEq l r) old new then none else some []
   | .hashEq v b c  => if evalWith O (.hashEq v b c) old new then none else some []
   | .ran program   => if evalWith O (.ran program) old new then none else some []
   | .not q         => if evalWith O (.not q) old new then none else some []
@@ -87,7 +88,8 @@ theorem leafWith_none_iff (O : Oracle) :
     (p : Pred) → (old new : State) → (leafWith O p old new = none ↔ evalWith O p old new = true)
   | .eq _ _, _, _ | .le _ _, _, _ | .memberOf _ _, _, _ | .writeOnce _, _, _
   | .monotone _, _, _ | .witnessed _, _, _ | .eqSlots _ _, _, _ | .leSlots _ _, _, _
-  | .leSlotsOff _ _ _, _, _ | .hashEq _ _ _, _, _ | .ran _, _, _ | .not _, _, _ | .anyL _, _, _ => by
+  | .leSlotsOff _ _ _, _, _ | .sumEq _ _, _, _ | .hashEq _ _ _, _, _ | .ran _, _, _ | .not _, _, _
+  | .anyL _, _, _ => by
       simp only [leafWith]; split <;> simp_all
   | .allL ps, old, new => by
       simp only [leafWith, evalWith]
@@ -116,6 +118,7 @@ theorem leafWith_sound (O : Oracle) :
   | .eq _ _, _, _, _, h | .le _ _, _, _, _, h | .memberOf _ _, _, _, _, h
   | .writeOnce _, _, _, _, h | .monotone _, _, _, _, h | .witnessed _, _, _, _, h
   | .eqSlots _ _, _, _, _, h | .leSlots _ _, _, _, _, h | .leSlotsOff _ _ _, _, _, _, h
+  | .sumEq _ _, _, _, _, h
   | .hashEq _ _ _, _, _, _, h | .ran _, _, _, _, h | .not _, _, _, _, h | .anyL _, _, _, _, h => by
       simp only [leafWith] at h
       split at h

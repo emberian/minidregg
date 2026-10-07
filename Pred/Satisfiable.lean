@@ -21,7 +21,7 @@ the translation returns `none` instead of exploding. Products and unions drop ev
 another one subsumes (`prune`), and a `memberOf` set becomes one interval per run of consecutive
 values, so a law of write-guarded clauses keeps a DNF near its clause count (`guardedEight` has
 4 systems, not `4^8`); a conjunction of genuinely independent disjunctions over different slots
-still grows exponentially and meets the cap. `witnessed`, `hashEq` and `ran` are outside the
+still grows exponentially and meets the cap. `sumEq`, `witnessed`, `hashEq` and `ran` are outside the
 fragment, so a law containing one returns `none`.
 
 ## The decision (`DiffProblem.decide`)
@@ -229,6 +229,7 @@ def dnf (cap : Nat) (b : Bool) (p : Pred) : Option (List Sys) :=
   | .eqSlots x y => (atomDnf b (.eqSlots x y)).bind (capped cap)
   | .leSlots x y => (atomDnf b (.leSlots x y)).bind (capped cap)
   | .leSlotsOff x y k => (atomDnf b (.leSlotsOff x y k)).bind (capped cap)
+  | .sumEq _ _ => none
   | .witnessed _ => none
   | .hashEq _ _ _ => none
   | .ran _ => none
@@ -703,7 +704,7 @@ theorem atom_covered (b : Bool) (p : Pred) (ss : List Sys) (h : atomDnf b p = so
       simp only [atomDnf, Option.some.injEq] at h; subst h
       simp only [evalWith] at he
       cases hx : n.get x <;> cases hy : n.get y <;> cases b <;> atom_simp <;> omega
-  | witnessed _ | hashEq _ _ _ | ran _ | not _ | allL _ | anyL _ => simp [atomDnf] at h
+  | sumEq _ _ | witnessed _ | hashEq _ _ _ | ran _ | not _ | allL _ | anyL _ => simp [atomDnf] at h
 
 /-- Every child evaluates to `b`. -/
 def AllAre (b : Bool) (o n : State) : PredList → Prop
@@ -776,6 +777,7 @@ theorem dnf_covers (cap : Nat) :
       simp only [dnf, Option.bind_eq_some_iff] at h
       obtain ⟨l, hl, hc⟩ := h
       exact covered_capped hc (atom_covered b _ l hl he)
+  | _, .sumEq _ _, _, h, _
   | _, .witnessed _, _, h, _ | _, .hashEq _ _ _, _, h, _ | _, .ran _, _, h, _ => by
       simp [dnf] at h
 theorem dnfAnd_covers (cap : Nat) :
