@@ -228,7 +228,7 @@ theorem shape_lawful {prepared : F.Prepared env durable command}
     (shaped : shape laws prepared = true) (judged : lawful laws prepared = true) :
     F.physicalPostLaw prepared = true ∧
       ∀ write (member : write ∈ F.writes prepared),
-        Lawful laws F.id durable write (F.lawStep prepared write member) := by
+        Lawful laws F.id durable (F.writes prepared) write (F.lawStep prepared write member) := by
   refine ⟨(shape_sound laws shaped).2.2.2, ?_⟩
   have none_ : lawFault laws prepared = none := by
     simpa [lawful, Option.isNone_iff_eq_none] using judged
@@ -424,7 +424,8 @@ theorem receive_committed_lawful {laws : Laws Durable}
     (committed : (F.receiver laws oracle).receive append env durable bytes =
       pure (.committed ingress admission witness)) :
     ∀ write (member : write ∈ F.writes admission.accepted.prepared),
-      Lawful laws F.id durable write (F.lawStep admission.accepted.prepared write member) := by
+      Lawful laws F.id durable (F.writes admission.accepted.prepared) write
+        (F.lawStep admission.accepted.prepared write member) := by
   obtain ⟨shaped, faultless⟩ := (F.receiver laws oracle).receive_committed_lawFault committed
   exact (shape_lawful laws shaped (by simpa [lawful, Option.isNone_iff_eq_none] using faultless)).2
 

@@ -40,12 +40,14 @@ factory law) and `stream` (FleetTurn checks only `CellLaw` on a topic head).
 They are `lawBearing` here, and each of those families meets the cell's own law
 when it moves onto `Kernel.Receiving.Family`.
 
-**Next obligation (births).**  A newborn has no committed law at its fresh
-pre-image; it is judged by its parent's export law (the factory for
-`declaredObject`, the world kind for `worldInstance`, the head for
-`streamEntry`).  Until `birthParent` exists here, the Receiver refuses a
-law-bearing birth (`lawUnavailable … birth`).  No family on `Family` writes one
-yet; the lane that migrates the birth families adds `birthParent`.
+**Births (`birthParent`).**  A newborn has no committed law at its fresh
+pre-image; it is judged by its EXPORT law: the descendants law of the room it is
+born in (its `parent` entry in the authority cell the same patch writes) and the
+structural restrictions its kind carries (a world instance's world kind,
+`WorldKindLawDependencies.loadNewborn`).  `birthParent` names those parents;
+`Kernel.ReceivingLaw` judges every law-bearing birth by them, on the family's
+view of the birth, with no second judge in the family.  A newborn's law source
+(`policySource`) is born under the same export law (`kernelOnlyOrBorn`).
 -/
 import Compiler.WorldKindCell
 import Compiler.DeclaredEffectCell
@@ -167,6 +169,10 @@ inductive LawClass where
   | lawBearing
   /-- No user law; only the named kernel families may write it. -/
   | kernelOnly (writers : List FamilyId)
+  /-- Written in place only by the named kernel families, with no step; BORN by any
+  family, under the newborn's export law (`birthParent`), judged like a law-bearing
+  birth.  A newborn's initial law source is born with the resource it governs. -/
+  | kernelOnlyOrBorn (writers : List FamilyId)
   deriving DecidableEq, Repr
 
 /-- The writers of the authority cell, each with what it changes there.  A
@@ -213,7 +219,7 @@ def Kind.lawClass : Kind → LawClass
   | .resourceBook => .kernelOnly bookWriters
   -- Installed by `PolicyInstall` under the OLD law's judgement of the candidate; the new
   -- source is never judged against its own install (`LawComposition`).
-  | .policySource => .kernelOnly [.policyInstall]
+  | .policySource => .kernelOnlyOrBorn [.policyInstall]
   -- The certified head and tail bound, written only by a certify record.
   | .system => .kernelOnly [.certify]
   -- Born by an append (DRC stream append, FleetTurn topic append), never written again;
@@ -234,8 +240,10 @@ def Kind.lawClass : Kind → LawClass
   -- no event-log writer is in the Host closure, measured at d27d1cad).
   | .eventHistory => .kernelOnly []
 
-theorem policySource_only_policyInstall :
-    Kind.policySource.lawClass = .kernelOnly [.policyInstall] := rfl
+/-- A law source is written in place only by `PolicyInstall`, and otherwise only
+born, under its birth parent's export law. -/
+theorem policySource_policyInstall_or_born :
+    Kind.policySource.lawClass = .kernelOnlyOrBorn [.policyInstall] := rfl
 
 theorem system_only_certify : Kind.system.lawClass = .kernelOnly [.certify] := rfl
 
@@ -249,6 +257,18 @@ theorem kernelOnly_kinds :
     Kind.all.filter (fun kind => kind.lawClass != .lawBearing) =
       [.eventHistory, .authority, .resourceBook, .policySource, .nockProgram, .streamEntry,
         .system, .objectiveActivity, .seat] := by decide
+
+/-- **The birth parents of a newborn**, the cells whose laws its export law is
+built from: the room it is born in (its `parent`, read from the authority cell's
+append-only parent plane), and, for a world instance, its world kind.  Every
+other kind adds no structural parent.  `Kernel.ReceivingLaw.Laws.physical`
+reads exactly these (`resolveBirth`). -/
+inductive BirthParent where
+  /-- The room the newborn is born in: its descendants law applies. -/
+  | room (cell : Nat)
+  /-- A world instance's world kind: the kind's law applies (`WorldKindLawDependencies`). -/
+  | worldKind (cell : Nat)
+  deriving DecidableEq, Repr
 
 /-- Tags 1/2/3/5/6/8/9/10/11/12/13/14/15/16 are deployment pins. The final table across
 lanes: 11 pay, 12 stream (head), 13 nockProgram, 14 clock, 15 streamEntry, 16 system.  Tag 3 is the one authority
