@@ -234,6 +234,31 @@ theorem bound_verifies_of_target_judged {F : Type} [Field F] [DecidableEq F]
   exact bound_verifies_of_judged profile snapshot directory left right step target additional
     judged judgedExact lowerable inRange casts evaluated bound
 
+/-- The judgement of an EXPORT law: the composed law of `roots` (a newborn's room
+descendants and structural parents) loaded at one snapshot, with the three
+compiler verdicts on `step`.  A birth is judged by this, not by a committed law at
+its own (fresh) id. -/
+structure RootsJudged {F : Type} [Field F] [DecidableEq F] (snapshot : Snapshot)
+    (directory : Directory Nat CanonicalCellRegistry.registry) (semantics : Digest)
+    (roots : List PolicyRef) where
+  law : GuardedRoots snapshot directory semantics roots
+  predicate : Minidregg.Pred.Pred
+  predicateExact : predicate = ResolvedLawCompilation.predicate law.graph.resolved
+  inRange : Bool
+  castsInjective : Bool
+  supported : Bool
+
+def judgeRoots {F : Type} [Field F] [DecidableEq F] (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (directory : Directory Nat CanonicalCellRegistry.registry)
+    (roots : List PolicyRef) (step : PolicyStepContext) :
+    Option (RootsJudged (F := F) snapshot directory profile.semantics roots) := do
+  let law ← loadRoots snapshot directory profile.semantics roots resolutionBudget
+  let predicate := ResolvedLawCompilation.predicate law.graph.resolved
+  pure ⟨law, predicate, rfl,
+    inputsInRange profile.compiler predicate step.oldState step.newState,
+    decide (castInjOn F (intsOf predicate step.oldState step.newState)),
+    supported profile.compiler predicate⟩
+
 def readGuards (snapshot : Snapshot)
     (directory : Directory Nat CanonicalCellRegistry.registry)
     (semantics : Digest) (target : Nat) (additional : List PolicyRef := []) :

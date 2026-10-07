@@ -76,15 +76,24 @@ def loadPost (deployment : CanonicalCellRegistry.Deployment)
     loadTarget deployment directory target
   else none
 
-/-- Newborn targets are absent from the old directory. Their source-prepared,
-signed birth item selects the kind, whose current identity/root/ROM defaults
-are checked before current exported restrictions evaluate the birth effect. -/
+/-- Newborn targets are absent from the old directory: the newborn itself selects
+its kind, whose current identity/root/ROM defaults are checked before current
+exported restrictions evaluate the birth effect.  The structural restrictions of a newborn `cell` at `cellId`: its cell law and
+kind-birth validity hold, then its kind's structural parents (a world instance's
+world kind).  The Receiver reads a birth's restrictions here
+(`Kernel.ReceivingLaw.Laws.physical`). -/
+def loadNewborn (deployment : CanonicalCellRegistry.Deployment)
+    (directory : Directory Nat Registry) (cellId : Nat) (cell : PackedCell Registry) :
+    Option Dependencies :=
+  if CanonicalCellRegistry.CellLaw deployment cellId cell ∧
+      CanonicalCellRegistry.kindBirthValid deployment directory cell = true then
+    ofCell deployment directory cell
+  else none
+
+/-- A birth item's restrictions: its newborn's. -/
 def loadBirth (deployment : CanonicalCellRegistry.Deployment)
     (directory : Directory Nat Registry) (item : ResourceBirth.BirthItem Registry) :
     Option Dependencies :=
-  if CanonicalCellRegistry.CellLaw deployment item.create.cellId item.create.cell ∧
-      CanonicalCellRegistry.kindBirthValid deployment directory item.create.cell = true then
-    ofCell deployment directory item.create.cell
-  else none
+  loadNewborn deployment directory item.create.cellId item.create.cell
 
 end Minidregg.Compiler.WorldKindLawDependencies
