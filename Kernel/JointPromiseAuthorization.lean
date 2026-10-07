@@ -230,8 +230,12 @@ structure Accepted (prepared : PreparedInvocation deployment profile ambient dur
   sourceExact : signed.declaration.sourceImageBytes = DurableReceiverCodec.imageStream.encode durable.image
   targetCount : signed.declaration.capabilities.length = command.targets.length
   envelopeCount : signed.targetEnvelopes.length = command.targets.length
-  checked : (incidence : Incidence command) → CheckedLeg prepared signed.declaration ordinary.tuple
-    incidence (signed.envelope incidence)
+  /-- An observe-only read target carries no promise envelope: no promise leg
+  runs for it; its only authorization is its `ReadLeg`. -/
+  readEnvelopes : ∀ i : TargetIndex command, command.targets[i].observeOnly = true →
+    signed.envelope (some i) = []
+  checked : (incidence : Incidence command) → incidenceObserveOnly command incidence = false →
+    CheckedLeg prepared signed.declaration ordinary.tuple incidence (signed.envelope incidence)
 
 def admit (native : CredentialSignatureIO.NativeConfig)
     (prepared : PreparedInvocation deployment profile ambient durable command)
@@ -241,17 +245,17 @@ def admit (native : CredentialSignatureIO.NativeConfig)
     if sourceExact : signed.declaration.sourceImageBytes = DurableReceiverCodec.imageStream.encode durable.image then
       if targetCount : signed.declaration.capabilities.length = command.targets.length then
         if envelopeCount : signed.targetEnvelopes.length = command.targets.length then
+         if readEnvelopes : ∀ i : TargetIndex command, command.targets[i].observeOnly = true →
+             signed.envelope (some i) = [] then
           match ← DeclaredResourceController.admit native prepared selected with
           | .error reason => return .error reason
           | .ok ordinary =>
-              match ← collectIO (fun i : TargetIndex command =>
-                  verifyLeg native prepared signed.declaration ordinary.tuple (some i) (signed.envelope (some i))) with
+              match ← collectLegs (fun incidence _ =>
+                  verifyLeg native prepared signed.declaration ordinary.tuple incidence (signed.envelope incidence)) with
               | .error reason => return .error reason
-              | .ok targets =>
-                  match ← verifyLeg native prepared signed.declaration ordinary.tuple none signed.authorityEnvelope with
-                  | .error reason => return .error reason
-                  | .ok authority => return .ok ⟨ordinary,shape,selectedExact,sourceExact,targetCount,envelopeCount,
-                      fun incidence => match incidence with | none => authority | some i => targets i⟩
+              | .ok checked => return .ok ⟨ordinary,shape,selectedExact,sourceExact,targetCount,envelopeCount,
+                  readEnvelopes,checked⟩
+         else return .error .readTargetEnvelope
         else return .error .wrongEnvelopeCount
       else return .error .wrongEnvelopeCount
     else return .error .physicalPreparation

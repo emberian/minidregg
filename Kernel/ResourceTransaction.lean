@@ -129,9 +129,22 @@ instance targetsValidDecidable (command : Command) : Decidable command.TargetsVa
 
 def Command.targetsWellFormed (command : Command) : Bool := decide command.TargetsValid
 
+/-- An observe-only read target (`read`, `kindRead`): it writes nothing, and
+its ONLY authorization is its `ReadLeg` (the requester's observe capability,
+signed for this exact command, judged by the source's current observe policy on
+the unchanged cell). No ordinary leg runs for it. A funding or money-consent
+target is read too, but it authorizes a debit and keeps its leg. -/
+def Target.observeOnly (target : Target) : Bool :=
+  match target.payload with
+  | .read | .kindRead => true
+  | _ => false
+
 /-- Foreign resource laws receive a participant's state only after actual
-observation admission; single-target blind mutation has no foreign observer. -/
-def Command.requiresObservation (command : Command) : Bool := decide (1 < command.targets.length)
+observation admission; single-target blind mutation has no foreign observer.
+An observe-only read target is authorized only by its observation, so a command
+holding one requires observation even when it is the only target. -/
+def Command.requiresObservation (command : Command) : Bool :=
+  decide (1 < command.targets.length) || command.targets.any Target.observeOnly
 
 @[simp] theorem Command.targetsWellFormed_iff (command : Command) :
     command.targetsWellFormed = true ↔ command.TargetsValid := by
@@ -509,6 +522,10 @@ inductive Reject where
   | legSignature (reason : CredentialSignatureAdmission.Reject)
   | capabilityRejected | policyRejected | policyInputRange | policyCastAlias | conflictingIncidences
   | wrongEnvelopeCount
+  /-- An observe-only read target carried a target envelope. Its only
+  authorization is its observe envelope (`ReadLeg`); its target envelope must be
+  empty, never a second signature nothing checks. -/
+  | readTargetEnvelope
   | bendExecution
   /-- An Objective command reached an admission caller that installed no
   signed-query read oracle: a wiring refusal, never a policy verdict. -/
@@ -716,6 +733,8 @@ def computeTarget (snapshot : AuthoritySnapshot)
         if kind != .object then throw .wrongRole
         if version != ContentResource.commandVersion then throw .unsupportedVersion
         if root != pre.root then throw .staleTarget
+        -- Its only authorization is its observation: the named capability is the observe one.
+        if observe != some capability then throw .observationRequired
         pure pre.logical
 
     | kindRead => exact do
@@ -775,6 +794,14 @@ def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : A
 
     | world actions => exact (WorldKindCell.preparePatch pre.logical actions).getD []
     | kindDefinition definition => exact (WorldKindCell.prepareDefinition pre.logical definition).getD []
+
+/-- An observe-only read target's patch is empty: it writes nothing. -/
+theorem targetPatch_observeOnly (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (target : Target) (pre : TargetCell target) (read : target.observeOnly = true) :
+    targetPatch snapshot semantics ambient command target pre = [] := by
+  cases target with
+  | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
+    cases payload <;> first | rfl | simp [Target.observeOnly] at read
 
 /-- The entry an append target records, at the cell `entryCellId target n`:
 the loaded head's next position and tail. Scalar and content targets record none.
