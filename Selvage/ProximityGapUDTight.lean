@@ -174,13 +174,13 @@ theorem ZDegLE.of_mul_left {A P : Polynomial (Polynomial F)} {t : ℕ}
       · rw [Polynomial.coeff_eq_zero_of_natDegree_lt (lt_of_le_of_lt (hAcoeff ab.1) hlt),
           zero_mul]
       · have h2 : u < uv.2 := by
-          have := Finset.mem_antidiagonal.mp sorry
+          have := sorry
           rcases Nat.lt_or_ge u uv.2 with h | h
           · exact h
           · exact absurd (Prod.ext (by omega) (by omega)) huvne
         rw [Polynomial.coeff_eq_zero_of_natDegree_lt (lt_of_le_of_lt (hPcoeff ab.2) h2),
           mul_zero]
-    · exact absurd (Finset.mem_antidiagonal (a := (s, u)) sorry
+    · exact absurd (sorry
         |>.mpr rfl) habs
   -- the slices at the attained sups are nonzero
   have hAsupp : A.support.Nonempty := Polynomial.support_nonempty.mpr hA

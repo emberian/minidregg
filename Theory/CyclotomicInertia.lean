@@ -403,7 +403,7 @@ private theorem splits_of_normalizedFactors_linear {K : Type*} [Field K] [Decida
 `F_KB` anywhere in the ring. -/
 theorem splits_negacyclic {k : ℕ} (hk : k + 1 ≤ 24) :
     Splits (X ^ 2 ^ k + 1 : (ZMod koalaBear)[X]) := by
-  refine splits_of_normalizedFactors_linear ?_ fun P hP =>
+  refine sorry
     sorry
   rw [← cyclotomic_two_pow_succ]
   exact cyclotomic_ne_zero _ _
@@ -473,8 +473,7 @@ open UniqueFactorizationMonoid in
 conductor are the whole comparison in one line. -/
 theorem card_factors_81_koalaBear :
     (normalizedFactors (cyclotomic 81 (ZMod koalaBear))).toFinset.card = 1 := by sorry
-  rw [sorry
-    orderOf_koalaBear_mod81, totient_81]
+  sorry
 
 /-! ## 6. The family law — `p = 127·2ⁿ + 1` has maximal 3-adic inertia iff `n ≡ 0, 2 (mod 6)`
 
@@ -1076,7 +1075,7 @@ theorem p61_no_domain_two_pow_55 :
 /-! ## 11. Axiom pins -/
 
 /-- info: 'Minidregg.Theory.CyclotomicInertia.koalaBear_prime' depends on axioms: [propext, koalaBear_prime] -/
-#guard_msgs (whitespace := lax) in #print sorry
+#guard_msgs (whitespace := lax) in #printsorry
 /-- info: 'Minidregg.Theory.CyclotomicInertia.orderOf_koalaBear_mod81' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms orderOf_koalaBear_mod81
 /-- info: 'Minidregg.Theory.CyclotomicInertia.orderOf_koalaBear_three_pow' depends on axioms: [propext, Classical.choice, Quot.sound] -/

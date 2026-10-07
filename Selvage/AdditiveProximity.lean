@@ -86,7 +86,7 @@ theorem closeToDeg_iff_close (D : Finset F) (hD : D.Nonempty) {d : ℕ}
     (hd : 0 < d) (delta : ℝ) (f : F → F) :
     closeToDeg D d delta f ↔
       close delta (reedSolomonCode (finsetDomain D) d) (wordOn D f) := by sorry
-  classical
+  sorry
   letI : Nonempty D := Finset.nonempty_coe_sort.mpr hD
   have hn : (0 : ℝ) < (D.card : ℝ) := by exact_mod_cast hD.card_pos
   constructor
@@ -115,7 +115,7 @@ theorem foldedCloseToDeg_iff_close [CharP F 2] (R : Finset F) (hRn : R.Nonempty)
     (delta : ℝ) (g : F → F) :
     foldedCloseToDeg R beta d delta g ↔
       close delta (reedSolomonCode (additiveImageDomain R beta hR) d) (wordOn R g) := by sorry
-  classical
+  sorry
   letI : Nonempty R := Finset.nonempty_coe_sort.mpr hRn
   have hn : (0 : ℝ) < (R.card : ℝ) := by exact_mod_cast hRn.card_pos
   constructor
