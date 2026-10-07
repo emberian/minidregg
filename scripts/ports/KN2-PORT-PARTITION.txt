@@ -178,10 +178,7 @@ LANES AND FILES
   Kernel/NativeHost.lean  (14 sites: G1,G4,G5,G6)
   Verify/GenericSimplexOperatorBridge.lean  (2 sites: G1,G5)
   scripts/durable-receiver.lean  (14 sites: G2,G3,G4,G7)
-  scripts/fn-b3/forge_history.lean  (1 sites: G5)
   scripts/native-accepted-fixture/replay.lean  (1 sites: G4)
-  scripts/probe-fn-accepted-history-selectors.lean  (3 sites: G1)
-  scripts/probe-fn-accepted-skip.lean  (1 sites: G5)
   scripts/probe-native-host-genesis.lean  (1 sites: G5)
 
 PER-LANE ACCEPTANCE SPECIFICS (in addition to the common acceptance above)

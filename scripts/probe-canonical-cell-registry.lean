@@ -13,9 +13,13 @@ namespace CanonicalCellRegistryProbe
 
 def deployment : Deployment := ⟨⟨4242⟩, 10, 11, 12⟩
 
-/-- A declared cell holding one field of the given key. -/
+/-- A declared cell holding one field of the given key; an object field is
+declared at its own object (K-FIELD-CLOSURE: a cell holds only declared fields). -/
 def declaredStore (key : StateKey) : Store.Store EffectDeclaration.effectLayout :=
-  StoreCodec.fromEntries [⟨key.address, (17 : Int)⟩]
+  StoreCodec.fromEntries (⟨key.address, (17 : Int)⟩ :: match key with
+    | .objectField object field =>
+        [⟨(Minidregg.Kernel.FieldClosure.declaredKey object.value field.value).address, (1 : Int)⟩]
+    | _ => [])
 
 def objectStore := declaredStore (.objectField ⟨20⟩ ⟨1⟩)
 def accountStore := declaredStore (.objectField ⟨21⟩ ⟨1⟩)
@@ -48,7 +52,7 @@ def require (label : String) (condition : Bool) : IO Unit :=
 def checkRows : IO Unit := do
   for (identifier, cell) in samples do
     let bytes := cellCodec.encode cell
-    require "every source kind satisfies loaded/final cell law" (cellCheck deployment identifier cell)
+    require s!"every source kind satisfies loaded/final cell law (cell {identifier})" (cellCheck deployment identifier cell)
     match cellCodec.decode bytes with
     | none => throw (IO.userError s!"FAIL canonical registry: roundtrip {repr (show Kind from cell.kind)}")
     | some decoded =>
@@ -71,6 +75,10 @@ def checkRows : IO Unit := do
   require "account shadow balance refuses permanent law" (!cellCheck deployment 21 (accountCell shadow))
   let objectShadow := declaredStore (.accountBalance ⟨20⟩ ⟨20⟩)
   require "object shadow balance refuses permanent law" (!cellCheck deployment 20 (objectCell objectShadow))
+  let undeclared : Store.Store EffectDeclaration.effectLayout :=
+    StoreCodec.fromEntries [⟨(StateKey.objectField ⟨20⟩ ⟨1⟩).address, (17 : Int)⟩]
+  require "an undeclared object field refuses (K-FIELD-CLOSURE)"
+    (!cellCheck deployment 20 (objectCell undeclared))
   let foreign := declaredStore (.objectField ⟨37⟩ ⟨1⟩)
   require "foreign id refuses" (!cellCheck deployment 21 (accountCell foreign))
   require "object request cannot select account metadata"
@@ -89,16 +97,21 @@ def checkRows : IO Unit := do
 
 def checkPhysical (binary : System.FilePath) : IO Unit :=
   IO.FS.withTempDir fun directory => do
-    let config : DurableReceiverIO.NativeConfig := ⟨binary, directory / "store"⟩
+    let keyPath := directory / "mac.key"
+    IO.FS.writeBinFile keyPath (List.replicate 32 (7 : UInt8)).toByteArray
+    IO.setAccessRights keyPath ⟨⟨true, true, false⟩, ⟨false, false, false⟩, ⟨false, false, false⟩⟩
+    let config : DurableReceiverIO.NativeConfig :=
+      { binary, root := directory / "store", key := keyPath }
+    let transport := { config.transport (fun _ => ⟨0⟩) ⟨0⟩ with systemCell := none }
     let seed : Minidregg.Kernel.DurableReceiver.Seed :=
       { absentBytes := []
         cells := samples.map fun (identifier, cell) =>
           (⟨identifier⟩, ResourceBirthCodec.LifecycleImage.bytes registry (.live cell))
         available := fun _ => 100 }
-    match ← DurableReceiverIO.bootstrap config.transport ResourceBirthCodec.rootBytes seed with
+    match ← DurableReceiverIO.bootstrap transport ResourceBirthCodec.rootBytes seed with
     | .error message => throw (IO.userError message)
     | .ok () => pure ()
-    match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
+    match ← DurableReceiverIO.load transport ResourceBirthCodec.rootBytes with
     | .error message => throw (IO.userError message)
     | .ok loaded =>
         require "every registry sample survives real native reopen" (loaded.cells.length == samples.length)

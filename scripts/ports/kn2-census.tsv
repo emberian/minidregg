@@ -53,10 +53,6 @@ LEFTOVER	Verify/NativeJointSourceFixture.lean	151	G5	def initializeStores (root 
 LEFTOVER	Verify/GenericSimplexOperatorBridge.lean	16	G1	def retainedPayload (replicas : Array Replica) (ingress : Bytes) : Option Bytes 	replica.participant.source.verified.opened.durable.image.accepted.findSome? fun record =>
 LEFTOVER	Verify/GenericSimplexOperatorBridge.lean	41	G5	def receiptPrefix (replica : Replica) (ingress : Bytes) : Option (List Bytes) :=	let records := replica.participant.source.verified.opened.durable.image.accepted
 LEFTOVER	scripts/probe-native-host-genesis.lean	58	G5	def run (alice bob : List UInt8) : IO Unit := do	require "zero accepted history" built.image.accepted.isEmpty
-LEFTOVER	scripts/probe-fn-accepted-history-selectors.lean	25	G1	def acceptedHistorySelectorsProbe : IO Unit := do	let bMatches := bOpened.durable.image.accepted.filter fun record =>
-LEFTOVER	scripts/probe-fn-accepted-history-selectors.lean	35	G1	def acceptedHistorySelectorsProbe : IO Unit := do	let aMatches := aOpened.durable.image.accepted.filter fun record =>
-LEFTOVER	scripts/probe-fn-accepted-history-selectors.lean	48	G1	def acceptedHistorySelectorsProbe : IO Unit := do	let revokedMatches := revokedOpened.durable.image.accepted.filter fun record =>
-LEFTOVER	scripts/probe-fn-accepted-skip.lean	32	G5	def acceptedSkipProbe : IO Unit := do	for record in opened.durable.image.accepted do
 LEFTOVER	scripts/durable-receiver.lean	116	G3	def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do	(one.model.available .feeDebit == 99 && one.model.consumed (nullifier 11) &&
 LEFTOVER	scripts/durable-receiver.lean	117	G2	def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do	one.model.history.length == 1 && one.model.journal.length == 1)
 LEFTOVER	scripts/durable-receiver.lean	124	G7	def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do	require "retry does not charge or append" (retried.model.available .feeDebit == 98 && retried.model.history.length == 2)
@@ -72,7 +68,6 @@ LEFTOVER	scripts/durable-receiver.lean	246	G4	def run (binary : System.FilePath)
 LEFTOVER	scripts/durable-receiver.lean	247	G4	def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do	(afterConcurrent.atPrefix height).isSome)
 LEFTOVER	scripts/durable-receiver.lean	250	G4	def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do	(afterConcurrent.atPrefix afterConcurrent.height).map (·.canonicalBytes ⟨cell⟩) ==
 LEFTOVER	scripts/native-accepted-fixture/replay.lean	45	G4	def main (args : List String) : IO UInt32 := do	let durable ← match DurableReceiverIO.loadImage ResourceBirthCodec.rootBytes (config.logStart seed) image with
-LEFTOVER	scripts/fn-b3/forge_history.lean	18	G5	def forgeHistory : IO Unit := do	let first :: rest := durable.image.accepted
 LEFTOVER	Compiler/CarriedDispatchProvenance.lean	58	G1	def select {config : Config} {current : Durable}	let some index := custody.source.durable.image.accepted.findIdx? (fun record =>
 LEFTOVER	Compiler/GenericSimplexIO.lean	453	G4	def natPrefixCounted (bytes : Bytes) : Option (Nat × Nat × Bytes) :=	def natPrefixCounted (bytes : Bytes) : Option (Nat × Nat × Bytes) :=
 LEFTOVER	Compiler/GenericSimplexIO.lean	469	G4	def scanFrames : Nat → Bytes → Nat → Option Nat	match natPrefixCounted rest with

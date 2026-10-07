@@ -16,7 +16,7 @@ open Minidregg.Kernel.NativeHostGenesis
 
 namespace NativeHostGenesisProbe
 
-def profile := NativeHostProfile.profile ⟨⟨5⟩, 100000, 10000⟩
+def profile := NativeHostProfile.profile { issuer := ⟨5⟩, ownerBudget := 100000, lifetime := 10000 }
   "genesis-acceptance-probe/no-deployment-claim".toUTF8.toList
 
 def key (subject : Nat) (bytes : List UInt8) : KeyRecord :=
@@ -36,6 +36,8 @@ def config (alice bob : List UInt8) : Config where
      ⟨key 8 bob, 8, ⟨42⟩, ⟨45⟩, ⟨47⟩, 200, .all []⟩]
   factoryController := ⟨⟨7⟩, ⟨43⟩⟩
   meterAllowance := fun _ => 10000000
+  clockTickers := []
+  tailBound := 64
 
 def require (label : String) (condition : Bool) : IO Unit :=
   unless condition do throw (IO.userError s!"FAIL native genesis: {label}")
