@@ -52,7 +52,6 @@ row_objective() {
 row_rooms() {
   local d=$SRC/native/resource-client/rooms-e2e.sh
   [ -f "$d" ] || return 99
-  command -v bc >/dev/null 2>&1 || { echo "no bc on this box (rooms-e2e.sh requires it)" >&2; return 98; }
   MINI_HOST_BIN=$BIN/minidregg-host MINI_BIN=$BIN/mini MINI_STORE_BIN=$BIN/minidregg-link-sqlite-store \
     MINI_VERIFIER_BIN=$BIN/minidregg-credential-signature-verifier \
     bash "$d" "$RUN/r" >"$OUT/rooms.out" 2>"$OUT/rooms.err"
