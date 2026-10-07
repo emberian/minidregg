@@ -35,6 +35,7 @@
 # updated 2026-10-07: batch b6: obeng-g1, P1-SEATSTORE, P1-BOUNTY-NATIVE, plat-store-audit, burst2-saturate; NativeAcceptedFixtureData regenerated in b5  [counts: Minidregg 0 1, Theory 75 173, Kernel 390 537, Pred 7 11, Effects 0 3, Compiler 146 318, Selvage 12 153, Assurance 0 153, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-07: batch b7: kn2-store-open-ii, upgrade-turns  [counts: Minidregg 0 1, Theory 75 173, Kernel 392 539, Pred 7 11, Effects 0 3, Compiler 146 319, Selvage 12 153, Assurance 0 153, Host 87 122, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-07: batch b10: P4-JP2-s2, obbc-w1-2, obbc-c3, obbc-docs, obbc fix d15bfc1f, ob-b-probe  [counts: Minidregg 0 1, Theory 76 177, Kernel 392 543, Pred 7 11, Effects 0 3, Compiler 146 321, Selvage 12 153, Assurance 0 153, Host 87 122, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-07: batch b10+b11  [counts: Minidregg 0 1, Theory 76 177, Kernel 392 544, Pred 7 11, Effects 0 3, Compiler 148 323, Selvage 12 153, Assurance 0 155, Host 87 122, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -128,6 +129,8 @@ Compiler.ObjectiveBendElaborate
 Compiler.ObjectiveBendFrontEnd
 Compiler.ObjectiveBendFrontEndIdentity
 Compiler.ObjectiveBendGenericResult
+Compiler.ObjectiveBendLaw
+Compiler.ObjectiveBendLawCodec
 Compiler.ObjectiveBendNativePlanData
 Compiler.ObjectiveBendParse
 Compiler.ObjectiveBendPlanAdapter
