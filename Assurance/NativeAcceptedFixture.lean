@@ -113,7 +113,7 @@ def ambientOf (durable : Durable) : Ambient := ⟨config.federation, NativeHost.
 /-- `DeclaredResourceController.admit` as the Host calls it for op 2, with the
 production read oracle -- the same definition, at `Id` instead of `IO`, its signature
 checks answered by the recorded run (`Oracle.recorded`) instead of the process. -/
-def admitRun {command : Command} {durable : Durable}
+def admitRun {command : Command} {ground : Ground deployment}
     (prepared : PreparedInvocation config.deployment config.profile (ambientOf durable) durable command)
     (signed : SignedCommand) : Except Reject (AcceptedInvocation prepared signed) :=
   Id.run (admit (.recorded transcript) prepared signed ObjectiveBendAuthenticatedInputs.oracle)

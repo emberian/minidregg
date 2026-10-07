@@ -59,7 +59,7 @@ structure Prepared (deployment : Deployment) (durable : Durable)
   readGuardsExact : ∀ guard ∈ readGuards,
     guard.expectedRoot = durable.snapshot.model.roots guard.cellId
   witness : NeedsWitness before after → ∃ next bytes,
-    after = some next ∧ ∃ checked : AudienceRosterBinding.CheckedBytes ⟨directory, authority⟩ next bytes,
+    after = some next ∧ ∃ checked : AudienceRosterBinding.CheckedBytes (Minidregg.Compiler.ServedBasis.Ground.full _ directory authority) next bytes,
       checked.checked.deviceGuard ∈ readGuards ∧ deviceRoot = checked.checked.deviceRoot
   supported : metadataRequired = true → SupportedObject deployment directory object
   guarded : metadataRequired = true →
@@ -86,7 +86,7 @@ def prepare (deployment : Deployment) (durable : Durable)
       | none => throw .audienceTransition
       | some next =>
         let bytes ← fromOption rosterBytes .audienceTransition
-        let roster ← fromOption (AudienceRosterBinding.checkBytes ⟨directory, authority⟩ next bytes) .audienceTransition
+        let roster ← fromOption (AudienceRosterBinding.checkBytes (Minidregg.Compiler.ServedBasis.Ground.full _ directory authority) next bytes) .audienceTransition
         let checked ← require (ObjectAudienceController.Bound object
           authority.snapshot.cell.root.value roster.checked.deviceRoot before after) .audienceTransition
         pure ⟨roster.checked.deviceRoot, (by simpa only [afterExact] using checked.down),

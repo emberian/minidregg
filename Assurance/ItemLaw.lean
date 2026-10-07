@@ -274,11 +274,11 @@ open Minidregg.Theory.TypedAuthorization
 
 variable {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient}
-  {durable : Durable} {command : Command}
+  {ground : Ground deployment} {command : Command}
 
 /-- The authenticated effective closure includes the item law at `p` as an active component. -/
 def ItemInstalled (p : Params)
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Prop :=
   Minidregg.Kernel.LawHistory.ActiveComponent
     (policyConfig prepared tuple incidence) (itemLaw p)
@@ -286,7 +286,7 @@ def ItemInstalled (p : Params)
 /-- Derive the installed-law assurance premise from the receiver's cached,
 authenticated effective graph; no caller assertion or second resolver is used. -/
 def checkInstalled (p : Params)
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
     (resolved : Minidregg.Compiler.ComposedPolicyAdmission.PreparedLaw
       (policyConfig prepared tuple incidence)) :
@@ -296,7 +296,7 @@ def checkInstalled (p : Params)
 /-- **Kernel form of clauses 1 and 4.** On every leg the controller admitted under the item law, a
 mutate was by the holder, or by the referee with zero `owner`/`where`/`worn` deltas. -/
 theorem kernel_holder_or_referee (p : Params)
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command} {envelope : List UInt8}
     (leg : CheckedLeg prepared tuple incidence envelope) (installed : ItemInstalled p tuple incidence)
     (x : Int) (verb : (step prepared tuple incidence).newState.get "request/verb" = some 2)
