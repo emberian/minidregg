@@ -211,6 +211,10 @@ def main():
             pass
         if "--reclaim" in a or "--watch" in a:
             reclaim(rows)
+        if "--watch" in a:      # second guard beside the lake shim's: purge poisoned cache entries
+            audit = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lake-cache-audit")
+            if os.path.exists(audit) and os.path.isdir(os.environ.get("PIPELINE_LAKE_CACHE", "/srv/lake-cache")):
+                subprocess.run([audit, "--since", "--purge", "--quiet"], capture_output=True)
         if "--free" in a:
             free = [r["slot"] for r in rows if r["state"] == "free" and r["slot"] in status["lane_slots"]]
             print("\n".join(free), end="\n" if free else "")

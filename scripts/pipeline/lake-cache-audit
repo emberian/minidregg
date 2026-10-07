@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""scripts/pipeline/lake-cache-audit -- refuse C objects with the wrong initializer prefix in the shared Lake cache.
+
+    lake-cache-audit [--cache DIR] [--tree SRC] [--since] [--purge] [--quiet]
+    lake-cache-audit --scan-tree TREE           list the bad .c / .c.o.* files in a lane tree's .lake/build/ir
+                                            (delete them; Lake then recompiles or re-fetches a clean one)
+
+A minidregg module compiled the way Lake compiles it names every in-tree initializer with the package:
+`initialize_minidregg_<Module>`. A bare `lean -c` (no Lake setup) emits `initialize_<Module>` and an
+.olean without the package; any module compiled against that .olean references the unprefixed name
+too. Such a .c links no lean_exe (undefined initialize_<Module>), and once Lake stored it in the
+shared artifact cache (/srv/lake-cache) every lane fetched it (burst2-b, 10-07: 79 files).
+
+For every outputs/minidregg/<input-hash>.json (only those newer than the last audit with --since),
+its .c (or, for a single-artifact entry, the compiled .o) is read and every `initialize_X` token is checked: X naming an in-tree module (from SRC, the
+warm base by default) without the `minidregg_` prefix makes the entry BAD. --purge deletes a bad
+entry's outputs json and each of its artifacts (.c, .olean*, .ilean, .ir) no remaining entry
+references, and appends a line to $ARTIFACT_ROOT/ALERTS. Exit 1 when a bad entry was found.
+The lake shim runs `--since --purge --quiet` before every Lake invocation in a cache-enabled tree, so a
+poisoned entry is removed before the next reader can fetch it; a full audit runs from burst-up.
+"""
+import json, os, re, sys, time
+
+args = sys.argv[1:]
+def opt(name, default=None):
+    return args[args.index(name) + 1] if name in args else default
+
+CACHE = opt("--cache", os.environ.get("PIPELINE_LAKE_CACHE", "/srv/lake-cache"))
+TREE = opt("--tree", os.environ.get("PIPELINE_WARM_BASE", "/srv/warm-base") + "/src")
+PKG = "minidregg"
+TOKEN = re.compile(rb"initialize_([A-Za-z0-9_]+)")
+# Declarations: Lake's compile names every minidregg declaration `lp_minidregg_<Name>`; a compile
+# without the package setup (or against an .olean from one) emits `l_<Name>`. `Minidregg` is the
+# repository's own namespace and never a core one, so `l_Minidregg_` is unambiguous.
+DECL = re.compile(rb"(?<![A-Za-z0-9_])l_Minidregg_[A-Za-z0-9_]+")
+quiet = "--quiet" in args
+
+def mangle(mod):
+    return "_".join(part.replace("_", "__") for part in mod.split("."))
+
+def local_modules(tree):
+    names = set()
+    for top in os.listdir(tree):
+        p = os.path.join(tree, top)
+        if top.startswith(".") or top in ("native", "scripts", "docs", "tests", "deploy", "protocol"):
+            if top != "scripts":
+                continue
+        if os.path.isfile(p) and top.endswith(".lean"):
+            names.add(mangle(top[:-5]))
+        elif os.path.isdir(p) and top[:1].isupper():
+            for dp, dn, fn in os.walk(p):
+                dn[:] = [d for d in dn if not d.startswith(".")]
+                for f in fn:
+                    if f.endswith(".lean"):
+                        rel = os.path.relpath(os.path.join(dp, f), tree)[:-5]
+                        names.add(mangle(rel.replace(os.sep, ".")))
+    return names
+
+def bad_tokens(data, local):
+    out = set()
+    for m in TOKEN.finditer(data):
+        x = m.group(1).decode()
+        if not x.startswith(PKG + "_") and x in local:
+            out.add(x)
+    m = DECL.search(data)
+    if m:
+        out.add(m.group(0).decode()[:80])
+    return out
+
+def arts(entry):
+    d = entry.get("data", {})
+    if isinstance(d, str):              # a single-artifact entry: a compiled object (.o) of a module's C
+        return [d]
+    v = []
+    for k in ("c", "i", "r"):
+        if isinstance(d.get(k), str): v.append(d[k])
+    o = d.get("o")
+    v += o if isinstance(o, list) else ([o] if isinstance(o, str) else [])
+    return v
+
+def main():
+    local = local_modules(TREE)
+    if not local:
+        sys.exit(f"lake-cache-audit: no in-tree modules found under {TREE}")
+    if "--scan-tree" in args:
+        t = opt("--scan-tree"); bad = 0
+        for dp, _, fn in os.walk(os.path.join(t, ".lake/build/ir")):
+            for f in fn:
+                if f.endswith(".c") or ".c.o" in f:
+                    p = os.path.join(dp, f)
+                    try:
+                        data = open(p, "rb").read()
+                    except OSError:             # a compiler's temporary renamed away mid-scan
+                        continue
+                    if bad_tokens(data, local):
+                        print(os.path.relpath(p, t)); bad += 1
+        sys.exit(1 if bad else 0)
+    outdir = os.path.join(CACHE, "outputs", PKG)
+    stamp = os.path.join(CACHE, ".audit-stamp")
+    since = os.stat(stamp).st_mtime if "--since" in args and os.path.exists(stamp) else 0
+    t0 = time.time()
+    entries, bad, seen = {}, {}, 0
+    names = os.listdir(outdir) if os.path.isdir(outdir) else []
+    def load(p):
+        try:
+            return json.load(open(p))
+        except (OSError, ValueError):
+            return None
+    for f in names:
+        p = os.path.join(outdir, f)
+        try:
+            if os.stat(p).st_mtime < since:     # audited before: parsed only if a purge needs the keep set
+                continue
+        except OSError:
+            continue
+        e = load(p)
+        if e is None:
+            continue
+        entries[p] = e; seen += 1
+        d = e.get("data", {})
+        c = d if isinstance(d, str) else d.get("c")   # the .c, or the object compiled from one
+        if not isinstance(c, str) or not c.endswith((".c", ".o")):
+            continue
+        try:
+            toks = bad_tokens(open(os.path.join(CACHE, "artifacts", c), "rb").read(), local)
+        except OSError:
+            continue
+        if toks:
+            bad[p] = sorted(toks)
+    if bad and "--purge" in args:
+        for f in names:                         # the keep set needs every entry
+            p = os.path.join(outdir, f)
+            if p not in entries:
+                e = load(p)
+                if e is not None:
+                    entries[p] = e
+    for p, toks in sorted(bad.items()):
+        if not quiet:
+            d = entries[p]['data']
+            print(f"BAD {os.path.basename(p)} {d if isinstance(d, str) else d.get('c')} unprefixed: {' '.join(toks[:4])}{' ...' if len(toks) > 4 else ''}")
+    if bad and "--purge" in args:
+        keep = {}
+        for p, e in entries.items():
+            if p not in bad:
+                for a in arts(e): keep[a] = True
+        gone = 0
+        for p in bad:
+            for a in arts(entries[p]):
+                if a not in keep:
+                    try: os.remove(os.path.join(CACHE, "artifacts", a)); gone += 1
+                    except OSError: pass
+            try: os.remove(p)
+            except OSError: pass
+        msg = (f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} LAKE CACHE PURGED {len(bad)} entries "
+               f"({gone} artifacts) in {CACHE}: C with unprefixed initializers, e.g. {next(iter(bad.values()))[0]}\n")
+        try:
+            open(os.path.join(os.environ.get("ARTIFACT_ROOT", "/srv/artifacts"), "ALERTS"), "a").write(msg)
+        except OSError:
+            pass
+        print(msg, end="", file=sys.stderr)
+    try:
+        open(stamp, "a").close(); os.utime(stamp, (t0, t0))
+    except OSError:
+        pass
+    if not quiet:
+        print(f"lake-cache-audit: {len(names)} {PKG} entries in {CACHE}, checked {seen} ({'since last audit' if since else 'all'}), "
+              f"{len(bad)} bad{', purged' if bad and '--purge' in args else ''}; {len(local)} in-tree modules from {TREE}")
+    sys.exit(1 if bad else 0)
+
+main()
