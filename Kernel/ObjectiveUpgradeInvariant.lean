@@ -2468,7 +2468,7 @@ theorem Creation.upgradable {rootBytes : Bytes → Digest} {config : Config} {sn
   have absent : payloads snapshot.canonicalBytes (objectCell config.domain request.object) = none :=
     readObject_none created.absent
   have headKinded : Kinded snapshot .object
-      (postAt snapshot (objectCell config.domain request.object) (objectImage request.object request.record)) :=
+      (postAt snapshot (objectCell config.domain request.object) (objectImage request.object (request.record created.laws))) :=
     ⟨fun p found => (by simp only [postAt] at found; rw [show payloadOf (snapshot.canonicalBytes
       (objectCell config.domain request.object)) = none from absent] at found; cases found), payloadOf_image_role _ _ _⟩
   have seedShape : ∀ p ∈ (request.seed.map (seedPost config snapshot request)).toList,
@@ -2486,16 +2486,16 @@ theorem Creation.upgradable {rootBytes : Bytes → Digest} {config : Config} {sn
     subst isSeed
     exact ⟨readState_role (created.stateFresh seed seeded), payloadOf_image_role _ _ _⟩
   have kinded : ∀ p ∈ created.posts, p = postAt snapshot (objectCell config.domain request.object)
-      (objectImage request.object request.record) ∨ ∃ role, role ≠ .object ∧ Kinded snapshot role p := by
+      (objectImage request.object (request.record created.laws)) ∨ ∃ role, role ≠ .object ∧ Kinded snapshot role p := by
     rw [created.postsExact]
     intro p member
     rcases List.mem_cons.mp member with isHead | inSeed
     · exact .inl isHead
     · exact .inr ⟨.state, by decide, seedKinded p inSeed⟩
   have effective : payloads (afterPosts snapshot created.posts) (objectCell config.domain request.object) =
-      payloadOf (objectImage request.object request.record) := by
+      payloadOf (objectImage request.object (request.record created.laws)) := by
     rw [created.postsExact]; exact head_payload_at snapshot _ _ _
-  have objects := objects_after_one config snapshot created.posts request.object request.record effective kinded
+  have objects := objects_after_one config snapshot created.posts request.object (request.record created.laws) effective kinded
     (fun other _ => by rw [absent]; rfl)
   have notRecord : ∀ p ∈ created.posts, ∃ role, role ≠ .record ∧ role ≠ .package ∧ Kinded snapshot role p := by
     intro p member
@@ -2536,7 +2536,7 @@ theorem Creation.upgradable {rootBytes : Bytes → Digest} {config : Config} {sn
         cases held
         rw [List.append_nil]
         have zero : cells.countP (counts config (payloads (afterPosts snapshot created.posts)) request.object
-            request.record c) = 0 := by
+            (request.record created.laws) c) = 0 := by
           apply List.countP_eq_zero.mpr
           intro cell _ isCounted
           unfold counts at isCounted
@@ -2714,11 +2714,11 @@ theorem Adoption.upgradable {rootBytes : Bytes → Digest} {config : Config} {sn
     Upgradable config (payloads (afterPosts snapshot adopted.posts)) := by
   have heldObject := readObject_some adopted.recordExact
   have headKinded := object_post_kinded
-    (record := adoptedRecord adopted.record (request.pending height)
+    (record := adoptedRecord adopted.record (request.pending height adopted.laws)
       (height + request.patience)) heldObject
   have bookSilent := book_silent adopted.bookExact adopted.posted
   have kinded : ∀ p ∈ adopted.posts, p = postAt snapshot (objectCell config.domain request.object)
-      (objectImage request.object (adoptedRecord adopted.record (request.pending height)
+      (objectImage request.object (adoptedRecord adopted.record (request.pending height adopted.laws)
         (height + request.patience))) ∨ ∃ role, role ≠ .object ∧ Kinded snapshot role p := by
     rw [adopted.postsExact]
     intro p member
@@ -2825,7 +2825,7 @@ theorem Adoption.upgradable {rootBytes : Bytes → Digest} {config : Config} {sn
           adopted.record .live x && !chosenIn config (payloads snapshot.canonicalBytes) request.object
             request.rebirth x) =
           cells.countP (counts config (payloads snapshot.canonicalBytes) request.object
-            (adoptedRecord adopted.record (request.pending height)
+            (adoptedRecord adopted.record (request.pending height adopted.laws)
               (height + request.patience)) .live) := by
         apply countP_congr_mem
         intro cell member

@@ -317,10 +317,12 @@ def rebirthTargets {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
     rebirthTarget config snapshot object record pin activity
     rebirthTargets config snapshot object record pin rest
 
-/-- The pending upgrade an ADOPT installs. -/
-def AdoptRequest.pending (request : AdoptRequest) (height : Nat) : Pending :=
-  ⟨request.pin, request.stateType, request.migration, request.dropped, request.law, request.upgrade, request.rebirth,
-    request.envelope, height, 0⟩
+/-- The pending upgrade an ADOPT installs; `laws` are the next package's (`packageLawsAt`
+of the next pin), never the request's. -/
+def AdoptRequest.pending (request : AdoptRequest) (height : Nat)
+    (laws : List (String × Minidregg.Compiler.ObjectiveBendLaw.LawExpr)) : Pending :=
+  ⟨request.pin, request.stateType, request.migration, request.dropped, request.law, laws, request.upgrade,
+    request.rebirth, request.envelope, height, 0⟩
 
 /-- The record an ADOPT writes: draining, the chosen activities counted as
 rebirths, the continuity one higher. -/
@@ -359,11 +361,17 @@ structure Adoption {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   extractCovered : config.planBudget.ticks ≤ request.envelope.extractTicks
   data : request.stateType.isData = true
   published : (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain request.pin))).isSome = true
-  migrationChecked : migrationCheck config snapshot record (request.pending height) = .ok ()
+  /-- The next package's enforced laws, read from its package cell. -/
+  laws : List (String × Minidregg.Compiler.ObjectiveBendLaw.LawExpr)
+  lawsExact : packageLawsAt config snapshot request.pin = .ok laws
+  /-- Every field the next package's laws read is a top-level natural or boolean field of the next
+  declared state type. -/
+  fieldsKnown : ObjectRecord.lawFieldIssue request.stateType laws = none
+  migrationChecked : migrationCheck config snapshot record (request.pending height laws) = .ok ()
   current : Option ObjectState
   currentExact : readState config snapshot request.object = .ok current
   migrated : Option Data
-  migratedExact : migrateCurrent config snapshot record request.object (request.pending height) current = .ok migrated
+  migratedExact : migrateCurrent config snapshot record request.object (request.pending height laws) current = .ok migrated
   nodup : request.rebirth.Nodup
   rebirthsChecked : rebirthTargets config snapshot request.object record request.pin request.rebirth = .ok ()
   book : BookCell
@@ -372,7 +380,7 @@ structure Adoption {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   postedBatch : posted.batch = adoptBatch config request
   posts : List Post
   postsExact : posts = [postAt snapshot (objectCell config.domain request.object)
-      (objectImage request.object (adoptedRecord record (request.pending height) (height + request.patience))),
+      (objectImage request.object (adoptedRecord record (request.pending height laws) (height + request.patience))),
     posted.write config snapshot]
   guards : List ReadGuard
   guardsExact : guards = guardAt snapshot (packageCell config.domain request.pin) ::
@@ -396,13 +404,19 @@ def adopt {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
   if extractCovered : config.planBudget.ticks ≤ request.envelope.extractTicks then
   if data : request.stateType.isData = true then
   if published : (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain request.pin))).isSome = true then
-  match migrationChecked : migrationCheck config snapshot record (request.pending height) with
+  match lawsExact : packageLawsAt config snapshot request.pin with
+  | .error reason => .error reason
+  | .ok laws =>
+  match fieldsKnown : ObjectRecord.lawFieldIssue request.stateType laws with
+  | some field => .error (.lawField field)
+  | none =>
+  match migrationChecked : migrationCheck config snapshot record (request.pending height laws) with
   | .error reason => .error reason
   | .ok () =>
   match currentExact : readState config snapshot request.object with
   | .error reason => .error reason
   | .ok current =>
-  match migratedExact : migrateCurrent config snapshot record request.object (request.pending height) current with
+  match migratedExact : migrateCurrent config snapshot record request.object (request.pending height laws) current with
   | .error reason => .error reason
   | .ok migrated =>
   if nodup : request.rebirth.Nodup then
@@ -416,8 +430,8 @@ def adopt {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
   | .error reason => .error reason
   | .ok posted =>
     .ok ⟨record, recordExact, policy, steady, noRebirths, distinct, patienceWithin, covered, extractCovered, data,
-      published,
-      migrationChecked, current, currentExact, migrated, migratedExact, nodup, rebirthsChecked, book, bookExact,
+      published, laws, lawsExact, fieldsKnown, migrationChecked, current, currentExact, migrated, migratedExact, nodup,
+      rebirthsChecked, book, bookExact,
       posted, postings_batch postedExact, _, rfl, _, rfl⟩
   else .error (.rebirthTarget "the rebirth list names an activity twice")
   else .error .pinUnpublished
@@ -928,7 +942,7 @@ next record's judgment in the ADOPT turn itself. -/
 theorem Adoption.migratable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : AdoptRequest} (adopted : Adoption config snapshot height request)
     {state : ObjectState} (current : adopted.current = some state) :
-    ∃ migrated, judgeMigrated config snapshot adopted.record request.object (request.pending height) state.value =
+    ∃ migrated, judgeMigrated config snapshot adopted.record request.object (request.pending height adopted.laws) state.value =
       .ok migrated := by
   have exact := adopted.migratedExact
   rw [current] at exact

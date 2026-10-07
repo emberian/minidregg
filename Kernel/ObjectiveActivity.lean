@@ -493,6 +493,9 @@ inductive Refusal where
 
   /-- A creation declares a state type that is not first-order data (`Ty.isData`). -/
   | stateTypeNotData
+  /-- A law of the pinned package reads `field`, which the declared state type does not hold as
+  a top-level natural or boolean field (`ObjectRecord.lawFieldIssue`). -/
+  | lawField (field : String)
   /-- The object drains toward an upgrade whose migration is not the identity (or
   whose old state type is not a value subtype of the new): no new birth or call
   until MIGRATE; a message to it waits in its inbox. -/
@@ -712,6 +715,19 @@ def Program.assumptions {config : Config} {pin : Digest} {input : Data} (program
 def packageBytes {rootBytes : Bytes → Digest} (config : Config) (snapshot : DataSnapshot rootBytes)
     (pin : Digest) : Bytes :=
   (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain pin))).getD []
+
+/-- **The enforced laws of the package a pin names**: the laws its artifact carries. The identity
+commits them, and the package cell holds only an artifact this kernel replayed when it was
+published (`publish`: the laws are the front end's reading of the package's own source). -/
+def packageLawsAt {rootBytes : Bytes → Digest} (config : Config) (snapshot : DataSnapshot rootBytes)
+    (pin : Digest) : Except Refusal (List (String × Minidregg.Compiler.ObjectiveBendLaw.LawExpr)) :=
+  match decodeStored (packageBytes config snapshot pin) with
+  | none => .error .packageMissing
+  | some stored =>
+    match ObjectiveBendSourceArtifact.decode stored.artifact with
+    | none => .error .packageMissing
+    | some artifact =>
+      if ObjectiveBendSourceArtifact.identity artifact = pin then .ok artifact.laws else .error .packageIdentity
 
 /-- A replayed package definition applied to its typed input: the shared prefix
 of an activity's program and of a seat contract's one-shot method
@@ -2655,9 +2671,11 @@ def createTransaction (request : CreateRequest) : TransactionId :=
     digestStream.encode request.object ++ (StreamCodec.option bytesStream).encode (request.seed.map dataBytes))
 
 /-- The record a creation installs: schema version 1, continuity 0, no live
-activity, steady. -/
-def CreateRequest.record (request : CreateRequest) : ObjectRecord :=
-  ⟨request.object, request.pin, request.stateType, 1, request.law, request.upgrade, 0, request.payer, 0, 0, .steady⟩
+activity, steady; `laws` are the pinned package's (`packageLawsAt`), never the request's. -/
+def CreateRequest.record (request : CreateRequest) (laws : List (String × Minidregg.Compiler.ObjectiveBendLaw.LawExpr)) :
+    ObjectRecord :=
+  ⟨request.object, request.pin, request.stateType, 1, request.law, laws, request.upgrade, 0, request.payer, 0, 0,
+    .steady⟩
 
 /-- The request facts a seed is judged under: turn 4, and no package writes (the artifact slot
 reads `-1`; the creator's law, not the pin, judges it). -/
@@ -2680,15 +2698,21 @@ structure Creation {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   published : (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain request.pin))).isSome = true
   /-- A seed is the state cell's first write: the cell holds nothing. -/
   stateFresh : ∀ seed, request.seed = some seed → readState config snapshot request.object = .ok none
-  /-- A seed is admitted by the creator's law, over no old state. -/
+  /-- The pinned package's enforced laws, read from its package cell. -/
+  laws : List (String × Minidregg.Compiler.ObjectiveBendLaw.LawExpr)
+  lawsExact : packageLawsAt config snapshot request.pin = .ok laws
+  /-- Every field the package's laws read is a top-level natural or boolean field of the declared
+  state type. -/
+  fieldsKnown : ObjectRecord.lawFieldIssue request.stateType laws = none
+  /-- A seed is admitted by the seed law (the package's laws, then the creator's), over no old state. -/
   seedJudged : ∀ seed, request.seed = some seed →
-    ObjectRecord.admitSeed request.record (seedFacts request height) seed = .ok ()
+    ObjectRecord.admitSeed (request.record laws) (seedFacts request height) seed = .ok ()
 
   /-- The declared state type is first-order data. -/
   data : request.stateType.isData = true
   posts : List Post
   postsExact : posts = postAt snapshot (objectCell config.domain request.object)
-      (objectImage request.object request.record) ::
+      (objectImage request.object (request.record laws)) ::
     (request.seed.map (seedPost config snapshot request)).toList
 
 def create {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
@@ -2699,20 +2723,26 @@ def create {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
   | .ok none =>
     if published : (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain request.pin))).isSome = true then
       if data : request.stateType.isData = true then
+      match lawsExact : packageLawsAt config snapshot request.pin with
+      | .error reason => .error reason
+      | .ok laws =>
+      match fieldsKnown : ObjectRecord.lawFieldIssue request.stateType laws with
+      | some field => .error (.lawField field)
+      | none =>
       match seedPlan : request.seed with
       | none =>
-        .ok ⟨absent, published, (fun _ h => by rw [seedPlan] at h; cases h),
+        .ok ⟨absent, published, (fun _ h => by rw [seedPlan] at h; cases h), laws, lawsExact, fieldsKnown,
           (fun _ h => by rw [seedPlan] at h; cases h), data, _, rfl⟩
       | some seed =>
         match stateRead : readState config snapshot request.object with
         | .error reason => .error reason
         | .ok (some _) => .error .stateExists
         | .ok none =>
-          match judged : ObjectRecord.admitSeed request.record (seedFacts request height) seed with
+          match judged : ObjectRecord.admitSeed (request.record laws) (seedFacts request height) seed with
           | .error reason => .error (.objectWrite reason)
           | .ok () =>
             .ok ⟨absent, published,
-              (fun _ h => by rw [seedPlan] at h; cases h; exact stateRead),
+              (fun _ h => by rw [seedPlan] at h; cases h; exact stateRead), laws, lawsExact, fieldsKnown,
               (fun _ h => by rw [seedPlan] at h; cases h; exact judged), data, _, rfl⟩
       else .error .stateTypeNotData
     else .error .pinUnpublished
@@ -4615,16 +4645,16 @@ theorem Publication.retention_cells_have_payer {rootBytes : Bytes → Digest} {c
   rw [each post member]; rfl
 
 /-- **The record a creation installs is what the post-state holds**: read back from the bytes
-the creation commits, the object's record is `request.record`. -/
+the creation commits, the object's record is `(request.record created.laws) created.laws`. -/
 theorem Creation.object_installed {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : CreateRequest} (created : Creation config snapshot height request) :
-    objectAt config (afterPosts snapshot created.posts) request.object = some request.record := by
+    objectAt config (afterPosts snapshot created.posts) request.object = some (request.record created.laws) := by
   have headBytes : afterPosts snapshot
-      (postAt snapshot (objectCell config.domain request.object) (objectImage request.object request.record) ::
+      (postAt snapshot (objectCell config.domain request.object) (objectImage request.object (request.record created.laws)) ::
         (request.seed.map (seedPost config snapshot request)).toList)
-      (objectCell config.domain request.object) = objectImage request.object request.record :=
+      (objectCell config.domain request.object) = objectImage request.object (request.record created.laws) :=
     afterPosts_first snapshot
-      (postAt snapshot (objectCell config.domain request.object) (objectImage request.object request.record))
+      (postAt snapshot (objectCell config.domain request.object) (objectImage request.object (request.record created.laws)))
       (request.seed.map (seedPost config snapshot request)).toList
   unfold objectAt
   rw [created.postsExact, headBytes]
@@ -4632,19 +4662,22 @@ theorem Creation.object_installed {rootBytes : Bytes → Digest} {config : Confi
 
 /-- **`create_installs_pin`.** An admitted creation installs one record, read back from the
 post-state it commits; the law that will judge every write of that object is the pin clause of
-exactly the package the request pins (published: `created.published`), then the creator's law. -/
+exactly the package the request pins (published: `created.published`), then that package's own
+enforced laws (read from its package cell, never from the request), then the creator's law. -/
 theorem create_installs_pin {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : CreateRequest} {created : Creation config snapshot height request}
     (_admitted : create config snapshot height request = .ok created) :
-    objectAt config (afterPosts snapshot created.posts) request.object = some request.record ∧
-      request.record.pin = request.pin ∧
-      request.record.effectiveLaw =
-        Minidregg.Pred.Pred.all [ObjectRecord.pinClause request.pin, request.law] ∧
+    objectAt config (afterPosts snapshot created.posts) request.object = some (request.record created.laws) ∧
+      (request.record created.laws).pin = request.pin ∧
+      (request.record created.laws).effectiveLaw =
+        Minidregg.Pred.Pred.all [ObjectRecord.pinClause request.pin,
+          Minidregg.Compiler.ObjectiveBendLaw.packageLaw created.laws, request.law] ∧
+      packageLawsAt config snapshot request.pin = .ok created.laws ∧
       (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain request.pin))).isSome = true :=
-  ⟨created.object_installed, rfl, rfl, created.published⟩
+  ⟨created.object_installed, rfl, rfl, created.lawsExact, created.published⟩
 
-/-- **`create_seed_judged`.** An admitted creation with a seed installs it only if the creator's
-law accepts it over no old state (turn 4, no package): the object is not born violating its own
+/-- **`create_seed_judged`.** An admitted creation with a seed installs it only if the package's
+laws and the creator's law accept it over no old state (turn 4, no package): the object is not born violating its own
 state clauses. The pin clause is not asked (`seed_teeth`: the same value is refused as a write). -/
 theorem create_seed_judged {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : CreateRequest} {created : Creation config snapshot height request}
@@ -4652,7 +4685,8 @@ theorem create_seed_judged {rootBytes : Bytes → Digest} {config : Config} {sna
     (seeded : request.seed = some seed) :
     ∃ before after,
       ObjectRecord.views (seedFacts request height) none seed = some (before, after) ∧
-        Minidregg.Pred.eval request.law before after = true ∧
+        Minidregg.Pred.eval (Minidregg.Pred.Pred.all [Minidregg.Compiler.ObjectiveBendLaw.packageLaw created.laws,
+          request.law]) before after = true ∧
         readState config snapshot request.object = .ok none ∧
         seedPost config snapshot request seed ∈ created.posts := by
   obtain ⟨⟨before, after, viewed, accepted⟩, _⟩ :=
@@ -4661,17 +4695,20 @@ theorem create_seed_judged {rootBytes : Bytes → Digest} {config : Config} {sna
   rw [created.postsExact, seeded]
   simp
 
-/-- **`create_seed_refused_names_clause`.** A seed the creator's law refuses is refused, and the
-refusal names the failing clause of the creator's law on the seed's own views. -/
+/-- **`create_seed_refused_names_clause`.** A seed the seed law (the package's laws, then the
+creator's) refuses is refused, and the refusal names the failing clause on the seed's own views. -/
 theorem create_seed_refused_names_clause {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {request : CreateRequest} {seed : Data}
     {reason : ObjectRecord.WriteRefusal}
     (absent : readObject config snapshot request.object = .ok none)
     (published : (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain request.pin))).isSome = true)
     (data : request.stateType.isData = true)
+    {laws : List (String × Minidregg.Compiler.ObjectiveBendLaw.LawExpr)}
+    (lawsExact : packageLawsAt config snapshot request.pin = .ok laws)
+    (fieldsKnown : ObjectRecord.lawFieldIssue request.stateType laws = none)
     (seeded : request.seed = some seed)
     (fresh : readState config snapshot request.object = .ok none)
-    (refused : ObjectRecord.admitSeed request.record (seedFacts request height) seed = .error reason) :
+    (refused : ObjectRecord.admitSeed (request.record laws) (seedFacts request height) seed = .error reason) :
     create config snapshot height request = .error (.objectWrite reason) := by
   unfold create
   split
@@ -4680,16 +4717,23 @@ theorem create_seed_refused_names_clause {rootBytes : Bytes → Digest} {config 
   · rename_i found
     rw [dif_pos published, dif_pos data]
     split
-    next plan => rw [seeded] at plan; cases plan
-    next seed2 plan =>
-      rw [seeded] at plan; cases plan
+    next reason1 read => rw [lawsExact] at read; cases read
+    next laws2 read =>
+      rw [lawsExact] at read; cases read
       split
-      next reason2 sr => rw [fresh] at sr; cases sr
-      next found2 sr => rw [fresh] at sr; cases sr
-      next sr =>
+      next field issue => rw [fieldsKnown] at issue; cases issue
+      next issue =>
         split
-        next reason3 judged => rw [refused] at judged; cases judged; rfl
-        next judged => rw [refused] at judged; cases judged
+        next plan => rw [seeded] at plan; cases plan
+        next seed2 plan =>
+          rw [seeded] at plan; cases plan
+          split
+          next reason2 sr => rw [fresh] at sr; cases sr
+          next found2 sr => rw [fresh] at sr; cases sr
+          next sr =>
+            split
+            next reason3 judged => rw [refused] at judged; cases judged; rfl
+            next judged => rw [refused] at judged; cases judged
 
 /-- **`pin_not_removable`.** Whatever turn commits `posts` on a snapshot where the object's
 record reads as `record`, if no post lands on the object's record coordinate the record reads
@@ -4703,7 +4747,8 @@ theorem pin_not_removable {rootBytes : Bytes → Digest} {config : Config} {snap
     (read : readObject config snapshot object = .ok (some record))
     (unwritten : ∀ post ∈ posts, post.cell ≠ objectCell config.domain object) :
     objectAt config (afterPosts snapshot posts) object = some record ∧
-      record.effectiveLaw = Minidregg.Pred.Pred.all [Minidregg.Pred.objectivePin record.pins, record.law] := by
+      record.effectiveLaw = Minidregg.Pred.Pred.all [Minidregg.Pred.objectivePin record.pins,
+        Minidregg.Compiler.ObjectiveBendLaw.packageLaw record.packageLaws, record.law] := by
   refine ⟨?_, rfl⟩
   unfold objectAt
   rw [afterPosts_unwritten snapshot _ _ unwritten]
@@ -4715,7 +4760,7 @@ theorem Creation.retention_cells_have_payer {rootBytes : Bytes → Digest} {conf
     {snapshot : Snapshot rootBytes} {height : Nat} {request : CreateRequest}
     (created : Creation config snapshot height request) :
     ∀ post ∈ created.posts,
-      payerOfBytes config (afterPosts snapshot created.posts) post.bytes = some request.record.payer := by
+      payerOfBytes config (afterPosts snapshot created.posts) post.bytes = some (request.record created.laws).payer := by
   intro post member
   rw [created.postsExact] at member
   rcases List.mem_cons.mp member with head | tail
@@ -4726,7 +4771,7 @@ theorem Creation.retention_cells_have_payer {rootBytes : Bytes → Digest} {conf
     | some seed =>
       simp only [seeded, Option.map_some, Option.toList_some, List.mem_singleton] at tail
       subst tail
-      exact payer_state_image config _ request.object _ request.record created.object_installed
+      exact payer_state_image config _ request.object _ (request.record created.laws) created.object_installed
 
 theorem decide_activity {slot decided : AnswerSlot.Slot} {subject : SubjectId} {height : Nat}
     {decision : AnswerSlot.Decision} (ok : AnswerSlot.decide slot subject height decision = .ok decided) :

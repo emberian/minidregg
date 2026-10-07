@@ -65,19 +65,6 @@ open Minidregg.Theory.ObjectiveBendDemandData (Data)
 open Minidregg.Pred (Slot)
 set_option autoImplicit false
 
-/-- Every field a law reads is a plain name (`ObjectRecord.plainName`). -/
-def LawRef.plain : LawRef → Bool
-  | .field name => plainName name
-  | _ => true
-
-/-- Every field a law names is a law field name. -/
-def LawExpr.fieldsPlain : LawExpr → Bool
-  | .eqC ref _ | .leC ref _ | .inC ref _ => ref.plain
-  | .eqR left right | .leR left right | .leROff left right _ => left.plain && right.plain
-  | .monotone field | .writeOnce field => plainName field
-  | .not body => body.fieldsPlain
-  | .and left right | .or left right | .implies left right => left.fieldsPlain && right.fieldsPlain
-
 /-- What a reference reads on the new state of a write under `facts`. -/
 def LawRef.read (facts : Facts) (new : Data) : LawRef → Option Int
   | .field name => fieldOf name new
@@ -124,16 +111,6 @@ def LawExpr.denote (facts : Facts) (old : Option Data) (new : Data) : LawExpr �
   | .or left right => left.denote facts old new || right.denote facts old new
   | .implies premise conclusion => !premise.denote facts old new || conclusion.denote facts old new
 
-/-! ## Compilation to the kernel's predicate -/
-
-/-- The view slot a reference reads (`ObjectRecord.stateSlots`, `Facts.slots`). -/
-def LawRef.slot : LawRef → Slot
-  | .field name => "state/" ++ name
-  | .subject => "request/subject"
-  | .caller => "request/caller"
-  | .height => "request/height"
-  | .turn => "request/turn"
-
 end Minidregg.Compiler.ObjectiveBendLaw
 
 namespace Minidregg.Kernel.ObjectLaw
@@ -142,21 +119,6 @@ open Minidregg.Compiler.ObjectiveBendLaw
 open Minidregg.Theory.ObjectiveBendDemandData (Data)
 open Minidregg.Pred (Pred State Slot eval)
 set_option autoImplicit false
-
-/-- The predicate the kernel installs for a law. -/
-def compile : LawExpr → Pred
-  | .eqC ref value => .eq ref.slot value
-  | .leC ref value => .le ref.slot value
-  | .inC ref values => .memberOf ref.slot values
-  | .eqR left right => .eqSlots left.slot right.slot
-  | .leR left right => .leSlots left.slot right.slot
-  | .leROff left right offset => .leSlotsOff left.slot right.slot offset
-  | .monotone field => .monotone ("state/" ++ field)
-  | .writeOnce field => .writeOnce ("state/" ++ field)
-  | .not body => .not (compile body)
-  | .and left right => Pred.all [compile left, compile right]
-  | .or left right => Pred.any [compile left, compile right]
-  | .implies premise conclusion => Pred.any [.not (compile premise), compile conclusion]
 
 /-! ## Reading a view -/
 
@@ -607,6 +569,46 @@ theorem compile_sound (facts : Facts) (old : Option Data) (new : Data) (before a
         ← ihConclusion plain.2]
       simp [Minidregg.Pred.eval_not]
 
+/-! ## A package's laws hold on every write the kernel admits -/
+
+/-- **The installed conjunction means every law.** On the views of a write, if the package law
+(`packageLaw`) evaluates true, every law of the package holds in its own meaning. -/
+theorem packageLaw_sound (facts : Facts) (old : Option Data) (new : Data) (before after : State)
+    (viewed : views facts old new = some (before, after)) (laws : List (String × LawExpr))
+    (holds : eval (packageLaw laws) before after = true) :
+    ∀ law ∈ laws, law.2.denote facts old new = true := by
+  intro law member
+  unfold packageLaw at holds
+  rw [Minidregg.Pred.eval_all, List.all_eq_true] at holds
+  have one := holds _ (List.mem_map_of_mem member)
+  by_cases plain : law.2.fieldsPlain = true
+  · simp only [plain, if_true] at one
+    rw [← compile_sound facts old new before after viewed law.2 plain]
+    exact one
+  · simp only [plain] at one
+    simp [Minidregg.Pred.eval_any] at one
+
+/-- **`package_law_enforced`**: every write of an object's declared state that the kernel's
+judgment admits (`ObjectRecord.admitWrite`, the judgment of births, deliveries, call frames and
+messages) satisfies every law of the object's package, in the law's own meaning over the data. -/
+theorem package_law_enforced (record : ObjectRecord) (facts : Facts) (old : Option Data) (new : Data)
+    (admitted : admitWrite record facts old new = .ok ()) :
+    ∀ law ∈ record.packageLaws, law.2.denote facts old new = true := by
+  obtain ⟨⟨before, after, viewed, accepted⟩, _⟩ := (admitWrite_ok_iff record facts old new).mp admitted
+  have packaged := ((effectiveLaw_accepts_iff record before after).mp accepted).2.1
+  exact packageLaw_sound facts old new before after viewed record.packageLaws packaged
+
+/-- **`package_law_enforced`, the seed**: an object's initial state is admitted only if every law
+of its package holds on it (over no old state). -/
+theorem package_law_enforced_seed (record : ObjectRecord) (facts : Facts) (seed : Data)
+    (admitted : admitSeed record facts seed = .ok ()) :
+    ∀ law ∈ record.packageLaws, law.2.denote facts none seed = true := by
+  obtain ⟨⟨before, after, viewed, accepted⟩, _⟩ := (admitSeed_ok_iff record facts seed).mp admitted
+  unfold ObjectRecord.seedLaw at accepted
+  rw [Minidregg.Pred.eval_all] at accepted
+  simp only [List.all_cons, List.all_nil, Bool.and_true, Bool.and_eq_true] at accepted
+  exact packageLaw_sound facts none seed before after viewed record.packageLaws accepted.1
+
 /-! ### The premise is inhabited, and the meaning decides
 
 A tally whose law is `new.total <= 1000 and monotone(total)`: the views of a write exist, the
@@ -642,6 +644,9 @@ theorem tally_meaning_decides :
 #assert_axioms old_view_reads_field
 #assert_axioms views_parts
 #assert_axioms compile_sound
+#assert_axioms packageLaw_sound
+#assert_axioms package_law_enforced
+#assert_axioms package_law_enforced_seed
 #assert_axioms tally_views_inhabited
 #assert_axioms tally_meaning_decides
 end Minidregg.Kernel.ObjectLaw

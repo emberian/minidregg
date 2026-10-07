@@ -594,23 +594,40 @@ view (`ObjectRecord.views`) carries the same slot, first, and every object's jud
 with the clause for its pinned package (`ObjectRecord.effectiveLaw`; see the object bullet
 above), so the creator's own law can read `objective/artifact` too.
 
-## Three things called "law" or "requires"
+## Four things called "law", "claim" or "requires"
 
 - **A cell law** (`Pred`) is a decidable predicate over a write's old and new projected
   state and the request: the admission judge for every write, whoever proposed it. An
   object's `law` in its record is one.
+- **A package `law NAME: EXPR`** (top level of the package's entry module) is ENFORCED: the
+  kernel installs it on every object created from the package and judges every write of the
+  object's declared state by it. The fragment (`Compiler/ObjectiveBendLaw.lean`) is exactly
+  what compiles to `Pred`: `REF == INT`, `REF <= INT`, `REF in [INT, ...]`, `REF == REF`,
+  `REF <= REF`, `REF <= REF + INT`, `monotone(FIELD)`, `writeOnce(FIELD)`, combined with
+  `not`, `and`, `or`, `implies`; `REF` is `new.FIELD` (a top-level natural or boolean field of
+  the declared state) or `request.subject`/`caller`/`height`/`turn`. Anything else refuses at
+  parse (`law outside the enforced fragment: ...`). The source artifact carries the laws and its
+  identity commits them; the receiver's replay recomputes them (a tampered law is refused,
+  `PublicationReplay` row 5). `create` and ADOPT read them from the pinned package's cell, never
+  from the request, and refuse a law reading a field the declared state type does not hold
+  (`lawField`). The judged law is `all [pin, package laws, creator's law]`; the seed is judged by
+  `all [package laws, creator's law]`. Theorems: `Kernel.ObjectLaw.compile_sound` (the compiled
+  predicate evaluates to the law's own meaning over the data, `LawExpr.denote`),
+  `package_law_enforced` (every admitted write satisfies every package law),
+  `Kernel.ObjectLawEnforced.package_law_not_removable`, and the teeth `capped_tally_teeth` over
+  `tests/objective-native/CappedTally.obend`.
 - **A spec `claim name(args): expr`** in `.obend` elaborates to a hidden knot field typed to
   return Bool and is listed in `SpecMeta` with status `unchecked`. Nothing evaluates or
   discharges it, and it never reaches admission; `claim impossible: false` is accepted (probe
   W08). It was spelled `law` until 2026-10-07; that spelling now refuses at parse
-  (`law_keyword_refused`): in `.obend`, `law` is reserved for an ENFORCED predicate or an
-  accepted proof obligation (GPT-6 row G), and an unchecked property must not borrow the word.
+  (`law_keyword_refused`): in `.obend`, `law` names an ENFORCED predicate (GPT-6 row G: a
+  top-level package law, above), and an unchecked property must not borrow the word.
 - **A spec `requires m(…)`** declares a member needed from the final self; it is checked
   (above). It is not a precondition.
 
-`.obend` has no form for stating an object's admission law (`invariant`, `guard`, `permit`,
-`forbid` compiled to `Pred` are a design, not built), so a program cannot yet state the law
-of its own object.
+A package states its objects' admission law with top-level `law` declarations (above). A law
+reads the declared state only through the fragment; nested paths (`new.a.b`) are refused in
+edition 1.
 
 ## What is proved
 
