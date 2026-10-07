@@ -91,11 +91,11 @@ theorem gatewayRequest_subject (federation : FederationId) (authority : AuthStat
 variable {deployment : Deployment} {durable : Durable}
 variable {F : Type} [Field F] [DecidableEq F]
 
-structure Prepared (context : Context deployment durable)
+structure Prepared (context : Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
     (height : Nat) (pin : FnGatewayPolicy.Pin) (proposal : Proposal) where
   private mk ::
-  observed : ResourceTargetAdmission.Observed deployment context.directory.directory
+  observed : ResourceTargetAdmission.Observed deployment context.directory
     .object proposal.target proposal.expectedTargetRoot
   contentKind : observed.before.kind = .content
   physicalCurrent : ResourceBirthCodec.physicalRoot (.live observed.before) =
@@ -104,16 +104,16 @@ structure Prepared (context : Context deployment durable)
   semanticsExact : proposal.semantics = profile.semantics
   pinExact : proposal.matchesPin pin = true
 
-def prepare (context : Context deployment durable)
+def prepare (context : Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
     (height : Nat) (pin : FnGatewayPolicy.Pin) (proposal : Proposal) :
     Except String (Prepared context profile federation height pin proposal) :=
   if proposal.canonicalSpec.isEmpty || proposal.canonicalSpec.length > 8192 then
     .error "fn consumer gateway testimony refused"
-  else match context.directory.directory.slots proposal.target with
+  else match context.directory.slots proposal.target with
   | .absent => .error "fn consumer gateway testimony refused"
   | .present _ =>
-      match ResourceTargetAdmission.observe deployment context.directory.directory
+      match ResourceTargetAdmission.observe deployment context.directory
           .object proposal.target proposal.expectedTargetRoot with
       | none => .error "fn consumer gateway testimony refused"
       | some observed =>
@@ -130,18 +130,18 @@ def prepare (context : Context deployment durable)
             else .error "fn consumer gateway testimony refused"
           else .error "fn consumer gateway testimony refused"
 
-variable {context : Context deployment durable}
+variable {context : Context deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
   {height : Nat} {pin : FnGatewayPolicy.Pin} {proposal : Proposal}
 
 def Prepared.wanted (_prepared : Prepared context profile federation height pin proposal) :
     Request .object :=
-  gatewayRequest federation context.authority.snapshot.authState height proposal
+  gatewayRequest federation context.authority.authState height proposal
 
 def project (prepared : Prepared context profile federation height pin proposal)
     (logical : Store.Store (CanonicalCellRegistry.layout prepared.observed.before.kind)) :
     Minidregg.Pred.State :=
-  ⟨WorldKindLawDependencies.targetSelectorSlots context.directory.directory proposal.target ++
+  ⟨WorldKindLawDependencies.targetSelectorSlots context.directory proposal.target ++
     CanonicalRuntimeProfile.requestSlots prepared.wanted ++
     ResourceAuthorityProjection.bytesSlots "context/bytes" 0 (signingBytes proposal) ++
     ResourceAuthorityProjection.bytesSlots "resource/bytes" 0
@@ -158,19 +158,19 @@ def step (prepared : Prepared context profile federation height pin proposal) :
 
 def kindDependencies (prepared : Prepared context profile federation height pin proposal) :
     Option WorldKindLawDependencies.Dependencies :=
-  WorldKindLawDependencies.loadTarget deployment context.directory.directory proposal.target
+  WorldKindLawDependencies.loadTarget deployment context.directory proposal.target
 
 def lawReadGuards (prepared : Prepared context profile federation height pin proposal) :
     Option (List (Nat × Digest)) := do
   let structural ← kindDependencies prepared
-  let sources ← PhysicalLawResolution.readGuards context.authority.snapshot
-    context.directory.directory profile.semantics proposal.target structural.additional
+  let sources ← PhysicalLawResolution.readGuards context.authority
+    context.directory profile.semantics proposal.target structural.additional
   pure (sources ++ structural.readGuards)
 
 def policyConfig (prepared : Prepared context profile federation height pin proposal) :
     ComposedPolicyAdmission.Config F :=
-  PhysicalLawResolution.config profile.compilerProfile context.authority.snapshot
-    context.directory.directory (sourceCapabilityPortal context.authority.snapshot (marker proposal))
+  PhysicalLawResolution.config profile.compilerProfile context.authority
+    context.directory (sourceCapabilityPortal context.authority (marker proposal))
     (step prepared) proposal.target
     ((kindDependencies prepared).map (·.additional) |>.getD [])
 
@@ -178,8 +178,8 @@ def portal (prepared : Prepared context profile federation height pin proposal) 
   (policyConfig prepared).portal
 
 def authorize (prepared : Prepared context profile federation height pin proposal)
-    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot) :
-    Option (Authorized (portal prepared) context.authority.snapshot.authState
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority) :
+    Option (Authorized (portal prepared) context.authority.authState
       prepared.wanted) := do
   let config := policyConfig prepared
   let _ ← lawReadGuards prepared
@@ -192,7 +192,7 @@ def authorize (prepared : Prepared context profile federation height pin proposa
 
 /-- A public success cannot be obtained with missing source custody. -/
 theorem authorize_requires_sources (prepared : Prepared context profile federation height pin proposal)
-    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority)
     (accepted : (authorize prepared signature).isSome = true) :
     (lawReadGuards prepared).isSome = true := by
   cases resolved : lawReadGuards prepared with
@@ -204,16 +204,16 @@ attribute [irreducible] portal
 structure Checked (prepared : Prepared context profile federation height pin proposal)
     (envelope : List UInt8) where
   private mk ::
-  signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot
+  signature : CredentialSignatureAdmission.CheckedSignature context.authority
   envelopeExact : signature.envelopeBytes = envelope
-  authorization : Authorized (portal prepared) context.authority.snapshot.authState
+  authorization : Authorized (portal prepared) context.authority.authState
     prepared.wanted
   authorized : authorize prepared signature = some authorization
 
 def check (native : CredentialSignatureIO.NativeConfig)
     (prepared : Prepared context profile federation height pin proposal)
     (envelope : List UInt8) : IO (Except String (Checked prepared envelope)) := do
-  match ← CredentialSignatureAdmission.verifyNative native context.authority.snapshot
+  match ← CredentialSignatureAdmission.verifyNative native context.authority
       (marker proposal) prepared.wanted envelope with
   | .error _ => return .error "fn consumer gateway testimony refused"
   | .ok signature =>
@@ -244,8 +244,8 @@ theorem readGuard_current
 /-- Shared lower current-law check used by historical Replay and live verified
 admission. It has no durable intent and no caller-supplied frontier authority. -/
 def contextOf {config : NativeHost.Config} (opened : NativeHost.Opened config) :
-    Context config.deployment opened.durable :=
-  ⟨opened.directory, opened.authority⟩
+    Context config.deployment :=
+  (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority)
 
 structure CheckedOpened (config : NativeHost.Config)
     (opened : NativeHost.Opened config) (proposal : Proposal)

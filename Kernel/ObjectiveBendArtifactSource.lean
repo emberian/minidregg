@@ -52,8 +52,7 @@ The receiver can construct this only with the actual signed current observation
 check, plus equality to that read's complete ContentStore. -/
 structure Current {F : Type} [Field F] [DecidableEq F]
     {deployment : ResourceObservationAdmission.Deployment}
-    {durable : ResourceObservationAdmission.Durable}
-    (context : ResourceObservationAdmission.Context deployment durable)
+    (context : ResourceObservationAdmission.Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F)
     {kind : ResourceKind} (wanted : Request kind) (marker : Nat)
     (capability : CapabilityId) (contextBytes : List UInt8)
@@ -70,8 +69,7 @@ structure Current {F : Type} [Field F] [DecidableEq F]
 /-- Callers cannot replace current read evidence with a manifest or root label. -/
 def bindCurrent {F : Type} [Field F] [DecidableEq F]
     {deployment : ResourceObservationAdmission.Deployment}
-    {durable : ResourceObservationAdmission.Durable}
-    {context : ResourceObservationAdmission.Context deployment durable}
+    {context : ResourceObservationAdmission.Context deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
     {kind : ResourceKind} {wanted : Request kind} {marker : Nat}
     {capability : CapabilityId} {contextBytes : List UInt8}

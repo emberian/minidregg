@@ -18,8 +18,8 @@ set_option autoImplicit false
 
 def context {config : NativeHost.Config} {target : NativeHost.Durable}
     (verified : NativeHostReplay.Verified config target) :
-    ResourceObservationAdmission.Context config.deployment verified.opened.durable :=
-  ⟨verified.opened.directory, verified.opened.authority⟩
+    ResourceObservationAdmission.Context config.deployment :=
+  (Minidregg.Compiler.ServedBasis.Ground.full _ verified.opened.directory verified.opened.authority)
 
 def proposal (ingress : Ingress) : FnConsumerFrontierGateway.Proposal :=
   { domain := ingress.spec.domain

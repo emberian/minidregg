@@ -26,7 +26,7 @@ def marker (request : RoomKeyReleaseCodec.Request) : Nat :=
     (RoomKeyReleaseCodec.encode request)).digest.value
 
 def context (prepared : PreparedInvocation deployment profile ambient durable command) :
-    ResourceObservationAdmission.Context deployment durable :=
+    ResourceObservationAdmission.Context deployment :=
   ⟨prepared.directory,prepared.authority⟩
 
 def roomRoot (prepared : PreparedInvocation deployment profile ambient durable command)

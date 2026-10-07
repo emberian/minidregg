@@ -25,8 +25,7 @@ set_option autoImplicit false
 abbrev Entry := Minidregg.Theory.ObjectAudienceRoster.Entry
 variable {F : Type} [Field F] [DecidableEq F]
 variable {deployment : ResourceObservationAdmission.Deployment}
-variable {durable : ResourceObservationAdmission.Durable}
-variable {context : ResourceObservationAdmission.Context deployment durable}
+variable {context : ResourceObservationAdmission.Context deployment}
 variable {profile : CanonicalRuntimeProfile.Profile F}
 variable {wanted : Request .object} {marker : Nat} {capability : CapabilityId}
 variable {contextBytes : List UInt8}
@@ -36,7 +35,7 @@ not be distributed under a grant authorizing only one narrowed field. -/
 def entryMatches (entry : Entry) (stored : StoredCapability .object) : Prop :=
   entry.subject = wanted.subject.value ∧ entry.capability = capability.value ∧
   stored.head.id = capability ∧ stored.head.holder = .subject wanted.subject ∧
-  wanted.subjectKeyEpoch = context.authority.snapshot.authState.subjectKeyEpoch wanted.subject ∧
+  wanted.subjectKeyEpoch = context.authority.authState.subjectKeyEpoch wanted.subject ∧
   stored.head.scope.fields = none
 instance (e : Entry) (s : StoredCapability .object) : Decidable (entryMatches (wanted := wanted) (capability := capability) (context := context) e s) := by
   unfold entryMatches; infer_instance
@@ -49,12 +48,12 @@ def composedConfig (prepared : Preparation (context := context) (profile := prof
   if preserved : CanonicalCellRegistry.instanceBinding prepared.observed.before =
       CanonicalCellRegistry.instanceBinding view then
     match WorldKindLawDependencies.loadPost deployment
-      context.directory.directory wanted.target.value prepared.observed.before view
+      context.directory wanted.target.value prepared.observed.before view
       prepared.observed.present preserved with
     | none => none
     | some dependencies =>
-      some (PhysicalLawResolution.config profile.compilerProfile context.authority.snapshot
-        context.directory.directory (sourceCapabilityPortal context.authority.snapshot marker)
+      some (PhysicalLawResolution.config profile.compilerProfile context.authority
+        context.directory (sourceCapabilityPortal context.authority marker)
         step wanted.target.value dependencies.additional)
   else none
 
@@ -64,11 +63,11 @@ No request-selected list may replace the source-derived kind dependencies. -/
 def readGuards (prepared : Preparation (context := context) (profile := profile)
     (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes)) : Option (List ReadGuard) := do
   let dependencies ← WorldKindLawDependencies.loadTarget deployment
-    context.directory.directory wanted.target.value
-  let sources ← PhysicalLawResolution.readGuards context.authority.snapshot
-    context.directory.directory profile.semantics wanted.target.value dependencies.additional
-  pure (context.authority.readGuards ++ [prepared.clock.readGuard,
-    ⟨⟨wanted.target.value⟩, durable.snapshot.model.roots ⟨wanted.target.value⟩⟩] ++
+    context.directory wanted.target.value
+  let sources ← PhysicalLawResolution.readGuards context.authority
+    context.directory profile.semantics wanted.target.value dependencies.additional
+  pure (context.authorityReadGuards ++ [prepared.clock.readGuard,
+    ⟨⟨wanted.target.value⟩, context.view.model.roots ⟨wanted.target.value⟩⟩] ++
     (dependencies.readGuards ++ sources).map (fun guard => ⟨⟨guard.1⟩, guard.2⟩))
 
 /-- The view is an exact materialized resource selected by a source-owned outer
@@ -108,13 +107,13 @@ structure CheckedView (genesisHeight : Nat) (prepared : Preparation (context := 
     (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes)) (entry : Entry)
     (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry) : Type where
   private mk ::
-  heightExact : wanted.height = genesisHeight + durable.height
+  heightExact : wanted.height = genesisHeight + context.height
   objectRole : view.1 = .content ∨ view.1 = .declaredObject ∨ view.1 = .stream ∨ view.1 = .worldInstance
   stored : StoredCapability .object
-  storedExact : readCapability context.authority.snapshot.cell .object capability = some stored
+  storedExact : readCapability context.authority.cell .object capability = some stored
   principal : entryMatches (wanted := wanted) (capability := capability) (context := context) entry stored
-  lineage : storedLineageCheck context.authority.snapshot.cell context.authority.snapshot.authState.parent stored = true
-  admissible : capabilityAdmissibleCheck stored.head context.authority.snapshot.authState
+  lineage : storedLineageCheck context.authority.cell context.authority.authState.parent stored = true
+  admissible : capabilityAdmissibleCheck stored.head context.authority.authState
     (viewRequest (wanted := wanted) view) = true
   witness : ComposedPolicyAdmission.Witness F
   /-- The composed portal is reconstructed from the indexed physical view.
@@ -129,14 +128,14 @@ def checkView (genesisHeight : Nat) (prepared : Preparation (context := context)
     (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes)) (entry : Entry)
     (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry) :
     Option (CheckedView genesisHeight prepared entry view) := do
-  if heightExact : wanted.height = genesisHeight + durable.height then
+  if heightExact : wanted.height = genesisHeight + context.height then
    if role : view.1 = .content ∨ view.1 = .declaredObject ∨ view.1 = .stream ∨ view.1 = .worldInstance then
-    match selected : readCapability context.authority.snapshot.cell .object capability with
+    match selected : readCapability context.authority.cell .object capability with
     | none => none
     | some stored =>
       if principal : entryMatches (wanted := wanted) (capability := capability) (context := context) entry stored then
-       if lineage : storedLineageCheck context.authority.snapshot.cell context.authority.snapshot.authState.parent stored = true then
-        if admissible : capabilityAdmissibleCheck stored.head context.authority.snapshot.authState
+       if lineage : storedLineageCheck context.authority.cell context.authority.authState.parent stored = true then
+        if admissible : capabilityAdmissibleCheck stored.head context.authority.authState
             (viewRequest (wanted := wanted) view) = true then
          match configExact : viewConfig prepared view with
          | none => none

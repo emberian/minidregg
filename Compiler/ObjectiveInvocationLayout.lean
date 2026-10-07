@@ -75,9 +75,8 @@ def genericSource (capacity : ObjectiveBendDemandCapacity.Profile) (limits : Lim
     | _ => none
 
 section
-variable {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-  {deployment : CanonicalCellRegistry.Deployment}
-  {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+variable {deployment : CanonicalCellRegistry.Deployment}
+  {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
   {profile : ObjectiveBendResultAdapter.Profile} {command : Command} {source : AnnotatedTerm}
   {limits : Limits} {budget : Budget} {capacity : ObjectiveBendDemandCapacity.Profile}
 

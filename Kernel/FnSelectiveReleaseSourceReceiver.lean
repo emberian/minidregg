@@ -27,8 +27,8 @@ def receipt (ingress : Ingress) : Receipt :=
   ⟨transactionId ingress.spec, (event ingress).eventId⟩
 
 def sourceContext (config : NativeHost.Config) (opened : NativeHost.Opened config) :
-    ResourceObservationAdmission.Context config.deployment opened.durable :=
-  ⟨opened.directory, opened.authority⟩
+    ResourceObservationAdmission.Context config.deployment :=
+  (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority)
 
 def replay {config : NativeHost.Config} (opened : NativeHost.Opened config) (ingress : Ingress) :
     Option (Except Unit Receipt) :=

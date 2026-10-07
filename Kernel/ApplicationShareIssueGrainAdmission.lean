@@ -66,7 +66,7 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
   grainAccepted : GrainResourceBirthAdmission.Accepted profile config.deployment
     specialPins durable ambient tariff decoded.source birth grain decoded
   appPrepared : ApplicationShareIssueDelegation.Prepared
-    ⟨birth.prepared.pre.directory, birth.prepared.pre.authority⟩
+    (Minidregg.Compiler.ServedBasis.Ground.full _ birth.prepared.pre.directory birth.prepared.pre.authority)
       profile config.federation ambient.height ingress.spec decoded.source.birth
   appChecked : ApplicationShareIssueDelegation.Checked appPrepared ingress.appEnvelope
   appReadOnly : ∀ guard ∈ ApplicationShareIssueDelegation.readGuards appPrepared, guard.cellId ∉
@@ -115,7 +115,7 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
           profile config.deployment specialPins durable ambient tariff decoded.source
           birth grain native decoded | return .error refused
       let context : ApplicationShareIssueDelegation.Context config.deployment durable :=
-        ⟨birth.prepared.pre.directory, birth.prepared.pre.authority⟩
+        (Minidregg.Compiler.ServedBasis.Ground.full _ birth.prepared.pre.directory birth.prepared.pre.authority)
       let .ok appPrepared := ApplicationShareIssueDelegation.prepare context
           profile config.federation ambient.height ingress.spec decoded.source.birth
         | return .error refused

@@ -1,5 +1,6 @@
 /- Objective-only native scalar/read binding. Exact native constructors and guards;
 no old language AST, checked Book, source evaluator, or authority constructor. -/
+import Compiler.ServedBasis
 import Compiler.BendWorldPlan
 import Compiler.CredentialAuthorityDomainReceiver
 import Kernel.PhysicalResourceReadGuard
@@ -51,9 +52,8 @@ def indexOf (command : Command) (resourceID : Nat) : Option (Fin command.targets
 
 /-- A successful adapter retains a complete sampled preimage from the native
 current directory. A client cannot provide the store or its own admission bit. -/
-structure BoundScalar {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+structure BoundScalar (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (command : Command) (scalar : Scalar) where
   private mk ::
   index : Fin command.targets.length
@@ -62,7 +62,7 @@ structure BoundScalar {durable : DurableReceiverIO.Loaded ResourceBirthCodec.roo
   idExact : command.targets[index].target = scalar.ref.resourceID
   targetRoot : command.targets[index].expectedTargetRoot = scalar.ref.root
   packed : PackedCell CanonicalCellRegistry.registry
-  present : loaded.directory.slots scalar.ref.resourceID = .present packed
+  present : loaded.slots scalar.ref.resourceID = .present packed
   pre : DeclaredEffectCell.Cell
   selected : CanonicalCellRegistry.selectDeclared deployment scalar.ref.resourceID .object packed = some pre
   currentRoot : pre.root = scalar.ref.root
@@ -70,9 +70,8 @@ structure BoundScalar {durable : DurableReceiverIO.Loaded ResourceBirthCodec.roo
   exact store obtained from its preceding native source-derived writes. -/
   guardsExact : Patch.ValidFrom pre.logical (sourcePatch scalar.ref scalar.writes)
 
-def bindScalar {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+def bindScalar (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (command : Command) (scalar : Scalar) : Option (BoundScalar deployment loaded command scalar) := do
   match indexExact : indexOf command scalar.ref.resourceID with
   | none => none
@@ -80,7 +79,7 @@ def bindScalar {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     if kindExact : command.targets[index].kind = .object then
       if idExact : command.targets[index].target = scalar.ref.resourceID then
         if targetRoot : command.targets[index].expectedTargetRoot = scalar.ref.root then
-          match present : loaded.directory.slots scalar.ref.resourceID with
+          match present : loaded.slots scalar.ref.resourceID with
           | .absent => none
           | .present packed =>
             match selected : CanonicalCellRegistry.selectDeclared deployment scalar.ref.resourceID .object packed with
@@ -98,9 +97,8 @@ def bindScalar {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
 
 /-- Ordered correspondence, including the complete native payload of EVERY
 source effect. Refusal cannot erase an effect and claim success on the rest. -/
-inductive Ordered {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+inductive Ordered (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (command : Command) : List Scalar → List BendWorldPlan.Effect → Type where
   | nil : Ordered deployment loaded command [] []
   | cons {scalar : Scalar} {rest : List Scalar} {effects : List BendWorldPlan.Effect}
@@ -108,9 +106,8 @@ inductive Ordered {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootByt
       (tail : Ordered deployment loaded command rest effects) :
       Ordered deployment loaded command (scalar :: rest) (effect bound.index.val scalar :: effects)
 
-def bindOrdered {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+def bindOrdered (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (command : Command) (scalars : List Scalar) :
     Option (Sigma fun effects => Ordered deployment loaded command scalars effects) :=
   match scalars with
@@ -123,33 +120,26 @@ def bindOrdered {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
 /-- Source handles quote the logical schema root. Durable CAS read guards
 quote the physical lifecycle envelope root. Both come from the SAME current
 loaded cell; treating either digest as the other is a receiving bug. -/
-structure BoundRead {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable) (ref : Ref) where
+structure BoundRead (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry) (ref : Ref) where
   private mk ::
   packed : PackedCell CanonicalCellRegistry.registry
-  present : loaded.directory.slots ref.resourceID = .present packed
+  present : loaded.slots ref.resourceID = .present packed
   logicalRoot : packed.payloadRoot = ref.root
-  physicalCurrent : ResourceBirthCodec.physicalRoot (.live packed) =
-    durable.snapshot.model.roots ⟨ref.resourceID⟩
 
-def BoundRead.guard {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable} {ref : Ref}
+def BoundRead.guard {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry} {ref : Ref}
     (bound : BoundRead loaded ref) : Minidregg.Kernel.DurableDataIntent.ReadGuard :=
   ⟨⟨ref.resourceID⟩, ResourceBirthCodec.physicalRoot (.live bound.packed)⟩
 
-def bindRead {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable) (ref : Ref) :
+def bindRead (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry) (ref : Ref) :
     Option (BoundRead loaded ref) :=
-  match present : loaded.directory.slots ref.resourceID with
+  match present : loaded.slots ref.resourceID with
   | .absent => none
   | .present packed =>
     if logicalRoot : packed.payloadRoot = ref.root then
-      some ⟨packed, present, logicalRoot,
-        Minidregg.Kernel.PhysicalResourceReadGuard.current loaded ref.resourceID packed present⟩
+      some ⟨packed, present, logicalRoot⟩
     else none
 
-inductive OrderedReads {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable) :
+inductive OrderedReads (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry) :
     List Ref → List Minidregg.Kernel.DurableDataIntent.ReadGuard → Type where
   | nil : OrderedReads loaded [] []
   | cons {ref : Ref} {rest : List Ref}
@@ -157,8 +147,7 @@ inductive OrderedReads {durable : DurableReceiverIO.Loaded ResourceBirthCodec.ro
       (bound : BoundRead loaded ref) (tail : OrderedReads loaded rest guards) :
       OrderedReads loaded (ref :: rest) (bound.guard :: guards)
 
-def bindReads {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable) (refs : List Ref) :
+def bindReads (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry) (refs : List Ref) :
     Option (Sigma fun guards => OrderedReads loaded refs guards) :=
   match refs with
   | [] => some ⟨[], .nil⟩
@@ -167,14 +156,15 @@ def bindReads {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     let tail ← bindReads loaded rest
     pure ⟨bound.guard :: tail.1, .cons bound tail.2⟩
 
-theorem BoundRead.guard_current {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable} {ref : Ref}
-    (bound : BoundRead loaded ref) :
-    bound.guard.expectedRoot = durable.snapshot.model.roots bound.guard.cellId :=
-  bound.physicalCurrent
+/-- A bound read's guard quotes the physical root the ground holds, for the
+ground whose directory it was bound against. -/
+theorem BoundRead.guard_current {deployment : CanonicalCellRegistry.Deployment}
+    (ground : ServedBasis.Ground deployment) {ref : Ref}
+    (bound : BoundRead ground.directory ref) :
+    bound.guard.expectedRoot = ground.view.model.roots bound.guard.cellId :=
+  ground.physicalCurrent ref.resourceID bound.packed bound.present
 
-theorem ordered_reads_complete {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable} {refs : List Ref}
+theorem ordered_reads_complete {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry} {refs : List Ref}
     {guards : List Minidregg.Kernel.DurableDataIntent.ReadGuard}
     (ordered : OrderedReads loaded refs guards) :
     List.Forall₂ (fun ref guard => ∃ bound : BoundRead loaded ref, guard = bound.guard) refs guards := by
@@ -182,9 +172,8 @@ theorem ordered_reads_complete {durable : DurableReceiverIO.Loaded ResourceBirth
   | nil => exact .nil
   | cons bound tail ih => exact .cons ⟨bound, rfl⟩ ih
 
-structure BoundPlan {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+structure BoundPlan (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (command : Command) (source : NativePlan) where
   private mk ::
   plan : BendWorldPlan.Plan
@@ -195,9 +184,8 @@ structure BoundPlan {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootB
   returnsExact : plan.returns = []
   nativeExact : BendWorldPlan.matchesCommand plan command = true
 
-def bindPlan {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+def bindPlan (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (command : Command) (source : NativePlan) : Option (BoundPlan deployment loaded command source) := do
   if commandDistinct : (command.targets.map Target.target).Nodup then
     if effectsDistinct : (source.effects.map (fun s => s.ref.resourceID)).Nodup then
@@ -210,25 +198,22 @@ def bindPlan {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     else none
   else none
 
-theorem ordered_length {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {deployment : CanonicalCellRegistry.Deployment}
-    {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+theorem ordered_length {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
     {command : Command} {scalars : List Scalar} {effects : List BendWorldPlan.Effect}
     (ordered : Ordered deployment loaded command scalars effects) : effects.length = scalars.length := by
   induction ordered with
   | nil => rfl
   | cons bound tail ih => exact congrArg Nat.succ ih
 
-theorem no_missing_effects {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {deployment : CanonicalCellRegistry.Deployment}
-    {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+theorem no_missing_effects {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
     {command : Command} {source : NativePlan}
     (bound : BoundPlan deployment loaded command source) :
     bound.plan.effects.length = source.effects.length := ordered_length bound.ordered
 
-theorem exact_native_effects {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {deployment : CanonicalCellRegistry.Deployment}
-    {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+theorem exact_native_effects {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
     {command : Command} {source : NativePlan}
     (bound : BoundPlan deployment loaded command source) :
     bound.plan.effects = BendWorldPlan.effectsOf command :=
@@ -241,9 +226,8 @@ theorem write_admitted (ref : Ref) (write : Write) :
 
 /-- Every source before-value is the actual native value at its precise
 ordered prior, including repeated writes to the same field. -/
-theorem source_before_at_prefix {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {deployment : CanonicalCellRegistry.Deployment}
-    {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+theorem source_before_at_prefix {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
     {command : Command} {scalar : Scalar}
     (bound : BoundScalar deployment loaded command scalar)
     (prior suffix : List Write) (write : Write)
@@ -260,32 +244,28 @@ theorem source_before_at_prefix {durable : DurableReceiverIO.Loaded ResourceBirt
     (sourcePatch scalar.ref prior) (sourcePatch scalar.ref (write :: suffix))).mp valid).2
   exact (DeclaredActionLowering.guardedSet_enabled_iff _ _ _ _).mp tail.1
 
-theorem aliased_command_refused {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+theorem aliased_command_refused (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (command : Command) (source : NativePlan)
     (aliased : ¬ (command.targets.map Target.target).Nodup) :
     bindPlan deployment loaded command source = none := by
   simp [bindPlan, aliased]
 
-theorem aliased_effect_refused {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+theorem aliased_effect_refused (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (command : Command) (source : NativePlan)
     (aliased : ¬ (source.effects.map (fun s => s.ref.resourceID)).Nodup) :
     bindPlan deployment loaded command source = none := by
   simp [bindPlan, aliased]
 
-theorem stale_root_impossible {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {deployment : CanonicalCellRegistry.Deployment}
-    {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+theorem stale_root_impossible {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
     {command : Command} {scalar : Scalar}
     (bound : BoundScalar deployment loaded command scalar)
     (stale : bound.pre.root ≠ scalar.ref.root) : False := stale bound.currentRoot
 
-theorem ordered_correspondence {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {deployment : CanonicalCellRegistry.Deployment}
-    {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+theorem ordered_correspondence {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
     {command : Command} {scalars : List Scalar} {effects : List BendWorldPlan.Effect}
     (ordered : Ordered deployment loaded command scalars effects) :
     List.Forall₂ (fun scalar native => ∃ bound : BoundScalar deployment loaded command scalar,

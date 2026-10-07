@@ -47,7 +47,7 @@ structure Accepted (profile : CanonicalRuntimeProfile.Profile F)
         birth.descriptor.fee.payer birth.descriptor.funding with
       auxiliaryCreates := birth.prepared.grants.auxiliaryCreates }
   appPrepared : ApplicationAgentLifetimeGrantDelegation.Prepared
-    ⟨birth.prepared.directory, birth.prepared.authority⟩ profile config.federation
+    (Minidregg.Compiler.ServedBasis.Ground.full _ birth.prepared.directory birth.prepared.authority) profile config.federation
       height ingress.spec birth.descriptor
   appChecked : ApplicationAgentLifetimeGrantDelegation.Checked appPrepared ingress.appEnvelope
   appReadOnly : ∀ guard ∈ ApplicationAgentLifetimeGrantDelegation.readGuards appPrepared, guard.cellId ∉
@@ -97,7 +97,7 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
               auxiliaryCreates := birth.prepared.grants.auxiliaryCreates } :=
           descriptorBytes_injective sourceDescriptorBytes
         let context : ApplicationAgentLifetimeGrantDelegation.Context config.deployment durable :=
-          ⟨birth.prepared.directory, birth.prepared.authority⟩
+          (Minidregg.Compiler.ServedBasis.Ground.full _ birth.prepared.directory birth.prepared.authority)
         let .ok appPrepared := ApplicationAgentLifetimeGrantDelegation.prepare context
           profile config.federation height ingress.spec birth.descriptor
           | return .error refused

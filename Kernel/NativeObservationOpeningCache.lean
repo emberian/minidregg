@@ -64,9 +64,8 @@ theorem resourceViewUsing_exact (opening : OpeningProvider)
 
 /-- Only resource rendering differs. All non-resource views use the original
 controller, including at-height authority. The equality below checks this seam. -/
-def queryResultUsing {deployment : CanonicalCellRegistry.Deployment}
-    {durable : NativeHost.Durable} {F : Type} [Field F] [DecidableEq F]
-    {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
+def queryResultUsing {deployment : CanonicalCellRegistry.Deployment} {F : Type} [Field F] [DecidableEq F]
+    {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation genesisHeight intent)
     (opening : OpeningProvider) : Except RefusalReason (List UInt8) := do
@@ -76,21 +75,20 @@ def queryResultUsing {deployment : CanonicalCellRegistry.Deployment}
       if present : 0 < intent.grants.length then
         let grant := intent.grants.get ⟨0, present⟩
         let checked := accepted.grants ⟨0, present⟩
-        let some stored := CredentialAuthorityState.readCapability context.authority.snapshot.cell
+        let some stored := CredentialAuthorityState.readCapability context.authority.cell
           grant.kind grant.capability | throw .malformed
         let view := resourceViewUsing opening stored.head.scope.fields
           checked.selected.packed checked.selected.accountBalances
           (if query.kind = .account then
-            RunComputeView.load deployment durable.snapshot intent.subject else none)
+            RunComputeView.load deployment context.view intent.subject else none)
         if query.view == .resource then pure (resourceViewCodec.encode view)
         else pure (resourceScopeViewCodec.encode
           (grant.kind, grant.capability.value, stored.head.scope.fields, view))
       else throw .malformed
   | _ => accepted.queryResult
 
-theorem queryResultUsing_exact {deployment : CanonicalCellRegistry.Deployment}
-    {durable : NativeHost.Durable} {F : Type} [Field F] [DecidableEq F]
-    {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
+theorem queryResultUsing_exact {deployment : CanonicalCellRegistry.Deployment} {F : Type} [Field F] [DecidableEq F]
+    {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation genesisHeight intent)
     (opening : OpeningProvider) : queryResultUsing accepted opening = accepted.queryResult := by

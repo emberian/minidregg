@@ -37,9 +37,8 @@ def augment (profile : ObjectiveBendResultAdapter.Profile) (command : Command)
       ⟨⟨target.target,target.expectedTargetRoot⟩,payload,payloadStream.toLawful.decode_encode payload⟩
     pure (effects++[extra])
 
-structure Prepared {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+structure Prepared (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (profile : ObjectiveBendResultAdapter.Profile) (command : Command) (source : AnnotatedTerm)
     (limits : Limits) (budget : Budget) (capacity : ObjectiveBendDemandCapacity.Profile) where
   private mk ::
@@ -70,9 +69,8 @@ structure Prepared {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBy
   nativeExact : BendWorldPlan.matchesCommand plan command = true
   returnsStored : plan.returns.all (storesReturn command) = true
 
-def prepareChecked {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+def prepareChecked (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (profile : ObjectiveBendResultAdapter.Profile) (command : Command) (source : AnnotatedTerm)
     (checked : Checked source []) (limits : Limits) (budget : Budget) (capacity : ObjectiveBendDemandCapacity.Profile) :
     Except ObjectiveBendResultAdapter.Failure (Prepared deployment loaded profile command source limits budget capacity) := do
@@ -111,9 +109,8 @@ def prepareChecked {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBy
         else throw .groundType
       | _ => throw .groundType
     | _ => throw .groundType
-def prepare {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+def prepare (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (profile : ObjectiveBendResultAdapter.Profile) (command : Command) (source : AnnotatedTerm)
     (typeFuel : Nat) (limits : Limits) (budget : Budget) (capacity : ObjectiveBendDemandCapacity.Profile) :
     Except ObjectiveBendResultAdapter.Failure (Prepared deployment loaded profile command source limits budget capacity) := do

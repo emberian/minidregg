@@ -107,7 +107,7 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
         sourceCapabilities,
       factory :: authority :: allocations ++ sources⟩
   let context : ApplicationShareIssueDelegation.Context config.deployment opened.durable :=
-    ⟨prepared.prepared.directory, prepared.prepared.authority⟩
+    (Minidregg.Compiler.ServedBasis.Ground.full _ prepared.prepared.directory prepared.prepared.authority)
   let .ok app := ApplicationShareIssueDelegation.prepare context profile
     config.federation height spec prepared.descriptor
     | throw "share ticket app preparation refused"

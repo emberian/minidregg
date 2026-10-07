@@ -119,7 +119,7 @@ def prepareLoaded {config : NativeHost.Config} {target : NativeHost.Durable}
         sourceCapabilities,
       factory :: authority :: allocations ++ sources⟩
   let context : ApplicationAgentLifetimeGrantDelegation.Context config.deployment opened.durable :=
-    ⟨prepared.prepared.directory, prepared.prepared.authority⟩
+    (Minidregg.Compiler.ServedBasis.Ground.full _ prepared.prepared.directory prepared.prepared.authority)
   let .ok app := ApplicationAgentLifetimeGrantDelegation.prepare context profile
     config.federation height spec prepared.descriptor
     | throw "agent lifetime grant app preparation refused"
