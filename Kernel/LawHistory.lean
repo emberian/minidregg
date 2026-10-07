@@ -62,7 +62,7 @@ theorem authorized_policy_eval {F : Type} [Field F] [DecidableEq F]
 
 variable {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient}
-  {durable : Durable} {command : Command}
+  {ground : Ground deployment} {command : Command}
 
 /-- A source-authenticated component of the effective closure whose selector
 applies to this exact step. Extra inherited restrictions remain in the closure;
@@ -126,7 +126,7 @@ theorem authorized_component_eval (config : ComposedPolicyAdmission.Config F)
 /-- Every checked leg satisfies the complete authenticated effective law on
 exactly the controller's old/new step, including active ambient restrictions. -/
 theorem checked_leg_policy_eval
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command} {envelope : List UInt8}
     (leg : CheckedLeg prepared tuple incidence envelope) :
     let config := policyConfig prepared tuple incidence
@@ -137,7 +137,7 @@ theorem checked_leg_policy_eval
       eval (ResolvedLawCompilation.predicate graph.resolved)
         (step prepared tuple incidence).oldState (step prepared tuple incidence).newState = true := by
   have authorized : Authorized (policyConfig prepared tuple incidence).portal
-      prepared.authority.snapshot.authState (tuple.request incidence).2 := by
+      ground.authority.authState (tuple.request incidence).2 := by
     with_unfolding_all exact leg.authorization
   exact ComposedPolicyAdmission.authorized_effective_law
     (policyConfig prepared tuple incidence) (tuple.request incidence).2 authorized
@@ -145,7 +145,7 @@ theorem checked_leg_policy_eval
 /-- An admitted intersection satisfies every authenticated selected component,
 so application assurances survive additional room, kind or explicit imports. -/
 theorem checked_leg_component_eval
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command} {envelope : List UInt8}
     (leg : CheckedLeg prepared tuple incidence envelope) (law : Pred)
     (installed : ActiveComponent (policyConfig prepared tuple incidence) law) :
