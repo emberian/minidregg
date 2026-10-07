@@ -3337,11 +3337,24 @@ def runFnLocal (fnBinary : String) (args : Array String) (stdoutBound : Nat) :
     | .error error => throw error
   return (exitCode.toNat, output, stderrBytes)
 
+/-- An fn without `--frame` (the production image, fn d420a2b5) answers a `--frame` verb with a
+usage refusal (exit 5) and prints no frame. Mini requires `--frame` on identity, status, position,
+ack and poll (`protocol/fn/images.json`), so that answer is refused by this name, never reported
+as an unreadable frame. -/
+def fnFrameUnsupported (exitCode : Nat) (output : List UInt8) : Bool :=
+  match FnOutcome.classify exitCode with
+  | some .usage => (FnWire.frameOfStdout output).isNone
+  | _ => false
+
+def fnNoFrameError (verb : String) : IO.Error :=
+  IO.userError s!"fn {verb}: this fn has no --frame (it refused the flag as usage, exit 5); Mini requires an fn with --frame on identity, status, position, ack and poll (fn 6679dae0e or later, protocol/fn/images.json)"
+
 /-- The refusal of a `--frame` verb names fn's outcome class and the reason read from the printed
 frame (`Host.FnOutcome`): refused, uncertain, fault, usage and the transport classes stay
-distinct. -/
+distinct; an fn without `--frame` is named as such (`fnNoFrameError`). -/
 def fnLocalFrameRefusal (verb : String) (exitCode : Nat) (output : List UInt8)
     (stderrBytes : ByteArray) : IO.Error :=
+  if fnFrameUnsupported exitCode output then fnNoFrameError verb else
   IO.userError s!"{FnOutcome.describe verb exitCode (FnOutcome.frameReason output)} (stderrPrefixBytes={stderrBytes.size})"
 
 def fnConsumerAscii (scope : FnPollScopePin) : IO String := do
@@ -3366,6 +3379,7 @@ def queryFnIdentity (fnBinary : String) (controlPath : String) : IO FnWire.Ident
   | .ok (.refused word) =>
       throw (IO.userError s!"fn identity refused ({word}) (exit {exitCode}, stderrPrefixBytes={stderrBytes.size})")
   | .error refusal =>
+      if fnFrameUnsupported exitCode output then throw (fnNoFrameError "identity")
       throw (IO.userError s!"fn identity frame refused: {refusal.fnWord} (exit {exitCode}, stderrPrefixBytes={stderrBytes.size})")
 
 /-- The running owner is the pinned store, before anything is asked of it. -/
@@ -3465,6 +3479,7 @@ def runFnConsumerPollFrame (fnBinary : String) (scope : FnPollScopePin)
         pure (cursor, record)
     | .ok _ => throw (fnLocalFrameRefusal "authenticated local consumer poll" exitCode output stderrBytes)
     | .error refusal =>
+        if fnFrameUnsupported exitCode output then throw (fnNoFrameError "consumer poll")
         throw (IO.userError s!"fn poll frame refused: {refusal.fnWord} (exit {exitCode}, stderrPrefixBytes={stderrBytes.size})")
   let cursor ← readBoundedBytes cursorPath FnWire.maxCursorOctets
   let event ← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes
