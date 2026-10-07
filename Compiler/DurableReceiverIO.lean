@@ -1476,7 +1476,8 @@ def Loaded.headSpentRoot {rootBytes : List UInt8 → Digest} (transport : Transp
             | none => return .error "durable head entry missing"
         | .ok none => return .error "durable store is not initialized"
         | .error message => return .error message
-  match DurableHistory.Head.verify key height tag loaded.chain frontier with
+  match DurableHistory.Head.verify (DurableHistory.StoreIdentity.ofOpen key loaded.logStart) height tag
+      loaded.chain frontier with
   | .ok head => return .ok head.spentRoot
   | .error refusal => return .error refusal.message
 
