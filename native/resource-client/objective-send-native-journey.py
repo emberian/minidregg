@@ -32,11 +32,24 @@ inbox and runs it with `request/caller` the sender and no subject.
                 (`none`, no reference): the queued send is refunded.
   S7 shape      a send to a decided slot is refused `notPipelinable`; to a cell with no record `notAnObject`; an
                 invocation that sends with no postage envelope is refused `uncovered`. Nothing commits.
+  S8 interface  (row F) poster.relay(counter, bounce, 1): `bounce`'s Plan admits `send`, and a delivered message
+                has no paying account for onward sends, so the SEND is refused `notDeliverable` naming (counter,
+                bounce): no fee, no postage escrowed, no message, no slot. An unknown method is refused
+                `notCallable`, arguments that do not type `argumentType`, all at the send. The same relay naming
+                `deposit` installs and delivers (+1).
+  S9 resolved   (row F) poster.relayVia(dir, bounce, 3): the pipelined send's target is known only when the lookup
+                resolves, so `Deliverable` is decided then, at the RESOLVED object: the lookup decides `ref counter`,
+                the queued `bounce` is NOT forwarded (inbox (poster, counter) unchanged) and its postage is REFUNDED
+                to the sponsor; the (poster, dir) purse ends empty.
 
 PLANTS (self-test: the named fault is put in the WORLD, so a check that must hold fails and its row goes red):
   vault-open      the vault is created permit-all: the S4 delivery succeeds         -> S4 red
   dir-empty       the directory names no object: S5's deposit is refunded           -> S5 red
   roomy-postage   S6's postage covers the lookup: its slot is decided `reply`       -> S6 red
+  relay-deposit   S8's sending-method relay names `deposit` (deliverable): admitted -> S8 red
+The kernel check itself is planted by building the Host with `ObjectiveCall.Mail.send` not consulting
+`deliverable` (the pre-row-F kernel): S8's relay then installs, escrows PRICE, and its delivery decides `broken`
+("a delivered message sends") -- S8 red, and S9's bounce is forwarded instead of refunded -- S9 red.
 ROOT/transcript holds every command's exact output; ROOT/results.json every row; ROOT/groups.tsv one line per
 journey row. Exit 1 on any red row.
 """
@@ -46,7 +59,12 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from activity_world import World, PERMIT_ALL, TICKS, PRICE, nat, record, eq, any_of, cap  # noqa: E402
 
-PLANTS = {'vault-open': {'S4-failed'}, 'dir-empty': {'S5-forward'}, 'roomy-postage': {'S6-broken'}}
+
+def label(text):
+    return {'tag': 'label', 'value': text}
+
+PLANTS = {'vault-open': {'S4-failed'}, 'dir-empty': {'S5-forward', 'S9-resolved'}, 'roomy-postage': {'S6-broken'},
+          'relay-deposit': {'S8-interface'}}
 ap = argparse.ArgumentParser()
 ap.add_argument('--bin', required=True)
 ap.add_argument('--root', required=True)
@@ -227,6 +245,53 @@ try:
         after = inbox('poster', 'counter', 's7-after')
         w.check('s7-nothing-commits', after['ids'] == before['ids'] and after['sponsor'] == before['sponsor'],
                 {'before': before['ids'], 'after': after['ids']})
+
+    def relay(target, method, amount):
+        return record(target=nat(O[target]), method=label(method), amount=nat(amount))
+
+    with w.group('S8-interface'):
+        sending = 'deposit' if 'relay-deposit' in plants else 'bounce'
+        before = inbox('poster', 'counter', 's8-before')
+        c0 = total('counter', 's8-c0')
+        invoke('s8-sending-method', 'poster', 'relay', relay('counter', sending, 1), 'refused',
+               ['notDeliverable', str(O['counter']), 'bounce', 'Plan admits send'])
+        invoke('s8-unknown-method', 'poster', 'relay', relay('counter', 'nothing', 1), 'refused',
+               ['notCallable', 'nothing'])
+        invoke('s8-ill-typed-args', 'poster', 'relay', relay('counter', 'post', 1), 'refused', 'argumentType')
+        after = inbox('poster', 'counter', 's8-after')
+        w.check('s8-nothing-escrowed', after['ids'] == before['ids'] and after['purse'] == before['purse']
+                and after['sponsor'] == before['sponsor'] and after['collector'] == before['collector'],
+                {'ids': (before['ids'], after['ids']), 'purse': (before['purse'], after['purse']),
+                 'sponsor': after['sponsor'] - before['sponsor']})
+        out = invoke('s8-deliverable-control', 'poster', 'relay', relay('counter', 'deposit', 1), 'installed')
+        m8 = reported(out)
+        if m8 is not None:
+            deliver('s8-deliver-control', 'poster', 'counter', m8, 'installed')
+        w.check('s8-control-delivered', total('counter', 's8-c1') == c0 + 1,
+                None)
+
+    with w.group('S9-resolved'):
+        c0 = total('counter', 's9-c0')
+        target_before = inbox('poster', 'counter', 's9-target-before')
+        out = invoke('s9-relay-via', 'poster', 'relayVia', relay('dir', 'bounce', 3), 'installed')
+        look = reported(out)
+        held = inbox('poster', 'dir', 's9-held')
+        sl = slot(look, 's9-slot-open')
+        w.check('s9-queued-on-slot', len(sl.get('queued', [])) == 1 and held['purse'] == 2 * PRICE,
+                {'queued': len(sl.get('queued', [])), 'purse': held['purse']})
+        deliver('s9-deliver-lookup', 'poster', 'dir', look, 'installed')
+        sl = slot(look, 's9-slot-decided')
+        target_after = inbox('poster', 'counter', 's9-target-after')
+        source = inbox('poster', 'dir', 's9-source-after')
+        w.check('s9-reply-ref', decision(sl) == {'kind': 'reply', 'value': {'tag': 'variant', 'label': 'ref',
+                                                                           'payload': nat(O['counter'])}}, sl)
+        w.check('s9-not-forwarded', target_after['ids'] == target_before['ids']
+                and target_after['purse'] == target_before['purse'], target_after['ids'])
+        w.check('s9-refunded', source['purse'] == 0 and source['sponsor'] - held['sponsor'] == PRICE
+                and source['collector'] - held['collector'] == PRICE,
+                {'purse': source['purse'], 'refund': source['sponsor'] - held['sponsor'],
+                 'fee': source['collector'] - held['collector']})
+        w.check('s9-counter-kept', total('counter', 's9-c1') == c0, None)
 finally:
     w.stop()
 

@@ -76,7 +76,11 @@ is answered in the same turn with `queued {slot}`, the message's id
 (`Inbox.sendId`: this turn's transaction and the send's index), which is also
 the name of its reply slot. A frame's Plan type therefore has labels among
 `call | send` and its response type among `returned | queued`. The turn's sends
-(`Journal.outbox`, in order) become its MAIL (`postMail`): each message is
+(`Journal.outbox`, in order) become its MAIL (`postMail`). A send to an object names
+a method its delivery can run (`Deliverable`, decided before anything is escrowed:
+the method loads there, and its Plan is within `call`, because a delivered message has
+no paying account for onward sends; else `notDeliverable`, `notCallable`, ...;
+`Invocation.sends_deliverable`). Each message is
 pushed onto the per-(sender, target) inbox, bounded at `Inbox.bound` (a full
 queue refuses the turn by name, `queueFull`), with its reply slot opened (decided
 only by the message's delivery, `AnswerSlot.Decider.delivery`), and its postage
@@ -181,6 +185,10 @@ inductive CallRefusal where
   /-- The declaration is not a call method of the pinned package (it does not
   lower, its type is not `view -> args -> Activity<call-only, returned-only, _>`). -/
   | notCallable (target : Nat) (method : String) (reason : String)
+  /-- A send names a method whose Plan type admits `send`: a delivered message has no
+  paying account for onward sends (until the prepaid allowance exists), so the send is
+  refused at the interface, before anything is escrowed (`Mail.send`, `Deliverable`). -/
+  | notDeliverable (target : Nat) (method : String) (reason : String)
   /-- The view or the arguments do not type at the method's declared domains. -/
   | argumentType (target : Nat) (method : String)
   /-- The frame yielded a Plan that is not `call {target, method, args}`. -/
@@ -915,20 +923,72 @@ def holdSlot {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsh
         else .error (.notPipelinable name.value)
       else .error (.notPipelinable name.value)
 
-/-- **Queue one message.** To an object: it must be an object; the message is
-pushed onto the inbox (sender, target), refused `queueFull` at the bound, and
-its reply slot is opened, decided only by its delivery. To a slot: the slot must
-be an open delivery slot (the reply of a message in an inbox); the message is
-queued on it, refused `slotQueueFull` at the bound. Either way its postage is
-credited to the purse of the queue that holds it. -/
+/-- The Plan labels a DELIVERED method may yield: calls only. A delivered message runs
+with no paying account, so a method whose Plan admits `send` cannot be delivered (row F:
+until the prepaid continuation allowance exists, such sends are refused at the interface). -/
+def deliveredPlans : List String := ["call"]
+
+/-- **A method a message to `target` can be delivered to**, decided at the send from the
+snapshot: `target` is an object with declared state, the message's arguments decode, the
+method loads exactly as its delivery's root frame will (`loadMethod` on the record's
+`activePin`, applied to the object's view and the arguments: the same front end, the same
+type check), and its Plan type is within `call`. -/
+structure Deliverable {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (target : Nat) (message : Inbox.Message) where
+  private mk ::
+  record : ObjectRecord
+  recordExact : readObject config snapshot ⟨target⟩ = .ok (some record)
+  view : ObjectState
+  viewExact : readState config snapshot ⟨target⟩ = .ok (some view)
+  args : Data
+  argsExact : decodeDataBytes message.args = some args
+  method : Method config record.activePin message.method (viewData view) args
+  methodExact : loadMethod config target (packageBytes config snapshot record.activePin) record.activePin
+    message.method (viewData view) args = .ok method
+  callsOnly : labelsWithin method.applied.assumptions method.planType deliveredPlans = true
+
+/-- Decide `Deliverable`, refusing by name: `notAnObject`, `stateMissing` (an object with no
+declared state: its delivery could not enter it), `argumentType` (arguments that do not
+decode or type), `notCallable` (anything `loadMethod` refuses: an unknown method, a Plan that
+awaits), `notDeliverable` (a Plan that admits `send`). -/
+def deliverable {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (target : Nat) (message : Inbox.Message) : Except CallRefusal (Deliverable config snapshot target message) :=
+  match recordExact : readObject config snapshot ⟨target⟩ with
+  | .error reason => .error (.kernel reason)
+  | .ok none => .error (.notAnObject target)
+  | .ok (some record) =>
+  match viewExact : readState config snapshot ⟨target⟩ with
+  | .error reason => .error (.kernel reason)
+  | .ok none => .error (.stateMissing target)
+  | .ok (some view) =>
+  match argsExact : decodeDataBytes message.args with
+  | none => .error (.argumentType target message.method)
+  | some args =>
+  match methodExact : loadMethod config target (packageBytes config snapshot record.activePin) record.activePin
+      message.method (viewData view) args with
+  | .error reason => .error reason
+  | .ok method =>
+    if callsOnly : labelsWithin method.applied.assumptions method.planType deliveredPlans = true then
+      .ok ⟨record, recordExact, view, viewExact, args, argsExact, method, methodExact, callsOnly⟩
+    else .error (.notDeliverable target message.method
+      "its Plan admits send: a delivered method cannot send until the prepaid allowance exists")
+
+/-- **Queue one message.** To an object: the target method must be `Deliverable` (decided
+before anything is escrowed: an object, with state, the method loads, its Plan within
+`call`); the message is pushed onto the inbox (sender, target), refused `queueFull` at the
+bound, and its reply slot is opened, decided only by its delivery. To a slot: the slot must
+be an open delivery slot (the reply of a message in an inbox); the message is queued on it,
+refused `slotQueueFull` at the bound. Its target is known only when that reply resolves, so
+`Deliverable` is decided then, when `ObjectiveSend.forward` queues it into the RESOLVED
+destination through this same function, and a refusal there refunds it. Either way its
+postage is credited to the purse of the queue that holds it. -/
 def Mail.send {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     (mail : Mail config snapshot) (message : Inbox.Message) :
     Destination → Except CallRefusal (Mail config snapshot)
   | .object target =>
-    match readObject config snapshot ⟨target⟩ with
-    | .error reason => .error (.kernel reason)
-    | .ok none => .error (.notAnObject target)
-    | .ok (some _) =>
+    match deliverable config snapshot target message with
+    | .error reason => .error reason
+    | .ok _ =>
     match holdInbox config snapshot mail message.sender target with
     | .error reason => .error reason
     | .ok (held, others) =>
@@ -972,6 +1032,7 @@ def postMail {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsh
     match mail.send (messageOf config postage refund out) out.destination with
     | .error reason => .error reason
     | .ok mail => postMail config snapshot postage refund mail rest
+
 
 /-- The posts of the mail: every held inbox and every held slot, against the
 roots the turn read them at. -/
@@ -1020,6 +1081,45 @@ theorem Mail.inboxes_lawful {rootBytes : Bytes → Digest} {config : Config} {sn
   intro held _
   refine ⟨held.readExact, held.lawful, ?_⟩
   rw [held.ends.1, held.ends.2]; rfl
+
+/-- **An admitted send to an object names a deliverable method** (row F, at the interface):
+whenever `Mail.send` queues a message on an object's inbox, the target method loads from the
+object's pinned package exactly as its delivery will (`loadMethod`, the record's `activePin`,
+the object's view, the message's arguments) and its Plan type is within `call`: no `send`.
+The run-time refusal in `ObjectiveSend.runMessage` stays as the backstop for what the send
+cannot see (a nested call into a sending method, an upgrade between send and delivery). -/
+theorem Mail.send_object_deliverable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {mail mail' : Mail config snapshot} {message : Inbox.Message} {target : Nat}
+    (sent : mail.send message (.object target) = .ok mail') :
+    ∃ d : Deliverable config snapshot target message, deliverable config snapshot target message = .ok d ∧
+      loadMethod config target (packageBytes config snapshot d.record.activePin) d.record.activePin message.method
+        (viewData d.view) d.args = .ok d.method ∧
+      labelsWithin d.method.applied.assumptions d.method.planType deliveredPlans = true := by
+  cases found : deliverable config snapshot target message with
+  | error reason => simp only [Mail.send, found] at sent; cases sent
+  | ok d => exact ⟨d, rfl, d.methodExact, d.callsOnly⟩
+
+/-- Every send of a posted mail addressed to an object is `Deliverable` there. -/
+theorem postMail_deliverable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {postage : Capacity} {refund : AccountId} :
+    ∀ {outs : List Outgoing} {mail mail' : Mail config snapshot},
+      postMail config snapshot postage refund mail outs = .ok mail' →
+      ∀ out ∈ outs, ∀ target, out.destination = .object target →
+        ∃ d : Deliverable config snapshot target (messageOf config postage refund out),
+          deliverable config snapshot target (messageOf config postage refund out) = .ok d
+  | [], _, _, _, out, member, _, _ => nomatch member
+  | out :: rest, mail, mail', posted, other, member, target, destination => by
+    simp only [postMail] at posted
+    cases sent : mail.send (messageOf config postage refund out) out.destination with
+    | error reason => rw [sent] at posted; cases posted
+    | ok next =>
+      rw [sent] at posted
+      rcases List.mem_cons.mp member with same | inRest
+      · subst same
+        rw [destination] at sent
+        obtain ⟨d, found, _⟩ := Mail.send_object_deliverable sent
+        exact ⟨d, found⟩
+      · exact postMail_deliverable posted other inRest target destination
 
 /-! ## The invocation turn -/
 
@@ -1194,6 +1294,17 @@ theorem Invocation.conserves {rootBytes : Bytes → Digest} {config : Config} {s
     {height : Nat} {request : InvokeRequest} (invoked : Invocation config snapshot height request) (asset : AssetId) :
     (logicalBook invoked.posted.post.logical).totalAsset asset = (logicalBook invoked.book.logical).totalAsset asset :=
   invoked.posted.conserves asset
+
+/-- **An admitted invocation sends only to deliverable methods**: every send of its call
+tree addressed to an object names a method that loads there with a Plan within `call`
+(`Deliverable`). A send to a sending method was refused `notDeliverable` before the
+invocation's fee or any postage was posted. -/
+theorem Invocation.sends_deliverable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : InvokeRequest} (invoked : Invocation config snapshot height request) :
+    ∀ out ∈ invoked.journal.outbox, ∀ target, out.destination = .object target →
+      ∃ d : Deliverable config snapshot target (messageOf config request.postage request.account out),
+        deliverable config snapshot target (messageOf config request.postage request.account out) = .ok d :=
+  postMail_deliverable invoked.mailExact
 
 /-! ## T2: the re-entry guard -/
 

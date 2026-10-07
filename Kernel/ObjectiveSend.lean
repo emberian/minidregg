@@ -15,7 +15,9 @@ inbox of (sender, target) and opens its reply slot, whose decider is the ROLE
   `reply result` when the call tree returned; otherwise `broken reason`. A
   failure of the delivered method (its law refused a write, it faulted, it ran
   out of the envelope, it is not callable, it tried to send: a delivery has no
-  paying account) is NOT a refusal of the turn: it is a kernel decision, and the
+  paying account; a send to a method whose Plan admits `send` is refused at the send,
+  `ObjectiveCall.Deliverable`, so this is the backstop for a nested call into a sending
+  method or an upgrade between send and delivery) is NOT a refusal of the turn: it is a kernel decision, and the
   message is popped all the same (`MessageRefusal` has no member for any of
   them; `failed_delivery_pops`). A delivery that failed commits no write of its
   call tree.
@@ -24,7 +26,9 @@ inbox of (sender, target) and opens its reply slot, whose decider is the ROLE
   (`ref n`), each is pushed onto the inbox (its sender, n) with its own reply
   slot opened, its postage moving from this inbox's purse to that inbox's purse
   (each forwarded send is paid from its own escrow, never by the resolver); a
-  forward that cannot be queued (a full inbox, a taken slot), and every queued
+  forward that cannot be queued (its method not `Deliverable` at the RESOLVED
+  object, decided now by the same `Mail.send` an invocation's send passes; a full
+  inbox; a taken slot), and every queued
   send when the reply is no reference or the delivery failed, is REFUNDED: its
   postage returns to the account that paid it (`broken NotAReference`).
 * **Paid from the inbox purse only.** The delivery's fee is the message's own
@@ -76,7 +80,10 @@ inductive Outcome where
   | failed (reason : String)
 
 /-- Run a message: `method` of `target` as a root frame, caller the sender, no
-subject, under the message's envelope. A delivered call tree may not send. -/
+subject, under the message's envelope. A delivered call tree may not send: the send
+that queued it already refused a sending method (`ObjectiveCall.Deliverable`); this
+refusal is the backstop for what that check could not see (a nested call into a sending
+method, an upgrade between send and delivery). -/
 def runMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (height : Nat)
     (target : Nat) (message : Inbox.Message) : Outcome :=
   match decodeDataBytes message.args with
@@ -111,8 +118,8 @@ def Outcome.guards {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
 
 /-- **Forward the sends queued on a decided slot** to the object its reply
 names: each is queued on (its sender, that object) with its reply slot opened;
-any that cannot be (no reference, not an object, a full inbox, a taken slot) is
-refunded. Never refuses. -/
+any that cannot be (no reference, not an object, a method not `Deliverable` there, a
+full inbox, a taken slot) is refunded. Never refuses. -/
 def forward {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     (reference : Option Nat) : Mail config snapshot → List Inbox.Message → Mail config snapshot × List Inbox.Message
   | mail, [] => (mail, [])
