@@ -538,7 +538,7 @@ binding in each header; this binding is not claimed to hide enrollment data.
 The clock it names is public (the clock view publishes it). -/
 def challenge (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent) (intentSignature : List UInt8) : Except Refusal Challenge := do
-  let clock ← need .operationRejected (ClockCellDomain.load deployment context.view)
+  let clock ← need .operationRejected (ClockCellDomain.load deployment context.cells)
   challengeAt context profile federation genesisHeight intent clock.clock intentSignature
 
 def checkGrant {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
@@ -1859,8 +1859,8 @@ theorem challenge_absent_target_refused (context : Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
     (genesisHeight : Nat) (intent : Intent) (intentSignature : List UInt8) (grant : GrantRef)
     (single : intent.grants = [grant]) (foot : footprintExact context intent = .ok ())
-    (clock : ClockCellDomain.Loaded deployment context.view)
-    (clockLoaded : ClockCellDomain.load deployment context.view = some clock)
+    (clock : ClockCellDomain.Loaded deployment context.cells)
+    (clockLoaded : ClockCellDomain.load deployment context.cells = some clock)
     (absent : context.directory.slots grant.target = .absent) :
     (challenge context profile federation genesisHeight intent intentSignature).mapError
       preAuthentication = .error (.of .undisclosed) := by
@@ -1895,12 +1895,12 @@ theorem challenge_names_clock {context : Context deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
     {genesisHeight : Nat} {intent : Intent} {issued : Challenge} {intentSignature : List UInt8}
     (h : challenge context profile federation genesisHeight intent intentSignature = .ok issued) :
-    ∃ clock, ClockCellDomain.load deployment context.view = some clock ∧
+    ∃ clock, ClockCellDomain.load deployment context.cells = some clock ∧
       issued.worldRoot = context.worldRoot ∧
       issued.height = genesisHeight + context.height ∧
       issued.clockNow = clock.clock.now ∧ issued.clockSlot = clock.clock.slot := by
   unfold challenge at h
-  cases loaded : ClockCellDomain.load deployment context.view with
+  cases loaded : ClockCellDomain.load deployment context.cells with
   | none => simp [need, loaded, bind, Except.bind] at h
   | some clock =>
     simp only [need, loaded, bind, Except.bind] at h

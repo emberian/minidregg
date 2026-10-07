@@ -143,8 +143,8 @@ structure Prepared (context : Context deployment) (profile : CanonicalRuntimePro
   accountBalances : List (Nat × Int)
   balancesExact : balances context kind wanted.target.value = some accountBalances
   /-- The deployment clock of the snapshot the read is answered from. -/
-  clock : Kernel.ClockCellDomain.Loaded deployment context.view
-  clockLoaded : Kernel.ClockCellDomain.load deployment context.view = some clock
+  clock : Kernel.ClockCellDomain.Loaded deployment context.cells
+  clockLoaded : Kernel.ClockCellDomain.load deployment context.cells = some clock
   kindDependencies : WorldKindLawDependencies.Dependencies
   kindDependenciesExact : WorldKindLawDependencies.loadTarget deployment context.directory
     wanted.target.value = some kindDependencies
@@ -169,7 +169,7 @@ def prepare (context : Context deployment) (profile : CanonicalRuntimeProfile.Pr
                   match balancesExact : balances context kind wanted.target.value with
                   | none => .error (.of .noGrant)
                   | some values =>
-                    match clockLoaded : Kernel.ClockCellDomain.load deployment context.view with
+                    match clockLoaded : Kernel.ClockCellDomain.load deployment context.cells with
                     | none => .error (.of .operationRejected)
                     | some clock =>
                         match dependenciesExact : WorldKindLawDependencies.loadTarget deployment
@@ -479,7 +479,7 @@ theorem read_law_sees_clock (prepared : Prepared context profile wanted marker c
         some (Int.ofNat (prepared.clock.clock.now / Kernel.ClockCell.secondsPerDay)) ∧
       (project prepared logical).get "clock/slot" = some (Int.ofNat prepared.clock.clock.slot) ∧
       Kernel.ClockCell.clockOf prepared.clock.cell.logical = some prepared.clock.clock ∧
-      Kernel.ClockCellDomain.load deployment context.view = some prepared.clock := by
+      Kernel.ClockCellDomain.load deployment context.cells = some prepared.clock := by
   refine ⟨?_, ?_, ?_, prepared.clock.clockExact, ?_⟩
   · simp [project, projectWith, Kernel.ClockCell.slots, Minidregg.Pred.State.get]
   · simp [project, projectWith, Kernel.ClockCell.slots, Minidregg.Pred.State.get]
