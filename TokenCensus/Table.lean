@@ -29,7 +29,7 @@ Minidregg.Assurance.ReactiveLifecycleHistory.Broken.mk | Assurance.ReactiveLifec
 Minidregg.Assurance.ReactiveLifecycleHistory.Expired.mk | Assurance.ReactiveLifecycleHistory | evidence | L2 | 2 proof / 1 data fields; layer-1 review pending
 Minidregg.Assurance.ReactiveLifecycleHistory.Finalized.mk | Assurance.ReactiveLifecycleHistory | evidence | L2 | 0 proof / 2 data fields; layer-1 review pending
 Minidregg.Assurance.ReactiveLifecycleHistory.Notification.mk | Assurance.ReactiveLifecycleHistory | evidence | L2 | 4 proof / 1 data fields; layer-1 review pending
-Minidregg.Assurance.ReactiveLifecycleHistory.Promise.mk | Assurance.ReactiveLifecycleHistory | evidence | L2 | 0 proof / 1 data fields; layer-1 review pending
+Minidregg.Assurance.ReactiveLifecycleHistory.Promise.mk | Assurance.ReactiveLifecycleHistory | evidence | L2 | 0 proof / 1 data fields; layer-1 review pending; mints: Promise.open (opening a promise is the model input; no verdict rests on it)
 Minidregg.Assurance.ReactiveLifecycleHistory.Reaction.mk | Assurance.ReactiveLifecycleHistory | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
 Minidregg.Assurance.SemanticHistoryAccumulator.VerifiedHistoryHead.mk | Assurance.SemanticHistoryAccumulator | evidence | L2 | 5 proof / 4 data fields; layer-1 review pending
 Minidregg.Assurance.SemanticHistoryBcsGame.HistoryBcsGameSecurity.mk | Assurance.SemanticHistoryBcsGame | evidence | L2 | 3 proof / 1 data fields; layer-1 review pending
@@ -37,7 +37,7 @@ Minidregg.Assurance.SemanticHistoryFamily.VerifiedHistoryHead.mk | Assurance.Sem
 Minidregg.Assurance.TransclusionBacklinkHistory.AppliedEffect.mk | Assurance.TransclusionBacklinkHistory | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
 Minidregg.Assurance.TransclusionBacklinkHistory.LinkEvent.mk | Assurance.TransclusionBacklinkHistory | evidence | L2 | 9 proof / 3 data fields; layer-1 review pending
 Minidregg.Assurance.TransclusionBacklinkHistory.Observation.mk | Assurance.TransclusionBacklinkHistory | evidence | L2 | 11 proof / 1 data fields; layer-1 review pending
-Minidregg.Compiler.CanonicalPolicyAdmission.PolicyStepContext.mk | Compiler.CanonicalPolicyAdmission | evidence | L2 | 0 proof / 5 data fields; layer-1 review pending
+Minidregg.Compiler.CanonicalPolicyAdmission.PolicyStepContext.mk | Compiler.CanonicalPolicyAdmission | evidence | L2 | 0 proof / 5 data fields; layer-1 review pending; mints: PolicyStepContext.ofPreparedTuple (projects a real prepared tuple; review pending: the tuple is not itself a census token)
 Minidregg.Compiler.CarriedApplicationProvenance.CarriedIssue.mk | Compiler.CarriedApplicationProvenance | evidence | L2 | 6 proof / 5 data fields; layer-1 review pending
 Minidregg.Compiler.CarriedDispatchProvenance.CarriedDispatchIssue.mk | Compiler.CarriedDispatchProvenance | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
 Minidregg.Compiler.CarriedSegmentIO.AuditedSource.mk | Compiler.CarriedSegmentIO | evidence | L2 | 0 proof / 3 data fields; layer-1 review pending
@@ -49,6 +49,10 @@ Minidregg.Compiler.CredentialAuthorityDomainReceiver.LoadedDirectory.mk | Compil
 Minidregg.Compiler.CredentialAuthorityDomainReceiver.PreparedGrantBatch.mk | Compiler.CredentialAuthorityDomainReceiver | evidence | L2 | 0 proof / 2 data fields; layer-1 review pending
 Minidregg.Compiler.CredentialSignatureAdmission.CheckedSignature.mk | Compiler.CredentialSignatureAdmission | evidence | L2 | 2 proof / 6 data fields; layer-1 review pending
 Minidregg.Compiler.CredentialSignatureAdmission.ReceiverSignature.mk | Compiler.CredentialSignatureAdmission | evidence | L2 | a voucher erased to a value a Prepared record can hold; the oracle verdict it carries is a runtime fact
+Minidregg.Compiler.DurableHistory.Head.mk | Compiler.DurableHistory | evidence | L2 | a verified history head of an opened Store; a genesis head asserts every nullifier and tx id absent; mints: Head.genesis
+Minidregg.Compiler.DurableHistory.RawEntry.mk | Compiler.DurableHistory | encapsulation | L2 | a raw history entry as stored; trusted only after Head.verify checks it at use (kn2-store-open)
+Minidregg.Compiler.DurableHistory.RawNode.mk | Compiler.DurableHistory | encapsulation | L2 | a raw accumulator node as stored; trusted only after Head.verify checks it at use (kn2-store-open)
+Minidregg.Compiler.DurableHistory.StoreIdentity.mk | Compiler.DurableHistory | evidence | L2 | the identity of an opened Store; minted only by the open (kn2-store-open); mints: StoreIdentity.ofOpen
 Minidregg.Compiler.GenericSimplexIO.VerifiedCommit.mk | Compiler.GenericSimplexIO | evidence | L2 | 4 proof / 1 data fields; layer-1 review pending
 Minidregg.Compiler.GrainResourceBirthAuthority.Prepared.mk | Compiler.GrainResourceBirthAuthority | evidence | L2 | 3 proof / 2 data fields; layer-1 review pending
 Minidregg.Compiler.GrainResourceBirthController.PreparedSourceAuthority.mk | Compiler.GrainResourceBirthController | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
@@ -289,17 +293,21 @@ Minidregg.Kernel.NativeObservationController.CheckedGrant.mk | Kernel.NativeObse
 Minidregg.Kernel.NativeObservationController.Selected.mk | Kernel.NativeObservationController | evidence | L2 | 5 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectAudienceInstall.Prepared.mk | Kernel.ObjectAudienceInstall | evidence | L2 | 5 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Abandonment.mk | Kernel.ObjectiveActivity | evidence | L2 | 10 proof / 8 data fields; layer-1 review pending
+Minidregg.Kernel.ObjectiveActivity.Abort.mk | Kernel.ObjectiveActivityUpgrade | evidence | L2 | upgrade-turns (DEPUTY-OB-ENG): proof fields mirror the admitting checks per its audit; L1 theorem pending from OB-ENG
+Minidregg.Kernel.ObjectiveActivity.Adoption.mk | Kernel.ObjectiveActivityUpgrade | evidence | L2 | upgrade-turns (DEPUTY-OB-ENG): proof fields mirror the admitting checks per its audit; L1 theorem pending from OB-ENG
 Minidregg.Kernel.ObjectiveActivity.Birth.mk | Kernel.ObjectiveActivity | evidence | L2 | 15 proof / 11 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Creation.mk | Kernel.ObjectiveActivity | evidence | L2 | 3 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Delivery.mk | Kernel.ObjectiveActivity | evidence | L2 | 23 proof / 20 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Exhaustion.mk | Kernel.ObjectiveActivity | evidence | L2 | 20 proof / 15 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Instantiated.mk | Kernel.ObjectiveActivity | evidence | L2 | 1 proof / 4 data fields; layer-1 review pending
+Minidregg.Kernel.ObjectiveActivity.Migrated.mk | Kernel.ObjectiveActivityUpgrade | evidence | L2 | upgrade-turns (DEPUTY-OB-ENG): proof fields mirror the admitting checks per its audit; L1 theorem pending from OB-ENG
+Minidregg.Kernel.ObjectiveActivity.Migration.mk | Kernel.ObjectiveActivity | evidence | L2 | upgrade-turns ObjectRecord migration (DEPUTY-OB-ENG); L1 theorem pending from OB-ENG
 Minidregg.Kernel.ObjectiveActivity.Postings.mk | Kernel.ObjectiveActivity | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Program.mk | Kernel.ObjectiveActivity | evidence | L2 | 3 proof / 8 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Publication.mk | Kernel.ObjectiveActivity | evidence | L2 | 5 proof / 5 data fields; layer-1 review pending
+Minidregg.Kernel.ObjectiveActivity.Rebirth.mk | Kernel.ObjectiveActivityUpgrade | evidence | L2 | upgrade-turns (DEPUTY-OB-ENG): proof fields mirror the admitting checks per its audit; L1 theorem pending from OB-ENG
 Minidregg.Kernel.ObjectiveActivity.Replay.mk | Kernel.ObjectiveActivity | evidence | L2 | 4 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Resolution.mk | Kernel.ObjectiveActivity | evidence | L2 | 5 proof / 3 data fields; layer-1 review pending
-Minidregg.Kernel.ObjectiveActivity.StateWrite.mk | Kernel.ObjectiveActivity | evidence | L2 | 4 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.TopUp.mk | Kernel.ObjectiveActivity | evidence | L2 | 3 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.TypedData.mk | Kernel.ObjectiveActivity | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivityReceiver.Accepted.mk | Kernel.ObjectiveActivityReceiver | evidence | L2 | 2 proof / 2 data fields; layer-1 review pending
@@ -312,7 +320,7 @@ Minidregg.Kernel.ObjectiveBendNativeAdmission.Core.mk | Kernel.ObjectiveBendNati
 Minidregg.Kernel.ObjectiveBendNativeAdmission.Selection.mk | Kernel.ObjectiveBendNativeAdmission | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveBendNativeAdmission.SourceSelection.mk | Kernel.ObjectiveBendNativeAdmission | evidence | L2 | 9 proof / 4 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveBendNativeInput.AdmittedRead.mk | Kernel.ObjectiveBendNativeInput | evidence | L2 | 1 proof / 9 data fields; layer-1 review pending
-Minidregg.Kernel.ObjectiveBendNativeInput.Bound.mk | Kernel.ObjectiveBendNativeInput | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
+Minidregg.Kernel.ObjectiveBendNativeInput.Bound.mk | Kernel.ObjectiveBendNativeInput | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending; mints: ObjectiveBendNativeInput.bind (review pending: binds by data, no proposition argument)
 Minidregg.Kernel.ObjectiveBendPreparedOutput.Prepared.mk | Kernel.ObjectiveBendPreparedOutput | evidence | L2 | 2 proof / 4 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveBendPublishedPackage.Loaded.mk | Kernel.ObjectiveBendPublishedPackage | evidence | L2 | 7 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveCall.Invocation.mk | Kernel.ObjectiveCall | evidence | L2 | 7 proof / 7 data fields; layer-1 review pending
@@ -351,8 +359,8 @@ Minidregg.Kernel.PayEnrolV2Receiver.Accepted.mk | Kernel.PayEnrolV2Receiver | ev
 Minidregg.Kernel.PayEnrolV2Receiver.AcceptedEnrol.mk | Kernel.PayEnrolV2Receiver | evidence | L2 | 1 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.PayEnrolV2Receiver.Prepared.mk | Kernel.PayEnrolV2Receiver | evidence | L2 | 10 proof / 15 data fields; layer-1 review pending
 Minidregg.Kernel.PayObservationReceiver.DecodedIngress.mk | Kernel.PayObservationReceiver | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
-Minidregg.Kernel.PayObservationReceiver.Planned.mk | Kernel.PayObservationReceiver | evidence | L2 | 5 proof / 9 data fields (the report's decision); layer-1 review pending
-Minidregg.Kernel.PayObservationReceiver.Prepared.mk | Kernel.PayObservationReceiver | evidence | L2 | 6 proof / 9 data fields; layer-1 review pending
+Minidregg.Kernel.PayObservationReceiver.Planned.mk | Kernel.PayObservationReceiver | evidence | L1 Minidregg.Kernel.PayObservationReceiver.Planned.sound | loaded cells exact, tip retained, clock at the tip slot, Book = batch applied
+Minidregg.Kernel.PayObservationReceiver.Prepared.mk | Kernel.PayObservationReceiver | evidence | L1 Minidregg.Kernel.PayObservationReceiver.Prepared.sound | receiver-sourced receipt for the carried envelope, request bound to the pay head; the receipt verdict is L2
 Minidregg.Kernel.PolicyInstallReceiver.AcceptedInstall.mk | Kernel.PolicyInstallReceiver | evidence | L2 | 4 proof / 5 data fields; layer-1 review pending
 Minidregg.Kernel.PolicyInstallReceiver.DecodedIngress.mk | Kernel.PolicyInstallReceiver | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.PolicyInstallReceiver.Prepared.mk | Kernel.PolicyInstallReceiver | evidence | L2 | 9 proof / 8 data fields; layer-1 review pending
@@ -394,20 +402,22 @@ Minidregg.Kernel.SubjectKeyCommitmentAdoption.Accepted.mk | Kernel.SubjectKeyCom
 Minidregg.Kernel.SubjectKeyCommitmentAdoption.AcceptedAdoption.mk | Kernel.SubjectKeyCommitmentAdoption | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.SubjectKeyCommitmentAdoption.DecodedIngress.mk | Kernel.SubjectKeyCommitmentAdoption | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.SubjectKeyCommitmentAdoption.Prepared.mk | Kernel.SubjectKeyCommitmentAdoption | evidence | L2 | 4 proof / 1 data fields; layer-1 review pending
-Minidregg.Kernel.SubjectKeyRotation.Checked.mk | Kernel.Receivers.SubjectKeyRotation | evidence | L2 | 7 proof / 2 data fields (gate result); layer-1 review pending
+Minidregg.Kernel.SubjectKeyRotation.Checked.mk | Kernel.Receivers.SubjectKeyRotation | evidence | L1 Minidregg.Kernel.SubjectKeyRotation.Checked.sound | every gate check is a proof field; sound derives the commitment, succession and freshness via gate_ok_iff
 Minidregg.Kernel.SubjectKeyRotation.DecodedIngress.mk | Kernel.Receivers.SubjectKeyRotation | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
-Minidregg.Kernel.SubjectKeyRotation.Prepared.mk | Kernel.Receivers.SubjectKeyRotation | evidence | L2 | 5 proof / 2 data fields; layer-1 review pending
+Minidregg.Kernel.SubjectKeyRotation.Prepared.mk | Kernel.Receivers.SubjectKeyRotation | evidence | L1 Minidregg.Kernel.SubjectKeyRotation.Prepared.gated_by_possession | the gate ran under the key of the possession signature it holds; that ReceiverSignature is L2
 Minidregg.Kernel.SystemCellDomain.Loaded.mk | Kernel.SystemCellDomain | evidence | L2 | 2 proof / 2 data fields; layer-1 review pending
 Minidregg.Theory.CanonicalReactiveView.PreparedReaction.mk | Theory.CanonicalReactiveView | evidence | L2 | 3 proof / 2 data fields; layer-1 review pending
-Minidregg.Theory.CellState.Materialized.mk | Theory.CellState | evidence | L2 | 0 proof / 1 data fields; layer-1 review pending
+Minidregg.Theory.CellState.Materialized.mk | Theory.CellState | evidence | L2 | 0 proof / 1 data fields; layer-1 review pending; mints: materialize (the root is computed from the logical store by the materializer, not asserted)
 Minidregg.Theory.CellState.ValidatedPatch.mk | Theory.CellState | evidence | L2 | 2 proof / 0 data fields; layer-1 review pending
 Minidregg.Theory.GuardedAdvice.VerifiedFill.mk | Theory.GuardedAdvice | evidence | L2 | 8 proof / 1 data fields; layer-1 review pending
 Minidregg.Theory.ObjectiveBendDemandData.ExecutionWith.mk | Theory.ObjectiveBendDemandData | evidence | L2 | 1 proof / 4 data fields; layer-1 review pending
 Minidregg.Theory.ObjectiveBendDemandData.ExtractionWith.mk | Theory.ObjectiveBendDemandData | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
 Minidregg.Theory.ReactiveCellTransition.Accepted.mk | Theory.ReactiveCellTransition | evidence | L2 | 2 proof / 1 data fields; layer-1 review pending
 Minidregg.Theory.ReceiptEvent.mk | Theory.AcceptedCellEffect | evidence | L2 | 5 proof / 10 data fields; layer-1 review pending
-Minidregg.Theory.Receiving.Receiver.Accepted.mk | Theory.Receiving | evidence | L2 | 0 proof / 1 data fields; layer-1 review pending
-Minidregg.Theory.Receiving.Vouchers.mk | Theory.Receiving | evidence | L2 | the claims the Receiver's verifier answered true on; an oracle (IO) verdict no proof expresses; minted only by Receiver.admitVia
+Minidregg.Theory.Receiving.Receiver.Accepted.mk | Theory.Receiving | evidence | L1 Minidregg.Theory.Receiving.Receiver.Accepted.sound | carries `admits`: prepared under covering vouchers, shape and laws passed; the vouchers are L2
+Minidregg.Theory.Receiving.Vouchers.mk | Theory.Receiving | evidence | L2 | the claims the Receiver's verifier answered true on; an oracle (IO) verdict no proof expresses; minted only by Receiver.admitVia; mints: Vouchers.empty (vouches for nothing)
+restrict | Minidregg.Compiler.DurableHistory.Head.genesis | Compiler.DurableHistoryStore, Compiler.DurableReceiverIO | a genesis head for a non-empty Store is a replay bypass: only the open mints one
+restrict | Minidregg.Compiler.DurableHistory.StoreIdentity.ofOpen | Compiler.DurableHistoryStore, Compiler.DurableReceiverIO | a Store identity comes only from the open
 "
 
 end Minidregg.TokenCensus

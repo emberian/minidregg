@@ -179,7 +179,8 @@ inductive Reject where
 /-- Everything the gate checks of a rotation on the loaded authority cell, given
 that the new key signed: the plan path runs this before any signature exists
 (`NativeHost.rotationPlanLoaded`); admission runs it inside `prepare`, behind
-the Receiver's possession signature. -/
+the Receiver's possession signature.  **Layer 1**: every check is a proof field,
+and `Checked.sound` states what they mean for every value. -/
 structure Checked (env : Env) (durable : Durable) (command : Command) where
   private mk ::
   authority : Loaded env.deployment durable.snapshot
@@ -222,8 +223,37 @@ def check (env : Env) (durable : Durable) (command : Command) :
       else throw .malformedKey
     else throw .publicKeyExists
 
+/-- **What every `Checked` value means** (the census's layer-1 theorem): the
+subject's current key on the loaded authority cell is the checked record, that
+record committed to exactly this rotation's new key, the new record is its
+successor and commits to a next key, the new public key is fresh and an Ed25519
+key active at the next revision, the rotation's marker is unspent, and the patch
+validated at the cell's root.  A value built any way at all carries all of it. -/
+theorem Checked.sound {env : Env} {durable : Durable} {command : Command}
+    (checked : Checked env durable command) :
+    currentSigningKey checked.authority.snapshot.logical command.subject = some checked.current ∧
+      checked.current.nextKeyDigest = some (nextKeyDigest command.key.publicKey) ∧
+      KeyPreRotation.Successor checked.current command.rotation ∧
+      command.key.nextKeyDigest.isSome = true ∧
+      ParticipantKeyEnrollment.allKeys checked.authority.snapshot.logical
+        (fun key => key.publicKey != command.key.publicKey) = true ∧
+      command.key.algorithm = CredentialSignatureAdmission.ed25519Algorithm ∧
+      command.key.publicKey.length = 32 ∧
+      checked.authority.snapshot.spent
+        (marker checked.authority.snapshot.domain env.semantics command) = false ∧
+      Nonempty (CellState.ValidatedPatch AuthorityMaterializer checked.authority.snapshot.cell
+        checked.authority.snapshot.cell.root
+        (KeyPreRotation.patch checked.authority.snapshot.logical checked.current command.rotation)) := by
+  obtain ⟨current, committed, successor, nextCommitted, -⟩ :=
+    (KeyPreRotation.gate_ok_iff nextKeyDigest _ command.rotation _ checked.current).1 checked.gated
+  exact ⟨current, committed, successor, nextCommitted, checked.publicKeyFresh, checked.keyShape.1,
+    checked.keyShape.2.1, checked.unspent, ⟨checked.validated⟩⟩
+
 /-- A prepared rotation: the Receiver's signature by the new key over this
-command's possession frame, and the gate's checks. -/
+command's possession frame, and the gate's checks.  **Layer 1** over a layer-2
+part: `Prepared.gated_by_possession` states, for every value, that the gate ran
+under exactly the key of the signature it holds; that signature
+(`ReceiverSignature`) is the Receiver's oracle verdict, layer 2. -/
 structure Prepared (env : Env) (durable : Durable) (command : Command) where
   private mk ::
   /-- The Receiver's verdict, as a value: the signature `claim` named, verified
@@ -463,6 +493,7 @@ def status (logical : Store CredentialAuthorityState.layout) (subject : SubjectI
 #assert_axioms Prepared.precommitted
 #assert_axioms readGuards_unjudged
 #assert_axioms writes_roots_bound
+#assert_axioms Checked.sound
 #assert_axioms Prepared.gated
 #assert_axioms Prepared.gated_by_possession
 #assert_axioms admitted_possession

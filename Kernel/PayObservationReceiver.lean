@@ -409,6 +409,24 @@ theorem Planned.dependencies_available (planned : Planned deployment profile amb
   rw [planned.dependenciesExact]
   rfl
 
+/-- **What every `Planned` report means** (the census's layer-1 theorem): its
+cells are the ones the durable state loads, the pay post retains exactly the
+report's tip, the clock post holds the next clock at the tip's slot, and the Book
+post is the decided batch applied to the loaded Book.  A value built any way at
+all carries all of it. -/
+theorem Planned.sound (planned : Planned deployment profile ambient durable command) :
+    loadDirectory durable = some planned.directory ∧
+      loadDeployment deployment durable.snapshot = some planned.authority ∧
+      decideObservations planned.pay.cell.logical planned.clock.clock (bookOf planned.book)
+        command.tip command.observations = .ok planned.plan ∧
+      chainTipOf planned.payPost.logical = some command.tip ∧
+      ClockCell.clockOf planned.clockPost.logical = some planned.plan.nextClock ∧
+      planned.plan.nextClock.slot = command.tip.slot ∧
+      CanonicalResourceKernel.logicalBook planned.bookPost.logical =
+        planned.plan.batch.apply (bookOf planned.book) :=
+  ⟨planned.directoryExact, planned.authorityExact, planned.decided, planned.pay_post_exact,
+    planned.clock_post, planned.clock_post_slot, planned.bookPost_exact⟩
+
 /-- The pay law's projected state of a pay store. -/
 def project (planned : Planned deployment profile ambient durable command)
     (logical : PayStore) : Minidregg.Pred.State :=
@@ -496,6 +514,20 @@ structure Prepared {F : Type} [Field F] [DecidableEq F] (deployment : Deployment
   receiptVouched : ∃ oracle, receipt.source = .receiver oracle
   envelopeExact : receipt.envelopeBytes = ingress.ingress.envelope
   authorized : Authorization planned
+
+/-- **What every `Prepared` report means** (the census's layer-1 theorem, over
+layer-2 parts): its decision is sound (`Planned.sound`), its receipt is the
+Receiver's (`Source.receiver`) for the envelope the ingress carries, and the
+observer's request is bound to the pay cell's committed head on the pay step.
+The receipt's signature verdict itself is the oracle's (layer 2). -/
+theorem Prepared.sound {ingress : DecodedIngress}
+    (prepared : Prepared deployment profile ambient durable ingress) :
+    (∃ oracle, prepared.receipt.source = .receiver oracle) ∧
+      prepared.receipt.envelopeBytes = ingress.ingress.envelope ∧
+      prepared.authorized.bound.law.binding
+        (request deployment prepared.planned.authority.snapshot prepared.planned.pay.cell
+          profile.semantics ambient ingress.command prepared.planned.plan) = true :=
+  ⟨prepared.receiptVouched, prepared.envelopeExact, prepared.authorized.bound.bound⟩
 
 /-- The gate: decide the report, build the receipt from the Receiver's voucher,
 check the observer's capability evidence under it, bind the request to the pay
@@ -818,6 +850,8 @@ def signingHeader (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
       plan⟩).mapError
       (fun reason => s!"pay-observation signer key: {repr reason}")
 
+#assert_axioms Planned.sound
+#assert_axioms Prepared.sound
 #assert_axioms Planned.pay_post
 #assert_axioms Planned.pay_post_exact
 #assert_axioms Planned.chain_tip_advances

@@ -237,29 +237,51 @@ section Generic
 variable {m : Type → Type} {verify : SigQuery → m (Except String Bool)}
 variable (R : Receiver J verify)
 
-/-- An admitted ingress: only `admit` constructs one.  **Layer 2** until it carries
-its admission as a proof field: `TokenCensus` refuses a foreign mint. -/
+/-- What an admission asserts of a prepared patch: it was prepared under vouchers
+of the receiver's verifier that cover every claim the ingress makes, and it passed
+the physical shape and the written cells' laws. -/
+def Admits (env : R.Env) (state : J.State) (ingress : R.Ingress)
+    (prepared : R.Prepared env state (R.command ingress)) : Prop :=
+  ∃ (vouchers : Vouchers verify) (claims : List SigQuery),
+    R.claims env state ingress = .ok claims ∧
+    (∀ claim ∈ claims, vouchers.vouches claim = true) ∧
+    R.prepare vouchers env state (R.command ingress) = .ok prepared ∧
+    R.shape prepared = true ∧ R.lawFault prepared = none
+
+/-- An admitted ingress.  **Layer 1**: it carries the proposition it asserts
+(`admits`), so a value built any way at all -- `admit`, a tactic, a metaprogram --
+is a prepared patch that passed the gate (`Accepted.sound`).  The vouchers the
+proposition names are layer 2 (`Vouchers`). -/
 structure Accepted (env : R.Env) (state : J.State) (ingress : R.Ingress) where
   private mk ::
   prepared : R.Prepared env state (R.command ingress)
+  admits : R.Admits env state ingress prepared
+
+/-- **Every accepted ingress passed the gate**: whatever built it, its patch was
+prepared under vouchers covering the ingress's claims and passed the shape and the
+laws.  This is the census's layer-1 theorem for `Accepted`. -/
+theorem Accepted.sound {env : R.Env} {state : J.State} {ingress : R.Ingress}
+    (accepted : R.Accepted env state ingress) : R.Admits env state ingress accepted.prepared :=
+  accepted.admits
 
 /-- Admission under a voucher set: every claim must be vouched for, then
 prepare (given the vouchers), then check the physical shape, then the written
 cells' laws.  The order is the content of `admit_signature_first`. -/
 def admit (env : R.Env) (state : J.State) (ingress : R.Ingress) (vouchers : Vouchers verify) :
     Except (Refusal R.Reject R.Fault) (R.Accepted env state ingress) :=
-  match R.claims env state ingress with
+  match resolved : R.claims env state ingress with
   | .error reason => .error (.family reason)
   | .ok claims =>
-      match firstRefused vouchers.vouches claims with
+      match refused : firstRefused vouchers.vouches claims with
       | some claim => .error (.unauthenticated claim)
       | none =>
-          match R.prepare vouchers env state (R.command ingress) with
+          match preparedEq : R.prepare vouchers env state (R.command ingress) with
           | .error reason => .error (.family reason)
           | .ok prepared =>
-              if R.shape prepared then
-                match R.lawFault prepared with
-                | none => .ok ⟨prepared⟩
+              if shaped : R.shape prepared = true then
+                match lawful : R.lawFault prepared with
+                | none => .ok ⟨prepared, vouchers, claims, resolved,
+                    (firstRefused_none_iff _ claims).1 refused, preparedEq, shaped, lawful⟩
                 | some fault => .error (.law fault)
               else .error .shape
 
@@ -272,7 +294,22 @@ theorem admit_signature_first {env : R.Env} {state : J.State} {ingress : R.Ingre
     (resolved : R.claims env state ingress = .ok claims)
     (refused : firstRefused vouchers.vouches claims = some claim) :
     R.admit env state ingress vouchers = .error (.unauthenticated claim) := by
-  simp [admit, resolved, refused]
+  unfold admit
+  split
+  · rename_i reason resolvedEq
+    rw [resolved] at resolvedEq
+    cases resolvedEq
+  · rename_i claims' resolvedEq
+    rw [resolved] at resolvedEq
+    cases resolvedEq
+    split
+    · rename_i found refusedEq
+      rw [refused] at refusedEq
+      cases refusedEq
+      rfl
+    · rename_i refusedEq
+      rw [refused] at refusedEq
+      cases refusedEq
 
 /-- **Admission, exactly.** -/
 theorem admit_ok_iff {env : R.Env} {state : J.State} {ingress : R.Ingress}
@@ -282,7 +319,7 @@ theorem admit_ok_iff {env : R.Env} {state : J.State} {ingress : R.Ingress}
         (∀ claim ∈ claims, vouchers.vouches claim = true) ∧
         R.prepare vouchers env state (R.command ingress) = .ok accepted.prepared ∧
         R.shape accepted.prepared = true ∧ R.lawFault accepted.prepared = none := by
-  obtain ⟨prepared⟩ := accepted
+  obtain ⟨prepared, admits⟩ := accepted
   unfold admit
   constructor
   · intro admitted
@@ -305,8 +342,47 @@ theorem admit_ok_iff {env : R.Env} {state : J.State} {ingress : R.Ingress}
             · cases admitted
           · cases admitted
   · rintro ⟨claims, resolved, verified, preparedEq, shaped, lawful⟩
-    simp only [resolved, (firstRefused_none_iff _ claims).2 verified, preparedEq, shaped,
-      lawful, if_true]
+    have unrefused := (firstRefused_none_iff _ claims).2 verified
+    split
+    · rename_i reason resolvedEq
+      rw [resolved] at resolvedEq
+      cases resolvedEq
+    · rename_i claims' resolvedEq
+      rw [resolved] at resolvedEq
+      cases resolvedEq
+      split
+      · rename_i found refusedEq
+        rw [unrefused] at refusedEq
+        cases refusedEq
+      · split
+        · rename_i reason preparedEq'
+          rw [preparedEq] at preparedEq'
+          cases preparedEq'
+        · rename_i prepared' preparedEq'
+          rw [preparedEq] at preparedEq'
+          cases preparedEq'
+          split
+          · split
+            · rfl
+            · rename_i fault lawfulEq
+              rw [lawful] at lawfulEq
+              cases lawfulEq
+          · rename_i notShaped
+            exact absurd shaped notShaped
+
+/-- **Every step passed, so admission accepts**: the accepted value carries that
+patch. -/
+theorem admit_ok_of {env : R.Env} {state : J.State} {ingress : R.Ingress}
+    {vouchers : Vouchers verify} {claims : List SigQuery}
+    {prepared : R.Prepared env state (R.command ingress)}
+    (resolved : R.claims env state ingress = .ok claims)
+    (verified : ∀ claim ∈ claims, vouchers.vouches claim = true)
+    (preparedEq : R.prepare vouchers env state (R.command ingress) = .ok prepared)
+    (shaped : R.shape prepared = true) (lawful : R.lawFault prepared = none) :
+    ∃ accepted, R.admit env state ingress vouchers = .ok accepted ∧
+      accepted.prepared = prepared :=
+  ⟨⟨prepared, vouchers, claims, resolved, verified, preparedEq, shaped, lawful⟩,
+    (R.admit_ok_iff _).2 ⟨claims, resolved, verified, preparedEq, shaped, lawful⟩, rfl⟩
 
 /-- **A law fault refuses**, naming the fault: a patch that prepares and passes
 the physical shape but whose laws raise `fault` is refused `law fault`. -/
@@ -318,7 +394,37 @@ theorem admit_law_refused {env : R.Env} {state : J.State} {ingress : R.Ingress}
     (preparedEq : R.prepare vouchers env state (R.command ingress) = .ok prepared)
     (shaped : R.shape prepared = true) (faulted : R.lawFault prepared = some fault) :
     R.admit env state ingress vouchers = .error (.law fault) := by
-  simp [admit, resolved, (firstRefused_none_iff _ claims).2 verified, preparedEq, shaped, faulted]
+  have unrefused := (firstRefused_none_iff _ claims).2 verified
+  unfold admit
+  split
+  · rename_i reason resolvedEq
+    rw [resolved] at resolvedEq
+    cases resolvedEq
+  · rename_i claims' resolvedEq
+    rw [resolved] at resolvedEq
+    cases resolvedEq
+    split
+    · rename_i found refusedEq
+      rw [unrefused] at refusedEq
+      cases refusedEq
+    · split
+      · rename_i reason preparedEq'
+        rw [preparedEq] at preparedEq'
+        cases preparedEq'
+      · rename_i prepared' preparedEq'
+        rw [preparedEq] at preparedEq'
+        cases preparedEq'
+        split
+        · split
+          · rename_i lawfulEq
+            rw [faulted] at lawfulEq
+            cases lawfulEq
+          · rename_i fault' faultEq
+            rw [faulted] at faultEq
+            cases faultEq
+            rfl
+        · rename_i notShaped
+          exact absurd shaped notShaped
 
 /-- An admission together with the vouchers it was made under. -/
 structure Admitted (env : R.Env) (state : J.State) (ingress : R.Ingress) where
@@ -331,7 +437,7 @@ and its laws raised no fault. -/
 theorem Admitted.lawful {R : Receiver J verify} {env : R.Env} {state : J.State}
     {ingress : R.Ingress} (admission : R.Admitted env state ingress) :
     R.shape admission.accepted.prepared = true ∧ R.lawFault admission.accepted.prepared = none := by
-  obtain ⟨-, -, -, -, shaped, lawful⟩ := (R.admit_ok_iff admission.accepted).1 admission.admitted
+  obtain ⟨-, -, -, -, -, shaped, lawful⟩ := admission.accepted.sound
   exact ⟨shaped, lawful⟩
 
 /-- **Every admission was prepared under its own vouchers**, and each of its
@@ -794,6 +900,8 @@ end Fixture
 #assert_axioms Receiver.admit_signature_first
 #assert_axioms Receiver.admit_ok_iff
 #assert_axioms Receiver.admit_law_refused
+#assert_axioms Receiver.admit_ok_of
+#assert_axioms Receiver.Accepted.sound
 #assert_axioms Receiver.Admitted.lawful
 #assert_axioms Receiver.Admitted.prepared
 #assert_axioms Receiver.receive_committed_lawFault
