@@ -136,4 +136,3 @@ import Theory.OptimisticAdjudication
 import Theory.ResearchRegime
 import Theory.Transferability
 import Verify.GenericSimplexAxioms
-import Verify.ResourceReserveBirthFixture

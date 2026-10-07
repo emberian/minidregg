@@ -4394,7 +4394,7 @@
     {
       "module": "Kernel.ApplicationAgentLifetimeGrantAdmission",
       "path": "Kernel/ApplicationAgentLifetimeGrantAdmission.lean",
-      "sha256": "b4b1bf40d85b1bbff699a38980f703d64914dae7f339f54585ba53c0f2ad5221",
+      "sha256": "971e47f8bfe3e42976a63768e709992eef052d79dd3836b7fcf8ba486e3b5f1e",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4408,7 +4408,7 @@
     {
       "module": "Kernel.ApplicationAgentLifetimeGrantIntentTemplate",
       "path": "Kernel/ApplicationAgentLifetimeGrantIntentTemplate.lean",
-      "sha256": "387170868d0e57a7f593522f2b91d82e44447ca76f0dac4b563b38926ad7bae5",
+      "sha256": "05245583e270b650108ebd7964dc6f0ededd06124e7a2903f7a966ba11bc1d4e",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -5234,7 +5234,7 @@
     {
       "module": "Kernel.ApplicationShareIssueAdmission",
       "path": "Kernel/ApplicationShareIssueAdmission.lean",
-      "sha256": "609f493f503512bfefa478608883a690b0e5c715023483d3ee00425d97905b18",
+      "sha256": "7a40c99a8084c6338eacbc0686515316766ae6ab3fbbeef755bfa74d6ee7e407",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -5276,7 +5276,7 @@
     {
       "module": "Kernel.ApplicationShareIssueGrainReceiver",
       "path": "Kernel/ApplicationShareIssueGrainReceiver.lean",
-      "sha256": "95a714826010e58371503f1affd38690555417ec050038d051d5b4e32c065985",
+      "sha256": "eef9ce34702852217a74112f39b7ceec5239a78d943268d85be1c4fc5e6149cd",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -5297,7 +5297,7 @@
     {
       "module": "Kernel.ApplicationShareIssueReceiver",
       "path": "Kernel/ApplicationShareIssueReceiver.lean",
-      "sha256": "376937f58f43d362f46ced813d458725e3cea910c9fee9894fbc25ba91e4d959",
+      "sha256": "be6d0e47043d0408d8bd76f04acacc751de5ad1649af8bc8c91261f912ed0ad0",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6382,7 +6382,7 @@
     {
       "module": "Kernel.GrainResourceBirthAdmission",
       "path": "Kernel/GrainResourceBirthAdmission.lean",
-      "sha256": "86feb9216b33d53d9cd723830259bc3763c24f713f5fff629bcb61283f456b3a",
+      "sha256": "52033a69bced2879aaf6c3da5a0ba73f7c45dc9bb67e07a1b0c4bfb4db9703a5",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6403,7 +6403,7 @@
     {
       "module": "Kernel.GrainResourceBirthReceiver",
       "path": "Kernel/GrainResourceBirthReceiver.lean",
-      "sha256": "f539325629f892bce6bc569d2a43db5633b76f9887abf3b52b5bcfa3426fd3c8",
+      "sha256": "b929754c04fc749d4b4a1e9616f60c72839b7dc7fd59ba71336815074ae1cc0c",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6739,7 +6739,7 @@
     {
       "module": "Kernel.NativeHost",
       "path": "Kernel/NativeHost.lean",
-      "sha256": "9b46a48e579836aa2f7eeff0094ad406e08d6771796bfe7e6130bf41dd7f2e7a",
+      "sha256": "f002a371c6b60da334db6d5a548c1cec67fbd0f86e64be6a7e73c020d030c5a1",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -8174,7 +8174,7 @@
     {
       "module": "ResearchWip",
       "path": "ResearchWip.lean",
-      "sha256": "db6b3d9e3cad111be30c82dd597457d44fd2424c08d28e6ff93717bfb1daef13",
+      "sha256": "9a3ccb144c07a265434775433be8fd731b6437ade876e7aabcc28f398ed5b183",
       "surface": "authored-research",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -10512,7 +10512,7 @@
     {
       "module": "Verify",
       "path": "Verify.lean",
-      "sha256": "1236ab83a3a27c00e20fd432a46e92cf58de43131b6dc465576f8ae3e33bd95a",
+      "sha256": "6455243e4de282fd7ddf298b8161ba7461678d09ab07796bf3243dbd0c9e30bf",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -10597,7 +10597,7 @@
       "module": "Verify.ResourceReserveBirthFixture",
       "path": "Verify/ResourceReserveBirthFixture.lean",
       "sha256": "1f7d722614747aa06d60bba37964c7994e3e0a263f42d71f7e9a7383815602de",
-      "surface": "authored-research",
+      "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     }
   ]
