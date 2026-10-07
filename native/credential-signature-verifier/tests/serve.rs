@@ -18,6 +18,9 @@ fn frame(arguments: &[&[u8]]) -> Vec<u8> {
 }
 
 fn reply(stream: &mut impl Read) -> (u32, Vec<u8>, Vec<u8>) {
+    let mut tag = [0u8; 8];
+    stream.read_exact(&mut tag).unwrap();
+    assert_eq!(&tag, b"MDCOPRC1", "every serve reply opens with the reply tag");
     let mut word = [0u8; 4];
     stream.read_exact(&mut word).unwrap();
     let code = u32::from_be_bytes(word);

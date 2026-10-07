@@ -180,16 +180,12 @@ fn coprocess_carries_identity_and_refuses_a_different_deployment() {
     drop(input);
     let result = child.wait_with_output().unwrap();
     assert!(result.status.success());
-    let mut bytes = result.stdout.as_slice();
+    let total = result.stdout.len() as u64;
+    let mut stream = std::io::Cursor::new(result.stdout);
     let mut replies = Vec::new();
-    while !bytes.is_empty() {
-        let code = u32::from_be_bytes(bytes[..4].try_into().unwrap());
-        bytes = &bytes[4..];
-        let n = u64::from_be_bytes(bytes[..8].try_into().unwrap()) as usize;
-        bytes = &bytes[8 + n..];
-        let n = u64::from_be_bytes(bytes[..8].try_into().unwrap()) as usize;
-        replies.push((code, String::from_utf8_lossy(&bytes[8..8 + n]).into_owned()));
-        bytes = &bytes[8 + n..];
+    while stream.position() < total {
+        let (code, _stdout, stderr) = serve_reply(&mut stream);
+        replies.push((code, String::from_utf8_lossy(&stderr).into_owned()));
     }
     assert_eq!(replies.len(), 3);
     assert_eq!(replies[0].0, 0);
@@ -208,6 +204,9 @@ fn serve_frame(command: &[String]) -> Vec<u8> {
 }
 
 fn serve_reply(stream: &mut impl std::io::Read) -> (u32, Vec<u8>, Vec<u8>) {
+    let mut tag = [0u8; 8];
+    stream.read_exact(&mut tag).unwrap();
+    assert_eq!(&tag, b"MDCOPRC1", "every serve reply opens with the reply tag");
     let mut word = [0u8; 4];
     stream.read_exact(&mut word).unwrap();
     let mut long = [0u8; 8];

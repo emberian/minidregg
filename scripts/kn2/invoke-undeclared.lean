@@ -18,8 +18,8 @@ The command is `objective-first`'s, decoded from the Host's call bytes.
     and before the signature is checked);
  3. control: the basis of `invocationKeys` (what `NativeHost.submitInvokeLight` reads)
     prepares (`.ok`, with its `PhysicalShape`); `recordedInvocation` on the declared basis answers "not recorded"; `withAcceptedOn`
-    on it does not refuse `undeclaredTransaction` (with VERIFIER given, it runs the
-    signature check and prints the verdict).
+    on it does not refuse `undeclaredTransaction`: with VERIFIER it is accepted; without,
+    the missing verifier answers `unavailable` naming zero reply bytes (no panic).
 
 Usage: lake env lean --run scripts/kn2/invoke-undeclared.lean STORE-HELPER [VERIFIER] -/
 import Assurance.NativeAcceptedFixtureData
@@ -143,9 +143,17 @@ def run (binary : System.FilePath) (verifier : Option System.FilePath) (director
     ObjectiveBendAuthenticatedInputs.oracle
   require s!"a declared transaction id is not refused as undeclared (got {declaredResult})"
     (declaredResult != "rejected undeclaredTransaction")
-  if verifier.isSome then
+  match verifier with
+  | some _ =>
     require s!"with the pinned verifier the declared request is accepted (got {declaredResult})"
       (declaredResult == "accepted")
+  | none =>
+    -- No verifier: the signature check reaches a helper that cannot start, which answers
+    -- `unavailable` naming zero reply bytes (it panicked the probe before 2026-10-07:
+    -- scripts/kn2/coprocess-faults.lean).
+    let absent := NativeCoprocess.Failure.render (.closed 0)
+    require s!"with no verifier the declared request is unavailable as `{absent}` (got {declaredResult})"
+      ((declaredResult.splitOn absent).length > 1)
   IO.println s!"control (withAcceptedOn, declared keys, verifier {verifier.isSome}): {declaredResult}"
   IO.println "PASS invoke undeclared: an undeclared marker and an undeclared transaction id, each refused by name; the declared request prepares and is accepted on the light ground"
 
