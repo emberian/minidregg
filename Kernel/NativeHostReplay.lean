@@ -13,6 +13,7 @@ wire versions and unsupported event families refuse rather than becoming opaque
 trusted history. Profile/clock changes require an explicit future migration.
 -/
 import Kernel.NativeHostContext
+import Kernel.NativeHostServed
 import Kernel.ObjectiveBendAuthenticatedInputs
 import Kernel.CarriedSessionEnrollmentAdmission
 import Kernel.CarriedDispatchAdmission
@@ -973,7 +974,7 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened (CapabilityDelegationReceiver.intent accepted)
   | revoke {ingress : CapabilityRevocationReceiver.DecodedIngress}
       (accepted : CapabilityRevocationReceiver.AcceptedRevocation config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress) :
       NativeAdmission config opened (CapabilityRevocationReceiver.intent accepted)
   | renounce {ingress : CapabilityRenounce.DecodedIngress}
       (accepted : CapabilityRenounce.AcceptedRenounce config.deployment config.profile.semantics
@@ -2269,7 +2270,7 @@ private def derive (config : Config) (opened : Opened config)
           .certify accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := CapabilityRevocationReceiver.decodeIngress bytes then
     match ← CapabilityRevocationReceiver.admitDecodedNative config.deployment config.profile
-        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+        ⟨config.federation, height⟩ opened.ground config.signature ingress with
     | .error reason => return .error s!"revocation refused: {repr reason}"
     | .ok accepted => return .ok ⟨CapabilityRevocationReceiver.intent accepted, .revoke accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := CapabilityRenounce.decodeIngress bytes then

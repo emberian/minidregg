@@ -33,7 +33,6 @@ Kernel/ApplicationLifecycleRetryCompletionV4CreatedHistory.lean
 Kernel/ApplicationLifecycleRetryCompletionV4History.lean
 Kernel/ApplicationShareIssueSource.lean
 Kernel/CapabilityDelegationReceiver.lean
-Kernel/CapabilityRevocationReceiver.lean
 Kernel/CarriedSegment.lean
 Kernel/ConsentAnchor.lean
 Kernel/ContentResource.lean
