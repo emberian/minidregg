@@ -24,7 +24,7 @@ if [ -z "$GL" ]; then
   "$here/mk-lane.sh" "mk-adv-${TIP:0:8}"
   cd "$GL/src" && git fetch -q github main && [ "$(git rev-parse FETCH_HEAD)" = "$TIP" ] || { echo "advance: github main != $TIP"; exit 3; }
   git checkout -q -B main "$TIP"
-  ( LEAN_NUM_THREADS=${THREADS:-${LEAN_NUM_THREADS:-8}} SWARM_MEM_MAX=${SWARM_MEM_MAX:-32G} SWARM_BUILD_TAG="advance-${TIP:0:8}" \
+  ( LEAN_NUM_THREADS=${THREADS:-${LEAN_NUM_THREADS:-8}} SWARM_MEM_MAX=${SWARM_MEM_MAX:-64G} SWARM_BUILD_TAG="advance-${TIP:0:8}" \
       "$here/slot-mk.sh" swarm-build lake build Minidregg +Host.Main:leanArts ObjectiveProofs ) > "$GL/logs/advance-umbrella.log" 2>&1 \
     || { echo "advance: umbrella RED in $GL (logs/advance-umbrella.log)"; exit 4; }
   green=$GL/logs/advance-umbrella.log
@@ -46,6 +46,7 @@ printf 'tip=%s\nfrozen_at=%s\nbuilt_in=%s\ngreen_log=%s\nprev=%s (kept at %s)\nr
 mv -f "$W/FROZEN.new" "$W/FROZEN"
 echo "verifying $TIP (advance by MERGE-KEEPER $(date -Is)); lanes wait for the replay probe" > "$W/NOT-READY.txt"
 probe=mk-verify-${TIP:0:8}
+rm -rf /srv/lanes/$probe 2>/dev/null || true   # a probe an earlier failed verify left behind is the relay's own
 if MK_LANE_PROBE=1 "$W/mk-lane.sh" --verify "$probe"; then
   rm -f "$W/NOT-READY.txt"; rm -rf "$LANES/$probe"
 else

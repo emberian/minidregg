@@ -6,10 +6,14 @@
 set -uo pipefail
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 G=$1 FROM=$2 TAG=$3
-export THREADS=${THREADS:-8} SWARM_MEM_MAX=${SWARM_MEM_MAX:-32G}
+export THREADS=${THREADS:-8} SWARM_MEM_MAX=${SWARM_MEM_MAX:-64G}
 export LAKE_WRAP=${LAKE_WRAP:-"$here/slot-mk.sh swarm-build"}
 export SWARM_BUILD_TAG=${SWARM_BUILD_TAG:-gate-$TAG}
 cd "$G/src" || exit 2; export PATH=$HOME/.elan/bin:$PATH
+# A gate that dies mid-way (ssh drop, OOM of the shell, kill) leaves gate-TAG.aborted, never a silent
+# "still running" (COORD-AUDIT C5): .done is written only by the last line below.
+trap '[ -f "$G/logs/gate-$TAG.done" ] || echo "ABORTED $(date -Is) rc=$? at ${BASH_COMMAND:0:80}" > "$G/logs/gate-$TAG.aborted"' EXIT
+rm -f "$G/logs/gate-$TAG.aborted"
 TO=$(git rev-parse HEAD)
 { echo "START $(date -Is) HEAD=$TO"; LEAN_NUM_THREADS=$THREADS $LAKE_WRAP lake build Minidregg +Host.Main:leanArts ObjectiveProofs; echo "UMBRELLA rc=$? $(date -Is)"; } > "$G/logs/gate-$TAG-umbrella.log" 2>&1
 grep -q "^UMBRELLA rc=0" "$G/logs/gate-$TAG-umbrella.log" && u=PASS || u=RED

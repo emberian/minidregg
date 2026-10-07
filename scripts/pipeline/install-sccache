@@ -47,7 +47,7 @@ export SCCACHE_DIR=$cache_dir
 export SCCACHE_CACHE_SIZE=$size
 export SCCACHE_IDLE_TIMEOUT=0
 # One server per box: every lane talks to the same port, so the cache and its size bound are shared.
-export SCCACHE_SERVER_PORT=4226
+export SCCACHE_SERVER_PORT=${PIPELINE_SCCACHE_PORT:-4226}
 SNIP
 mv -f "$PIPELINE_ROOT/sccache.env.new" "$PIPELINE_ROOT/sccache.env"
 . "$PIPELINE_ROOT/sccache.env"
@@ -56,11 +56,16 @@ mv -f "$PIPELINE_ROOT/sccache.env.new" "$PIPELINE_ROOT/sccache.env"
 # auto-started outside the slice would run rustc uncapped; stop any such server first.
 if ! systemctl --user is-active -q pipeline-sccache.service; then
   "$bin" --stop-server >/dev/null 2>&1 || true
+  if [ -f ~/.config/systemd/user/pipeline-sccache.service ]; then
+    # a PERSISTENT unit (scripts/burst/units, installed by burst-up) exists: start that, never a transient twin
+    systemctl --user daemon-reload; systemctl --user restart pipeline-sccache.service
+  else
   systemd-run --user --unit=pipeline-sccache --slice=swarm.slice --quiet \
     -p MemoryMax="${PIPELINE_SCCACHE_MEM_MAX:-32G}" -p MemorySwapMax=0 -p Restart=always -p Nice=10 \
     --setenv=SCCACHE_DIR="$cache_dir" --setenv=SCCACHE_CACHE_SIZE="$size" --setenv=SCCACHE_IDLE_TIMEOUT=0 \
-    --setenv=SCCACHE_SERVER_PORT=4226 --setenv=SCCACHE_NO_DAEMON=1 --setenv=SCCACHE_START_SERVER=1 \
+    --setenv=SCCACHE_SERVER_PORT="${PIPELINE_SCCACHE_PORT:-4226}" --setenv=SCCACHE_NO_DAEMON=1 --setenv=SCCACHE_START_SERVER=1 \
     --setenv=PATH="$PATH" -- "$bin"
+  fi
   for _ in 1 2 3 4 5 6 7 8 9 10; do "$bin" --show-stats >/dev/null 2>&1 && break; sleep 0.5; done
 fi
 systemctl --user is-active -q pipeline-sccache.service || pipeline_die "pipeline-sccache.service is not active"

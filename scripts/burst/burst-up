@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# scripts/burst/burst-up -- ONE reproducible, idempotent entry point for a burst of Mini build boxes.
+#
+#   scripts/burst/burst-up --id BURST_ID --tip SHA [--gate HOST] [--journeys HOST] [--hbox hbox]
+#                          [--briefs DIR] [--spk FILE] [--boot HOST=BOOTHOST]... [--sccache-port N]
+#                          [--phase stage,root,user,keys,hbox,base,check] [--no-data-disk] [--srv /srv] HOST...
+#
+# HOST is an ssh destination for the login user (an alias or ember@ip). Fresh Ubuntu boxes need
+# --boot HOST=ubuntu@ip (the provider's sudo user) for the root phase; afterwards HOST suffices.
+# Phases (each idempotent; re-run any subset with --phase):
+#   stage  copy THIS checkout's scripts/burst, scripts/pipeline, deploy/candidate and --briefs to HOST:/tmp/burst-up
+#   root   remote/root.sh as root: disk, packages (incl. fuser/lsof), user, capnp, swarm-build, slice cap,
+#          slots sized from nproc/RAM, /srv layout
+#   user   remote/user.sh: toolchains, /srv/mini at TIP, profile, pipeline scripts, sccache, box.env, REPL,
+#          persistent units (sccache, slots watcher, publisher on the gate, journey runner on --journeys),
+#          shared remote + sync timer on the gate, SPK, briefs
+#   keys   box peer keys crosswise (box-peer-gate), mirror key gate -> others (rrsync artifacts)
+#   hbox   hbox's read-only puller key authorized on the gate (box-peer-gate), pull script + 10-min timer on hbox
+#          mirroring the shared remote into bundles/<ID>-minidregg.git (bounded operational keys: Ember 10-07)
+#   base   warm base at TIP: cold build + make-warm-base on the gate (or first host), relay-base to the others
+#   check  remote/check.sh on every host: ok/DIFF rows, exit = total DIFF (the proof, and the hand-built diff)
+# Everything that was applied by hand on burst2 (BURST2-SATURATE's list, 10-07) is a line in one of these.
+# BURST_SSH_OPTS (e.g. "-F my.conf") is passed to every ssh/scp/rsync and, as PIPELINE_SSH, to relay-base.sh.
+# --base-from HOST: a box outside the list whose warm base at TIP seeds the new ones (relay, never a cold build);
+# `local:HOST` when that box IS the one the new box lives on (an nspawn stand-in): the copy stays on its disk.
+set -uo pipefail
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd); repo=$(CDPATH='' cd -- "$here/../.." && pwd)
+SSHOPTS=${BURST_SSH_OPTS:-}; export PIPELINE_SSH="ssh $SSHOPTS"
+id="" tip="" gate="" journeys="" hbox="" briefs="" spk="" port=4226 phases="stage,root,user,keys,hbox,base,check" nodisk="" SRV=/srv basefrom=""
+declare -A BOOT; hosts=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --id) id=$2; shift 2 ;; --tip) tip=$2; shift 2 ;; --gate) gate=$2; shift 2 ;; --journeys) journeys=$2; shift 2 ;;
+    --hbox) hbox=$2; shift 2 ;; --briefs) briefs=$2; shift 2 ;; --spk) spk=$2; shift 2 ;; --sccache-port) port=$2; shift 2 ;;
+    --phase) phases=$2; shift 2 ;; --no-data-disk) nodisk=--no-data-disk; shift ;; --srv) SRV=$2; shift 2 ;;
+    --boot) BOOT[${2%%=*}]=${2#*=}; shift 2 ;; --base-from) basefrom=$2; shift 2 ;;
+    -*) echo "burst-up: unknown $1" >&2; exit 64 ;; *) hosts+=("$1"); shift ;;
+  esac
+done
+[ ${#hosts[@]} -ge 1 ] || { echo "burst-up: HOST... required" >&2; exit 64; }
+[[ $id =~ ^[a-z0-9-]+$ ]] || { echo "burst-up: --id must be [a-z0-9-]+" >&2; exit 64; }
+[ -z "$tip" ] && tip=$(git -C "$repo" rev-parse HEAD); [[ $tip =~ ^[0-9a-f]{40}$ ]] || tip=$(git -C "$repo" rev-parse --verify "$tip^{commit}") || exit 64
+[ -n "$gate" ] || gate=${hosts[0]}
+has() { case ",$phases," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
+log() { printf '%s burst-up: %s\n' "$(date -u +%H:%M:%SZ)" "$*"; }
+S=/tmp/burst-up
+rsh() { ssh $SSHOPTS -o BatchMode=yes -o ConnectTimeout=20 "$@"; }
+rcp() { scp $SSHOPTS -q -o BatchMode=yes "$@"; }
+LOGS=${BURST_LOGS:-$HOME/.cache/burst-up/$id}; mkdir -p "$LOGS"
+# remote_step HOST PHASE N CMD: run CMD on HOST, keep its whole output in $LOGS/<host>-<phase>.log, show the last N
+# lines; the exit status is the COMMAND's (a `| tail` inside the remote string would answer for the work).
+remote_step() { local h=$1 ph=$2 n=$3 cmd=$4 f; f=$LOGS/$(echo "$h" | tr -c 'A-Za-z0-9.\n' '_')-$ph.log
+  rsh "$h" "$cmd" > "$f" 2>&1; local rc=$?; tail -n "$n" "$f" | sed "s|^|  [$h] |"; [ $rc = 0 ] || echo "  [$h] exit $rc; full log $f"; return $rc; }
+others_of() { local h o=""; for h in "${hosts[@]}"; do [ "$h" = "$1" ] || o="$o $h"; done; echo "${o# }"; }
+ipof() { rsh "$1" 'hostname -I 2>/dev/null | cut -d" " -f1'; }
+role_of() { [ "$1" = "$gate" ] && echo gate || echo lane; }
+fail=0
+
+if has stage; then
+  tmp=$(mktemp -d); mkdir -p "$tmp/stage/briefs"
+  cp -a "$here" "$tmp/stage/burst"; cp -a "$repo/scripts/pipeline" "$tmp/stage/pipeline"; mkdir -p "$tmp/stage/candidate"
+  cp -a "$repo/deploy/candidate/lane-build.sh" "$repo/deploy/candidate/lib.sh" "$tmp/stage/candidate/"
+  [ -n "$briefs" ] && cp -a "$briefs"/*.txt "$briefs"/*.md "$tmp/stage/briefs/" 2>/dev/null
+  [ -n "$briefs" ] && [ -f "$briefs/queue/README.txt" ] && cp "$briefs/queue/README.txt" "$tmp/stage/briefs/QUEUE-README.txt"
+  [ -n "$spk" ] && cp "$spk" "$tmp/stage/$(basename "$spk")"
+  git -C "$repo" rev-parse HEAD > "$tmp/stage/STAGED-FROM"; chmod -R a+rX "$tmp/stage"
+  for h in "${hosts[@]}"; do
+    b=${BOOT[$h]:-$h}
+    # tar over ssh: a fresh box has no rsync yet (root.sh installs it)
+    if tar -C "$tmp/stage" -cf - . | rsh "$b" "rm -rf $S && mkdir -p $S && tar -C $S -xf - && chmod -R a+rX $S"; then log "staged on $h"; else log "STAGE FAILED on $h"; fail=1; fi
+  done; rm -rf "$tmp"
+fi
+if has root; then
+  for h in "${hosts[@]}"; do
+    b=${BOOT[$h]:-$h}
+    remote_step "$b" root 4 "sudo -n cp ~/.ssh/authorized_keys $S/boot-keys && sudo -n bash $S/burst/remote/root.sh --role $(role_of "$h") --user ember --pubkeys $S/boot-keys --srv $SRV $nodisk" && log "root phase ok on $h" || { log "ROOT PHASE FAILED on $h"; fail=1; }
+  done
+fi
+if has user; then
+  for h in "${hosts[@]}"; do
+    role=$(role_of "$h"); args="--tip $tip --stage $S --srv $SRV --role $role --sccache-port $port"
+    [ -n "$spk" ] && args="$args --spk $S/$(basename "$spk")"
+    [ "$h" = "$journeys" ] && args="$args --journeys"
+    gip=$(ipof "$gate"); [ -n "$gip" ] && args="$args --origin ember@$gip"
+    if [ "$role" = gate ]; then m=""; for o in $(others_of "$h"); do m="$m ember@$(ipof "$o")"; done; [ -n "$m" ] && args="$args --mirrors '${m# }'"
+    else args="$args --fetch-from $id-gate"; fi
+    o=$(others_of "$h" | cut -d' ' -f1); [ -n "$o" ] && args="$args --peer $id-$( [ "$o" = "$gate" ] && echo gate || echo "$(echo "$o" | tr -c 'a-z0-9\n' '-' )")"
+    remote_step "$h" user 12 "bash $S/burst/remote/user.sh $args" && log "user phase ok on $h" || { log "USER PHASE FAILED on $h"; fail=1; }
+  done
+fi
+if has keys && [ ${#hosts[@]} -ge 2 ]; then
+  declare -A PUB; for h in "${hosts[@]}"; do PUB[$h]=$(rsh "$h" "$SRV/pipeline/scripts/setup-box-peer"); done
+  for h in "${hosts[@]}"; do
+    for o in $(others_of "$h"); do
+      alias=$id-$( [ "$o" = "$gate" ] && echo gate || echo "$(echo "$o" | tr -c 'a-z0-9\n' '-')")
+      rsh "$h" "$SRV/pipeline/scripts/setup-box-peer --authorize '${PUB[$o]}' >/dev/null; grep -q '^Host $alias\$' ~/.ssh/config 2>/dev/null || $SRV/pipeline/scripts/setup-box-peer --alias $alias ember@$(ipof "$o") >/dev/null" && log "$h: peer $o as $alias" || { log "KEYS FAILED $h<-$o"; fail=1; }
+    done
+  done
+  mpub=$(rsh "$gate" "$SRV/pipeline/scripts/setup-mirror-key")
+  for o in $(others_of "$gate"); do rsh "$o" "$SRV/pipeline/scripts/setup-mirror-key --authorize '$mpub'" >/dev/null && log "$o accepts the gate's mirror key (rrsync artifacts)"; done
+fi
+if has hbox && [ -n "$hbox" ]; then
+  key=".ssh/${id}_pull"
+  hpub=$(rsh "$hbox" "[ -f $key ] || ssh-keygen -q -t ed25519 -N '' -C ${id}-pull@hbox -f $key; cat $key.pub")
+  rsh "$gate" "$SRV/pipeline/scripts/setup-box-peer --authorize '$hpub'" >/dev/null && log "gate accepts hbox's puller key (read-only: box-peer-gate)"
+  gip=$(ipof "$gate")
+  rsh "$hbox" "mkdir -p .local/bin"; rcp "$here/hbox-pull.sh" "$hbox:.local/bin/pull-$id-remote"
+  remote_step "$hbox" hbox 1 "chmod 755 .local/bin/pull-$id-remote; mkdir -p .config/systemd/user; printf '[Unit]\nDescription=mirror $id shared git remote\n[Service]\nType=oneshot\nNice=10\nExecStart=%s/.local/bin/pull-$id-remote $id ember@$gip\n' \"\$HOME\" > .config/systemd/user/pull-$id-remote.service; printf '[Unit]\nDescription=mirror $id remote every 10 min\n[Timer]\nOnBootSec=2min\nOnUnitActiveSec=10min\n[Install]\nWantedBy=timers.target\n' > .config/systemd/user/pull-$id-remote.timer; systemctl --user daemon-reload; systemctl --user enable -q --now pull-$id-remote.timer; systemctl --user start pull-$id-remote.service; git --git-dir=/tank/dregg-build/claude-lanes/bundles/$id-minidregg.git for-each-ref | wc -l" && log "hbox pulls $id's remote every 10 min" || { log "HBOX PHASE FAILED"; fail=1; }
+fi
+if has base; then
+  ft() { rsh "$1" "sed -n 's/^tip=//p' $SRV/warm-base/FROZEN 2>/dev/null; [ -e $SRV/warm-base/NOT-READY.txt ] && echo NOT-READY"; }
+  # a base whose verify FAILED (NOT-READY says so) is moved aside so the relay can seed it again from scratch
+  reseed() { rsh "$1" "W=$SRV/warm-base; if grep -q '^verify FAILED' \$W/NOT-READY.txt 2>/dev/null; then mv \$W/src \$W/src.failed-\$(date +%s); rm -f \$W/NOT-READY.txt \$W/FROZEN; echo reseed; fi"; }
+  src=""; for h in "${hosts[@]}"; do [ "$(ft "$h")" = "$tip" ] && { src=$h; break; }; done
+  [ -z "$src" ] && [ -n "$basefrom" ] && [ "$(ft "${basefrom#local:}")" = "$tip" ] && src=$basefrom
+  if [ -z "$src" ]; then
+    log "cold build of $tip on $gate (Mathlib cache + umbrella, ~15 min on an f4)"
+    if remote_step "$gate" cold-build 3 "SRV=$SRV bash $S/burst/cold-build.sh --tip $tip" && remote_step "$gate" make-warm-base 2 "SRV=$SRV bash $S/burst/make-warm-base.sh"; then src=$gate; else log "BASE FAILED on $gate"; fail=1; fi
+  else log "warm base at $tip already on $src"; fi
+  if [ -n "$src" ]; then for h in "${hosts[@]}"; do
+    [ "$h" = "$src" ] && continue; [ "$(ft "$h")" = "$tip" ] && { log "$h already at $tip"; continue; }
+    [ "$(reseed "$h")" = reseed ] && log "$h: a base whose verify failed was moved aside; seeding again"
+    case "$src" in
+      local:*) # the relay runs ON the source box; the destination is reached from there (BURST_LOCAL_DST_SSH, e.g. "ssh -p 2222 ember@127.0.0.1")
+        rsh "${src#local:}" "cat > /tmp/burst-up/relay-base.sh" < "$repo/scripts/pipeline/relay-base.sh"; rsh "${src#local:}" "cat > /tmp/burst-up/mk-lane.sh" < "$repo/scripts/pipeline/mk-lane.sh"
+        remote_step "${src#local:}" relay 3 "PIPELINE_SSH='${BURST_LOCAL_DST_SSH:-ssh}' bash /tmp/burst-up/relay-base.sh $tip local '${BURST_LOCAL_DST_HOST:-$h}'" && log "relayed to $h from ${src#local:} (on its disk)" || { log "RELAY FAILED to $h"; fail=1; } ;;
+      *) "$repo/scripts/pipeline/relay-base.sh" "$tip" "$src" "$h" > "$LOGS/relay-$h.log" 2>&1; rc=$?; tail -3 "$LOGS/relay-$h.log"; [ $rc = 0 ] && log "relayed to $h (a fresh box gets the full copy)" || { log "RELAY FAILED to $h (rc $rc, $LOGS/relay-$h.log)"; fail=1; } ;;
+    esac
+  done; fi
+fi
+if has check; then
+  total=0
+  for h in "${hosts[@]}"; do
+    args="--tip $tip --role $(role_of "$h") --srv $SRV --expect-swarm $S/burst/swarm-build"   # the staged copy root.sh installed from; [ "$h" = "$journeys" ] && args="$args --journeys"
+    [ ${#hosts[@]} = 1 ] && args="$args --single"; [ -n "$hbox" ] || args="$args --no-hbox"
+    rsh "$h" "bash $S/burst/remote/check.sh $args"; rc=$?; total=$((total + rc))
+  done
+  log "check: $total DIFF in total"; [ "$total" = 0 ] || fail=1
+fi
+exit $fail

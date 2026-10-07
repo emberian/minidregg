@@ -1,0 +1,11 @@
+[Unit]
+Description=pipeline journey runner (scripts/pipeline/journey-runner; one per box, it holds its own lock)
+[Service]
+Nice=5
+Restart=always
+RestartSec=30
+ExecStart=/usr/bin/bash -lc '. @SRV@/pipeline/box.env; exec @SRV@/pipeline/scripts/journey-runner'
+StandardOutput=append:@SRV@/journeys/runner.log
+StandardError=append:@SRV@/journeys/runner.log
+[Install]
+WantedBy=default.target

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# scripts/burst/burst-down --id BURST_ID [--hbox hbox] [--dest /tank/dregg-build/claude-lanes/bundles/<ID>] HOST...
+# -- before the boxes are deleted: pull the shared remote once more on hbox, collect every box's evidence
+# (remote/collect.sh: shared-remote bundle, lane bundles + uncommitted diffs + logs, READY artifact sets,
+# journeys, slots.log, box.env, burst logs) and relay it through this machine to hbox:DEST/<host>/, verify with
+# a checksum dry-run (0 differences), print sizes and the free space left on tank. It NEVER deletes a box or a
+# resource: deletion is an outward, irreversible act for Ember (the provider's console or CLI) after reading this.
+# Refuses to copy when tank would drop below 10% free (disk pressure is Ember's; it reports sizes instead).
+set -uo pipefail
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+id="" hbox=hbox dest="" hosts=()
+while [ $# -gt 0 ]; do case "$1" in --id) id=$2; shift 2 ;; --hbox) hbox=$2; shift 2 ;; --dest) dest=$2; shift 2 ;; -*) echo "burst-down: unknown $1" >&2; exit 64 ;; *) hosts+=("$1"); shift ;; esac; done
+[[ $id =~ ^[a-z0-9-]+$ ]] && [ ${#hosts[@]} -ge 1 ] || { echo "usage: burst-down --id ID [--hbox H] HOST..." >&2; exit 64; }
+[ -n "$dest" ] || dest=/tank/dregg-build/claude-lanes/bundles/$id
+SSHOPTS=${BURST_SSH_OPTS:-}
+rsh() { ssh $SSHOPTS -o BatchMode=yes -o ConnectTimeout=20 "$@"; }
+log() { printf '%s burst-down: %s\n' "$(date -u +%H:%M:%SZ)" "$*"; }
+fail=0
+rsh "$hbox" "systemctl --user start pull-$id-remote.service 2>/dev/null; [ -d /tank/dregg-build/claude-lanes/bundles/$id-minidregg.git ] && git --git-dir=/tank/dregg-build/claude-lanes/bundles/$id-minidregg.git for-each-ref | wc -l" | sed 's/^/hbox mirror refs after a final pull: /'
+total_kb=0; declare -A OUT
+for h in "${hosts[@]}"; do
+  out=/srv/burst/down-$(date -u +%Y%m%dT%H%M%SZ); OUT[$h]=$out
+  rsh "$h" "mkdir -p /tmp/burst-down && cat > /tmp/burst-down/collect.sh" < "$here/remote/collect.sh"   # always this checkout's collector
+  rsh "$h" "bash /tmp/burst-down/collect.sh $out" | tail -8 || { log "COLLECT FAILED on $h"; fail=1; continue; }
+  kb=$(rsh "$h" "du -sk $out | cut -f1"); total_kb=$((total_kb + kb)); log "$h: $((kb/1024)) MB to mirror"
+done
+read -r size_kb avail_kb < <(rsh "$hbox" "df --output=size,avail -k /tank | tail -1") || true
+[[ ${size_kb:-} =~ ^[0-9]+$ ]] && [[ ${avail_kb:-} =~ ^[0-9]+$ ]] || { log "REFUSED: cannot read $hbox:/tank free space (ssh or df failed); nothing copied"; exit 4; }
+after=$(( (avail_kb - total_kb) * 100 / size_kb ))
+log "tank: $((avail_kb/1024/1024)) GB free now, $after% free after the copy"
+[ "$after" -ge 10 ] || { log "REFUSED: tank would drop below 10% free; nothing copied. Tell Ember the sizes above and wait."; exit 3; }
+rsh "$hbox" "mkdir -p $dest"
+for h in "${hosts[@]}"; do
+  [ -n "${OUT[$h]:-}" ] || continue
+  name=$(rsh "$h" hostname)
+  rsh "$h" "tar -C ${OUT[$h]} -cf - . | zstd -3 -T4 -q -c" | rsh "$hbox" "mkdir -p $dest/$name && zstd -d -q -c | tar -C $dest/$name -xf -" && log "mirrored $h -> $hbox:$dest/$name" || { log "MIRROR FAILED for $h"; fail=1; continue; }
+  # verify: a checksum dry-run must find nothing to transfer (relayed through this machine, read-only on the box)
+  remote_count=$(rsh "$h" "find ${OUT[$h]} -type f | wc -l"); hbox_count=$(rsh "$hbox" "find $dest/$name -type f | wc -l")
+  [ "$remote_count" = "$hbox_count" ] && log "$h: $hbox_count files present on hbox (counts match)" || { log "$h: FILE COUNT MISMATCH box $remote_count vs hbox $hbox_count"; fail=1; }
+done
+rsh "$hbox" "du -sh $dest/* 2>/dev/null; df -h /tank | tail -1"
+log "done (fail=$fail). Nothing was deleted. When Ember decides: delete the provider resources tagged $id; the mirror is $hbox:$dest and the git mirror $hbox:/tank/dregg-build/claude-lanes/bundles/$id-minidregg.git"
+exit $fail

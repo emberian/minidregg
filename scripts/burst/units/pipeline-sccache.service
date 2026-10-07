@@ -1,0 +1,14 @@
+[Unit]
+Description=pipeline sccache server (one per box, in swarm.slice; scripts/burst)
+[Service]
+Slice=swarm.slice
+MemoryMax=32G
+MemorySwapMax=0
+Nice=10
+Restart=always
+RestartSec=2
+Environment=SCCACHE_DIR=@SRV@/sccache SCCACHE_CACHE_SIZE=120G SCCACHE_IDLE_TIMEOUT=0 SCCACHE_SERVER_PORT=@PORT@ SCCACHE_NO_DAEMON=1 SCCACHE_START_SERVER=1
+Environment=PATH=@HOME@/.elan/bin:@HOME@/.cargo/bin:@HOME@/.bun/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=@SRV@/pipeline/bin/sccache
+[Install]
+WantedBy=default.target

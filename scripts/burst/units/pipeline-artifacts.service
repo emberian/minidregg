@@ -1,0 +1,12 @@
+[Unit]
+Description=pipeline artifact publisher loop (gate box; scripts/pipeline/artifact-watch)
+[Service]
+Nice=5
+Restart=always
+RestartSec=30
+Environment=MINI_CANDIDATE_CARGO_JOBS=12 PIPELINE_PUBLISH_MEM_MAX=32G
+ExecStart=/usr/bin/bash -lc '. @SRV@/pipeline/box.env; exec @SRV@/pipeline/scripts/artifact-watch'
+StandardOutput=append:@SRV@/artifacts/watch.log
+StandardError=append:@SRV@/artifacts/watch.log
+[Install]
+WantedBy=default.target

@@ -1,0 +1,9 @@
+[Unit]
+Description=pipeline slots watcher: idle-slot reclaim + slots.status every 2 min (scripts/pipeline/slots --watch)
+[Service]
+Nice=5
+Restart=always
+RestartSec=10
+ExecStart=/usr/bin/bash -c '. @SRV@/pipeline/box.env; exec @SRV@/pipeline/scripts/slots --watch'
+[Install]
+WantedBy=default.target
