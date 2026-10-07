@@ -20,6 +20,7 @@ import Kernel.ClockCellDomain
 import Kernel.RunComputeBudgetDomain
 import Kernel.ResourceMoneyReceiver
 import Kernel.ResourceObservationAdmission
+import Kernel.ObjectiveWorkAccount
 
 namespace Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Compiler
@@ -559,6 +560,11 @@ inductive Reject where
   /-- The claim's source query does not select a live artifact and package
   whose declaration, parser/frontend/elaborator pins and codecs the policy admits. -/
   | objectiveSource
+  /-- The claim's envelope does not declare the front-end work of the source it selected
+  (GPT-6 row E): the selected package's source bytes (`replayBytes`) or its artifact's typed
+  core bytes (`coreBytes`), named with what the stage needs and what the claim declared. Refused
+  from the stored pair, before the replay runs (`ObjectiveWorkAccount.uncovered`). -/
+  | objectiveWork (stage : ObjectiveWorkAccount.Stage) (needed declared : Nat)
   /-- The authenticated input is not the one the claim signed (`expectedInput`),
   or the applied source does not decode or type-check. -/
   | objectiveInput
