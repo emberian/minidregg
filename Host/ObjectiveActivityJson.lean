@@ -194,8 +194,9 @@ def turnJson : Turn → Json
   | .publish artifact package payer pc => .mkObj [("kind", "publish"), ("artifactBytes", decimal artifact.length),
       ("packageBytes", decimal package.length), ("payer", decimal payer), ("payerCapability", decimal pc.value)]
   | .create object oc pin law policy seed payer pc => .mkObj
-      ([("kind", "create"), ("object", decimal object), ("objectCapability", decimal oc.value),
-       ("pin", decimal pin.value), ("law", toJson (reprStr law)), ("upgrade", upgradeJson policy)] ++
+      (([("kind", "create"), ("object", decimal object), ("objectCapability", decimal oc.value),
+       ("pin", decimal pin.value), ("law", toJson (reprStr law)), ("upgrade", upgradeJson policy)] :
+          List (String × Json)) ++
        (match seed with | some bytes => [("seed", dataOf bytes)] | none => []) ++
        [("payer", decimal payer), ("payerCapability", decimal pc.value)])
   | .birth object oc account ac pin input envelope resume timeout deposit => .mkObj
