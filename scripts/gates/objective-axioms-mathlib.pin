@@ -9805,6 +9805,7 @@ A Minidregg.Kernel.ContentResource.Action.createDocument.elim : Quot.sound, prop
 A Minidregg.Kernel.ContentResource.Action.createRun.elim : Quot.sound, propext
 A Minidregg.Kernel.ContentResource.Action.editAtom.elim : Quot.sound, propext
 A Minidregg.Kernel.ContentResource.Action.editElement.elim : Quot.sound, propext
+A Minidregg.Kernel.ContentResource.Action.insertRun.elim : Quot.sound, propext
 A Minidregg.Kernel.ContentResource.Action.link.elim : Quot.sound, propext
 A Minidregg.Kernel.ContentResource.Action.mark.elim : Quot.sound, propext
 A Minidregg.Kernel.ContentResource.Action.ofWire : Quot.sound, propext
@@ -9974,6 +9975,10 @@ A Minidregg.Kernel.ContentResource.empty_command_rejected : Classical.choice, Qu
 A Minidregg.Kernel.ContentResource.endpointsLive : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ContentResource.foldlM_executes : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ContentResource.initialStore : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ContentResource.insertRunCheck : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ContentResource.insertRunStep : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ContentResource.insertRunStep_ok : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ContentResource.insertionCut : -
 A Minidregg.Kernel.ContentResource.lawStore : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ContentResource.leafRecord : -
 A Minidregg.Kernel.ContentResource.linkRetired : Classical.choice, Quot.sound, propext
