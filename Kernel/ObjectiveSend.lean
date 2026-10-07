@@ -11,6 +11,9 @@ inbox of (sender, target) and opens its reply slot, whose decider is the ROLE
   message's own escrowed envelope, with `request/caller` the sender and NO
   subject (`request/subject` is absent: a message carries no signer's
   authority, so a law that reads it fails closed).
+* **The reply slot is THIS inbox's** (its activity cell is the inbox popped, else
+  `replySlot "not this inbox's"`), and an unwatched one (its sender stopped waiting,
+  `ObjectiveCall.ControlKind.stop`) is RETIRED instead of written (`replyPost`).
 * **The delivery decides the reply slot** (`AnswerSlot.decideDelivery`):
   `reply result` when the call tree returned; otherwise `broken reason`. A
   failure of the delivered method (its law refused a write, it faulted, it ran
@@ -94,10 +97,11 @@ def runMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
         message.envelope.sourceTicks with
     | .error reason => .failed (reprStr reason)
     | .ok (result, journal, _) =>
-      if journal.outbox.isEmpty && journal.drained then .replied result journal
-      else .failed (if journal.outbox.isEmpty then
-          "the state it leaves on a draining object is one MIGRATE would refuse"
-        else "a delivered message sends: its delivery has no paying account")
+      if journal.outbox.isEmpty && journal.controls.isEmpty && journal.drained then .replied result journal
+      else .failed (if !journal.outbox.isEmpty then "a delivered message sends: its delivery has no paying account"
+        else if !journal.controls.isEmpty then
+          "a delivered message stops or cancels: only an invocation's call tree controls its object's messages"
+        else "the state it leaves on a draining object is one MIGRATE would refuse")
 
 def Outcome.decision : Outcome → AnswerSlot.Decision
   | .replied result _ => .reply (dataBytes result)
@@ -141,13 +145,21 @@ def deliveryBatch {rootBytes : Bytes → Digest} {snapshot : Snapshot rootBytes}
       refunds.filterMap (fun refunded => if refunded.postage = 0 ∨ refunded.refund = purse then none
         else some (.transfer purse refunded.refund config.asset refunded.postage)), []⟩
 
+/-- What a delivery writes at the reply slot: the decided slot, when someone waits for it;
+the retired image when its sender stopped waiting (`ObjectiveCall.ControlKind.stop`): a
+decision nobody reads is not kept. -/
+def replyPost {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (slot decided : AnswerSlot.Slot) : Post :=
+  if slot.watched then slotPost config snapshot decided else slotRetire config snapshot slot.name
+
 inductive MessageRefusal where
   /-- The inbox cell holds no inbox of (sender, target). -/
   | noInbox (sender target : Nat)
   | empty (sender target : Nat)
   /-- The head is not the message the command names (it was delivered). -/
   | staleHead (head : Digest)
-  /-- The head's reply slot is missing, misnamed or not its delivery's to decide. -/
+  /-- The head's reply slot is missing, misnamed, not this inbox's (its activity cell is
+  another), or not its delivery's to decide. -/
   | replySlot (reason : String)
   | kernel (reason : ObjectiveActivity.Refusal)
   deriving Repr
@@ -167,6 +179,8 @@ structure MessageDelivery {rootBytes : Bytes → Digest} (config : Config) (snap
   slot : AnswerSlot.Slot
   slotExact : readSlot config snapshot message.id = some slot
   slotNamed : slot.name = message.id
+  /-- The slot answers to THIS inbox: its activity cell is the inbox the message was popped from. -/
+  activityExact : slot.activity = Inbox.cell config.domain request.sender request.target
   outcome : Outcome
   outcomeExact : runMessage config snapshot height request.target message = outcome
   decided : AnswerSlot.Slot
@@ -174,7 +188,8 @@ structure MessageDelivery {rootBytes : Bytes → Digest} (config : Config) (snap
   /-- The popped inbox, held by this turn. -/
   seed : Mail config snapshot
   seedExact : seed.inboxes.map (fun held => (held.sender, held.target, held.now)) =
-    [(request.sender, request.target, remaining)] ∧ seed.slots = [] ∧ seed.credits = [] ∧ seed.targets = []
+    [(request.sender, request.target, remaining)] ∧ seed.slots = [] ∧ seed.credits = [] ∧ seed.targets = [] ∧
+      seed.closed = [] ∧ seed.refunds = []
   mail : Mail config snapshot
   refunds : List Inbox.Message
   forwarded : forward outcome.reference seed slot.queued = (mail, refunds)
@@ -185,7 +200,14 @@ structure MessageDelivery {rootBytes : Bytes → Digest} (config : Config) (snap
     (Inbox.cell config.domain request.sender request.target).value message mail refunds
   posts : List Post
   postsExact : posts = outcome.posts config snapshot ++ mail.posts ++
-    [slotPost config snapshot decided, posted.write config snapshot]
+    [replyPost config snapshot slot decided, posted.write config snapshot]
+
+/-- **An unwatched slot's delivery retires it; a watched one's writes the decision.** -/
+theorem replyPost_spec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (slot decided : AnswerSlot.Slot) :
+    (slot.watched = true → replyPost config snapshot slot decided = slotPost config snapshot decided) ∧
+      (slot.watched = false → replyPost config snapshot slot decided = slotRetire config snapshot slot.name) := by
+  constructor <;> intro watched <;> simp [replyPost, watched]
 
 /-- The popped inbox, as a held inbox of this turn's mail. -/
 def seedMail {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (sender target : Nat)
@@ -197,7 +219,7 @@ def seedMail {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsh
   have step := (Inbox.pop_step popped).1
   have keeps := step.keeps
   ⟨[⟨sender, target, some inbox, readExact, clean, remaining, .step step (.refl _),
-      ⟨keeps.1.trans ends.1, keeps.2.1.trans ends.2⟩⟩], [], [], []⟩
+      ⟨keeps.1.trans ends.1, keeps.2.1.trans ends.2⟩⟩], [], [], [], [], []⟩
 
 /-- **A message to a draining object waits.** The target object drains toward an
 upgrade that admits no new frame (`ObjectRecord.admitsNew`): delivering now would
@@ -225,6 +247,7 @@ def deliverMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   | none => .error (.replySlot "missing")
   | some slot =>
   if slotNamed : slot.name = message.id then
+  if activityExact : slot.activity = Inbox.cell config.domain request.sender request.target then
   match outcomeExact : runMessage config snapshot height request.target message with
   | outcome =>
   match decidedExact : AnswerSlot.decideDelivery slot message.id height outcome.decision with
@@ -246,9 +269,10 @@ def deliverMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
       split at postedExact
       · cases postedExact; rfl
       · cases postedExact
-    .ok ⟨inbox, readExact, clean, ends, message, remaining, popped, named, slot, slotExact, slotNamed, outcome,
-      outcomeExact, decided, decidedExact, seed, ⟨rfl, rfl, rfl, rfl⟩, mail, refunds, forwarded, book, bookExact,
-      posted, batchExact, _, rfl⟩
+    .ok ⟨inbox, readExact, clean, ends, message, remaining, popped, named, slot, slotExact, slotNamed, activityExact,
+      outcome, outcomeExact, decided, decidedExact, seed, ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩, mail, refunds, forwarded, book,
+      bookExact, posted, batchExact, _, rfl⟩
+  else .error (.replySlot "not this inbox's")
   else .error (.replySlot "misnamed")
   else .error (.staleHead message.id)
   else .error (.noInbox request.sender request.target)
@@ -457,21 +481,112 @@ questions for the grounding round): no STORAGE DEPOSIT backs an inbox cell or a
 delivery slot (an inbox purse holds postage, which is the price of the delivered
 envelope, and nothing for the bytes of the queued messages); an emptied inbox cell
 is never retired and its purse never deregistered; a decided delivery slot is
-never retired. -/
+retired only by its sender's `stop` (`ObjectiveCall.Mail.control`), or by its delivery when
+the sender had stopped waiting before it (`replyPost`). -/
 
-/-- **An invocation is paid from its signer's account only**: every operation of its
-batch (the envelope's fee and each send's postage into its queue's purse) debits
-`request.account`. -/
+/-- **An invocation pays from its signer's account, and moves escrow only as its controls
+refund it**: every operation of its batch (the envelope's fee, each send's postage into its
+queue's purse) debits `request.account`, except the refund transfers of its controls, each
+exactly a `Refund` its mail recorded (out of the purse that held the escrow, back to the
+account that paid it; `Mail.control_cancel_refunds`). (Restated for row F: before the
+controls the second alternative did not occur; `Invocation.debits_only_account_of_silent`
+is the old statement, for a turn that controls nothing.) -/
 theorem Invocation.debits_only_account {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {request : InvokeRequest}
     (invoked : Invocation config snapshot height request) :
-    ∀ op ∈ invoked.posted.batch.operations, debited op = some request.account := by
+    ∀ op ∈ invoked.posted.batch.operations, debited op = some request.account ∨
+      ∃ refund ∈ invoked.mail.refunds, op = .transfer refund.purse refund.payer config.asset refund.amount := by
   rw [invoked.batchExact]
   intro op member
-  simp only [invokeBatch, List.mem_cons] at member
-  rcases member with fee | credit
-  · subst fee; rfl
-  · exact creditTransfers_debit config _ _ op credit
+  simp only [invokeBatch, List.mem_cons, List.mem_append] at member
+  rcases member with fee | credit | refunded
+  · subst fee; exact .inl rfl
+  · exact .inl (creditTransfers_debit config _ _ op credit)
+  · right
+    simp only [refundTransfers, List.mem_filterMap] at refunded
+    obtain ⟨refund, member, made⟩ := refunded
+    split at made
+    · cases made
+    · cases made; exact ⟨refund, member, rfl⟩
+
+/-- Sending touches neither the closed slots nor the refunds of a mail. -/
+theorem Mail.send_keeps {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {mail next : Mail config snapshot} {message : Inbox.Message} {destination : Destination}
+    (sent : mail.send message destination = .ok next) : next.closed = mail.closed ∧ next.refunds = mail.refunds := by
+  cases destination with
+  | object target =>
+    simp only [Mail.send] at sent
+    repeat' split at sent
+    all_goals first | (cases sent; done) | (cases sent; exact ⟨rfl, rfl⟩)
+  | slot name =>
+    simp only [Mail.send] at sent
+    repeat' split at sent
+    all_goals first | (cases sent; done) | (cases sent; exact ⟨rfl, rfl⟩)
+
+theorem postMail_keeps {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (postage : Minidregg.Compiler.ObjectiveInvocationClaim.Capacity) (refund : AccountId) :
+    ∀ (outs : List Outgoing) (mail next : Mail config snapshot),
+      postMail config snapshot postage refund mail outs = .ok next →
+      next.closed = mail.closed ∧ next.refunds = mail.refunds
+  | [], mail, next, ok => by simp only [postMail] at ok; cases ok; exact ⟨rfl, rfl⟩
+  | out :: rest, mail, next, ok => by
+    simp only [postMail] at ok
+    split at ok
+    · cases ok
+    · rename_i mail' sent
+      obtain ⟨c1, r1⟩ := Mail.send_keeps sent
+      obtain ⟨c2, r2⟩ := postMail_keeps postage refund rest mail' next ok
+      exact ⟨c2.trans c1, r2.trans r1⟩
+
+/-- Controls touch neither the credits nor the targets of a mail. -/
+theorem Mail.control_credits {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {mail next : Mail config snapshot} {height : Nat} {control : Control}
+    (ok : mail.control height control = .ok next) : next.credits = mail.credits ∧ next.targets = mail.targets := by
+  rcases Mail.control_cases ok with same | ⟨_, _, _, _, _, _, _, _, _, rfl⟩ |
+    ⟨_, _, _, _, _, _, _, _, _, _, _, rfl⟩ | ⟨_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, rfl⟩
+  · rw [same]; exact ⟨rfl, rfl⟩
+  all_goals exact ⟨rfl, rfl⟩
+
+theorem postControls_credits {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (height : Nat) :
+    ∀ (controls : List Control) (mail next : Mail config snapshot),
+      postControls config snapshot height mail controls = .ok next →
+      next.credits = mail.credits ∧ next.targets = mail.targets
+  | [], mail, next, ok => by simp only [postControls] at ok; cases ok; exact ⟨rfl, rfl⟩
+  | control :: rest, mail, next, ok => by
+    simp only [postControls] at ok
+    split at ok
+    · cases ok
+    · rename_i mail' controlled
+      obtain ⟨c1, t1⟩ := Mail.control_credits controlled
+      obtain ⟨c2, t2⟩ := postControls_credits height rest mail' next ok
+      exact ⟨c2.trans c1, t2.trans t1⟩
+
+/-- A turn that yields no control posts the mail of its sends. -/
+theorem Invocation.mail_of_silent {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : InvokeRequest}
+    (invoked : Invocation config snapshot height request) (silent : invoked.journal.controls = []) :
+    invoked.mail = invoked.sent := by
+  have ok := invoked.mailExact
+  rw [silent] at ok
+  simp only [postControls] at ok
+  exact (Except.ok.inj ok).symm
+
+/-- **The old statement, for a turn that controls nothing**: every operation of its batch
+debits `request.account`. -/
+theorem Invocation.debits_only_account_of_silent {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : InvokeRequest}
+    (invoked : Invocation config snapshot height request) (silent : invoked.journal.controls = []) :
+    ∀ op ∈ invoked.posted.batch.operations, debited op = some request.account := by
+  intro op member
+  rcases Invocation.debits_only_account invoked op member with paid | ⟨refund, member, _⟩
+  · exact paid
+  · have none_ : invoked.mail.refunds = [] := by
+      rw [Invocation.mail_of_silent invoked silent,
+        (postMail_keeps request.postage request.account _ _ _ invoked.sentExact).2]
+      rfl
+    rw [none_] at member
+    cases member
 
 /-- **Every send credits exactly one purse, with the postage of its message.** -/
 theorem Mail.send_credit {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -529,7 +644,8 @@ theorem Invocation.escrows_every_send {rootBytes : Bytes → Digest} {config : C
     invoked.mail.credits.length = invoked.journal.outbox.length ∧
       ∀ credit ∈ invoked.mail.credits, credit.2 = config.tariff.workOf request.postage := by
   obtain ⟨len, each⟩ := postMail_credits request.postage request.account invoked.journal.outbox Mail.empty
-    invoked.mail invoked.mailExact
+    invoked.sent invoked.sentExact
+  rw [(postControls_credits height _ _ _ invoked.mailExact).1]
   refine ⟨?_, ?_⟩
   · rw [len]; simp [Mail.empty]
   · intro credit member
@@ -582,17 +698,18 @@ theorem MessageDelivery.failed_mail {rootBytes : Bytes → Digest} {config : Con
   exact ⟨forwarded.1.symm, forwarded.2.symm⟩
 
 /-- **A failed delivery leaves behind exactly three posts**: the popped, shortened inbox,
-the slot it decided `broken`, and the Book. No cell is opened, no state cell written. -/
+its reply slot (decided `broken`, or retired when its sender had stopped waiting:
+`replyPost`), and the Book. No cell is opened, no state cell written. -/
 theorem MessageDelivery.failed_delivery_posts {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {request : MessageRequest}
     (delivered : MessageDelivery config snapshot height request) {reason : String}
     (failed : delivered.outcome = .failed reason) :
     delivered.posts =
       [postAt snapshot (Inbox.cell config.domain request.sender request.target) (inboxImage delivered.remaining),
-        slotPost config snapshot delivered.decided, delivered.posted.write config snapshot] := by
+        replyPost config snapshot delivered.slot delivered.decided, delivered.posted.write config snapshot] := by
   obtain ⟨sameMail, _⟩ := delivered.failed_mail failed
   have noPosts : delivered.outcome.posts config snapshot = [] := by rw [failed]; rfl
-  obtain ⟨inboxes, slots, _, _⟩ := delivered.seedExact
+  obtain ⟨inboxes, slots, _, _, closed, _⟩ := delivered.seedExact
   have seedPosts : delivered.seed.posts =
       [postAt snapshot (Inbox.cell config.domain request.sender request.target) (inboxImage delivered.remaining)] := by
     cases hl : delivered.seed.inboxes with
@@ -602,7 +719,7 @@ theorem MessageDelivery.failed_delivery_posts {rootBytes : Bytes → Digest} {co
       simp only [List.map_cons, List.cons.injEq, Prod.mk.injEq, List.map_eq_nil_iff] at inboxes
       obtain ⟨⟨hs, ht, hn⟩, restNil⟩ := inboxes
       unfold Mail.posts
-      rw [hl, slots, restNil]
+      rw [hl, slots, restNil, closed]
       simp [HeldInbox.cell, hs, ht, hn]
   rw [delivered.postsExact, noPosts, sameMail, seedPosts]
   simp
@@ -671,15 +788,16 @@ theorem inboxAt_posted {rootBytes : Bytes → Digest} (snapshot : Snapshot rootB
   rw [afterPosts_of_nodup snapshot posts nodup post member, isImage]
   simp [inboxImage, bodyOf_image, Inbox.roundTrip]
 
-/-- **Anchored**: every reply slot a mail opens (one it did not read) answers to an inbox cell the mail holds. -/
+/-- **Anchored**: every reply slot a mail opens (one it did not read), and every slot a
+cancel decides, answers to an inbox cell the mail holds. -/
 def Mail.Anchored {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     (mail : Mail config snapshot) : Prop :=
-  ∀ slot ∈ mail.slots, slot.read = none → ∃ held ∈ mail.inboxes, held.cell = slot.now.activity
+  (∀ slot ∈ mail.slots, slot.read = none → ∃ held ∈ mail.inboxes, held.cell = slot.now.activity) ∧
+    ∀ closed ∈ mail.closed, ∀ slot, closed.decided = some slot → ∃ held ∈ mail.inboxes, held.cell = slot.activity
 
 theorem Mail.empty_anchored {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes} :
     Mail.Anchored (Mail.empty : Mail config snapshot) := by
-  intro slot member
-  cases member
+  constructor <;> intro _ member <;> cases member
 
 theorem holdInbox_cover {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {mail : Mail config snapshot} {sender target : Nat} {held : HeldInbox config snapshot}
@@ -769,6 +887,13 @@ theorem Mail.send_anchored {rootBytes : Bytes → Digest} {config : Config} {sna
     (anchored : Mail.Anchored mail) (sent : mail.send message destination = .ok next) :
     Mail.Anchored next := by
   have persist := Mail.send_inboxes_persist sent
+  refine ⟨?_, ?_⟩
+  swap
+  · intro closed member slot decided
+    rw [(Mail.send_keeps sent).1] at member
+    obtain ⟨held, hm, hc⟩ := anchored.2 closed member slot decided
+    obtain ⟨held', hm', hc'⟩ := persist held hm
+    exact ⟨held', hm', hc'.trans hc⟩
   cases destination with
   | object target =>
     simp only [Mail.send] at sent
@@ -779,7 +904,7 @@ theorem Mail.send_anchored {rootBytes : Bytes → Digest} {config : Config} {sna
     cases sent
     intro slot member opened
     rcases List.mem_append.mp member with old | fresh
-    · obtain ⟨held, hm, hc⟩ := anchored slot old opened
+    · obtain ⟨held, hm, hc⟩ := anchored.1 slot old opened
       obtain ⟨held', hm', hc'⟩ := persist held hm
       exact ⟨held', hm', hc'.trans hc⟩
     · have same := List.mem_singleton.mp fresh
@@ -795,11 +920,11 @@ theorem Mail.send_anchored {rootBytes : Bytes → Digest} {config : Config} {sna
     cases sent
     intro slot member opened
     rcases List.mem_append.mp member with old | updated
-    · exact anchored slot (others slot old) opened
+    · exact anchored.1 slot (others slot old) opened
     · have same := List.mem_singleton.mp updated
       subst same
       rcases heldCover with inMail | read
-      · have a := anchored _ inMail opened
+      · have a := anchored.1 _ inMail opened
         exact a
       · exact absurd opened read
 
@@ -850,6 +975,129 @@ theorem forward_inboxes_persist {rootBytes : Bytes → Digest} {config : Config}
         exact ⟨h2, m2, c2.trans c1⟩
     · exact forward_inboxes_persist reference rest mail held member
 
+theorem controlSlot_held_cover {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {mail : Mail config snapshot} {name : Digest} {held : HeldSlot config snapshot}
+    {others : List (HeldSlot config snapshot)}
+    (ok : controlSlot config snapshot mail name = .ok (.held held others)) :
+    (∀ other ∈ others, other ∈ mail.slots) ∧ (held ∈ mail.slots ∨ held.read ≠ none) := by
+  unfold controlSlot at ok
+  split at ok
+  · cases ok
+  · split at ok
+    · rename_i found hit
+      split at ok
+      · cases ok
+      · cases ok
+        exact ⟨fun other member => (List.mem_filter.mp member).1, .inl (List.mem_of_find?_eq_some hit)⟩
+    · repeat' split at ok
+      all_goals first
+        | (cases ok; done)
+        | (cases ok; exact ⟨fun other member => member, Or.inr (by simp)⟩)
+
+/-- A control keeps every inbox cell the mail holds. -/
+theorem Mail.control_inboxes_persist {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {mail next : Mail config snapshot} {height : Nat} {control : Control}
+    (ok : mail.control height control = .ok next) :
+    ∀ held ∈ mail.inboxes, ∃ held' ∈ next.inboxes, held'.cell = held.cell := by
+  rcases Mail.control_cases ok with same | ⟨_, _, _, _, _, _, _, _, _, rfl⟩ |
+    ⟨_, _, _, _, _, _, _, _, _, _, _, rfl⟩ |
+    ⟨_, held, others, inbox, updated, inboxes, message, closing, found, heldOk, _, _, _, _, us, ut, _, _, _, rfl⟩
+  · rw [same]; exact fun held member => ⟨held, member, rfl⟩
+  · exact fun held member => ⟨held, member, rfl⟩
+  · exact fun held member => ⟨held, member, rfl⟩
+  · obtain ⟨_, hold⟩ := controlInbox_spec heldOk
+    obtain ⟨_, _, cover⟩ := holdInbox_cover hold
+    intro other member
+    rcases cover other member with kept | same
+    · exact ⟨other, List.mem_append.mpr (.inl kept), rfl⟩
+    · exact ⟨updated, List.mem_append.mpr (.inr (List.mem_singleton.mpr rfl)),
+        HeldInbox.cell_eq (us.trans same.1.symm) (ut.trans same.2.symm)⟩
+
+/-- **A control keeps a mail anchored**: the slot a cancel decides answers to the inbox it
+withdrew the message from, which the mail now holds. -/
+theorem Mail.control_anchored {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {mail next : Mail config snapshot} {height : Nat} {control : Control}
+    (anchored : Mail.Anchored mail) (ok : mail.control height control = .ok next) : Mail.Anchored next := by
+  have persist := Mail.control_inboxes_persist ok
+  have lift : ∀ (slot : AnswerSlot.Slot), (∃ held ∈ mail.inboxes, held.cell = slot.activity) →
+      ∃ held ∈ next.inboxes, held.cell = slot.activity := by
+    intro slot ⟨held, hm, hc⟩
+    obtain ⟨held', hm', hc'⟩ := persist held hm
+    exact ⟨held', hm', hc'.trans hc⟩
+  rcases Mail.control_cases ok with same | ⟨_, _, closing, _, _, _, none_, _, _, rfl⟩ |
+    ⟨_, held, updated, others, _, _, found, _, _, read, now, rfl⟩ |
+    ⟨_, held, others, inbox, updated, inboxes, message, closing, found, heldOk, _, cell, _, _, us, ut, _, decided, _,
+      rfl⟩
+  · rw [same]; exact anchored
+  · refine ⟨anchored.1, ?_⟩
+    intro closed member slot isSome
+    rcases List.mem_append.mp member with old | fresh
+    · exact anchored.2 closed old slot isSome
+    · rw [List.mem_singleton.mp fresh, none_] at isSome; cases isSome
+  · obtain ⟨others', heldCover⟩ := controlSlot_held_cover found
+    refine ⟨?_, anchored.2⟩
+    intro slot member opened
+    rcases List.mem_append.mp member with old | fresh
+    · exact anchored.1 slot (others' slot old) opened
+    · rw [List.mem_singleton.mp fresh] at opened ⊢
+      rw [read] at opened
+      rw [now]
+      rcases heldCover with inMail | wasRead
+      · exact anchored.1 held inMail opened
+      · exact absurd opened wasRead
+  · obtain ⟨others', _⟩ := controlSlot_held_cover found
+    refine ⟨fun slot member opened => lift slot.now (anchored.1 slot (others' slot member) opened), ?_⟩
+    intro closed member slot isSome
+    rcases List.mem_append.mp member with old | fresh
+    · exact lift slot (anchored.2 closed old slot isSome)
+    · rw [List.mem_singleton.mp fresh] at isSome
+      obtain ⟨_, rfl⟩ := decided slot isSome
+      refine ⟨updated, List.mem_append.mpr (.inr (List.mem_singleton.mpr rfl)), ?_⟩
+      rw [← cell]
+      exact HeldInbox.cell_eq us ut
+
+theorem postControls_anchored {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (height : Nat) :
+    ∀ (controls : List Control) (mail next : Mail config snapshot),
+      postControls config snapshot height mail controls = .ok next → Mail.Anchored mail → Mail.Anchored next
+  | [], mail, next, ok, anchored => by simp only [postControls] at ok; cases ok; exact anchored
+  | control :: rest, mail, next, ok, anchored => by
+    simp only [postControls] at ok
+    split at ok
+    · cases ok
+    · rename_i mail' controlled
+      exact postControls_anchored height rest mail' next ok (Mail.control_anchored anchored controlled)
+
+/-- **Controls that cancel nothing write no inbox and decide no slot**: with no `cancel`
+among them, the inboxes of the mail are untouched and every slot they close is retired. -/
+theorem postControls_stops {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (height : Nat) :
+    ∀ (controls : List Control) (mail next : Mail config snapshot),
+      postControls config snapshot height mail controls = .ok next →
+      (∀ control ∈ controls, control.kind ≠ .cancel) →
+      (∀ closed ∈ mail.closed, closed.decided = none) →
+      next.inboxes = mail.inboxes ∧ ∀ closed ∈ next.closed, closed.decided = none
+  | [], mail, next, ok, _, retired => by
+    simp only [postControls] at ok; cases ok; exact ⟨rfl, retired⟩
+  | control :: rest, mail, next, ok, stops, retired => by
+    simp only [postControls] at ok
+    split at ok
+    · cases ok
+    · rename_i mail' controlled
+      have one : mail'.inboxes = mail.inboxes ∧ ∀ closed ∈ mail'.closed, closed.decided = none := by
+        rcases Mail.control_cases controlled with same | ⟨_, _, closing, _, _, _, none_, _, _, rfl⟩ |
+          ⟨_, _, _, _, _, _, _, _, _, _, _, rfl⟩ | ⟨cancel, _⟩
+        · rw [same]; exact ⟨rfl, retired⟩
+        · refine ⟨rfl, fun closed member => ?_⟩
+          rcases List.mem_append.mp member with old | fresh
+          · exact retired closed old
+          · rw [List.mem_singleton.mp fresh]; exact none_
+        · exact ⟨rfl, retired⟩
+        · exact absurd cancel (stops control (List.mem_cons_self ..))
+      obtain ⟨two, rest'⟩ := postControls_stops height rest mail' next ok
+        (fun c member => stops c (List.mem_cons_of_mem _ member)) one.2
+      exact ⟨two.trans one.1, rest'⟩
+
 /-- **Every post of a mail names a payer**, in the state the turn installs. Premises (the
 census's, as `Birth.retention_cells_have_payer`'s): the posts' cells are pairwise
 distinct and none lands on an object record (a coordinate collision); the objects
@@ -865,30 +1113,47 @@ theorem Mail.cells_have_payer {rootBytes : Bytes → Digest} {config : Config} {
     (pipelined : ∀ held ∈ mail.slots, held.read ≠ none → ∃ inbox,
       inboxAt (afterPosts snapshot posts) held.now.activity = some inbox ∧
         (objectAt config snapshot.canonicalBytes ⟨inbox.sender⟩).isSome = true) :
-    ∀ post ∈ mail.posts, (payerOfBytes config (afterPosts snapshot posts) post.bytes).isSome = true := by
+    ∀ post ∈ mail.posts, (payloadOf post.bytes).isSome = true →
+      (payerOfBytes config (afterPosts snapshot posts) post.bytes).isSome = true := by
   have ownedAfter : ∀ (sender : Nat), (objectAt config snapshot.canonicalBytes ⟨sender⟩).isSome = true →
       ∃ record, objectAt config (afterPosts snapshot posts) ⟨sender⟩ = some record := by
     intro sender isSome
     rw [objectAt_afterPosts config snapshot posts ⟨sender⟩ (fun post member => objectsUnwritten post member _)]
     exact Option.isSome_iff_exists.mp isSome
-  intro post member
-  rcases List.mem_append.mp member with inInbox | inSlot
+  intro post member live
+  have inboxOf : ∀ (cell : CellId), (∃ held ∈ mail.inboxes, held.cell = cell) → ∃ inbox,
+      inboxAt (afterPosts snapshot posts) cell = some inbox ∧
+        (objectAt config snapshot.canonicalBytes ⟨inbox.sender⟩).isSome = true := by
+    intro cell ⟨h, hm, hcell⟩
+    have inPosts := included _ (List.mem_append.mpr (.inl (List.mem_append.mpr (.inl (List.mem_map.mpr ⟨h, hm, rfl⟩)))))
+    refine ⟨h.now, ?_, ?_⟩
+    · rw [← hcell]
+      exact inboxAt_posted snapshot posts distinct _ inPosts h.now rfl
+    · rw [h.ends.1]; exact owned h hm
+  rcases List.mem_append.mp member with front | inClosed
+  swap
+  · obtain ⟨closed, hmem, rfl⟩ := List.mem_map.mp inClosed
+    unfold ClosedSlot.post at live ⊢
+    cases decided : closed.decided with
+    | none =>
+      rw [decided] at live
+      simp [slotRetire, postAt, payloadOf_retired] at live
+    | some slot =>
+      obtain ⟨inbox, hin, hown⟩ := inboxOf slot.activity (anchored.2 closed hmem slot decided)
+      obtain ⟨record, hrec⟩ := ownedAfter inbox.sender hown
+      exact payer_slot_image_inbox config _ slot inbox record hin hrec
+  rcases List.mem_append.mp front with inInbox | inSlot
   · obtain ⟨held, hmem, rfl⟩ := List.mem_map.mp inInbox
     obtain ⟨record, hrec⟩ := ownedAfter held.sender (owned held hmem)
     have ends := held.ends.1
     exact option_isSome_of_eq (payer_inbox_image config _ held.now record (by rw [ends]; exact hrec))
   · obtain ⟨held, hmem, rfl⟩ := List.mem_map.mp inSlot
-    have inboxOf : ∃ inbox, inboxAt (afterPosts snapshot posts) held.now.activity = some inbox ∧
+    have found : ∃ inbox, inboxAt (afterPosts snapshot posts) held.now.activity = some inbox ∧
         (objectAt config snapshot.canonicalBytes ⟨inbox.sender⟩).isSome = true := by
       by_cases fresh : held.read = none
-      · obtain ⟨h, hm, hcell⟩ := anchored held hmem fresh
-        have inPosts := included _ (List.mem_append.mpr (.inl (List.mem_map.mpr ⟨h, hm, rfl⟩)))
-        refine ⟨h.now, ?_, ?_⟩
-        · rw [← hcell]
-          exact inboxAt_posted snapshot posts distinct _ inPosts h.now rfl
-        · rw [h.ends.1]; exact owned h hm
+      · exact inboxOf _ (anchored.1 held hmem fresh)
       · exact pipelined held hmem fresh
-    obtain ⟨inbox, hin, hown⟩ := inboxOf
+    obtain ⟨inbox, hin, hown⟩ := found
     obtain ⟨record, hrec⟩ := ownedAfter inbox.sender hown
     exact payer_slot_image_inbox config _ held.now inbox record hin hrec
 
@@ -913,7 +1178,8 @@ theorem Invocation.retention_cells_have_payer {rootBytes : Bytes → Digest} {co
     exec_invariant config snapshot height request.authority (invokeTransaction request) _ [] _ _ _ _ _ _
       invoked.execExact (by simp) (by intro _ _ h; cases h) (by intro _ h; cases h)
   have anchored : Mail.Anchored invoked.mail :=
-    postMail_anchored request.postage request.account _ _ _ invoked.mailExact Mail.empty_anchored
+    postControls_anchored height _ _ _ invoked.mailExact
+      (postMail_anchored request.postage request.account _ _ _ invoked.sentExact Mail.empty_anchored)
   apply cellsPaid_of_posts
   intro post member live
   have inPosts := member
@@ -931,7 +1197,7 @@ theorem Invocation.retention_cells_have_payer {rootBytes : Bytes → Digest} {co
         (fun post member => by
           rw [invoked.postsExact]
           exact List.mem_append.mpr (.inl (List.mem_append.mpr (.inr member))))
-        distinct objectsUnwritten anchored owned pipelined post inMail
+        distinct objectsUnwritten anchored owned pipelined post inMail live
   · simp only [List.mem_singleton] at isBook
     subst isBook
     rw [Postings.write_payload] at live
@@ -958,9 +1224,10 @@ theorem runMessage_read {rootBytes : Bytes → Digest} {config : Config} {snapsh
 delivery leaves holding an activity payload names its payer in the installed state: the
 state cells its call tree wrote their object's, the inboxes (the popped one and the
 forwarded ones) their sender object's, the slots it opens and the slot it decides the
-payer of the inbox they answer to. Premises: as `Mail.cells_have_payer`, and that the
-slot the message answers to is the reply slot of the inbox that held it
-(`activity`: established by `openSlot`, which `deliverMessage` does not recheck). -/
+payer of the inbox they answer to (a slot whose sender stopped waiting is retired and
+holds nothing). Premises: as `Mail.cells_have_payer`. (The former premise that the slot
+answers to the inbox that held its message is now checked by `deliverMessage` itself,
+`MessageDelivery.activityExact`, cv 01a113fe-140a.) -/
 theorem MessageDelivery.retention_cells_have_payer {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {request : MessageRequest}
     (delivered : MessageDelivery config snapshot height request)
@@ -970,13 +1237,14 @@ theorem MessageDelivery.retention_cells_have_payer {rootBytes : Bytes → Digest
       (objectAt config snapshot.canonicalBytes ⟨held.sender⟩).isSome = true)
     (pipelined : ∀ held ∈ delivered.mail.slots, held.read ≠ none → ∃ inbox,
       inboxAt (afterPosts snapshot delivered.posts) held.now.activity = some inbox ∧
-        (objectAt config snapshot.canonicalBytes ⟨inbox.sender⟩).isSome = true)
-    (activity : delivered.slot.activity = Inbox.cell config.domain request.sender request.target) :
+        (objectAt config snapshot.canonicalBytes ⟨inbox.sender⟩).isSome = true) :
     CellsPaid config (afterPosts snapshot delivered.posts) (delivered.posts.map Post.cell) := by
   have seedAnchored : Mail.Anchored delivered.seed := by
-    intro slot member
-    rw [delivered.seedExact.2.1] at member
-    cases member
+    refine ⟨fun slot member => ?_, fun closed member => ?_⟩
+    · rw [delivered.seedExact.2.1] at member
+      cases member
+    · rw [delivered.seedExact.2.2.2.2.1] at member
+      cases member
   have anchored : Mail.Anchored delivered.mail := by
     have := forward_anchored delivered.outcome.reference delivered.slot.queued delivered.seed seedAnchored
     rw [delivered.forwarded] at this
@@ -1005,10 +1273,16 @@ theorem MessageDelivery.retention_cells_have_payer {rootBytes : Bytes → Digest
       · rw [hout] at inOutcome
         simp [Outcome.posts] at inOutcome
     · exact Mail.cells_have_payer delivered.mail delivered.posts mailIn distinct objectsUnwritten anchored owned
-        pipelined post inMail
+        pipelined post inMail live
   · simp only [List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at last
     rcases last with isSlot | isBook
     · subst isSlot
+      unfold replyPost at live ⊢
+      split
+      swap
+      · rename_i unwatched
+        rw [if_neg unwatched] at live
+        simp [slotRetire, postAt, payloadOf_retired] at live
       obtain ⟨_, _, _, decided⟩ := AnswerSlot.decideDelivery_single delivered.decidedExact
       have decidedActivity : delivered.decided.activity = delivered.slot.activity := by rw [decided]
       have inboxCell : ∃ held ∈ delivered.mail.inboxes,
@@ -1029,9 +1303,9 @@ theorem MessageDelivery.retention_cells_have_payer {rootBytes : Bytes → Digest
           unfold HeldInbox.cell
           rw [hs, ht]
       obtain ⟨held, hm, hcell⟩ := inboxCell
-      have inPosts := mailIn _ (List.mem_append.mpr (.inl (List.mem_map.mpr ⟨held, hm, rfl⟩)))
+      have inPosts := mailIn _ (List.mem_append.mpr (.inl (List.mem_append.mpr (.inl (List.mem_map.mpr ⟨held, hm, rfl⟩)))))
       have inboxHeld : inboxAt (afterPosts snapshot delivered.posts) delivered.decided.activity = some held.now := by
-        rw [decidedActivity, activity, ← hcell]
+        rw [decidedActivity, delivered.activityExact, ← hcell]
         exact inboxAt_posted snapshot delivered.posts distinct _ inPosts held.now rfl
       obtain ⟨record, hrec⟩ : ∃ record, objectAt config (afterPosts snapshot delivered.posts) ⟨held.now.sender⟩ =
           some record := by
@@ -1068,6 +1342,18 @@ theorem MessageDelivery.retention_cells_have_payer {rootBytes : Bytes → Digest
 #assert_axioms forward_anchored
 #assert_axioms forward_inboxes_persist
 #assert_axioms Mail.cells_have_payer
+#assert_axioms Mail.send_keeps
+#assert_axioms postMail_keeps
+#assert_axioms Mail.control_credits
+#assert_axioms postControls_credits
+#assert_axioms Invocation.mail_of_silent
+#assert_axioms Invocation.debits_only_account_of_silent
+#assert_axioms controlSlot_held_cover
+#assert_axioms Mail.control_inboxes_persist
+#assert_axioms Mail.control_anchored
+#assert_axioms postControls_anchored
+#assert_axioms postControls_stops
+#assert_axioms replyPost_spec
 #assert_axioms Invocation.retention_cells_have_payer
 #assert_axioms Invocation.debits_only_account
 #assert_axioms Mail.send_credit

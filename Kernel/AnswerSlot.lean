@@ -26,6 +26,16 @@ A delivery slot also holds the sends queued ON it (`queued`, at most
 turn that decides the slot forwards them (when the reply names an object) or
 refunds them, in that same turn.
 
+The message's SENDER (a frame of the sending object, `ObjectiveCall`) controls the
+slot two separate ways (GPT-6 row F: stop-waiting is not cancel-if-queued):
+* `stopWaiting`: the sender stops waiting for the reply. The pipelined sends are
+  refunded, nothing more may be pipelined on it (`watched = false`), and the message
+  STAYS QUEUED: it is delivered as ever, and the delivery RETIRES the unwatched slot
+  instead of writing a decision nobody reads. A decided slot it retires at once.
+* `cancelDelivery`: the sender withdraws the message IF IT IS STILL QUEUED. Its slot is
+  decided `cancelled` (by the cancelling turn, the only decider besides the
+  delivery). A slot already decided is left as it is: the cancel is a no-op.
+
 The rule below is pure. Its intents (in `Kernel.ObjectiveActivity`) write the
 slot cell against its open root AND spend the slot's claim, so a second
 decision is refused twice over: the cell CAS (`stalePreRoot`) and the claim
@@ -54,6 +64,9 @@ inductive Decision where
   | unknown
   | broken (reason : String)
   | expired
+  /-- The message's sender withdrew it while it was still queued. Kernel-only: no
+  subject's answer carries it (`ObjectiveActivityReceiver.AnswerWire`). -/
+  | cancelled
   deriving DecidableEq, Repr
 
 inductive Phase where
@@ -78,24 +91,30 @@ structure Slot where
   phase : Phase
   /-- Sends queued on this slot's reply (delivery slots only). -/
   queued : List Inbox.Message
+  /-- Someone waits for the reply: false once the message's sender stopped waiting
+  (`stopWaiting`); an unwatched slot takes no pipelined send and is retired by the
+  turn that would decide it. -/
+  watched : Bool
   deriving DecidableEq, Repr
 
 def decisionStream : StreamCodec Decision :=
   StreamCodec.xmap
     (StreamCodec.sum bytesStream (StreamCodec.sum stringStream
-      (StreamCodec.sum unitStream (StreamCodec.sum stringStream unitStream))))
+      (StreamCodec.sum unitStream (StreamCodec.sum stringStream (StreamCodec.sum unitStream unitStream)))))
     (fun decision => match decision with
       | .reply value => .inl value
       | .refused reason => .inr (.inl reason)
       | .unknown => .inr (.inr (.inl ()))
       | .broken reason => .inr (.inr (.inr (.inl reason)))
-      | .expired => .inr (.inr (.inr (.inr ()))))
+      | .expired => .inr (.inr (.inr (.inr (.inl ()))))
+      | .cancelled => .inr (.inr (.inr (.inr (.inr ())))))
     (fun wire => match wire with
       | .inl value => .reply value
       | .inr (.inl reason) => .refused reason
       | .inr (.inr (.inl _)) => .unknown
       | .inr (.inr (.inr (.inl reason))) => .broken reason
-      | .inr (.inr (.inr (.inr _))) => .expired)
+      | .inr (.inr (.inr (.inr (.inl _)))) => .expired
+      | .inr (.inr (.inr (.inr (.inr _)))) => .cancelled)
     (by intro decision; cases decision <;> rfl)
 
 def phaseStream : StreamCodec Phase :=
@@ -122,14 +141,15 @@ def slotStream : StreamCodec Slot :=
   StreamCodec.xmap
     (StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product deciderStream (StreamCodec.product StreamCodec.nat
-        (StreamCodec.product phaseStream (StreamCodec.list Inbox.messageStream))))))
-    (fun slot => (slot.name, slot.activity, slot.decider, slot.deadline, slot.phase, slot.queued))
-    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1, wire.2.2.2.2.1, wire.2.2.2.2.2⟩)
+        (StreamCodec.product phaseStream (StreamCodec.product (StreamCodec.list Inbox.messageStream)
+          StreamCodec.bool))))))
+    (fun slot => (slot.name, slot.activity, slot.decider, slot.deadline, slot.phase, slot.queued, slot.watched))
+    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1, wire.2.2.2.2.1, wire.2.2.2.2.2.1, wire.2.2.2.2.2.2⟩)
     (by intro slot; cases slot; rfl)
 
-/-- v2: the decider is a role (`Decider`) and a slot carries its queued sends;
-a v1 slot refuses to decode. -/
-def frame : Bytes := "DREGG/OBJECTIVE/ANSWER-SLOT/v2".toUTF8.toList
+/-- v3: a slot carries `watched` and a decision may be `cancelled` (GPT-6 row F); a v2
+or v1 slot refuses to decode (`v2_refuses`). -/
+def frame : Bytes := "DREGG/OBJECTIVE/ANSWER-SLOT/v3".toUTF8.toList
 def codec := framed frame slotStream
 def encode (slot : Slot) : Bytes := codec.encode slot
 def decode (bytes : Bytes) : Option Slot := codec.decode bytes
@@ -198,6 +218,55 @@ def decideDelivery (slot : Slot) (message : Digest) (height : Nat) (decision : D
     if decision = .expired then .error .expiryIsKernelOnly
     else if slot.decider ≠ .delivery message then .error .notDecider
     else .ok {slot with phase := .decided decision height, queued := []}
+
+/-- **The sender stops waiting**: an open delivery slot keeps its message's place
+(nothing about the inbox changes) but drops its pipelined sends (the caller refunds
+them) and is unwatched from now on. -/
+def stopWaiting (slot : Slot) : Except Refusal Slot :=
+  match slot.phase with
+  | .decided _ _ => .error .notOpen
+  | .opened =>
+    match slot.decider with
+    | .subject _ => .error .notDecider
+    | .delivery _ => .ok {slot with queued := [], watched := false}
+
+/-- **The sender cancels a still-queued message**: its open delivery slot is decided
+`cancelled` with nothing queued (the caller refunds the message and every pipelined send). -/
+def cancelDelivery (slot : Slot) (height : Nat) : Except Refusal Slot :=
+  match slot.phase with
+  | .decided _ _ => .error .notOpen
+  | .opened =>
+    match slot.decider with
+    | .subject _ => .error .notDecider
+    | .delivery _ => .ok {slot with phase := .decided .cancelled height, queued := []}
+
+/-- A cancel decides only an open delivery slot, `cancelled`, emptying its queue. -/
+theorem cancelDelivery_spec {slot decided : Slot} {height : Nat} (ok : cancelDelivery slot height = .ok decided) :
+    slot.phase = .opened ∧ (∃ message, slot.decider = .delivery message) ∧
+      decided = {slot with phase := .decided .cancelled height, queued := []} := by
+  unfold cancelDelivery at ok
+  split at ok
+  · cases ok
+  · rename_i opened
+    split at ok
+    · cases ok
+    · rename_i message role
+      cases ok
+      exact ⟨opened, ⟨message, role⟩, rfl⟩
+
+/-- Stopping keeps the slot open and its decider; it only unwatches it and empties its queue. -/
+theorem stopWaiting_spec {slot stopped : Slot} (ok : stopWaiting slot = .ok stopped) :
+    slot.phase = .opened ∧ (∃ message, slot.decider = .delivery message) ∧
+      stopped = {slot with queued := [], watched := false} := by
+  unfold stopWaiting at ok
+  split at ok
+  · cases ok
+  · rename_i opened
+    split at ok
+    · cases ok
+    · rename_i message role
+      cases ok
+      exact ⟨opened, ⟨message, role⟩, rfl⟩
 
 /-- Exactly one decider: a decided slot names the subject that decided it. -/
 theorem decide_single_decider {slot decided : Slot} {subject : SubjectId} {height : Nat}
@@ -304,10 +373,33 @@ theorem stranger_refused (slot : Slot) (subject : SubjectId) (height : Nat) (dec
 
 /-! Inhabitants of the premises above (closed slots, no hashing). -/
 
-def sampleSlot : Slot := ⟨⟨1⟩, ⟨2⟩, .subject ⟨7⟩, 10, .opened, []⟩
+def sampleSlot : Slot := ⟨⟨1⟩, ⟨2⟩, .subject ⟨7⟩, 10, .opened, [], true⟩
 
 /-- A delivery slot: the reply of message 1. -/
-def sampleSendSlot : Slot := ⟨⟨1⟩, ⟨2⟩, .delivery ⟨1⟩, 0, .opened, []⟩
+def sampleSendSlot : Slot := ⟨⟨1⟩, ⟨2⟩, .delivery ⟨1⟩, 0, .opened, [], true⟩
+
+theorem sample_cancelled :
+    cancelDelivery sampleSendSlot 5 = .ok {sampleSendSlot with phase := .decided .cancelled 5, queued := []} := rfl
+
+theorem sample_cancel_decided_refused :
+    cancelDelivery {sampleSendSlot with phase := .decided (.reply [3]) 4} 5 = .error .notOpen := rfl
+
+theorem sample_cancel_subject_refused : cancelDelivery sampleSlot 5 = .error .notDecider := rfl
+
+theorem sample_stopped : stopWaiting sampleSendSlot = .ok {sampleSendSlot with watched := false} := rfl
+
+/-- The v2 frame (no `watched`, no `cancelled`) refuses to decode as v3. -/
+theorem v2_refuses (body : Bytes) :
+    decode ("DREGG/OBJECTIVE/ANSWER-SLOT/v2".toUTF8.toList ++ body) = none := by
+  cases found : decode ("DREGG/OBJECTIVE/ANSWER-SLOT/v2".toUTF8.toList ++ body) with
+  | none => rfl
+  | some slot =>
+    have canon := framed_canonical found
+    have cut := congrArg (List.take frame.length) canon
+    change (frame ++ slotStream.encode slot).take frame.length =
+      ("DREGG/OBJECTIVE/ANSWER-SLOT/v2".toUTF8.toList ++ body).take frame.length at cut
+    rw [List.take_left' rfl, List.take_left' (by decide +kernel)] at cut
+    exact absurd cut (by decide +kernel)
 
 theorem sample_delivered :
     decideDelivery sampleSendSlot ⟨1⟩ 5 (.reply [3]) =
@@ -351,4 +443,11 @@ theorem sample_not_yet_expired : expire sampleSlot 10 = .error (.notYetExpired 1
 #assert_axioms sample_other_message
 #assert_axioms sample_subject_on_send_slot
 #assert_axioms sample_send_slot_never_expires
+#assert_axioms cancelDelivery_spec
+#assert_axioms stopWaiting_spec
+#assert_axioms sample_cancelled
+#assert_axioms sample_cancel_decided_refused
+#assert_axioms sample_cancel_subject_refused
+#assert_axioms sample_stopped
+#assert_axioms v2_refuses
 end Minidregg.Kernel.AnswerSlot

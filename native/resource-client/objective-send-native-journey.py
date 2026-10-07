@@ -41,12 +41,38 @@ inbox and runs it with `request/caller` the sender and no subject.
                 resolves, so `Deliverable` is decided then, at the RESOLVED object: the lookup decides `ref counter`,
                 the queued `bounce` is NOT forwarded (inbox (poster, counter) unchanged) and its postage is REFUNDED
                 to the sponsor; the (poster, dir) purse ends empty.
+  S10 cancel    (row F, CANCEL-IF-QUEUED) poster queues three deposits a, b, c on (poster, counter) and cancels b
+                (`cancelOf`, the sending object's frame): b leaves the inbox, a and c keep their order and the
+                head stays; the purse returns EXACTLY b's postage to the sponsor (sponsor +PRICE = refund, less the
+                cancel's own fee, which the collector gets); b's slot is decided `cancelled`; delivering b is
+                refused; a and c are delivered (+1, +3). A cancel of a pipelined lookup refunds the lookup AND the
+                send queued on its slot (2 x PRICE), leaving the (poster, dir) purse empty.
+  S11 pole      (row F, ack at the yield, effect at the commit) a cancel of m PREPARED while m is queued (acked),
+                then m is delivered: the prepared cancel no longer commits (refused `wrongMessage`: the outcome
+                its signature consented to, a withdrawal, is not what it would commit now), and a
+                fresh cancel commits as a NO-OP: the slot stays `reply`, nothing is refunded (sponsor pays only
+                the fee), the purse is unchanged.
+  S12 stop      (row F, STOP-WAITING) poster pipes a deposit on a lookup, then `stopOf`s the lookup: the pipelined
+                deposit's postage is refunded (PRICE), the slot stays open, unwatched, its queue empty; the lookup
+                is STILL delivered (popped, its postage to the collector) and its delivery RETIRES the slot; the
+                counter is unchanged. A stop of a slot already decided (S2's) retires it at once.
+  S13 who       (row F, authority) another object's cancel or stop of poster's queued message is refused
+                `notSender`; a slot that does not exist `notControllable`; a pipelined send onto a stopped slot
+                `notPipelinable`; nothing commits.
 
 PLANTS (self-test: the named fault is put in the WORLD, so a check that must hold fails and its row goes red):
   vault-open      the vault is created permit-all: the S4 delivery succeeds         -> S4 red
   dir-empty       the directory names no object: S5's deposit is refunded           -> S5 red
   roomy-postage   S6's postage covers the lookup: its slot is decided `reply`       -> S6 red
   relay-deposit   S8's sending-method relay names `deposit` (deliverable): admitted -> S8 red
+  cancel-late     S10's b is delivered before it is cancelled: nothing to withdraw  -> S10 red
+  cancel-early    S11's fresh cancel runs BEFORE m is delivered: it withdraws        -> S11 red
+  stop-cancels    S12 yields `cancelOf` where it should `stopOf`: m is withdrawn     -> S12 red
+  sender-controls S13's "other object" is poster itself, the sender: admitted        -> S13 red
+Every plant is ASSERTED APPLIED before its row is judged (group P-plant-applied, which must stay PASS): a plant
+that did not take hold reads as `blind`, never as red.
+The kernel's control checks are planted by building the Host from a planted tree (authority check removed,
+cancel refunds nothing, stop does not unwatch, a cancel of a decided slot retires it): S10-S13 red together.
 The kernel check itself is planted by building the Host with `ObjectiveCall.Mail.send` not consulting
 `deliverable` (the pre-row-F kernel): S8's relay then installs, escrows PRICE, and its delivery decides `broken`
 ("a delivered message sends") -- S8 red, and S9's bounce is forwarded instead of refunded -- S9 red.
@@ -64,7 +90,8 @@ def label(text):
     return {'tag': 'label', 'value': text}
 
 PLANTS = {'vault-open': {'S4-failed'}, 'dir-empty': {'S5-forward', 'S9-resolved'}, 'roomy-postage': {'S6-broken'},
-          'relay-deposit': {'S8-interface'}}
+          'relay-deposit': {'S8-interface'}, 'cancel-late': {'S10-cancel'}, 'cancel-early': {'S11-pole'},
+          'stop-cancels': {'S12-stop'}, 'sender-controls': {'S13-who'}}
 ap = argparse.ArgumentParser()
 ap.add_argument('--bin', required=True)
 ap.add_argument('--root', required=True)
@@ -292,6 +319,128 @@ try:
                 {'purse': source['purse'], 'refund': source['sponsor'] - held['sponsor'],
                  'fee': source['collector'] - held['collector']})
         w.check('s9-counter-kept', total('counter', 's9-c1') == c0, None)
+
+    applied = {}  # plant -> did it take hold (judged in group P-plant-applied, after the rows)
+
+    def slot_cell(name, label):
+        v = w.view(label, {'slots': [str(name)]})
+        return w.cell_of(v, v['slots'][0]['cell'])
+
+    def control(label, by, method, slot_id, expect, detail=None):
+        return invoke(label, by, method, nat(int(slot_id)), expect, detail)
+
+    def paid(before, after):
+        """(refund to the sponsor, fee to the collector) between two inbox views of one turn."""
+        fee = after['collector'] - before['collector']
+        return after['sponsor'] - before['sponsor'] + fee, fee
+
+    with w.group('S10-cancel'):
+        c0 = total('counter', 's10-c0')
+        ma = reported(invoke('s10-post-a', 'poster', 'post', post('counter', 1), 'installed'))
+        mb = reported(invoke('s10-post-b', 'poster', 'post', post('counter', 2), 'installed'))
+        mc = reported(invoke('s10-post-c', 'poster', 'post', post('counter', 3), 'installed'))
+        if 'cancel-late' in plants:  # the plant: b is delivered first (a, then b, leave the head)
+            deliver('s10-plant-deliver-a', 'poster', 'counter', ma, 'installed')
+            deliver('s10-plant-deliver-b', 'poster', 'counter', mb, 'installed')
+            applied['cancel-late'] = decision(slot(mb, 's10-plant-b')).get('kind') == 'reply'
+        before = inbox('poster', 'counter', 's10-before')
+        out = control('s10-cancel-b', 'poster', 'cancelOf', mb, 'installed')
+        after = inbox('poster', 'counter', 's10-after')
+        refund, fee = paid(before, after)
+        w.check('s10-acked', reported(out) == mb, reported(out))
+        w.check('s10-withdrawn-fifo-kept', after['ids'] == [i for i in before['ids'] if i != str(mb)]
+                and str(mb) in before['ids'] and after['head'] == before['head'], (before['ids'], after['ids']))
+        w.check('s10-refund-exact', refund == PRICE and before['purse'] - after['purse'] == PRICE and fee == PRICE,
+                {'refund': refund, 'fee': fee, 'purse': (before['purse'], after['purse'])})
+        sb = slot(mb, 's10-slot-b')
+        w.check('s10-slot-cancelled', decision(sb) == {'kind': 'cancelled'} and sb.get('queued') == [], sb)
+        deliver('s10-deliver-cancelled-refused', 'poster', 'counter', mb, 'refused')
+        if 'cancel-late' not in plants:
+            deliver('s10-deliver-a', 'poster', 'counter', ma, 'installed')
+        deliver('s10-deliver-c', 'poster', 'counter', mc, 'installed')
+        w.check('s10-others-delivered', total('counter', 's10-c1') == c0 + 1 + 3, total('counter', 's10-c1x'))
+        look = reported(invoke('s10-pipe', 'poster', 'pipe', record(via=nat(O['dir']), amount=nat(5)), 'installed'))
+        held = inbox('poster', 'dir', 's10-pipe-held')
+        control('s10-cancel-lookup', 'poster', 'cancelOf', look, 'installed')
+        gone = inbox('poster', 'dir', 's10-pipe-gone')
+        refund, fee = paid(held, gone)
+        w.check('s10-pipelined-refunded', held['purse'] == 2 * PRICE and gone['purse'] == 0 and refund == 2 * PRICE
+                and gone['ids'] == [], {'refund': refund, 'purse': (held['purse'], gone['purse']), 'ids': gone['ids']})
+        w.check('s10-lookup-cancelled', decision(slot(look, 's10-slot-look')) == {'kind': 'cancelled'}, None)
+        deliver('s10-deliver-lookup-refused', 'poster', 'dir', look, 'refused')
+
+    with w.group('S11-pole'):
+        m = reported(invoke('s11-post', 'poster', 'post', post('counter', 6), 'installed'))
+        c0 = total('counter', 's11-c0')
+        w.turn('s11-cancel-prepared', w.sponsor, {'kind': 'invoke', 'object': O['poster'],
+               'objectCapability': w.objects['poster']['capability'], 'method': 'cancelOf', 'args': nat(m),
+               'envelope': cap(TICKS), 'account': w.SPONSOR_ACCOUNT, 'accountCapability': w.SPONSOR_SPEND,
+               'postage': cap(TICKS)}, 'prepared', prepare=True)
+        if 'cancel-early' in plants:
+            applied['cancel-early'] = slot(m, 's11-plant-open').get('phase') == 'open'
+        else:
+            deliver('s11-deliver-first', 'poster', 'counter', m, 'installed')
+        w.resubmit('s11-prepared-cancel-stale', w.attempts / 's11-cancel-prepared' / 'ingress.bin', 'refused',
+                   'wrongMessage')
+        before = inbox('poster', 'counter', 's11-before')
+        out = control('s11-cancel-after', 'poster', 'cancelOf', m, 'installed')
+        after = inbox('poster', 'counter', 's11-after')
+        refund, fee = paid(before, after)
+        w.check('s11-acked', reported(out) == m, reported(out))
+        w.check('s11-noop-refunds-nothing', refund == 0 and fee == PRICE and after['purse'] == before['purse']
+                and after['ids'] == before['ids'], {'refund': refund, 'fee': fee, 'ids': after['ids']})
+        w.check('s11-slot-still-reply', decision(slot(m, 's11-slot')) == {'kind': 'reply', 'value': nat(c0 + 6)}
+                and total('counter', 's11-c1') == c0 + 6, None)
+
+    with w.group('S12-stop'):
+        c0 = total('counter', 's12-c0')
+        look = reported(invoke('s12-pipe', 'poster', 'pipe', record(via=nat(O['dir']), amount=nat(5)), 'installed'))
+        held = inbox('poster', 'dir', 's12-held')
+        how = 'cancelOf' if 'stop-cancels' in plants else 'stopOf'
+        out = control('s12-stop', 'poster', how, look, 'installed')
+        stopped = inbox('poster', 'dir', 's12-stopped')
+        if 'stop-cancels' in plants:
+            applied['stop-cancels'] = str(look) not in stopped['ids']
+        refund, fee = paid(held, stopped)
+        sl = slot(look, 's12-slot-stopped')
+        w.check('s12-acked', reported(out) == look, reported(out))
+        w.check('s12-pipelined-refunded', refund == PRICE and held['purse'] - stopped['purse'] == PRICE
+                and stopped['ids'] == held['ids'], {'refund': refund, 'purse': (held['purse'], stopped['purse'])})
+        w.check('s12-open-unwatched', sl.get('phase') == 'open' and sl.get('watched') is False
+                and sl.get('queued') == [], sl)
+        deliver('s12-still-delivered', 'poster', 'dir', look, 'installed')
+        done = inbox('poster', 'dir', 's12-done')
+        w.check('s12-popped-paid', done['ids'] == [] and done['purse'] == 0
+                and done['collector'] - stopped['collector'] == PRICE, done)
+        w.check('s12-delivery-retires', slot_cell(look, 's12-cell').get('kind') == 'retired',
+                slot_cell(look, 's12-cell-x'))
+        w.check('s12-counter-kept', total('counter', 's12-c1') == c0, None)
+        control('s12-stop-decided', 'poster', 'stopOf', m1, 'installed')
+        w.check('s12-decided-retired', slot_cell(m1, 's12-m1-cell').get('kind') == 'retired',
+                slot_cell(m1, 's12-m1-cell-x'))
+
+    with w.group('S13-who'):
+        m = reported(invoke('s13-post', 'poster', 'post', post('counter', 1), 'installed'))
+        look = reported(invoke('s13-pipe', 'poster', 'pipe', record(via=nat(O['dir']), amount=nat(1)), 'installed'))
+        control('s13-stop-look', 'poster', 'stopOf', look, 'installed')
+        before = inbox('poster', 'counter', 's13-before')
+        other = 'poster' if 'sender-controls' in plants else 'counter'
+        if 'sender-controls' in plants:
+            applied['sender-controls'] = other == 'poster'
+        control('s13-other-cancel', other, 'cancelOf', m, 'refused', ['notSender', str(m), str(O['counter'])])
+        control('s13-other-stop', other, 'stopOf', m, 'refused', ['notSender', str(m), str(O['counter'])])
+        control('s13-no-such-slot', 'poster', 'cancelOf', 987654321, 'refused', ['notControllable', '987654321'])
+        invoke('s13-chase-stopped', 'poster', 'chase', record(target=nat(look), amount=nat(1)), 'refused',
+               ['notPipelinable', str(look)])
+        after = inbox('poster', 'counter', 's13-after')
+        w.check('s13-nothing-commits', after['ids'] == before['ids'] and after['purse'] == before['purse']
+                and after['sponsor'] == before['sponsor'], {'ids': (before['ids'], after['ids'])})
+
+    if plants:
+        with w.group('P-plant-applied'):
+            for p in sorted(plants):
+                if p in ('cancel-late', 'cancel-early', 'stop-cancels', 'sender-controls'):
+                    w.check(f'plant-{p}-applied', applied.get(p) is True, applied.get(p))
 finally:
     w.stop()
 

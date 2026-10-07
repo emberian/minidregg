@@ -1581,7 +1581,7 @@ def commitYield {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
     .ok ⟨⟨awaitId cell generation checkpoint, .reply (AnswerSlot.name transaction cell generation) decider,
         height + plan.patience, height⟩, written,
       (written.map StateWritten.post).toList ++ [slotPost config snapshot
-        ⟨AnswerSlot.name transaction cell generation, cell, .subject decider, height + plan.patience, .opened, []⟩]⟩
+        ⟨AnswerSlot.name transaction cell generation, cell, .subject decider, height + plan.patience, .opened, [], true⟩]⟩
   | .height due =>
     if height + plan.patience < due then .error (.plan "a height await is due after its deadline") else
     .ok ⟨⟨awaitId cell generation checkpoint, .height due, height + plan.patience, height⟩, written,
@@ -2316,6 +2316,8 @@ def outcomeOfDecision : AnswerSlot.Decision → Except Refusal AwaitOutcome
   | .unknown => .ok .unknown
   | .broken _ => .ok .broken
   | .expired => .ok .timedOut
+  -- a delivery slot only (no await names one): the reply will never come
+  | .cancelled => .ok .broken
 
 /-- How the await ends at this height: its decided slot, its due height, or its
 deadline. A function of the snapshot, the height and the await only. -/
