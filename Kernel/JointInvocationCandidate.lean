@@ -99,8 +99,8 @@ theorem candidate_encode_injective {Custody : Type} (custody : StreamCodec Custo
 including audience read guards, exact compute fees and signed event bytes. -/
 def projectionOfAccepted {Custody F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-    {ambient : Ambient} {durable : Durable} {command : Command}
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {ambient : Ambient} {ground : Ground deployment} {command : Command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {signed : SignedCommand} (accepted : AcceptedInvocation prepared signed)
     (shape : PhysicalShape prepared) (epoch generation : Nat) (custody : Custody) :
     Projection Custody :=
@@ -109,8 +109,8 @@ def projectionOfAccepted {Custody F : Type} [Field F] [DecidableEq F]
 
 @[simp] theorem projectionOfAccepted_intent {Custody F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-    {ambient : Ambient} {durable : Durable} {command : Command}
-    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {ambient : Ambient} {ground : Ground deployment} {command : Command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
     {signed : SignedCommand} (accepted : AcceptedInvocation prepared signed)
     (shape : PhysicalShape prepared) (epoch generation : Nat) (custody : Custody) :
     (projectionOfAccepted accepted shape epoch generation custody).intent.bind?
@@ -122,22 +122,22 @@ Boolean. The physical image equality is checked by the agreement adapter before
 recording the reservation. This does not itself implement a reservation law. -/
 structure CurrentAdmission {Custody F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (ambient : Ambient) (durable : Durable) (command : Command)
+    (ambient : Ambient) (ground : Ground deployment) (command : Command)
     (signed : SignedCommand) (projection : Projection Custody) where
-  prepared : PreparedInvocation deployment profile ambient durable command
+  prepared : PreparedInvocation deployment profile ambient ground command
   accepted : AcceptedInvocation prepared signed
   shape : PhysicalShape prepared
   domain_exact : projection.domain = deployment.domain
   record_exact : projection.intent = IntentRecord.ofIntent (accepted.dataIntent shape)
-  ready : (accepted.dataIntent shape).preflight durable.snapshot = .ok ()
+  ready : (accepted.dataIntent shape).preflight ground.view = .ok ()
 
 /-- Every authority/clock/audience guard of the existing receiver belongs to
 what the reservation must protect. No submitter-declared footprint is used. -/
 theorem admitted_guard_in_footprint {Custody F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-    {ambient : Ambient} {durable : Durable} {command : Command}
+    {ambient : Ambient} {ground : Ground deployment} {command : Command}
     {signed : SignedCommand} {projection : Projection Custody}
-    (admission : CurrentAdmission deployment profile ambient durable command signed projection)
+    (admission : CurrentAdmission deployment profile ambient ground command signed projection)
     (guard : ReadGuard) (member : guard ∈ (admission.accepted.dataIntent admission.shape).readGuards) :
     guard.cellId ∈ projection.footprint := by
   unfold Projection.footprint
