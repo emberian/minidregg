@@ -409,7 +409,7 @@ child = {"id": str(NEW_OBSERVER_CAP), "root": str(PAY_CONTROL), "parent": str(PA
 rc, r, tail = mini_submit("delegate", {"subject": str(EMBER), "nonce": fresh(), "purpose": {"type": "prepare", "draft": {
     "type": "delegate-source", "command": {"kind": "program", "domain": "8501", "semantics": SEMANTICS,
         "subject": str(EMBER), "nonce": fresh(), "expectedTargetRoot": v["payRoot"], "parentId": str(PAY_CONTROL),
-        "target": PAY_CELL, "expectedPreRoot": v["authorityRoot"], "child": child}}},
+        "target": PAY_CELL, "child": child}}},
     "grants": [{"kind": "program", "target": PAY_CELL, "capability": str(PAY_CONTROL)}]}, EMBER)
 row("controller delegates observePayment to subject 31 at runtime", "confirmed",
     f"rc={rc} {r.get('type')} {tail if rc else ''}", rc == 0 and r.get("type") == "confirmed")

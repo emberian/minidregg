@@ -727,7 +727,7 @@ def main(argv=None):
             n = next_nonce()
             return {'subject': owner_subject, 'nonce': str(n), 'purpose': {'type': 'prepare', 'draft': {'type': 'delegate-source', 'command': {
                 'kind': 'object', 'domain': str(genesis['domain']), 'semantics': genesis['expectedSemantics'], 'subject': owner_subject, 'nonce': str(n + 1),
-                'expectedTargetRoot': cell['root'], 'parentId': parent, 'target': str(target), 'expectedPreRoot': authority,
+                'expectedTargetRoot': cell['root'], 'parentId': parent, 'target': str(target),
                 'child': {'id': child, 'root': parent, 'parent': parent, 'issuer': str(configured['issuer']), 'holder': {'type': 'subject', 'subject': holder},
                           'targets': [str(target)], 'verbs': verbs, 'maxCost': '50000', 'notBefore': str(configured['genesisHeight']),
                           'notAfter': str(int(configured['genesisHeight']) + int(configured['lifetime']) - 1), 'issuerEpoch': genesis['issuerEpoch'],

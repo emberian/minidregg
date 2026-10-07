@@ -137,7 +137,7 @@ delegate() {
     '{subject:"7",nonce:$nonce,purpose:{type:"prepare",draft:{type:"delegate-source",
       command:{kind:"object",domain:"8501",semantics:env.WORKROOM_SEMANTICS,
         subject:"7",nonce:($nonce + "1"),expectedTargetRoot:$root,parentId:"89",
-        target:"8001",expectedPreRoot:$authority,
+        target:"8001",
         child:{id:$child,root:"89",parent:"89",issuer:"5",
           holder:{type:"subject",subject:"9"},targets:["8001"],
           verbs:(if $verb == "both" then ["observe","mutate"] else [$verb] end),

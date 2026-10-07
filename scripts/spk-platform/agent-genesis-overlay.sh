@@ -283,7 +283,6 @@ for route in hermes-a hermes-b; do
         type:"delegate-source",command:{kind:"object",domain:"8501",
           semantics:$semantics,subject:$s,nonce:$commandNonce,
           expectedTargetRoot:$root,parentId:$p,target:$t,
-          expectedPreRoot:$authority,
           child:{id:$child,root:$p,parent:$p,issuer:"5",
             holder:{type:"subject",subject:$holder},targets:[$t],
             verbs:["observe","mutate"],maxCost:"50000",

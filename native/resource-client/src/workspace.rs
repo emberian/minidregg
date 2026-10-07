@@ -3426,7 +3426,7 @@ fn propose_summary_once(
                     "command":{"kind":kind,"domain":member(&policy,"domain")?,
                     "semantics":member(&policy,"semantics")?,"subject":member(workspace,"subject")?,
                     "nonce":random_nonce()?,"expectedTargetRoot":target_root,
-                    "parentId":parent_id,"target":target,"expectedPreRoot":authority,
+                    "parentId":parent_id,"target":target,
                     "child":child}}},
                 "grants":[{"kind":kind,"target":target,"capability":parent_id}]})
         }
@@ -3673,11 +3673,16 @@ pub(crate) fn submit_intent(
 /// Thin consent: one signed `resource` read of every target of an invocation
 /// intent, under its observe grant, retained as the plan's served views. A
 /// target this member cannot observe is refused here, before anything is signed.
+/// A delegation reads no view: its parent is bound by its signed id, and the
+/// child's lineage is the kernel's copy of that parent.
 fn thin_views(root: &Path, workspace: &Value, source: &Path) -> Result<()> {
     let intent = bounded_json(source)?;
     let draft = &intent["purpose"]["draft"];
+    if intent["purpose"]["type"] == "prepare" && draft["type"] == "delegate-source" {
+        return crate::client_consent::set_thin_views(Vec::new());
+    }
     if intent["purpose"]["type"] != "prepare" || draft["type"] != "invoke" {
-        return Err("thin consent signs invocations only; nothing signed".into());
+        return Err("thin consent signs invocations and delegations only; nothing signed".into());
     }
     let targets = draft["command"]["targets"].as_array().ok_or("invocation intent has no targets")?;
     let mut views = Vec::new();

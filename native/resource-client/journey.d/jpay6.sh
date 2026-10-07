@@ -245,7 +245,6 @@ def delegate(name, target, parent, child, holder, verbs, nonce):
         "type": "delegate-source", "command": {"kind": "object", "domain": "8501",
         "semantics": SEMANTICS, "subject": "7", "nonce": str(nonce + 1),
         "expectedTargetRoot": cell["root"], "parentId": str(parent), "target": str(target),
-        "expectedPreRoot": authority,
         "child": {"id": str(child), "root": str(parent), "parent": str(parent), "issuer": "5",
                   "holder": {"type": "subject", "subject": str(holder)}, "targets": [str(target)],
                   "verbs": verbs, "maxCost": "50000", "notBefore": "10", "notAfter": "1000",
