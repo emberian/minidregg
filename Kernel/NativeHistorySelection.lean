@@ -5,6 +5,7 @@ records were semantically admitted and exposes no commit or host permit. The
 upper native history verifier supplies that separate inductive provenance.
 -/
 import Kernel.NativeHostContext
+import Compiler.DurableHistoryReader
 
 namespace Minidregg.Kernel.NativeHistorySelection
 
@@ -139,5 +140,36 @@ def selectIO (config : Config) (opened : Opened config) (index : Nat) :
               return .ok ⟨prior, record, found,
                 (congrArg DurableReceiverIO.Loaded.image (validateLoaded_durable validated)).trans
                   imageExact⟩
+
+/-! ## Bounded windows over the Store's verified records
+
+Operator and validation paths that must compare or export a long run of
+records read them through the `Reader` in windows of at most `windowSize`
+records, handing each window to a step that either threads its state or
+refuses. A `Refusal` surfaces by its message (it names the height); nothing is
+mapped to "absent". Callers that carry a size bound stop inside `step`, so the
+scan is bounded by the bound they state, not by the history. -/
+
+def windowSize : Nat := 1024
+
+def foldRange {root : List UInt8 → Digest} {store : Minidregg.Compiler.DurableHistory.StoreIdentity}
+    {σ : Type}
+    (reader : Minidregg.Compiler.DurableHistoryReader.Reader root store)
+    (first last : Nat) (init : σ)
+    (step : σ → List DurableReceiver.IntentRecord → Except String σ) :
+    IO (Except String σ) := do
+  let mut state := init
+  let mut cursor := first
+  for _ in List.range ((last + 1 - first) / windowSize + 1) do
+    if cursor > last then break
+    let upto := min last (cursor + windowSize - 1)
+    match ← reader.range cursor upto with
+    | .error refusal => return .error refusal.message
+    | .ok reads =>
+        match step state (reads.map (·.2.record)) with
+        | .error detail => return .error detail
+        | .ok next => state := next
+    cursor := upto + 1
+  return .ok state
 
 end Minidregg.Kernel.NativeHistorySelection

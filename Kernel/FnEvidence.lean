@@ -4,6 +4,8 @@ Verification calls the existing native historical re-admission path. It never
 installs the foreign image or treats a carried receipt as execution authority.
 -/
 import Kernel.NativeHost
+import Kernel.NativeHistorySelection
+import Compiler.DurableHistoryStore
 import Compiler.FnEvidenceCodec
 
 namespace Minidregg.Kernel.FnEvidence
@@ -37,8 +39,24 @@ def exportPackage (config : Config) (signedCall : List UInt8)
   unless 1 ≤ receipt.acceptedCount &&
       receipt.acceptedCount ≤ opened.durable.height do
     return .error "original receipt is outside accepted history"
-  let image : DurableReceiver.Image :=
-    ⟨opened.durable.image.seed, opened.durable.image.accepted.take receipt.acceptedCount⟩
+  -- The original prefix is read through the Store's verified `Reader`, in
+  -- bounded windows, and the read stops as soon as the encoded records pass
+  -- the package's prefix bound.
+  let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport
+      ResourceBirthCodec.rootBytes opened.durable with
+    | .error detail => return .error s!"source history reader: {detail}"
+    | .ok sealed => pure sealed
+  let gathered ← NativeHistorySelection.foldRange reader 1 receipt.acceptedCount
+    (([] : List DurableReceiver.IntentRecord), 0)
+    fun (held, size) window =>
+      let size := window.foldl (fun total record =>
+        total + (DurableReceiverCodec.intentStream.encode record).length) size
+      if size > limits.prefixBytes then .error "accepted prefix exceeds evidence bound"
+      else .ok (held ++ window, size)
+  let records ← match gathered with
+    | .error detail => return .error detail
+    | .ok (records, _) => pure records
+  let image : DurableReceiver.Image := ⟨reader.seed, records⟩
   return encodeCheckedWith limits ⟨config.deployment.domain, config.profile.semantics,
     config.expectedSeed, signedCall, receipt, DurableReceiverCodec.encode image⟩
 

@@ -2,6 +2,7 @@
 image used by ordinary signed observations. No journal payload is disclosed. -/
 import Kernel.ReceiptContinuity
 import Kernel.NativeHostContext
+import Compiler.DurableHistoryStore
 import Lean
 
 namespace Minidregg.Compiler.ReceiptContinuityIO
@@ -61,32 +62,52 @@ def remember (config : NativeHost.Config) (loaded : NativeHost.Durable) : IO Uni
     ((identity, value) :: entries.filter (fun entry =>
       !(entry.1 == identity && entry.2.point == value.point))).take 64
 
-/-- Historical fallback uses the canonical prefix executor and the same world
-root entries as normal receiving. No alleged root supplied by a client is used
-as a producer's computed root. -/
-def atHeight (loaded : NativeHost.Durable) (height : Nat) : Except String RootWitness := do
-  if height > loaded.height then throw "continuity target is beyond the loaded head"
-  if height = loaded.height then return current loaded
-  let some snapshot := loaded.atPrefix height
-    | throw "continuity historical prefix did not replay"
-  let image := loaded.prefixImage height
-  let chain := DurableCheckpointCodec.chainAfter loaded.logStart image.accepted
-  let roots := DurableReceiverIO.RootCache.ofEntries (DurableReceiverIO.entriesOf image snapshot chain)
-  return ⟨⟨height, roots.root⟩, chain, cachedSiblings roots.tree (deployed.ix .system)⟩
+/-- The root witness of an authentic past state: the same world-root entries
+normal receiving serves (the system slot with the height and the log chain
+after the last record, then every enumerable cell's current root), read off
+the `StateAt` of the Reader instead of a genesis replay. -/
+def pastWitness {rootBytes : List UInt8 → Digest} {seed : DurableReceiver.Seed}
+    {store : DurableHistory.StoreIdentity} {head : DurableHistory.Head store} {height : Nat}
+    (past : DurableHistoryReader.StateAt rootBytes seed head height) : RootWitness :=
+  let chain := (past.reads.getLast?.map (·.2.verified.chain)).getD past.baseChain
+  let ids := (past.baseState.cells.map Prod.fst ++
+    past.reads.flatMap fun read => read.2.record.writes.map DurableDataIntent.DataWrite.cellId).eraseDups
+  let entries := (Key.system, DurableCheckpointCodec.systemLeaf height chain) ::
+    ids.map fun cellId => (Key.cell cellId.value, past.snapshot.model.roots cellId)
+  let roots := DurableReceiverIO.RootCache.ofEntries entries
+  ⟨⟨height, roots.root⟩, chain, cachedSiblings roots.tree (deployed.ix .system)⟩
 
-def atPoint (config : NativeHost.Config) (loaded : NativeHost.Durable)
+/-- Historical fallback reads the authentic state after `height` records from
+the Store's `Reader` (latest retained checkpoint plus at most 63 verified
+records), never a genesis replay. No alleged root supplied by a client is used
+as a producer's computed root. A refusal is surfaced by its message (it names
+the height). -/
+def atHeight {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
+    (loaded : NativeHost.Durable) (height : Nat) : IO (Except String RootWitness) := do
+  if height > loaded.height then return .error "continuity target is beyond the loaded head"
+  if height = loaded.height then return .ok (current loaded)
+  match ← reader.stateAt height with
+  | .error refusal => return .error refusal.message
+  | .ok past => return .ok (pastWitness past)
+
+def atPoint {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
+    (config : NativeHost.Config) (loaded : NativeHost.Durable)
     (point : Point) : IO (Except String RootWitness) := do
   if point.height > loaded.height then return .error "continuity target is beyond the loaded head"
   let cache ← recent.get
   match cache.find? (fun entry => entry.1 == identityOf config && entry.2.point == point) with
   | some entry => return .ok entry.2
   | none =>
-      return do
-        let witness ← atHeight loaded point.height
-        if witness.point ≠ point then throw "continuity root differs at the requested height"
-        return witness
+      match ← atHeight reader loaded point.height with
+      | .error message => return .error message
+      | .ok witness =>
+          if witness.point ≠ point then return .error "continuity root differs at the requested height"
+          return .ok witness
 
-/-- The suffix comes from accepted records of the actual loaded image, and the
+/-- The suffix comes from the Store's verified records (one bounded window of at
+most `maxSuffix` records through the `Reader`), and the
 end chain is opened through the exact requested world root. Hash collisions are
 the cryptographic limit; source-asserted height/digest claims alone never pass. -/
 def produce (config : NativeHost.Config) (loaded : NativeHost.Durable)
@@ -95,17 +116,23 @@ def produce (config : NativeHost.Config) (loaded : NativeHost.Durable)
   if query.identity ≠ identityOf config then return .error "continuity deployment identity differs"
   if query.start.height > query.target.height then return .error "continuity query runs backwards"
   if query.target.height > loaded.height then return .error "continuity target is beyond the loaded head"
-  let target ← atPoint config loaded query.target
+  let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport
+      ResourceBirthCodec.rootBytes loaded with
+    | .error message => return .error s!"continuity history reader unavailable: {message}"
+    | .ok opened => pure opened
+  let target ← atPoint reader config loaded query.target
   let .ok _ := target | return .error "continuity target root differs from the loaded history"
   let start ← match request.witness with
     | some (chain, siblings) => pure (.ok ⟨query.start, chain, siblings⟩)
-    | none => atPoint config loaded query.start
+    | none => atPoint reader config loaded query.start
   let .ok start := start | return .error "continuity starting root differs from the loaded history"
   let endHeight := min (query.start.height + maxSuffix) query.target.height
-  let ending := if endHeight = query.target.height then target else atHeight loaded endHeight
+  let ending ← if endHeight = query.target.height then pure target else atHeight reader loaded endHeight
   let .ok ending := ending | return .error "continuity intermediate prefix unavailable"
-  let suffix := ((loaded.image.accepted.drop query.start.height).take
-    (endHeight - query.start.height)).map DurableCheckpointCodec.recordDigest
+  let suffix ← if endHeight = query.start.height then pure [] else
+    match ← reader.range (query.start.height + 1) endHeight with
+    | .error refusal => return .error refusal.message
+    | .ok reads => pure (reads.map fun read => DurableCheckpointCodec.recordDigest read.2.record)
   let extension : Extension := ⟨identityOf config, start.point, ending.point,
     start.chain, ending.chain, start.siblings, ending.siblings, suffix,
     decide (endHeight = query.target.height)⟩

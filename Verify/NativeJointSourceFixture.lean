@@ -116,7 +116,7 @@ def bootstrapFresh (config : NativeHost.Config) (canonicalImage : List UInt8) :
   match DurableReceiverIO.loadBytes ResourceBirthCodec.rootBytes config.logStart canonicalImage with
   | .error detail => return .error detail
   | .ok durable =>
-      if !durable.image.accepted.isEmpty then return .error "bootstrap image contains accepted history"
+      if durable.height != 0 then return .error "bootstrap image contains accepted history"
       match NativeHost.validateLoaded config durable with
       | .error detail => return .error detail
       | .ok _ =>
