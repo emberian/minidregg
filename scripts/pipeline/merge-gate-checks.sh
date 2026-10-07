@@ -23,6 +23,11 @@ run() { local n=$1; shift; local s=$(date +%s); ( "$@" ) > "$L/gate-$TAG-$n.log"
 tnames() { git show "$1:lakefile.toml" | sed -n '/^\[\[lean_\(lib\|exe\)\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' | sort; }
 newt=$(comm -13 <(tnames "$FROM") <(tnames "$TO") | grep -v '^ResearchWip$' | tr '\n' ' ')
 if [ -n "$newt" ]; then run new-targets env LEAN_NUM_THREADS=${THREADS:-6} ${LAKE_WRAP:-nice -n 10} lake build $newt; fi
+# EVERY lean_exe root, every batch (cv 01a1147a-f80e): the umbrella reaches none of the exe-only
+# modules, so Compiler.ObjectiveBendCDiffGen sat red on main unseen and a range that broke
+# Kernel/ConsentAnchor (outside Minidregg, inside minidregg-client-consent) would have landed.
+exes=$(git show "$TO:lakefile.toml" | sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' | tr '\n' ' ')
+run exe-roots env LEAN_NUM_THREADS=${THREADS:-6} ${LAKE_WRAP:-nice -n 10} lake build $exes
 run host-closure    bash scripts/check-host-closure.sh
 run import-boundary bash scripts/check-import-boundary.sh
 run proof-hygiene   bash scripts/check-proof-hygiene.sh
