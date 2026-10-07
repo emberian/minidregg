@@ -305,6 +305,18 @@ def Config.transport (config : Config) : DurableReceiverIO.Transport :=
     { config.physicalTransport with append := fun _ _ _ => pure .conflict }
   else config.physicalTransport
 
+/-- A scratch Store for a portable image (a foreign accepted prefix verified with
+no Store of its own): this deployment's config with its Store moved into
+`directory`, which the caller owns and removes, and a fresh 32-byte MAC key written
+there (mode 0600). Its `physicalTransport` names an EMPTY Store, the transport
+`DurableHistoryStore.scratchReader` writes the image into. -/
+def Config.scratch (config : Config) (directory : System.FilePath) : IO Config := do
+  IO.FS.createDirAll directory
+  let key := directory / "key"
+  IO.FS.writeBinFile key (← IO.getRandomBytes 32)
+  IO.setAccessRights key { user := { read := true, write := true } }
+  pure { config with storage := { config.storage with root := directory / "store", key := key } }
+
 theorem Config.transport_systemCell (config : Config) :
     config.transport.systemCell = some config.systemCell := by
   unfold Config.transport
