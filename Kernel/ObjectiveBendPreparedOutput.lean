@@ -22,9 +22,8 @@ inductive Failure where
   | nativeBinding
   deriving Repr
 
-structure Prepared {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+structure Prepared (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (command : Command) (source : AnnotatedTerm) (limits : Limits) (budget : Budget)
     (capacity : ObjectiveBendDemandCapacity.Profile) where
   private mk ::
@@ -38,9 +37,8 @@ structure Prepared {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBy
 
 /-- Current source/input/codec/profile/funding/family gates consume this evidence
 separately. Native binding refusal never becomes a source success fallback. -/
-def prepare {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (deployment : CanonicalCellRegistry.Deployment)
-    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+def prepare (deployment : CanonicalCellRegistry.Deployment)
+    (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
     (command : Command) (source : AnnotatedTerm) (typeFuel : Nat)
     (limits : Limits) (budget : Budget) (capacity : ObjectiveBendDemandCapacity.Profile) :
     Except Failure (Prepared deployment loaded command source limits budget capacity) := do
@@ -59,9 +57,8 @@ structure Usage where
   allocatedHeap : Nat
   deriving Repr
 
-def usage {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {deployment : CanonicalCellRegistry.Deployment}
-    {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+def usage {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
     {command : Command} {source : AnnotatedTerm} {limits : Limits} {budget : Budget}
     {capacity : ObjectiveBendDemandCapacity.Profile}
     (prepared : Prepared deployment loaded command source limits budget capacity) : Usage :=
@@ -72,25 +69,22 @@ def usage {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
 
 /-- Complete proposed effects/physical read guards come from the existing
 proof-producing native binder. A surface/result cannot substitute their lists. -/
-def plan {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {deployment : CanonicalCellRegistry.Deployment}
-    {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+def plan {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
     {command : Command} {source : AnnotatedTerm} {limits : Limits} {budget : Budget}
     {capacity : ObjectiveBendDemandCapacity.Profile}
     (prepared : Prepared deployment loaded command source limits budget capacity) : BendWorldPlan.Plan :=
   prepared.bound.plan
-theorem native_matches {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {deployment : CanonicalCellRegistry.Deployment}
-    {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+theorem native_matches {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
     {command : Command} {source : AnnotatedTerm} {limits : Limits} {budget : Budget}
     {capacity : ObjectiveBendDemandCapacity.Profile}
     (prepared : Prepared deployment loaded command source limits budget capacity) :
     BendWorldPlan.matchesCommand (plan prepared) command = true :=
   prepared.bound.nativeExact
 
-theorem no_returns {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {deployment : CanonicalCellRegistry.Deployment}
-    {loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+theorem no_returns {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
     {command : Command} {source : AnnotatedTerm} {limits : Limits} {budget : Budget}
     {capacity : ObjectiveBendDemandCapacity.Profile}
     (prepared : Prepared deployment loaded command source limits budget capacity) :

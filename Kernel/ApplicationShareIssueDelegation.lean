@@ -31,45 +31,45 @@ variable {F : Type} [Field F] [DecidableEq F]
 
 /-- A read-only app cell selected from the exact loaded directory. No public
 constructor accepts an asserted policy result, owner, or capability value. -/
-structure Prepared (context : Context deployment durable)
+structure Prepared (context : Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
     (height : Nat) (spec : Spec)
     (descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry) where
   private mk ::
   root : Digest
-  observed : ResourceTargetAdmission.Observed deployment context.directory.directory
+  observed : ResourceTargetAdmission.Observed deployment context.directory
     .object spec.ticket.scope.app root
   declared : observed.before.kind = .declaredObject
   physicalCurrent : ResourceBirthCodec.physicalRoot (.live observed.before) =
     durable.snapshot.model.roots ⟨spec.ticket.scope.app⟩
   epochCurrent :
     (appRequest deployment.domain profile.semantics federation
-      context.authority.snapshot.authState height root spec descriptor).policyEpoch =
-        context.authority.snapshot.authState.policyEpoch ⟨spec.ticket.scope.app⟩
+      context.authority.authState height root spec descriptor).policyEpoch =
+        context.authority.authState.policyEpoch ⟨spec.ticket.scope.app⟩
   revisionCurrent :
     (appRequest deployment.domain profile.semantics federation
-      context.authority.snapshot.authState height root spec descriptor).policyRevision =
-        context.authority.snapshot.authState.policyRevision ⟨spec.ticket.scope.app⟩
+      context.authority.authState height root spec descriptor).policyRevision =
+        context.authority.authState.policyRevision ⟨spec.ticket.scope.app⟩
 
-def Prepared.wanted {context : Context deployment durable}
+def Prepared.wanted {context : Context deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
     {height : Nat} {spec : Spec}
     {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
     (prepared : Prepared context profile federation height spec descriptor) : Request .object :=
   appRequest deployment.domain profile.semantics federation
-    context.authority.snapshot.authState height prepared.root spec descriptor
+    context.authority.authState height prepared.root spec descriptor
 
 private def refused : String := "app share delegation refused"
 
-def prepare (context : Context deployment durable)
+def prepare (context : Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
     (height : Nat) (spec : Spec)
     (descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry) :
     Except String (Prepared context profile federation height spec descriptor) :=
-  match context.directory.directory.slots spec.ticket.scope.app with
+  match context.directory.slots spec.ticket.scope.app with
   | .absent => .error refused
   | .present packed =>
-      match ResourceTargetAdmission.observe deployment context.directory.directory
+      match ResourceTargetAdmission.observe deployment context.directory
           .object spec.ticket.scope.app packed.payload.root with
       | none => .error refused
       | some observed =>
@@ -80,7 +80,7 @@ def prepare (context : Context deployment durable)
               rfl, rfl⟩
           else .error refused
 
-variable {context : Context deployment durable}
+variable {context : Context deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
   {height : Nat} {spec : Spec}
   {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
@@ -88,7 +88,7 @@ variable {context : Context deployment durable}
 def project (prepared : Prepared context profile federation height spec descriptor)
     (logical : Store.Store (CanonicalCellRegistry.layout prepared.observed.before.kind)) :
     Minidregg.Pred.State :=
-  ⟨WorldKindLawDependencies.targetSelectorSlots context.directory.directory spec.ticket.scope.app ++
+  ⟨WorldKindLawDependencies.targetSelectorSlots context.directory spec.ticket.scope.app ++
     CanonicalRuntimeProfile.requestSlots prepared.wanted ++
     ResourceAuthorityProjection.bytesSlots "context/bytes" 0 (sourceBytes spec descriptor) ++
     ResourceAuthorityProjection.bytesSlots "resource/bytes" 0
@@ -105,21 +105,21 @@ def step (prepared : Prepared context profile federation height spec descriptor)
 
 def kindDependencies (_prepared : Prepared context profile federation height spec descriptor) :
     Option WorldKindLawDependencies.Dependencies :=
-  WorldKindLawDependencies.loadTarget deployment context.directory.directory spec.ticket.scope.app
+  WorldKindLawDependencies.loadTarget deployment context.directory spec.ticket.scope.app
 
 def policyConfig (prepared : Prepared context profile federation height spec descriptor) :
     ComposedPolicyAdmission.Config F :=
-  PhysicalLawResolution.config profile.compilerProfile context.authority.snapshot
-    context.directory.directory
-    (sourceCapabilityPortal context.authority.snapshot (issueMarker spec descriptor))
+  PhysicalLawResolution.config profile.compilerProfile context.authority
+    context.directory
+    (sourceCapabilityPortal context.authority (issueMarker spec descriptor))
     (step prepared) spec.ticket.scope.app
     ((kindDependencies prepared).map (·.additional) |>.getD [])
 
 def lawReadGuards (prepared : Prepared context profile federation height spec descriptor) :
     Option (List DurableDataIntent.ReadGuard) := do
   let structural ← kindDependencies prepared
-  let sources ← PhysicalLawResolution.readGuards context.authority.snapshot
-    context.directory.directory profile.semantics spec.ticket.scope.app structural.additional
+  let sources ← PhysicalLawResolution.readGuards context.authority
+    context.directory profile.semantics spec.ticket.scope.app structural.additional
   pure ((sources ++ structural.readGuards).map fun (cellIdValue, root) => (⟨⟨cellIdValue⟩, root⟩ : Minidregg.Kernel.DurableDataIntent.ReadGuard))
 
 def readGuards (prepared : Prepared context profile federation height spec descriptor) :
@@ -130,8 +130,8 @@ def portal (prepared : Prepared context profile federation height spec descripto
   (policyConfig prepared).portal
 
 def authorize (prepared : Prepared context profile federation height spec descriptor)
-    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot) :
-    Option (Authorized (portal prepared) context.authority.snapshot.authState prepared.wanted) := do
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority) :
+    Option (Authorized (portal prepared) context.authority.authState prepared.wanted) := do
   let config := policyConfig prepared
   let _ ← kindDependencies prepared
   let evidence ← (config.capabilityEvidenceChecked prepared.wanted
@@ -146,9 +146,9 @@ attribute [irreducible] portal
 structure Checked (prepared : Prepared context profile federation height spec descriptor)
     (envelope : List UInt8) where
   private mk ::
-  signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot
+  signature : CredentialSignatureAdmission.CheckedSignature context.authority
   envelopeExact : signature.envelopeBytes = envelope
-  authorization : Authorized (portal prepared) context.authority.snapshot.authState prepared.wanted
+  authorization : Authorized (portal prepared) context.authority.authState prepared.wanted
   authorized : authorize prepared signature = some authorization
   guardsPresent : (lawReadGuards prepared).isSome = true
   guardsCurrent : ∀ guard ∈ readGuards prepared,
@@ -157,7 +157,7 @@ structure Checked (prepared : Prepared context profile federation height spec de
 def check (native : CredentialSignatureIO.NativeConfig)
     (prepared : Prepared context profile federation height spec descriptor)
     (envelope : List UInt8) : IO (Except String (Checked prepared envelope)) := do
-  match ← CredentialSignatureAdmission.verifyNative native context.authority.snapshot
+  match ← CredentialSignatureAdmission.verifyNative native context.authority
       (issueMarker spec descriptor) prepared.wanted envelope with
   | .error _ => return .error refused
   | .ok signature =>

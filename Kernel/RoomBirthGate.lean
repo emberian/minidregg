@@ -210,7 +210,7 @@ def lawOf (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
     (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
     (room : Nat) : Option Minidregg.Pred.Pred :=
   ((CredentialAuthorityPolicyRegistry.policyRegistry authority.snapshot
-      (ResourceObservationAdmission.sourceStore ⟨directory, authority⟩)).resolve ⟨room⟩
+      (ResourceObservationAdmission.sourceStoreOf deployment directory.directory)).resolve ⟨room⟩
       (authority.snapshot.authState.policyRevision ⟨room⟩)).map (·.record.predicate)
 
 /-- The room cell's current root, as the loaded directory holds it (the zero
