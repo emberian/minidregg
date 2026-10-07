@@ -242,10 +242,10 @@ pinned by `tests/objective-bend-source/ltuo/probe-cohort.json`:
     fix(compose(AddY, AddZW), {x: 5n}).w
   ```
 
-  `AddY` is checked once, at its own bounds, with `Self` **rigid**: it is a lower bound,
-  not an alias of its row, so the body may read `self.x` and nothing else, and may not use
-  `self` where a value of exactly `{x: Nat}` is expected (`refused (self-rigid)`,
-  `refused (self-unbound-member)`). `Super with {y: Nat}` keeps whatever else `Super` has.
+  `AddY` is checked once, at its own bounds, with `Self` and `Super` **rigid**: each is a
+  lower bound, not an alias of its row, so the body may read `self.x` and nothing else, and may
+  not use `self` (or `super`) where a value of exactly its bound row is expected
+  (`refused (self-rigid)`, `refused (super-rigid)`, `refused (self-unbound-member)`). `Super with {y: Nat}` keeps whatever else `Super` has.
   At `fix`, each open layer is instantiated at the final self and the row beneath it, after
   both bounds are discharged (`refused (self-bound)`, `refused (inherited-unprovided)`). The
   final self comes from the closed layers, else the enclosing definition's result type or
@@ -294,26 +294,42 @@ pinned by `tests/objective-bend-source/ltuo/probe-cohort.json`:
   result: 12
   ```
 
-**Design.** Templates, not polymorphic core terms: an open declaration is checked once
-against rigid variables, and every use is an instance with the actual types substituted, so
-the emitted program is an ordinary closed Core4 program and every machine theorem keeps its
-statement and proof (D1, D2 of [MODULAR-TYPING.md](objective-bend/MODULAR-TYPING.md)).
+**Design.** Templates, not polymorphic core terms. An open declaration is checked ONCE, at its
+own bounds, with `Self` and `Super` both rigid bounded variables (`checkTemplates`): a body that
+uses `self` or `super` where a value of exactly its bound row is expected is refused
+(`self-rigid`, `super-rigid`), because the actual self or row beneath may have more members. At
+`fix` every use is EMITTED as that checked template under its substitution
+(`ATerm.instantiate σ template`, σ = {Self ↦ the final self, Super ↦ the row beneath}); nothing
+is re-elaborated per instance. The emitted program is an ordinary closed Core4 program, so every
+machine theorem keeps its statement (D1, D2 of [MODULAR-TYPING.md](objective-bend/MODULAR-TYPING.md)).
 
-**What is proved** (`Theory/ObjectiveBendTemplates.lean`): `canonical_instantiate`;
-`Discharges.infer_instantiate` and `Discharges.check_instantiate` (if the checker accepts a
-template under rigid bounds and a substitution discharges them, it accepts the instance, at
-the instantiated type, with the same uses, given `extra` more fuel); inhabited by
-`coloured_discharges` / `coloured_instance_accepted` (a `{weight}` template accepted at
-`{colour, weight}` by the theorem); the rigidity tooth `self_as_bound_row_alias_accepted` /
-`self_as_bound_row_rigid_refused`. The theorem is about the checker.
+**The composition contract** (GPT-6 row D, `Compiler/ObjectiveBendContract.lean`). Each layer of
+`fix(compose(L₁, …, Lₙ), seed)` has a contract: what it ASSUMES of the final self (its `Self`
+bound and `requires`), what it CONSUMES from the row beneath (its `Super` bound), and what it
+PROVIDES. `chainFix` decides every contract refusal by running that one algebra, nothing else:
+- `self-bound` / `inherited-unprovided`: an assumption or consumption is missing, or present at
+  another type (`checkBounds`);
+- `replace-undeclared`: a layer gives a member beneath it a different type. A layer may ADD a
+  member absent beneath or OVERRIDE one at the same type; a type change is a replacement, and no
+  source form declares one (before, a replacement a later layer undid passed silently);
+- `requires-unprovided`, `seed-extra`, `provided-mismatch`: at the end, the final row must be
+  exactly the final self (`close`).
 
-**How the front end uses it.** Since GPT-6 row D the elaborator emits each open instance as the
-checked template under its substitution (`Super` is a second rigid variable, `super-rigid`), and the
-contract decides by name whether the substitution discharges the bounds (`self-bound`,
-`inherited-unprovided`). The closed program, instances included, is still checked by the checker,
-and that is the check admission relies on; no front-end corollary of `check_instantiate` is stated
-or needed. Ancestry specs and non-plain operands in a `fix` chain keep the closed whole-target rule.
-Instances across package roots are not addressed.
+Proved over the algebra: `run_append` (C_{A;B}(S, I) = C_A(S, I) ∧ C_B(S, F_A(S, I)) and
+F_{A;B} = F_B ∘ F_A), `run_assoc`, `checkLayer_ok`, `discharge_ok`. The acceptance case is
+`tests/objective-bend-source/three-package/` (preview rows D1/D1b): a package integrates two
+separately written specs without editing them, and both read its final definitions (300 against
+30 without it).
+
+**What is proved at the checker** (`Theory/ObjectiveBendTemplates.lean`): `canonical_instantiate`;
+`Discharges.infer_instantiate` and `Discharges.check_instantiate` (a template the checker accepts
+under rigid bounds is accepted at every substitution that discharges them, at the instantiated
+type, with the same uses, given `extra` more fuel), inhabited by `coloured_discharges` /
+`coloured_instance_accepted`; the rigidity tooth `self_as_bound_row_alias_accepted` /
+`self_as_bound_row_rigid_refused`. **What admission relies on** is not that theorem: the closed
+program, instances included, is checked again by the checker. No front-end corollary is
+claimed, because no check depends on one. Ancestry specs and non-plain operands in a `fix` chain
+keep the closed whole-target rule; instances across package roots are not addressed.
 
 ## Activities
 
@@ -380,28 +396,57 @@ resident's pure segment terminates.
 The kernel runs activities on objects. Detail, with every turn and theorem, is in
 [OBJECTIVE-BEND-EVENTS.md](OBJECTIVE-BEND-EVENTS.md); the shape:
 
-- **An object** is a cell with an `ObjectRecord` (`Kernel/ObjectRecord.lean`: id, package
-  `pin`, `schemaVersion`, `law`, upgrade policy, continuity, payer), installed by `create`.
-  Its declared state is an `ObjectState {version, value}`. **Every declared-state write is
-  judged by the object's law** over the old and new state and the request facts
-  (`admitWrite`; `Birth.write_judged`, `Delivery.write_judged`). A creation may carry the object's initial
-  state (`seed`), judged by the creator's law alone (`create_seed_judged`,
-  `create_seed_refused_names_clause`).
-  The judged law is `ObjectRecord.effectiveLaw`: the kernel's package-pin clause
-  (`ObjectRecord.pinClause`, `objectivePin` over the record's `pin`) first, then the creator's
-  law; the clause is derived from the record, never stored, so no creator law omits it
-  (`create_installs_pin`, `pin_in_every_judged_law`). There is no direct write of declared
-  state: every write after creation is a birth, a delivery, a call frame or a delivered
-  message, made under the pinned package, and passes the pin (`Birth.write_passes_pin`,
-  `Delivery.write_passes_pin`, `invocation_writes_pinned`, `MessageDelivery.writes_pinned`).
-  A birth must run the pinned package (`birth_refuses_non_object`,
-  `birth_refuses_other_pin`, `native_birth_on_pinned_object`). The kernel's cells sit at
-  reserved coordinates (≥ 2^256) that the ordinary route cannot write
-  (`ObjectiveActivityGate`: `ordinaryGate_refuses`, `forged_protected_write_refused`, run
-  for every non-kernel facet by `NativeHost.Config.sourceGate`).
-- **The program is the front end's output.** `publish` stores an artifact and its source
-  package only after re-running the Lean front end; every later turn reloads and replays
-  the pair (`Program.runs_front_end_output`).
+- **An object** is a cell with an `ObjectRecord` (`Kernel/ObjectRecord.lean`: package `pin`,
+  declared `stateType`, the package's laws, the creator's `law`, upgrade policy, the upgrade
+  phase and its live-activity counters, the invariant domains it belongs to, payer), installed
+  by `create`. Its declared state is an `ObjectState {version, value}`.
+- **What judges a declared-state write** (`admitWrite`), in order, all ENFORCED by the kernel
+  on every route (`Birth.write_judged`, `Delivery.write_judged`, `invocation_writes_from_view`):
+  1. the value must type at the record's `stateType` (`illTyped`);
+  2. the pin clause: the write was made by the pinned package (`ObjectRecord.pinClause`, derived
+     from the record, never stored, so no creator law omits it; `create_installs_pin`,
+     `Birth.write_passes_pin`, `Delivery.write_passes_pin`, `invocation_writes_pinned`,
+     `MessageDelivery.writes_pinned`);
+  3. the PACKAGE's laws, copied from the pinned package at create and ADOPT and never taken from
+     a request (`package_law_enforced`, `package_law_not_removable`; see "law" below);
+  4. the creator's law;
+  5. at turn end, every invariant domain the object belongs to (below).
+  A refusal names the clause (`LawLeaf`). There is no direct write of declared state: a creation
+  may carry the object's initial state (`seed`, judged by the package's and the creator's laws,
+  `create_seed_judged`, `create_seed_refused_names_clause`), and every later write is a birth, a
+  delivery, a call frame or a delivered message under the pinned package. A birth must run the
+  pinned package (`birth_refuses_non_object`, `birth_refuses_other_pin`). The kernel's cells sit
+  at reserved coordinates (≥ 2^256) that the ordinary route cannot write (`ObjectiveActivityGate`:
+  `ordinaryGate_refuses`, `forged_protected_write_refused`).
+- **Upgrade** (`Kernel/ObjectiveActivityUpgrade.lean`, `Kernel/ObjectiveUpgradeInvariant.lean`).
+  ADOPT moves an object toward a new package under its upgrade policy (`adopt_requires_authority`,
+  `frozen_never_adopts`); the new law must entail the policy's floors (`adopt_floors_entailed`,
+  refused `floorNotEntailed` otherwise); a new pin is required (`samePin`); the migration is a
+  declaration of the NEW package, checked by the existing checker at `old state -> new state`, and
+  must read every field of the old state or drop it by name (`migrationShape`). While the object
+  DRAINS, an old activity's write is judged by the old law AND its migrated value by the new one
+  (`drained_write_migratable`; `upgradeConflict` otherwise); births and calls are admitted only
+  for an identity migration; a call tree that writes the object is drained-judged
+  (`drainConflict`); messages to it wait (`draining`). MIGRATE (single turn, when no old activity
+  is live) runs the migration under the new package's envelope: `migrate_cannot_fail` holds over
+  every reachable world with no premise on the state, and `live_counts` proves the counters equal
+  the awaiting records. `abortDrained` (anyone, after the drain deadline) resumes a straggler with `upgraded` for one
+  segment on its own package and ends it (`abort_after_deadline_exclusive`); activities chosen for REBIRTH are frozen after MIGRATE
+  (`awaitingRebirth`) until `rebirth` restarts them on the new package from their stored input
+  (`rebirth_from_stored_input`).
+- **Invariant domains** (GPT-6 row A, `Kernel/ObjectiveDomain.lean`). `registerDomain` names
+  member objects and one law over their JOINT state (member `i`'s slots under `member/<i>/`). Every
+  member consents under its upgrade policy (`memberFrozen` refuses a frozen one) and the law must
+  hold on the current states. At the end of EVERY admitted turn, each domain of every object whose
+  state the turn wrote is judged on all members' FINAL states, written or not
+  (`judgeDomains_sound`, `finish_domains`), and refused `domainLawDenied domain leaf`. The judgment
+  only adds refusals. It reads its members under guards, so a concurrent write to an unwritten
+  member conflicts instead of slipping past (`finalIntent_guards`). A domain law is a state
+  predicate (no request slots). Membership is permanent.
+- **The program is the front end's output.** `publish` stores an artifact and its source package
+  only after re-running the Lean front end; every later turn reloads and replays the pair
+  (`Program.runs_front_end_output`). The artifact commits the package's laws; a tampered or
+  dropped law is refused at replay.
 - **Kernel Plans and responses.** A resident yields `await {write, on, patience}`: a record
   of per-field edits (`keep | set v | add n`) and what it waits for (an answer slot with one
   decider, or a height), with a mandatory deadline. It is resumed with
@@ -445,14 +490,27 @@ The kernel runs activities on objects. Detail, with every turn and theorem, is i
   (`delivery_refusal_reference`). Call frames run the reference machine directly
   (`Kernel/ObjectiveCallReference.lean`).
 - **Metering.** One public tariff (`Kernel/ObjectiveTariff.lean`, `Tariff.workOf`) prices a
-  **declared** envelope; no fee depends on measured work (`refund_measurement_free`,
-  `submitter_charge_declared`). A yield reserves its resume/timeout fee pair in the
-  activity's purse, a Book account of its own. **Exhaustion is a paid turn**: an attempt
-  that runs out of its envelope commits a charge and changes nothing else; an attempt at or
-  below the largest envelope already tried is refused before it runs
-  (`exhaustion_charges_declared`, `exhaustion_spends_nothing`,
-  `exhaustion_excludes_delivery`). Every turn's postings conserve every asset
-  (`Birth.conserves`, `Delivery.conserves`, …).
+  **declared** envelope (heap, stack, ticks, extraction ticks); no fee depends on measured work
+  (`refund_measurement_free`, `submitter_charge_declared`). Each turn decides its coverage BEFORE
+  any Core4 run, by name: `uncovered` (the envelope exceeds the deployment's policy);
+  `heapUncovered needed declared` (a resumed segment's heap limit is the stored checkpoint's size
+  plus the declared heap, `segmentLimits`, so a stored checkpoint resumes exactly,
+  `largerYield_resumes_exactly`, where absolute limits would not, `absolute_limits_refuted`; the
+  price covers it, `Delivery.heap_priced`; the Host quotes `needed` from the same function,
+  `resumeQuote`, op 214); `extractUncovered` (extraction ticks spent forcing Plans and results
+  are declared and priced like any resource, against a per-turn ceiling `Config.maxExtractTicks`
+  that op 214 publishes; a call tree draws each extraction's ACTUAL spend from that declaration,
+  `Journal.draw_two`, `Journal.draw_short`, and `ceiling_reservation_refuses` is the pole showing
+  why reserving the maximum per extraction would refuse honest trees). A yield reserves its
+  resume/timeout fee pair and a **storage deposit** (`storageDeposit`, the rate per octet of the
+  record) in the activity's purse. The charged record spells its digests and heights at fixed
+  width, so its length, and so the deposit, is the same for the quote and the submission
+  (`encodeRecord_length_mask`, `birth_not_underfunded_at_quote`; executed: fifty quote-then-submit
+  births, one quote, none refused). **Exhaustion is a paid turn**: an attempt that runs out of its
+  envelope commits a charge and changes nothing else; an attempt at or below the largest envelope
+  already tried is refused before it runs (`exhaustion_charges_declared`,
+  `exhaustion_spends_nothing`, `exhaustion_excludes_delivery`). Every turn's postings conserve
+  every asset (`Birth.conserves`, `Delivery.conserves`, …).
 - **Disposal.** An ended activity's record and settled slots are retired: the id never
   returns, and a late delivery or decision is refused by name. Anyone may `abandon` an await
   past its deadline plus a grace; the purse returns to the payer
@@ -461,62 +519,108 @@ The kernel runs activities on objects. Detail, with every turn and theorem, is i
   with an unextractable result commits `faulted` and returns the unused escrow; it never
   refuses the turn, so a faulty program cannot park its activity
   (`resumedSegment_never_refuses_program_fault`).
-- **Route.** Ten turns (`publish`, `create`, `birth`, `resolve`, `deliver`, `exhaust`,
-  `abandon`, `topUp`, `invoke`, `deliverMessage`), each a signed native command
-  (`Kernel/ObjectiveActivityReceiver.lean`; Host operations 210-214; `mini activity`). The
-  receiver writes only kernel cells and the Book (`intent_writes_activity_or_book`).
-  **Integrated on scratch worlds**: journey rows `activity`
-  (`objective-activity-native-acceptance.py`) and `objectrecord`.
+- **Route.** Fifteen turns, each a signed native command (`Kernel/ObjectiveActivityReceiver.lean`;
+  Host operations 210-214; `mini activity`): `publish`, `create`, `birth`, `resolve`, `deliver`,
+  `exhaust`, `abandon`, `topUp`, `invoke`, `deliverMessage`, `adopt`, `migrate`, `abortDrained`,
+  `rebirth`, `registerDomain`. The receiver writes only kernel cells and the Book
+  (`intent_writes_activity_or_book`). Proofs that classify every turn (`AdmittedTurn`, no
+  wildcard) break when a turn is added, by design. **Executed on scratch worlds**: the pipeline
+  journey rows `activity`, `objectrecord`, `call`, `send`, `seats`, `bounty`; the domain journey
+  (`objective-domain-native-journey.py`, D1-D4) runs from its driver but is not a pipeline row.
+  **No executed row** drives the upgrade turns (`world/activity/TallyV2.obend` lowers and is
+  checked; cv 01a1141b-d4f6).
 
 ## Calls and sends
 
 **Call** (`Kernel/ObjectiveCall.lean`). An `invoke` turn calls one method of one object; the
-method may call other objects' methods in the same turn, depth first, to depth 8. A method
-is a declaration of the object's pinned package, lowered by the kernel's own front end, of
-type `method(view: {version, state}, args: X) -> Activity<P, R, {result, write}>` with `P`
-among `call | send` and `R` among `returned | queued`: every yield is answered in the same
-turn, so no frame suspends across turns (a method whose Plan admits `await` is refused
-`notCallable`).
+method may call other objects' methods in the same turn, depth first, to depth 8. A method is a
+declaration of the object's pinned package, lowered by the kernel's own front end, of type
+`method(view: {version, state}, args: X) -> Activity<P, R, {result, write}>` with `P` among
+`call | send | stop | cancel` and `R` among `returned | queued`: every yield is answered in the
+same turn, so no frame suspends across turns (a method whose Plan admits `await` is refused
+`notCallable`). The whole tree co-fails: any refusal refuses the turn.
 
-- Re-entry is refused (`reentry_refused`; `invocation_reentry_free`: no object occurs twice
-  on a stack an admitted invocation entered).
-- Writes apply at frame return, to the frame's own object, judged by that object's law
-  against exactly the state the frame was shown (`invocation_writes_from_view`), so a callee
-  never sees a caller's pending write and none is lost.
-- Authority: the root frame carries the signer; a nested frame carries the signer as
-  `request/subject` only under a scoped grant `{object, method, uses}` of the invocation,
-  spending a use (`grantSpent` when none is left); `request/caller` names the calling
-  object, so a law can admit chosen callers.
-- One declared envelope for the whole tree (`runCounted`, proven equal to `runBounded`),
-  priced by the tariff.
+- **View stability.** Re-entry is refused (`reentry_refused`; `invocation_reentry_free`). So a
+  call subtree leaves the state of every object on the stack it was entered from exactly as it
+  was, and each frame's write is applied to exactly the state that frame was shown
+  (`active_frame_view_stability`, `invocation_writes_from_view`; for a delivered message's tree,
+  `runMessage_writes_from_view`). Remove the re-entry guard and the theorem goes red: that is
+  the DAO mutant (bank 40 / thief 60, journey row C5).
+- **Authority is delegated by signed grants, and delegation is not consent.** The root frame
+  carries the signer (`request/subject`; `request/caller` none). A nested frame carries the
+  signer only under a grant of the invocation that names its object, method, the CODE it runs
+  (its package pin), its arguments (`exact` digest of the canonical arguments, or a `recipient`
+  field equal to a value, or a `capped` Nat charged cumulatively against a limit), optionally its
+  direct caller, and a number of uses. A frame a grant names but does not admit refuses the whole
+  tree `grantMismatch` (the field that mismatched is named); an exhausted grant `grantSpent`; a
+  frame no grant names runs without the subject. Every delegation is recorded, and
+  `invocation_delegated_authority` proves each one matches a signed grant, no grant is used past
+  its uses or charged past its cap, and every write carries the subject only at the root or
+  through a delegation recorded for exactly that frame. Each write is still judged by its
+  object's law. `request/caller` names the calling object, so a law can admit chosen callers.
+- **One declared envelope** for the whole tree, priced by the tariff. Each frame's Plan and
+  result extraction draws its actual spend from the envelope's extraction ticks, refused
+  `extractUncovered` when short (`Journal.draw_two`, `Journal.draw_short`); a frame enters at an
+  empty heap (`frame_limits_are_segment_limits`).
 
 **Send** (`Kernel/ObjectiveSend.lean`, `Kernel/Inbox.lean`). A frame may yield
-`send {to: object n | slot n, method, args}`, answered at once with `queued {slot}`; the
-message id names its reply slot. The invocation declares `postage`, the envelope each
-message is delivered under, and each send escrows its price into the purse of the queue
-holding it (`uncovered` otherwise). Inboxes are per-(sender, target) FIFO queues of at most
-16 (`Inbox.Lawful`, `lawful_fifo`, `reorder_unlawful`; `queueFull`). `deliverMessage`
-(anyone) pops the head and runs the target's method with `request/caller` the sender and no
-subject, paid from the inbox purse only (`debits_only_purse`); it decides the message's
-reply slot, whose decider is the role `delivery m` (`decide_delivery_refused`,
-`decides_own_slot`). A failed delivery pops, decides `broken` and commits no write
-(`failed_delivery_pops`). A send to `slot n` (the reply of an undelivered message) queues on
-that slot and is forwarded when the reply is an object reference, else refunded; a send on
-the reply of an already pipelined send is refused `notPipelinable`.
+`send {to: object n | slot n, method, args, allowance?}`, answered at once with `queued {slot}`;
+the message id names its reply slot, whose only decider is that message's delivery
+(`decide_delivery_refused`, `decides_own_slot`). The invocation declares `postage`, the envelope
+each message is delivered under, and each send escrows its price (and its allowance) into the
+purse of the queue holding it (`uncovered` otherwise; `Invocation.escrows_every_send`).
+- **The target must be deliverable, decided at the send before anything is escrowed**: an object,
+  with state, whose method loads at the target's pin, types the arguments, and whose Plan is
+  within what a delivered method may do (`Mail.send_object_deliverable`). Refusals:
+  `notAnObject`, `stateMissing`, `notCallable`, `argumentType`, `notDeliverable` (its Plan admits
+  `send` and the message carries no allowance covering an onward send, or admits `stop`/`cancel`).
+  A send to `slot n` (the reply of an undelivered message) queues on that slot and is checked the
+  same way when the reply resolves to an object; otherwise it is refunded.
+- **Inboxes** are per-(sender, target) FIFO queues of at most 16 (`queueFull`). The queue
+  discipline is push, pop or withdraw, nothing else (`Inbox.Lawful`, `lawful_fifo`;
+  `reorder_unlawful` is the tooth). `deliverMessage` (anyone) pops the head, checks that the reply
+  slot answers to that inbox, and runs the target's method with `request/caller` the sender and no
+  subject, paid from the inbox purse only (`debits_only_purse`). A failed delivery pops, decides
+  `broken` naming the reason and commits no write (`failed_delivery_pops`).
+- **Continuations** (GPT-6 row F). A message may carry a prepaid `allowance`, escrowed beside its
+  postage, capped by the `allowance` the invoker signed (`allowanceExceeded`). Its delivered method
+  may send onward only out of it, within fan-out `Inbox.fanOut` (4) and depth
+  `Inbox.continuationDepth` (3); a send over a bound is refused by name (`fanOut 4`,
+  `continuationDepth 3`, `allowanceExceeded need held`), the delivery decided `broken` and the
+  whole allowance refunded: postage buys the attempt, the allowance only the continuation. What
+  it does not spend returns to the payer. `escrow_conservation` proves, over the committed batch's
+  own postings, that a send credits exactly its escrow, a delivery pays out exactly the popped
+  escrow plus what was pipelined on its slot (with spent ≤ allowance), and a cancel refunds exactly
+  what it withdrew. `MessageDelivery.onward_bounded` and `chain_total` bound what one message's
+  chain can post.
+- **The sender controls its own speech.** A frame of the SENDING object may yield `stop {slot}`
+  (stop waiting: pipelined sends refunded, the slot unwatched and retired when decided; the
+  message is still delivered) or `cancel {slot}` (withdraw a still-queued message: it and every
+  send pipelined on its slot are refunded, the slot decided `cancelled`). Both are acked at the
+  yield and applied at commit; anyone else is refused `notSender`. A cancel of a message that is
+  still queued takes the withdraw branch (`Mail.control_cancel_withdraws`), and the refunds equal
+  the escrow (`cancelRefunds_escrow`); a cancel that arrives after delivery is a no-op that
+  refunds nothing.
 
-**Evidence:** compiled and proved; executed on scratch native worlds by
-`native/resource-client/objective-call-native-journey.py` (C1-C8) and
-`objective-send-native-journey.py` (S1-S7). No pipeline journey row runs those two drivers.
+**Evidence:** compiled and proved; executed on scratch native worlds by the pipeline rows `call`
+(`objective-call-native-journey.py`, C1-C10: grants, view stability, the DAO row) and `send`
+(`objective-send-native-journey.py`, S1-S18), each with planted Hosts that turn exactly their
+rows red.
 
-**Not built:** an activity's segment yielding `call` or `send` (the kernel performs only
-`await`), an activity awaiting a message (`messageAwaitNeedsInbox`), sends from a delivered
-message, nested pipelining, objects holding capabilities.
+**Not built:** an activity's segment yielding `call` or `send` (the kernel performs only `await`
+there), an activity awaiting a message reply (`messageAwaitNeedsInbox`), pipelining deeper than
+one reply, objects holding capabilities.
 
 ## Seats
 
 A seat (`Kernel/Seat.lean`, [SEATS.md](SEATS.md)) holds Book balances under an offer whose
 safety is a law judged on every reallocation, with an exit no clause can forbid
-(`seat_offer_safe_forever`, `exit_enabled`, `exit_pays_allocation`, `seat_conserves`).
+(`seat_offer_safe_forever`, `exit_enabled`, `exit_pays_allocation`, `seat_conserves`). An offer
+that wants nothing gives its holding away, so it must say so: an unmarked one is refused
+`donationUnmarked`, and the marker on an offer that wants something `donationMarkedWithWant`
+(`empty_want_requires_marker`, `marked_offer_has_empty_want`). A holding activity's end exits a
+deadline seat only at or after its due height (`holder_respects_deadline`). A closed seat's account
+is deregistered and its cell retired.
 A contract's method is shown each open seat identity-blind: coordinate, role, terms, proposal
 and allocation, and a principal (offerer, payee, holding activity) only if the offerer's
 proposal discloses it (`Proposal.disclose`, default none; `SeatStore.seatView_identity_blind`).
@@ -540,6 +644,9 @@ its price is covered. The actors:
 | an await is abandoned | anyone, after its timeout | the activity's escrow | `abandon_returns_escrow`, `abandon_delivery_exclusive` |
 | a queued message is delivered | anyone | the inbox purse | `MessageDelivery.decides_own_slot` |
 | a parked activity resumes past grown state | any submitter adding `extra.heap` | the submitter | `Delivery.heap_priced` |
+| a draining object's straggler ends | anyone, after the drain deadline | the activity's escrow | `abort_after_deadline_exclusive` |
+| an activity chosen for rebirth restarts | anyone, after MIGRATE | its moved purse | `rebirth_from_stored_input` |
+| an object migrates | anyone, once no old activity is live | the submitter (the migration's price) | `migrate_cannot_fail` |
 
 If no such actor acts, nothing happens: an unclaimed deadline seat stays open and keeps its
 allocation, an unabandoned await keeps its escrow.
@@ -595,11 +702,11 @@ view (`ObjectRecord.views`) carries the same slot, first, and every object's jud
 with the clause for its pinned package (`ObjectRecord.effectiveLaw`; see the object bullet
 above), so the creator's own law can read `objective/artifact` too.
 
-## Four things called "law", "claim" or "requires"
+## What "law", "claim" and "requires" mean
 
 - **A cell law** (`Pred`) is a decidable predicate over a write's old and new projected
-  state and the request: the admission judge for every write, whoever proposed it. An
-  object's `law` in its record is one.
+  state and the request: the admission judge for every write, whoever proposed it. ENFORCED.
+  An object's creator `law` in its record is one.
 - **A package `law NAME: EXPR`** (top level of the package's entry module) is ENFORCED: the
   kernel installs it on every object created from the package and judges every write of the
   object's declared state by it. The fragment (`Compiler/ObjectiveBendLaw.lean`) is exactly
@@ -617,6 +724,8 @@ above), so the creator's own law can read `objective/artifact` too.
   `package_law_enforced` (every admitted write satisfies every package law),
   `Kernel.ObjectLawEnforced.package_law_not_removable`, and the teeth `capped_tally_teeth` over
   `tests/objective-native/CappedTally.obend`.
+- **A domain law** (`registerDomain`, above) is a cell law over several objects' JOINT state,
+  ENFORCED at the end of every turn that writes a member.
 - **A spec `claim name(args): expr`** in `.obend` elaborates to a hidden knot field typed to
   return Bool and is listed in `SpecMeta` with status `unchecked`. Nothing evaluates or
   discharges it, and it never reaches admission; `claim impossible: false` is accepted (probe
@@ -662,6 +771,9 @@ trusted, the equalities are theorems.
 **Templates** (scope: the checker): `Discharges.infer_instantiate`,
 `Discharges.check_instantiate` (above).
 
+**Composition contract** (scope: the contract algebra `chainFix` runs, not the source):
+`run_append`, `run_assoc`, `checkLayer_ok`, `discharge_ok` (above).
+
 **Front end** (scope: the elaborator's output, not the source):
 `Compiler/ObjectiveBendFrontEndAdequacy.lean` proves that whenever the checker accepts the
 front end's own packet, the erased term is closed and typed (`accepted_typed`), never refused
@@ -686,7 +798,9 @@ records that a value came from the call that produced it.
   `OrderedPresentationInvariant` (`Compiler/ObjectiveBendC4.lean`) is a `Prop` nothing proves;
   the evidence is compiled vector theorems (`Compiler/ObjectiveBendC4Vectors.lean`: published
   precedence vectors and 4000 seeded DAGs).
-- **Laws** (LT6, OB5): spec laws are never checked; no object-law clauses in the source.
+- **Laws** (LT6, OB5): a package `law` is enforced, but only its fragment (no nested paths, no
+  `old.` beyond `monotone`/`writeOnce`, no witnessed or hashed atoms); a spec `claim` is never
+  checked; laws are not re-checked at each template instance's types.
 - **Ecosystem** (LT5, OB5): no surface form names another package's root; no dynamic
   selection by label; no generative identity beyond the kernel's object ids.
 - **Reflection** (LT4): a provenance-establishing prototype constructor; `R(Y M)` vs `Y(R∘M)`;
@@ -694,11 +808,11 @@ records that a value came from the call that produced it.
 - **Guardedness** (LT6): no check that a well-typed resident's segment terminates.
 - **Machine**: a resource bound for completeness (completion is finite, not bounded); use
   counts at run time (quantities are static); `stepRaw` linear in the heap.
-- **Kernel**: upgrade (no upgrade turn; nothing produces `upgraded`; `ObjectRecord` has no
-  state-type field and `Kernel/ObjectStateType` is consumed by no turn); a storage charge for
-  packages, records and state cells (an activity's record carries only a refundable storage
-  deposit); the package pin installed as an object's law; `message` awaits, resident calls and
-  sends (above).
+- **Kernel**: upgrade is single-turn MIGRATE only (no multi-turn `migrating` phase, cv
+  01a1141b-d4b5), has no interface-compatibility check (no facet table, cv 01a1141b-d4d6) and no
+  executed journey row (cv 01a1141b-d4f6); domains cannot be left or changed (cv 01a115c9-d990)
+  and their judgment is not priced (cv 01a115c9-d9b7); a storage charge for packages, object
+  records and state cells (an activity's record carries a refundable deposit); activities that call, send or await a message (above); objects holding capabilities.
 - **Language** (OB3, OB6): a digest primitive callable from source (`Theory/ObjectiveBendDigest`
   exists; Core4 has no digest term); sum-typed entry arguments and unary `!`; `before` and
   `after` methods; sealing, `final`, field enumeration.
