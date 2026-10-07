@@ -20,7 +20,7 @@ abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Durable := ResourceObservationAdmission.Durable
 abbrev Environment := ObjectiveBendNativeAdmission.Environment
 variable {F : Type} [Field F] [DecidableEq F]
-variable {deployment : Deployment} {durable : Durable}
+variable {deployment : Deployment} {ground : DeclaredResourceController.Ground deployment}
 
 inductive Failure where
   | malformed | selection | capacity
@@ -28,7 +28,7 @@ inductive Failure where
   deriving Repr
 
 /-- Exactly one resourceScope query by this subject and nonce for this ref. -/
-def matchesRef (environment : Environment deployment durable)
+def matchesRef (environment : Environment deployment ground)
     (ref : ObjectiveInvocationClaim.InputRef) (signed : Signed) : Bool :=
   decide (signed.challenge.intent.subject = environment.subject ∧
     signed.challenge.intent.nonce = environment.nonce ∧
@@ -36,7 +36,7 @@ def matchesRef (environment : Environment deployment durable)
     signed.challenge.intent.grants = [⟨ref.kind,ref.resource,ref.capability⟩])
 
 /-- The admitted read of one authorized single-grant query. -/
-def readOf (environment : Environment deployment durable)
+def readOf (environment : Environment deployment ground)
     (profile : CanonicalRuntimeProfile.Profile F)
     (ref : ObjectiveInvocationClaim.InputRef) (signed : Signed)
     (authorized : NativeObservationController.AuthorizedIntent environment.context profile
@@ -49,7 +49,7 @@ def readOf (environment : Environment deployment durable)
       signed.challenge.intent.grants = [⟨ref.kind,ref.resource,ref.capability⟩])
     let index : Fin signed.challenge.intent.grants.length := ⟨0,by simp [components.2.2.2]⟩
     let admitted := authorized.grants index
-    let funded : Option (RunComputeBudgetDomain.Prepared deployment durable.snapshot signed.challenge.intent.subject) :=
+    let funded : Option (RunComputeBudgetDomain.Prepared deployment ground.view signed.challenge.intent.subject) :=
       components.1.symm ▸ environment.compute
     some (ObjectiveBendNativeInput.admitRead environment.subject admitted.preparation admitted.checked
       (by change signed.challenge.intent.subject = environment.subject; exact components.1) funded)
@@ -58,7 +58,7 @@ def readOf (environment : Environment deployment durable)
 /-- Pure request-shape checks precede crypto; every state-dependent check is the
 existing signature-first observation receiver. -/
 def authorizeQuery {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
-    (environment : Environment deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+    (environment : Environment deployment ground) (profile : CanonicalRuntimeProfile.Profile F)
     (ref : ObjectiveInvocationClaim.InputRef) (bytes : List UInt8) :
     m (Except Failure (ObjectiveBendNativeAdmission.Read environment profile)) := do
   match signedCodec.decode bytes with
@@ -74,7 +74,7 @@ def authorizeQuery {m : Type → Type} [Monad m] (native : CredentialSignatureIO
       | some read => return .ok read
 
 private def authorizeList {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
-    (environment : Environment deployment durable) (profile : CanonicalRuntimeProfile.Profile F) :
+    (environment : Environment deployment ground) (profile : CanonicalRuntimeProfile.Profile F) :
     List ObjectiveInvocationClaim.InputRef → List (List UInt8) →
       m (Except Failure (List (ObjectiveBendNativeAdmission.Read environment profile)))
   | [],[] => pure (.ok [])
@@ -90,7 +90,7 @@ private def authorizeList {m : Type → Type} [Monad m] (native : CredentialSign
 /-- Authenticate the claim's source envelope and every input envelope, bounded
 by the signed capacity before any signature work. -/
 def authorize {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
-    (environment : Environment deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+    (environment : Environment deployment ground) (profile : CanonicalRuntimeProfile.Profile F)
     (claim : ObjectiveInvocationClaim.Claim) :
     m (Except Failure (ObjectiveBendNativeAdmission.Authenticated environment profile claim)) := do
   if claim.sourceEnvelope.length + claim.inputEnvelopes.flatten.length > claim.capacity.turnBytes ||

@@ -125,23 +125,23 @@ theorem IssuedEvidence.record_event_bytes {config : Config} (issued : IssuedEvid
 /-- Core selection is only a *current-image component*. The issue evidence
 must be added to a verifier-minted chronological context before this candidate
 can be committed or handed to a physical app. -/
-structure CheckedCandidate (config : Config) (durable : NativeHost.Durable)
+structure CheckedCandidate (config : Config) (ground : DeclaredResourceController.Ground config.deployment)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (issued : IssuedEvidence config) where
   private mk ::
   issueBytesExact : ingress.issueIngressBytes = issued.ingressBytes
   checked : ApplicationDispatchAdmission.CheckedCurrent config.deployment config.profile
-    ⟨config.federation, NativeHost.logicalHeight config durable⟩ durable ingress
+    ⟨config.federation, config.genesisHeight + ground.height⟩ ground ingress
     issued.spec issued.descriptor
 
-def checkCurrent (config : Config) (durable : NativeHost.Durable)
+def checkCurrent (config : Config) (ground : DeclaredResourceController.Ground config.deployment)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (issued : IssuedEvidence config) :
-    IO (Except String (CheckedCandidate config durable ingress issued)) := do
+    IO (Except String (CheckedCandidate config ground ingress issued)) := do
   if issueBytesExact : ingress.issueIngressBytes = issued.ingressBytes then
     match ← ApplicationDispatchAdmission.checkCurrent config.deployment config.profile
-        ⟨config.federation, NativeHost.logicalHeight config durable⟩ config.signature
-        durable ingress issued.spec issued.descriptor with
+        ⟨config.federation, config.genesisHeight + ground.height⟩ config.signature
+        ground ingress issued.spec issued.descriptor with
     | .error detail => return .error detail
     | .ok checked => return .ok ⟨issueBytesExact, checked⟩
   else return .error "dispatch issue ingress differs from admitted source"
