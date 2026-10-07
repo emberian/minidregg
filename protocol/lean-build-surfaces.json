@@ -4233,7 +4233,7 @@
     {
       "module": "Kernel",
       "path": "Kernel.lean",
-      "sha256": "2362389da8f92eb5f1cf27757f6f5a9a296ce944034103a2a5a82b308a6dadcf",
+      "sha256": "e93e9e6baa6996c6b9463bce36ba59d910760ef66cddd980f501d0e4c65a008e",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6905,9 +6905,16 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Kernel.ObjectLaw",
+      "path": "Kernel/ObjectLaw.lean",
+      "sha256": "69e9f869bb3707b36ad9ae830b6eacf5216dbd8f835073ceb1616d502a7d50bb",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
       "module": "Kernel.ObjectRecord",
       "path": "Kernel/ObjectRecord.lean",
-      "sha256": "a60603ee5343a9bfd1b447f7f6e97b0e91a2eb7b5488c631a37a3164bd9224cc",
+      "sha256": "90a17e1b8dc246c7d398ebb12a51634bf82b6e3d518d79a2fdecf27d3a47367e",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7054,7 +7061,7 @@
     {
       "module": "Kernel.ObjectiveReferenceLift",
       "path": "Kernel/ObjectiveReferenceLift.lean",
-      "sha256": "2b97cf3c43b43bbd6bb78cf6716848842091937f070ccf1978bfe7a62b1c1265",
+      "sha256": "d59cf4c57556f6b23095e122aca4bde336127bf3c1cb88d045e835e1dfe20081",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
