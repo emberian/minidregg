@@ -45,13 +45,32 @@ def variant(label, payload):
     return {'tag': 'variant', 'label': label, 'payload': payload}
 
 
+# The extraction budget one Plan or result extraction needs declared: the Host publishes it in the public view
+# (`limits.extractTicks` = `config.maxExtractTicks`, the per-turn ceiling `Config.covers` compares an envelope's
+# extractTicks against; each extraction then draws only what it actually spent). It is learned from the Host after genesis (`learn_extract`), never authored into an envelope.
+EXTRACT = {'ticks': None}
+EXTRACT_PER_TURN = 16 * MAXIMUM['extractTicks']  # the extractTicksPerTurn this world's policy authors
+
+
+def published_extract_ticks(view):
+    """`limits.extractTicks` of a view reply. A Host that publishes none is a red world, not a default."""
+    ticks = (view.get('limits') or {}).get('extractTicks')
+    if ticks is None:
+        raise RuntimeError(f'the Host published no extraction budget: {view}')
+    return int(ticks)
+
+
 def cap(ticks, full=True):
     """A declared envelope (Capacity): `ticks` source ticks; a full one also declares the kernel's fixed
-    heap, stack, type fuel and Plan budget (Config.covers), priced at 0."""
+    heap, stack, type fuel and Plan budget (Config.covers), priced at 0, and the extraction budget the Host
+    publishes."""
     c = {k: '0' for k in MAXIMUM}
     if full:
-        for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes', 'extractTicks']:
+        if EXTRACT['ticks'] is None:
+            raise RuntimeError('cap() before the Host\'s extraction budget was learned (World.bring_up)')
+        for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes']:
             c[k] = str(MAXIMUM[k])
+        c['extractTicks'] = str(EXTRACT['ticks'])
     c['sourceTicks'] = str(ticks)
     return c
 
@@ -221,6 +240,10 @@ class World:
         self.SPONSOR_ACCOUNT = str(params['sponsor']['accountId'])
         self.SPONSOR_SPEND = str(params['sponsor']['spendCapabilityId'])
         self.COLLECTOR = str(params['collector'])
+        limits = self.view('limits', {})
+        EXTRACT['ticks'] = published_extract_ticks(limits)
+        self.check('extract-quote-is-the-policy-ceiling', EXTRACT['ticks'] == EXTRACT_PER_TURN,
+                   {'published': limits.get('limits'), 'policy': EXTRACT_PER_TURN})
         (root / 'permit-all.json').write_text('{"type":"all","predicates":[]}\n')
         for name in object_names:
             self.sh(f'resource-{name}', self.mini, 'workspace', '--action', 'create', '--dir', self.sponsor,
@@ -397,13 +420,25 @@ class World:
         return self.turn(label, workspace, body, expect, detail)
 
     def birth(self, label, workspace, name, deposit, expect, detail=None, init=None, decider=None, ticks=TICKS,
-              pin=None):
+              pin=None, extract_ticks=None):
+        """`extract_ticks`: declare that many extraction ticks in the birth envelope instead of the published
+        budget (the plant: one over)."""
         o = self.objects[name]
         body = {'kind': 'birth', 'object': o['object'], 'objectCapability': o['capability'],
                 'account': self.SPONSOR_ACCOUNT, 'accountCapability': self.SPONSOR_SPEND, 'pin': pin or self.PIN,
                 'input': record(init=init or variant('set', nat(0)), decider=nat(int(decider or self.SECOND))),
                 'envelope': cap(ticks), 'resume': cap(ticks), 'timeout': cap(ticks), 'deposit': str(deposit)}
+        if extract_ticks is not None:
+            body['envelope'] = dict(body['envelope'], extractTicks=str(extract_ticks))
         return self.turn(label, workspace, body, expect, detail).get('transaction')
+
+    def over_extract_plant(self, label, workspace, name, deposit):
+        """The PLANT of the extraction declaration: a birth declaring ONE tick over the published per-turn ceiling
+        must be refused `uncovered` by `Config.covers`, the envelope named with that number. (One short is no
+        longer a refusal: each extraction draws only what it spent.) Red if it installs."""
+        over = EXTRACT['ticks'] + 1
+        self.birth(label, workspace, name, deposit, 'refused', ['uncovered', f'extractTicks := {over}'],
+                   extract_ticks=over)
 
     def state(self, name, label, transaction=None):
         """The object's record, declared state and (when a birth is named) the activity's record and purse."""
