@@ -135,15 +135,19 @@ fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool) -> Result<Value
     // What a submission at the planning snapshot commits: null when admitted, `charged failure: ...`
     // (only the envelope's price is posted) or `refused: ...` (GPT-6 row E).
     let verdict = inspected.get("verdict").cloned().unwrap_or(Value::Null);
+    // The front-end work the decided turn's replays drew (`{replayBytes, coreBytes}`): what an
+    // invocation declares (plan over a generous envelope, declare this, plan again; GPT-6 row E).
+    let front_end = inspected.get("frontEnd").cloned().unwrap_or(Value::Null);
     if prepare_only {
         return Ok(json!({"type": "prepared", "ingress": out.join("ingress.bin"), "transaction": transaction,
-            "report": report, "verdict": verdict}));
+            "report": report, "verdict": verdict, "frontEnd": front_end}));
     }
     let mut outcome = inspect(ws, "outcome", &invoke(ws, 212, &ingress)?)?;
     write_new(&out.join("outcome.json"), outcome.to_string().as_bytes())?;
     outcome["transaction"] = transaction;
     outcome["report"] = report;
     outcome["verdict"] = verdict;
+    outcome["frontEnd"] = front_end;
     outcome["ingress"] = json!(out.join("ingress.bin"));
     Ok(outcome)
 }

@@ -56,6 +56,7 @@ import argparse, json, pathlib, sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import activity_world as AW  # noqa: E402
 from activity_world import World, PERMIT_ALL, TICKS, nat, record, variant, eq, any_of, cap, op_id, price  # noqa: E402
 
 PLANTS = {'honest-thief': {'C5-dao'}, 'vault-permit-all': {'C6-authority'}, 'gate-open': {'C7-facet'},
@@ -145,6 +146,37 @@ try:
         w.check('c3-second-sees-first', reported(out) == 12, out.get('report'))
         w.check('c3-both-land', total('counter', 'c3-after') == 12, None)
 
+    with w.group('C11-front-end-meter'):
+        # GPT-6 row E: one front-end meter per turn. Every frame's method load draws its replay's work (source
+        # bytes, typed-core bytes) from the envelope's budget; a three-frame tree declared one byte short of
+        # what its replays draw is refused by name (a charged call-tree refusal: the frames before it ran).
+        def metered(label, name, method, args, short):
+            body = {'kind': 'invoke', 'object': O[name], 'objectCapability': w.objects[name]['capability'],
+                    'method': method, 'args': args, 'envelope': cap(TICKS), 'account': w.SPONSOR_ACCOUNT,
+                    'accountCapability': w.SPONSOR_SPEND, 'opId': op_id()}
+            w.quote_front_end(f'{label}-quote', w.sponsor, body)
+            drawn = (int(body['envelope']['replayBytes']), int(body['envelope']['coreBytes']))
+            if short:
+                body['envelope']['replayBytes'] = str(drawn[0] - 1)
+            return drawn, w.turn(label, w.sponsor, body, 'charged' if short else 'installed',
+                                 ['frontEndExhausted'] if short else None)
+        one, _ = metered('c11-one-frame', 'counter', 'deposit', nat(1), False)
+        three, _ = metered('c11-three-frames', 'relayA', 'twice', hop('counter', 1), False)
+        w.check('c11-three-frames-draw-more', three[0] > one[0] and three[1] > one[1], [one, three])
+        metered('c11-one-byte-short', 'relayA', 'twice', hop('counter', 1), True)
+        # An envelope covering EXACTLY one load (the root frame's: its entry replay and its method lowering, each
+        # the package's source bytes S; core declared at the ceiling so the source stage binds): the second
+        # frame's quote draw is refused `frontEndExhausted frontEnd S 0`, and the refusal reports what the turn
+        # drew at that point, the first load's source 2S (cv 01a117cd-857b, `invoke_refused_within`).
+        S = int(AW.FRONT['replayBytes'])
+        body = {'kind': 'invoke', 'object': O['relayA'], 'objectCapability': w.objects['relayA']['capability'],
+                'method': 'twice', 'args': hop('counter', 1), 'envelope': cap(TICKS), 'account': w.SPONSOR_ACCOUNT,
+                'accountCapability': w.SPONSOR_SPEND, 'opId': op_id(), 'frontEndAsWritten': True}
+        body['envelope']['replayBytes'] = str(2 * S)
+        body['envelope']['coreBytes'] = str(AW.MAXIMUM['coreBytes'])
+        w.turn('c11-exactly-one-load', w.sponsor, body, 'charged',
+               ['frontEndExhausted', 'Stage.frontEnd) ' + f'{S} 0', f'source := {2 * S},'])
+
     with w.group('C4-reentry'):
         before = snapshot_of(['counter', 'relayA', 'relayB'], 'c4-before')
         fee_before = w.watched('c4-fee-before')
@@ -155,9 +187,13 @@ try:
         fee_after = w.watched('c4-fee-after')
         w.check('c4-nothing-commits', before == after, {'before': before, 'after': after})
         # Re-entry is refused after the call tree ran: a CHARGED FAILURE (row E), the envelope's price and nothing else.
-        w.check('c4-charged-the-price-only', w.balance(fee_before, w.SPONSOR_ACCOUNT) - w.balance(fee_after, w.SPONSOR_ACCOUNT)
-                == price(cap(TICKS)), {'paid': w.balance(fee_before, w.SPONSOR_ACCOUNT) - w.balance(fee_after, w.SPONSOR_ACCOUNT),
-                                       'price': price(cap(TICKS))})
+        # The envelope declares what the REFUSED plan reported it drew (cv 01a117cd-857b: the meter at the failure
+        # point, two frames' loads), so the turn reaches the same re-entry refusal, not `frontEndExhausted`.
+        paid = w.balance(fee_before, w.SPONSOR_ACCOUNT) - w.balance(fee_after, w.SPONSOR_ACCOUNT)
+        w.check('c4-charged-the-price-only', paid == w.quoted['c4-relay-back'][0],
+                {'paid': paid, 'price': w.quoted['c4-relay-back'][0]})
+        drawn = w.planned['c4-relay-back']
+        w.check('c4-refused-plan-reports-draws', int(drawn['replayBytes']) > 0 and int(drawn['coreBytes']) > 0, drawn)
 
     with w.group('C5-dao'):
         def pay(to, hook):

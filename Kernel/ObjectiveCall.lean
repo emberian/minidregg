@@ -198,6 +198,14 @@ inductive CallRefusal where
   | depth (limit : Nat)
   /-- The target cell has no object record. -/
   | notAnObject (target : Nat)
+  /-- The turn's front-end budget (its paying envelope's `replayBytes`/`coreBytes`,
+  `ObjectiveWorkAccount.Meter`) has `left` of `stage` and a replay needs `needed`: refused before
+  that replay parses (`frontEnd`, and the stored core it must generate), or right after a lowering
+  whose generated core does not fit (GPT-6 row E). -/
+  | frontEndExhausted (stage : ObjectiveWorkAccount.Stage) (needed left : Nat)
+  /-- A send to `target` whose postage envelope does not declare the front-end work its delivery's
+  root frame must replay (measured at the send, by the same load): refused at the send. -/
+  | postageFrontEnd (target : Nat) (stage : ObjectiveWorkAccount.Stage) (needed declared : Nat)
   /-- The target object has no declared state to show the callee. -/
   | stateMissing (target : Nat)
   /-- The declaration is not a call method of the pinned package (it does not
@@ -320,17 +328,53 @@ structure Method (config : Config) (pin : Digest) (method : String) (view args :
   callsOnly : labelsWithin applied.assumptions planType framePlans = true
   returnsOnly : labelsWithin applied.assumptions responseType frameResponses = true
 
-def loadMethod (config : Config) (target : Nat) (bytes : Bytes) (pin : Digest) (method : String)
+/-- Draw a replay's work from the turn's meter, refused by name. -/
+def drawFrontEnd (meter : ObjectiveWorkAccount.Meter) (source core : Nat) :
+    Except CallRefusal ObjectiveWorkAccount.Meter :=
+  match meter.draw source core with
+  | .error (stage, needed, left) => .error (.frontEndExhausted stage needed left)
+  | .ok meter => .ok meter
+
+theorem drawFrontEnd_ok {meter meter' : ObjectiveWorkAccount.Meter} {source core : Nat}
+    (drawn : drawFrontEnd meter source core = .ok meter') : meter.draw source core = .ok meter' := by
+  unfold drawFrontEnd at drawn
+  split at drawn
+  · cases drawn
+  · rename_i h; cases drawn; exact h
+
+/-- **What a turn's front end drew** (GPT-6 row E; cv 01a117cd-857b): the source and typed-core
+bytes summed over every replay its meter admitted (each frame's method load, each send's
+deliverable check), and the largest front end any one send's delivery root frame replays (what the
+turn's POSTAGE envelope must declare; `Deliverable.postagePays`). An admitted invocation reports
+it (`Invocation.frontEnd`); a refused one reports it AT ITS FAILURE POINT, so a signer learns the
+budget that reaches the same refusal rather than nothing. -/
+structure FrontEnd where
+  source : Nat
+  core : Nat
+  postageSource : Nat
+  postageCore : Nat
+  deriving Repr, DecidableEq
+
+/-- A meter's draws, with the postage a turn's sends need so far. -/
+def FrontEnd.of (meter : ObjectiveWorkAccount.Meter) (postage : Nat × Nat) : FrontEnd :=
+  ⟨meter.source, meter.core, postage.1, postage.2⟩
+
+/-- The source and typed-core bytes of a list of draws. -/
+def drawnTotal (draws : List (Nat × Nat)) : Nat × Nat := ((draws.map Prod.fst).sum, (draws.map Prod.snd).sum)
+
+/-- A method of a stored pair: the pinned entry replayed (`replayPackage`, which parses the
+package ONCE), the method lowered from that parse (`replay_select`), accepted, applied to the
+view and arguments, and checked. -/
+def methodOf (config : Config) (target : Nat) (stored : Stored) (pin : Digest) (method : String)
     (view args : Data) : Except CallRefusal (Method config pin method view args) :=
-  match decodeStored bytes with
-  | none => .error (.kernel .packageMissing)
-  | some stored =>
   match replayPackage config stored pin with
   | .error reason => .error (.kernel reason)
   | .ok definition =>
-  match replayExact : ObjectiveBendPublication.replay (methodPackage definition.package method) with
+  match lowered : ObjectiveBendPublication.lowerParsed definition.replayed.parsed definition.package.entryModule method with
   | .error d => .error (.notCallable target method d.message)
   | .ok lowering =>
+  have replayExact : ObjectiveBendPublication.replay (methodPackage definition.package method) = .ok lowering :=
+    (ObjectiveBendPublication.replay_select definition.replayed.parseExact method).trans lowered
   match ObjectiveBendFrontEnd.accept lowering with
   | .error d => .error (.notCallable target method d.message)
   | .ok accepted =>
@@ -360,6 +404,163 @@ def loadMethod (config : Config) (target : Nat) (bytes : Bytes) (pin : Digest) (
         | _ => .error (.notCallable target method "it does not return an Activity")
     | _ => .error (.notCallable target method "it does not take a view and arguments")
   else .error (.notCallable target method "typed core checker fuel exceeds the kernel's capacity")
+
+/-- The typed-core bytes a method's lowering generated (drawn after the lowering). -/
+def Method.generatedCore {config : Config} {pin : Digest} {method : String} {view args : Data}
+    (m : Method config pin method view args) : Nat :=
+  m.lowering.packet.compress.toUTF8.toList.length
+
+/-- Draw a pair's front-end quote (its source bytes, the stored core its replay must generate);
+a pair whose quote does not decode draws nothing and is refused by `replayPackage` before any
+replay. -/
+def drawQuote (meter : ObjectiveWorkAccount.Meter) (bytes : Bytes) : Except CallRefusal ObjectiveWorkAccount.Meter :=
+  match frontEndQuote bytes with
+  | some (source, core) => drawFrontEnd meter source core
+  | none => .ok meter
+
+/-- **Load a method, metered.** A refusal reports the meter at its failure point. Two lowerings of one parse, each drawn from the turn's meter:
+* the pinned entry's replay (`replayPackage`: parse, lower, compare with the stored core), drawn from
+  the pair's quote (its source bytes, the stored core it must generate) BEFORE anything is replayed;
+* the method's lowering from that parse (`methodOf`, `replay_select`), drawn as the package's source
+  bytes again (the elaborator's lowering cost grows with the whole source, not only the selected
+  declaration: measured, lowering a 335 KB module of unused records costs 1.92 us/B against its
+  parse's 0.54 us/B) and the core the lowering generated, right after it exists. An overshoot is the
+  turn's own `frontEndExhausted`, a charged call-tree refusal; until the elaborator is metered before
+  it renders (cv 01a11636-203c) the work before that refusal is bounded only by the front end's fixed
+  limits (`ObjectiveBendPublication.limits`, the checker's `typeFuel`, `maxArtifactBytes` of source). -/
+def loadMethod (config : Config) (target : Nat) (bytes : Bytes) (pin : Digest) (method : String)
+    (view args : Data) (meter : ObjectiveWorkAccount.Meter) :
+    Except (CallRefusal × ObjectiveWorkAccount.Meter) (Method config pin method view args × ObjectiveWorkAccount.Meter) :=
+  match decodeStored bytes with
+  | none => .error (.kernel .packageMissing, meter)
+  | some stored =>
+  match drawQuote meter bytes with
+  | .error reason => .error (reason, meter)
+  | .ok quoted =>
+  -- refused after the entry's replay: the meter reports the quote it drew
+  match methodOf config target stored pin method view args with
+  | .error reason => .error (reason, quoted)
+  | .ok m =>
+  match drawFrontEnd quoted (ObjectiveWorkAccount.sourceBytes m.definition.package) m.generatedCore with
+  | .error reason => .error (reason, quoted)
+  | .ok drawn => .ok (m, drawn)
+
+/-- **A loaded method's front end was drawn**: an admitted load reaches its result meter from the
+meter it was given by admitted draws (`ObjectiveWorkAccount.Meter.Reaches`), so a turn whose loads
+start from its envelope's meter stays within it, summed over every load. -/
+theorem loadMethod_reaches {config : Config} {target : Nat} {bytes : Bytes} {pin : Digest} {method : String}
+    {view args : Data} {meter meter' : ObjectiveWorkAccount.Meter} {m : Method config pin method view args}
+    (loaded : loadMethod config target bytes pin method view args meter = .ok (m, meter'))
+    {start : ObjectiveWorkAccount.Meter} (reached : ObjectiveWorkAccount.Meter.Reaches start meter) :
+    ObjectiveWorkAccount.Meter.Reaches start meter' := by
+  unfold loadMethod at loaded
+  split at loaded
+  · cases loaded
+  · split at loaded
+    · cases loaded
+    · rename_i quoted hq
+      have r1 : ObjectiveWorkAccount.Meter.Reaches start quoted := by
+        unfold drawQuote at hq
+        split at hq
+        · exact .draw reached (drawFrontEnd_ok hq)
+        · cases hq; exact reached
+      split at loaded
+      · cases loaded
+      · split at loaded
+        · cases loaded
+        · rename_i drawn hd
+          cases loaded
+          exact .draw r1 (drawFrontEnd_ok hd)
+
+/-- The draw a pair's front-end quote makes (`drawQuote`): its (source, stored core), or none when the
+quote does not decode (and then the pair refuses, `loadMethod_unquoted_refused`). -/
+def quoteDraws (bytes : Bytes) : List (Nat × Nat) :=
+  match frontEndQuote bytes with
+  | some draw => [draw]
+  | none => []
+
+/-- **An admitted load draws exactly its work** (the lower half of the meter, beside the upper
+bound `Meter.Reaches.within`): its meter's draws are the given ones, then the pair's quote, then the
+method lowering's (package source bytes, generated core). A load that skipped a draw falsifies it. -/
+theorem loadMethod_draws {config : Config} {target : Nat} {bytes : Bytes} {pin : Digest} {method : String}
+    {view args : Data} {meter meter' : ObjectiveWorkAccount.Meter} {m : Method config pin method view args}
+    (loaded : loadMethod config target bytes pin method view args meter = .ok (m, meter')) :
+    meter'.draws = meter.draws ++ quoteDraws bytes ++
+      [(ObjectiveWorkAccount.sourceBytes m.definition.package, m.generatedCore)] := by
+  unfold loadMethod at loaded
+  split at loaded
+  · cases loaded
+  · split at loaded
+    · cases loaded
+    · rename_i quoted hq
+      have q : quoted.draws = meter.draws ++ quoteDraws bytes := by
+        unfold drawQuote at hq
+        unfold quoteDraws
+        split at hq
+        · rename_i source core hquote
+          rw [hquote]
+          exact (ObjectiveWorkAccount.Meter.draw_ok (drawFrontEnd_ok hq)).2.2.1
+        · rename_i hquote
+          cases hq; rw [hquote]; simp
+      split at loaded
+      · cases loaded
+      · split at loaded
+        · cases loaded
+        · rename_i drawn hd
+          cases loaded
+          rw [(ObjectiveWorkAccount.Meter.draw_ok (drawFrontEnd_ok hd)).2.2.1, q]
+
+/-- **A pair whose quote does not decode replays nothing**: `replayPackage` refuses it (an artifact
+or package that does not decode is refused before any replay), so `drawQuote`'s draw-nothing case is
+never a free replay. -/
+theorem replayPackage_unquoted_refused {config : Config} {bytes : Bytes} {stored : Stored} {pin : Digest}
+    (decoded : decodeStored bytes = some stored) (unquoted : frontEndQuote bytes = none) :
+    ∃ reason, replayPackage config stored pin = .error reason := by
+  unfold frontEndQuote at unquoted
+  rw [decoded] at unquoted
+  unfold replayPackage
+  cases ha : ObjectiveBendSourceArtifact.decode stored.artifact with
+  | none => split_ifs <;> exact ⟨_, rfl⟩
+  | some artifact =>
+    cases hp : ObjectiveSourcePackage.decode stored.package with
+    | none => dsimp only; split_ifs <;> exact ⟨_, rfl⟩
+    | some package => simp [ha, hp] at unquoted
+
+/-- **A load of an unquoted pair refuses and draws nothing.** -/
+theorem loadMethod_unquoted_refused {config : Config} {target : Nat} {bytes : Bytes} {pin : Digest}
+    {method : String} {view args : Data} {meter : ObjectiveWorkAccount.Meter}
+    (unquoted : frontEndQuote bytes = none) :
+    ∃ reason, loadMethod config target bytes pin method view args meter = .error (reason, meter) := by
+  unfold loadMethod
+  cases decoded : decodeStored bytes with
+  | none => exact ⟨_, rfl⟩
+  | some stored =>
+    have quoteNone : drawQuote meter bytes = .ok meter := by unfold drawQuote; rw [unquoted]
+    obtain ⟨reason, refused⟩ := replayPackage_unquoted_refused (config := config) (pin := pin) decoded unquoted
+    simp only [quoteNone]
+    have : methodOf config target stored pin method view args = .error (.kernel reason) := by
+      unfold methodOf; rw [refused]
+    rw [this]
+    exact ⟨_, rfl⟩
+
+/-- The method an admitted load returns is the pair's own (`methodOf`): the meter decides only
+WHETHER it loads. -/
+theorem loadMethod_method {config : Config} {target : Nat} {bytes : Bytes} {pin : Digest} {method : String}
+    {view args : Data} {meter meter' : ObjectiveWorkAccount.Meter} {m : Method config pin method view args}
+    (loaded : loadMethod config target bytes pin method view args meter = .ok (m, meter')) :
+    ∃ stored, decodeStored bytes = some stored ∧ methodOf config target stored pin method view args = .ok m := by
+  unfold loadMethod at loaded
+  split at loaded
+  · cases loaded
+  · rename_i stored hs
+    split at loaded
+    · cases loaded
+    · split at loaded
+      · cases loaded
+      · rename_i m' hm
+        split at loaded
+        · cases loaded
+        · cases loaded; exact ⟨stored, hs, hm⟩
 
 /-! ## Plans, returns, grants -/
 
@@ -672,8 +873,14 @@ structure Journal where
   ALL the turn's sends (`postControls` after `postMail`), so a turn may cancel a message it
   sent itself. -/
   controls : List Control
+  /-- The turn's front-end meter: every method a frame loads draws its replay's work from it
+  (`loadMethod`), refused by name when the paying envelope's budget is short. -/
+  meter : ObjectiveWorkAccount.Meter
 
-def Journal.start (grants : List Grant) (extracts : Nat) : Journal := ⟨[], grants, [], [], [], [], extracts, []⟩
+/-- A fresh journal: the turn's grants, its extraction allowance, and the front-end meter of the
+envelope that pays for its replays. -/
+def Journal.start (grants : List Grant) (envelope : Capacity) : Journal :=
+  ⟨[], grants, [], [], [], [], envelope.extractTicks, [], ObjectiveWorkAccount.Meter.start envelope⟩
 
 /-- **Debit an extraction's actual tick spend** from the turn's allowance, refused by name when
 the allowance left is below it. The spend is deterministic (the extraction's own tick count),
@@ -834,91 +1041,93 @@ the frame's `result`, the journal, and the ticks left. `fuel` only bounds the
 recursion; the envelope's ticks bound the work. -/
 def exec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (height : Nat)
     (authority : Authority) (turn : TransactionId) :
-    Nat → List Ctx → Task → Journal → Nat → Except CallRefusal (Data × Journal × Nat)
-  | 0, _, _, _, _ => .error .exhausted
+    Nat → List Ctx → Task → Journal → Nat → Except (CallRefusal × ObjectiveWorkAccount.Meter) (Data × Journal × Nat)
+  | 0, _, _, journal, _ => .error (.exhausted, journal.meter)
   | fuel + 1, stack, .enter call, journal, ticks =>
     if stack.any (fun ctx => ctx.object == call.target) then
-      .error (.reentry call.target.value (stack.map (·.object.value)))
-    else if callDepth ≤ stack.length then .error (.depth callDepth)
+      .error (.reentry call.target.value (stack.map (·.object.value)), journal.meter)
+    else if callDepth ≤ stack.length then .error (.depth callDepth, journal.meter)
     else
     match touch config snapshot journal call.target with
-    | .error reason => .error reason
+    | .error reason => .error (reason, journal.meter)
     | .ok (entry, journal) =>
     match entry.current, entry.record.admitsNew with
-    | none, _ => .error (.stateMissing call.target.value)
+    | none, _ => .error (.stateMissing call.target.value, journal.meter)
     -- A draining object admits no new frame unless its upgrade's migration is the identity.
-    | some _, false => .error (.kernel .draining)
+    | some _, false => .error (.kernel .draining, journal.meter)
     | some view, true =>
     match frameAuthority authority stack journal call entry.record.activePin with
-    | .error reason => .error reason
+    | .error reason => .error (reason, journal.meter)
     | .ok (subject, delegation) =>
     match loadMethod config call.target.value (packageBytes config snapshot entry.record.activePin) entry.record.activePin
-        call.method (viewData view) call.args with
+        call.method (viewData view) call.args journal.meter with
     | .error reason => .error reason
-    | .ok program =>
+    | .ok (program, meter) =>
     let ctx : Ctx := ⟨call.target, call.method, entry.record, program.applied.assumptions, program.responseType,
       view, subject, height, callerOf authority stack, call.args, delegation⟩
     let journal : Journal := ⟨journal.entries, journal.grants, journal.delegations ++ delegation.toList,
       journal.frames ++ [call.target.value :: stack.map (·.object.value)], journal.writes, journal.outbox,
-      journal.extracts, journal.controls⟩
+      journal.extracts, journal.controls, meter⟩
     exec config snapshot height authority turn fuel (ctx :: stack) (.run (initial program.applied.erase)) journal ticks
-  | _ + 1, [], .run _, _, _ => .error .exhausted
+  | _ + 1, [], .run _, journal, _ => .error (.exhausted, journal.meter)
   | fuel + 1, ctx :: rest, .run state, journal, ticks =>
     match runCounted config.limits ticks state with
     | (.yielded _ yielded, left) =>
       match ObjectiveBendDemandData.yieldedPlan config.limits config.planBudget yielded with
-      | .error (failure, _) => .error (.frameFault ctx.object.value ctx.method s!"plan extraction: {reprStr failure}")
+      | .error (failure, _) =>
+        .error (.frameFault ctx.object.value ctx.method s!"plan extraction: {reprStr failure}", journal.meter)
       | .ok extracted =>
       match journal.draw (config.planBudget.ticks - extracted.remaining.ticks) with
-      | .error reason => .error reason
+      | .error reason => .error (reason, journal.meter)
       | .ok journal =>
       match decodeYield ctx.object.value ctx.method extracted.value with
-      | .error reason => .error reason
+      | .error reason => .error (reason, journal.meter)
       | .ok (.call call) =>
         match exec config snapshot height authority turn fuel (ctx :: rest) (.enter call) journal left with
-        | .error reason => .error reason
+        | .error refused => .error refused
         | .ok (result, journal, left) =>
         match typeData ctx.assumptions config.typeFuel (returnedData result) ctx.responseType with
-        | none => .error (.resultType ctx.object.value ctx.method)
+        | none => .error (.resultType ctx.object.value ctx.method, journal.meter)
         | some _ =>
         match resume (returnedData result).term yielded with
-        | none => .error (.frameFault ctx.object.value ctx.method "resume")
+        | none => .error (.frameFault ctx.object.value ctx.method "resume", journal.meter)
         | some next => exec config snapshot height authority turn fuel (ctx :: rest) (.run next) journal left
       | .ok (.send send) =>
         let id := Inbox.sendId turn journal.outbox.length
         match typeData ctx.assumptions config.typeFuel (queuedData id) ctx.responseType with
-        | none => .error (.resultType ctx.object.value ctx.method)
+        | none => .error (.resultType ctx.object.value ctx.method, journal.meter)
         | some _ =>
         match resume (queuedData id).term yielded with
-        | none => .error (.frameFault ctx.object.value ctx.method "resume")
+        | none => .error (.frameFault ctx.object.value ctx.method "resume", journal.meter)
         | some next => exec config snapshot height authority turn fuel (ctx :: rest) (.run next)
             { journal with outbox := journal.outbox ++ [⟨id, ctx.object.value, send.destination, send.method, send.args, send.allowance⟩] }
             left
       | .ok (.control kind slot) =>
         match typeData ctx.assumptions config.typeFuel (ackedData slot) ctx.responseType with
-        | none => .error (.resultType ctx.object.value ctx.method)
+        | none => .error (.resultType ctx.object.value ctx.method, journal.meter)
         | some _ =>
         match resume (ackedData slot).term yielded with
-        | none => .error (.frameFault ctx.object.value ctx.method "resume")
+        | none => .error (.frameFault ctx.object.value ctx.method "resume", journal.meter)
         | some next => exec config snapshot height authority turn fuel (ctx :: rest) (.run next)
             { journal with controls := journal.controls ++ [⟨ctx.object.value, kind, slot⟩] }
             left
     | (.finished _ finished, left) =>
       match ObjectiveBendDemandData.complete config.limits config.planBudget finished with
-      | .error (failure, _) => .error (.frameFault ctx.object.value ctx.method s!"result extraction: {reprStr failure}")
+      | .error (failure, _) =>
+        .error (.frameFault ctx.object.value ctx.method s!"result extraction: {reprStr failure}", journal.meter)
       | .ok out =>
       match journal.draw (config.planBudget.ticks - out.remaining.ticks) with
-      | .error reason => .error reason
+      | .error reason => .error (reason, journal.meter)
       | .ok journal =>
       match decodeReturn ctx.object.value ctx.method out.value with
-      | .error reason => .error reason
+      | .error reason => .error (reason, journal.meter)
       | .ok (result, write) =>
       match frameReturn ctx write journal with
-      | .error reason => .error reason
+      | .error reason => .error (reason, journal.meter)
       | .ok journal => .ok (result, journal, left)
-    | (.suspended _ _, _) => .error .exhausted
-    | (.divergent _ _, _) => .error (.frameFault ctx.object.value ctx.method "divergent")
-    | (.refused reason _, _) => .error (.frameFault ctx.object.value ctx.method (reprStr reason))
+    | (.suspended _ _, _) => .error (.exhausted, journal.meter)
+    | (.divergent _ _, _) => .error (.frameFault ctx.object.value ctx.method "divergent", journal.meter)
+    | (.refused reason _, _) => .error (.frameFault ctx.object.value ctx.method (reprStr reason), journal.meter)
 
 
 /-! ## The turn's mail: inboxes and reply slots -/
@@ -992,9 +1201,20 @@ structure Mail {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
   closed : List (ClosedSlot config snapshot)
   /-- The escrow this turn's controls return, in order. -/
   refunds : List Refund
+  /-- The turn's front-end meter: each send to an object loads the target's method (`Deliverable`)
+  and draws that replay's work from it. -/
+  meter : ObjectiveWorkAccount.Meter
+  /-- The largest front end (source, typed-core bytes) any one of this turn's sends' delivery root
+  frames replays: what the postage envelope must declare (`Deliverable.postagePays`). -/
+  postage : Nat × Nat
 
-def Mail.empty {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes} :
-    Mail config snapshot := ⟨[], [], [], [], [], []⟩
+/-- The mail of a turn before any send, over the turn's front-end meter. -/
+def Mail.start {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (meter : ObjectiveWorkAccount.Meter) : Mail config snapshot := ⟨[], [], [], [], [], [], meter, (0, 0)⟩
+
+/-- What the mail's turn has drawn so far (`FrontEnd`). -/
+def Mail.frontEnd {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (mail : Mail config snapshot) : FrontEnd := FrontEnd.of mail.meter mail.postage
 
 /-- The inbox of (sender, target): the one this turn holds, else read from the
 snapshot. Returns it and the other held inboxes. -/
@@ -1068,7 +1288,7 @@ method loads exactly as its delivery's root frame will (`loadMethod` on the reco
 `activePin`, applied to the object's view and the arguments: the same front end, the same
 type check), and its Plan type is within `deliveredPlans message`. -/
 structure Deliverable {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
-    (target : Nat) (message : Inbox.Message) where
+    (target : Nat) (message : Inbox.Message) (meter : ObjectiveWorkAccount.Meter) where
   private mk ::
   record : ObjectRecord
   recordExact : readObject config snapshot ⟨target⟩ = .ok (some record)
@@ -1077,9 +1297,14 @@ structure Deliverable {rootBytes : Bytes → Digest} (config : Config) (snapshot
   args : Data
   argsExact : decodeDataBytes message.args = some args
   method : Method config record.activePin message.method (viewData view) args
+  /-- The sending turn's meter after the load: the load's replay is drawn from the SENDER's turn. -/
+  meterAfter : ObjectiveWorkAccount.Meter
   methodExact : loadMethod config target (packageBytes config snapshot record.activePin) record.activePin
-    message.method (viewData view) args = .ok method
+    message.method (viewData view) args meter = .ok (method, meterAfter)
   callsOnly : labelsWithin method.applied.assumptions method.planType (deliveredPlans message) = true
+  /-- The message's postage pays the front end its delivery's root frame replays: the same draws,
+  replayed on a fresh meter over the postage envelope (GPT-6 row E). -/
+  postagePays : ((ObjectiveWorkAccount.Meter.start message.envelope).drawAll (meterAfter.since meter)).toBool = true
 
 /-- Decide `Deliverable`, refusing by name: `notAnObject`, `stateMissing` (an object with no
 declared state: its delivery could not enter it), `argumentType` (arguments that do not
@@ -1088,29 +1313,54 @@ awaits), `continuationDepth` (a sending method, the message at the depth bound),
 `notDeliverable` (a sending method and an allowance that covers no onward send, or a Plan
 that admits `stop`/`cancel`). -/
 def deliverable {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
-    (target : Nat) (message : Inbox.Message) : Except CallRefusal (Deliverable config snapshot target message) :=
+    (target : Nat) (message : Inbox.Message) (meter : ObjectiveWorkAccount.Meter) :
+    Except (CallRefusal × ObjectiveWorkAccount.Meter) (Deliverable config snapshot target message meter) :=
   match recordExact : readObject config snapshot ⟨target⟩ with
-  | .error reason => .error (.kernel reason)
-  | .ok none => .error (.notAnObject target)
+  | .error reason => .error (.kernel reason, meter)
+  | .ok none => .error (.notAnObject target, meter)
   | .ok (some record) =>
   match viewExact : readState config snapshot ⟨target⟩ with
-  | .error reason => .error (.kernel reason)
-  | .ok none => .error (.stateMissing target)
+  | .error reason => .error (.kernel reason, meter)
+  | .ok none => .error (.stateMissing target, meter)
   | .ok (some view) =>
   match argsExact : decodeDataBytes message.args with
-  | none => .error (.argumentType target message.method)
+  | none => .error (.argumentType target message.method, meter)
   | some args =>
   match methodExact : loadMethod config target (packageBytes config snapshot record.activePin) record.activePin
-      message.method (viewData view) args with
-  | .error reason => .error reason
-  | .ok method =>
+      message.method (viewData view) args meter with
+  | .error refused => .error refused
+  | .ok (method, meterAfter) =>
     if callsOnly : labelsWithin method.applied.assumptions method.planType (deliveredPlans message) = true then
-      .ok ⟨record, recordExact, view, viewExact, args, argsExact, method, methodExact, callsOnly⟩
+      match paid : (ObjectiveWorkAccount.Meter.start message.envelope).drawAll (meterAfter.since meter) with
+      | .error (stage, needed, left) => .error (.postageFrontEnd target stage needed left, meterAfter)
+      | .ok _ =>
+        .ok ⟨record, recordExact, view, viewExact, args, argsExact, method, meterAfter, methodExact, callsOnly,
+          by rw [paid]; rfl⟩
     else if !labelsWithin method.applied.assumptions method.planType ["call", "send"] then
-      .error (.notDeliverable target message.method "its Plan admits stop or cancel: a delivered method controls nothing")
-    else if Inbox.continuationDepth ≤ message.depth then .error (.continuationDepth Inbox.continuationDepth)
+      .error (.notDeliverable target message.method "its Plan admits stop or cancel: a delivered method controls nothing",
+        meterAfter)
+    else if Inbox.continuationDepth ≤ message.depth then .error (.continuationDepth Inbox.continuationDepth, meterAfter)
     else .error (.notDeliverable target message.method
-      "its Plan admits send and the message's allowance does not cover an onward send")
+      "its Plan admits send and the message's allowance does not cover an onward send", meterAfter)
+
+/-- The front end a deliverable message's delivery root frame replays (source, typed-core bytes):
+the draws its check made on the sender's meter, which its postage must cover. -/
+def Deliverable.postageNeed {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {target : Nat} {message : Inbox.Message} {meter : ObjectiveWorkAccount.Meter}
+    (d : Deliverable config snapshot target message meter) : Nat × Nat :=
+  drawnTotal (d.meterAfter.since meter)
+
+/-- The larger of two front ends, part by part. -/
+def maxFrontEnd (a b : Nat × Nat) : Nat × Nat := (max a.1 b.1, max a.2 b.2)
+
+/-- **A deliverable send draws exactly its target's root load** on the sender's meter (what its
+postage then pays, `Deliverable.postagePays`). -/
+theorem Deliverable.draws {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {target : Nat} {message : Inbox.Message} {meter : ObjectiveWorkAccount.Meter}
+    (d : Deliverable config snapshot target message meter) :
+    d.meterAfter.draws = meter.draws ++ quoteDraws (packageBytes config snapshot d.record.activePin) ++
+      [(ObjectiveWorkAccount.sourceBytes d.method.definition.package, d.method.generatedCore)] :=
+  loadMethod_draws d.methodExact
 
 /-- **Queue one message.** To an object: the target method must be `Deliverable` (decided
 before anything is escrowed: an object, with state, the method loads, its Plan within
@@ -1123,19 +1373,21 @@ destination through this same function, and a refusal there refunds it. Either w
 postage is credited to the purse of the queue that holds it. -/
 def Mail.send {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     (mail : Mail config snapshot) (message : Inbox.Message) :
-    Destination → Except CallRefusal (Mail config snapshot)
+    Destination → Except (CallRefusal × FrontEnd) (Mail config snapshot)
   | .object target =>
-    match deliverable config snapshot target message with
-    | .error reason => .error reason
-    | .ok _ =>
+    match deliverable config snapshot target message mail.meter with
+    | .error (reason, meter) => .error (reason, FrontEnd.of meter mail.postage)
+    | .ok d =>
+    -- refused after the check: the turn drew the load, and its postage must cover it
+    let drawn := FrontEnd.of d.meterAfter (maxFrontEnd mail.postage d.postageNeed)
     match holdInbox config snapshot mail message.sender target with
-    | .error reason => .error reason
+    | .error reason => .error (reason, drawn)
     | .ok (held, others) =>
     match pushed : held.now.push message with
-    | none => .error (.queueFull message.sender target)
+    | none => .error (.queueFull message.sender target, drawn)
     | some next =>
     match openSlot config snapshot mail message.id message.sender held.cell with
-    | .error reason => .error reason
+    | .error reason => .error (reason, drawn)
     | .ok slot =>
       have keeps := (Inbox.push_step pushed).keeps
       let updated : HeldInbox config snapshot :=
@@ -1145,16 +1397,18 @@ def Mail.send {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snaps
         inboxes := others ++ [updated]
         slots := mail.slots ++ [slot]
         credits := mail.credits ++ [(held.cell.value, message.escrow)]
-        targets := mail.targets ++ [target] }
+        targets := mail.targets ++ [target]
+        meter := d.meterAfter
+        postage := maxFrontEnd mail.postage d.postageNeed }
   | .slot name =>
     match holdSlot config snapshot mail name with
-    | .error reason => .error reason
+    | .error reason => .error (reason, mail.frontEnd)
     | .ok (held, others) =>
       match held.now.decider with
-      | .subject _ => .error (.notPipelinable name.value)
+      | .subject _ => .error (.notPipelinable name.value, mail.frontEnd)
       | .delivery _ _ =>
         -- Its sender stopped waiting (`ControlKind.stop`): nothing more is pipelined on it.
-        if !held.now.watched then .error (.notPipelinable name.value) else
+        if !held.now.watched then .error (.notPipelinable name.value, mail.frontEnd) else
         if held.now.queued.length < Inbox.bound then
           let updated : HeldSlot config snapshot :=
             ⟨held.name, held.read, held.clean, held.slotted, { held.now with queued := held.now.queued ++ [message] },
@@ -1162,7 +1416,7 @@ def Mail.send {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snaps
           .ok { mail with
             slots := others ++ [updated]
             credits := mail.credits ++ [(held.now.activity.value, message.escrow)] }
-        else .error (.slotQueueFull name.value)
+        else .error (.slotQueueFull name.value, mail.frontEnd)
 
 /-- The message a send queues: its delivery runs under `postage`, whose public
 price it escrows with the send's allowance, both refunded to `refund` if it is never
@@ -1176,12 +1430,12 @@ def messageOf (config : Config) (postage : Capacity) (refund : AccountId) (depth
 /-- The mail of a turn's sends, in order. -/
 def postMail {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (postage : Capacity) (refund : AccountId) (depth : Nat) :
-    Mail config snapshot → List Outgoing → Except CallRefusal (Mail config snapshot)
+    Mail config snapshot → List Outgoing → Except (CallRefusal × FrontEnd) (Mail config snapshot)
   | mail, [] => .ok mail
   | mail, out :: rest =>
-    if !(messageOf config postage refund depth out).fits then .error (.messageWide out.id.value) else
+    if !(messageOf config postage refund depth out).fits then .error (.messageWide out.id.value, mail.frontEnd) else
     match mail.send (messageOf config postage refund depth out) out.destination with
-    | .error reason => .error reason
+    | .error refused => .error refused
     | .ok mail => postMail config snapshot postage refund depth mail rest
 
 /-- One step of an admitted `postMail`: the message fits what its deposit covers, it is sent,
@@ -1762,11 +2016,11 @@ cannot see (a nested call into a sending method, an upgrade between send and del
 theorem Mail.send_object_deliverable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {mail mail' : Mail config snapshot} {message : Inbox.Message} {target : Nat}
     (sent : mail.send message (.object target) = .ok mail') :
-    ∃ d : Deliverable config snapshot target message, deliverable config snapshot target message = .ok d ∧
+    ∃ d : Deliverable config snapshot target message mail.meter, deliverable config snapshot target message mail.meter = .ok d ∧
       loadMethod config target (packageBytes config snapshot d.record.activePin) d.record.activePin message.method
-        (viewData d.view) d.args = .ok d.method ∧
+        (viewData d.view) d.args mail.meter = .ok (d.method, d.meterAfter) ∧
       labelsWithin d.method.applied.assumptions d.method.planType (deliveredPlans message) = true := by
-  cases found : deliverable config snapshot target message with
+  cases found : deliverable config snapshot target message mail.meter with
   | error reason => simp only [Mail.send, found] at sent; cases sent
   | ok d => exact ⟨d, rfl, d.methodExact, d.callsOnly⟩
 
@@ -1776,8 +2030,8 @@ theorem postMail_deliverable {rootBytes : Bytes → Digest} {config : Config} {s
     ∀ {outs : List Outgoing} {mail mail' : Mail config snapshot},
       postMail config snapshot postage refund depth mail outs = .ok mail' →
       ∀ out ∈ outs, ∀ target, out.destination = .object target →
-        ∃ d : Deliverable config snapshot target (messageOf config postage refund depth out),
-          deliverable config snapshot target (messageOf config postage refund depth out) = .ok d
+        ∃ meter, ∃ d : Deliverable config snapshot target (messageOf config postage refund depth out) meter,
+          deliverable config snapshot target (messageOf config postage refund depth out) meter = .ok d
   | [], _, _, _, out, member, _, _ => nomatch member
   | out :: rest, mail, mail', posted, other, member, target, destination => by
     obtain ⟨_, next, sent, posted⟩ := postMail_cons posted
@@ -1785,7 +2039,7 @@ theorem postMail_deliverable {rootBytes : Bytes → Digest} {config : Config} {s
     · subst same
       rw [destination] at sent
       obtain ⟨d, found, _⟩ := Mail.send_object_deliverable sent
-      exact ⟨d, found⟩
+      exact ⟨_, d, found⟩
     · exact postMail_deliverable posted other inRest target destination
 
 /-! ## The invocation turn -/
@@ -1912,7 +2166,7 @@ structure Invocation {rootBytes : Bytes → Digest} (config : Config) (snapshot 
   journal : Journal
   left : Nat
   execExact : exec config snapshot height request.authority (invokeTransaction request) (callFuel request.envelope) []
-    (.enter (rootCall request)) (Journal.start request.grants request.envelope.extractTicks) request.envelope.sourceTicks =
+    (.enter (rootCall request)) (Journal.start request.grants request.envelope) request.envelope.sourceTicks =
       .ok (result, journal, left)
   /-- A turn that sends declares a postage envelope the deployment covers. -/
   postageCovered : journal.outbox ≠ [] → config.covers request.postage = true
@@ -1922,7 +2176,7 @@ structure Invocation {rootBytes : Bytes → Digest} (config : Config) (snapshot 
   allowanceCovered : outboxAllowance journal.outbox ≤ request.allowance
   /-- The mail of the turn's sends (each at depth 0). -/
   sent : Mail config snapshot
-  sentExact : postMail config snapshot request.postage request.account 0 Mail.empty journal.outbox = .ok sent
+  sentExact : postMail config snapshot request.postage request.account 0 (Mail.start journal.meter) journal.outbox = .ok sent
   /-- That mail after the turn's controls. -/
   mail : Mail config snapshot
   mailExact : postControls config snapshot height sent journal.controls = .ok mail
@@ -1934,36 +2188,30 @@ structure Invocation {rootBytes : Bytes → Digest} (config : Config) (snapshot 
   postsExact : posts = journal.posts config snapshot ++ mail.posts ++ [posted.write config snapshot]
 
 def invoke {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
-    (height : Nat) (request : InvokeRequest) : Except CallRefusal (Invocation config snapshot height request) :=
+    (height : Nat) (request : InvokeRequest) : Except (CallRefusal × FrontEnd) (Invocation config snapshot height request) :=
   if covered : config.covers request.envelope = true then
-    -- The root frame's front-end work account (GPT-6 row E), judged from the stored pair of the
-    -- package the root frame will load, before any frame replays it. Nested frames and the root's
-    -- second (method) replay are not yet in the account (cv task 01a11636-201e).
-    match (match readObject config snapshot request.object with
-        | .ok (some record) => frontEndPaid config (packageBytes config snapshot record.activePin) [request.envelope]
-        | _ => .ok ()) with
-    | .error reason => .error (.kernel reason)
-    | .ok () =>
+    -- Every frame's load and every send's deliverable check draws its replay from the turn's one
+    -- front-end meter, started over the envelope (`Journal.start`, `Mail.start`; GPT-6 row E).
     match execExact : exec config snapshot height request.authority (invokeTransaction request)
-        (callFuel request.envelope) [] (.enter (rootCall request)) (Journal.start request.grants request.envelope.extractTicks)
+        (callFuel request.envelope) [] (.enter (rootCall request)) (Journal.start request.grants request.envelope)
         request.envelope.sourceTicks with
-    | .error reason => .error reason
+    | .error (reason, meter) => .error (reason, FrontEnd.of meter (0, 0))
     | .ok (result, journal, left) =>
       if postageCovered : journal.outbox ≠ [] → config.covers request.postage = true then
       if drainedOk : journal.drained = true then
       if allowanceCovered : outboxAllowance journal.outbox ≤ request.allowance then
-      match sentExact : postMail config snapshot request.postage request.account 0 Mail.empty journal.outbox with
-      | .error reason => .error reason
+      match sentExact : postMail config snapshot request.postage request.account 0 (Mail.start journal.meter) journal.outbox with
+      | .error refused => .error refused
       | .ok sent =>
       match mailExact : postControls config snapshot height sent journal.controls with
-      | .error reason => .error reason
+      | .error reason => .error (reason, sent.frontEnd)
       | .ok mail =>
       match bookExact : loadBook config snapshot with
-      | .error reason => .error (.kernel reason)
+      | .error reason => .error (.kernel reason, sent.frontEnd)
       | .ok book =>
         let batch := invokeBatch config (logicalBook book.logical) request mail
         match postedExact : postings book batch with
-        | .error reason => .error (.kernel reason)
+        | .error reason => .error (.kernel reason, sent.frontEnd)
         | .ok posted =>
           have batchExact : posted.batch = batch := by
             unfold postings at postedExact
@@ -1972,10 +2220,16 @@ def invoke {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
             · cases postedExact
           .ok ⟨covered, result, journal, left, execExact, postageCovered, drainedOk, allowanceCovered, sent, sentExact,
             mail, mailExact, book, bookExact, posted, batchExact, _, rfl⟩
-      else .error (.allowanceExceeded (outboxAllowance journal.outbox) request.allowance)
-      else .error (.drainConflict request.object.value)
-      else .error (.kernel (.uncovered request.postage))
-  else .error (.kernel (.uncovered request.envelope))
+      else .error (.allowanceExceeded (outboxAllowance journal.outbox) request.allowance, FrontEnd.of journal.meter (0, 0))
+      else .error (.drainConflict request.object.value, FrontEnd.of journal.meter (0, 0))
+      else .error (.kernel (.uncovered request.postage), FrontEnd.of journal.meter (0, 0))
+  else .error (.kernel (.uncovered request.envelope), FrontEnd.of (ObjectiveWorkAccount.Meter.start request.envelope) (0, 0))
+
+/-- **What an admitted invocation's front end drew** (`FrontEnd`): its sends' mail's meter (every
+frame's load and every send's check) and the largest delivery root load among its sends. -/
+def Invocation.frontEnd {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : InvokeRequest} (invoked : Invocation config snapshot height request) : FrontEnd :=
+  invoked.sent.frontEnd
 
 def Invocation.guards {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : InvokeRequest} (invoked : Invocation config snapshot height request) : List ReadGuard :=
@@ -2000,19 +2254,19 @@ invocation's fee or any postage was posted. -/
 theorem Invocation.sends_deliverable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : InvokeRequest} (invoked : Invocation config snapshot height request) :
     ∀ out ∈ invoked.journal.outbox, ∀ target, out.destination = .object target →
-      ∃ d : Deliverable config snapshot target (messageOf config request.postage request.account 0 out),
-        deliverable config snapshot target (messageOf config request.postage request.account 0 out) = .ok d :=
+      ∃ meter, ∃ d : Deliverable config snapshot target (messageOf config request.postage request.account 0 out) meter,
+        deliverable config snapshot target (messageOf config request.postage request.account 0 out) meter = .ok d :=
   postMail_deliverable invoked.sentExact
 
 /-! ## T2: the re-entry guard -/
 
 /-- **Re-entry is refused**: a call whose target is on the stack is refused by
-name, whatever the journal, ticks or fuel. -/
+name, whatever the journal, ticks or fuel, before it draws anything (the journal's meter). -/
 theorem reentry_refused {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (authority : Authority) (turn : TransactionId) (fuel : Nat) (stack : List Ctx) (call : CallPlan)
     (journal : Journal) (ticks : Nat) (onStack : ∃ ctx ∈ stack, ctx.object = call.target) :
     exec config snapshot height authority turn (fuel + 1) stack (.enter call) journal ticks =
-      .error (.reentry call.target.value (stack.map (·.object.value))) := by
+      .error (.reentry call.target.value (stack.map (·.object.value)), journal.meter) := by
   have hit : stack.any (fun ctx => ctx.object == call.target) = true := by
     obtain ⟨ctx, member, same⟩ := onStack
     exact List.any_eq_true.mpr ⟨ctx, member, by simp [same]⟩
@@ -2217,7 +2471,7 @@ theorem exec_invariant {rootBytes : Bytes → Digest} (config : Config) (snapsho
               · rename_i subject grants _
                 split at ran
                 · cases ran
-                · rename_i program _
+                · rename_i program _ _
                   have notOn : ∀ ctx ∈ stack, ctx.object ≠ call.target := by
                     intro ctx member same
                     apply free
@@ -2709,6 +2963,414 @@ theorem frameReturn_delegations {ctx : Ctx} {write : Data} {journal journal' : J
           exact ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
     · cases returned
 
+theorem touch_meter {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {journal journal' : Journal} {object : CellId} {entry : Entry}
+    (touched : touch config snapshot journal object = .ok (entry, journal')) : journal'.meter = journal.meter := by
+  unfold touch at touched
+  split at touched
+  · cases touched; rfl
+  · split at touched
+    · cases touched
+    · cases touched
+    · split at touched
+      · cases touched
+      · cases touched; rfl
+
+theorem frameReturn_meter {ctx : Ctx} {write : Data} {journal journal' : Journal}
+    (returned : frameReturn ctx write journal = .ok journal') : journal'.meter = journal.meter := by
+  unfold frameReturn at returned
+  split at returned
+  · cases returned
+  · split at returned
+    · split at returned
+      · cases returned
+      · cases returned; rfl
+      · split at returned
+        · cases returned
+        · cases returned; rfl
+    · cases returned
+
+/-- **The call tree's front end is drawn from its one meter** (by induction over the executor):
+every frame's load draws from the journal's meter (`loadMethod_reaches`) and nothing else
+changes it, so the meter a call tree leaves is reached from the one it was given by admitted
+draws. -/
+theorem exec_meter {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (authority : Authority) (turn : TransactionId) :
+    ∀ (fuel : Nat) (stack : List Ctx) (task : Task) (journal : Journal) (ticks : Nat)
+      (result : Data) (journal' : Journal) (left : Nat),
+    exec config snapshot height authority turn fuel stack task journal ticks = .ok (result, journal', left) →
+    ∀ {start : ObjectiveWorkAccount.Meter}, ObjectiveWorkAccount.Meter.Reaches start journal.meter →
+      ObjectiveWorkAccount.Meter.Reaches start journal'.meter := by
+  intro fuel
+  induction fuel with
+  | zero => intro stack task journal ticks result journal' left ran; simp [exec] at ran
+  | succ fuel ih =>
+    intro stack task journal ticks result journal' left ran start reached
+    cases task with
+    | enter call =>
+      simp only [exec] at ran
+      split at ran
+      · cases ran
+      · split at ran
+        · cases ran
+        · split at ran
+          · cases ran
+          · rename_i entry journal1 touched
+            have m1 := touch_meter touched
+            split at ran
+            · cases ran
+            · cases ran
+            · split at ran
+              · cases ran
+              · split at ran
+                · cases ran
+                · rename_i program meter loaded
+                  exact ih _ _ _ _ _ _ _ ran (loadMethod_reaches loaded (m1 ▸ reached))
+    | run state =>
+      cases stack with
+      | nil => simp [exec] at ran
+      | cons ctx rest =>
+        simp only [exec] at ran
+        split at ran
+        · split at ran
+          · cases ran
+          split at ran
+          · cases ran
+          · rename_i _ drawn
+            obtain rfl := Journal.draw_ok drawn
+            split at ran
+            · cases ran
+            · split at ran
+              · cases ran
+              · rename_i entered
+                split at ran
+                · cases ran
+                · split at ran
+                  · cases ran
+                  · exact ih _ _ _ _ _ _ _ ran (ih _ _ _ _ _ _ _ entered reached)
+            · split at ran
+              · cases ran
+              · split at ran
+                · cases ran
+                · exact ih _ _ _ _ _ _ _ ran reached
+            · split at ran
+              · cases ran
+              · split at ran
+                · cases ran
+                · exact ih _ _ _ _ _ _ _ ran reached
+        · split at ran
+          · cases ran
+          split at ran
+          · cases ran
+          · rename_i _ drawn
+            obtain rfl := Journal.draw_ok drawn
+            split at ran
+            · cases ran
+            · split at ran
+              · cases ran
+              · rename_i journal1 returned
+                cases ran
+                rw [frameReturn_meter returned]; exact reached
+        all_goals first | (cases ran) | skip
+
+/-- A send draws only through the target's deliverable check (`loadMethod_reaches`). -/
+theorem Mail.send_meter {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {mail mail' : Mail config snapshot} {message : Inbox.Message} {destination : Destination}
+    (sent : mail.send message destination = .ok mail') {start : ObjectiveWorkAccount.Meter}
+    (reached : ObjectiveWorkAccount.Meter.Reaches start mail.meter) :
+    ObjectiveWorkAccount.Meter.Reaches start mail'.meter := by
+  cases destination with
+  | object target =>
+    simp only [Mail.send] at sent
+    split at sent
+    · cases sent
+    · rename_i d found
+      split at sent
+      · cases sent
+      · split at sent
+        · cases sent
+        · split at sent
+          · cases sent
+          · cases sent
+            exact loadMethod_reaches d.methodExact reached
+  | slot name =>
+    simp only [Mail.send] at sent
+    split at sent
+    · cases sent
+    · split at sent
+      · cases sent
+      · split at sent
+        · cases sent
+        · split at sent
+          · cases sent; exact reached
+          · cases sent
+
+/-- Posting sends draws only through each send's deliverable check. -/
+theorem postMail_meter {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {postage : Capacity} {refund : AccountId} {depth : Nat} {start : ObjectiveWorkAccount.Meter} :
+    ∀ {outs : List Outgoing} {mail mail' : Mail config snapshot},
+      postMail config snapshot postage refund depth mail outs = .ok mail' →
+      ObjectiveWorkAccount.Meter.Reaches start mail.meter → ObjectiveWorkAccount.Meter.Reaches start mail'.meter
+  | [], _, _, posted, reached => by simp only [postMail] at posted; cases posted; exact reached
+  | _ :: _, _, _, posted, reached => by
+    obtain ⟨_, next, sent, posted⟩ := postMail_cons posted
+    exact postMail_meter posted (Mail.send_meter sent reached)
+
+/-- **An invocation's whole front end is within its envelope** (GPT-6 row E): summed over EVERY
+replay the turn performs (every frame's method load in the call tree, every send's deliverable
+check of its target's method), the source bytes parsed and the typed-core bytes generated are at
+most the envelope's `replayBytes` and `coreBytes`, the work the turn's price charges
+(`Tariff.workOf`). -/
+theorem Invocation.frontEnd_within {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : InvokeRequest} (invoked : Invocation config snapshot height request) :
+    invoked.sent.meter.source ≤ request.envelope.replayBytes ∧ invoked.sent.meter.core ≤ request.envelope.coreBytes := by
+  have ran := exec_meter config snapshot height request.authority (invokeTransaction request) _ _ _ _ _ _ _ _
+    invoked.execExact (start := ObjectiveWorkAccount.Meter.start request.envelope) (.refl _)
+  have posted := postMail_meter invoked.sentExact ran
+  obtain ⟨a, b, _, _⟩ := ObjectiveWorkAccount.Meter.Reaches.within posted
+  exact ⟨a, b⟩
+
+/-! ### A refusal reports what the turn drew (cv 01a117cd-857b)
+
+A refused turn's `FrontEnd` is the meter AT ITS FAILURE POINT: reached from the envelope's fresh
+meter by admitted draws, so it reports work the turn actually did, within what it declared. -/
+
+/-- A refused load reports a meter reached by admitted draws from the one it was given. -/
+theorem loadMethod_refused_reaches {config : Config} {target : Nat} {bytes : Bytes} {pin : Digest}
+    {method : String} {view args : Data} {meter meter' : ObjectiveWorkAccount.Meter} {reason : CallRefusal}
+    (refused : loadMethod config target bytes pin method view args meter = .error (reason, meter'))
+    {start : ObjectiveWorkAccount.Meter} (reached : ObjectiveWorkAccount.Meter.Reaches start meter) :
+    ObjectiveWorkAccount.Meter.Reaches start meter' := by
+  unfold loadMethod at refused
+  split at refused
+  · cases refused; exact reached
+  · split at refused
+    · cases refused; exact reached
+    · rename_i quoted hq
+      have r1 : ObjectiveWorkAccount.Meter.Reaches start quoted := by
+        unfold drawQuote at hq
+        split at hq
+        · exact .draw reached (drawFrontEnd_ok hq)
+        · cases hq; exact reached
+      split at refused
+      · cases refused; exact r1
+      · split at refused
+        · cases refused; exact r1
+        · cases refused
+
+/-- A refused deliverable check reports a meter reached from the sender's. -/
+theorem deliverable_refused_reaches {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {target : Nat} {message : Inbox.Message} {meter meter' : ObjectiveWorkAccount.Meter} {reason : CallRefusal}
+    (refused : deliverable config snapshot target message meter = .error (reason, meter'))
+    {start : ObjectiveWorkAccount.Meter} (reached : ObjectiveWorkAccount.Meter.Reaches start meter) :
+    ObjectiveWorkAccount.Meter.Reaches start meter' := by
+  unfold deliverable at refused
+  split at refused
+  · cases refused; exact reached
+  · cases refused; exact reached
+  · split at refused
+    · cases refused; exact reached
+    · cases refused; exact reached
+    · split at refused
+      · cases refused; exact reached
+      · split at refused
+        · rename_i refused' loaded
+          cases refused
+          exact loadMethod_refused_reaches loaded reached
+        · rename_i method meterAfter loaded
+          have r1 := loadMethod_reaches loaded reached
+          split at refused
+          · split at refused
+            · cases refused; exact r1
+            · cases refused
+          · split at refused
+            · cases refused; exact r1
+            · split at refused
+              · cases refused; exact r1
+              · cases refused; exact r1
+
+/-- **A refused call tree reports what it drew** (by induction over the executor): the meter its
+refusal carries is reached by admitted draws from the journal's meter it started with. -/
+theorem exec_refused_meter {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (height : Nat) (authority : Authority) (turn : TransactionId) :
+    ∀ (fuel : Nat) (stack : List Ctx) (task : Task) (journal : Journal) (ticks : Nat)
+      (reason : CallRefusal) (meter : ObjectiveWorkAccount.Meter),
+    exec config snapshot height authority turn fuel stack task journal ticks = .error (reason, meter) →
+    ∀ {start : ObjectiveWorkAccount.Meter}, ObjectiveWorkAccount.Meter.Reaches start journal.meter →
+      ObjectiveWorkAccount.Meter.Reaches start meter := by
+  intro fuel
+  induction fuel with
+  | zero => intro stack task journal ticks reason meter ran start reached; simp [exec] at ran; rw [← ran.2]; exact reached
+  | succ fuel ih =>
+    intro stack task journal ticks reason meter ran start reached
+    cases task with
+    | enter call =>
+      simp only [exec] at ran
+      split at ran
+      · cases ran; exact reached
+      · split at ran
+        · cases ran; exact reached
+        · split at ran
+          · cases ran; exact reached
+          · rename_i entry journal1 touched
+            have m1 := touch_meter touched
+            split at ran
+            · cases ran; rw [m1]; exact reached
+            · cases ran; rw [m1]; exact reached
+            · split at ran
+              · cases ran; rw [m1]; exact reached
+              · split at ran
+                · rename_i refused loaded
+                  cases ran
+                  exact loadMethod_refused_reaches loaded (m1 ▸ reached)
+                · rename_i program meter1 loaded
+                  exact ih _ _ _ _ _ _ ran (loadMethod_reaches loaded (m1 ▸ reached))
+    | run state =>
+      cases stack with
+      | nil => simp [exec] at ran; rw [← ran.2]; exact reached
+      | cons ctx rest =>
+        simp only [exec] at ran
+        split at ran
+        · split at ran
+          · cases ran; exact reached
+          split at ran
+          · cases ran; exact reached
+          · rename_i _ drawn
+            obtain rfl := Journal.draw_ok drawn
+            split at ran
+            · cases ran; exact reached
+            · split at ran
+              · rename_i refused' entered
+                cases ran
+                exact ih _ _ _ _ _ _ entered reached
+              · rename_i entered
+                have r1 := exec_meter config snapshot height authority turn _ _ _ _ _ _ _ _ entered reached
+                split at ran
+                · cases ran; exact r1
+                · split at ran
+                  · cases ran; exact r1
+                  · exact ih _ _ _ _ _ _ ran r1
+            · split at ran
+              · cases ran; exact reached
+              · split at ran
+                · cases ran; exact reached
+                · exact ih _ _ _ _ _ _ ran reached
+            · split at ran
+              · cases ran; exact reached
+              · split at ran
+                · cases ran; exact reached
+                · exact ih _ _ _ _ _ _ ran reached
+        · split at ran
+          · cases ran; exact reached
+          split at ran
+          · cases ran; exact reached
+          · rename_i _ drawn
+            obtain rfl := Journal.draw_ok drawn
+            split at ran
+            · cases ran; exact reached
+            · split at ran
+              · cases ran; exact reached
+              · cases ran
+        all_goals first | (cases ran; exact reached) | skip
+
+/-- A refused send reports a front end whose draws are reached from the mail's meter. -/
+theorem Mail.send_refused_meter {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {mail : Mail config snapshot} {message : Inbox.Message} {destination : Destination} {reason : CallRefusal}
+    {drawn : FrontEnd} (refused : mail.send message destination = .error (reason, drawn))
+    {start : ObjectiveWorkAccount.Meter} (reached : ObjectiveWorkAccount.Meter.Reaches start mail.meter) :
+    ∃ meter, ObjectiveWorkAccount.Meter.Reaches start meter ∧ drawn.source = meter.source ∧ drawn.core = meter.core := by
+  cases destination with
+  | object target =>
+    simp only [Mail.send] at refused
+    split at refused
+    · rename_i _ meter found
+      cases refused
+      exact ⟨meter, deliverable_refused_reaches found reached, rfl, rfl⟩
+    · rename_i d found
+      have r1 := loadMethod_reaches d.methodExact reached
+      split at refused
+      · cases refused; exact ⟨_, r1, rfl, rfl⟩
+      · split at refused
+        · cases refused; exact ⟨_, r1, rfl, rfl⟩
+        · split at refused
+          · cases refused; exact ⟨_, r1, rfl, rfl⟩
+          · cases refused
+  | slot name =>
+    simp only [Mail.send] at refused
+    split at refused
+    · cases refused; exact ⟨_, reached, rfl, rfl⟩
+    · split at refused
+      · cases refused; exact ⟨_, reached, rfl, rfl⟩
+      · split at refused
+        · cases refused; exact ⟨_, reached, rfl, rfl⟩
+        · split at refused
+          · cases refused
+          · cases refused; exact ⟨_, reached, rfl, rfl⟩
+
+/-- Refused posting reports a front end whose draws are reached from the mail's meter. -/
+theorem postMail_refused_meter {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {postage : Capacity} {refund : AccountId} {depth : Nat} {start : ObjectiveWorkAccount.Meter}
+    {reason : CallRefusal} {drawn : FrontEnd} :
+    ∀ {outs : List Outgoing} {mail : Mail config snapshot},
+      postMail config snapshot postage refund depth mail outs = .error (reason, drawn) →
+      ObjectiveWorkAccount.Meter.Reaches start mail.meter →
+      ∃ meter, ObjectiveWorkAccount.Meter.Reaches start meter ∧ drawn.source = meter.source ∧ drawn.core = meter.core
+  | [], _, posted, _ => by simp only [postMail] at posted; cases posted
+  | _ :: _, _, posted, reached => by
+    simp only [postMail] at posted
+    split at posted
+    · cases posted; exact ⟨_, reached, rfl, rfl⟩
+    · split at posted
+      · rename_i sent; cases posted; exact Mail.send_refused_meter sent reached
+      · rename_i sent; exact postMail_refused_meter posted (Mail.send_meter sent reached)
+
+/-- **A refused invocation reports work it did, within what it declared** (cv 01a117cd-857b): the
+front end a refused invocation carries (`Reject.call`, what its plan reports) is the source and
+typed-core bytes its meter had drawn at the failure point, summed over every replay before it, at
+most the envelope's `replayBytes` and `coreBytes`. -/
+theorem invoke_refused_within {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : InvokeRequest} {reason : CallRefusal} {drawn : FrontEnd}
+    (refused : invoke config snapshot height request = .error (reason, drawn)) :
+    drawn.source ≤ request.envelope.replayBytes ∧ drawn.core ≤ request.envelope.coreBytes := by
+  have fresh : ObjectiveWorkAccount.Meter.Reaches (ObjectiveWorkAccount.Meter.start request.envelope)
+      (Journal.start request.grants request.envelope).meter := .refl _
+  have bound : ∀ {meter : ObjectiveWorkAccount.Meter},
+      ObjectiveWorkAccount.Meter.Reaches (ObjectiveWorkAccount.Meter.start request.envelope) meter →
+      meter.source ≤ request.envelope.replayBytes ∧ meter.core ≤ request.envelope.coreBytes := fun r =>
+    let w := ObjectiveWorkAccount.Meter.Reaches.within r; ⟨w.1, w.2.1⟩
+  unfold invoke at refused
+  split at refused
+  · split at refused
+    · rename_i _ meter ran
+      cases refused
+      exact bound (exec_refused_meter config snapshot height _ _ _ _ _ _ _ _ _ ran fresh)
+    · rename_i result journal left ran
+      have r1 := exec_meter config snapshot height _ _ _ _ _ _ _ _ _ _ ran fresh
+      split at refused
+      · split at refused
+        · split at refused
+          · split at refused
+            · rename_i posted
+              obtain ⟨meter, r, hs, hc⟩ := postMail_refused_meter posted r1
+              cases refused
+              exact hs ▸ hc ▸ bound r
+            · rename_i sent sentExact
+              have r2 := postMail_meter sentExact r1
+              have b2 := bound r2
+              split at refused
+              · cases refused; exact b2
+              · split at refused
+                · cases refused; exact b2
+                · dsimp only at refused
+                  split at refused
+                  · cases refused; exact b2
+                  · cases refused
+          · cases refused; exact bound r1
+        · cases refused; exact bound r1
+      · cases refused; exact bound r1
+  · cases refused
+    simp [FrontEnd.of, ObjectiveWorkAccount.Meter.start, ObjectiveWorkAccount.Meter.source, ObjectiveWorkAccount.Meter.core]
+
 /-- **What the executor maintains about delegation** (by induction over its recursion): the grants
 never change; delegations are only appended; every delegation stays authorized by a grant (no grant
 used more than `uses` times, no cap exceeded); and every write's subject is accounted for. -/
@@ -2747,7 +3409,7 @@ theorem exec_delegations {rootBytes : Bytes → Digest} (config : Config) (snaps
               · rename_i subject delegation decided
                 split at ran
                 · cases ran
-                · rename_i program _
+                · rename_i program _ _
                   have decided' := frameAuthority_spec decided
                   rw [grants1, delegations1] at decided'
                   -- the journal the frame runs under
@@ -2910,6 +3572,22 @@ theorem invocation_delegated_authority {rootBytes : Bytes → Digest} {config : 
 #assert_axioms Authorized.spend
 #assert_axioms frameAuthority_spec
 #assert_axioms exec_delegations
+#assert_axioms exec_meter
+#assert_axioms Mail.send_meter
+#assert_axioms postMail_meter
+#assert_axioms Invocation.frontEnd_within
+#assert_axioms loadMethod_refused_reaches
+#assert_axioms deliverable_refused_reaches
+#assert_axioms exec_refused_meter
+#assert_axioms Mail.send_refused_meter
+#assert_axioms postMail_refused_meter
+#assert_axioms invoke_refused_within
+#assert_axioms loadMethod_reaches
+#assert_axioms loadMethod_method
+#assert_axioms loadMethod_draws
+#assert_axioms Deliverable.draws
+#assert_axioms replayPackage_unquoted_refused
+#assert_axioms loadMethod_unquoted_refused
 #assert_axioms invocation_delegated_authority
 #assert_axioms controlInbox_spec
 #assert_axioms Mail.control_cases
