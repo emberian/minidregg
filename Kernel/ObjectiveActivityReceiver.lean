@@ -164,9 +164,11 @@ inductive Turn where
   within the one declared `envelope`, whose public price `account` pays.
   `grants` lend the signer's authority to named nested frames. Every message the
   tree sends is delivered under `postage`, whose price `account` escrows per
-  send. Only a holder of a capability on `object`, spending an account it owns. -/
+  send, with the send's continuation allowance; the sends' allowances total at most
+  `allowance` (GPT-6 row F). Only a holder of a capability on `object`, spending an account
+  it owns. -/
   | invoke (object : Nat) (objectCapability : CapabilityId) (method : String) (args : List UInt8)
-      (grants : List ObjectiveCall.Grant) (envelope postage : Capacity) (account : Nat)
+      (grants : List ObjectiveCall.Grant) (envelope postage : Capacity) (allowance : Nat) (account : Nat)
       (accountCapability : CapabilityId)
   /-- Deliver the head `message` of the inbox (sender, target)
   (`Kernel.ObjectiveSend`): anyone may; paid from the inbox's purse. -/
@@ -204,7 +206,8 @@ abbrev BirthWire :=
   Nat × CapabilityId × Nat × CapabilityId × Digest × List UInt8 × Capacity × Capacity × Capacity × Nat
 abbrev EndWire := Digest × Digest × Capacity × Nat × CapabilityId
 abbrev InvokeWire :=
-  Nat × CapabilityId × String × List UInt8 × List ObjectiveCall.Grant × Capacity × Capacity × Nat × CapabilityId
+  Nat × CapabilityId × String × List UInt8 × List ObjectiveCall.Grant × Capacity × Capacity × Nat × Nat ×
+    CapabilityId
 abbrev AdoptWire :=
   Nat × CapabilityId × Digest × Minidregg.Theory.ObjectiveBendTypes.Ty × Option String × List String ×
     Minidregg.Pred.Pred × ObjectRecord.UpgradePolicy × List Digest × Capacity × Nat × Nat × CapabilityId
@@ -227,8 +230,9 @@ def Turn.toWire : Turn → TurnWire
   | .exhaust record await extra account cap =>
       .inr (.inr (.inr (.inr (.inr (.inr (.inl (record, await, extra, account, cap)))))))
   | .abandon record await => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (record, await))))))))
-  | .invoke o oc method args grants envelope postage a ac =>
-      .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (o, oc, method, args, grants, envelope, postage, a, ac)))))))))
+  | .invoke o oc method args grants envelope postage allowance a ac =>
+      .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl
+        (o, oc, method, args, grants, envelope, postage, allowance, a, ac)))))))))
   | .deliverMessage sender target message =>
       .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (sender, target, message))))))))))
   | .adopt o oc pin st mig dropped law upgrade chosen envelope patience a ac =>
@@ -248,8 +252,9 @@ def Turn.ofWire : TurnWire → Turn
   | .inr (.inr (.inr (.inr (.inr (.inr (.inl (record, await, extra, account, cap))))))) =>
       .exhaust record await extra account cap
   | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (record, await)))))))) => .abandon record await
-  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (o, oc, method, args, grants, envelope, postage, a, ac))))))))) =>
-      .invoke o oc method args grants envelope postage a ac
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl
+      (o, oc, method, args, grants, envelope, postage, allowance, a, ac))))))))) =>
+      .invoke o oc method args grants envelope postage allowance a ac
   | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (sender, target, message)))))))))) =>
       .deliverMessage sender target message
   | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (o, oc, pin, st, mig, dropped, law, upgrade, chosen, envelope, patience, a, ac))))))))))) =>
@@ -285,7 +290,8 @@ def invokeStream : StreamCodec InvokeWire :=
   StreamCodec.product StreamCodec.nat (StreamCodec.product capabilityIdStream
     (StreamCodec.product stringStream (StreamCodec.product bytesStream
       (StreamCodec.product (StreamCodec.list ObjectiveCall.grantStream) (StreamCodec.product capacityStream
-        (StreamCodec.product capacityStream (StreamCodec.product StreamCodec.nat capabilityIdStream)))))))
+        (StreamCodec.product capacityStream (StreamCodec.product StreamCodec.nat
+          (StreamCodec.product StreamCodec.nat capabilityIdStream))))))))
 
 def adoptStream : StreamCodec AdoptWire :=
   StreamCodec.product StreamCodec.nat (StreamCodec.product capabilityIdStream
@@ -332,12 +338,13 @@ def commandStream : StreamCodec Command :=
     (fun (subject, nonce, root, turn) => ⟨subject, nonce, root, turn⟩)
     (by intro c; cases c; rfl)
 
-/-- v9: the turn sum ends with `registerDomain` (`ObjectiveDomain`); v8: an `invoke`'s grants are v2 (`ObjectiveCall.grantStream`: code, arguments bound, caller);
+/-- v10: `invoke` carries the signer's continuation `allowance` (GPT-6 row F); v9: the turn sum ends
+with `registerDomain` (`ObjectiveDomain`); v8: an `invoke`'s grants are v2 (`ObjectiveCall.grantStream`: code, arguments bound, caller);
 v7: envelopes carry the extraction tick lane (`Capacity.extractTicks`); v6: the upgrade turns
 (`adopt`, `migrate`, `abortDrained`, `rebirth`) join the sum, and `create` declares the object's
 state type (`ObjectStateType.tyStream`); v5: `create` carries an optional initial declared state,
-and the turn sum has no `writeState`; v8 (and older) commands refuse to decode. -/
-def commandFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/COMMAND/v9".toUTF8.toList
+and the turn sum has no `writeState`; v9 (and older) commands refuse to decode. -/
+def commandFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/COMMAND/v10".toUTF8.toList
 
 def commandCodec : LawfulCodec Command := ObjectiveActivityWire.framed commandFrame commandStream
 
@@ -417,8 +424,9 @@ def decodeSeed : Option (List UInt8) → Option (Option Data)
   | some bytes => (decodeDataBytes bytes).map some
 
 def invokeRequest (command : Command) (object : Nat) (method : String) (args : Data)
-    (grants : List ObjectiveCall.Grant) (envelope postage : Capacity) (account : Nat) : ObjectiveCall.InvokeRequest :=
-  ⟨command.subject, ⟨object⟩, method, args, grants, envelope, account, command.nonce, postage⟩
+    (grants : List ObjectiveCall.Grant) (envelope postage : Capacity) (allowance account : Nat) :
+    ObjectiveCall.InvokeRequest :=
+  ⟨command.subject, ⟨object⟩, method, args, grants, envelope, account, command.nonce, postage, allowance⟩
 
 def messageRequest (command : Command) (sender target : Nat) (message : Digest) : ObjectiveSend.MessageRequest :=
   ⟨command.subject, sender, target, message⟩
@@ -464,9 +472,10 @@ def transactionOf (command : Command) : Option TransactionId :=
   | .exhaust record await extra account _ =>
       some (ObjectiveActivity.exhaustTransaction await ⟨command.subject, record, extra, account, command.nonce⟩)
   | .abandon _ await => some (ObjectiveActivity.abandonTransaction await)
-  | .invoke object _ method args grants envelope postage account _ =>
+  | .invoke object _ method args grants envelope postage allowance account _ =>
       (decodeDataBytes args).map fun value =>
-        ObjectiveCall.invokeTransaction (invokeRequest command object method value grants envelope postage account)
+        ObjectiveCall.invokeTransaction
+          (invokeRequest command object method value grants envelope postage allowance account)
   | .deliverMessage _ _ message => some (ObjectiveSend.messageTransaction message)
   | .adopt object _ pin stateType migration dropped law upgrade chosen envelope patience account _ =>
       some (ObjectiveActivity.adoptTransaction
@@ -537,9 +546,9 @@ def decideTurn {rootBytes : List UInt8 → Digest} (config : Config) (snapshot :
       let abandoned ← kernel (ObjectiveActivity.abandon config snapshot height request)
       if abandoned.await.id ≠ await then throw .staleAwait
       pure (.abandon request abandoned)
-  | .invoke object _ method args grants envelope postage account _ => do
+  | .invoke object _ method args grants envelope postage allowance account _ => do
       let some value := decodeDataBytes args | throw .inputUndecodable
-      let request := invokeRequest command object method value grants envelope postage account
+      let request := invokeRequest command object method value grants envelope postage allowance account
       match ObjectiveCall.invoke config snapshot height request with
       | .ok invoked => pure (.invoke request invoked)
       | .error reason => throw (.call reason)
@@ -616,7 +625,7 @@ def signedTarget (domain : Digest) (command : Command) : ResourceKind × Nat :=
   | .topUp _ account _ _ => (.account, account)
   | .exhaust record _ _ _ _ => (.object, record.value)
   | .abandon record _ => (.object, record.value)
-  | .invoke object _ _ _ _ _ _ _ _ => (.object, object)
+  | .invoke object _ _ _ _ _ _ _ _ _ => (.object, object)
   | .deliverMessage sender target _ => (.object, (Inbox.cell domain sender target).value)
   | .adopt object _ _ _ _ _ _ _ _ _ _ _ _ => (.object, object)
   | .migrate object _ _ => (.object, object)
@@ -707,7 +716,7 @@ def authorized (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (c
   | .deliver _ _ extra a ac | .exhaust _ _ extra a ac =>
       if extra = zeroCapacity then .ok () else account a ac
   | .topUp _ a ac _ => account a ac
-  | .invoke o oc _ _ _ _ _ a ac => do object o oc; account a ac
+  | .invoke o oc _ _ _ _ _ _ a ac => do object o oc; account a ac
   | .registerDomain members _ p pc => do
       members.forM fun (o, oc) => object o oc
       account p pc

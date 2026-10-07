@@ -49,7 +49,19 @@ structure Message where
   postage : Nat
   /-- The Book account the postage returns to if the message is never delivered. -/
   refund : Nat
+  /-- The prepaid CONTINUATION ALLOWANCE (GPT-6 row F): escrowed beside the postage, in the
+  same purse, by whoever paid the postage. Its delivered method may send onward ONLY out of
+  it (each onward send costs that message's own `escrow`), within `fanOut` sends and
+  `continuationDepth` hops; what it does not spend returns to `refund`. Zero: a message whose
+  method cannot send (`ObjectiveCall.Deliverable`). -/
+  allowance : Nat
+  /-- How many deliveries precede it in its chain: an invocation's send is at depth 0, an
+  onward send of the delivery of a message at depth `d` is at depth `d + 1`. -/
+  depth : Nat
   deriving DecidableEq, Repr
+
+/-- What a message holds in its queue's purse: its postage and its continuation allowance. -/
+def Message.escrow (message : Message) : Nat := message.postage + message.allowance
 
 structure Inbox where
   sender : Nat
@@ -61,6 +73,20 @@ structure Inbox where
 
 /-- The most messages one inbox (and one slot's forwarding queue) holds. -/
 def bound : Nat := 16
+
+/-- The most onward sends one delivery may make out of its message's allowance. -/
+def fanOut : Nat := 4
+
+/-- The deepest a continuation chain goes: a message at depth `continuationDepth` cannot be
+delivered to a method that sends (its onward sends would be one hop deeper). -/
+def continuationDepth : Nat := 3
+
+/-- **A message whose delivered method may send onward**: it is within the depth bound and
+its allowance covers at least one onward send at its own price (its postage). How many it
+covers is decided at its delivery, against what the method actually sends
+(`ObjectiveSend.continueMessage`). -/
+def Message.continues (message : Message) : Bool :=
+  decide (message.depth < continuationDepth) && decide (message.postage ≤ message.allowance)
 
 def Inbox.empty (sender target : Nat) : Inbox := ⟨sender, target, 0, []⟩
 
@@ -285,7 +311,7 @@ theorem fifoAccount_nil_iff {a b : Inbox} {popped pushed : List Message} :
 
 /-! Inhabitants and teeth (closed values, no hashing). -/
 
-def sampleMessage (n : Nat) : Message := ⟨⟨n⟩, 1, "m", [], ⟨0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0⟩, 1, 9⟩
+def sampleMessage (n : Nat) : Message := ⟨⟨n⟩, 1, "m", [], ⟨0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0⟩, 1, 9, 0, 0⟩
 
 def sampleInbox : Inbox := ⟨1, 2, 0, [sampleMessage 10, sampleMessage 11]⟩
 
@@ -343,9 +369,11 @@ def messageStream : StreamCodec Message :=
   StreamCodec.xmap
     (StreamCodec.product digestStream (StreamCodec.product StreamCodec.nat (StreamCodec.product stringStream
       (StreamCodec.product bytesStream (StreamCodec.product capacityStream
-        (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))
-    (fun m => (m.id, m.sender, m.method, m.args, m.envelope, m.postage, m.refund))
-    (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2.1, w.2.2.2.2.2.2⟩)
+        (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+          (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))))
+    (fun m => (m.id, m.sender, m.method, m.args, m.envelope, m.postage, m.refund, m.allowance, m.depth))
+    (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2.1, w.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.1,
+      w.2.2.2.2.2.2.2.2⟩)
     (by intro m; cases m; rfl)
 
 def inboxStream : StreamCodec Inbox :=
@@ -356,12 +384,33 @@ def inboxStream : StreamCodec Inbox :=
     (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2⟩)
     (by intro i; cases i; rfl)
 
-def frame : Bytes := "DREGG/OBJECTIVE/INBOX/v1".toUTF8.toList
+/-- v2: a message carries its continuation `allowance` and `depth` (GPT-6 row F); a v1 inbox
+refuses to decode (`v1_refuses`). -/
+def frame : Bytes := "DREGG/OBJECTIVE/INBOX/v2".toUTF8.toList
 def codec := framed frame inboxStream
 def encode (inbox : Inbox) : Bytes := codec.encode inbox
 def decode (bytes : Bytes) : Option Inbox := codec.decode bytes
 
 theorem roundTrip (inbox : Inbox) : decode (encode inbox) = some inbox := framed_roundTrip _ _ inbox
+
+/-- The v1 frame (messages without an allowance or a depth) refuses to decode as v2. -/
+theorem v1_refuses (body : Bytes) :
+    decode ("DREGG/OBJECTIVE/INBOX/v1".toUTF8.toList ++ body) = none := by
+  cases found : decode ("DREGG/OBJECTIVE/INBOX/v1".toUTF8.toList ++ body) with
+  | none => rfl
+  | some inbox =>
+    have canon := framed_canonical found
+    have cut := congrArg (List.take frame.length) canon
+    change (frame ++ inboxStream.encode inbox).take frame.length =
+      ("DREGG/OBJECTIVE/INBOX/v1".toUTF8.toList ++ body).take frame.length at cut
+    rw [List.take_left' rfl, List.take_left' (by decide +kernel)] at cut
+    exact absurd cut (by decide +kernel)
+
+/-- A message with no allowance does not continue; one at the depth bound does not either. -/
+theorem sample_continues :
+    (sampleMessage 10).continues = false ∧ { sampleMessage 10 with allowance := 1 }.continues = true ∧
+      { sampleMessage 10 with allowance := 1, depth := continuationDepth }.continues = false := by
+  decide
 
 /-- The coordinate preimage of an inbox: (sender, target). -/
 def key (sender target : Nat) : Bytes := StreamCodec.nat.encode sender ++ StreamCodec.nat.encode target
@@ -399,6 +448,8 @@ def sendId (turn : TransactionId) (index : Nat) : Digest :=
 #assert_axioms sample_withdraw
 #assert_axioms sample_full
 #assert_axioms roundTrip
+#assert_axioms v1_refuses
+#assert_axioms sample_continues
 #assert_axioms cell_reserved
 
 end Minidregg.Kernel.Inbox

@@ -79,9 +79,13 @@ the name of its reply slot. A frame's Plan type therefore has labels among
 `call | send` and its response type among `returned | queued`. The turn's sends
 (`Journal.outbox`, in order) become its MAIL (`postMail`). A send to an object names
 a method its delivery can run (`Deliverable`, decided before anything is escrowed:
-the method loads there, and its Plan is within `call`, because a delivered message has
-no paying account for onward sends; else `notDeliverable`, `notCallable`, ...;
-`Invocation.sends_deliverable`). Each message is
+the method loads there, and its Plan is within `call`, or within `call | send` when the
+message carries a CONTINUATION ALLOWANCE covering an onward send within the depth bound
+(`Inbox.Message.continues`); else `notDeliverable`, `continuationDepth`, `notCallable`, ...;
+`Invocation.sends_deliverable`). A send may carry an `allowance` (`send {to, method, args,
+allowance}`, absent = 0): escrowed with its postage, it is the only money the delivered
+method may send onward with (`ObjectiveSend.continueMessage`); an invocation's sends carry
+in total at most the `allowance` its signer declared (`allowanceExceeded`). Each message is
 pushed onto the per-(sender, target) inbox, bounded at `Inbox.bound` (a full
 queue refuses the turn by name, `queueFull`), with its reply slot opened (decided
 only by the message's delivery, `AnswerSlot.Decider.delivery`), and its postage
@@ -199,10 +203,20 @@ inductive CallRefusal where
   /-- The declaration is not a call method of the pinned package (it does not
   lower, its type is not `view -> args -> Activity<call-only, returned-only, _>`). -/
   | notCallable (target : Nat) (method : String) (reason : String)
-  /-- A send names a method whose Plan type admits `send`: a delivered message has no
-  paying account for onward sends (until the prepaid allowance exists), so the send is
-  refused at the interface, before anything is escrowed (`Mail.send`, `Deliverable`). -/
+  /-- A send names a method whose Plan type admits `send` while the message carries no
+  continuation allowance covering an onward send (`Inbox.Message.continues`): a delivered
+  method spends only its message's allowance, so the send is refused at the interface,
+  before anything is escrowed (`Mail.send`, `Deliverable`). -/
   | notDeliverable (target : Nat) (method : String) (reason : String)
+  /-- A send to a sending method at the depth bound (`Inbox.continuationDepth`): its onward
+  sends would be one hop deeper. Also the backstop of a delivery whose message is there. -/
+  | continuationDepth (limit : Nat)
+  /-- A delivery's method sent more than `Inbox.fanOut` messages onward. -/
+  | fanOut (limit : Nat)
+  /-- Onward sends that would escrow `needed` while the allowance holds `held`: a delivered
+  method's out of its message's allowance, an invocation's allowances out of the `allowance`
+  its signer declared. -/
+  | allowanceExceeded (needed held : Nat)
   /-- The view or the arguments do not type at the method's declared domains. -/
   | argumentType (target : Nat) (method : String)
   /-- The frame yielded a Plan that is not `call {target, method, args}`. -/
@@ -359,11 +373,13 @@ inductive Destination where
   | slot (name : Digest)
   deriving DecidableEq, Repr
 
-/-- A send a frame yields: `send {to, method, args}`. -/
+/-- A send a frame yields: `send {to, method, args, allowance?}`. -/
 structure SendPlan where
   destination : Destination
   method : String
   args : Data
+  /-- The continuation allowance the message carries (absent: 0). -/
+  allowance : Nat
 
 /-- The two controls of a message's sender over the message's reply slot (GPT-6 row F:
 stop-waiting is not cancel-if-queued). -/
@@ -384,18 +400,26 @@ inductive Yield where
   /-- `stop {slot}` / `cancel {slot}`. -/
   | control (kind : ControlKind) (slot : Digest)
 
+/-- The send of `send {to, method, args, allowance?}`, its allowance decoded. -/
+def decodeSend (target : Nat) (method : String) (fields : List (String × Data)) (allowance : Nat) :
+    Except CallRefusal Yield :=
+  match fieldOf fields "to", fieldOf fields "method", fieldOf fields "args" with
+  | some (.variant "object" (.natural object)), some (.label name), some args =>
+    .ok (.send ⟨.object object, name, args, allowance⟩)
+  | some (.variant "slot" (.natural slot)), some (.label name), some args =>
+    .ok (.send ⟨.slot ⟨slot⟩, name, args, allowance⟩)
+  | _, _, _ => .error (.callShape target method "send needs to (object Nat | slot Nat), method (String) and args")
+
 def decodeYield (target : Nat) (method : String) : Data → Except CallRefusal Yield
   | .variant "call" (.record fields) =>
     match fieldOf fields "target", fieldOf fields "method", fieldOf fields "args" with
     | some (.natural object), some (.label name), some args => .ok (.call ⟨⟨object⟩, name, args⟩)
     | _, _, _ => .error (.callShape target method "call needs target (Nat), method (String) and args")
   | .variant "send" (.record fields) =>
-    match fieldOf fields "to", fieldOf fields "method", fieldOf fields "args" with
-    | some (.variant "object" (.natural object)), some (.label name), some args =>
-      .ok (.send ⟨.object object, name, args⟩)
-    | some (.variant "slot" (.natural slot)), some (.label name), some args =>
-      .ok (.send ⟨.slot ⟨slot⟩, name, args⟩)
-    | _, _, _ => .error (.callShape target method "send needs to (object Nat | slot Nat), method (String) and args")
+    match fieldOf fields "allowance" with
+    | none => decodeSend target method fields 0
+    | some (.natural allowance) => decodeSend target method fields allowance
+    | some _ => .error (.callShape target method "a send's allowance is a Nat")
   | .variant "stop" (.record fields) =>
     match fieldOf fields "slot" with
     | some (.natural slot) => .ok (.control .stop ⟨slot⟩)
@@ -621,6 +645,8 @@ structure Outgoing where
   destination : Destination
   method : String
   args : Data
+  /-- The continuation allowance its message carries. -/
+  allowance : Nat
 
 structure Journal where
   entries : List Entry
@@ -863,7 +889,7 @@ def exec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot r
         match resume (queuedData id).term yielded with
         | none => .error (.frameFault ctx.object.value ctx.method "resume")
         | some next => exec config snapshot height authority turn fuel (ctx :: rest) (.run next)
-            { journal with outbox := journal.outbox ++ [⟨id, ctx.object.value, send.destination, send.method, send.args⟩] }
+            { journal with outbox := journal.outbox ++ [⟨id, ctx.object.value, send.destination, send.method, send.args, send.allowance⟩] }
             left
       | .ok (.control kind slot) =>
         match typeData ctx.assumptions config.typeFuel (ackedData slot) ctx.responseType with
@@ -1025,16 +1051,18 @@ def holdSlot {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsh
         else .error (.notPipelinable name.value)
       else .error (.notPipelinable name.value)
 
-/-- The Plan labels a DELIVERED method may yield: calls only. A delivered message runs
-with no paying account, so a method whose Plan admits `send` cannot be delivered (row F:
-until the prepaid continuation allowance exists, such sends are refused at the interface). -/
-def deliveredPlans : List String := ["call"]
+/-- The Plan labels the method a message is DELIVERED to may yield: calls, and sends only when
+the message continues (`Inbox.Message.continues`: within the depth bound, its allowance
+covering an onward send). A delivered message has no paying account but its own allowance,
+so a method whose Plan admits `send` is refused at the interface for any other message. -/
+def deliveredPlans (message : Inbox.Message) : List String :=
+  if message.continues then ["call", "send"] else ["call"]
 
 /-- **A method a message to `target` can be delivered to**, decided at the send from the
 snapshot: `target` is an object with declared state, the message's arguments decode, the
 method loads exactly as its delivery's root frame will (`loadMethod` on the record's
 `activePin`, applied to the object's view and the arguments: the same front end, the same
-type check), and its Plan type is within `call`. -/
+type check), and its Plan type is within `deliveredPlans message`. -/
 structure Deliverable {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (target : Nat) (message : Inbox.Message) where
   private mk ::
@@ -1047,12 +1075,14 @@ structure Deliverable {rootBytes : Bytes → Digest} (config : Config) (snapshot
   method : Method config record.activePin message.method (viewData view) args
   methodExact : loadMethod config target (packageBytes config snapshot record.activePin) record.activePin
     message.method (viewData view) args = .ok method
-  callsOnly : labelsWithin method.applied.assumptions method.planType deliveredPlans = true
+  callsOnly : labelsWithin method.applied.assumptions method.planType (deliveredPlans message) = true
 
 /-- Decide `Deliverable`, refusing by name: `notAnObject`, `stateMissing` (an object with no
 declared state: its delivery could not enter it), `argumentType` (arguments that do not
 decode or type), `notCallable` (anything `loadMethod` refuses: an unknown method, a Plan that
-awaits), `notDeliverable` (a Plan that admits `send`). -/
+awaits), `continuationDepth` (a sending method, the message at the depth bound),
+`notDeliverable` (a sending method and an allowance that covers no onward send, or a Plan
+that admits `stop`/`cancel`). -/
 def deliverable {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (target : Nat) (message : Inbox.Message) : Except CallRefusal (Deliverable config snapshot target message) :=
   match recordExact : readObject config snapshot ⟨target⟩ with
@@ -1070,10 +1100,13 @@ def deliverable {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
       message.method (viewData view) args with
   | .error reason => .error reason
   | .ok method =>
-    if callsOnly : labelsWithin method.applied.assumptions method.planType deliveredPlans = true then
+    if callsOnly : labelsWithin method.applied.assumptions method.planType (deliveredPlans message) = true then
       .ok ⟨record, recordExact, view, viewExact, args, argsExact, method, methodExact, callsOnly⟩
+    else if !labelsWithin method.applied.assumptions method.planType ["call", "send"] then
+      .error (.notDeliverable target message.method "its Plan admits stop or cancel: a delivered method controls nothing")
+    else if Inbox.continuationDepth ≤ message.depth then .error (.continuationDepth Inbox.continuationDepth)
     else .error (.notDeliverable target message.method
-      "its Plan admits send: a delivered method cannot send until the prepaid allowance exists")
+      "its Plan admits send and the message's allowance does not cover an onward send")
 
 /-- **Queue one message.** To an object: the target method must be `Deliverable` (decided
 before anything is escrowed: an object, with state, the method loads, its Plan within
@@ -1107,7 +1140,7 @@ def Mail.send {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snaps
       .ok { mail with
         inboxes := others ++ [updated]
         slots := mail.slots ++ [slot]
-        credits := mail.credits ++ [(held.cell.value, message.postage)]
+        credits := mail.credits ++ [(held.cell.value, message.escrow)]
         targets := mail.targets ++ [target] }
   | .slot name =>
     match holdSlot config snapshot mail name with
@@ -1124,22 +1157,26 @@ def Mail.send {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snaps
               held.named, held.opened⟩
           .ok { mail with
             slots := others ++ [updated]
-            credits := mail.credits ++ [(held.now.activity.value, message.postage)] }
+            credits := mail.credits ++ [(held.now.activity.value, message.escrow)] }
         else .error (.slotQueueFull name.value)
 
 /-- The message a send queues: its delivery runs under `postage`, whose public
-price it escrows, refunded to `refund` if it is never delivered. -/
-def messageOf (config : Config) (postage : Capacity) (refund : AccountId) (out : Outgoing) : Inbox.Message :=
-  ⟨out.id, out.sender, out.method, dataBytes out.args, postage, config.tariff.workOf postage, refund⟩
+price it escrows with the send's allowance, both refunded to `refund` if it is never
+delivered; `depth` is its place in its continuation chain. -/
+def messageOf (config : Config) (postage : Capacity) (refund : AccountId) (depth : Nat) (out : Outgoing) :
+    Inbox.Message :=
+  ⟨out.id, out.sender, out.method, dataBytes out.args, postage, config.tariff.workOf postage, refund, out.allowance,
+    depth⟩
 
 /-- The mail of a turn's sends, in order. -/
 def postMail {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
-    (postage : Capacity) (refund : AccountId) : Mail config snapshot → List Outgoing → Except CallRefusal (Mail config snapshot)
+    (postage : Capacity) (refund : AccountId) (depth : Nat) :
+    Mail config snapshot → List Outgoing → Except CallRefusal (Mail config snapshot)
   | mail, [] => .ok mail
   | mail, out :: rest =>
-    match mail.send (messageOf config postage refund out) out.destination with
+    match mail.send (messageOf config postage refund depth out) out.destination with
     | .error reason => .error reason
-    | .ok mail => postMail config snapshot postage refund mail rest
+    | .ok mail => postMail config snapshot postage refund depth mail rest
 
 
 /-! ### The sender's controls: stop-waiting and cancel-if-queued (GPT-6 row F)
@@ -1216,13 +1253,14 @@ def controlInbox {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sn
       else .error (.slotInbox name.value "its activity cell is not its inbox's")
 
 /-- The refunds of a cancel: the withdrawn message and every send pipelined on its slot,
-each its own postage, from the purse of the inbox that held them back to its payer. -/
+each its whole escrow (postage and continuation allowance), from the purse of the inbox that
+held them back to its payer. -/
 def cancelRefunds (purse : AccountId) (message : Inbox.Message) (queued : List Inbox.Message) : List Refund :=
-  (message :: queued).map fun refunded => ⟨purse, refunded.refund, refunded.postage⟩
+  (message :: queued).map fun refunded => ⟨purse, refunded.refund, refunded.escrow⟩
 
-/-- The refunds of a stop: every send pipelined on the slot. -/
+/-- The refunds of a stop: every send pipelined on the slot, each its whole escrow. -/
 def stopRefunds (purse : AccountId) (queued : List Inbox.Message) : List Refund :=
-  queued.map fun refunded => ⟨purse, refunded.refund, refunded.postage⟩
+  queued.map fun refunded => ⟨purse, refunded.refund, refunded.escrow⟩
 
 /-- **Apply one control.** The authority check comes first wherever the slot is still there
 (`notSender`); then:
@@ -1443,11 +1481,11 @@ theorem Mail.control_cases {rootBytes : Bytes → Digest} {config : Config} {sna
               · intro watched
                 simp [watched]
 
-/-- **A cancel refunds exactly the escrow it withdraws**: the message's postage plus the
-postage of every send pipelined on its slot, and nothing else. -/
+/-- **A cancel refunds exactly the escrow it withdraws**: the message's postage and
+continuation allowance plus the escrow of every send pipelined on its slot, and nothing else. -/
 theorem cancelRefunds_escrow (purse : AccountId) (message : Inbox.Message) (queued : List Inbox.Message) :
     ((cancelRefunds purse message queued).map Refund.amount).sum =
-      message.postage + (queued.map Inbox.Message.postage).sum ∧
+      message.escrow + (queued.map Inbox.Message.escrow).sum ∧
     ∀ refund ∈ cancelRefunds purse message queued, refund.purse = purse := by
   refine ⟨?_, ?_⟩
   · simp [cancelRefunds, List.map_map, Function.comp_def]
@@ -1488,7 +1526,7 @@ theorem Mail.control_cancel_refunds {rootBytes : Bytes → Digest} {config : Con
       inbox.now.withdraw control.slot = some (message, rest) ∧ message.id = control.slot ∧
       next.refunds = mail.refunds ++ cancelRefunds held.now.activity.value message held.now.queued ∧
       ((cancelRefunds held.now.activity.value message held.now.queued).map Refund.amount).sum =
-        message.postage + (held.now.queued.map Inbox.Message.postage).sum ∧
+        message.escrow + (held.now.queued.map Inbox.Message.escrow).sum ∧
       ∀ refund ∈ cancelRefunds held.now.activity.value message held.now.queued,
         refund.purse = held.now.activity.value := by
   rcases Mail.control_cases ok with same | ⟨stop, _⟩ | ⟨stop, _⟩ |
@@ -1641,7 +1679,8 @@ theorem Mail.inboxes_lawful {rootBytes : Bytes → Digest} {config : Config} {sn
 /-- **An admitted send to an object names a deliverable method** (row F, at the interface):
 whenever `Mail.send` queues a message on an object's inbox, the target method loads from the
 object's pinned package exactly as its delivery will (`loadMethod`, the record's `activePin`,
-the object's view, the message's arguments) and its Plan type is within `call`: no `send`.
+the object's view, the message's arguments) and its Plan type is within `deliveredPlans
+message`: `call`, and `send` only for a message whose allowance continues.
 The run-time refusal in `ObjectiveSend.runMessage` stays as the backstop for what the send
 cannot see (a nested call into a sending method, an upgrade between send and delivery). -/
 theorem Mail.send_object_deliverable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -1650,23 +1689,23 @@ theorem Mail.send_object_deliverable {rootBytes : Bytes → Digest} {config : Co
     ∃ d : Deliverable config snapshot target message, deliverable config snapshot target message = .ok d ∧
       loadMethod config target (packageBytes config snapshot d.record.activePin) d.record.activePin message.method
         (viewData d.view) d.args = .ok d.method ∧
-      labelsWithin d.method.applied.assumptions d.method.planType deliveredPlans = true := by
+      labelsWithin d.method.applied.assumptions d.method.planType (deliveredPlans message) = true := by
   cases found : deliverable config snapshot target message with
   | error reason => simp only [Mail.send, found] at sent; cases sent
   | ok d => exact ⟨d, rfl, d.methodExact, d.callsOnly⟩
 
 /-- Every send of a posted mail addressed to an object is `Deliverable` there. -/
 theorem postMail_deliverable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {postage : Capacity} {refund : AccountId} :
+    {postage : Capacity} {refund : AccountId} {depth : Nat} :
     ∀ {outs : List Outgoing} {mail mail' : Mail config snapshot},
-      postMail config snapshot postage refund mail outs = .ok mail' →
+      postMail config snapshot postage refund depth mail outs = .ok mail' →
       ∀ out ∈ outs, ∀ target, out.destination = .object target →
-        ∃ d : Deliverable config snapshot target (messageOf config postage refund out),
-          deliverable config snapshot target (messageOf config postage refund out) = .ok d
+        ∃ d : Deliverable config snapshot target (messageOf config postage refund depth out),
+          deliverable config snapshot target (messageOf config postage refund depth out) = .ok d
   | [], _, _, _, out, member, _, _ => nomatch member
   | out :: rest, mail, mail', posted, other, member, target, destination => by
     simp only [postMail] at posted
-    cases sent : mail.send (messageOf config postage refund out) out.destination with
+    cases sent : mail.send (messageOf config postage refund depth out) out.destination with
     | error reason => rw [sent] at posted; cases posted
     | ok next =>
       rw [sent] at posted
@@ -1693,6 +1732,9 @@ structure InvokeRequest where
   /-- The declared envelope every message this invocation sends is delivered
   under; each send escrows its public price (`Inbox.Message.postage`). -/
   postage : Capacity
+  /-- The most the turn's sends may carry, in total, as continuation allowances
+  (`Inbox.Message.allowance`), each escrowed from `account` with its postage. -/
+  allowance : Nat
 
 def pathStream : StreamCodec (List String) := StreamCodec.list stringStream
 
@@ -1779,6 +1821,9 @@ def invokeBatch {rootBytes : Bytes → Digest} {snapshot : Snapshot rootBytes} (
     .fee request.account config.collector config.asset (config.tariff.workOf request.envelope) ::
       (creditTransfers config request.account mail.credits ++ refundTransfers config mail.refunds), []⟩
 
+/-- The continuation allowances a list of sends carries, in total. -/
+def outboxAllowance (outs : List Outgoing) : Nat := (outs.map Outgoing.allowance).sum
+
 /-- An admitted invocation: the call tree ran to the root's return within the
 envelope, every frame write passed its object's law, its sends are queued (each
 inbox within its bound, each reply slot opened), and the fee and postage are posted. -/
@@ -1796,9 +1841,11 @@ structure Invocation {rootBytes : Bytes → Digest} (config : Config) (snapshot 
   postageCovered : journal.outbox ≠ [] → config.covers request.postage = true
   /-- What the call tree commits on a draining object is migratable. -/
   drainedOk : journal.drained = true
-  /-- The mail of the turn's sends. -/
+  /-- The sends' continuation allowances are within the one the signer declared. -/
+  allowanceCovered : outboxAllowance journal.outbox ≤ request.allowance
+  /-- The mail of the turn's sends (each at depth 0). -/
   sent : Mail config snapshot
-  sentExact : postMail config snapshot request.postage request.account Mail.empty journal.outbox = .ok sent
+  sentExact : postMail config snapshot request.postage request.account 0 Mail.empty journal.outbox = .ok sent
   /-- That mail after the turn's controls. -/
   mail : Mail config snapshot
   mailExact : postControls config snapshot height sent journal.controls = .ok mail
@@ -1819,7 +1866,8 @@ def invoke {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
     | .ok (result, journal, left) =>
       if postageCovered : journal.outbox ≠ [] → config.covers request.postage = true then
       if drainedOk : journal.drained = true then
-      match sentExact : postMail config snapshot request.postage request.account Mail.empty journal.outbox with
+      if allowanceCovered : outboxAllowance journal.outbox ≤ request.allowance then
+      match sentExact : postMail config snapshot request.postage request.account 0 Mail.empty journal.outbox with
       | .error reason => .error reason
       | .ok sent =>
       match mailExact : postControls config snapshot height sent journal.controls with
@@ -1837,8 +1885,9 @@ def invoke {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
             split at postedExact
             · cases postedExact; rfl
             · cases postedExact
-          .ok ⟨covered, result, journal, left, execExact, postageCovered, drainedOk, sent, sentExact, mail, mailExact,
-            book, bookExact, posted, batchExact, _, rfl⟩
+          .ok ⟨covered, result, journal, left, execExact, postageCovered, drainedOk, allowanceCovered, sent, sentExact,
+            mail, mailExact, book, bookExact, posted, batchExact, _, rfl⟩
+      else .error (.allowanceExceeded (outboxAllowance journal.outbox) request.allowance)
       else .error (.drainConflict request.object.value)
       else .error (.kernel (.uncovered request.postage))
   else .error (.kernel (.uncovered request.envelope))
@@ -1866,8 +1915,8 @@ invocation's fee or any postage was posted. -/
 theorem Invocation.sends_deliverable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : InvokeRequest} (invoked : Invocation config snapshot height request) :
     ∀ out ∈ invoked.journal.outbox, ∀ target, out.destination = .object target →
-      ∃ d : Deliverable config snapshot target (messageOf config request.postage request.account out),
-        deliverable config snapshot target (messageOf config request.postage request.account out) = .ok d :=
+      ∃ d : Deliverable config snapshot target (messageOf config request.postage request.account 0 out),
+        deliverable config snapshot target (messageOf config request.postage request.account 0 out) = .ok d :=
   postMail_deliverable invoked.sentExact
 
 /-! ## T2: the re-entry guard -/

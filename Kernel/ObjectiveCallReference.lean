@@ -302,7 +302,7 @@ theorem messageDelivery_reference {rootBytes : Bytes → Digest} {config : Confi
       ∃ more out write, (∀ r ∈ more, FrameResponse r) ∧
         observe config.planBudget (initial program.applied.erase) more = .ret out ∧
         decodeReturn request.target delivery.message.method out = .ok (result, write) :=
-  runMessage_reference (delivery.outcomeExact.trans replied)
+  runMessage_reference (delivery.ran replied)
 
 #assert_axioms FrameRun.reference
 #assert_axioms FrameRun.ends

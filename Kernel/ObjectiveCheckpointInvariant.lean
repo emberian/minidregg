@@ -813,7 +813,7 @@ theorem messageDelivery_safe {rootBytes : Bytes → Digest} {config : Config} {s
   intro post member
   rcases List.mem_append.mp member with front | last
   · rcases List.mem_append.mp front with fromCalls | fromMail
-    · exact outcome_posts_safe delivered.outcomeExact post fromCalls
+    · exact outcome_posts_safe delivered.runExact post (delivered.posts_of_run post fromCalls)
     · obtain ⟨cell, clean, ⟨role, key, body, notRecord, isMail⟩ | isRetire⟩ := delivered.mail.posts_shape post fromMail
       · subst isMail; exact postSafe_inert clean (recordIn_image_other key body notRecord)
       · subst isRetire; exact postSafe_inert clean recordIn_retired
@@ -1320,7 +1320,7 @@ theorem invocation_mail_silent {rootBytes : Bytes → Digest} {config : Config} 
   rw [silent] at sent
   have same : (Except.ok ObjectiveCall.Mail.empty : Except ObjectiveCall.CallRefusal (ObjectiveCall.Mail config snapshot)) =
       Except.ok invoked.sent :=
-    (show ObjectiveCall.postMail config snapshot request.postage request.account ObjectiveCall.Mail.empty [] =
+    (show ObjectiveCall.postMail config snapshot request.postage request.account 0 ObjectiveCall.Mail.empty [] =
       .ok ObjectiveCall.Mail.empty from rfl).symm.trans sent
   have empty := Except.ok.inj same
   obtain ⟨inboxes, closed⟩ := ObjectiveSend.postControls_stops height _ _ _ invoked.mailExact noCancel
@@ -1337,7 +1337,7 @@ theorem invocation_mail_nil {rootBytes : Bytes → Digest} {config : Config} {sn
   rw [silent] at sent
   have same : (Except.ok ObjectiveCall.Mail.empty : Except ObjectiveCall.CallRefusal (ObjectiveCall.Mail config snapshot)) =
       Except.ok invoked.sent :=
-    (show ObjectiveCall.postMail config snapshot request.postage request.account ObjectiveCall.Mail.empty [] =
+    (show ObjectiveCall.postMail config snapshot request.postage request.account 0 ObjectiveCall.Mail.empty [] =
       .ok ObjectiveCall.Mail.empty from rfl).symm.trans sent
   rw [ObjectiveSend.Invocation.mail_of_silent invoked still, ← Except.ok.inj same]
   rfl
@@ -1391,7 +1391,7 @@ theorem invocation_decides_nothing {rootBytes : Bytes → Digest} {config : Conf
   · exact not_decidesDelivery_of_payload_none absent
   · exact not_decidesDelivery_image (role := .state) (key := stateKey object) (body := ObjectState.encodeObjectState state)
       (shape.trans rfl) (by decide)
-  · have sentKeeps := (ObjectiveSend.postMail_keeps request.postage request.account _ _ _ invoked.sentExact).1
+  · have sentKeeps := (ObjectiveSend.postMail_keeps request.postage request.account 0 _ _ _ invoked.sentExact).1
     have retired := (ObjectiveSend.postControls_stops height _ _ _ invoked.mailExact noCancel
       (by rw [sentKeeps]; intro _ member; cases member)).2
     exact mail_decides_nothing invoked.mail retired post inMail
@@ -1413,7 +1413,8 @@ theorem invocation_silent_holds_no_inbox {rootBytes : Bytes → Digest} {config 
 
 /-- **The turns that may write an inbox.** An invocation whose call tree sent a
 message (its mail is then non-empty) or cancelled one (withdrawing it from its inbox),
-and a message delivery (which forwards the sends queued on the slot it decides). Every
+and a message delivery (which forwards the sends queued on the slot it decides, and queues
+its method's onward sends out of the message's allowance, row F). Every
 constructor is listed: a new turn constructor must say here whether it may write an inbox. -/
 def AdmittedTurn.Sends {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} : AdmittedTurn config snapshot height → Prop

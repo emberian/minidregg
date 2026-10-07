@@ -17,13 +17,24 @@ inbox of (sender, target) and opens its reply slot, whose decider is the ROLE
 * **The delivery decides the reply slot** (`AnswerSlot.decideDelivery`):
   `reply result` when the call tree returned; otherwise `broken reason`. A
   failure of the delivered method (its law refused a write, it faulted, it ran
-  out of the envelope, it is not callable, it tried to send: a delivery has no
-  paying account; a send to a method whose Plan admits `send` is refused at the send,
-  `ObjectiveCall.Deliverable`, so this is the backstop for a nested call into a sending
-  method or an upgrade between send and delivery) is NOT a refusal of the turn: it is a kernel decision, and the
+  out of the envelope, it is not callable, its onward sends were refused: see below)
+  is NOT a refusal of the turn: it is a kernel decision, and the
   message is popped all the same (`MessageRefusal` has no member for any of
   them; `failed_delivery_pops`). A delivery that failed commits no write of its
   call tree.
+* **Onward sends, out of the prepaid allowance (GPT-6 row F).** The delivered call tree may
+  send only out of its message's continuation allowance (`Inbox.Message.allowance`, escrowed
+  in this purse by whoever paid the postage): at most `Inbox.fanOut` sends, from a message
+  below `Inbox.continuationDepth`, escrowing in total at most the allowance, each onward
+  message one hop deeper, delivered under the same envelope, refunded to the same payer
+  (`continueMessage`). Any refusal (`fanOut`, `continuationDepth`, `allowanceExceeded`, or
+  one of `Mail.send`'s, such as `notDeliverable` for an onward send to a sending method)
+  decides the slot `broken` naming it and commits none of the call tree's writes. The split
+  is deliberate: the POSTAGE bought the attempt (the method ran, the collector is paid), the
+  ALLOWANCE buys only the continuation, so it is refunded in full; what a successful
+  delivery does not spend of it returns to the payer too (`escrow_conservation`). A send to a
+  sending method is refused at the send unless its message continues
+  (`ObjectiveCall.Deliverable`), so these checks are where the actual count is decided.
 * **Forwarding.** Sends queued on the slot (pipelined sends to this reply) are
   handled in the same turn: when the reply is a reference to an object
   (`ref n`), each is pushed onto the inbox (its sender, n) with its own reply
@@ -83,10 +94,8 @@ inductive Outcome where
   | failed (reason : String)
 
 /-- Run a message: `method` of `target` as a root frame, caller the sender, no
-subject, under the message's envelope. A delivered call tree may not send: the send
-that queued it already refused a sending method (`ObjectiveCall.Deliverable`); this
-refusal is the backstop for what that check could not see (a nested call into a sending
-method, an upgrade between send and delivery). -/
+subject, under the message's envelope. A delivered call tree may not stop or cancel; its
+sends are judged against the message's allowance by `continueMessage`. -/
 def runMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (height : Nat)
     (target : Nat) (message : Inbox.Message) : Outcome :=
   match decodeDataBytes message.args with
@@ -97,9 +106,8 @@ def runMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
         message.envelope.sourceTicks with
     | .error reason => .failed (reprStr reason)
     | .ok (result, journal, _) =>
-      if journal.outbox.isEmpty && journal.controls.isEmpty && journal.drained then .replied result journal
-      else .failed (if !journal.outbox.isEmpty then "a delivered message sends: its delivery has no paying account"
-        else if !journal.controls.isEmpty then
+      if journal.controls.isEmpty && journal.drained then .replied result journal
+      else .failed (if !journal.controls.isEmpty then
           "a delivered message stops or cancels: only an invocation's call tree controls its object's messages"
         else "the state it leaves on a draining object is one MIGRATE would refuse")
 
@@ -120,6 +128,109 @@ def Outcome.guards {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   | .replied _ journal => journal.guards config snapshot
   | .failed _ => []
 
+/-! ### The continuation: onward sends out of the allowance -/
+
+/-- The message an onward send of the delivery of `message` queues: delivered under the same
+envelope, refunded to the same payer, one hop deeper. -/
+def onwardOf (config : Config) (message : Inbox.Message) (out : Outgoing) : Inbox.Message :=
+  messageOf config message.envelope message.refund (message.depth + 1) out
+
+/-- What a delivery's onward sends escrow, in total, out of its message's allowance. -/
+def onwardEscrow (config : Config) (message : Inbox.Message) (outs : List Outgoing) : Nat :=
+  (outs.map fun out => (onwardOf config message out).escrow).sum
+
+/-- The bounds of a delivery's onward sends, in order: the depth (`Inbox.continuationDepth`),
+the fan-out (`Inbox.fanOut`), the allowance. -/
+def onwardRefusal (config : Config) (message : Inbox.Message) (outs : List Outgoing) : Option CallRefusal :=
+  if Inbox.continuationDepth ≤ message.depth then some (.continuationDepth Inbox.continuationDepth)
+  else if Inbox.fanOut < outs.length then some (.fanOut Inbox.fanOut)
+  else if message.allowance < onwardEscrow config message outs then
+    some (.allowanceExceeded (onwardEscrow config message outs) message.allowance)
+  else none
+
+/-- **Continue a delivered message**: the call tree's sends are queued (`postMail`, into the
+delivery's own mail) and paid out of the message's allowance, within its bounds; the result
+is the delivery's outcome, its mail, and what the onward sends spent of the allowance. A
+refusal fails the delivery (nothing of the call tree commits, nothing is spent). -/
+def continueMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (message : Inbox.Message) (seed : Mail config snapshot) : Outcome → Outcome × Mail config snapshot × Nat
+  | .failed reason => (.failed reason, seed, 0)
+  | .replied result journal =>
+    if journal.outbox = [] then (.replied result journal, seed, 0) else
+    match onwardRefusal config message journal.outbox with
+    | some refusal => (.failed (reprStr refusal), seed, 0)
+    | none =>
+      match postMail config snapshot message.envelope message.refund (message.depth + 1) seed journal.outbox with
+      | .error reason => (.failed (reprStr reason), seed, 0)
+      | .ok mail => (.replied result journal, mail, onwardEscrow config message journal.outbox)
+
+/-- **What a continuation can be**: the run unchanged, nothing sent; or a failure, nothing
+sent; or the run with its sends queued out of the allowance, within every bound. -/
+theorem continueMessage_cases {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {message : Inbox.Message} {seed mail : Mail config snapshot} {run outcome : Outcome} {spent : Nat}
+    (continued : continueMessage config snapshot message seed run = (outcome, mail, spent)) :
+    (outcome = run ∧ mail = seed ∧ spent = 0) ∨ (∃ reason, outcome = .failed reason ∧ mail = seed ∧ spent = 0) ∨
+    (∃ result journal, run = .replied result journal ∧ outcome = run ∧ journal.outbox ≠ [] ∧
+      message.depth < Inbox.continuationDepth ∧ journal.outbox.length ≤ Inbox.fanOut ∧
+      spent = onwardEscrow config message journal.outbox ∧ spent ≤ message.allowance ∧
+      postMail config snapshot message.envelope message.refund (message.depth + 1) seed journal.outbox = .ok mail) := by
+  cases run with
+  | failed reason =>
+    simp only [continueMessage, Prod.mk.injEq] at continued
+    obtain ⟨rfl, rfl, rfl⟩ := continued
+    exact .inl ⟨rfl, rfl, rfl⟩
+  | replied result journal =>
+    simp only [continueMessage] at continued
+    split at continued
+    · simp only [Prod.mk.injEq] at continued
+      obtain ⟨rfl, rfl, rfl⟩ := continued
+      exact .inl ⟨rfl, rfl, rfl⟩
+    · rename_i sends
+      split at continued
+      · simp only [Prod.mk.injEq] at continued
+        obtain ⟨rfl, rfl, rfl⟩ := continued
+        exact .inr (.inl ⟨_, rfl, rfl, rfl⟩)
+      · rename_i within
+        unfold onwardRefusal at within
+        split at within
+        · cases within
+        · rename_i shallow
+          split at within
+          · cases within
+          · rename_i narrow
+            split at within
+            · cases within
+            · rename_i covered
+              split at continued
+              · simp only [Prod.mk.injEq] at continued
+                obtain ⟨rfl, rfl, rfl⟩ := continued
+                exact .inr (.inl ⟨_, rfl, rfl, rfl⟩)
+              · rename_i posted
+                simp only [Prod.mk.injEq] at continued
+                obtain ⟨rfl, rfl, rfl⟩ := continued
+                exact .inr (.inr ⟨result, journal, rfl, rfl, sends, by omega, by omega, rfl, by omega, posted⟩)
+
+/-- A continuation that failed sent nothing: its mail is the seed and it spent nothing. -/
+theorem continueMessage_failed {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {message : Inbox.Message} {seed mail : Mail config snapshot} {run : Outcome} {reason : String} {spent : Nat}
+    (continued : continueMessage config snapshot message seed run = (.failed reason, mail, spent)) :
+    mail = seed ∧ spent = 0 := by
+  rcases continueMessage_cases continued with ⟨_, m, s⟩ | ⟨_, _, m, s⟩ | ⟨_, _, hrun, hout, _⟩
+  · exact ⟨m, s⟩
+  · exact ⟨m, s⟩
+  · cases hout.trans hrun
+
+/-- A continuation's outcome that replied is the run's own. -/
+theorem continueMessage_replied {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {message : Inbox.Message} {seed mail : Mail config snapshot} {run : Outcome} {result : Data} {journal : Journal}
+    {spent : Nat}
+    (continued : continueMessage config snapshot message seed run = (.replied result journal, mail, spent)) :
+    run = .replied result journal := by
+  rcases continueMessage_cases continued with ⟨same, _⟩ | ⟨_, bad, _⟩ | ⟨_, _, _, same, _⟩
+  · exact same.symm
+  · cases bad
+  · exact same.symm
+
 /-- **Forward the sends queued on a decided slot** to the object its reply
 names: each is queued on (its sender, that object) with its reply slot opened;
 any that cannot be (no reference, not an object, a method not `Deliverable` there, a
@@ -134,16 +245,23 @@ def forward {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapsho
       let (mail, refunds) := forward reference mail rest
       (mail, message :: refunds)
 
+/-- A payment out of `purse` (dropped when zero, or when it would land in `purse` itself: the
+escrow then simply stays where it is). -/
+def payOut (config : Config) (purse payee : AccountId) (amount : Nat) : List Operation :=
+  if amount = 0 ∨ payee = purse then [] else [.transfer purse payee config.asset amount]
+
 /-- The delivery's Book batch, every operation out of the inbox's purse: the
-message's postage to the collector, each forward's postage to its new inbox's
-purse, each refund back to its payer. -/
+message's postage to the collector, each onward send's and each forward's escrow to its
+new queue's purse, each refunded forward's escrow back to its payer, and what the onward
+sends did not spend of the allowance (`spent`) back to the message's payer. -/
 def deliveryBatch {rootBytes : Bytes → Digest} {snapshot : Snapshot rootBytes} (config : Config) (book : Book)
-    (purse : AccountId) (message : Inbox.Message) (mail : Mail config snapshot) (refunds : List Inbox.Message) : Batch :=
+    (purse : AccountId) (message : Inbox.Message) (spent : Nat) (mail : Mail config snapshot)
+    (refunds : List Inbox.Message) : Batch :=
   ⟨mail.registrations book,
     (if message.postage = 0 then [] else [.fee purse config.collector config.asset message.postage]) ++
       creditTransfers config purse mail.credits ++
-      refunds.filterMap (fun refunded => if refunded.postage = 0 ∨ refunded.refund = purse then none
-        else some (.transfer purse refunded.refund config.asset refunded.postage)), []⟩
+      refunds.flatMap (fun refunded => payOut config purse refunded.refund refunded.escrow) ++
+      payOut config purse message.refund (message.allowance - spent), []⟩
 
 /-- What a delivery writes at the reply slot: the decided slot, when someone waits for it;
 the retired image when its sender stopped waiting (`ObjectiveCall.ControlKind.stop`): a
@@ -181,23 +299,30 @@ structure MessageDelivery {rootBytes : Bytes → Digest} (config : Config) (snap
   slotNamed : slot.name = message.id
   /-- The slot answers to THIS inbox: its activity cell is the inbox the message was popped from. -/
   activityExact : slot.activity = Inbox.cell config.domain request.sender request.target
-  outcome : Outcome
-  outcomeExact : runMessage config snapshot height request.target message = outcome
-  decided : AnswerSlot.Slot
-  decidedExact : AnswerSlot.decideDelivery slot message.id height outcome.decision = .ok decided
+  /-- The call tree as it ran. -/
+  run : Outcome
+  runExact : runMessage config snapshot height request.target message = run
   /-- The popped inbox, held by this turn. -/
   seed : Mail config snapshot
   seedExact : seed.inboxes.map (fun held => (held.sender, held.target, held.now)) =
     [(request.sender, request.target, remaining)] ∧ seed.slots = [] ∧ seed.credits = [] ∧ seed.targets = [] ∧
       seed.closed = [] ∧ seed.refunds = []
+  /-- The delivery as it is decided: the run with its onward sends queued out of the
+  allowance (`sent`, spending `spent`), or failed. -/
+  outcome : Outcome
+  sent : Mail config snapshot
+  spent : Nat
+  continued : continueMessage config snapshot message seed run = (outcome, sent, spent)
+  decided : AnswerSlot.Slot
+  decidedExact : AnswerSlot.decideDelivery slot message.id height outcome.decision = .ok decided
   mail : Mail config snapshot
   refunds : List Inbox.Message
-  forwarded : forward outcome.reference seed slot.queued = (mail, refunds)
+  forwarded : forward outcome.reference sent slot.queued = (mail, refunds)
   book : BookCell
   bookExact : loadBook config snapshot = .ok book
   posted : Postings book
   batchExact : posted.batch = deliveryBatch config (logicalBook book.logical)
-    (Inbox.cell config.domain request.sender request.target).value message mail refunds
+    (Inbox.cell config.domain request.sender request.target).value message spent mail refunds
   posts : List Post
   postsExact : posts = outcome.posts config snapshot ++ mail.posts ++
     [replyPost config snapshot slot decided, posted.write config snapshot]
@@ -248,19 +373,21 @@ def deliverMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   | some slot =>
   if slotNamed : slot.name = message.id then
   if activityExact : slot.activity = Inbox.cell config.domain request.sender request.target then
-  match outcomeExact : runMessage config snapshot height request.target message with
-  | outcome =>
+  match runExact : runMessage config snapshot height request.target message with
+  | run =>
+  let seed := seedMail config snapshot request.sender request.target inbox remaining message readExact clean ends popped
+  match continued : continueMessage config snapshot message seed run with
+  | (outcome, sent, spent) =>
   match decidedExact : AnswerSlot.decideDelivery slot message.id height outcome.decision with
   | .error reason => .error (.replySlot (reprStr reason))
   | .ok decided =>
-  let seed := seedMail config snapshot request.sender request.target inbox remaining message readExact clean ends popped
-  match forwarded : forward outcome.reference seed slot.queued with
+  match forwarded : forward outcome.reference sent slot.queued with
   | (mail, refunds) =>
   match bookExact : loadBook config snapshot with
   | .error reason => .error (.kernel reason)
   | .ok book =>
   let batch := deliveryBatch config (logicalBook book.logical)
-    (Inbox.cell config.domain request.sender request.target).value message mail refunds
+    (Inbox.cell config.domain request.sender request.target).value message spent mail refunds
   match postedExact : postings book batch with
   | .error reason => .error (.kernel reason)
   | .ok posted =>
@@ -270,8 +397,8 @@ def deliverMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
       · cases postedExact; rfl
       · cases postedExact
     .ok ⟨inbox, readExact, clean, ends, message, remaining, popped, named, slot, slotExact, slotNamed, activityExact,
-      outcome, outcomeExact, decided, decidedExact, seed, ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩, mail, refunds, forwarded, book,
-      bookExact, posted, batchExact, _, rfl⟩
+      run, runExact, seed, ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩, outcome, sent, spent, continued, decided, decidedExact, mail,
+      refunds, forwarded, book, bookExact, posted, batchExact, _, rfl⟩
   else .error (.replySlot "not this inbox's")
   else .error (.replySlot "misnamed")
   else .error (.staleHead message.id)
@@ -320,10 +447,18 @@ theorem creditTransfers_debit (config : Config) (source : AccountId) (credits : 
   · cases made
   · cases made; rfl
 
+theorem payOut_debit (config : Config) (purse payee : AccountId) (amount : Nat) :
+    ∀ op ∈ payOut config purse payee amount, debited op = some purse := by
+  intro op member
+  unfold payOut at member
+  split at member
+  · cases member
+  · simp only [List.mem_singleton] at member; subst member; rfl
+
 /-- **Condition (d): a delivery is paid from the inbox's purse only.** Every
 operation of its batch, delivered or failed, debits the purse of the popped
-inbox: the fee is the message's own escrowed postage, forwards and refunds move
-escrow out of the same purse. No submitter, sender or target account is debited. -/
+inbox: the fee is the message's own escrowed postage, onward sends, forwards and refunds
+move escrow out of the same purse. No submitter, sender or target account is debited. -/
 theorem MessageDelivery.debits_only_purse {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {request : MessageRequest}
     (delivered : MessageDelivery config snapshot height request) :
@@ -332,17 +467,16 @@ theorem MessageDelivery.debits_only_purse {rootBytes : Bytes → Digest} {config
   rw [delivered.batchExact]
   intro op member
   simp only [deliveryBatch] at member
-  rcases List.mem_append.mp member with front | refund
-  · rcases List.mem_append.mp front with fee | credit
-    · split at fee
-      · cases fee
-      · simp only [List.mem_singleton] at fee; subst fee; rfl
-    · exact creditTransfers_debit config _ _ op credit
-  · simp only [List.mem_filterMap] at refund
-    obtain ⟨refunded, _, made⟩ := refund
-    split at made
-    · cases made
-    · cases made; rfl
+  rcases List.mem_append.mp member with front | remainder
+  · rcases List.mem_append.mp front with front | refund
+    · rcases List.mem_append.mp front with fee | credit
+      · split at fee
+        · cases fee
+        · simp only [List.mem_singleton] at fee; subst fee; rfl
+      · exact creditTransfers_debit config _ _ op credit
+    · obtain ⟨refunded, _, made⟩ := List.mem_flatMap.mp refund
+      exact payOut_debit config _ _ _ op made
+  · exact payOut_debit config _ _ _ op remainder
 
 /-- **The delivery pops its message**: the head of the inbox it read is the
 message it ran and decided, and the inbox it posts is a lawful change (FIFO,
@@ -370,21 +504,25 @@ theorem MessageDelivery.decides_own_slot {rootBytes : Bytes → Digest} {config 
   exact ⟨delivered.slotExact, role, opened, by rw [front]; rfl, decided⟩
 
 /-- **A failed delivery still pops, and decides `broken`** (condition (d)): when
-the delivered call tree failed, for whatever reason the method gave, the turn
-is admitted all the same; it removes the head, decides the reply slot `broken`
-with the reason, commits no write of the failed call tree, and refunds every
-send queued on the slot. -/
+the delivered call tree failed, for whatever reason the method gave (or its onward sends
+were refused), the turn is admitted all the same; it removes the head, decides the reply
+slot `broken` with the reason, commits no write of the failed call tree, sends nothing
+onward, spends none of the allowance, and refunds every send queued on the slot. -/
 theorem MessageDelivery.failed_delivery_pops {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {request : MessageRequest}
     (delivered : MessageDelivery config snapshot height request) {reason : String}
     (failed : delivered.outcome = .failed reason) :
     delivered.decided.phase = .decided (.broken reason) height ∧
       delivered.outcome.posts config snapshot = [] ∧ delivered.refunds = delivered.slot.queued ∧
+      delivered.spent = 0 ∧
       delivered.mail.inboxes.map (fun held => (held.sender, held.target, held.now)) =
         [(request.sender, request.target, delivered.remaining)] := by
   obtain ⟨_, _, _, decided⟩ := AnswerSlot.decideDelivery_single delivered.decidedExact
+  have continued := delivered.continued
+  rw [failed] at continued
+  obtain ⟨sentSeed, spentZero⟩ := continueMessage_failed continued
   have forwarded := delivered.forwarded
-  rw [failed] at forwarded
+  rw [failed, sentSeed] at forwarded
   have none_forwarded : ∀ (mail : Mail config snapshot) (queued : List Inbox.Message),
       forward (rootBytes := rootBytes) none mail queued = (mail, queued) := by
     intro mail queued
@@ -394,7 +532,7 @@ theorem MessageDelivery.failed_delivery_pops {rootBytes : Bytes → Digest} {con
   rw [show (Outcome.failed reason).reference = none from rfl, none_forwarded] at forwarded
   simp only [Prod.mk.injEq] at forwarded
   obtain ⟨sameMail, sameRefunds⟩ := forwarded
-  refine ⟨by rw [decided, failed]; rfl, by rw [failed]; rfl, sameRefunds.symm, ?_⟩
+  refine ⟨by rw [decided, failed]; rfl, by rw [failed]; rfl, sameRefunds.symm, spentZero, ?_⟩
   rw [← sameMail]
   exact delivered.seedExact.1
 
@@ -444,17 +582,50 @@ theorem runMessage_writes_from_view {rootBytes : Bytes → Digest} {config : Con
         exact fresh w member
       · cases ran
 
+/-- **A delivery that replied is the run of its message**: the outcome it decides, when it
+replied, is exactly what `runMessage` returned (`continueMessage` only fails a run or keeps it). -/
+theorem MessageDelivery.ran {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : MessageRequest}
+    (delivered : MessageDelivery config snapshot height request) {result : Data} {journal : Journal}
+    (replied : delivered.outcome = .replied result journal) :
+    runMessage config snapshot height request.target delivered.message = .replied result journal := by
+  have continued := delivered.continued
+  rw [replied] at continued
+  rw [delivered.runExact]
+  exact continueMessage_replied continued
+
+/-- Every state write a delivery commits is one its run made. -/
+theorem MessageDelivery.posts_of_run {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : MessageRequest}
+    (delivered : MessageDelivery config snapshot height request) :
+    ∀ post ∈ delivered.outcome.posts config snapshot, post ∈ delivered.run.posts config snapshot := by
+  intro post member
+  cases hout : delivered.outcome with
+  | failed _ => rw [hout] at member; cases member
+  | replied result journal =>
+    rw [hout] at member
+    have continued := delivered.continued
+    rw [hout] at continued
+    rw [continueMessage_replied continued]
+    exact member
+
 /-- The admitted delivery's own outcome, read through `runMessage_writes_pinned`. -/
 theorem MessageDelivery.writes_pinned {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {request : MessageRequest}
     (delivered : MessageDelivery config snapshot height request) {result : Data} {journal : Journal}
     (replied : delivered.outcome = .replied result journal) :
     ∀ w ∈ journal.writes, w.facts.artifact = some w.record.activePin.value :=
-  runMessage_writes_pinned (delivered.outcomeExact.trans replied)
+  runMessage_writes_pinned (delivered.ran replied)
 
 #assert_axioms runMessage_writes_pinned
 #assert_axioms runMessage_writes_from_view
 #assert_axioms MessageDelivery.writes_pinned
+#assert_axioms MessageDelivery.ran
+#assert_axioms MessageDelivery.posts_of_run
+#assert_axioms continueMessage_cases
+#assert_axioms continueMessage_failed
+#assert_axioms continueMessage_replied
+#assert_axioms payOut_debit
 
 /-! ## Retention: what a send and a delivery pay, and what they leave behind (OB8)
 
@@ -524,9 +695,9 @@ theorem Mail.send_keeps {rootBytes : Bytes → Digest} {config : Config} {snapsh
     all_goals first | (cases sent; done) | (cases sent; exact ⟨rfl, rfl⟩)
 
 theorem postMail_keeps {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    (postage : Minidregg.Compiler.ObjectiveInvocationClaim.Capacity) (refund : AccountId) :
+    (postage : Minidregg.Compiler.ObjectiveInvocationClaim.Capacity) (refund : AccountId) (depth : Nat) :
     ∀ (outs : List Outgoing) (mail next : Mail config snapshot),
-      postMail config snapshot postage refund mail outs = .ok next →
+      postMail config snapshot postage refund depth mail outs = .ok next →
       next.closed = mail.closed ∧ next.refunds = mail.refunds
   | [], mail, next, ok => by simp only [postMail] at ok; cases ok; exact ⟨rfl, rfl⟩
   | out :: rest, mail, next, ok => by
@@ -535,7 +706,7 @@ theorem postMail_keeps {rootBytes : Bytes → Digest} {config : Config} {snapsho
     · cases ok
     · rename_i mail' sent
       obtain ⟨c1, r1⟩ := Mail.send_keeps sent
-      obtain ⟨c2, r2⟩ := postMail_keeps postage refund rest mail' next ok
+      obtain ⟨c2, r2⟩ := postMail_keeps postage refund depth rest mail' next ok
       exact ⟨c2.trans c1, r2.trans r1⟩
 
 /-- Controls touch neither the credits nor the targets of a mail. -/
@@ -583,16 +754,17 @@ theorem Invocation.debits_only_account_of_silent {rootBytes : Bytes → Digest} 
   · exact paid
   · have none_ : invoked.mail.refunds = [] := by
       rw [Invocation.mail_of_silent invoked silent,
-        (postMail_keeps request.postage request.account _ _ _ invoked.sentExact).2]
+        (postMail_keeps request.postage request.account 0 _ _ _ invoked.sentExact).2]
       rfl
     rw [none_] at member
     cases member
 
-/-- **Every send credits exactly one purse, with the postage of its message.** -/
+/-- **Every send credits exactly one purse, with the escrow of its message** (its postage
+and its continuation allowance). -/
 theorem Mail.send_credit {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {mail next : Mail config snapshot} {message : Inbox.Message} {destination : Destination}
     (sent : mail.send message destination = .ok next) :
-    ∃ purse, next.credits = mail.credits ++ [(purse, message.postage)] := by
+    ∃ purse, next.credits = mail.credits ++ [(purse, message.escrow)] := by
   cases destination with
   | object target =>
     simp only [Mail.send] at sent
@@ -607,51 +779,57 @@ theorem Mail.send_credit {rootBytes : Bytes → Digest} {config : Config} {snaps
       | (cases sent; done)
       | (cases sent; exact ⟨_, rfl⟩)
 
+/-- **Posting sends credits exactly their escrows**: one credit per send, and in total the
+escrow of every message posted (postage and continuation allowance). -/
 theorem postMail_credits {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    (postage : Minidregg.Compiler.ObjectiveInvocationClaim.Capacity) (refund : AccountId) :
+    (postage : Minidregg.Compiler.ObjectiveInvocationClaim.Capacity) (refund : AccountId) (depth : Nat) :
     ∀ (outs : List Outgoing) (mail next : Mail config snapshot),
-      postMail config snapshot postage refund mail outs = .ok next →
+      postMail config snapshot postage refund depth mail outs = .ok next →
       next.credits.length = mail.credits.length + outs.length ∧
-        ∀ credit ∈ next.credits, credit ∈ mail.credits ∨ credit.2 = config.tariff.workOf postage
+        (next.credits.map Prod.snd).sum = (mail.credits.map Prod.snd).sum +
+          (outs.map fun out => (messageOf config postage refund depth out).escrow).sum
   | [], mail, next, ok => by
     simp only [postMail] at ok
     cases ok
-    exact ⟨by simp, fun credit member => .inl member⟩
+    exact ⟨by simp, by simp⟩
   | out :: rest, mail, next, ok => by
     simp only [postMail] at ok
     split at ok
     · cases ok
     · rename_i mail' sent
       obtain ⟨purse, credits⟩ := Mail.send_credit sent
-      obtain ⟨len, each⟩ := postMail_credits postage refund rest mail' next ok
+      obtain ⟨len, sum⟩ := postMail_credits postage refund depth rest mail' next ok
       refine ⟨?_, ?_⟩
       · rw [len, credits]; simp; omega
-      · intro credit member
-        rcases each credit member with old | fresh
-        · rw [credits] at old
-          rcases List.mem_append.mp old with first | added
-          · exact .inl first
-          · simp only [List.mem_singleton] at added
-            exact .inr (congrArg Prod.snd added)
-        · exact .inr fresh
+      · rw [sum, credits]; simp; omega
 
 /-- **An invocation escrows every send at the public price of its declared postage
-envelope**: one credit per send, each of `workOf request.postage`, and nothing else.
-(A credit is the message's postage, not a storage deposit.) -/
+envelope plus the allowance it carries, within the allowance its signer declared**: one
+credit per send, in total `workOf request.postage` per send plus the sends' allowances, which
+`request.allowance` bounds. (A credit is the message's escrow, not a storage deposit.) -/
 theorem Invocation.escrows_every_send {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {request : InvokeRequest}
     (invoked : Invocation config snapshot height request) :
     invoked.mail.credits.length = invoked.journal.outbox.length ∧
-      ∀ credit ∈ invoked.mail.credits, credit.2 = config.tariff.workOf request.postage := by
-  obtain ⟨len, each⟩ := postMail_credits request.postage request.account invoked.journal.outbox Mail.empty
+      (invoked.mail.credits.map Prod.snd).sum =
+        invoked.journal.outbox.length * config.tariff.workOf request.postage + outboxAllowance invoked.journal.outbox ∧
+      outboxAllowance invoked.journal.outbox ≤ request.allowance := by
+  obtain ⟨len, sum⟩ := postMail_credits request.postage request.account 0 invoked.journal.outbox Mail.empty
     invoked.sent invoked.sentExact
   rw [(postControls_credits height _ _ _ invoked.mailExact).1]
-  refine ⟨?_, ?_⟩
+  have each : ∀ (outs : List Outgoing),
+      (outs.map fun out => (messageOf config request.postage request.account 0 out).escrow).sum =
+        outs.length * config.tariff.workOf request.postage + outboxAllowance outs := by
+    intro outs
+    induction outs with
+    | nil => simp [outboxAllowance]
+    | cons out rest ih =>
+      simp only [List.map_cons, List.sum_cons, ih, outboxAllowance, List.length_cons] at ⊢
+      simp only [messageOf, Inbox.Message.escrow, outboxAllowance] at ⊢ ih
+      rw [Nat.succ_mul]; omega
+  refine ⟨?_, ?_, invoked.allowanceCovered⟩
   · rw [len]; simp [Mail.empty]
-  · intro credit member
-    rcases each credit member with old | fresh
-    · exact absurd old (by simp [Mail.empty])
-    · exact fresh
+  · rw [sum, each]; simp [Mail.empty]
 
 /-- **An inbox the mail holds stays within `Inbox.bound`** when the inbox the turn read
 was (a fresh inbox, read as nothing, always is). -/
@@ -692,8 +870,11 @@ theorem MessageDelivery.failed_mail {rootBytes : Bytes → Digest} {config : Con
     (delivered : MessageDelivery config snapshot height request) {reason : String}
     (failed : delivered.outcome = .failed reason) :
     delivered.mail = delivered.seed ∧ delivered.refunds = delivered.slot.queued := by
+  have continued := delivered.continued
+  rw [failed] at continued
   have forwarded := delivered.forwarded
-  rw [failed, show (Outcome.failed reason).reference = none from rfl, forward_none] at forwarded
+  rw [failed, show (Outcome.failed reason).reference = none from rfl, forward_none,
+    (continueMessage_failed continued).1] at forwarded
   simp only [Prod.mk.injEq] at forwarded
   exact ⟨forwarded.1.symm, forwarded.2.symm⟩
 
@@ -723,6 +904,277 @@ theorem MessageDelivery.failed_delivery_posts {rootBytes : Bytes → Digest} {co
       simp [HeldInbox.cell, hs, ht, hn]
   rw [delivered.postsExact, noPosts, sameMail, seedPosts]
   simp
+
+/-! ## Escrow conservation (GPT-6 row F): postage + allowance in = delivered spend + refunds
+
+A message's ESCROW (`Inbox.Message.escrow`: its postage and its continuation allowance) is
+credited into its queue's purse by the turn that sends it, and leaves that purse by exactly
+one of three exits: its delivery (the postage to the collector, the onward sends' escrows to
+their queues, the unspent allowance back to its payer; the sends pipelined on its slot
+forwarded or refunded), or a cancel (all of it, with the pipelined sends', back to the
+payer), and a failed delivery is the first exit with nothing spent. `escrow_conservation`
+states all three over the REAL ledger: the amounts of the postings of the batch the turn
+commits (`Operation.posting`), plus whatever lands back in the same purse (a payment the
+batch drops because it would move escrow from a purse to itself, e.g. an onward send that
+re-queues on the inbox it was popped from). -/
+
+/-- The amounts the postings of `ops` move. -/
+def postedAmount (ops : List Operation) : Nat := (ops.map fun op => op.posting.amount).sum
+
+/-- What of `flows` (payee, amount) lands back in `purse` itself. -/
+def retained (purse : AccountId) (flows : List (AccountId × Nat)) : Nat :=
+  ((flows.filter fun flow => decide (flow.1 = purse)).map Prod.snd).sum
+
+theorem postedAmount_append (a b : List Operation) : postedAmount (a ++ b) = postedAmount a + postedAmount b := by
+  simp [postedAmount]
+
+theorem retained_append (purse : AccountId) (a b : List (AccountId × Nat)) :
+    retained purse (a ++ b) = retained purse a + retained purse b := by
+  simp [retained, List.filter_append]
+
+theorem payOut_posted (config : Config) (purse payee : AccountId) (amount : Nat) :
+    postedAmount (payOut config purse payee amount) + retained purse [(payee, amount)] = amount := by
+  unfold payOut retained postedAmount
+  by_cases zero : amount = 0
+  · subst zero; by_cases same : payee = purse <;> simp [same]
+  · by_cases same : payee = purse
+    · simp [same]
+    · simp [zero, same, Operation.posting]
+
+theorem creditTransfers_posted (config : Config) (purse : AccountId) :
+    ∀ credits : List (AccountId × Nat),
+      postedAmount (creditTransfers config purse credits) + retained purse credits = (credits.map Prod.snd).sum
+  | [] => by simp [creditTransfers, postedAmount, retained]
+  | (payee, amount) :: rest => by
+    have ih := creditTransfers_posted config purse rest
+    have one := payOut_posted config purse payee amount
+    have split : creditTransfers config purse ((payee, amount) :: rest) =
+        payOut config purse payee amount ++ creditTransfers config purse rest := by
+      unfold payOut
+      simp only [creditTransfers, List.filterMap_cons]
+      split <;> simp_all
+    rw [split, postedAmount_append, show (payee, amount) :: rest = [(payee, amount)] ++ rest from rfl,
+      retained_append]
+    simp only [List.map_append, List.sum_append, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil] at ih one ⊢
+    omega
+
+theorem refunds_posted (config : Config) (purse : AccountId) :
+    ∀ refunds : List Inbox.Message,
+      postedAmount (refunds.flatMap fun refunded => payOut config purse refunded.refund refunded.escrow) +
+        retained purse (refunds.map fun refunded => (refunded.refund, refunded.escrow)) =
+      (refunds.map Inbox.Message.escrow).sum
+  | [] => by simp [postedAmount, retained]
+  | refunded :: rest => by
+    have ih := refunds_posted config purse rest
+    have one := payOut_posted config purse refunded.refund refunded.escrow
+    rw [List.flatMap_cons, postedAmount_append, List.map_cons,
+      show (refunded.refund, refunded.escrow) :: rest.map (fun r => (r.refund, r.escrow)) =
+        [(refunded.refund, refunded.escrow)] ++ rest.map (fun r => (r.refund, r.escrow)) from rfl, retained_append]
+    simp only [List.map_cons, List.sum_cons] at ih ⊢
+    omega
+
+/-- **Forwarding conserves the pipelined escrow**: every send queued on the slot is either
+credited, its whole escrow, to the queue it is forwarded into, or refunded. -/
+theorem forward_escrow {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (reference : Option Nat) :
+    ∀ (queued : List Inbox.Message) (mail next : Mail config snapshot) (refunds : List Inbox.Message),
+      forward reference mail queued = (next, refunds) →
+      (next.credits.map Prod.snd).sum + (refunds.map Inbox.Message.escrow).sum =
+        (mail.credits.map Prod.snd).sum + (queued.map Inbox.Message.escrow).sum
+  | [], mail, next, refunds, ok => by
+    simp only [forward, Prod.mk.injEq] at ok
+    obtain ⟨rfl, rfl⟩ := ok
+    simp
+  | message :: rest, mail, next, refunds, ok => by
+    simp only [forward] at ok
+    split at ok
+    · rename_i mail' hmatch
+      cases reference with
+      | none => simp at hmatch
+      | some target =>
+        have sent : mail.send message (.object target) = .ok mail' := by simpa using hmatch
+        obtain ⟨purse, credits⟩ := Mail.send_credit sent
+        have ih := forward_escrow (some target) rest mail' next refunds ok
+        rw [credits] at ih
+        simp only [List.map_append, List.sum_append, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil] at ih ⊢
+        omega
+    · cases inner : forward reference mail rest with
+      | mk next' refunds' =>
+        rw [inner] at ok
+        simp only [Prod.mk.injEq] at ok
+        obtain ⟨rfl, rfl⟩ := ok
+        have ih := forward_escrow reference rest mail next' refunds' inner
+        simp only [List.map_cons, List.sum_cons] at ih ⊢
+        omega
+
+/-- **A continuation credits exactly what it spends of the allowance**, and spends at most it. -/
+theorem continueMessage_credits {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {message : Inbox.Message} {seed mail : Mail config snapshot} {run outcome : Outcome} {spent : Nat}
+    (continued : continueMessage config snapshot message seed run = (outcome, mail, spent)) :
+    (mail.credits.map Prod.snd).sum = (seed.credits.map Prod.snd).sum + spent ∧ spent ≤ message.allowance ∧
+      mail.credits.length ≤ seed.credits.length + Inbox.fanOut ∧
+      (mail.credits.length ≠ seed.credits.length → message.depth < Inbox.continuationDepth) := by
+  rcases continueMessage_cases continued with ⟨_, rfl, rfl⟩ | ⟨_, _, rfl, rfl⟩ |
+    ⟨_, journal, _, _, _, shallow, narrow, rfl, within, posted⟩
+  · exact ⟨by simp, Nat.zero_le _, by omega, fun same => absurd rfl same⟩
+  · exact ⟨by simp, Nat.zero_le _, by omega, fun same => absurd rfl same⟩
+  · obtain ⟨len, sum⟩ := postMail_credits _ _ _ _ _ _ posted
+    exact ⟨by rw [sum]; rfl, within, by omega, fun _ => shallow⟩
+
+/-- The flows of a delivery out of its purse, payee and amount: the onward sends' and the
+forwards' credits, the refunded forwards, and the unspent allowance (the fee aside). -/
+def MessageDelivery.flows {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : MessageRequest} (delivered : MessageDelivery config snapshot height request) :
+    List (AccountId × Nat) :=
+  delivered.mail.credits ++ delivered.refunds.map (fun refunded => (refunded.refund, refunded.escrow)) ++
+    [(delivered.message.refund, delivered.message.allowance - delivered.spent)]
+
+/-- **The delivery leg, over its real postings**: the amounts its batch posts out of the
+purse, plus what of its flows lands back in that purse, are EXACTLY the popped message's
+escrow (postage + allowance) plus the escrow of every send pipelined on its slot; and the
+onward sends spent at most the allowance. -/
+theorem MessageDelivery.escrow_conserves {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : MessageRequest}
+    (delivered : MessageDelivery config snapshot height request) :
+    postedAmount delivered.posted.batch.operations +
+        retained (Inbox.cell config.domain request.sender request.target).value delivered.flows =
+      delivered.message.escrow + (delivered.slot.queued.map Inbox.Message.escrow).sum ∧
+    delivered.spent ≤ delivered.message.allowance := by
+  rw [delivered.batchExact]
+  simp only [deliveryBatch, MessageDelivery.flows, postedAmount_append, retained_append]
+  set purse := (Inbox.cell config.domain request.sender request.target).value
+  obtain ⟨sentSum, within, _, _⟩ := continueMessage_credits delivered.continued
+  have seedNil : delivered.seed.credits = [] := delivered.seedExact.2.2.1
+  rw [seedNil] at sentSum
+  have fwd := forward_escrow delivered.outcome.reference delivered.slot.queued delivered.sent delivered.mail
+    delivered.refunds delivered.forwarded
+  have credits := creditTransfers_posted config purse delivered.mail.credits
+  have refunded := refunds_posted config purse delivered.refunds
+  have remainder := payOut_posted config purse delivered.message.refund (delivered.message.allowance - delivered.spent)
+  have fee : postedAmount (if delivered.message.postage = 0 then []
+      else [.fee purse config.collector config.asset delivered.message.postage]) = delivered.message.postage := by
+    by_cases zero : delivered.message.postage = 0
+    · simp [zero, postedAmount]
+    · simp [zero, postedAmount, Operation.posting]
+  refine ⟨?_, within⟩
+  simp only [List.map_nil, List.sum_nil] at sentSum
+  have escrow : delivered.message.escrow = delivered.message.postage + delivered.message.allowance := rfl
+  omega
+
+/-- **The bounds bound the work, per delivery**: a delivery queues at most `Inbox.fanOut`
+onward messages, only from a message below `Inbox.continuationDepth`, each one hop deeper
+(`onwardOf`). So the messages a chain rooted at one message posts are bounded generation by
+generation (`chain_total`). -/
+theorem MessageDelivery.onward_bounded {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : MessageRequest}
+    (delivered : MessageDelivery config snapshot height request) :
+    delivered.sent.credits.length ≤ Inbox.fanOut ∧
+      (delivered.sent.credits ≠ [] → delivered.message.depth < Inbox.continuationDepth) := by
+  obtain ⟨_, _, wide, deep⟩ := continueMessage_credits delivered.continued
+  have seedNil : delivered.seed.credits = [] := delivered.seedExact.2.2.1
+  rw [seedNil] at wide deep
+  refine ⟨by simpa using wide, fun some => deep (by simpa using some)⟩
+
+theorem onwardOf_depth (config : Config) (message : Inbox.Message) (out : Outgoing) :
+    (onwardOf config message out).depth = message.depth + 1 := rfl
+
+/-- **Generation counting**: if a chain has at most one message at relative depth 0, each
+generation at most `fanOut` times the one before, and none past `depth`, then it holds at
+most `Σ_{k ≤ depth} fanOut^k` messages. With `Inbox.fanOut` = 4 and the relative depth
+`Inbox.continuationDepth` = 3 below an invocation's send: at most 1 + 4 + 16 + 64 = 85. -/
+theorem chain_total (fanOut depth : Nat) (count : Nat → Nat) (root : count 0 ≤ 1)
+    (fans : ∀ k, count (k + 1) ≤ fanOut * count k) :
+    (∀ n, count n ≤ fanOut ^ n) ∧
+      ((List.range (depth + 1)).map count).sum ≤ ((List.range (depth + 1)).map (fanOut ^ ·)).sum := by
+  have each : ∀ n, count n ≤ fanOut ^ n := by
+    intro n
+    induction n with
+    | zero => simpa using root
+    | succ n ih =>
+      calc count (n + 1) ≤ fanOut * count n := fans n
+        _ ≤ fanOut * fanOut ^ n := Nat.mul_le_mul_left _ ih
+        _ = fanOut ^ (n + 1) := by rw [Nat.pow_succ, Nat.mul_comm]
+  refine ⟨each, ?_⟩
+  clear root fans
+  induction depth with
+  | zero => simpa using each 0
+  | succ d ih =>
+    rw [List.range_succ, List.map_append, List.map_append, List.sum_append, List.sum_append]
+    simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]
+    have := each (d + 1)
+    omega
+
+/-- **`escrow_conservation`: ONE statement, three exits, over the real ledger.**
+* A SEND credits its queue's purse with exactly the message's escrow (postage + allowance).
+* A DELIVERY (succeeded, failed, or refused at its continuation) posts out of the purse,
+  plus what lands back in it, exactly the popped escrow plus the escrow pipelined on its
+  slot: postage to the collector, onward escrows (at most the allowance), forwards, refunds
+  and the unspent allowance.
+* A CANCEL either refunds nothing (the message was delivered first, or its slot is gone) or
+  its refund transfers post, plus what lands back in the purse, exactly the withdrawn
+  message's escrow plus the escrow of every send pipelined on its slot. -/
+theorem escrow_conservation {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes} :
+    (∀ (mail next : Mail config snapshot) (message : Inbox.Message) (destination : Destination),
+      mail.send message destination = .ok next →
+      ∃ purse, next.credits = mail.credits ++ [(purse, message.escrow)]) ∧
+    (∀ (height : Nat) (request : MessageRequest) (delivered : MessageDelivery config snapshot height request),
+      postedAmount delivered.posted.batch.operations +
+          retained (Inbox.cell config.domain request.sender request.target).value delivered.flows =
+        delivered.message.escrow + (delivered.slot.queued.map Inbox.Message.escrow).sum ∧
+      delivered.spent ≤ delivered.message.allowance) ∧
+    (∀ (mail next : Mail config snapshot) (height : Nat) (control : Control),
+      mail.control height control = .ok next → control.kind = .cancel →
+      next.refunds = mail.refunds ∨
+      ∃ (purse : AccountId) (message : Inbox.Message) (queued : List Inbox.Message),
+        next.refunds = mail.refunds ++ cancelRefunds purse message queued ∧
+        postedAmount (refundTransfers config (cancelRefunds purse message queued)) +
+            retained purse ((cancelRefunds purse message queued).map fun refund => (refund.payer, refund.amount)) =
+          message.escrow + (queued.map Inbox.Message.escrow).sum) := by
+  refine ⟨fun _ _ _ _ sent => Mail.send_credit sent, fun _ _ delivered => delivered.escrow_conserves, ?_⟩
+  intro mail next height control ok cancel
+  rcases Mail.control_cancel_refunds ok cancel with same | ⟨held, _, message, _, _, _, _, _, _, refunds, sum, _⟩
+  · exact .inl same
+  · refine .inr ⟨held.now.activity.value, message, held.now.queued, refunds, ?_⟩
+    rw [← sum]
+    have general : ∀ (rs : List Refund), (∀ r ∈ rs, r.purse = held.now.activity.value) →
+        postedAmount (refundTransfers config rs) +
+          retained held.now.activity.value (rs.map fun refund => (refund.payer, refund.amount)) =
+        (rs.map Refund.amount).sum := by
+      intro rs fromPurse
+      induction rs with
+      | nil => simp [refundTransfers, postedAmount, retained]
+      | cons r rest ih =>
+        have ih := ih (fun r' member => fromPurse r' (List.mem_cons_of_mem _ member))
+        have rp := fromPurse r (List.mem_cons_self ..)
+        have one := payOut_posted config held.now.activity.value r.payer r.amount
+        have split : refundTransfers config (r :: rest) =
+            payOut config held.now.activity.value r.payer r.amount ++ refundTransfers config rest := by
+          unfold payOut
+          simp only [refundTransfers, List.filterMap_cons, rp]
+          by_cases zero : r.amount = 0
+          · simp [zero]
+          · by_cases self : r.payer = held.now.activity.value
+            · simp [zero, self]
+            · simp [zero, self, Ne.symm self]
+        rw [split, postedAmount_append, List.map_cons,
+          show (r.payer, r.amount) :: rest.map (fun refund => (refund.payer, refund.amount)) =
+            [(r.payer, r.amount)] ++ rest.map (fun refund => (refund.payer, refund.amount)) from rfl,
+          retained_append]
+        simp only [List.map_cons, List.sum_cons] at ih ⊢
+        omega
+    exact general _ (cancelRefunds_escrow held.now.activity.value message held.now.queued).2
+
+#assert_axioms postedAmount_append
+#assert_axioms retained_append
+#assert_axioms payOut_posted
+#assert_axioms creditTransfers_posted
+#assert_axioms refunds_posted
+#assert_axioms forward_escrow
+#assert_axioms continueMessage_credits
+#assert_axioms MessageDelivery.escrow_conserves
+#assert_axioms MessageDelivery.onward_bounded
+#assert_axioms chain_total
+#assert_axioms escrow_conservation
 
 /-! ### Every live cell a send or a delivery writes names a payer -/
 
@@ -929,9 +1381,9 @@ theorem Mail.send_anchored {rootBytes : Bytes → Digest} {config : Config} {sna
       · exact absurd opened read
 
 theorem postMail_anchored {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    (postage : Minidregg.Compiler.ObjectiveInvocationClaim.Capacity) (refund : AccountId) :
+    (postage : Minidregg.Compiler.ObjectiveInvocationClaim.Capacity) (refund : AccountId) (depth : Nat) :
     ∀ (outs : List Outgoing) (mail next : Mail config snapshot),
-      postMail config snapshot postage refund mail outs = .ok next → Mail.Anchored mail → Mail.Anchored next
+      postMail config snapshot postage refund depth mail outs = .ok next → Mail.Anchored mail → Mail.Anchored next
   | [], mail, next, ok, anchored => by
     simp only [postMail] at ok
     cases ok
@@ -941,7 +1393,36 @@ theorem postMail_anchored {rootBytes : Bytes → Digest} {config : Config} {snap
     split at ok
     · cases ok
     · rename_i mail' sent
-      exact postMail_anchored postage refund rest mail' next ok (Mail.send_anchored anchored sent)
+      exact postMail_anchored postage refund depth rest mail' next ok (Mail.send_anchored anchored sent)
+
+theorem postMail_inboxes_persist {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (postage : Minidregg.Compiler.ObjectiveInvocationClaim.Capacity) (refund : AccountId) (depth : Nat) :
+    ∀ (outs : List Outgoing) (mail next : Mail config snapshot),
+      postMail config snapshot postage refund depth mail outs = .ok next →
+      ∀ held ∈ mail.inboxes, ∃ held' ∈ next.inboxes, held'.cell = held.cell
+  | [], mail, next, ok, held, member => by
+    simp only [postMail] at ok; cases ok; exact ⟨held, member, rfl⟩
+  | out :: rest, mail, next, ok, held, member => by
+    simp only [postMail] at ok
+    split at ok
+    · cases ok
+    · rename_i mail' sent
+      obtain ⟨h1, m1, c1⟩ := Mail.send_inboxes_persist sent held member
+      obtain ⟨h2, m2, c2⟩ := postMail_inboxes_persist postage refund depth rest mail' next ok h1 m1
+      exact ⟨h2, m2, c2.trans c1⟩
+
+/-- The mail a continuation leaves is anchored and keeps every inbox of the seed. -/
+theorem continueMessage_mail {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {message : Inbox.Message} {seed mail : Mail config snapshot} {run outcome : Outcome} {spent : Nat}
+    (continued : continueMessage config snapshot message seed run = (outcome, mail, spent))
+    (anchored : Mail.Anchored seed) :
+    Mail.Anchored mail ∧ (∀ held ∈ seed.inboxes, ∃ held' ∈ mail.inboxes, held'.cell = held.cell) ∧
+      mail.closed = seed.closed ∧ mail.refunds = seed.refunds := by
+  rcases continueMessage_cases continued with ⟨_, rfl, _⟩ | ⟨_, _, rfl, _⟩ | ⟨_, _, _, _, _, _, _, _, _, posted⟩
+  · exact ⟨anchored, fun held member => ⟨held, member, rfl⟩, rfl, rfl⟩
+  · exact ⟨anchored, fun held member => ⟨held, member, rfl⟩, rfl, rfl⟩
+  · obtain ⟨c, r⟩ := postMail_keeps _ _ _ _ _ _ posted
+    exact ⟨postMail_anchored _ _ _ _ _ _ posted anchored, postMail_inboxes_persist _ _ _ _ _ _ posted, c, r⟩
 
 theorem forward_anchored {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes} :
     ∀ (reference : Option Nat) (queued : List Inbox.Message) (mail : Mail config snapshot),
@@ -1179,7 +1660,7 @@ theorem Invocation.retention_cells_have_payer {rootBytes : Bytes → Digest} {co
       invoked.execExact (by simp) (by intro _ _ h; cases h) (by intro _ h; cases h)
   have anchored : Mail.Anchored invoked.mail :=
     postControls_anchored height _ _ _ invoked.mailExact
-      (postMail_anchored request.postage request.account _ _ _ invoked.sentExact Mail.empty_anchored)
+      (postMail_anchored request.postage request.account 0 _ _ _ invoked.sentExact Mail.empty_anchored)
   apply cellsPaid_of_posts
   intro post member live
   have inPosts := member
@@ -1245,8 +1726,9 @@ theorem MessageDelivery.retention_cells_have_payer {rootBytes : Bytes → Digest
       cases member
     · rw [delivered.seedExact.2.2.2.2.1] at member
       cases member
+  obtain ⟨sentAnchored, sentPersist, _, _⟩ := continueMessage_mail delivered.continued seedAnchored
   have anchored : Mail.Anchored delivered.mail := by
-    have := forward_anchored delivered.outcome.reference delivered.slot.queued delivered.seed seedAnchored
+    have := forward_anchored delivered.outcome.reference delivered.slot.queued delivered.sent sentAnchored
     rw [delivered.forwarded] at this
     exact this
   have mailIn : ∀ post ∈ delivered.mail.posts, post ∈ delivered.posts := by
@@ -1260,9 +1742,7 @@ theorem MessageDelivery.retention_cells_have_payer {rootBytes : Bytes → Digest
   · rcases List.mem_append.mp inFront with inOutcome | inMail
     · rcases hout : delivered.outcome with ⟨result, journal⟩ | reason
       · rw [hout] at inOutcome
-        have ran := delivered.outcomeExact
-        rw [hout] at ran
-        have read := runMessage_read ran
+        have read := runMessage_read (delivered.ran hout)
         obtain ⟨entry, entryIn, state, shape⟩ := Journal.posts_state journal config snapshot post inOutcome
         have held : objectAt config (afterPosts snapshot delivered.posts) entry.object = some entry.record := by
           rw [objectAt_afterPosts config snapshot delivered.posts entry.object
@@ -1295,11 +1775,12 @@ theorem MessageDelivery.retention_cells_have_payer {rootBytes : Bytes → Digest
           simp only [List.map_cons, List.cons.injEq, Prod.mk.injEq] at seeded
           obtain ⟨⟨hs, ht, _⟩, _⟩ := seeded
           have firstIn : first ∈ delivered.seed.inboxes := by rw [hl]; exact List.mem_cons_self ..
+          obtain ⟨kept, keptIn, keptCell⟩ := sentPersist first firstIn
           have persisted := forward_inboxes_persist delivered.outcome.reference delivered.slot.queued
-            delivered.seed first firstIn
+            delivered.sent kept keptIn
           rw [delivered.forwarded] at persisted
           obtain ⟨held, hm, hc⟩ := persisted
-          refine ⟨held, hm, hc.trans ?_⟩
+          refine ⟨held, hm, (hc.trans keptCell).trans ?_⟩
           unfold HeldInbox.cell
           rw [hs, ht]
       obtain ⟨held, hm, hcell⟩ := inboxCell
@@ -1340,6 +1821,8 @@ theorem MessageDelivery.retention_cells_have_payer {rootBytes : Bytes → Digest
 #assert_axioms Mail.send_anchored
 #assert_axioms postMail_anchored
 #assert_axioms forward_anchored
+#assert_axioms postMail_inboxes_persist
+#assert_axioms continueMessage_mail
 #assert_axioms forward_inboxes_persist
 #assert_axioms Mail.cells_have_payer
 #assert_axioms Mail.send_keeps
