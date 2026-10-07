@@ -115,8 +115,11 @@ pub(crate) fn framed_payload<'a>(reply: &'a [u8], opcode: u8, tag: &[u8]) -> io:
     Ok(&reply[5..])
 }
 
+pub(crate) const BEGIN_ACTIVE_MARKER: &str = "lifecycle-begin-v3-active.json";
+pub(crate) const BEGIN_INGRESS_FILE: &str = "begin-v3.bin";
+
 fn hold_begin_attempt(parent: &Path, active: &[u8]) -> io::Result<()> {
-    write_new(parent, "lifecycle-begin-v3-active.json", active)?;
+    write_new(parent, BEGIN_ACTIVE_MARKER, active)?;
     Ok(())
 }
 
@@ -474,7 +477,7 @@ pub(crate) fn submit_once(
     let reply = operator.invoke(67, &pair)?;
     write_new(attempt_dir, "op67-frame.bin", &reply)?;
     let ingress = framed_payload(&reply, 67, BEGIN_TAG)?.to_vec();
-    write_new(attempt_dir, "begin-v3.bin", &ingress)?;
+    write_new(attempt_dir, BEGIN_INGRESS_FILE, &ingress)?;
     let marker = json!({
         "protocol":"mini-spk-launch-begin-submit-requested-v1",
         "clientOperationId":client_operation_id,
@@ -523,6 +526,26 @@ pub(crate) fn submit_once(
         accepted_count: receipt("acceptedCount")?,
         world_root: receipt("worldRoot")?,
     })
+}
+
+/// Op23 after an uncertain op22: the exact retained v3 BEGIN only. The
+/// receipt is historical evidence and can never arm a CLAIM or a launch.
+pub(crate) fn recover_begin_receipt_only(
+    operator: &PrivateOperator,
+    attempt_dir: &Path,
+) -> io::Result<crate::lifecycle_receipt_lookup::RecoveredReceipt> {
+    let ingress = crate::lifecycle_receipt_lookup::retained_submitted_ingress(
+        attempt_dir,
+        BEGIN_ACTIVE_MARKER,
+        "op66-requested.json",
+        "op22-requested.json",
+        "mini-spk-launch-begin-submit-requested-v1",
+        BEGIN_INGRESS_FILE,
+    )?;
+    if !ingress.starts_with(BEGIN_TAG) {
+        return Err(invalid("v3 retained BEGIN frame refused"));
+    }
+    crate::lifecycle_receipt_lookup::lookup_retained(operator, attempt_dir, 23, &ingress)
 }
 
 #[cfg(test)]

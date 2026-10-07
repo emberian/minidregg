@@ -10,10 +10,12 @@
 //!
 //! Wire (CONTRACT-V4-WIRE): op66 plan / op67 assemble / op22 submit /
 //! op23 receipt-only lookup. Uncertainty is never resubmitted.
-#![allow(dead_code)] // The retry lookup arm is reached only by operator recovery.
-
 use crate::dispatch_author::SignerPin;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
+use crate::lifecycle_receipt_lookup::{
+    lookup_retained, outcome_receipt, retained, retained_submitted_ingress, RecoveredReceipt,
+    OUTCOME_TAG,
+};
 use crate::lifecycle_v3_native::{
     decimal, framed_payload, hex, lowercase_hex, sign_pinned_slots, text, AcceptedLaunchBegin,
     LaunchBeginAction,
@@ -23,9 +25,9 @@ use crate::resident_launch::SourceBoundLaunch;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::fs::{self, DirBuilder, File, OpenOptions};
-use std::io::{self, Read};
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::fs::{self, DirBuilder};
+use std::io;
+use std::os::unix::fs::DirBuilderExt;
 use std::path::Path;
 
 const MAX_FRAME: usize = 12_102_760;
@@ -46,7 +48,6 @@ pub(crate) const RECOVERY_INGRESS_TAG: &[u8] =
     b"DREGG/APPLICATION/FAILED-START-RECOVERY-INGRESS/v1";
 /// Kernel/ApplicationFailedCreateRetryEvidence.lean:33-35 (selectorCodec frame).
 pub(crate) const SELECTOR_TAG: &[u8] = b"DREGG/APPLICATION/FAILED-CREATE-RETRY-SELECTOR/v1";
-pub(crate) const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v4";
 
 /// Host inspect kinds (CONTRACT-V4-WIRE) and the `type` values
 /// Host/ApplicationLifecycleRetryBeginV4Inspection.lean returns.
@@ -264,34 +265,6 @@ pub(crate) fn unit_generation(unit: &str, app: u64) -> io::Result<u64> {
     generation
         .parse::<u64>()
         .map_err(|_| invalid("resident unit generation exceeds range"))
-}
-
-fn retained(path: &Path, max: u64) -> io::Result<Vec<u8>> {
-    let metadata = fs::symlink_metadata(path)?;
-    if !metadata.is_file()
-        || metadata.file_type().is_symlink()
-        || metadata.nlink() != 1
-        || metadata.uid() != unsafe { libc::geteuid() }
-        || metadata.permissions().mode() & 0o777 != 0o600
-        || metadata.len() == 0
-        || metadata.len() > max
-    {
-        return Err(invalid("failed-START recovery artifact identity refused"));
-    }
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let opened = file.metadata()?;
-    if opened.dev() != metadata.dev() || opened.ino() != metadata.ino() {
-        return Err(invalid("failed-START recovery artifact changed"));
-    }
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.by_ref().take(max + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != metadata.len() {
-        return Err(invalid("failed-START recovery artifact length changed"));
-    }
-    Ok(bytes)
 }
 
 /// Pure choice. Continue never retries; a create retries only when the
@@ -574,25 +547,6 @@ impl FixedRetryBeginSigners {
     }
 }
 
-fn outcome_receipt(outcome: &Value, confirmation: &str) -> io::Result<[String; 4]> {
-    if text(outcome, "type")? != "confirmed" || text(outcome, "confirmation")? != confirmation {
-        return Err(invalid("v4 retry outcome confirmation refused"));
-    }
-    let receipt = |name| -> io::Result<String> {
-        let value = text(outcome, name)?;
-        if !decimal(value) {
-            return Err(invalid("v4 retry receipt noncanonical"));
-        }
-        Ok(value.to_owned())
-    };
-    Ok([
-        receipt("transactionId")?,
-        receipt("eventId")?,
-        receipt("acceptedCount")?,
-        receipt("worldRoot")?,
-    ])
-}
-
 /// Single v4 author/assemble/submit attempt. The request marker is durable
 /// before the first current-image call; uncertain results are never retried.
 #[allow(clippy::too_many_arguments)]
@@ -747,91 +701,11 @@ pub(crate) fn submit_once(
     })
 }
 
-/// Historical receipt only. It cannot arm a CLAIM or a physical launch.
-pub(crate) struct RecoveredRetryReceipt {
-    pub transaction_id: String,
-    pub event_id: String,
-    pub accepted_count: String,
-    pub world_root: String,
-    pub inspection_name: String,
-    pub inspection_sha256: String,
-}
-
-/// Reads the retained one-shot attempt and returns its exact submitted
-/// ingress after checking the active marker, the op66 marker and the submit
-/// marker. Never assembles, signs or chooses a new ingress.
-pub(crate) fn retained_submitted_ingress(
-    attempt_dir: &Path,
-    active_marker: &str,
-    prepare_marker: &str,
-    submit_marker: &str,
-    submit_protocol: &str,
-    ingress_file: &str,
-) -> io::Result<Vec<u8>> {
-    private_dir(attempt_dir)?;
-    let parent = attempt_dir
-        .parent()
-        .ok_or_else(|| invalid("v4 retry retained parent absent"))?;
-    private_dir(parent)?;
-    if retained(&parent.join(active_marker), 4096)?
-        != retained(&attempt_dir.join(prepare_marker), 4096)?
-    {
-        return Err(invalid("v4 retry active marker differs from attempt"));
-    }
-    let marker: Value = serde_json::from_slice(&retained(&attempt_dir.join(submit_marker), 4096)?)?;
-    let ingress = retained(&attempt_dir.join(ingress_file), MAX_FRAME as u64)?;
-    if text(&marker, "protocol")? != submit_protocol
-        || text(&marker, "ingressSha256")? != hex(&Sha256::digest(&ingress))
-    {
-        return Err(invalid("v4 retry original submit marker differs"));
-    }
-    Ok(ingress)
-}
-
-/// Read-only lookup of one retained exact ingress: opcode `lookup` with the
-/// same bytes the one submit carried. Each probe owns fresh output paths.
-pub(crate) fn lookup_retained(
-    operator: &PrivateOperator,
-    attempt_dir: &Path,
-    lookup: u8,
-    ingress: &[u8],
-) -> io::Result<RecoveredRetryReceipt> {
-    let mut nonce = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut nonce)?;
-    let lookup_dir = attempt_dir.join(format!("op{lookup}-lookup-{}", hex(&nonce)));
-    DirBuilder::new().mode(0o700).create(&lookup_dir)?;
-    let reply = operator.invoke(lookup, ingress)?;
-    write_new(&lookup_dir, "frame.bin", &reply)?;
-    let payload = framed_payload(&reply, lookup, OUTCOME_TAG)?;
-    let payload_path = write_new(&lookup_dir, "outcome.bin", payload)?;
-    let inspected = operator.tool(
-        "inspect",
-        "outcome",
-        &payload_path,
-        &lookup_dir.join("outcome.json"),
-    )?;
-    let view: Value = serde_json::from_slice(&inspected)?;
-    let [transaction_id, event_id, accepted_count, world_root] =
-        outcome_receipt(&view, "replayed")?;
-    let lookup_name = lookup_dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| invalid("v4 retry lookup name absent"))?;
-    Ok(RecoveredRetryReceipt {
-        transaction_id,
-        event_id,
-        accepted_count,
-        world_root,
-        inspection_name: format!("{lookup_name}/outcome.json"),
-        inspection_sha256: hex(&Sha256::digest(&inspected)),
-    })
-}
-
 /// Op23 after an uncertain op22: the exact retained v4 BEGIN only.
 pub(crate) fn recover_begin_receipt_only(
     operator: &PrivateOperator,
     attempt_dir: &Path,
-) -> io::Result<RecoveredRetryReceipt> {
+) -> io::Result<RecoveredReceipt> {
     let ingress = retained_submitted_ingress(
         attempt_dir,
         ACTIVE_MARKER,
@@ -1007,7 +881,8 @@ mod tests {
         let sha = hex(&Sha256::digest(&ingress));
         let write = |path: std::path::PathBuf, bytes: &[u8]| {
             use std::io::Write;
-            let mut file = OpenOptions::new()
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut file = std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .mode(0o600)

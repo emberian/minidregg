@@ -4,8 +4,6 @@
 //! claim consumes the one-use retry token; it never clears the v3
 //! first-attempt marker. Only a fresh op26 committed projection can arm the
 //! physical launch, exactly as in v3.
-#![allow(dead_code)] // The op27 arm is reached only by operator recovery.
-
 use crate::dispatch_author::SignerPin;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::hostd::VerifiedBegin;
@@ -14,9 +12,9 @@ use crate::lifecycle_v3_native::{
     decimal, framed_payload, hex, lowercase_hex, sign_pinned_slots, text, AcceptedLaunchBegin,
     LaunchBeginAction,
 };
+use crate::lifecycle_receipt_lookup::{lookup_retained, retained_submitted_ingress, RecoveredReceipt};
 use crate::lifecycle_v4_retry_native::{
-    checked_retry_fields, decimal_predecessor, encode_nat_decimal, lookup_retained,
-    retained_submitted_ingress, RecoveredRetryReceipt, RetrySelection, BEGIN_TAG,
+    checked_retry_fields, decimal_predecessor, encode_nat_decimal, RetrySelection, BEGIN_TAG,
 };
 use crate::operation_ledger::allocate_operation_id;
 use crate::resident_launch::SourceBoundLaunch;
@@ -508,7 +506,7 @@ fn checked_assembled(
 pub(crate) fn recover_claim_receipt_only(
     operator: &PrivateOperator,
     attempt_dir: &Path,
-) -> io::Result<RecoveredRetryReceipt> {
+) -> io::Result<RecoveredReceipt> {
     let ingress = retained_submitted_ingress(
         attempt_dir,
         ACTIVE_MARKER,
