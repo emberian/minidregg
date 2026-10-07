@@ -1674,16 +1674,18 @@ def Migration.applied {config : Config} {pin : Digest} {name : String} (migratio
       | _ => none,
     migration.accepted.source.assumptions⟩
 
-/-- Run a migration on a state datum within `ticks`: the application must check,
-and the run must finish with a value. -/
+/-- Run a migration on a state datum within `ticks`, under the segment limits every run
+gets (`segmentLimits`, from the fresh start): the application must check, and the run must
+finish with a value. -/
 def runMigration (config : Config) {pin : Digest} {name : String} (migration : Migration config pin name)
     (ticks : Nat) (value : Data) : Except Refusal Data :=
   match check (migration.applied value) [] config.typeFuel with
   | none => .error (.migrationFault "the state does not type at the migration's domain")
   | some _ =>
-    match runBounded config.limits ticks (initial (migration.applied value).erase) with
+    let start := initial (migration.applied value).erase
+    match runBounded (segmentLimits config start) ticks start with
     | .finished _ finished =>
-      match ObjectiveBendDemandData.complete config.limits config.planBudget finished with
+      match ObjectiveBendDemandData.complete (segmentLimits config start) config.planBudget finished with
       | .ok result => .ok result.value
       | .error (failure, _) => .error (.migrationFault s!"result extraction: {reprStr failure}")
     | .suspended _ _ => .error (.migrationFault "it exhausted its declared envelope")
