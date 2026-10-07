@@ -7914,7 +7914,7 @@ def run (arguments : List String) : IO UInt32 := do
             throw (IO.userError "reserve birth call exceeds host frame bound")
           writeBytes output call
           pure 0
-      | "plan-ungated", [input, output] =>
+      | "plan-ungated", ["--test-harness", input, output] =>
           -- Operator-local test tooling: plan the invoke draft of a client intent (`intent.bin`)
           -- against the Store as it is NOW (each target's expected root re-read from its current
           -- cell), WITHOUT the served path's observation and law gates (`NativeHost.prepareLoaded`,

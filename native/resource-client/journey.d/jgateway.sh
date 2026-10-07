@@ -162,7 +162,7 @@ row "a call B signed under the open law does not land after the gateway law (its
 # (`minidregg-host plan-ungated`, operator-local), B signs each slot with its own key, the Host
 # assembles it, and the raw call goes to the live receiver. The draft is B's held intent; the
 # planner re-reads each target's expected root from the current cell.
-run plan "$HOST" "$CONFIG" plan-ungated "$WS_B/attempts/jgw-b-signed/intent.bin" "$D/plan.bin"
+run plan "$HOST" "$CONFIG" plan-ungated --test-harness "$WS_B/attempts/jgw-b-signed/intent.bin" "$D/plan.bin"
 run plan-view "$HOST" "$CONFIG" inspect plan "$D/plan.bin" "$D/plan.json"
 signed=1
 if [ "$(rc plan)" = 0 ] && [ "$(rc plan-view)" = 0 ]; then
