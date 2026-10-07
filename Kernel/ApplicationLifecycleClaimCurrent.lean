@@ -23,9 +23,16 @@ open Minidregg.Kernel.ApplicationLifecycleClaim
 
 set_option autoImplicit false
 
+open Minidregg.Compiler.ServedBasis (Ground)
+
 abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Ambient := DeclaredResourceController.Ambient
-abbrev Durable := DeclaredResourceController.Durable
+
+/-- The keys a claim's current admission reads: the DRC invocation's transaction
+id and operation marker (a light basis declares at least these). -/
+def keys (ingress : ApplicationLifecycleClaimIngress.Ingress) : DurableView.Keys :=
+  DeclaredResourceController.invocationKeys ingress.domain ingress.semantics
+    (command ingress.domain ingress.semantics ingress.source)
 
 def appState (app : Nat) (cell : PackedCell CanonicalCellRegistry.registry) :
     Option ApplicationGrain.State := do
@@ -39,11 +46,11 @@ def appState (app : Nat) (cell : PackedCell CanonicalCellRegistry.registry) :
 available solely for historical BEGIN replay at the original prefix. -/
 def linkedCurrentPolicy {F : Type} [Field F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (ambient : Ambient) (durable : Durable) (source : Source)
-    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+    (ambient : Ambient) (ground : Ground deployment) (source : Source)
+    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
       (command deployment.domain profile.semantics source)) : Bool :=
-  let auth := prepared.authority.snapshot.logical
-  let directory := prepared.directory.directory
+  let auth := ground.authority.logical
+  let directory := ground.directory
   let appPolicy := do
     let head ← CredentialAuthorityDomain.headAt auth ⟨source.begin.source.app⟩
     let policy ← CanonicalCellRegistry.loadPolicySource deployment.domain directory head.address
@@ -72,13 +79,13 @@ def linkedCurrentPolicy {F : Type} [Field F]
 
 def observationRequest {F : Type} [Field F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (ambient : Ambient) (durable : Durable) (source : Source)
-    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+    (ambient : Ambient) (ground : Ground deployment) (source : Source)
+    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
       (command deployment.domain profile.semantics source))
     (resource : Nat) (capability : CapabilityId) (root : Digest) : Request .object :=
   let target : DeclaredResourceController.Target :=
     ⟨.object, resource, capability, 1, root, .content ⟨[]⟩, none, none, none⟩
-  { DeclaredResourceController.requestFor prepared.authority.snapshot profile.semantics
+  { DeclaredResourceController.requestFor ground.authority profile.semantics
       ambient (command deployment.domain profile.semantics source) target root with
     verb := .observeObject }
 
@@ -88,35 +95,35 @@ def observationGuard (resource : Nat)
 
 structure CheckedRead {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (ambient : Ambient) (durable : Durable) (source : Source)
-    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+    (ambient : Ambient) (ground : Ground deployment) (source : Source)
+    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
       (command deployment.domain profile.semantics source))
     (resource : Nat) (capability : CapabilityId) (root : Digest)
     (envelope : List UInt8) where
   private mk ::
   selected : ResourceObservationAdmission.Prepared
     (DeclaredResourceController.readContext prepared) profile
-    (observationRequest deployment profile ambient durable source prepared
+    (observationRequest deployment profile ambient ground source prepared
       resource capability root)
     (DeclaredResourceController.operationMarker deployment.domain profile.semantics
       (command deployment.domain profile.semantics source))
     capability source.canonicalBytes
   checked : ResourceObservationAdmission.Checked selected envelope
   current : (observationGuard resource selected.observed.before).expectedRoot =
-    durable.snapshot.model.roots
+    ground.view.model.roots
       (observationGuard resource selected.observed.before).cellId
 
 def checkRead {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
-    (durable : Durable) (source : Source)
-    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+    (ground : Ground deployment) (source : Source)
+    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
       (command deployment.domain profile.semantics source))
     (resource : Nat) (capability : CapabilityId) (root : Digest)
     (envelope : List UInt8) :
-    IO (Except String (CheckedRead deployment profile ambient durable source prepared
+    IO (Except String (CheckedRead deployment profile ambient ground source prepared
       resource capability root envelope)) := do
-  let wanted := observationRequest deployment profile ambient durable source prepared
+  let wanted := observationRequest deployment profile ambient ground source prepared
     resource capability root
   let context := DeclaredResourceController.readContext prepared
   let marker := DeclaredResourceController.operationMarker deployment.domain profile.semantics
@@ -129,9 +136,9 @@ def checkRead {F : Type} [Field F] [DecidableEq F]
       | .error _ => return .error "signed lifecycle claim observation refused"
       | .ok checked =>
           have current : (observationGuard resource selected.observed.before).expectedRoot =
-              durable.snapshot.model.roots
+              ground.view.model.roots
                 (observationGuard resource selected.observed.before).cellId :=
-            PhysicalResourceReadGuard.current context.directory resource
+            Ground.physicalCurrent context resource
               selected.observed.before selected.observed.present
           return .ok ⟨selected, checked, current⟩
 
@@ -140,23 +147,23 @@ management law, two separately signed observations and exact old physical
 roots. Historical BEGIN admission is a distinct prerequisite in ClaimHistory. -/
 structure Accepted {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (ambient : Ambient) (durable : Durable)
+    (ambient : Ambient) (ground : Ground deployment)
     (ingress : ApplicationLifecycleClaimIngress.Ingress) where
   sourceValid : ingress.source.valid = true
   profileExact : ingress.domain = deployment.domain ∧
     ingress.semantics = profile.semantics
   boundary : ingress.source.currentWorldRoot =
-    durable.worldRoot
-  prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+    ground.worldRoot
+  prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
     (command deployment.domain profile.semantics ingress.source)
-  linked : linkedCurrentPolicy deployment profile ambient durable ingress.source prepared = true
+  linked : linkedCurrentPolicy deployment profile ambient ground ingress.source prepared = true
   shape : DeclaredResourceController.PhysicalShape prepared
-  appRead : CheckedRead deployment profile ambient durable ingress.source prepared
+  appRead : CheckedRead deployment profile ambient ground ingress.source prepared
     ingress.source.begin.source.app ingress.source.appObserveCapability
     ingress.source.currentAppRoot ingress.appObservationEnvelope
   appExact : appState ingress.source.begin.source.app appRead.selected.observed.before =
     some ingress.source.before
-  packageRead : CheckedRead deployment profile ambient durable ingress.source prepared
+  packageRead : CheckedRead deployment profile ambient ground ingress.source prepared
     ingress.source.begin.source.packageManifest ingress.source.packageObserveCapability
     ingress.source.currentPackageRoot ingress.packageObservationEnvelope
   packageReadOnly :
@@ -170,50 +177,50 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
 
 theorem stale_app_root_has_no_admission {F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-    {ambient : Ambient} {durable : Durable}
+    {ambient : Ambient} {ground : Ground deployment}
     {ingress : ApplicationLifecycleClaimIngress.Ingress}
     (stale : ∀ before : PackedCell CanonicalCellRegistry.registry,
       ingress.source.currentAppRoot = before.payload.root →
         (observationGuard ingress.source.begin.source.app before).expectedRoot ≠
-          durable.snapshot.model.roots
+          ground.view.model.roots
             (observationGuard ingress.source.begin.source.app before).cellId) :
-    ¬ Nonempty (Accepted deployment profile ambient durable ingress) := by
+    ¬ Nonempty (Accepted deployment profile ambient ground ingress) := by
   rintro ⟨accepted⟩
   exact stale accepted.appRead.selected.observed.before
     accepted.appRead.selected.observed.rootExact accepted.appRead.current
 
 theorem stale_image_boundary_has_no_admission {F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-    {ambient : Ambient} {durable : Durable}
+    {ambient : Ambient} {ground : Ground deployment}
     {ingress : ApplicationLifecycleClaimIngress.Ingress}
     (stale : ingress.source.currentWorldRoot ≠
-      durable.worldRoot) :
-    ¬ Nonempty (Accepted deployment profile ambient durable ingress) := by
+      ground.worldRoot) :
+    ¬ Nonempty (Accepted deployment profile ambient ground ingress) := by
   rintro ⟨accepted⟩
   exact stale accepted.boundary
 
 def admitLoaded {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
-    (durable : Durable) (ingress : ApplicationLifecycleClaimIngress.Ingress) :
-    IO (Except String (Accepted deployment profile ambient durable ingress)) := do
+    (ground : Ground deployment) (ingress : ApplicationLifecycleClaimIngress.Ingress) :
+    IO (Except String (Accepted deployment profile ambient ground ingress)) := do
   let source := ingress.source
   if sourceValid : source.valid = true then
     if profileExact : ingress.domain = deployment.domain ∧
         ingress.semantics = profile.semantics then
       if boundary : source.currentWorldRoot =
-          durable.worldRoot then
+          ground.worldRoot then
         let expected := command deployment.domain profile.semantics source
         unless ingress.signed.commandBytes ==
             DeclaredResourceController.commandCodec.encode expected do
           return .error "signed claim command differs from source"
         match ← DeclaredResourceController.prepareAuthenticated deployment profile ambient native
-            durable expected ingress.signed.authorityEnvelope with
+            ground expected ingress.signed.authorityEnvelope with
         | .error _ => return .error "current lifecycle claim preparation refused"
         | .ok prepared =>
-            if linked : linkedCurrentPolicy deployment profile ambient durable source prepared = true then
+            if linked : linkedCurrentPolicy deployment profile ambient ground source prepared = true then
               if shape : DeclaredResourceController.PhysicalShape prepared then
-                let appResult ← checkRead deployment profile ambient native durable source
+                let appResult ← checkRead deployment profile ambient native ground source
                   prepared source.begin.source.app source.appObserveCapability
                   source.currentAppRoot ingress.appObservationEnvelope
                 match appResult with
@@ -221,7 +228,7 @@ def admitLoaded {F : Type} [Field F] [DecidableEq F]
                 | .ok appRead =>
                     if appExact : appState source.begin.source.app
                         appRead.selected.observed.before = some source.before then
-                      let packageResult ← checkRead deployment profile ambient native durable
+                      let packageResult ← checkRead deployment profile ambient native ground
                         source prepared source.begin.source.packageManifest
                         source.packageObserveCapability source.currentPackageRoot
                         ingress.packageObservationEnvelope
