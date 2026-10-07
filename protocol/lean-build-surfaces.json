@@ -3911,7 +3911,7 @@
     {
       "module": "Host.FnSelectiveReleaseAuthoring",
       "path": "Host/FnSelectiveReleaseAuthoring.lean",
-      "sha256": "90aa1c4990afd9091a13dd2635b1f87bcd786ec62adb490f8ece0e9cb563815c",
+      "sha256": "cb2efba69c1c444b95f79b13c3680020209a758c2a1ce23d464d230c3f20fee5",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -3932,7 +3932,7 @@
     {
       "module": "Host.FnSelectiveReleaseSourceAuthoring",
       "path": "Host/FnSelectiveReleaseSourceAuthoring.lean",
-      "sha256": "339c0e9669b6cb3e05cfdeb9eea4d11b16cabbfd15f236787122908556c6dd60",
+      "sha256": "98397385b724f265a505dd34306d367697c00484b9ed5d0625c0bc75bff553a0",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6123,7 +6123,7 @@
     {
       "module": "Kernel.FnSelectiveReleaseSourceAuthority",
       "path": "Kernel/FnSelectiveReleaseSourceAuthority.lean",
-      "sha256": "c97c6d54ecfb4c5a886496574dc46bef225b843c3748a4218c56553519c5db44",
+      "sha256": "f6eb6e0e3c1c1067a6c42a1fd4bda2c9a13572b08f23ca05a12779fe70cc5f28",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6137,7 +6137,7 @@
     {
       "module": "Kernel.FnSelectiveReleaseSourceReceiver",
       "path": "Kernel/FnSelectiveReleaseSourceReceiver.lean",
-      "sha256": "09d9c9f21499feaf5181fb7bb51418e468e347db5066140a1f0c4beaeb4f8835",
+      "sha256": "0eebb657d5a3b36ab6f002c6daadc8b0d965ad5d87108e167c8c9e1d8bbb8600",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
