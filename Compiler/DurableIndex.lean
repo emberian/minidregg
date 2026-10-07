@@ -25,6 +25,7 @@ import Theory.AuthTrieRange
 import Compiler.Sp800185Cshake256
 import Kernel.WorldRoot
 import Compiler.DurableReceiverCodec
+import Theory.AssertCompiled
 
 namespace Minidregg.Compiler.DurableIndex
 
@@ -207,7 +208,8 @@ theorem nullifierKey_ne_transactionKey (nullifier : Kernel.DurableDataIntent.Sta
     (transactionId : Kernel.DurableDataIntent.TransactionId) :
     nullifierKey nullifier ≠ transactionKey transactionId := by
   intro same
-  exact absurd (congrArg IndexKey.family same) (by decide)
+  have families := congrArg IndexKey.family same
+  simp [nullifierKey, transactionKey, Family.spent, Family.transaction] at families
 
 /-- The value of a family-0/1 row: the height, as a canonical natural. -/
 def heightValue (height : Nat) : List UInt8 := StreamCodec.nat.encode height
@@ -219,7 +221,9 @@ def heightOf (value : List UInt8) : Option Nat :=
   | _ => none
 
 @[simp] theorem heightOf_heightValue (height : Nat) : heightOf (heightValue height) = some height := by
-  simp [heightOf, heightValue, StreamCodec.nat.decodePrefix_encode height []]
+  have decoded := StreamCodec.nat.decodePrefix_encode height []
+  rw [List.append_nil] at decoded
+  simp [heightOf, heightValue, decoded]
 
 /-! ## The verifier and its answers -/
 
@@ -300,13 +304,10 @@ def Row.digest : Row → Digest
   | .branch l r => dig (.branch l r)
 
 /-- Bits packed eight to an octet, most significant first (the last octet zero-padded). -/
-def packBits : List Bool → List UInt8
-  | [] => []
-  | bits =>
-      let octet := (bits.take 8).foldl (fun acc bit => acc * 2 + (if bit then 1 else 0)) (0 : Nat)
-      UInt8.ofNat (octet * 2 ^ (8 - (bits.take 8).length)) :: packBits (bits.drop 8)
-termination_by bits => bits.length
-decreasing_by simp_wf; rename_i h; cases bits <;> simp_all; omega
+def packBits (bits : List Bool) : List UInt8 :=
+  (List.range ((bits.length + 7) / 8)).map fun i =>
+    let chunk := (bits.drop (8 * i)).take 8
+    UInt8.ofNat (chunk.foldl (fun acc bit => acc * 2 + (if bit then 1 else 0)) (0 : Nat) * 2 ^ (8 - chunk.length))
 
 /-- The Store key of the row at a bit prefix: its length, then its packed bits. -/
 def rowKey (prefixBits : List Bool) : List UInt8 :=
@@ -427,7 +428,7 @@ def set (rows : List Bool → Option Row) (root : Digest) (k : IndexKey) (value 
     match opening.terminal, value with
     | .empty, none => none
     | .empty, some v => some (.leaf k v, [(bits.take depth, .leaf k v)])
-    | .leaf other otherValue, none =>
+    | .leaf other _, none =>
         if other = k then some (.empty, []) else none
     | .leaf other otherValue, some v =>
         if other = k then
@@ -510,6 +511,77 @@ def revealRows (rows : List Bool → Option Row) (root : Digest) (p : List Bool)
   if ok : Theory.AuthTrie.revealVerify dig bitsOf 520 root p reveal = true then .ok ⟨reveal, ok⟩
   else .error "index reveal does not reach the authenticated index root (a member is missing or forged)"
 
+/-! ## The incremental set against the canonical root (executed probe)
+
+`set` is not yet proved to compute `rootOf` of the updated map (cv
+01a11741-1af8; `store audit` rebuilds every row version from the records). This
+probe runs a sequence of inserts, updates and deletes — including keys that share
+their family and primary (a 264-bit common prefix), deletes that collapse a leaf
+upward, and a delete of the last member — through `setAll` over in-memory rows,
+and checks after EVERY step that the incremental root is `rootOf` of the logical
+map, that every key's row lookup verifies and answers the map's value, and that
+each family's reveal answers exactly the family's members. -/
+
+namespace Probe
+
+/-- The logical map after setting `k` (`none` deletes). -/
+def modelSet (m : List (IndexKey × List UInt8)) (k : IndexKey) (value : Option (List UInt8)) :
+    List (IndexKey × List UInt8) :=
+  m.filter (·.1 ≠ k) ++ (value.map (k, ·)).toList
+
+def probeKey (family : UInt8) (n : Nat) (secondary : Nat) : IndexKey :=
+  ⟨family, primaryOf family [UInt8.ofNat n], ⟨secondary % 256 ^ 32, Nat.mod_lt _ (by decide)⟩⟩
+
+def keys : List IndexKey :=
+  [probeKey 4 1 0, probeKey 4 1 1, probeKey 4 1 2, probeKey 4 1 3, probeKey 4 1 7,
+   probeKey 4 2 0, probeKey 0 1 0, probeKey 0 2 0, probeKey 0 3 0, probeKey 1 1 0, probeKey 1 9 0]
+
+def ops : List (Nat × Option (List UInt8)) :=
+  (List.range 11).map (fun i => (i, some [UInt8.ofNat i])) ++
+  [(2, some [9, 9]), (6, some [1]), (0, none), (1, none), (2, none), (6, some [2]), (9, none),
+   (0, some [5]), (3, none), (4, none), (5, none), (7, none), (8, none), (10, none), (6, none),
+   (0, none), (1, none), (9, none)]
+
+def familyPrefix (family : UInt8) : List Bool := (bitsOf ⟨family, 0, 0⟩).take 8
+
+def sameSet (a b : List (IndexKey × List UInt8)) : Bool :=
+  a.length == b.length && a.all (b.contains ·) && b.all (a.contains ·)
+
+/-- One step checked: the root, every key's verified lookup, every family's reveal. -/
+def stepOk (rows : List Bool → Option Row) (root : Digest) (model : List (IndexKey × List UInt8)) : Bool :=
+  root == rootOf model &&
+  keys.all (fun k => match lookupRows rows root k with
+    | .ok answer => answer.value == (model.find? (·.1 = k)).map (·.2)
+    | .error _ => false) &&
+  [0, 1, 4].all (fun family : UInt8 => match revealRows rows root (familyPrefix family) with
+    | .ok revealed => sameSet revealed.members (model.filter (·.1.family = family))
+    | .error _ => false)
+
+def run : List (Nat × Option (List UInt8)) → List (List Bool × Row) → Digest →
+    List (IndexKey × List UInt8) → Bool
+  | [], _, root, model => model.isEmpty == (root == emptyDigest)
+  | (i, value) :: rest, written, root, model =>
+      let k := keys.getD i (probeKey 0 0 0)
+      match setAll (overlay (fun _ => none) written) root [(k, value)] with
+      | .error _ => false
+      | .ok (root', rows) =>
+          let written' := rows ++ written
+          let model' := modelSet model k value
+          stepOk (overlay (fun _ => none) written') root' model' && run rest written' root' model'
+
+theorem incremental_matches_canonical : run ops [] emptyDigest [] = true := by native_decide
+
+/-- Rows read against a root they do not reach (here a forged one-leaf root
+naming another value) are refused, both by the lookup and by the reveal — never
+answered as the rows say. -/
+theorem wrong_root_refused :
+    (match setAll (overlay (fun _ => none) []) emptyDigest [(probeKey 4 1 0, some [1])] with
+      | .ok (_, rows) => (lookupRows (overlay (fun _ => none) rows) (dig (.leaf (probeKey 4 1 0) [2])) (probeKey 4 1 0)).toOption.isNone &&
+          (revealRows (overlay (fun _ => none) rows) (dig (.leaf (probeKey 4 1 0) [2])) (familyPrefix 4)).toOption.isNone
+      | .error _ => false) = true := by native_decide
+
+end Probe
+
 #assert_axioms key_injective
 #assert_axioms family_disjoint
 #assert_axioms bitsOf_length
@@ -522,5 +594,7 @@ def revealRows (rows : List Bool → Option Row) (root : Digest) (p : List Bool)
 #assert_axioms Answer.sound
 #assert_axioms empty_absent
 #assert_axioms empty_present_refused
+#assert_compiled Probe.incremental_matches_canonical
+#assert_compiled Probe.wrong_root_refused
 
 end Minidregg.Compiler.DurableIndex
