@@ -9,8 +9,7 @@ are each `malformed`; an inner refusal is the answer. The interpreter is
 (`FnWireRoundTrip.decode_encode`, `encode_decode`, and `decodeAll_*`) cover this arm like every
 other. Here: one accept and every malformed case, as named theorems (`decide`, kernel-checked).
 
-`pollReplyAccepted` is the accepted arm of fn's `fnct.consumer.poll-reply`:
-`(:seq (:sized 4 31 346 <fncu cursor>) (:bytes 4 0 max :any))`; `max` is 4294966940, the largest
+`pollReplyGrammar` is fn's `fnct.consumer.poll-reply`; the bytes bound 4294966940 is the largest
 Store event the poll reply carries (fn `docs/operator-internals.md`: the Store frame's u32 less
 the reply's 9 header and 346 cursor octets).
 -/
@@ -67,15 +66,23 @@ theorem sized_encode_refuses_out_of_bounds :
       | .error .malformed => true
       | _ => false) = true := by decide
 
-/-- fn's `fnct.consumer.poll-reply`, accepted arm. -/
-def pollReplyAccepted : Grammar :=
-  .seqCons (.sized 4 31 346 cursorGrammar) <|
-  .seqCons (.bytes 4 0 4294966940 .any) .seqNil
+/-- fn's `fnct.consumer.poll-reply` (FNCT kind 6): `accepted` carries the cursor behind its
+4-octet length (a `sized` region, 31..346 octets) and the record behind its 4-octet length;
+`refused`, `uncertain` and `fault` carry eight zero octets. `Compiler.FnWirePinned` proves it
+is the pinned file's family of that name. -/
+def pollReplyGrammar : Grammar :=
+  .frame [0x46, 0x4e, 0x43, 0x54] 1 6 4294967295 <|
+    .tagArm 1 0 "accepted"
+      (.seqCons (.sized 4 31 346 cursorGrammar) <|
+        .seqCons (.bytes 4 0 4294966940 .any) .seqNil) <|
+    .tagArm 1 1 "refused" (.const (List.replicate 8 0)) <|
+    .tagArm 1 2 "uncertain" (.const (List.replicate 8 0)) <|
+    .tagArm 1 3 "fault" (.const (List.replicate 8 0)) (.tagNil 1)
 
-theorem pollReplyAccepted_wf : pollReplyAccepted.wf = true := by decide
+theorem pollReplyGrammar_wf : pollReplyGrammar.wf = true := by decide
 
 #assert_axioms sizedU16_wf sizedU16Loose_wf sized_accepts sized_refuses_too_short
   sized_refuses_overrun sized_refuses_leftover sized_refuses_length_out_of_bounds
-  sized_refuses_empty sized_encode_refuses_out_of_bounds pollReplyAccepted_wf
+  sized_refuses_empty sized_encode_refuses_out_of_bounds pollReplyGrammar_wf
 
 end Minidregg.Compiler.FnWire
