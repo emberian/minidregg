@@ -155,8 +155,8 @@ run_meta Minidregg.ObjectiveManifest.main {{
 EOF
 }
 
-public_rows() { # public rows pinned for one module (the floor of a scratch copy of it)
-  grep -v '^#' "$manifests/$1.tsv" | cut -f2 | grep -vc '^private ' || true
+public_rows() { # public rows of one module in a run's output (the floor of a scratch copy of it)
+  awk -F'\t' -v m="$2" '$1 == "R" && $4 == m && $3 !~ /^private / { n++ } END { print n + 0 }' "$1"
 }
 
 gate_proofs() {
@@ -223,18 +223,22 @@ gate_proofs() {
       echo "self-test ($run b) scan deleted: FAIL (exit $s)"; head -20 "$tmp/$run-noscan.err"; failed=1
     fi
   done
-  if [ "$planted_c" = 1 ] && [ -s "$tmp/premise.out" ] && "${tool[@]}" expect "$tmp/premise.out" \
+  # (c) and (d) compare the planted copy with the UNPLANTED run of the same tree, not with the pins:
+  # against the pins, every real unpinned change the module's rows reach would count as the plant's
+  # (measured at e92cbf10: three siblings `redefined` by b7/b8 changes, and `--pin` then refused
+  # because this self-test failed, so the pins could never catch up)
+  if [ "$planted_c" = 1 ] && [ -s "$tmp/premise.out" ] && "${tool[@]}" expect "$tmp/premise.out" --against "$tmp/mathlib.out" \
        --changed "$ns_c.admitted_source_semantics=restated" \
-       --floor "$(public_rows Kernel.ObjectiveBendAdmissionSemantics)" >"$tmp/premise.expect"; then
-    echo "self-test (c) planted (_vacuous : False) on admitted_source_semantics: PASS ($(grep -m1 '^expect: ' "$tmp/premise.expect"))"
+       --floor "$(public_rows "$tmp/mathlib.out" Kernel.ObjectiveBendAdmissionSemantics)" >"$tmp/premise.expect"; then
+    echo "self-test (c) planted (_vacuous : False) on admitted_source_semantics: PASS ($(grep -m1 '^expect: ' "$tmp/premise.expect"); $(tail -1 "$tmp/premise.expect"))"
   else
     echo "self-test (c) planted (_vacuous : False) on admitted_source_semantics: FAIL"
     cat "$tmp/premise.expect" 2>/dev/null; head -20 "$tmp/premise.err" 2>/dev/null; failed=1
   fi
-  if [ "$planted_d" = 1 ] && [ -s "$tmp/redefine.out" ] && "${tool[@]}" expect "$tmp/redefine.out" \
+  if [ "$planted_d" = 1 ] && [ -s "$tmp/redefine.out" ] && "${tool[@]}" expect "$tmp/redefine.out" --against "$tmp/theory.out" \
        --changed "$ns_d.lazy_fixed_function=redefined:$ns_d.Evaluates" --allow-downstream \
-       --floor "$(public_rows Theory.ObjectiveBendOpenRecursion)" >"$tmp/redefine.expect"; then
-    echo "self-test (d) redefined Evaluates := True under lazy_fixed_function: PASS ($(grep -m1 '^expect: ' "$tmp/redefine.expect"))"
+       --floor "$(public_rows "$tmp/theory.out" Theory.ObjectiveBendOpenRecursion)" >"$tmp/redefine.expect"; then
+    echo "self-test (d) redefined Evaluates := True under lazy_fixed_function: PASS ($(grep -m1 '^expect: ' "$tmp/redefine.expect"); $(tail -1 "$tmp/redefine.expect"))"
   else
     echo "self-test (d) redefined Evaluates := True under lazy_fixed_function: FAIL"
     cat "$tmp/redefine.expect" 2>/dev/null; head -20 "$tmp/redefine.err" 2>/dev/null; failed=1
