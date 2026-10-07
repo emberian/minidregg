@@ -334,14 +334,21 @@ claim's exact key, message and signature, its error printed. -/
 def receiverVerify : {m : Type → Type} → CredentialSignatureIO.Oracle m → SigQuery →
     m (Except String Bool)
   | _, .live config, claim => do
-      match ← CredentialSignatureIO.verify config claim.publicKey claim.message claim.signature with
+      let answer ← match claim.scheme with
+        | .ed25519 => CredentialSignatureIO.verify config claim.publicKey claim.message claim.signature
+        | .sshsig nameSpace =>
+          CredentialSignatureIO.verifySshsig config claim.publicKey nameSpace claim.message claim.signature
+      match answer with
       | .error reason => pure (.error s!"{repr reason}")
       | .ok verdict => pure (.ok verdict)
   | _, .recorded transcript, claim =>
-      (match CredentialSignatureIO.recordedVerdict transcript claim.publicKey claim.message
-          claim.signature with
-        | .error reason => .error s!"{repr reason}"
-        | .ok verdict => .ok verdict : Except String Bool)
+      (match claim.scheme with
+        | .sshsig _ => .error "a recorded transcript holds Ed25519 verdicts only"
+        | .ed25519 =>
+          match CredentialSignatureIO.recordedVerdict transcript claim.publicKey claim.message
+              claim.signature with
+          | .error reason => .error s!"{repr reason}"
+          | .ok verdict => .ok verdict : Except String Bool)
 
 /-- **What a family's `prepare` receives from the Receiver**: the oracle that
 answered and the vouchers of the claims it accepted, typed by that oracle's
@@ -367,9 +374,9 @@ namespace Received
 def find? (received : Received) (claim : SigQuery) : Option ReceiverSignature :=
   if received.vouchers.vouches claim then some ⟨.receiver received.oracle.source, claim⟩ else none
 
-/-- The Receiver's signature by `publicKey` over `message`, if it vouched for one. -/
+/-- The Receiver's Ed25519 signature by `publicKey` over `message`, if it vouched for one. -/
 def signed? (received : Received) (publicKey message : List UInt8) : Option ReceiverSignature :=
-  (received.vouchers.signed? publicKey message).map fun claim =>
+  (received.vouchers.signed? .ed25519 publicKey message).map fun claim =>
     ⟨.receiver received.oracle.source, claim⟩
 
 theorem find?_some {received : Received} {claim : SigQuery} {signature : ReceiverSignature}
@@ -385,16 +392,17 @@ theorem find?_some {received : Received} {claim : SigQuery} {signature : Receive
 
 theorem signed?_some {received : Received} {publicKey message : List UInt8}
     {signature : ReceiverSignature} (found : received.signed? publicKey message = some signature) :
-    signature.claim ∈ received.vouchers.verified ∧ signature.claim.publicKey = publicKey ∧
+    signature.claim ∈ received.vouchers.verified ∧ signature.claim.scheme = .ed25519 ∧
+      signature.claim.publicKey = publicKey ∧
       signature.claim.message = message ∧ signature.source = .receiver received.oracle.source := by
   unfold signed? at found
-  cases vouched : received.vouchers.signed? publicKey message with
+  cases vouched : received.vouchers.signed? .ed25519 publicKey message with
   | none => rw [vouched] at found; cases found
   | some claim =>
       rw [vouched] at found
       cases found
-      obtain ⟨member, key, frame⟩ := Vouchers.signed?_some vouched
-      exact ⟨member, key, frame, rfl⟩
+      obtain ⟨member, scheme, key, frame⟩ := Vouchers.signed?_some vouched
+      exact ⟨member, scheme, key, frame, rfl⟩
 
 end Received
 
@@ -402,7 +410,7 @@ end Received
 the controller's frame (the encoded signed header) and the envelope's signature
 -- exactly what `verifyNative` hands the oracle. -/
 def controllerClaim (controller : CredentialSignedEnvelopeController.Prepared) : SigQuery :=
-  ⟨controller.key.publicKey, controller.frame, controller.envelope.signature⟩
+  ⟨.ed25519, controller.key.publicKey, controller.frame, controller.envelope.signature⟩
 
 /-- **The claim the Receiver verifies for a signed envelope by `subject`**,
 before any preparation: the subject's current key (a key lookup), the envelope's
@@ -417,7 +425,7 @@ def envelopeClaim (snapshot : Snapshot) (subject : SubjectId) (envelopeBytes : L
   | some key =>
       match CredentialSignedEnvelopeController.envelopeCodec.decode envelopeBytes with
       | none => .error (.envelope .malformedEnvelope)
-      | some envelope => .ok ⟨key.publicKey, envelope.frame, envelope.signature⟩
+      | some envelope => .ok ⟨.ed25519, key.publicKey, envelope.frame, envelope.signature⟩
 
 /-- **A checked signature from the Receiver's verdict.**  The envelope admission
 runs exactly as in `verifyNative` (`prepare`: key selection, footprint, the

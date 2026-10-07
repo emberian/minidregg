@@ -240,10 +240,11 @@ variable {verify : SigQuery → Id (Except String Bool)} (R : Receiver journal v
 
 theorem admitVia_error {reason : Theory.Receiving.Refusal R.Reject R.Fault}
     (noClaims : R.claims env durable ingress = .ok [])
-    (refused : R.admit env durable ingress Vouchers.empty = .error reason) :
+    (refused : R.admit env durable ingress Vouchers.empty = .error reason)
+    (noObserved : R.observations env durable ingress = .ok [] := by rfl) :
     R.admitVia env durable ingress = pure (.error reason) := by
   unfold Receiver.admitVia
-  simp only [noClaims, Receiver.verifyAll, pure_bind]
+  simp only [noClaims, noObserved, Receiver.verifyAll, Receiver.observeAll, pure_bind]
   split
   · rename_i reason' admitted
     rw [refused] at admitted
@@ -256,10 +257,11 @@ theorem admitVia_error {reason : Theory.Receiving.Refusal R.Reject R.Fault}
 theorem admitVia_ok
     (noClaims : R.claims env durable ingress = .ok [])
     (prepares : R.prepare Vouchers.empty env durable (R.command ingress) = .ok prepared)
-    (shaped : R.shape prepared = true) (lawful : R.lawFault prepared = none) :
+    (shaped : R.shape prepared = true) (lawful : R.lawFault prepared = none)
+    (noObserved : R.observations env durable ingress = .ok [] := by rfl) :
     ∃ admission, R.admitVia env durable ingress = pure (.ok admission) := by
   unfold Receiver.admitVia
-  simp only [noClaims, Receiver.verifyAll, pure_bind]
+  simp only [noClaims, noObserved, Receiver.verifyAll, Receiver.observeAll, pure_bind]
   split
   · rename_i reason admitted
     obtain ⟨accepted, ok, -⟩ := R.admit_ok_of noClaims (by simp) prepares shaped lawful
@@ -274,12 +276,13 @@ theorem receive_faulted {fault : R.Fault}
     (decoded : R.decode [] = some ingress) (isFresh : R.replay env durable ingress = none)
     (noClaims : R.claims env durable ingress = .ok [])
     (prepares : R.prepare Vouchers.empty env durable (R.command ingress) = .ok prepared)
-    (shaped : R.shape prepared = true) (faulted : R.lawFault prepared = some fault) :
+    (shaped : R.shape prepared = true) (faulted : R.lawFault prepared = some fault)
+    (noObserved : R.observations env durable ingress = .ok [] := by rfl) :
     R.receive append env durable [] = pure (.refused (.law fault)) := by
   have refused := R.admit_law_refused (vouchers := Vouchers.empty) noClaims (by simp) prepares
     shaped faulted
   unfold Receiver.receive
-  simp only [decoded, isFresh, admitVia_error R noClaims refused]
+  simp only [decoded, isFresh, admitVia_error R noClaims refused noObserved]
   rfl
 
 /-- ... or committed. -/
@@ -287,10 +290,11 @@ theorem receive_lawful
     (decoded : R.decode [] = some ingress) (isFresh : R.replay env durable ingress = none)
     (noClaims : R.claims env durable ingress = .ok [])
     (prepares : R.prepare Vouchers.empty env durable (R.command ingress) = .ok prepared)
-    (shaped : R.shape prepared = true) (lawful : R.lawFault prepared = none) :
+    (shaped : R.shape prepared = true) (lawful : R.lawFault prepared = none)
+    (noObserved : R.observations env durable ingress = .ok [] := by rfl) :
     ∃ admission witness,
       R.receive append env durable [] = pure (.committed ingress admission witness) := by
-  obtain ⟨admission, admitted⟩ := admitVia_ok R noClaims prepares shaped lawful
+  obtain ⟨admission, admitted⟩ := admitVia_ok R noClaims prepares shaped lawful noObserved
   refine ⟨admission, (), ?_⟩
   unfold Receiver.receive
   simp only [decoded, isFresh, admitted, pure_bind]
