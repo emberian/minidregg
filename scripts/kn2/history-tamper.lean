@@ -133,6 +133,23 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   -- TAMPER 2: an accumulator node on height 19's path (the leaf node at level 0, end 20).
   sql database "UPDATE durable_node SET value = zeroblob(length(value)) WHERE space = 1 AND height = 20"
   expectRefusedAt "tampered accumulator node beside height 19" 19 (← reader.atHeight 19)
+  -- EPOCH: a Store born with the previous accumulator component (checkpoint v2,
+  -- before the consumed list left the checkpoint) is refused at open, by name.
+  let olderLabel := "state-key/tagged-v4;schema-refs/v5;" ++ DurableCheckpointCodec.logTagLabel ++
+    ";history/mmr-v1;spent/trie-v1"
+  let olderFrame := DurableCheckpointCodec.seedFrameName ++ [2] ++ olderLabel.toUTF8.toList
+  let olderSeed := (Tower256ConcreteBackend.StreamCodec.product Tower256ConcreteBackend.bytesStream
+    DurableReceiverCodec.seedStream).encode (olderFrame, seed)
+  let hex := String.join (olderSeed.map fun b =>
+    let digits := String.ofList (Nat.toDigits 16 b.toNat)
+    if digits.length = 1 then "0" ++ digits else digits)
+  sql database s!"UPDATE durable_seed SET bytes = X'{hex}'"
+  match ← load transport rootBytes with
+  | .ok _ => throw (IO.userError "FAIL an older-epoch Store opened")
+  | .error detail =>
+      IO.println s!"older epoch refused: {detail}"
+      require "the refusal names the accumulator component"
+        ((detail.splitOn "history accumulator: Store history/mmr-v1;spent/trie-v1").length > 1)
   IO.println "PASS history tamper: a non-head record and an accumulator node, each refused by name at use"
 
 end HistoryTamper
