@@ -366,20 +366,33 @@ theorem history_length_eq_height (loaded : Loaded rootBytes) :
     rw [← List.length_append, List.take_append_drop]
   next => simp at resumed
 
-/-- A served state from a base state and the records replayed after it: the
-base's cells plus every cell the records wrote, the bytes of the replay. Private:
-only the producers below call it, each from a base and records it verified. -/
+/-- A served state from a snapshot whose cells outside `ids` hold `absentBytes`
+and the records replayed after it: `ids` plus every cell the records wrote, the
+bytes of the replay. Private: only the producers below call it, each from a base
+and records it verified. -/
+private def ofReplay (seed : Seed) (absentBytes : List UInt8) (ids : List CellId)
+    (before : DataSnapshot rootBytes) (outside : ∀ cellId, cellId ∉ ids → before.canonicalBytes cellId = absentBytes)
+    (records : List IntentRecord) (snapshot : DataSnapshot rootBytes)
+    (replayed : replay rootBytes before records = some snapshot)
+    (height : Nat) (chain worldRoot : Digest) : Served rootBytes store :=
+  ⟨bare snapshot, seed, extendIds ids records, absentBytes, height, chain, worldRoot, fun cellId missing => by
+      obtain ⟨notBase, notWritten⟩ := not_mem_extendIds missing
+      show snapshot.canonicalBytes cellId = _
+      rw [DurableReceiver.replay_outside_support rootBytes _ _ cellId notWritten snapshot replayed]
+      exact outside cellId notBase,
+    DurableCheckpoint.nodup_eraseDups _⟩
+
+theorem state_snapshot_outside (base : State) (cellId : CellId) (missing : cellId ∉ base.cells.map Prod.fst) :
+    (base.snapshot rootBytes []).canonicalBytes cellId = base.absentBytes := by
+  simp [State.snapshot, DurableReceiver.Seed.lookup_missing base.cells cellId missing]
+
+/-- A served state from a base state and the records replayed after it. -/
 private def ofBase (seed : Seed) (base : State) (records : List IntentRecord)
     (snapshot : DataSnapshot rootBytes)
     (replayed : replay rootBytes (base.snapshot rootBytes []) records = some snapshot)
     (height : Nat) (chain worldRoot : Digest) : Served rootBytes store :=
-  ⟨bare snapshot, seed, extendIds (base.cells.map Prod.fst) records, base.absentBytes, height, chain,
-    worldRoot, fun cellId missing => by
-      obtain ⟨notBase, notWritten⟩ := not_mem_extendIds missing
-      show snapshot.canonicalBytes cellId = _
-      rw [DurableReceiver.replay_outside_support rootBytes _ _ cellId notWritten snapshot replayed]
-      simp [State.snapshot, DurableReceiver.Seed.lookup_missing base.cells cellId notBase],
-    DurableCheckpoint.nodup_eraseDups _⟩
+  ofReplay seed base.absentBytes (base.cells.map Prod.fst) (base.snapshot rootBytes [])
+    (state_snapshot_outside base) records snapshot replayed height chain worldRoot
 
 /-- A past height from `Reader.stateAt`: the base's cells plus every cell its
 verified records wrote, the chain after its last verified record (or the
@@ -599,7 +612,95 @@ private def checkSpent (rows : List Bool → Option DurableSpent.Row) :
         throw s!"the tag at height {height} carries a spent root the log does not reach"
       checkSpent rows (writes.foldl (fun map row => map.insert row.1 row.2) written) next (height + 1) rest
 
-/-- The light opening of an opened Store's head. -/
+/-- What an extension starts from: a verified state (bare snapshot, its
+enumeration, the fresh-cell bytes) at `height`, with the chain, accumulator
+frontier and spent root there, and the head tag there when it is not 0. -/
+private structure Start (rootBytes : List UInt8 → Digest) where
+  seed : Seed
+  absentBytes : List UInt8
+  ids : List CellId
+  before : DataSnapshot rootBytes
+  outside : ∀ cellId, cellId ∉ ids → before.canonicalBytes cellId = absentBytes
+  height : Nat
+  chain : Digest
+  frontier : List (Nat × Digest)
+  spentRoot : Digest
+  tag : Option (List UInt8)
+  checkpoint : Nat
+
+/-- **The one verification of new entries**, used by the open (from its
+checkpoint) and by a session's refresh (from its head): every entry after
+`start.height` — canonical record bytes (named by height), the chain over the
+stored bytes, its tag's MAC, the frontier its tag carries, the spent root its
+tag carries (re-derived by inserting the record's keys into the spent map at the
+start's version: a key already present refuses) — then the replay from the
+start's state, the head tag's MAC and its carried root against the replayed
+world root. -/
+private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 → Digest)
+    (store : StoreIdentity) (start : Start rootBytes) (suffix : List DurableReceiverIO.Entry)
+    (lap : String → IO Unit) : IO (Except String (Opening rootBytes)) := do
+  let key := store.key
+  let headHeight := start.height + suffix.length
+  let records ← match decodeRecordsAt (start.height + 1) suffix with
+    | .error message => return .error message
+    | .ok records => pure records
+  let chains := DurableLogTags.chainPrefixesStored start.chain (suffix.map (·.record))
+  if let .error message := DurableLogTags.verifyTags key start.height chains (suffix.map (·.tag)) then
+    return .error message
+  let frontier ← match DurableReceiverIO.walkFrontier start.height start.frontier (suffix.zip (chains.drop 1)) with
+    | .error message => return .error message
+    | .ok frontier => pure frontier
+  lap "records, chain, tags, frontier"
+  let carriedSpent ← match suffix.mapM fun entry => DurableHistory.trailerCarried entry.tag with
+    | none => return .error "durable log tag malformed"
+    | some carried => pure (carried.map (·.spentRoot))
+  let keys := records.flatMap fun record => DurableSpent.recordKeys record.transactionId record.nullifiers
+  -- Rows down to 32 bits first; every prefix when what they open does not verify.
+  let shallow ← match ← DurableReceiverIO.spentRows transport start.height keys 32 with
+    | .error message => return .error message
+    | .ok rows => pure rows
+  lap "spent rows read"
+  if let .error _ := checkSpent shallow {} start.spentRoot (start.height + 1) (records.zip carriedSpent) then
+    let deep ← match ← DurableReceiverIO.spentRows transport start.height keys with
+      | .error message => return .error message
+      | .ok rows => pure rows
+    if let .error message := checkSpent deep {} start.spentRoot (start.height + 1) (records.zip carriedSpent) then
+      return .error message
+  lap "spent map"
+  let headChain := chains.getLast?.getD start.chain
+  match replayed : replay rootBytes start.before records with
+  | none => return .error "durable log suffix does not replay through the canonical executor"
+  | some snapshot =>
+      let cellIds := extendIds start.ids records
+      let entries := Served.entriesOf snapshot.model.roots cellIds headHeight headChain
+      let roots := DurableReceiverIO.RootCache.ofEntries entries
+      let rootsExact := DurableReceiverIO.RootsExact.ofEntries entries
+      let worldRoot := if rootsExact.injective then roots.root else WorldRoot.deployedRoot entries
+      let served : Served rootBytes store :=
+        Served.ofReplay start.seed start.absentBytes start.ids start.before start.outside records snapshot
+          replayed headHeight headChain worldRoot
+      lap "replay and root"
+      if zero : headHeight = 0 then
+        if genesisChain : headChain = store.logStart then
+          let head := Head.genesis store worldRoot
+          return .ok ⟨store, head, served, zero.trans (Head.genesis_fields store worldRoot).1.symm,
+            genesisChain.trans (Head.genesis_fields store worldRoot).2.1.symm, roots, rootsExact,
+            start.checkpoint⟩
+        else return .error "an empty durable log's chain is not its genesis log start"
+      else
+        let some headTag := (suffix.getLast?.map (·.tag)).or start.tag
+          | return .error "durable head entry missing"
+        match verified : Head.verify store headHeight headTag headChain frontier with
+        | .error refusal => return .error refusal.message
+        | .ok head =>
+            if head.root ≠ worldRoot then
+              return .error "durable log head root differs from the replayed root"
+            have fields := Head.verify_fields verified
+            return .ok ⟨store, head, served, fields.1.symm, fields.2.1.symm, roots, rootsExact,
+              start.checkpoint⟩
+
+/-- The light opening of an opened Store's head: its checkpoint (or the seed),
+then `extendVerified` over the entries after it. -/
 def openHead (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 → Digest) :
     IO (Except String (Opening rootBytes)) := do
   -- Operator measurement control: MINI_OPEN_TIMING=1 prints each stage's elapsed time to stderr.
@@ -627,14 +728,14 @@ def openHead (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 �
   let store := StoreIdentity.ofOpen key logStart
   let headHeight := stored.head
   -- The base: the seed at height 0, or the checkpoint sitting on the log.
-  let ((baseHeight, base, baseChain, baseFrontier, baseSpent, suffix) :
-      Nat × State × Digest × List (Nat × Digest) × Digest × List DurableReceiverIO.Entry) ←
+  let ((base, baseHeight, baseChain, baseFrontier, baseSpent, baseTag, suffix) :
+      State × Nat × Digest × List (Nat × Digest) × Digest × Option (List UInt8) ×
+        List DurableReceiverIO.Entry) ←
     match stored.checkpoint with
     | none =>
         if stored.entries.length ≠ headHeight then
           return .error "durable log head does not match its entries"
-        pure (0, State.ofSeed seed, logStart, ([] : List (Nat × Digest)), DurableSpent.emptyDigest,
-          stored.entries)
+        pure (State.ofSeed seed, 0, logStart, [], DurableSpent.emptyDigest, none, stored.entries)
     | some checkpoint =>
         match DurableCheckpointCodec.openSealed key rootBytes checkpoint.bytes with
         | .error reason => return .error s!"checkpoint refused: {repr reason}"
@@ -648,65 +749,36 @@ def openHead (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 �
                 (DurableHistory.frontierDigest body.height body.frontier) body.spentRoot with
             | .error refusal => return .error s!"checkpoint does not sit on the log: {refusal.message}"
             | .ok _ =>
-                pure (body.height, body.state, body.chain, body.frontier, body.spentRoot,
-                  stored.entries.drop 1)
+                pure (body.state, body.height, body.chain, body.frontier, body.spentRoot,
+                  some atCheckpoint.tag, stored.entries.drop 1)
   lap "checkpoint"
   if !((base.cells.map Prod.fst).Nodup ∧ base.absentBytes = seed.absentBytes) then
     return .error "checkpoint state is not admissible for this Store's seed"
-  let records ← match decodeRecordsAt (baseHeight + 1) suffix with
-    | .error message => return .error message
-    | .ok records => pure records
-  let chains := DurableLogTags.chainPrefixesStored baseChain (suffix.map (·.record))
-  if let .error message := DurableLogTags.verifyTags key baseHeight chains (suffix.map (·.tag)) then
-    return .error message
-  let frontier ← match DurableReceiverIO.walkFrontier baseHeight baseFrontier (suffix.zip (chains.drop 1)) with
-    | .error message => return .error message
-    | .ok frontier => pure frontier
-  lap "records, chain, tags, frontier"
-  let carriedSpent ← match suffix.mapM fun entry => DurableHistory.trailerCarried entry.tag with
-    | none => return .error "durable log tag malformed"
-    | some carried => pure (carried.map (·.spentRoot))
-  let keys := records.flatMap fun record => DurableSpent.recordKeys record.transactionId record.nullifiers
-  -- Rows down to 32 bits first; every prefix when what they open does not verify.
-  let shallow ← match ← DurableReceiverIO.spentRows transport baseHeight keys 32 with
-    | .error message => return .error message
-    | .ok rows => pure rows
-  lap "spent rows read"
-  if let .error _ := checkSpent shallow {} baseSpent (baseHeight + 1) (records.zip carriedSpent) then
-    let deep ← match ← DurableReceiverIO.spentRows transport baseHeight keys with
-      | .error message => return .error message
-      | .ok rows => pure rows
-    if let .error message := checkSpent deep {} baseSpent (baseHeight + 1) (records.zip carriedSpent) then
-      return .error message
-  lap "spent map"
-  let headChain := chains.getLast?.getD baseChain
-  match replayed : replay rootBytes (base.snapshot rootBytes []) records with
-  | none => return .error "durable log suffix does not replay through the canonical executor"
-  | some snapshot =>
-      let cellIds := extendIds (base.cells.map Prod.fst) records
-      let entries := Served.entriesOf snapshot.model.roots cellIds headHeight headChain
-      let roots := DurableReceiverIO.RootCache.ofEntries entries
-      let rootsExact := DurableReceiverIO.RootsExact.ofEntries entries
-      let worldRoot := if rootsExact.injective then roots.root else WorldRoot.deployedRoot entries
-      let served : Served rootBytes store :=
-        Served.ofBase seed base records snapshot replayed headHeight headChain worldRoot
-      lap "replay and root"
-      if zero : headHeight = 0 then
-        if genesisChain : headChain = store.logStart then
-          let head := Head.genesis store worldRoot
-          return .ok ⟨store, head, served, zero.trans (Head.genesis_fields store worldRoot).1.symm,
-            genesisChain.trans (Head.genesis_fields store worldRoot).2.1.symm, roots, rootsExact, baseHeight⟩
-        else return .error "an empty durable log's chain is not its genesis log start"
-      else
-        let some last := suffix.getLast? | return .error "durable head entry missing"
-        match verified : Head.verify store headHeight last.tag headChain frontier with
-        | .error refusal => return .error refusal.message
-        | .ok head =>
-            if head.root ≠ worldRoot then
-              return .error "durable log head root differs from the replayed root"
-            have fields := Head.verify_fields verified
-            return .ok ⟨store, head, served, fields.1.symm, fields.2.1.symm, roots, rootsExact, baseHeight⟩
+  extendVerified transport rootBytes store
+    ⟨seed, base.absentBytes, base.cells.map Prod.fst, base.snapshot rootBytes [], Served.state_snapshot_outside base,
+      baseHeight, baseChain, baseFrontier, baseSpent, baseTag, baseHeight⟩ suffix lap
 
+/-- **A session's refresh**: the entries another writer appended after this
+opening's head, verified exactly as the open verifies the entries after its
+checkpoint (`extendVerified`, the same function). Nothing new: the same opening. -/
+def Opening.extend (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 → Digest)
+    (opening : Opening rootBytes) : IO (Except String (Opening rootBytes)) := do
+  let height := opening.head.height
+  match ← transport.read (height + 1) false with
+  | .error message => return .error message
+  | .ok none => return .error "durable store is not initialized"
+  | .ok (some stored) =>
+      if stored.head < height then
+        return .error "the Store's head is below this opening's authenticated head"
+      if stored.entries.isEmpty then return .ok opening
+      if stored.entries.length ≠ stored.head - height then
+        return .error "durable log head does not match its entries"
+      let served := opening.served
+      extendVerified transport rootBytes opening.store
+        ⟨served.seed, served.absentBytes, served.cellIds, served.state,
+          fun cellId missing => served.outsideAbsent cellId missing, height, opening.head.chain,
+          opening.head.frontier, opening.head.spentRoot, none, opening.baseHeight⟩
+        stored.entries (fun _ => pure ())
 
 /-! ## The light receive (KN2 2b-1, step 4)
 

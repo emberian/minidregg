@@ -85,6 +85,7 @@ import Kernel.HyperedgeKnowledge  -- the epistemic reading of legs_agree: in the
 import Kernel.FinalityLiveness  -- liveness as ONE carrier: PostGSTProgress bundles the replicated layer's three premises (available quorum, fair delivery, responsive replicas) as a realizer slot; progress reuses finalized_of_available_fair_responsive and the decider accepts it (checked_of_progress); the constitution's sentence as two theorems kept apart — cannot_forge (no liveness premise anywhere) and no_progress_without_quorum (IsEmpty PostGSTProgress); closed Fin 3 realizer built, dead quorum system / partition / never-delivering schedule each refuted at its own leg. Residuals [LIVENESS-gst] [LIVENESS-authenticated]
 import Kernel.NativeHost
 import Kernel.NativeHostServed -- KN2 2b-1: a validated served state (no history): validateServed, OpenedServed
+import Kernel.NativeHostLight -- KN2 2b-1: the validated light opening a session serves ported operations from
 import Kernel.NativeThinConsent  -- thin consent: what a member signs without replaying is what commits (thin_display_is_commit), lying Hosts refused by name
 import Kernel.NativeHostSession
 import Kernel.NativeReserveContinuity

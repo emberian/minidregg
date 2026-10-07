@@ -75,6 +75,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
     | .ok loaded => pure loaded
     | .error detail => throw (IO.userError s!"FAIL open: {detail}")
   require "41 records" (loaded.height == 41)
+  let database := directory / "store" / "forward-link.sqlite3"
   let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf transport rootBytes loaded with
     | .ok reader => pure reader
     | .error detail => throw (IO.userError s!"FAIL reader: {detail}")
@@ -139,6 +140,32 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   require "light receive: head 42, the full open's root and cell bytes"
     (next.head.height == 42 && full.height == 42 && next.served.worldRoot == full.worldRoot &&
       next.served.canonicalBytes ⟨3⟩ == [42])
+  -- A session's refresh: the opening at 41 extended by the entry another writer appended (42),
+  -- verified as the open verifies; it serves what the writer's opening serves.
+  match ← opening.extend transport rootBytes with
+  | .error detail => throw (IO.userError s!"FAIL light refresh: {detail}")
+  | .ok refreshed =>
+      require "light refresh: head 42, the writer's root, chain and cells"
+        (refreshed.head.height == 42 && refreshed.served.worldRoot == next.served.worldRoot &&
+          refreshed.served.chain == next.served.chain && refreshed.served.cellIds == next.served.cellIds)
+      match ← refreshed.extend transport rootBytes with
+      | .ok again => require "light refresh with nothing new is the same head" (again.head.height == 42)
+      | .error detail => throw (IO.userError s!"FAIL light refresh (nothing new): {detail}")
+      -- Record 43 on the refreshed opening, then ONE BYTE of record 42 (no longer the head, which the
+      -- native anchor pins): the refresh of the opening at 41 refuses naming 42; then restored.
+      match ← DurableServed.receiveServed transport rootBytes refreshed (step 43) with
+      | .appended .. => pure ()
+      | _ => throw (IO.userError "FAIL light receive 43 on the refreshed opening")
+      sql database "CREATE TABLE kn2_saved AS SELECT height, record FROM durable_log WHERE height = 42"
+      sql database "UPDATE durable_log SET record = CAST(substr(record,1,length(record)-1) || X'FF' AS BLOB) WHERE height = 42"
+      match ← opening.extend transport rootBytes with
+      | .ok _ => throw (IO.userError "FAIL light refresh accepted a tampered record at 42")
+      | .error detail =>
+          IO.println s!"light refresh refused the tampered record: {detail}"
+          require "light refresh names height 42" ((detail.splitOn "height 42").length > 1)
+      sql database "UPDATE durable_log SET record = (SELECT record FROM kn2_saved) WHERE height = 42"
+      sql database "DROP TABLE kn2_saved"
+      require "record 42 restored" ((← opening.extend transport rootBytes).toOption.isSome)
   -- The same transaction again: the footprint finds it (verified at use), the executor replays it.
   match ← DurableServed.receiveServed transport rootBytes next (step 42) with
   | .replayed _ => pure ()
@@ -161,7 +188,6 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
       | _ => throw (IO.userError "FAIL control: the undeclared view refused the reuse; the control no longer distinguishes")
   IO.println "light receive: record 42 appended (root equals the full open's), its repeat replayed, a pre-checkpoint nullifier refused"
   -- TAMPER 1: one byte of the record at height 20 (a non-head record).
-  let database := directory / "store" / "forward-link.sqlite3"
   sql database "UPDATE durable_log SET record = CAST(substr(record,1,length(record)-1) || X'FF' AS BLOB) WHERE height = 20"
   expectRefusedAt "tampered record at height 20 of 41" 20 (← reader.atHeight 20)
   require "height 19 still verifies" ((← reader.atHeight 19).toOption.isSome)
