@@ -15,7 +15,8 @@ pre and post stores).  The Receiver JUDGES:
   without a step (a step offered for a kernel-only cell is a registry mismatch);
 * a `lawBearing` cell is judged by ITS OWN committed law, resolved at the cell's
   id on the loaded state the family prepared against: the resolution must
-  succeed, every input the law reads must be in range, the field cast of those
+  succeed, the compiler must be able to lower the law, every input the law
+  reads must be in range, the field cast of those
   inputs must be injective, and `Pred.eval` must accept the step.  A refusal
   names the failing clause with `LawLeaf.of` on the same step;
 * a `lawBearing` BIRTH (the actual pre-image is the fresh root) is refused until
@@ -65,6 +66,9 @@ structure ResolvedLaw where
   predicate : Minidregg.Pred.Pred
   inRange : Bool
   castsInjective : Bool
+  /-- The compiler can lower the law: with the two verdicts above, `Pred.eval` is
+  the compiled verdict (`PreparedLaw.verifies_iff_eval`). -/
+  supported : Bool
   guards : List ReadGuard
 
 /-- How the Receiver reads laws on a loaded state `S`.  Built by the host from
@@ -93,6 +97,8 @@ inductive LawFault where
   | lawUnavailable (cell : Nat) (why : Unavailable)
   | lawInputRange (cell : Nat)
   | lawCastAlias (cell : Nat)
+  /-- The committed law uses a form the deployment's compiler cannot lower. -/
+  | lawUnsupported (cell : Nat)
   /-- The committed law refused the step at this clause (`LawLeaf.of`). -/
   | lawDenied (cell : Nat) (leaf : LawLeaf)
   | kernelOnlyForeignWriter (cell : Nat) (kind : Kind) (family : FamilyId)
@@ -125,7 +131,8 @@ def judgeWrite (write : DataWrite) (step : Option PolicyStepContext) : Option La
           match laws.resolve state cell step with
           | none => some (.lawUnavailable cell .unresolved)
           | some law =>
-            if !law.inRange then some (.lawInputRange cell)
+            if !law.supported then some (.lawUnsupported cell)
+            else if !law.inRange then some (.lawInputRange cell)
             else if !law.castsInjective then some (.lawCastAlias cell)
             else (LawLeaf.of law.predicate step.oldState step.newState).map (.lawDenied cell)
 
@@ -177,7 +184,7 @@ def Lawful (write : DataWrite) (step : Option PolicyStepContext) : Prop :=
   ∃ kind, laws.kindOf state write = some kind ∧
     ((kind.lawClass = .lawBearing ∧ laws.birth write = false ∧
         ∃ s law, step = some s ∧ laws.resolve state write.cellId.value s = some law ∧
-          law.inRange = true ∧ law.castsInjective = true ∧
+          law.supported = true ∧ law.inRange = true ∧ law.castsInjective = true ∧
           Minidregg.Pred.eval law.predicate s.oldState s.newState = true) ∨
       (∃ writers, kind.lawClass = .kernelOnly writers ∧ family ∈ writers ∧ step = none))
 
@@ -207,8 +214,9 @@ theorem judgeWrite_none_iff (write : DataWrite) (step : Option PolicyStepContext
             cases resolved : laws.resolve state write.cellId.value s with
             | none => simp [resolved]
             | some law =>
-              cases inRange : law.inRange <;> cases casts : law.castsInjective <;>
-                simp [resolved, inRange, casts, Option.map_eq_none_iff, LawLeaf.of_none_iff]
+              cases lowerable : law.supported <;> cases inRange : law.inRange <;>
+                cases casts : law.castsInjective <;>
+                simp [resolved, lowerable, inRange, casts, Option.map_eq_none_iff, LawLeaf.of_none_iff]
 
 /-- **The patch is judged exactly**: no fault iff every write is lawful. -/
 theorem lawFault_none_iff (writes : List DataWrite)
@@ -257,14 +265,16 @@ theorem judgeWrite_lawDenied {write : DataWrite} {step : Option PolicyStepContex
           cases resolved : laws.resolve state write.cellId.value s with
           | none => simp [birthEq, resolved] at denied
           | some law =>
+            cases lowerable : law.supported
+            · simp [birthEq, resolved, lowerable] at denied
             cases inRange : law.inRange
-            · simp [birthEq, resolved, inRange] at denied
+            · simp [birthEq, resolved, lowerable, inRange] at denied
             cases casts : law.castsInjective
-            · simp [birthEq, resolved, inRange, casts] at denied
+            · simp [birthEq, resolved, lowerable, inRange, casts] at denied
             cases named : LawLeaf.of law.predicate s.oldState s.newState with
-            | none => simp [birthEq, resolved, inRange, casts, named] at denied
+            | none => simp [birthEq, resolved, lowerable, inRange, casts, named] at denied
             | some found =>
-              simp [birthEq, resolved, inRange, casts, named] at denied
+              simp [birthEq, resolved, lowerable, inRange, casts, named] at denied
               obtain ⟨rfl, rfl⟩ := denied
               obtain ⟨at_, isLeaf, fails⟩ := LawLeaf.of_fails _ _ _ _ named
               have rejects : Minidregg.Pred.eval law.predicate s.oldState s.newState = false := by
@@ -332,7 +342,7 @@ def Laws.physical {Fld : Type} [Field Fld] [DecidableEq Fld]
       profile.semantics target structural.additional
     let judged ← PhysicalLawResolution.judge (PhysicalLawResolution.targetConfig deployment profile
       authority.snapshot directory.directory (lawPortal authority.snapshot) step target)
-    pure ⟨judged.law.predicate, judged.inRange, judged.castsInjective,
+    pure ⟨judged.law.predicate, judged.inRange, judged.castsInjective, judged.supported,
       authority.readGuards ++ (sources ++ structural.readGuards).map fun (cell, root) =>
         (⟨⟨cell⟩, root⟩ : ReadGuard)⟩
 
@@ -340,7 +350,7 @@ def Laws.physical {Fld : Type} [Field Fld] [DecidableEq Fld]
 law exactly when the directory and authority cell load, the structural
 restrictions and source guards load, and `PhysicalLawResolution.judge` -- the
 judgement `authorizeLeg` runs -- resolves it on the target configuration; the
-predicate and both compiler verdicts are that judgement's, and the guards are
+predicate and the three compiler verdicts are that judgement's, and the guards are
 the authority cell, the sources and the structural cells. -/
 theorem physical_resolve_some_iff {Fld : Type} [Field Fld] [DecidableEq Fld]
     (profile : PolicyCompilerProfile Fld) (deployment : Deployment) (durable : Durable)
@@ -355,7 +365,7 @@ theorem physical_resolve_some_iff {Fld : Type} [Field Fld] [DecidableEq Fld]
         PhysicalLawResolution.judge (PhysicalLawResolution.targetConfig deployment profile
           authority.snapshot directory.directory (lawPortal authority.snapshot) step target) =
             some judged ∧
-        law = ⟨judged.law.predicate, judged.inRange, judged.castsInjective,
+        law = ⟨judged.law.predicate, judged.inRange, judged.castsInjective, judged.supported,
           authority.readGuards ++ (sources ++ structural.readGuards).map fun (cell, root) =>
             (⟨⟨cell⟩, root⟩ : ReadGuard)⟩ := by
   simp only [Laws.physical, Option.bind_eq_bind, Option.pure_def, Option.bind_eq_some_iff,

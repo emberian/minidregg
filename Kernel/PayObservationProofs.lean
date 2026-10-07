@@ -304,23 +304,27 @@ theorem second_credit_refused {F : Type} [Field F] [DecidableEq F]
     {deployment : PayObservationReceiver.Deployment}
     {profile : Minidregg.Compiler.CanonicalRuntimeProfile.Profile F} {ambient : Ambient}
     {durable : PayObservationReceiver.Durable} {ingress : DecodedIngress}
-    (accepted : AcceptedObservation deployment profile ambient durable ingress)
+    {laws : Minidregg.Kernel.ReceivingLaw.Laws PayObservationReceiver.Durable} {m : Type → Type}
+    {oracle : Minidregg.Compiler.CredentialSignatureIO.Oracle m}
+    (accepted : ((family deployment profile).receiver laws oracle).Accepted ambient durable ingress)
     (before : DataSnapshot Minidregg.Compiler.ResourceBirthCodec.rootBytes)
     (o : Observation) (member : o ∈ ingress.command.observations)
     (spent : before.model.consumed (nullifier deployment.domain o) = true) :
-    (intent accepted).preflight before ≠ .ok () :=
-  DataIntent.consumed_nullifier_refused before (intent accepted) _ (intent_spends accepted o member) spent
+    (((family deployment profile).receiver laws oracle).intent accepted).preflight before ≠ .ok () :=
+  DataIntent.consumed_nullifier_refused before _ _ (intent_spends accepted o member) spent
 
 /-- A second report at a tip slot already spent is refused the same way. -/
 theorem second_tick_refused {F : Type} [Field F] [DecidableEq F]
     {deployment : PayObservationReceiver.Deployment}
     {profile : Minidregg.Compiler.CanonicalRuntimeProfile.Profile F} {ambient : Ambient}
     {durable : PayObservationReceiver.Durable} {ingress : DecodedIngress}
-    (accepted : AcceptedObservation deployment profile ambient durable ingress)
+    {laws : Minidregg.Kernel.ReceivingLaw.Laws PayObservationReceiver.Durable} {m : Type → Type}
+    {oracle : Minidregg.Compiler.CredentialSignatureIO.Oracle m}
+    (accepted : ((family deployment profile).receiver laws oracle).Accepted ambient durable ingress)
     (before : DataSnapshot Minidregg.Compiler.ResourceBirthCodec.rootBytes)
     (spent : before.model.consumed (tickNullifier deployment.domain ingress.command.tip) = true) :
-    (intent accepted).preflight before ≠ .ok () :=
-  DataIntent.consumed_nullifier_refused before (intent accepted) _ (intent_spends_tick accepted) spent
+    (((family deployment profile).receiver laws oracle).intent accepted).preflight before ≠ .ok () :=
+  DataIntent.consumed_nullifier_refused before _ _ (intent_spends_tick accepted) spent
 
 /-! ## Concrete poles (kernel `decide` on real cells and Books) -/
 

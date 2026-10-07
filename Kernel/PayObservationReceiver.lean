@@ -2,30 +2,42 @@
 # Kernel.PayObservationReceiver — observed payments become Book credit
 
 One signed report of the enrolled observer (`PayObservation.Command`) is one
-turn over two cells:
+turn over three cells, as a `Kernel.Receiving.Family` (`family`): the Receiver
+verifies the observer's signature before anything is decided, the family
+decides and binds the report, and the Receiver judges every written cell's law.
 
+* the **pay cell**: the finalized tip is retained (`PayChainTip.patch`).  The
+  pay cell is `lawBearing`; its committed law (genesis: `eq request/subject
+  observer`) is judged by the Receiver on the report's step (`step`: the pay
+  target's selector slots, the observer's signed request, operation
+  `pay-observe`, the report's counts, the command bytes, the observer's grant);
 * the **clock cell** (`Kernel.ClockCell`, the deployment's one clock): its
   `slot` becomes the tip's and its `now` the tip's block time when that is
-  later (`Plan.nextClock`, a guarded write at the clock's exact pre-root).
-  The clock is `lawBearing`: its OWN committed law judges this write
-  (`ReceivingLaw.judgeWrite` on `Laws.physical`, the Receiver's one judgement,
-  on `ClockLaw.step` -- the observer's request under operation `pay-observe`,
-  the clock before and after), and a refusal names the failing clause
-  (`Reject.law`, `Prepared.clock_lawful`); the law's source cells join the
-  read guards;
-* the **pay cell** is read, not written: tariff, book and assignment, pinned
-  at its exact pre-root `expectedPayRoot` and writes the finalized tip there;
+  later (`Plan.nextClock`).  The clock is `lawBearing`; its OWN committed law is
+  judged by the Receiver on `ClockLaw.step` (the observer's request under
+  operation `pay-observe`, the clock before and after);
 * the **Book**: one issuer mint `.mint tariff.asset payer (creditFor amount)`
   per observation, as a `Batch` decided by `Batch.Admission` at the Book's
-  loaded state (`AcceptedBatch.ofAdmission`, as resource birth does).
+  loaded state.  The Book is `kernelOnly` and names this family.
 
-Authorization: the observer signs a capability-mode request of kind `program`,
-target and policy the pay cell (`PayCell.physicalId`), verb `observePayment`,
-presenting its capability; it is admitted under the pay cell's complete current law closure
-(genesis installs `eq request/subject observer`, `NativeHostGenesis`), with the
-operation slot `authority/operation/pay-observe`.  The effect digest commits
-to the command bytes and to the decided plan, so the authorized request binds
-every credit.
+The family projects both law steps (`lawStep`); it judges no law.  One judge:
+the Receiver's (`Kernel.ReceivingLaw`).  `Minidregg.Kernel.Receiving.Family.receive_committed_lawful`
+is the per-write statement for every committed report.
+
+**Signature first.**  The one claim (`claims`) is the observer's current key over
+the envelope's own signed header (`CredentialSignatureAdmission.envelopeClaim`):
+a key lookup and a decode, no decision.  `prepare` receives the Receiver's
+verdict and builds the capability-mode receipt from it
+(`CheckedSignature.ofReceiverClaim`, `Source.receiver`); without the voucher it
+refuses `signature unvouched`.
+
+**Authorization** is binding only (`ComposedPolicyAdmission.Bound`): the
+observer's capability evidence under the receipt, and the signed request bound to
+the pay cell's committed head (policy, revision, domain, semantics, the step),
+its address and membership.  The law's verdict on the step is the Receiver's;
+`ComposedPolicyAdmission.Bound.admit_of_verifies` shows the binding plus that
+verdict is the former `admit` exactly.  The effect digest commits to the command
+bytes and the decided plan, so the authorized request binds every credit.
 
 The intent's nullifiers are the observations' `"soltx:" ‖ signature ‖ address`
 nullifiers followed by the tip's tick nullifier: the durable preflight refuses a
@@ -41,6 +53,7 @@ import Compiler.PhysicalLawResolution
 import Compiler.WorldKindLawDependencies
 import Kernel.ClockLaw
 import Kernel.ReceivingLaw
+import Kernel.Receiving
 
 namespace Minidregg.Kernel.PayObservationReceiver
 
@@ -65,6 +78,7 @@ open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.PolicyInstall
 open Minidregg.Theory.Store (Store Patch Op Address)
 open Minidregg.Theory.TypedAuthorization
+open Minidregg.Theory.Receiving (SigQuery)
 
 set_option autoImplicit false
 
@@ -188,7 +202,7 @@ def request (deployment : Deployment) (snapshot : Snapshot) (pay : PayCell.Cell)
     (marker snapshot.domain semantics command)
     (declaration snapshot.domain semantics command plan)).2
 
-def family (deployment : Deployment) (snapshot : Snapshot) (pay : PayCell.Cell) (semantics : Digest)
+def effectFamily (deployment : Deployment) (snapshot : Snapshot) (pay : PayCell.Cell) (semantics : Digest)
     (ambient : Ambient) (command : Command) :
     SemanticEffectFamily PayCell.layout PayCell.materializer Nat where
   Declaration := Declaration
@@ -221,10 +235,11 @@ def bookOf {deployment : Deployment} {directory : Directory Nat Registry}
     (book : BookCell deployment directory) : CanonicalResourceKernel.Book :=
   CanonicalResourceKernel.logicalBook book.payload.logical
 
-/-! ## The clock write's law -/
+/-! ## The laws -/
 
-/-- The laws the clock write is judged by: the deployed law source
-(`ReceivingLaw.Laws.physical`), the one every `Receiving.Family` is judged by. -/
+/-- The deployed law source (`ReceivingLaw.Laws.physical`) under a runtime
+profile: what the Receiver judges every `Minidregg.Kernel.Receiving.Family` by on a Host
+(`Minidregg.Kernel.Receiving.Family.receiveLoaded`). -/
 def laws {F : Type} [Field F] [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) : ReceivingLaw.Laws Durable :=
   ReceivingLaw.Laws.physical profile.compilerProfile deployment
@@ -246,14 +261,20 @@ def clockStepOf {F : Type} [Field F] (deployment : Deployment)
       (declaration snapshot.domain profile.semantics command plan))
     clockValid
 
-/-! ## Preparation -/
+/-! ## The decision -/
 
-structure Prepared {F : Type} [Field F] [DecidableEq F] (deployment : Deployment)
+/-- A report decided on the loaded state: the loaded cells, the plan, the
+validated clock and pay patches, the admitted Book batch and the pay target's
+structural dependencies.  No law is judged here (the Receiver judges every
+written cell) and no signature is read (that is `Prepared`'s). -/
+structure Planned {F : Type} [Field F] [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (command : Command) where
   private mk ::
   directory : LoadedDirectory durable
+  directoryExact : loadDirectory durable = some directory
   authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
+  authorityExact : loadDeployment deployment durable.snapshot = some authority
   pay : PayCellDomain.Loaded deployment durable.snapshot
   clock : ClockCellDomain.Loaded deployment durable.snapshot
   book : BookCell deployment directory.directory
@@ -261,32 +282,26 @@ structure Prepared {F : Type} [Field F] [DecidableEq F] (deployment : Deployment
   decided : decideObservations pay.cell.logical clock.clock (bookOf book) command.tip
     command.observations = .ok plan
   clockValid : ValidatedPatch ClockCell.materializer clock.cell clock.cell.root plan.patch
-  /-- The clock's own committed law admits the advance (no fault). -/
-  clockJudged : ReceivingLaw.judgeWrite (laws deployment profile) .payObservation durable
-    (clock.write clockValid.apply)
-    (some (clockStepOf deployment profile ambient command directory.directory authority.snapshot
-      pay.cell clock.cell clock.clock plan clockValid)) = none
   resources : CanonicalResourceKernel.AcceptedBatch book.payload plan.batch
-  candidate : Candidate (family deployment authority.snapshot pay.cell profile.semantics ambient command)
-    pay.cell (declaration authority.snapshot.domain profile.semantics command plan) ()
+  candidate : Candidate (effectFamily deployment authority.snapshot pay.cell profile.semantics ambient
+    command) pay.cell (declaration authority.snapshot.domain profile.semantics command plan) ()
   /-- Structural selector roots are mandatory, not a default empty list. -/
   dependencies : WorldKindLawDependencies.Dependencies
   dependenciesExact : WorldKindLawDependencies.loadTarget deployment directory.directory
     (payTarget deployment) = some dependencies
-  /-- Every resolved component and historical predecessor is guarded at CAS. -/
-  sourceGuards : List (Nat × Digest)
-  sourceGuardsExact : PhysicalLawResolution.readGuards authority.snapshot directory.directory
-    profile.semantics (payTarget deployment) dependencies.additional = some sourceGuards
 
 /-- The decision, in order: the loaded cells, the two pinned roots, the pure
-`decideObservations` (which includes the Book admission), the pay patch's
-validation and the complete current law dependency closure.  Refusal reasons before the signature
-check are named (the enrollment pattern of this branch). -/
-def prepare {F : Type} [Field F] [DecidableEq F] (deployment : Deployment)
+`decideObservations` (which includes the Book admission), the clock and pay
+patches' validation and the pay target's structural dependencies. -/
+def planReport {F : Type} [Field F] [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
-    (command : Command) : Except Reject (Prepared deployment profile ambient durable command) := do
-  let directory ← requireSome .directoryUnavailable (loadDirectory durable)
-  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
+    (command : Command) : Except Reject (Planned deployment profile ambient durable command) := do
+  match directoryExact : loadDirectory durable with
+  | none => throw .directoryUnavailable
+  | some directory =>
+  match authorityExact : loadDeployment deployment durable.snapshot with
+  | none => throw .authorityUnavailable
+  | some authority =>
   let pay ← requireSome .payUnavailable (PayCellDomain.load deployment durable.snapshot)
   let clock ← requireSome .clockUnavailable (ClockCellDomain.load deployment durable.snapshot)
   let book ← requireSome .bookUnavailable
@@ -303,17 +318,11 @@ def prepare {F : Type} [Field F] [DecidableEq F] (deployment : Deployment)
         match validate ClockCell.materializer clock.cell clock.cell.root plan.patch with
         | .rejected _ => throw .validation
         | .accepted clockValid =>
-        match clockJudged : ReceivingLaw.judgeWrite (laws deployment profile) .payObservation durable
-            (clock.write clockValid.apply)
-            (some (clockStepOf deployment profile ambient command directory.directory snapshot
-              pay.cell clock.cell clock.clock plan clockValid)) with
-        | some fault => throw (.law fault)
-        | none =>
         match validate PayCell.materializer pay.cell pay.cell.root
             (PayChainTip.patch (chainTipOf pay.cell.logical) plan.tip) with
         | .rejected _ => throw .validation
         | .accepted validated =>
-            let candidate : Candidate (family deployment snapshot pay.cell profile.semantics
+            let candidate : Candidate (effectFamily deployment snapshot pay.cell profile.semantics
                 ambient command) pay.cell d () :=
               { preStateBound := rfl
                 modeEvidence := ⟨rootExact⟩
@@ -323,14 +332,11 @@ def prepare {F : Type} [Field F] [DecidableEq F] (deployment : Deployment)
                 directory.directory (payTarget deployment) with
             | none => throw .policyUnavailable
             | some dependencies =>
-              match sourceGuardsExact : PhysicalLawResolution.readGuards snapshot
-                  directory.directory profile.semantics (payTarget deployment) dependencies.additional with
-              | none => throw .policyUnavailable
-              | some sourceGuards =>
-                pure ⟨directory, authority, pay, clock, book, plan, decided, clockValid, clockJudged,
+                pure ⟨directory, directoryExact, authority, authorityExact, pay, clock, book, plan,
+                  decided, clockValid,
                   CanonicalResourceKernel.AcceptedBatch.ofAdmission
                     (decideObservations_admitted decided), candidate,
-                  dependencies, dependenciesExact, sourceGuards, sourceGuardsExact⟩
+                  dependencies, dependenciesExact⟩
     else throw .stalePay
   else throw .staleAuthority
 
@@ -339,176 +345,448 @@ variable {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
   {command : Command}
 
 /-- The clock cell after the report: the validated clock write applied. -/
-def Prepared.clockPost (prepared : Prepared deployment profile ambient durable command) : ClockCell.Cell :=
-  prepared.clockValid.apply
+def Planned.clockPost (planned : Planned deployment profile ambient durable command) : ClockCell.Cell :=
+  planned.clockValid.apply
 
 /-- The clock write's law step. -/
-def Prepared.clockStep (prepared : Prepared deployment profile ambient durable command) :
+def Planned.clockStep (planned : Planned deployment profile ambient durable command) :
     PolicyStepContext :=
-  clockStepOf deployment profile ambient command prepared.directory.directory
-    prepared.authority.snapshot prepared.pay.cell prepared.clock.cell prepared.clock.clock
-    prepared.plan prepared.clockValid
-
-/-- **The clock's own law admitted the advance.**  A prepared report's clock
-write is lawful under the deployed laws: the clock is a `lawBearing` cell (not
-a birth) whose committed law resolved at the loaded state on the report's step
-with both compiler verdicts true and `Pred.eval` accepting it -- or, were the
-registry to make the clock kernel-only, a write by a family its row names.
-Exactly `Receiving.Family.shape_lawful`'s per-write conclusion. -/
-theorem Prepared.clock_lawful (prepared : Prepared deployment profile ambient durable command) :
-    ReceivingLaw.Lawful (laws deployment profile) .payObservation durable
-      (prepared.clock.write prepared.clockPost) (some prepared.clockStep) :=
-  (ReceivingLaw.judgeWrite_none_iff _ _ _ _ _).1 prepared.clockJudged
+  clockStepOf deployment profile ambient command planned.directory.directory
+    planned.authority.snapshot planned.pay.cell planned.clock.cell planned.clock.clock
+    planned.plan planned.clockValid
 
 /-- The validated semantic family's exact pay post, including chain evidence. -/
-def Prepared.payPost (prepared : Prepared deployment profile ambient durable command) : PayCell.Cell :=
-  prepared.candidate.validated.apply
+def Planned.payPost (planned : Planned deployment profile ambient durable command) : PayCell.Cell :=
+  planned.candidate.validated.apply
 
 /-- A checked observation, including a heartbeat, actually retains its tip in
 the pay post committed by this receiver. -/
-theorem Prepared.pay_post (prepared : Prepared deployment profile ambient durable command) :
-    chainTipOf prepared.payPost.logical = some prepared.plan.tip := by
-  change chainTipOf (Minidregg.Theory.Store.Patch.run prepared.pay.cell.logical
-    (PayChainTip.patch (chainTipOf prepared.pay.cell.logical) prepared.plan.tip)) =
-      some prepared.plan.tip
+theorem Planned.pay_post (planned : Planned deployment profile ambient durable command) :
+    chainTipOf planned.payPost.logical = some planned.plan.tip := by
+  change chainTipOf (Minidregg.Theory.Store.Patch.run planned.pay.cell.logical
+    (PayChainTip.patch (chainTipOf planned.pay.cell.logical) planned.plan.tip)) =
+      some planned.plan.tip
   exact PayChainTip.patch_tip _ _ _
 
 /-- The committed evidence is exactly the ingress tip, not a wall-clock
 substitute or an unchecked declaration-only value. -/
-theorem Prepared.pay_post_exact (prepared : Prepared deployment profile ambient durable command) :
-    chainTipOf prepared.payPost.logical = some command.tip := by
-  rw [prepared.pay_post, decideObservations_tip prepared.decided]
+theorem Planned.pay_post_exact (planned : Planned deployment profile ambient durable command) :
+    chainTipOf planned.payPost.logical = some command.tip := by
+  rw [planned.pay_post, decideObservations_tip planned.decided]
 
-theorem Prepared.chain_tip_advances (prepared : Prepared deployment profile ambient durable command) :
-    PayChainTip.advances (chainTipOf prepared.pay.cell.logical) command.tip :=
-  decideObservations_chainTip prepared.decided
+theorem Planned.chain_tip_advances (planned : Planned deployment profile ambient durable command) :
+    PayChainTip.advances (chainTipOf planned.pay.cell.logical) command.tip :=
+  decideObservations_chainTip planned.decided
 
 /-- The Book after the report: the admitted batch applied. -/
-def Prepared.bookPost (prepared : Prepared deployment profile ambient durable command) :
+def Planned.bookPost (planned : Planned deployment profile ambient durable command) :
     Materialized (CanonicalCellRegistry.materializer .resourceBook) :=
-  prepared.resources.post
+  planned.resources.post
 
 /-- The prepared Book is exactly the batch applied to the loaded Book. -/
-theorem Prepared.bookPost_exact (prepared : Prepared deployment profile ambient durable command) :
-    CanonicalResourceKernel.logicalBook prepared.bookPost.logical =
-      prepared.plan.batch.apply (bookOf prepared.book) :=
-  prepared.resources.post_logicalBook
+theorem Planned.bookPost_exact (planned : Planned deployment profile ambient durable command) :
+    CanonicalResourceKernel.logicalBook planned.bookPost.logical =
+      planned.plan.batch.apply (bookOf planned.book) :=
+  planned.resources.post_logicalBook
 
 /-- The prepared clock cell holds the report's next clock: the tip's slot, and
 `now` advanced to the tip's block time when that is later. -/
-theorem Prepared.clock_post (prepared : Prepared deployment profile ambient durable command) :
-    ClockCell.clockOf prepared.clockPost.logical = some prepared.plan.nextClock := by
-  change Minidregg.Theory.Store.Patch.run prepared.clock.cell.logical prepared.plan.patch
-    ClockCell.clockAddress = some prepared.plan.nextClock
+theorem Planned.clock_post (planned : Planned deployment profile ambient durable command) :
+    ClockCell.clockOf planned.clockPost.logical = some planned.plan.nextClock := by
+  change Minidregg.Theory.Store.Patch.run planned.clock.cell.logical planned.plan.patch
+    ClockCell.clockAddress = some planned.plan.nextClock
   exact Minidregg.Theory.Store.Store.set_eq _ _ _
 
 /-- The next clock's slot is the report's tip slot. -/
-theorem Prepared.clock_post_slot (prepared : Prepared deployment profile ambient durable command) :
-    prepared.plan.nextClock.slot = command.tip.slot := by
-  show prepared.plan.tip.slot = command.tip.slot
-  rw [decideObservations_tip prepared.decided]
+theorem Planned.clock_post_slot (planned : Planned deployment profile ambient durable command) :
+    planned.plan.nextClock.slot = command.tip.slot := by
+  show planned.plan.tip.slot = command.tip.slot
+  rw [decideObservations_tip planned.decided]
 
-def project (prepared : Prepared deployment profile ambient durable command)
+theorem Planned.dependencies_available (planned : Planned deployment profile ambient durable command) :
+    (WorldKindLawDependencies.loadTarget deployment planned.directory.directory
+      (payTarget deployment)).isSome = true := by
+  rw [planned.dependenciesExact]
+  rfl
+
+/-- The pay law's projected state of a pay store. -/
+def project (planned : Planned deployment profile ambient durable command)
     (logical : PayStore) : Minidregg.Pred.State :=
-  ⟨WorldKindLawDependencies.targetSelectorSlots prepared.directory.directory
+  ⟨WorldKindLawDependencies.targetSelectorSlots planned.directory.directory
       (payTarget deployment) ++
     CanonicalRuntimeProfile.requestSlots
-      (request deployment prepared.authority.snapshot prepared.pay.cell profile.semantics ambient
-        command prepared.plan) ++
+      (request deployment planned.authority.snapshot planned.pay.cell profile.semantics ambient
+        command planned.plan) ++
     [(ClockLaw.payObserveSlot, 1),
      ("pay/observations", Int.ofNat command.observations.length),
      ("pay/tip/slot", Int.ofNat command.tip.slot),
-     ("pay/clock/slot", Int.ofNat prepared.clock.clock.slot)] ++
+     ("pay/clock/slot", Int.ofNat planned.clock.clock.slot)] ++
     DeclaredResourceController.bytesSlots "command/bytes" 0 (commandCodec.encode command) ++
     ResourceAuthorityProjection.grantSlots "authority/observer" .program command.capability
-      prepared.authority.snapshot.logical⟩
+      planned.authority.snapshot.logical⟩
 
-def step (prepared : Prepared deployment profile ambient durable command) : PolicyStepContext :=
-  PolicyStepContext.ofCandidate (project prepared) profile.semantics prepared.candidate
+/-- The pay write's law step: the pay law's projection of the pay cell before
+and after the retained tip. -/
+def step (planned : Planned deployment profile ambient durable command) : PolicyStepContext :=
+  PolicyStepContext.ofCandidate (project planned) profile.semantics planned.candidate
 
+/-- The configuration the observer's request is bound under: the pay target's
+committed law on the pay step, its structural restrictions, the observer's
+capability portal. -/
 def policyConfig
-    (prepared : Prepared deployment profile ambient durable command) : ComposedPolicyAdmission.Config F :=
-  PhysicalLawResolution.config profile.compilerProfile prepared.authority.snapshot
-    prepared.directory.directory
-    (sourceCapabilityPortal prepared.authority.snapshot
-      (marker prepared.authority.snapshot.domain profile.semantics command))
-    (step prepared) (payTarget deployment) prepared.dependencies.additional
+    (planned : Planned deployment profile ambient durable command) : ComposedPolicyAdmission.Config F :=
+  PhysicalLawResolution.config profile.compilerProfile planned.authority.snapshot
+    planned.directory.directory
+    (sourceCapabilityPortal planned.authority.snapshot
+      (marker planned.authority.snapshot.domain profile.semantics command))
+    (step planned) (payTarget deployment) planned.dependencies.additional
 
-abbrev Prepared.SemanticAccepted
-    (prepared : Prepared deployment profile ambient durable command) :=
-  AcceptedCellEffect (portal := (policyConfig prepared).portal)
-    (authState := prepared.authority.snapshot.authState)
-    (family deployment prepared.authority.snapshot prepared.pay.cell profile.semantics ambient command)
-    (request deployment prepared.authority.snapshot prepared.pay.cell profile.semantics ambient command
-      prepared.plan)
-    prepared.pay.cell
-    (declaration prepared.authority.snapshot.domain profile.semantics command prepared.plan) ()
+/-! ## The signature claim, the receipt and the binding -/
 
-def authorize
-    (prepared : Prepared deployment profile ambient durable command)
-    (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot) :
-    Except Reject prepared.SemanticAccepted := do
-  let wanted := request deployment prepared.authority.snapshot prepared.pay.cell profile.semantics
-    ambient command prepared.plan
-  let config := policyConfig prepared
-  let evidence ← requireSome .capabilityRejected
-    (config.capabilityEvidenceChecked wanted command.capability () receipt () (fun _ => ())).toOption
-  let law ← requireSome .policyUnavailable config.resolve?
-  let witness := law.witness
-  if inputsInRange profile.compilerProfile.compiler law.predicate
-      (step prepared).oldState (step prepared).newState != true then
-    throw .policyInputRange
-  if !decide (castInjOn F
-      (intsOf law.predicate (step prepared).oldState (step prepared).newState)) then
-    throw .policyCastAlias
-  match ComposedPolicyAdmission.admit config wanted evidence witness
-      (.policy wanted.policyId wanted.policyRevision) rfl rfl with
-  | none => .error .policyRejected
-  | some authorization =>
-      .ok (prepared.candidate.accept authorization rfl rfl rfl .sealed trivial)
+/-- **The one claim**: the observer's current key over the envelope's own signed
+header.  A key lookup and a decode; no decision is made before the Receiver has
+verified it. -/
+def claims (deployment : Deployment) (durable : Durable) (ingress : DecodedIngress) :
+    Except Reject (List SigQuery) :=
+  match loadDeployment deployment durable.snapshot with
+  | none => .error .authorityUnavailable
+  | some authority =>
+      match CredentialSignatureAdmission.envelopeClaim authority.snapshot ingress.command.observer
+          ingress.ingress.envelope with
+      | .error reason => .error (.signature reason)
+      | .ok claim => .ok [claim]
 
-structure Accepted
-    (prepared : Prepared deployment profile ambient durable command)
+/-- The observer's request bound to the pay cell's committed head on the pay
+step (`ComposedPolicyAdmission.Bound`). -/
+@[irreducible] def Authorization (planned : Planned deployment profile ambient durable command) : Type :=
+  ComposedPolicyAdmission.Bound (policyConfig planned)
+    (request deployment planned.authority.snapshot planned.pay.cell profile.semantics ambient
+      command planned.plan)
+
+/-- A bound request as the report's authorization (the definition is
+irreducible: the structure holding it would otherwise unfold the whole binding
+while it is declared). -/
+def Authorization.of {planned : Planned deployment profile ambient durable command}
+    (bound : ComposedPolicyAdmission.Bound (policyConfig planned)
+      (request deployment planned.authority.snapshot planned.pay.cell profile.semantics ambient
+        command planned.plan)) : Authorization planned := by
+  unfold Authorization
+  exact bound
+
+/-- The binding an authorization holds. -/
+def Authorization.bound {planned : Planned deployment profile ambient durable command}
+    (authorization : Authorization planned) :
+    ComposedPolicyAdmission.Bound (policyConfig planned)
+      (request deployment planned.authority.snapshot planned.pay.cell profile.semantics ambient
+        command planned.plan) := by
+  unfold Authorization at authorization
+  exact authorization
+
+/-- A prepared report: the decision, the capability-mode receipt built from the
+Receiver's voucher, and the observer's request bound to the pay cell's committed
+head on the pay step.  The pay and clock laws' verdicts are the Receiver's. -/
+structure Prepared {F : Type} [Field F] [DecidableEq F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (ingress : DecodedIngress) where
   private mk ::
-  receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
+  planned : Planned deployment profile ambient durable ingress.command
+  receipt : CredentialSignatureAdmission.CheckedSignature planned.authority.snapshot
+  /-- The receipt is the Receiver's: its oracle answered the claim the envelope
+  admission checked, before `prepare` ran. -/
+  receiptVouched : ∃ oracle, receipt.source = .receiver oracle
   envelopeExact : receipt.envelopeBytes = ingress.ingress.envelope
-  semantic : prepared.SemanticAccepted
+  authorized : Authorization planned
 
-/-- Acceptance evaluates the full source-resolved current restriction
-closure on the observer's actual scoped step, including selector coordinates. -/
-theorem Accepted.policy_evaluated_actual_post
-    {prepared : Prepared deployment profile ambient durable command} {ingress : DecodedIngress}
-    (accepted : Accepted prepared ingress) :
-    ∃ graph : PolicyComponentResolution.LoadedGraph
-        (policyConfig prepared).snapshot (policyConfig prepared).store
-        (policyConfig prepared).profile.semantics (policyConfig prepared).target
-        (policyConfig prepared).additional,
-      PolicyComponentResolution.loadTarget (policyConfig prepared).snapshot
-        (policyConfig prepared).store (policyConfig prepared).profile.semantics
-        (policyConfig prepared).target (policyConfig prepared).resolutionBudget
-        (policyConfig prepared).additional = .ok graph ∧
-      Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
-        (step prepared).oldState (step prepared).newState = true := by
-  exact ComposedPolicyAdmission.authorized_effective_law (policyConfig prepared)
-    (request deployment prepared.authority.snapshot prepared.pay.cell profile.semantics ambient
-      command prepared.plan) accepted.semantic.authorization
+/-- The gate: decide the report, build the receipt from the Receiver's voucher,
+check the observer's capability evidence under it, bind the request to the pay
+cell's committed head.  It judges no law. -/
+def prepare {F : Type} [Field F] [DecidableEq F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (received : CredentialSignatureAdmission.Received)
+    (ambient : Ambient) (durable : Durable) (ingress : DecodedIngress) :
+    Except Reject (Prepared deployment profile ambient durable ingress) :=
+  match planReport deployment profile ambient durable ingress.command with
+  | .error reason => .error reason
+  | .ok planned =>
+    let wanted := request deployment planned.authority.snapshot planned.pay.cell profile.semantics
+      ambient ingress.command planned.plan
+    match checked : CredentialSignatureAdmission.CheckedSignature.ofReceiverClaim received
+        planned.authority.snapshot
+        (marker planned.authority.snapshot.domain profile.semantics ingress.command) wanted
+        ingress.ingress.envelope with
+    | .error reason => .error (.signature reason)
+    | .ok receipt =>
+      let config := policyConfig planned
+      match (config.capabilityEvidenceChecked wanted ingress.command.capability () receipt ()
+          (fun _ => ())).toOption with
+      | none => .error .capabilityRejected
+      | some evidence =>
+        match config.resolve? with
+        | none => .error .policyUnavailable
+        | some law =>
+          match ComposedPolicyAdmission.bind config wanted evidence law
+              (.policy wanted.policyId wanted.policyRevision) rfl rfl with
+          | none => .error .policyRejected
+          | some authorized =>
+            have vouched := CredentialSignatureAdmission.CheckedSignature.ofReceiverClaim_vouched checked
+            .ok ⟨planned, receipt, ⟨_, vouched.2.1⟩, vouched.2.2.2.2, Authorization.of authorized⟩
 
-def admitNative (native : CredentialSignatureIO.NativeConfig)
-    (prepared : Prepared deployment profile ambient durable command)
-    (ingress : DecodedIngress) : IO (Except Reject (Accepted prepared ingress)) := do
-  match ← CredentialSignatureAdmission.verifyNative native prepared.authority.snapshot
-      (marker prepared.authority.snapshot.domain profile.semantics command)
-      (request deployment prepared.authority.snapshot prepared.pay.cell profile.semantics ambient
-        command prepared.plan)
-      ingress.ingress.envelope with
-  | .error reason => return .error (.signature reason)
-  | .ok receipt =>
-      if same : receipt.envelopeBytes = ingress.ingress.envelope then
-        match authorize prepared receipt with
-        | .error reason => return .error reason
-        | .ok semantic => return .ok ⟨receipt, same, semantic⟩
-      else return .error .capabilityRejected
+/-! ## The patch -/
+
+def payWrite (planned : Planned deployment profile ambient durable command) : DataWrite :=
+  planned.pay.write planned.payPost
+
+def clockWrite (planned : Planned deployment profile ambient durable command) : DataWrite :=
+  planned.clock.write planned.clockPost
+
+def bookWrite (planned : Planned deployment profile ambient durable command) : DataWrite :=
+  ResourceBirthController.Concrete.packedWrite deployment.resourceBookId
+    ⟨.resourceBook, planned.book.payload⟩ ⟨.resourceBook, planned.bookPost⟩
+
+/-- Retained chain evidence, the clock, the Book. -/
+def writes (planned : Planned deployment profile ambient durable command) : List DataWrite :=
+  [payWrite planned, clockWrite planned, bookWrite planned]
+
+theorem writes_bound (planned : Planned deployment profile ambient durable command)
+    (write : DataWrite) (member : write ∈ writes planned) :
+    rootBytes write.canonicalPostBytes = write.exactPost := by
+  simp only [writes, List.mem_cons, List.mem_nil_iff, or_false] at member
+  rcases member with rfl | rfl | rfl <;> rfl
+
+/-- **The family projects; the Receiver judges.**  The pay write carries the pay
+law's step, the clock write the clock law's step; the Book (kernel-only) none. -/
+def lawStepOf (planned : Planned deployment profile ambient durable command) (write : DataWrite) :
+    Option PolicyStepContext :=
+  if write.cellId = PayCellDomain.cellIdOf deployment then some (step planned)
+  else if write.cellId = ClockCellDomain.cellIdOf deployment then some planned.clockStep
+  else none
+
+theorem lawStepOf_pay (planned : Planned deployment profile ambient durable command) :
+    lawStepOf planned (payWrite planned) = some (step planned) := by
+  unfold lawStepOf
+  split
+  · rfl
+  · rename_i differs
+    exact absurd rfl differs
+
+theorem lawStepOf_clock (planned : Planned deployment profile ambient durable command)
+    (distinct : (clockWrite planned).cellId ≠ (payWrite planned).cellId) :
+    lawStepOf planned (clockWrite planned) = some planned.clockStep := by
+  unfold lawStepOf
+  split
+  · rename_i same
+    exact absurd same distinct
+  · split
+    · rfl
+    · rename_i differs
+      exact absurd rfl differs
+
+theorem lawStepOf_book (planned : Planned deployment profile ambient durable command)
+    (notPay : (bookWrite planned).cellId ≠ (payWrite planned).cellId)
+    (notClock : (bookWrite planned).cellId ≠ (clockWrite planned).cellId) :
+    lawStepOf planned (bookWrite planned) = none := by
+  unfold lawStepOf
+  split
+  · rename_i same
+    exact absurd same notPay
+  · split
+    · rename_i same
+      exact absurd same notClock
+    · rfl
+
+theorem distinct_of_nodup {α : Type} {a b c : α} (nodup : [a, b, c].Nodup) :
+    a ≠ b ∧ a ≠ c ∧ b ≠ c := by
+  obtain ⟨notA, rest⟩ := List.nodup_cons.1 nodup
+  obtain ⟨notB, -⟩ := List.nodup_cons.1 rest
+  exact ⟨fun same => notA (by simp [same]), fun same => notA (by simp [same]),
+    fun same => notB (by simp [same])⟩
+
+def physicalPostLaw (planned : Planned deployment profile ambient durable command) : Bool :=
+  (writes planned).all fun write =>
+    decide (ResourceBirthController.Concrete.PhysicalPostLaw deployment write)
+
+/-! ## The receiver -/
+
+def transactionId (domain semantics : Digest) (ingress : DecodedIngress) : Digest :=
+  ⟨marker domain semantics ingress.command⟩
+
+def event (domain _semantics : Digest) (ingress : DecodedIngress) : StableEvent where
+  codecVersion := 1
+  domain := domain
+  eventId := (Sp800185Cshake256.hash "DREGG.PAY.OBSERVATION.EVENT/v1".toUTF8.toList
+    ingress.bytes).digest
+  canonicalBytes := ingress.bytes
+
+/-- **The payment observation family.** -/
+def family {F : Type} [Field F] [DecidableEq F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) : Minidregg.Kernel.Receiving.Family where
+  id := .payObservation
+  Env := Ambient
+  Ingress := DecodedIngress
+  Command := DecodedIngress
+  Reject := Reject
+  rejectRepr := inferInstance
+  Prepared := fun ambient durable ingress => Prepared deployment profile ambient durable ingress
+  decode := decodeIngress
+  bytes := DecodedIngress.bytes
+  command := id
+  claims := fun _ durable ingress => claims deployment durable ingress
+  prepare := fun received ambient durable ingress =>
+    prepare deployment profile received ambient durable ingress
+  writes := fun prepared => writes prepared.planned
+  writes_bound := fun prepared => writes_bound prepared.planned
+  lawStep := fun prepared write _ => lawStepOf prepared.planned write
+  observed := fun prepared => prepared.planned.authority.readGuards
+  physicalPostLaw := fun prepared => physicalPostLaw prepared.planned
+  txId := fun _ ingress => transactionId deployment.domain profile.semantics ingress
+  event := fun _ ingress => event deployment.domain profile.semantics ingress
+  nullifiers := fun _ ingress => nullifiers deployment.domain ingress.command
+  subject := fun ingress => some ingress.command.observer
+  witnessBytes := fun ingress => ingress.ingress.envelope.length
+
+/-! ## What a committed report means -/
+
+variable {ingress : DecodedIngress}
+
+/-- **Every committed report's pay and clock writes were judged by their own
+committed laws, on the family's steps**, and its Book write by the registry row
+that names this family.  `Minidregg.Kernel.Receiving.Family.receive_committed_lawful`,
+instantiated: the pay cell's law on the pay step and the clock's law on the
+clock step both resolved at the loaded state with the three compiler verdicts
+true and `Pred.eval` accepting.  The planted fault for this theorem is the
+Receiver's judgement removed (`lawFault := fun _ => none` in
+`Minidregg.Kernel.Receiving.Family.receiver`). -/
+theorem committed_lawful {laws : ReceivingLaw.Laws Durable}
+    {oracle : CredentialSignatureIO.Oracle Id}
+    {Exact : Durable → DataIntent rootBytes → Type} {Other : Type}
+    {append : (state : Durable) → (intent : DataIntent rootBytes) →
+      Id (Minidregg.Theory.Receiving.Receiver.Commit (Exact state intent) Other)}
+    {bytes : List UInt8}
+    {admission : ((family deployment profile).receiver laws oracle).Admitted ambient durable ingress}
+    {witness : Exact durable (((family deployment profile).receiver laws oracle).intent admission.accepted)}
+    (committed : ((family deployment profile).receiver laws oracle).receive append ambient durable bytes =
+      pure (.committed ingress admission witness)) :
+    let planned := admission.accepted.prepared.planned
+    ReceivingLaw.Lawful laws .payObservation durable (payWrite planned) (some (step planned)) ∧
+      ReceivingLaw.Lawful laws .payObservation durable (clockWrite planned)
+        (some planned.clockStep) ∧
+      ReceivingLaw.Lawful laws .payObservation durable (bookWrite planned) none := by
+  intro planned
+  have judged := Minidregg.Kernel.Receiving.Family.receive_committed_lawful (family deployment profile) committed
+  have nodup : ((writes planned).map DataWrite.cellId).Nodup :=
+    (Minidregg.Kernel.Receiving.Family.receive_committed_shape (family deployment profile)
+      committed).1
+  simp only [writes, List.map_cons, List.map_nil] at nodup
+  obtain ⟨payClock, payBook, clockBook⟩ := distinct_of_nodup nodup
+  have payMem : payWrite planned ∈ writes planned := List.Mem.head _
+  have clockMem : clockWrite planned ∈ writes planned := List.Mem.tail _ (List.Mem.head _)
+  have bookMem : bookWrite planned ∈ writes planned :=
+    List.Mem.tail _ (List.Mem.tail _ (List.Mem.head _))
+  refine ⟨?_, ?_, ?_⟩
+  · have lawful := judged (payWrite planned) payMem
+    have stepEq : (family deployment profile).lawStep admission.accepted.prepared (payWrite planned)
+        payMem = some (step planned) := by
+      dsimp only [family]
+      exact lawStepOf_pay planned
+    rwa [stepEq] at lawful
+  · have lawful := judged (clockWrite planned) clockMem
+    have stepEq : (family deployment profile).lawStep admission.accepted.prepared (clockWrite planned)
+        clockMem = some planned.clockStep := by
+      dsimp only [family]
+      exact lawStepOf_clock planned (Ne.symm payClock)
+    rwa [stepEq] at lawful
+  · have lawful := judged (bookWrite planned) bookMem
+    have stepEq : (family deployment profile).lawStep admission.accepted.prepared (bookWrite planned)
+        bookMem = none := by
+      dsimp only [family]
+      exact lawStepOf_book planned (Ne.symm payBook) (Ne.symm clockBook)
+    rwa [stepEq] at lawful
+
+/-- **One judge, nothing weakened.**  Under the deployed laws, every committed
+report satisfies the full compiled admission the family's `prepare` no longer
+runs itself: the observer's bound request (`Prepared.authorized`), with the pay
+law's compiled verdict on the pay step, is `ComposedPolicyAdmission.admit`
+exactly.  The verdict comes from the Receiver's judgement of the pay write
+(`committed_lawful`): the law it resolved is the bound law
+(`PhysicalLawResolution.predicate_portal_irrelevant`), and its three compiler
+verdicts are `verifies_iff_eval`'s premises. -/
+theorem committed_admitted {oracle : CredentialSignatureIO.Oracle Id}
+    {Exact : Durable → DataIntent rootBytes → Type} {Other : Type}
+    {append : (state : Durable) → (intent : DataIntent rootBytes) →
+      Id (Minidregg.Theory.Receiving.Receiver.Commit (Exact state intent) Other)}
+    {bytes : List UInt8}
+    {admission : ((family deployment profile).receiver (laws deployment profile) oracle).Admitted
+      ambient durable ingress}
+    {witness : Exact durable
+      (((family deployment profile).receiver (laws deployment profile) oracle).intent
+        admission.accepted)}
+    (committed : ((family deployment profile).receiver (laws deployment profile) oracle).receive
+      append ambient durable bytes = pure (.committed ingress admission witness)) :
+    let planned := admission.accepted.prepared.planned
+    let bound := admission.accepted.prepared.authorized.bound
+    ∃ authorized, ComposedPolicyAdmission.admit (policyConfig planned)
+      (request deployment planned.authority.snapshot planned.pay.cell profile.semantics ambient
+        ingress.command planned.plan)
+      bound.evidence bound.law.witness bound.membership bound.epochExact bound.revisionExact =
+        some authorized := by
+  intro planned bound
+  apply bound.admit_of_verifies
+  obtain ⟨payLawful, -, -⟩ := committed_lawful committed
+  obtain ⟨kind, -, judgedPay⟩ := payLawful
+  rcases judgedPay with ⟨-, -, judgedStep, law, stepEq, resolved, lowerable, inRange, casts, evaluated⟩ |
+      ⟨-, -, -, noStep⟩
+  · cases stepEq
+    obtain ⟨directory, authority, structural, sources, judged, directoryEq, authorityEq, -, -,
+        judgedEq, rfl⟩ :=
+      (ReceivingLaw.physical_resolve_some_iff _ _ _ _ _ _).1 resolved
+    rw [planned.directoryExact] at directoryEq
+    rw [planned.authorityExact] at authorityEq
+    cases directoryEq
+    cases authorityEq
+    have restrictions : ((WorldKindLawDependencies.loadTarget deployment planned.directory.directory
+        (payTarget deployment)).map (·.additional) |>.getD []) = planned.dependencies.additional := by
+      rw [planned.dependenciesExact]
+      rfl
+    simp only at lowerable inRange casts evaluated
+    exact PhysicalLawResolution.bound_verifies_of_target_judged deployment profile.compilerProfile
+      planned.authority.snapshot planned.directory.directory _ _ (step planned) (payTarget deployment)
+      planned.dependencies.additional restrictions judged judgedEq lowerable inRange casts evaluated
+      bound
+  · cases noStep
+
+/-- **The receipt behind every admitted report is the Receiver's**: it was built
+from a voucher of the receiver's own oracle (`Source.receiver`), for the envelope
+the ingress carries. -/
+theorem admitted_receipt_vouched {laws : ReceivingLaw.Laws Durable} {m : Type → Type}
+    {oracle : CredentialSignatureIO.Oracle m}
+    (admission : ((family deployment profile).receiver laws oracle).Admitted ambient durable ingress) :
+    (∃ source, admission.accepted.prepared.receipt.source = .receiver source) ∧
+      admission.accepted.prepared.receipt.envelopeBytes = ingress.ingress.envelope :=
+  ⟨admission.accepted.prepared.receiptVouched, admission.accepted.prepared.envelopeExact⟩
+
+/-- An admitted report spends each observation's transfer nullifier. -/
+theorem intent_spends {laws : ReceivingLaw.Laws Durable} {m : Type → Type}
+    {oracle : CredentialSignatureIO.Oracle m}
+    (accepted : ((family deployment profile).receiver laws oracle).Accepted ambient durable ingress)
+    (o : Observation) (member : o ∈ ingress.command.observations) :
+    nullifier deployment.domain o ∈
+      (((family deployment profile).receiver laws oracle).intent accepted).nullifiers :=
+  List.mem_append_left _ (List.mem_map_of_mem member)
+
+/-- An admitted report spends its tip's tick nullifier. -/
+theorem intent_spends_tick {laws : ReceivingLaw.Laws Durable} {m : Type → Type}
+    {oracle : CredentialSignatureIO.Oracle m}
+    (accepted : ((family deployment profile).receiver laws oracle).Accepted ambient durable ingress) :
+    tickNullifier deployment.domain ingress.command.tip ∈
+      (((family deployment profile).receiver laws oracle).intent accepted).nullifiers :=
+  List.mem_append_right _ (List.mem_singleton_self _)
+
+/-- An admitted report writes retained chain evidence, the clock and the Book. -/
+theorem intent_writes {laws : ReceivingLaw.Laws Durable} {m : Type → Type}
+    {oracle : CredentialSignatureIO.Oracle m}
+    (accepted : ((family deployment profile).receiver laws oracle).Accepted ambient durable ingress) :
+    (((family deployment profile).receiver laws oracle).intent accepted).writes.map DataWrite.cellId =
+      [PayCellDomain.cellIdOf deployment, ClockCellDomain.cellIdOf deployment,
+        ⟨deployment.resourceBookId⟩] := rfl
 
 /-- The exact header the observer signs.  It is derived from the current pay
 cell, Book and authority, and discloses no decision: when the report does not
@@ -540,223 +818,23 @@ def signingHeader (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
       plan⟩).mapError
       (fun reason => s!"pay-observation signer key: {repr reason}")
 
-/-! ## The receiver -/
-
-def transactionId (domain semantics : Digest) (ingress : DecodedIngress) : Digest :=
-  ⟨marker domain semantics ingress.command⟩
-
-def event (domain _semantics : Digest) (ingress : DecodedIngress) : StableEvent where
-  codecVersion := 1
-  domain := domain
-  eventId := (Sp800185Cshake256.hash "DREGG.PAY.OBSERVATION.EVENT/v1".toUTF8.toList
-    ingress.bytes).digest
-  canonicalBytes := ingress.bytes
-
-def clockWrite (prepared : Prepared deployment profile ambient durable command) : DataWrite :=
-  prepared.clock.write prepared.clockPost
-
-def bookWrite (prepared : Prepared deployment profile ambient durable command) : DataWrite :=
-  ResourceBirthController.Concrete.packedWrite deployment.resourceBookId
-    ⟨.resourceBook, prepared.book.payload⟩ ⟨.resourceBook, prepared.bookPost⟩
-
-def payWrite (prepared : Prepared deployment profile ambient durable command) : DataWrite :=
-  prepared.pay.write prepared.payPost
-
-def writes (prepared : Prepared deployment profile ambient durable command) : List DataWrite :=
-  [payWrite prepared, clockWrite prepared, bookWrite prepared]
-
-/-- The successful physical resolver's complete source/history closure plus
-the actual target and structural kind roots. Prepared retains both load proofs. -/
-def lawReadGuards (prepared : Prepared deployment profile ambient durable command) : List ReadGuard :=
-  (prepared.sourceGuards ++ prepared.dependencies.readGuards).map
-    fun (cellIdentifier, expectedRoot) => ⟨⟨cellIdentifier⟩, expectedRoot⟩
-
-/-- The cells the clock law's resolution read (`ReceivingLaw.writeGuards`): a
-concurrent change of the clock's law conflicts with the report. -/
-def clockLawGuards (prepared : Prepared deployment profile ambient durable command) : List ReadGuard :=
-  ReceivingLaw.writeGuards (laws deployment profile) durable (clockWrite prepared)
-    (some prepared.clockStep)
-
-def readGuards (prepared : Prepared deployment profile ambient durable command) : List ReadGuard :=
-  (prepared.authority.readGuards ++ lawReadGuards prepared ++ clockLawGuards prepared).filter
-      fun guard => guard.cellId ∉ (writes prepared).map DataWrite.cellId
-
-/-- No resolved dependency can disappear between admission and commit:
-an existing write guards its pre-root, otherwise the intent reads its root. -/
-theorem lawGuard_read_or_written (prepared : Prepared deployment profile ambient durable command)
-    (guard : ReadGuard) (member : guard ∈ lawReadGuards prepared) :
-    guard ∈ readGuards prepared ∨ guard.cellId ∈ (writes prepared).map DataWrite.cellId := by
-  by_cases written : guard.cellId ∈ (writes prepared).map DataWrite.cellId
-  · exact Or.inr written
-  · apply Or.inl
-    apply List.mem_filter.mpr
-    exact ⟨List.mem_append_left _ (List.mem_append_right _ member), by simpa using written⟩
-
-/-- The same for the clock law's source cells. -/
-theorem clockLawGuard_read_or_written (prepared : Prepared deployment profile ambient durable command)
-    (guard : ReadGuard) (member : guard ∈ clockLawGuards prepared) :
-    guard ∈ readGuards prepared ∨ guard.cellId ∈ (writes prepared).map DataWrite.cellId := by
-  by_cases written : guard.cellId ∈ (writes prepared).map DataWrite.cellId
-  · exact Or.inr written
-  · apply Or.inl
-    apply List.mem_filter.mpr
-    exact ⟨List.mem_append_right _ member, by simpa using written⟩
-
-theorem Prepared.dependencies_available (prepared : Prepared deployment profile ambient durable command) :
-    (WorldKindLawDependencies.loadTarget deployment prepared.directory.directory
-      (payTarget deployment)).isSome = true := by
-  rw [prepared.dependenciesExact]
-  rfl
-
-theorem Prepared.source_guards_available (prepared : Prepared deployment profile ambient durable command) :
-    (PhysicalLawResolution.readGuards prepared.authority.snapshot prepared.directory.directory
-      profile.semantics (payTarget deployment) prepared.dependencies.additional).isSome = true := by
-  rw [prepared.sourceGuardsExact]
-  rfl
-
-def PhysicalShape (prepared : Prepared deployment profile ambient durable command) : Prop :=
-  ((writes prepared).map DataWrite.cellId).Nodup ∧
-    (∀ write ∈ writes prepared, write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
-    (∀ write ∈ writes prepared, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
-    (∀ write ∈ writes prepared, rootBytes write.canonicalPostBytes = write.exactPost) ∧
-
-    (∀ guard ∈ readGuards prepared, guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
-
-instance physicalShapeDecidable (prepared : Prepared deployment profile ambient durable command) :
-    Decidable (PhysicalShape prepared) := by
-  unfold PhysicalShape
-  infer_instance
-
-theorem readGuards_readonly (prepared : Prepared deployment profile ambient durable command)
-    (shape : PhysicalShape prepared) (guard : ReadGuard) (member : guard ∈ readGuards prepared) :
-    guard.cellId ∉ (writes prepared).map DataWrite.cellId := by
-  simpa [readGuards] using (List.mem_filter.mp member).2
-
-structure AcceptedObservation (deployment : Deployment)
-    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
-    (ingress : DecodedIngress) where
-  private mk ::
-  prepared : Prepared deployment profile ambient durable ingress.command
-  accepted : PayObservationReceiver.Accepted prepared ingress
-  physical : PhysicalShape prepared
-
-def admitDecodedNative (deployment : Deployment)
-    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
-    (native : CredentialSignatureIO.NativeConfig) (ingress : DecodedIngress) :
-    IO (Except Reject (AcceptedObservation deployment profile ambient durable ingress)) := do
-  match prepare deployment profile ambient durable ingress.command with
-  | .error reason => return .error reason
-  | .ok prepared =>
-    if physical : PhysicalShape prepared then
-      match ← admitNative native prepared ingress with
-      | .error reason => return .error reason
-      | .ok accepted => return .ok ⟨prepared, accepted, physical⟩
-    else return .error .physicalPreparation
-
-variable {ingress : DecodedIngress}
-
-def charge (accepted : AcceptedObservation deployment profile ambient durable ingress) :
-    ResourceCost.Charge
-  | .incidences => 3
-  | .turnBytes => ingress.bytes.length
-  | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
-  | .storageBytes => ((writes accepted.prepared).map fun write => write.canonicalPostBytes.length).sum
-  | .witnessBytes => ingress.ingress.envelope.length
-  | .proofWork => 2
-  | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
-
-def intent (accepted : AcceptedObservation deployment profile ambient durable ingress) :
-    DataIntent rootBytes where
-  transactionId := transactionId deployment.domain profile.semantics ingress
-  subject := some ingress.command.observer
-  writes := writes accepted.prepared
-  readGuards := readGuards accepted.prepared
-  nullifiers := nullifiers deployment.domain ingress.command
-  exactCharge := charge accepted
-  event := event deployment.domain profile.semantics ingress
-  postRootsBound := accepted.physical.2.2.2.1
-  guardsReadOnly := readGuards_readonly accepted.prepared accepted.physical
-
-/-- An accepted report writes retained chain evidence, the clock and the Book. -/
-theorem intent_writes (accepted : AcceptedObservation deployment profile ambient durable ingress) :
-    (intent accepted).writes.map DataWrite.cellId =
-      [PayCellDomain.cellIdOf deployment, ClockCellDomain.cellIdOf deployment, ⟨deployment.resourceBookId⟩] := rfl
-
-/-- An accepted report spends each observation's transfer nullifier. -/
-theorem intent_spends (accepted : AcceptedObservation deployment profile ambient durable ingress)
-    (o : Observation) (member : o ∈ ingress.command.observations) :
-    nullifier deployment.domain o ∈ (intent accepted).nullifiers :=
-  List.mem_append_left _ (List.mem_map_of_mem member)
-
-/-- An accepted report spends its tip's tick nullifier. -/
-theorem intent_spends_tick (accepted : AcceptedObservation deployment profile ambient durable ingress) :
-    tickNullifier deployment.domain ingress.command.tip ∈ (intent accepted).nullifiers :=
-  List.mem_append_right _ (List.mem_singleton_self _)
-
-structure Receipt where
-  transactionId : Digest
-  eventId : Digest
-  deriving DecidableEq, Repr
-
-def receipt (domain semantics : Digest) (ingress : DecodedIngress) : Receipt :=
-  ⟨transactionId domain semantics ingress, (event domain semantics ingress).eventId⟩
-
-def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIngress) :
-    Option (Except Unit Receipt) :=
-  match DurableCommitProtocol.Snapshot.lookupRecorded
-      (transactionId domain semantics ingress) durable.snapshot.model.journal with
-  | none => none
-  | some recorded =>
-    if recorded.transactionId = transactionId domain semantics ingress ∧
-        recorded.event.event = event domain semantics ingress ∧
-        recorded.nullifiers = nullifiers domain ingress.command then
-      some (.ok (receipt domain semantics ingress))
-    else some (.error ())
-
-inductive Result where
-  | confirmed (kind : DurableReceiverIO.Confirmation) (receipt : Receipt)
-  | rejected (reason : Reject)
-  | transactionConflict
-  | durableRejected (reason : DurableDataIntent.RejectReason)
-  | contention
-  | unavailable (detail : String)
-  | uncertain (detail : String)
-
-def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
-    (transport : DurableReceiverIO.Transport) (durable : Durable)
-    (bytes : List UInt8) : IO Result := do
-  let some ingress := decodeIngress bytes
-    | return .rejected .malformedIngress
-  match replay deployment.domain profile.semantics durable ingress with
-  | some (.ok prior) => return .confirmed .replayed prior
-  | some (.error _) => return .transactionConflict
-  | none =>
-    match ← admitDecodedNative deployment profile ambient durable native ingress with
-    | .error reason => return .rejected reason
-    | .ok accepted =>
-      match ← DurableReceiverIO.receiveLoaded transport rootBytes durable (intent accepted) with
-      | .confirmed kind _ =>
-          return .confirmed kind (receipt deployment.domain profile.semantics ingress)
-      | .rejected reason => return .durableRejected reason
-      | .contention => return .contention
-      | .unavailable detail => return .unavailable detail
-      | .uncertain detail => return .uncertain detail
-
-#assert_axioms Accepted.policy_evaluated_actual_post
-#assert_axioms Prepared.pay_post
-#assert_axioms Prepared.pay_post_exact
-#assert_axioms Prepared.chain_tip_advances
-#assert_axioms Prepared.bookPost_exact
-#assert_axioms Prepared.clock_post
-#assert_axioms lawGuard_read_or_written
-#assert_axioms clockLawGuard_read_or_written
-#assert_axioms Prepared.clock_lawful
-#assert_axioms Prepared.dependencies_available
-#assert_axioms Prepared.source_guards_available
-#assert_axioms readGuards_readonly
-#assert_axioms intent_writes
+#assert_axioms Planned.pay_post
+#assert_axioms Planned.pay_post_exact
+#assert_axioms Planned.chain_tip_advances
+#assert_axioms Planned.bookPost_exact
+#assert_axioms Planned.clock_post
+#assert_axioms Planned.clock_post_slot
+#assert_axioms Planned.dependencies_available
+#assert_axioms writes_bound
+#assert_axioms lawStepOf_pay
+#assert_axioms lawStepOf_clock
+#assert_axioms lawStepOf_book
+#assert_axioms distinct_of_nodup
+#assert_axioms committed_lawful
+#assert_axioms committed_admitted
+#assert_axioms admitted_receipt_vouched
 #assert_axioms intent_spends
 #assert_axioms intent_spends_tick
+#assert_axioms intent_writes
 
 end Minidregg.Kernel.PayObservationReceiver

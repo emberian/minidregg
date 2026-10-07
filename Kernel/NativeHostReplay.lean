@@ -1018,9 +1018,12 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (ClockTickReceiver.intent accepted)
   | payObservation {ingress : PayObservationReceiver.DecodedIngress}
-      (accepted : PayObservationReceiver.AcceptedObservation config.deployment config.profile
+      (admission : ((PayObservationReceiver.family config.deployment config.profile).liveReceiver
+        (receivingLaws config) config.signature).Admitted
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
-      NativeAdmission config opened (PayObservationReceiver.intent accepted)
+      NativeAdmission config opened
+        (((PayObservationReceiver.family config.deployment config.profile).liveReceiver
+          (receivingLaws config) config.signature).intent admission.accepted)
   | payEnrol {ingress : PayEnrolReceiver.DecodedIngress}
       (accepted : PayEnrolReceiver.AcceptedEnrol config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable, config.tariff⟩ opened.durable ingress) :
@@ -2196,12 +2199,14 @@ private def derive (config : Config) (opened : Opened config)
         return .ok ⟨ClockTickReceiver.intent accepted,
           .clockTick accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := PayObservationReceiver.decodeIngress bytes then
-    match ← PayObservationReceiver.admitDecodedNative config.deployment config.profile
-        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+    match ← (PayObservationReceiver.family config.deployment config.profile).admitNative
+        config.profile.compilerProfile config.deployment config.signature
+        ⟨config.federation, height⟩ opened.durable ingress with
     | .error reason => return .error s!"pay observation refused: {repr reason}"
-    | .ok accepted =>
-        return .ok ⟨PayObservationReceiver.intent accepted,
-          .payObservation accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
+    | .ok admission =>
+        return .ok ⟨((PayObservationReceiver.family config.deployment config.profile).liveReceiver
+            (receivingLaws config) config.signature).intent admission.accepted,
+          .payObservation admission, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := PayClaimCommand.decodeIngress bytes then
     match ← PayClaimReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height, config.tariff⟩ config.expectedSeed opened.durable config.signature ingress with
