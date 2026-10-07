@@ -21,6 +21,7 @@ import Theory.ObjectiveBendDemandForcingConverse
 import Theory.ObjectiveBendInteraction
 import Kernel.ObjectiveResumeContract
 import Kernel.ObjectiveCheckpointInvariant
+import Kernel.ObjectiveReferenceLift
 import Kernel.ObjectiveActivityGateRoute
 import Compiler.ObjectiveBendFrontEndAdequacy
 import Compiler.ObjectiveBendSpecificationClosure
