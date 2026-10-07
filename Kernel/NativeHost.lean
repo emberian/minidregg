@@ -1346,18 +1346,26 @@ def historicalReceiptVia (config : Config) (opened : Opened config)
   | .ok none => return .ok none
   | .ok (some receipt) => return .ok (if receipt.eventId == eventId then some receipt else none)
 
-/-- The accepted record of a transaction id, verified at use through the
-Reader built from this open (`Reader.byTx`). A history refusal is thrown with its
-message (it names the height); it is never reported as an absent transaction. -/
-def acceptedRecord (config : Config) (opened : Opened config) (transactionId : Digest) :
-    IO (Option DurableReceiver.IntentRecord) := do
+/-- The accepted record of a transaction id, verified at use through the Reader
+built from this open (`Reader.byTx`). A history refusal is RETURNED (its message
+names the height); it is never reported as an absent transaction. -/
+def acceptedRecordE (config : Config) (opened : Opened config) (transactionId : Digest) :
+    IO (Except Refusal (Option DurableReceiver.IntentRecord)) := do
   match ← historyReader config opened with
-  | .error refusal => throw (IO.userError refusal.detail)
+  | .error refusal => return .error refusal
   | .ok ⟨_, reader⟩ =>
       match ← reader.byTx transactionId with
-      | .error refusal => throw (IO.userError refusal.message)
-      | .ok (.absent _) => return none
-      | .ok (.present found) => return some found.read.record
+      | .error refusal => return .error (historyRefusal refusal)
+      | .ok (.absent _) => return .ok none
+      | .ok (.present found) => return .ok (some found.read.record)
+
+/-- `acceptedRecordE` for IO callers that fail by exception: the refusal message
+is thrown, never mapped to none. -/
+def acceptedRecord (config : Config) (opened : Opened config) (transactionId : Digest) :
+    IO (Option DurableReceiver.IntentRecord) := do
+  match ← acceptedRecordE config opened transactionId with
+  | .error refusal => throw (IO.userError refusal.detail)
+  | .ok record => return record
 
 /-- OPERATOR TOOLS ONLY, never a request or session path: every accepted record,
 each verified at use, read in `Reader.range` windows of 256 (one Store call and

@@ -16,8 +16,8 @@ participant's accepted log is read in verified `Reader.range` windows
 (`NativeHost.operatorAcceptedLog`, an operator tool, not a request path). -/
 def retainedPayload (replicas : Array Replica) (ingress : Bytes) : IO (Option Bytes) := do
   for replica in replicas do
-    let log ← Minidregg.Kernel.NativeHost.operatorAcceptedLog replica.config
-      replica.participant.source.verified.opened
+    let log ← Minidregg.Kernel.NativeHost.operatorAcceptedLogOfDurable replica.config
+      replica.participant.source.target
     if let some payload := log.findSome? fun record =>
         if record.event.canonicalBytes == ingress then
           some (DurableCheckpointCodec.recordFrame.encode record)
@@ -52,8 +52,8 @@ def receiptPrefix (replica : Replica) (ingress : Bytes) : Option (List Bytes) :=
 /-- `receiptPrefix` over the Reader's verified windows (the pure form above is kept
 only for `Verify.NativeJointSourceFixture` until its lane ports it). -/
 def receiptPrefixVerified (replica : Replica) (ingress : Bytes) : IO (Option (List Bytes)) := do
-  let records ← Minidregg.Kernel.NativeHost.operatorAcceptedLog replica.config
-    replica.participant.source.verified.opened
+  let records ← Minidregg.Kernel.NativeHost.operatorAcceptedLogOfDurable replica.config
+    replica.participant.source.target
   return do
     let index ← records.findIdx? (fun record => record.event.canonicalBytes == ingress)
     pure ((records.take (index + 1)).map DurableCheckpointCodec.recordFrame.encode)
