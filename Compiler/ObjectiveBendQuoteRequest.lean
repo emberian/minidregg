@@ -101,7 +101,7 @@ def requestStream : StreamCodec Request := StreamCodec.xmap
     r.2.2.2.2.2.2.2.2.2.1,r.2.2.2.2.2.2.2.2.2.2.1,r.2.2.2.2.2.2.2.2.2.2.2⟩)
   (by intro r; cases r; rfl)
 
-def frame : List UInt8 := "DREGG/OBJECTIVE-BEND/LOCAL-REQUEST".toUTF8.toList ++ [1]
+def frame : List UInt8 := "DREGG/OBJECTIVE-BEND/LOCAL-REQUEST".toUTF8.toList ++ [2]
 def codec : LawfulCodec Request := NativeHostCodec.framed frame requestStream
 
 def queryFor (subject : SubjectId) (nonce : Nat) (ref : ObjectiveInvocationClaim.InputRef) : NativeObservationCodec.Intent :=

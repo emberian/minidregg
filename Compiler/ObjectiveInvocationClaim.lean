@@ -22,6 +22,9 @@ structure Capacity where
   stack : Nat
   outputNodes : Nat
   outputBytes : Nat
+  /-- The Plan/result extraction's tick allowance: forcing during materialization is
+  validator work, metered and priced like the run's own ticks, never folded into them. -/
+  extractTicks : Nat
   inputBytes : Nat
   scalarBits : Nat
   memoryTouches : Nat
@@ -76,14 +79,15 @@ def capacityStream : StreamCodec Capacity :=
       (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))))))
+      (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))))))))
       (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))))
-    (fun c => ((c.typeFuel,c.sourceTicks,c.heap,c.stack,c.outputNodes,c.outputBytes,
+    (fun c => ((c.typeFuel,c.sourceTicks,c.heap,c.stack,c.outputNodes,c.outputBytes,c.extractTicks,
       c.inputBytes,c.scalarBits,c.memoryTouches,c.proofWork,c.feeDebit),
       (c.turnBytes,c.witnessBytes,c.storageBytes,c.sideEffectCount,c.networkBytes,c.leaseByteBlocks,c.incidences)))
-    (fun ((t,s,h,k,n,b,i,w,m,p,f),(u,v,x,e,y,l,j)) => ⟨t,s,h,k,n,b,i,w,m,p,f,u,v,x,e,y,l,j⟩)
+    (fun ((t,s,h,k,n,b,z,i,w,m,p,f),(u,v,x,e,y,l,j)) => ⟨t,s,h,k,n,b,z,i,w,m,p,f,u,v,x,e,y,l,j⟩)
     (by intro c; cases c; rfl)
 
 def stream : StreamCodec Claim :=
@@ -97,7 +101,7 @@ def stream : StreamCodec Claim :=
       c.inputRefs,c.inputEnvelopes,c.expectedInput,c.capacity))
     (fun (s,v,a,c,o,b,r,q,e,p) => ⟨s,v,a,c,o,b,r,q,e,p⟩) (by intro c; cases c; rfl)
 
-def frame : List UInt8 := "DREGG/OBJECTIVE/INVOCATION-CLAIM/v4".toUTF8.toList
+def frame : List UInt8 := "DREGG/OBJECTIVE/INVOCATION-CLAIM/v5".toUTF8.toList
 
 def rawCodec : LawfulCodec Claim where
   encode claim := frame ++ stream.encode claim

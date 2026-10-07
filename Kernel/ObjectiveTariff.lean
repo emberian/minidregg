@@ -30,6 +30,8 @@ structure Tariff where
   stack : Nat
   outputNodes : Nat
   outputBytes : Nat
+  /-- The rate per declared extraction tick (`Capacity.extractTicks`). -/
+  extractTicks : Nat
   inputBytes : Nat
   deriving DecidableEq, Repr
 
@@ -37,19 +39,22 @@ def tariffStream : StreamCodec Tariff := StreamCodec.xmap
   (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
     (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
     (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))))
-  (fun t => (t.version,t.base,t.typeFuel,t.sourceTicks,t.heap,t.stack,t.outputNodes,t.outputBytes,t.inputBytes))
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+    (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))))))
+  (fun t => (t.version,t.base,t.typeFuel,t.sourceTicks,t.heap,t.stack,t.outputNodes,t.outputBytes,t.extractTicks,
+    t.inputBytes))
   (fun t => ⟨t.1,t.2.1,t.2.2.1,t.2.2.2.1,t.2.2.2.2.1,t.2.2.2.2.2.1,t.2.2.2.2.2.2.1,t.2.2.2.2.2.2.2.1,
-    t.2.2.2.2.2.2.2.2⟩) (by intro t; cases t; rfl)
+    t.2.2.2.2.2.2.2.2.1,t.2.2.2.2.2.2.2.2.2⟩) (by intro t; cases t; rfl)
 
-/-- The tariff edition this receiver prices with. -/
-def tariffVersion : Nat := 1
+/-- The tariff edition this receiver prices with. Edition 2 prices extraction ticks; an
+edition-1 tariff (no extraction rate) is refused (`Tariff.valid`). -/
+def tariffVersion : Nat := 2
 
 /-- The work units a declared envelope costs. -/
 def Tariff.workOf (t : Tariff) (c : ObjectiveInvocationClaim.Capacity) : Nat :=
   t.base + t.typeFuel * c.typeFuel + t.sourceTicks * c.sourceTicks + t.heap * c.heap +
     t.stack * c.stack + t.outputNodes * c.outputNodes + t.outputBytes * c.outputBytes +
-    t.inputBytes * c.inputBytes
+    t.extractTicks * c.extractTicks + t.inputBytes * c.inputBytes
 
 def Tariff.valid (t : Tariff) : Bool := t.version == tariffVersion && decide (0 < t.base)
 
@@ -64,7 +69,8 @@ theorem Tariff.workOf_pos {t : Tariff} (valid : t.valid = true) (c : ObjectiveIn
 theorem Tariff.workOf_mono (t : Tariff) {a b : ObjectiveInvocationClaim.Capacity}
     (typeFuel : a.typeFuel ≤ b.typeFuel) (sourceTicks : a.sourceTicks ≤ b.sourceTicks)
     (heap : a.heap ≤ b.heap) (stack : a.stack ≤ b.stack) (outputNodes : a.outputNodes ≤ b.outputNodes)
-    (outputBytes : a.outputBytes ≤ b.outputBytes) (inputBytes : a.inputBytes ≤ b.inputBytes) :
+    (outputBytes : a.outputBytes ≤ b.outputBytes) (extractTicks : a.extractTicks ≤ b.extractTicks)
+    (inputBytes : a.inputBytes ≤ b.inputBytes) :
     t.workOf a ≤ t.workOf b := by
   unfold Tariff.workOf
   have := Nat.mul_le_mul_left t.typeFuel typeFuel
@@ -73,23 +79,25 @@ theorem Tariff.workOf_mono (t : Tariff) {a b : ObjectiveInvocationClaim.Capacity
   have := Nat.mul_le_mul_left t.stack stack
   have := Nat.mul_le_mul_left t.outputNodes outputNodes
   have := Nat.mul_le_mul_left t.outputBytes outputBytes
+  have := Nat.mul_le_mul_left t.extractTicks extractTicks
   have := Nat.mul_le_mul_left t.inputBytes inputBytes
   omega
 
 /-- An inhabitant of `Tariff.valid`: one work unit per call and per declared
 source tick (the premise of `workOf_pos` is satisfiable). -/
-def Tariff.unit : Tariff := ⟨tariffVersion,1,0,1,0,0,0,0,0⟩
+def Tariff.unit : Tariff := ⟨tariffVersion,1,0,1,0,0,0,0,0,0⟩
 theorem Tariff.unit_valid : Tariff.unit.valid = true := by decide
 
 open Minidregg.Compiler.ObjectiveInvocationClaim (Capacity) in
 /-- The empty envelope. -/
-def zeroCapacity : Capacity := ⟨0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0⟩
+def zeroCapacity : Capacity := ⟨0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0⟩
 
 open Minidregg.Compiler.ObjectiveInvocationClaim (Capacity) in
 /-- Two envelopes, field by field. -/
 def addCapacity (a b : Capacity) : Capacity :=
   ⟨a.typeFuel + b.typeFuel, a.sourceTicks + b.sourceTicks, a.heap + b.heap, a.stack + b.stack,
-    a.outputNodes + b.outputNodes, a.outputBytes + b.outputBytes, a.inputBytes + b.inputBytes,
+    a.outputNodes + b.outputNodes, a.outputBytes + b.outputBytes, a.extractTicks + b.extractTicks,
+    a.inputBytes + b.inputBytes,
     a.scalarBits + b.scalarBits, a.memoryTouches + b.memoryTouches, a.proofWork + b.proofWork,
     a.feeDebit + b.feeDebit, a.turnBytes + b.turnBytes, a.witnessBytes + b.witnessBytes,
     a.storageBytes + b.storageBytes, a.sideEffectCount + b.sideEffectCount, a.networkBytes + b.networkBytes,

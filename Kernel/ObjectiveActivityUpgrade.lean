@@ -353,6 +353,10 @@ structure Adoption {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   distinct : request.pin ≠ record.pin
   patienceWithin : 0 < request.patience ∧ request.patience ≤ config.maxPatience
   covered : config.covers request.envelope = true
+  /-- The migration envelope covers the extraction tick budget: every migration run it pays
+  for (MIGRATE's, and each drained write's judgment, charged to this same adopted envelope)
+  extracts its migrated Data. -/
+  extractCovered : config.planBudget.ticks ≤ request.envelope.extractTicks
   data : request.stateType.isData = true
   published : (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain request.pin))).isSome = true
   migrationChecked : migrationCheck config snapshot record (request.pending height) = .ok ()
@@ -389,6 +393,7 @@ def adopt {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
   if distinct : request.pin ≠ record.pin then
   if patienceWithin : 0 < request.patience ∧ request.patience ≤ config.maxPatience then
   if covered : config.covers request.envelope = true then
+  if extractCovered : config.planBudget.ticks ≤ request.envelope.extractTicks then
   if data : request.stateType.isData = true then
   if published : (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain request.pin))).isSome = true then
   match migrationChecked : migrationCheck config snapshot record (request.pending height) with
@@ -410,12 +415,14 @@ def adopt {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
   match postedExact : postings book (adoptBatch config request) with
   | .error reason => .error reason
   | .ok posted =>
-    .ok ⟨record, recordExact, policy, steady, noRebirths, distinct, patienceWithin, covered, data, published,
+    .ok ⟨record, recordExact, policy, steady, noRebirths, distinct, patienceWithin, covered, extractCovered, data,
+      published,
       migrationChecked, current, currentExact, migrated, migratedExact, nodup, rebirthsChecked, book, bookExact,
       posted, postings_batch postedExact, _, rfl, _, rfl⟩
   else .error (.rebirthTarget "the rebirth list names an activity twice")
   else .error .pinUnpublished
   else .error .stateTypeNotData
+  else .error (.extractUncovered config.planBudget.ticks request.envelope.extractTicks)
   else .error (.uncovered request.envelope)
   else .error (.drainPatience request.patience config.maxPatience)
   else .error .samePin
@@ -593,6 +600,10 @@ structure Abort {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
   envelope : Capacity
   envelopeExact : envelope = addCapacity record.escrow.timeout request.extra
   covered : config.covers envelope = true
+  /-- As a delivery: the declared envelope covers the resumed run's heap (`segmentLimits`). -/
+  heapCovered : (segmentLimits config resumed).heap ≤ envelope.heap
+  /-- As a delivery: the declared envelope covers the extraction tick budget. -/
+  extractCovered : config.planBudget.ticks ≤ envelope.extractTicks
   segment : Segment
   segmentExact : abortSegment config envelope.sourceTicks resumed = .ok segment
   ended : Record
@@ -656,6 +667,8 @@ def abortDrained {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sn
   | some resumed =>
   let envelope := addCapacity record.escrow.timeout request.extra
   if covered : config.covers envelope = true then
+  if heapCovered : (segmentLimits config resumed).heap ≤ envelope.heap then
+  if extractCovered : config.planBudget.ticks ≤ envelope.extractTicks then
   match segmentExact : abortSegment config envelope.sourceTicks resumed with
   | .error reason => .error reason
   | .ok segment =>
@@ -672,8 +685,11 @@ def abortDrained {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sn
   | .ok posted =>
     .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, program, programExact,
       object, objectExact, next, deadline, draining, due, old, notChosen, slotPosts, slotClaims, slotExact, view,
-      viewExact, response, state, stateExact, resumed, resumeExact, envelope, rfl, covered, segment, segmentExact,
+      viewExact, response, state, stateExact, resumed, resumeExact, envelope, rfl, covered, heapCovered, extractCovered,
+      segment, segmentExact,
       ended, rfl, book, bookExact, batch, batchExact, posted, postings_batch postedExact, _, rfl, _, rfl⟩
+  else .error (.extractUncovered config.planBudget.ticks envelope.extractTicks)
+  else .error (.heapUncovered (segmentLimits config resumed).heap envelope.heap)
   else .error (.uncovered envelope)
   else .error .rebirthDisposition
   else .error .notDraining

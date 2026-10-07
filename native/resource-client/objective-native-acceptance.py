@@ -71,18 +71,18 @@ def digest_hex(decimal):return enc_nat(int(decimal)).hex()
 def canonical(obj):return json.dumps(obj,sort_keys=True,separators=(',',':'),ensure_ascii=False)
 def ref(s,name):return json.loads((pathlib.Path(s['sponsor'])/'refs'/f'{name}.json').read_text())
 
-CAP_KEYS=['typeFuel','sourceTicks','heap','stack','outputNodes','outputBytes','inputBytes','scalarBits',
+CAP_KEYS=['typeFuel','sourceTicks','heap','stack','outputNodes','outputBytes','extractTicks','inputBytes','scalarBits',
   'memoryTouches','proofWork','feeDebit','turnBytes','witnessBytes','storageBytes','sideEffectCount',
   'networkBytes','leaseByteBlocks','incidences']
 MAXIMUM={'typeFuel':16384,'sourceTicks':200000,'heap':200000,'stack':200000,'outputNodes':20000,
-  'outputBytes':200000,'inputBytes':200000,'scalarBits':512,'memoryTouches':2000000,'proofWork':900000,
+  'outputBytes':200000, 'extractTicks': 200000,'inputBytes':200000,'scalarBits':512,'memoryTouches':2000000,'proofWork':900000,
   'feeDebit':1000000,'turnBytes':4000000,'witnessBytes':4000000,'storageBytes':4000000,'sideEffectCount':16,
   'networkBytes':0,'leaseByteBlocks':0,'incidences':16}
 ENVELOPE={'typeFuel':16384,'sourceTicks':100000,'heap':100000,'stack':100000,'outputNodes':10000,
-  'outputBytes':100000,'inputBytes':100000,'scalarBits':512,'memoryTouches':1000000,'feeDebit':0,
+  'outputBytes':100000, 'extractTicks': 100000,'inputBytes':100000,'scalarBits':512,'memoryTouches':1000000,'feeDebit':0,
   'turnBytes':2000000,'witnessBytes':2000000,'storageBytes':2000000,'sideEffectCount':8,
   'networkBytes':0,'leaseByteBlocks':0,'incidences':8}
-TARIFF_KEYS=['typeFuel','sourceTicks','heap','stack','outputNodes','outputBytes','inputBytes']
+TARIFF_KEYS=['typeFuel','sourceTicks','heap','stack','outputNodes','outputBytes','extractTicks','inputBytes']
 def price(tariff,c):return int(tariff['base'])+sum(int(tariff[k])*int(c[k]) for k in TARIFF_KEYS)
 
 if a.verb=='all':
@@ -161,8 +161,8 @@ elif a.verb=='world':
     if root.exists():raise SystemExit('root exists')
     root.mkdir(mode=0o700);T.mkdir()
     constants=json.loads(sh('constants',host,'/dev/null','objective-constants').stdout)
-    tariff={'version':'1','base':a.tariff_base or '1','typeFuel':'0','sourceTicks':a.tariff_tick or '1','heap':'0',
-        'stack':'0','outputNodes':'0','outputBytes':'0','inputBytes':'0'}
+    tariff={'version':'2','base':a.tariff_base or '1','typeFuel':'0','sourceTicks':a.tariff_tick or '1','heap':'0',
+        'stack':'0','outputNodes':'0','outputBytes':'0', 'extractTicks': '0','inputBytes':'0'}
     policy={'schema':'dregg.objective-bend.policy.v1','sourceBytes':'4194304',
         'maximum':{k:str(v) for k,v in MAXIMUM.items()},'outputs':[constants['genericCodec']],
         'clearAudience':digest_hex(1),'frontEnd':constants['frontEnd'],'tariff':tariff}

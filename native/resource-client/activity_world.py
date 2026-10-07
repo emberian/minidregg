@@ -18,12 +18,12 @@ process exit code (1 on any red row).
 import contextlib, json, os, pathlib, re, subprocess, sys, time, traceback
 
 MAXIMUM = {'typeFuel': 16384, 'sourceTicks': 200000, 'heap': 200000, 'stack': 200000, 'outputNodes': 20000,
-           'outputBytes': 200000, 'inputBytes': 200000, 'scalarBits': 512, 'memoryTouches': 2000000,
+           'outputBytes': 200000, 'extractTicks': 200000, 'inputBytes': 200000, 'scalarBits': 512, 'memoryTouches': 2000000,
            'proofWork': 900000, 'feeDebit': 1000000, 'turnBytes': 4000000, 'witnessBytes': 4000000,
            'storageBytes': 4000000, 'sideEffectCount': 16, 'networkBytes': 0, 'leaseByteBlocks': 0,
            'incidences': 16}
-TARIFF = {'version': '1', 'base': '1', 'typeFuel': '0', 'sourceTicks': '1', 'heap': '0', 'stack': '0',
-          'outputNodes': '0', 'outputBytes': '0', 'inputBytes': '0'}
+TARIFF = {'version': '2', 'base': '1', 'typeFuel': '0', 'sourceTicks': '1', 'heap': '0', 'stack': '0',
+          'outputNodes': '0', 'outputBytes': '0', 'extractTicks': '0', 'inputBytes': '0'}
 PERMIT_ALL = {'type': 'all', 'predicates': []}
 
 # A declared envelope of TICKS source ticks is priced base + ticks (TARIFF); an await escrows one
@@ -50,7 +50,7 @@ def cap(ticks, full=True):
     heap, stack, type fuel and Plan budget (Config.covers), priced at 0."""
     c = {k: '0' for k in MAXIMUM}
     if full:
-        for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes']:
+        for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes', 'extractTicks']:
             c[k] = str(MAXIMUM[k])
     c['sourceTicks'] = str(ticks)
     return c

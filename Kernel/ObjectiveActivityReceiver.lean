@@ -318,12 +318,11 @@ def commandStream : StreamCodec Command :=
     (fun (subject, nonce, root, turn) => ⟨subject, nonce, root, turn⟩)
     (by intro c; cases c; rfl)
 
-/-- v6: the upgrade turns (`adopt`, `migrate`, `abortDrained`, `rebirth`) join the sum, and
-`create` declares the object's state type (`ObjectStateType.tyStream`); v5: `create`
-carries an optional initial declared state, and the turn sum has no `writeState` (a direct write
-of declared state is no turn: only the object's package writes it, under its pin); v5 (and
-older) commands refuse to decode. -/
-def commandFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/COMMAND/v6".toUTF8.toList
+/-- v7: envelopes carry the extraction tick lane (`Capacity.extractTicks`); v6: the upgrade turns
+(`adopt`, `migrate`, `abortDrained`, `rebirth`) join the sum, and `create` declares the object's
+state type (`ObjectStateType.tyStream`); v5: `create` carries an optional initial declared state,
+and the turn sum has no `writeState`; v6 (and older) commands refuse to decode. -/
+def commandFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/COMMAND/v7".toUTF8.toList
 
 def commandCodec : LawfulCodec Command := ObjectiveActivityWire.framed commandFrame commandStream
 

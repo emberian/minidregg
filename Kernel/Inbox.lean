@@ -160,7 +160,7 @@ theorem lawful_fifo {a b : Inbox} (lawful : Lawful a b) :
 
 /-! Inhabitants and teeth (closed values, no hashing). -/
 
-def sampleMessage (n : Nat) : Message := ⟨⟨n⟩, 1, "m", [], ⟨0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0⟩, 1, 9⟩
+def sampleMessage (n : Nat) : Message := ⟨⟨n⟩, 1, "m", [], ⟨0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0⟩, 1, 9⟩
 
 def sampleInbox : Inbox := ⟨1, 2, 0, [sampleMessage 10, sampleMessage 11]⟩
 

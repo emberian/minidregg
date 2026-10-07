@@ -38,8 +38,11 @@ forced-state typing (`typed_checkpoint`) and the codec round trip (`state_roundT
   checkpoint the kernel stores, with no premise beyond the one the typing invariant
   already discharges, the stored state is the checkpoint of the yield the segment's own run
   retained, and resumes as that yield (`StoredComplete`);
-* `Delivery.heap_priced`, `Exhaustion.heap_priced`: a resumed run's heap (the checkpoint's
-  cells plus the allocation) is declared and priced by the turn that runs it.
+* `Delivery.spend`, `Exhaustion.spend`, `SpendDeclared.priced`: every component a resumed run
+  may spend (heap past the checkpoint, stack, ticks, output nodes and bytes, extraction ticks)
+  is declared by its envelope and charged by the envelope's price;
+* `runSegment_stored_converse` (with `ResourcesOnly`) and `runSegment_stored_next`: the
+  converse, resources only, and the continuation states after a stored yield.
 
 So the before-root check of a kernel checkpoint is codec validity and the digest
 binding (Scribe note B3): no executable machine-state checker is needed for
@@ -629,7 +632,7 @@ def tallyConfig : Config where
   maxPatience := 16
   typeFuel := 16384
   maxArtifactBytes := 4194304
-  tariff := ⟨Minidregg.Kernel.ObjectiveTariff.tariffVersion, 10, 0, 1, 0, 0, 0, 0, 0⟩
+  tariff := ⟨Minidregg.Kernel.ObjectiveTariff.tariffVersion, 10, 0, 1, 0, 0, 0, 0, 0, 0⟩
   abandonGrace := 16
   storageRate := 1
 
@@ -1118,40 +1121,99 @@ theorem not_resourcesOnly_lostStack :
     · cases checked
   · cases checked
 
-/-! ### Growth is paid by the delivery that runs it
+/-! ### The kernel spends what the envelope declares, and the envelope is priced
 
-A resumed segment's limits are counted from its checkpoint's heap, so a checkpoint may grow
-from segment to segment. Every delivery (and every exhaustion attempt) declares an envelope
-whose heap covers the checkpoint's cells plus the deployment's allocation
-(`Delivery.heapCovered`, refused `heapUncovered` before any run), and the envelope is priced
-by the tariff's `workOf` (the purse pays the escrowed part, the submitter the `extra` it
-adds). So the price a delivery's envelope carries is at least the tariff's heap rate times
-the checkpoint's cells plus the allocation. -/
+C3, deployed accounting (GPT-6): the actual kernel admits and pays for exactly the resources
+its run may spend. A resumed segment runs `runSegment config envelope.sourceTicks resumed`:
+under `segmentLimits` (the checkpoint's cells plus the deployment's allocation, and the
+deployment's stack), `envelope.sourceTicks` ticks, and the deployment's extraction budget
+`planBudget` (output nodes, output bytes, extraction ticks). Every component is declared by
+the envelope (`Config.covers`; `heapUncovered` and `extractUncovered` refuse by name before
+any run), and the envelope's price, `Tariff.workOf`, charges each declared component at its
+rate. A checkpoint that grew is paid by the delivery that resumes it (`heapCovered`); the
+extraction's forcing, validator work at every delivery, is declared and paid
+(`extractCovered`) rather than folded into the source ceiling. -/
 
-theorem tariff_heap_le_workOf (tariff : Minidregg.Kernel.ObjectiveTariff.Tariff) (capacity : Minidregg.Compiler.ObjectiveInvocationClaim.Capacity) :
-    tariff.heap * capacity.heap ≤ tariff.workOf capacity := by
+open Minidregg.Compiler.ObjectiveInvocationClaim (Capacity)
+
+/-- The resource vector a resumed segment may spend, componentwise within its declared
+envelope. -/
+structure SpendDeclared (config : Config) (resumed : State) (envelope : Capacity) : Prop where
+  heap : (segmentLimits config resumed).heap ≤ envelope.heap
+  stack : (segmentLimits config resumed).stack ≤ envelope.stack
+  ticks : envelope.sourceTicks ≤ config.maxTicks
+  outputNodes : config.planBudget.nodes ≤ envelope.outputNodes
+  outputBytes : config.planBudget.bytes ≤ envelope.outputBytes
+  extractTicks : config.planBudget.ticks ≤ envelope.extractTicks
+
+theorem spendDeclared_of {config : Config} {resumed : State} {envelope : Capacity}
+    (covered : config.covers envelope = true) (heapCovered : (segmentLimits config resumed).heap ≤ envelope.heap)
+    (extractCovered : config.planBudget.ticks ≤ envelope.extractTicks) : SpendDeclared config resumed envelope := by
+  simp only [Config.covers, Bool.and_eq_true, decide_eq_true_eq] at covered
+  obtain ⟨⟨⟨⟨⟨ticks, _⟩, stack⟩, _⟩, nodes⟩, bytes⟩ := covered
+  exact ⟨heapCovered, by simpa [segmentLimits, ObjectiveBendDemandCollect.limitsPast] using stack, ticks, nodes, bytes,
+    extractCovered⟩
+
+/-- **The price covers the spend**: every component the segment may spend, at its tariff rate,
+is within the envelope's price. -/
+theorem SpendDeclared.priced {config : Config} {resumed : State} {envelope : Capacity}
+    (spend : SpendDeclared config resumed envelope) :
+    config.tariff.heap * (segmentLimits config resumed).heap + config.tariff.stack * (segmentLimits config resumed).stack +
+      config.tariff.sourceTicks * envelope.sourceTicks + config.tariff.outputNodes * config.planBudget.nodes +
+      config.tariff.outputBytes * config.planBudget.bytes + config.tariff.extractTicks * config.planBudget.ticks ≤
+      config.tariff.workOf envelope := by
   unfold Minidregg.Kernel.ObjectiveTariff.Tariff.workOf
-  apply Nat.le_add_right_of_le; apply Nat.le_add_right_of_le
-  apply Nat.le_add_right_of_le; apply Nat.le_add_right_of_le
-  exact Nat.le_add_left _ _
+  have := Nat.mul_le_mul_left config.tariff.heap spend.heap
+  have := Nat.mul_le_mul_left config.tariff.stack spend.stack
+  have := Nat.mul_le_mul_left config.tariff.outputNodes spend.outputNodes
+  have := Nat.mul_le_mul_left config.tariff.outputBytes spend.outputBytes
+  have := Nat.mul_le_mul_left config.tariff.extractTicks spend.extractTicks
+  omega
 
-/-- **A delivery's declared price covers its checkpoint's heap.** -/
+/-- **A delivery spends what it declared.** -/
+theorem Delivery.spend {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) :
+    SpendDeclared config delivery.resumed delivery.envelope :=
+  spendDeclared_of delivery.covered delivery.heapCovered delivery.extractCovered
+
+/-- **So does an exhaustion attempt.** -/
+theorem Exhaustion.spend {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : ExhaustRequest} (attempt : Exhaustion config snapshot height request) :
+    SpendDeclared config attempt.resumed attempt.envelope :=
+  spendDeclared_of attempt.covered attempt.heapCovered attempt.extractCovered
+
+/-- The checkpoint's cells are paid at the delivery that resumes them: its price covers the
+checkpoint's heap plus the allocation, at the heap rate. -/
 theorem Delivery.heap_priced {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) :
     config.tariff.heap * (delivery.state.heap.size + config.limits.heap) ≤ config.tariff.workOf delivery.envelope := by
-  have covered := delivery.heapCovered
+  have priced := (Delivery.spend delivery).priced
   have same := (resume_keeps_heap_and_stack _ _ _ delivery.resumeExact).1
-  simp only [segmentLimits, ObjectiveBendDemandCollect.limitsPast, same] at covered
-  exact Nat.le_trans (Nat.mul_le_mul_left _ covered) (tariff_heap_le_workOf _ _)
+  simp only [segmentLimits, ObjectiveBendDemandCollect.limitsPast, same] at priced
+  omega
 
-/-- **So does an exhaustion attempt's.** -/
-theorem Exhaustion.heap_priced {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {height : Nat} {request : ExhaustRequest} (attempt : Exhaustion config snapshot height request) :
-    config.tariff.heap * (attempt.state.heap.size + config.limits.heap) ≤ config.tariff.workOf attempt.envelope := by
-  have covered := attempt.heapCovered
-  have same := (resume_keeps_heap_and_stack _ _ _ attempt.resumeExact).1
-  simp only [segmentLimits, ObjectiveBendDemandCollect.limitsPast, same] at covered
-  exact Nat.le_trans (Nat.mul_le_mul_left _ covered) (tariff_heap_le_workOf _ _)
+/-- The delivery's extraction ticks are paid at the extraction-tick rate. -/
+theorem Delivery.extraction_priced {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) :
+    config.tariff.extractTicks * config.planBudget.ticks ≤ config.tariff.workOf delivery.envelope := by
+  have := (Delivery.spend delivery).priced
+  omega
+
+/-- The spend's refuting pole: an envelope declaring no extraction ticks does not cover a
+deployment whose extraction budget is positive (the delivery is refused `extractUncovered`). -/
+theorem not_spendDeclared_noExtract {config : Config} {resumed : State} {envelope : Capacity}
+    (positive : 0 < config.planBudget.ticks) (none : envelope.extractTicks = 0) :
+    ¬ SpendDeclared config resumed envelope := by
+  intro spend
+  have := spend.extractTicks
+  omega
+
+/-- Its satisfying pole: the Tally deployment, a resumed state with an empty heap, and the
+envelope declaring exactly the deployment's ceilings. -/
+theorem spendDeclared_tally :
+    SpendDeclared tallyConfig (initial (.nat 0))
+      ⟨0, 200000, 100000, 100000, 10000, 1048576, 100000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0⟩ := by
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩ <;> decide
 
 /-! ## A delivery advances the record
 
@@ -1358,9 +1420,14 @@ theorem forcingTransparent_not_of_extraction :
 #assert_axioms runSegment_self_above
 #assert_axioms not_resourcesOnly_of_disagree
 #assert_compiled lostStack_checked
-#assert_axioms tariff_heap_le_workOf
+#assert_axioms spendDeclared_of
+#assert_axioms SpendDeclared.priced
+#assert_axioms Delivery.spend
+#assert_axioms Exhaustion.spend
 #assert_axioms Delivery.heap_priced
-#assert_axioms Exhaustion.heap_priced
+#assert_axioms Delivery.extraction_priced
+#assert_axioms not_spendDeclared_noExtract
+#assert_axioms spendDeclared_tally
 #assert_axioms nextRecord_generation
 #assert_axioms Delivery.next_generation
 #assert_axioms encodeRecord_ne_nil
