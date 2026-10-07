@@ -27,7 +27,8 @@ inductive AdmittedTurn {rootBytes : Bytes → Digest} (config : Config) (snapsho
     (height : Nat) : Type where
   | publish (stored : Stored) (publication : Publication config snapshot stored)
   | create (request : CreateRequest) (created : Creation config snapshot height request)
-  | birth (request : BirthRequest) (born : Birth config snapshot height request)
+  /-- A signed birth: never a rebirth's (whose predecessor `rebirth` retires in the same turn). -/
+  | birth (request : BirthRequest) (signed : request.predecessor = none) (born : Birth config snapshot height request)
   | resolve (request : ResolveRequest) (resolution : Resolution config snapshot height request)
   | deliver (request : DeliverRequest) (delivery : Delivery config snapshot height request)
   | topUp (request : TopUpRequest) (topped : TopUp config snapshot request)
@@ -46,7 +47,7 @@ def AdmittedTurn.posts {rootBytes : Bytes → Digest} {config : Config} {snapsho
     {height : Nat} : AdmittedTurn config snapshot height → List Post
   | .publish _ publication => publication.posts
   | .create _ created => created.posts
-  | .birth _ born => born.posts
+  | .birth _ _ born => born.posts
   | .resolve _ resolution => resolution.posts
   | .deliver _ delivery => delivery.posts
   | .topUp _ topped => [topped.posted.write config snapshot]
@@ -64,7 +65,7 @@ def AdmittedTurn.intent {rootBytes : Bytes → Digest} {config : Config} {snapsh
     {height : Nat} (sealing : Seal) : AdmittedTurn config snapshot height → DataIntent rootBytes
   | .publish _ publication => publication.intent sealing
   | .create _ created => created.intent sealing
-  | .birth _ born => born.intent sealing
+  | .birth _ _ born => born.intent sealing
   | .resolve _ resolution => resolution.intent sealing
   | .deliver _ delivery => delivery.intent sealing
   | .topUp _ topped => topped.intent sealing
