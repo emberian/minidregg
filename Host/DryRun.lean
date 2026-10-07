@@ -154,8 +154,8 @@ theorem submit_storage_irrelevant (t : DurableReceiverIO.Transport)
     rw [same, stale]
     rfl
   all_goals first
-    | rfl
     | (simp only [NativeHost.submitLoadedVia]; rw [same]; rfl)
+    | rfl
 
 /-- **The served submission and the dry run are one program.** Op 2 runs
 `submitLoadedWith`, which is `submitLoadedVia` over the Store's transport; the dry
@@ -180,7 +180,7 @@ theorem dryReceive_refusal_agrees (t : DurableReceiverIO.Transport) (reached : I
     DurableReceiverIO.receiveLoadedDetailedWithFresh (dryTransport t reached) rootBytes loaded intent =
       DurableReceiverIO.receiveLoadedDetailedWithFresh t rootBytes loaded intent := by
   unfold DurableReceiverIO.receiveLoadedDetailedWithFresh
-  split <;> first | rfl | (rename_i h; exact absurd h (refused _))
+  split <;> first | (rename_i h; exact absurd h (refused _)) | rfl
 
 /-- The dry transport names the Store's system cell, so the tail law
 (`Loaded.judge`, C14) judges a dry run exactly as it judges the submission. -/
@@ -200,8 +200,12 @@ theorem dryTransport_prepareAppend (t : DurableReceiverIO.Transport) (reached : 
       loaded.snapshot intent) (key : DurableCheckpointCodec.MacKey) :
     DurableReceiverIO.prepareAppend (dryTransport t reached) loaded ready key =
       DurableReceiverIO.prepareAppend t loaded ready key := by
+  have subtrees : DurableReceiverIO.readSubtrees (dryTransport t reached) = DurableReceiverIO.readSubtrees t :=
+    DurableReceiverIO.readSubtrees_history rfl
   unfold DurableReceiverIO.prepareAppend DurableReceiverIO.Loaded.headIndexRoot
-    DurableReceiverIO.withIndexRows DurableReceiverIO.indexRows dryTransport
+    DurableReceiverIO.applyRecords DurableReceiverIO.indexRowsFor
+  rw [subtrees]
+  unfold DurableReceiverIO.indexRows DurableReceiverIO.readIndexRows dryTransport
   rfl
 
 /-- **At the Store writer, the dry run agrees with submission on a tail-bound
