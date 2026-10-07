@@ -147,9 +147,10 @@ def slotStream : StreamCodec Slot :=
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1, wire.2.2.2.2.1, wire.2.2.2.2.2.1, wire.2.2.2.2.2.2⟩)
     (by intro slot; cases slot; rfl)
 
-/-- v3: a slot carries `watched` and a decision may be `cancelled` (GPT-6 row F); a v2
-or v1 slot refuses to decode (`v2_refuses`). -/
-def frame : Bytes := "DREGG/OBJECTIVE/ANSWER-SLOT/v3".toUTF8.toList
+/-- v4: the messages a slot queues carry their continuation `allowance` and `depth` (the INBOX
+v2 message, GPT-6 row F); v3 carried `watched` and `cancelled`. A v3 (or older) slot refuses
+to decode (`v3_refuses`). -/
+def frame : Bytes := "DREGG/OBJECTIVE/ANSWER-SLOT/v4".toUTF8.toList
 def codec := framed frame slotStream
 def encode (slot : Slot) : Bytes := codec.encode slot
 def decode (bytes : Bytes) : Option Slot := codec.decode bytes
@@ -388,16 +389,16 @@ theorem sample_cancel_subject_refused : cancelDelivery sampleSlot 5 = .error .no
 
 theorem sample_stopped : stopWaiting sampleSendSlot = .ok {sampleSendSlot with watched := false} := rfl
 
-/-- The v2 frame (no `watched`, no `cancelled`) refuses to decode as v3. -/
-theorem v2_refuses (body : Bytes) :
-    decode ("DREGG/OBJECTIVE/ANSWER-SLOT/v2".toUTF8.toList ++ body) = none := by
-  cases found : decode ("DREGG/OBJECTIVE/ANSWER-SLOT/v2".toUTF8.toList ++ body) with
+/-- The v3 frame (queued messages without an allowance) refuses to decode as v4. -/
+theorem v3_refuses (body : Bytes) :
+    decode ("DREGG/OBJECTIVE/ANSWER-SLOT/v3".toUTF8.toList ++ body) = none := by
+  cases found : decode ("DREGG/OBJECTIVE/ANSWER-SLOT/v3".toUTF8.toList ++ body) with
   | none => rfl
   | some slot =>
     have canon := framed_canonical found
     have cut := congrArg (List.take frame.length) canon
     change (frame ++ slotStream.encode slot).take frame.length =
-      ("DREGG/OBJECTIVE/ANSWER-SLOT/v2".toUTF8.toList ++ body).take frame.length at cut
+      ("DREGG/OBJECTIVE/ANSWER-SLOT/v3".toUTF8.toList ++ body).take frame.length at cut
     rw [List.take_left' rfl, List.take_left' (by decide +kernel)] at cut
     exact absurd cut (by decide +kernel)
 
@@ -449,5 +450,5 @@ theorem sample_not_yet_expired : expire sampleSlot 10 = .error (.notYetExpired 1
 #assert_axioms sample_cancel_decided_refused
 #assert_axioms sample_cancel_subject_refused
 #assert_axioms sample_stopped
-#assert_axioms v2_refuses
+#assert_axioms v3_refuses
 end Minidregg.Kernel.AnswerSlot

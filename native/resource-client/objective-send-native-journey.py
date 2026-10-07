@@ -59,6 +59,23 @@ inbox and runs it with `request/caller` the sender and no subject.
   S13 who       (row F, authority) another object's cancel or stop of poster's queued message is refused
                 `notSender`; a slot that does not exist `notControllable`; a pipelined send onto a stopped slot
                 `notPipelinable`; nothing commits.
+  S14 continue  (row F, PREPAID CONTINUATION ALLOWANCE) relayer.relayA(counter, bounce, allowance A = 1.5 PRICE):
+                the send to a sending method is admitted because its message carries an allowance covering an
+                onward send; it escrows PRICE + A. Its delivery replies, queues bounce's onward deposit on
+                (counter, counter) at depth 1 with no allowance, its escrow (PRICE) moved purse to purse out of
+                the allowance, and refunds EXACTLY the remainder A - PRICE to the sponsor; the onward deposit is
+                then delivered.
+  S15 exceed    the same with bounce2 (two onward sends, 2 PRICE > A): the delivery decides `broken` naming
+                `allowanceExceeded 2PRICE A`, queues nothing onward, commits no write, and refunds the WHOLE
+                allowance (the postage paid the attempt). An invocation whose sends carry more allowance than
+                the `allowance` its signer declared is refused `allowanceExceeded` at the send; nothing commits.
+  S16 fanout    bounce5 (five onward sends, allowance 6 PRICE): broken naming `fanOut 4`, nothing onward,
+                the allowance refunded.
+  S17 depth     relayer.hop(hopper, 10 PRICE): a self-relaying chain on hopper. Depth 0 and 1 are delivered (each
+                queues the next hop, one deeper, out of its allowance); the delivery at depth 2 decides `broken`
+                naming `continuationDepth 3` (its onward hop would be at depth 3) and refunds its allowance.
+  S18 cancel    relayer queues relayA(counter, bounce, A) and cancels it while queued: the refund is EXACTLY
+                PRICE + A (postage and allowance), the slot decided `cancelled`.
 
 PLANTS (self-test: the named fault is put in the WORLD, so a check that must hold fails and its row goes red):
   vault-open      the vault is created permit-all: the S4 delivery succeeds         -> S4 red
@@ -69,6 +86,11 @@ PLANTS (self-test: the named fault is put in the WORLD, so a check that must hol
   cancel-early    S11's fresh cancel runs BEFORE m is delivered: it withdraws        -> S11 red
   stop-cancels    S12 yields `cancelOf` where it should `stopOf`: m is withdrawn     -> S12 red
   sender-controls S13's "other object" is poster itself, the sender: admitted        -> S13 red
+  bounce-twice    S14 relays bounce2 (two onward sends): over its allowance       -> S14 red
+  roomy-allowance S15's allowance is 2 PRICE: bounce2 fits                        -> S15 red
+  fan-four        S16 relays bounce4 (four onward sends): within the fan-out      -> S16 red
+  short-chain     S17's chain starts with 3 PRICE: it ends by allowance, at depth 1 -> S17 red
+  cancel-bare     S18's message carries no allowance (a deposit): refund PRICE     -> S18 red
 Every plant is ASSERTED APPLIED before its row is judged (group P-plant-applied, which must stay PASS): a plant
 that did not take hold reads as `blind`, never as red.
 The kernel's control checks are planted by building the Host from a planted tree (authority check removed,
@@ -91,7 +113,9 @@ def label(text):
 
 PLANTS = {'vault-open': {'S4-failed'}, 'dir-empty': {'S5-forward', 'S9-resolved'}, 'roomy-postage': {'S6-broken'},
           'relay-deposit': {'S8-interface'}, 'cancel-late': {'S10-cancel'}, 'cancel-early': {'S11-pole'},
-          'stop-cancels': {'S12-stop'}, 'sender-controls': {'S13-who'}}
+          'stop-cancels': {'S12-stop'}, 'sender-controls': {'S13-who'}, 'bounce-twice': {'S14-continue'},
+          'roomy-allowance': {'S15-exceed'}, 'fan-four': {'S16-fanout'}, 'short-chain': {'S17-depth'},
+          'cancel-bare': {'S18-cancel'}}
 ap = argparse.ArgumentParser()
 ap.add_argument('--bin', required=True)
 ap.add_argument('--root', required=True)
@@ -101,7 +125,7 @@ plants = {p for p in a.plant.split(',') if p}
 if plants - set(PLANTS):
     raise SystemExit(f'unknown plant {sorted(plants - set(PLANTS))}; known: {sorted(PLANTS)}')
 
-NAMES = ['poster', 'counter', 'fan', 'sink', 'vault', 'dir', 'nodir', 'bare']
+NAMES = ['poster', 'counter', 'fan', 'sink', 'vault', 'dir', 'nodir', 'relayer', 'hopper', 'bare']
 SMALL = 3  # a postage envelope too small to run a lookup
 w = World(a.bin, a.root, HERE.parent.parent)
 try:
@@ -123,12 +147,14 @@ try:
     def total(name, label):
         return w.total_of(w.state(name, label))
 
-    def invoke(label, name, method, args, expect, detail=None, postage=TICKS):
+    def invoke(label, name, method, args, expect, detail=None, postage=TICKS, allowance=None):
         body = {'kind': 'invoke', 'object': O[name], 'objectCapability': w.objects[name]['capability'],
                 'method': method, 'args': args, 'envelope': cap(TICKS), 'account': w.SPONSOR_ACCOUNT,
                 'accountCapability': w.SPONSOR_SPEND}
         if postage is not None:
             body['postage'] = cap(postage)
+        if allowance is not None:
+            body['allowance'] = str(allowance)
         return w.turn(label, w.sponsor, body, expect, detail)
 
     def deliver(label, sender, target, message, expect, detail=None):
@@ -436,10 +462,152 @@ try:
         w.check('s13-nothing-commits', after['ids'] == before['ids'] and after['purse'] == before['purse']
                 and after['sponsor'] == before['sponsor'], {'ids': (before['ids'], after['ids'])})
 
+
+    def relay_a(target, method, amount, allowance):
+        return record(target=nat(O[target]), method=label(method), amount=nat(amount), allowance=nat(allowance))
+
+    def queued_message(view, mid):
+        found = [x for x in view['messages'] if x['id'] == str(mid)]
+        return found[0] if found else {}
+
+    def fresh(before, after):
+        return [i for i in after['ids'] if i not in before['ids']]
+
+    with w.group('S14-continue'):
+        A = PRICE + PRICE // 2
+        how = 'bounce2' if 'bounce-twice' in plants else 'bounce'
+        c0 = total('counter', 's14-c0')
+        start = inbox('relayer', 'counter', 's14-start')
+        cc0 = inbox('counter', 'counter', 's14-cc0')
+        m = reported(invoke('s14-relay', 'relayer', 'relayA', relay_a('counter', how, int(O['counter']), A),
+                            'installed', allowance=A))
+        held = inbox('relayer', 'counter', 's14-held')
+        msg = queued_message(held, m)
+        if 'bounce-twice' in plants:
+            applied['bounce-twice'] = msg.get('method') == 'bounce2'
+        w.check('s14-escrowed', msg.get('allowance') == str(A) and msg.get('depth') == '0'
+                and held['purse'] - start['purse'] == PRICE + A and start['sponsor'] - held['sponsor'] == 2 * PRICE + A,
+                {'message': msg, 'purse': held['purse'] - start['purse'], 'paid': start['sponsor'] - held['sponsor']})
+        deliver('s14-deliver', 'relayer', 'counter', m, 'installed')
+        after = inbox('relayer', 'counter', 's14-after')
+        cc1 = inbox('counter', 'counter', 's14-cc1')
+        d = decision(slot(m, 's14-slot'))
+        onward = fresh(cc0, cc1)
+        om = queued_message(cc1, onward[0]) if onward else {}
+        w.check('s14-replied', d.get('kind') == 'reply', d)
+        w.check('s14-onward-queued', len(onward) == 1 and om.get('method') == 'deposit' and om.get('depth') == '1'
+                and om.get('allowance') == '0' and cc1['purse'] - cc0['purse'] == PRICE,
+                {'onward': onward, 'message': om, 'purse': cc1['purse'] - cc0['purse']})
+        w.check('s14-remainder-exact', after['sponsor'] - held['sponsor'] == A - PRICE
+                and after['purse'] == start['purse'] and after['collector'] - held['collector'] == PRICE,
+                {'refund': after['sponsor'] - held['sponsor'], 'purse': (start['purse'], after['purse']),
+                 'fee': after['collector'] - held['collector']})
+        if onward:
+            deliver('s14-deliver-onward', 'counter', 'counter', onward[0], 'installed')
+        w.check('s14-onward-delivered', total('counter', 's14-c1') == c0 + int(O['counter'])
+                and inbox('counter', 'counter', 's14-cc2')['purse'] == cc0['purse'], None)
+
+    with w.group('S15-exceed'):
+        A = 2 * PRICE if 'roomy-allowance' in plants else PRICE + PRICE // 2
+        c0 = total('counter', 's15-c0')
+        start = inbox('relayer', 'counter', 's15-start')
+        invoke('s15-over-declared', 'relayer', 'relayA', relay_a('counter', 'bounce2', int(O['counter']), A),
+               'refused', ['allowanceExceeded', f'{A} {A - 1}'], allowance=A - 1)
+        unchanged = inbox('relayer', 'counter', 's15-unchanged')
+        w.check('s15-over-declared-nothing', unchanged['ids'] == start['ids'] and unchanged['sponsor'] == start['sponsor'],
+                {'ids': unchanged['ids'], 'paid': start['sponsor'] - unchanged['sponsor']})
+        cc0 = inbox('counter', 'counter', 's15-cc0')
+        m = reported(invoke('s15-relay', 'relayer', 'relayA', relay_a('counter', 'bounce2', int(O['counter']), A),
+                            'installed', allowance=A))
+        held = inbox('relayer', 'counter', 's15-held')
+        if 'roomy-allowance' in plants:
+            applied['roomy-allowance'] = queued_message(held, m).get('allowance') == str(2 * PRICE)
+        deliver('s15-deliver', 'relayer', 'counter', m, 'installed')
+        after = inbox('relayer', 'counter', 's15-after')
+        cc1 = inbox('counter', 'counter', 's15-cc1')
+        d = decision(slot(m, 's15-slot'))
+        w.check('s15-broken-named', d.get('kind') == 'broken' and 'allowanceExceeded' in d.get('reason', '')
+                and f'{2 * PRICE} {A}' in d.get('reason', ''), d)
+        w.check('s15-nothing-onward', fresh(cc0, cc1) == [] and cc1['purse'] == cc0['purse'], fresh(cc0, cc1))
+        w.check('s15-allowance-refunded', after['sponsor'] - held['sponsor'] == A and after['purse'] == start['purse']
+                and after['collector'] - held['collector'] == PRICE,
+                {'refund': after['sponsor'] - held['sponsor'], 'fee': after['collector'] - held['collector']})
+        w.check('s15-counter-kept', total('counter', 's15-c1') == c0, None)
+
+    with w.group('S16-fanout'):
+        A = 6 * PRICE
+        how = 'bounce4' if 'fan-four' in plants else 'bounce5'
+        start = inbox('relayer', 'counter', 's16-start')
+        cc0 = inbox('counter', 'counter', 's16-cc0')
+        m = reported(invoke('s16-relay', 'relayer', 'relayA', relay_a('counter', how, int(O['counter']), A),
+                            'installed', allowance=A))
+        held = inbox('relayer', 'counter', 's16-held')
+        if 'fan-four' in plants:
+            applied['fan-four'] = queued_message(held, m).get('method') == 'bounce4'
+        deliver('s16-deliver', 'relayer', 'counter', m, 'installed')
+        after = inbox('relayer', 'counter', 's16-after')
+        cc1 = inbox('counter', 'counter', 's16-cc1')
+        d = decision(slot(m, 's16-slot'))
+        w.check('s16-broken-fanout', d.get('kind') == 'broken' and 'fanOut 4' in d.get('reason', ''), d)
+        w.check('s16-nothing-onward', fresh(cc0, cc1) == [], fresh(cc0, cc1))
+        w.check('s16-allowance-refunded', after['sponsor'] - held['sponsor'] == A and after['purse'] == start['purse'],
+                {'refund': after['sponsor'] - held['sponsor']})
+
+    with w.group('S17-depth'):
+        A = 3 * PRICE if 'short-chain' in plants else 10 * PRICE
+        h0 = total('hopper', 's17-h0')
+        start = inbox('relayer', 'hopper', 's17-start')
+        hh0 = inbox('hopper', 'hopper', 's17-hh0')
+        m0 = reported(invoke('s17-hop', 'relayer', 'hop', record(target=nat(O['hopper']), price=nat(PRICE),
+                                                                   allowance=nat(A)), 'installed', allowance=A - PRICE))
+        held = inbox('relayer', 'hopper', 's17-held')
+        if 'short-chain' in plants:
+            applied['short-chain'] = queued_message(held, m0).get('allowance') == str(2 * PRICE)
+        deliver('s17-deliver-0', 'relayer', 'hopper', m0, 'installed')
+        hh1 = inbox('hopper', 'hopper', 's17-hh1')
+        n1 = fresh(hh0, hh1)
+        m1 = queued_message(hh1, n1[0]) if n1 else {}
+        if n1:
+            deliver('s17-deliver-1', 'hopper', 'hopper', n1[0], 'installed')
+        hh2 = inbox('hopper', 'hopper', 's17-hh2')
+        n2 = fresh(hh1, hh2)
+        n2 = [i for i in n2 if not n1 or i != n1[0]]
+        m2 = queued_message(hh2, n2[0]) if n2 else {}
+        w.check('s17-one-hop-deeper', m1.get('depth') == '1' and m2.get('depth') == '2'
+                and m2.get('allowance') == str(A - 3 * PRICE), {'m1': m1, 'm2': m2})
+        if n2:
+            deliver('s17-deliver-2', 'hopper', 'hopper', n2[0], 'installed')
+        hh3 = inbox('hopper', 'hopper', 's17-hh3')
+        d2 = decision(slot(n2[0], 's17-slot-2')) if n2 else {}
+        w.check('s17-depth-refused', d2.get('kind') == 'broken' and 'continuationDepth 3' in d2.get('reason', ''), d2)
+        w.check('s17-depth-refund', bool(n2) and hh3['sponsor'] - hh2['sponsor'] == A - 3 * PRICE
+                and hh3['ids'] == [] and hh3['purse'] == hh0['purse'],
+                {'refund': hh3['sponsor'] - hh2['sponsor'], 'ids': hh3['ids'], 'purse': hh3['purse']})
+        w.check('s17-two-delivered', total('hopper', 's17-h1') == h0 + 2, total('hopper', 's17-h1x'))
+
+    with w.group('S18-cancel'):
+        bare = 'cancel-bare' in plants
+        A = 0 if bare else PRICE + PRICE // 2
+        m = reported(invoke('s18-relay', 'relayer', 'relayA',
+                            relay_a('counter', 'deposit' if bare else 'bounce', int(O['counter']), A), 'installed',
+                            allowance=A))
+        before = inbox('relayer', 'counter', 's18-before')
+        if bare:
+            applied['cancel-bare'] = queued_message(before, m).get('allowance') == '0'
+        control('s18-cancel', 'relayer', 'cancelOf', m, 'installed')
+        after = inbox('relayer', 'counter', 's18-after')
+        refund, fee = paid(before, after)
+        w.check('s18-refund-postage-and-allowance', refund == 2 * PRICE + PRICE // 2
+                and before['purse'] - after['purse'] == 2 * PRICE + PRICE // 2 and fee == PRICE,
+                {'refund': refund, 'fee': fee, 'purse': (before['purse'], after['purse'])})
+        w.check('s18-slot-cancelled', decision(slot(m, 's18-slot')) == {'kind': 'cancelled'}
+                and after['ids'] == [i for i in before['ids'] if i != str(m)], None)
+
     if plants:
         with w.group('P-plant-applied'):
             for p in sorted(plants):
-                if p in ('cancel-late', 'cancel-early', 'stop-cancels', 'sender-controls'):
+                if p in ('cancel-late', 'cancel-early', 'stop-cancels', 'sender-controls', 'bounce-twice',
+                         'roomy-allowance', 'fan-four', 'short-chain', 'cancel-bare'):
                     w.check(f'plant-{p}-applied', applied.get(p) is True, applied.get(p))
 finally:
     w.stop()

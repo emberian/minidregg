@@ -119,6 +119,13 @@ def postage (path : String) (json : Json) : Result Capacity :=
   | .ok value => capacity (path ++ ".postage") value
   | .error _ => .ok ObjectiveTariff.zeroCapacity
 
+/-- The total continuation allowance an invocation's sends may carry (GPT-6 row F):
+`allowance` (a decimal), or 0 when absent (its sends then carry none). -/
+def allowance (path : String) (json : Json) : Result Nat :=
+  match json.getObjVal? "allowance" with
+  | .ok _ => nat path json "allowance"
+  | .error _ => .ok 0
+
 /-- An optional decimal (absent or null: none). -/
 def optDecimal (path : String) (json : Json) (name : String) : Result (Option Nat) :=
   match json.getObjVal? name with
@@ -205,7 +212,7 @@ def turn (law : String → Json → Result Minidregg.Pred.Pred) (json : Json) : 
   | "abandon" => pure (.abandon ⟨← nat p json "record"⟩ ⟨← nat p json "await"⟩)
   | "invoke" => pure (.invoke (← nat p json "object") ⟨← nat p json "objectCapability"⟩ (← str p json "method")
       (← data p json "args") (← grants p json) (← capacity (p ++ ".envelope") (← field p json "envelope"))
-      (← postage p json) (← nat p json "account") ⟨← nat p json "accountCapability"⟩)
+      (← postage p json) (← allowance p json) (← nat p json "account") ⟨← nat p json "accountCapability"⟩)
   | "deliverMessage" => pure (.deliverMessage (← nat p json "sender") (← nat p json "target")
       ⟨← nat p json "message"⟩)
   | "adopt" => pure (.adopt (← nat p json "object") ⟨← nat p json "objectCapability"⟩ ⟨← nat p json "pin"⟩
@@ -285,11 +292,12 @@ def turnJson : Turn → Json
        ("extra", capacityJson extra), ("account", decimal account), ("accountCapability", decimal ac.value)]
   | .abandon record await => .mkObj
       [("kind", "abandon"), ("record", decimal record.value), ("await", decimal await.value)]
-  | .invoke object oc method args grants envelope postage account ac => .mkObj
+  | .invoke object oc method args grants envelope postage allowance account ac => .mkObj
       [("kind", "invoke"), ("object", decimal object), ("objectCapability", decimal oc.value),
        ("method", toJson method), ("args", dataOf args),
        ("grants", .arr (grants.map grantJson).toArray),
-       ("envelope", capacityJson envelope), ("postage", capacityJson postage), ("account", decimal account),
+       ("envelope", capacityJson envelope), ("postage", capacityJson postage), ("allowance", decimal allowance),
+       ("account", decimal account),
        ("accountCapability", decimal ac.value)]
   | .deliverMessage sender target message => .mkObj
       [("kind", "deliverMessage"), ("sender", decimal sender), ("target", decimal target),
@@ -390,7 +398,7 @@ def decisionJson : AnswerSlot.Decision → Json
 def messageJson (message : Inbox.Message) : Json :=
   .mkObj [("id", decimal message.id.value), ("sender", decimal message.sender), ("method", toJson message.method),
     ("args", dataOf message.args), ("envelope", capacityJson message.envelope), ("postage", decimal message.postage),
-    ("refund", decimal message.refund)]
+    ("refund", decimal message.refund), ("allowance", decimal message.allowance), ("depth", decimal message.depth)]
 
 def slotJson (slot : AnswerSlot.Slot) : Json :=
   .mkObj [("name", decimal slot.name.value), ("activity", decimal slot.activity.value),
