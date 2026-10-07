@@ -102,13 +102,15 @@ inhabitant `coloured_discharges` / `coloured_instance_accepted`; tooth
 
 Open:
 
-- **`instance_accepted`.** Since GPT-6 row D, `Super` in a template is a second rigid bounded
-  variable (`super-rigid` refuses a use of `super` as its bound row), and chainFix EMITS each open
-  instance as `ATerm.instantiate σ template` from the one cached `templateLayer` that the knot field
-  holds and `checkTemplates` checks. So the square holds at the term level by construction. What
-  is still open is the theorem composing it with `Discharges.check_instantiate`, which needs the
-  PTy→Ty proposal translation to commute with substitution and canonicalization (cv 01a115d6-7ee9).
-  Meanwhile every instance is still re-checked in the whole program, which is sound.
+- **Instances are the template at σ, and the whole program is the check.** Since GPT-6 row D, `Super`
+  in a template is a second rigid bounded variable (`super-rigid` refuses a use of `super` as its
+  bound row), and chainFix EMITS each open instance as `ATerm.instantiate σ template` from the one
+  cached `templateLayer` that the knot field holds and `checkTemplates` checks. Whether σ discharges
+  the bounds is decided by the contract (`checkBounds`: `self-bound`, `inherited-unprovided`, at the
+  member types), by name. The closed program, instances included, is then checked by the checker,
+  and that check is what admission relies on. No front-end corollary of `check_instantiate` is
+  claimed: no check depends on one, because a translation defect it would rule out is still caught
+  by the whole-program check, as an anonymous `typing refused`.
 - **Composition contract.** `Compiler/ObjectiveBendContract.lean` is the contract algebra that
   chainFix runs (`run_append`: C_{A;B}(S,I) = C_A(S,I) ∧ C_B(S, F_A(S,I))). Per-operation
   constraints: add (absent beneath), override (same type), and a type change is `replace-undeclared`.
