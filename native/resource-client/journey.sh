@@ -46,6 +46,7 @@
 #   JROT   K-PREROTATE: key pre-rotation on this Store (journey.d/jrot.sh; restarts the service once)
 #   JROTL  K-PREROTATE x the generic Receiver: a lost op-142 reply recovered by op-143 lookup, a never-seen
 #          rotation looks up absent and is never resubmitted (journey.d/jrot-lookup.sh, a recording proxy)
+#   JGATE  the fn gateway content target refuses an ordinary grant holder's signed direct call by its law (journey.d/jgateway.sh)
 #   JRLANE R2-1 #5: authenticated refusals are charged to the signer's lane and close it; wrongly signed
 #          and unsigned calls cost nothing; another subject is untouched (journey.d/jrefusal-lane.sh)
 #   M3, M4, M5 run their lanes' stand-alone journeys on their own fresh Stores
@@ -188,7 +189,7 @@ cap_s() {
   echo "$want"
 }
 
-STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT K12I K12T K12N K12E K12M K12R K12H WEB KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JDISCLOSE JAUDIT)
+STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT K12I K12T K12N K12E K12M K12R K12H WEB KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JAUDIT)
 if [ -n "${JOURNEY_STEPS:-}" ]; then
   SELECTED=()
   for id in "${STEPS[@]}"; do
@@ -284,6 +285,7 @@ TITLE[KT]="C14 TAIL-BOUND: no write past certified + L; a checkpoint restores pr
 TITLE[JROT]="key pre-rotation: a stolen daily key cannot rotate; the next key does"
 TITLE[JROTL]="key rotation through the generic Receiver: a lost reply is found by lookup, exactly once; a rotation the Host never saw is absent and never resubmitted"
 TITLE[JRLANE]="refusal lane: authenticated refusals close the signer's lane, wrongly signed ones cost nothing, another subject stays open"
+TITLE[JGATE]="gateway law: an ordinary subject's signed direct call on the gateway's content target is refused, the target unchanged"
 TITLE[JDISCLOSE]="disclosure: a narrowed refusal, authentication before any target, the installer's lockout, eight client fixes"
 TITLE[JAUDIT]="mini store audit: the Store re-derived from genesis, then every ingress re-admitted; one flipped byte of a non-head record in a copy is refused naming its height"
 
@@ -1047,6 +1049,7 @@ step_JPAY2() { hook jpay2 "the pay cell on its own fresh Store: tariff, 64-row b
 step_JROT() { hook jrot "a thief holding the daily key cannot rotate (notPrecommitted; unauthenticated before the gate); the friend rotates with the committed next key; the old key's write is refused; grants survive; a second rotation; a --no-prerotation subject cannot rotate; restart; audit re-admits (lane k-prerotate)"; }
 step_JROTL() { hook jrot-lookup "F's op-142 reply is lost and its op-143 lookup confirms the rotation (replayed, same receipt, epoch 2, one submit); G's op 142 never reaches the Host: lookup absent, a retry only looks up, epoch 1 (lane native-exercise)"; }
 step_JRLANE() { hook jrefusal-lane "wrongly signed and unsigned calls are refused by name and cost nothing; authenticated refusals close the lane after >= 600 at full speed; a closed lane admits <= 1 charged refusal per 500 ms; another subject is untouched; the signer's own valid call is refused refusalLane, then admitted after refill (lane native-exercise)"; }
+step_JGATE() { hook jgateway "the gateway content target under request/subject == gateway: the gateway appends; an ordinary subject with a valid observe+mutate grant signs a direct append through its own workspace and is refused law-denied, the Host's read of the target unchanged (cv 01a1177f-1ba6)"; }
 step_JDISCLOSE() { hook jdisclose "a --fields 1 guest is refused naming no clause over field 2 and never its value, with one frame whatever field 2 holds, while the owner keeps clause and value; a never-enrolled key gets one frame at challenge for a present and an absent target; a law its installer can never pass is refused without --i-lock-myself-out, sealed keeps --allow-unsatisfiable, a law it can never change warns; can --all, room ls, inspect law, help forget, a stale delegation hint, tail members, a sealed doc read back and sealed by cell (lane fix-disclose)" shell; }
 step_M7() { hook m7 "a candidate built from portable interfaces reproduces the pinned hashes and runs this journey with no private fixture (list item 7, lane m7-candidate)" candidate; }
 step_JAUDIT() { hook jstoreaudit "mini store audit re-derives the Store from genesis (chain, tags, accumulator, spent map, checkpoints, head root) then re-admits every ingress and exits 0 printing both lines; one flipped byte of a non-head record in a copy exits 1 naming its height (lane plat-store-audit)"; }
@@ -1137,6 +1140,7 @@ run_step JP2 J0
 run_step JROT J1
 run_step JROTL J1
 run_step JRLANE J1
+run_step JGATE J4
 run_step JDISCLOSE J0
 run_step JAUDIT J0
 
