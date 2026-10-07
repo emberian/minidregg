@@ -425,6 +425,16 @@ end
 def primitiveName : Primitive → String
   | .add => "add" | .multiply => "multiply" | .equal => "equal"
   | .conjunction => "conjunction" | .labelEqual => "labelEqual"
+  | .subtract => "subtract" | .divide => "divide" | .modulo => "modulo"
+  | .less => "less" | .lessEqual => "lessEqual"
+
+/-- The packet's primitive name is the one the typed-core decoder reads back: the
+generator and `Theory.ObjectiveBendTyping.decodePrimitive` cannot drift apart. -/
+theorem primitiveName_decodes (p : Primitive) :
+    decodePrimitive (Json.str (primitiveName p)) = .ok p := by
+  cases p <;> rfl
+
+#assert_axioms primitiveName_decodes
 
 partial def termJson : Term → Json
   | .bound i => Json.mkObj [("tag", "bound"), ("index", toJson (toString i))]
