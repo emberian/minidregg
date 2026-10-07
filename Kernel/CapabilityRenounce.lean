@@ -264,9 +264,16 @@ theorem prepare_undeclared (deployment : Deployment) (semantics : Digest) (ambie
         (operationMarker (ServedBasis.Ground.ofBasis basis).authority.domain semantics command) ∉
           basis.keys.nullifiers) :
     prepare deployment semantics ambient (ServedBasis.Ground.ofBasis basis) command = .error .undeclaredMarker := by
-  unfold prepare
-  rw [ServedBasis.Ground.markerSpent_undeclared basis _ undeclared]
-  rfl
+  have unanswered := ServedBasis.Ground.markerSpent_undeclared basis _ undeclared
+  unfold prepare prepareOn
+  split
+  · rfl
+  · rename_i answered
+    rw [unanswered] at answered
+    cases answered
+  · rename_i answered
+    rw [unanswered] at answered
+    cases answered
 
 #assert_axioms Prepared.unspent
 #assert_axioms prepare_agrees
