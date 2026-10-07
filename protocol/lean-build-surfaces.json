@@ -537,7 +537,7 @@
     {
       "module": "Assurance.NativeAcceptedFixtureData",
       "path": "Assurance/NativeAcceptedFixtureData.lean",
-      "sha256": "8c54277d9253e3e1321528d4f43b76e928c539f10e1dde96746e770b03d96c67",
+      "sha256": "4bc1ff47cf4d5f49a3969da93ae573ecad79a662b16929bf549c25eaf887ddcd",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -1727,7 +1727,7 @@
     {
       "module": "Compiler.CredentialSignatureIO",
       "path": "Compiler/CredentialSignatureIO.lean",
-      "sha256": "71131aeb3dcf2e2a9a1e5cb53b21be77d3cf3f0f539c51a60c1ff3b877a69b1a",
+      "sha256": "b8eaac1323c380430a58923c3a2df5bfcdf3b7f8bc92a795f379f945a9e25616",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7628,7 +7628,7 @@
     {
       "module": "Kernel.Receiving",
       "path": "Kernel/Receiving.lean",
-      "sha256": "6b675b6578b4c9d92e16e7fe1651c2db3cddf9855340709397815162441ba851",
+      "sha256": "392ec798f3ea9cdb366208f789b4a3e46a398ddef6b11d41ccb8fdeaaffcd5be",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7642,7 +7642,7 @@
     {
       "module": "Kernel.ReceivingLawFixture",
       "path": "Kernel/ReceivingLawFixture.lean",
-      "sha256": "6975f828e762f387eb7aa1ba6598eb39212410351af5997db82ae088b2aae8c9",
+      "sha256": "1ef94dca4ea2197caa651879e73963f51cd0fefc7435b82cc877ecbbb06f3aae",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
