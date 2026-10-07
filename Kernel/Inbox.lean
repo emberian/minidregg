@@ -58,10 +58,15 @@ structure Message where
   /-- How many deliveries precede it in its chain: an invocation's send is at depth 0, an
   onward send of the delivery of a message at depth `d` is at depth `d + 1`. -/
   depth : Nat
+  /-- The STORAGE DEPOSIT of the queued message (`storageDeposit`): the deployment's rate per
+  octet of its widest spelling (`chargedBytes`), escrowed beside the postage by whoever paid it and
+  returned to `refund` whenever the message leaves its queue (delivered, forwarded, withdrawn). -/
+  deposit : Nat
   deriving DecidableEq, Repr
 
-/-- What a message holds in its queue's purse: its postage and its continuation allowance. -/
-def Message.escrow (message : Message) : Nat := message.postage + message.allowance
+/-- What a message holds in its queue's purse: its postage, its continuation allowance and its
+storage deposit. -/
+def Message.escrow (message : Message) : Nat := message.postage + message.allowance + message.deposit
 
 structure Inbox where
   sender : Nat
@@ -311,7 +316,7 @@ theorem fifoAccount_nil_iff {a b : Inbox} {popped pushed : List Message} :
 
 /-! Inhabitants and teeth (closed values, no hashing). -/
 
-def sampleMessage (n : Nat) : Message := ⟨⟨n⟩, 1, "m", [], ⟨0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0⟩, 1, 9, 0, 0⟩
+def sampleMessage (n : Nat) : Message := ⟨⟨n⟩, 1, "m", [], ⟨0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0⟩, 1, 9, 0, 0, 0⟩
 
 def sampleInbox : Inbox := ⟨1, 2, 0, [sampleMessage 10, sampleMessage 11]⟩
 
@@ -370,10 +375,10 @@ def messageStream : StreamCodec Message :=
     (StreamCodec.product digestStream (StreamCodec.product StreamCodec.nat (StreamCodec.product stringStream
       (StreamCodec.product bytesStream (StreamCodec.product capacityStream
         (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-          (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))))
-    (fun m => (m.id, m.sender, m.method, m.args, m.envelope, m.postage, m.refund, m.allowance, m.depth))
+          (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))))))
+    (fun m => (m.id, m.sender, m.method, m.args, m.envelope, m.postage, m.refund, m.allowance, m.depth, m.deposit))
     (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2.1, w.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.1,
-      w.2.2.2.2.2.2.2.2⟩)
+      w.2.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.2⟩)
     (by intro m; cases m; rfl)
 
 def inboxStream : StreamCodec Inbox :=
@@ -384,16 +389,16 @@ def inboxStream : StreamCodec Inbox :=
     (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2⟩)
     (by intro i; cases i; rfl)
 
-/-- v2: a message carries its continuation `allowance` and `depth` (GPT-6 row F); a v1 inbox
-refuses to decode (`v1_refuses`). -/
-def frame : Bytes := "DREGG/OBJECTIVE/INBOX/v2".toUTF8.toList
+/-- v3: a message carries its storage `deposit` (v2 added the continuation `allowance` and
+`depth`, GPT-6 row F); v1 and v2 inboxes refuse to decode (`v1_refuses`, `v2_refuses`). -/
+def frame : Bytes := "DREGG/OBJECTIVE/INBOX/v3".toUTF8.toList
 def codec := framed frame inboxStream
 def encode (inbox : Inbox) : Bytes := codec.encode inbox
 def decode (bytes : Bytes) : Option Inbox := codec.decode bytes
 
 theorem roundTrip (inbox : Inbox) : decode (encode inbox) = some inbox := framed_roundTrip _ _ inbox
 
-/-- The v1 frame (messages without an allowance or a depth) refuses to decode as v2. -/
+/-- The v1 frame (messages without an allowance or a depth) refuses to decode as v3. -/
 theorem v1_refuses (body : Bytes) :
     decode ("DREGG/OBJECTIVE/INBOX/v1".toUTF8.toList ++ body) = none := by
   cases found : decode ("DREGG/OBJECTIVE/INBOX/v1".toUTF8.toList ++ body) with
@@ -406,11 +411,72 @@ theorem v1_refuses (body : Bytes) :
     rw [List.take_left' rfl, List.take_left' (by decide +kernel)] at cut
     exact absurd cut (by decide +kernel)
 
+/-- The v2 frame (messages without a storage deposit) refuses to decode as v3. -/
+theorem v2_refuses (body : Bytes) :
+    decode ("DREGG/OBJECTIVE/INBOX/v2".toUTF8.toList ++ body) = none := by
+  cases found : decode ("DREGG/OBJECTIVE/INBOX/v2".toUTF8.toList ++ body) with
+  | none => rfl
+  | some inbox =>
+    have canon := framed_canonical found
+    have cut := congrArg (List.take frame.length) canon
+    change (frame ++ inboxStream.encode inbox).take frame.length =
+      ("DREGG/OBJECTIVE/INBOX/v2".toUTF8.toList ++ body).take frame.length at cut
+    rw [List.take_left' rfl, List.take_left' (by decide +kernel)] at cut
+    exact absurd cut (by decide +kernel)
+
 /-- A message with no allowance does not continue; one at the depth bound does not either. -/
 theorem sample_continues :
     (sampleMessage 10).continues = false ∧ { sampleMessage 10 with allowance := 1 }.continues = true ∧
       { sampleMessage 10 with allowance := 1, depth := continuationDepth }.continues = false := by
   decide
+
+/-! ## The storage deposit -/
+
+/-- The widest a message's id can be (`sendId` is a 256-bit hash, `ObjectiveActivityWire.tagged_lt`). -/
+def widestId : Digest := ⟨256 ^ 32 - 1⟩
+
+/-- The widest deposit a message may carry (`depositWide` refuses a wider one). -/
+def widestDeposit : Nat := 256 ^ 8 - 1
+
+/-- **The octets a queued message is charged for**: its spelling with its id and its deposit
+at their WIDEST. It does not depend on either (`chargedBytes_independent`), so the deposit
+computed from it is a fixed point of quote then submit (an id is a hash of the sending turn,
+and the deposit is part of the message), and it covers the real spelling of every message
+whose id and deposit fit (`chargedBytes_covers`). -/
+def chargedBytes (message : Message) : Nat :=
+  (messageStream.encode { message with id := widestId, deposit := widestDeposit }).length
+
+theorem chargedBytes_independent (message : Message) (id : Digest) (deposit : Nat) :
+    chargedBytes { message with id := id, deposit := deposit } = chargedBytes message := rfl
+
+/-- A message's id is a 256-bit value and its deposit fits 8 octets: what its storage deposit
+covers (`chargedBytes_covers`). A send whose message does not fit is refused (`messageWide`). -/
+def Message.fits (message : Message) : Bool :=
+  decide (message.id.value < 256 ^ 32) && decide (message.deposit < 256 ^ 8)
+
+/-- The storage deposit of a message at storage rate `rate`. -/
+def storageDeposit (rate : Nat) (message : Message) : Nat := rate * chargedBytes message
+
+theorem encodeNat_length_mono {a b : Nat} (le : a ≤ b) :
+    (StreamCodec.nat.encode a).length ≤ (StreamCodec.nat.encode b).length := by
+  show (StreamCodec.encodeNat a).length ≤ (StreamCodec.encodeNat b).length
+  unfold StreamCodec.encodeNat StreamCodec.natDigits
+  simp only [List.length_append, List.length_map, List.length_singleton]
+  exact Nat.add_le_add_right (Nat.le_length_digits_le 255 a b le) 1
+
+/-- **The deposit covers every octet the message occupies**, once its id is a 256-bit value
+and its deposit below `256 ^ 8`. -/
+theorem chargedBytes_covers (message : Message) (fits : message.fits = true) :
+    (messageStream.encode message).length ≤ chargedBytes message := by
+  simp only [Message.fits, Bool.and_eq_true, decide_eq_true_eq] at fits
+  obtain ⟨idFits, depositFits⟩ := fits
+  have hid : (digestStream.encode message.id).length ≤ (digestStream.encode widestId).length := by
+    show (StreamCodec.nat.encode message.id.value).length ≤ (StreamCodec.nat.encode widestId.value).length
+    exact encodeNat_length_mono (by simp only [widestId]; omega)
+  have hdep : (StreamCodec.nat.encode message.deposit).length ≤ (StreamCodec.nat.encode widestDeposit).length :=
+    encodeNat_length_mono (by simp only [widestDeposit]; omega)
+  simp only [chargedBytes, messageStream, StreamCodec.xmap, StreamCodec.product, List.length_append]
+  omega
 
 /-- The coordinate preimage of an inbox: (sender, target). -/
 def key (sender target : Nat) : Bytes := StreamCodec.nat.encode sender ++ StreamCodec.nat.encode target
@@ -449,6 +515,9 @@ def sendId (turn : TransactionId) (index : Nat) : Digest :=
 #assert_axioms sample_full
 #assert_axioms roundTrip
 #assert_axioms v1_refuses
+#assert_axioms v2_refuses
+#assert_axioms chargedBytes_independent
+#assert_axioms chargedBytes_covers
 #assert_axioms sample_continues
 #assert_axioms cell_reserved
 

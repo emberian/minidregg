@@ -1320,9 +1320,13 @@ def readState {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snaps
     Except Refusal (Option ObjectState) :=
   stateFor object (snapshot.canonicalBytes (stateCell config.domain object))
 
-/-- The image an inbox installs. -/
+/-- The image an inbox installs: an EMPTY inbox is retired (cv 01a113fe-1390), so a queue
+that no message is in retains nothing; the next send to the pair opens it afresh
+(`readInbox` reads a retired cell as no inbox). Its purse is closed in the same batch when
+it can be (`ObjectiveCall.Mail.deregistrations`). -/
 def inboxImage (inbox : Inbox.Inbox) : Bytes :=
-  image .inbox (Inbox.key inbox.sender inbox.target) (Inbox.encode inbox)
+  if inbox.messages = [] then retiredImage
+  else image .inbox (Inbox.key inbox.sender inbox.target) (Inbox.encode inbox)
 
 /-- The inbox an inbox cell holds: `none` when the cell holds no activity cell
 (no inbox yet), refused when it holds anything else. -/
@@ -4546,7 +4550,7 @@ read from the cell's own bytes along its role's route (`payerOf`):
 | role      | route            | payer                                          |
 |-----------|------------------|------------------------------------------------|
 | `record`  | `escrow`         | the record's `escrow.account`                  |
-| `slot`    | `activityOfSlot` | the escrow of the awaiting record it answers   |
+| `slot`    | `activityOfSlot` | a subject slot: the escrow of the awaiting record it answers; a delivery slot: `ObjectRecord.payer` of the object that sent its message (named in the decider, so it holds after the inbox is retired) |
 | `state`   | `objectOfState`  | `ObjectRecord.payer` of the object its key names |
 | `package` | `stored`         | the package cell's `Stored.payer`              |
 | `object`  | `objectRecord`   | the record's own `ObjectRecord.payer`          |
@@ -4666,8 +4670,9 @@ def routePayer (config : Config) (bytesAt : CellId → Bytes) (payload : Objecti
     PayerRoute → Option AccountId
   | .escrow => (decodeRecord payload.body).map fun record => record.escrow.account
   | .activityOfSlot => (AnswerSlot.decode payload.body).bind fun slot =>
-      ((recordAt bytesAt slot.activity).map fun record => record.escrow.account).orElse fun _ =>
-        (inboxAt bytesAt slot.activity).bind fun inbox => (objectAt config bytesAt ⟨inbox.sender⟩).map ObjectRecord.payer
+      match slot.decider with
+      | .subject _ => (recordAt bytesAt slot.activity).map fun record => record.escrow.account
+      | .delivery _ sender => (objectAt config bytesAt ⟨sender⟩).map ObjectRecord.payer
   | .objectOfInbox => (Inbox.decode payload.body).bind fun inbox =>
       (objectAt config bytesAt ⟨inbox.sender⟩).map ObjectRecord.payer
   | .objectOfState => (digestStream.toLawful.decode payload.key).bind fun object =>
@@ -5114,10 +5119,11 @@ theorem payloadOf_recordImage_live (record : Record) (live : (payloadOf (recordI
 
 /-- The payer of a slot image whose activity is the record a byte map holds. -/
 theorem payer_slot_image (config : Config) (bytesAt : CellId → Bytes) (slot : AnswerSlot.Slot) (record : Record)
-    (held : recordAt bytesAt slot.activity = some record) :
+    (subject : ∃ subject, slot.decider = .subject subject) (held : recordAt bytesAt slot.activity = some record) :
     payerOfBytes config bytesAt (image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot)) =
       some record.escrow.account := by
-  simp [payerOfBytes, payloadOf_image, payerRoute, routePayer, AnswerSlot.roundTrip, held]
+  obtain ⟨subject, role⟩ := subject
+  simp [payerOfBytes, payloadOf_image, payerRoute, routePayer, AnswerSlot.roundTrip, held, role]
 
 /-- The payer of a state image whose object's record a byte map holds. -/
 theorem payer_state_image (config : Config) (bytesAt : CellId → Bytes) (object : CellId) (state : ObjectState)
@@ -5142,6 +5148,7 @@ theorem commitYield_posts {rootBytes : Bytes → Digest} {config : Config} {snap
       .ok committed) :
     ∀ post ∈ committed.posts, (∃ state, post.bytes = stateImage object state) ∨
       (∃ slot : AnswerSlot.Slot, slot.activity = cell ∧ slot.phase = .opened ∧
+        (∃ subject, slot.decider = .subject subject) ∧
         post.bytes = image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot)) := by
   have stateShape : ∀ written : Option StateWritten,
       stateWrite config snapshot object current viewed plan.write = .ok written →
@@ -5173,7 +5180,7 @@ theorem commitYield_posts {rootBytes : Bytes → Digest} {config : Config} {snap
             rcases member with inState | isSlot
             · exact .inl (stateShape _ wrote post inState)
             · subst isSlot
-              exact .inr ⟨_, rfl, rfl, rfl⟩
+              exact .inr ⟨_, rfl, rfl, ⟨_, rfl⟩, rfl⟩
         · split at ok
           · cases ok
           · simp only [Except.ok.injEq] at ok
@@ -5202,7 +5209,7 @@ slot image for the record cell, a retired image, no activity cell (the Book), or
 the object's record (its counters moved). -/
 def CensusPost (object cell : CellId) (post : Post) : Prop :=
   (∃ state, post.bytes = stateImage object state) ∨
-    (∃ slot : AnswerSlot.Slot, slot.activity = cell ∧
+    (∃ slot : AnswerSlot.Slot, slot.activity = cell ∧ (∃ subject, slot.decider = .subject subject) ∧
       post.bytes = image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot)) ∨
     post.bytes = retiredImage ∨ payloadOf post.bytes = none ∨ (∃ record, post.bytes = objectImage object record)
 
@@ -5267,13 +5274,13 @@ theorem recordFirst_cells_paid {rootBytes : Bytes → Digest} (config : Config) 
     show (payerOfBytes config _ (recordImage record)).isSome = true
     rw [payer_record_image config _ record await recordFits awaiting]
     rfl
-  · rcases shape post inRest with ⟨state, isState⟩ | ⟨slot, activity, isSlot⟩ | retired | none | ⟨held, isObject⟩
+  · rcases shape post inRest with ⟨state, isState⟩ | ⟨slot, activity, subject, isSlot⟩ | retired | none | ⟨held, isObject⟩
     · rw [isState, payer_state_image config _ object state objectHeldRecord objectHeld]
       rfl
     · obtain ⟨await, awaiting⟩ := slotsNeedRecord ⟨post, inRest, slot, activity, isSlot⟩
       have held := recordAt_recordImage (afterPosts snapshot (recordPost config snapshot cell record :: rest))
         slot.activity record await recordFits awaiting (by rw [activity]; exact headBytes)
-      rw [isSlot, payer_slot_image config _ slot record held]
+      rw [isSlot, payer_slot_image config _ slot record subject held]
       rfl
     · rw [retired, payloadOf_retired] at live; cases live
     · rw [none] at live; cases live
@@ -5293,7 +5300,7 @@ theorem segmentCommit_census {rootBytes : Bytes → Digest} {config : Config} {s
   | some committed =>
     obtain ⟨_, _, _, committedOk⟩ := segmentCommit_spec ok
     exact (commitYield_posts committedOk post member).elim .inl
-      (fun ⟨slot, activity, _, isSlot⟩ => .inr (.inl ⟨slot, activity, isSlot⟩))
+      (fun ⟨slot, activity, _, subject, isSlot⟩ => .inr (.inl ⟨slot, activity, subject, isSlot⟩))
 
 /-- A turn that opens a slot commits an awaiting record. -/
 theorem segmentCommit_awaiting {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -5615,7 +5622,8 @@ theorem Resolution.retention_cells_have_payer {rootBytes : Bytes → Digest} {co
   rw [resolution.postsExact] at shape
   simp only [List.mem_singleton] at shape
   rw [shape]
-  exact payer_slot_image config _ resolution.decided record held
+  obtain ⟨_, _, _, decidedEq, _⟩ := AnswerSlot.decide_single_decider resolution.decidedExact
+  exact payer_slot_image config _ resolution.decided record ⟨_, by rw [decidedEq]; exact AnswerSlot.decide_single_decider resolution.decidedExact |>.1⟩ held
 
 #assert_axioms retention_census_paid
 #assert_axioms planted_census_unpaid

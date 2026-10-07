@@ -398,13 +398,14 @@ def decisionJson : AnswerSlot.Decision → Json
 def messageJson (message : Inbox.Message) : Json :=
   .mkObj [("id", decimal message.id.value), ("sender", decimal message.sender), ("method", toJson message.method),
     ("args", dataOf message.args), ("envelope", capacityJson message.envelope), ("postage", decimal message.postage),
-    ("refund", decimal message.refund), ("allowance", decimal message.allowance), ("depth", decimal message.depth)]
+    ("refund", decimal message.refund), ("allowance", decimal message.allowance), ("depth", decimal message.depth),
+    ("deposit", decimal message.deposit)]
 
 def slotJson (slot : AnswerSlot.Slot) : Json :=
   .mkObj [("name", decimal slot.name.value), ("activity", decimal slot.activity.value),
     ("decider", match slot.decider with
       | .subject subject => .mkObj [("subject", decimal subject.value)]
-      | .delivery message => .mkObj [("delivery", decimal message.value)]),
+      | .delivery message sender => .mkObj [("delivery", decimal message.value), ("sender", decimal sender)]),
     ("deadline", decimal slot.deadline),
     ("phase", match slot.phase with
       | .opened => "open"

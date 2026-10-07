@@ -1027,21 +1027,23 @@ def HoldsInbox (bytes : Bytes) : Prop := bodyOf .inbox bytes ≠ none
 /-- The bytes hold a delivery slot that is DECIDED: a slot payload whose decider
 is the role `delivery message` and whose phase is `decided`. -/
 def DecidesDelivery (bytes : Bytes) : Prop :=
-  ∃ (body : Bytes) (slot : AnswerSlot.Slot) (message : Digest) (decision : AnswerSlot.Decision) (at_ : Nat),
-    bodyOf .slot bytes = some body ∧ AnswerSlot.decode body = some slot ∧
-      slot.decider = .delivery message ∧ slot.phase = .decided decision at_
+  ∃ (body : Bytes) (slot : AnswerSlot.Slot) (message : Digest) (sender : Nat) (decision : AnswerSlot.Decision)
+    (at_ : Nat), bodyOf .slot bytes = some body ∧ AnswerSlot.decode body = some slot ∧
+      slot.decider = .delivery message sender ∧ slot.phase = .decided decision at_
 
-theorem holdsInbox_inboxImage (inbox : Inbox.Inbox) : HoldsInbox (inboxImage inbox) := by
+theorem holdsInbox_inboxImage (inbox : Inbox.Inbox) (queued : inbox.messages ≠ []) :
+    HoldsInbox (inboxImage inbox) := by
   intro absent
   unfold inboxImage at absent
+  rw [if_neg queued] at absent
   rw [bodyOf_image] at absent
   cases absent
 
-theorem decidesDelivery_decided_slot {slot : AnswerSlot.Slot} {message : Digest}
-    {decision : AnswerSlot.Decision} {at_ : Nat} (role : slot.decider = .delivery message)
+theorem decidesDelivery_decided_slot {slot : AnswerSlot.Slot} {message : Digest} {sender : Nat}
+    {decision : AnswerSlot.Decision} {at_ : Nat} (role : slot.decider = .delivery message sender)
     (decided : slot.phase = .decided decision at_) :
     DecidesDelivery (image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot)) :=
-  ⟨AnswerSlot.encode slot, slot, message, decision, at_, bodyOf_image _ _ _, AnswerSlot.roundTrip slot, role,
+  ⟨AnswerSlot.encode slot, slot, message, sender, decision, at_, bodyOf_image _ _ _, AnswerSlot.roundTrip slot, role,
     decided⟩
 
 theorem not_holdsInbox_of_payload_none {bytes : Bytes} (absent : payloadOf bytes = none) :
@@ -1054,30 +1056,30 @@ theorem not_holdsInbox_image {bytes : Bytes} {role : ObjectiveActivityCell.Role}
 
 theorem not_decidesDelivery_of_payload_none {bytes : Bytes} (absent : payloadOf bytes = none) :
     ¬ DecidesDelivery bytes := by
-  rintro ⟨_, _, _, _, _, found, _⟩
+  rintro ⟨_, _, _, _, _, _, found, _⟩
   rw [bodyOf_of_payload_none absent] at found
   cases found
 
 theorem not_decidesDelivery_image {bytes : Bytes} {role : ObjectiveActivityCell.Role} {key body : Bytes}
     (shape : bytes = image role key body) (other : role ≠ .slot) : ¬ DecidesDelivery bytes := by
   subst shape
-  rintro ⟨_, _, _, _, _, found, _⟩
+  rintro ⟨_, _, _, _, _, _, found, _⟩
   rw [bodyOf_image_other key body other] at found
   cases found
 
 /-- A slot image decides no delivery slot when the slot it holds does not. -/
 theorem not_decidesDelivery_slot {bytes : Bytes} {slot : AnswerSlot.Slot}
     (shape : bytes = image .slot (AnswerSlot.key slot.name) (AnswerSlot.encode slot))
-    (undecided : ∀ (message : Digest) (decision : AnswerSlot.Decision) (at_ : Nat),
-      slot.decider = .delivery message → slot.phase ≠ .decided decision at_) :
+    (undecided : ∀ (message : Digest) (sender : Nat) (decision : AnswerSlot.Decision) (at_ : Nat),
+      slot.decider = .delivery message sender → slot.phase ≠ .decided decision at_) :
     ¬ DecidesDelivery bytes := by
   subst shape
-  rintro ⟨stored, other, message, decision, at_, found, decoded, role, phase⟩
+  rintro ⟨stored, other, message, sender, decision, at_, found, decoded, role, phase⟩
   rw [bodyOf_image] at found
   cases found
   rw [AnswerSlot.roundTrip] at decoded
   cases decoded
-  exact undecided message decision at_ role phase
+  exact undecided message sender decision at_ role phase
 
 /-- A post that holds no inbox and decides no delivery slot. -/
 def Quiet (bytes : Bytes) : Prop := ¬ HoldsInbox bytes ∧ ¬ DecidesDelivery bytes
@@ -1113,11 +1115,11 @@ theorem yielded_posts_quiet {rootBytes : Bytes → Digest} {config : Config} {sn
   | none => simp at member
   | some committed =>
     obtain ⟨_, _, _, committedOk⟩ := segmentCommit_spec ok
-    rcases commitYield_posts committedOk post member with ⟨state, isState⟩ | ⟨slot, _, opened, isSlot⟩
+    rcases commitYield_posts committedOk post member with ⟨state, isState⟩ | ⟨slot, _, opened, _, isSlot⟩
     · exact quiet_image (role := .state) (key := stateKey object) (body := ObjectState.encodeObjectState state)
         (isState.trans rfl) (by decide) (by decide)
     · exact ⟨not_holdsInbox_image isSlot (by decide),
-        not_decidesDelivery_slot isSlot (fun _ _ _ _ phase => by rw [opened] at phase; cases phase)⟩
+        not_decidesDelivery_slot isSlot (fun _ _ _ _ _ phase => by rw [opened] at phase; cases phase)⟩
 
 theorem birth_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request) :
@@ -1203,7 +1205,7 @@ theorem resolution_quiet {rootBytes : Bytes → Digest} {config : Config} {snaps
   exact ⟨not_holdsInbox_image (role := .slot) (key := AnswerSlot.key resolution.decided.name)
       (body := AnswerSlot.encode resolution.decided) rfl (by decide),
     not_decidesDelivery_slot (slot := resolution.decided) rfl
-      (fun message _ _ isDelivery _ => by rw [role] at isDelivery; cases isDelivery)⟩
+      (fun message _ _ _ isDelivery _ => by rw [role] at isDelivery; cases isDelivery)⟩
 
 theorem publication_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {stored : Stored} (publication : Publication config snapshot stored) :
@@ -1352,11 +1354,13 @@ theorem mail_decides_nothing {rootBytes : Bytes → Digest} {config : Config} {s
   rcases List.mem_append.mp member with front | inClosed
   · rcases List.mem_append.mp front with inInbox | inSlot
     · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inInbox
-      exact not_decidesDelivery_image (role := .inbox) (key := Inbox.key held.now.sender held.now.target)
-        (body := Inbox.encode held.now) rfl (by decide)
+      by_cases empty : held.now.messages = []
+      · exact not_decidesDelivery_of_payload_none (by simp [postAt, inboxImage, empty, payloadOf_retired])
+      · exact not_decidesDelivery_image (role := .inbox) (key := Inbox.key held.now.sender held.now.target)
+          (body := Inbox.encode held.now) (by simp [postAt, inboxImage, empty]) (by decide)
     · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inSlot
       exact not_decidesDelivery_slot (slot := held.now) rfl
-        (fun _ _ _ _ phase => by rw [held.opened] at phase; cases phase)
+        (fun _ _ _ _ _ phase => by rw [held.opened] at phase; cases phase)
   · obtain ⟨closed, hm, rfl⟩ := List.mem_map.mp inClosed
     unfold ObjectiveCall.ClosedSlot.post
     rw [retired closed hm]

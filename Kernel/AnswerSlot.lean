@@ -77,7 +77,9 @@ inductive Phase where
 /-- Who decides a slot: a subject, or the delivery of one message. -/
 inductive Decider where
   | subject (subject : SubjectId)
-  | delivery (message : Digest)
+  /-- The delivery of `message`, which object `sender` sent: the sender's object answers for
+  the slot's storage (`ObjectiveActivity.routePayer`), whether or not its inbox still exists. -/
+  | delivery (message : Digest) (sender : Nat)
   deriving DecidableEq, Repr
 
 structure Slot where
@@ -128,13 +130,13 @@ def phaseStream : StreamCodec Phase :=
     (by intro phase; cases phase <;> rfl)
 
 def deciderStream : StreamCodec Decider :=
-  StreamCodec.xmap (StreamCodec.sum subjectStream digestStream)
+  StreamCodec.xmap (StreamCodec.sum subjectStream (StreamCodec.product digestStream StreamCodec.nat))
     (fun decider => match decider with
       | .subject subject => .inl subject
-      | .delivery message => .inr message)
+      | .delivery message sender => .inr (message, sender))
     (fun wire => match wire with
       | .inl subject => .subject subject
-      | .inr message => .delivery message)
+      | .inr (message, sender) => .delivery message sender)
     (by intro decider; cases decider <;> rfl)
 
 def slotStream : StreamCodec Slot :=
@@ -147,10 +149,10 @@ def slotStream : StreamCodec Slot :=
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1, wire.2.2.2.2.1, wire.2.2.2.2.2.1, wire.2.2.2.2.2.2⟩)
     (by intro slot; cases slot; rfl)
 
-/-- v4: the messages a slot queues carry their continuation `allowance` and `depth` (the INBOX
-v2 message, GPT-6 row F); v3 carried `watched` and `cancelled`. A v3 (or older) slot refuses
-to decode (`v3_refuses`). -/
-def frame : Bytes := "DREGG/OBJECTIVE/ANSWER-SLOT/v4".toUTF8.toList
+/-- v5: a delivery decider names the sending object, and the messages a slot queues carry their
+storage `deposit` (the INBOX v3 message); v4 added `allowance` and `depth` (GPT-6 row F), v3
+`watched` and `cancelled`. A v4 (or older) slot refuses to decode (`v4_refuses`). -/
+def frame : Bytes := "DREGG/OBJECTIVE/ANSWER-SLOT/v5".toUTF8.toList
 def codec := framed frame slotStream
 def encode (slot : Slot) : Bytes := codec.encode slot
 def decode (bytes : Bytes) : Option Slot := codec.decode bytes
@@ -203,7 +205,7 @@ def expire (slot : Slot) (height : Nat) : Except Refusal Slot :=
   | .decided _ _ => .error .notOpen
   | .opened =>
     match slot.decider with
-    | .delivery _ => .error .deliveryDecides
+    | .delivery _ _ => .error .deliveryDecides
     | .subject _ =>
       if slot.deadline < height then .ok {slot with phase := .decided .expired height}
       else .error (.notYetExpired slot.deadline height)
@@ -211,13 +213,13 @@ def expire (slot : Slot) (height : Nat) : Except Refusal Slot :=
 /-- The delivery of `message` decides its reply slot: only an open slot whose
 decider is that delivery, and never `expired`. The decided slot keeps nothing
 queued: the deciding turn forwards or refunds every queued send. -/
-def decideDelivery (slot : Slot) (message : Digest) (height : Nat) (decision : Decision) :
+def decideDelivery (slot : Slot) (message : Digest) (sender : Nat) (height : Nat) (decision : Decision) :
     Except Refusal Slot :=
   match slot.phase with
   | .decided _ _ => .error .notOpen
   | .opened =>
     if decision = .expired then .error .expiryIsKernelOnly
-    else if slot.decider ≠ .delivery message then .error .notDecider
+    else if slot.decider ≠ .delivery message sender then .error .notDecider
     else .ok {slot with phase := .decided decision height, queued := []}
 
 /-- **The sender stops waiting**: an open delivery slot keeps its message's place
@@ -229,7 +231,7 @@ def stopWaiting (slot : Slot) : Except Refusal Slot :=
   | .opened =>
     match slot.decider with
     | .subject _ => .error .notDecider
-    | .delivery _ => .ok {slot with queued := [], watched := false}
+    | .delivery _ _ => .ok {slot with queued := [], watched := false}
 
 /-- **The sender cancels a still-queued message**: its open delivery slot is decided
 `cancelled` with nothing queued (the caller refunds the message and every pipelined send). -/
@@ -239,11 +241,11 @@ def cancelDelivery (slot : Slot) (height : Nat) : Except Refusal Slot :=
   | .opened =>
     match slot.decider with
     | .subject _ => .error .notDecider
-    | .delivery _ => .ok {slot with phase := .decided .cancelled height, queued := []}
+    | .delivery _ _ => .ok {slot with phase := .decided .cancelled height, queued := []}
 
 /-- A cancel decides only an open delivery slot, `cancelled`, emptying its queue. -/
 theorem cancelDelivery_spec {slot decided : Slot} {height : Nat} (ok : cancelDelivery slot height = .ok decided) :
-    slot.phase = .opened ∧ (∃ message, slot.decider = .delivery message) ∧
+    slot.phase = .opened ∧ (∃ message sender, slot.decider = .delivery message sender) ∧
       decided = {slot with phase := .decided .cancelled height, queued := []} := by
   unfold cancelDelivery at ok
   split at ok
@@ -251,13 +253,13 @@ theorem cancelDelivery_spec {slot decided : Slot} {height : Nat} (ok : cancelDel
   · rename_i opened
     split at ok
     · cases ok
-    · rename_i message role
+    · rename_i message sender role
       cases ok
-      exact ⟨opened, ⟨message, role⟩, rfl⟩
+      exact ⟨opened, ⟨message, sender, role⟩, rfl⟩
 
 /-- Stopping keeps the slot open and its decider; it only unwatches it and empties its queue. -/
 theorem stopWaiting_spec {slot stopped : Slot} (ok : stopWaiting slot = .ok stopped) :
-    slot.phase = .opened ∧ (∃ message, slot.decider = .delivery message) ∧
+    slot.phase = .opened ∧ (∃ message sender, slot.decider = .delivery message sender) ∧
       stopped = {slot with queued := [], watched := false} := by
   unfold stopWaiting at ok
   split at ok
@@ -265,9 +267,9 @@ theorem stopWaiting_spec {slot stopped : Slot} (ok : stopWaiting slot = .ok stop
   · rename_i opened
     split at ok
     · cases ok
-    · rename_i message role
+    · rename_i message sender role
       cases ok
-      exact ⟨opened, ⟨message, role⟩, rfl⟩
+      exact ⟨opened, ⟨message, sender, role⟩, rfl⟩
 
 /-- Exactly one decider: a decided slot names the subject that decided it. -/
 theorem decide_single_decider {slot decided : Slot} {subject : SubjectId} {height : Nat}
@@ -318,8 +320,8 @@ theorem expire_after_deadline {slot expired : Slot} {height : Nat}
 /-! ### The delivery role (condition (c) of OB8, at the rule) -/
 
 /-- **No subject decides a delivery slot**, whatever it decides. -/
-theorem decide_delivery_refused (slot : Slot) (message : Digest) (subject : SubjectId) (height : Nat)
-    (decision : Decision) (role : slot.decider = .delivery message) :
+theorem decide_delivery_refused (slot : Slot) (message : Digest) (sender : Nat) (subject : SubjectId) (height : Nat)
+    (decision : Decision) (role : slot.decider = .delivery message sender) :
     ∃ reason, decide slot subject height decision = .error reason := by
   unfold decide
   split
@@ -330,16 +332,16 @@ theorem decide_delivery_refused (slot : Slot) (message : Digest) (subject : Subj
       exact ⟨_, rfl⟩
 
 /-- **A delivery slot never expires.** -/
-theorem expire_delivery_refused (slot : Slot) (message : Digest) (height : Nat)
-    (role : slot.decider = .delivery message) (opened : slot.phase = .opened) :
+theorem expire_delivery_refused (slot : Slot) (message : Digest) (sender : Nat) (height : Nat)
+    (role : slot.decider = .delivery message sender) (opened : slot.phase = .opened) :
     expire slot height = .error .deliveryDecides := by
   simp [expire, opened, role]
 
 /-- **Only the delivery of its own message decides a delivery slot**: a decided
 slot was open, its decider is that delivery, and its queue is emptied. -/
-theorem decideDelivery_single {slot decided : Slot} {message : Digest} {height : Nat} {decision : Decision}
-    (ok : decideDelivery slot message height decision = .ok decided) :
-    slot.decider = .delivery message ∧ slot.phase = .opened ∧ decision ≠ .expired ∧
+theorem decideDelivery_single {slot decided : Slot} {message : Digest} {sender : Nat} {height : Nat}
+    {decision : Decision} (ok : decideDelivery slot message sender height decision = .ok decided) :
+    slot.decider = .delivery message sender ∧ slot.phase = .opened ∧ decision ≠ .expired ∧
       decided = {slot with phase := .decided decision height, queued := []} := by
   unfold decideDelivery at ok
   split at ok
@@ -355,9 +357,9 @@ theorem decideDelivery_single {slot decided : Slot} {message : Digest} {height :
         exact ⟨Classical.not_not.mp same, opened, notExpired, rfl⟩
 
 /-- A subject's decision cannot take a delivery slot's role. -/
-theorem decideDelivery_subject_refused (slot : Slot) (subject : SubjectId) (message : Digest) (height : Nat)
-    (decision : Decision) (role : slot.decider = .subject subject) :
-    ∃ reason, decideDelivery slot message height decision = .error reason := by
+theorem decideDelivery_subject_refused (slot : Slot) (subject : SubjectId) (message : Digest) (sender : Nat)
+    (height : Nat) (decision : Decision) (role : slot.decider = .subject subject) :
+    ∃ reason, decideDelivery slot message sender height decision = .error reason := by
   unfold decideDelivery
   split
   · exact ⟨_, rfl⟩
@@ -377,7 +379,7 @@ theorem stranger_refused (slot : Slot) (subject : SubjectId) (height : Nat) (dec
 def sampleSlot : Slot := ⟨⟨1⟩, ⟨2⟩, .subject ⟨7⟩, 10, .opened, [], true⟩
 
 /-- A delivery slot: the reply of message 1. -/
-def sampleSendSlot : Slot := ⟨⟨1⟩, ⟨2⟩, .delivery ⟨1⟩, 0, .opened, [], true⟩
+def sampleSendSlot : Slot := ⟨⟨1⟩, ⟨2⟩, .delivery ⟨1⟩ 3, 0, .opened, [], true⟩
 
 theorem sample_cancelled :
     cancelDelivery sampleSendSlot 5 = .ok {sampleSendSlot with phase := .decided .cancelled 5, queued := []} := rfl
@@ -389,7 +391,7 @@ theorem sample_cancel_subject_refused : cancelDelivery sampleSlot 5 = .error .no
 
 theorem sample_stopped : stopWaiting sampleSendSlot = .ok {sampleSendSlot with watched := false} := rfl
 
-/-- The v3 frame (queued messages without an allowance) refuses to decode as v4. -/
+/-- The v3 frame (queued messages without an allowance) refuses to decode as v5. -/
 theorem v3_refuses (body : Bytes) :
     decode ("DREGG/OBJECTIVE/ANSWER-SLOT/v3".toUTF8.toList ++ body) = none := by
   cases found : decode ("DREGG/OBJECTIVE/ANSWER-SLOT/v3".toUTF8.toList ++ body) with
@@ -402,11 +404,24 @@ theorem v3_refuses (body : Bytes) :
     rw [List.take_left' rfl, List.take_left' (by decide +kernel)] at cut
     exact absurd cut (by decide +kernel)
 
+/-- The v4 frame (deciders without a sender, messages without a deposit) refuses to decode as v5. -/
+theorem v4_refuses (body : Bytes) :
+    decode ("DREGG/OBJECTIVE/ANSWER-SLOT/v4".toUTF8.toList ++ body) = none := by
+  cases found : decode ("DREGG/OBJECTIVE/ANSWER-SLOT/v4".toUTF8.toList ++ body) with
+  | none => rfl
+  | some slot =>
+    have canon := framed_canonical found
+    have cut := congrArg (List.take frame.length) canon
+    change (frame ++ slotStream.encode slot).take frame.length =
+      ("DREGG/OBJECTIVE/ANSWER-SLOT/v4".toUTF8.toList ++ body).take frame.length at cut
+    rw [List.take_left' rfl, List.take_left' (by decide +kernel)] at cut
+    exact absurd cut (by decide +kernel)
+
 theorem sample_delivered :
-    decideDelivery sampleSendSlot ⟨1⟩ 5 (.reply [3]) =
+    decideDelivery sampleSendSlot ⟨1⟩ 3 5 (.reply [3]) =
       .ok {sampleSendSlot with phase := .decided (.reply [3]) 5, queued := []} := rfl
 
-theorem sample_other_message : decideDelivery sampleSendSlot ⟨2⟩ 5 (.reply [3]) = .error .notDecider := rfl
+theorem sample_other_message : decideDelivery sampleSendSlot ⟨2⟩ 3 5 (.reply [3]) = .error .notDecider := rfl
 
 theorem sample_subject_on_send_slot : decide sampleSendSlot ⟨1⟩ 5 (.reply [3]) = .error .notDecider := rfl
 
@@ -451,4 +466,5 @@ theorem sample_not_yet_expired : expire sampleSlot 10 = .error (.notYetExpired 1
 #assert_axioms sample_cancel_subject_refused
 #assert_axioms sample_stopped
 #assert_axioms v3_refuses
+#assert_axioms v4_refuses
 end Minidregg.Kernel.AnswerSlot
