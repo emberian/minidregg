@@ -2227,6 +2227,9 @@ structure ActivityView where
   the same prefix and the same `ResumeTail.needed` the turns' `heapUncovered` refusal states), or the
   kernel's refusal of the pending await. -/
   quotes : List (Nat × Nat × Except String ObjectiveActivity.HeapQuote)
+  /-- The extraction budget one Plan or result extraction needs declared (`config.planBudget.ticks`, the field
+  every `extractUncovered` refusal states), or none when the deployment registers no Objective policy. -/
+  extractTicks : Option Nat
 
 def activityViewLoaded (config : Config) (opened : Opened config) (cells : List Nat)
     (quotes : List (Nat × Nat)) : Except String ActivityView := do
@@ -2234,6 +2237,10 @@ def activityViewLoaded (config : Config) (opened : Opened config) (cells : List 
     (CredentialAuthorityDomainReceiver.loadDeployment config.deployment opened.durable.snapshot)
   let snapshot := opened.durable.snapshot
   let height := logicalHeight config opened.durable
+  let extractTicks := match ObjectiveKernelConfig.configOf config.deployment config.profile
+      (activityAmbient config opened) with
+    | .ok kernel => some kernel.planBudget.ticks
+    | .error _ => none
   let quoted := quotes.map fun (record, await) =>
     (record, await,
       match ObjectiveKernelConfig.configOf config.deployment config.profile (activityAmbient config opened) with
@@ -2244,7 +2251,7 @@ def activityViewLoaded (config : Config) (opened : Opened config) (cells : List 
         | .ok quote => .ok quote)
   pure ⟨height, authority.snapshot.cell.root,
     ObjectiveActivity.bookOf (snapshot.canonicalBytes ⟨config.deployment.resourceBookId⟩),
-    cells.map (fun cell => (cell, snapshot.model.roots ⟨cell⟩, snapshot.canonicalBytes ⟨cell⟩)), quoted⟩
+    cells.map (fun cell => (cell, snapshot.model.roots ⟨cell⟩, snapshot.canonicalBytes ⟨cell⟩)), quoted, extractTicks⟩
 
 /-! ## Seats and invitations (SEATS-NATIVE): session operations 215–219
 
