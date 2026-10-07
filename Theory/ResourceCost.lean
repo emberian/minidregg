@@ -473,5 +473,5 @@ end Minidregg.Theory.ResourceCost
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceCost.Quote.compose
 /-- info: 'Minidregg.Theory.ResourceCost.WordLayout.encode?_none_of_overflow' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceCost.WordLayout.encode?_none_of_overflow
-/-- info: 'Minidregg.Theory.ResourceCost.SettledDecision.admitted_exact' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.ResourceCost.SettledDecision.admitted_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceCost.SettledDecision.admitted_exact

@@ -342,38 +342,38 @@ theorem bound_tightening_narrows :
 
 /-- info: 'Minidregg.Theory.TypedAuthorizationWitness.treasurer_moves_30' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms treasurer_moves_30
-/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.treasurer_refused_60' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.treasurer_refused_60' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms treasurer_refused_60
 /-- info: 'Minidregg.Theory.TypedAuthorizationWitness.treasurer_moves_30_again' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms treasurer_moves_30_again
 /-- info: 'Minidregg.Theory.TypedAuthorizationWitness.reviewer_annotates' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms reviewer_annotates
-/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.reviewer_cannot_edit' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.reviewer_cannot_edit' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms reviewer_cannot_edit
-/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.fields_widening_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.fields_widening_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms fields_widening_refused
-/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.bound_loosening_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.bound_loosening_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms bound_loosening_refused
-/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.bound_tightening_narrows' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.bound_tightening_narrows' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms bound_tightening_narrows
 
-/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.authorized_nonempty' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.authorized_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms authorized_nonempty
 /-- info: 'Minidregg.Theory.TypedAuthorizationWitness.capability_admissible' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms capability_admissible
 /-- info: 'Minidregg.Theory.TypedAuthorizationWitness.capability_not_admissible_offTarget' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms capability_not_admissible_offTarget
-/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.capability_not_admissible_expired' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.capability_not_admissible_expired' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms capability_not_admissible_expired
-/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.capability_not_admissible_revoked' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.capability_not_admissible_revoked' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms capability_not_admissible_revoked
-/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.evidence_exists_at_policyClosedPortal' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.evidence_exists_at_policyClosedPortal' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms evidence_exists_at_policyClosedPortal
-/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.authorized_isEmpty_of_policyClosed' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.authorized_isEmpty_of_policyClosed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms authorized_isEmpty_of_policyClosed
-/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.evidence_exists_at_rotatedState' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.evidence_exists_at_rotatedState' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms evidence_exists_at_rotatedState
-/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.authorized_isEmpty_of_staleEpoch' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.authorized_isEmpty_of_staleEpoch' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms authorized_isEmpty_of_staleEpoch
 
 end Minidregg.Theory.TypedAuthorizationWitness
