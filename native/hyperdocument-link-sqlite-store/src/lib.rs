@@ -71,6 +71,8 @@ extern "C" {
     ) -> c_int;
     fn sqlite3_step(statement: *mut sqlite3_stmt) -> c_int;
     fn sqlite3_finalize(statement: *mut sqlite3_stmt) -> c_int;
+    fn sqlite3_reset(statement: *mut sqlite3_stmt) -> c_int;
+    fn sqlite3_clear_bindings(statement: *mut sqlite3_stmt) -> c_int;
     fn sqlite3_bind_blob(
         statement: *mut sqlite3_stmt,
         index: c_int,
@@ -259,6 +261,18 @@ struct Statement<'database> {
 }
 
 impl Statement<'_> {
+    /// Reset the statement for another execution with fresh bindings.
+    fn reset(&self) -> Result<(), StoreError> {
+        // SAFETY: the handle is a live prepared statement owned by `self`.
+        let code = unsafe { sqlite3_reset(self.raw.as_ptr()) };
+        if code != SQLITE_OK {
+            return Err(self.database.error(code));
+        }
+        // SAFETY: as above.
+        let _ = unsafe { sqlite3_clear_bindings(self.raw.as_ptr()) };
+        Ok(())
+    }
+
     fn step(&self) -> Result<c_int, StoreError> {
         // SAFETY: `raw` is a prepared, non-finalized statement.
         let code = unsafe { sqlite3_step(self.raw.as_ptr()) };
@@ -990,10 +1004,12 @@ impl SqliteByteStore {
             }
         }
         let mut found = Vec::new();
+        // One prepared statement for every node: a history read names thousands.
+        let statement = self.database.prepare(
+            b"SELECT height, value FROM durable_node WHERE space=?1 AND key=?2 AND height<=?3 ORDER BY height DESC LIMIT 1\0",
+        )?;
         for (space, key) in nodes {
-            let statement = self.database.prepare(
-                b"SELECT height, value FROM durable_node WHERE space=?1 AND key=?2 AND height<=?3 ORDER BY height DESC LIMIT 1\0",
-            )?;
+            statement.reset()?;
             statement.bind_int64(1, (*space).min(i64::MAX as u64) as i64)?;
             statement.bind_blob_at(2, key)?;
             statement.bind_int64(3, at.min(i64::MAX as u64) as i64)?;

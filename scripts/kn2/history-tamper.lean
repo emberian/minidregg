@@ -8,6 +8,7 @@ Usage: lake env lean --run scripts/kn2/history-tamper.lean STORE-HELPER
 Tampering edits the SQLite file directly with python3's sqlite3 module (the
 helper never rewrites an entry). -/
 import Compiler.DurableStoreAudit
+import Compiler.DurableServed
 import Compiler.Sp800185Cshake256
 
 open Minidregg.Theory.TypedAuthorization
@@ -107,9 +108,58 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
         (state.snapshot.canonicalBytes ⟨3⟩ == [30] && state.baseHeight == 16 && state.reads.length == 14)
   | .error refusal => throw (IO.userError s!"FAIL stateAt: {refusal.message}")
   IO.println "honest: heights 1..41, byTx present/absent, spent present/absent, stateAt 30 all verified"
+  -- The light opening of the head: the checkpoint at 32 and records 33..41 only.
+  match ← DurableServed.openHead transport rootBytes with
+  | .error detail => throw (IO.userError s!"FAIL light open: {detail}")
+  | .ok opening =>
+      require "light open: head 41, from the checkpoint at 32"
+        (opening.head.height == 41 && opening.baseHeight == 32 && opening.served.height == 41)
+      require "light open serves the full open's world root" (opening.served.worldRoot == loaded.worldRoot)
+      require "light open serves the full open's chain" (opening.served.chain == loaded.chain)
+      require "light open serves the full open's cells" (opening.served.cellIds == loaded.cellIds)
+      require "light open: cell 3 holds [41]" (opening.served.canonicalBytes ⟨3⟩ == [41])
+      IO.println "light open: head 41 from the checkpoint at 32; root, chain and cells equal the full open's"
   match ← DurableStoreAudit.audit transport rootBytes with
   | .ok report => IO.println report.line
   | .error message => throw (IO.userError s!"FAIL store audit on the honest Store: {message}")
+  -- The light receive: record 42 on the light opening; the full open then agrees on the root.
+  let opening ← match ← DurableServed.openHead transport rootBytes with
+    | .ok opening => pure opening
+    | .error detail => throw (IO.userError s!"FAIL light open: {detail}")
+  let next ← match ← DurableServed.receiveServed transport rootBytes opening (step 42) with
+    | .appended _ next _ _ _ => pure next
+    | .rejected reason => throw (IO.userError s!"FAIL light receive 42: rejected {repr reason}")
+    | .replayed _ => throw (IO.userError "FAIL light receive 42: replayed")
+    | .contention => throw (IO.userError "FAIL light receive 42: contention")
+    | .unavailable detail => throw (IO.userError s!"FAIL light receive 42: {detail}")
+    | .uncertain detail => throw (IO.userError s!"FAIL light receive 42: uncertain {detail}")
+  let full ← match ← load transport rootBytes with
+    | .ok loaded => pure loaded
+    | .error detail => throw (IO.userError s!"FAIL full open after the light receive: {detail}")
+  require "light receive: head 42, the full open's root and cell bytes"
+    (next.head.height == 42 && full.height == 42 && next.served.worldRoot == full.worldRoot &&
+      next.served.canonicalBytes ⟨3⟩ == [42])
+  -- The same transaction again: the footprint finds it (verified at use), the executor replays it.
+  match ← DurableServed.receiveServed transport rootBytes next (step 42) with
+  | .replayed _ => pure ()
+  | _ => throw (IO.userError "FAIL light receive: a repeated transaction was not replayed")
+  -- A new transaction spending nullifier 5 (consumed at height 5, below the checkpoint at 32): the
+  -- spent map answers it consumed; the light receive refuses it (no silent "absent").
+  let reuse : DataIntent rootBytes := { step 43 with nullifiers := [nullifier 5] }
+  match ← DurableServed.receiveServed transport rootBytes next reuse with
+  | .rejected reason =>
+      IO.println s!"light receive refused a nullifier consumed at height 5: {repr reason}"
+      require "the refusal is alreadyConsumed" (reason == .durable .alreadyConsumed)
+  | _ => throw (IO.userError "FAIL light receive accepted a nullifier consumed below its checkpoint")
+  -- The declaration is load-bearing: on a view that did NOT declare the nullifier, the executor
+  -- sees it unconsumed and would accept the reuse (what `Family.covers` forbids a port to do).
+  match ← (next.reader transport rootBytes).footprint ⟨[], []⟩ with
+  | .error refusal => throw (IO.userError s!"FAIL empty footprint: {refusal.message}")
+  | .ok undeclared =>
+      match DurableDataIntent.execute .complete (next.served.viewAt undeclared) reuse with
+      | .accepted _ => IO.println "control: an undeclared nullifier reads unconsumed on a view (the hazard the declaration closes)"
+      | _ => throw (IO.userError "FAIL control: the undeclared view refused the reuse; the control no longer distinguishes")
+  IO.println "light receive: record 42 appended (root equals the full open's), its repeat replayed, a pre-checkpoint nullifier refused"
   -- TAMPER 1: one byte of the record at height 20 (a non-head record).
   let database := directory / "store" / "forward-link.sqlite3"
   sql database "UPDATE durable_log SET record = CAST(substr(record,1,length(record)-1) || X'FF' AS BLOB) WHERE height = 20"
@@ -130,9 +180,39 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   | .error detail =>
       IO.println s!"open refused the tampered Store: {detail}"
       require "open names height 20" ((detail.splitOn "height 20").length > 1)
+  -- The light open reads nothing below the checkpoint (32): record 20 is verified at use.
+  match ← DurableServed.openHead transport rootBytes with
+  | .ok _ => IO.println "light open: record 20 lies below the checkpoint; it is refused at use (above), not read at open"
+  | .error detail => throw (IO.userError s!"FAIL light open read below its checkpoint: {detail}")
   -- TAMPER 2: an accumulator node on height 19's path (the leaf node at level 0, end 20).
   sql database "UPDATE durable_node SET value = zeroblob(length(value)) WHERE space = 1 AND height = 20"
   expectRefusedAt "tampered accumulator node beside height 19" 19 (← reader.atHeight 19)
+  -- TAMPER 3a: the spent-map rows record 34 wrote (after the checkpoint). A spent read at use
+  -- refuses; the light open never trusts those rows (it re-derives every spent root after its
+  -- checkpoint from the checkpoint's version and the records) and still opens.
+  sql database "UPDATE durable_node SET value = zeroblob(length(value)) WHERE space = 2 AND height = 34"
+  match ← reader.spent (nullifier 34) with
+  | .ok _ => throw (IO.userError "FAIL a spent read through a forged row at 34 verified")
+  | .error refusal => IO.println s!"refused as expected (spent read through a forged row at 34): {refusal.message}"
+  match ← DurableServed.openHead transport rootBytes with
+  | .ok _ => IO.println "light open: rows written after its checkpoint are re-derived, not trusted"
+  | .error detail => throw (IO.userError s!"FAIL light open trusted a row written after its checkpoint: {detail}")
+  -- TAMPER 3b: the spent map's rows at the checkpoint's version (written by record 32): the
+  -- light open's re-derivation starts from them and refuses at the first record after it.
+  sql database "UPDATE durable_node SET value = zeroblob(length(value)) WHERE space = 2 AND height = 32"
+  match ← DurableServed.openHead transport rootBytes with
+  | .ok _ => throw (IO.userError "FAIL light open accepted forged spent rows at its checkpoint")
+  | .error detail =>
+      IO.println s!"light open refused the forged checkpoint-version spent rows: {detail}"
+      require "light open names height 33" ((detail.splitOn "height 33").length > 1)
+  sql database "DELETE FROM durable_node WHERE space = 2 AND (height = 32 OR height = 34)"
+  -- TAMPER 4: one byte of the record at height 37 (after the checkpoint): refused at open by name.
+  sql database "UPDATE durable_log SET record = CAST(substr(record,1,length(record)-1) || X'FF' AS BLOB) WHERE height = 37"
+  match ← DurableServed.openHead transport rootBytes with
+  | .ok _ => throw (IO.userError "FAIL light open accepted a tampered record at 37")
+  | .error detail =>
+      IO.println s!"light open refused the tampered suffix record: {detail}"
+      require "light open names height 37" ((detail.splitOn "height 37").length > 1)
   -- EPOCH: a Store born with the previous accumulator component (checkpoint v2,
   -- before the consumed list left the checkpoint) is refused at open, by name.
   let olderLabel := "state-key/tagged-v4;schema-refs/v5;" ++ DurableCheckpointCodec.logTagLabel ++

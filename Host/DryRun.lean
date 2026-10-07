@@ -51,6 +51,7 @@ def dryTransport (t : DurableReceiverIO.Transport) (reached : IO.Ref Bool) :
   sourceGate := t.sourceGate
   history := t.history
   checkpointAt := t.checkpointAt
+  readFromCheckpoint := t.readFromCheckpoint
 
 /-- The dry run's writer does not depend on the Store's writers at all: any two
 transports that read alike give the same dry transport. -/
@@ -177,7 +178,7 @@ theorem dryTransport_prepareAppend (t : DurableReceiverIO.Transport) (reached : 
     DurableReceiverIO.prepareAppend (dryTransport t reached) loaded ready key =
       DurableReceiverIO.prepareAppend t loaded ready key := by
   unfold DurableReceiverIO.prepareAppend DurableReceiverIO.Loaded.headSpentRoot
-    DurableReceiverIO.spentRows dryTransport
+    DurableReceiverIO.withSpentRows DurableReceiverIO.spentRows dryTransport
   rfl
 
 /-- **At the Store writer, the dry run agrees with submission on a tail-bound

@@ -27,6 +27,8 @@ import Compiler.NativeCoprocess
 import Compiler.DurableLogTags
 import Compiler.DurableHistory
 import Compiler.DurableSpent
+import Std.Data.HashMap
+import Std.Data.HashSet
 import Kernel.PresenceIndex
 import Kernel.TailBound
 import Kernel.LinkIndex
@@ -125,6 +127,11 @@ structure Transport where
   /-- The latest stored checkpoint at or below a height. -/
   checkpointAt : Nat → IO (Except String (Option StoredCheckpoint)) :=
     fun _ => pure (.error "this transport serves no checkpoint reads")
+  /-- The light open's read under the head anchor: the seed, the latest
+  checkpoint, and the entries from the checkpoint's height (inclusive; from 1
+  when there is none) to the head. -/
+  readFromCheckpoint : IO (Except String (Option Stored)) :=
+    pure (.error "this transport serves no read from the checkpoint")
 
 structure NativeConfig where
   binary : System.FilePath
@@ -348,6 +355,35 @@ def NativeConfig.history (config : NativeConfig) (request : HistoryRequest) :
       else return .error s!"native durable history read failed (exit {output.exitCode}): {output.stderr}"
   catch error => pure (.error s!"native durable history read unavailable: {error}")
 
+/-- The checkpoint height a base read names (`none`: no checkpoint). -/
+def checkpointHeightOf (bytes : ByteArray) : Option (Option Nat) := do
+  let flag ← u64At bytes 8
+  if flag ≠ 1 then none
+  let (_, afterSeed) ← blobAt bytes 16
+  let hasCheckpoint ← u64At bytes afterSeed
+  if hasCheckpoint = 0 then some none
+  else if hasCheckpoint = 1 then some (some (← u64At bytes (afterSeed + 8)))
+  else none
+
+def NativeConfig.readFromCheckpoint (config : NativeConfig) : IO (Except String (Option Stored)) :=
+  try
+    IO.FS.withTempDir fun directory => do
+      let path := directory / "read.bin"
+      let output ← runNative config #["durable-read", config.root.toString, "1", "2", path.toString]
+      if output.exitCode == 0 && output.stdout == "" && output.stderr == "" then
+        let bytes ← IO.FS.readBinFile path
+        match checkpointHeightOf bytes with
+        | none => return .error "native durable read malformed"
+        | some checkpoint =>
+            match parseStored ((checkpoint.getD 1).max 1) true bytes with
+            | some stored => return .ok (some stored)
+            | none => return .error "native durable read malformed"
+      else if output.exitCode == 3 && output.stdout == "" then
+        return .ok none
+      else
+        return .error s!"native durable read failed (exit {output.exitCode}): {output.stderr}"
+  catch error => pure (.error s!"native durable read unavailable: {error}")
+
 def NativeConfig.checkpointAt (config : NativeConfig) (height : Nat) :
     IO (Except String (Option StoredCheckpoint)) :=
   try
@@ -373,7 +409,7 @@ def NativeConfig.transport (config : NativeConfig) (logStart : Seed → Digest)
     (systemCell : CellId) : Transport :=
   ⟨config.read, fun height entry nodes => config.append height entry nodes, config.putCheckpoint,
     config.initialize, config.readKey, config.checkpointEvery, logStart, some systemCell, fun _ _ => .ok (),
-    config.peekSeed, config.history, config.checkpointAt⟩
+    config.peekSeed, config.history, config.checkpointAt, config.readFromCheckpoint⟩
 
 /-- ByteArray's derived equality compares every byte, with no digest premise. -/
 theorem byteArray_beq_exact (left right : List UInt8) :
@@ -1511,20 +1547,48 @@ def Loaded.headSpentRoot {rootBytes : List UInt8 → Digest} (transport : Transp
   | .ok head => return .ok head.spentRoot
   | .error refusal => return .error refusal.message
 
-/-- The spent-map rows on the paths of `keys`, at or below `height`. Untrusted:
-`DurableSpent.lookupRows` verifies every opening built from them. -/
-def spentRows (transport : Transport) (height : Nat) (keys : List Digest) :
+/-- The spent-map rows on the paths of `keys`, at or below `height`, down to
+`depth` bits (257: every prefix). Untrusted: `DurableSpent.lookupRows` verifies
+every opening built from them, so a path cut short opens to nothing and refuses
+(`withSpentRows` then reads every prefix). -/
+def spentRows (transport : Transport) (height : Nat) (keys : List Digest) (depth : Nat := 257) :
     IO (Except String (List Bool → Option DurableSpent.Row)) := do
-  let paths := (keys.flatMap DurableSpent.prefixes).eraseDups
-  match ← transport.history ⟨height, [],
-      paths.map fun path => (DurableSpent.spentSpace, DurableSpent.rowKey path)⟩ with
+  let mut seen : Std.HashSet (List UInt8) := {}
+  let mut requested : Array (Nat × List UInt8) := #[]
+  for k in keys do
+    let bits := DurableSpent.keyBits k
+    for path in (List.range (min depth 256 + 1)).map bits.take do
+      let rowKey := DurableSpent.rowKey path
+      unless seen.contains rowKey do
+        seen := seen.insert rowKey
+        requested := requested.push (DurableSpent.spentSpace, rowKey)
+  match ← transport.history ⟨height, [], requested.toList⟩ with
   | .error message => return .error message
   | .ok read =>
-      let found : List (List UInt8 × DurableSpent.Row) := read.nodes.filterMap fun node => do
-        let (_, value) ← node.2.2
-        let row ← DurableSpent.rowStream.toLawful.decode value
-        pure (node.2.1, row)
-      return .ok fun path => (found.find? (·.1 = DurableSpent.rowKey path)).map (·.2)
+      let found : Std.HashMap (List UInt8) DurableSpent.Row :=
+        read.nodes.foldl (init := {}) fun map node =>
+          match node.2.2 with
+          | none => map
+          | some (_, value) =>
+              match DurableSpent.rowStream.toLawful.decode value with
+              | some row => map.insert node.2.1 row
+              | none => map
+      return .ok fun path => found.get? (DurableSpent.rowKey path)
+
+/-- Use the spent-map rows of `keys`: first down to 32 bits (a compressed trie
+over far fewer than 2^32 keys rarely reaches deeper), and when what they open
+does not verify, every prefix. Both answers are verified by `use`'s lookups. -/
+def withSpentRows {α : Type} (transport : Transport) (height : Nat) (keys : List Digest)
+    (use : (List Bool → Option DurableSpent.Row) → Except String α) : IO (Except String α) := do
+  match ← spentRows transport height keys 32 with
+  | .error message => return .error message
+  | .ok rows =>
+      match use rows with
+      | .ok value => return .ok value
+      | .error _ =>
+          match ← spentRows transport height keys with
+          | .error message => return .error message
+          | .ok rows => return use rows
 
 /-- The node rows an append writes: the accumulator nodes it completes
 (space 1) and the spent-map rows its keys' insertion changes (space 2). -/
@@ -1561,10 +1625,8 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
     | .ok root => pure root
     | .error message => return .error message
   let keys := DurableSpent.recordKeys intent.transactionId intent.nullifiers
-  let rows ← match ← spentRows transport loaded.image.accepted.length keys with
-    | .ok rows => pure rows
-    | .error message => return .error message
-  let (spentAfter, spentWrites) ← match DurableSpent.insertAll rows spentBefore height keys with
+  let (spentAfter, spentWrites) ← match ← withSpentRows transport loaded.image.accepted.length keys
+      (fun rows => DurableSpent.insertAll rows spentBefore height keys) with
     | .ok result => pure result
     | .error message => return .error message
   -- The tag keeps this record's receipt root, the root the extended image

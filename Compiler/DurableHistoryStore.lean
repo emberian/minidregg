@@ -83,9 +83,8 @@ def atHeight (transport : Transport) {store : StoreIdentity} (head : Head store)
 /-- A spent-map answer for one key, verified against the head's spent root. -/
 def spentAnswer (transport : Transport) {store : StoreIdentity} (head : Head store) (key : Digest) :
     IO (Except String (DurableSpent.Answer head.spentRoot key)) := do
-  match ← spentRows transport head.height [key] with
-  | .error message => return .error message
-  | .ok rows => return DurableSpent.lookupRows rows head.spentRoot key
+  DurableReceiverIO.withSpentRows transport head.height [key] fun rows =>
+    DurableSpent.lookupRows rows head.spentRoot key
 
 def spent (transport : Transport) {store : StoreIdentity} (head : Head store) (nullifier : StableNullifier) :
     IO (Except Refusal (Spent head nullifier)) := do

@@ -9,12 +9,15 @@ cell with 1000 bytes and spending one nullifier. Then, timed (compiled code):
 * `open`: a cold `DurableReceiverIO.load`;
 * `first read`: the Store-backed Reader of that opening (`readerOf`), then one
   verified record by height (the middle) and one transaction lookup (byTx);
-* `append`: one more record through `receiveLoaded` on the fresh opening.
+* `append`: one more record through `receiveLoaded` on the fresh opening;
+* `light open`: `DurableServed.openHead` (checkpoint + the records after it);
+* `light open+append`: one more record through `DurableServed.receiveServed` on it.
 Best of three for each. Not part of the umbrella gate.
 
 usage: kn2-store-bench STORE-HELPER N...
 -/
 import Compiler.DurableHistoryStore
+import Compiler.DurableServed
 import Compiler.Sp800185Cshake256
 
 open Minidregg.Theory.TypedAuthorization
@@ -91,6 +94,14 @@ def run (binary : System.FilePath) (directory : System.FilePath) (count : Nat) :
     let readMs ← ms t1
     openBest := min openBest openMs
     readBest := min readBest readMs
+  let mut lightBest := 1000000000
+  for _ in [0:3] do
+    let t ← IO.monoMsNow
+    match ← DurableServed.openHead transport rootBytes with
+    | .error detail => throw (IO.userError s!"light open: {detail}")
+    | .ok opening =>
+        unless opening.head.height == count do throw (IO.userError "light open: wrong head")
+    lightBest := min lightBest (← ms t)
   let t2 ← IO.monoMsNow
   let loaded ← match ← load transport rootBytes with
     | .ok loaded => pure loaded
@@ -99,7 +110,15 @@ def run (binary : System.FilePath) (directory : System.FilePath) (count : Nat) :
   | .exact _ _ => pure ()
   | .ordinary _ => throw (IO.userError "the measured append did not confirm")
   let appendMs ← ms t2
-  IO.println s!"records {count}: open {openBest} ms, first read (reader + 1 record + 1 byTx) {readBest} ms, open+append {appendMs} ms (grown in {growMs} ms)"
+  let t3 ← IO.monoMsNow
+  match ← DurableServed.openHead transport rootBytes with
+  | .error detail => throw (IO.userError s!"light open: {detail}")
+  | .ok opening =>
+      match ← DurableServed.receiveServed transport rootBytes opening (step (count + 2)) with
+      | .appended .. => pure ()
+      | _ => throw (IO.userError "the measured light append did not confirm")
+  let lightAppendMs ← ms t3
+  IO.println s!"records {count}: open {openBest} ms, first read (reader + 1 record + 1 byTx) {readBest} ms, open+append {appendMs} ms, light open {lightBest} ms, light open+append {lightAppendMs} ms (grown in {growMs} ms)"
 
 end Kn2StoreBench
 

@@ -359,6 +359,23 @@ def Head.verify (store : StoreIdentity) (height : Nat) (tag : List UInt8) (chain
       | .ok root => .ok ⟨height, chain, frontier, carried.spentRoot, root, Or.inr ⟨tag, checked⟩⟩
       | .error refusal => .error refusal
 
+/-- A verified head is at the height, chain and frontier it was verified for. -/
+theorem Head.verify_fields {store : StoreIdentity} {height : Nat} {tag : List UInt8} {chain : Digest}
+    {frontier : List (Nat × Digest)} {head : Head store}
+    (verified : Head.verify store height tag chain frontier = .ok head) :
+    head.height = height ∧ head.chain = chain ∧ head.frontier = frontier := by
+  unfold Head.verify at verified
+  split at verified
+  · cases verified
+  · split at verified
+    · cases verified
+      exact ⟨rfl, rfl, rfl⟩
+    · cases verified
+
+theorem Head.genesis_fields (store : StoreIdentity) (root : Digest) :
+    (Head.genesis store root).height = 0 ∧ (Head.genesis store root).chain = store.logStart ∧
+      (Head.genesis store root).frontier = [] := ⟨rfl, rfl, rfl⟩
+
 /-- **A head is MAC-bound to its Store**: unless it is the empty log's (whose
 chain is the Store's genesis log start), some tag of its height verifies under
 the Store's key for its chain, frontier and spent root. -/

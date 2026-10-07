@@ -2,7 +2,7 @@
 # LAYER 2: these are minted ONLY in the listed modules; any other module that names the minting
 # function (or builds the structure by `by constructor` / anonymous constructor) is a forge.
 # token                                  minting functions                     allowed modules
-Minidregg.Compiler.DurableHistory.StoreIdentity   StoreIdentity.ofOpen           Compiler/DurableHistoryStore.lean Compiler/DurableReceiverIO.lean
-Minidregg.Compiler.DurableHistory.Head            Head.genesis, Head.verify      Compiler/DurableHistoryStore.lean Compiler/DurableReceiverIO.lean
+Minidregg.Compiler.DurableHistory.StoreIdentity   StoreIdentity.ofOpen           Compiler/DurableHistoryStore.lean Compiler/DurableReceiverIO.lean Compiler/DurableServed.lean
+Minidregg.Compiler.DurableHistory.Head            Head.genesis, Head.verify      Compiler/DurableHistoryStore.lean Compiler/DurableReceiverIO.lean Compiler/DurableServed.lean
 # Head.genesis says every key is absent: it may be minted only when the anchored read's head is 0
 # (DurableHistoryStore.readerOf: `if height = 0`). Planted forges: scripts/kn2/planted-token-forges.lean.

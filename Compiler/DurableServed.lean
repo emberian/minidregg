@@ -30,6 +30,7 @@ Producers:
 from a head of the same Store.
 -/
 import Compiler.DurableHistoryStore
+import Std.Data.HashMap
 
 namespace Minidregg.Compiler.DurableServed
 
@@ -80,6 +81,7 @@ structure Served (rootBytes : List UInt8 → Digest) (store : StoreIdentity) whe
   chain : Digest
   worldRoot : Digest
   private outsideAbsent : ∀ cellId, cellId ∉ cellIds → state.canonicalBytes cellId = absentBytes
+  private cellIdsNodup : cellIds.Nodup
 
 namespace Served
 
@@ -99,6 +101,8 @@ theorem coherent (served : Served rootBytes store) (cellId : CellId) :
 theorem canonicalBytes_outside (served : Served rootBytes store) (cellId : CellId)
     (missing : cellId ∉ served.cellIds) : served.canonicalBytes cellId = served.absentBytes :=
   served.outsideAbsent cellId missing
+
+theorem cellIds_nodup (served : Served rootBytes store) : served.cellIds.Nodup := served.cellIdsNodup
 
 /-- The cells a directory loads, in enumeration order. -/
 def cells (served : Served rootBytes store) : List (CellId × List UInt8) :=
@@ -314,7 +318,8 @@ def ofLoaded (loaded : Loaded rootBytes) (_sameStart : store.logStart = loaded.l
     loaded.chain, loaded.worldRoot, fun cellId missing => by
       rw [Loaded.cellIds_eq] at missing
       exact DurableCheckpoint.resume_outside_support rootBytes loaded.image loaded.baseHeight loaded.base
-        loaded.snapshot loaded.resumed cellId missing⟩
+        loaded.snapshot loaded.resumed cellId missing,
+    by rw [Loaded.cellIds_eq]; exact DurableCheckpoint.nodup_eraseDups _⟩
 
 @[simp] theorem ofLoaded_canonicalBytes (loaded : Loaded rootBytes) (sameStart : store.logStart = loaded.logStart) :
     (ofLoaded loaded sameStart).canonicalBytes = loaded.snapshot.canonicalBytes := rfl
@@ -361,6 +366,21 @@ theorem history_length_eq_height (loaded : Loaded rootBytes) :
     rw [← List.length_append, List.take_append_drop]
   next => simp at resumed
 
+/-- A served state from a base state and the records replayed after it: the
+base's cells plus every cell the records wrote, the bytes of the replay. Private:
+only the producers below call it, each from a base and records it verified. -/
+private def ofBase (seed : Seed) (base : State) (records : List IntentRecord)
+    (snapshot : DataSnapshot rootBytes)
+    (replayed : replay rootBytes (base.snapshot rootBytes []) records = some snapshot)
+    (height : Nat) (chain worldRoot : Digest) : Served rootBytes store :=
+  ⟨bare snapshot, seed, extendIds (base.cells.map Prod.fst) records, base.absentBytes, height, chain,
+    worldRoot, fun cellId missing => by
+      obtain ⟨notBase, notWritten⟩ := not_mem_extendIds missing
+      show snapshot.canonicalBytes cellId = _
+      rw [DurableReceiver.replay_outside_support rootBytes _ _ cellId notWritten snapshot replayed]
+      simp [State.snapshot, DurableReceiver.Seed.lookup_missing base.cells cellId notBase],
+    DurableCheckpoint.nodup_eraseDups _⟩
+
 /-- A past height from `Reader.stateAt`: the base's cells plus every cell its
 verified records wrote, the chain after its last verified record (or the
 base's), and the world root over that state. -/
@@ -369,14 +389,8 @@ def ofStateAt {seed : Seed} {head : Head store} {height : Nat}
   let records := state.reads.map (·.2.record)
   let cellIds := extendIds (state.baseState.cells.map Prod.fst) records
   let chain := (state.reads.getLast?.map (·.2.verified.chain)).getD state.baseChain
-  ⟨bare state.snapshot, seed, cellIds, state.baseState.absentBytes, height, chain,
-    WorldRoot.deployedRoot (entriesOf state.snapshot.model.roots cellIds height chain),
-    fun cellId missing => by
-      obtain ⟨notBase, notWritten⟩ := not_mem_extendIds missing
-      show state.snapshot.canonicalBytes cellId = _
-      rw [DurableReceiver.replay_outside_support rootBytes _ _ cellId notWritten state.snapshot
-        state.replayed]
-      simp [State.snapshot, DurableReceiver.Seed.lookup_missing state.baseState.cells cellId notBase]⟩
+  ofBase seed state.baseState records state.snapshot state.replayed height chain
+    (WorldRoot.deployedRoot (entriesOf state.snapshot.model.roots cellIds height chain))
 
 /-- **A past state's chain is the chain after its verified records** from the
 base (the reads are chained, `StateAt.chained`). -/
@@ -414,7 +428,426 @@ theorem ofStateAt_canonicalBytes {seed : Seed} {head : Head store} {height : Nat
     (state : StateAt rootBytes seed head height) :
     (ofStateAt state).canonicalBytes = state.snapshot.canonicalBytes := rfl
 
+/-! ## One accepted record -/
+
+open Minidregg.Compiler.DurableReceiverIO (recordSlots lastVal_cellIds lastVal_writes lastVal_cells_system
+  lookupPost_member lookupPost_isSome)
+open Minidregg.Kernel.WorldRootCache (lastVal lastVal_cons)
+
+/-- The state after one record the executor accepted on a view of this state. -/
+def advance (served : Served rootBytes store) {head : Head store} {keys : Keys}
+    (footprint : VerifiedFootprint head keys) (intent : DurableDataIntent.DataIntent rootBytes)
+    (next : DataSnapshot rootBytes)
+    (executed : DurableDataIntent.execute .complete (served.viewAt footprint) intent = .accepted next)
+    (chain worldRoot : Digest) : Served rootBytes store :=
+  ⟨bare next, served.seed, extendIds served.cellIds [IntentRecord.ofIntent intent], served.absentBytes,
+    served.height + 1, chain, worldRoot, fun cellId missing => by
+      obtain ⟨notOld, notWritten⟩ := not_mem_extendIds missing
+      have installed := DurableReceiver.execute_accepted_install _ intent next executed
+      subst installed
+      show (DurableDataIntent.DataSnapshot.lookupPostBytes cellId intent.writes).getD
+        ((served.viewAt footprint).canonicalBytes cellId) = _
+      rw [DurableReceiver.lookupPostBytes_missing intent.writes cellId
+        (by simpa [IntentRecord.ofIntent] using notWritten)]
+      exact served.outsideAbsent cellId notOld,
+    DurableCheckpoint.nodup_eraseDups _⟩
+
+@[simp] theorem advance_height (served : Served rootBytes store) {head : Head store} {keys : Keys}
+    (footprint : VerifiedFootprint head keys) (intent : DurableDataIntent.DataIntent rootBytes)
+    (next : DataSnapshot rootBytes)
+    (executed : DurableDataIntent.execute .complete (served.viewAt footprint) intent = .accepted next)
+    (chain worldRoot : Digest) :
+    (served.advance footprint intent next executed chain worldRoot).height = served.height + 1 := rfl
+
+/-- **The served entries after an accepted intent** are the entries before it
+overwritten by the record's slot writes (`recordSlots`): what lets the root
+cache advance by one path per written cell. -/
+theorem entries_step (ids : List CellId) (nodup : ids.Nodup) (before next : DataSnapshot rootBytes)
+    (intent : DurableDataIntent.DataIntent rootBytes) (height : Nat) (chain chain' : Digest)
+    (executed : DurableDataIntent.execute .complete before intent = .accepted next) (k : WorldRoot.Key) :
+    lastVal (entriesOf next.model.roots (extendIds ids [IntentRecord.ofIntent intent]) (height + 1) chain') k =
+      (lastVal (recordSlots (height + 1) chain' (IntentRecord.ofIntent intent)) k).or
+        (lastVal (entriesOf before.model.roots ids height chain) k) := by
+  have accepted : next = DurableDataIntent.DataSnapshot.install before intent ∧
+      (intent.writes.map DataWrite.cellId).Nodup := by
+    unfold DurableDataIntent.execute at executed
+    split at executed
+    · split at executed <;> cases executed
+    · split at executed
+      · cases executed
+      · rename_i passed
+        cases executed
+        refine ⟨rfl, ?_⟩
+        unfold DurableDataIntent.DataIntent.preflight at passed
+        split at passed
+        · cases passed
+        split at passed
+        · cases passed
+        split at passed
+        · cases passed
+        rename_i lower
+        unfold DurableCommitProtocol.Intent.preflight at lower
+        by_contra repeated
+        have mapped : ¬ (intent.erase.rootWrites.map DurableCommitProtocol.RootWrite.cellId).Nodup := by
+          simpa [DurableDataIntent.DataIntent.erase, List.map_map, Function.comp_def] using repeated
+        simp only [mapped, decide_false, Bool.not_false, if_true] at lower
+        split at lower <;> cases lower
+  obtain ⟨installed, writesNodup⟩ := accepted
+  subst installed
+  cases k with
+  | system =>
+      simp only [entriesOf, recordSlots, lastVal_cons, lastVal_cells_system, IntentRecord.ofIntent]
+      simp
+  | cell n =>
+      have newIds : ∀ id : CellId, id ∈ extendIds ids [IntentRecord.ofIntent intent] ↔
+          id ∈ ids ∨ id ∈ intent.writes.map DataWrite.cellId := by
+        intro id
+        simp only [extendIds, List.mem_eraseDups, List.mem_append, List.flatMap_cons, List.flatMap_nil,
+          List.append_nil, IntentRecord.ofIntent]
+      have extended : (extendIds ids [IntentRecord.ofIntent intent]).Nodup :=
+        DurableCheckpoint.nodup_eraseDups _
+      simp only [entriesOf, recordSlots, lastVal_cons, reduceCtorEq, if_false, Option.or_none]
+      rw [lastVal_cellIds _ extended, lastVal_cellIds _ nodup]
+      simp only [IntentRecord.ofIntent] at newIds ⊢
+      rw [lastVal_writes _ writesNodup]
+      have roots : (DurableDataIntent.DataSnapshot.install before intent).model.roots ⟨n⟩ =
+          (DurableCommitProtocol.Snapshot.lookupPost ⟨n⟩ intent.erase.rootWrites).getD
+            (before.model.roots ⟨n⟩) := rfl
+      rw [roots]
+      simp only [DurableDataIntent.DataIntent.erase]
+      cases found : DurableCommitProtocol.Snapshot.lookupPost (⟨n⟩ : CellId)
+          (intent.writes.map fun write =>
+        ({ cellId := write.cellId, expectedPre := write.expectedPre, exactPost := write.exactPost } :
+          DurableCommitProtocol.RootWrite CellId)) with
+      | some post =>
+          have member := lookupPost_member _ _ found
+          simp [(newIds ⟨n⟩).mpr (Or.inr member)]
+      | none =>
+          have unwritten : (⟨n⟩ : CellId) ∉ intent.writes.map DataWrite.cellId := by
+            intro member
+            have := lookupPost_isSome _ _ member
+            rw [found] at this
+            cases this
+          by_cases old : (⟨n⟩ : CellId) ∈ ids
+          · simp [(newIds ⟨n⟩).mpr (Or.inl old), old]
+          · have absent : ¬ ((⟨n⟩ : CellId) ∈ ids ∨ (⟨n⟩ : CellId) ∈ intent.writes.map DataWrite.cellId) := by
+              tauto
+            rw [← newIds] at absent
+            simp [absent, old]
+
 end Served
+
+/-! ## The light opening of the head (KN2 2b-1, step 3)
+
+The open reads the seed, the latest checkpoint and the entries from it to the
+head (`Transport.readFromCheckpoint`, one call, under the head anchor), and
+nothing older. What it establishes, each refused by name:
+
+* the Store's epoch (the seed label), before anything else;
+* the checkpoint: its MAC (`openSealed`), and the MAC of the entry at its height
+  for the checkpoint's chain, accumulator frontier and spent root
+  (`verifyTagged`): the checkpoint sits on the log the head anchor fixes;
+* every entry after it: canonical record bytes (named by height), the chain over
+  the stored bytes, its tag's MAC (`verifyTags`), the frontier its tag carries
+  (`walkFrontier`), and the spent root its tag carries, re-derived by inserting
+  the record's transaction id and nullifiers into the spent map at the
+  checkpoint's version (`DurableSpent.insertAll` refuses a key already present:
+  a transaction or nullifier accepted before the checkpoint);
+* the replay of those records from the checkpoint state through the executor;
+* the head: its tag's MAC under the Store's key (`Head.verify`) and the root it
+  carries equal to the replayed world root.
+
+Records at or below the checkpoint are verified at use (`Reader`) and by
+`store audit`; the full shape's open (`DurableReceiverIO.loadChained`) still
+verifies every one, for its ratchet-listed callers. -/
+
+structure Opening (rootBytes : List UInt8 → Digest) where
+  store : StoreIdentity
+  head : Head store
+  served : Served rootBytes store
+  heightExact : served.height = head.height
+  chainExact : served.chain = head.chain
+  /-- The world root, cached; advanced by one path per written cell. -/
+  roots : DurableReceiverIO.RootCache
+  rootsExact : DurableReceiverIO.RootsExact roots
+    (Served.entriesOf served.roots served.cellIds served.height served.chain)
+  /-- The height of the checkpoint the opening resumed from (the cadence). -/
+  baseHeight : Nat
+
+private def decodeRecordsAt : Nat → List DurableReceiverIO.Entry → Except String (List IntentRecord)
+  | _, [] => .ok []
+  | height, entry :: rest => do
+      let some record := DurableCheckpointCodec.recordFrame.decode entry.record
+        | throw s!"noncanonical durable log record at height {height}"
+      return record :: (← decodeRecordsAt (height + 1) rest)
+
+/-- The spent root after each record, re-derived from the map at the base's
+version: each record's keys inserted at its height; the root after each must be
+the one its (MAC-verified) tag carries. The rows each record writes are kept in a
+map (newest wins) laid over the Store's rows. -/
+private def checkSpent (rows : List Bool → Option DurableSpent.Row) :
+    Std.HashMap (List Bool) DurableSpent.Row → Digest → Nat → List (IntentRecord × Digest) →
+      Except String Unit
+  | _, _, _, [] => .ok ()
+  | written, root, height, (record, carried) :: rest => do
+      let keys := DurableSpent.recordKeys record.transactionId record.nullifiers
+      let current := fun path => (written.get? path).or (rows path)
+      let (next, writes) ← match DurableSpent.insertAll current root height keys with
+        | .ok result => pure result
+        | .error message => throw s!"durable log record at height {height}: {message}"
+      if next ≠ carried then
+        throw s!"the tag at height {height} carries a spent root the log does not reach"
+      checkSpent rows (writes.foldl (fun map row => map.insert row.1 row.2) written) next (height + 1) rest
+
+/-- The light opening of an opened Store's head. -/
+def openHead (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 → Digest) :
+    IO (Except String (Opening rootBytes)) := do
+  -- Operator measurement control: MINI_OPEN_TIMING=1 prints each stage's elapsed time to stderr.
+  let timing := (← IO.getEnv "MINI_OPEN_TIMING") == some "1"
+  let started ← IO.monoMsNow
+  let lap := fun (label : String) => do
+    if timing then IO.eprintln s!"light open {label}: {(← IO.monoMsNow) - started} ms"
+  if let .ok (some seedBytes) := ← transport.peekSeed then
+    if let some refusal := (DurableCheckpointCodec.SeedEpoch.ofBytes seedBytes).refusal then
+      return .error s!"durable store refused: {refusal}"
+  let key ← match ← transport.key with
+    | .error message => return .error message
+    | .ok key => pure key
+  let stored ← match ← transport.readFromCheckpoint with
+    | .error message => return .error message
+    | .ok none => return .error "durable store is not initialized"
+    | .ok (some stored) => pure stored
+  lap "read"
+  let some seedBytes := stored.seed | return .error "durable seed missing"
+  if let some refusal := (DurableCheckpointCodec.SeedEpoch.ofBytes seedBytes).refusal then
+    return .error s!"durable store refused: {refusal}"
+  let some seed := DurableCheckpointCodec.seedFrame.decode seedBytes
+    | return .error "noncanonical durable seed"
+  let logStart := transport.logStart seed
+  let store := StoreIdentity.ofOpen key logStart
+  let headHeight := stored.head
+  -- The base: the seed at height 0, or the checkpoint sitting on the log.
+  let ((baseHeight, base, baseChain, baseFrontier, baseSpent, suffix) :
+      Nat × State × Digest × List (Nat × Digest) × Digest × List DurableReceiverIO.Entry) ←
+    match stored.checkpoint with
+    | none =>
+        if stored.entries.length ≠ headHeight then
+          return .error "durable log head does not match its entries"
+        pure (0, State.ofSeed seed, logStart, ([] : List (Nat × Digest)), DurableSpent.emptyDigest,
+          stored.entries)
+    | some checkpoint =>
+        match DurableCheckpointCodec.openSealed key rootBytes checkpoint.bytes with
+        | .error reason => return .error s!"checkpoint refused: {repr reason}"
+        | .ok body =>
+            if body.height ≠ checkpoint.height ∨ body.height = 0 ∨ body.height > headHeight then
+              return .error "checkpoint height does not match the log"
+            if stored.entries.length ≠ headHeight - body.height + 1 then
+              return .error "durable log head does not match its entries"
+            let some atCheckpoint := stored.entries.head? | return .error "checkpoint height has no log entry"
+            match DurableHistory.verifyTagged key body.height atCheckpoint.tag body.chain
+                (DurableHistory.frontierDigest body.height body.frontier) body.spentRoot with
+            | .error refusal => return .error s!"checkpoint does not sit on the log: {refusal.message}"
+            | .ok _ =>
+                pure (body.height, body.state, body.chain, body.frontier, body.spentRoot,
+                  stored.entries.drop 1)
+  lap "checkpoint"
+  if !((base.cells.map Prod.fst).Nodup ∧ base.absentBytes = seed.absentBytes) then
+    return .error "checkpoint state is not admissible for this Store's seed"
+  let records ← match decodeRecordsAt (baseHeight + 1) suffix with
+    | .error message => return .error message
+    | .ok records => pure records
+  let chains := DurableLogTags.chainPrefixesStored baseChain (suffix.map (·.record))
+  if let .error message := DurableLogTags.verifyTags key baseHeight chains (suffix.map (·.tag)) then
+    return .error message
+  let frontier ← match DurableReceiverIO.walkFrontier baseHeight baseFrontier (suffix.zip (chains.drop 1)) with
+    | .error message => return .error message
+    | .ok frontier => pure frontier
+  lap "records, chain, tags, frontier"
+  let carriedSpent ← match suffix.mapM fun entry => DurableHistory.trailerCarried entry.tag with
+    | none => return .error "durable log tag malformed"
+    | some carried => pure (carried.map (·.spentRoot))
+  let keys := records.flatMap fun record => DurableSpent.recordKeys record.transactionId record.nullifiers
+  -- Rows down to 32 bits first; every prefix when what they open does not verify.
+  let shallow ← match ← DurableReceiverIO.spentRows transport baseHeight keys 32 with
+    | .error message => return .error message
+    | .ok rows => pure rows
+  lap "spent rows read"
+  if let .error _ := checkSpent shallow {} baseSpent (baseHeight + 1) (records.zip carriedSpent) then
+    let deep ← match ← DurableReceiverIO.spentRows transport baseHeight keys with
+      | .error message => return .error message
+      | .ok rows => pure rows
+    if let .error message := checkSpent deep {} baseSpent (baseHeight + 1) (records.zip carriedSpent) then
+      return .error message
+  lap "spent map"
+  let headChain := chains.getLast?.getD baseChain
+  match replayed : replay rootBytes (base.snapshot rootBytes []) records with
+  | none => return .error "durable log suffix does not replay through the canonical executor"
+  | some snapshot =>
+      let cellIds := extendIds (base.cells.map Prod.fst) records
+      let entries := Served.entriesOf snapshot.model.roots cellIds headHeight headChain
+      let roots := DurableReceiverIO.RootCache.ofEntries entries
+      let rootsExact := DurableReceiverIO.RootsExact.ofEntries entries
+      let worldRoot := if rootsExact.injective then roots.root else WorldRoot.deployedRoot entries
+      let served : Served rootBytes store :=
+        Served.ofBase seed base records snapshot replayed headHeight headChain worldRoot
+      lap "replay and root"
+      if zero : headHeight = 0 then
+        if genesisChain : headChain = store.logStart then
+          let head := Head.genesis store worldRoot
+          return .ok ⟨store, head, served, zero.trans (Head.genesis_fields store worldRoot).1.symm,
+            genesisChain.trans (Head.genesis_fields store worldRoot).2.1.symm, roots, rootsExact, baseHeight⟩
+        else return .error "an empty durable log's chain is not its genesis log start"
+      else
+        let some last := suffix.getLast? | return .error "durable head entry missing"
+        match verified : Head.verify store headHeight last.tag headChain frontier with
+        | .error refusal => return .error refusal.message
+        | .ok head =>
+            if head.root ≠ worldRoot then
+              return .error "durable log head root differs from the replayed root"
+            have fields := Head.verify_fields verified
+            return .ok ⟨store, head, served, fields.1.symm, fields.2.1.symm, roots, rootsExact, baseHeight⟩
+
+
+/-! ## The light receive (KN2 2b-1, step 4)
+
+One record on a light opening: the request's footprint (its transaction id and
+nullifiers) read from the authenticated history, the executor run on the view
+(`DurableView.execute_view`: it cannot tell the view from the full snapshot),
+the same gates the full receive applies, the spent map extended from the head's
+MAC-verified spent root, the accumulator and the root cache advanced by one
+path each, and one append of the entry with its node rows. -/
+
+/-- The Reader of a light opening at its head. -/
+def Opening.reader (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 → Digest)
+    (opening : Opening rootBytes) : DurableHistoryReader.Reader rootBytes opening.store :=
+  { head := opening.head, seed := opening.served.seed
+    atHeight := DurableHistoryStore.atHeight transport opening.head
+    byTx := DurableHistoryStore.byTx transport opening.head
+    spent := DurableHistoryStore.spent transport opening.head
+    range := DurableHistoryStore.range transport opening.head
+    stateAt := DurableHistoryStore.stateAt transport rootBytes opening.served.seed opening.head }
+
+/-- The keys the shared executor consults for an intent (`DurableView.executeFamily`). -/
+def intentKeys (intent : DurableDataIntent.DataIntent rootBytes) : Keys :=
+  ⟨[intent.transactionId], intent.nullifiers⟩
+
+/-- **The light receive executes what the full receive executes**: on any full
+snapshot that holds the served state and answers the intent's transaction id
+and nullifiers as the authenticated history does at the served height, the
+executor's observable outcome (rejection, replayed record, or accepted roots,
+bytes and allowance) is the one `receiveServed` acts on
+(`DurableView.executeFamily`, `Served.viewAt_agrees`). -/
+theorem receive_executes_as_full {store : StoreIdentity} (served : Served rootBytes store) {head : Head store}
+    (intent : DurableDataIntent.DataIntent rootBytes) (footprint : VerifiedFootprint head (intentKeys intent))
+    (full : DataSnapshot rootBytes)
+    (roots : full.model.roots = served.roots) (bytes : full.canonicalBytes = served.canonicalBytes)
+    (available : full.model.available = served.available)
+    (journal : Snapshot.lookupRecorded intent.transactionId full.model.journal =
+      Snapshot.lookupRecorded intent.transactionId (Served.recordedAt footprint served.height))
+    (consumed : ∀ nullifier ∈ intent.nullifiers,
+      full.model.consumed nullifier = Served.spentAt footprint served.height nullifier) :
+    DurableView.observe (DurableDataIntent.execute .complete (served.viewAt footprint) intent) =
+      DurableView.observe (DurableDataIntent.execute .complete full intent) :=
+  DurableView.run_view DurableView.executeFamily intent _ _
+    (served.viewAt_agrees footprint full roots bytes available
+      (fun transactionId member => by
+        simp only [intentKeys, List.mem_singleton] at member
+        subst member
+        exact journal)
+      consumed)
+
+inductive Received (rootBytes : List UInt8 → Digest) (opening : Opening rootBytes)
+    (intent : DurableDataIntent.DataIntent rootBytes) where
+  /-- Appended (or found appended) and read back byte for byte; `next` is the
+  opening after exactly this record. -/
+  | appended (kind : DurableReceiverIO.Confirmation) (next : Opening rootBytes)
+      (height : next.head.height = opening.head.height + 1) (entry : DurableReceiverIO.Entry)
+      (entryExact : entry.record = DurableCheckpointCodec.recordFrame.encode (IntentRecord.ofIntent intent))
+  /-- The transaction was already accepted: its verified record. -/
+  | replayed (recorded : Intent TransactionId CellId StableNullifier ReplayEnvelope)
+  | rejected (reason : DurableDataIntent.RejectReason)
+  | contention
+  | unavailable (detail : String)
+  | uncertain (detail : String)
+
+/-- The checkpoint state of a served state (`DurableCheckpoint.State.ofSnapshot`'s shape). -/
+def Served.checkpointState {store : StoreIdentity} (served : Served rootBytes store) : State :=
+  ⟨served.absentBytes, served.cells, served.available⟩
+
+def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 → Digest)
+    (opening : Opening rootBytes) (intent : DurableDataIntent.DataIntent rootBytes) :
+    IO (Received rootBytes opening intent) := do
+  let served := opening.served
+  let head := opening.head
+  let reader := opening.reader transport rootBytes
+  let footprint ← match ← reader.footprint (intentKeys intent) with
+    | .error refusal => return .unavailable refusal.message
+    | .ok footprint => pure footprint
+  let view := served.viewAt footprint
+  match executed : DurableDataIntent.execute .complete view intent with
+  | .replayed recorded => return .replayed recorded
+  | .rejected reason => return .rejected reason
+  | .crashed _ _ => return .unavailable "unexpected complete-schedule outcome"
+  | .accepted next =>
+      if let .error reason := transport.sourceGate view intent then return .rejected reason
+      if let some systemId := transport.systemCell then
+        if let .error reason := Kernel.TailBound.gate systemId (served.height + 1) served.chain view intent then
+          return .rejected reason
+      let key := opening.store.key
+      let height := served.height + 1
+      let record := IntentRecord.ofIntent intent
+      let recordBytes := DurableCheckpointCodec.recordFrame.encode record
+      let chain := DurableCheckpointCodec.chainStep served.chain record
+      -- The spent map after the head (MAC-verified, carried by the head's tag), this record's keys inserted.
+      let keys := DurableSpent.recordKeys intent.transactionId intent.nullifiers
+      let (spentAfter, spentWrites) ← match ← DurableReceiverIO.withSpentRows transport served.height keys
+          (fun rows => DurableSpent.insertAll rows head.spentRoot height keys) with
+        | .ok result => pure result
+        | .error message => return .unavailable message
+      -- The root cache advanced by the record's slot writes.
+      let roots := opening.rootsExact.advance (DurableReceiverIO.recordSlots height chain record)
+        (Served.entries_step served.cellIds served.cellIds_nodup view next intent served.height
+          served.chain chain executed)
+      let entries := Served.entriesOf next.model.roots (extendIds served.cellIds [record]) height chain
+      let worldRoot := if roots.2.injective then roots.1.root else WorldRoot.deployedRoot entries
+      let leaf := DurableHistory.leafDigest height recordBytes chain worldRoot
+      let frontierAfter := DurableHistory.Frontier.push head.frontier leaf
+      let nodes := DurableReceiverIO.appendNodes
+        (DurableHistory.completedNodes head.frontier height leaf) spentWrites
+      let entry : DurableReceiverIO.Entry := ⟨recordBytes, DurableHistory.trailer key height
+        ⟨worldRoot, chain, DurableHistory.frontierDigest height frontierAfter, spentAfter⟩⟩
+      let confirm := fun (kind : DurableReceiverIO.Confirmation) => do
+        match ← transport.read height false with
+        | .error message => return Received.uncertain s!"append attempted; readback unavailable: {message}"
+        | .ok none => return .uncertain "append attempted; the Store is not initialized"
+        | .ok (some stored) =>
+            match stored.entries.head? with
+            | none => return .uncertain "append attempted; entry absent on readback"
+            | some readBack =>
+                if readBack ≠ entry then return .contention
+                match verified : Head.verify opening.store height entry.tag chain frontierAfter with
+                | .error refusal => return .unavailable refusal.message
+                | .ok head' =>
+                    have fields := Head.verify_fields verified
+                    let served' := served.advance footprint intent next executed chain worldRoot
+                    -- A due checkpoint (a function of the height alone); a failed seal loses nothing.
+                    let sealedAt ←
+                      if transport.checkpointEvery > 0 && height % transport.checkpointEvery == 0 then do
+                        let sealed := DurableCheckpointCodec.sealAt key height chain frontierAfter spentAfter
+                          served'.checkpointState worldRoot
+                        match ← transport.putCheckpoint height
+                            (DurableCheckpointCodec.checkpointFrame.encode sealed) with
+                        | .ok () => pure height
+                        | .error _ => pure opening.baseHeight
+                      else pure opening.baseHeight
+                    return .appended kind
+                      ⟨opening.store, head', served', fields.1.symm, fields.2.1.symm, roots.1, roots.2, sealedAt⟩
+                      (by rw [fields.1, ← opening.heightExact]) entry rfl
+      match ← transport.append height entry nodes with
+      | .installed => confirm .installed
+      | .alreadyPresent => confirm .installed
+      | .conflict => return .contention
+      | .uncertain _ => confirm .recoveredAfterUncertainResponse
 
 #assert_axioms Served.recordedAt_some
 #assert_axioms Served.recordedAt_none
@@ -424,5 +857,7 @@ end Served
 #assert_axioms Served.ofLoaded_cellIds
 #assert_axioms Served.history_length_eq_height
 #assert_axioms Served.ofStateAt_chain
+#assert_axioms Served.entries_step
+#assert_axioms receive_executes_as_full
 
 end Minidregg.Compiler.DurableServed
