@@ -17,6 +17,7 @@ import Compiler.CanonicalRuntimeProfileCore
 import Theory.PolicyInstall
 import Compiler.PhysicalLawResolution
 import Compiler.CandidateLawResolution
+import Kernel.ReceivingLaw
 
 namespace Minidregg.Kernel.PolicyInstallController
 
@@ -263,6 +264,14 @@ def addressSlots : Nat → List UInt8 → List (String × Int)
   | offset, byte :: bytes =>
       (s!"policy/address/{offset}", Int.ofNat byte.toNat) :: addressSlots (offset + 1) bytes
 
+/-- **The newborn an installation creates**, named on its step: the successor
+policy-source cell, `birth/<id>` ↦ the exact post root of its birth write
+(`ReceivingLaw.namesBirth`).  The old source's law judges a state that holds it. -/
+def newbornSlots (domain : Digest) (declaration : Declaration) : List (Minidregg.Pred.Slot × Int) :=
+  let create := CanonicalCellRegistry.policySourceCreate domain declaration.source
+  [(ReceivingLaw.birthSlot create.cellId,
+    Int.ofNat (ResourceBirthCodec.physicalRoot (ResourceBirthCodec.LifecycleImage.live create.cell)).value)]
+
 /-- The source-owned install view keeps absent policy fields absent. Request
 identity is fixed by the declaration; projected slots cannot replace its
 complete source/effect commitment. -/
@@ -272,11 +281,12 @@ def project (wanted : Request .program) (declaration : Declaration)
   let header := CanonicalRuntimeProfile.requestSlots wanted
   let fields := currentHead logical declaration.source.policyId
   { slots := ("target/storageKind", Int.ofNat storageKind) :: header ++
-      match fields with
+      (match fields with
       | none => []
       | some head =>
           ("policy/version", Int.ofNat head.version) ::
-            addressSlots 0 (Sp800185Cshake256.digestCodec.encode head.address) }
+            addressSlots 0 (Sp800185Cshake256.digestCodec.encode head.address)) ++
+      newbornSlots wanted.domain declaration }
 
 /-- The one authority patch: the policy head's succession, generated from the
 snapshot's own store.  The operation marker is the intent's durable nullifier. -/

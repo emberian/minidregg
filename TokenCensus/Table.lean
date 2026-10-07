@@ -368,7 +368,7 @@ Minidregg.Kernel.PayEnrolV2Receiver.Prepared.mk | Kernel.PayEnrolV2Receiver | ev
 Minidregg.Kernel.PayObservationReceiver.DecodedIngress.mk | Kernel.PayObservationReceiver | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.PayObservationReceiver.Planned.mk | Kernel.PayObservationReceiver | evidence | L1 Minidregg.Kernel.PayObservationReceiver.Planned.sound | loaded cells exact, tip retained, clock at the tip slot, Book = batch applied
 Minidregg.Kernel.PayObservationReceiver.Prepared.mk | Kernel.PayObservationReceiver | evidence | L1 Minidregg.Kernel.PayObservationReceiver.Prepared.sound | receiver-sourced receipt for the carried envelope, request bound to the pay head; the receipt verdict is L2
-Minidregg.Kernel.PolicyInstallReceiver.AcceptedInstall.mk | Kernel.PolicyInstallReceiver | evidence | L2 | 4 proof / 5 data fields; layer-1 review pending
+Minidregg.Kernel.PolicyInstallReceiver.AcceptedInstall.mk | Kernel.PolicyInstallReceiver | evidence | L2 | 5 proof / 5 data fields; layer-1 review pending
 Minidregg.Kernel.PolicyInstallReceiver.DecodedIngress.mk | Kernel.PolicyInstallReceiver | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.PolicyInstallReceiver.Prepared.mk | Kernel.PolicyInstallReceiver | evidence | L2 | 9 proof / 8 data fields; layer-1 review pending
 Minidregg.Kernel.PurseRefillReceiver.Accepted.mk | Kernel.PurseRefillReceiver | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
