@@ -65,19 +65,6 @@ open Minidregg.Theory.ObjectiveBendDemandData (Data)
 open Minidregg.Pred (Slot)
 set_option autoImplicit false
 
-/-- Every field a law reads is a plain name (`ObjectRecord.plainName`). -/
-def LawRef.plain : LawRef → Bool
-  | .field name => plainName name
-  | _ => true
-
-/-- Every field a law names is a law field name. -/
-def LawExpr.fieldsPlain : LawExpr → Bool
-  | .eqC ref _ | .leC ref _ | .inC ref _ => ref.plain
-  | .eqR left right | .leR left right | .leROff left right _ => left.plain && right.plain
-  | .monotone field | .writeOnce field => plainName field
-  | .not body => body.fieldsPlain
-  | .and left right | .or left right | .implies left right => left.fieldsPlain && right.fieldsPlain
-
 /-- What a reference reads on the new state of a write under `facts`. -/
 def LawRef.read (facts : Facts) (new : Data) : LawRef → Option Int
   | .field name => fieldOf name new
@@ -124,16 +111,6 @@ def LawExpr.denote (facts : Facts) (old : Option Data) (new : Data) : LawExpr �
   | .or left right => left.denote facts old new || right.denote facts old new
   | .implies premise conclusion => !premise.denote facts old new || conclusion.denote facts old new
 
-/-! ## Compilation to the kernel's predicate -/
-
-/-- The view slot a reference reads (`ObjectRecord.stateSlots`, `Facts.slots`). -/
-def LawRef.slot : LawRef → Slot
-  | .field name => "state/" ++ name
-  | .subject => "request/subject"
-  | .caller => "request/caller"
-  | .height => "request/height"
-  | .turn => "request/turn"
-
 end Minidregg.Compiler.ObjectiveBendLaw
 
 namespace Minidregg.Kernel.ObjectLaw
@@ -142,21 +119,6 @@ open Minidregg.Compiler.ObjectiveBendLaw
 open Minidregg.Theory.ObjectiveBendDemandData (Data)
 open Minidregg.Pred (Pred State Slot eval)
 set_option autoImplicit false
-
-/-- The predicate the kernel installs for a law. -/
-def compile : LawExpr → Pred
-  | .eqC ref value => .eq ref.slot value
-  | .leC ref value => .le ref.slot value
-  | .inC ref values => .memberOf ref.slot values
-  | .eqR left right => .eqSlots left.slot right.slot
-  | .leR left right => .leSlots left.slot right.slot
-  | .leROff left right offset => .leSlotsOff left.slot right.slot offset
-  | .monotone field => .monotone ("state/" ++ field)
-  | .writeOnce field => .writeOnce ("state/" ++ field)
-  | .not body => .not (compile body)
-  | .and left right => Pred.all [compile left, compile right]
-  | .or left right => Pred.any [compile left, compile right]
-  | .implies premise conclusion => Pred.any [.not (compile premise), compile conclusion]
 
 /-! ## Reading a view -/
 

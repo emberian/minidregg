@@ -21,7 +21,9 @@ The fragment, exactly (G1B-ENFORCED-LAW-DESIGN; anything else refuses
 fields only: `new.a.b` refuses by name. `old.` is readable only through `monotone` and
 `writeOnce` (all the kernel's predicate can say about the old state). -/
 import Theory.AssertCompiled
+import Pred.Core
 namespace Minidregg.Compiler.ObjectiveBendLaw
+open Minidregg.Pred (Pred Slot)
 set_option autoImplicit false
 
 /-! ## Syntax -/
@@ -63,6 +65,57 @@ def LawExpr.fields : LawExpr → List String
   | .monotone field | .writeOnce field => [field]
   | .not body => body.fields
   | .and left right | .or left right | .implies left right => left.fields ++ right.fields
+
+/-- A field or variant name that cannot alias another path (`Kernel.ObjectRecord.stateSlots`
+projects only these). Stated over `toList`, so the kernel evaluates it (`String.all` does not
+reduce in the kernel) and proofs read its characters. -/
+def plainName (name : String) : Bool :=
+  !name.toList.isEmpty && name.toList.all (fun c => c != '.' && c != '@' && c != '/')
+
+/-- Every field a law reads is a plain name. -/
+def LawRef.plain : LawRef → Bool
+  | .field name => plainName name
+  | _ => true
+
+/-- Every field a law names is a law field name. -/
+def LawExpr.fieldsPlain : LawExpr → Bool
+  | .eqC ref _ | .leC ref _ | .inC ref _ => ref.plain
+  | .eqR left right | .leR left right | .leROff left right _ => left.plain && right.plain
+  | .monotone field | .writeOnce field => plainName field
+  | .not body => body.fieldsPlain
+  | .and left right | .or left right | .implies left right => left.fieldsPlain && right.fieldsPlain
+
+/-! ## Compilation to the kernel's predicate -/
+
+/-- The view slot a reference reads (`ObjectRecord.stateSlots`, `Facts.slots`). -/
+def LawRef.slot : LawRef → Slot
+  | .field name => "state/" ++ name
+  | .subject => "request/subject"
+  | .caller => "request/caller"
+  | .height => "request/height"
+  | .turn => "request/turn"
+
+/-- The predicate the kernel installs for a law (`Kernel.ObjectLaw.compile_sound`: it evaluates
+to the law's meaning on every view the kernel judges). -/
+def compile : LawExpr → Pred
+  | .eqC ref value => .eq ref.slot value
+  | .leC ref value => .le ref.slot value
+  | .inC ref values => .memberOf ref.slot values
+  | .eqR left right => .eqSlots left.slot right.slot
+  | .leR left right => .leSlots left.slot right.slot
+  | .leROff left right offset => .leSlotsOff left.slot right.slot offset
+  | .monotone field => .monotone ("state/" ++ field)
+  | .writeOnce field => .writeOnce ("state/" ++ field)
+  | .not body => .not (compile body)
+  | .and left right => Pred.all [compile left, compile right]
+  | .or left right => Pred.any [compile left, compile right]
+  | .implies premise conclusion => Pred.any [.not (compile premise), compile conclusion]
+
+/-- **The law a package installs**: the conjunction of its laws, in order. A law whose fields are
+not all plain names compiles to `any []` (refuses every write): a field the views cannot read
+never reads as something else. -/
+def packageLaw (laws : List (String × LawExpr)) : Pred :=
+  Pred.all (laws.map fun law => if law.2.fieldsPlain then compile law.2 else Pred.any [])
 
 /-! ## Rendering (diagnostics and documents) -/
 
