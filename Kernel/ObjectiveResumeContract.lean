@@ -1246,12 +1246,12 @@ theorem Delivery.next_generation {rootBytes : Bytes → Digest} {config : Config
     delivery.next.generation = delivery.record.generation + 1 := by
   rw [delivery.nextExact, nextRecord_generation]
 
-/-- A stored record is never empty: the codec writes its frame first. -/
-theorem encodeRecord_ne_nil (record : Record) : encodeRecord record ≠ [] := by
+/-- A stored (fitting) record is never empty: the codec writes its frame first. -/
+theorem encodeRecord_ne_nil (record : Record) (fits : record.Fits) : encodeRecord record ≠ [] := by
   have frame : recordFrame ≠ [] := by decide +kernel
   obtain ⟨b, bs, h⟩ := List.exists_cons_of_ne_nil frame
-  show recordFrame ++ _ ≠ []
-  rw [h]; simp
+  unfold encodeRecord
+  rw [dif_pos fits, h]; simp
 
 /-- **After a delivery that keeps the activity awaiting installs, its record cell
 holds exactly the record it wrote**: the executor's accepted snapshot reads
@@ -1266,7 +1266,7 @@ theorem Delivery.installed_record {rootBytes : Bytes → Digest} {config : Confi
   unfold readRecord
   rw [execute_accepted_install installed, DataSnapshot.install_canonicalBytes]
   simp [Delivery.intent, intentOf, delivery.postsExact, DataSnapshot.lookupPostBytes, Post.write,
-    recordPost, postAt, recordImage, awaiting, bodyOf_image, record_roundTrip]
+    recordPost, postAt, recordImage, awaiting, bodyOf_image, record_roundTrip _ delivery.next_fits]
 
 /-- **After a delivery that ENDS the activity installs, its record cell is
 retired**: it holds the retired image and no record (disposal,

@@ -34,6 +34,13 @@ abbrev Bytes := List UInt8
 def tagged (customization : String) (input : Bytes) : Digest :=
   (Sp800185Cshake256.hash customization.toUTF8.toList input).digest
 
+/-- **Every hash output is a 256-bit digest**: below `256 ^ 32`, so it has exactly one
+fixed-width spelling (`digest256Stream`). The bound is at the deployed hash, the
+cSHAKE256 output (`Sp800185Cshake256.hash`, 32 octets by `length_exact`). -/
+theorem tagged_lt (customization : String) (input : Bytes) : (tagged customization input).value < 256 ^ 32 := by
+  have bound := fixedValue_lt (Sp800185Cshake256.hash customization.toUTF8.toList input).bytes
+  rwa [(Sp800185Cshake256.hash customization.toUTF8.toList input).length_exact] at bound
+
 /-! ## Small stream codecs -/
 
 def unitStream : StreamCodec Unit where
@@ -104,6 +111,8 @@ theorem checkpointBytes_tokens (state : State) :
 /-- The checkpoint identity bound into the await id and the activity record. -/
 def checkpointDigest (bytes : Bytes) : Digest :=
   tagged "DREGG/OBJECTIVE/ACTIVITY/CHECKPOINT/v1" bytes
+
+theorem checkpointDigest_lt (bytes : Bytes) : (checkpointDigest bytes).value < 256 ^ 32 := tagged_lt _ _
 
 /-! ## First-order data bytes
 
@@ -281,4 +290,7 @@ def event (kind : String) (bytes : Bytes) : StableEvent :=
 #assert_axioms data_roundTrip
 #assert_axioms decodeDataBytes_dataBytes
 #assert_axioms decodeDataBytes_canonical
+#assert_axioms tagged_lt
+#assert_axioms checkpointDigest_lt
+
 end Minidregg.Kernel.ObjectiveActivityWire
