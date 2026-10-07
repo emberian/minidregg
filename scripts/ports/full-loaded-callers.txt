@@ -21,7 +21,6 @@ Host/FnInboxView.lean
 Host/Json.lean
 Host/Kn2StoreBench.lean
 Host/Main.lean
-Host/RetainedSegmentInspection.lean
 Host/SourceAgreementReader.lean
 Kernel/ApplicationAgentLifetimeGrantLookup.lean
 Kernel/ApplicationAgentLifetimeGrantReceiver.lean
@@ -70,6 +69,7 @@ scripts/durable-receiver.lean
 scripts/fn-b3/forge_history.lean
 scripts/fn-e1e2/probe_gateway_direct_submit.lean
 scripts/kn2/history-tamper.lean
+scripts/kn2/port-b-tamper.lean
 scripts/kn2/receipt-tamper.lean
 scripts/native-accepted-fixture/replay.lean
 scripts/probe-canonical-cell-registry.lean
