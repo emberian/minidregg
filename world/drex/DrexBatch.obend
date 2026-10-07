@@ -52,6 +52,16 @@ sum Terms:
 
 # The seat kernel's view of one open seat (SeatStore.callData), seats sorted by
 # account.
+# A seat's principals as the contract is shown them (SeatStore.disclosedData): hidden
+# unless the offerer's proposal discloses them; a disclosed holder of an unheld seat is none.
+sum Shown:
+  hidden: {}
+  none: {}
+  shown: Nat
+record Disclosed:
+  offerer: Shown
+  payee: Shown
+  holder: Shown
 record SeatView:
   seat: Nat
   role: String
@@ -59,6 +69,7 @@ record SeatView:
   give: Amounts
   want: Amounts
   allocation: Amounts
+  disclosed: Disclosed
 
 sum Seats:
   nil: {}
@@ -270,11 +281,14 @@ def amount(asset: Nat, value: Nat) -> Amounts:
 def both(first: Amount, second: Amount) -> Amounts:
   Amounts.cons({head: first, tail: Amounts.cons({head: second, tail: Amounts.nil()})})
 
+def blind() -> Disclosed:
+  {offerer: Shown.hidden(), payee: Shown.hidden(), holder: Shown.hidden()}
+
 def bidView(seat: Nat, budget: Nat, qty: Nat) -> SeatView:
-  {seat: seat, role: "bid", terms: Terms.nil(), give: amount(200n, budget), want: amount(100n, qty), allocation: both({asset: 200n, amount: budget}, {asset: 100n, amount: 0n})}
+  {seat: seat, role: "bid", terms: Terms.nil(), give: amount(200n, budget), want: amount(100n, qty), allocation: both({asset: 200n, amount: budget}, {asset: 100n, amount: 0n}), disclosed: blind()}
 
 def askView(seat: Nat, qty: Nat, reserve: Nat) -> SeatView:
-  {seat: seat, role: "ask", terms: Terms.nil(), give: amount(100n, qty), want: amount(200n, reserve), allocation: both({asset: 100n, amount: qty}, {asset: 200n, amount: 0n})}
+  {seat: seat, role: "ask", terms: Terms.nil(), give: amount(100n, qty), want: amount(200n, reserve), allocation: both({asset: 100n, amount: qty}, {asset: 200n, amount: 0n}), disclosed: blind()}
 
 def demoSeats() -> Seats:
   Seats.cons({head: bidView(51n, 10n, 2n), tail: Seats.cons({head: bidView(52n, 12n, 3n), tail: Seats.cons({head: askView(53n, 2n, 6n), tail: Seats.cons({head: askView(54n, 3n, 12n), tail: Seats.nil()})})})})
