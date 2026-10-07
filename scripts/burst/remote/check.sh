@@ -39,7 +39,9 @@ P=$SRV/pipeline/scripts
 for f in lib.sh slot.sh slots build-anywhere peer-build box-peer-gate lane-check lean-ask mk-lane.sh publish-artifacts fetch-artifacts journey-runner install-sccache; do [ -x "$P/$f" ] || [ -f "$P/$f" ] || diff "script:$f" missing; done; ok scripts "$(ls "$P" | wc -l) files, from $(cat "$P/.installed-from" 2>/dev/null | cut -c1-8 || echo '? (hand-installed)')"
 [ -f "$P/.installed-from" ] || diff scripts:provenance "no .installed-from (installed by hand or rsync, not burst-up)"
 [ -x "$SRV/pipeline/candidate/lane-build.sh" ] && ok candidate-builder || diff candidate-builder missing
-cmp -s "$SRV/warm-base/mk-lane.sh" "$P/mk-lane.sh" 2>/dev/null && ok mk-lane:one-copy || diff mk-lane:one-copy "$SRV/warm-base/mk-lane.sh != pipeline/scripts/mk-lane.sh"
+if [ -f "$SRV/warm-base/src/scripts/pipeline/mk-lane.sh" ]; then cmp -s "$SRV/warm-base/mk-lane.sh" "$SRV/warm-base/src/scripts/pipeline/mk-lane.sh" && ok mk-lane:one-copy "= the base tree's" || diff mk-lane:one-copy "$SRV/warm-base/mk-lane.sh != its tree's scripts/pipeline/mk-lane.sh"
+else cmp -s "$SRV/warm-base/mk-lane.sh" "$P/mk-lane.sh" 2>/dev/null && ok mk-lane:one-copy || diff mk-lane:one-copy "$SRV/warm-base/mk-lane.sh != pipeline/scripts/mk-lane.sh"; fi
+grep -q MK_LANE_PROBE "$SRV/warm-base/mk-lane.sh" 2>/dev/null && ok mk-lane:probe-aware || diff mk-lane:probe-aware "base mk-lane.sh predates MK_LANE_PROBE (an advance's verify would be refused)"
 [ -x "$SRV/pipeline/repl/.lake/build/bin/repl" ] && ok lean-ask-repl || diff lean-ask-repl "not built"
 [ -x "$SRV/pipeline/bin/sccache" ] && ok sccache-bin || diff sccache-bin missing
 for u in pipeline-sccache pipeline-slots; do systemctl --user is-active -q $u.service && { systemctl --user is-enabled -q $u.service 2>/dev/null && ok "unit:$u" "active, enabled" || diff "unit:$u" "active but TRANSIENT/not enabled (lost on reboot)"; } || diff "unit:$u" "not active"; done

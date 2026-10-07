@@ -55,8 +55,10 @@ rsync -a --delete "$STAGE/pipeline/" "$PIPELINE_ROOT/scripts/"
 rsync -a "$STAGE/candidate/lane-build.sh" "$STAGE/candidate/lib.sh" "$PIPELINE_ROOT/candidate/"
 git -C "$SRV/mini" rev-parse HEAD > "$PIPELINE_ROOT/scripts/.installed-from"; echo "installed-from: $(cat "$PIPELINE_ROOT/scripts/.installed-from") (staged by burst-up)"
 P=$PIPELINE_ROOT/scripts
-# the warm base's mk-lane.sh is the repo's one copy: refresh it with the scripts (advance/relay do the same)
-[ -d "$SRV/warm-base/src" ] && { install -m 755 "$P/mk-lane.sh" "$SRV/warm-base/.mk-lane.sh.new" && mv -f "$SRV/warm-base/.mk-lane.sh.new" "$SRV/warm-base/mk-lane.sh"; }
+# the warm base's mk-lane.sh is its OWN tree's scripts/pipeline/mk-lane.sh (advance/relay keep it so); refresh when it knows MK_LANE_PROBE
+if [ -f "$SRV/warm-base/src/scripts/pipeline/mk-lane.sh" ] && grep -q MK_LANE_PROBE "$SRV/warm-base/src/scripts/pipeline/mk-lane.sh"; then
+  install -m 755 "$SRV/warm-base/src/scripts/pipeline/mk-lane.sh" "$SRV/warm-base/.mk-lane.sh.new" && mv -f "$SRV/warm-base/.mk-lane.sh.new" "$SRV/warm-base/mk-lane.sh"
+fi
 
 # --- the persistent unit files first (install-sccache starts the persistent sccache unit when its file exists) ---
 U=~/.config/systemd/user; mkdir -p "$U"
