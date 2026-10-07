@@ -195,7 +195,11 @@ size then eats the resumed segment's room (`absolute_limits_refuted`; the same p
 exactly under the kernel's limits, `largerYield_resumes_exactly`). The converse is false: the
 stored checkpoint holds cached what the yield would compute again, so the kernel commits
 segments the program's own run is refused for ticks (`stored_commits_where_lazy_exhausts`) or
-faults on for extraction budget (`stored_commits_where_lazy_extraction_fails`). Its core is `forcingTransparent_of_yieldedPlan`:
+faults on for extraction budget (`stored_commits_where_lazy_extraction_fails`). Every such
+case is a resource difference only: whenever the stored checkpoint commits a segment, the
+program's own yield commits an agreeing one under every resource vector above a threshold
+(`runSegment_stored_converse`), and after a stored yield the program's own next yield is in a
+`Chain` with the stored next checkpoint (`runSegment_stored_next`). Its core is `forcingTransparent_of_yieldedPlan`:
 a successful Plan extraction is a chain of finished closed demands, each a forcing chain
 (`Theory/ObjectiveBendDemandForcingDemand.lean`, `demand_forces`), and along a forcing chain
 the forced run ends every segment the lazy run ends (`Theory/ObjectiveBendDemandForcingExtract.lean`,

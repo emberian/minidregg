@@ -424,6 +424,27 @@ The kernel runs activities on objects. Detail, with every turn and theorem, is i
   and across every reachable snapshot every awaiting record's checkpoint is typed
   (`stored_checkpoints_typed`, `Kernel/ObjectiveCheckpointInvariant.lean`, over the three
   kinds of step the replay walk admits, `derived_route`).
+- **The checkpoint changes only what a run costs.** Whatever resuming the stored checkpoint
+  commits, resuming the program's own yield commits alike under every resource vector above a
+  threshold (heap and stack room, ticks, extraction ticks), with the deployment's output sizes
+  (`runSegment_stored_converse`, `ResourcesOnly`; it is not "the same budget, the same result",
+  which `stored_commits_where_lazy_exhausts` refutes). After a stored yield the program's own
+  next yield is in a `Chain` (forcing, settling, collection) with the stored next checkpoint,
+  and every response keeps it so (`runSegment_stored_next`, `Chain.resume`). Proof: backward
+  simulation (`Theory/ObjectiveBendDemandForcingBack.lean`, `...Converse.lean`): a forced run
+  that halts has a lazy run that halts, which redoes the closed demands the extraction cached.
+  Planted fault: a checkpoint that lost its stack is not resources-only
+  (`not_resourcesOnly_lostStack`).
+- **Activities against their reference interaction tree.** The reference meaning of an activity
+  is the interaction tree of the program's own machine (`Theory/ObjectiveBendInteraction.lean`:
+  `observe`, nodes `vis d` with continuation `k r` = the program's own yield resumed, `ret`,
+  faults, `malformed`, and `spin`, silent divergence, a node of its own). Along every history
+  of one record (birth, deliveries, exhaustions), every committed segment that is the run's own
+  is the reference node after the same responses, resources only (`History.reference`,
+  `Kernel/ObjectiveReferenceLift.lean`); where the reference spins, nothing is ever committed
+  (`History.spin`, `chain_spin`); a committed program fault is classified against the reference
+  (`delivery_refusal_reference`). Call frames run the reference machine directly
+  (`Kernel/ObjectiveCallReference.lean`).
 - **Metering.** One public tariff (`Kernel/ObjectiveTariff.lean`, `Tariff.workOf`) prices a
   **declared** envelope; no fee depends on measured work (`refund_measurement_free`,
   `submitter_charge_declared`). A yield reserves its resume/timeout fee pair in the
@@ -654,14 +675,6 @@ records that a value came from the call that produced it.
 - **Reflection** (LT4): a provenance-establishing prototype constructor; `R(Y M)` vs `Y(R∘M)`;
   resource observations stated as theorems; `composition_associative` tied to `Term.mix`.
 - **Guardedness** (LT6): no check that a well-typed resident's segment terminates.
-- **Forcing transparency, converse**: the stored checkpoint resumes as the program's own yield
-  under the kernel's own limits (`runSegment_stored_complete`, `birth_stored_complete`,
-  `reachable_delivery_stored_complete`, `Kernel/ObjectiveResumeContract.lean`; segments run
-  under `segmentLimits`, counted from their own heap end), but not conversely: the kernel
-  commits segments the program's own run is refused for ticks or faults on for extraction
-  budget (`stored_commits_where_lazy_exhausts`, `stored_commits_where_lazy_extraction_fails`).
-  No theorem yet says the two differ ONLY in resources (that the program's own run, given the
-  ticks and budget the cache saved, agrees).
 - **Machine**: a resource bound for completeness (completion is finite, not bounded); use
   counts at run time (quantities are static); `stepRaw` linear in the heap.
 - **Kernel**: upgrade (no upgrade turn; nothing produces `upgraded`; `ObjectRecord` has no
