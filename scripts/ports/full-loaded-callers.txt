@@ -30,7 +30,6 @@ Kernel/CapabilityDelegationReceiver.lean
 Kernel/CarriedSegment.lean
 Kernel/ConsentAnchor.lean
 Kernel/ContentResource.lean
-Kernel/DeclaredResourceController.lean
 Kernel/DomainEpochStream.lean
 Kernel/FleetTurn.lean
 Kernel/FnConsumerNamespaceReceiver.lean
