@@ -1531,7 +1531,7 @@
     {
       "module": "Compiler.CanonicalCellRegistry",
       "path": "Compiler/CanonicalCellRegistry.lean",
-      "sha256": "838592b28695bb9df3d63a341f9d79e719fd4451a076f6b30dd0a078efc3f59f",
+      "sha256": "18c7c43117df634b831ef80a8bf0352f2e5d381d2e26cf184fb88491f9272b49",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -1720,7 +1720,7 @@
     {
       "module": "Compiler.CredentialSignatureAdmission",
       "path": "Compiler/CredentialSignatureAdmission.lean",
-      "sha256": "3f1c83e3fafe4993427fae79dd59b73f99f762403d907a8655930124fe80806a",
+      "sha256": "44266105d689cc01cc5ad4dbd0cd8cccad8e321c3b30ead051236d9fd3ca105d",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -2796,16 +2796,9 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
-      "module": "Compiler.PayEnrolSignatureV2IO",
-      "path": "Compiler/PayEnrolSignatureV2IO.lean",
-      "sha256": "1fd88a07e2cc3c5347534effd083749c3255eb7becbac055cd5b791522d406ce",
-      "surface": "default",
-      "ownerReportedStatus": "No matching owner source report"
-    },
-    {
       "module": "Compiler.PhysicalLawResolution",
       "path": "Compiler/PhysicalLawResolution.lean",
-      "sha256": "c98756591b4dcfc7500b7dd47f0d188a401f80396af34f53d53d3222457877c5",
+      "sha256": "c21418e2c1028c0a227d3ea97664ce219a524db1fe1468bf2b242c53b576a0ea",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -3379,7 +3372,7 @@
     {
       "module": "Compiler.WorldKindLawDependencies",
       "path": "Compiler/WorldKindLawDependencies.lean",
-      "sha256": "56060a039f410e437e87a100ac58d870d4c930d0591abaa26afaf9f39fcdb664",
+      "sha256": "6a9696ffa8fb81ee3500e5c8246dbfa7e2a40594b9409584981230b1ca8b4570",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6767,7 +6760,7 @@
     {
       "module": "Kernel.NativeHost",
       "path": "Kernel/NativeHost.lean",
-      "sha256": "1dc52ae2159587ed512428aa103bfb1cb7b34269a3cd919e0f008363a374e941",
+      "sha256": "f70f8c177d441f2bbe826b7119aac88c540a181db32dae74797d3f21935dba2c",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6788,7 +6781,7 @@
     {
       "module": "Kernel.NativeHostGenesis",
       "path": "Kernel/NativeHostGenesis.lean",
-      "sha256": "8b000c4f1c196c974aa21abeef6e3ee7cf78f6428645811b7cb79d8f250bda5e",
+      "sha256": "9400aaf20115a6b307bb6ae6f8b88f9a2f7e9ee2b2c7faf0cc10a4673443eb14",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6823,14 +6816,14 @@
     {
       "module": "Kernel.NativeHostPayClaims",
       "path": "Kernel/NativeHostPayClaims.lean",
-      "sha256": "ef3d6bed333ed6a8a64c86650e7d145e81355a2edf19cf48ce25c43bc260a333",
+      "sha256": "6c5975402ec563ab89d6dc82c9c2eb1719f9ccf576e479a0f7c41c7feb70a1f3",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.NativeHostReplay",
       "path": "Kernel/NativeHostReplay.lean",
-      "sha256": "304d41987265ba09f193960b1585994c7f7146bc6d1e083ef129b8f79a9cb917",
+      "sha256": "048a7e8b78c0a8c972cea4294fb4c41784801a590c3c9fb68b99c6c9548c0a1b",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7341,7 +7334,7 @@
     {
       "module": "Kernel.PayEnrolProofs",
       "path": "Kernel/PayEnrolProofs.lean",
-      "sha256": "f7d97193349e042d8d8f6c30cd4524005ace5055bee3f47c8d4cca48531802c3",
+      "sha256": "e0628cc0481b16487e9c6fc42ce869444381e8e7b1f284692a34d827df7112b8",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7355,14 +7348,14 @@
     {
       "module": "Kernel.PayEnrolReceiver",
       "path": "Kernel/PayEnrolReceiver.lean",
-      "sha256": "7e3264b79e0920358581f2741b2c5c15ab31952e970dc9da05846d1ee8972cc2",
+      "sha256": "d1f1dba5139ed76a308ab3b271e65e56f79dd94487f49ec8a6ffce1551377987",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.PayEnrolV2Decision",
       "path": "Kernel/PayEnrolV2Decision.lean",
-      "sha256": "9de464702e775d5445e1fcdfae11d6c4546d7126b976c5bab1ef810927c85187",
+      "sha256": "fdde15b424630a8aba7d7250f26f341282faf20ea8adadd5aeebabeb7db3c51d",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7376,7 +7369,7 @@
     {
       "module": "Kernel.PayEnrolV2Receiver",
       "path": "Kernel/PayEnrolV2Receiver.lean",
-      "sha256": "0384dce9137f89c79760f6ff5117aef114845a1f2abaaa97e4c1f237f6a006ef",
+      "sha256": "ea882b419c2a810b96aaaf7233c9235e891e4191f108b30e1013d97a91b6ca6e",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7404,7 +7397,7 @@
     {
       "module": "Kernel.PayObservationReceiver",
       "path": "Kernel/PayObservationReceiver.lean",
-      "sha256": "6574387767cbbcd5d491ec5dc86e41c6ce50312488082fa9bc228e3e0da2e1a2",
+      "sha256": "6145d64e7c226a61a713c71af65c1d21119dbb80ebdeb6ebd31b7ba58870a09a",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7635,28 +7628,28 @@
     {
       "module": "Kernel.Receivers.SubjectKeyRotation",
       "path": "Kernel/Receivers/SubjectKeyRotation.lean",
-      "sha256": "2fcf3a3f63970958c6ed8fc199ea05c81343b7fc9cd7d612bbc48b1781a690fb",
+      "sha256": "1f5986bae22ccd9ae0d64f52f5bdbfd79ac3efad72fb216967cdd1dad60f60b0",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.Receiving",
       "path": "Kernel/Receiving.lean",
-      "sha256": "879bdfe916caab00cb0ab9c53477de177223f3dcecf1fcce5a82f145205f513a",
+      "sha256": "6b675b6578b4c9d92e16e7fe1651c2db3cddf9855340709397815162441ba851",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.ReceivingLaw",
       "path": "Kernel/ReceivingLaw.lean",
-      "sha256": "29bae2bfcb02c46136d177664f3efc95f91da0799b0c6f66a577044dc250c1ad",
+      "sha256": "52636bd6318337336e95642993bbbd6eee78b3945b41259e95e4b975291731a8",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.ReceivingLawFixture",
       "path": "Kernel/ReceivingLawFixture.lean",
-      "sha256": "3d466c14962e60adafcabbf803526cefea3364eceed301de22696c37a3a197e2",
+      "sha256": "6975f828e762f387eb7aa1ba6598eb39212410351af5997db82ae088b2aae8c9",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -10358,7 +10351,7 @@
     {
       "module": "Theory.Receiving",
       "path": "Theory/Receiving.lean",
-      "sha256": "4ebc001ee291d847a38b150c3eebee144c8c6c1249be0274dd7f95ba29a30fc8",
+      "sha256": "2dff8a5aa4d42e0539196034d203ee3bfdbf05a53d0c0c6541a31df9d50e1df6",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
