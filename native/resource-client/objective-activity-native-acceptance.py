@@ -234,10 +234,20 @@ def resubmit(label, ingress, expect, detail=None):
     return judge(label, last_json(r), expect, detail)
 
 
+QUOTED = {}
+
+
 def judge(label, value, expect, detail):
     kind = value.get('type')
     reason = value.get('reason', '')
     text = unhex(value.get('detail', '')) if 'detail' in value else value.get('error', '')
+    if expect == 'installed' and label in QUOTED:
+        # a deposit the Host itself quoted must be accepted: the quote and the charge are computed from a record
+        # whose size depends on transaction-derived digests (base-255 Nat codec), so they can disagree by a byte
+        charged = re.search(r'underfunded (\d+) (\d+)', text)
+        if kind == 'refused' and charged:
+            text = (f'deposit quote not a fixed point (cv 01a11467-08ce): quoted {QUOTED[label]}, '
+                    f'charged {charged.group(2)}')
     if expect == 'installed':
         ok = kind == 'confirmed' and value.get('confirmation') == 'installed'
     elif expect == 'replayed':
@@ -246,12 +256,6 @@ def judge(label, value, expect, detail):
         ok = kind == 'prepared'
     elif expect == 'conflict':
         ok = kind == 'refused' and reason == 'conflict'
-    elif expect == 'installed-or-requote':
-        # the record's size depends on digests derived from the transaction id (base-255 Nat codec: a
-        # digest is 32 or 33 bytes), so a quote taken in one transaction can be one byte short in the
-        # next: the answer is installed, or underfunded (the caller re-quotes from the refusal)
-        ok = (kind == 'confirmed' and value.get('confirmation') == 'installed') or \
-             (kind == 'refused' and 'Refusal.underfunded' in text)
     else:
         ok = kind == 'refused' or 'refused' in str(value.get('error', ''))
     if ok and detail is not None:
@@ -505,19 +509,14 @@ quote = re.search(r'underfunded (\d+) (\d+)', unhex(LAST['value'].get('detail', 
 NEED = int(quote.group(2)) if quote else 0
 check('deposit-reserves-pair-and-storage', quote is not None and int(quote.group(1)) == PAIR and NEED > PAIR,
       {'pair': PAIR, 'quote': quote.groups() if quote else None})
-# The quote came from one transaction and the record's size depends on digests derived from the
-# transaction id (measured: 16 identical quote turns answered 8456 x12, 8457 x3, 8458 x1), so the exact
-# deposit is re-quoted from each underfunded answer until a turn installs (each retry is a new transaction).
-tx3 = None
-for attempt in range(1, 9):
-    label = 'birth-exact-deposit' if attempt == 1 else f'birth-exact-deposit-retry{attempt}'
-    birth(label, sponsor, 'tally-three', NEED, 'installed-or-requote'); value = LAST['value']
-    if value.get('type') == 'confirmed':
-        tx3 = value.get('transaction')
-        break
-    requote = re.search(r'underfunded (\d+) (\d+)', unhex(LAST['value'].get('detail', '')))
-    NEED = int(requote.group(2)) if requote else NEED
-check('exact-deposit-installed-within-requotes', tx3 is not None, {'attempts': attempt, 'deposit': NEED})
+QUOTED['birth-exact-deposit'] = NEED   # one quote, one submit: a refusal here is the defect, named by judge
+tx3 = birth('birth-exact-deposit', sponsor, 'tally-three', NEED, 'installed')
+if not results[-1]['ok'] and 'not a fixed point' in results[-1].get('detail', ''):
+    # the rest of the journey needs the birth: stop here, red, with the cause named as the last line
+    (root / 'results.json').write_text(json.dumps({'rows': results, 'allPass': False,
+                                                   'stoppedAt': 'birth-exact-deposit'}, indent=1) + '\n')
+    print(f"{results[-1]['detail']} (journey stopped at birth-exact-deposit)", flush=True)
+    sys.exit(1)
 f1 = state('tally-three', 'funding-born', tx3)
 REC3 = f1['recordCell']
 turn('funding-resolve', second, {'kind': 'resolve', 'slot': await_of(f1)['source']['slot'],
