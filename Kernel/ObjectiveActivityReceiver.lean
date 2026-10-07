@@ -945,7 +945,9 @@ def callAfterWork : ObjectiveCall.CallRefusal → Bool
   | .fanOut _ | .allowanceExceeded _ _ | .messageWide _ | .argumentType _ _ | .callShape _ _ _ | .frameFault _ _ _
   | .resultType _ _ | .grantSpent _ _ | .grantMismatch _ _ _ | .notControllable _ | .notSender _ _ | .slotInbox _ _
   | .lawDenied _ _ _ | .exhausted | .queueFull _ _ | .slotQueueFull _ | .notPipelinable _ | .slotTaken _
-  | .inboxCodec _ _ | .packageCell _ | .drainConflict _ => true
+  | .inboxCodec _ _ | .packageCell _ | .drainConflict _
+  -- the turn's front-end meter, drawn as frames load and sends are checked (GPT-6 row E)
+  | .frontEndExhausted _ _ _ | .postageFrontEnd _ _ _ _ => true
 
 /-- **The refusals a signed, authorized, funded turn is CHARGED for**: the ones it meets after
 the validator's work (`ObjectiveActivity.Refusal.afterWork`, a call tree's own, the seat end),
