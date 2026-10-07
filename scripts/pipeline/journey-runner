@@ -87,7 +87,9 @@ run_row() {  # ROW: one row in its own scratch world and scope; its lines go to 
 run_tip() {
   local tip=$1 set=$ARTIFACT_ROOT/$1 J=$JOURNEY_ROOT/$1 src leanenv=0 rowsfile t0 tmp
   pipeline_verify_set "$set"
-  rm -rf "$J"; mkdir -p "$J/rows"; t0=$(date +%s)
+  # a re-run keeps the earlier run's evidence beside it (TIP.run-<time>), never deletes it first
+  [ -e "$J" ] && mv "$J" "$J.run-$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p "$J/rows"; t0=$(date +%s)
   labels=$(for l in next green main; do [ "$(readlink "$ARTIFACT_ROOT/$l" 2>/dev/null)" = "$tip" ] && printf '%s ' "$l"; done)
   if [ -f "$ARTIFACT_ROOT/.leanenv/$tip/.pipeline-leanenv-complete" ]; then src=$ARTIFACT_ROOT/.leanenv/$tip; leanenv=1
   else tmp=$(mktemp -d "$scratch_base/pjs.XXXXXX"); tar -xf "$set/source.tar" -C "$tmp"; src=$tmp; fi

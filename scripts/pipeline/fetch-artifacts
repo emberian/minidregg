@@ -40,6 +40,7 @@ if { [ -z "$tip" ] || [ ! -f "$ARTIFACT_ROOT/$tip/READY" ]; } && [ -n "${PIPELIN
   rsync -a --exclude=/READY "$PIPELINE_FETCH_FROM:$rel/$tip/" "$ARTIFACT_ROOT/$tip/"
   rsync -a "$PIPELINE_FETCH_FROM:$rel/$tip/READY" "$ARTIFACT_ROOT/$tip/READY"
 fi
+grep -sF -e "${tip:-$want}" "$ARTIFACT_ROOT/ALERTS" >&2 && echo "fetch-artifacts: (the alert above is about what you asked for)" >&2
 [ -n "$tip" ] || pipeline_die "no artifact set for '$want' in $ARTIFACT_ROOT (published: $(cd "$ARTIFACT_ROOT" 2>/dev/null && ls -d [0-9a-f]* 2>/dev/null | cut -c1-12 | paste -sd' '))"
 set_dir=$ARTIFACT_ROOT/$tip
 pipeline_verify_set "$set_dir"
