@@ -257,23 +257,18 @@ theorem prepare_agrees (deployment : Deployment) (semantics : Digest) (ambient :
   unfold prepare
   rw [prepareOn_map, prepareOn_map, markers]
 
-/-- **An undeclared marker is refused by name**, exactly, whatever the state. -/
+/-- **An undeclared marker is refused by name**: the preparation's outcome is exactly the
+refusal `undeclaredMarker`, whatever the state (the prepared value is a proof-only record,
+so its outcome is all there is). -/
 theorem prepare_undeclared (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
     {store : DurableHistory.StoreIdentity} (basis : ServedBasis.Basis deployment store) (command : Command)
     (undeclared : CredentialAuthorityReplay.nullifier deployment.domain
         (operationMarker (ServedBasis.Ground.ofBasis basis).authority.domain semantics command) ∉
           basis.keys.nullifiers) :
-    prepare deployment semantics ambient (ServedBasis.Ground.ofBasis basis) command = .error .undeclaredMarker := by
-  have unanswered := ServedBasis.Ground.markerSpent_undeclared basis _ undeclared
-  unfold prepare prepareOn
-  split
-  · rfl
-  · rename_i answered
-    rw [unanswered] at answered
-    cases answered
-  · rename_i answered
-    rw [unanswered] at answered
-    cases answered
+    (prepare deployment semantics ambient (ServedBasis.Ground.ofBasis basis) command).map (fun _ => ()) =
+      .error .undeclaredMarker := by
+  unfold prepare
+  rw [prepareOn_map, ServedBasis.Ground.markerSpent_undeclared basis _ undeclared]
 
 #assert_axioms Prepared.unspent
 #assert_axioms prepare_agrees
