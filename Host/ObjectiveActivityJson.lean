@@ -359,7 +359,13 @@ def inspectPlan (bytes : List UInt8) : Result Json :=
   match ObjectiveActivityReceiver.signingPlanCodec.decode bytes with
   | none => .error "noncanonical activity plan"
   | some plan => .ok (.mkObj
-      [("type", "objective-activity-plan-v3"), ("canonical", toJson (hex bytes)),
+      [("type", "objective-activity-plan-v4"), ("canonical", toJson (hex bytes)),
+       -- The front-end work the decided turn's replays drew (GPT-6 row E): what an invocation's envelope
+       -- declares as `replayBytes`/`coreBytes` (plan once over a generous envelope, declare this, re-plan).
+       ("frontEnd", .mkObj [("replayBytes", toJson (toString plan.frontEnd.source)),
+         ("coreBytes", toJson (toString plan.frontEnd.core)),
+         ("postageReplayBytes", toJson (toString plan.frontEnd.postageSource)),
+         ("postageCoreBytes", toJson (toString plan.frontEnd.postageCore))]),
        ("report", if plan.report.isEmpty then .null else dataOf plan.report),
        -- What a submission at the planning snapshot commits (GPT-6 row E): null when admitted,
        -- `charged failure: ...` (the price of the envelope, nothing else) or `refused: ...`.

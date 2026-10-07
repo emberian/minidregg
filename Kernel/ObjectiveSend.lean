@@ -102,9 +102,9 @@ def runMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
   | none => .failed "the arguments do not decode"
   | some args =>
     match exec config snapshot height ⟨none, some message.sender⟩ (messageTransaction message.id)
-        (callFuel message.envelope) [] (.enter ⟨⟨target⟩, message.method, args⟩) (Journal.start [] message.envelope.extractTicks)
+        (callFuel message.envelope) [] (.enter ⟨⟨target⟩, message.method, args⟩) (Journal.start [] message.envelope)
         message.envelope.sourceTicks with
-    | .error reason => .failed (reprStr reason)
+    | .error (reason, _) => .failed (reprStr reason)
     | .ok (result, journal, _) =>
       if journal.controls.isEmpty && journal.drained then .replied result journal
       else .failed (if !journal.controls.isEmpty then
@@ -160,8 +160,9 @@ def continueMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot :
     match onwardRefusal config message journal.outbox with
     | some refusal => (.failed (reprStr refusal), seed, 0)
     | none =>
-      match postMail config snapshot message.envelope message.refund (message.depth + 1) seed journal.outbox with
-      | .error reason => (.failed (reprStr reason), seed, 0)
+      match postMail config snapshot message.envelope message.refund (message.depth + 1) { seed with meter := journal.meter }
+          journal.outbox with
+      | .error (reason, _) => (.failed (reprStr reason), seed, 0)
       | .ok mail => (.replied result journal, mail, onwardEscrow config message journal.outbox)
 
 /-- **What a continuation can be**: the run unchanged, nothing sent; or a failure, nothing
@@ -173,7 +174,7 @@ theorem continueMessage_cases {rootBytes : Bytes → Digest} {config : Config} {
     (∃ result journal, run = .replied result journal ∧ outcome = run ∧ journal.outbox ≠ [] ∧
       message.depth < Inbox.continuationDepth ∧ journal.outbox.length ≤ Inbox.fanOut ∧
       spent = onwardEscrow config message journal.outbox ∧ spent ≤ message.allowance ∧
-      postMail config snapshot message.envelope message.refund (message.depth + 1) seed journal.outbox = .ok mail) := by
+      postMail config snapshot message.envelope message.refund (message.depth + 1) { seed with meter := journal.meter } journal.outbox = .ok mail) := by
   cases run with
   | failed reason =>
     simp only [continueMessage, Prod.mk.injEq] at continued
@@ -351,7 +352,8 @@ def seedMail {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsh
   have step := (Inbox.pop_step popped).1
   have keeps := step.keeps
   ⟨[⟨sender, target, some inbox, readExact, clean, remaining, .step step (.refl _),
-      ⟨keeps.1.trans ends.1, keeps.2.1.trans ends.2⟩⟩], [], [], [], [], []⟩
+      ⟨keeps.1.trans ends.1, keeps.2.1.trans ends.2⟩⟩], [], [], [], [], [],
+    ObjectiveWorkAccount.Meter.start message.envelope, (0, 0)⟩
 
 /-- **A message to a draining object waits.** The target object drains toward an
 upgrade that admits no new frame (`ObjectRecord.admitsNew`): delivering now would
@@ -816,7 +818,7 @@ theorem Invocation.escrows_every_send {rootBytes : Bytes → Digest} {config : C
         invoked.journal.outbox.length * config.tariff.workOf request.postage + outboxAllowance invoked.journal.outbox +
           (invoked.journal.outbox.map fun out => (messageOf config request.postage request.account 0 out).deposit).sum ∧
       outboxAllowance invoked.journal.outbox ≤ request.allowance := by
-  obtain ⟨len, sum⟩ := postMail_credits request.postage request.account 0 invoked.journal.outbox Mail.empty
+  obtain ⟨len, sum⟩ := postMail_credits request.postage request.account 0 invoked.journal.outbox (Mail.start invoked.journal.meter)
     invoked.sent invoked.sentExact
   rw [(postControls_credits height _ _ _ invoked.mailExact).1]
   have each : ∀ (outs : List Outgoing),
@@ -831,8 +833,8 @@ theorem Invocation.escrows_every_send {rootBytes : Bytes → Digest} {config : C
       simp only [messageOf, Inbox.Message.escrow, outboxAllowance] at ⊢ ih
       rw [Nat.succ_mul]; omega
   refine ⟨?_, ?_, invoked.allowanceCovered⟩
-  · rw [len]; simp [Mail.empty]
-  · rw [sum, each]; simp [Mail.empty]
+  · rw [len]; simp [Mail.start]
+  · rw [sum, each]; simp [Mail.start]
 
 /-- **An inbox the mail holds stays within `Inbox.bound`** when the inbox the turn read
 was (a fresh inbox, read as nothing, always is). -/
@@ -1022,6 +1024,7 @@ theorem continueMessage_credits {rootBytes : Bytes → Digest} {config : Config}
   · exact ⟨by simp, Nat.zero_le _, by omega, fun same => absurd rfl same⟩
   · exact ⟨by simp, Nat.zero_le _, by omega, fun same => absurd rfl same⟩
   · obtain ⟨len, sum⟩ := postMail_credits _ _ _ _ _ _ posted
+    simp only at len sum
     exact ⟨by rw [sum]; rfl, within, by omega, fun _ => shallow⟩
 
 /-- The flows of a delivery out of its purse, payee and amount: the onward sends' and the

@@ -1333,10 +1333,10 @@ theorem invocation_mail_silent {rootBytes : Bytes → Digest} {config : Config} 
     invoked.mail.inboxes = [] ∧ ∀ closed ∈ invoked.mail.closed, closed.decided = none := by
   have sent := invoked.sentExact
   rw [silent] at sent
-  have same : (Except.ok ObjectiveCall.Mail.empty : Except ObjectiveCall.CallRefusal (ObjectiveCall.Mail config snapshot)) =
+  have same : (Except.ok (ObjectiveCall.Mail.start invoked.journal.meter) : Except (ObjectiveCall.CallRefusal × ObjectiveCall.FrontEnd) (ObjectiveCall.Mail config snapshot)) =
       Except.ok invoked.sent :=
-    (show ObjectiveCall.postMail config snapshot request.postage request.account 0 ObjectiveCall.Mail.empty [] =
-      .ok ObjectiveCall.Mail.empty from rfl).symm.trans sent
+    (show ObjectiveCall.postMail config snapshot request.postage request.account 0 (ObjectiveCall.Mail.start invoked.journal.meter) [] =
+      .ok (ObjectiveCall.Mail.start invoked.journal.meter) from rfl).symm.trans sent
   have empty := Except.ok.inj same
   obtain ⟨inboxes, closed⟩ := ObjectiveSend.postControls_stops height _ _ _ invoked.mailExact noCancel
     (by rw [← empty]; intro _ member; cases member)
@@ -1350,10 +1350,10 @@ theorem invocation_mail_nil {rootBytes : Bytes → Digest} {config : Config} {sn
     (silent : invoked.journal.outbox = []) (still : invoked.journal.controls = []) : invoked.mail.posts = [] := by
   have sent := invoked.sentExact
   rw [silent] at sent
-  have same : (Except.ok ObjectiveCall.Mail.empty : Except ObjectiveCall.CallRefusal (ObjectiveCall.Mail config snapshot)) =
+  have same : (Except.ok (ObjectiveCall.Mail.start invoked.journal.meter) : Except (ObjectiveCall.CallRefusal × ObjectiveCall.FrontEnd) (ObjectiveCall.Mail config snapshot)) =
       Except.ok invoked.sent :=
-    (show ObjectiveCall.postMail config snapshot request.postage request.account 0 ObjectiveCall.Mail.empty [] =
-      .ok ObjectiveCall.Mail.empty from rfl).symm.trans sent
+    (show ObjectiveCall.postMail config snapshot request.postage request.account 0 (ObjectiveCall.Mail.start invoked.journal.meter) [] =
+      .ok (ObjectiveCall.Mail.start invoked.journal.meter) from rfl).symm.trans sent
   rw [ObjectiveSend.Invocation.mail_of_silent invoked still, ← Except.ok.inj same]
   rfl
 

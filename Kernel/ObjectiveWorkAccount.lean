@@ -150,6 +150,107 @@ theorem workOf_prices_every_stage_unit (stage : Stage) :
     Tariff.everyStage.workOf ObjectiveTariff.zeroCapacity < Tariff.everyStage.workOf (unitOf stage) := by
   cases stage <;> decide
 
+/-! ### The turn's front-end meter
+
+A turn may replay MANY packages: every frame of a call tree loads its object's method, a send
+to an object checks that the target's method is deliverable, an upgrade lowers a migration and
+re-births activities. The envelope's `replayBytes` and `coreBytes` are a BUDGET for all of
+them, not a cover of each: every replay DRAWS its source bytes and the typed-core bytes it
+generates from the one meter, refused by name when the budget left is short. -/
+
+/-- The front end's work a turn has drawn, against what its paying envelope declared. -/
+structure Meter where
+  /-- The source bytes the envelope declared (`Capacity.replayBytes`). -/
+  replayBytes : Nat
+  /-- The typed-core bytes the envelope declared (`Capacity.coreBytes`). -/
+  coreBytes : Nat
+  /-- Every draw, in order: the source bytes a replay parsed and the core bytes it generated. -/
+  draws : List (Nat × Nat)
+  deriving Repr, DecidableEq
+
+/-- A fresh meter over a paying envelope. -/
+def Meter.start (envelope : Capacity) : Meter := ⟨envelope.replayBytes, envelope.coreBytes, []⟩
+
+/-- The source bytes drawn so far. -/
+def Meter.source (m : Meter) : Nat := (m.draws.map Prod.fst).sum
+
+/-- The typed-core bytes drawn so far. -/
+def Meter.core (m : Meter) : Nat := (m.draws.map Prod.snd).sum
+
+/-- **Draw one replay's work**, refused naming the stage, what it needs and what the budget has
+left when it does not fit. -/
+def Meter.draw (m : Meter) (source core : Nat) : Except (Stage × Nat × Nat) Meter :=
+  if m.replayBytes < m.source + source then .error (.frontEnd, source, m.replayBytes - m.source)
+  else if m.coreBytes < m.core + core then .error (.core, core, m.coreBytes - m.core)
+  else .ok { m with draws := m.draws ++ [(source, core)] }
+
+/-- Replay a list of draws on a meter, in order (refused at the first that does not fit). -/
+def Meter.drawAll (m : Meter) : List (Nat × Nat) → Except (Stage × Nat × Nat) Meter
+  | [] => .ok m
+  | (source, core) :: rest => do (← m.draw source core).drawAll rest
+
+/-- The draws a meter made after another (its suffix past `before`'s draws). -/
+def Meter.since (m before : Meter) : List (Nat × Nat) := m.draws.drop before.draws.length
+
+/-- The meter's draws are within its budget. -/
+def Meter.Within (m : Meter) : Prop := m.source ≤ m.replayBytes ∧ m.core ≤ m.coreBytes
+
+theorem Meter.start_within (envelope : Capacity) : (Meter.start envelope).Within := by
+  simp [Meter.start, Meter.Within, Meter.source, Meter.core]
+
+/-- **A draw stays within the budget**: an admitted draw keeps the declared budget, appends
+exactly its own work, and leaves the total drawn within what the envelope declared. -/
+theorem Meter.draw_ok {m m' : Meter} {source core : Nat} (drawn : m.draw source core = .ok m') :
+    m'.replayBytes = m.replayBytes ∧ m'.coreBytes = m.coreBytes ∧ m'.draws = m.draws ++ [(source, core)] ∧
+      m'.Within := by
+  unfold Meter.draw at drawn
+  split at drawn
+  · cases drawn
+  · split at drawn
+    · cases drawn
+    · cases drawn
+      refine ⟨rfl, rfl, rfl, ?_, ?_⟩ <;> simp [Meter.source, Meter.core] at * <;> omega
+
+/-- A refused draw names a stage whose need exceeds what the budget has left. -/
+theorem Meter.draw_refused {m : Meter} {source core : Nat} {stage : Stage} {needed left : Nat}
+    (refused : m.draw source core = .error (stage, needed, left)) :
+    (stage = .frontEnd ∧ needed = source ∧ left = m.replayBytes - m.source ∧ m.replayBytes < m.source + source) ∨
+    (stage = .core ∧ needed = core ∧ left = m.coreBytes - m.core ∧ m.coreBytes < m.core + core) := by
+  unfold Meter.draw at refused
+  split at refused
+  · cases refused; exact .inl ⟨rfl, rfl, rfl, by assumption⟩
+  · split at refused
+    · cases refused; exact .inr ⟨rfl, rfl, rfl, by assumption⟩
+    · cases refused
+
+/-- Draws compose: a meter reached from another by admitted draws extends its draw list and keeps
+its budget (the shape every replay site's draws take, over a whole turn). -/
+inductive Meter.Reaches : Meter → Meter → Prop
+  | refl (m : Meter) : Meter.Reaches m m
+  | draw {m m' m'' : Meter} {source core : Nat} :
+      Meter.Reaches m m' → m'.draw source core = .ok m'' → Meter.Reaches m m''
+
+/-- **The whole turn's front end is within its envelope**: every meter reached by admitted
+draws from a fresh meter over `envelope` has drawn, summed over all its replays, at most the
+source bytes and the typed-core bytes the envelope declared. -/
+theorem Meter.Reaches.within {envelope : Capacity} {m : Meter} (reached : Meter.Reaches (Meter.start envelope) m) :
+    m.source ≤ envelope.replayBytes ∧ m.core ≤ envelope.coreBytes ∧
+      m.replayBytes = envelope.replayBytes ∧ m.coreBytes = envelope.coreBytes := by
+  induction reached with
+  | refl => simp [Meter.start, Meter.source, Meter.core]
+  | draw _ drawn ih =>
+    obtain ⟨r, c, _, w⟩ := Meter.draw_ok drawn
+    obtain ⟨_, _, r0, c0⟩ := ih
+    have r' := r.trans r0
+    have c' := c.trans c0
+    exact ⟨r' ▸ w.1, c' ▸ w.2, r', c'⟩
+
+/-- An instance: two replays of a 10-byte package with a 4-byte core fit a budget of 20 source
+and 8 core bytes; a third is refused naming the source stage with nothing left. -/
+theorem meter_third_replay_refused :
+    ((Meter.start { ObjectiveTariff.zeroCapacity with replayBytes := 20, coreBytes := 8 }).draw 10 4 >>=
+      (·.draw 10 4) >>= (·.draw 10 4)) = .error (.frontEnd, 10, 0) := by decide
+
 /-! ### Instances: the refusal and its plant -/
 
 /-- A ten-byte one-module package whose artifact carries a four-byte typed core. -/
@@ -176,6 +277,11 @@ theorem exact_envelope_covered :
     uncovered sample sampleArtifact { ObjectiveTariff.zeroCapacity with replayBytes := 10, coreBytes := 4 } =
       none := by decide
 
+#assert_axioms Meter.start_within
+#assert_axioms Meter.draw_ok
+#assert_axioms Meter.draw_refused
+#assert_axioms Meter.Reaches.within
+#assert_axioms meter_third_replay_refused
 #assert_axioms frontEnd_refuses_oversized
 #assert_axioms core_refuses_oversized
 #assert_axioms exact_envelope_covered
