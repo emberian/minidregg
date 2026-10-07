@@ -11,11 +11,13 @@
 #   FA  a Host serving a view of another state: refused servedRootMismatch
 #       before anything is signed
 #   T2  honest again after the faults: shown = committed
-#   N1  a member holding no observe grant on its target: refused before
-#       anything is signed, and the Host served no bytes of the target
+#   N1  a member whose observe grant is narrowed to one field: the served view
+#       is not the cell, refused servedRootMismatch before anything is signed
+#   N2  a member with no grant on the target: the Host refuses the signed read,
+#       serves no bytes, and nothing is signed
 #   S1  a signed call whose target moved, for a signer who observes the target:
 #       refused naming the target (phase stale-target)
-#   S2  the same for a signer who does not observe the target: the uniform
+#   S2  the same for a signer whose observe grant is narrowed: the uniform
 #       undisclosed frame
 #   M   (only with THIN_MUTANT_PROVIDER: a provider built with the served-root
 #       comparison removed) the mutant accepts a view of another state, shows a
@@ -79,6 +81,7 @@ ok kind-create alice 'kind create tc-poll @poll.json open'
 ok instance-create alice 'create tc-one --from tc-poll open'
 
 # ---- T1: honest thin consent; what it shows is what commits
+ok t1-propose-show alice 'instance show tc-one'
 ok t1-propose alice 'instance set t1 tc-one open 0 0'
 say alice 'submit t1' pass
 [ "$RC" = 0 ] || fail t1-submit 0 "$RC" x "$(tail -3 "$ERR")"
@@ -87,15 +90,19 @@ T1=$(attempt_of "$ERR"); PRE_T1=$(reads_of "$ERR" | tail -1)/view.bin
 check t1-thin-frames proxy_saw 'frame 232'
 check t1-shown test -s "$T1/thin-display.json"
 cp "$PRE_T1" "$D/view-pre-t1.bin"
+ok t1b-propose-show alice 'instance show tc-one'
 ok t1b-propose alice 'instance set t1b tc-one open 0 1'
 check t1-shown-is-committed test "$(shown_root "$T1")" = "$(proposal_root t1b)"
 
 # ---- FB: the Host's plan carries another command's slots
+ok t3b-propose-show alice 'instance show tc-one'
 ok t3b-propose alice "instance set t3b tc-one votes $SPONSOR_SUBJECT 1"
 say alice 'submit t3b' "capture=$D/planB"
 [ "$RC" != 0 ] || fail fb-capture refused 0 x "the capturing proxy let t3b through"
 check fb-captured test -s "$D/planB.plan"
-OTHER_INTENT=$D/planB.intent say alice 'submit t1b' "slots-from=$D/planB.plan"
+ok fb1-propose-show alice 'instance show tc-one'
+ok fb1-propose alice 'instance set fb1 tc-one open 0 1'
+OTHER_INTENT=$D/planB.intent say alice 'submit fb1' "slots-from=$D/planB.plan"
 check fb-planted proxy_saw 'slots-from: spliced'
 grep -q 'headerMismatch' "$ERR" || fail fb-refused headerMismatch "$RC" x "$(tail -3 "$ERR")"
 FB=$(attempt_of "$ERR")
@@ -103,7 +110,9 @@ check fb-nothing-signed test ! -e "$FB/transaction-signatures.json"
 row fb-refused headerMismatch "$RC" PASS
 
 # ---- FA: the Host serves a view of another state (the pre-T1 view)
-say alice 'submit t1b' "view=$D/view-pre-t1.bin"
+ok fa1-propose-show alice 'instance show tc-one'
+ok fa1-propose alice 'instance set fa1 tc-one open 0 1'
+say alice 'submit fa1' "view=$D/view-pre-t1.bin"
 check fa-planted proxy_saw 'view: replaced'
 grep -q 'servedRootMismatch' "$ERR" || fail fa-refused servedRootMismatch "$RC" x "$(tail -3 "$ERR")"
 FA=$(attempt_of "$ERR")
@@ -111,14 +120,18 @@ check fa-nothing-signed test ! -e "$FA/transaction-signatures.json"
 row fa-refused servedRootMismatch "$RC" PASS
 
 # ---- T2: honest again
-say alice 'submit t1b' pass
+ok t2-propose-show alice 'instance show tc-one'
+ok t2-propose alice 'instance set t2 tc-one open 0 1'
+say alice 'submit t2' pass
 [ "$RC" = 0 ] || fail t2-submit 0 "$RC" x "$(tail -3 "$ERR")"
 row t2-submit 0 0 PASS
 T2=$(attempt_of "$ERR")
+ok t2c-propose-show alice 'instance show tc-one'
 ok t2c-propose alice 'instance set t2c tc-one open 0 0'
 check t2-shown-is-committed test "$(shown_root "$T2")" = "$(proposal_root t2c)"
 
 # ---- S1: a signed call whose target moved, signer observes the target
+ok s1-propose-show alice 'instance show tc-one'
 ok s1-propose alice 'instance set s1 tc-one open 0 1'
 S1=$D/s1-attempt
 env MINI_THIN_CONSENT=1 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
@@ -141,7 +154,7 @@ printf '%s\n' '{"type":"all","predicates":[]}' >"$D/req/permit-all.json"
   --predicate "$D/req/permit-all.json" --fields 401-405 >"$D/log/blind-create.out" 2>"$D/log/blind-create.err" \
   || fail blind-create 0 1 x "$(tail -3 "$D/log/blind-create.err")"
 jq -n --arg r "$NEWCOMER_SUBJECT" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"tc-blind",
-  recipient:$r,verbs:["mutate"],maxCost:"50000"}' >"$D/req/blind-grant.json"
+  recipient:$r,verbs:["observe","mutate"],fields:["401"],maxCost:"50000"}' >"$D/req/blind-grant.json"
 "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/blind-grant.json" --proposal-id tc-blind-grant \
   >"$D/log/blind-grant.out" 2>"$D/log/blind-grant.err" || fail blind-grant 0 1 x "$(tail -3 "$D/log/blind-grant.err")"
 "$MINI" workspace --action submit --dir "$SPONSOR_WS" --intent "$SPONSOR_WS/proposals/tc-blind-grant/intent.json" \
@@ -157,18 +170,34 @@ row blind-setup 0 0 PASS
 printf '{"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{"name":"tc-blind","payload":{"type":"scalar","actions":[{"type":"create","key":{"type":"object","field":"401"},"value":"1"}]}}]}\n' >"$D/req/blind-write.json"
 "$MINI" workspace --action propose --dir "$NEWCOMER_WS" --request "$D/req/blind-write.json" --proposal-id n1 \
   >"$D/log/n1-propose.out" 2>"$D/log/n1-propose.err" || fail n1-propose 0 1 x "$(tail -3 "$D/log/n1-propose.err")"
+# N1: its observe grant is narrowed to field 401, so the view the Host serves is
+# not the cell: refused servedRootMismatch before anything is signed.
 : >"$D/proxy-n1.log"
 rc=0; env MINI_THIN_CONSENT=1 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
   THIN_PROXY_REAL="$REAL" THIN_PROXY_MODE=pass THIN_PROXY_LOG="$D/proxy-n1.log" \
   "$MINI" workspace --action submit --dir "$NEWCOMER_WS" --intent "$NEWCOMER_WS/proposals/n1/intent.json" \
   --attempt "$NEWCOMER_WS/attempts/n1" >"$D/log/n1-submit.out" 2>"$D/log/n1-submit.err" || rc=$?
-[ "$rc" != 0 ] || fail n1-refused refused 0 x "a member without observe signed and submitted"
-check n1-no-plan-consent sh -c "! grep -q 'frame 232' '$D/proxy-n1.log'"
+grep -q 'servedRootMismatch' "$D/log/n1-submit.err" || fail n1-narrowed servedRootMismatch "$rc" x "$(tail -3 "$D/log/n1-submit.err")"
 check n1-nothing-signed test ! -e "$NEWCOMER_WS/attempts/n1/transaction-signatures.json"
-for read in $(reads_of "$D/log/n1-submit.err"); do
-  check n1-no-bytes-served test ! -e "$read/view.bin"
+row n1-narrowed servedRootMismatch "$rc" PASS
+# N2: a target it holds no grant on at all (tc-one, under its tc-blind
+# capability): the Host refuses the signed read, serves no bytes, and nothing
+# is signed.
+jq --arg t "$(jq -r .target "$SPONSOR_WS/refs/tc-one.json")" '.purpose.draft.command.targets[0].target=$t' \
+  "$NEWCOMER_WS/proposals/n1/intent.json" >"$D/req/n2-intent.json"
+: >"$D/proxy-n2.log"
+rc=0; env MINI_THIN_CONSENT=1 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
+  THIN_PROXY_REAL="$REAL" THIN_PROXY_MODE=pass THIN_PROXY_LOG="$D/proxy-n2.log" \
+  "$MINI" workspace --action submit --dir "$NEWCOMER_WS" --intent "$D/req/n2-intent.json" \
+  --attempt "$NEWCOMER_WS/attempts/n2" >"$D/log/n2-submit.out" 2>"$D/log/n2-submit.err" || rc=$?
+[ "$rc" != 0 ] || fail n2-refused refused 0 x "a member without a grant signed and submitted"
+grep -q '^refused: ' "$D/log/n2-submit.err" || fail n2-refused "host refusal" "$rc" x "$(tail -3 "$D/log/n2-submit.err")"
+check n2-no-plan-consent sh -c "! grep -q 'frame 232' '$D/proxy-n2.log'"
+for read in $(reads_of "$D/log/n2-submit.err"); do
+  check n2-no-bytes-served test ! -e "$read/view.bin"
 done
-row n1-refused "refused before signing" "$rc" PASS
+check n2-nothing-signed test ! -e "$NEWCOMER_WS/attempts/n2/transaction-signatures.json"
+row n2-refused "$(grep -m1 '^refused: ' "$D/log/n2-submit.err" | cut -c1-60)" "$rc" PASS
 # S2: the newcomer signs with full consent (it replays), the sponsor moves the cell, the call is refused uniformly.
 "$MINI" workspace --action submit --dir "$NEWCOMER_WS" --intent "$NEWCOMER_WS/proposals/n1/intent.json" \
   --attempt "$NEWCOMER_WS/attempts/s2-sealed" --prepare-only true >"$D/log/s2-prepare.out" 2>"$D/log/s2-prepare.err" \
@@ -186,6 +215,7 @@ row s2-uniform undisclosed "$rc" PASS
 
 if [ -n "${THIN_MUTANT_PROVIDER:-}" ]; then
   check m-is-mutant sh -c "[ \"\$(sha256sum < '$THIN_MUTANT_PROVIDER')\" != \"\$(sha256sum < '$REAL')\" ]"
+  ok m-propose-show alice 'instance show tc-one'
   ok m-propose alice "instance set m1 tc-one votes $SPONSOR_SUBJECT 1"
   REAL_SAVED=$REAL; REAL=$THIN_MUTANT_PROVIDER
   say alice 'submit m1' "view=$D/view-pre-t1.bin"
@@ -194,6 +224,7 @@ if [ -n "${THIN_MUTANT_PROVIDER:-}" ]; then
   [ "$RC" = 0 ] || fail m-mutant-signed 0 "$RC" x "the mutant refused: $(tail -3 "$ERR")"
   row m-mutant-signed 0 0 PASS
   M=$(attempt_of "$ERR")
+  ok m-next-show alice 'instance show tc-one'
   ok m-next alice 'instance set m2 tc-one open 0 1'
   check m-shown-differs-from-committed test "$(shown_root "$M")" != "$(proposal_root m2)"
   printf 'JTHIN-MUTANT: the mutant showed %s, the turn committed %s\n' "$(shown_root "$M")" "$(proposal_root m2)" >&2

@@ -324,6 +324,15 @@ pub(crate) fn codec_process(host:&Path,config:&Path,args:&[&OsStr])->Result<Opti
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn thin_view_list_is_the_lean_byte_list_codec() {
+        // StreamCodec.nat: base-255 little-endian digits then 255; list = count then items.
+        assert_eq!(stream_nat(0), vec![255]);
+        assert_eq!(stream_nat(254), vec![254, 255]);
+        assert_eq!(stream_nat(255), vec![0, 1, 255]);
+        assert_eq!(stream_byte_list(&[]), vec![255]);
+        assert_eq!(stream_byte_list(&[vec![7, 8], vec![]]), vec![2, 255, 2, 255, 7, 8, 255]);
+    }
     use super::*;
     #[test]
     fn consent_pair_preserves_exact_order_and_bounds() {

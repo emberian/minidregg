@@ -231,22 +231,22 @@ theorem computeTarget_root (snapshot : AuthoritySnapshot) (semantics : Digest) (
         by_contra moved
         have hb : (root != pre.root) = true := bne_iff_ne.mpr moved
         simp only [computeTarget, hb, if_true] at computed
-        split_ifs at computed <;> simp [throw, throwThe, MonadExceptOf.throw, bind, Except.bind, Functor.map, Except.map, pure, Except.pure] at computed
+        split_ifs at computed <;> simp [bind, Except.bind, pure, Except.pure] at computed
     | kindDefinition definition =>
         by_contra moved
         have hb : (root != pre.root) = true := bne_iff_ne.mpr moved
         simp only [computeTarget, hb, if_true] at computed
-        split_ifs at computed <;> simp [throw, throwThe, MonadExceptOf.throw, bind, Except.bind, Functor.map, Except.map, pure, Except.pure] at computed
+        split_ifs at computed <;> simp [bind, Except.bind, pure, Except.pure] at computed
     | read =>
         by_contra moved
         have hb : (root != pre.root) = true := bne_iff_ne.mpr moved
         simp only [computeTarget, hb, if_true] at computed
-        split_ifs at computed <;> simp [throw, throwThe, MonadExceptOf.throw, bind, Except.bind, Functor.map, Except.map, pure, Except.pure] at computed
+        split_ifs at computed <;> simp [bind, Except.bind, pure, Except.pure] at computed
     | kindRead =>
         by_contra moved
         have hb : (root != pre.root) = true := bne_iff_ne.mpr moved
         simp only [computeTarget, hb, if_true] at computed
-        split_ifs at computed <;> simp [throw, throwThe, MonadExceptOf.throw, bind, Except.bind, Functor.map, Except.map, pure, Except.pure] at computed
+        split_ifs at computed <;> simp [bind, Except.bind, pure, Except.pure] at computed
     | content _ => exact supported.elim
     | append _ => exact supported.elim
     | computeFunding _ => exact supported.elim
