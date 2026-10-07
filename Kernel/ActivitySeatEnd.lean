@@ -158,7 +158,7 @@ rebirth. Other turns end nothing. -/
 def AdmittedTurn.ending {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} :
     AdmittedTurn config snapshot height → Option (Nat × Σ pre : BookCell, Postings pre)
-  | .birth _ born => match born.record.phase with
+  | .birth _ _ born => match born.record.phase with
     | .awaiting _ => none
     | _ => some (born.cell.value, ⟨born.book, born.posted⟩)
   | .deliver request delivery => match delivery.next.phase with
@@ -187,7 +187,7 @@ turn's own transaction, guards and claims). -/
 def AdmittedTurn.finalIntent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} (sealing : Seal) (posts : List Post) (extra : List ReadGuard) :
     AdmittedTurn config snapshot height → DataIntent rootBytes
-  | .birth request born =>
+  | .birth request _ born =>
       intentOf rootBytes (ObjectiveActivity.birthTransaction request) posts
         (born.guards ++ extra) [] sealing
   | .deliver _ delivery =>
