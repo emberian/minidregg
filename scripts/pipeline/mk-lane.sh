@@ -5,8 +5,8 @@
 # default /srv/warm-base/src) at $PIPELINE_LANES/<lane-name>/src (+ logs/), warm enough that
 # `lake build Minidregg +Host.Main:leanArts ObjectiveProofs` replays without compiling, and
 # isolated enough that nothing the lane does writes into the base. ONE copy of this script: the
-# repo's scripts/pipeline/mk-lane.sh; advance-base-burst.sh and relay-base.sh install it as
-# $PIPELINE_WARM_BASE/mk-lane.sh at every advance (hbox and persvati carry older ports).
+# repo's scripts/pipeline/mk-lane.sh; advance-base-burst.sh and relay-base.sh install the TIP TREE's
+# copy as $PIPELINE_WARM_BASE/mk-lane.sh at every advance (hbox and persvati carry older ports).
 #
 # What is copied and what is shared (inode-level), and why:
 #   - source tree + .git: REAL copies (rsync). Editors and git write in place.

@@ -5,7 +5,9 @@
 #   slot under swarm-build, then swap. Then a probe lane (mk-lane --verify) must replay 0 modules BEFORE the
 #   base is published: NOT-READY.txt stays through the swap AND the verify (`verifying ...`), and a failed
 #   verify leaves it in place with the reason (exit 8) instead of a FROZEN base nobody can replay from.
-# The base's mk-lane.sh is refreshed from this script's directory (the repo's one copy) at every advance.
+# The base's mk-lane.sh is the TIP TREE's scripts/pipeline/mk-lane.sh (never a tools-dir copy: on 10-07 06:41Z a stale
+# mk-tools copy without MK_LANE_PROBE was installed, the probe was refused and burst2-a's base sat NOT-READY for 5 min);
+# it must know MK_LANE_PROBE or the advance refuses before touching the base.
 # Refuses when NOT-READY is set (another advance, or a failed one) or src.prev-<old> already exists.
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -36,7 +38,9 @@ cd "$GL/src"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "advance: tracked tree dirty in $GL"; exit 5; }
 rm -rf build-logs target-gates   # gate outputs (untracked, this keeper's own)
 git remote set-url base "$W/src" 2>/dev/null || true
-install -m 755 "$here/mk-lane.sh" "$W/.mk-lane.sh.new" && mv -f "$W/.mk-lane.sh.new" "$W/mk-lane.sh"
+mk=$GL/src/scripts/pipeline/mk-lane.sh
+[ -f "$mk" ] && grep -q 'MK_LANE_PROBE' "$mk" || { echo "advance: REFUSED, $mk is missing or predates MK_LANE_PROBE (the probe would be refused and the base left NOT-READY)"; exit 9; }
+install -m 755 "$mk" "$W/.mk-lane.sh.new" && mv -f "$W/.mk-lane.sh.new" "$W/mk-lane.sh"
 echo "advancing $old -> $TIP by MERGE-KEEPER $(date -Is)" > "$W/NOT-READY.txt"
 mv "$W/src" "$W/src.prev-${old:0:8}"
 mv "$GL/src" "$W/src"

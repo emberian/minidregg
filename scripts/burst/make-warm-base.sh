@@ -17,7 +17,9 @@ cp -p "$(readlink -f "$SRV/mini-logs/cold-build-latest.log")" "$W/logs/green.log
 for p in "$W"/src/.lake/packages/*/; do git -C "$p" config core.trustctime false; done
 git -C "$W/src" config core.trustctime false
 [ -z "$(git -C "$W/src" status --porcelain --untracked-files=no)" ] || { echo "base tracked tree dirty"; exit 1; }
-install -m 755 "$SRV/pipeline/scripts/mk-lane.sh" "$W/mk-lane.sh"    # the repo's one copy (installed by burst-up)
+mk=$SRV/mini/scripts/pipeline/mk-lane.sh    # the TIP tree's copy, never a tools-dir one
+[ -f "$mk" ] && grep -q MK_LANE_PROBE "$mk" || { echo "make-warm-base: $mk is missing or predates MK_LANE_PROBE"; exit 9; }
+install -m 755 "$mk" "$W/mk-lane.sh"
 printf 'tip=%s\nfrozen_at=%s\nbuilt_on=%s:%s/mini\n%s\nrule=read-only base; lanes come from %s/mk-lane.sh <lane>; never build in %s/src\n' \
   "$TIP" "$(date -Is)" "$(hostname)" "$SRV" "$(grep -E '^(build_wall|build_rc)' "$R" | tr ' ' '\n' | grep -E '^build_(wall|rc)=' | paste -sd' ')" "$W" "$W" > "$W/FROZEN"
 [ "$(git -C "$SRV/mini" rev-parse HEAD)" = "$TIP" ] && [ "$(git -C "$W/src" rev-parse HEAD)" = "$TIP" ] || { echo "tip moved during the copy"; exit 1; }

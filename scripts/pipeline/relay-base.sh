@@ -4,7 +4,9 @@
 # .lake/packages is NOT sent: the receiver hardlinks its own (same lake-manifest). The receiver's src is
 # swapped in by rename under NOT-READY, FROZEN rewritten, and the base is PUBLISHED (NOT-READY removed)
 # ONLY after a probe lane replays 0 modules; a failed verify leaves NOT-READY with the reason, exit 8.
-# The receiver's mk-lane.sh is refreshed from this script's directory (the repo's one copy).
+# The receiver's mk-lane.sh is the TIP TREE's scripts/pipeline/mk-lane.sh (copied with the tree), never a tools-dir
+# copy (10-07 06:41Z: a stale copy without MK_LANE_PROBE left a base NOT-READY); it must know MK_LANE_PROBE or the relay
+# refuses before the swap.
 # A receiver with NO base yet (a fresh box, burst-up) gets everything, .lake/packages included: a warm base
 # is copied from a sibling, never cold-built twice (WARM BASES, NEVER PARALLEL REBUILDS).
 # Remote steps are shell SCRIPTS fed over stdin (bash -s with positional args), not quoted strings.
@@ -40,7 +42,6 @@ echo "relay: copied in $(( $(date +%s) - s ))s"
 # the source base's green log travels too: mk-lane --verify's positive control (the Built-line pattern must match
 # a real build log) reads $W/logs/green*.log on the RECEIVER, which a fresh box does not have
 src_run "cat \$(ls -t $(dirname "$SD")/logs/green*.log 2>/dev/null | head -1)" | $SSH "$DH" "cat > /srv/warm-base/logs/green-relayed-${T:0:8}.log"
-$SSH "$DH" "cat > /srv/warm-base/.mk-lane.sh.new" < "$here/mk-lane.sh"
 $SSH "$DH" bash -s -- "$T" "$SH" "$SD" "$fresh" <<'POST'
 set -e; T=$1 SH=$2 SD=$3 fresh=$4; W=/srv/warm-base; old=$(sed -n 's/^tip=//p' $W/FROZEN 2>/dev/null || true)
 if [ "$fresh" = 1 ]; then cp -p $W/src.new/.lake/../lake-manifest.json /dev/null 2>/dev/null || true; for p in $W/src.new/.lake/packages/*/; do git -C "$p" config core.trustctime false; done; git -C $W/src.new config core.trustctime false; fi
@@ -49,7 +50,9 @@ mkdir -p /srv/lanes; cd $W/src.new
 [ "$(git rev-parse HEAD)" = "$T" ] || { echo "relay: copy HEAD != $T" >&2; exit 3; }
 [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "relay: copy tracked tree dirty" >&2; exit 3; }
 git remote set-url base $W/src 2>/dev/null || true
-chmod 755 $W/.mk-lane.sh.new && mv -f $W/.mk-lane.sh.new $W/mk-lane.sh
+mk=$W/src.new/scripts/pipeline/mk-lane.sh
+[ -f "$mk" ] && grep -q MK_LANE_PROBE "$mk" || { echo "relay: REFUSED, the tip tree's scripts/pipeline/mk-lane.sh is missing or predates MK_LANE_PROBE" >&2; exit 9; }
+install -m 755 "$mk" $W/.mk-lane.sh.new && mv -f $W/.mk-lane.sh.new $W/mk-lane.sh
 echo "advancing ${old:-nothing} -> $T (copy from $SH:$SD) $(date -Is)" > $W/NOT-READY.txt
 [ -z "$old" ] || mv $W/src $W/src.prev-${old:0:8}; mv $W/src.new $W/src
 printf 'tip=%s\nfrozen_at=%s\nbuilt_in=%s:%s (copied by relay; .lake/packages %s)\nprev=%s\nrule=read-only base; lanes come from /srv/warm-base/mk-lane.sh <lane>; never build in /srv/warm-base/src\n' \
