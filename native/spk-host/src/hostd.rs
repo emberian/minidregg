@@ -16,6 +16,7 @@ use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+#[cfg(test)]
 use std::process::Command;
 use std::process::{Output, Stdio};
 use std::time::{Duration, Instant};
@@ -182,7 +183,7 @@ impl Record {
         let child = self
             .child_pid
             .ok_or_else(|| invalid("Running app PID absent"))?;
-        let child_group = fs::read_to_string(format!("/proc/{child}/cgroup"))?;
+        let child_group = crate::os::pid_cgroup(child)?;
         if !child_group
             .lines()
             .any(|line| line == format!("0::{}", current.control_group))
@@ -381,7 +382,7 @@ fn stop_unit(unit: &str) -> io::Result<()> {
 }
 
 fn bounded_systemctl(args: &[&str], deadline: Duration) -> io::Result<Output> {
-    let mut child = Command::new("/usr/bin/systemctl")
+    let mut child = crate::os::systemctl()
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -426,7 +427,7 @@ impl UnitInstance {
     fn current(unit: &str) -> io::Result<Self> {
         let invocation_id =
             std::env::var("INVOCATION_ID").map_err(|_| invalid("missing systemd InvocationID"))?;
-        let cgroup = fs::read_to_string("/proc/self/cgroup")?;
+        let cgroup = crate::os::self_cgroup()?;
         let control_group = cgroup
             .lines()
             .find_map(|line| line.strip_prefix("0::"))
@@ -642,8 +643,7 @@ impl UnitStopAudit {
             return Err(invalid("systemd cgroup differs from durable unit instance"));
         }
         let exact_cgroup_empty = if let Some(group) = recorded_group {
-            let path = Path::new("/sys/fs/cgroup").join(group.trim_start_matches('/'));
-            match fs::read_to_string(path.join("cgroup.events")) {
+            match crate::os::cgroup_events(group) {
                 Ok(events) => {
                     let populated = events
                         .lines()
@@ -866,7 +866,7 @@ impl Journal {
             let manager = systemd_show(record.unit())?;
             let child_group = record
                 .child_pid
-                .and_then(|pid| fs::read_to_string(format!("/proc/{pid}/cgroup")).ok());
+                .and_then(|pid| crate::os::pid_cgroup(pid).ok());
             let running = property(&manager, "Id")? == record.unit()
                 && property(&manager, "LoadState")? == "loaded"
                 && property(&manager, "ActiveState")? == "active"

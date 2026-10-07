@@ -126,3 +126,8 @@ pub mod resident_route_control;
 
 #[cfg(target_os = "linux")]
 mod checkpoint_control;
+
+#[cfg(target_os = "linux")]
+mod os;
+#[cfg(all(target_os = "linux", feature = "fixture-os"))]
+pub mod fixture_os;

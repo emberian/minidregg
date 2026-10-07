@@ -99,7 +99,7 @@ fn validate(spec: &SpawnSpec, test_mode: bool) -> io::Result<()> {
 /// The gate clears supplementary groups before execveat. Check the execute
 /// class of that exact UID/GID, rather than accepting any inode execute bit.
 /// The kernel still checks ACLs and LSM policy at the final exec boundary.
-fn execute_mode_permits(owner: u32, group: u32, mode: u32, uid: u32, gid: u32) -> bool {
+pub(crate) fn execute_mode_permits(owner: u32, group: u32, mode: u32, uid: u32, gid: u32) -> bool {
     let bit = if owner == uid { 0o100 } else if group == gid { 0o010 } else { 0o001 };
     mode & bit != 0
 }
@@ -140,7 +140,7 @@ fn pinned_executable(spec: &SpawnSpec) -> io::Result<OwnedFd> {
     if !meta.is_file()
         || meta.uid() == spec.app_uid
         || meta.mode() & 0o022 != 0
-        || !execute_mode_permits(meta.uid(), meta.gid(), meta.mode(), spec.app_uid, spec.app_gid)
+        || !crate::os::executes_as_app(meta.uid(), meta.gid(), meta.mode(), spec.app_uid, spec.app_gid)
         || meta.len() > MAX_ELF_BYTES
     {
         return Err(invalid(
@@ -257,25 +257,7 @@ unsafe fn child_exec(input: ChildExecInput<'_>) -> ! {
     if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
         fail(write_fd);
     }
-    if libc::geteuid() != spec.app_uid || libc::getegid() != spec.app_gid {
-        // Only the root audit harness switches here. The production app
-        // worker has already assumed this exact identity, cleared every
-        // capability/group and checked no_new_privs before parsing.
-        if libc::setgroups(0, std::ptr::null()) != 0
-            || libc::setresgid(spec.app_gid, spec.app_gid, spec.app_gid) != 0
-            || libc::setresuid(spec.app_uid, spec.app_uid, spec.app_uid) != 0
-        {
-            fail(write_fd);
-        }
-        // A non-root caller keeps its capability sets across a change between
-        // two non-root UIDs; clear all of them so bubblewrap starts with none.
-        if libc::prctl(libc::PR_CAP_AMBIENT, libc::PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0) != 0
-            || !crate::setid_bound::clear_capabilities()
-        {
-            fail(write_fd);
-        }
-    }
-    if libc::geteuid() != spec.app_uid || libc::getegid() != spec.app_gid {
+    if !crate::os::child_assume_app_identity(spec.app_uid, spec.app_gid) {
         fail(write_fd);
     }
     let empty = b"\0";
@@ -510,7 +492,7 @@ pub(crate) fn spawn_privilege_audit(spec: &SpawnSpec) -> io::Result<BoundedChild
 
 pub(crate) fn spawn_bounded(spec: &SpawnSpec) -> io::Result<BoundedChild> {
     if let Some(child)=crate::resident_privilege::launch(spec)? {return Ok(child)}
-    if unsafe { libc::geteuid() } != 0 {
+    if !crate::os::privileged() {
         return Err(invalid(
             "production SPK gate requires trusted bootstrap channel",
         ));

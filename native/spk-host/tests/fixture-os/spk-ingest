@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Fixture model of deploy/spk-host/spk-ingest, for `fixture-os` journeys only
+# (scripts/spk-platform/fixture-v4.sh copies it into $MINI_FIXTURE_OS). The
+# broker clears the environment, so the model root is this file's directory.
+# Same arguments and the same `spk-host materialize` publication; what the real
+# helper adds is OS custody (root-owned inbox and store, a transient confined
+# systemd unit), which the fixture principal stands in for.
+set -euo pipefail
+umask 077
+[[ ${1:-} == --root ]] || { echo 'fixture spk-ingest: --root SPK_ROOT required' >&2; exit 2; }
+(( $# == 6 )) || { echo 'usage: spk-ingest --root SPK_ROOT HOST_BINARY HOST_SHA256 INBOX_SPK APP_UID' >&2; exit 2; }
+base=$2
+shift 2
+host_binary=$1 expected_host_sha=$2 package=$3 app_uid=$4
+[[ $expected_host_sha =~ ^[0-9a-f]{64}$ && $app_uid =~ ^[1-9][0-9]{0,9}$ ]] || exit 2
+inbox=$base/inbox
+store=$base/packages
+[[ $(dirname -- "$package") == "$inbox" && -f $package && ! -L $package ]] || {
+  echo 'SPK must be directly under the inbox' >&2; exit 1;
+}
+[[ $(sha256sum -- "$host_binary" | cut -c1-64) == "$expected_host_sha" ]] || {
+  echo 'host binary SHA mismatch' >&2; exit 1;
+}
+input_sha=$(sha256sum -- "$package" | cut -c1-64)
+installed=$store/sha256-$input_sha
+[[ ! -e $installed && ! -L $installed ]] || { echo 'exact SPK already installed' >&2; exit 1; }
+"$host_binary" materialize "$package" "$store" "$app_uid"
+[[ -d $installed/root && ! -L $installed/root ]] || {
+  echo 'materialize succeeded without publishing exact image' >&2; exit 1;
+}
+[[ $(sha256sum -- "$installed/package.spk" | cut -c1-64) == "$input_sha" ]] || {
+  echo 'published raw package digest mismatch' >&2; exit 1;
+}
+echo "ingest_verified unit=fixture-os spkSha256=$input_sha image=$installed"

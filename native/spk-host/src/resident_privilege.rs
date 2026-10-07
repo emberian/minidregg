@@ -36,32 +36,8 @@ impl Identity {
         })
     }
 }
-fn capability_sets_zero() -> io::Result<bool> {
-    let status = fs::read_to_string("/proc/thread-self/status")?;
-    for field in ["CapInh:", "CapPrm:", "CapEff:", "CapBnd:", "CapAmb:"] {
-        let value = status
-            .lines()
-            .find_map(|x| x.strip_prefix(field))
-            .ok_or_else(|| refused("capability set absent"))?;
-        if u64::from_str_radix(value.trim(), 16).map_err(|_| refused("capability set invalid"))?
-            != 0
-        {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
 fn dropped(identity: Identity) -> io::Result<()> {
-    let (mut u0, mut u1, mut u2) = (0, 0, 0);
-    let (mut g0, mut g1, mut g2) = (0, 0, 0);
-    if unsafe { libc::getresuid(&mut u0, &mut u1, &mut u2) } != 0
-        || unsafe { libc::getresgid(&mut g0, &mut g1, &mut g2) } != 0
-        || [u0, u1, u2] != [identity.uid; 3]
-        || [g0, g1, g2] != [identity.gid; 3]
-        || unsafe { libc::getgroups(0, std::ptr::null_mut()) } != 0
-        || unsafe { libc::prctl(libc::PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) } != 1
-        || !capability_sets_zero()?
-    {
+    if !crate::os::holds_exactly_identity(identity.uid, identity.gid)? {
         return Err(refused(
             "bootstrap identity/groups/capabilities/no_new_privs differ",
         ));
@@ -69,34 +45,7 @@ fn dropped(identity: Identity) -> io::Result<()> {
     Ok(())
 }
 fn drop_identity(identity: Identity) -> io::Result<()> {
-    // The root-owned unit bounds startup to SETUID, SETGID, SETPCAP. Dropping
-    // bounding bits does not remove currently permitted SETID before the switch.
-    for cap in 0..64 {
-        if unsafe { libc::prctl(libc::PR_CAPBSET_DROP, cap, 0, 0, 0) } != 0 {
-            let e = io::Error::last_os_error();
-            if e.raw_os_error() != Some(libc::EINVAL) {
-                return Err(e);
-            }
-        }
-    }
-    if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0
-        || unsafe { libc::setgroups(0, std::ptr::null()) } != 0
-        || unsafe { libc::setresgid(identity.gid, identity.gid, identity.gid) } != 0
-        || unsafe { libc::setresuid(identity.uid, identity.uid, identity.uid) } != 0
-        || unsafe {
-            libc::prctl(
-                libc::PR_CAP_AMBIENT,
-                libc::PR_CAP_AMBIENT_CLEAR_ALL,
-                0,
-                0,
-                0,
-            )
-        } != 0
-        || !crate::setid_bound::clear_capabilities()
-        || unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } != 0
-    {
-        return Err(io::Error::last_os_error());
-    }
+    crate::os::drop_to_identity(identity.uid, identity.gid)?;
     dropped(identity)
 }
 fn install_parser_namespace_filter() -> io::Result<()> {
@@ -511,7 +460,7 @@ pub(crate) fn require_parser() -> io::Result<()> {
 /// Only root-owned broker unit environment selects identities. No app packet
 /// can name an operator/app UID/GID; neither parser retains switch privileges.
 pub fn run(path: &Path) -> io::Result<()> {
-    if unsafe { libc::geteuid() } != 0 {
+    if !crate::os::privileged() {
         return Err(refused("resident bootstrap requires trusted root unit"));
     }
     let operator = Identity::unit("OPERATOR")?;
