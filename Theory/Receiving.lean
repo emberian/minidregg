@@ -186,9 +186,14 @@ structure Journal where
   nullifierDecEq : DecidableEq Nullifier
   lookup : Snap → TxId → Option (Recorded TxId Event Nullifier)
   intentOf : TxId → Event → List Nullifier → Payload → Intent
+  /-- The nullifiers a prepared patch spends beyond the ingress's own (a decision's
+  markers, such as a birth identity's): the intent spends the ingress's nullifiers,
+  then these. -/
+  spent : Payload → List Nullifier
   install : Snap → Intent → Snap
   lookup_install : ∀ snap txId event nullifiers payload,
-    lookup (install snap (intentOf txId event nullifiers payload)) txId = some ⟨txId, event, nullifiers⟩
+    lookup (install snap (intentOf txId event nullifiers payload)) txId =
+      some ⟨txId, event, nullifiers ++ spent payload⟩
 
 instance (J : Journal) : DecidableEq J.TxId := J.txIdDecEq
 instance (J : Journal) : DecidableEq J.Event := J.eventDecEq
@@ -552,14 +557,16 @@ def receipt (env : R.Env) (ingress : R.Ingress) : J.TxId × J.Event :=
   (R.txId env ingress, R.event env ingress)
 
 /-- Exact retry: `none` when the transaction is not journaled; a receipt when
-the journal holds this transaction with this event and these nullifiers; a
-conflict otherwise. -/
+the journal holds this transaction with this event, spending this ingress's
+nullifiers first (then whatever its prepared patch spent, which replay does not
+re-derive); a conflict otherwise. -/
 def replay (env : R.Env) (state : J.State) (ingress : R.Ingress) :
     Option (Except Unit (J.TxId × J.Event)) :=
   match J.lookup (J.snap state) (R.txId env ingress) with
   | none => none
   | some recorded =>
-      if recorded = ⟨R.txId env ingress, R.event env ingress, R.nullifiers env ingress⟩ then
+      if recorded.txId = R.txId env ingress ∧ recorded.event = R.event env ingress ∧
+          (R.nullifiers env ingress).isPrefixOf recorded.nullifiers = true then
         some (.ok (R.receipt env ingress))
       else some (.error ())
 
@@ -567,8 +574,8 @@ def replay (env : R.Env) (state : J.State) (ingress : R.Ingress) :
 theorem replay_only_original {env : R.Env} {state : J.State} {ingress : R.Ingress}
     {selected : J.TxId × J.Event} (found : R.replay env state ingress = some (.ok selected)) :
     selected = R.receipt env ingress ∧
-      J.lookup (J.snap state) (R.txId env ingress) =
-        some ⟨R.txId env ingress, R.event env ingress, R.nullifiers env ingress⟩ := by
+      ∃ rest, J.lookup (J.snap state) (R.txId env ingress) =
+        some ⟨R.txId env ingress, R.event env ingress, R.nullifiers env ingress ++ rest⟩ := by
   unfold replay at found
   split at found
   · cases found
@@ -576,7 +583,13 @@ theorem replay_only_original {env : R.Env} {state : J.State} {ingress : R.Ingres
     split at found
     · rename_i exact
       cases found
-      exact ⟨rfl, looked.trans (congrArg some exact)⟩
+      obtain ⟨txIdEq, eventEq, prefixed⟩ := exact
+      obtain ⟨rest, restEq⟩ := List.isPrefixOf_iff_prefix.1 prefixed
+      refine ⟨rfl, rest, looked.trans (congrArg some ?_)⟩
+      obtain ⟨txId, event, nullifiers⟩ := recorded
+      simp only at txIdEq eventEq restEq
+      subst txIdEq eventEq restEq
+      rfl
     · cases found
 
 /-- **Replay = live admission.**  In any state whose journal snapshot installs
@@ -588,7 +601,7 @@ theorem replay_after_install {env : R.Env} {state : J.State} {ingress : R.Ingres
     R.replay env later ingress = some (.ok (R.receipt env ingress)) := by
   unfold replay
   rw [installed, intent, J.lookup_install]
-  simp
+  simp [List.isPrefixOf_iff_prefix]
 
 /-- What one receipt attempt produced. -/
 inductive Outcome (env : R.Env) (state : J.State)
@@ -974,6 +987,7 @@ def journal : Journal where
   nullifierDecEq := inferInstance
   lookup := fun snap txId => snap.find? fun recorded => recorded.txId == txId
   intentOf := fun txId event nullifiers _ => ⟨txId, event, nullifiers⟩
+  spent := fun _ => []
   install := fun snap intent => intent :: snap
   lookup_install := by intro snap txId event nullifiers payload; simp
 
