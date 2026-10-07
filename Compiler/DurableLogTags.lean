@@ -14,7 +14,7 @@ type so the decided poles below run on small concrete values; `verifyTags` is
 it at `entryTag key` over `chainPrefixes`, the chain values the open path
 already computes for the checkpoint check (no second chain pass).
 -/
-import Compiler.DurableCheckpointCodec
+import Compiler.DurableHistory
 import Theory.AssertAxioms
 
 namespace Minidregg.Compiler.DurableLogTags
@@ -22,6 +22,7 @@ namespace Minidregg.Compiler.DurableLogTags
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Kernel.DurableReceiver
 open Minidregg.Compiler.DurableCheckpointCodec
+open Minidregg.Compiler.DurableHistory (Carried trailer trailerCarried trailerCarried_trailer)
 
 set_option autoImplicit false
 
@@ -159,20 +160,25 @@ def verifyTagsWith {D T : Type} [DecidableEq T] (tag : Nat → D → T) (height 
   | none => .ok ()
   | some bad => .error (tagRefusal bad)
 
-/-- Each chain value beside the root the stored tag after it carries: element
-`i + 1` is (the chain after entry `i + 1`, the root stored tag `i` carries).
-Element `0` (the chain before the first entry) carries no tag. -/
-def rootedChains (chains : List Digest) (tags : List (List UInt8)) : List (Digest × Digest) :=
+/-- The values a malformed tag is compared under (it never verifies). -/
+def defaultCarried : Carried := ⟨⟨0⟩, ⟨0⟩, ⟨0⟩, ⟨0⟩⟩
+
+/-- Each chain value beside what the stored tag after it carries: element
+`i + 1` is (the chain after entry `i + 1`, the root, frontier digest and spent
+root tag `i` carries). Element `0` (the chain before the first entry) carries
+no tag. -/
+def rootedChains (chains : List Digest) (tags : List (List UInt8)) : List (Digest × Carried) :=
   match chains with
   | [] => []
-  | first :: rest => (first, ⟨0⟩) :: rest.zipWith (fun chain tag => (chain, (tagRoot tag).getD ⟨0⟩)) tags
+  | first :: rest => (first, defaultCarried) ::
+      rest.zipWith (fun chain tag => (chain, (trailerCarried tag).getD defaultCarried)) tags
 
-/-- The deployed tag of a height at a (chain, root) pair. -/
-def rootedTag (key : MacKey) (height : Nat) (point : Digest × Digest) : List UInt8 :=
-  entryTag key height point.1 point.2
+/-- The deployed tag of a height at the recomputed chain and the carried rest. -/
+def rootedTag (key : MacKey) (height : Nat) (point : Digest × Carried) : List UInt8 :=
+  trailer key height { point.2 with chain := point.1 }
 
 /-- Every stored tag, the first entry at `height + 1`, against `chains`
-(`chainPrefixes` from the chain at `height`) and the root it carries. -/
+(`chainPrefixes` from the chain at `height`) and what it carries. -/
 def verifyTags (key : MacKey) (height : Nat) (chains : List Digest) (tags : List (List UInt8)) :
     Except String Unit :=
   verifyTagsWith (rootedTag key) height (rootedChains chains tags) tags
@@ -180,26 +186,32 @@ def verifyTags (key : MacKey) (height : Nat) (chains : List Digest) (tags : List
 theorem rootedChains_getElem? (chains : List Digest) (tags : List (List UInt8)) (i : Nat)
     (tag : List UInt8) (stored : tags[i]? = some tag) :
     (rootedChains chains tags)[i + 1]? =
-      chains[i + 1]?.map fun chain => (chain, (tagRoot tag).getD ⟨0⟩) := by
+      chains[i + 1]?.map fun chain => (chain, (trailerCarried tag).getD defaultCarried) := by
   cases chains with
   | nil => simp [rootedChains]
   | cons first rest =>
       simp only [rootedChains, List.getElem?_cons_succ, List.getElem?_zipWith, stored]
       cases rest[i]? <;> rfl
 
+theorem rootedTag_trailer (key : MacKey) (height : Nat) (carried : Carried) :
+    rootedTag key height (carried.chain, (trailerCarried (trailer key height carried)).getD
+      defaultCarried) = trailer key height carried := by
+  simp only [rootedTag, trailerCarried_trailer, Option.getD_some]
+
 /-- **The stored check is read**: the verifier accepts exactly the stores whose
-every tag is the MAC of its height, the chain after the records up to it, and
-the root it carries. -/
+every tag is the trailer of its height, carrying the chain after the records up
+to it (and whatever root, frontier digest and spent root its MAC binds). -/
 theorem verifyTags_ok_iff (key : MacKey) (height : Nat) (start : Digest)
     (records : List IntentRecord) (tags : List (List UInt8)) (lengths : tags.length ≤ records.length) :
     verifyTags key height (chainPrefixes start records) tags = .ok () ↔
-      ∀ i (hi : i < tags.length), ∃ root,
-        tags[i] = entryTag key (height + i + 1) (chainAfter start (records.take (i + 1))) root := by
+      ∀ i (hi : i < tags.length), ∃ carried : Carried,
+        carried.chain = chainAfter start (records.take (i + 1)) ∧
+          tags[i] = trailer key (height + i + 1) carried := by
   have none_iff := firstBadTag_eq_none_iff (rootedTag key) height
     (rootedChains (chainPrefixes start records) tags) tags
   have pointAt : ∀ i (hi : i < tags.length),
       (rootedChains (chainPrefixes start records) tags)[i + 1]? =
-        some (chainAfter start (records.take (i + 1)), (tagRoot tags[i]).getD ⟨0⟩) := by
+        some (chainAfter start (records.take (i + 1)), (trailerCarried tags[i]).getD defaultCarried) := by
     intro i hi
     rw [rootedChains_getElem? _ tags i tags[i] (List.getElem?_eq_getElem hi),
       chainPrefixes_getElem? start records (i + 1) (by omega)]
@@ -215,33 +227,32 @@ theorem verifyTags_ok_iff (key : MacKey) (height : Nat) (start : Digest)
     obtain ⟨point, at_, eq⟩ := none_iff.mp this i hi
     rw [pointAt i hi] at at_
     cases at_
-    exact ⟨_, eq⟩
+    exact ⟨_, rfl, eq⟩
   · intro honest
     have : firstBadTag (rootedTag key) height (rootedChains (chainPrefixes start records) tags)
         tags = none :=
       none_iff.mpr fun i hi => by
-        obtain ⟨root, eq⟩ := honest i hi
+        obtain ⟨carried, chainEq, eq⟩ := honest i hi
         refine ⟨_, pointAt i hi, ?_⟩
-        unfold rootedTag
-        rw [eq, tagRoot_entryTag]
-        rfl
+        rw [eq, ← chainEq, rootedTag_trailer]
     simp [verifyTags, verifyTagsWith, this]
 
 /-- **A wrong tag at any height refuses, naming that height** — the first wrong
-one, whatever root it claims; the entries after it do not matter. -/
+one, whatever it carries; the entries after it do not matter. -/
 theorem verifyTags_refuses_at (key : MacKey) (height : Nat) (start : Digest)
     (records : List IntentRecord) (pre post : List (List UInt8)) (stored : List UInt8)
     (within : pre.length < records.length)
-    (honest : ∀ i (hi : i < pre.length), ∃ root,
-      pre[i] = entryTag key (height + i + 1) (chainAfter start (records.take (i + 1))) root)
-    (bad : ∀ root, stored ≠ entryTag key (height + pre.length + 1)
-      (chainAfter start (records.take (pre.length + 1))) root) :
+    (honest : ∀ i (hi : i < pre.length), ∃ carried : Carried,
+      carried.chain = chainAfter start (records.take (i + 1)) ∧
+        pre[i] = trailer key (height + i + 1) carried)
+    (bad : ∀ carried : Carried, carried.chain = chainAfter start (records.take (pre.length + 1)) →
+      stored ≠ trailer key (height + pre.length + 1) carried) :
     verifyTags key height (chainPrefixes start records) (pre ++ stored :: post) =
       .error (tagRefusal (height + pre.length + 1)) := by
   let tags := pre ++ stored :: post
   have pointAt : ∀ i (hi : i < tags.length) (hr : i < records.length),
       (rootedChains (chainPrefixes start records) tags)[i + 1]? =
-        some (chainAfter start (records.take (i + 1)), (tagRoot tags[i]).getD ⟨0⟩) := by
+        some (chainAfter start (records.take (i + 1)), (trailerCarried tags[i]).getD defaultCarried) := by
     intro i hi hr
     rw [rootedChains_getElem? _ tags i tags[i] (List.getElem?_eq_getElem hi),
       chainPrefixes_getElem? start records (i + 1) (by omega)]
@@ -249,49 +260,52 @@ theorem verifyTags_refuses_at (key : MacKey) (height : Nat) (start : Digest)
   have named := firstBadTag_names_first (rootedTag key) height
     (rootedChains (chainPrefixes start records) tags) pre post stored _
     (fun i hi => by
-      obtain ⟨root, eq⟩ := honest i hi
+      obtain ⟨carried, chainEq, eq⟩ := honest i hi
       have hi' : i < tags.length := by simp [tags]; omega
       refine ⟨_, pointAt i hi' (by omega), ?_⟩
       have same : tags[i] = pre[i] := by simp [tags, List.getElem_append_left hi]
-      unfold rootedTag
-      rw [same, eq, tagRoot_entryTag]
-      rfl)
+      rw [same, eq, ← chainEq, rootedTag_trailer])
     (pointAt pre.length (by simp [tags]) within)
     (by
       have same : tags[pre.length]'(by simp [tags]) = stored := by simp [tags]
-      unfold rootedTag
       simp only [same]
-      exact bad _)
+      intro equal
+      exact bad { (trailerCarried stored).getD defaultCarried with
+          chain := chainAfter start (records.take (pre.length + 1)) } rfl equal)
   simp [verifyTags, verifyTagsWith, tags, named]
 
 /-- **The head is no exception**: a wrong last tag refuses at the head's height. -/
 theorem verifyTags_refuses_head (key : MacKey) (height : Nat) (start : Digest)
     (records : List IntentRecord) (pre : List (List UInt8)) (stored : List UInt8)
     (exact : pre.length + 1 = records.length)
-    (honest : ∀ i (hi : i < pre.length), ∃ root,
-      pre[i] = entryTag key (height + i + 1) (chainAfter start (records.take (i + 1))) root)
-    (bad : ∀ root, stored ≠ entryTag key (height + records.length) (chainAfter start records) root) :
+    (honest : ∀ i (hi : i < pre.length), ∃ carried : Carried,
+      carried.chain = chainAfter start (records.take (i + 1)) ∧
+        pre[i] = trailer key (height + i + 1) carried)
+    (bad : ∀ carried : Carried, carried.chain = chainAfter start records →
+      stored ≠ trailer key (height + records.length) carried) :
     verifyTags key height (chainPrefixes start records) (pre ++ [stored]) =
       .error (tagRefusal (height + records.length)) := by
   have := verifyTags_refuses_at key height start records pre [] stored (by omega) honest
     (by
-      intro root
-      rw [exact, List.take_of_length_le (by omega), Nat.add_assoc, exact]
-      exact bad root)
+      intro carried chainEq
+      rw [exact, List.take_of_length_le (by omega)] at chainEq
+      rw [Nat.add_assoc, exact]
+      exact bad carried chainEq)
   rw [this, ← exact, Nat.add_assoc]
 
-/-- **Every verified root is bound**: a store the verifier accepts carries, at
-each height, exactly the root its tag was sealed with — the root a historical
-receipt reads (`DurableReceiverIO.Loaded.rootLog`). -/
-theorem verifyTags_root (key : MacKey) (height : Nat) (start : Digest)
+/-- **Every verified tag is the Host's trailer of its height and chain**: what it
+carries (the receipt root `DurableReceiverIO.Loaded.rootLog` reads, the
+frontier digest, the spent root) is bound by its MAC. -/
+theorem verifyTags_carried (key : MacKey) (height : Nat) (start : Digest)
     (records : List IntentRecord) (tags : List (List UInt8)) (lengths : tags.length ≤ records.length)
     (accepted : verifyTags key height (chainPrefixes start records) tags = .ok ())
     (i : Nat) (hi : i < tags.length) :
-    tags[i] = entryTag key (height + i + 1) (chainAfter start (records.take (i + 1)))
-      ((tagRoot tags[i]).getD ⟨0⟩) := by
-  obtain ⟨root, eq⟩ := (verifyTags_ok_iff key height start records tags lengths).mp accepted i hi
-  rw [eq, tagRoot_entryTag]
-  rfl
+    ∃ carried : Carried, trailerCarried tags[i] = some carried ∧
+      carried.chain = chainAfter start (records.take (i + 1)) ∧
+        tags[i] = trailer key (height + i + 1) carried := by
+  obtain ⟨carried, chainEq, eq⟩ :=
+    (verifyTags_ok_iff key height start records tags lengths).mp accepted i hi
+  exact ⟨carried, by rw [eq, trailerCarried_trailer], chainEq, eq⟩
 
 /-! ## Decided poles: three records, tag = (height, chain), chain = running sum -/
 
@@ -324,7 +338,8 @@ theorem pole_base_height_named :
 #assert_axioms verifyTags_refuses_at
 #assert_axioms verifyTags_refuses_head
 #assert_axioms rootedChains_getElem?
-#assert_axioms verifyTags_root
+#assert_axioms verifyTags_carried
+#assert_axioms rootedTag_trailer
 #assert_axioms pole_honest_accepted
 #assert_axioms pole_middle_refused
 #assert_axioms pole_head_refused

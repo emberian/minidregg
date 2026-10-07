@@ -118,13 +118,17 @@ epoch is refused by name — read from its seed before anything else, including
 the physical head anchor (`DurableReceiverIO.load`). -/
 
 /-- The log-tag MAC customization; `entryTag` uses exactly this label. -/
-def logTagLabel : String := "DREGG/NATIVE-HOST/LOG-TAG/v2"
+def logTagLabel : String := "DREGG/NATIVE-HOST/LOG-TAG/v3"
 
 /-- One Store epoch: the three format components its bytes commit to. -/
 structure StoreEpoch where
   stateKey : String
   schemaRefs : String
   logTag : String
+  /-- The history accumulator and spent map (`Compiler.DurableHistory`,
+  `Compiler.DurableSpent`, KN2-STORE-OPEN). A three-component label (an epoch
+  born before it) reads as `none` and is refused by naming this component. -/
+  accumulator : String
   deriving DecidableEq, Repr
 
 /-- The epoch this Host writes and reads. `stateKey` is
@@ -134,17 +138,25 @@ schema reference version (`DeployedCellRegistry.declaredEffectSchemaRef`);
 either moves without this value. A change to any component changes the seed
 frame and refuses every older Store by name. -/
 def StoreEpoch.current : StoreEpoch :=
-  ⟨"state-key/tagged-v4", "schema-refs/v5", logTagLabel⟩
+  ⟨"state-key/tagged-v4", "schema-refs/v5", logTagLabel, "history/mmr-v1;spent/trie-v1"⟩
 
 /-- The label carried in the seed frame: the three components, `;`-separated. -/
 def StoreEpoch.label (epoch : StoreEpoch) : String :=
+  s!"{epoch.stateKey};{epoch.schemaRefs};{epoch.logTag};{epoch.accumulator}"
+
+/-- The label of an epoch born before the accumulator: three components. -/
+def StoreEpoch.labelBeforeAccumulator (epoch : StoreEpoch) : String :=
   s!"{epoch.stateKey};{epoch.schemaRefs};{epoch.logTag}"
 
-/-- Exact inverse of `label` on its image. -/
+/-- Exact inverse of `label` on its image; a three-component label is an epoch
+born before the accumulator (`accumulator = "none"`), named, never read as this one. -/
 def StoreEpoch.parse (text : String) : Option StoreEpoch :=
   match text.splitOn ";" with
   | [stateKey, schemaRefs, logTag] =>
-      let epoch : StoreEpoch := ⟨stateKey, schemaRefs, logTag⟩
+      let epoch : StoreEpoch := ⟨stateKey, schemaRefs, logTag, "none"⟩
+      if epoch.labelBeforeAccumulator = text then some epoch else none
+  | [stateKey, schemaRefs, logTag, history, spent] =>
+      let epoch : StoreEpoch := ⟨stateKey, schemaRefs, logTag, s!"{history};{spent}"⟩
       if epoch.label = text then some epoch else none
   | _ => none
 
@@ -155,7 +167,9 @@ def StoreEpoch.differing (store host : StoreEpoch) : List String :=
     (if store.schemaRefs = host.schemaRefs then [] else
       [s!"cell schema references: Store {store.schemaRefs}, this Host {host.schemaRefs}"]) ++
     (if store.logTag = host.logTag then [] else
-      [s!"log tags: Store {store.logTag}, this Host {host.logTag}"])
+      [s!"log tags: Store {store.logTag}, this Host {host.logTag}"]) ++
+    (if store.accumulator = host.accumulator then [] else
+      [s!"history accumulator: Store {store.accumulator}, this Host {host.accumulator}"])
 
 /-- **No component differs exactly when the epochs are equal.** -/
 theorem StoreEpoch.differing_nil_iff (store host : StoreEpoch) :
@@ -164,8 +178,8 @@ theorem StoreEpoch.differing_nil_iff (store host : StoreEpoch) :
   simp only [StoreEpoch.differing, StoreEpoch.mk.injEq]
   constructor
   · intro none
-    refine ⟨?_, ?_, ?_⟩ <;> (apply Classical.byContradiction; intro ne; simp_all)
-  · rintro ⟨rfl, rfl, rfl⟩
+    refine ⟨?_, ?_, ?_, ?_⟩ <;> (apply Classical.byContradiction; intro ne; simp_all)
+  · rintro ⟨rfl, rfl, rfl, rfl⟩
     simp
 
 /-- **A state-key codec break is named, and only it.** -/
@@ -259,6 +273,14 @@ theorem seedEpoch_v1_refused (rest : List UInt8) :
   simp only [older, if_false, if_true]
   exact ⟨_, rfl⟩
 
+/-- **An accumulator break is named, and only it.** -/
+theorem StoreEpoch.differing_accumulator (host : StoreEpoch) (accumulator : String)
+    (changed : accumulator ≠ host.accumulator) :
+    StoreEpoch.differing { host with accumulator } host =
+      [s!"history accumulator: Store {accumulator}, this Host {host.accumulator}"] := by
+  simp [StoreEpoch.differing, changed]
+
+#assert_axioms StoreEpoch.differing_accumulator
 #assert_axioms StoreEpoch.differing_nil_iff
 #assert_axioms StoreEpoch.differing_stateKey
 #assert_axioms StoreEpoch.differing_schemaRefs
@@ -314,29 +336,8 @@ def systemLeaf (height : Nat) (chain : Digest) : Digest :=
   (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.SYSTEM/v1".toUTF8.toList
     ((StreamCodec.product StreamCodec.nat digestStream).encode (height, chain))).digest
 
-def tagInputStream : StreamCodec (List UInt8 × Nat × Digest × Digest) :=
-  StreamCodec.product bytesStream
-    (StreamCodec.product StreamCodec.nat (StreamCodec.product digestStream digestStream))
-
-/-- Entry `h`'s tag: the world root after entry `h` — its receipt root, kept at
-append — then the KMAC of the key id, `h`, the chain after `h` and that root.
-A historical receipt reads its root here instead of re-evaluating its prefix
-(`NativeHost.receiptRoot`); the MAC binds the root to its height and chain, so
-a moved, swapped or rewritten root refuses exactly as a moved chain does
-(`DurableLogTags.verifyTags`). v2: v1 tags carried no root and refuse. -/
-def entryTag (key : MacKey) (height : Nat) (chain root : Digest) : List UInt8 :=
-  digestStream.encode root ++
-    kmac256Bytes key.bytes logTagLabel.toUTF8.toList
-      (tagInputStream.encode (key.id, height, chain, root))
-
-/-- The root a stored tag carries (its prefix), whether or not its MAC verifies;
-`verifyTags` is what binds it. -/
-def tagRoot (tag : List UInt8) : Option Digest :=
-  (digestStream.decodePrefix tag).map Prod.fst
-
-@[simp] theorem tagRoot_entryTag (key : MacKey) (height : Nat) (chain root : Digest) :
-    tagRoot (entryTag key height chain root) = some root := by
-  simp [tagRoot, entryTag, digestStream.decodePrefix_encode]
+-- The entry tag (v3 trailer: root, chain, frontier digest, spent root, MAC)
+-- is `Compiler.DurableHistory.trailer`; the log-tag label above is its MAC label.
 
 /-! ## Checkpoints -/
 
@@ -354,14 +355,22 @@ structure Body where
   keyId : List UInt8
   height : Nat
   chain : Digest
+  /-- The log accumulator's peaks after `height` leaves (`DurableHistory`). -/
+  frontier : List (Nat × Digest)
+  /-- The spent map's root after `height` records (`DurableSpent`). -/
+  spentRoot : Digest
   state : State
+
+def frontierStream : StreamCodec (List (Nat × Digest)) :=
+  StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)
 
 def bodyStream : StreamCodec Body :=
   StreamCodec.xmap
     (StreamCodec.product bytesStream
-      (StreamCodec.product StreamCodec.nat (StreamCodec.product digestStream stateStream)))
-    (fun body => (body.keyId, body.height, body.chain, body.state))
-    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2⟩)
+      (StreamCodec.product StreamCodec.nat (StreamCodec.product digestStream
+        (StreamCodec.product frontierStream (StreamCodec.product digestStream stateStream)))))
+    (fun body => (body.keyId, body.height, body.chain, body.frontier, body.spentRoot, body.state))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1, tuple.2.2.2.2.1, tuple.2.2.2.2.2⟩)
     (by intro value; cases value; rfl)
 
 /-- The world-root entries of a materialized state at a height: the system slot
@@ -388,8 +397,10 @@ def sealedStream : StreamCodec Sealed :=
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2⟩)
     (by intro value; cases value; rfl)
 
+/-- v2: the body carries the accumulator frontier and the spent root. A v1
+checkpoint refuses (`malformed`), as its frame differs. -/
 def checkpointFrame : Framed Sealed :=
-  ⟨"DREGG.DURABLE.CHECKPOINT".toUTF8.toList ++ [1], sealedStream⟩
+  ⟨"DREGG.DURABLE.CHECKPOINT".toUTF8.toList ++ [2], sealedStream⟩
 
 def macInputStream : StreamCodec (List UInt8 × Nat × Digest × List UInt8) :=
   StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat
@@ -405,21 +416,25 @@ def checkpointMac (key : MacKey) (body : Body) (root : Digest) : List UInt8 :=
 /-- Seal a checkpoint body under a supplied world root. The host supplies its
 cached root (`DurableReceiverIO.sealCheckpoint_uses_cached_root`); `openSealed`
 recomputes it from the body and refuses any other. -/
-def sealAt (key : MacKey) (height : Nat) (chain : Digest) (state : State) (root : Digest) : Sealed :=
-  let body : Body := ⟨key.id, height, chain, state⟩
+def sealAt (key : MacKey) (height : Nat) (chain : Digest) (frontier : List (Nat × Digest))
+    (spentRoot : Digest) (state : State) (root : Digest) : Sealed :=
+  let body : Body := ⟨key.id, height, chain, frontier, spentRoot, state⟩
   ⟨body, root, checkpointMac key body root⟩
 
 /-- The specification seal: the root evaluated in full from the body. -/
 def sealCheckpoint (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat) (chain : Digest)
-    (state : State) : Sealed :=
-  sealAt key height chain state (worldRoot rootBytes ⟨key.id, height, chain, state⟩)
+    (frontier : List (Nat × Digest)) (spentRoot : Digest) (state : State) : Sealed :=
+  sealAt key height chain frontier spentRoot state
+    (worldRoot rootBytes ⟨key.id, height, chain, frontier, spentRoot, state⟩)
 
 /-- Sealing under any root equal to the body's world root is the
 specification seal, byte for byte. -/
 theorem sealAt_eq_sealCheckpoint (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat)
-    (chain : Digest) (state : State) {root : Digest}
-    (exact : root = worldRoot rootBytes ⟨key.id, height, chain, state⟩) :
-    sealAt key height chain state root = sealCheckpoint key rootBytes height chain state := by
+    (chain : Digest) (frontier : List (Nat × Digest)) (spentRoot : Digest) (state : State)
+    {root : Digest}
+    (exact : root = worldRoot rootBytes ⟨key.id, height, chain, frontier, spentRoot, state⟩) :
+    sealAt key height chain frontier spentRoot state root =
+      sealCheckpoint key rootBytes height chain frontier spentRoot state := by
   subst exact
   rfl
 
@@ -442,9 +457,10 @@ def openSealed (key : MacKey) (rootBytes : List UInt8 → Digest) (bytes : List 
 
 /-- Satisfiable pole: what the host seals, it opens, exactly. -/
 theorem openSealed_seal (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat)
-    (chain : Digest) (state : State) :
-    openSealed key rootBytes (checkpointFrame.encode (sealCheckpoint key rootBytes height chain state)) =
-      .ok ⟨key.id, height, chain, state⟩ := by
+    (chain : Digest) (frontier : List (Nat × Digest)) (spentRoot : Digest) (state : State) :
+    openSealed key rootBytes (checkpointFrame.encode
+        (sealCheckpoint key rootBytes height chain frontier spentRoot state)) =
+      .ok ⟨key.id, height, chain, frontier, spentRoot, state⟩ := by
   simp [openSealed, Framed.decode_encode, sealCheckpoint, sealAt]
   rfl
 
@@ -480,8 +496,10 @@ theorem empty_mac_forged (key : MacKey) (body : Body) (root : Digest) :
 /-- A checkpoint sealed under one key and opened under a key with a different
 id refuses. -/
 theorem openSealed_foreign_key (key other : MacKey) (rootBytes : List UInt8 → Digest)
-    (height : Nat) (chain : Digest) (state : State) (distinct : other.id ≠ key.id) :
-    openSealed key rootBytes (checkpointFrame.encode (sealCheckpoint other rootBytes height chain state)) =
+    (height : Nat) (chain : Digest) (frontier : List (Nat × Digest)) (spentRoot : Digest)
+    (state : State) (distinct : other.id ≠ key.id) :
+    openSealed key rootBytes (checkpointFrame.encode
+        (sealCheckpoint other rootBytes height chain frontier spentRoot state)) =
       .error .foreignKey := by
   simp [openSealed, Framed.decode_encode, sealCheckpoint, sealAt, distinct]
   rfl
