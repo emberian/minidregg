@@ -100,6 +100,17 @@ def selectIssue {config : Config} {current : Durable}
         else return .error "carried original event22 identity differs"
   else return .error "carried issue index is not before the original cut"
 
+/-- **The original receipt's root is read, verified, from the source Store**: it is the root
+carried by a record of the source Store at the issue's height whose inclusion was verified
+against the source Store's MAC-bound head, and that record is the selected issue record. -/
+theorem CarriedIssue.receipt_root_verified {config : Config} {current : Durable}
+    (issue : CarriedIssue config current) :
+    ∃ read : DurableHistoryReader.Record issue.head (issue.index + 1),
+      read.record = issue.record ∧ issue.receipt.worldRoot = read.verified.root :=
+  ⟨issue.original, issue.originalExact, rfl⟩
+
+#assert_axioms CarriedIssue.receipt_root_verified
+
 theorem CarriedIssue.original_receipt_height {config : Config} {current : Durable}
     (issue : CarriedIssue config current) :
     issue.receipt.acceptedCount = issue.index + 1 := rfl
