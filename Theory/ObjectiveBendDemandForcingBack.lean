@@ -536,9 +536,18 @@ theorem relatedSim (f : Nat → Nat) (D : Nat → Prop) :
     · have := halts.1 j lt; rwa [(all j).control, active_rename] at this
     · have := halts.2; rwa [(all _).control, active_rename] at this
 
+/-- **`BackSim`'s refuting pole**: relating every pair of states is not a backward simulation
+(it would have to rename a running control into a refused one). Its satisfying poles are
+`forcesSim`, `relatedSim` and `settleSim`. -/
+theorem not_backSim_everything : ¬ BackSim (fun _ _ _ => True) (fun _ _ => True) := by
+  intro sim
+  have renamed := (sim.renames (F := id) (s := initial (.nat 0))
+    (t := ⟨#[], .refused .unbound, []⟩) trivial).1
+  simp [renameControl, initial] at renamed
+
 #assert_axioms halts_prepend agree_halts_back pend_halts_back forces_halts_back forces_transfer_back
 #assert_axioms fitsFrom_mono fitsFrom_exists rename_state_congr
 #assert_axioms BackSim.forceWith BackSim.fold BackSim.materialize BackSim.yieldedPlan BackSim.complete
-#assert_axioms BackSim.runBounded forcesSim related_exec relatedSim
+#assert_axioms BackSim.runBounded forcesSim related_exec relatedSim not_backSim_everything
 
 end Minidregg.Theory.ObjectiveBendDemandForcing

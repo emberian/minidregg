@@ -411,6 +411,47 @@ structure Journal where
 
 def Journal.start (grants : List Grant) (extracts : Nat) : Journal := ⟨[], grants, [], [], [], extracts⟩
 
+/-- **Debit an extraction's actual tick spend** from the turn's allowance, refused by name when
+the allowance left is below it. The spend is deterministic (the extraction's own tick count),
+so re-execution agrees; an extraction never reserves the deployment's per-extraction ceiling. -/
+def Journal.draw (journal : Journal) (spent : Nat) : Except CallRefusal Journal :=
+  if journal.extracts < spent then .error (.kernel (.extractUncovered spent journal.extracts))
+  else .ok { journal with extracts := journal.extracts - spent }
+
+theorem Journal.draw_ok {journal journal' : Journal} {spent : Nat} (drawn : journal.draw spent = .ok journal') :
+    journal' = { journal with extracts := journal.extracts - spent } := by
+  unfold Journal.draw at drawn
+  split at drawn
+  · cases drawn
+  · cases drawn; rfl
+
+/-- **Two draws within the allowance both succeed** (a frame that yields once and finishes, each
+extraction debited what it spent). -/
+theorem Journal.draw_two (journal : Journal) {first second : Nat}
+    (within : first + second ≤ journal.extracts) :
+    (journal.draw first >>= fun j => j.draw second) =
+      .ok { journal with extracts := journal.extracts - first - second } := by
+  have one : ¬ journal.extracts < first := by omega
+  have two : ¬ journal.extracts - first < second := by omega
+  simp [Journal.draw, one, two, bind, Except.bind]
+
+/-- **An under-declared allowance is refused by name**, with the spend it could not cover. -/
+theorem Journal.draw_short (journal : Journal) {spent : Nat} (short : journal.extracts < spent) :
+    journal.draw spent = .error (.kernel (.extractUncovered spent journal.extracts)) := by
+  simp [Journal.draw, short]
+
+/-- The refuted design (planted pole): reserving the per-extraction CEILING at every extraction
+refuses a frame that yields once and finishes within an allowance that covers both actual spends,
+whenever the ceiling is more than half the allowance. -/
+theorem ceiling_reservation_refuses (journal : Journal) {ceiling first second : Nat}
+    (within : first + second ≤ journal.extracts) (big : journal.extracts < 2 * ceiling) :
+    ∃ reason, (journal.draw ceiling >>= fun j => j.draw ceiling) = .error reason := by
+  by_cases h : journal.extracts < ceiling
+  · exact ⟨.kernel (.extractUncovered ceiling journal.extracts), by simp [Journal.draw, h, bind, Except.bind]⟩
+  · have two : journal.extracts - ceiling < ceiling := by omega
+    exact ⟨.kernel (.extractUncovered ceiling (journal.extracts - ceiling)),
+      by simp [Journal.draw, h, two, bind, Except.bind]⟩
+
 /-- Who a call tree runs for: the root frame's subject (an invocation's signer;
 none for a delivered message) and the root's caller (none for an invocation;
 the sending object for a delivered message). -/
@@ -548,12 +589,12 @@ def exec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot r
   | fuel + 1, ctx :: rest, .run state, journal, ticks =>
     match runCounted config.limits ticks state with
     | (.yielded _ yielded, left) =>
-      if journal.extracts < config.planBudget.ticks then
-        .error (.kernel (.extractUncovered config.planBudget.ticks journal.extracts)) else
-      let journal := { journal with extracts := journal.extracts - config.planBudget.ticks }
       match ObjectiveBendDemandData.yieldedPlan config.limits config.planBudget yielded with
       | .error (failure, _) => .error (.frameFault ctx.object.value ctx.method s!"plan extraction: {reprStr failure}")
       | .ok extracted =>
+      match journal.draw (config.planBudget.ticks - extracted.remaining.ticks) with
+      | .error reason => .error reason
+      | .ok journal =>
       match decodeYield ctx.object.value ctx.method extracted.value with
       | .error reason => .error reason
       | .ok (.call call) =>
@@ -577,12 +618,12 @@ def exec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot r
             { journal with outbox := journal.outbox ++ [⟨id, ctx.object.value, send.destination, send.method, send.args⟩] }
             left
     | (.finished _ finished, left) =>
-      if journal.extracts < config.planBudget.ticks then
-        .error (.kernel (.extractUncovered config.planBudget.ticks journal.extracts)) else
-      let journal := { journal with extracts := journal.extracts - config.planBudget.ticks }
       match ObjectiveBendDemandData.complete config.limits config.planBudget finished with
       | .error (failure, _) => .error (.frameFault ctx.object.value ctx.method s!"result extraction: {reprStr failure}")
       | .ok out =>
+      match journal.draw (config.planBudget.ticks - out.remaining.ticks) with
+      | .error reason => .error reason
+      | .ok journal =>
       match decodeReturn ctx.object.value ctx.method out.value with
       | .error reason => .error reason
       | .ok (result, write) =>
@@ -1216,12 +1257,16 @@ theorem exec_invariant {rootBytes : Bytes → Digest} (config : Config) (snapsho
         · -- yielded
           split at ran
           · cases ran
-          have viewed : ({ journal with extracts := journal.extracts - config.planBudget.ticks } : Journal).lookup
-              ctx.object = some (some ctx.view) := viewed
-          have read : ObjectsRead config snapshot
-              { journal with extracts := journal.extracts - config.planBudget.ticks } := read
+          rename_i extracted _
           split at ran
           · cases ran
+          rename_i _ drawn
+          obtain rfl := Journal.draw_ok drawn
+          have viewed : ({ journal with extracts := journal.extracts -
+              (config.planBudget.ticks - extracted.remaining.ticks) } : Journal).lookup
+              ctx.object = some (some ctx.view) := viewed
+          have read : ObjectsRead config snapshot { journal with extracts := journal.extracts -
+              (config.planBudget.ticks - extracted.remaining.ticks) } := read
           · split at ran
             · cases ran
             · rename_i call _
@@ -1277,12 +1322,16 @@ theorem exec_invariant {rootBytes : Bytes → Digest} (config : Config) (snapsho
         · -- finished
           split at ran
           · cases ran
-          have viewed : ({ journal with extracts := journal.extracts - config.planBudget.ticks } : Journal).lookup
-              ctx.object = some (some ctx.view) := viewed
-          have read : ObjectsRead config snapshot
-              { journal with extracts := journal.extracts - config.planBudget.ticks } := read
+          rename_i out _
           split at ran
           · cases ran
+          rename_i _ drawn
+          obtain rfl := Journal.draw_ok drawn
+          have viewed : ({ journal with extracts := journal.extracts -
+              (config.planBudget.ticks - out.remaining.ticks) } : Journal).lookup
+              ctx.object = some (some ctx.view) := viewed
+          have read : ObjectsRead config snapshot { journal with extracts := journal.extracts -
+              (config.planBudget.ticks - out.remaining.ticks) } := read
           · split at ran
             · cases ran
             · split at ran
@@ -1429,6 +1478,7 @@ theorem Invocation.posts_shape {rootBytes : Bytes → Digest} {config : Config} 
 #assert_axioms lookup_install_ne
 #assert_axioms frameReturn_spec
 #assert_axioms exec_invariant
+#assert_axioms Journal.draw_ok Journal.draw_two Journal.draw_short ceiling_reservation_refuses
 #assert_axioms invocation_reentry_free
 #assert_axioms invocation_writes_from_view
 #assert_axioms active_frame_view_stability

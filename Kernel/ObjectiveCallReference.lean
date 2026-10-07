@@ -124,10 +124,12 @@ theorem exec_run_reference {rootBytes : Bytes → Digest} {config : Config} {sna
     · rename_i address yielded left1 counted
       split at ran
       · cases ran
-      try dsimp only at ran
-      split at ran
-      · cases ran
       · rename_i extracted found
+        split at ran
+        · cases ran
+        rename_i _ drawn
+        obtain rfl := Journal.draw_ok drawn
+        try dsimp only at ran
         split at ran
         · cases ran
         · rename_i call decoded
@@ -166,10 +168,12 @@ theorem exec_run_reference {rootBytes : Bytes → Digest} {config : Config} {sna
     · rename_i value finished left1 counted
       split at ran
       · cases ran
-      try dsimp only at ran
-      split at ran
-      · cases ran
       · rename_i out completed
+        split at ran
+        · cases ran
+        rename_i _ drawn
+        obtain rfl := Journal.draw_ok drawn
+        try dsimp only at ran
         split at ran
         · cases ran
         · rename_i result0 write decodedOut
