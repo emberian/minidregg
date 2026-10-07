@@ -154,6 +154,10 @@ instance : Coe NativeConfig (Oracle IO) := ⟨Oracle.live⟩
 inductive Source where
   | process (binary : System.FilePath)
   | transcript (transcript : Transcript)
+  /-- `oracle` answered the check for the Receiver, before the family's
+  `prepare` ran; the receipt was built from the Receiver's voucher
+  (`CredentialSignatureAdmission.CheckedSignature.ofReceiverClaim`). -/
+  | receiver (oracle : Source)
   deriving DecidableEq, Repr
 
 def Oracle.source : {m : Type → Type} → Oracle m → Source
