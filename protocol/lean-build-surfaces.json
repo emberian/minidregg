@@ -530,14 +530,14 @@
     {
       "module": "Assurance.NativeAcceptedFixtureAuthority",
       "path": "Assurance/NativeAcceptedFixtureAuthority.lean",
-      "sha256": "2e19943bdac0c1c85b38a3dd648b873dde96921149f99dd8d88f4aa94e712c31",
+      "sha256": "4c6b32cf14dadc923ba145848cf54198a0b906ef4b1418abf6aa441d15796e2d",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Assurance.NativeAcceptedFixtureData",
       "path": "Assurance/NativeAcceptedFixtureData.lean",
-      "sha256": "4bc1ff47cf4d5f49a3969da93ae573ecad79a662b16929bf549c25eaf887ddcd",
+      "sha256": "3e9d2d3132a6a5e53f2d33a3bc22aed41d4fb558e1e896b1045b7b963f9b1d65",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
