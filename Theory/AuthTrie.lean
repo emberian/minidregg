@@ -15,10 +15,10 @@ list, and an opening is one sibling per branch walked (about `log₂ n`).
   exactly the entries under its prefix (so the answer is `lookup`), or exhibits
   a collision of the node digest (`Collision`: two different node inputs, one
   digest). No premise about the opening or the Store's rows.
-* `verify_complete` — the honest opening (`openFor`) verifies, with the true answer.
-* `insertRoot_eq` — the root after inserting an absent key, computed from its
-  absence opening alone, is the canonical root of the extended entry list:
-  the incremental maintenance fact.
+* NOT proved here (cv task, see the KN2 index range): completeness of the honest
+  opening, and the incremental insert's root equation. A wrong incremental root
+  is caught by `store audit` (it rebuilds every stored node version); reads rely
+  only on `verify_sound`.
 -/
 import Theory.AssertAxioms
 
