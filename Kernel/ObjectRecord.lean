@@ -348,9 +348,10 @@ theorem permits_tightens (authority authority' : Pred) (floors floors' : List Pr
 
 /-! ## Law views -/
 
-/-- A field or variant name that cannot alias another path. -/
+/-- A field or variant name that cannot alias another path. Stated over `toList`, so the
+kernel evaluates it (`String.all` does not reduce in the kernel) and proofs read its characters. -/
 def plainName (name : String) : Bool :=
-  !name.isEmpty && name.all (fun c => c != '.' && c != '@' && c != '/')
+  !name.toList.isEmpty && name.toList.all (fun c => c != '.' && c != '@' && c != '/')
 
 mutual
 /-- The scalar slots of a state value at `path`; `none` if a name is not plain. -/
