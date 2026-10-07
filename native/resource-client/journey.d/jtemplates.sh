@@ -36,6 +36,7 @@
 # JOURNEY_STEP_DIR. Last stdout line: the row table. Last stderr line: the
 # detail. Exit 0 only when every row is ok.
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/../journey-private.sh"
 umask 077
 : "${JOURNEY_STEP_DIR:?}" "${SHELL_BIN:?}" "${MINI:?}" "${HOST:?}" "${CONFIG:?}" "${SOCKET:?}" \
   "${SPONSOR_WS:?}" "${SPONSOR_SUBJECT:?}" "${JOURNEY_WORLD:?}"
@@ -216,7 +217,7 @@ for f in alice bob carl; do
   mkdir -p -m 700 "$H/$f"
   ok setup "$f" "keygen mini.key"
   operator setup "CUSTODY: copy $f's secret into the sponsor home (enroll plan+seal sign with both keys)" \
-    install -D -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/ktpl-$f.key"
+    install_private 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/ktpl-$f.key"
   ok setup sponsor "enroll plan ktpl-$f ktpl-$f.key $(xxd -p -c 256 "$H/$f/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$f/keys/mini.key.next.cosign")"
   ok setup sponsor "enroll seal ktpl-$f"
   ok setup sponsor "enroll submit ktpl-$f"
@@ -227,7 +228,7 @@ for f in alice bob carl; do
     "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "ktpl-$f" --holder "${SUBJ[$f]}" \
       --funding 1000 --account-predicate "$SD/permit-all.json" --factory-ref factory
   operator setup "DELIVER: the birth context into $f's HOME/provision/" \
-    install -D -m 0600 "$SPONSOR_WS/provisions/ktpl-$f/birth-context.json" "$H/$f/provision/birth-context.json"
+    install_private 0600 "$SPONSOR_WS/provisions/ktpl-$f/birth-context.json" "$H/$f/provision/birth-context.json"
   ok setup "$f" "init mini.key ${SUBJ[$f]}"
 done
 A=${SUBJ[alice]} B=${SUBJ[bob]} C=${SUBJ[carl]}
@@ -353,7 +354,7 @@ check member "the map is unchanged after bob's refusals" same_shape lab "$OUT" l
 printf '%s\n' '# bad: line 3 is not a verb' 'room new $ROOM --law open' 'doc new $ROOM/x castle --in $ROOM' \
   'doc new $ROOM/y draft --in $ROOM' >"$SD/bad-usage.shell"
 operator bad "a friend's own template (line 3 is not a verb) into alice's HOME/requests" \
-  install -D -m 0600 "$SD/bad-usage.shell" "$H/alice/requests/bad-usage.shell"
+  install_private 0600 "$SD/bad-usage.shell" "$H/alice/requests/bad-usage.shell"
 stderr_says bad alice "room new bad1 --template @bad-usage.shell" 2 \
   "template @bad-usage.shell line 3: doc new bad1/x castle --in bad1"
 check bad "nothing was born: no bad1 room" test ! -e "$AW/bad1.json"
@@ -361,7 +362,7 @@ printf '%s\n' '# bad: line 8 edits a note' 'room new $ROOM --law open' 'doc new 
   'doc append $ROOM-a1 $ROOM/log one' 'submit $ROOM-a1' 'doc show $ROOM/log' "doc edit \$ROOM-e1 \$ROOM/log 1 'one, rewritten'" \
   'submit $ROOM-e1' 'doc new $ROOM/after draft --in $ROOM' >"$SD/bad-host.shell"
 operator bad "a friend's own template (line 8 is refused by the note's law) into alice's HOME/requests" \
-  install -D -m 0600 "$SD/bad-host.shell" "$H/alice/requests/bad-host.shell"
+  install_private 0600 "$SD/bad-host.shell" "$H/alice/requests/bad-host.shell"
 stderr_says bad alice "room new bad2 --template @bad-host.shell" 3 \
   "refused: law-denied: " "template @bad-host.shell stopped at line 8: submit bad2-e1" "the 6 line(s) before it stand"
 check bad "the lines before line 8 stand: bad2 and bad2/log exist" sh -c "test -f '$AW/bad2.json' && test -f '$AW/bad2.log.json'"

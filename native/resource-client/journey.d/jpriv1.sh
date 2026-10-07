@@ -53,6 +53,7 @@
 # Hook contract: journey.sh (executed). Last stdout line: the row table. Last
 # stderr line: the detail. Exit 0 only when every row is ok.
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/../journey-private.sh"
 umask 077
 : "${JOURNEY_STEP_DIR:?}" "${SHELL_BIN:?}" "${MINI:?}" "${HOST:?}" "${CONFIG:?}" "${SOCKET:?}" \
   "${SPONSOR_WS:?}" "${SPONSOR_SUBJECT:?}" "${JOURNEY_WORLD:?}"
@@ -199,7 +200,7 @@ for f in alice bob carl dave; do
     "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "jp-$f" --holder "${SUBJ[$f]}" \
       --funding 1000 --account-predicate "$SD/permit-all.json" --factory-ref factory
   operator setup "DELIVER: the birth context into $f's HOME/provision/" \
-    install -D -m 0600 "$SPONSOR_WS/provisions/jp-$f/birth-context.json" "$H/$f/provision/birth-context.json"
+    install_private 0600 "$SPONSOR_WS/provisions/jp-$f/birth-context.json" "$H/$f/provision/birth-context.json"
   ok setup "$f" "init mini.key ${SUBJ[$f]}"
   ok setup "$f" "whoami"
   ENC[$f]=$(jq -r '.encryptionKey // empty' "$OUT")
@@ -219,7 +220,7 @@ declare_for() {
   raw room "$who" "room-key --op recipient-record for $room: pins the founder key, prints the signed declaration" ok \
     "$MINI" workspace --action room-key --op recipient-record --dir "$WS/$who" \
     --room-id "$rid" --keys-cell "$kid" --key-epoch "$ke" --founder-key "$fk"
-  install -D -m 0600 "$OUT" "$H/$founder/requests/decl-$room-$who.json"
+  install_private 0600 "$OUT" "$H/$founder/requests/decl-$room-$who.json"
   check room "$who's declaration for $room is a signed v3 record (1333 bytes) naming this room and keys cell" \
     sh -c "jq -e --arg r '$rid' --arg k '$kid' '.type == \"minidregg-signed-room-recipient-v3\" and .room == \$r and .keysCell == \$k and (.recordHex | length) == 2666' '$OUT'"
 }

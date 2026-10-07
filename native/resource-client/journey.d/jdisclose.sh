@@ -15,6 +15,7 @@
 # Hook contract: journey.sh exports MINI HOST CONFIG SOCKET SPONSOR_WS SHELL_BIN
 # JOURNEY_WORLD JOURNEY_STEP_DIR. Last stdout line = artifact; last stderr line = detail.
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/../journey-private.sh"
 umask 077
 D=$JOURNEY_STEP_DIR/jdisclose
 H=$D/h; WS=$D/w
@@ -42,8 +43,8 @@ enroll() {  # enroll WHO FUND
   local f=$1 subject
   mkdir -p -m 700 "$H/$f"
   q "$f" "keygen mini.key" || die "keygen $f"
-  install -D -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/jd-$f.key"
-  install -D -m 0644 "$H/$f/keys/mini.key.next.pub" "$H/sponsor/keys/jd-$f.key.next.pub"
+  install_private 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/jd-$f.key"
+  install_private 0644 "$H/$f/keys/mini.key.next.pub" "$H/sponsor/keys/jd-$f.key.next.pub"
   q sponsor "enroll plan jd-$f jd-$f.key" || die "enroll plan $f: $(refused)"
   q sponsor "enroll seal jd-$f" || die "enroll seal $f"
   q sponsor "enroll submit jd-$f" || die "enroll submit $f: $(refused)"
@@ -51,7 +52,7 @@ enroll() {  # enroll WHO FUND
   rm -f "$H/sponsor/keys/jd-$f.key"
   "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "jd-$f" --holder "$subject" --funding "$2" \
     --account-predicate "$D/permit-all.json" --factory-ref factory >"$LAST" 2>"$LASTERR" || die "provision $f"
-  install -D -m 0600 "$SPONSOR_WS/provisions/jd-$f/birth-context.json" "$H/$f/provision/birth-context.json"
+  install_private 0600 "$SPONSOR_WS/provisions/jd-$f/birth-context.json" "$H/$f/provision/birth-context.json"
   q "$f" "init mini.key $subject" || die "init $f"
   echo "$subject" >"$H/$f/subject"
 }
