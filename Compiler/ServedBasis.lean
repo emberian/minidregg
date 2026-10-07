@@ -441,6 +441,17 @@ theorem replayOf_agrees {R : Type} (first second : Ground deployment) (transacti
   unfold replayOf
   rw [answers]
 
+/-- **A different intent under the id is a conflict**: when the ground's journal
+answer for the id is an intent this ingress does not reproduce exactly, the
+verdict is `conflict` (never `fresh`, never `original`). -/
+theorem replayOf_conflict {R : Type} (ground : Ground deployment) (transactionId : TransactionId)
+    (exact : Intent TransactionId CellId StableNullifier ReplayEnvelope → Bool) (receipt : R)
+    {recorded : Intent TransactionId CellId StableNullifier ReplayEnvelope}
+    (found : ground.recorded transactionId = some (some recorded)) (differs : exact recorded = false) :
+    ground.replayOf transactionId exact receipt = .conflict := by
+  simp [replayOf, found, differs]
+
+#assert_axioms replayOf_conflict
 #assert_axioms replayOf_undeclared
 #assert_axioms replayOf_original
 #assert_axioms replayOf_agrees
