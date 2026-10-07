@@ -8,12 +8,16 @@ config and read back as a history Reader of that real Store.
  - plant 1: the deployment's log start is not the one asked for -> refused by name;
  - plant 2: writing into a Store that is not empty -> refused by name (bootstrap);
  - plant 3: an image with one record's post bytes altered (its root no longer binds)
-   -> refused by name, naming that record's height.
+   -> refused by name, naming that record's height (its carried root check is bypassed
+   for this plant, so the write path's own refusal is what is exercised);
+ - plants 4, 5: the carried commitment (the native Host's reported world root after
+   objective-first, at height 4) altered in its root or its height -> refused by name.
 
 Usage: lake env lean --run scripts/kn2/scratch-reader.lean STORE-HELPER -/
 import Assurance.NativeAcceptedFixtureData
 import Kernel.NativeHostContext
 import Compiler.DurableHistoryStore
+import Compiler.NativeHostCodec
 
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Kernel
@@ -75,11 +79,17 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
     | throw (IO.userError "FAIL the fixture seed no longer decodes")
   let some records := recordHexes.mapM fun record => recordFrame.decode (hexBytes record)
     | throw (IO.userError "FAIL the fixture records no longer decode")
+  let some first := recordFrame.decode (hexBytes firstRecordHex)
+    | throw (IO.userError "FAIL the fixture's first record no longer decodes")
+  -- The image through objective-first: its carried commitment is the root the native Host reported.
+  let records := records ++ [first]
   let image : Image := ⟨seed, records⟩
   let cfg := a
   let logStart := cfg.logStart seed
+  let rootOf := NativeHostCodec.worldRoot cfg.deployment.domain cfg.profile.semantics
+  let carried : DurableHistoryStore.Commitment := ⟨records.length, ⟨firstWorldRoot⟩, rootOf⟩
   -- control
-  match ← DurableHistoryStore.scratchReader cfg.physicalTransport rootBytes image logStart with
+  match ← DurableHistoryStore.scratchReader cfg.physicalTransport rootBytes image logStart carried with
   | .error detail => throw (IO.userError s!"FAIL scratch reader of the fixture image: {detail}")
   | .ok ⟨_, reader⟩ =>
       require s!"the head is at the image's height ({reader.head.height})" (reader.head.height == records.length)
@@ -95,16 +105,25 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
       IO.println s!"control: a Reader at height {reader.head.height}, every record verified and exact, stateAt the head"
   -- plant 1: another log start
   expectRefused "another log start" "log start"
-    (← DurableHistoryStore.scratchReader b.physicalTransport rootBytes image ⟨logStart.value + 1⟩)
+    (← DurableHistoryStore.scratchReader b.physicalTransport rootBytes image ⟨logStart.value + 1⟩ carried)
   -- plant 2: the Store is not empty (store a holds the image)
   expectRefused "a non-empty Store" "scratch Store"
-    (← DurableHistoryStore.scratchReader cfg.physicalTransport rootBytes image logStart)
+    (← DurableHistoryStore.scratchReader cfg.physicalTransport rootBytes image logStart carried)
   -- plant 3: an altered record
   let altered : Image := ⟨seed, records.map alter⟩
   require "the plant alters the first record" (records.head?.map (·.writes.length) != some 0)
   expectRefused "an altered record" "record 1 does not bind"
-    (← DurableHistoryStore.scratchReader c.physicalTransport rootBytes altered logStart)
-  IO.println "PASS scratch reader: a portable image is a real Store's Reader; another log start, a non-empty Store and an altered record are each refused by name"
+    (← DurableHistoryStore.scratchReader c.physicalTransport rootBytes altered logStart
+      { carried with rootOf := fun _ => carried.worldRoot })
+  -- plants 4 and 5: the carried commitment disagrees (root, height); nothing is written.
+  let d ← base.scratch (directory / "d")
+  expectRefused "another carried root" "is not the carried commitment"
+    (← DurableHistoryStore.scratchReader d.physicalTransport rootBytes image logStart
+      { carried with worldRoot := ⟨firstWorldRoot + 1⟩ })
+  expectRefused "another carried height" "is not the carried height"
+    (← DurableHistoryStore.scratchReader d.physicalTransport rootBytes image logStart
+      { carried with height := records.length - 1 })
+  IO.println "PASS scratch reader: a portable image is a real Store's Reader; another log start, a non-empty Store, an altered record, another carried root and another carried height are each refused by name"
 
 end ScratchReader
 
