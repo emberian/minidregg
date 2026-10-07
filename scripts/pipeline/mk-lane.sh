@@ -164,7 +164,7 @@ rule=never change lake-manifest.json or lean-toolchain in this lane (package bui
 first: git fetch github next && git rebase github/next     (lanes build on next; the keeper rebases arrivals onto it)
 check: $PIPELINE_ROOT/scripts/lean-ask check <File.lean>   (0.4 s; --reload after a fetch/rebase) or $PIPELINE_ROOT/scripts/lane-check <File.lean>
        NEVER bare \`lake env lean\` after a fetch/rebase: it reads stale import oleans (false green AND false red).
-build: cd $DEST/src && SWARM_MEM_MAX=24G $SLOT_SH swarm-build lake build <targets>
+build: cd $DEST/src && $SLOT_SH swarm-build lake build <targets>      (per-build cap 48G by default; the box slice is the guard)
        slot.sh takes the first FREE lane slot of this box (box.env PIPELINE_SLOTS) and polls all of them; it sets no
        thread count, so export LEAN_NUM_THREADS=$threads (box.env) or less. NEVER hand-type a flock chain: a
        \`flock -n A cmd || flock B cmd\` blocks on B while other slots are free, and re-runs a FAILED cmd in B.
@@ -175,7 +175,7 @@ echo "mk-lane: OK $DEST at $TIP"
 
 if [ "$verify" = 1 ]; then
   log=$DEST/logs/verify-replay.log
-  ( LEAN_NUM_THREADS=$threads SWARM_MEM_MAX=${SWARM_MEM_MAX:-24G} SWARM_BUILD_TAG="mk-verify-$lane" swarm-build lake build Minidregg +Host.Main:leanArts ObjectiveProofs ) > "$log" 2>&1 \
+  ( LEAN_NUM_THREADS=$threads SWARM_MEM_MAX=${SWARM_MEM_MAX:-48G} SWARM_BUILD_TAG="mk-verify-$lane" swarm-build lake build Minidregg +Host.Main:leanArts ObjectiveProofs ) > "$log" 2>&1 \
     || refuse "verify build failed: $log"
   # Locale-independent pattern; positive control against the base green log.
   ctl=$(cat "$W"/logs/green*.log 2>/dev/null | grep -c '\] Built ' || true)
