@@ -134,4 +134,5 @@ import Compiler.FnWireRoundTrip  -- decode_encode / encode_decode (canonicity) f
 import Compiler.FnWireJson  -- loader + contract check of fn specs/wire-grammar.json
 import Compiler.FnWireFncu  -- fncu.cursor read by the interpreter (replaces fn consumer-inspect)
 import Compiler.FnWireSized  -- the `sized` node's teeth; the poll-reply accepted-arm grammar
+import Compiler.FnWireConsumer  -- fn consumer / identity reply frames (--frame) read by the interpreter
 import Compiler.FnWirePinned  -- the vendored file at a pinned fn revision: digest, 1028 vectors, teeth

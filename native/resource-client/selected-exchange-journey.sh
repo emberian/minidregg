@@ -323,12 +323,17 @@ done
 "$FNX" --fn consumer-inspect "$FN/registered.fncu" >"$FN/registered.inspect"
 end
 inspect_field() { tr ' ' '\n' <"$FN/registered.inspect" | sed -n "s/^$1=//p"; }
+# The store's pin: genesis node and schema digest, from the owner's own `fn identity` line
+# (this script plays the operator who pins them once, out of band).
+"$FNX" --fn identity "$FN/control.sock" >"$FN/identity.stdout"
+identity_field() { tr ' ' '\n' <"$FN/identity.stdout" | sed -n "s/^$1=//p"; }
 jq -n --arg h "$(inspect_field history)" --arg i "$(inspect_field incarnation)" \
   --arg c "$(inspect_field consumer)" --arg p "$(inspect_field principal)" \
   --arg q "$(inspect_field query)" --argjson qv "$(inspect_field query-version)" \
   --argjson vv "$(inspect_field view-version)" --argjson re "$(inspect_field registration-epoch)" \
+  --arg n "$(identity_field node)" --arg s "$(identity_field schema)" \
   '{consumer:$c,history:$h,incarnation:$i,principal:$p,query:$q,
-    queryVersion:$qv,registrationEpoch:$re,viewVersion:$vv}' >"$FN/scope.json"
+    queryVersion:$qv,registrationEpoch:$re,viewVersion:$vv,node:$n,schema:$s}' >"$FN/scope.json"
 jq -n --arg cert "$FN/tls-cert.pem" --arg pw "$FN/posting-password" --argjson port "$FN_PORT" \
   '{type:"minidregg-fn-post-v1",port:$port,username:"selected-mini-publisher",
     passwordFile:$pw,certificatePath:$cert}' >"$FN/post-config.json"
