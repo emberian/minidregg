@@ -53,6 +53,10 @@
 #            remove or change a row the ledger does not admit; commit the manifests it writes.
 #   --draft  (proofs only) print a ledger line (reason TODO, which the ledger refuses) for every
 #            unadmitted change, to review, give a commit and a reason, and append.
+#   --draft FROM..TO  the same lines with commit and reason attributed from the commits of FROM..TO
+#            that touched each change's cause module, written to build-logs/objective/draft-ledger.txt,
+#            and build-logs/objective/draft-review.txt: every removed and restated row with its commit,
+#            redefined rows grouped by root. Read the review, then append the lines and run --pin.
 #   Requires `bun` for c (BUN=/path/to/bun or on PATH):
 #   absent, those gates are RED, never skipped. Logs: build-logs/objective/<gate>/.
 set -euo pipefail
@@ -63,9 +67,10 @@ export PATH=$HOME/.elan/bin:$PATH
 lake=${LAKE:-lake}
 what=${1:-all}
 mode=check
+attribute=
 case "${2:-}" in
   --pin) mode=pin ;;
-  --draft) mode=draft ;;
+  --draft) mode=draft; attribute=${3:-} ;;
   "") ;;
   *) echo "usage: $0 [proofs|c|cgen|transparency|all] [--pin|--draft]" >&2; exit 64 ;;
 esac
@@ -246,7 +251,9 @@ gate_proofs() {
   if [ "$mode" = pin ] && [ "$failed" != 0 ]; then
     echo "objective-manifest: pin REFUSED: a self-test failed; nothing written"; return 1
   fi
-  if "${tool[@]}" "$mode" "$tmp/theory.out" "$tmp/mathlib.out" | tee "$logs/manifest-$mode.log"; then :; else failed=1; fi
+  local extra=()
+  [ -n "$attribute" ] && extra=(--attribute "$attribute" --out "$logs/draft-ledger.txt" --review "$logs/draft-review.txt")
+  if "${tool[@]}" "$mode" "${extra[@]}" "$tmp/theory.out" "$tmp/mathlib.out" | tee "$logs/manifest-$mode.log"; then :; else failed=1; fi
   [ "$failed" = 0 ]
 }
 
