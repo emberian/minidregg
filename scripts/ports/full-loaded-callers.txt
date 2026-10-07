@@ -26,7 +26,6 @@ Kernel/ApplicationAgentLifetimeGrantLookup.lean
 Kernel/ApplicationAgentLifetimeGrantReceiver.lean
 Kernel/ApplicationAgentLifetimeGrantSource.lean
 Kernel/ApplicationShareIssueSource.lean
-Kernel/CapabilityDelegationReceiver.lean
 Kernel/CarriedSegment.lean
 Kernel/ConsentAnchor.lean
 Kernel/ContentResource.lean

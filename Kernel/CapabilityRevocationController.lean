@@ -179,6 +179,10 @@ inductive Reject where
   ground has no answer for it (`ServedBasis.Ground.markerSpent`): refused, never
   read as unspent. -/
   | undeclaredMarker
+  /-- The request did not declare the revocation's transaction id, so its ground
+  has no journal answer for it (`ServedBasis.Ground.replayOf`): refused, never read
+  as "not recorded". -/
+  | undeclaredTransaction
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
   deriving Repr

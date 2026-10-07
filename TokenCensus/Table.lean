@@ -178,7 +178,7 @@ Minidregg.Kernel.BirthExportAdmission.ItemChecked.mk | Kernel.BirthExportAdmissi
 Minidregg.Kernel.BirthExportAdmission.Neutral.mk | Kernel.BirthExportAdmission | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.BirthExportAdmission.NeutralItem.mk | Kernel.BirthExportAdmission | evidence | L2 | 2 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.CapabilityDelegationController.Accepted.mk | Kernel.CapabilityDelegationController | evidence | L2 | 2 proof / 2 data fields; layer-1 review pending
-Minidregg.Kernel.CapabilityDelegationController.Prepared.mk | Kernel.CapabilityDelegationController | evidence | L2 | 4 proof / 6 data fields; layer-1 review pending
+Minidregg.Kernel.CapabilityDelegationController.PreparedOn.mk | Kernel.CapabilityDelegationController | evidence | L2 | 4 proof / 4 data fields; layer-1 review pending
 Minidregg.Kernel.CapabilityDelegationReceiver.AcceptedDelegation.mk | Kernel.CapabilityDelegationReceiver | evidence | L2 | 1 proof / 2 data fields; layer-1 review pending
 Minidregg.Kernel.CapabilityDelegationReceiver.DecodedIngress.mk | Kernel.CapabilityDelegationReceiver | evidence | L2 | 2 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.CapabilityRenounce.Accepted.mk | Kernel.CapabilityRenounce | evidence | L2 | 4 proof / 2 data fields; layer-1 review pending

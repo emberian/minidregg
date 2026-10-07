@@ -379,6 +379,72 @@ theorem recorded_full (durable : DurableReceiverIO.Loaded ResourceBirthCodec.roo
     (Ground.ofLoaded durable directory authority).recorded transactionId =
       some (Snapshot.lookupRecorded transactionId durable.snapshot.model.journal) := rfl
 
+/-- A receiver's replay verdict for its transaction id on a ground: the ground
+does not answer the id (`undeclared`: the light basis did not declare it — refused
+by name, never read as "not recorded"), the id is not recorded (`fresh`), the
+recorded intent is exactly this ingress's (`original`), or another intent holds
+the id (`conflict`). -/
+inductive Replay (R : Type) where
+  | undeclared
+  | fresh
+  | original (receipt : R)
+  | conflict
+
+/-- The replay verdict through `recorded`: the one journal read a receiver makes. -/
+def replayOf {R : Type} (ground : Ground deployment) (transactionId : TransactionId)
+    (exact : Intent TransactionId CellId StableNullifier ReplayEnvelope → Bool) (receipt : R) : Replay R :=
+  match ground.recorded transactionId with
+  | none => .undeclared
+  | some none => .fresh
+  | some (some recorded) => if exact recorded then .original receipt else .conflict
+
+/-- **An undeclared transaction id is refused by name**: on a light basis that did
+not declare it, the verdict is `undeclared`, never `fresh`. -/
+theorem replayOf_undeclared {R : Type} {store : StoreIdentity} (basis : Basis deployment store)
+    (transactionId : TransactionId)
+    (exact : Intent TransactionId CellId StableNullifier ReplayEnvelope → Bool) (receipt : R)
+    (undeclared : transactionId ∉ basis.keys.transactions) :
+    (Ground.ofBasis basis).replayOf transactionId exact receipt = .undeclared := by
+  simp [replayOf, recorded_undeclared basis transactionId undeclared]
+
+/-- **An original verdict names a recorded intent**: the ground's journal holds an
+intent under the id and it is exact. -/
+theorem replayOf_original {R : Type} (ground : Ground deployment) (transactionId : TransactionId)
+    (exact : Intent TransactionId CellId StableNullifier ReplayEnvelope → Bool) (receipt result : R)
+    (original : ground.replayOf transactionId exact receipt = .original result) :
+    result = receipt ∧ ∃ recorded,
+      Snapshot.lookupRecorded transactionId ground.view.model.journal = some recorded ∧
+        exact recorded = true := by
+  unfold replayOf at original
+  split at original
+  · cases original
+  · cases original
+  · rename_i recorded found
+    split at original
+    · rename_i isExact
+      cases original
+      refine ⟨rfl, recorded, ?_, isExact⟩
+      unfold Ground.recorded at found
+      split at found
+      · exact Option.some.inj found
+      · cases found
+    · cases original
+
+/-- **The verdict depends only on the ground's answer for the id**: two grounds
+that answer the transaction id alike (on the light route, the verified journal
+answer of a declared id, `recorded_light_some` / `recorded_light_none`) reach the
+same verdict. -/
+theorem replayOf_agrees {R : Type} (first second : Ground deployment) (transactionId : TransactionId)
+    (exact : Intent TransactionId CellId StableNullifier ReplayEnvelope → Bool) (receipt : R)
+    (answers : first.recorded transactionId = second.recorded transactionId) :
+    first.replayOf transactionId exact receipt = second.replayOf transactionId exact receipt := by
+  unfold replayOf
+  rw [answers]
+
+#assert_axioms replayOf_undeclared
+#assert_axioms replayOf_original
+#assert_axioms replayOf_agrees
+
 /-- An authority operation marker's spent bit, where this ground answers it;
 `none` for a marker whose replay nullifier the request did not declare — a
 controller refuses it by name, never reads it as unspent. -/

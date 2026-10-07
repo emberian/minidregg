@@ -242,42 +242,40 @@ replay lookup) and its marker's replay nullifier (the spent check). -/
 def keys (domain semantics : Digest) (ingress : DecodedIngress) : DurableView.Keys :=
   ⟨[transactionId domain semantics ingress], [nullifier domain semantics ingress]⟩
 
+/-- The recorded intent under this revocation's transaction id is exactly its own. -/
+def exactRecord (domain semantics : Digest) (ingress : DecodedIngress)
+    (recorded : DurableCommitProtocol.Intent Digest Digest StableNullifier ReplayEnvelope) : Bool :=
+  decide (recorded.transactionId = transactionId domain semantics ingress ∧
+    recorded.event.event = event domain semantics ingress ∧
+    recorded.nullifiers = [nullifier domain semantics ingress])
+
+/-- The replay verdict on a ground, read only through its answer for the
+transaction id (`ServedBasis.Ground.replayOf`): an undeclared id is `undeclared`. -/
 def replay (domain semantics : Digest) (ground : Ground deployment) (ingress : DecodedIngress) :
-    Option (Except Unit Receipt) :=
-  match DurableCommitProtocol.Snapshot.lookupRecorded (transactionId domain semantics ingress) ground.view.model.journal with
-  | none => none
-  | some recorded =>
-    if recorded.transactionId = transactionId domain semantics ingress ∧
-        recorded.event.event = event domain semantics ingress ∧
-        recorded.nullifiers = [nullifier domain semantics ingress] then
-      some (.ok (receipt domain semantics ingress))
-    else some (.error ())
+    ServedBasis.Ground.Replay Receipt :=
+  ground.replayOf (transactionId domain semantics ingress) (exactRecord domain semantics ingress)
+    (receipt domain semantics ingress)
 
 theorem replay_only_original (domain semantics : Digest) (ground : Ground deployment) (ingress : DecodedIngress)
-    (result : Receipt) (accepted : replay domain semantics ground ingress = some (.ok result)) :
+    (result : Receipt) (accepted : replay domain semantics ground ingress = .original result) :
     result = receipt domain semantics ingress ∧
       ∃ recorded,
         DurableCommitProtocol.Snapshot.lookupRecorded (transactionId domain semantics ingress) ground.view.model.journal = some recorded ∧
         recorded.event.event = event domain semantics ingress ∧
         recorded.nullifiers = [nullifier domain semantics ingress] := by
-  unfold replay at accepted
-  split at accepted
-  · cases accepted
-  · rename_i recorded found
-    split at accepted
-    · rename_i exactRecord
-      have same : receipt domain semantics ingress = result := by simpa using accepted
-      exact ⟨same.symm, recorded, found, exactRecord.2⟩
-    · cases accepted
+  obtain ⟨same, recorded, found, isExact⟩ := ServedBasis.Ground.replayOf_original ground _ _ _ result accepted
+  simp only [exactRecord, decide_eq_true_eq] at isExact
+  exact ⟨same, recorded, found, isExact.2⟩
 
-inductive Result where
-  | confirmed (kind : DurableReceiverIO.Confirmation) (receipt : Receipt)
-  | rejected (reason : Reject)
-  | transactionConflict
-  | durableRejected (reason : DurableDataIntent.RejectReason)
-  | contention
-  | unavailable (detail : String)
-  | uncertain (detail : String)
+/-- **An undeclared transaction id is refused by name**: on a light basis that did
+not declare it, the verdict is `undeclared`, never "not recorded". -/
+theorem replay_undeclared (domain semantics : Digest) {store : DurableHistory.StoreIdentity}
+    (basis : ServedBasis.Basis deployment store) (ingress : DecodedIngress)
+    (undeclared : transactionId domain semantics ingress ∉ basis.keys.transactions) :
+    replay domain semantics (ServedBasis.Ground.ofBasis basis) ingress = .undeclared :=
+  ServedBasis.Ground.replayOf_undeclared basis _ _ _ undeclared
+
+#assert_axioms replay_undeclared
 
 /-- info: 'Minidregg.Kernel.CapabilityRevocationReceiver.accepted_authority_post' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms accepted_authority_post
@@ -288,7 +286,6 @@ inductive Result where
 /-- info: 'Minidregg.Kernel.CapabilityRevocationReceiver.no_partial_commit' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_partial_commit
 
-/-- info: 'Minidregg.Kernel.CapabilityRevocationReceiver.replay_only_original' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms replay_only_original
+#assert_axioms replay_only_original
 
 end Minidregg.Kernel.CapabilityRevocationReceiver
