@@ -14,6 +14,7 @@ other route; every caller of it is on `scripts/ports/full-loaded-callers.txt`.
 -/
 import Kernel.NativeHostContext
 import Compiler.CredentialAuthorityServed
+import Compiler.ServedBasis
 
 namespace Minidregg.Kernel.NativeHostServed
 
@@ -137,6 +138,16 @@ theorem validateServed_ofLoaded (config : Config) {store : StoreIdentity} (durab
     (·.directory) (·.snapshot.logical) (fun loaded => cellsLawful config durable loaded.directory) = full
   intro served
   cases light <;> cases full <;> simp_all [Except.map]
+
+/-- The basis a request on a validated served state is prepared against: the
+validated state, directory and authority, the Store's head, and the request's
+verified footprint (`Reader.footprint reader keys`). -/
+def OpenedServed.basis {config : Config} {store : StoreIdentity} (opened : OpenedServed config store)
+    (head : Minidregg.Compiler.DurableHistory.Head store) (below : opened.served.height ≤ head.height)
+    {keys : Minidregg.Kernel.DurableView.Keys}
+    (footprint : Minidregg.Compiler.DurableHistoryReader.VerifiedFootprint head keys) :
+    ServedBasis.Basis config.deployment store :=
+  ⟨opened.served, opened.directory, opened.authority, head, below, keys, footprint⟩
 
 #assert_axioms validateServed_served
 #assert_axioms OpenedServed.cellLawful_all
