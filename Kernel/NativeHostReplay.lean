@@ -146,7 +146,7 @@ structure PriorBegin (config : Config) where
   record : DurableReceiver.IntentRecord
   admitted : ∃ original : Opened config,
     ∃ accepted : ApplicationLifecycleBeginReceiver.Accepted config.deployment config.profile
-      ⟨config.federation, logicalHeight config original.durable⟩ original.durable ingress,
+      ⟨config.federation, logicalHeight config original.durable⟩ original.ground ingress,
       record = DurableReceiver.IntentRecord.ofIntent accepted.intent
 
 /-- The v2 descriptor-bound BEGIN is retained separately from the historical
@@ -160,7 +160,7 @@ structure PriorBeginV2 (config : Config) where
     ∃ accepted : ApplicationLifecycleBeginV2Admission.Accepted
       config.deployment config.profile
       ⟨config.federation, logicalHeight config original.durable⟩
-      original.durable ingress,
+      original.ground ingress,
       record = DurableReceiver.IntentRecord.ofIntent accepted.intent
 
 /-- Compact selected-release evidence retained only after the same replay
@@ -388,7 +388,7 @@ structure BeginAtV3 (config : Config) (opened : Opened config)
   private mk ::
   accepted : ApplicationLifecycleBeginV3Admission.Accepted
     config.deployment config.profile
-    ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress
+    ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress
   history : BeginV3History config opened ingress
 
 def BeginAtV3.intent {config : Config} {opened : Opened config}
@@ -520,7 +520,7 @@ private def admitBeginV3At (config : Config) (opened : Opened config)
   let ambient : DeclaredResourceController.Ambient :=
     ⟨config.federation, logicalHeight config opened.durable⟩
   match ← ApplicationLifecycleBeginV3Admission.admitNative config.deployment
-      config.profile ambient config.signature opened.durable ingress with
+      config.profile ambient config.signature opened.ground ingress with
   | .error detail => return .error detail
   | .ok accepted => return .ok ⟨accepted, history⟩
 
@@ -938,7 +938,7 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : JointControlBootstrapBundle.Accepted config opened source) :
       NativeAdmission config opened accepted.intent
   | jointReserve (reserved : JointReceiverAdmission.Reserved config.deployment config.profile
-      ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable) :
+      ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground) :
       NativeAdmission config opened reserved.intent
   | birth (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth
       config.profile config.deployment opened.pins opened.durable
@@ -960,7 +960,7 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened (GrainResourceBirthReceiver.intent accepted)
   | invoke {command : DeclaredResourceController.Command}
       (prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command)
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground command)
       (signed : DeclaredResourceController.SignedCommand)
       (shape : DeclaredResourceController.PhysicalShape prepared)
       (accepted : DeclaredResourceController.AcceptedInvocation prepared signed) :
@@ -970,7 +970,7 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened (PolicyInstallReceiver.intent accepted)
   | delegate {ingress : CapabilityDelegationReceiver.DecodedIngress}
       (accepted : CapabilityDelegationReceiver.AcceptedDelegation config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress) :
       NativeAdmission config opened (CapabilityDelegationReceiver.intent accepted)
   | revoke {ingress : CapabilityRevocationReceiver.DecodedIngress}
       (accepted : CapabilityRevocationReceiver.AcceptedRevocation config.deployment config.profile
@@ -978,11 +978,11 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened (CapabilityRevocationReceiver.intent accepted)
   | renounce {ingress : CapabilityRenounce.DecodedIngress}
       (accepted : CapabilityRenounce.AcceptedRenounce config.deployment config.profile.semantics
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress) :
       NativeAdmission config opened (CapabilityRenounce.intent accepted)
   | participantKeyEnrollment {ingress : ParticipantKeyEnrollment.DecodedIngress}
       (accepted : ParticipantKeyEnrollmentReceiver.AcceptedEnrollment config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress) :
       NativeAdmission config opened (ParticipantKeyEnrollmentReceiver.intent accepted)
   | subjectKeyRotation {ingress : SubjectKeyRotation.DecodedIngress}
       (admission : (SubjectKeyRotation.receiver (receivingLaws config) (.live config.signature)).Admitted (rotationEnv config)
@@ -995,19 +995,19 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened (SubjectKeyCommitmentAdoption.intent accepted)
   | participantFactoryProvisioning {ingress : ParticipantFactoryProvisioning.DecodedIngress}
       (accepted : ParticipantFactoryProvisioningReceiver.AcceptedProvisioning config.deployment
-        config.profile ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+        config.profile ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress) :
       NativeAdmission config opened (ParticipantFactoryProvisioningReceiver.intent accepted)
   | fleetTurn {ingress : FleetTurn.DecodedIngress}
       (accepted : FleetTurnReceiver.AcceptedTurn config.deployment config.profile config.tariff
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress) :
       NativeAdmission config opened (FleetTurnReceiver.intent accepted)
   | payBook {ingress : PayBookReceiver.DecodedIngress}
       (accepted : PayBookReceiver.AcceptedChange config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress) :
       NativeAdmission config opened (PayBookReceiver.intent accepted)
   | payAssignment {ingress : PayAssignmentReceiver.DecodedIngress}
       (accepted : PayAssignmentReceiver.AcceptedAssignment config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress) :
       NativeAdmission config opened (PayAssignmentReceiver.intent accepted)
   | realmWell {ingress : RealmWellReceiver.DecodedIngress}
       (accepted : RealmWellReceiver.AcceptedWell config.deployment config.profile
@@ -1016,12 +1016,12 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened (RealmWellReceiver.intent accepted)
   | clockTick {ingress : ClockTickReceiver.DecodedIngress}
       (accepted : ClockTickReceiver.AcceptedTick config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress) :
       NativeAdmission config opened (ClockTickReceiver.intent accepted)
   | payObservation {ingress : PayObservationReceiver.DecodedIngress}
       (admission : ((PayObservationReceiver.family config.deployment config.profile).liveReceiver
         (receivingLaws config) config.signature).Admitted
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress) :
       NativeAdmission config opened
         (((PayObservationReceiver.family config.deployment config.profile).liveReceiver
           (receivingLaws config) config.signature).intent admission.accepted)
@@ -1046,11 +1046,11 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened (PayClaimReceiver.intent accepted)
   | payRefill {ingress : PurseRefillReceiver.DecodedIngress}
       (accepted : PurseRefillReceiver.AcceptedRefill config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress) :
       NativeAdmission config opened (PurseRefillReceiver.intent accepted)
   | jobMoney {ingress : JobMoneyReceiver.DecodedIngress}
       (accepted : JobMoneyReceiver.AcceptedMoney config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress) :
       NativeAdmission config opened (JobMoneyReceiver.intent accepted)
   | activity {ingress : ObjectiveActivityReceiver.DecodedIngress}
       (accepted : ObjectiveActivityReceiver.Accepted config.deployment config.profile
@@ -1064,7 +1064,7 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened (SeatReceiver.intent accepted)
   | certify {ingress : CertifyReceiver.DecodedIngress}
       (accepted : CertifyReceiver.AcceptedCertify config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress) :
       NativeAdmission config opened (CertifyReceiver.intent accepted)
   | selectiveRelease {ingress : FnSelectiveReleaseIngress.Ingress}
       (accepted : FnSelectiveReleaseAdmission.Accepted config opened ingress) :
@@ -1101,7 +1101,7 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened (accepted.intent config opened ingress)
   | applicationLifecycleBegin {ingress : ApplicationLifecycleBeginIngress.Ingress}
       (accepted : ApplicationLifecycleBeginReceiver.Accepted config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress) :
       NativeAdmission config opened accepted.intent
   | applicationLifecycleClaim {ingress : ApplicationLifecycleClaimIngress.Ingress}
       (admitted : ClaimAt config opened ingress) :
@@ -1109,7 +1109,7 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
   | applicationLifecycleBeginV2 {ingress : ApplicationLifecycleBeginV2Ingress.Ingress}
       (accepted : ApplicationLifecycleBeginV2Admission.Accepted
         config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress) :
       NativeAdmission config opened accepted.intent
   | applicationLifecycleClaimV2 {ingress : ApplicationLifecycleClaimV2Ingress.Ingress}
       (admitted : ClaimAtV2 config opened ingress) :
@@ -1168,7 +1168,7 @@ structure OrdinaryAt (config : Config) (opened : Opened config)
   signed : DeclaredResourceController.SignedCommand
   prepared : DeclaredResourceController.PreparedInvocation config.deployment
     config.profile ⟨config.federation, logicalHeight config opened.durable⟩
-    opened.durable command
+    opened.ground command
   shape : DeclaredResourceController.PhysicalShape prepared
   accepted : DeclaredResourceController.AcceptedInvocation prepared signed
   intentExact : intent = accepted.dataIntent shape
@@ -1205,12 +1205,12 @@ structure Derived (config : Config) (opened : Opened config) where
   issue : Option (IssueAdmission config opened intent)
   begin : Option (Σ ingress : ApplicationLifecycleBeginIngress.Ingress,
     { accepted : ApplicationLifecycleBeginReceiver.Accepted config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress //
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress //
       intent = accepted.intent })
   beginV2 : Option (Σ ingress : ApplicationLifecycleBeginV2Ingress.Ingress,
     { accepted : ApplicationLifecycleBeginV2Admission.Accepted
         config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress //
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress //
       intent = accepted.intent })
   claimV2 : Option (Σ ingress : ApplicationLifecycleClaimV2Ingress.Ingress,
     { admitted : ClaimAtV2 config opened ingress // intent = admitted.intent })
@@ -1224,7 +1224,7 @@ structure Derived (config : Config) (opened : Opened config) where
   grantIssue : Option (Σ ingress : ApplicationAgentLifetimeGrantSource.Ingress,
     { admitted : LifetimeGrantIssueAt config opened ingress // intent = admitted.intent }) := none
   jointReservation : Option {reserved : JointReceiverAdmission.Reserved config.deployment config.profile
-      ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable //
+      ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground //
       intent = reserved.intent} := none
   bootstrap : Option (JointControlBootstrap.Admission config opened intent) := none
   bootstrapBundle : Option (Σ source : JointControlBootstrapBundle.Source,
@@ -1305,7 +1305,7 @@ def Derived.ofBootstrapBundle {config : Config} {opened : Opened config}
 replay and one physical append; no raw event can construct this witness. -/
 def Derived.ofJointReserve {config : Config} {opened : Opened config}
     (reserved : JointReceiverAdmission.Reserved config.deployment config.profile
-      ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable) :
+      ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground) :
     Derived config opened :=
   { intent := reserved.intent
     admission := .jointReserve reserved
@@ -1348,7 +1348,7 @@ def Derived.ofInvoke {config : Config} {opened : Opened config}
     {command : DeclaredResourceController.Command}
     (prepared : DeclaredResourceController.PreparedInvocation config.deployment
       config.profile ⟨config.federation, logicalHeight config opened.durable⟩
-      opened.durable command)
+      opened.ground command)
     (signed : DeclaredResourceController.SignedCommand)
     (shape : DeclaredResourceController.PhysicalShape prepared)
     (accepted : DeclaredResourceController.AcceptedInvocation prepared signed) :
@@ -2430,14 +2430,14 @@ private def derive (config : Config) (opened : Opened config)
         return .ok ⟨admitted.intent, .applicationLifecycleClaim admitted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ApplicationLifecycleBeginV2Ingress.codec.decode bytes then
     match ← ApplicationLifecycleBeginV2Admission.admitNative config.deployment
-        config.profile ⟨config.federation, height⟩ config.signature opened.durable ingress with
+        config.profile ⟨config.federation, height⟩ config.signature opened.ground ingress with
     | .error _ => return .error "historical descriptor-bound lifecycle BEGIN refused"
     | .ok accepted =>
         return .ok ⟨accepted.intent, .applicationLifecycleBeginV2 accepted,
           none, none, some ⟨ingress, ⟨accepted, rfl⟩⟩, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ApplicationLifecycleBeginIngress.codec.decode bytes then
     match ← ApplicationLifecycleBeginReceiver.admitLoaded config.deployment config.profile
-        ⟨config.federation, height⟩ config.signature opened.durable ingress with
+        ⟨config.federation, height⟩ config.signature opened.ground ingress with
     | .error _ => return .error "historical application lifecycle begin admission refused"
     | .ok accepted => return .ok ⟨accepted.intent, .applicationLifecycleBegin accepted,
         none, some ⟨ingress, ⟨accepted, rfl⟩⟩, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
