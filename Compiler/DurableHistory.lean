@@ -17,8 +17,8 @@ instantiated at the deployed hash.
   `frontierDigest`) into every entry's tag MAC and into the checkpoint; the
   MINIANC2 head anchor fixes the head entry's exact bytes. So a frontier read
   from a verified head tag is "the MAC'd, anchor-bound root".
-* **Trailer** (the Store's tag column, v3): the root and chain after `h`, the
-  frontier digest and spent root after `h`, then the MAC (`tagMac`) over all
+* **Trailer** (the Store's tag column, v4): the root and chain after `h`, the
+  frontier digest and index root after `h`, then the MAC (`tagMac`) over all
   four. The chain binds the record (it hashes it); the MAC binds the rest.
 
 The Store hands Lean `RawEntry` and `RawNode` values. Their fields are PRIVATE
@@ -30,7 +30,7 @@ state what a `Verified` value means.
 -/
 import Compiler.DurableCheckpointCodec
 import Theory.LogAccumulator
-import Compiler.DurableSpent
+import Compiler.DurableIndex
 
 namespace Minidregg.Compiler.DurableHistory
 
@@ -93,21 +93,21 @@ where
         ((k, height), r) :: (if k' = k then go rest (k + 1) (nodeDigest l r) else [])
     | [], k, r => [((k, height), r)]
 
-/-! ## The trailer (tag column, v3) -/
+/-! ## The trailer (tag column, v4) -/
 
-/-- What a trailer carries besides its MAC: root, chain, frontier digest, spent root. -/
+/-- What a trailer carries besides its MAC: root, chain, frontier digest, index root. -/
 structure Carried where
   root : Digest
   chain : Digest
   frontier : Digest
-  spentRoot : Digest
+  indexRoot : Digest
   deriving DecidableEq, Repr
 
 def trailerStream : StreamCodec (Carried × List UInt8) :=
   StreamCodec.xmap
     (StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream))))
-    (fun t => (t.1.root, t.1.chain, t.1.frontier, t.1.spentRoot, t.2))
+    (fun t => (t.1.root, t.1.chain, t.1.frontier, t.1.indexRoot, t.2))
     (fun t => (⟨t.1, t.2.1, t.2.2.1, t.2.2.2.1⟩, t.2.2.2.2))
     (by intro value; cases value; rfl)
 
@@ -116,11 +116,11 @@ def tagInputStream : StreamCodec (List UInt8 × Nat × Digest × Digest × Diges
     (StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product digestStream digestStream))))
 
-/-- `KMAC256(key, logTagLabel, (keyId, h, chain, root, frontierDigest, spentRoot))`. -/
+/-- `KMAC256(key, logTagLabel, (keyId, h, chain, root, frontierDigest, indexRoot))`. -/
 def tagMac (key : MacKey) (height : Nat) (carried : Carried) : List UInt8 :=
   kmac256Bytes key.bytes logTagLabel.toUTF8.toList
     (tagInputStream.encode (key.id, height, carried.chain, carried.root, carried.frontier,
-      carried.spentRoot))
+      carried.indexRoot))
 
 /-- The stored tag of height `h`. -/
 def trailer (key : MacKey) (height : Nat) (carried : Carried) : List UInt8 :=
@@ -185,7 +185,7 @@ inductive Refusal where
   deriving DecidableEq, Repr
 
 def Refusal.message : Refusal → String
-  | .malformedTrailer h => s!"durable history record refused at height {h}: its tag is not a v3 trailer"
+  | .malformedTrailer h => s!"durable history record refused at height {h}: its tag is not a v4 trailer"
   | .wrongHeight h stored => s!"durable history record refused at height {h}: the Store returned height {stored}"
   | .notIncluded h => s!"durable history record refused at height {h}: its inclusion proof does not reach the anchored log frontier (the record, its tag or a node on its path was altered); run `mini store audit`"
   | .beyondHead h head => s!"durable history record refused at height {h}: beyond the authenticated head {head}"
@@ -283,19 +283,19 @@ theorem verifyAt_refuses {frontier : List (Nat × Digest)} {n height : Nat} {ent
 the checkpoint) against the open's own recomputed chain, frontier and spent
 root: the carried values must equal them and the MAC must verify. Returns the
 carried root (the receipt root of `h`). -/
-def verifyTagged (key : MacKey) (height : Nat) (tag : List UInt8) (chain frontier spentRoot : Digest) :
+def verifyTagged (key : MacKey) (height : Nat) (tag : List UInt8) (chain frontier indexRoot : Digest) :
     Except Refusal Digest :=
   match trailerStream.toLawful.decode tag with
   | none => .error (.malformedTrailer height)
   | some (carried, mac) =>
-      if carried.chain = chain ∧ carried.frontier = frontier ∧ carried.spentRoot = spentRoot ∧
+      if carried.chain = chain ∧ carried.frontier = frontier ∧ carried.indexRoot = indexRoot ∧
           mac = tagMac key height carried then .ok carried.root
       else .error (.notIncluded height)
 
 /-- What the Host writes verifies, exactly. -/
 theorem verifyTagged_trailer (key : MacKey) (height : Nat) (carried : Carried) :
     verifyTagged key height (trailer key height carried) carried.chain carried.frontier
-      carried.spentRoot = .ok carried.root := by
+      carried.indexRoot = .ok carried.root := by
   have decoded : trailerStream.toLawful.decode (trailerStream.encode (carried, tagMac key height carried)) =
       some (carried, tagMac key height carried) :=
     trailerStream.toLawful.decode_encode (carried, tagMac key height carried)
@@ -305,7 +305,7 @@ theorem verifyTagged_trailer (key : MacKey) (height : Nat) (carried : Carried) :
 
 `StoreIdentity` is the opened Store: its MAC key and its genesis log start
 (the deployment's domain and semantics and the seed, `NativeHostCodec.logRoot0`).
-A `Head store` is the height, chain, accumulator frontier and spent root that
+A `Head store` is the height, chain, accumulator frontier and index root that
 the head entry's tag MACs under `store.key` — or the empty log's values.
 Every `Verified`, `ByTx`, spent answer and state answer of
 `Compiler.DurableHistoryReader` is indexed by a `Head store`, so a head of
@@ -369,26 +369,26 @@ structure Head (store : StoreIdentity) where
   height : Nat
   chain : Digest
   frontier : List (Nat × Digest)
-  spentRoot : Digest
+  indexRoot : Digest
   root : Digest
-  bound : (height = 0 ∧ chain = store.logStart ∧ frontier = [] ∧ spentRoot = DurableSpent.emptyDigest) ∨
-    ∃ tag, verifyTagged store.key height tag chain (frontierDigest height frontier) spentRoot = .ok root
+  bound : (height = 0 ∧ chain = store.logStart ∧ frontier = [] ∧ indexRoot = DurableIndex.emptyDigest) ∨
+    ∃ tag, verifyTagged store.key height tag chain (frontierDigest height frontier) indexRoot = .ok root
 
 /-- The empty log's head: its chain is the Store's genesis log start. LAYER 2:
 minted only by the open, and only when the anchored read's head is 0. -/
 def Head.genesis (store : StoreIdentity) (root : Digest) : Head store :=
-  ⟨0, store.logStart, [], DurableSpent.emptyDigest, root, Or.inl ⟨rfl, rfl, rfl, rfl⟩⟩
+  ⟨0, store.logStart, [], DurableIndex.emptyDigest, root, Or.inl ⟨rfl, rfl, rfl, rfl⟩⟩
 
 /-- A head from the head entry's tag: the MAC must verify under the Store's key
-for this height, the recomputed chain and frontier, and the spent root the tag carries. -/
+for this height, the recomputed chain and frontier, and the index root the tag carries. -/
 def Head.verify (store : StoreIdentity) (height : Nat) (tag : List UInt8) (chain : Digest)
     (frontier : List (Nat × Digest)) : Except Refusal (Head store) :=
   match trailerCarried tag with
   | none => .error (.malformedTrailer height)
   | some carried =>
       match checked : verifyTagged store.key height tag chain (frontierDigest height frontier)
-          carried.spentRoot with
-      | .ok root => .ok ⟨height, chain, frontier, carried.spentRoot, root, Or.inr ⟨tag, checked⟩⟩
+          carried.indexRoot with
+      | .ok root => .ok ⟨height, chain, frontier, carried.indexRoot, root, Or.inr ⟨tag, checked⟩⟩
       | .error refusal => .error refusal
 
 /-- A verified head is at the height, chain and frontier it was verified for. -/
@@ -410,10 +410,10 @@ theorem Head.genesis_fields (store : StoreIdentity) (root : Digest) :
 
 /-- **A head is MAC-bound to its Store**: unless it is the empty log's (whose
 chain is the Store's genesis log start), some tag of its height verifies under
-the Store's key for its chain, frontier and spent root. -/
+the Store's key for its chain, frontier and index root. -/
 theorem Head.bound_tag {store : StoreIdentity} (head : Head store) (nonempty : head.height ≠ 0) :
     ∃ tag, verifyTagged store.key head.height tag head.chain (frontierDigest head.height head.frontier)
-      head.spentRoot = .ok head.root := by
+      head.indexRoot = .ok head.root := by
   rcases head.bound with ⟨zero, _⟩ | tagged
   · exact absurd zero nonempty
   · exact tagged

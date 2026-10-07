@@ -214,16 +214,26 @@ theorem nullifierKey_ne_transactionKey (nullifier : Kernel.DurableDataIntent.Sta
 /-- The value of a family-0/1 row: the height, as a canonical natural. -/
 def heightValue (height : Nat) : List UInt8 := StreamCodec.nat.encode height
 
-/-- Read a height value back (the canonical natural, nothing after it). -/
+/-- Read a height value back: only the canonical encoding of a height is one
+(`heightOf_some`), so a verified value names exactly one height. -/
 def heightOf (value : List UInt8) : Option Nat :=
   match StreamCodec.nat.decodePrefix value with
-  | some (height, []) => some height
+  | some (height, []) => if heightValue height = value then some height else none
   | _ => none
 
 @[simp] theorem heightOf_heightValue (height : Nat) : heightOf (heightValue height) = some height := by
   have decoded := StreamCodec.nat.decodePrefix_encode height []
   rw [List.append_nil] at decoded
   simp [heightOf, heightValue, decoded]
+
+theorem heightOf_some {value : List UInt8} {height : Nat} (read : heightOf value = some height) :
+    value = heightValue height := by
+  unfold heightOf at read
+  split at read
+  · split at read
+    · rename_i same; cases read; exact same.symm
+    · cases read
+  · cases read
 
 /-! ## The verifier and its answers -/
 
@@ -702,6 +712,7 @@ end Probe
 #assert_axioms reveal_sound
 #assert_axioms nullifierKey_ne_transactionKey
 #assert_axioms heightOf_heightValue
+#assert_axioms heightOf_some
 #assert_axioms Answer.sound
 #assert_axioms empty_absent
 #assert_axioms empty_present_refused

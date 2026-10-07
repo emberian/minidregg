@@ -1,7 +1,7 @@
 /-
 # Theory.AuthTrie — a compressed authenticated binary trie with O(log n) openings
 
-KN2-STORE-OPEN's spent set and transaction index (`Compiler.DurableSpent`).
+KN2-STORE-OPEN's one authenticated index (`Compiler.DurableIndex`: spent set, transaction index, keyed families).
 `Theory.AuthMap` is the uncompressed sparse Merkle map: its openings cost
 `depth + 1 = 257` hashes. Here a subtree holding exactly one entry is that
 entry's leaf, at the highest level where it is alone; an empty subtree is the

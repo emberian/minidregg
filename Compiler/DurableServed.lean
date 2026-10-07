@@ -197,7 +197,7 @@ theorem recordedAt_lookup_none_list {head : Head store} (height : Nat) (transact
             else none
         | .absent _ => none) = none →
       ∀ answer ∈ answers, answer.1 = transactionId →
-        (∃ opens : DurableSpent.Opens head.spentRoot (DurableSpent.transactionKey answer.1) none,
+        (∃ opens : DurableIndex.Opens head.indexRoot (DurableIndex.transactionKey answer.1) none,
             answer.2 = .absent opens) ∨
           ∃ found : ByTx head answer.1, answer.2 = .present found ∧ height < found.height
   | [], _, _, member, _ => by cases member
@@ -236,12 +236,12 @@ theorem recordedAt_none {head : Head store} {keys : Keys} (footprint : VerifiedF
     (miss : Snapshot.lookupRecorded transactionId (recordedAt footprint height) = none)
     (answer : (id : TransactionId) × TxAnswer head id) (member : answer ∈ footprint.transactions)
     (same : answer.1 = transactionId) :
-    (∃ opens : DurableSpent.Opens head.spentRoot (DurableSpent.transactionKey answer.1) none,
+    (∃ opens : DurableIndex.Opens head.indexRoot (DurableIndex.transactionKey answer.1) none,
         answer.2 = .absent opens) ∨
       ∃ found : ByTx head answer.1, answer.2 = .present found ∧ height < found.height :=
   recordedAt_lookup_none_list height transactionId footprint.transactions miss answer member same
 
-/-- **A consumed bit of a view is the spent map's verified answer at the served
+/-- **A consumed bit of a view is the index's verified answer at the served
 height**: true exactly when the nullifier's answer opens an inserting height at
 or below it. -/
 theorem spentAt_true {head : Head store} {keys : Keys} (footprint : VerifiedFootprint head keys)
@@ -558,13 +558,13 @@ nothing older. What it establishes, each refused by name:
 
 * the Store's epoch (the seed label), before anything else;
 * the checkpoint: its MAC (`openSealed`), and the MAC of the entry at its height
-  for the checkpoint's chain, accumulator frontier and spent root
+  for the checkpoint's chain, accumulator frontier and index root
   (`verifyTagged`): the checkpoint sits on the log the head anchor fixes;
 * every entry after it: canonical record bytes (named by height), the chain over
   the stored bytes, its tag's MAC (`verifyTags`), the frontier its tag carries
-  (`walkFrontier`), and the spent root its tag carries, re-derived by inserting
-  the record's transaction id and nullifiers into the spent map at the
-  checkpoint's version (`DurableSpent.insertAll` refuses a key already present:
+  (`walkFrontier`), and the index root its tag carries, re-derived by inserting
+  the record's transaction id and nullifiers into the index at the
+  checkpoint's version (`DurableIndex.IndexRows.apply` refuses a key already present:
   a transaction or nullifier accepted before the checkpoint);
 * the replay of those records from the checkpoint state through the executor;
 * the head: its tag's MAC under the Store's key (`Head.verify`) and the root it
@@ -603,27 +603,27 @@ private def decodeRecordsAt : Nat → List DurableReceiverIO.Entry → Except St
         | throw s!"noncanonical durable log record at height {height}"
       return record :: (← decodeRecordsAt (height + 1) rest)
 
-/-- The spent root after each record, re-derived from the map at the base's
-version: each record's keys inserted at its height; the root after each must be
-the one its (MAC-verified) tag carries. The rows each record writes are kept in a
-map (newest wins) laid over the Store's rows. -/
-private def checkSpent (rows : List Bool → Option DurableSpent.Row) :
-    Std.HashMap (List Bool) DurableSpent.Row → Digest → Nat → List (IntentRecord × Digest) →
+/-- The index root after each record, re-derived from the trie at the base's
+version: each record's rows (`IndexRows.apply`) at its height; the root after
+each must be the one its (MAC-verified) tag carries. The rows each record writes
+are kept in a map (newest wins) laid over the Store's rows. -/
+private def checkIndex (rows : List Bool → Option DurableIndex.Row) :
+    Std.HashMap (List Bool) DurableIndex.Row → Digest → Nat → List (IntentRecord × Digest) →
       Except String Unit
   | _, _, _, [] => .ok ()
   | written, root, height, (record, carried) :: rest => do
-      let keys := DurableSpent.recordKeys record.transactionId record.nullifiers
       let current := fun path => (written.get? path).or (rows path)
-      let (next, writes) ← match DurableSpent.insertAll current root height keys with
+      let (next, writes) ← match DurableIndex.IndexRows.apply current root height record.transactionId
+          record.nullifiers with
         | .ok result => pure result
         | .error message => throw s!"durable log record at height {height}: {message}"
       if next ≠ carried then
-        throw s!"the tag at height {height} carries a spent root the log does not reach"
-      checkSpent rows (writes.foldl (fun map row => map.insert row.1 row.2) written) next (height + 1) rest
+        throw s!"the tag at height {height} carries an index root the log does not reach"
+      checkIndex rows (writes.foldl (fun map row => map.insert row.1 row.2) written) next (height + 1) rest
 
 /-- What an extension starts from: a verified state (bare snapshot, its
 enumeration, the fresh-cell bytes) at `height`, with the chain, accumulator
-frontier and spent root there, and the head tag there when it is not 0. -/
+frontier and index root there, and the head tag there when it is not 0. -/
 private structure Start (rootBytes : List UInt8 → Digest) where
   seed : Seed
   absentBytes : List UInt8
@@ -633,15 +633,15 @@ private structure Start (rootBytes : List UInt8 → Digest) where
   height : Nat
   chain : Digest
   frontier : List (Nat × Digest)
-  spentRoot : Digest
+  indexRoot : Digest
   tag : Option (List UInt8)
   checkpoint : Nat
 
 /-- **The one verification of new entries**, used by the open (from its
 checkpoint) and by a session's refresh (from its head): every entry after
 `start.height` — canonical record bytes (named by height), the chain over the
-stored bytes, its tag's MAC, the frontier its tag carries, the spent root its
-tag carries (re-derived by inserting the record's keys into the spent map at the
+stored bytes, its tag's MAC, the frontier its tag carries, the index root its
+tag carries (re-derived by applying the record's rows to the index at the
 start's version: a key already present refuses) — then the replay from the
 start's state, the head tag's MAC and its carried root against the replayed
 world root. -/
@@ -661,22 +661,22 @@ private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes 
     | .error message => return .error message
     | .ok frontier => pure frontier
   lap "records, chain, tags, frontier"
-  let carriedSpent ← match suffix.mapM fun entry => DurableHistory.trailerCarried entry.tag with
+  let carriedIndex ← match suffix.mapM fun entry => DurableHistory.trailerCarried entry.tag with
     | none => return .error "durable log tag malformed"
-    | some carried => pure (carried.map (·.spentRoot))
-  let keys := records.flatMap fun record => DurableSpent.recordKeys record.transactionId record.nullifiers
-  -- Rows down to 32 bits first; every prefix when what they open does not verify.
-  let shallow ← match ← DurableReceiverIO.spentRows transport start.height keys 32 with
+    | some carried => pure (carried.map (·.indexRoot))
+  let keys := records.flatMap fun record => DurableIndex.IndexRows.keys record.transactionId record.nullifiers
+  -- Rows down to 48 bits first; every prefix when what they open does not verify.
+  let shallow ← match ← DurableReceiverIO.indexRows transport start.height keys 48 with
     | .error message => return .error message
     | .ok rows => pure rows
-  lap "spent rows read"
-  if let .error _ := checkSpent shallow {} start.spentRoot (start.height + 1) (records.zip carriedSpent) then
-    let deep ← match ← DurableReceiverIO.spentRows transport start.height keys with
+  lap "index rows read"
+  if let .error _ := checkIndex shallow {} start.indexRoot (start.height + 1) (records.zip carriedIndex) then
+    let deep ← match ← DurableReceiverIO.indexRows transport start.height keys with
       | .error message => return .error message
       | .ok rows => pure rows
-    if let .error message := checkSpent deep {} start.spentRoot (start.height + 1) (records.zip carriedSpent) then
+    if let .error message := checkIndex deep {} start.indexRoot (start.height + 1) (records.zip carriedIndex) then
       return .error message
-  lap "spent map"
+  lap "index"
   let headChain := chains.getLast?.getD start.chain
   match replayed : replay rootBytes start.before records with
   | none => return .error "durable log suffix does not replay through the canonical executor"
@@ -745,7 +745,7 @@ def openHead (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 �
     | none =>
         if stored.entries.length ≠ headHeight then
           return .error "durable log head does not match its entries"
-        pure (State.ofSeed seed, 0, logStart, [], DurableSpent.emptyDigest, none, stored.entries)
+        pure (State.ofSeed seed, 0, logStart, [], DurableIndex.emptyDigest, none, stored.entries)
     | some checkpoint =>
         match DurableCheckpointCodec.openSealed key rootBytes checkpoint.bytes with
         | .error reason => return .error s!"checkpoint refused: {repr reason}"
@@ -756,10 +756,10 @@ def openHead (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 �
               return .error "durable log head does not match its entries"
             let some atCheckpoint := stored.entries.head? | return .error "checkpoint height has no log entry"
             match DurableHistory.verifyTagged key body.height atCheckpoint.tag body.chain
-                (DurableHistory.frontierDigest body.height body.frontier) body.spentRoot with
+                (DurableHistory.frontierDigest body.height body.frontier) body.indexRoot with
             | .error refusal => return .error s!"checkpoint does not sit on the log: {refusal.message}"
             | .ok _ =>
-                pure (body.state, body.height, body.chain, body.frontier, body.spentRoot,
+                pure (body.state, body.height, body.chain, body.frontier, body.indexRoot,
                   some atCheckpoint.tag, stored.entries.drop 1)
   lap "checkpoint"
   if !((base.cells.map Prod.fst).Nodup ∧ base.absentBytes = seed.absentBytes) then
@@ -787,7 +787,7 @@ def Opening.extend (transport : DurableReceiverIO.Transport) (rootBytes : List U
       extendVerified transport rootBytes opening.store opening.live
         ⟨served.seed, served.absentBytes, served.cellIds, served.state,
           fun cellId missing => served.outsideAbsent cellId missing, height, opening.head.chain,
-          opening.head.frontier, opening.head.spentRoot, none, opening.baseHeight⟩
+          opening.head.frontier, opening.head.indexRoot, none, opening.baseHeight⟩
         stored.entries (fun _ => pure ())
 
 /-! ## The light receive (KN2 2b-1, step 4)
@@ -795,8 +795,8 @@ def Opening.extend (transport : DurableReceiverIO.Transport) (rootBytes : List U
 One record on a light opening: the request's footprint (its transaction id and
 nullifiers) read from the authenticated history, the executor run on the view
 (`DurableView.execute_view`: it cannot tell the view from the full snapshot),
-the same gates the full receive applies, the spent map extended from the head's
-MAC-verified spent root, the accumulator and the root cache advanced by one
+the same gates the full receive applies, the index extended from the head's
+MAC-verified index root, the accumulator and the root cache advanced by one
 path each, and one append of the entry with its node rows. -/
 
 /-- The Reader of a light opening at its head. -/
@@ -880,10 +880,11 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
       let record := IntentRecord.ofIntent intent
       let recordBytes := DurableCheckpointCodec.recordFrame.encode record
       let chain := DurableCheckpointCodec.chainStep served.chain record
-      -- The spent map after the head (MAC-verified, carried by the head's tag), this record's keys inserted.
-      let keys := DurableSpent.recordKeys intent.transactionId intent.nullifiers
-      let (spentAfter, spentWrites) ← match ← DurableReceiverIO.withSpentRows transport served.height keys
-          (fun rows => DurableSpent.insertAll rows head.spentRoot height keys) with
+      -- The index after the head (MAC-verified, carried by the head's tag), this record's keys inserted.
+      let keys := DurableIndex.IndexRows.keys intent.transactionId intent.nullifiers
+      let (indexAfter, indexWrites) ← match ← DurableReceiverIO.withIndexRows transport served.height keys
+          (fun rows => DurableIndex.IndexRows.apply rows head.indexRoot height intent.transactionId
+            intent.nullifiers) with
         | .ok result => pure result
         | .error message => return .unavailable message
       -- The root cache advanced by the record's slot writes.
@@ -895,9 +896,9 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
       let leaf := DurableHistory.leafDigest height recordBytes chain worldRoot
       let frontierAfter := DurableHistory.Frontier.push head.frontier leaf
       let nodes := DurableReceiverIO.appendNodes
-        (DurableHistory.completedNodes head.frontier height leaf) spentWrites
+        (DurableHistory.completedNodes head.frontier height leaf) indexWrites
       let entry : DurableReceiverIO.Entry := ⟨recordBytes, DurableHistory.trailer key height
-        ⟨worldRoot, chain, DurableHistory.frontierDigest height frontierAfter, spentAfter⟩⟩
+        ⟨worldRoot, chain, DurableHistory.frontierDigest height frontierAfter, indexAfter⟩⟩
       let confirm := fun (kind : DurableReceiverIO.Confirmation) => do
         match ← transport.read height false with
         | .error message => return Received.uncertain s!"append attempted; readback unavailable: {message}"
@@ -915,7 +916,7 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
                     -- A due checkpoint (a function of the height alone); a failed seal loses nothing.
                     let sealedAt ←
                       if transport.checkpointEvery > 0 && height % transport.checkpointEvery == 0 then do
-                        let sealed := DurableCheckpointCodec.sealAt key height chain frontierAfter spentAfter
+                        let sealed := DurableCheckpointCodec.sealAt key height chain frontierAfter indexAfter
                           served'.checkpointState worldRoot
                         match ← transport.putCheckpoint height
                             (DurableCheckpointCodec.checkpointFrame.encode sealed) with
