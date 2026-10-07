@@ -184,6 +184,10 @@ inductive CallRefusal where
   | inboxCodec (sender target : Nat)
   /-- A mail write would land on a cell that holds a package (never, for a cell read as an inbox or a slot). -/
   | packageCell (cell : Nat)
+  /-- The state the call tree leaves on a draining object is one MIGRATE would refuse
+  (`Journal.drained`; every frame's write already passed `ObjectRecord.judge`, this re-judges
+  what the turn commits). -/
+  | drainConflict (target : Nat)
   deriving Repr
 
 /-- The deepest call stack a turn may build. -/
@@ -604,6 +608,9 @@ structure HeldSlot {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   name : Digest
   read : Option AnswerSlot.Slot
   clean : bodyOf .package (snapshot.canonicalBytes (AnswerSlot.cell config.domain name)) = none
+  /-- The cell held nothing (a slot this turn opens) or a slot (one it read). -/
+  slotted : ∀ payload, payloadOf (snapshot.canonicalBytes (AnswerSlot.cell config.domain name)) = some payload →
+    payload.role = .slot
   now : AnswerSlot.Slot
   named : now.name = name
   opened : now.phase = .opened
@@ -644,10 +651,13 @@ hold nothing (no slot, never retired) and no slot of this turn may name it. -/
 def openSlot {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (mail : Mail config snapshot) (name : Digest) (inbox : CellId) : Except CallRefusal (HeldSlot config snapshot) :=
   let bytes := snapshot.canonicalBytes (AnswerSlot.cell config.domain name)
-  if (payloadOf bytes).isSome || isRetired bytes || mail.slots.any (fun held => held.name == name) then
+  if taken : (payloadOf bytes).isSome || isRetired bytes || mail.slots.any (fun held => held.name == name) then
     .error (.slotTaken name.value)
   else if clean : bodyOf .package bytes = none then
-    .ok ⟨name, none, clean, ⟨name, inbox, .delivery name, 0, .opened, []⟩, rfl, rfl⟩
+    have slotted : ∀ payload, payloadOf bytes = some payload → payload.role = .slot := by
+      intro payload found
+      simp [found] at taken
+    .ok ⟨name, none, clean, slotted, ⟨name, inbox, .delivery name, 0, .opened, []⟩, rfl, rfl⟩
   else .error (.packageCell (AnswerSlot.cell config.domain name).value)
 
 /-- The open slot a pipelined send names: the one this turn holds, else read. -/
@@ -657,13 +667,20 @@ def holdSlot {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsh
   match mail.slots.find? (fun held => held.name == name) with
   | some held => .ok (held, mail.slots.filter (fun other => !(other.name == name)))
   | none =>
-    match readSlot config snapshot name with
+    match readExact : readSlot config snapshot name with
     | none => .error (.notPipelinable name.value)
     | some slot =>
       if named : slot.name = name then
         if opened : slot.phase = .opened then
           if clean : bodyOf .package (snapshot.canonicalBytes (AnswerSlot.cell config.domain name)) = none then
-            .ok (⟨name, some slot, clean, slot, named, opened⟩, mail.slots)
+            have slotted : ∀ payload, payloadOf (snapshot.canonicalBytes (AnswerSlot.cell config.domain name)) =
+                some payload → payload.role = .slot := by
+              intro payload found
+              by_contra wrong
+              have empty : bodyOf .slot (snapshot.canonicalBytes (AnswerSlot.cell config.domain name)) = none := by
+                simp [bodyOf, found, wrong]
+              simp [readSlot, empty] at readExact
+            .ok (⟨name, some slot, clean, slotted, slot, named, opened⟩, mail.slots)
           else .error (.packageCell (AnswerSlot.cell config.domain name).value)
         else .error (.notPipelinable name.value)
       else .error (.notPipelinable name.value)
@@ -706,7 +723,7 @@ def Mail.send {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snaps
       | .delivery _ =>
         if held.now.queued.length < Inbox.bound then
           let updated : HeldSlot config snapshot :=
-            ⟨held.name, held.read, held.clean, { held.now with queued := held.now.queued ++ [message] },
+            ⟨held.name, held.read, held.clean, held.slotted, { held.now with queued := held.now.queued ++ [message] },
               held.named, held.opened⟩
           .ok ⟨mail.inboxes, others ++ [updated], mail.credits ++ [(held.now.activity.value, message.postage)],
             mail.targets⟩
@@ -808,6 +825,23 @@ def callFuel (envelope : Capacity) : Nat := 2 * envelope.sourceTicks + 2 * callD
 
 def rootCall (request : InvokeRequest) : CallPlan := ⟨request.object, request.method, request.args⟩
 
+/-- **What a call tree commits on a draining object is migratable**: a written entry of an
+object that drains (under the identity: a frame never enters one under a migration term)
+leaves a state the record MIGRATE will install admits under the migration's facts. -/
+def Entry.drained (entry : Entry) : Bool :=
+  !entry.dirty ||
+    match entry.current, entry.record.phase with
+    | some state, .draining next _ =>
+      next.migration.isNone &&
+        (match admitWrite (entry.record.successor next) (ObjectRecord.migrateFacts entry.object.value next)
+            (some state.value) state.value with
+          | .ok () => true
+          | .error _ => false)
+    | _, _ => true
+
+/-- Every written entry of the journal is `drained`. -/
+def Journal.drained (journal : Journal) : Bool := journal.entries.all Entry.drained
+
 /-- The posts of the written objects' state cells. -/
 def Journal.posts {rootBytes : Bytes → Digest} (journal : Journal) (config : Config)
     (snapshot : Snapshot rootBytes) : List Post :=
@@ -849,6 +883,8 @@ structure Invocation {rootBytes : Bytes → Digest} (config : Config) (snapshot 
     (.enter (rootCall request)) (Journal.start request.grants) request.envelope.sourceTicks = .ok (result, journal, left)
   /-- A turn that sends declares a postage envelope the deployment covers. -/
   postageCovered : journal.outbox ≠ [] → config.covers request.postage = true
+  /-- What the call tree commits on a draining object is migratable. -/
+  drainedOk : journal.drained = true
   mail : Mail config snapshot
   mailExact : postMail config snapshot request.postage request.account Mail.empty journal.outbox = .ok mail
   book : BookCell
@@ -867,6 +903,7 @@ def invoke {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
     | .error reason => .error reason
     | .ok (result, journal, left) =>
       if postageCovered : journal.outbox ≠ [] → config.covers request.postage = true then
+      if drainedOk : journal.drained = true then
       match mailExact : postMail config snapshot request.postage request.account Mail.empty journal.outbox with
       | .error reason => .error reason
       | .ok mail =>
@@ -882,8 +919,9 @@ def invoke {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
             split at postedExact
             · cases postedExact; rfl
             · cases postedExact
-          .ok ⟨covered, result, journal, left, execExact, postageCovered, mail, mailExact, book, bookExact, posted,
-            batchExact, _, rfl⟩
+          .ok ⟨covered, result, journal, left, execExact, postageCovered, drainedOk, mail, mailExact, book, bookExact,
+            posted, batchExact, _, rfl⟩
+      else .error (.drainConflict request.object.value)
       else .error (.kernel (.uncovered request.postage))
   else .error (.kernel (.uncovered request.envelope))
 

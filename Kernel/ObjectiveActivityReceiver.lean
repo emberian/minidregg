@@ -494,7 +494,7 @@ def decideTurn {rootBytes : List UInt8 → Digest} (config : Config) (snapshot :
   | .birth object _ account _ pin input envelope resume timeout deposit => do
       let some value := decodeDataBytes input | throw .inputUndecodable
       let request := birthRequest command object account pin value envelope resume timeout deposit
-      pure (.birth request (← kernel (ObjectiveActivity.birth config snapshot height request)))
+      pure (.birth request rfl (← kernel (ObjectiveActivity.birth config snapshot height request)))
   | .resolve slot wire => do
       let answer ← kernel (answerOf wire)
       let request : ResolveRequest := ⟨command.subject, slot, answer⟩
@@ -935,7 +935,7 @@ snapshot), and that record pins exactly the package the command names: an
 object without a record is refused `notAnObject`, another pin `pinMismatch`. -/
 theorem native_birth_on_pinned_object (accepted : Accepted deployment profile ambient durable ingress)
     {request : BirthRequest} {born : Birth accepted.prepared.config durable.snapshot ambient.height request}
-    (_decided : accepted.prepared.decided = .birth request born) :
+    {signed : request.predecessor = none} (_decided : accepted.prepared.decided = .birth request signed born) :
     ∃ object : ObjectRecord.ObjectRecord,
       ObjectiveActivity.readObject accepted.prepared.config durable.snapshot request.object = .ok (some object) ∧
         object.activePin = request.pin :=
