@@ -293,6 +293,20 @@ def Planned.declaration (planned : Planned deployment profile ambient seed durab
     Declaration :=
   declarationOf command planned.decision planned.legs
 
+/-- **The newborns the payment step names** (`ReceivingLaw.namesBirth`): every
+birth write of an enrollment's plan as `birth/<id>` ↦ its exact post root. -/
+def newbornSlots {durable : Durable} {directory : LoadedDirectory durable}
+    {authority : Loaded deployment durable.snapshot}
+    {pay : PayCellDomain.Loaded deployment durable.snapshot}
+    {book : BookCell deployment directory.directory} {tariff : Tariff} :
+    {input : PayEnrolV2Legs.Input} →
+    PayEnrolV2Legs.Legs deployment profile ambient directory authority pay book tariff input →
+      List (Minidregg.Pred.Slot × Int)
+  | _, .enrol _ legs => (ResourceBirthController.allocationWrites legs.descriptor).map fun write =>
+      (ReceivingLaw.birthSlot write.cellId.value, Int.ofNat write.exactPost.value)
+  | _, .renew _ _ => []
+  | _, .noCredit => []
+
 def project (planned : Planned deployment profile ambient seed durable command memo verified)
     (_logical : PayStore) : Minidregg.Pred.State :=
   ⟨WorldKindLawDependencies.targetSelectorSlots planned.directory.directory deployment.factoryId ++
@@ -306,7 +320,8 @@ def project (planned : Planned deployment profile ambient seed durable command m
         | some consumed => consumed.birthFee + consumed.membershipCredit
         | none => 0))] ++
     ResourceAuthorityProjection.grantSlots "authority/enrol" .program command.capability
-      planned.authority.snapshot.logical⟩
+      planned.authority.snapshot.logical ++
+    newbornSlots planned.legs⟩
 
 /-- The payment's law step: the factory's selector slots, the observer's
 self-enrollment request (the self-enrol slot 1), the decision, the amount and
@@ -755,7 +770,7 @@ theorem committed_admitted {oracle : CredentialSignatureIO.Oracle Id}
   obtain ⟨-, -, factoryLawful⟩ := committed_lawful committed
   obtain ⟨kind, -, judgedFactory⟩ := factoryLawful
   have notBirth := factoryPacked_not_birth planned
-  rcases judgedFactory with ⟨-, judgedStep, law, stepEq, resolvedOf, lowerable, inRange, casts,
+  rcases judgedFactory with ⟨-, judgedStep, law, stepEq, resolvedOf, -, lowerable, inRange, casts,
       evaluated⟩ | ⟨-, -, -, noStep⟩ | ⟨-, -, (⟨birth, -⟩ | ⟨-, -, noStep⟩)⟩
   · cases stepEq
     have resolved : (PayEnrolReceiver.laws deployment profile).resolve durable

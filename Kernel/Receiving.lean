@@ -247,7 +247,7 @@ theorem shape_lawful {prepared : F.Prepared env durable command}
   refine ⟨(shape_sound laws shaped).2.2.2, ?_⟩
   have none_ : lawFault laws prepared = none := by
     simpa [lawful, Option.isNone_iff_eq_none] using judged
-  exact (ReceivingLaw.lawFault_none_iff laws F.id durable _ _).1 none_
+  exact ReceivingLaw.lawful_of_lawFault laws F.id durable none_
 
 variable (F)
 

@@ -784,7 +784,7 @@ theorem committed_admitted {oracle : CredentialSignatureIO.Oracle Id}
   obtain ⟨payLawful, -, -⟩ := committed_lawful committed
   obtain ⟨kind, -, judgedPay⟩ := payLawful
   have notBirth := payWrite_not_birth planned
-  rcases judgedPay with ⟨-, judgedStep, law, stepEq, resolvedOf, lowerable, inRange, casts, evaluated⟩ |
+  rcases judgedPay with ⟨-, judgedStep, law, stepEq, resolvedOf, -, lowerable, inRange, casts, evaluated⟩ |
       ⟨-, -, -, noStep⟩ | ⟨-, -, (⟨birth, -⟩ | ⟨-, -, noStep⟩)⟩
   · cases stepEq
     have resolved : (laws deployment profile).resolve durable (payWrite planned).cellId.value

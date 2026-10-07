@@ -117,13 +117,17 @@ def laws : Laws Durable where
     | 5 => some .declaredObject
     | 6 => some .policySource
     | 7 => some .policySource
+    | 8 => some .declaredObject
     | _ => none
-  birth _ write := write.cellId.value == 5 || write.cellId.value == 6
-  resolve _ target _ := if target = 1 then some ⟨law, true, true, true, []⟩ else none
+  birth _ write := write.cellId.value == 5 || write.cellId.value == 6 || write.cellId.value == 8
+  resolve _ target _ := if target = 1 then some ⟨law, true, true, true, true, []⟩ else none
   -- Cell 5 is a newborn whose export law is the same pin.
   -- Cells 5 and 6 are newborns (6 a law source) whose export law is the same pin.
   resolveBirth _ _ write _ :=
-    if write.cellId.value = 5 ∨ write.cellId.value = 6 then some ⟨law, true, true, true, []⟩ else none
+    if write.cellId.value = 5 ∨ write.cellId.value = 6 then some ⟨law, true, true, true, true, []⟩
+    -- Cell 8 is an unparented newborn: its export law is NEUTRAL (no root).
+    else if write.cellId.value = 8 then some ⟨.all [], true, true, true, false, []⟩
+    else none
 
 /-! ## The bypass family: writes, projects, judges nothing -/
 
@@ -205,19 +209,25 @@ theorem fault_eq (id : FamilyId) (stepFor : Nat → Option PolicyStepContext)
     (a : Nat := 1) (b : Nat := 2) :
     Family.lawFault (F := bypass id [a, b] stepFor) (env := ()) (durable := durable) (command := ())
       laws () =
-      (ReceivingLaw.judgeWrite laws id durable [write durable a, write durable b] (write durable a)
+      (ReceivingLaw.judgeWrite laws id durable (ReceivingLaw.authorizerStepsOf laws durable [write durable a, write durable b] (fun written => stepFor written.cellId.value))
+      [write durable a, write durable b] (write durable a)
           (stepFor a)).or
-        (ReceivingLaw.judgeWrite laws id durable [write durable a, write durable b] (write durable b)
+        (ReceivingLaw.judgeWrite laws id durable (ReceivingLaw.authorizerStepsOf laws durable [write durable a, write durable b] (fun written => stepFor written.cellId.value))
+      [write durable a, write durable b] (write durable b)
           (stepFor b)) := by
   simp only [Family.lawFault, bypass, ReceivingLaw.lawFault_uniform, List.map_cons, List.map_nil,
     List.findSome?_cons, List.findSome?_nil]
-  change _ = (ReceivingLaw.judgeWrite laws id durable [write durable a, write durable b] (write durable a)
+  change _ = (ReceivingLaw.judgeWrite laws id durable (ReceivingLaw.authorizerStepsOf laws durable [write durable a, write durable b] (fun written => stepFor written.cellId.value))
+      [write durable a, write durable b] (write durable a)
       (stepFor (write durable a).cellId.value)).or
-    (ReceivingLaw.judgeWrite laws id durable [write durable a, write durable b] (write durable b)
+    (ReceivingLaw.judgeWrite laws id durable (ReceivingLaw.authorizerStepsOf laws durable [write durable a, write durable b] (fun written => stepFor written.cellId.value))
+      [write durable a, write durable b] (write durable b)
       (stepFor (write durable b).cellId.value))
-  generalize ReceivingLaw.judgeWrite laws id durable [write durable a, write durable b] (write durable a)
+  generalize ReceivingLaw.judgeWrite laws id durable (ReceivingLaw.authorizerStepsOf laws durable [write durable a, write durable b] (fun written => stepFor written.cellId.value))
+      [write durable a, write durable b] (write durable a)
     (stepFor (write durable a).cellId.value) = first
-  generalize ReceivingLaw.judgeWrite laws id durable [write durable a, write durable b] (write durable b)
+  generalize ReceivingLaw.judgeWrite laws id durable (ReceivingLaw.authorizerStepsOf laws durable [write durable a, write durable b] (fun written => stepFor written.cellId.value))
+      [write durable a, write durable b] (write durable b)
     (stepFor (write durable b).cellId.value) = second
   cases first <;> cases second <;> rfl
 
@@ -554,6 +564,82 @@ theorem lawSource_inPlace_foreign_refused :
     CanonicalCellRegistry.Kind.lawClass]
   decide
 
+/-! ### Neutral births: named by a judged authorizer, or refused -/
+
+theorem write_cellId (durable : Durable) (cell : Nat) : (write durable cell).cellId = ⟨cell⟩ := rfl
+
+/-- A step whose new state names newborn 8 (`ReceivingLaw.namesBirth`) beside the
+pinned artifact. -/
+def stateNaming : Minidregg.Pred.State :=
+  ⟨(ReceivingLaw.birthSlot 8, Int.ofNat (write durable 8).exactPost.value) :: (stateWith pinned).slots⟩
+
+noncomputable def namingStep : PolicyStepContext :=
+  PolicyStepContext.ofCandidate (fun _ => stateNaming) ⟨0⟩ candidate
+
+theorem namingStep_old : namingStep.oldState = stateNaming := rfl
+theorem namingStep_new : namingStep.newState = stateNaming := rfl
+
+/-- The naming step names newborn 8 (its id and exact post root). -/
+theorem namingStep_names : ReceivingLaw.namesBirth namingStep (write durable 8) = true := by
+  simp [ReceivingLaw.namesBirth, namingStep_new, stateNaming, Minidregg.Pred.State.get, write_cellId]
+
+/-- Object cell 1 under `forObject`, newborn 8 under the pinned step. -/
+noncomputable def authorizedStep (forObject : PolicyStepContext) : Nat → Option PolicyStepContext :=
+  fun cell => if cell = 1 then some forObject else if cell = 8 then some (stepAt pinned) else none
+
+/-- **A neutral birth with no authorizer is refused by name**: newborn 8 beside a
+kernel-only stream entry (no law-bearing write names it). -/
+theorem neutral_unauthorized_refused :
+    ((bypass .declaredResourceController [8, 2] (bornStep pinned 8)).receiver laws oracle).receive
+        append () durable [] = pure (.refused (.law (.neutralBirthUnjudged 8))) := by
+  refine receive_faulted _ rfl (bypass_fresh' .declaredResourceController (bornStep pinned 8) 8 2) rfl
+    rfl (shape_ok .declaredResourceController (bornStep pinned 8) 8 2) ?_
+  change Family.lawFault (F := bypass .declaredResourceController [8, 2] (bornStep pinned 8))
+    (env := ()) (durable := durable) (command := ()) laws () = _
+  rw [fault_eq _ _ 8 2]
+  simp [ReceivingLaw.judgeWrite, ReceivingLaw.judgeKernel, ReceivingLaw.judgeBearing,
+    ReceivingLaw.authorizerStepsOf, ReceivingLaw.authorizes, ReceivingLaw.lawOf, write, laws,
+    bornStep, CanonicalCellRegistry.Kind.lawClass]
+  rfl
+
+/-- **Smuggling is refused**: a patch with a legitimate, judged object write (cell
+1 under the pin) and a neutral newborn 8 its step does NOT name refuses the
+newborn by name. -/
+theorem neutral_smuggled_refused :
+    ((bypass .declaredResourceController [1, 8] (authorizedStep (stepAt pinned))).receiver laws
+        oracle).receive append () durable [] = pure (.refused (.law (.neutralBirthUnjudged 8))) := by
+  refine receive_faulted _ rfl
+    (bypass_fresh' .declaredResourceController (authorizedStep (stepAt pinned)) 1 8) rfl
+    rfl (shape_ok .declaredResourceController (authorizedStep (stepAt pinned)) 1 8) ?_
+  change Family.lawFault (F := bypass .declaredResourceController [1, 8] (authorizedStep (stepAt pinned)))
+    (env := ()) (durable := durable) (command := ()) laws () = _
+  rw [fault_eq _ _ 1 8]
+  simp [ReceivingLaw.judgeWrite, ReceivingLaw.judgeKernel, ReceivingLaw.judgeBearing,
+    ReceivingLaw.authorizerStepsOf, ReceivingLaw.authorizes, ReceivingLaw.namesBirth,
+    ReceivingLaw.birthSlot,
+    ReceivingLaw.judgeLaw, ReceivingLaw.lawOf, write, laws, authorizedStep,
+    CanonicalCellRegistry.Kind.lawClass, stepAt_old, stepAt_new, stateWith,
+    Minidregg.Pred.State.get]
+  decide
+
+/-- **The control commits**: the same newborn, named (id and post root) by the
+step the object's pin law judged. -/
+theorem neutral_named_commits :
+    ∃ admission witness,
+      ((bypass .declaredResourceController [1, 8] (authorizedStep namingStep)).receiver laws
+          oracle).receive append () durable [] = pure (.committed () admission witness) := by
+  refine receive_lawful _ rfl (bypass_fresh' .declaredResourceController (authorizedStep namingStep) 1 8)
+    rfl rfl (shape_ok .declaredResourceController (authorizedStep namingStep) 1 8) ?_
+  change Family.lawFault (F := bypass .declaredResourceController [1, 8] (authorizedStep namingStep))
+    (env := ()) (durable := durable) (command := ()) laws () = _
+  rw [fault_eq _ _ 1 8]
+  simp [ReceivingLaw.judgeWrite, ReceivingLaw.judgeKernel, ReceivingLaw.judgeBearing,
+    ReceivingLaw.authorizerStepsOf, ReceivingLaw.authorizes, namingStep_names,
+    ReceivingLaw.judgeLaw, ReceivingLaw.lawOf, write_cellId, laws,
+    authorizedStep, CanonicalCellRegistry.Kind.lawClass, namingStep_old, namingStep_new,
+    stepAt_old, stepAt_new]
+  decide
+
 #assert_compiled durable_loads
 #assert_compiled unclassified_refused
 #assert_compiled birth_denied_names_pin
@@ -563,6 +649,10 @@ theorem lawSource_inPlace_foreign_refused :
 #assert_compiled lawSource_birth_denied_names_pin
 #assert_compiled lawSource_birth_lawful_commits
 #assert_compiled lawSource_inPlace_foreign_refused
+#assert_compiled neutral_unauthorized_refused
+#assert_compiled neutral_smuggled_refused
+#assert_compiled neutral_named_commits
+#assert_compiled namingStep_names
 #assert_compiled writeGuards_nil
 #assert_compiled fresh
 #assert_compiled bypass_refused_names_pin

@@ -47,7 +47,8 @@ born in (its `parent` entry in the authority cell the same patch writes,
 carries (a world instance's world kind, `WorldKindLawDependencies.loadNewborn`).
 `Kernel.ReceivingLaw` judges every law-bearing birth by them, on the family's
 view of the birth, with no second judge in the family.  A newborn's law source
-(`policySource`) is born under the same export law (`kernelOnlyOrBorn`).
+(`policySource`) is born the same way (`kernelOnlyOrBorn`).  A birth with no export
+root is NEUTRAL: admitted only when a judged authorizer of the same patch names it.
 -/
 import Compiler.WorldKindCell
 import Compiler.DeclaredEffectCell
@@ -170,8 +171,10 @@ inductive LawClass where
   /-- No user law; only the named kernel families may write it. -/
   | kernelOnly (writers : List FamilyId)
   /-- Written in place only by the named kernel families, with no step; BORN by any
-  family, under the newborn's export law (`birthParent`), judged like a law-bearing
-  birth.  A newborn's initial law source is born with the resource it governs. -/
+  family, judged like a law-bearing birth: by a non-empty export law, or, when the
+  newborn has no export root, named (id and post root) by the step of a judged,
+  law-bearing, non-birth write of the same patch (`Kernel.ReceivingLaw.Named`).
+  A newborn's initial law source is born with the resource it governs. -/
   | kernelOnlyOrBorn (writers : List FamilyId)
   deriving DecidableEq, Repr
 
