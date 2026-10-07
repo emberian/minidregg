@@ -5,6 +5,7 @@ No HTTP delivery permit or native receiver is exported here.
 -/
 import Kernel.ApplicationAgentLifetimeDispatchCurrent
 import Kernel.ApplicationAgentLifetimeDispatchPayer
+import Kernel.NativeHostServed
 
 namespace Minidregg.Kernel.ApplicationAgentLifetimeDispatchCore
 
@@ -43,7 +44,7 @@ structure Checked (config : Config) (opened : Opened config)
   contextExact : reserved.context = ingress.reserveContext
   current : ApplicationAgentLifetimeDispatchCurrent.Checked config.deployment
     config.profile ⟨config.federation, logicalHeight config opened.durable⟩
-    opened.durable ingress spec descriptor grant ticketIssueIndex ticketIssueReceipt
+    opened.ground ingress spec descriptor grant ticketIssueIndex ticketIssueReceipt
     issuedIngressBytes certifiedGrantIssueIndex certifiedGrantRoot
   payer : ApplicationAgentLifetimeDispatchPayer.Checked config opened ingress.reserveContext
   holdExact : payer.state = AgentGrain.reserve reserved.beforeState
@@ -69,7 +70,7 @@ def checkCurrent (config : Config) (opened : Opened config)
   if contextExact : reserved.context = ingress.reserveContext then
     match ← ApplicationAgentLifetimeDispatchCurrent.checkCurrent config.deployment
         config.profile ⟨config.federation, logicalHeight config opened.durable⟩
-        config.signature opened.durable ingress spec descriptor grant
+        config.signature opened.ground ingress spec descriptor grant
         ticketIssueIndex ticketIssueReceipt issuedIngressBytes certifiedGrantIssueIndex certifiedGrantRoot with
     | .error detail => return .error detail
     | .ok current =>
