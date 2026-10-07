@@ -1010,7 +1010,7 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened (PolicyInstallReceiver.intent accepted)
   | delegate {ingress : CapabilityDelegationReceiver.DecodedIngress}
       (accepted : CapabilityDelegationReceiver.AcceptedDelegation config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress) :
       NativeAdmission config opened (CapabilityDelegationReceiver.intent accepted)
   | revoke {ingress : CapabilityRevocationReceiver.DecodedIngress}
       (accepted : CapabilityRevocationReceiver.AcceptedRevocation config.deployment config.profile
