@@ -1116,7 +1116,6 @@ theorem gate_refusal_runs_nothing [DecidableEq F] (native : CredentialSignatureI
     admitDecodedNative deployment profile ambient durable native ingress = pure (.error reason) := by
   unfold admitDecodedNative
   rw [refused]
-  rfl
 
 variable [DecidableEq F] {ingress : DecodedIngress}
 
@@ -1128,8 +1127,8 @@ def Failed.intent (failed : Failed deployment profile ambient durable ingress) :
     failed.request failed.failure failed.final
 
 def Verdict.intent : Verdict deployment profile ambient durable ingress → DataIntent rootBytes
-  | .accepted accepted => intent accepted
-  | .failed failed => failed.intent
+  | .accepted admitted => Minidregg.Kernel.ObjectiveActivityReceiver.intent admitted
+  | .failed charged => charged.intent
 
 /-- **A charged failure charges and rolls back.** Every write of a charged failure's intent is the
 Book cell, there is exactly one, and the batch it posts is exactly the fee of the declared
@@ -1376,7 +1375,6 @@ theorem malformed_no_charge (deployment : Deployment) (profile : CanonicalRuntim
     receiveLoaded deployment profile ambient native transport durable bytes = pure (.rejected .malformedIngress) := by
   unfold receiveLoaded
   rw [malformed]
-  rfl
 
 /-- **An unauthorized or unfunded request is refused with no state change and no charge**: a
 gate refusal (authority, capability over the claimed outcome, funds) reaches neither the
