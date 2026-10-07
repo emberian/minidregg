@@ -131,7 +131,10 @@ sponsor() { ssh -F "$SPONSOR_TERM/config" sponsor-box "$1"; }
 friend_ssh() { ssh -F "$LAPTOP/.ssh/config" box "$@"; }
 FMINI=$LAPTOP/bin/mini                 # the friend's own copy of the client
 install -m 0500 "$MINI" "$FMINI"
-fmini() { MINI_SSH=$LAPTOP/bin/ssh "$FMINI" "$@"; }
+# The friend runs the pure codecs (author, inspect, assemble) on a local native Host image of their own:
+# a remote Host digest is not an executable (client_consent.rs pure_host). The journey's pinned image
+# stands in for the copy the friend bundle carries.
+fmini() { MINI_SSH=$LAPTOP/bin/ssh MINI_LOCAL_HOST=$HOST "$FMINI" "$@"; }
 ME=$LAPTOP/.mini
 FKEY=$ME/friend.key
 FROOT=$ME/box
@@ -165,7 +168,7 @@ run sponsor "hosted shell: provision friend $FSUBJ 1000 all[]" 0 sponsor "provis
 run sponsor "hosted shell: enroll welcome friend" 0 sponsor "enroll welcome friend"
 cp "$LAST" "$LAPTOP/welcome.json"
 run friend "join --remote box --welcome: remote workspace on the laptop" 0 \
-  fmini --remote box join --key "$FKEY" --welcome "$LAPTOP/welcome.json" --dir "$FROOT"
+  fmini --remote box join --key "$FKEY" --welcome "$LAPTOP/welcome.json" --dir "$FROOT" --verifier "$HOST"
 check friend "workspace pins socket ssh:box, no Host image, the Host digest, the laptop key" \
   jq -e --arg k "$FKEY" '.socket == "ssh:box" and .host == null and (.hostSha256 | length == 64) and .key == $k' "$FWS/workspace.json"
 
