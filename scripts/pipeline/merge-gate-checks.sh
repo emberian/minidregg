@@ -41,6 +41,8 @@ if [ -n "$newt" ]; then run new-targets env LEAN_NUM_THREADS=${THREADS:-6} $LAKE
 exes=$(git show "$TO:lakefile.toml" | sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' | tr '\n' ' ')
 run exe-roots env LEAN_NUM_THREADS=${THREADS:-6} $LAKE_WRAP lake build $exes
 run host-closure    bash scripts/check-host-closure.sh
+# KN2 ratchet: callers of the full verified materialization may only shrink (a text ratchet, not a call-graph proof)
+run full-loaded-ratchet bash scripts/ports/check-full-loaded-callers.sh
 run import-boundary bash scripts/check-import-boundary.sh
 run proof-hygiene   bash scripts/check-proof-hygiene.sh
 run build-surfaces  python3 scripts/lean-build-surfaces.py check
