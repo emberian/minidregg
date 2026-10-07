@@ -15,14 +15,14 @@ variable {F : Type} [Field F] {deployment : Deployment}
   {ground : Ground deployment} {command : Command}
 
 theorem empty_targets_refused (subject : SubjectId) (nonce : Nat) :
-    prepare deployment profile ambient durable { subject := subject, nonce := nonce, targets := [] } =
+    prepare deployment profile ambient ground { subject := subject, nonce := nonce, targets := [] } =
       .error .emptyTargets := by
-  simp [prepare, prepareFrom]
+  simp [prepare]
 
 theorem duplicate_targets_refused (nonempty : command.targets ≠ [])
     (duplicate : ¬(command.targets.map Target.target).Nodup) :
-    prepare deployment profile ambient durable command = .error .duplicateTargets := by
-  simp [prepare, prepareFrom, nonempty, duplicate]
+    prepare deployment profile ambient ground command = .error .duplicateTargets := by
+  simp [prepare, nonempty, duplicate]
 
 theorem prepared_targets_valid (prepared : PreparedInvocation deployment profile ambient ground command) :
     command.targetsWellFormed = true :=
