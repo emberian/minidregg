@@ -343,7 +343,7 @@ theorem clear_offer_safe {genesis world next : World} {height : Nat} {inst : Ins
     {market : Market} {transfers : List Transfer} {certificate : Certificate}
     (empty : genesis.seats = []) (reachable : Reachable genesis world)
     (cleared : clear world height inst market transfers certificate = .ok next) :
-    ∀ seat ∈ next.seats, seat.isOpen = true → safeAt next.book seat.account seat.proposal = true :=
+    ∀ seat ∈ next.seats, safeAt next.book seat.account seat.proposal = true :=
   seat_offer_safe_forever empty (Reachable.admit height _ _ reachable (clear_spec cleared).2.choose_spec)
 
 /-- **Conservation.** A clearing conserves every asset of the Book. -/
@@ -592,7 +592,7 @@ theorem full_clearing_admitted : (clear opened 6 1 market fullClearing honest).t
   decide +kernel
 
 theorem full_clearing_offer_safe {next : World} (cleared : clear opened 6 1 market fullClearing honest = .ok next) :
-    ∀ seat ∈ next.seats, seat.isOpen = true → safeAt next.book seat.account seat.proposal = true :=
+    ∀ seat ∈ next.seats, safeAt next.book seat.account seat.proposal = true :=
   clear_offer_safe rfl window_reachable cleared
 
 #assert_axioms opened_orders batch_settles honest_certified suboptimal_passes_offer_safety

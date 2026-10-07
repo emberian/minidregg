@@ -8,6 +8,7 @@ Nothing here decides anything: commands are judged by `Kernel.SeatReceiver`,
 artifacts by the seat kernel's `publish`. -/
 import Kernel.NativeHost
 import Compiler.ObjectiveBendDataWire
+import Host.CapacityJson
 
 namespace Minidregg.Host.SeatJson
 open Lean (Json toJson)
@@ -19,11 +20,8 @@ open Minidregg.Kernel.SeatStore (Turn)
 open Minidregg.Kernel.SeatReceiver (Command Grants)
 open Minidregg.Compiler.ObjectiveBendDataWire (dataJson)
 open Minidregg.Pred (Pred)
+open Minidregg.Host.CapacityJson (Result decimal field natOf nat capacity)
 set_option autoImplicit false
-
-abbrev Result := Except String
-
-def decimal (value : Nat) : Json := .str (toString value)
 
 def hexDigit (n : Nat) : Char := "0123456789abcdef".toList.getD n '0'
 def hex (bytes : List UInt8) : String :=
@@ -42,20 +40,6 @@ def unhex (text : String) : Result (List UInt8) :=
         pure ((high * 16 + low).toUInt8 :: (← go rest))
     | [_] => throw "odd hex length"
   go text.toList
-
-def field (path : String) (json : Json) (name : String) : Result Json :=
-  match json.getObjVal? name with
-  | .ok value => .ok value
-  | .error _ => .error s!"{path}.{name} missing"
-
-def natOf (path : String) (value : Json) : Result Nat := do
-  let some text := value.getStr?.toOption | throw s!"{path} must be a decimal string"
-  let some n := text.toNat? | throw s!"{path} must be a decimal string"
-  unless toString n == text do throw s!"{path} must be canonical decimal"
-  pure n
-
-def nat (path : String) (json : Json) (name : String) : Result Nat := do
-  natOf s!"{path}.{name}" (← field path json name)
 
 def optNat (path : String) (json : Json) (name : String) : Result (Option Nat) :=
   match json.getObjVal? name with
@@ -83,14 +67,6 @@ def proposal (json : Json) : Result Seats.Proposal := do
     | none => pure Seats.ExitRule.onDemand
     | some due => pure (Seats.ExitRule.afterDeadline due)
   pure ⟨← amounts p json "give", ← amounts p json "want", exit⟩
-
-/-- A declared envelope: the eighteen `Capacity` lanes as decimal strings. -/
-def capacity (path : String) (json : Json) : Result ObjectiveInvocationClaim.Capacity := do
-  let n := nat path json
-  pure ⟨← n "typeFuel", ← n "sourceTicks", ← n "heap", ← n "stack", ← n "outputNodes", ← n "outputBytes",
-    ← n "inputBytes", ← n "scalarBits", ← n "memoryTouches", ← n "proofWork", ← n "feeDebit", ← n "turnBytes",
-    ← n "witnessBytes", ← n "storageBytes", ← n "sideEffectCount", ← n "networkBytes", ← n "leaseByteBlocks",
-    ← n "incidences"⟩
 
 /-- `$.turn`: `{kind: publish|create|handOver|offer|invoke|exit, ...}`. A
 publication carries the artifact and its source package (hex) and the payer. The
@@ -202,7 +178,7 @@ def seatJson (body : SeatStore.SeatBody) : Json :=
     ("offerer", decimal body.seat.offerer.value), ("payee", decimal body.seat.payee),
     ("proposal", proposalJson body.seat.proposal),
     ("holder", match body.seat.holder with | some r => decimal r | none => .null),
-    ("open", toJson body.seat.isOpen), ("role", toJson body.role),
+    ("role", toJson body.role),
     ("terms", Json.arr (body.terms.map fun (n, v) => Json.mkObj [("name", toJson n), ("value", decimal v)]).toArray)]
 
 def invitationJson (body : SeatStore.InvitationBody) : Json :=
@@ -218,7 +194,8 @@ def instanceJson (body : SeatStore.InstanceBody) : Json :=
 def cellJson (domain : Digest) (cell : Nat) (root : Digest) (bytes : List UInt8) : Json :=
   let described : List (String × Json) :=
     match SeatStore.payloadOf bytes with
-    | none => [("kind", if bytes.isEmpty then "absent" else "not-a-seat-cell")]
+    | none => [("kind", if bytes.isEmpty then "absent"
+        else if bytes = ObjectiveActivity.retiredImage then "retired" else "not-a-seat-cell")]
     | some payload =>
       let at_ := decide (cell = SeatCell.coordinate domain payload.role payload.key)
       [("atCoordinate", toJson at_)] ++
