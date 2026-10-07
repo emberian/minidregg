@@ -145,36 +145,45 @@ theorem readState_package {rootBytes : Bytes → Digest} {config : Config} {snap
     {object : CellId} {current : Option ObjectState}
     (read : readState config snapshot object = .ok current) :
     bodyOf .package (snapshot.canonicalBytes (stateCell config.domain object)) = none := by
-  cases found : bodyOf .state (snapshot.canonicalBytes (stateCell config.domain object)) with
-  | some body => exact bodyOf_other found (by decide)
-  | none =>
-    cases present : payloadOf (snapshot.canonicalBytes (stateCell config.domain object)) with
-    | none => exact bodyOf_of_payload_none present
-    | some payload => simp [readState, found, present] at read
+  unfold readState stateFor at read
+  cases present : payloadOf (snapshot.canonicalBytes (stateCell config.domain object)) with
+  | none => exact bodyOf_of_payload_none present
+  | some payload =>
+    rw [present] at read
+    simp only at read
+    split at read
+    · rename_i owned
+      simp [bodyOf, present, owned.1]
+    · cases read
 
 /-- A cell `readObject` finds empty holds no activity cell at all. -/
 theorem readObject_none_payload {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {object : CellId} (read : readObject config snapshot object = .ok none) :
     payloadOf (snapshot.canonicalBytes (objectCell config.domain object)) = none := by
-  cases found : bodyOf .object (snapshot.canonicalBytes (objectCell config.domain object)) with
-  | some body =>
-    simp only [readObject, found] at read
-    split at read <;> cases read
-  | none =>
-    cases present : payloadOf (snapshot.canonicalBytes (objectCell config.domain object)) with
-    | none => rfl
-    | some payload => simp [readObject, found, present] at read
+  unfold readObject objectFor at read
+  cases present : payloadOf (snapshot.canonicalBytes (objectCell config.domain object)) with
+  | none => rfl
+  | some payload =>
+    rw [present] at read
+    simp only at read
+    split at read
+    · split at read <;> cases read
+    · cases read
 
 /-- A cell `readObject` reads a record from holds no package. -/
 theorem readObject_package {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {object : CellId} {record : ObjectRecord.ObjectRecord} (read : readObject config snapshot object = .ok (some record)) :
     bodyOf .package (snapshot.canonicalBytes (objectCell config.domain object)) = none := by
-  cases found : bodyOf .object (snapshot.canonicalBytes (objectCell config.domain object)) with
-  | some body => exact bodyOf_other found (by decide)
-  | none =>
-    cases present : payloadOf (snapshot.canonicalBytes (objectCell config.domain object)) with
-    | none => exact bodyOf_of_payload_none present
-    | some payload => simp [readObject, found, present] at read
+  unfold readObject objectFor at read
+  cases present : payloadOf (snapshot.canonicalBytes (objectCell config.domain object)) with
+  | none => exact bodyOf_of_payload_none present
+  | some payload =>
+    rw [present] at read
+    simp only at read
+    split at read
+    · rename_i owned
+      simp [bodyOf, present, owned.1]
+    · cases read
 
 theorem readSlot_package {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {name : Digest} {slot : AnswerSlot.Slot} (read : readSlot config snapshot name = some slot) :
@@ -832,7 +841,7 @@ theorem AdmittedTurn.safe {rootBytes : Bytes → Digest} {config : Config} {snap
   cases turn with
   | publish _ publication => exact publication_safe publication
   | create _ created => exact creation_safe created
-  | birth _ born => exact birth_safe born
+  | birth _ _ born => exact birth_safe born
   | resolve _ resolution => exact resolution_safe resolution
   | deliver _ delivery => exact delivery_safe typed delivery
   | topUp _ topped =>
@@ -864,7 +873,7 @@ theorem finalIntent_writes {rootBytes : Bytes → Digest} {config : Config} {sna
     {extra : List ReadGuard} (final : ActivitySeatEnd.finalize config snapshot height turn = .ok (posts, extra)) :
     (ActivitySeatEnd.AdmittedTurn.finalIntent sealing posts extra turn).writes = posts.map (Post.write rootBytes) := by
   cases turn with
-  | birth _ _ => rfl
+  | birth _ _ _ => rfl
   | deliver _ _ => rfl
   | abandon _ _ => rfl
   | publish _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
@@ -1297,7 +1306,7 @@ def AdmittedTurn.Sends {rootBytes : Bytes → Digest} {config : Config} {snapsho
     {height : Nat} : AdmittedTurn config snapshot height → Prop
   | .publish _ _ => False
   | .create _ _ => False
-  | .birth _ _ => False
+  | .birth _ _ _ => False
   | .resolve _ _ => False
   | .deliver _ _ => False
   | .topUp _ _ => False
@@ -1316,7 +1325,7 @@ def AdmittedTurn.DeliversMessage {rootBytes : Bytes → Digest} {config : Config
     {height : Nat} : AdmittedTurn config snapshot height → Prop
   | .publish _ _ => False
   | .create _ _ => False
-  | .birth _ _ => False
+  | .birth _ _ _ => False
   | .resolve _ _ => False
   | .deliver _ _ => False
   | .topUp _ _ => False
@@ -1336,7 +1345,7 @@ theorem AdmittedTurn.posts_hold_no_inbox {rootBytes : Bytes → Digest} {config 
   cases turn with
   | publish _ publication => exact fun post member => (publication_quiet publication post member).1
   | create _ created => exact fun post member => (creation_quiet created post member).1
-  | birth _ born => exact fun post member => (birth_quiet born post member).1
+  | birth _ _ born => exact fun post member => (birth_quiet born post member).1
   | resolve _ resolution => exact fun post member => (resolution_quiet resolution post member).1
   | deliver _ delivery => exact fun post member => (delivery_quiet delivery post member).1
   | topUp _ topped =>
@@ -1361,7 +1370,7 @@ theorem AdmittedTurn.posts_decide_no_delivery {rootBytes : Bytes → Digest} {co
   cases turn with
   | publish _ publication => exact fun post member => (publication_quiet publication post member).2
   | create _ created => exact fun post member => (creation_quiet created post member).2
-  | birth _ born => exact fun post member => (birth_quiet born post member).2
+  | birth _ _ born => exact fun post member => (birth_quiet born post member).2
   | resolve _ resolution => exact fun post member => (resolution_quiet resolution post member).2
   | deliver _ delivery => exact fun post member => (delivery_quiet delivery post member).2
   | topUp _ topped =>

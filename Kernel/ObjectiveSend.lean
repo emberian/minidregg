@@ -87,8 +87,10 @@ def runMessage {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
         message.envelope.sourceTicks with
     | .error reason => .failed (reprStr reason)
     | .ok (result, journal, _) =>
-      if journal.outbox.isEmpty then .replied result journal
-      else .failed "a delivered message sends: its delivery has no paying account"
+      if journal.outbox.isEmpty && journal.drained then .replied result journal
+      else .failed (if journal.outbox.isEmpty then
+          "the state it leaves on a draining object is one MIGRATE would refuse"
+        else "a delivered message sends: its delivery has no paying account")
 
 def Outcome.decision : Outcome → AnswerSlot.Decision
   | .replied result _ => .reply (dataBytes result)
