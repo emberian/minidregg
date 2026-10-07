@@ -589,6 +589,9 @@ structure Abort {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
   digestExact : checkpointDigest record.checkpoint = record.checkpointDigest
   input : Data
   inputExact : decodeDataBytes record.input = some input
+  /-- Both escrowed envelopes cover the front-end stages of the pinned package, judged before the
+  replay; the turn's envelope (one of them plus any extra) covers them too. -/
+  paid : frontEndPaid config (packageBytes config snapshot record.pin) [record.escrow.resume, record.escrow.timeout] = .ok ()
   program : Program config record.pin input
   programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input = .ok program
   object : ObjectRecord
@@ -650,6 +653,10 @@ def abortDrained {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sn
   match inputExact : decodeDataBytes record.input with
   | none => .error .inputType
   | some input =>
+  match paid : frontEndPaid config (packageBytes config snapshot record.pin)
+      [record.escrow.resume, record.escrow.timeout] with
+  | .error reason => .error reason
+  | .ok () =>
   match programExact : loadProgram config (packageBytes config snapshot record.pin) record.pin input with
   | .error reason => .error reason
   | .ok program =>
@@ -697,7 +704,8 @@ def abortDrained {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sn
   match postedExact : postings book batch with
   | .error reason => .error reason
   | .ok posted =>
-    .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, program, programExact,
+    .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, paid, program,
+      programExact,
       object, objectExact, next, deadline, draining, due, old, notChosen, slotPosts, slotClaims, slotExact, view,
       viewExact, response, state, stateExact, resumed, resumeExact, envelope, rfl, covered, heapCovered, extractCovered,
       segment, segmentExact,

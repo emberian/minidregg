@@ -21,9 +21,10 @@ MAXIMUM = {'typeFuel': 16384, 'sourceTicks': 200000, 'heap': 200000, 'stack': 20
            'outputBytes': 200000, 'extractTicks': 200000, 'inputBytes': 200000, 'scalarBits': 512, 'memoryTouches': 2000000,
            'proofWork': 900000, 'feeDebit': 1000000, 'turnBytes': 4000000, 'witnessBytes': 4000000,
            'storageBytes': 4000000, 'sideEffectCount': 16, 'networkBytes': 0, 'leaseByteBlocks': 0,
-           'incidences': 16}
-TARIFF = {'version': '2', 'base': '1', 'typeFuel': '0', 'sourceTicks': '1', 'heap': '0', 'stack': '0',
-          'outputNodes': '0', 'outputBytes': '0', 'extractTicks': '0', 'inputBytes': '0'}
+           'incidences': 16, 'replayBytes': 4194304, 'coreBytes': 4194304}
+TARIFF = {'version': '3', 'base': '1', 'typeFuel': '0', 'sourceTicks': '1', 'heap': '0', 'stack': '0',
+          'outputNodes': '0', 'outputBytes': '0', 'extractTicks': '0', 'inputBytes': '0',
+          'replayBytes': '0', 'coreBytes': '0'}
 PERMIT_ALL = {'type': 'all', 'predicates': []}
 
 # A declared envelope of TICKS source ticks is priced base + ticks (TARIFF); an await escrows one
@@ -68,7 +69,7 @@ def cap(ticks, full=True):
     if full:
         if EXTRACT['ticks'] is None:
             raise RuntimeError('cap() before the Host\'s extraction budget was learned (World.bring_up)')
-        for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes']:
+        for k in ['heap', 'stack', 'typeFuel', 'outputNodes', 'outputBytes', 'replayBytes', 'coreBytes']:
             c[k] = str(MAXIMUM[k])
         c['extractTicks'] = str(EXTRACT['ticks'])
     c['sourceTicks'] = str(ticks)

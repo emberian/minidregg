@@ -548,7 +548,15 @@ def viewJson (domain : Digest) (asset : Nat) (request : ViewRequest) (view : Nat
       .mkObj [("object", decimal object), ("transaction", decimal transaction),
         ("record", decimal (recordCellOf domain object transaction))]).toArray),
     ("pins", Json.arr (request.pins.map fun pin =>
-      .mkObj [("pin", decimal pin), ("packageCell", decimal (packageCellOf domain pin))]).toArray),
+      .mkObj ([("pin", decimal pin), ("packageCell", decimal (packageCellOf domain pin))] ++
+        -- The front-end quote (`ObjectiveActivity.frontEndQuote`): what a paying envelope declares as
+        -- `replayBytes` and `coreBytes` for this package (`frontEndPaid_at_quote`); absent when the
+        -- cell holds no canonical package.
+        match (view.cells.find? fun (cell, _, _) => cell == packageCellOf domain pin).bind fun (_, _, bytes) =>
+            ObjectiveActivity.frontEndQuote ((ObjectiveActivity.bodyOf .package bytes).getD []) with
+        | some (replayBytes, coreBytes) =>
+          [("frontEnd", .mkObj [("replayBytes", decimal replayBytes), ("coreBytes", decimal coreBytes)])]
+        | none => [])).toArray),
     ("inboxes", Json.arr (request.inboxes.map fun (sender, target) =>
       .mkObj [("sender", decimal sender), ("target", decimal target),
         ("cell", decimal (inboxCellOf domain sender target))]).toArray),

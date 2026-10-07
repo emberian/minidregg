@@ -344,7 +344,8 @@ v7: envelopes carry the extraction tick lane (`Capacity.extractTicks`); v6: the 
 (`adopt`, `migrate`, `abortDrained`, `rebirth`) join the sum, and `create` declares the object's
 state type (`ObjectStateType.tyStream`); v5: `create` carries an optional initial declared state,
 and the turn sum has no `writeState`; v9 (and older) commands refuse to decode. -/
-def commandFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/COMMAND/v10".toUTF8.toList
+-- v11: envelopes carry `replayBytes`, `coreBytes` (GPT-6 row E work account); a v10 command does not decode.
+def commandFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/COMMAND/v11".toUTF8.toList
 
 def commandCodec : LawfulCodec Command := ObjectiveActivityWire.framed commandFrame commandStream
 

@@ -1936,6 +1936,14 @@ structure Invocation {rootBytes : Bytes → Digest} (config : Config) (snapshot 
 def invoke {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : InvokeRequest) : Except CallRefusal (Invocation config snapshot height request) :=
   if covered : config.covers request.envelope = true then
+    -- The root frame's front-end work account (GPT-6 row E), judged from the stored pair of the
+    -- package the root frame will load, before any frame replays it. Nested frames and the root's
+    -- second (method) replay are not yet in the account (cv task 01a11636-201e).
+    match (match readObject config snapshot request.object with
+        | .ok (some record) => frontEndPaid config (packageBytes config snapshot record.activePin) [request.envelope]
+        | _ => .ok ()) with
+    | .error reason => .error (.kernel reason)
+    | .ok () =>
     match execExact : exec config snapshot height request.authority (invokeTransaction request)
         (callFuel request.envelope) [] (.enter (rootCall request)) (Journal.start request.grants request.envelope.extractTicks)
         request.envelope.sourceTicks with

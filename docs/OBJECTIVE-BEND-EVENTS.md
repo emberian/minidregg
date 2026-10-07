@@ -97,7 +97,7 @@ names the clause. Theorems: `Birth.write_judged`, `Delivery.write_judged`,
 
 ### Records, checkpoints and awaits
 
-- **Record** (frame `ACTIVITY-RECORD/v6`): object, activity id, package `pin`, input,
+- **Record** (frame `ACTIVITY-RECORD/v7`): object, activity id, package `pin`, input,
   `generation`, checkpoint bytes and digest, escrow (payer, purse account, declared resume and
   timeout envelopes and their fees), `tried` (the largest envelope an exhausted attempt at the
   current await ran under), and phase `awaiting await | done result | faulted reason`. Its digests are
