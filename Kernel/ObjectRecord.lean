@@ -361,10 +361,22 @@ theorem views_shape (facts : Facts) (old : Option Data) (new : Data) (before aft
     (viewed : views facts old new = some (before, after)) :
     ∃ b a, before = ⟨facts.slots ++ b⟩ ∧ after = ⟨facts.slots ++ a⟩ := by
   unfold views at viewed
-  simp only [Option.bind_eq_bind, Option.pure_def, Option.bind_eq_some_iff, Option.some.injEq,
-    Prod.mk.injEq] at viewed
-  obtain ⟨b, -, a, -, hb, ha⟩ := viewed
-  exact ⟨b, a, hb.symm, ha.symm⟩
+  cases old with
+  | none =>
+    cases h : stateSlots new with
+    | none => simp [h] at viewed
+    | some a =>
+      simp [h] at viewed
+      exact ⟨[], a, by simp [← viewed.1], by simp [← viewed.2]⟩
+  | some value =>
+    cases hv : stateSlots value with
+    | none => simp [hv] at viewed
+    | some b =>
+      cases h : stateSlots new with
+      | none => simp [hv, h] at viewed
+      | some a =>
+        simp [hv, h] at viewed
+        exact ⟨b, a, viewed.1.symm, viewed.2.symm⟩
 
 /-- **The artifact slot is exact**: in both views of every write, `objective/artifact`
 reads the writing package's identity, or `-1` when no package code writes, whatever the

@@ -2321,8 +2321,8 @@ def create {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
     if published : (bodyOf .package (snapshot.canonicalBytes (packageCell config.domain request.pin))).isSome = true then
       match seedPlan : request.seed with
       | none =>
-        .ok ⟨absent, published, fun _ h => by rw [seedPlan] at h; cases h,
-          fun _ h => by rw [seedPlan] at h; cases h, _, rfl⟩
+        .ok ⟨absent, published, (fun _ h => by rw [seedPlan] at h; cases h),
+          (fun _ h => by rw [seedPlan] at h; cases h), _, rfl⟩
       | some seed =>
         match stateRead : readState config snapshot request.object with
         | .error reason => .error reason
@@ -2332,8 +2332,8 @@ def create {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
           | .error reason => .error (.objectWrite reason)
           | .ok () =>
             .ok ⟨absent, published,
-              fun _ h => by rw [seedPlan] at h; cases h; exact stateRead,
-              fun _ h => by rw [seedPlan] at h; cases h; exact judged, _, rfl⟩
+              (fun _ h => by rw [seedPlan] at h; cases h; exact stateRead),
+              (fun _ h => by rw [seedPlan] at h; cases h; exact judged), _, rfl⟩
     else .error .pinUnpublished
 
 def Creation.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -4210,17 +4210,16 @@ theorem create_seed_refused_names_clause {rootBytes : Bytes → Digest} {config 
   · rename_i found
     rw [dif_pos published]
     split
-    · rename_i plan; rw [seeded] at plan; cases plan
-    · rename_i seed' plan
+    next plan => rw [seeded] at plan; cases plan
+    next seed2 plan =>
       rw [seeded] at plan; cases plan
       split
-      · rename_i reason' stateRead; rw [fresh] at stateRead; cases stateRead
-      · rename_i found' stateRead; rw [fresh] at stateRead; cases stateRead
-      · rename_i stateRead
+      next reason2 sr => rw [fresh] at sr; cases sr
+      next found2 sr => rw [fresh] at sr; cases sr
+      next sr =>
         split
-        · rename_i reason' judged
-          rw [refused] at judged; cases judged; rfl
-        · rename_i judged; rw [refused] at judged; cases judged
+        next reason3 judged => rw [refused] at judged; cases judged; rfl
+        next judged => rw [refused] at judged; cases judged
 
 /-- **`pin_not_removable`.** Whatever turn commits `posts` on a snapshot where the object's
 record reads as `record`, if no post lands on the object's record coordinate the record reads
