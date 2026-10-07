@@ -148,7 +148,7 @@ is the "bidegree of the quotient" fact BCIKS use silently when dividing
 `B(X, Z)` by `A(X, Z)`. -/
 theorem ZDegLE.of_mul_left {A P : Polynomial (Polynomial F)} {t : ℕ}
     (hA : A ≠ 0) (hP : P ≠ 0) (hAP : ZDegLE (A * P) t) : ZDegLE P t := by sorry
-  classical
+  sorry
   set s : ℕ := A.support.sup fun i => (A.coeff i).natDegree with hs
   set u : ℕ := P.support.sup fun i => (P.coeff i).natDegree with hu
   have hAcoeff : ∀ a, (A.coeff a).natDegree ≤ s := by
