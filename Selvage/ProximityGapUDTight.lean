@@ -147,8 +147,8 @@ omit [Fintype ι] [DecidableEq ι] [DecidableEq F] in
 is the "bidegree of the quotient" fact BCIKS use silently when dividing
 `B(X, Z)` by `A(X, Z)`. -/
 theorem ZDegLE.of_mul_left {A P : Polynomial (Polynomial F)} {t : ℕ}
-    (hA : A ≠ 0) (hP : P ≠ 0) (hAP : ZDegLE (A * P) t) : ZDegLE P t := by sorry
-  sorry
+    (hA : A ≠ 0) (hP : P ≠ 0) (hAP : ZDegLE (A * P) t) : ZDegLE P t := by
+  classical
   set s : ℕ := A.support.sup fun i => (A.coeff i).natDegree with hs
   set u : ℕ := P.support.sup fun i => (P.coeff i).natDegree with hu
   have hAcoeff : ∀ a, (A.coeff a).natDegree ≤ s := by
@@ -163,7 +163,7 @@ theorem ZDegLE.of_mul_left {A P : Polynomial (Polynomial F)} {t : ℕ}
     · rw [Polynomial.notMem_support_iff.mp hb]; simp
   -- the top slices multiply
   have hslice : ∀ j : ℕ,
-      ((A * P).coeff j).coeff (s + u) = (zslice s A * zslice u P).coeff j := by sorry
+      ((A * P).coeff j).coeff (s + u) = (zslice s A * zslice u P).coeff j := by
     intro j
     rw [coeff_mul, coeff_mul]
     rw [finsetSum_coeff]
@@ -173,8 +173,14 @@ theorem ZDegLE.of_mul_left {A P : Polynomial (Polynomial F)} {t : ℕ}
     · rcases Nat.lt_or_ge s uv.1 with hlt | hge
       · rw [Polynomial.coeff_eq_zero_of_natDegree_lt (lt_of_le_of_lt (hAcoeff ab.1) hlt),
           zero_mul]
-      sorry
-    · exact absurd (sorry
+      · have h2 : u < uv.2 := by
+          have := Finset.mem_antidiagonal.mp huv
+          rcases Nat.lt_or_ge u uv.2 with h | h
+          · exact h
+          · exact absurd (Prod.ext (by omega) (by omega)) huvne
+        rw [Polynomial.coeff_eq_zero_of_natDegree_lt (lt_of_le_of_lt (hPcoeff ab.2) h2),
+          mul_zero]
+    · exact absurd (Finset.mem_antidiagonal (a := (s, u)) (n := s + u)
         |>.mpr rfl) habs
   -- the slices at the attained sups are nonzero
   have hAsupp : A.support.Nonempty := Polynomial.support_nonempty.mpr hA
@@ -1097,12 +1103,12 @@ head above is unconditional; `[PROXGAP-tight]`(a) is closed at `ℓ = 2`.
 `ProximityGapUDTightExample.good_line_CA_fullBand`: `propext`,
 `Classical.choice`, `Quot.sound` (pinned below). -/
 
--- STUBBED #assert_axioms polishchukSpielmanCramer_holds
--- STUBBED #assert_axioms correlatedAgreement_of_close_card_full
--- STUBBED #assert_axioms rs_proximityGap_UD_full
--- STUBBED #assert_axioms reedSolomonCode_isProximityGenerator_UD_full
--- STUBBED #assert_axioms hasMutualCorrelatedAgreement_UD_full
--- STUBBED #assert_axioms foldDistancePreserving_UD_full
--- STUBBED #assert_axioms ProximityGapUDTightExample.good_line_CA_fullBand
+#assert_axioms polishchukSpielmanCramer_holds
+#assert_axioms correlatedAgreement_of_close_card_full
+#assert_axioms rs_proximityGap_UD_full
+#assert_axioms reedSolomonCode_isProximityGenerator_UD_full
+#assert_axioms hasMutualCorrelatedAgreement_UD_full
+#assert_axioms foldDistancePreserving_UD_full
+#assert_axioms ProximityGapUDTightExample.good_line_CA_fullBand
 
 end Minidregg.Selvage

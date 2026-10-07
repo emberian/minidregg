@@ -589,7 +589,7 @@ theorem shaped_header {e t : Nat} {v : List (Cell sched.profile)} (h : Shaped sc
 theorem headerAt_injective {e t j k : Nat} (hj : j < sched.n) (hk : k < sched.n)
     (h : sched.headerAt e t j = sched.headerAt e t k) : j = k := by
   have := congrArg (fun x => x.slot.val) h
-  sorry
+  simp only at this
   rwa [sched.headerAt_slot hj, sched.headerAt_slot hk] at this
 
 /-- One cell per position: in a checked vector, a cell under position `ρ`'s header is the cell at `ρ`. -/
