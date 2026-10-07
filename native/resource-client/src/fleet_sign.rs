@@ -250,7 +250,10 @@ fn number(value: &str) -> Value {
 fn current_balance(agent: &fleet::Agent, reference: &Value) -> Result<String> {
     let (view, _) = fleet::observe(agent, reference)?;
     let (_, asset) = fleet::tariff(agent)?;
-    fleet::balance(&view, &asset).ok_or_else(|| "the account view lists no balance in the fee asset".into())
+    // The view lists only held balances: an account that holds nothing lists no pair (the same
+    // reading `mini fleet`'s own account balance makes). helm's `join --fund 0` re-run on a
+    // seat that holds 0 must answer balance 0, not an error.
+    Ok(fleet::balance(&view, &asset).unwrap_or_else(|| "0".into()))
 }
 
 fn join(flags: &Flags) -> Result<Value> {
