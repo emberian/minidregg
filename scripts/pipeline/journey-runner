@@ -43,6 +43,16 @@ owner_for() {  # SET ROW SRC -> a lane or commit naming who last changed the row
   awk -F'\t' -v p="$pat" '$3 ~ p {print substr($1,1,12)" "substr($2,1,60); exit}' "$set/commits.tsv" | grep . || echo "?"
 }
 
+# column(1) is util-linux/bsdextra and absent on the burst2 boxes (no sudo to install it): align with python3 there.
+tabalign() {
+  if command -v column >/dev/null 2>&1; then column -t -s $'\t'; else
+    python3 -c 'import sys
+rows=[l.rstrip("\n").split("\t") for l in sys.stdin]
+w=[max(len(r[i]) for r in rows if i<len(r)) for i in range(max(map(len,rows)))] if rows else []
+for r in rows: print("  ".join(c.ljust(w[i]) for i,c in enumerate(r)).rstrip())'
+  fi
+}
+
 run_tip() {
   local tip=$1 set=$ARTIFACT_ROOT/$1 J=$JOURNEY_ROOT/$1 src leanenv=0 rowsfile t0 tmp
   pipeline_verify_set "$set"
@@ -88,7 +98,7 @@ run_tip() {
   local wall=$(( $(date +%s) - t0 ))
   { printf 'tip %s  labels: %s\njourney wall %s s on %s (%s CPUs), finished %s; set built %s\n\n' "$tip" "${labels% }" \
       "$wall" "$(hostname)" "$(nproc)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(sed -n 's/.*finished=\([^ ]*\).*/\1/p' "$set/PROVENANCE" 2>/dev/null)"
-    { printf 'ROW\tSTATUS\tWALL_S\tOWNER\tDETAIL\n'; cat "$J/results.tsv"; } | column -t -s $'\t'; } >"$J/table.txt"
+    { printf 'ROW\tSTATUS\tWALL_S\tOWNER\tDETAIL\n'; cat "$J/results.tsv"; } | tabalign; } >"$J/table.txt"
   bash "$here/journey-red-lines" "$JOURNEY_ROOT" "$tip" "${labels% }" >"$J/red.txt"
   echo "$wall" >"$J/WALL_S"; date -u +%Y-%m-%dT%H:%M:%SZ >"$J/DONE"
   pipeline_log "DONE $tip in ${wall}s: $(awk -F'\t' '{c[$2]++} END {for (k in c) printf "%s=%d ", k, c[k]}' "$J/results.tsv")"
