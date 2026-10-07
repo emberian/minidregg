@@ -4142,7 +4142,7 @@ private def deriveSuffixAt (config : Config) (anchor : Opened config)
         | return .error "pre-anchor enrollment requires authenticated carried provenance"
       let .ok custody := retained.rebindChecked opened.durable
         | return .error "carried enrollment prefix no longer matches authorized anchor"
-      let .ok issue := CarriedApplicationProvenance.selectIssue custody ingress.request.issueIndex
+      let .ok issue ← CarriedApplicationProvenance.selectIssue custody ingress.request.issueIndex
         | return .error "carried enrollment original event22 refused"
       match ← CarriedSessionEnrollmentAdmission.admitAt config opened issue ingress with
       | .error detail => return .error detail
@@ -4156,7 +4156,7 @@ private def deriveSuffixAt (config : Config) (anchor : Opened config)
           record.event.canonicalBytes == ingress.issueIngressBytes) then
         let .ok custody := retained.rebindChecked opened.durable
           | return .error "carried dispatch prefix no longer matches authorized anchor"
-        let .ok issue := CarriedDispatchProvenance.select custody ingress.issueIngressBytes
+        let .ok issue ← CarriedDispatchProvenance.select custody ingress.issueIngressBytes
           | return .error "carried dispatch original event22 refused"
         match ← CarriedDispatchAdmission.admitAt config opened issue ingress with
         | .error detail => return .error detail
