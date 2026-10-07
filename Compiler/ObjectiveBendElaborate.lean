@@ -454,6 +454,9 @@ structure St where
   knot field (the template at its own bounds). The front end checks each once with that
   variable RIGID (`ObjectiveBendFrontEnd.checkTemplates`, D2). -/
   templates : List (String × List Nat × ATerm) := []
+  /-- Each open declaration's template layer at its own bounds, elaborated ONCE: the knot field
+  holds it (checked rigid) and every chain instance is `instantiate σ` of it. -/
+  templateLayers : List (String × (Nat × Nat × ATerm)) := []
   /-- The declared result type of the body being lowered (for a `fix` in tail position). -/
   resultType : Option PTy := none
   /-- The target a `fix` about to be lowered must produce (tail position or annotated let). -/
@@ -1081,6 +1084,64 @@ def abstract (c : Ctx) (fuel : Nat) (params : List Param) (env : List Binding)
     (lower : List Binding → M ATerm) (nodeName : String) (result : ResultSpec) (moduleName : String) : M ATerm :=
   abstractWith c fuel params none env lower nodeName result moduleName
 
+/-- Substitute type variables (`σ i = some t` replaces variable `i`). -/
+def PTy.subst (σ : Nat → Option PTy) : PTy → PTy
+  | .variable i => (σ i).getD (.variable i)
+  | .arrow r q d c => .arrow r q (d.subst σ) (c.subst σ)
+  | .field n m t => .field n (m.subst σ) (t.subst σ)
+  | .specification m e => .specification (m.subst σ) (e.subst σ)
+  | .variant r => .variant (r.subst σ)
+  | .computation p r a => .computation (p.subst σ) (r.subst σ) (a.subst σ)
+  | other => other
+
+mutual
+/-- Apply `f` to every type annotation of a lowered term. -/
+def ATerm.mapTypes (f : PTy → PTy) : ATerm → ATerm
+  | .bound i => .bound i
+  | .lam p b => .lam { p with domain := p.domain.map f, codomain := p.codomain.map f } (b.mapTypes f)
+  | .app x y => .app (x.mapTypes f) (y.mapTypes f)
+  | .mix x y => .mix (x.mapTypes f) (y.mapTypes f)
+  | .fix x y => .fix (x.mapTypes f) (y.mapTypes f)
+  | .specification x y => .specification (x.mapTypes f) (y.mapTypes f)
+  | .prototype x y => .prototype (x.mapTypes f) (y.mapTypes f)
+  | .reflect x => .reflect (x.mapTypes f)
+  | .metadata x => .metadata (x.mapTypes f)
+  | .project x => .project (x.mapTypes f)
+  | .nat v => .nat v
+  | .boolean v => .boolean v
+  | .label v => .label v
+  | .binary p x y => .binary p (x.mapTypes f) (y.mapTypes f)
+  | .extend x fs => .extend (x.mapTypes f) (ATerm.mapFieldTypes f fs)
+  | .record fs => .record (ATerm.mapFieldTypes f fs)
+  | .get x n => .get (x.mapTypes f) n
+  | .ifZero x z y => .ifZero (x.mapTypes f) (z.mapTypes f) (y.mapTypes f)
+  | .inject l t r x => .inject l (t.map f) r (x.mapTypes f)
+  | .case x arms => .case (x.mapTypes f) (ATerm.mapFieldTypes f arms)
+  | .ifBool x y z => .ifBool (x.mapTypes f) (y.mapTypes f) (z.mapTypes f)
+  | .perform p r x => .perform (f p) (f r) (x.mapTypes f)
+  | .done p r x => .done (f p) (f r) (x.mapTypes f)
+def ATerm.mapFieldTypes (f : PTy → PTy) : List (String × ATerm) → List (String × ATerm)
+  | [] => []
+  | (n, x) :: rest => (n, x.mapTypes f) :: ATerm.mapFieldTypes f rest
+end
+
+/-- A template's instance at σ: its annotations substituted, then canonical (the instance a
+chain emits; MODULAR-TYPING §6 `template[σ]`). -/
+def ATerm.instantiate (σ : Nat → Option PTy) (t : ATerm) : ATerm :=
+  t.mapTypes fun ty => (ty.subst σ).canonical
+
+/-- Re-annotate the result of the `n`-parameter function `t` as `result` (the last layer of a
+chain over a recursive record is annotated with the record's variable, which unfolds to the
+row the layer provides). Returns the term and its new type. -/
+def ATerm.retarget (result : PTy) : Nat → ATerm → ATerm × Option PTy
+  | 0, t => (t, some result)
+  | n + 1, .lam p b =>
+    let (b', cod) := ATerm.retarget result n b
+    (.lam { p with codomain := cod } b', match p.domain, cod with
+      | some d, some c => some (arrowTy d c p.parameter p.reuse)
+      | _, _ => none)
+  | _, t => (t, none)
+
 def rowNames : PTy → List String
   | .field n _ t => n :: rowNames t
   | _ => []
@@ -1436,6 +1497,32 @@ def tail (c : Ctx) : Nat → Expr → List Binding → Module → M ATerm
       return ← expression c fuel e env m
     return .done p r (← expression c fuel e env m)
 
+/-- An open declaration's template layer at its own bounds (Self and Super its two rigid
+bounded variables), elaborated once and cached: `(Self index, Super index, layer)`. The knot
+field holds it, `checkTemplates` checks it rigid, and a chain's instance is `instantiate σ` of it. -/
+def templateLayer (c : Ctx) : Nat → String → Decl → Module → M (Nat × Nat × ATerm)
+  | 0, _, _, _ => fail "elaboration fuel"
+  | fuel + 1, key, d, m => do
+    if let some t := (← get).templateLayers.lookup key then return t
+    let requirements ← match d with
+      | .spec s => requirementsOf s
+      | _ => pure []
+    let some (selfVar, superVar) ← openBinding c fuel key d.binders requirements m.name
+      | fail ("open declaration " ++ key ++ ": its Self/Super bounds do not resolve")
+    let (.variable i, .variable j) := (selfVar, superVar)
+      | fail ("open declaration " ++ key ++ ": its Self/Super variables are unresolved")
+    let layer ← withTypes [("Self", selfVar), ("Super", superVar)] do
+      match d with
+      | .spec s =>
+        let some provided ← specProvided c fuel s m.name superVar
+          | fail ("open spec " ++ key ++ ": a method signature does not resolve")
+        layerAt c fuel s m selfVar superVar provided
+      | .extension _ params targetType b _ =>
+        abstract c fuel params outerEnv (fun next => body c fuel b next m) d.name (.source targetType) m.name
+      | _ => fail ("open declaration " ++ key ++ ": not a spec or extension")
+    modify fun st => { st with templateLayers := st.templateLayers ++ [(key, (i, j, layer))] }
+    return (i, j, layer)
+
 /-- The primary layer of plain spec `s` at final self `target` and inherited `inherited`:
 `λself: target. λsuper: inherited. extend super {defs}`, typed
 target → inherited → provided (provided = overlay(defs, inherited), canonical). -/
@@ -1555,14 +1642,20 @@ def chainFix (c : Ctx) : Nat → List (String × Decl × Module) → Expr → Op
         | some name => pure name
         | none => do
           let name := key ++ "@" ++ toString (← get).instances.length
+          -- An open declaration's instance is its checked template at σ = {Self ↦ target,
+          -- Super ↦ below}: the square `template[σ] = instance` holds by construction.
+          let instanceOf := fun (arity : Nat) => do
+            let (i, j, layer) ← templateLayer c fuel key d dm
+            let σ := fun k => if k == i then some target else if k == j then some below else none
+            pure (ATerm.retarget annotated arity (layer.instantiate σ)).1
           let (value, type) ← match d with
             | .spec s => do
-              let layer ← withTypes bindings (layerAt c fuel s dm target below annotated)
+              let layer ← if d.binders.isEmpty then withTypes bindings (layerAt c fuel s dm target below annotated)
+                else instanceOf 2
               pure (ATerm.specification (.metadata (← globalRef outerEnv key)) layer,
                 metaTy.map fun mt => PTy.specification mt (arrowTy target (arrowTy below annotated)))
-            | .extension _ params _ b _ => do
-              let layer ← withTypes bindings (abstractWith c fuel params (some [some target, some below]) outerEnv
-                (fun next => body c fuel b next dm) key (.given (some annotated)) dm.name)
+            | .extension _ params _ _ _ => do
+              let layer ← instanceOf params.length
               pure (layer, some (arrowTy target (arrowTy below annotated)))
             | _ => fail "internal: chain operand"
           modify fun st => { st with instances := st.instances ++ [(index, name)] }
@@ -1724,12 +1817,10 @@ def specification (c : Ctx) (fuel : Nat) (s : Spec) (m : Module) : M ATerm := do
   let key := m.name ++ "." ++ s.name
   if !s.binders.isEmpty then
     -- An open spec: checked once at its own bounds; its knot field is that instance.
-    let some (selfVar, superRow) ← openBinding c fuel key s.binders (← requirementsOf s) m.name
+    let some (selfVar, superVar) ← openBinding c fuel key s.binders (← requirementsOf s) m.name
       | fail ("open spec " ++ key ++ ": its Self/Super bounds do not resolve")
-    return ← withTypes [("Self", selfVar), ("Super", superRow)] do
-      let some provided ← specProvided c fuel s m.name superRow
-        | fail ("open spec " ++ key ++ ": a method signature does not resolve")
-      finishSpecification c fuel s m key [key] (← layerAt c fuel s m selfVar superRow provided)
+    let (_, _, layer) ← templateLayer c fuel key (.spec s) m
+    return ← withTypes [("Self", selfVar), ("Super", superVar)] (finishSpecification c fuel s m key [key] layer)
   let target ← sourceType c fuel s.targetType m.name []
   -- `requires` is checked: a requirement is a member of the closed target, at its type.
   if let some t := target then
@@ -1847,11 +1938,10 @@ def emitDecl (c : Ctx) (fuel : Nat) (m : Module) (d : Decl) (fields : List (Stri
     | .extension _ params targetType b binders =>
       if binders.isEmpty then abstract c fuel params outerEnv (fun next => body c fuel b next m) d.name (.source targetType) m.name
       else do
-        -- Checked once, at its own bounds (Self = the bounded variable, Super = the bound row).
-        let some (selfVar, superRow) ← openBinding c fuel key binders [] m.name
-          | fail ("open extension " ++ key ++ ": its Self/Super bounds do not resolve")
-        withTypes [("Self", selfVar), ("Super", superRow)]
-          (abstract c fuel params outerEnv (fun next => body c fuel b next m) d.name (.source targetType) m.name)
+        -- Checked once, at its own bounds (Self and Super the two rigid bounded variables);
+        -- every chain instance is this template at its σ.
+        let (_, _, layer) ← templateLayer c fuel key d m
+        pure layer
     | .spec s => specification c fuel s m
     | _ => fail "unsupported declaration"
   if !d.binders.isEmpty then
