@@ -72,10 +72,8 @@ try:
     starts = {n: 0 for n in NAMES[:-1]}
     starts['dir'] = 0 if 'dir-empty' in plants else int(O['counter'])
     for name in NAMES[:-1]:
-        w.create(f'create-{name}', w.sponsor, name, VAULT if name == 'vault' else PERMIT_ALL, 'installed')
-        w.turn(f'init-{name}', w.sponsor, {'kind': 'writeState', 'object': O[name],
-                                           'objectCapability': w.objects[name]['capability'],
-                                           'value': record(total=nat(starts[name]))}, 'installed')
+        w.create(f'create-{name}', w.sponsor, name, VAULT if name == 'vault' else PERMIT_ALL, 'installed',
+                 seed=record(total=nat(starts[name])))
 
     def total(name, label):
         return w.total_of(w.state(name, label))

@@ -62,6 +62,13 @@ def data (path : String) (json : Json) (name : String) : Result (List UInt8) := 
   let value ← ObjectiveBendDataWire.decodeData 64 (← field path json name)
   pure (dataBytes value)
 
+/-- A creation's initial declared state: `seed` (a data value), or none (the object starts without
+state). -/
+def seed (path : String) (json : Json) : Result (Option (List UInt8)) :=
+  match json.getObjVal? "seed" with
+  | .ok _ => do pure (some (← data path json "seed"))
+  | .error _ => .ok none
+
 def answer (json : Json) : Result AnswerWire :=
   match json.getObjVal? "reply" with
   | .ok value => do pure (.reply (dataBytes (← ObjectiveBendDataWire.decodeData 64 value)))
@@ -137,7 +144,7 @@ def turn (law : String → Json → Result Minidregg.Pred.Pred) (json : Json) : 
       (← nat p json "payer") ⟨← nat p json "payerCapability"⟩)
   | "create" => pure (.create (← nat p json "object") ⟨← nat p json "objectCapability"⟩ ⟨← nat p json "pin"⟩
       (← law (p ++ ".law") (← field p json "law")) (← upgrade law (p ++ ".upgrade") (← field p json "upgrade"))
-      (← nat p json "payer") ⟨← nat p json "payerCapability"⟩)
+      (← seed p json) (← nat p json "payer") ⟨← nat p json "payerCapability"⟩)
   | "birth" => pure (.birth (← nat p json "object") ⟨← nat p json "objectCapability"⟩
       (← nat p json "account") ⟨← nat p json "accountCapability"⟩ ⟨← nat p json "pin"⟩
       (← data p json "input") (← capacity (p ++ ".envelope") (← field p json "envelope"))
@@ -148,8 +155,6 @@ def turn (law : String → Json → Result Minidregg.Pred.Pred) (json : Json) : 
       (← nat p json "account") ⟨← nat p json "accountCapability"⟩)
   | "topUp" => pure (.topUp ⟨← nat p json "record"⟩ (← nat p json "account") ⟨← nat p json "accountCapability"⟩
       (← nat p json "amount"))
-  | "writeState" => pure (.writeState (← nat p json "object") ⟨← nat p json "objectCapability"⟩
-      (← data p json "value"))
   | "exhaust" => pure (.exhaust ⟨← nat p json "record"⟩ ⟨← nat p json "await"⟩ (← extra p json)
       (← nat p json "account") ⟨← nat p json "accountCapability"⟩)
   | "abandon" => pure (.abandon ⟨← nat p json "record"⟩ ⟨← nat p json "await"⟩)
@@ -158,7 +163,7 @@ def turn (law : String → Json → Result Minidregg.Pred.Pred) (json : Json) : 
       (← postage p json) (← nat p json "account") ⟨← nat p json "accountCapability"⟩)
   | "deliverMessage" => pure (.deliverMessage (← nat p json "sender") (← nat p json "target")
       ⟨← nat p json "message"⟩)
-  | other => throw s!"$.turn.kind {other} is not publish, create, birth, resolve, deliver, topUp, writeState, \
+  | other => throw s!"$.turn.kind {other} is not publish, create, birth, resolve, deliver, topUp, \
       exhaust, abandon, invoke or deliverMessage"
 
 /-- `author objective-activity`: `{subject, nonce, expectedAuthorityRoot, turn}`. -/
@@ -188,10 +193,11 @@ def upgradeJson : ObjectRecord.UpgradePolicy → Json
 def turnJson : Turn → Json
   | .publish artifact package payer pc => .mkObj [("kind", "publish"), ("artifactBytes", decimal artifact.length),
       ("packageBytes", decimal package.length), ("payer", decimal payer), ("payerCapability", decimal pc.value)]
-  | .create object oc pin law policy payer pc => .mkObj
-      [("kind", "create"), ("object", decimal object), ("objectCapability", decimal oc.value),
-       ("pin", decimal pin.value), ("law", toJson (reprStr law)), ("upgrade", upgradeJson policy),
-       ("payer", decimal payer), ("payerCapability", decimal pc.value)]
+  | .create object oc pin law policy seed payer pc => .mkObj
+      ([("kind", "create"), ("object", decimal object), ("objectCapability", decimal oc.value),
+       ("pin", decimal pin.value), ("law", toJson (reprStr law)), ("upgrade", upgradeJson policy)] ++
+       (match seed with | some bytes => [("seed", dataOf bytes)] | none => []) ++
+       [("payer", decimal payer), ("payerCapability", decimal pc.value)])
   | .birth object oc account ac pin input envelope resume timeout deposit => .mkObj
       [("kind", "birth"), ("object", decimal object), ("objectCapability", decimal oc.value),
        ("account", decimal account), ("accountCapability", decimal ac.value), ("pin", decimal pin.value),
@@ -204,9 +210,6 @@ def turnJson : Turn → Json
   | .topUp record account ac amount => .mkObj
       [("kind", "topUp"), ("record", decimal record.value), ("account", decimal account),
        ("accountCapability", decimal ac.value), ("amount", decimal amount)]
-  | .writeState object oc value => .mkObj
-      [("kind", "writeState"), ("object", decimal object), ("objectCapability", decimal oc.value),
-       ("value", dataOf value)]
   | .exhaust record await extra account ac => .mkObj
       [("kind", "exhaust"), ("record", decimal record.value), ("await", decimal await.value),
        ("extra", capacityJson extra), ("account", decimal account), ("accountCapability", decimal ac.value)]

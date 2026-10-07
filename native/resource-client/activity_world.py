@@ -299,12 +299,17 @@ class World:
                                    'package': (pub / 'out' / 'package.bin').read_bytes().hex()}
 
     def create(self, label, workspace, name, law, expect, detail=None, pin=None, payer=None, payer_cap=None,
-               object_cap=None):
+               object_cap=None, seed=None):
+        """`seed`: the object's initial declared state (a data value), judged by `law` alone (turn 4); the
+        state of an object changes after that only by its own package's turns, under the pin."""
         o = self.objects[name]
-        return self.turn(label, workspace, {
+        body = {
             'kind': 'create', 'object': o['object'], 'objectCapability': object_cap or o['capability'],
             'pin': pin or self.PIN, 'law': law, 'upgrade': {'frozen': {}}, 'payer': payer or self.SPONSOR_ACCOUNT,
-            'payerCapability': payer_cap or self.SPONSOR_SPEND}, expect, detail)
+            'payerCapability': payer_cap or self.SPONSOR_SPEND}
+        if seed is not None:
+            body['seed'] = seed
+        return self.turn(label, workspace, body, expect, detail)
 
     def birth(self, label, workspace, name, deposit, expect, detail=None, init=None, decider=None, ticks=TICKS,
               pin=None):

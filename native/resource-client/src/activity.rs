@@ -4,7 +4,7 @@
 //! `mini activity --action submit --workspace DIR --command FILE.json --out NEW_DIR
 //!   [--prepare-only true]`
 //!   FILE.json is the command's `turn` (`{"kind": "publish" | "create" | "birth" | "resolve" |
-//!   "deliver" | "topUp" | "writeState" | "exhaust" | "abandon", ...}`,
+//!   "deliver" | "topUp" | "exhaust" | "abandon", ...}`,
 //!   `Host/ObjectiveActivityJson.lean`).
 //!   The workspace's subject signs; the nonce is fresh; the authority root is the
 //!   one the public view (op 214) shows now. The Host authors the command (op 7

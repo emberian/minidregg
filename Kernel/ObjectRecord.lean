@@ -207,8 +207,8 @@ structure Facts where
   height : Nat
   /-- The object the write is about (its id's value). -/
   target : Nat
-  /-- Which kernel turn writes: 1 birth, 2 delivery, 3 direct write, 4 creation,
-  5 a call frame. -/
+  /-- Which kernel turn writes: 1 birth, 2 delivery, 3 (unused: there is no direct write of
+  declared state), 4 creation (the seed), 5 a call frame. -/
   turn : Nat
   /-- The object whose frame called the writing frame (`request/caller`); `none`
   (slot absent) when the write is not a nested call frame's. A callee's law
@@ -259,56 +259,95 @@ inductive WriteRefusal where
   | lawDenied (leaf : LawLeaf)
   deriving DecidableEq, Repr
 
-/-- The judgment every write of an object's declared state passes. -/
-def admitWrite (record : ObjectRecord) (facts : Facts) (old : Option Data) (new : Data) :
-    Except WriteRefusal Unit :=
+/-- Judge a write by `law` on its views: the one judgment, parameterised by which law. -/
+def judgeLaw (law : Pred) (facts : Facts) (old : Option Data) (new : Data) : Except WriteRefusal Unit :=
   match views facts old new with
   | none => .error .unprojectable
   | some (before, after) =>
-      match LawLeaf.of record.effectiveLaw before after with
+      match LawLeaf.of law before after with
       | none => .ok ()
       | some leaf => .error (.lawDenied leaf)
+
+/-- The judgment every write of an object's declared state passes after the object exists:
+its effective law (the kernel's pin clause, then the creator's law). -/
+def admitWrite (record : ObjectRecord) (facts : Facts) (old : Option Data) (new : Data) :
+    Except WriteRefusal Unit :=
+  judgeLaw record.effectiveLaw facts old new
+
+/-- The judgment of an object's INITIAL state, at its creation: the creator's law alone. The pin
+governs the writes after the object exists; at creation no package has run, so the pin clause
+would refuse every seed. The seed is judged over `old = none`, so an object cannot be born
+violating its own state clauses. -/
+def admitSeed (record : ObjectRecord) (facts : Facts) (seed : Data) : Except WriteRefusal Unit :=
+  judgeLaw record.law facts none seed
+
+/-- **A write is admitted exactly when the law accepts its views.** -/
+theorem judgeLaw_ok_iff (law : Pred) (facts : Facts) (old : Option Data) (new : Data) :
+    judgeLaw law facts old new = .ok () ↔
+      ∃ before after, views facts old new = some (before, after) ∧ eval law before after = true := by
+  unfold judgeLaw
+  cases viewed : views facts old new with
+  | none => simp
+  | some pair =>
+      obtain ⟨before, after⟩ := pair
+      cases named : LawLeaf.of law before after with
+      | none =>
+          have accepts := (LawLeaf.of_none_iff law before after).mp named
+          simp [named, accepts]
+      | some leaf =>
+          have rejects : eval law before after ≠ true := by
+            intro accepts
+            have := (LawLeaf.of_none_iff law before after).mpr accepts
+            rw [named] at this; cases this
+          simp [named, rejects]
+
+/-- **A refusal names a clause of the law that is false on the same views.** -/
+theorem judgeLaw_lawDenied_fails (law : Pred) (facts : Facts) (old : Option Data) (new : Data)
+    (leaf : LawLeaf) (refused : judgeLaw law facts old new = .error (.lawDenied leaf)) :
+    ∃ before after, views facts old new = some (before, after) ∧
+      law.subterm leaf.path = some leaf.clause ∧ eval leaf.clause before after = false := by
+  unfold judgeLaw at refused
+  cases viewed : views facts old new with
+  | none => simp [viewed] at refused
+  | some pair =>
+      obtain ⟨before, after⟩ := pair
+      rw [viewed] at refused
+      cases named : LawLeaf.of law before after with
+      | none => simp [named] at refused
+      | some found =>
+          simp only [named, Except.error.injEq, WriteRefusal.lawDenied.injEq] at refused
+          subst refused
+          obtain ⟨at_, _, fails⟩ := LawLeaf.of_fails law before after found named
+          exact ⟨before, after, rfl, at_, fails⟩
 
 /-- **A write is admitted exactly when the effective law (the pin clause, then the
 creator's law) accepts its views.** -/
 theorem admitWrite_ok_iff (record : ObjectRecord) (facts : Facts) (old : Option Data) (new : Data) :
     admitWrite record facts old new = .ok () ↔
       ∃ before after, views facts old new = some (before, after) ∧
-        eval record.effectiveLaw before after = true := by
-  unfold admitWrite
-  cases viewed : views facts old new with
-  | none => simp
-  | some pair =>
-      obtain ⟨before, after⟩ := pair
-      cases named : LawLeaf.of record.effectiveLaw before after with
-      | none =>
-          have accepts := (LawLeaf.of_none_iff record.effectiveLaw before after).mp named
-          simp [named, accepts]
-      | some leaf =>
-          have rejects : eval record.effectiveLaw before after ≠ true := by
-            intro accepts
-            have := (LawLeaf.of_none_iff record.effectiveLaw before after).mpr accepts
-            rw [named] at this; cases this
-          simp [named, rejects]
+        eval record.effectiveLaw before after = true :=
+  judgeLaw_ok_iff record.effectiveLaw facts old new
 
-/-- **A refusal names a clause of the law that is false on the same views.** -/
+/-- **A refusal names a clause of the effective law that is false on the same views.** -/
 theorem admitWrite_lawDenied_fails (record : ObjectRecord) (facts : Facts) (old : Option Data) (new : Data)
     (leaf : LawLeaf) (refused : admitWrite record facts old new = .error (.lawDenied leaf)) :
     ∃ before after, views facts old new = some (before, after) ∧
-      record.effectiveLaw.subterm leaf.path = some leaf.clause ∧ eval leaf.clause before after = false := by
-  unfold admitWrite at refused
-  cases viewed : views facts old new with
-  | none => simp [viewed] at refused
-  | some pair =>
-      obtain ⟨before, after⟩ := pair
-      rw [viewed] at refused
-      cases named : LawLeaf.of record.effectiveLaw before after with
-      | none => simp [named] at refused
-      | some found =>
-          simp only [named, Except.error.injEq, WriteRefusal.lawDenied.injEq] at refused
-          subst refused
-          obtain ⟨at_, _, fails⟩ := LawLeaf.of_fails record.effectiveLaw before after found named
-          exact ⟨before, after, rfl, at_, fails⟩
+      record.effectiveLaw.subterm leaf.path = some leaf.clause ∧ eval leaf.clause before after = false :=
+  judgeLaw_lawDenied_fails record.effectiveLaw facts old new leaf refused
+
+/-- **A seed is admitted exactly when the CREATOR'S law accepts its views** (no pin clause:
+nothing has run yet). -/
+theorem admitSeed_ok_iff (record : ObjectRecord) (facts : Facts) (seed : Data) :
+    admitSeed record facts seed = .ok () ↔
+      ∃ before after, views facts none seed = some (before, after) ∧ eval record.law before after = true :=
+  judgeLaw_ok_iff record.law facts none seed
+
+/-- **A refused seed names the creator's clause that is false on the seed's views.** -/
+theorem admitSeed_lawDenied_fails (record : ObjectRecord) (facts : Facts) (seed : Data) (leaf : LawLeaf)
+    (refused : admitSeed record facts seed = .error (.lawDenied leaf)) :
+    ∃ before after, views facts none seed = some (before, after) ∧
+      record.law.subterm leaf.path = some leaf.clause ∧ eval leaf.clause before after = false :=
+  judgeLaw_lawDenied_fails record.law facts none seed leaf refused
 
 /-- **The payer is not authority**: the judgment does not read it. -/
 theorem admitWrite_payer_irrelevant (record : ObjectRecord) (payer : Minidregg.Theory.CanonicalResourceKernel.AccountId)
@@ -382,7 +421,7 @@ theorem unpinned_write_names_pin (record : ObjectRecord) (facts : Facts) (old : 
   have named : LawLeaf.of record.effectiveLaw before after =
       some ⟨[0], pinClause record.pin, before.get Minidregg.Pred.objectiveArtifactSlot, some (-1)⟩ :=
     all_pin_names_pin [record.pin.value] [record.law] before after unclaimed
-  simp only [admitWrite, viewed, named]
+  simp only [admitWrite, judgeLaw, viewed, named]
 
 /-- A write no package code made is never admitted, for every object and value. -/
 theorem unpinned_write_refused (record : ObjectRecord) (facts : Facts) (old : Option Data) (new : Data)
@@ -421,6 +460,21 @@ theorem pin_teeth :
       accepted (admitWrite teethRecord (teethFacts (some 7)) none (.natural 1)) = true := by
   decide +kernel
 
+/-- An object whose creator's law pins its state to 5. -/
+def teethSeedRecord : ObjectRecord := { teethRecord with law := Pred.eq "state" 5 }
+
+/-- **Seed teeth.** The initial state is judged by the creator's law and NOT by the pin: a
+permit-all object's seed is admitted though no package made it (the same value as a write is
+refused at the pin), and a seed the creator's law refuses is refused at the creator's clause
+(the root leaf, reading 6), and 5 is admitted. Both directions. -/
+theorem seed_teeth :
+    accepted (admitSeed teethRecord (teethFacts none) (.natural 1)) = true ∧
+      accepted (admitWrite teethRecord (teethFacts none) none (.natural 1)) = false ∧
+      accepted (admitSeed teethSeedRecord (teethFacts none) (.natural 5)) = true ∧
+      leafOf (admitSeed teethSeedRecord (teethFacts none) (.natural 6)) =
+        some ⟨[], Pred.eq "state" 5, none, some 6⟩ := by
+  decide +kernel
+
 /-! ## The record's bytes -/
 
 def upgradeStream : StreamCodec UpgradePolicy :=
@@ -455,6 +509,10 @@ theorem record_roundTrip (record : ObjectRecord) : decodeRecord (encodeRecord re
 #assert_axioms frozen_absorbing
 #assert_axioms strengthens_sound
 #assert_axioms permits_tightens
+#assert_axioms judgeLaw_ok_iff
+#assert_axioms judgeLaw_lawDenied_fails
+#assert_axioms admitSeed_ok_iff
+#assert_axioms admitSeed_lawDenied_fails
 #assert_axioms admitWrite_ok_iff
 #assert_axioms admitWrite_lawDenied_fails
 #assert_axioms admitWrite_payer_irrelevant
@@ -467,5 +525,6 @@ theorem record_roundTrip (record : ObjectRecord) : decodeRecord (encodeRecord re
 #assert_axioms unpinned_write_names_pin
 #assert_axioms unpinned_write_refused
 #assert_axioms pin_teeth
+#assert_axioms seed_teeth
 #assert_axioms record_roundTrip
 end Minidregg.Kernel.ObjectRecord
