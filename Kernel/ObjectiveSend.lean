@@ -717,7 +717,7 @@ theorem postMail_keeps {rootBytes : Bytes → Digest} {config : Config} {snapsho
 theorem Mail.control_credits {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {mail next : Mail config snapshot} {height : Nat} {control : Control}
     (ok : mail.control height control = .ok next) : next.credits = mail.credits ∧ next.targets = mail.targets := by
-  rcases Mail.control_cases ok with same | ⟨_, _, _, _, _, _, _, _, _, rfl⟩ |
+  rcases Mail.control_cases ok with same | ⟨_, _, _, _, _, _, _, rfl⟩ |
     ⟨_, _, _, _, _, _, _, _, _, _, _, rfl⟩ | ⟨_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, rfl⟩
   · rw [same]; exact ⟨rfl, rfl⟩
   all_goals exact ⟨rfl, rfl⟩
@@ -1253,7 +1253,7 @@ theorem postControls_stops {rootBytes : Bytes → Digest} {config : Config} {sna
     · cases ok
     · rename_i mail' controlled
       have one : mail'.inboxes = mail.inboxes ∧ ∀ closed ∈ mail'.closed, closed.decided = none := by
-        rcases Mail.control_cases controlled with same | ⟨_, _, closing, _, _, _, none_, _, _, rfl⟩ |
+        rcases Mail.control_cases controlled with same | ⟨_, _, closing, _, _, none_, _, rfl⟩ |
           ⟨_, _, _, _, _, _, _, _, _, _, _, rfl⟩ | ⟨cancel, _⟩
         · rw [same]; exact ⟨rfl, retired⟩
         · refine ⟨rfl, fun closed member => ?_⟩
