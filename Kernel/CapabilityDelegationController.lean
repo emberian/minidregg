@@ -270,12 +270,15 @@ structure PreparedOn {F : Type} [Field F] (deployment : Deployment)
       (authority.authState.policyRevision command.declaration.child.policyId))
 
 /-- The preparation over what it reads: the directory, the authority snapshot and
-the operation marker's spent answer (`none`: not declared by the request). The
-marker's spent bit is read only through that answer, never from the snapshot. -/
+the operation marker's spent answer (`none`: not declared by the request, refused
+`undeclaredMarker` before anything else is read). The marker's spent bit is read
+only through that answer, never from the snapshot. -/
 def prepareOn {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (directory : Directory Nat Registry)
     (authority : Snapshot) (markerSpent : Option Bool) {kind : ResourceKind} (command : Command kind) :
     Except Reject (PreparedOn deployment profile ambient directory authority command) := do
+  -- An undeclared marker is refused first, before any state is read.
+  let some spent := markerSpent | throw .undeclaredMarker
   let target ← requireSome .targetUnavailable (observeTarget deployment directory command)
   let parent ← requireSome .parentUnavailable (readCapability authority.cell kind command.declaration.parentId)
   if ready : DescentReady authority command parent then
@@ -286,10 +289,7 @@ def prepareOn {F : Type} [Field F] (deployment : Deployment)
           (parentage authority command) then
         if policyTarget : command.declaration.child.policyId = ⟨command.declaration.target.value⟩ then
           if identity : command.declaration.operationNullifier = operationMarker authority.domain profile.semantics command then
-            match markerSpent with
-            | none => .error .undeclaredMarker
-            | some true => .error .replayedMarker
-            | some false =>
+            if spent then .error .replayedMarker else
             match validate AuthorityMaterializer authority.cell authority.cell.root
                 (command.declaration.patch parent (request authority profile.semantics ambient command)
                   authority.logical) with
@@ -351,33 +351,25 @@ theorem prepare_agrees {F : Type} [Field F] (deployment : Deployment)
       (prepare deployment profile ambient full command).map (fun _ => ()) :=
   prepareOn_map_congr deployment profile ambient command directories authorities markers
 
-/-- With no answer for the marker, the preparation never succeeds. -/
+/-- With no answer for the marker, the preparation refuses exactly `undeclaredMarker`. -/
 theorem prepareOn_unanswered {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (directory : Directory Nat Registry)
     (authority : Snapshot) {kind : ResourceKind} (command : Command kind) :
-    ∀ prepared, prepareOn deployment profile ambient directory authority none command ≠ .ok prepared := by
-  intro prepared accepted
-  unfold prepareOn at accepted
-  cases target : observeTarget deployment directory command with
-  | none => simp [requireSome, target, bind, Except.bind] at accepted
-  | some observed =>
-      simp only [requireSome, target, bind, Except.bind] at accepted
-      repeat' split at accepted
-      all_goals cases accepted
+    prepareOn deployment profile ambient directory authority none command = .error .undeclaredMarker := rfl
 
 /-- **An undeclared marker is refused by name** (the plant's pole): a light basis
-that did not declare the marker's replay nullifier never prepares the delegation
-as unspent. -/
+that did not declare the marker's replay nullifier refuses the delegation exactly
+`undeclaredMarker`, whatever the state. -/
 theorem prepare_undeclared {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) {store : DurableHistory.StoreIdentity}
     (basis : ServedBasis.Basis deployment store) {kind : ResourceKind} (command : Command kind)
     (undeclared : CredentialAuthorityReplay.nullifier deployment.domain
         (operationMarker (ServedBasis.Ground.ofBasis basis).authority.domain profile.semantics command) ∉
           basis.keys.nullifiers) :
-    ∀ prepared, prepare deployment profile ambient (ServedBasis.Ground.ofBasis basis) command ≠ .ok prepared := by
+    prepare deployment profile ambient (ServedBasis.Ground.ofBasis basis) command = .error .undeclaredMarker := by
   unfold prepare
   rw [ServedBasis.Ground.markerSpent_undeclared basis _ undeclared]
-  exact prepareOn_unanswered deployment profile ambient _ _ command
+  rfl
 
 #assert_axioms prepare_agrees
 #assert_axioms prepare_undeclared
