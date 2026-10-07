@@ -677,10 +677,12 @@ try:
                 {'first': (first.get('transactionId'), first.get('eventId'), m),
                  'retry': (retry.get('transactionId'), retry.get('eventId'), reported(retry)),
                  'richer': (richer.get('transactionId'), richer.get('eventId'))})
-        w.check('s19-paid-once', before['sponsor'] - after['sponsor'] == 2 * PRICE
-                and after['purse'] - before['purse'] == PRICE and held['purse'] == after['purse'],
-                {'paid': before['sponsor'] - after['sponsor'], 'purse': (before['purse'], held['purse'],
-                                                                          after['purse'])})
+        # Paid once: the invoke's envelope and the one message's escrow (postage + its storage deposit).
+        d19 = dep(queued_message(after, m))
+        w.check('s19-paid-once', d19 > 0 and before['sponsor'] - after['sponsor'] == 2 * PRICE + d19
+                and after['purse'] - before['purse'] == PRICE + d19 and held['purse'] == after['purse'],
+                {'paid': before['sponsor'] - after['sponsor'], 'deposit': d19,
+                 'purse': (before['purse'], held['purse'], after['purse'])})
 
     with w.group('S20-same-op-other-call'):
         op = op_id()
@@ -688,9 +690,10 @@ try:
         m = reported(invoke('s20-post', 'poster', 'post', post('counter', 6), 'installed', op=op))
         invoke('s20-other-call', 'poster', 'post', post('counter', 7), 'refused', 'replayedMarker', op=op)
         after = inbox('poster', 'counter', 's20-after')
-        w.check('s20-one-message', fresh(before, after) == [str(m)]
-                and before['sponsor'] - after['sponsor'] == 2 * PRICE,
-                {'new': fresh(before, after), 'paid': before['sponsor'] - after['sponsor']})
+        d20 = dep(queued_message(after, m))
+        w.check('s20-one-message', fresh(before, after) == [str(m)] and d20 > 0
+                and before['sponsor'] - after['sponsor'] == 2 * PRICE + d20,
+                {'new': fresh(before, after), 'deposit': d20, 'paid': before['sponsor'] - after['sponsor']})
 
     with w.group('S21-forged-retry'):
         # A retry of S19's operation in the sponsor's name, signed with the SECOND subject's key: the replay answer
