@@ -69,6 +69,8 @@ structure Payload where
   readGuards : List ReadGuard
   exactCharge : Charge
   subject : Option SubjectId
+  /-- The nullifiers the prepared patch spends beyond the ingress's (`Family.spent`). -/
+  spent : List StableNullifier
   postRootsBound : ∀ write, write ∈ writes → rootBytes write.canonicalPostBytes = write.exactPost
   guardsReadOnly : ∀ guard, guard ∈ readGuards → guard.cellId ∉ writes.map DataWrite.cellId
 
@@ -77,7 +79,7 @@ def intentOf (txId : Digest) (event : StableEvent) (nullifiers : List StableNull
   transactionId := txId
   writes := payload.writes
   readGuards := payload.readGuards
-  nullifiers := nullifiers
+  nullifiers := nullifiers ++ payload.spent
   exactCharge := payload.exactCharge
   event := event
   subject := payload.subject
@@ -94,7 +96,7 @@ def lookup (snapshot : DataSnapshot rootBytes) (txId : Digest) :
 theorem lookup_install (snapshot : DataSnapshot rootBytes) (txId : Digest)
     (event : StableEvent) (nullifiers : List StableNullifier) (payload : Payload) :
     lookup (DataSnapshot.install snapshot (intentOf txId event nullifiers payload)) txId =
-      some ⟨txId, event, nullifiers⟩ := by
+      some ⟨txId, event, nullifiers ++ payload.spent⟩ := by
   simp [lookup, DataSnapshot.install, intentOf, DataIntent.erase,
     DurableCommitProtocol.Snapshot.install, DurableCommitProtocol.Snapshot.lookupRecorded]
 
@@ -112,6 +114,7 @@ theorem lookup_install (snapshot : DataSnapshot rootBytes) (txId : Digest)
   nullifierDecEq := inferInstance
   lookup := lookup
   intentOf := intentOf
+  spent := Payload.spent
   install := DataSnapshot.install
   lookup_install := lookup_install
 
@@ -178,6 +181,11 @@ structure Family where
   txId : Env → Ingress → Digest
   event : Env → Ingress → StableEvent
   nullifiers : Env → Ingress → List StableNullifier
+  /-- The nullifiers the prepared patch spends beyond the ingress's own: a
+  decision's markers (an enrollment's birth identity).  Replay recognises the
+  ingress's nullifiers as the record's prefix. -/
+  spent : {env : Env} → {durable : Durable} → {command : Command} →
+    Prepared env durable command → List StableNullifier := fun _ => []
   subject : Ingress → Option SubjectId
   /-- Witness bytes the turn carries beyond its command. -/
   witnessBytes : Ingress → Nat
@@ -266,6 +274,7 @@ def payload (laws : Laws Durable) {env : F.Env} {durable : Durable} (ingress : F
   readGuards := readGuards laws prepared
   exactCharge := F.charge laws env durable ingress prepared
   subject := F.subject ingress
+  spent := F.spent prepared
   postRootsBound := F.writes_bound prepared
   guardsReadOnly := fun _ member => Receiver.guardsOff_readonly member
 
