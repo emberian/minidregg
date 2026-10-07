@@ -45,7 +45,7 @@ def observe {F : Type} [Field F] [DecidableEq F]
     {wanted : Request kind} {marker : Nat} {capability : CapabilityId} {contextBytes : List UInt8}
     (prepared : ResourceObservationAdmission.Prepared context profile wanted marker capability contextBytes)
     {envelope : List UInt8} (_checked : ResourceObservationAdmission.Checked prepared envelope)
-    (compute : Option (RunComputeBudgetDomain.Prepared deployment context.view wanted.subject)) : Observation :=
+    (compute : Option (RunComputeBudgetDomain.Prepared deployment context.cells wanted.subject)) : Observation :=
   let fields := ResourceObservationAdmission.readerFields context kind capability
   let packed := ResourceObservationAdmission.narrowPacked fields prepared.observed.before
   let balances := match compute with
@@ -72,7 +72,7 @@ structure AdmittedRead {F : Type} [Field F] [DecidableEq F]
   prepared : ResourceObservationAdmission.Prepared context profile request marker capability contextBytes
   envelope : List UInt8
   checked : ResourceObservationAdmission.Checked prepared envelope
-  compute : Option (RunComputeBudgetDomain.Prepared deployment context.view request.subject)
+  compute : Option (RunComputeBudgetDomain.Prepared deployment context.cells request.subject)
 
 def AdmittedRead.value {F : Type} [Field F] [DecidableEq F]
     {deployment : ResourceObservationAdmission.Deployment}
@@ -89,7 +89,7 @@ def admitRead {F : Type} [Field F] [DecidableEq F]
     (prepared : ResourceObservationAdmission.Prepared context profile wanted marker capability contextBytes)
     {envelope : List UInt8} (checked : ResourceObservationAdmission.Checked prepared envelope)
     (subjectExact : wanted.subject = subject)
-    (compute : Option (RunComputeBudgetDomain.Prepared deployment context.view wanted.subject)) :
+    (compute : Option (RunComputeBudgetDomain.Prepared deployment context.cells wanted.subject)) :
     AdmittedRead context profile subject :=
   ⟨kind,wanted,subjectExact,marker,capability,contextBytes,prepared,envelope,checked,compute⟩
 

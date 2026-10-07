@@ -210,7 +210,7 @@ Minidregg.Kernel.ConfidentialAudienceAdmission.Checked.mk | Kernel.ConfidentialA
 Minidregg.Kernel.ContentResource.PreparedCell.mk | Kernel.ContentResource | evidence | L2 | 3 proof / 1 data fields; layer-1 review pending
 Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.mk | Kernel.DeclaredResourceController | evidence | L2 | 4 proof / 6 data fields; layer-1 review pending
 Minidregg.Kernel.DeclaredResourceController.AuthorityInvocation.mk | Kernel.DeclaredResourceController | evidence | L2 | 3 proof / 4 data fields; layer-1 review pending
-Minidregg.Kernel.DeclaredResourceController.PreparedInvocation.mk | Kernel.ResourceTransaction | evidence | L2 | 7 proof / 8 data fields; layer-1 review pending
+Minidregg.Kernel.DeclaredResourceController.PreparedOn.mk | Kernel.ResourceTransaction | evidence | L2 | 7 proof / 8 data fields; layer-1 review pending
 Minidregg.Kernel.DeclaredResourceController.PreparedPolicyLeg.mk | Kernel.PreparedInvocationDiagnostics | evidence | L2 | 4 proof / 4 data fields; layer-1 review pending
 Minidregg.Kernel.DeclaredResourceController.PreparedTarget.mk | Kernel.ResourceTransaction | evidence | L2 | 5 proof / 5 data fields; layer-1 review pending
 Minidregg.Kernel.DeclaredResourceScalar.PreparedCell.mk | Kernel.DeclaredResourceScalar | evidence | L2 | 0 proof / 2 data fields; layer-1 review pending
