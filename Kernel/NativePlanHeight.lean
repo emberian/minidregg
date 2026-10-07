@@ -66,8 +66,8 @@ def pin (plan : SigningPlan) : Except String SigningPlan := do
     | .error "height pin requires an invocation plan"
   let some command := DeclaredResourceController.commandCodec.decode bytes
     | .error "noncanonical finalized invocation"
-  let targetCount := command.targets.length
-  let observeCount := if command.requiresObservation then targetCount else 0
+  let targetCount := command.signedTargetCount
+  let observeCount := if command.requiresObservation then command.targets.length else 0
   if command.targets.isEmpty || plan.slots.length != targetCount + observeCount + 1 then
     .error "invocation signing slots mismatch"
   else

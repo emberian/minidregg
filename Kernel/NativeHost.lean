@@ -174,8 +174,10 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
             (fun reason => s!"invocation preparation: {repr reason}")
         let tuple ← need "invocation incidence collision" (DeclaredResourceController.prepareTuple prepared)
         let marker := DeclaredResourceController.operationMarker config.deployment.domain profile.semantics command
-        let targets ← (List.finRange command.targets.length).mapM fun index =>
-          slot prepared.authority.snapshot marker 4 index.val (tuple.request (some index))
+        -- An observe-only read target signs only its observation slot.
+        let targets ← (List.finRange command.targets.length).filterMapM fun index =>
+          if command.targets[index].observeOnly then pure none
+          else some <$> slot prepared.authority.snapshot marker 4 index.val (tuple.request (some index))
         let observations ← if command.requiresObservation then
           (List.finRange command.targets.length).mapM fun index =>
             slot prepared.authority.snapshot marker 8 index.val
@@ -809,12 +811,13 @@ def assemble (plan : SigningPlan) (signatures : List (List UInt8)) : Except Stri
   match plan.finalizedDraft with
   | .invoke bytes => do
       let command ← need "noncanonical finalized invocation" (DeclaredResourceController.commandCodec.decode bytes)
-      let targetCount := command.targets.length
-      let observeCount := if command.requiresObservation then targetCount else 0
+      let targetCount := command.signedTargetCount
+      let observeCount := if command.requiresObservation then command.targets.length else 0
       check (!command.targets.isEmpty && envelopes.length == targetCount + observeCount + 1)
         "invocation signing slots mismatch"
       let authority ← need "missing invocation authority envelope" envelopes[targetCount + observeCount]?
-      pure (.invoke ⟨bytes, envelopes.take targetCount,
+      pure (.invoke ⟨bytes,
+        DeclaredResourceController.placeTargetEnvelopes command.targets (envelopes.take targetCount),
         envelopes.drop targetCount |>.take observeCount, authority⟩)
   | .install subject control bytes =>
       match envelopes with

@@ -129,9 +129,28 @@ instance targetsValidDecidable (command : Command) : Decidable command.TargetsVa
 
 def Command.targetsWellFormed (command : Command) : Bool := decide command.TargetsValid
 
+/-- An observe-only read target (`read`, `kindRead`): it writes nothing, and
+its ONLY authorization is its `ReadLeg` (the requester's observe capability,
+signed for this exact command, judged by the source's current observe policy on
+the unchanged cell). No ordinary leg runs for it. A funding or money-consent
+target is read too, but it authorizes a debit and keeps its leg. -/
+def Target.observeOnly (target : Target) : Bool :=
+  match target.payload with
+  | .read | .kindRead => true
+  | _ => false
+
+/-- Whether the command writes any target. A command of observe-only reads alone
+makes no transition: no law has anything to judge (a signed read is the
+observation query's), and preparation refuses it `readOnlyCommand`. -/
+def Command.writesSome (command : Command) : Bool :=
+  command.targets.any fun target => !target.observeOnly
+
 /-- Foreign resource laws receive a participant's state only after actual
-observation admission; single-target blind mutation has no foreign observer. -/
-def Command.requiresObservation (command : Command) : Bool := decide (1 < command.targets.length)
+observation admission; single-target blind mutation has no foreign observer.
+An observe-only read target is authorized only by its observation, so a command
+holding one requires observation even when it is the only target. -/
+def Command.requiresObservation (command : Command) : Bool :=
+  decide (1 < command.targets.length) || command.targets.any Target.observeOnly
 
 @[simp] theorem Command.targetsWellFormed_iff (command : Command) :
     command.targetsWellFormed = true ↔ command.TargetsValid := by
@@ -348,9 +367,13 @@ theorem command_decode_canonical {bytes : List UInt8} {command : Command}
     (decoded : commandCodec.decode bytes = some command) : commandCodec.encode command = bytes :=
   ResourceBirthCodec.strictCodec_canonical rawCommandCodec decoded
 
-/-- Empty lists never reach preparation; the default merely makes this total. -/
+/-- The target whose policy and capability the authority leg carries: the
+first target the command WRITES. An observe-only read target is authorized by
+its observation alone, so no ordinary law of a read runs from the authority leg
+either. Empty lists never reach preparation; the default merely makes this total. -/
 def Command.first (command : Command) : Target :=
-  command.targets.headD ⟨.object, 0, ⟨0⟩, 1, ⟨0⟩, .scalar [], none, none, none⟩
+  (command.targets.find? fun target => !target.observeOnly).getD
+    (command.targets.headD ⟨.object, 0, ⟨0⟩, 1, ⟨0⟩, .scalar [], none, none, none⟩)
 
 def framedCommandBytes (domain semantics : Digest) (encodedCommand : List UInt8) : List UInt8 :=
   (StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
@@ -509,6 +532,12 @@ inductive Reject where
   | legSignature (reason : CredentialSignatureAdmission.Reject)
   | capabilityRejected | policyRejected | policyInputRange | policyCastAlias | conflictingIncidences
   | wrongEnvelopeCount
+  /-- An observe-only read target carried a target envelope. Its only
+  authorization is its observe envelope (`ReadLeg`); its target envelope must be
+  empty, never a second signature nothing checks. -/
+  | readTargetEnvelope
+  /-- Every target is an observe-only read: the command makes no transition. -/
+  | readOnlyCommand
   | bendExecution
   /-- An Objective command reached an admission caller that installed no
   signed-query read oracle: a wiring refusal, never a policy verdict. -/
@@ -716,6 +745,8 @@ def computeTarget (snapshot : AuthoritySnapshot)
         if kind != .object then throw .wrongRole
         if version != ContentResource.commandVersion then throw .unsupportedVersion
         if root != pre.root then throw .staleTarget
+        -- Its only authorization is its observation: the named capability is the observe one.
+        if observe != some capability then throw .observationRequired
         pure pre.logical
 
     | kindRead => exact do
@@ -775,6 +806,14 @@ def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : A
 
     | world actions => exact (WorldKindCell.preparePatch pre.logical actions).getD []
     | kindDefinition definition => exact (WorldKindCell.prepareDefinition pre.logical definition).getD []
+
+/-- An observe-only read target's patch is empty: it writes nothing. -/
+theorem targetPatch_observeOnly (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (target : Target) (pre : TargetCell target) (read : target.observeOnly = true) :
+    targetPatch snapshot semantics ambient command target pre = [] := by
+  cases target with
+  | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
+    cases payload <;> first | rfl | simp [Target.observeOnly] at read
 
 /-- The entry an append target records, at the cell `entryCellId target n`:
 the loaded head's next position and tail. Scalar and content targets record none.
@@ -845,6 +884,37 @@ structure PreparedTarget (deployment : Deployment) (directory : Directory Nat Re
   source : CanonicalCellRegistry.LoadedPolicySource snapshot.domain directory
     (snapshot.authState.policyAddress ⟨target.target⟩ (snapshot.authState.policyRevision ⟨target.target⟩))
   audienceFresh : ObjectAudience.checkFresh source.record.audience target.target target.audienceEpoch = .ok ()
+
+/-- An observe-only content read computes only when its named capability is its
+observe capability: the read's one authorization is its observation. -/
+theorem computeTarget_read_observe (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (target : Target) (pre : TargetCell target) (post : target.Outcome)
+    (read : target.payload = .read)
+    (computed : computeTarget snapshot semantics ambient command target pre = .ok post) :
+    target.observeCapability = some target.capability := by
+  cases target with
+  | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
+    simp only at read
+    subst read
+    simp only [computeTarget] at computed
+    show observe = some capability
+    repeat' split at computed
+    all_goals first
+      | (rename_i same; simpa only [bne_iff_ne, ne_eq, Decidable.not_not] using same)
+      | (exfalso; simp [throw, throwThe, MonadExceptOf.throw, Functor.map, Except.map, bind,
+          Except.bind, pure, Except.pure] at computed)
+
+/-- **A prepared read target names its observe capability.** No observe-only
+content read is prepared, hence none accepted, whose `capability` is not its
+observe capability (refused `observationRequired` otherwise). -/
+theorem PreparedTarget.read_names_observe_capability {deployment : Deployment}
+    {directory : Directory Nat Registry} {snapshot : AuthoritySnapshot} {semantics : Digest}
+    {ambient : Ambient} {command : Command} {target : Target}
+    (prepared : PreparedTarget deployment directory snapshot semantics ambient command target)
+    (read : target.payload = .read) :
+    target.observeCapability = some target.capability :=
+  computeTarget_read_observe snapshot semantics ambient command target prepared.pre prepared.post read
+    prepared.candidate.modeEvidence.down
 
 def prepareTarget (deployment : Deployment) (directory : Directory Nat Registry)
     (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
@@ -1329,6 +1399,9 @@ structure PreparedInvocation {F : Type} [Field F]
   private mk ::
   nonempty : command.targets ≠ []
   distinct : (command.targets.map Target.target).Nodup
+  /-- The command writes something: an all-read command holds no transition for
+  any law to judge, and is refused `readOnlyCommand`. -/
+  writes : command.writesSome = true
   directory : LoadedDirectory durable
   authority : Loaded deployment durable.snapshot
   /-- The deployment clock of the same physical snapshot; its slots enter
@@ -1374,6 +1447,7 @@ def prepareFrom {F : Type} [Field F] (deployment : Deployment)
     Except Reject (PreparedInvocation deployment profile ambient durable command) := do
   if nonempty : command.targets ≠ [] then
     if distinct : (command.targets.map Target.target).Nodup then
+     if writes : command.writesSome = true then
       let directory ← requireSome .directoryUnavailable directory?
       let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
       let clock ← requireSome .clockUnavailable (ClockCellDomain.load deployment durable.snapshot)
@@ -1393,12 +1467,43 @@ def prepareFrom {F : Type} [Field F] (deployment : Deployment)
               match moneyChecked : prepareMoney deployment durable.snapshot command compute with
               | .error reason => .error reason
               | .ok money =>
-                .ok ⟨nonempty, distinct, directory, authority, clock, targets, openings, marker,
+                .ok ⟨nonempty, distinct, writes, directory, authority, clock, targets, openings, marker,
                   compute, computeChecked, money, moneyChecked, run, checked, computeRunExact⟩
             else .error .computeFunding
       else .error (.content .staleOpening)
+     else .error .readOnlyCommand
     else .error .duplicateTargets
   else .error .emptyTargets
+
+/-- **Refusal by name: a command that only reads.** A command whose targets are
+all observe-only reads is refused `readOnlyCommand` at preparation, before any
+law or signature is looked at. This refusal is new with READ-TARGET-LEG: a read
+is authorized by its observation alone, so an all-read command holds no
+transition for any ordinary law -- including the authority leg's -- to judge. -/
+theorem prepareFrom_refuses_read_only {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient)
+    (durable : Durable) (directory? : Option (LoadedDirectory durable)) (command : Command)
+    (nonempty : command.targets ≠ []) (distinct : (command.targets.map Target.target).Nodup)
+    (readOnly : command.writesSome = false) :
+    prepareFrom deployment profile ambient durable directory? command = .error .readOnlyCommand := by
+  have refused : ¬ command.writesSome = true := by simp [readOnly]
+  unfold prepareFrom
+  rw [dif_pos nonempty, dif_pos distinct, dif_neg refused]
+
+/-- A command of one observe-only read target is refused `readOnlyCommand`. -/
+theorem prepareFrom_refuses_lone_read {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient)
+    (durable : Durable) (directory? : Option (LoadedDirectory durable)) (command : Command)
+    (target : Target) (lone : command.targets = [target]) (read : target.observeOnly = true) :
+    prepareFrom deployment profile ambient durable directory? command = .error .readOnlyCommand :=
+  prepareFrom_refuses_read_only deployment profile ambient durable directory? command
+    (by simp [lone]) (by simp [lone]) (by simp [Command.writesSome, lone, read])
+
+#assert_axioms prepareFrom_refuses_read_only
+#assert_axioms prepareFrom_refuses_lone_read
+#assert_axioms computeTarget_read_observe
+#assert_axioms PreparedTarget.read_names_observe_capability
+#assert_axioms targetPatch_observeOnly
 
 def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient)

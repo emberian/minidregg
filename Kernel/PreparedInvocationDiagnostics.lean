@@ -132,7 +132,7 @@ abbrev PolicyLegs [DecidableEq F]
 def preparePolicyLegs [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) : PolicyLegs prepared tuple :=
-  ((List.finRange command.targets.length).map some ++ [none]).map fun incidence =>
+  (ordinaryIncidences command).map fun incidence =>
     ⟨incidence, preparePolicyLeg prepared tuple incidence⟩
 
 def PolicyLegs.firstRangeRefusal [DecidableEq F]
