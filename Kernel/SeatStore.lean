@@ -936,9 +936,9 @@ the written world and its account is no Book account, and the end's batch is
 admitted on the Book it was given and conserves every asset. -/
 theorem HeldEnd.closes {rootBytes : Bytes → Digest} {domain : Digest} {snapshot : Snapshot rootBytes}
     {height record : Nat} {book : Book} (held : HeldEnd domain snapshot height record book) :
-    (∀ seat ∈ heldOpen (held.loaded.world book) record, ∀ after ∈ held.next.seats,
+    (∀ seat ∈ heldOpen (held.loaded.world book) height record, ∀ after ∈ held.next.seats,
         after.account ≠ seat.account) ∧
-      (∀ seat ∈ heldOpen (held.loaded.world book) record, seat.account ∉ held.next.book.accounts) ∧
+      (∀ seat ∈ heldOpen (held.loaded.world book) height record, seat.account ∉ held.next.book.accounts) ∧
       Posts book held.batch held.next.book ∧ held.batch.registrations = [] ∧
       ∀ asset, held.next.book.totalAsset asset = book.totalAsset asset := by
   obtain ⟨closes, gone, posted, conserves⟩ := activity_end_closes_seats held.ended
@@ -967,7 +967,7 @@ theorem statePosts_retires {rootBytes : Bytes → Digest} {domain : Digest} {sna
 /-- **An activity's end retires the seat cells it closes.** -/
 theorem HeldEnd.retires {rootBytes : Bytes → Digest} {domain : Digest} {snapshot : Snapshot rootBytes}
     {height record : Nat} {book : Book} (held : HeldEnd domain snapshot height record book) :
-    ∀ seat ∈ heldOpen (held.loaded.world book) record,
+    ∀ seat ∈ heldOpen (held.loaded.world book) height record,
       postAt snapshot (seatCell seat.account) ObjectiveActivity.retiredImage ∈ held.posts := by
   intro seat member
   have mem : seat ∈ held.loaded.seats.map SeatBody.seat := (List.mem_filter.mp member).1

@@ -810,13 +810,15 @@ def closeAll (world : World) : List Seat → Except Refusal (World × Batch)
       | .ok (next, later) => .ok (next, seqBatch first later)
 
 /-- Who may exit a seat: its offerer on demand; its contract; the activity that
-holds it; anyone once a deadline seat's due height is reached. The contract's
-clause is not an argument. -/
+holds it, but on a deadline seat only once the due height is reached (a holder
+is not a way around the seat's own exit rule); anyone once a deadline seat's due
+height is reached. The contract's clause is not an argument. -/
 def exitAuthorized (height : Nat) (actor : Actor) (seat : Seat) : Bool :=
   match actor, seat.proposal.exit with
   | .subject subject, .onDemand => subject == seat.offerer
   | .inst inst, _ => inst == seat.inst
-  | .activity record, _ => seat.holder == some record
+  | .activity record, .onDemand => seat.holder == some record
+  | .activity record, .afterDeadline due => seat.holder == some record && decide (due ≤ height)
   | .subject _, .afterDeadline due => decide (due ≤ height)
 
 def openSeatsOf (world : World) (inst : InstanceId) : List Seat :=
@@ -1521,11 +1523,33 @@ theorem exit_after_deadline {world : World} {seat : Seat} (inv : Inv world) (mem
     ∃ next, step world height (.subject anyone) (.exit seat.account) = .ok next :=
   ⟨_, exit_admitted inv member (by simp [exitAuthorized, deadline, reached])⟩
 
-/-- The activity that holds a seat can always end it. -/
+/-- The activity that holds a seat can end it: at any height on an on-demand seat, and on a
+deadline seat once the due height is reached (and not before: `holder_respects_deadline`). -/
 theorem exit_by_holder {world : World} {seat : Seat} (inv : Inv world) (member : seat ∈ world.seats)
-    {record : Nat} (held : seat.holder = some record) (height : Nat) :
+    {record : Nat} (held : seat.holder = some record) (height : Nat)
+    (due : ∀ d, seat.proposal.exit = .afterDeadline d → d ≤ height) :
     ∃ next, step world height (.activity record) (.exit seat.account) = .ok next :=
-  ⟨_, exit_admitted inv member (by simp [exitAuthorized, held])⟩
+  ⟨_, exit_admitted inv member (by
+    unfold exitAuthorized
+    cases rule : seat.proposal.exit with
+    | onDemand => simp [held]
+    | afterDeadline d => simp [held, due d rule])⟩
+
+/-- **`holder_respects_deadline`.** An admitted exit by the end of an activity on a deadline
+seat implies the due height is reached: naming one's own activity as holder is no way to pull a
+deadline seat early. -/
+theorem holder_respects_deadline {world next : World} {height record : Nat} {account : AccountId}
+    {batch : Batch} (admitted : step world height (.activity record) (.exit account) = .ok (next, batch)) :
+    ∃ seat ∈ world.seats, seat.account = account ∧ seat.holder = some record ∧
+      ∀ due, seat.proposal.exit = .afterDeadline due → due ≤ height := by
+  obtain ⟨seat, member, same, authorized, _⟩ := exit_spec admitted
+  refine ⟨seat, member, same, ?_, ?_⟩
+  · revert authorized
+    unfold exitAuthorized
+    cases seat.proposal.exit <;> simp <;> tauto
+  · intro due rule
+    revert authorized
+    simp [exitAuthorized, rule]
 
 theorem closeBatch_balance (book : Book) (seat : Seat) (account : AccountId) (asset : AssetId) :
     ((closeBatch book seat).apply book).balance account asset =
@@ -1869,9 +1893,10 @@ theorem runPlan_reachable {height : Nat} {inst : Instance} {mintId : Nat → Inv
         cases ran
         exact runPlan_reachable (Reachable.admit height _ _ reachable hstep) hrest
 
-/-- The open seats an activity holds. -/
-def heldOpen (world : World) (record : Nat) : List Seat :=
-  world.seats.filter fun seat => seat.holder == some record
+/-- The open seats an activity holds that its end may exit at `height`: a held deadline
+seat before its due height stays open (`holder_respects_deadline`). -/
+def heldOpen (world : World) (height record : Nat) : List Seat :=
+  world.seats.filter fun seat => seat.holder == some record && exitAuthorized height (.activity record) seat
 
 /-- The end of the activity at `record`: exit every open seat it holds, each a
 step of `Actor.activity record`, under one batch. -/
@@ -1886,7 +1911,7 @@ def exitEach (height : Nat) (record : Nat) : World → List AccountId → Except
       | .ok (next, later) => .ok (next, seqBatch posted later)
 
 def closeHeld (world : World) (height : Nat) (record : Nat) : Except Refusal (World × Batch) :=
-  exitEach height record world ((heldOpen world record).map Seat.account)
+  exitEach height record world ((heldOpen world height record).map Seat.account)
 
 theorem exitEach_posts {height record : Nat} :
     ∀ {world next : World} {accounts : List AccountId} {batch : Batch},
@@ -1993,8 +2018,8 @@ that conserves every asset. (Each exit sweeps its payee's whole holding:
 from any world satisfying `Inv`.) -/
 theorem activity_end_closes_seats {world next : World} {height record : Nat} {batch : Batch}
     (ended : closeHeld world height record = .ok (next, batch)) :
-    (∀ seat ∈ heldOpen world record, ∀ after ∈ next.seats, after.account ≠ seat.account) ∧
-      (∀ seat ∈ heldOpen world record, seat.account ∉ next.book.accounts) ∧
+    (∀ seat ∈ heldOpen world height record, ∀ after ∈ next.seats, after.account ≠ seat.account) ∧
+      (∀ seat ∈ heldOpen world height record, seat.account ∉ next.book.accounts) ∧
       Posts world.book batch next.book ∧ ∀ asset, next.book.totalAsset asset = world.book.totalAsset asset := by
   obtain ⟨posted, _, _⟩ := exitEach_posts ended
   refine ⟨fun seat member after amember =>
@@ -2015,7 +2040,7 @@ theorem closeHeld_reachable {genesis world next : World} {height record : Nat} {
   seat_offer_safe_forever exit_enabled exit_after_deadline exit_by_holder exit_pays_allocation seat_conserves
   seat_debit_authorized exit_step_authorized runPlan_posts runPlan_reachable activity_end_closes_seats closeHeld_reachable
   mem_heldAssets payout_all_exact closeDeregistration closeAll_deregisters exit_deregisters exit_removes_seat
-  terminate_deregisters closed_seat_posting_refused exitEach_deregistrations
+  terminate_deregisters closed_seat_posting_refused exitEach_deregistrations holder_respects_deadline exit_by_holder
 
 
 /-! ## Inhabitants and teeth
@@ -2218,6 +2243,30 @@ theorem swap_opening_reachable : ∃ world, Reachable genesis world ∧ world.se
     rw [h] at two
     exact ⟨world, run_reachable Reachable.start h, by simpa [Except.map] using two⟩
 
+/-- **A holder is no way around a deadline.** Alice's seat has exit rule `afterDeadline 10` and
+names the activity at record 900 as its holder. That activity ending at height 7 leaves the seat
+open with its whole allocation (and the activity's end is still admitted); once the due height is
+reached the activity's end pays it, and before that anyone may exit it only from height 10. -/
+def deadlineHeldOpening : List Entry :=
+  opening.take 2 ++
+    [ .signed 2 alice (.offer 1 ⟨1, package, "sell"⟩ aliceSeat aliceAccount aliceAccount
+        ⟨[(X, 10)], [(Y, 5)], .afterDeadline 10⟩ (some 900)) ]
+
+theorem activity_end_leaves_deadline_seat_open :
+    (run genesis (deadlineHeldOpening ++ [.ended 7 900])).map
+      (fun world => (world.book.balance aliceSeat X, world.seats.length)) = .ok (10, 1) := by decide +kernel
+
+theorem activity_end_pays_deadline_seat_after_due :
+    (run genesis (deadlineHeldOpening ++ [.ended 10 900])).map balances = .ok [10, 0, 0, 7] := by decide +kernel
+
+theorem anyone_exits_deadline_seat_after_due :
+    (run genesis (deadlineHeldOpening ++ [.ended 7 900, .signed 10 bob (.exit aliceSeat)])).map balances =
+      .ok [10, 0, 0, 7] := by decide +kernel
+
+theorem stranger_cannot_exit_deadline_seat_early :
+    (run genesis (deadlineHeldOpening ++ [.ended 7 900, .signed 9 bob (.exit aliceSeat)])).map balances =
+      .error (.exitNotAuthorized aliceSeat) := by decide +kernel
+
 /-- **An exit leaves no account behind.** After Alice exits, her seat is no Book
 account and no seat of the world; Bob's seat is untouched. -/
 theorem exit_deregisters_example :
@@ -2259,7 +2308,8 @@ theorem exit_sweeps_unnamed_asset :
   unprotected_seat_refused zero_want_satisfied nat_predecessor_encoding_refuses_zero_want
   zero_want_gift_admitted absent_slot_reads_as_met activity_end_pays_held_seat another_activity_ends_nothing
   swap_opening_reachable exit_deregisters_example replayed_exit_refused closed_seat_refuses_top_up
-  exit_sweeps_unnamed_asset
+  exit_sweeps_unnamed_asset activity_end_leaves_deadline_seat_open activity_end_pays_deadline_seat_after_due
+  anyone_exits_deadline_seat_after_due stranger_cannot_exit_deadline_seat_early
 
 end Example
 
