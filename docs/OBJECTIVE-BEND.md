@@ -442,7 +442,16 @@ The kernel runs activities on objects. Detail, with every turn and theorem, is i
   (`judgeDomains_sound`, `finish_domains`), and refused `domainLawDenied domain leaf`. The judgment
   only adds refusals. It reads its members under guards, so a concurrent write to an unwritten
   member conflicts instead of slipping past (`finalIntent_guards`). A domain law is a state
-  predicate (no request slots). Membership is permanent.
+  predicate (no request slots). Membership is permanent. The judgment is PRICED work: it reports
+  its units (one per cell it reads and guards: judging a domain costs `|members| + 1`, indexing a
+  posted one `|members|`, `judgeDomains_units`), and the turn end refuses `domainUncovered units
+  allowance` when they exceed the `domainWork` of the envelope the turn was charged for
+  (`AdmittedTurn.domainAllowance`, every turn kind listed: the request's envelope for invoke, birth,
+  adopt, rebirth and registerDomain; the turn's envelope for deliver, exhaust and abortDrained; the
+  message's for deliverMessage; the adopted one for a migration that runs a term). So the payer of a
+  finished turn paid `tariff.domainWork` for every unit (`finish_domain_covered`,
+  `Tariff.workOf_domainWork`). `registerDomain` carries an envelope and pays its public price from
+  `payer` (`registerBatch`).
 - **The program is the front end's output.** `publish` stores an artifact and its source package
   only after re-running the Lean front end; every later turn reloads and replays the pair
   (`Program.runs_front_end_output`). The artifact commits the package's laws; a tampered or
@@ -817,8 +826,8 @@ records that a value came from the call that produced it.
 - **Machine**: a resource bound for completeness (completion is finite, not bounded); use
   counts at run time (quantities are static); `stepRaw` linear in the heap.
 - **Kernel**: upgrade is single-turn MIGRATE only (no multi-turn `migrating` phase, cv
-  01a1141b-d4b5) and has no interface-compatibility check (no facet table, cv 01a1141b-d4d6); domains cannot be left or changed (cv 01a115c9-d990)
-  and their judgment is not priced (cv 01a115c9-d9b7); a storage charge for packages, object
+  01a1141b-d4b5) and has no interface-compatibility check (no facet table, cv 01a1141b-d4d6); domains cannot be left or changed (cv 01a115c9-d990);
+  a storage charge for packages, object
   records and state cells (an activity's record and a queued message carry refundable deposits); activities that call, send or await a message (above); objects holding capabilities.
 - **Language** (OB3, OB6): a digest primitive callable from source (`Theory/ObjectiveBendDigest`
   exists; Core4 has no digest term); sum-typed entry arguments and unary `!`; `before` and
