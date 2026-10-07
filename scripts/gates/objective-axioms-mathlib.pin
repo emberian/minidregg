@@ -1575,8 +1575,10 @@ A Minidregg.Compiler.DemoOp.leaf.elim : -
 A Minidregg.Compiler.DemoOp.node.elim : -
 A Minidregg.Compiler.DemoSig : -
 A Minidregg.Compiler.DurableCheckpointCodec.Body.chain : -
+A Minidregg.Compiler.DurableCheckpointCodec.Body.frontier : -
 A Minidregg.Compiler.DurableCheckpointCodec.Body.height : -
 A Minidregg.Compiler.DurableCheckpointCodec.Body.keyId : -
+A Minidregg.Compiler.DurableCheckpointCodec.Body.spentRoot : -
 A Minidregg.Compiler.DurableCheckpointCodec.Body.state : -
 A Minidregg.Compiler.DurableCheckpointCodec.Framed.decode : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableCheckpointCodec.Framed.decode_canonical : Classical.choice, Quot.sound, propext
@@ -1603,13 +1605,16 @@ A Minidregg.Compiler.DurableCheckpointCodec.SeedEpoch.labelled.elim : -
 A Minidregg.Compiler.DurableCheckpointCodec.SeedEpoch.ofBytes : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableCheckpointCodec.SeedEpoch.refusal : propext
 A Minidregg.Compiler.DurableCheckpointCodec.SeedEpoch.unlabelled.elim : -
+A Minidregg.Compiler.DurableCheckpointCodec.StoreEpoch.accumulator : -
 A Minidregg.Compiler.DurableCheckpointCodec.StoreEpoch.current : -
 A Minidregg.Compiler.DurableCheckpointCodec.StoreEpoch.differing : propext
+A Minidregg.Compiler.DurableCheckpointCodec.StoreEpoch.differing_accumulator : propext
 A Minidregg.Compiler.DurableCheckpointCodec.StoreEpoch.differing_logTag : propext
 A Minidregg.Compiler.DurableCheckpointCodec.StoreEpoch.differing_nil_iff : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableCheckpointCodec.StoreEpoch.differing_schemaRefs : propext
 A Minidregg.Compiler.DurableCheckpointCodec.StoreEpoch.differing_stateKey : propext
 A Minidregg.Compiler.DurableCheckpointCodec.StoreEpoch.label : propext
+A Minidregg.Compiler.DurableCheckpointCodec.StoreEpoch.labelBeforeAccumulator : propext
 A Minidregg.Compiler.DurableCheckpointCodec.StoreEpoch.logTag : -
 A Minidregg.Compiler.DurableCheckpointCodec.StoreEpoch.parse : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableCheckpointCodec.StoreEpoch.schemaRefs : -
@@ -1621,7 +1626,7 @@ A Minidregg.Compiler.DurableCheckpointCodec.chainStep : Classical.choice, Quot.s
 A Minidregg.Compiler.DurableCheckpointCodec.checkpointFrame : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableCheckpointCodec.checkpointMac : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableCheckpointCodec.empty_mac_forged : Classical.choice, Quot.sound, propext
-A Minidregg.Compiler.DurableCheckpointCodec.entryTag : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableCheckpointCodec.frontierStream : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableCheckpointCodec.logTagLabel : -
 A Minidregg.Compiler.DurableCheckpointCodec.macInputStream : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableCheckpointCodec.openSealed : Classical.choice, Quot.sound, propext
@@ -1643,15 +1648,72 @@ A Minidregg.Compiler.DurableCheckpointCodec.seedFrameName : propext
 A Minidregg.Compiler.DurableCheckpointCodec.stateEntries : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableCheckpointCodec.stateStream : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableCheckpointCodec.systemLeaf : Classical.choice, Quot.sound, propext
-A Minidregg.Compiler.DurableCheckpointCodec.tagInputStream : Classical.choice, Quot.sound, propext
-A Minidregg.Compiler.DurableCheckpointCodec.tagRoot : Classical.choice, Quot.sound, propext
-A Minidregg.Compiler.DurableCheckpointCodec.tagRoot_entryTag : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableCheckpointCodec.v1_record_refused : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableCheckpointCodec.worldRoot : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.Carried.chain : -
+A Minidregg.Compiler.DurableHistory.Carried.frontier : -
+A Minidregg.Compiler.DurableHistory.Carried.root : -
+A Minidregg.Compiler.DurableHistory.Carried.spentRoot : -
+A Minidregg.Compiler.DurableHistory.Frontier.push : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.Head.bound : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.Head.bound_tag : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.Head.chain : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.Head.frontier : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.Head.genesis : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.Head.height : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.Head.root : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.Head.spentRoot : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.Head.verify : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.Included : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.RawEntry.claimedHeight : -
+A Minidregg.Compiler.DurableHistory.RawEntry.ofStore : -
+A Minidregg.Compiler.DurableHistory.RawNode.ofStore : -
+A Minidregg.Compiler.DurableHistory.Refusal.beyondHead.elim : -
+A Minidregg.Compiler.DurableHistory.Refusal.malformedTrailer.elim : -
+A Minidregg.Compiler.DurableHistory.Refusal.message : propext
+A Minidregg.Compiler.DurableHistory.Refusal.notIncluded.elim : -
+A Minidregg.Compiler.DurableHistory.Refusal.unavailable.elim : -
+A Minidregg.Compiler.DurableHistory.Refusal.undecodable.elim : -
+A Minidregg.Compiler.DurableHistory.Refusal.wrongHeight.elim : -
+A Minidregg.Compiler.DurableHistory.StoreIdentity.key : -
+A Minidregg.Compiler.DurableHistory.StoreIdentity.logStart : -
+A Minidregg.Compiler.DurableHistory.StoreIdentity.ofOpen : -
+A Minidregg.Compiler.DurableHistory.Verified.chain : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.Verified.included : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.Verified.record : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.Verified.root : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.completedNodes : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.completedNodes.go : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.decodeDigest : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.frontierCustomization : propext
+A Minidregg.Compiler.DurableHistory.frontierDigest : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.leafCustomization : propext
+A Minidregg.Compiler.DurableHistory.leafDigest : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.leafInput : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.lookupNode : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.nodeCustomization : propext
+A Minidregg.Compiler.DurableHistory.nodeDigest : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.nodeKey : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.recordCustomization : propext
+A Minidregg.Compiler.DurableHistory.recordHash : Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.tagInputStream : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.tagMac : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.trailer : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.trailerCarried : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.trailerCarried_trailer : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.trailerStream : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.verifyAt : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.verifyAt_bytes : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.verifyAt_included : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.verifyAt_refuses : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.verifyAt_sound : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.verifyTagged : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableHistory.verifyTagged_trailer : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableLogTags.TagsHonest : propext
 A Minidregg.Compiler.DurableLogTags.chainPrefixes : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableLogTags.chainPrefixes_getElem? : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableLogTags.chainPrefixes_getLast? : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableLogTags.defaultCarried : -
 A Minidregg.Compiler.DurableLogTags.firstBadTag : propext
 A Minidregg.Compiler.DurableLogTags.firstBadTag_eq_none_iff : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableLogTags.firstBadTag_names_first : Classical.choice, Quot.sound, propext
@@ -1664,13 +1726,14 @@ A Minidregg.Compiler.DurableLogTags.pole_middle_refused : propext
 A Minidregg.Compiler.DurableLogTags.rootedChains : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableLogTags.rootedChains_getElem? : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableLogTags.rootedTag : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableLogTags.rootedTag_trailer : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableLogTags.tagRefusal : propext
 A Minidregg.Compiler.DurableLogTags.verifyTags : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableLogTags.verifyTagsWith : propext
+A Minidregg.Compiler.DurableLogTags.verifyTags_carried : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableLogTags.verifyTags_ok_iff : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableLogTags.verifyTags_refuses_at : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableLogTags.verifyTags_refuses_head : Classical.choice, Quot.sound, propext
-A Minidregg.Compiler.DurableLogTags.verifyTags_root : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverCodec.ChargeTuple : -
 A Minidregg.Compiler.DurableReceiverCodec.chargeOfTuple : -
 A Minidregg.Compiler.DurableReceiverCodec.chargeOfTuple_tuple : Quot.sound
@@ -1713,6 +1776,12 @@ A Minidregg.Compiler.DurableReceiverIO.DetailedResult.ordinary.elim : Classical.
 A Minidregg.Compiler.DurableReceiverIO.DetailedResult.toResult : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.Entry.record : -
 A Minidregg.Compiler.DurableReceiverIO.Entry.tag : -
+A Minidregg.Compiler.DurableReceiverIO.HistoryRead.entries : -
+A Minidregg.Compiler.DurableReceiverIO.HistoryRead.head : -
+A Minidregg.Compiler.DurableReceiverIO.HistoryRead.nodes : -
+A Minidregg.Compiler.DurableReceiverIO.HistoryRequest.atHeight : -
+A Minidregg.Compiler.DurableReceiverIO.HistoryRequest.heights : -
+A Minidregg.Compiler.DurableReceiverIO.HistoryRequest.nodes : -
 A Minidregg.Compiler.DurableReceiverIO.Loaded.atPrefix : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.Loaded.atPrefix_below : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.Loaded.atPrefix_current : Classical.choice, Quot.sound, propext
@@ -1733,6 +1802,9 @@ A Minidregg.Compiler.DurableReceiverIO.Loaded.extend_rootLog_back : Classical.ch
 A Minidregg.Compiler.DurableReceiverIO.Loaded.extend_rootLog_prefix : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.Loaded.firstIndex : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.Loaded.firstIndex_eq : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableReceiverIO.Loaded.frontier : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableReceiverIO.Loaded.headSpentRoot : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableReceiverIO.Loaded.headTag : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.Loaded.height : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.Loaded.ids : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.Loaded.idsExact : Classical.choice, Quot.sound, propext
@@ -1768,7 +1840,9 @@ A Minidregg.Compiler.DurableReceiverIO.Loaded.worldRoot_eq : Classical.choice, Q
 A Minidregg.Compiler.DurableReceiverIO.NativeConfig.anchorIdentity : -
 A Minidregg.Compiler.DurableReceiverIO.NativeConfig.append : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.NativeConfig.binary : -
+A Minidregg.Compiler.DurableReceiverIO.NativeConfig.checkpointAt : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.NativeConfig.checkpointEvery : -
+A Minidregg.Compiler.DurableReceiverIO.NativeConfig.history : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.NativeConfig.initialize : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.NativeConfig.key : -
 A Minidregg.Compiler.DurableReceiverIO.NativeConfig.peekSeed : Classical.choice, Quot.sound, propext
@@ -1777,6 +1851,15 @@ A Minidregg.Compiler.DurableReceiverIO.NativeConfig.read : Classical.choice, Quo
 A Minidregg.Compiler.DurableReceiverIO.NativeConfig.readKey : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.NativeConfig.root : -
 A Minidregg.Compiler.DurableReceiverIO.NativeConfig.transport : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableReceiverIO.NodeWrite.key : -
+A Minidregg.Compiler.DurableReceiverIO.NodeWrite.space : -
+A Minidregg.Compiler.DurableReceiverIO.NodeWrite.value : -
+A Minidregg.Compiler.DurableReceiverIO.PreparedAppend.entry : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableReceiverIO.PreparedAppend.entryExact : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableReceiverIO.PreparedAppend.extended : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableReceiverIO.PreparedAppend.extendedImage : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableReceiverIO.PreparedAppend.nodes : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableReceiverIO.PreparedAppend.spentAfter : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.Result.confirmed.elim : -
 A Minidregg.Compiler.DurableReceiverIO.Result.contention.elim : -
 A Minidregg.Compiler.DurableReceiverIO.Result.rejected.elim : -
@@ -1810,7 +1893,9 @@ A Minidregg.Compiler.DurableReceiverIO.Stored.seed : -
 A Minidregg.Compiler.DurableReceiverIO.StoredCheckpoint.bytes : -
 A Minidregg.Compiler.DurableReceiverIO.StoredCheckpoint.height : -
 A Minidregg.Compiler.DurableReceiverIO.Transport.append : -
+A Minidregg.Compiler.DurableReceiverIO.Transport.checkpointAt : -
 A Minidregg.Compiler.DurableReceiverIO.Transport.checkpointEvery : -
+A Minidregg.Compiler.DurableReceiverIO.Transport.history : -
 A Minidregg.Compiler.DurableReceiverIO.Transport.initializeSeed : -
 A Minidregg.Compiler.DurableReceiverIO.Transport.key : -
 A Minidregg.Compiler.DurableReceiverIO.Transport.logStart : -
@@ -1821,11 +1906,14 @@ A Minidregg.Compiler.DurableReceiverIO.Transport.sourceGate : -
 A Minidregg.Compiler.DurableReceiverIO.Transport.systemCell : -
 A Minidregg.Compiler.DurableReceiverIO.afterCheckpoint : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.afterCheckpoint_image : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableReceiverIO.appendNodes : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.bootstrap : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.byteArray_beq_exact : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.cachedSeal_root : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.checkpointDifferential : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.checkpointDue : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableReceiverIO.encodeHistoryRequest : propext
+A Minidregg.Compiler.DurableReceiverIO.encodeNodes : propext
 A Minidregg.Compiler.DurableReceiverIO.entriesOf : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.entriesOf_rebase : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.entriesOf_step : Classical.choice, Quot.sound, propext
@@ -1842,7 +1930,12 @@ A Minidregg.Compiler.DurableReceiverIO.loadSeed : Classical.choice, Quot.sound, 
 A Minidregg.Compiler.DurableReceiverIO.lookupPost_isSome : propext
 A Minidregg.Compiler.DurableReceiverIO.lookupPost_member : Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.parseCasOutput : propext
+A Minidregg.Compiler.DurableReceiverIO.parseHistory : propext
 A Minidregg.Compiler.DurableReceiverIO.parseStored : propext
+A Minidregg.Compiler.DurableReceiverIO.prepareAppend : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableReceiverIO.publish : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableReceiverIO.publishAfter : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableReceiverIO.publishAfter_conflict : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.receive : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.receiveLoaded : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.receiveLoadedDetailed : Classical.choice, Quot.sound, propext
@@ -1851,9 +1944,51 @@ A Minidregg.Compiler.DurableReceiverIO.recordSlots : Classical.choice, Quot.soun
 A Minidregg.Compiler.DurableReceiverIO.runNative : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.sealCheckpoint_uses_cached_root : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.seedLookup_map : propext
+A Minidregg.Compiler.DurableReceiverIO.spentRows : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.stateEntries_ofSnapshot : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.storeCheckpoint : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.DurableReceiverIO.tipIs : -
+A Minidregg.Compiler.DurableReceiverIO.walkFrontier : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.Answer.opens : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.Answer.value : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.Opening.siblings : -
+A Minidregg.Compiler.DurableSpent.Opening.terminal : -
+A Minidregg.Compiler.DurableSpent.Opens : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.Row.branch.elim : -
+A Minidregg.Compiler.DurableSpent.Row.digest : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.Row.leaf.elim : -
+A Minidregg.Compiler.DurableSpent.Terminal.digest : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.Terminal.empty.elim : -
+A Minidregg.Compiler.DurableSpent.Terminal.leaf.elim : -
+A Minidregg.Compiler.DurableSpent.accumulatorSpace : -
+A Minidregg.Compiler.DurableSpent.branchDigest : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.climb : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.emptyDigest : Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.empty_absent : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.empty_present_refused : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.hashNode : Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.insert : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.insertAll : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.insertAncestors : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.insertSubtree : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.insertSubtree.up : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.key : Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.keyBits : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.keyCustomization : propext
+A Minidregg.Compiler.DurableSpent.leafDigest : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.lookupRows : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.nodeCustomization : propext
+A Minidregg.Compiler.DurableSpent.nullifierKey : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.openingOf : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.overlay : -
+A Minidregg.Compiler.DurableSpent.prefixes : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.recordKeys : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.rowKey : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.rowStream : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.spentSpace : -
+A Minidregg.Compiler.DurableSpent.transactionKey : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.verify : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.DurableSpent.walk : propext
 A Minidregg.Compiler.EvalDoor.Event : -
 A Minidregg.Compiler.EvalDoor.claimOutput : -
 A Minidregg.Compiler.EvalDoor.decodeState : -
@@ -3177,6 +3312,9 @@ A Minidregg.Compiler.ObjectiveBendElaborate.Body.brecOn_2.go : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Body.cases.elim : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Body.expr.elim : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Body.letB.elim : -
+A Minidregg.Compiler.ObjectiveBendElaborate.Claim.body : -
+A Minidregg.Compiler.ObjectiveBendElaborate.Claim.name : -
+A Minidregg.Compiler.ObjectiveBendElaborate.Claim.params : -
 A Minidregg.Compiler.ObjectiveBendElaborate.CorePrimitive : -
 A Minidregg.Compiler.ObjectiveBendElaborate.CoreTerm : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Ctx.decls : Classical.choice, Quot.sound, propext
@@ -3220,9 +3358,6 @@ A Minidregg.Compiler.ObjectiveBendElaborate.Expr.var.elim : -
 A Minidregg.Compiler.ObjectiveBendElaborate.InternM : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Interner.seen : Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendElaborate.Interner.table : Classical.choice, Quot.sound, propext
-A Minidregg.Compiler.ObjectiveBendElaborate.Law.body : -
-A Minidregg.Compiler.ObjectiveBendElaborate.Law.name : -
-A Minidregg.Compiler.ObjectiveBendElaborate.Law.params : -
 A Minidregg.Compiler.ObjectiveBendElaborate.M : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Method.body : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendElaborate.Method.name : Classical.choice, Quot.sound, propext
@@ -3273,7 +3408,7 @@ A Minidregg.Compiler.ObjectiveBendElaborate.Signature.name : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Signature.params : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Signature.resultType : -
 A Minidregg.Compiler.ObjectiveBendElaborate.Spec.binders : Classical.choice, Quot.sound, propext
-A Minidregg.Compiler.ObjectiveBendElaborate.Spec.laws : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.ObjectiveBendElaborate.Spec.claims : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendElaborate.Spec.methods : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendElaborate.Spec.name : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendElaborate.Spec.parents : Classical.choice, Quot.sound, propext
@@ -3392,8 +3527,8 @@ A Minidregg.Compiler.ObjectiveBendElaborate.shiftRef : propext
 A Minidregg.Compiler.ObjectiveBendElaborate.signatureText : propext
 A Minidregg.Compiler.ObjectiveBendElaborate.signatureTy : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendElaborate.sourceType : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.ObjectiveBendElaborate.specClaimsName : -
 A Minidregg.Compiler.ObjectiveBendElaborate.specKey : Classical.choice, Quot.sound, propext
-A Minidregg.Compiler.ObjectiveBendElaborate.specLawsName : -
 A Minidregg.Compiler.ObjectiveBendElaborate.specMetaName : -
 A Minidregg.Compiler.ObjectiveBendElaborate.specOf : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendElaborate.specProvided : Classical.choice, Quot.sound, propext
@@ -3603,6 +3738,7 @@ A Minidregg.Compiler.ObjectiveBendParse.body : Classical.choice, Quot.sound, pro
 A Minidregg.Compiler.ObjectiveBendParse.cap : propext
 A Minidregg.Compiler.ObjectiveBendParse.capture : propext
 A Minidregg.Compiler.ObjectiveBendParse.caseRe : Classical.choice, Quot.sound, propext
+A Minidregg.Compiler.ObjectiveBendParse.claimRe : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendParse.declarations : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendParse.decodeSource : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendParse.endsWith : Classical.choice, Quot.sound, propext
@@ -3625,7 +3761,6 @@ A Minidregg.Compiler.ObjectiveBendParse.jsTrimStart : -
 A Minidregg.Compiler.ObjectiveBendParse.jsonStringLiteral : propext
 A Minidregg.Compiler.ObjectiveBendParse.kindOf : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendParse.lastIndexOf : -
-A Minidregg.Compiler.ObjectiveBendParse.lawRe : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendParse.letRe : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendParse.liftAt : -
 A Minidregg.Compiler.ObjectiveBendParse.liftBare : -
@@ -3767,9 +3902,12 @@ A Minidregg.Compiler.ObjectiveBendSourceArtifact.schema : Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendSourceArtifact.selected_core_exact : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendSourceArtifact.stream : Classical.choice, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.acceptsSource : Classical.choice, Quot.sound, propext
-A Minidregg.Compiler.ObjectiveBendSpecificationClosure.badLawSource : propext
+A Minidregg.Compiler.ObjectiveBendSpecificationClosure.badClaimSource : propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.binary_self_accepted : Classical.choice, Minidregg.Compiler.ObjectiveBendSpecificationClosure.binary_self_accepted._native.native_decide.ax_1_1, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.builtin_parses : Classical.choice, Minidregg.Compiler.ObjectiveBendSpecificationClosure.builtin_parses._native.native_decide.ax_1_1, Quot.sound, propext
+A Minidregg.Compiler.ObjectiveBendSpecificationClosure.claimSpecSource : propext
+A Minidregg.Compiler.ObjectiveBendSpecificationClosure.claim_spec_accepted : Classical.choice, Minidregg.Compiler.ObjectiveBendSpecificationClosure.claim_spec_accepted._native.native_decide.ax_1_1, Quot.sound, propext
+A Minidregg.Compiler.ObjectiveBendSpecificationClosure.claimsVariable : -
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.composeTy_closed : Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.composeTy_fold_closed : Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.composeWrapper : -
@@ -3782,14 +3920,13 @@ A Minidregg.Compiler.ObjectiveBendSpecificationClosure.f_bound_mismatch_refused 
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.fourthFieldSource : propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.heavierSpec : propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.inherited_unprovided_refused : Classical.choice, Minidregg.Compiler.ObjectiveBendSpecificationClosure.inherited_unprovided_refused._native.native_decide.ax_1_1, Quot.sound, propext
-A Minidregg.Compiler.ObjectiveBendSpecificationClosure.lawSpecSource : propext
-A Minidregg.Compiler.ObjectiveBendSpecificationClosure.law_spec_accepted : Classical.choice, Minidregg.Compiler.ObjectiveBendSpecificationClosure.law_spec_accepted._native.native_decide.ax_1_1, Quot.sound, propext
-A Minidregg.Compiler.ObjectiveBendSpecificationClosure.lawsVariable : -
+A Minidregg.Compiler.ObjectiveBendSpecificationClosure.lawKeywordSource : propext
+A Minidregg.Compiler.ObjectiveBendSpecificationClosure.law_keyword_refused : Classical.choice, Minidregg.Compiler.ObjectiveBendSpecificationClosure.law_keyword_refused._native.native_decide.ax_1_1, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.metaAssumptions : -
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.metaAssumptions_valid : propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.metaVariable : -
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.meta_conversion : Classical.choice, Quot.sound, propext
-A Minidregg.Compiler.ObjectiveBendSpecificationClosure.non_boolean_law_refused : Classical.choice, Minidregg.Compiler.ObjectiveBendSpecificationClosure.non_boolean_law_refused._native.native_decide.ax_1_1, Quot.sound, propext
+A Minidregg.Compiler.ObjectiveBendSpecificationClosure.non_boolean_claim_refused : Classical.choice, Minidregg.Compiler.ObjectiveBendSpecificationClosure.non_boolean_claim_refused._native.native_decide.ax_1_1, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.open_extension_reused_accepted : Classical.choice, Minidregg.Compiler.ObjectiveBendSpecificationClosure.open_extension_reused_accepted._native.native_decide.ax_1_1, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.operandTy : -
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.operand_callable : propext
@@ -3799,7 +3936,7 @@ A Minidregg.Compiler.ObjectiveBendSpecificationClosure.provenance_typed : Classi
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.requires_signature_refused : Classical.choice, Minidregg.Compiler.ObjectiveBendSpecificationClosure.requires_signature_refused._native.native_decide.ax_1_1, Quot.sound, propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.reviewSpecs : propext
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.shareableUnder_of_shareable : propext
-A Minidregg.Compiler.ObjectiveBendSpecificationClosure.specLawsRow : -
+A Minidregg.Compiler.ObjectiveBendSpecificationClosure.specClaimsRow : -
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.specMetaRow : -
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.specTy : -
 A Minidregg.Compiler.ObjectiveBendSpecificationClosure.twiceSource : propext
@@ -7200,6 +7337,7 @@ A Minidregg.Kernel.ApplicationFailedStartRecoveryPolicy.Accepted.ingressExact : 
 A Minidregg.Kernel.ApplicationFailedStartRecoveryPolicy.Accepted.legs : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationFailedStartRecoveryPolicy.Accepted.observations : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationFailedStartRecoveryPolicy.Accepted.observeCount : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationFailedStartRecoveryPolicy.Accepted.readEnvelopes : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationFailedStartRecoveryPolicy.Accepted.tuple : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationFailedStartRecoveryPolicy.CheckedLeg.admitted : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationFailedStartRecoveryPolicy.CheckedLeg.authorization : Classical.choice, Quot.sound, propext
@@ -7895,6 +8033,7 @@ A Minidregg.Kernel.ApplicationLifecycleCompletionPolicy.Accepted.ingressExact : 
 A Minidregg.Kernel.ApplicationLifecycleCompletionPolicy.Accepted.legs : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationLifecycleCompletionPolicy.Accepted.observations : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationLifecycleCompletionPolicy.Accepted.observeCount : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleCompletionPolicy.Accepted.readEnvelopes : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationLifecycleCompletionPolicy.Accepted.tuple : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationLifecycleCompletionPolicy.CheckedLeg.admitted : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationLifecycleCompletionPolicy.CheckedLeg.authorization : Classical.choice, Quot.sound, propext
@@ -8063,6 +8202,7 @@ A Minidregg.Kernel.ApplicationLifecycleCompletionV2Policy.Accepted.ingressExact 
 A Minidregg.Kernel.ApplicationLifecycleCompletionV2Policy.Accepted.legs : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationLifecycleCompletionV2Policy.Accepted.observations : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationLifecycleCompletionV2Policy.Accepted.observeCount : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleCompletionV2Policy.Accepted.readEnvelopes : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationLifecycleCompletionV2Policy.Accepted.tuple : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationLifecycleCompletionV2Policy.CheckedLeg.admitted : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationLifecycleCompletionV2Policy.CheckedLeg.authorization : Classical.choice, Quot.sound, propext
@@ -8352,6 +8492,7 @@ A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.Accepted.ingressE
 A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.Accepted.legs : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.Accepted.observations : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.Accepted.observeCount : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.Accepted.readEnvelopes : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.Accepted.tuple : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.CheckedLeg.admitted : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy.CheckedLeg.authorization : Classical.choice, Quot.sound, propext
@@ -9838,6 +9979,7 @@ A Minidregg.Kernel.ContentResource.Action.createDocument.elim : Quot.sound, prop
 A Minidregg.Kernel.ContentResource.Action.createRun.elim : Quot.sound, propext
 A Minidregg.Kernel.ContentResource.Action.editAtom.elim : Quot.sound, propext
 A Minidregg.Kernel.ContentResource.Action.editElement.elim : Quot.sound, propext
+A Minidregg.Kernel.ContentResource.Action.insertRun.elim : Quot.sound, propext
 A Minidregg.Kernel.ContentResource.Action.link.elim : Quot.sound, propext
 A Minidregg.Kernel.ContentResource.Action.mark.elim : Quot.sound, propext
 A Minidregg.Kernel.ContentResource.Action.ofWire : Quot.sound, propext
@@ -10007,6 +10149,10 @@ A Minidregg.Kernel.ContentResource.empty_command_rejected : Classical.choice, Qu
 A Minidregg.Kernel.ContentResource.endpointsLive : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ContentResource.foldlM_executes : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ContentResource.initialStore : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ContentResource.insertRunCheck : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ContentResource.insertRunStep : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ContentResource.insertRunStep_ok : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.ContentResource.insertionCut : -
 A Minidregg.Kernel.ContentResource.lawStore : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.ContentResource.leafRecord : -
 A Minidregg.Kernel.ContentResource.linkRetired : Classical.choice, Quot.sound, propext
@@ -10235,6 +10381,7 @@ A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.envelopeCount :
 A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.evidence : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.execution : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.executionRequired : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.incidence_authorized : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.ingressExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.legs : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.native_ingress_exact : Classical.choice, Quot.sound, propext
@@ -10243,9 +10390,13 @@ A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.observations : 
 A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.observeCount : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.policy_view_exact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.post_exact : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.readEnvelopes : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.readGuards : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.readGuards_readonly : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.readGuards_roots : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.readLeg : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.read_target_authorized_by_readLeg_only : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.receipt : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.route : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.sourceCharge : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.AcceptedInvocation.storage_charge_is_written_bytes : Classical.choice, Quot.sound, propext
@@ -10261,6 +10412,7 @@ A Minidregg.Kernel.DeclaredResourceController.AuthorityInvocation.envelopeCount 
 A Minidregg.Kernel.DeclaredResourceController.AuthorityInvocation.ingressExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.AuthorityInvocation.observations : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.AuthorityInvocation.observeCount : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.AuthorityInvocation.readEnvelopes : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.AuthorityInvocation.tuple : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.AuthoritySnapshot : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.CheckedLeg.authorization : Classical.choice, Quot.sound, propext
@@ -10285,10 +10437,12 @@ A Minidregg.Kernel.DeclaredResourceController.Command.objectiveClaim : Classical
 A Minidregg.Kernel.DeclaredResourceController.Command.ofBody : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.Command.requiresObservation : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.Command.run : Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.Command.signedTargetCount : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.Command.subject : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.Command.targets : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.Command.targetsWellFormed : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.Command.targetsWellFormed_iff : Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.Command.writesSome : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.CommandBody : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.ComputeFunding : -
 A Minidregg.Kernel.DeclaredResourceController.Deployment : -
@@ -10355,6 +10509,7 @@ A Minidregg.Kernel.DeclaredResourceController.PreparedInvocation.runChecked : Cl
 A Minidregg.Kernel.DeclaredResourceController.PreparedInvocation.run_sound : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.PreparedInvocation.run_unclaimed : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.PreparedInvocation.targets : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.PreparedInvocation.writes : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.PreparedTarget.audienceFresh : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.PreparedTarget.before : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.PreparedTarget.candidate : Classical.choice, Quot.sound, propext
@@ -10364,10 +10519,14 @@ A Minidregg.Kernel.DeclaredResourceController.PreparedTarget.postExact : Classic
 A Minidregg.Kernel.DeclaredResourceController.PreparedTarget.postLaw : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.PreparedTarget.pre : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.PreparedTarget.present : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.PreparedTarget.read_names_observe_capability : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.PreparedTarget.scalar_ratchets : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.PreparedTarget.selected : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.PreparedTarget.source : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.ProgramAccepted : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.ReadEnvelopesEmpty : Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.ReadLeg.authorization : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.ReadLeg.authorization_heq : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.ReadLeg.capabilityPresent : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.ReadLeg.checked : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.ReadLeg.moneyCovered : Classical.choice, Quot.sound, propext
@@ -10418,6 +10577,8 @@ A Minidregg.Kernel.DeclaredResourceController.Reject.policyCastAlias.elim : -
 A Minidregg.Kernel.DeclaredResourceController.Reject.policyInputRange.elim : -
 A Minidregg.Kernel.DeclaredResourceController.Reject.policyRejected.elim : -
 A Minidregg.Kernel.DeclaredResourceController.Reject.policyUnavailable.elim : -
+A Minidregg.Kernel.DeclaredResourceController.Reject.readOnlyCommand.elim : -
+A Minidregg.Kernel.DeclaredResourceController.Reject.readTargetEnvelope.elim : -
 A Minidregg.Kernel.DeclaredResourceController.Reject.refusalLane.elim : -
 A Minidregg.Kernel.DeclaredResourceController.Reject.run.elim : -
 A Minidregg.Kernel.DeclaredResourceController.Reject.scalar.elim : -
@@ -10446,6 +10607,7 @@ A Minidregg.Kernel.DeclaredResourceController.Target.kind : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.Target.layout : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.Target.materializer : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.Target.observeCapability : Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.Target.observeOnly : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.Target.outcomeCodec : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.Target.payload : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.Target.schemaVersion : Quot.sound, propext
@@ -10462,6 +10624,8 @@ A Minidregg.Kernel.DeclaredResourceController.admissionEvidence : Classical.choi
 A Minidregg.Kernel.DeclaredResourceController.admissionGuards : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.admit : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.admitAuthority : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.admitAuthority_refuses_read_target_envelope : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.admitAuthority_refuses_read_without_observation : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.admitObjective : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.admitOrdinary : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.admitOrdinaryRoute : Classical.choice, Quot.sound, propext
@@ -10492,9 +10656,11 @@ A Minidregg.Kernel.DeclaredResourceController.checkProgram_fieldOverMax : Classi
 A Minidregg.Kernel.DeclaredResourceController.checkProgram_sound : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.checkTargetAudience : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.clockSlots_unjoint : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.closedPortal : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.collect : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.collectIO : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.collectIO.loop : Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.collectLegs : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.commandBytes : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.commandCodec : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.commandFrame : propext
@@ -10510,6 +10676,7 @@ A Minidregg.Kernel.DeclaredResourceController.computeRunMatches : Classical.choi
 A Minidregg.Kernel.DeclaredResourceController.computeSlots : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.computeSlots_unjoint : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.computeTarget : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.computeTarget_read_observe : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.computeWrites : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.compute_objective_matches_exact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.contentAuthor : Quot.sound, propext
@@ -10538,6 +10705,8 @@ A Minidregg.Kernel.DeclaredResourceController.framedCommandBytes_exact : Classic
 A Minidregg.Kernel.DeclaredResourceController.fundingProject : -
 A Minidregg.Kernel.DeclaredResourceController.fundingProject_unjoint : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.funding_unvalidated : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.incidenceAuthorization : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.incidenceObserveOnly : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.incidenceTarget : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.incidences : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.invocationEvent : Classical.choice, Quot.sound, propext
@@ -10561,6 +10730,7 @@ A Minidregg.Kernel.DeclaredResourceController.layout : Classical.choice, Quot.so
 A Minidregg.Kernel.DeclaredResourceController.legFootprint : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.legFootprint_exact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.legFullFootprint : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.legPortal : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.legacyCommandStream : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.legacySourceChargeFrom : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.markerFamily : Classical.choice, Quot.sound, propext
@@ -10572,6 +10742,7 @@ A Minidregg.Kernel.DeclaredResourceController.moneyPolicySlots : Classical.choic
 A Minidregg.Kernel.DeclaredResourceController.moneyReadCovered : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.moneyReadCoveredDecidable : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.moneyVerbsCheck : Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.no_accepted_read_target_envelope : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.nock.checkProgram_fieldOverMax : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.nock.pinned_claim_admissible_across_heights : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.nock.pinned_claim_stale_on_field_change : Classical.choice, Quot.sound, propext
@@ -10584,6 +10755,7 @@ A Minidregg.Kernel.DeclaredResourceController.objective_artifact_slot_exact : Cl
 A Minidregg.Kernel.DeclaredResourceController.observeVerb : -
 A Minidregg.Kernel.DeclaredResourceController.openingsCheck : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.operationMarker : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.ordinaryIncidences : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.ordinaryVerb : -
 A Minidregg.Kernel.DeclaredResourceController.ordinaryWrites : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.ordinary_objectivePin_refused : Classical.choice, Quot.sound, propext
@@ -10599,6 +10771,8 @@ A Minidregg.Kernel.DeclaredResourceController.physicalShapeDecidable : Classical
 A Minidregg.Kernel.DeclaredResourceController.pinned_claim_admissible_across_heights : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.pinned_claim_stale_on_field_change : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.pinned_objectivePin_accepts : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.placeTargetEnvelopes : Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.placeTargetEnvelopes_length : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.plan : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.policyConfig : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.policyConfigFromStep : Classical.choice, Quot.sound, propext
@@ -10608,11 +10782,15 @@ A Minidregg.Kernel.DeclaredResourceController.policyPostState_exact : Classical.
 A Minidregg.Kernel.DeclaredResourceController.policyPreCell : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.policyPreCell_exact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.portals : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.portals_read : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.portals_written : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.postconditions : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.prepare : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.prepareAuthenticated : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.prepareCompute : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.prepareFrom : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.prepareFrom_refuses_lone_read : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.prepareFrom_refuses_read_only : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.prepareMarker : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.prepareMoney : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.prepareTarget : Classical.choice, Quot.sound, propext
@@ -10637,10 +10815,13 @@ A Minidregg.Kernel.DeclaredResourceController.rawCommandCodec : Classical.choice
 A Minidregg.Kernel.DeclaredResourceController.rawLeg : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.readCapability : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.readContext : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.readEnvelopesEmptyDecidable : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.readGuards : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.readGuards_readonly : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.readPortal : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.readPreparation : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.readRequest : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.readRequest_observeOnly : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.receive : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.receiveLoaded : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.recordedInvocation : Classical.choice, Quot.sound, propext
@@ -10650,6 +10831,7 @@ A Minidregg.Kernel.DeclaredResourceController.requestFor : Classical.choice, Quo
 A Minidregg.Kernel.DeclaredResourceController.requestForReference : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.requestFor_eq_reference : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.requireSome : -
+A Minidregg.Kernel.DeclaredResourceController.requiresObservation_of_observeOnly : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.runClaimStream : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.runContext : Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.runSlots : propext
@@ -10684,6 +10866,7 @@ A Minidregg.Kernel.DeclaredResourceController.targetFootprint : Classical.choice
 A Minidregg.Kernel.DeclaredResourceController.targetFootprint_exact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.targetFullFootprint : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.targetPatch : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.DeclaredResourceController.targetPatch_observeOnly : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.targetProjection : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.targetProjection_unjoint : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.DeclaredResourceController.targetRatchet : Classical.choice, Quot.sound, propext
@@ -13327,6 +13510,7 @@ A Minidregg.Kernel.JointInvocationCandidate.projectionStream : Classical.choice,
 A Minidregg.Kernel.JointPromiseAuthorization.Accepted.checked : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.JointPromiseAuthorization.Accepted.envelopeCount : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.JointPromiseAuthorization.Accepted.ordinary : Classical.choice, Quot.sound, propext
+A Minidregg.Kernel.JointPromiseAuthorization.Accepted.readEnvelopes : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.JointPromiseAuthorization.Accepted.selectedExact : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.JointPromiseAuthorization.Accepted.shape : Classical.choice, Quot.sound, propext
 A Minidregg.Kernel.JointPromiseAuthorization.Accepted.sourceExact : Classical.choice, Quot.sound, propext
@@ -25599,6 +25783,33 @@ A Minidregg.Theory.LawComposition.neutral_effective_eval : Quot.sound, propext
 A Minidregg.Theory.LawComposition.receivingContract : propext
 A Minidregg.Theory.LawComposition.resolve : -
 A Minidregg.Theory.LawComposition.revision_keys_distinct : -
+A Minidregg.Theory.LogAccumulator.Honest : -
+A Minidregg.Theory.LogAccumulator.NodeCollision : -
+A Minidregg.Theory.LogAccumulator.Poles.beyond_head_refused : -
+A Minidregg.Theory.LogAccumulator.Poles.five : -
+A Minidregg.Theory.LogAccumulator.Poles.head_accepted : -
+A Minidregg.Theory.LogAccumulator.Poles.honestNodes : -
+A Minidregg.Theory.LogAccumulator.Poles.honest_height_two_accepted : -
+A Minidregg.Theory.LogAccumulator.Poles.tamperedNodes : -
+A Minidregg.Theory.LogAccumulator.Poles.tampered_node_refused : -
+A Minidregg.Theory.LogAccumulator.Poles.tampered_record_height_two_refused : -
+A Minidregg.Theory.LogAccumulator.Poles.toyLeaf : -
+A Minidregg.Theory.LogAccumulator.Poles.toyNode : -
+A Minidregg.Theory.LogAccumulator.block : -
+A Minidregg.Theory.LogAccumulator.frontierOf : -
+A Minidregg.Theory.LogAccumulator.frontierOf_honest : Quot.sound, propext
+A Minidregg.Theory.LogAccumulator.locate : -
+A Minidregg.Theory.LogAccumulator.locate_honest : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.LogAccumulator.pathKeys : -
+A Minidregg.Theory.LogAccumulator.pathKeys_within : propext
+A Minidregg.Theory.LogAccumulator.push : -
+A Minidregg.Theory.LogAccumulator.push_honest : Quot.sound, propext
+A Minidregg.Theory.LogAccumulator.rootOfPath : -
+A Minidregg.Theory.LogAccumulator.rootOfPath_honest : Quot.sound, propext
+A Minidregg.Theory.LogAccumulator.rootOfPath_sound : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.LogAccumulator.verify : -
+A Minidregg.Theory.LogAccumulator.verify_complete : Classical.choice, Quot.sound, propext
+A Minidregg.Theory.LogAccumulator.verify_sound : Classical.choice, Quot.sound, propext
 A Minidregg.Theory.NamedRepresentationBridge.CheckedIdentity.nameBound : -
 A Minidregg.Theory.NamedRepresentationBridge.CheckedIdentity.sameOpening : propext
 A Minidregg.Theory.NamedRepresentationBridge.CheckedIdentity.sourceWitness : -
@@ -27614,11 +27825,21 @@ A private Minidregg.Compiler.CredentialAuthorityPolicyRegistry.capabilityEvidenc
 A private Minidregg.Compiler.CredentialAuthorityPolicyRegistry.capabilityEvidenceChecked_semantic : Classical.choice, Quot.sound, propext
 A private Minidregg.Compiler.DeclaredEffectCell.objectEntry_addresses : propext
 A private Minidregg.Compiler.DeclaredEffectCell.objectEntry_addresses_nodup : Classical.choice, Quot.sound, propext
+A private Minidregg.Compiler.DurableHistory.RawEntry.height : -
+A private Minidregg.Compiler.DurableHistory.RawEntry.record : -
+A private Minidregg.Compiler.DurableHistory.RawEntry.tag : -
+A private Minidregg.Compiler.DurableHistory.RawNode.finish : -
+A private Minidregg.Compiler.DurableHistory.RawNode.level : -
+A private Minidregg.Compiler.DurableHistory.RawNode.value : -
 A private Minidregg.Compiler.DurableReceiverIO.blobAt : propext
-A private Minidregg.Compiler.DurableReceiverIO.decodeRecords : Classical.choice, Quot.sound, propext
+A private Minidregg.Compiler.DurableReceiverIO.blobBytes : propext
+A private Minidregg.Compiler.DurableReceiverIO.decodeRecordsFrom : Classical.choice, Quot.sound, propext
 A private Minidregg.Compiler.DurableReceiverIO.entriesAt : propext
+A private Minidregg.Compiler.DurableReceiverIO.historyEntriesAt : propext
+A private Minidregg.Compiler.DurableReceiverIO.historyNodesAt : propext
 A private Minidregg.Compiler.DurableReceiverIO.readBackEntry : -
 A private Minidregg.Compiler.DurableReceiverIO.u64At : -
+A private Minidregg.Compiler.DurableReceiverIO.u64Bytes : propext
 A private Minidregg.Compiler.FiniteDependentMapCachedOrdering.keyTree : Classical.choice, Quot.sound, propext
 A private Minidregg.Compiler.FiniteDependentMapCachedOrdering.mem_keyTree : Classical.choice, Quot.sound, propext
 A private Minidregg.Compiler.FiniteDependentMapCachedOrdering.orderedEqCmp : Quot.sound, propext
