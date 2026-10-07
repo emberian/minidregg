@@ -47,6 +47,8 @@ const USAGE: &str = "mini fleet-sign: dregg-client-sign's verbs as Mini fleet tu
 env (flags win): MINI_FLEET_HOME, MINI_PROFILE, MINI_FLEET_SPONSOR, MINI_FLEET_FACTORY_REF.\n\
 --node-url accepts only unix:/ABSOLUTE/SOCKET, and only the socket the profile is pinned to.";
 
+const VERBS: [&str; 5] = ["join", "send", "transfer", "receipt", "retry"];
+
 /// The account reference name every fleet-sign profile pays from.
 const ACCOUNT: &str = "account";
 
@@ -106,6 +108,11 @@ fn parse(argv: Vec<OsString>) -> Result<Flags> {
     let verb = argv.next().ok_or_else(|| USAGE.to_owned())?;
     if verb == "--help" || verb == "-h" {
         return Err(USAGE.to_owned());
+    }
+    // The verb is judged before any flag, so a legacy verb with its own flags (helm's
+    // `roster --json`) is refused as the verb it is, not as its first unknown flag.
+    if !VERBS.contains(&verb.as_str()) {
+        return Err(format!("unknown verb '{verb}' (try --help)"));
     }
     let mut flags = Flags {
         verb,
@@ -346,8 +353,8 @@ fn send(flags: &Flags) -> Result<Value> {
     if flags.rest.is_empty() {
         return Err("send requires a payload".into());
     }
-    if flags.to.is_some() || flags.amount.is_some() {
-        return Err("send takes no --to: it always posts on the profile's own account".into());
+    if flags.amount.is_some() {
+        return Err("send takes no --amount: use transfer to move value".into());
     }
     if flags.fund.is_some() {
         return Err("--fund on send: Mini has no faucet; fund a profile at join or by a transfer".into());
@@ -355,6 +362,22 @@ fn send(flags: &Flags) -> Result<Value> {
     let payload = flags.rest.join(" ");
     let profile = profile(flags)?;
     let (agent, reference, record) = joined(flags, &profile)?;
+    // Pug's harness (helm `chat.py` `_sign_send`) passes `--to <the cell join printed>` on every
+    // send: Bread's tool took `--to` there only when it named the signer's OWN cell. The same
+    // contract holds here: the profile's own account is accepted and means nothing more; any
+    // other destination is refused by name, since a send never moves value.
+    if let Some(to) = &flags.to {
+        if to.len() == 64 && to.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err("--to is a Bread cell id; a Mini account is the decimal `cell` its join printed".into());
+        }
+        if to != field(&record, "account")? {
+            return Err(format!(
+                "send posts on the profile's own account and takes --to only as that account \
+                 ({}); {to} is another account: use transfer to move value",
+                field(&record, "account")?
+            ));
+        }
+    }
     let topic = fleet::topic_bytes(&flags.topic)?;
     if payload.len() > 16_384 {
         return Err("payload exceeds 16384 bytes".into());
@@ -497,8 +520,35 @@ impl Drop for StdoutToStderr {
     }
 }
 
+/// Bread's signer reads these from the environment, and a harness exports them on every call
+/// (helm sets DREGG_NODE_URL, DREGG_API_TOKEN, DREGG_PROFILE and DREGG_COORDINATION_EXEMPT for
+/// each signer subprocess). Refusing the ambient environment would refuse every call, so each
+/// one that is set is named on stderr as not read; the flags that choose the same things are
+/// refused outright, because those are a deliberate per-call act.
+const BREAD_ENV: [&str; 6] = [
+    "DREGG_NODE_URL",
+    "DREGG_API_TOKEN",
+    "DREGG_API_TOKEN_FILE",
+    "DREGG_NODE_PASSPHRASE",
+    "DREGG_COORDINATION_EXEMPT",
+    "DREGG_PROFILE",
+];
+
+fn note_unread_bread_env() {
+    for name in BREAD_ENV {
+        if env_value(name).is_some() {
+            eprintln!(
+                "mini fleet-sign: {name} is set and not read (Bread's signer used it; Mini's \
+                 profile, socket and fee come from --profile/MINI_PROFILE, the profile's pinned \
+                 Host and the pinned tariff)"
+            );
+        }
+    }
+}
+
 pub(crate) fn run(argv: Vec<OsString>) -> Result<()> {
     let flags = parse(argv)?;
+    note_unread_bread_env();
     let value = {
         let _progress = StdoutToStderr::hold()?;
         match flags.verb.as_str() {
@@ -548,6 +598,28 @@ mod tests {
         assert!(refusal(&["send", "--home", "/h", "--token", "t", "x"]).contains("no bearer token"));
         assert!(refusal(&["transfer", "--home", "/h", "--accept-tentative"]).contains("one commitment level"));
         assert!(refusal(&["send", "--home", "/h", "--bogus", "x"]).contains("unknown option"));
+    }
+
+    #[test]
+    fn a_verb_bread_never_had_is_refused_as_the_verb() {
+        for words in [
+            &["roster", "--json"][..],
+            &["accept", "--home", "/h"][..],
+            &["recv"][..],
+            &["heartbeat", "--profile", "x"][..],
+            &["frobnicate"][..],
+        ] {
+            let error = refusal(words);
+            assert!(error.contains(&format!("unknown verb '{}'", words[0])), "{error}");
+        }
+    }
+
+    #[test]
+    fn bread_environment_names_are_the_ones_the_notice_covers() {
+        // helm exports exactly these on every signer subprocess (cell.py ENV_MAP, chat.py _env_extra).
+        for name in ["DREGG_NODE_URL", "DREGG_API_TOKEN", "DREGG_NODE_PASSPHRASE", "DREGG_COORDINATION_EXEMPT", "DREGG_PROFILE"] {
+            assert!(BREAD_ENV.contains(&name), "{name}");
+        }
     }
 
     #[test]
