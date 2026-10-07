@@ -30,6 +30,7 @@ state what a `Verified` value means.
 -/
 import Compiler.DurableCheckpointCodec
 import Theory.LogAccumulator
+import Compiler.DurableSpent
 
 namespace Minidregg.Compiler.DurableHistory
 
@@ -294,9 +295,58 @@ theorem verifyTagged_trailer (key : MacKey) (height : Nat) (carried : Carried) :
     trailerStream.toLawful.decode_encode (carried, tagMac key height carried)
   simp [verifyTagged, trailer, decoded]
 
+/-! ## The authenticated head
+
+A `Head` is the height, chain, accumulator frontier and spent root that the
+head entry's tag MACs under the Store key — or the empty log's canonical
+values. Its constructor is PRIVATE: the only ways to obtain one are
+`Head.verify` (which checks the tag's MAC against the frontier the caller
+recomputed) and `Head.genesis`. Every `Verified`, `ByTx`, spent answer and
+state answer of `Compiler.DurableHistoryReader` is stated relative to a
+`Head`, so nothing downstream is sound "relative to whatever frontier someone
+put there". Which tag: the helper serves durable reads only under the MINIANC2
+head anchor (`docs/DURABLE-STORE.md`), so the tag the open passes here is the
+anchor-fixed head entry's. -/
+
+structure Head where
+  private mk ::
+  key : MacKey
+  height : Nat
+  chain : Digest
+  frontier : List (Nat × Digest)
+  spentRoot : Digest
+  root : Digest
+  bound : (height = 0 ∧ frontier = [] ∧ spentRoot = DurableSpent.emptyDigest) ∨
+    ∃ tag, verifyTagged key height tag chain (frontierDigest height frontier) spentRoot = .ok root
+
+/-- The empty log's head. -/
+def Head.genesis (key : MacKey) (chain root : Digest) : Head :=
+  ⟨key, 0, chain, [], DurableSpent.emptyDigest, root, Or.inl ⟨rfl, rfl, rfl⟩⟩
+
+/-- A head from the head entry's tag: the MAC must verify for this height, the
+recomputed chain and frontier, and the spent root the tag carries. -/
+def Head.verify (key : MacKey) (height : Nat) (tag : List UInt8) (chain : Digest)
+    (frontier : List (Nat × Digest)) : Except Refusal Head :=
+  match trailerCarried tag with
+  | none => .error (.malformedTrailer height)
+  | some carried =>
+      match checked : verifyTagged key height tag chain (frontierDigest height frontier) carried.spentRoot with
+      | .ok root => .ok ⟨key, height, chain, frontier, carried.spentRoot, root, Or.inr ⟨tag, checked⟩⟩
+      | .error refusal => .error refusal
+
+/-- **A head is MAC-bound**: unless it is the empty log's, some tag of its
+height verifies under its key for its chain, frontier and spent root. -/
+theorem Head.bound_tag (head : Head) (nonempty : head.height ≠ 0) :
+    ∃ tag, verifyTagged head.key head.height tag head.chain (frontierDigest head.height head.frontier)
+      head.spentRoot = .ok head.root := by
+  rcases head.bound with ⟨zero, _⟩ | tagged
+  · exact absurd zero nonempty
+  · exact tagged
+
 #assert_axioms verifyAt_bytes
 #assert_axioms verifyAt_sound
 #assert_axioms verifyAt_refuses
 #assert_axioms verifyTagged_trailer
+#assert_axioms Head.bound_tag
 
 end Minidregg.Compiler.DurableHistory

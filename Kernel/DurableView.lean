@@ -130,8 +130,96 @@ theorem view_lookup (served : DataSnapshot rootBytes) (footprint : Footprint)
       simp only [List.cons_append, Snapshot.lookupRecorded]
       split <;> simp_all
 
+/-! ## Request families: the keys a receiver may consult are DECLARED
+
+A port of a receiver is a `Family`: the footprint keys of each request, the
+receiver's run over a snapshot, and `covers` — a proof that the run's result
+is the same on any two snapshots that agree on the state and on the declared
+keys. A receiver that consults an undeclared transaction id or nullifier
+cannot inhabit `covers` (`undeclared_lookup_not_covered`): an uncovered read is
+a type error in the port, never a silent "absent" at run time. -/
+
+/-- The keys a request consults beyond the state. -/
+structure Keys where
+  transactions : List TransactionId
+  nullifiers : List StableNullifier
+
+/-- Two snapshots agree on the state and on the declared keys. -/
+structure AgreesOnKeys (keys : Keys) (a b : DataSnapshot rootBytes) : Prop where
+  roots : a.model.roots = b.model.roots
+  bytes : a.canonicalBytes = b.canonicalBytes
+  available : a.model.available = b.model.available
+  journal : ∀ transactionId ∈ keys.transactions,
+    Snapshot.lookupRecorded transactionId a.model.journal =
+      Snapshot.lookupRecorded transactionId b.model.journal
+  consumed : ∀ nullifier ∈ keys.nullifiers, a.model.consumed nullifier = b.model.consumed nullifier
+
+structure Family (rootBytes : List UInt8 → Digest) (Request Observed : Type) where
+  keys : Request → Keys
+  run : Request → DataSnapshot rootBytes → Observed
+  covers : ∀ request a b, AgreesOnKeys (keys request) a b → run request a = run request b
+
+/-- What the Host observes of an executor outcome. -/
+inductive Observed (rootBytes : List UInt8 → Digest) where
+  | accepted (roots : CellId → Digest) (bytes : CellId → List UInt8) (available : Charge)
+  | replayed (recorded : Intent TransactionId CellId StableNullifier ReplayEnvelope)
+  | rejected (reason : DurableDataIntent.RejectReason)
+  | crashed
+
+def observe : Outcome rootBytes → Observed rootBytes
+  | .accepted next => .accepted next.model.roots next.canonicalBytes next.model.available
+  | .replayed recorded => .replayed recorded
+  | .rejected reason => .rejected reason
+  | .crashed _ _ => .crashed
+
+theorem observe_of_agree_complete (a b : DataSnapshot rootBytes) (intent : DataIntent rootBytes)
+    (agree : Agree (DurableDataIntent.execute .complete a intent)
+      (DurableDataIntent.execute .complete b intent)) :
+    observe (DurableDataIntent.execute .complete a intent) =
+      observe (DurableDataIntent.execute .complete b intent) := by
+  generalize DurableDataIntent.execute .complete a intent = x at agree ⊢
+  generalize DurableDataIntent.execute .complete b intent = y at agree ⊢
+  cases x <;> cases y <;> simp only [Agree] at agree <;> simp only [observe]
+  all_goals first
+    | (obtain ⟨h1, h2, h3⟩ := agree; rw [h1, h2, h3])
+    | rw [agree]
+
+/-- **The shared executor is a family**: its keys are the intent's own
+transaction id and nullifiers. -/
+def executeFamily : Family rootBytes (DataIntent rootBytes) (Observed rootBytes) where
+  keys intent := ⟨[intent.transactionId], intent.nullifiers⟩
+  run intent snapshot := observe (DurableDataIntent.execute .complete snapshot intent)
+  covers intent a b agree :=
+    observe_of_agree_complete a b intent
+      (execute_view a b intent ⟨agree.roots, agree.bytes, agree.available,
+        agree.journal _ (by simp), agree.consumed⟩)
+
+/-- A family run on the view of a served snapshot with VERIFIED answers equals
+its run on any full snapshot that agrees with the served state and has those
+answers for the declared keys. -/
+theorem run_view {Request Result : Type} (family : Family rootBytes Request Result) (request : Request)
+    (view full : DataSnapshot rootBytes) (agree : AgreesOnKeys (family.keys request) view full) :
+    family.run request view = family.run request full :=
+  family.covers request view full agree
+
+/-- The refuting pole: a "receiver" that reads a transaction id it did not
+declare (here: it declares nothing) cannot be a family. -/
+theorem undeclared_lookup_not_covered :
+    ¬ ∀ (a b : DataSnapshot Witness.lengthRoot), AgreesOnKeys ⟨[], []⟩ a b →
+      Snapshot.lookupRecorded Witness.intent.transactionId a.model.journal =
+        Snapshot.lookupRecorded Witness.intent.transactionId b.model.journal := by
+  intro claim
+  let recorded : DataSnapshot Witness.lengthRoot :=
+    { Witness.before with model := { Witness.before.model with
+        journal := [(Witness.intent.transactionId, Witness.intent.erase)] } }
+  have := claim recorded Witness.before ⟨rfl, rfl, rfl, by simp, by simp⟩
+  simp [recorded, Snapshot.lookupRecorded, Witness.before, Witness.beforeModel] at this
+
 #assert_axioms preflight_eq
 #assert_axioms execute_view
 #assert_axioms view_lookup
+#assert_axioms observe_of_agree_complete
+#assert_axioms run_view
+#assert_axioms undeclared_lookup_not_covered
 
 end Minidregg.Kernel.DurableView
