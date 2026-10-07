@@ -203,7 +203,7 @@ abbrev DeployedQuotient :=
 
 theorem deployedQuotient_capacity (q : DeployedQuotient) :
     q.encoded.toNat < 2 ^ quotientBits := by
-  simpa [quotientBits] using q.encoded_lt_capacity (by norm_num : 0 < 64)
+  simpa [quotientBits] using q.encoded_lt_capacity
 
 theorem deployedQuotient_abs (q : DeployedQuotient) :
     q.value.natAbs <= quotientAbsBound := q.value_abs_le

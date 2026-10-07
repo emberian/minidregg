@@ -179,7 +179,7 @@ theorem digestBytesLE_digestOfBytesLE (bytes : List UInt8)
     intro digit hdigit
     rcases List.mem_map.mp hdigit with ⟨byte, _, rfl⟩
     exact byte.toNat_lt
-  have hvalue := Bignum.denoteNat_lt_pow (by decide)
+  have hvalue := Bignum.denoteNat_lt_pow
     (bytes.map UInt8.toNat) hranged
   simp only [List.length_map, hlength] at hvalue
   simp only [digestBytesLE, digestOfBytesLE, hvalue, if_true,
@@ -266,7 +266,7 @@ theorem checkedXofCall_reply_width (algorithmId : Digest)
 
 theorem hash_digest_lt (customization input : List UInt8) :
     (hash customization input).digest.value < 256 ^ 32 := by
-  apply Bignum.denoteNat_lt_pow (by decide)
+  apply Bignum.denoteNat_lt_pow
   intro digit hdigit
   rcases List.mem_map.mp hdigit with ⟨byte, _, rfl⟩
   exact byte.toNat_lt

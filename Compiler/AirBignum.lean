@@ -194,7 +194,7 @@ theorem limbVals_canonical {p : Nat} [Fact p.Prime] {J : Type}
   · simp [limbVals]
 
 /-- Field equality of two naturals below `p` is honest integer equality. -/
-private theorem nat_eq_of_zmod_eq {p a b : Nat} [NeZero p]
+private theorem nat_eq_of_zmod_eq {p a b : Nat}
     (ha : a < p) (hb : b < p) (h : (a : ZMod p) = (b : ZMod p)) : a = b := by
   have := congrArg ZMod.val h
   simpa [ZMod.val_cast_of_lt ha, ZMod.val_cast_of_lt hb] using this
@@ -306,7 +306,7 @@ example : ¬ (exists asg : Fin 21 -> ZMod 17,
   rintro ⟨asg, hx, hy, hacc⟩
   obtain ⟨-, -, hz, heq⟩ := addGadget_sound (by norm_num) asg demoWires hacc
   have hzlt : Bignum.denoteNat 4 (limbVals asg demoWires.z) < 4 ^ 2 := by
-    simpa [hz.2] using Bignum.denoteNat_lt_pow (base := 4) (by norm_num)
+    simpa [hz.2] using Bignum.denoteNat_lt_pow (base := 4)
       (limbVals asg demoWires.z) hz.1
   norm_num at heq
   rw [heq, hx, hy] at hzlt
