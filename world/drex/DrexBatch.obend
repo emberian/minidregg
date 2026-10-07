@@ -136,6 +136,7 @@ sum Input:
 record Call:
   input: Input
   height: Nat
+  invoker: Shown
   seats: Seats
 
 record Mint:
@@ -314,7 +315,7 @@ def partialProposal() -> Proposal:
   {fills: fill(51n, 2n, fill(53n, 2n, Fills.nil())), certificate: {price: 4n, bidPotential: 0n, askPotential: 1n, slacks: nats4(0n, 0n, 2n, 2n)}}
 
 def demoClear(height: Nat, proposal: Proposal) -> Plan:
-  market(demoMarket(), {input: Input.clear(proposal), height: height, seats: demoSeats()})
+  market(demoMarket(), {input: Input.clear(proposal), height: height, invoker: Shown.hidden(), seats: demoSeats()})
 
 # The routed moves of the full book (the kernel example's `fullClearing`).
 def demoFullClearing() -> Plan:
@@ -339,11 +340,11 @@ def noClearingOutsideWindow() -> Bool:
 
 # Invitations only while the window is open, and only for the two roles.
 def mintsOnlyWhileOpen() -> Bool:
-  Order.not(isEmpty(market(demoMarket(), {input: Input.mint({role: "bid", holder: 1n}), height: 5n, seats: Seats.nil()}))) && isEmpty(market(demoMarket(), {input: Input.mint({role: "bid", holder: 1n}), height: 6n, seats: Seats.nil()})) && isEmpty(market(demoMarket(), {input: Input.mint({role: "broker", holder: 1n}), height: 1n, seats: Seats.nil()}))
+  Order.not(isEmpty(market(demoMarket(), {input: Input.mint({role: "bid", holder: 1n}), height: 5n, invoker: Shown.hidden(), seats: Seats.nil()}))) && isEmpty(market(demoMarket(), {input: Input.mint({role: "bid", holder: 1n}), height: 6n, invoker: Shown.hidden(), seats: Seats.nil()})) && isEmpty(market(demoMarket(), {input: Input.mint({role: "broker", holder: 1n}), height: 1n, invoker: Shown.hidden(), seats: Seats.nil()}))
 
 # Abort: only at or after the deadline, and then one exit per open seat.
 def demoAbort(height: Nat) -> Plan:
-  market(demoMarket(), {input: Input.abort(), height: height, seats: demoSeats()})
+  market(demoMarket(), {input: Input.abort(), height: height, invoker: Shown.hidden(), seats: demoSeats()})
 
 def abortExitsEverySeat() -> Bool:
   isEmpty(demoAbort(19n)) && planLength(demoAbort(20n)) == 4n

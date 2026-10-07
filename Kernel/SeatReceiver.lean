@@ -111,7 +111,7 @@ def commandStream : StreamCodec Command :=
     (by intro c; cases c; rfl)
 
 /-- Frame v2: an offer's proposal carries the donation marker. -/
-def commandFrame : List UInt8 := "DREGG/SEAT/COMMAND/v3".toUTF8.toList
+def commandFrame : List UInt8 := "DREGG/SEAT/COMMAND/v4".toUTF8.toList
 
 def commandCodec : LawfulCodec Command := ObjectiveActivityWire.framed commandFrame commandStream
 
@@ -224,7 +224,7 @@ def signedTarget (domain : Digest) (command : Command) : ResourceKind × Nat :=
   | .create inst _ _ => (.object, inst)
   | .handOver invitation _ => (.object, (SeatStore.invitationCell domain invitation).value)
   | .offer _ _ funding _ _ _ => (.account, funding)
-  | .invoke inst _ _ _ => (.object, inst)
+  | .invoke inst _ _ _ _ => (.object, inst)
   | .exit seat => (.object, seat)
 
 def verbFor : (kind : ResourceKind) → Verb kind
@@ -316,7 +316,7 @@ def authorized {rootBytes : List UInt8 → Digest} (data : DataSnapshot rootByte
   -- the publication's payer (named in the stored bytes) consents by its account grant
   | .publish stored => account ((ObjectiveActivity.decodeStored stored).map (·.payer) |>.getD 0)
   | .create inst _ _ => object inst
-  | .invoke inst _ _ payer => do object inst; account payer
+  | .invoke inst _ _ payer _ => do object inst; account payer
   | .offer _ _ funding _ _ holder => do
       account funding
       match holder with
@@ -536,8 +536,8 @@ reallocation or a mint exists only as a member of the Plan an `invoke`
 re-executes; an accepted `invoke`'s signer holds a capability admissible for
 mutating the instance object and owns the paying account. -/
 theorem reallocate_requires_instance_holder (accepted : Accepted deployment profile ambient durable ingress)
-    {inst payer : Nat} {input : List UInt8} {envelope : ObjectiveInvocationClaim.Capacity}
-    (turn : ingress.command.turn = .invoke inst input envelope payer) :
+    {inst payer : Nat} {input : List UInt8} {envelope : ObjectiveInvocationClaim.Capacity} {disclose : Bool}
+    (turn : ingress.command.turn = .invoke inst input envelope payer disclose) :
     objectHolder accepted.prepared.authority.snapshot profile.semantics ambient ingress.command inst
         ingress.command.grants.object accepted.prepared.preRoot accepted.prepared.outcome = true ∧
       accountHolder accepted.prepared.authority.snapshot profile.semantics ambient ingress.command payer

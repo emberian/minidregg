@@ -106,7 +106,12 @@ def turn (predicate : String → Json → Result Pred) (json : Json) : Result Tu
         (← optNat p json "holder"))
   | "invoke" => pure (.invoke (← nat p json "instance")
       (dataBytes (← ObjectiveBendDataWire.decodeData 64 (← field p json "input")))
-      (← capacity (p ++ ".envelope") (← field p json "envelope")) (← nat p json "account"))
+      (← capacity (p ++ ".envelope") (← field p json "envelope")) (← nat p json "account")
+      (← match json.getObjVal? "discloseInvoker" with
+        | .error _ => pure false
+        | .ok value => match value.getBool? with
+          | .ok flag => pure flag
+          | .error _ => throw s!"{p}.discloseInvoker must be a boolean"))
   | "exit" => pure (.exit (← nat p json "seat"))
   | other => throw s!"$.turn.kind {other} is not publish, create, handOver, offer, invoke or exit"
 
@@ -147,8 +152,9 @@ def turnJson : Turn → Json
          ("role", toJson expect.role)]),
        ("funding", decimal funding), ("payee", decimal payee), ("proposal", proposalJson p),
        ("holder", match holder with | some r => decimal r | none => .null)]
-  | .invoke inst input envelope account => .mkObj [("kind", "invoke"), ("instance", decimal inst),
-      ("input", dataOf input), ("sourceTicks", decimal envelope.sourceTicks), ("account", decimal account)]
+  | .invoke inst input envelope account disclose => .mkObj [("kind", "invoke"), ("instance", decimal inst),
+      ("input", dataOf input), ("sourceTicks", decimal envelope.sourceTicks), ("account", decimal account),
+      ("discloseInvoker", toJson disclose)]
   | .exit seat => .mkObj [("kind", "exit"), ("seat", decimal seat)]
 
 def commandJson (domain : Option Digest) (command : Command) : Json :=
@@ -164,7 +170,7 @@ def commandJson (domain : Option Digest) (command : Command) : Json :=
      | _, _ => .null),
    -- the ids a Plan member at index 0..7 mints under (SeatStore.mintId)
    ("mintIds", match command.turn with
-     | .invoke inst _ _ _ => Json.arr ((List.range 8).map fun index =>
+     | .invoke inst _ _ _ _ => Json.arr ((List.range 8).map fun index =>
          decimal (SeatStore.mintId transaction inst index)).toArray
      | _ => .null),
    ("turn", turnJson command.turn)]
