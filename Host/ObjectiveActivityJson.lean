@@ -230,12 +230,25 @@ def turn (law : String → Json → Result Minidregg.Pred.Pred) (json : Json) : 
   | other => throw s!"$.turn.kind {other} is not publish, create, birth, resolve, deliver, topUp, \
       exhaust, abandon, invoke, deliverMessage, adopt, migrate, abortDrained, rebirth or registerDomain"
 
-/-- `author objective-activity`: `{subject, nonce, expectedAuthorityRoot, turn}`. -/
+/-- `author objective-activity`: `{subject, nonce, expectedAuthorityRoot, turn}`, except that an
+invoke's nonce is its operation id: `{subject, expectedAuthorityRoot, turn: {kind: "invoke", opId, ...}}`.
+The caller mints the op id once per operation and reuses it on every retry. A retry then answers the
+original's receipt (`ObjectiveActivityReceiver.replay`) or is refused `replayedMarker`; it is never
+a second invocation. An invoke without `$.turn.opId`, or with a top-level `$.nonce`, is refused by
+name. -/
 def author (law : String → Json → Result Minidregg.Pred.Pred) (json : Json) : Result (List UInt8) := do
+  let turnJson ← field "$" json "turn"
+  let decided ← turn law turnJson
+  let nonce ← match decided with
+    | .invoke .. => do
+      if (json.getObjVal? "nonce").toOption.isSome then
+        throw "$.nonce: an invoke's nonce is its operation id, $.turn.opId"
+      nat "$.turn" turnJson "opId"
+    | _ => nat "$" json "nonce"
   let command : Command :=
-    { subject := ⟨← nat "$" json "subject"⟩, nonce := ← nat "$" json "nonce"
+    { subject := ⟨← nat "$" json "subject"⟩, nonce := nonce
       expectedAuthorityRoot := ⟨← nat "$" json "expectedAuthorityRoot"⟩
-      turn := ← turn law (← field "$" json "turn") }
+      turn := decided }
   pure (ObjectiveActivityReceiver.commandCodec.encode command)
 
 def dataOf (bytes : List UInt8) : Json :=
@@ -330,7 +343,8 @@ def turnJson : Turn → Json
 def commandJson (command : Command) : Json := .mkObj
   [("type", "objective-activity-command-v4"),
    ("canonical", toJson (hex (ObjectiveActivityReceiver.commandCodec.encode command))),
-   ("subject", decimal command.subject.value), ("nonce", decimal command.nonce),
+   ("subject", decimal command.subject.value),
+   (if ObjectiveActivityReceiver.Command.isInvoke command then "opId" else "nonce", decimal command.nonce),
    ("expectedAuthorityRoot", decimal command.expectedAuthorityRoot.value),
    ("transaction", match ObjectiveActivityReceiver.transactionOf command with
      | some tx => decimal tx.value | none => .null),

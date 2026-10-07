@@ -349,6 +349,19 @@ def commandFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/COMMAND/v11".toUTF8.t
 
 def commandCodec : LawfulCodec Command := ObjectiveActivityWire.framed commandFrame commandStream
 
+/-- A v9 command (before the invoke carried its continuation allowance) refuses to decode. -/
+theorem command_v9_refuses (body : List UInt8) :
+    commandCodec.decode ("DREGG/OBJECTIVE/ACTIVITY/COMMAND/v9".toUTF8.toList ++ body) = none := by
+  cases found : commandCodec.decode ("DREGG/OBJECTIVE/ACTIVITY/COMMAND/v9".toUTF8.toList ++ body) with
+  | none => rfl
+  | some command =>
+    have canon := ObjectiveActivityWire.framed_canonical found
+    have cut := congrArg (List.take "DREGG/OBJECTIVE/ACTIVITY/COMMAND/v9".toUTF8.toList.length) canon
+    change (commandFrame ++ commandStream.encode command).take _ =
+      ("DREGG/OBJECTIVE/ACTIVITY/COMMAND/v9".toUTF8.toList ++ body).take _ at cut
+    rw [List.take_append_of_le_length (by decide +kernel), List.take_left' rfl] at cut
+    exact absurd cut (by decide +kernel)
+
 theorem command_roundtrip (command : Command) :
     commandCodec.decode (commandCodec.encode command) = some command :=
   commandCodec.decode_encode command
@@ -779,6 +792,21 @@ variable {F : Type} [Field F] {deployment : Deployment}
 def Prepared.request (prepared : Prepared deployment profile ambient durable command) : PackedEffectRequest :=
   signedRequest prepared.authority.snapshot profile.semantics ambient command prepared.preRoot prepared.outcome
 
+/-- **A claimed operation never admits again**: once the signer's marker (for
+an invocation, `(subject, opId)`) is spent, admission refuses `replayedMarker`
+before deciding anything, whatever the command's content. The same op id with
+a different call is refused here; the same call is answered first by `replay`. -/
+theorem prepare_spent_refused {directory : LoadedDirectory durable}
+    {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    (dir : loadDirectory durable = some directory)
+    (auth : loadDeployment deployment durable.snapshot = some authority)
+    (current : command.expectedAuthorityRoot = authority.snapshot.cell.root)
+    (spent : authority.snapshot.spent (marker authority.snapshot.domain profile.semantics command) = true) :
+    prepare deployment profile ambient durable command = .error .replayedMarker := by
+  simp only [prepare, requireSome, dir, auth]
+  simp [bind, Except.bind, current, spent]
+  rfl
+
 /-! ## The receiver -/
 
 def transactionId (domain semantics : Digest) (ingress : DecodedIngress) : Digest :=
@@ -1074,19 +1102,66 @@ structure Receipt where
 def receipt (domain semantics : Digest) (ingress : DecodedIngress) : Receipt :=
   ⟨transactionId domain semantics ingress, (event domain semantics ingress).eventId⟩
 
-/-- A retained ingress finds its record by its transaction id: the exact
-ingress replays, any other ingress under the same id (another delivery of the
-same await, another decision of the same slot) is a conflict. -/
+/-- An invocation's operation id is its command `nonce` (the Host's invoke JSON
+names it `opId`). It is signed, claimed through `marker` in the spent map, and
+hashed into `ObjectiveCall.invokeTransaction`, hence into every message id the
+invocation sends (`Inbox.sendId`). A retry of the operation reuses it. -/
+def Command.isInvoke (command : Command) : Bool :=
+  match command.turn with
+  | .invoke .. => true
+  | _ => false
+
+/-- What a recorded transaction answers an ingress under its id: the RECORDED
+receipt (its transaction and event), for the exact ingress (`exact`) or for an
+invocation re-signed under the same operation id (`retry`). -/
+inductive Replayed where
+  | exact (receipt : Receipt)
+  | retry (receipt : Receipt)
+  deriving DecidableEq, Repr
+
+/-- A retained ingress finds its record by its transaction id. The exact
+ingress replays (`exact`). An invocation re-signed under the same operation id
+is a `retry`. That covers a retry after a lost answer, which is re-planned, so
+its bytes differ. Its transaction id binds the subject, the call and the op id,
+so it names the same operation. It is answered with the original's receipt
+only once its signature verifies under the subject's key (`verifyRetry`), and
+it commits nothing. A changed postage or allowance does not matter, since the
+id leaves both out. Any other ingress under the same id (another delivery of
+the same await, another decision of the same slot) is a conflict. -/
 def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIngress) :
-    Option (Except Unit Receipt) :=
+    Option (Except Unit Replayed) :=
   match DurableCommitProtocol.Snapshot.lookupRecorded
       (transactionId domain semantics ingress) durable.snapshot.model.journal with
   | none => none
   | some recorded =>
-    if recorded.transactionId = transactionId domain semantics ingress ∧
-        recorded.event.event = event domain semantics ingress then
-      some (.ok (receipt domain semantics ingress))
+    if recorded.transactionId = transactionId domain semantics ingress then
+      if recorded.event.event = event domain semantics ingress then
+        some (.ok (.exact ⟨recorded.transactionId, recorded.event.event.eventId⟩))
+      else if ingress.command.isInvoke then
+        some (.ok (.retry ⟨recorded.transactionId, recorded.event.event.eventId⟩))
+      else some (.error ())
     else some (.error ())
+
+/-- **A recorded invocation, re-signed, is a retry of the recorded operation**,
+carrying the recorded receipt (the original transaction and event). -/
+theorem replay_invoke_recorded {domain semantics : Digest} {durable : Durable} {ingress : DecodedIngress}
+    {recorded} (found : DurableCommitProtocol.Snapshot.lookupRecorded
+      (transactionId domain semantics ingress) durable.snapshot.model.journal = some recorded)
+    (same : recorded.transactionId = transactionId domain semantics ingress)
+    (resigned : recorded.event.event ≠ event domain semantics ingress)
+    (invoke : ingress.command.isInvoke = true) :
+    replay domain semantics durable ingress =
+      some (.ok (.retry ⟨recorded.transactionId, recorded.event.event.eventId⟩)) := by
+  simp [replay, found, same, resigned, invoke]
+
+/-- The exact ingress still answers exactly its own receipt. -/
+theorem replay_exact {domain semantics : Digest} {durable : Durable} {ingress : DecodedIngress}
+    {recorded} (found : DurableCommitProtocol.Snapshot.lookupRecorded
+      (transactionId domain semantics ingress) durable.snapshot.model.journal = some recorded)
+    (same : recorded.transactionId = transactionId domain semantics ingress)
+    (exact : recorded.event.event = event domain semantics ingress) :
+    replay domain semantics durable ingress = some (.ok (.exact (receipt domain semantics ingress))) := by
+  simp [replay, found, same, exact, receipt]
 
 inductive Result where
   | confirmed (kind : DurableReceiverIO.Confirmation) (receipt : Receipt)
@@ -1097,6 +1172,62 @@ inductive Result where
   | unavailable (detail : String)
   | uncertain (detail : String)
 
+/-- The outcome a plan shows its signer: the decided turn's posts, or no posts
+when the kernel refuses the command. `signingHeader` signs over it, and
+`verifyRetry` checks a retry's signature over the same value. -/
+def planOutcome (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (durable : Durable) (command : Command) : Digest :=
+  match configOf deployment profile ambient with
+  | .ok config => match decideTurn config durable.snapshot ambient.height command with
+    | .ok decided => match ActivitySeatEnd.finish config durable.snapshot ambient.height decided with
+      | .ok final => outcomeDigest final.1
+      | .error _ => outcomeDigest []
+    | .error _ => outcomeDigest []
+  | .error _ => outcomeDigest []
+
+/-- The authority a retry's signature is checked against is the snapshot
+admission uses, with one exception: the retried operation's own marker is not
+counted as consumed, because that operation consumed it. Every other marker,
+the keys, the root and the revision are unchanged. -/
+def retrySnapshot (snapshot : CredentialAuthorityDomain.Snapshot) (claimed : Nat) :
+    CredentialAuthorityDomain.Snapshot :=
+  { snapshot with spent := fun n => n != claimed && snapshot.spent n }
+
+/-- **A retry is answered only under the operation's own authority**: its
+signature must verify, by the command subject's current key, over the header
+its plan showed at this state. This is the same `verifyNative` admission runs.
+Without the check, anyone holding the content could use the replay answer as
+an existence oracle for another subject's operation. Nothing commits either
+way. -/
+def verifyRetry (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig) (durable : Durable)
+    (ingress : DecodedIngress) : IO (Except Reject Unit) := do
+  let some authority := loadDeployment deployment durable.snapshot
+    | return .error .authorityUnavailable
+  let command := ingress.command
+  let claimed := marker authority.snapshot.domain profile.semantics command
+  let preRoot := durable.snapshot.model.roots ⟨(signedTarget deployment.domain command).2⟩
+  let ⟨_, request⟩ := signedRequest authority.snapshot profile.semantics ambient command preRoot
+    (planOutcome deployment profile ambient durable command)
+  match ← CredentialSignatureAdmission.verifyNative native (retrySnapshot authority.snapshot claimed) claimed
+      request ingress.ingress.envelope with
+  | .error reason => return .error (.signature reason)
+  | .ok _ => return .ok ()
+
+/-- How a verified-or-refused retry is answered: the recorded receipt, or the
+named refusal. A refused retry is never answered with the receipt. -/
+def retryAnswer (verified : Except Reject Unit) (prior : Receipt) : Result :=
+  match verified with
+  | .ok () => .confirmed .replayed prior
+  | .error reason => .rejected reason
+
+/-- **A retry that does not verify is refused by name, not answered**. -/
+theorem retry_unverified_refused (reason : Reject) (prior : Receipt) :
+    retryAnswer (.error reason) prior = .rejected reason ∧
+      ∀ kind receipt, retryAnswer (.error reason) prior ≠ .confirmed kind receipt := by
+  refine ⟨rfl, fun kind receipt => ?_⟩
+  simp [retryAnswer]
+
 def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
     (transport : DurableReceiverIO.Transport) (durable : Durable)
@@ -1104,7 +1235,9 @@ def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
   let some ingress := decodeIngress bytes
     | return .rejected .malformedIngress
   match replay deployment.domain profile.semantics durable ingress with
-  | some (.ok prior) => return .confirmed .replayed prior
+  | some (.ok (.exact prior)) => return .confirmed .replayed prior
+  | some (.ok (.retry prior)) =>
+    return retryAnswer (← verifyRetry deployment profile ambient native durable ingress) prior
   | some (.error _) => return .transactionConflict
   | none =>
     match ← admitDecodedNative deployment profile ambient durable native ingress with
@@ -1127,13 +1260,7 @@ def signingHeader (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
     Except String CredentialSignedEnvelopeController.SignedHeader := do
   let some authority := loadDeployment deployment durable.snapshot
     | .error "authority unavailable"
-  let outcome := match configOf deployment profile ambient with
-    | .ok config => match decideTurn config durable.snapshot ambient.height command with
-      | .ok decided => match ActivitySeatEnd.finish config durable.snapshot ambient.height decided with
-        | .ok final => outcomeDigest final.1
-        | .error _ => outcomeDigest []
-      | .error _ => outcomeDigest []
-    | .error _ => outcomeDigest []
+  let outcome := planOutcome deployment profile ambient durable command
   let preRoot := durable.snapshot.model.roots ⟨(signedTarget deployment.domain command).2⟩
   (CredentialSignatureAdmission.signingHeader authority.snapshot
     (marker deployment.domain profile.semantics command)
@@ -1193,5 +1320,10 @@ def signingPlanCodec : LawfulCodec SigningPlan :=
 #assert_axioms native_delivery_consumes_once
 #assert_axioms native_delivery_fields_bind_checkpoint
 #assert_axioms native_end_closes_held_seats
+#assert_axioms prepare_spent_refused
+#assert_axioms command_v9_refuses
+#assert_axioms replay_invoke_recorded
+#assert_axioms replay_exact
+#assert_axioms retry_unverified_refused
 
 end Minidregg.Kernel.ObjectiveActivityReceiver

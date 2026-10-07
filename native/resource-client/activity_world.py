@@ -34,6 +34,12 @@ PRICE = 1 + TICKS
 PAIR = 2 * PRICE
 
 
+def op_id():
+    """A fresh operation id: an invoke's nonce (`turn.opId`). Minted ONCE per operation, written into the turn
+    before its first submit; a retry of that operation resubmits the same turn and so the same op id."""
+    return str(int.from_bytes(os.urandom(8), 'big') >> 2)
+
+
 def nat(n):
     return {'tag': 'natural', 'value': str(n)}
 

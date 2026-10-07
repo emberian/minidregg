@@ -105,7 +105,18 @@ fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool) -> Result<Value
     fs::create_dir(out).map_err(|error| format!("activity: cannot create {}: {error}", out.display()))?;
     let current = view(ws, &json!({}))?;
     let authority = current.get("authorityRoot").and_then(Value::as_str).ok_or("activity: view lacks authorityRoot")?;
-    let command = json!({"subject": ws.subject, "nonce": crate::fsio::random_nonce()?, "expectedAuthorityRoot": authority, "turn": turn});
+    // An invoke's nonce is its operation id, `turn.opId`: the caller names the operation in the turn it
+    // writes before the first submit, and a retry resubmits the same turn. Minting one here, per attempt,
+    // would make every retry a second invocation.
+    let command = if turn.get("kind").and_then(Value::as_str) == Some("invoke") {
+        if turn.get("opId").and_then(Value::as_str).is_none() {
+            return Err("activity: an invoke turn names its operation: turn.opId (a decimal string, minted once \
+                        per operation and reused on every retry)".into());
+        }
+        json!({"subject": ws.subject, "expectedAuthorityRoot": authority, "turn": turn})
+    } else {
+        json!({"subject": ws.subject, "nonce": crate::fsio::random_nonce()?, "expectedAuthorityRoot": authority, "turn": turn})
+    };
     write_new(&out.join("command.json"), command.to_string().as_bytes())?;
     let command_bytes = author(ws, "objective-activity", &command)?;
     write_new(&out.join("command.bin"), &command_bytes)?;

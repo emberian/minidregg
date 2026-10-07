@@ -2226,7 +2226,10 @@ def activitySubmitLoaded (config : Config) (opened : Opened config) (bytes : Lis
   | .unavailable detail => return .unavailable detail.toUTF8.toList
   | .uncertain detail => return .uncertain detail.toUTF8.toList
 
-/-- Receipt-only historical lookup of an activity turn. Absence never submits. -/
+/-- Receipt-only historical lookup of an activity turn. Absence never submits.
+A re-signed retry of a recorded invocation is not a lookup hit: these bytes have
+no record, and the retry is answered only on submission, once its signature
+verifies (`ObjectiveActivityReceiver.verifyRetry`). -/
 def activityLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) : Outcome :=
   match ObjectiveActivityReceiver.decodeIngress bytes with
   | none => refused .malformed "activity" "noncanonical signed ingress"
@@ -2234,8 +2237,9 @@ def activityLookupLoaded (config : Config) (opened : Opened config) (bytes : Lis
       match ObjectiveActivityReceiver.replay config.deployment.domain config.profile.semantics
           opened.durable ingress with
       | none => .absent
+      | some (.ok (.retry _)) => .absent
       | some (.error _) => refused .conflict "replay" "transaction identity conflict"
-      | some (.ok receipt) =>
+      | some (.ok (.exact receipt)) =>
           match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
           | some original => .confirmed .replayed original
           | none => .uncertain "original receipt prefix unavailable".toUTF8.toList

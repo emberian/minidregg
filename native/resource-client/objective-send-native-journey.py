@@ -76,6 +76,15 @@ inbox and runs it with `request/caller` the sender and no subject.
                 naming `continuationDepth 3` (its onward hop would be at depth 3) and refunds its allowance.
   S18 cancel    relayer queues relayA(counter, bounce, A) and cancels it while queued: the refund is EXACTLY
                 PRICE + A (postage and allowance), the slot decided `cancelled`.
+  S19 retry     (row F, STABLE OPERATION IDS) poster.post(counter, 5) under op id X installs message m; its
+                answer is lost and the client resubmits the same operation (same turn, op id X), re-planned and
+                re-signed: answered `replayed` with the ORIGINAL transaction, event and report m; a retry
+                offering twice the postage is answered the same. Exactly ONE message landed and the sponsor
+                paid once, at the original postage.
+  S20 same-op   poster.post(counter, 6) under op id Y installs; post(counter, 7) under Y is refused
+                `replayedMarker` (the op id is claimed in the spent map): one message, paid once.
+  S21 forged    S19's operation resubmitted in the sponsor's name but signed with the SECOND subject's key:
+                refused by name (`signature`), NOT answered with the receipt; nothing lands, nothing is paid.
 
 PLANTS (self-test: the named fault is put in the WORLD, so a check that must hold fails and its row goes red):
   vault-open      the vault is created permit-all: the S4 delivery succeeds         -> S4 red
@@ -91,6 +100,7 @@ PLANTS (self-test: the named fault is put in the WORLD, so a check that must hol
   fan-four        S16 relays bounce4 (four onward sends): within the fan-out      -> S16 red
   short-chain     S17's chain starts with 3 PRICE: it ends by allowance, at depth 1 -> S17 red
   cancel-bare     S18's message carries no allowance (a deposit): refund PRICE     -> S18 red
+  fresh-op        S19's client mints a new op id per attempt (keyed on the attempt): two messages -> S19 red
 Every plant is ASSERTED APPLIED before its row is judged (group P-plant-applied, which must stay PASS): a plant
 that did not take hold reads as `blind`, never as red.
 The kernel's control checks are planted by building the Host from a planted tree (authority check removed,
@@ -98,6 +108,9 @@ cancel refunds nothing, stop does not unwatch, a cancel of a decided slot retire
 The kernel check itself is planted by building the Host with `ObjectiveCall.Mail.send` not consulting
 `deliverable` (the pre-row-F kernel): S8's relay then installs, escrows PRICE, and its delivery decides `broken`
 ("a delivered message sends") -- S8 red, and S9's bounce is forwarded instead of refunded -- S9 red.
+Row F's op ids are planted in the Host too: `replay` back to the exact-bytes rule (the re-signed retry answers
+`conflict`) -> S19 red; the marker claim not consulted at admission (the other call under Y installs) -> S20 red; a retry answered
+without verifying its signature (the forged one gets the receipt) -> S21 red.
 ROOT/transcript holds every command's exact output; ROOT/results.json every row; ROOT/groups.tsv one line per
 journey row. Exit 1 on any red row.
 """
@@ -105,7 +118,7 @@ import argparse, json, pathlib, sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from activity_world import World, PERMIT_ALL, TICKS, PRICE, nat, record, eq, any_of, cap  # noqa: E402
+from activity_world import World, PERMIT_ALL, TICKS, PRICE, nat, record, eq, any_of, cap, op_id  # noqa: E402
 
 
 def label(text):
@@ -115,7 +128,7 @@ PLANTS = {'vault-open': {'S4-failed'}, 'dir-empty': {'S5-forward', 'S9-resolved'
           'relay-deposit': {'S8-interface'}, 'cancel-late': {'S10-cancel'}, 'cancel-early': {'S11-pole'},
           'stop-cancels': {'S12-stop'}, 'sender-controls': {'S13-who'}, 'bounce-twice': {'S14-continue'},
           'roomy-allowance': {'S15-exceed'}, 'fan-four': {'S16-fanout'}, 'short-chain': {'S17-depth'},
-          'cancel-bare': {'S18-cancel'}}
+          'cancel-bare': {'S18-cancel'}, 'fresh-op': {'S19-retry'}}
 ap = argparse.ArgumentParser()
 ap.add_argument('--bin', required=True)
 ap.add_argument('--root', required=True)
@@ -147,10 +160,10 @@ try:
     def total(name, label):
         return w.total_of(w.state(name, label))
 
-    def invoke(label, name, method, args, expect, detail=None, postage=TICKS, allowance=None):
+    def invoke(label, name, method, args, expect, detail=None, postage=TICKS, allowance=None, op=None):
         body = {'kind': 'invoke', 'object': O[name], 'objectCapability': w.objects[name]['capability'],
                 'method': method, 'args': args, 'envelope': cap(TICKS), 'account': w.SPONSOR_ACCOUNT,
-                'accountCapability': w.SPONSOR_SPEND}
+                'accountCapability': w.SPONSOR_SPEND, 'opId': op or op_id()}
         if postage is not None:
             body['postage'] = cap(postage)
         if allowance is not None:
@@ -429,7 +442,7 @@ try:
         w.turn('s11-cancel-prepared', w.sponsor, {'kind': 'invoke', 'object': O['poster'],
                'objectCapability': w.objects['poster']['capability'], 'method': 'cancelOf', 'args': nat(m),
                'envelope': cap(TICKS), 'account': w.SPONSOR_ACCOUNT, 'accountCapability': w.SPONSOR_SPEND,
-               'postage': cap(TICKS)}, 'prepared', prepare=True)
+               'postage': cap(TICKS), 'opId': op_id()}, 'prepared', prepare=True)
         if 'cancel-early' in plants:
             applied['cancel-early'] = slot(m, 's11-plant-open').get('phase') == 'open'
         else:
@@ -639,11 +652,69 @@ try:
         w.check('s18-slot-cancelled', decision(slot(m, 's18-slot')) == {'kind': 'cancelled'}
                 and after['ids'] == [i for i in before['ids'] if i != str(m)], None)
 
+    with w.group('S19-retry'):
+        op = op19 = op_id()
+        before = inbox('poster', 'counter', 's19-before')
+        first = invoke('s19-post', 'poster', 'post', post('counter', 5), 'installed', op=op)
+        m = reported(first)
+        held = inbox('poster', 'counter', 's19-held')
+        # The answer is lost: the client resubmits the SAME operation (its turn, op id included), re-planned and
+        # re-signed at the state the first one left. Plant fresh-op: it mints a new op id per attempt.
+        again = op_id() if 'fresh-op' in plants else op
+        applied['fresh-op'] = again != op
+        retry = invoke('s19-retry', 'poster', 'post', post('counter', 5),
+                       'installed' if 'fresh-op' in plants else 'replayed', op=again)
+        richer = invoke('s19-retry-richer', 'poster', 'post', post('counter', 5),
+                        'installed' if 'fresh-op' in plants else 'replayed', postage=2 * TICKS, op=again)
+        after = inbox('poster', 'counter', 's19-after')
+        w.check('s19-one-message', fresh(before, after) == [str(m)], {'new': fresh(before, after), 'first': m})
+        # The answer is the ORIGINAL receipt (transaction and event); the message ids are the transaction's
+        # (Inbox.sendId), so the one message is m. The retry's plan shows no report: re-deciding the operation
+        # at the state its own first run left does not run it again.
+        w.check('s19-same-answer', all(r.get('transactionId') == first.get('transactionId')
+                                       and r.get('eventId') == first.get('eventId') for r in (retry, richer))
+                and first.get('transactionId') is not None,
+                {'first': (first.get('transactionId'), first.get('eventId'), m),
+                 'retry': (retry.get('transactionId'), retry.get('eventId'), reported(retry)),
+                 'richer': (richer.get('transactionId'), richer.get('eventId'))})
+        w.check('s19-paid-once', before['sponsor'] - after['sponsor'] == 2 * PRICE
+                and after['purse'] - before['purse'] == PRICE and held['purse'] == after['purse'],
+                {'paid': before['sponsor'] - after['sponsor'], 'purse': (before['purse'], held['purse'],
+                                                                          after['purse'])})
+
+    with w.group('S20-same-op-other-call'):
+        op = op_id()
+        before = inbox('poster', 'counter', 's20-before')
+        m = reported(invoke('s20-post', 'poster', 'post', post('counter', 6), 'installed', op=op))
+        invoke('s20-other-call', 'poster', 'post', post('counter', 7), 'refused', 'replayedMarker', op=op)
+        after = inbox('poster', 'counter', 's20-after')
+        w.check('s20-one-message', fresh(before, after) == [str(m)]
+                and before['sponsor'] - after['sponsor'] == 2 * PRICE,
+                {'new': fresh(before, after), 'paid': before['sponsor'] - after['sponsor']})
+
+    with w.group('S21-forged-retry'):
+        # A retry of S19's operation in the sponsor's name, signed with the SECOND subject's key: the replay answer
+        # sits behind the operation's own authority, so it is refused by name and never answered with the receipt.
+        forger = w.root / 'forger'
+        forger.mkdir(mode=0o700, exist_ok=True)
+        pin = json.loads((w.second / 'workspace.json').read_text())
+        (forger / 'workspace.json').write_text(json.dumps(dict(pin, subject=w.SPONSOR)))
+        before = inbox('poster', 'counter', 's21-before')
+        body = {'kind': 'invoke', 'object': O['poster'], 'objectCapability': w.objects['poster']['capability'],
+                'method': 'post', 'args': post('counter', 5), 'envelope': cap(TICKS), 'account': w.SPONSOR_ACCOUNT,
+                'accountCapability': w.SPONSOR_SPEND, 'opId': op19, 'postage': cap(TICKS)}
+        forged = w.turn('s21-forged', forger, body, 'refused', 'signature')
+        after = inbox('poster', 'counter', 's21-after')
+        w.check('s21-no-receipt', forged.get('transactionId') is None and forged.get('eventId') is None
+                and forged.get('confirmation') is None, forged)
+        w.check('s21-nothing', fresh(before, after) == [] and after['sponsor'] == before['sponsor']
+                and after['purse'] == before['purse'], {'new': fresh(before, after)})
+
     if plants:
         with w.group('P-plant-applied'):
             for p in sorted(plants):
                 if p in ('cancel-late', 'cancel-early', 'stop-cancels', 'sender-controls', 'bounce-twice',
-                         'roomy-allowance', 'fan-four', 'short-chain', 'cancel-bare'):
+                         'roomy-allowance', 'fan-four', 'short-chain', 'cancel-bare', 'fresh-op'):
                     w.check(f'plant-{p}-applied', applied.get(p) is True, applied.get(p))
 finally:
     w.stop()
