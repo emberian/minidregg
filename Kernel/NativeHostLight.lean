@@ -49,21 +49,42 @@ def Light.refresh {config : Config} (light : Light config) : IO (Except String (
       if opening.head.height = light.opening.head.height then return .ok light
       return validated config opening
 
+/-- The same light opening under a config that differs only in its Store paths. -/
+def Light.restorage {config : Config} (light : Light config) (storage : DurableReceiverIO.NativeConfig) :
+    Light { config with storage } :=
+  ⟨light.opening, light.opened.restorage storage, light.same⟩
+
 /-- Adopt the opening a light receive returned (its record read back exactly). -/
 def Light.adopt {config : Config} (_light : Light config) (opening : Opening ResourceBirthCodec.rootBytes) :
     Except String (Light config) :=
   validated config opening
 
 /-- The basis of one request: the validated served state, the Store's head and
-the request's declared keys read from the authenticated history. -/
-def Light.basis {config : Config} (light : Light config) (keys : DurableView.Keys) :
-    IO (Except String {basis : Basis config.deployment light.opening.store // basis.keys = keys}) := do
-  let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+the request's declared keys read from the authenticated history (through the
+reads of `transport`). -/
+def Light.basisVia {config : Config} (transport : DurableReceiverIO.Transport) (light : Light config)
+    (keys : DurableView.Keys) : IO (Except String (Basis config.deployment light.opening.store)) := do
+  let reader := light.opening.reader transport ResourceBirthCodec.rootBytes
   match ← reader.footprint keys with
   | .error refusal => return .error refusal.message
   | .ok footprint =>
       have below : light.opened.served.height ≤ light.opening.head.height := by
         rw [light.same, light.opening.heightExact]
-      return .ok ⟨light.opened.basis light.opening.head below footprint, rfl⟩
+      -- `OpenedServed.basis` declares exactly `keys` (`basis.keys = keys`, by construction).
+      return .ok (light.opened.basis light.opening.head below footprint)
+
+/-- A request's basis does not depend on the Store paths a config names: under
+`restorage` it is read through the same transport from the same opening. -/
+theorem Light.basisVia_restorage {config : Config} (transport : DurableReceiverIO.Transport)
+    (light : Light config) (storage : DurableReceiverIO.NativeConfig) (keys : DurableView.Keys) :
+    (light.restorage storage).basisVia transport keys = light.basisVia transport keys := by
+  unfold Light.basisVia
+  simp only [Light.restorage]
+  exact bind_congr fun answer => by cases answer <;> rfl
+
+/-- `basisVia` over the deployment's Store transport. -/
+def Light.basis {config : Config} (light : Light config) (keys : DurableView.Keys) :
+    IO (Except String (Basis config.deployment light.opening.store)) :=
+  light.basisVia config.transport keys
 
 end Minidregg.Kernel.NativeHostLight

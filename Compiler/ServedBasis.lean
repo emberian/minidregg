@@ -235,6 +235,42 @@ theorem authorityObserved (ground : Ground deployment) :
   | light basis => exact basis.authority.observed
   | full _ _ authority => exact authority.observed
 
+/-- Whether this ground answers a nullifier: on the light route only a declared
+one (`Basis.keys`); the full shape answers every one. -/
+def declaresNullifier : Ground deployment → Minidregg.Kernel.DurableDataIntent.StableNullifier → Bool
+  | .light basis, nullifier => decide (nullifier ∈ basis.keys.nullifiers)
+  | .full .., _ => true
+
+/-- An authority operation marker's spent bit, where this ground answers it;
+`none` for a marker whose replay nullifier the request did not declare — a
+controller refuses it by name, never reads it as unspent. -/
+def markerSpent (ground : Ground deployment) (marker : Nat) : Option Bool :=
+  if ground.declaresNullifier (CredentialAuthorityReplay.nullifier deployment.domain marker) then
+    some (ground.authority.spent marker)
+  else none
+
+/-- **A marker answer is the authority's spent bit**, and on the light route the
+spent map's verified answer at the served height (`Basis.view_consumed_declared`). -/
+theorem markerSpent_some (ground : Ground deployment) {marker : Nat} {spent : Bool}
+    (answered : ground.markerSpent marker = some spent) : spent = ground.authority.spent marker := by
+  unfold markerSpent at answered
+  split at answered
+  · exact (Option.some.inj answered).symm
+  · cases answered
+
+/-- **An undeclared marker gets no answer** (refuting pole of a silent "unspent"). -/
+theorem markerSpent_undeclared {store : StoreIdentity} (basis : Basis deployment store) (marker : Nat)
+    (undeclared : CredentialAuthorityReplay.nullifier deployment.domain marker ∉ basis.keys.nullifiers) :
+    (Ground.ofBasis basis).markerSpent marker = none := by
+  simp [markerSpent, declaresNullifier, undeclared]
+
+/-- The full shape answers every marker with its spent bit. -/
+theorem markerSpent_full (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes)
+    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot) (marker : Nat) :
+    (Ground.ofLoaded durable directory authority).markerSpent marker = some (authority.snapshot.spent marker) := by
+  simp [markerSpent, declaresNullifier, Ground.authority]
+
 /-- The one authority write: the post cell at the authority cell, guarded at
 its root in this ground. -/
 def authorityWrite (ground : Ground deployment) (post : CredentialAuthorityDomain.Cell) :
@@ -276,5 +312,8 @@ end Ground
 #assert_axioms Basis.view_lookup_declared
 #assert_axioms Basis.view_consumed_declared
 #assert_axioms Ground.authorityWrite_pre_is_root
+#assert_axioms Ground.markerSpent_some
+#assert_axioms Ground.markerSpent_undeclared
+#assert_axioms Ground.markerSpent_full
 
 end Minidregg.Compiler.ServedBasis

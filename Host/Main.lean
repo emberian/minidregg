@@ -2038,9 +2038,9 @@ def dispatchSession (config : NativeHost.Config)
       return (0, (descriptionLoaded config).compress.toUTF8.toList)
   | 1 =>
       let t0 ← IO.monoMsNow
-      let opened ← sessionOpened config state
+      let session ← sessionCurrent config state
       phaseTrace "op1 refresh" t0
-      match ← NativeHost.prepareAuthorizedLoaded config opened payload with
+      match ← NativeHost.prepareAuthorizedLoaded config session.opened session.light payload with
       | .ok plan => return (1, signingPlanCodec.encode plan)
       | .error detail => return (255, refusalFrame "prepare" detail)
   | 2 | 3 => fnDispatch operation payload
@@ -2090,7 +2090,7 @@ def dispatchSession (config : NativeHost.Config)
       let (observation, signaturesBytes) ← splitPair payload
       let signatures ← decodeSignatures signaturesBytes
       let session ← sessionCurrent config state
-      match ← DryRun.dryRunLoaded config session.opened observation signatures with
+      match ← DryRun.dryRunLoaded config session.opened session.light observation signatures with
       | .admitted plan => return (130, signingPlanCodec.encode plan)
       | .stopped outcome => return (255, outcomeCodec.encode outcome)
   | 150 =>
@@ -3933,7 +3933,8 @@ def carriedOrdinaryCall (config : NativeHost.Config)
   let some call := callCodec.decode payload
     | return .refused .malformed "wire".toUTF8.toList "noncanonical native host call".toUTF8.toList
   let outcome ← if submit then do
-    let result ← NativeHost.submitDisclosedWith config session.verified.opened call
+    let light := (← sessionCurrent config state).light
+    let result ← NativeHost.submitDisclosedWith config session.verified.opened light call
       (fun kind transaction event => do
         let current ← sessionCarriedWalked config state carried settings
         match ← carriedReceipt config current transaction event with
@@ -6551,7 +6552,7 @@ def run (arguments : List String) : IO UInt32 := do
                                     "wire".toUTF8.toList "noncanonical native host call".toUTF8.toList,
                                     NativeHost.Disclosure.uniform)
                                 | some call =>
-                                  NativeHost.submitDisclosedWith pinnedConfig session.opened call
+                                  NativeHost.submitDisclosedWith pinnedConfig session.opened session.light call
                                     (sessionConfirmed pinnedConfig state)
                               NativeHost.logOperatorRefusal result.1
                               return (2, outcomeCodec.encode (NativeHost.disclose result))
@@ -7950,7 +7951,8 @@ def run (arguments : List String) : IO UInt32 := do
       | "dry-run", [observationPath, signaturesPath, output] =>
           let signatures ← decodeSignatures (← readBytes signaturesPath)
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          match ← DryRun.dryRunLoaded config opened (← readBytes observationPath) signatures with
+          let light ← IO.ofExcept (← NativeHostLight.start config)
+          match ← DryRun.dryRunLoaded config opened light (← readBytes observationPath) signatures with
           | .admitted plan =>
               writeBytes output (signingPlanCodec.encode plan)
               pure 0

@@ -38,6 +38,9 @@ structure Session (config : Config) where
   opened : Opened config
   openingCache : IO.Ref NativeObservationOpeningCache.Cache
   walked : Option (Walked config) := none
+  /-- The light opening of the same Store (KN2): the ported operations are served
+  from it (`NativeHost.submitRevokeLight`); refreshed with the full opening. -/
+  light : NativeHostLight.Light config
 
 /-- There is one process-local current image: the validated opening. Keeping a
 second stored `durable` allowed exact readback adoption to move the semantic
@@ -136,8 +139,11 @@ def start (config : Config) : IO (Except String (Session config)) := do
   match ← openExisting config with
   | .error detail => return .error detail
   | .ok opened =>
-      let cache ← IO.mkRef ([] : NativeObservationOpeningCache.Cache)
-      return .ok ⟨opened, cache, none⟩
+      match ← NativeHostLight.start config with
+      | .error detail => return .error detail
+      | .ok light =>
+          let cache ← IO.mkRef ([] : NativeObservationOpeningCache.Cache)
+          return .ok ⟨opened, cache, none, light⟩
 
 def refresh (config : Config) (session : Session config) :
     IO (Except String (Session config)) := do
@@ -145,13 +151,17 @@ def refresh (config : Config) (session : Session config) :
       session.durable with
   | .error detail => return .error detail
   | .ok ⟨durable, _⟩ =>
+      -- The light opening reads the same new entries, verified as its open verifies them.
+      let light ← match ← session.light.refresh with
+        | .error detail => return .error detail
+        | .ok light => pure light
       if durable.height = session.durable.height then
-        return .ok session
+        return .ok { session with light }
       -- `validateLoadedFrom_eq`: the full validation, re-decoding and
       -- re-checking only the cells whose bytes the new records moved.
       match validateLoadedFrom config session.opened durable with
       | .error detail => return .error detail
-      | .ok opened => return .ok { session with opened }
+      | .ok opened => return .ok { session with opened, light }
 
 /-- The one semantic refresh routine. A retained exact tip extends only the
 new authenticated suffix; a first provenance read starts at pinned genesis. -/

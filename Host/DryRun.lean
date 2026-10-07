@@ -85,10 +85,10 @@ def dryConfirm (config : NativeHost.Config) (opened : NativeHost.Opened config)
 
 /-- Op 130 over the Store reader `t`: plan exactly as op 1, assemble exactly as
 op 11, submit exactly as op 2 — with the writer swapped. -/
-def dryRunVia (t : DurableReceiverIO.Transport) (config : NativeHost.Config)
-    (opened : NativeHost.Opened config) (observation : List UInt8)
+def dryRunWith (dry : IO.Ref Bool → DurableReceiverIO.Transport) (config : NativeHost.Config)
+    (opened : NativeHost.Opened config) (light : NativeHostLight.Light config) (observation : List UInt8)
     (signatures : List (List UInt8)) : IO Verdict := do
-  match ← NativeHost.prepareAuthorizedLoaded config opened observation with
+  match ← NativeHost.prepareAuthorizedLoaded config opened light observation with
   | .error refusal => return .stopped (NativeHost.refusalOutcome "prepare" refusal)
   | .ok plan =>
       match NativeHost.assemble plan signatures with
@@ -96,13 +96,19 @@ def dryRunVia (t : DurableReceiverIO.Transport) (config : NativeHost.Config)
           return .stopped (.refused .malformed "assemble".toUTF8.toList detail.toUTF8.toList)
       | .ok call =>
           let reached ← IO.mkRef false
-          let outcome ← NativeHost.submitLoadedVia (dryTransport t reached) config opened call
+          let outcome ← NativeHost.submitLoadedVia (dry reached) config opened light call
             (dryConfirm config opened)
           if ← reached.get then return .admitted plan else return .stopped outcome
 
+def dryRunVia (t : DurableReceiverIO.Transport) (config : NativeHost.Config)
+    (opened : NativeHost.Opened config) (light : NativeHostLight.Light config) (observation : List UInt8)
+    (signatures : List (List UInt8)) : IO Verdict :=
+  dryRunWith (dryTransport t) config opened light observation signatures
+
 def dryRunLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config)
+    (light : NativeHostLight.Light config)
     (observation : List UInt8) (signatures : List (List UInt8)) : IO Verdict :=
-  dryRunVia config.transport config opened observation signatures
+  dryRunVia config.transport config opened light observation signatures
 
 /-- **Commits nothing.** Every Store mutation goes through the transport's
 `append`, `putCheckpoint` or `initializeSeed`. The dry run is the same program
@@ -113,10 +119,12 @@ theorem dryRun_commits_nothing (t : DurableReceiverIO.Transport)
       IO DurableReceiverIO.CasObservation)
     (putCheckpoint : Nat → List UInt8 → IO (Except String Unit))
     (initializeSeed : List UInt8 → IO DurableReceiverIO.CasObservation)
-    (config : NativeHost.Config) (opened : NativeHost.Opened config)
+    (config : NativeHost.Config) (opened : NativeHost.Opened config) (light : NativeHostLight.Light config)
     (observation : List UInt8) (signatures : List (List UInt8)) :
-    dryRunVia { t with append, putCheckpoint, initializeSeed } config opened observation
-      signatures = dryRunVia t config opened observation signatures := rfl
+    dryRunVia { t with append, putCheckpoint, initializeSeed } config opened light observation
+      signatures = dryRunVia t config opened light observation signatures := by
+  unfold dryRunVia
+  rw [dryTransport_writers_irrelevant]
 
 /-- **The submission half never names the Store's writers through its config.**
 `submitLoadedVia` — the half of the dry run that could write — gives the same
@@ -127,22 +135,31 @@ reachable from the dry run's submission. (The plan half, op 1's
 `prepareAuthorizedLoaded`, takes no transport and is the existing read-only
 path; the same statement for it does not close by `rfl` — see the report.) -/
 theorem submit_storage_irrelevant (t : DurableReceiverIO.Transport)
-    (config : NativeHost.Config) (opened : NativeHost.Opened config)
+    (config : NativeHost.Config) (opened : NativeHost.Opened config) (light : NativeHostLight.Light config)
     (storage : DurableReceiverIO.NativeConfig) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Minidregg.Theory.TypedAuthorization.Digest →
       Minidregg.Theory.TypedAuthorization.Digest → IO Outcome) :
-    NativeHost.submitLoadedVia t { config with storage } (opened.restorage storage) call confirm =
-      NativeHost.submitLoadedVia t config opened call confirm := rfl
+    NativeHost.submitLoadedVia t { config with storage } (opened.restorage storage)
+        (light.restorage storage) call confirm =
+      NativeHost.submitLoadedVia t config opened light call confirm := by
+  cases call
+  case revoke bytes =>
+    have same : (light.restorage storage).basisVia t = light.basisVia t :=
+      funext (NativeHostLight.Light.basisVia_restorage t light storage)
+    simp only [NativeHost.submitLoadedVia]
+    rw [same]
+    rfl
+  all_goals rfl
 
 /-- **The served submission and the dry run are one program.** Op 2 runs
 `submitLoadedWith`, which is `submitLoadedVia` over the Store's transport; the dry
 run runs `submitLoadedVia` over `dryTransport` of the same reader. -/
 theorem submit_is_via_store_transport (config : NativeHost.Config)
-    (opened : NativeHost.Opened config) (call : SignedCall)
+    (opened : NativeHost.Opened config) (light : NativeHostLight.Light config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Minidregg.Theory.TypedAuthorization.Digest →
       Minidregg.Theory.TypedAuthorization.Digest → IO Outcome) :
-    NativeHost.submitLoadedWith config opened call confirm =
-      NativeHost.submitLoadedVia config.transport config opened call confirm := rfl
+    NativeHost.submitLoadedWith config opened light call confirm =
+      NativeHost.submitLoadedVia config.transport config opened light call confirm := rfl
 
 /-- **At the Store writer, the dry run agrees with submission on every refusal.**
 Every receiver ends in `DurableReceiverIO.receiveLoaded`. Wherever the durable
