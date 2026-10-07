@@ -113,16 +113,23 @@ def ambientOf (durable : Durable) : Ambient := ⟨config.federation, NativeHost.
 /-- `DeclaredResourceController.admit` as the Host calls it for op 2, with the
 production read oracle -- the same definition, at `Id` instead of `IO`, its signature
 checks answered by the recorded run (`Oracle.recorded`) instead of the process. -/
-def admitRun {command : Command} {ground : Ground deployment}
-    (prepared : PreparedInvocation config.deployment config.profile (ambientOf durable) durable command)
+def admitRun {command : Command} {durable : Durable} {ground : Ground config.deployment}
+    (prepared : PreparedInvocation config.deployment config.profile (ambientOf durable) ground command)
     (signed : SignedCommand) : Except Reject (AcceptedInvocation prepared signed) :=
   Id.run (admit (.recorded transcript) prepared signed ObjectiveBendAuthenticatedInputs.oracle)
+
+/-- The full shape's ground of an image: its own decoded directory and authority. -/
+def groundAt (durable : Durable) : Option (Ground config.deployment) := do
+  let directory ← CredentialAuthorityDomainReceiver.loadDirectory durable
+  let authority ← CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot
+  pure (.full durable directory authority)
 
 /-- An accepted op-2 call, with the Host's evidence of the same acceptance. -/
 structure Accepted (signed : SignedCommand) (hostRecord : List UInt8) (hostRoot : Nat) where
   durable : Durable
+  ground : Ground config.deployment
   command : Command
-  prepared : PreparedInvocation config.deployment config.profile (ambientOf durable) durable command
+  prepared : PreparedInvocation config.deployment config.profile (ambientOf durable) ground command
   shape : PhysicalShape prepared
   accepted : AcceptedInvocation prepared signed
   /-- The accepted intent's journal record is the Host's appended record. -/
@@ -135,14 +142,14 @@ structure Accepted (signed : SignedCommand) (hostRecord : List UInt8) (hostRoot 
 def acceptAt (durable : Durable) (signed : SignedCommand) (hostRecord : List UInt8) (hostRoot : Nat) :
     Option (Accepted signed hostRecord hostRoot) := do
   let command ← commandCodec.decode signed.commandBytes
-  let .ok prepared := prepareFrom config.deployment config.profile (ambientOf durable) durable
-    (CredentialAuthorityDomainReceiver.loadDirectory durable) command | none
+  let ground ← groundAt durable
+  let .ok prepared := prepare config.deployment config.profile (ambientOf durable) ground command | none
   if shape : PhysicalShape prepared then
     let .ok accepted := admitRun prepared signed | none
     if journal : recordFrame.encode (IntentRecord.ofIntent (accepted.dataIntent shape)) = hostRecord then
       if root : (NativeHostCodec.worldRoot config.deployment.domain config.profile.semantics
           (durable.image.append (accepted.dataIntent shape))).value = hostRoot then
-        some ⟨durable, command, prepared, shape, accepted, journal, root⟩
+        some ⟨durable, ground, command, prepared, shape, accepted, journal, root⟩
       else none
     else none
   else none
@@ -219,8 +226,8 @@ def refusedRun : Option Reject := do
   let ⟨_, accepted⟩ ← firstRun
   let durable ← loadAt (accepted.durable.image.append (accepted.accepted.dataIntent accepted.shape))
   let command ← commandCodec.decode signed.commandBytes
-  let .ok prepared := prepareFrom config.deployment config.profile (ambientOf durable) durable
-    (CredentialAuthorityDomainReceiver.loadDirectory durable) command | none
+  let ground ← groundAt durable
+  let .ok prepared := prepare config.deployment config.profile (ambientOf durable) ground command | none
   if PhysicalShape prepared then
     match admitRun prepared signed with
     | .error reason => some reason
