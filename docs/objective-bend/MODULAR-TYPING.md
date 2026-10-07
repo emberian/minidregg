@@ -102,12 +102,19 @@ inhabitant `coloured_discharges` / `coloured_instance_accepted`; tooth
 
 Open:
 
-- **`instance_accepted`.** Instances are produced by re-elaborating each layer at its
-  substitution, and `Super` in a template is the literal bound row, not a second rigid
-  variable, so the emitted instance is not literally `template[σ]`. The front-end corollary
-  (every refusal after a template check is a named discharge refusal) needs instances emitted
-  as substitutions of the checked template. Meanwhile every instance is re-checked in the
-  whole program, which is sound.
+- **`instance_accepted`.** Since GPT-6 row D, `Super` in a template is a second rigid bounded
+  variable (`super-rigid` refuses a use of `super` as its bound row), and chainFix EMITS each open
+  instance as `ATerm.instantiate σ template` from the one cached `templateLayer` that the knot field
+  holds and `checkTemplates` checks. So the square holds at the term level by construction. What
+  is still open is the theorem composing it with `Discharges.check_instantiate`, which needs the
+  PTy→Ty proposal translation to commute with substitution and canonicalization (cv 01a115d6-7ee9).
+  Meanwhile every instance is still re-checked in the whole program, which is sound.
+- **Composition contract.** `Compiler/ObjectiveBendContract.lean` is the contract algebra that
+  chainFix runs (`run_append`: C_{A;B}(S,I) = C_A(S,I) ∧ C_B(S, F_A(S,I))). Per-operation
+  constraints: add (absent beneath), override (same type), and a type change is `replace-undeclared`.
+- **Staged modularity.** An open declaration is checked once against its bounds alone, then linked
+  by `compose` + `fix` before closed Core4. Nothing below Core4 sees an open term: the checker
+  and machine receive a closed program.
 - Ancestry specs and non-plain operands in a partial-seed chain keep the whole-target rule.
 - Instances across package roots (LT5).
 - Laws checked at each instance's types (LT6); the `Lowers` relation of a surface semantics
