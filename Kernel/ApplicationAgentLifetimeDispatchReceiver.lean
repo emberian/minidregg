@@ -41,7 +41,7 @@ def Permit.receipt {config : Config} (permit : Permit config) : NativeHostCodec.
     permit.readback.derived permit.readback.ready
   ⟨permit.readback.derived.intent.transactionId,
     permit.readback.derived.intent.event.eventId,
-    permit.old.opened.durable.image.accepted.length + 1,
+    permit.old.opened.durable.height + 1,
     candidate.worldRoot⟩
 
 theorem Permit.postRecord_exact {config : Config} (permit : Permit config) :
@@ -71,7 +71,7 @@ fences are still checked by the runtime before fd3 delivery. -/
 def Permit.withFreshTip {config : Config} {α : Type} (permit : Permit config)
     (handoff : List UInt8 → IO α) : IO (Except String α) := do
   let .ok current ← DurableReceiverIO.tipIs config.transport
-      permit.readback.appended.next.image.accepted.length permit.readback.appended.entry
+      permit.readback.appended.next.height permit.readback.appended.entry
     | return .error "lifetime dispatch physical tip unavailable before handoff"
   if current then
     return .ok (← handoff permit.canonicalBytes)

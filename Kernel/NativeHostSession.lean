@@ -145,7 +145,7 @@ def refresh (config : Config) (session : Session config) :
       session.durable with
   | .error detail => return .error detail
   | .ok ⟨durable, _⟩ =>
-      if durable.image.accepted.length = session.durable.image.accepted.length then
+      if durable.height = session.durable.height then
         return .ok session
       -- `validateLoadedFrom_eq`: the full validation, re-decoding and
       -- re-checking only the cells whose bytes the new records moved.

@@ -42,7 +42,7 @@ def select (config : Config) (target : Durable) (point : Point)
   match ← NativeHostReplay.verifyLoaded config target with
   | .error failure => return .error s!"source audit failed at {failure.index}: {failure.detail}"
   | .ok source =>
-    if heightExact : source.opened.durable.image.accepted.length = point.height then
+    if heightExact : source.opened.durable.height = point.height then
       if rootExact : source.opened.durable.worldRoot = point.root then
         if bounded : CurrentRecipientRecord.bounded claim then
           match current : CredentialAuthorityState.currentSigningKey source.opened.authority.snapshot.logical claim.member with

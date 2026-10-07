@@ -112,7 +112,7 @@ def loadPrefix (logStart : Digest) (image : DurableReceiver.Image) :
     else retainedPrefixes.get
   let height := image.accepted.length
   let hit := held.find? fun loaded =>
-    loaded.baseHeight == 0 && loaded.image.accepted.length == height &&
+    loaded.baseHeight == 0 && loaded.height == height &&
       loaded.logStart == logStart && decide (loaded.image = image)
   match hit with
   | some loaded =>

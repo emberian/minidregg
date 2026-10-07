@@ -187,7 +187,7 @@ partial def serveLoop {config : SourceConfig} (p : Participant config) (spool : 
   if report.refused > 0 then
     IO.eprintln s!"serve: dropped {report.refused} unauthenticated packets"
   if report.status == "applied" then
-    IO.eprintln s!"serve: {← IO.monoMsNow} ms applied certified source record; height {p.source.verified.opened.durable.image.accepted.length}"
+    IO.eprintln s!"serve: {← IO.monoMsNow} ms applied certified source record; height {p.source.verified.opened.durable.height}"
   let stats : ServeStats := { stats with
     packets := stats.packets + inbound.length
     busyMs := stats.busyMs + (t1 - t0)

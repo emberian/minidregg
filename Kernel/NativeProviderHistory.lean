@@ -53,7 +53,7 @@ theorem PriorInPrefix.exact_root {config : Config}
 def checkPrior {config : Config} (session : NativeHostSession.Walked config)
     (reserveCount : Nat) (point : PriorChecked) :
     Except String (PriorInPrefix session reserveCount point) := do
-  if bounds : priorBounds reserveCount session.target.image.accepted.length point = true then
+  if bounds : priorBounds reserveCount session.target.height point = true then
     match receiptAt : session.verified.receipts[point.acceptedCount - 1]? with
     | none => .error "prior checked prefix receipt is absent from verified history"
     | some receipt =>

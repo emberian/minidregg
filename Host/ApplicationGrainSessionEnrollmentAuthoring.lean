@@ -278,7 +278,7 @@ come from the retained profile, new issues from the admitted target suffix. -/
 def prepareSuffix (config : Config) {anchor : Opened config} {target : Durable}
     (verified : NativeHostReplay.SuffixVerified config anchor target) (request : Request) :
     Except String Plan := do
-  if request.issueIndex < anchor.durable.image.accepted.length then
+  if request.issueIndex < anchor.durable.height then
     let some origin := verified.origin
       | throw "old session issue lacks authenticated carried origin"
     let custody ← origin.rebindChecked verified.opened.durable

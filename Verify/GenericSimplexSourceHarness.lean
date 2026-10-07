@@ -101,7 +101,7 @@ def runWithLostResponseCheck (fuel : Nat) (replicas : Array Replica) (signedIngr
     require (replica.participant.source.verified.opened.durable.image ==
       first.participant.source.verified.opened.durable.image) "replicas start at different source histories"
   let before := replicas
-  let initialCount := first.participant.source.verified.opened.durable.image.accepted.length
+  let initialCount := first.participant.source.verified.opened.durable.height
   let finished ← run fuel replicas signedIngress
   let some final := finished[0]? | throw (IO.userError "missing final replica")
   for replica in finished do
@@ -128,7 +128,7 @@ def runWithLostResponseCheck (fuel : Nat) (replicas : Array Replica) (signedIngr
     let (participant,_) ← reloadSource participant
     require ((completedIngress participant signedIngress).isSome)
       "lost-response recovery lacks exact original-ingress receipt"
-    require (participant.source.verified.opened.durable.image.accepted.length == initialCount + 1)
+    require (participant.source.verified.opened.durable.height == initialCount + 1)
       "lost-response recovery did not preserve exactly one append"
     require (participant.source.verified.opened.durable.image ==
       final.participant.source.verified.opened.durable.image) "restart source readback differs"

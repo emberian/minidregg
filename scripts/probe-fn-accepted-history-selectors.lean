@@ -50,6 +50,6 @@ def acceptedHistorySelectorsProbe : IO Unit := do
           revokedConfig.deployment.domain revokedConfig.profile.semantics record).isSome
       unless revokedMatches.length == 1 do
         throw (IO.userError s!"revoked B strict historical binding matches={revokedMatches.length}, expected 1")
-  IO.println s!"PASS source-matched accepted B binding and A result selectors: B accepted={bOpened.durable.image.accepted.length}, A accepted={aOpened.durable.image.accepted.length}"
+  IO.println s!"PASS source-matched accepted B binding and A result selectors: B accepted={bOpened.durable.height}, A accepted={aOpened.durable.height}"
 
 #eval acceptedHistorySelectorsProbe
