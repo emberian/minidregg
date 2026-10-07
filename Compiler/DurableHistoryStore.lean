@@ -94,7 +94,8 @@ def spent (transport : Transport) {store : StoreIdentity} (head : Head store) (n
   | .ok ⟨some value, opens⟩ =>
       match decoded : DurableIndex.heightOf value with
       | none => return .error (.unavailable 0 "the index holds a spent row that is not a height")
-      | some height => return .ok ⟨some height, DurableIndex.heightOf_some decoded ▸ opens⟩
+      | some height =>
+          return .ok ⟨some height, by rw [DurableIndex.heightOf_some decoded] at opens; exact opens⟩
 
 def byTx (transport : Transport) {store : StoreIdentity} (head : Head store) (transactionId : TransactionId) :
     IO (Except Refusal (TxAnswer head transactionId)) := do
@@ -109,7 +110,8 @@ def byTx (transport : Transport) {store : StoreIdentity} (head : Head store) (tr
           | .error refusal => return .error refusal
           | .ok read =>
               if carries : read.record.transactionId = transactionId then
-                return .ok (.present ⟨height, DurableIndex.heightOf_some decoded ▸ opens, read, carries⟩)
+                return .ok (.present ⟨height, by rw [DurableIndex.heightOf_some decoded] at opens; exact opens,
+                  read, carries⟩)
               else return .error (.unavailable height
                 "the index names a height whose record carries another transaction")
 
