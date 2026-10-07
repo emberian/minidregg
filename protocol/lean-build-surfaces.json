@@ -936,7 +936,7 @@
     {
       "module": "Assurance.StoryLaw",
       "path": "Assurance/StoryLaw.lean",
-      "sha256": "f5e680723bf79d1ae7362afa61a2e6d6834ee7bd8a1f836be92906fc5be4fe84",
+      "sha256": "6d1d7d3a6ebd1ef82e6a4b7d39e2ad1c9fa36a5e539c18514336a2371cdc9a91",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6760,7 +6760,7 @@
     {
       "module": "Kernel.NativeHost",
       "path": "Kernel/NativeHost.lean",
-      "sha256": "6033160e10d736fa0c4551b7196b808469eea5c2c5ae7ab1426c355729a62c66",
+      "sha256": "ddbd2c1c43ad974444f62e3a07d6050b5099f8dc1eab4ce6e9e2ed700118f6cc",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6823,7 +6823,7 @@
     {
       "module": "Kernel.NativeHostReplay",
       "path": "Kernel/NativeHostReplay.lean",
-      "sha256": "1a01a5e3b5fcdaa081c73031a65c1e74618888e646a95734af2afb77c347c60a",
+      "sha256": "2c6ed1f0c21e6b7a98a0346ab187132430b299dd87169a702ad80e99c828f541",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -6949,7 +6949,7 @@
     {
       "module": "Kernel.ObjectAudienceInstall",
       "path": "Kernel/ObjectAudienceInstall.lean",
-      "sha256": "c6e9bb2d8938c81247a8c6ae2210ecf216eee9048559cde5af2dc80602e4f884",
+      "sha256": "ef5101259300f75365e05de7bfb0994a8e8cbb629f5b9858a3958692468487f6",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7453,14 +7453,14 @@
     {
       "module": "Kernel.PolicyInstallController",
       "path": "Kernel/PolicyInstallController.lean",
-      "sha256": "9561aadc2ba9e77f8c906338dfce986051090cf88cf843050f41fb14e85a7941",
+      "sha256": "3adab7f2473a2c08dec893f048d2a39d55b13bfe83fa5c81970c40f6c1dd0565",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.PolicyInstallReceiver",
       "path": "Kernel/PolicyInstallReceiver.lean",
-      "sha256": "084b172c4f7db6aab963f27a96cac3b030201d4e50a60fd8e26922ffa40cfae1",
+      "sha256": "deb28f76c21dc2fdb85ea51ef8b07184c6bdcbf5ccf7868c103f27f602504c32",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
