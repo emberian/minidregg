@@ -9,9 +9,10 @@ lowered by the kernel's own front end with that declaration selected
 
     method(view: {version: Nat, state: S}, args: X) -> Activity<P, R, {result: A, write: W}>
 
-where the Plan type `P` has labels among `call | send` and the response type `R`
-among `returned | queued`. A method can therefore yield nothing but a call or a
-send, each answered in the same turn: no frame ever suspends across turns (the
+where the Plan type `P` has labels among `call | send | stop | cancel` and the
+response type `R` among `returned | queued | acked`. A method can therefore yield
+nothing but a call, a send or a control of a message it sent, each answered in the
+same turn: no frame ever suspends across turns (the
 design's "an Activity cannot be called", stated as a type rule the loader checks
 before anything runs: `notCallable`). A method that never calls is a pure
 function whose body is its `{result, write}` record.
@@ -88,6 +89,19 @@ only by the message's delivery, `AnswerSlot.Decider.delivery`), and its postage
 its delivery runs under) moved from the invocation's account into the purse of
 the queue holding it. Every inbox and slot the mail writes is a cell the turn
 read: its post is a lawful change (`Inbox.Lawful`) of what the cell held.
+
+**Stop-waiting is not cancel-if-queued (GPT-6 row F).** A frame may also yield
+`stop {slot}` or `cancel {slot}` naming the reply slot of a message its OBJECT sent
+(the authority: the inbox the slot answers to has that object as its sender, else
+`notSender`), answered `acked {slot}` at the yield and applied when the turn commits,
+after all its sends (`postControls`, `Mail.control`). `cancel` withdraws a message that
+is still queued (`Inbox.Step.withdraw`: the others keep their order), refunds its
+postage and that of every send pipelined on its slot (`cancelRefunds`, exactly:
+`cancelRefunds_escrow`, `Mail.control_cancel_refunds`), and decides the slot
+`cancelled`; a message already delivered is left alone (a no-op that refunds nothing).
+`stop` keeps the message queued, refunds the pipelined sends and unwatches the slot,
+which then takes no pipelined send (`notPipelinable`) and is retired by its delivery
+(`ObjectiveSend.replyPost`); a slot already decided it retires at once.
 
 **The turn** (`invoke`) commits every written object's state cell, its mail and
 the fee and escrow postings, as ONE intent, guarded on every object record,
@@ -203,6 +217,14 @@ inductive CallRefusal where
   /-- A grant names (target, method) but does not admit the frame: its code, its caller, its
   arguments or its cumulative cap (`spendGrant`). The whole call tree co-fails. -/
   | grantMismatch (target : Nat) (method : String) (field : GrantField)
+  /-- A `stop` or `cancel` names no delivery slot (no such slot, or a subject's). -/
+  | notControllable (slot : Nat)
+  /-- A `stop` or `cancel` of a slot whose message another object sent: only the sending
+  object's frames control a message's slot. -/
+  | notSender (slot sender : Nat)
+  /-- A delivery slot whose activity cell is not the inbox holding its message (or whose
+  open message is missing from it). -/
+  | slotInbox (slot : Nat) (reason : String)
   /-- The object's law refuses the frame's write: the frame and the clause. -/
   | lawDenied (target : Nat) (method : String) (reason : WriteRefusal)
   /-- The invocation's declared envelope ran out (nothing commits). -/
@@ -250,11 +272,13 @@ def labelsWithin (assumptions : Assumptions) (type : Ty) (allowed : List String)
     | none => false
   | _ => false
 
-/-- The Plan labels a call frame may yield: both answered in the same turn. -/
-def framePlans : List String := ["call", "send"]
+/-- The Plan labels a call frame may yield, every one answered in the same turn: a call
+(`returned`), a send (`queued`), and the two controls of a message the frame's object sent
+(`stop`, `cancel`, both `acked`; row F). -/
+def framePlans : List String := ["call", "send", "stop", "cancel"]
 
 /-- The responses a call frame is resumed with. -/
-def frameResponses : List String := ["returned", "queued"]
+def frameResponses : List String := ["returned", "queued", "acked"]
 
 /-- The package `pin` names with `method` selected: the same sources. -/
 def methodPackage (package : ObjectiveSourcePackage.Package) (method : String) :
@@ -313,9 +337,9 @@ def loadMethod (config : Config) (target : Nat) (bytes : Bytes) (pin : Digest) (
             if returnsOnly : labelsWithin applied.assumptions responseType frameResponses = true then
               .ok ⟨definition, lowering, replayExact, accepted, fuelWithin, applied, checked, planType,
                 responseType, resultType, typeExact, callsOnly, returnsOnly⟩
-            else .error (.notCallable target method "its response type is not within `returned | queued`")
+            else .error (.notCallable target method "its response type is not within `returned | queued | acked`")
           else .error (.notCallable target method
-            "its Plan type is not within `call | send`: a method that awaits is not callable")
+            "its Plan type is not within `call | send | stop | cancel`: a method that awaits is not callable")
         | _ => .error (.notCallable target method "it does not return an Activity")
     | _ => .error (.notCallable target method "it does not take a view and arguments")
   else .error (.notCallable target method "typed core checker fuel exceeds the kernel's capacity")
@@ -341,9 +365,24 @@ structure SendPlan where
   method : String
   args : Data
 
+/-- The two controls of a message's sender over the message's reply slot (GPT-6 row F:
+stop-waiting is not cancel-if-queued). -/
+inductive ControlKind where
+  /-- Stop waiting: the pipelined sends are refunded, nothing more may be pipelined, the
+  message stays queued and is delivered as ever; its delivery retires the slot. A slot
+  already decided is retired at once. -/
+  | stop
+  /-- Cancel if queued: a message still queued is withdrawn and refunded (with its
+  pipelined sends) and its slot decided `cancelled`; a message already delivered is left
+  as it is (a no-op that refunds nothing). -/
+  | cancel
+  deriving DecidableEq, Repr
+
 inductive Yield where
   | call (plan : CallPlan)
   | send (plan : SendPlan)
+  /-- `stop {slot}` / `cancel {slot}`. -/
+  | control (kind : ControlKind) (slot : Digest)
 
 def decodeYield (target : Nat) (method : String) : Data → Except CallRefusal Yield
   | .variant "call" (.record fields) =>
@@ -357,11 +396,24 @@ def decodeYield (target : Nat) (method : String) : Data → Except CallRefusal Y
     | some (.variant "slot" (.natural slot)), some (.label name), some args =>
       .ok (.send ⟨.slot ⟨slot⟩, name, args⟩)
     | _, _, _ => .error (.callShape target method "send needs to (object Nat | slot Nat), method (String) and args")
-  | _ => .error (.callShape target method "a frame yields only `call` or `send`")
+  | .variant "stop" (.record fields) =>
+    match fieldOf fields "slot" with
+    | some (.natural slot) => .ok (.control .stop ⟨slot⟩)
+    | _ => .error (.callShape target method "stop needs slot (Nat)")
+  | .variant "cancel" (.record fields) =>
+    match fieldOf fields "slot" with
+    | some (.natural slot) => .ok (.control .cancel ⟨slot⟩)
+    | _ => .error (.callShape target method "cancel needs slot (Nat)")
+  | _ => .error (.callShape target method "a frame yields only `call`, `send`, `stop` or `cancel`")
 
 /-- The response a frame is resumed with after a send: its message id, which is
 also its reply slot's name. -/
 def queuedData (id : Digest) : Data := .variant "queued" (.record [("slot", .natural id.value)])
+
+/-- The response a frame is resumed with after a `stop` or `cancel`: acknowledged at the
+yield; its effect is decided when the turn commits (`postControls`), against the state
+then (a message delivered before the cancel commits is not withdrawn). -/
+def ackedData (slot : Digest) : Data := .variant "acked" (.record [("slot", .natural slot.value)])
 
 /-- The response a frame is resumed with after its callee returned. -/
 def returnedData (result : Data) : Data := .variant "returned" (.record [("result", result)])
@@ -553,6 +605,13 @@ structure Written where
   /-- The delegation that lent the frame the signer's authority (none: the root, or ungranted). -/
   delegation : Option Delegation
 
+/-- A control a frame of this turn yielded: the yielding frame's object, the kind, the slot. -/
+structure Control where
+  sender : Nat
+  kind : ControlKind
+  slot : Digest
+  deriving DecidableEq, Repr
+
 /-- A send a frame of this turn made. -/
 structure Outgoing where
   /-- `Inbox.sendId turn index`. -/
@@ -580,8 +639,12 @@ structure Journal where
   deployment's extraction budget (`planBudget.ticks`) from it, refused by name when it is
   short (`extractUncovered`). -/
   extracts : Nat
+  /-- Every `stop`/`cancel`, in the order the frames yielded them. They are applied after
+  ALL the turn's sends (`postControls` after `postMail`), so a turn may cancel a message it
+  sent itself. -/
+  controls : List Control
 
-def Journal.start (grants : List Grant) (extracts : Nat) : Journal := ⟨[], grants, [], [], [], [], extracts⟩
+def Journal.start (grants : List Grant) (extracts : Nat) : Journal := ⟨[], grants, [], [], [], [], extracts, []⟩
 
 /-- **Debit an extraction's actual tick spend** from the turn's allowance, refused by name when
 the allowance left is below it. The spend is deterministic (the extraction's own tick count),
@@ -768,7 +831,7 @@ def exec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot r
       view, subject, height, callerOf authority stack, call.args, delegation⟩
     let journal : Journal := ⟨journal.entries, journal.grants, journal.delegations ++ delegation.toList,
       journal.frames ++ [call.target.value :: stack.map (·.object.value)], journal.writes, journal.outbox,
-      journal.extracts⟩
+      journal.extracts, journal.controls⟩
     exec config snapshot height authority turn fuel (ctx :: stack) (.run (initial program.applied.erase)) journal ticks
   | _ + 1, [], .run _, _, _ => .error .exhausted
   | fuel + 1, ctx :: rest, .run state, journal, ticks =>
@@ -801,6 +864,15 @@ def exec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot r
         | none => .error (.frameFault ctx.object.value ctx.method "resume")
         | some next => exec config snapshot height authority turn fuel (ctx :: rest) (.run next)
             { journal with outbox := journal.outbox ++ [⟨id, ctx.object.value, send.destination, send.method, send.args⟩] }
+            left
+      | .ok (.control kind slot) =>
+        match typeData ctx.assumptions config.typeFuel (ackedData slot) ctx.responseType with
+        | none => .error (.resultType ctx.object.value ctx.method)
+        | some _ =>
+        match resume (ackedData slot).term yielded with
+        | none => .error (.frameFault ctx.object.value ctx.method "resume")
+        | some next => exec config snapshot height authority turn fuel (ctx :: rest) (.run next)
+            { journal with controls := journal.controls ++ [⟨ctx.object.value, kind, slot⟩] }
             left
     | (.finished _ finished, left) =>
       match ObjectiveBendDemandData.complete config.limits config.planBudget finished with
@@ -853,6 +925,32 @@ structure HeldSlot {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   named : now.name = name
   opened : now.phase = .opened
 
+/-- A delivery slot this turn's controls CLOSE: decided `cancelled` (`decided = some slot`,
+a cancel of a still-queued message) or retired (`none`: a stop of a decided slot, or a
+cancel of an unwatched one). Its cell was read as a slot and holds no package. -/
+structure ClosedSlot {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) where
+  name : Digest
+  clean : bodyOf .package (snapshot.canonicalBytes (AnswerSlot.cell config.domain name)) = none
+  slotted : ∀ payload, payloadOf (snapshot.canonicalBytes (AnswerSlot.cell config.domain name)) = some payload →
+    payload.role = .slot
+  decided : Option AnswerSlot.Slot
+  named : ∀ slot, decided = some slot → slot.name = name
+
+/-- The post of a closed slot: its decided image, or the retired image. -/
+def ClosedSlot.post {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (closed : ClosedSlot config snapshot) : Post :=
+  match closed.decided with
+  | some slot => slotPost config snapshot slot
+  | none => slotRetire config snapshot closed.name
+
+/-- Escrow a control returns: `amount` from the purse of the queue that held it to the
+account that paid it. -/
+structure Refund where
+  purse : AccountId
+  payer : AccountId
+  amount : Nat
+  deriving DecidableEq, Repr
+
 structure Mail {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) where
   inboxes : List (HeldInbox config snapshot)
   slots : List (HeldSlot config snapshot)
@@ -861,9 +959,13 @@ structure Mail {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
   credits : List (AccountId × Nat)
   /-- Every object a message was addressed to (read as an object; guarded). -/
   targets : List Nat
+  /-- The slots this turn's controls closed (`Mail.control`). -/
+  closed : List (ClosedSlot config snapshot)
+  /-- The escrow this turn's controls return, in order. -/
+  refunds : List Refund
 
 def Mail.empty {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes} :
-    Mail config snapshot := ⟨[], [], [], []⟩
+    Mail config snapshot := ⟨[], [], [], [], [], []⟩
 
 /-- The inbox of (sender, target): the one this turn holds, else read from the
 snapshot. Returns it and the other held inboxes. -/
@@ -895,7 +997,7 @@ def openSlot {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsh
     have slotted : ∀ payload, payloadOf bytes = some payload → payload.role = .slot := by
       intro payload found
       simp [found] at taken
-    .ok ⟨name, none, clean, slotted, ⟨name, inbox, .delivery name, 0, .opened, []⟩, rfl, rfl⟩
+    .ok ⟨name, none, clean, slotted, ⟨name, inbox, .delivery name, 0, .opened, [], true⟩, rfl, rfl⟩
   else .error (.packageCell (AnswerSlot.cell config.domain name).value)
 
 /-- The open slot a pipelined send names: the one this turn holds, else read. -/
@@ -1002,8 +1104,11 @@ def Mail.send {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snaps
       let updated : HeldInbox config snapshot :=
         ⟨held.sender, held.target, held.read, held.readExact, held.clean, next,
           held.lawful.snoc (Inbox.push_step pushed), ⟨keeps.1.trans held.ends.1, keeps.2.1.trans held.ends.2⟩⟩
-      .ok ⟨others ++ [updated], mail.slots ++ [slot], mail.credits ++ [(held.cell.value, message.postage)],
-        mail.targets ++ [target]⟩
+      .ok { mail with
+        inboxes := others ++ [updated]
+        slots := mail.slots ++ [slot]
+        credits := mail.credits ++ [(held.cell.value, message.postage)]
+        targets := mail.targets ++ [target] }
   | .slot name =>
     match holdSlot config snapshot mail name with
     | .error reason => .error reason
@@ -1011,12 +1116,15 @@ def Mail.send {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snaps
       match held.now.decider with
       | .subject _ => .error (.notPipelinable name.value)
       | .delivery _ =>
+        -- Its sender stopped waiting (`ControlKind.stop`): nothing more is pipelined on it.
+        if !held.now.watched then .error (.notPipelinable name.value) else
         if held.now.queued.length < Inbox.bound then
           let updated : HeldSlot config snapshot :=
             ⟨held.name, held.read, held.clean, held.slotted, { held.now with queued := held.now.queued ++ [message] },
               held.named, held.opened⟩
-          .ok ⟨mail.inboxes, others ++ [updated], mail.credits ++ [(held.now.activity.value, message.postage)],
-            mail.targets⟩
+          .ok { mail with
+            slots := others ++ [updated]
+            credits := mail.credits ++ [(held.now.activity.value, message.postage)] }
         else .error (.slotQueueFull name.value)
 
 /-- The message a send queues: its delivery runs under `postage`, whose public
@@ -1034,38 +1142,486 @@ def postMail {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsh
     | .ok mail => postMail config snapshot postage refund mail rest
 
 
-/-- The posts of the mail: every held inbox and every held slot, against the
-roots the turn read them at. -/
+/-! ### The sender's controls: stop-waiting and cancel-if-queued (GPT-6 row F)
+
+A frame's `stop {slot}` / `cancel {slot}` is acknowledged at the yield (`acked`) and takes
+effect when the turn commits, after all its sends (`postControls`), against the state the
+turn reads. The AUTHORITY is the sending object: the slot's activity cell is the inbox
+holding its message, and that inbox's sender must be the yielding frame's object
+(`notSender`). -/
+
+/-- What a control finds at a slot name. -/
+inductive Controlled {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) where
+  /-- Retired, or closed by an earlier control of this turn: every control is a no-op. -/
+  | gone
+  /-- A delivery slot decided before this turn (read from the snapshot). -/
+  | decided (slot : AnswerSlot.Slot) (closing : ClosedSlot config snapshot)
+  /-- An open delivery slot: the one this turn holds, else read; and the other held slots. -/
+  | held (slot : HeldSlot config snapshot) (others : List (HeldSlot config snapshot))
+
+/-- The delivery slot a control names, by name: `notControllable` when there is none (never
+a slot, or a subject's slot). -/
+def controlSlot {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (mail : Mail config snapshot) (name : Digest) : Except CallRefusal (Controlled config snapshot) :=
+  if mail.closed.any (fun closed => closed.name == name) then .ok .gone else
+  match mail.slots.find? (fun held => held.name == name) with
+  | some held =>
+    match held.now.decider with
+    | .subject _ => .error (.notControllable name.value)
+    | .delivery _ => .ok (.held held (mail.slots.filter (fun other => !(other.name == name))))
+  | none =>
+    if isRetired (snapshot.canonicalBytes (AnswerSlot.cell config.domain name)) then .ok .gone else
+    match readExact : readSlot config snapshot name with
+    | none => .error (.notControllable name.value)
+    | some slot =>
+      if named : slot.name = name then
+        if clean : bodyOf .package (snapshot.canonicalBytes (AnswerSlot.cell config.domain name)) = none then
+          have slotted : ∀ payload, payloadOf (snapshot.canonicalBytes (AnswerSlot.cell config.domain name)) =
+              some payload → payload.role = .slot := by
+            intro payload found
+            by_contra wrong
+            have empty : bodyOf .slot (snapshot.canonicalBytes (AnswerSlot.cell config.domain name)) = none := by
+              simp [bodyOf, found, wrong]
+            simp [readSlot, empty] at readExact
+          match slot.decider with
+          | .subject _ => .error (.notControllable name.value)
+          | .delivery _ =>
+            match opened : slot.phase with
+            | .opened => .ok (.held ⟨name, some slot, clean, slotted, slot, named, opened⟩ mail.slots)
+            | .decided _ _ => .ok (.decided slot ⟨name, clean, slotted, none, fun _ none_ => by cases none_⟩)
+        else .error (.packageCell (AnswerSlot.cell config.domain name).value)
+      else .error (.notControllable name.value)
+
+/-- The inbox a delivery slot answers to (its `activity` cell), held: located by the
+(sender, target) of the inbox this turn holds at that cell, else of the inbox read there,
+and `slotInbox` unless that inbox's cell IS the activity cell. -/
+def inboxEnds {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (mail : Mail config snapshot) (activity : CellId) : Option (Nat × Nat) :=
+  match mail.inboxes.find? (fun held => held.cell == activity) with
+  | some held => some (held.sender, held.target)
+  | none => match readInbox snapshot activity with
+    | some (some inbox) => some (inbox.sender, inbox.target)
+    | _ => none
+
+def controlInbox {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (mail : Mail config snapshot) (name : Digest) (activity : CellId) :
+    Except CallRefusal (HeldInbox config snapshot × List (HeldInbox config snapshot)) :=
+  match inboxEnds mail activity with
+  | none => .error (.slotInbox name.value "its activity cell holds no inbox")
+  | some (sender, target) =>
+    match holdInbox config snapshot mail sender target with
+    | .error reason => .error reason
+    | .ok (held, others) =>
+      if held.cell = activity then .ok (held, others)
+      else .error (.slotInbox name.value "its activity cell is not its inbox's")
+
+/-- The refunds of a cancel: the withdrawn message and every send pipelined on its slot,
+each its own postage, from the purse of the inbox that held them back to its payer. -/
+def cancelRefunds (purse : AccountId) (message : Inbox.Message) (queued : List Inbox.Message) : List Refund :=
+  (message :: queued).map fun refunded => ⟨purse, refunded.refund, refunded.postage⟩
+
+/-- The refunds of a stop: every send pipelined on the slot. -/
+def stopRefunds (purse : AccountId) (queued : List Inbox.Message) : List Refund :=
+  queued.map fun refunded => ⟨purse, refunded.refund, refunded.postage⟩
+
+/-- **Apply one control.** The authority check comes first wherever the slot is still there
+(`notSender`); then:
+* `stop` of an open slot: its pipelined sends are refunded, it is unwatched and empty
+  (`AnswerSlot.stopWaiting`); the message stays queued.
+* `stop` of a decided slot: the slot is retired.
+* `cancel` of an open slot: its message is withdrawn from the inbox (`Inbox.Step.withdraw`;
+  `slotInbox` if it is not there), the message and every pipelined send are refunded
+  (`cancelRefunds`), and the slot is decided `cancelled` (`AnswerSlot.cancelDelivery`), or
+  retired when nobody watches it.
+* `cancel` of a decided slot (the message was delivered first): a no-op, nothing refunded.
+* either, on a retired slot or one closed earlier in this turn: a no-op. -/
+def Mail.control {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    (mail : Mail config snapshot) (height : Nat) (control : Control) : Except CallRefusal (Mail config snapshot) :=
+  match controlSlot config snapshot mail control.slot with
+  | .error reason => .error reason
+  | .ok .gone => .ok mail
+  | .ok (.decided slot closing) =>
+    match controlInbox config snapshot mail control.slot slot.activity with
+    | .error reason => .error reason
+    | .ok (inbox, _) =>
+    if inbox.sender ≠ control.sender then .error (.notSender control.slot.value control.sender) else
+    match control.kind with
+    | .cancel => .ok mail
+    | .stop => .ok { mail with closed := mail.closed ++ [closing] }
+  | .ok (.held held others) =>
+    match controlInbox config snapshot mail control.slot held.now.activity with
+    | .error reason => .error reason
+    | .ok (inbox, inboxes) =>
+    if inbox.sender ≠ control.sender then .error (.notSender control.slot.value control.sender) else
+    let purse := held.now.activity.value
+    match control.kind with
+    | .stop =>
+      match stopped : AnswerSlot.stopWaiting held.now with
+      | .error _ => .error (.notControllable control.slot.value)
+      | .ok now =>
+        have same := AnswerSlot.stopWaiting_spec stopped
+        let updated : HeldSlot config snapshot :=
+          ⟨held.name, held.read, held.clean, held.slotted, now,
+            by rw [same.2.2]; exact held.named, by rw [same.2.2]; exact held.opened⟩
+        .ok { mail with
+          slots := others ++ [updated]
+          refunds := mail.refunds ++ stopRefunds purse held.now.queued }
+    | .cancel =>
+      match withdrawn : inbox.now.withdraw control.slot with
+      | none => .error (.slotInbox control.slot.value "its open message is not queued in its inbox")
+      | some (message, next) =>
+      match cancelled : AnswerSlot.cancelDelivery held.now height with
+      | .error _ => .error (.notControllable control.slot.value)
+      | .ok decided =>
+        have step := (Inbox.withdraw_step withdrawn).1
+        have keeps := step.keeps
+        let updated : HeldInbox config snapshot :=
+          ⟨inbox.sender, inbox.target, inbox.read, inbox.readExact, inbox.clean, next, inbox.lawful.snoc step,
+            ⟨keeps.1.trans inbox.ends.1, keeps.2.1.trans inbox.ends.2⟩⟩
+        have named : decided.name = held.name := by
+          rw [(AnswerSlot.cancelDelivery_spec cancelled).2.2]; exact held.named
+        let closing : ClosedSlot config snapshot :=
+          ⟨held.name, held.clean, held.slotted, if held.now.watched then some decided else none, by
+            intro slot isSome
+            split at isSome
+            · cases isSome; exact named
+            · cases isSome⟩
+        .ok { mail with
+          inboxes := inboxes ++ [updated]
+          slots := others
+          closed := mail.closed ++ [closing]
+          refunds := mail.refunds ++ cancelRefunds purse message held.now.queued }
+
+/-- The turn's controls, in order, after its sends. -/
+def postControls {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (height : Nat) :
+    Mail config snapshot → List Control → Except CallRefusal (Mail config snapshot)
+  | mail, [] => .ok mail
+  | mail, control :: rest =>
+    match mail.control height control with
+    | .error reason => .error reason
+    | .ok mail => postControls config snapshot height mail rest
+
+theorem controlInbox_spec {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {mail : Mail config snapshot} {name : Digest} {activity : CellId} {held : HeldInbox config snapshot}
+    {others : List (HeldInbox config snapshot)}
+    (ok : controlInbox config snapshot mail name activity = .ok (held, others)) :
+    held.cell = activity ∧ holdInbox config snapshot mail held.sender held.target = .ok (held, others) := by
+  unfold controlInbox at ok
+  split at ok
+  · cases ok
+  · rename_i sender target _
+    split at ok
+    · cases ok
+    · rename_i pair hold
+      split at ok
+      · rename_i same
+        cases ok
+        refine ⟨same, ?_⟩
+        have sides : held.sender = sender ∧ held.target = target := by
+          unfold holdInbox at hold
+          split at hold
+          · rename_i found hit
+            cases hold
+            have hits := List.find?_some hit
+            simp only [Bool.and_eq_true, beq_iff_eq] at hits
+            exact hits
+          · split at hold
+            · cases hold
+            · split at hold
+              · split at hold
+                · cases hold; exact ⟨rfl, rfl⟩
+                · cases hold
+              · cases hold
+        rw [sides.1, sides.2]; exact hold
+      · cases ok
+
+/-- **What one control does to the mail**, case by case (`Mail.control`): nothing; a decided
+slot retired (stop); an open slot unwatched with its pipelined sends refunded (stop); or a
+still-queued message withdrawn from its sender's inbox, refunded with the sends pipelined
+on it, its slot closed (cancel). The authority is in every case that changes anything: the
+inbox the slot answers to has the controlling object as its sender. -/
+theorem Mail.control_cases {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {mail next : Mail config snapshot} {height : Nat} {control : Control}
+    (ok : mail.control height control = .ok next) :
+    next = mail ∨
+    (control.kind = .stop ∧ ∃ (slot : AnswerSlot.Slot) (closing : ClosedSlot config snapshot)
+      (inbox : HeldInbox config snapshot) (inboxes : List (HeldInbox config snapshot)),
+      controlSlot config snapshot mail control.slot = .ok (.decided slot closing) ∧ closing.decided = none ∧
+      controlInbox config snapshot mail control.slot slot.activity = .ok (inbox, inboxes) ∧
+      inbox.sender = control.sender ∧
+      next = { mail with closed := mail.closed ++ [closing] }) ∨
+    (control.kind = .stop ∧ ∃ (held updated : HeldSlot config snapshot) (others : List (HeldSlot config snapshot))
+      (inbox : HeldInbox config snapshot) (inboxes : List (HeldInbox config snapshot)),
+      controlSlot config snapshot mail control.slot = .ok (.held held others) ∧
+      controlInbox config snapshot mail control.slot held.now.activity = .ok (inbox, inboxes) ∧
+      inbox.sender = control.sender ∧
+      updated.read = held.read ∧ updated.now = { held.now with queued := [], watched := false } ∧
+      next = { mail with
+        slots := others ++ [updated]
+        refunds := mail.refunds ++ stopRefunds held.now.activity.value held.now.queued }) ∨
+    (control.kind = .cancel ∧ ∃ (held : HeldSlot config snapshot) (others : List (HeldSlot config snapshot))
+      (inbox updatedInbox : HeldInbox config snapshot) (inboxes : List (HeldInbox config snapshot)) (message : Inbox.Message) (closing : ClosedSlot config snapshot),
+      controlSlot config snapshot mail control.slot = .ok (.held held others) ∧
+      controlInbox config snapshot mail control.slot held.now.activity = .ok (inbox, inboxes) ∧
+      inbox.sender = control.sender ∧ inbox.cell = held.now.activity ∧
+      inbox.now.withdraw control.slot = some (message, updatedInbox.now) ∧ message.id = control.slot ∧
+      updatedInbox.sender = inbox.sender ∧ updatedInbox.target = inbox.target ∧
+      closing.name = held.name ∧
+      (∀ slot, closing.decided = some slot → held.now.watched = true ∧
+        slot = { held.now with phase := .decided .cancelled height, queued := [] }) ∧
+      (held.now.watched = true → closing.decided.isSome = true) ∧
+      next = { mail with
+        inboxes := inboxes ++ [updatedInbox]
+        slots := others
+        closed := mail.closed ++ [closing]
+        refunds := mail.refunds ++ cancelRefunds held.now.activity.value message held.now.queued }) := by
+  unfold Mail.control at ok
+  split at ok
+  · cases ok
+  · cases ok; exact .inl rfl
+  · rename_i slot closing found
+    have closedNone : closing.decided = none := by
+      unfold controlSlot at found
+      repeat' split at found
+      all_goals first | (cases found; done) | (cases found; rfl)
+    split at ok
+    · cases ok
+    · rename_i inbox inboxes heldOk
+      split at ok
+      · cases ok
+      · rename_i authority
+        cases kind : control.kind with
+        | cancel => rw [kind] at ok; cases ok; exact .inl rfl
+        | stop =>
+          rw [kind] at ok; cases ok
+          exact .inr (.inl ⟨rfl, slot, closing, inbox, inboxes, found, closedNone, heldOk,
+            Classical.not_not.mp authority, rfl⟩)
+  · rename_i held others found
+    split at ok
+    · cases ok
+    · rename_i inbox inboxes heldOk
+      split at ok
+      · cases ok
+      · rename_i authority
+        have sender : inbox.sender = control.sender := Classical.not_not.mp authority
+        cases kind : control.kind with
+        | stop =>
+          rw [kind] at ok
+          simp only at ok
+          split at ok
+          · cases ok
+          · rename_i now stopped
+            cases ok
+            refine .inr (.inr (.inl ⟨rfl, held, _, others, inbox, inboxes, found, heldOk, sender, ?_, ?_, rfl⟩))
+            · rfl
+            · exact (AnswerSlot.stopWaiting_spec stopped).2.2
+        | cancel =>
+          rw [kind] at ok
+          simp only at ok
+          split at ok
+          · cases ok
+          · rename_i message next' withdrawn
+            split at ok
+            · cases ok
+            · rename_i decided cancelled
+              cases ok
+              have spec := AnswerSlot.cancelDelivery_spec cancelled
+              refine .inr (.inr (.inr ⟨rfl, held, others, inbox, _, inboxes, message, _, found, heldOk, sender,
+                (controlInbox_spec heldOk).1, ?_, (Inbox.withdraw_step withdrawn).2.1, ?_, ?_, ?_,
+                ?_, ?_, rfl⟩))
+              · exact withdrawn
+              · rfl
+              · rfl
+              · rfl
+              · intro slot isSome
+                dsimp only at isSome
+                split at isSome
+                · rename_i watched
+                  cases isSome
+                  exact ⟨watched, spec.2.2⟩
+                · cases isSome
+              · intro watched
+                simp [watched]
+
+/-- **A cancel refunds exactly the escrow it withdraws**: the message's postage plus the
+postage of every send pipelined on its slot, and nothing else. -/
+theorem cancelRefunds_escrow (purse : AccountId) (message : Inbox.Message) (queued : List Inbox.Message) :
+    ((cancelRefunds purse message queued).map Refund.amount).sum =
+      message.postage + (queued.map Inbox.Message.postage).sum ∧
+    ∀ refund ∈ cancelRefunds purse message queued, refund.purse = purse := by
+  refine ⟨?_, ?_⟩
+  · simp [cancelRefunds, List.map_map, Function.comp_def]
+  · intro refund member
+    simp only [cancelRefunds, List.mem_map] at member
+    obtain ⟨_, _, rfl⟩ := member
+    rfl
+
+theorem controlSlot_held_name {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {mail : Mail config snapshot} {name : Digest} {held : HeldSlot config snapshot}
+    {others : List (HeldSlot config snapshot)}
+    (ok : controlSlot config snapshot mail name = .ok (.held held others)) : held.name = name := by
+  unfold controlSlot at ok
+  split at ok
+  · cases ok
+  · split at ok
+    · rename_i found hit
+      split at ok
+      · cases ok
+      · cases ok
+        simpa using List.find?_some hit
+    · repeat' split at ok
+      all_goals first | (cases ok; done) | (cases ok; rfl)
+
+/-- **The control-level escrow theorem** (OB-ENG condition 3). A cancel either changes no
+refund (the message was delivered first, or its slot is gone), or it withdrew the message
+named by its slot from an inbox whose SENDER is the cancelling object, and the refunds it
+adds are exactly `cancelRefunds` of that message and the sends pipelined on its slot: in
+total the message's postage plus the sum of their postage, all out of the purse of the
+inbox that held them. -/
+theorem Mail.control_cancel_refunds {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {mail next : Mail config snapshot} {height : Nat} {control : Control}
+    (ok : mail.control height control = .ok next) (cancel : control.kind = .cancel) :
+    next.refunds = mail.refunds ∨
+    ∃ (held : HeldSlot config snapshot) (inbox : HeldInbox config snapshot) (message : Inbox.Message)
+      (rest : Inbox.Inbox),
+      held.name = control.slot ∧ inbox.cell = held.now.activity ∧ inbox.sender = control.sender ∧
+      inbox.now.withdraw control.slot = some (message, rest) ∧ message.id = control.slot ∧
+      next.refunds = mail.refunds ++ cancelRefunds held.now.activity.value message held.now.queued ∧
+      ((cancelRefunds held.now.activity.value message held.now.queued).map Refund.amount).sum =
+        message.postage + (held.now.queued.map Inbox.Message.postage).sum ∧
+      ∀ refund ∈ cancelRefunds held.now.activity.value message held.now.queued,
+        refund.purse = held.now.activity.value := by
+  rcases Mail.control_cases ok with same | ⟨stop, _⟩ | ⟨stop, _⟩ |
+      ⟨_, held, others, inbox, updated, inboxes, message, closing, found, _, sender, cell, withdrawn, named,
+        _, _, _, _, _, rfl⟩
+  · exact .inl (by rw [same])
+  · rw [cancel] at stop; cases stop
+  · rw [cancel] at stop; cases stop
+  · obtain ⟨sum, purse⟩ := cancelRefunds_escrow held.now.activity.value message held.now.queued
+    exact .inr ⟨held, inbox, message, updated.now, controlSlot_held_name found, cell, sender, withdrawn, named, rfl,
+      sum, purse⟩
+
+theorem controlSlot_held_delivery {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {mail : Mail config snapshot} {name : Digest} {held : HeldSlot config snapshot}
+    {others : List (HeldSlot config snapshot)}
+    (ok : controlSlot config snapshot mail name = .ok (.held held others)) :
+    ∃ message, held.now.decider = .delivery message := by
+  unfold controlSlot at ok
+  split at ok
+  · cases ok
+  · split at ok
+    · split at ok
+      · cases ok
+      · rename_i message decider
+        cases ok
+        exact ⟨message, decider⟩
+    · split at ok
+      · cases ok
+      · split at ok
+        · cases ok
+        · split at ok
+          · split at ok
+            · split at ok
+              · cases ok
+              · rename_i message decider
+                split at ok
+                · cases ok
+                  exact ⟨message, decider⟩
+                · cases ok
+            · cases ok
+          · cases ok
+
+/-- **A cancel of a withdrawable message is never a silent no-op** (the converse of
+`Mail.control_cancel_refunds`, OB-ENG): when the slot a cancel names is an open delivery
+slot, the inbox it answers to has the cancelling object as sender, and its message is
+queued there, an admitted cancel takes the withdraw branch: it adds exactly
+`cancelRefunds` of that message and the sends pipelined on the slot. So the no-op
+alternative of `Mail.control_cancel_refunds` happens only when the message was not
+withdrawable (delivered first, slot gone or decided). -/
+theorem Mail.control_cancel_withdraws {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {mail next : Mail config snapshot} {height : Nat} {control : Control}
+    {held : HeldSlot config snapshot} {others : List (HeldSlot config snapshot)}
+    {inbox : HeldInbox config snapshot} {inboxes : List (HeldInbox config snapshot)}
+    {message : Inbox.Message} {rest : Inbox.Inbox}
+    (ok : mail.control height control = .ok next) (cancel : control.kind = .cancel)
+    (found : controlSlot config snapshot mail control.slot = .ok (.held held others))
+    (located : controlInbox config snapshot mail control.slot held.now.activity = .ok (inbox, inboxes))
+    (sender : inbox.sender = control.sender)
+    (queued : inbox.now.withdraw control.slot = some (message, rest)) :
+    next.refunds = mail.refunds ++ cancelRefunds held.now.activity.value message held.now.queued := by
+  obtain ⟨delivery, decider⟩ := controlSlot_held_delivery found
+  unfold Mail.control at ok
+  rw [found] at ok
+  simp only at ok
+  rw [located] at ok
+  simp only [sender, ne_eq, not_true_eq_false, if_false, cancel] at ok
+  split at ok
+  · rename_i none_
+    rw [queued] at none_; cases none_
+  · rename_i message' next' withdrawn
+    rw [queued] at withdrawn
+    simp only [Option.some.injEq, Prod.mk.injEq] at withdrawn
+    obtain ⟨rfl, rfl⟩ := withdrawn
+    split at ok
+    · rename_i reason refused
+      unfold AnswerSlot.cancelDelivery at refused
+      rw [held.opened, decider] at refused
+      cases refused
+    · cases ok; rfl
+
+/-- The posts of the mail: every held inbox, every held slot and every closed slot,
+against the roots the turn read them at. -/
 def Mail.posts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     (mail : Mail config snapshot) : List Post :=
   mail.inboxes.map (fun held => postAt snapshot held.cell (inboxImage held.now)) ++
-    mail.slots.map (fun held => slotPost config snapshot held.now)
+    mail.slots.map (fun held => slotPost config snapshot held.now) ++
+    mail.closed.map ClosedSlot.post
 
 /-- The purses of inboxes the mail opens: registered on the Book in its batch. -/
 def Mail.registrations {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     (mail : Mail config snapshot) (book : Book) : List AccountId :=
   (mail.inboxes.map fun held => held.cell.value).filter fun account => !decide (account ∈ book.accounts)
 
+/-- Control refunds as transfers out of each purse (zero amounts and self-transfers dropped). -/
+def refundTransfers (config : Config) (refunds : List Refund) : List Operation :=
+  refunds.filterMap fun refund =>
+    if refund.amount = 0 ∨ refund.purse = refund.payer then none
+    else some (.transfer refund.purse refund.payer config.asset refund.amount)
+
 /-- Postage credits as transfers from `source` (zero amounts and self-transfers dropped). -/
 def creditTransfers (config : Config) (source : AccountId) (credits : List (AccountId × Nat)) : List Operation :=
   credits.filterMap fun (purse, amount) =>
     if amount = 0 ∨ purse = source then none else some (.transfer source purse config.asset amount)
 
-/-- Every post of the mail is an inbox or slot image at a cell that holds no package. -/
+/-- Every post of the mail is, at a cell that holds no package, an inbox or slot image or
+(a slot a control retired) the retired image. (Restated for row F: before the controls,
+the retired alternative did not occur.) -/
 theorem Mail.posts_shape {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     (mail : Mail config snapshot) :
-    ∀ post ∈ mail.posts, ∃ cell role key body, role ≠ .record ∧
-      bodyOf .package (snapshot.canonicalBytes cell) = none ∧ post = postAt snapshot cell (image role key body) := by
+    ∀ post ∈ mail.posts, ∃ cell, bodyOf .package (snapshot.canonicalBytes cell) = none ∧
+      ((∃ role key body, role ≠ .record ∧ post = postAt snapshot cell (image role key body)) ∨
+        post = postAt snapshot cell retiredImage) := by
   intro post member
-  rcases List.mem_append.mp member with inInbox | inSlot
-  · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inInbox
-    exact ⟨held.cell, .inbox, Inbox.key held.now.sender held.now.target, Inbox.encode held.now,
-      (by decide : ObjectiveActivityCell.Role.inbox ≠ .record), held.clean, rfl⟩
-  · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inSlot
-    refine ⟨AnswerSlot.cell config.domain held.name, .slot, AnswerSlot.key held.now.name, AnswerSlot.encode held.now,
-      (by decide : ObjectiveActivityCell.Role.slot ≠ .record), held.clean, ?_⟩
-    unfold slotPost
-    rw [held.named]
+  rcases List.mem_append.mp member with front | inClosed
+  · rcases List.mem_append.mp front with inInbox | inSlot
+    · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inInbox
+      exact ⟨held.cell, held.clean, .inl ⟨.inbox, Inbox.key held.now.sender held.now.target, Inbox.encode held.now,
+        (by decide : ObjectiveActivityCell.Role.inbox ≠ .record), rfl⟩⟩
+    · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inSlot
+      refine ⟨AnswerSlot.cell config.domain held.name, held.clean, .inl ⟨.slot, AnswerSlot.key held.now.name,
+        AnswerSlot.encode held.now, (by decide : ObjectiveActivityCell.Role.slot ≠ .record), ?_⟩⟩
+      unfold slotPost
+      rw [held.named]
+  · obtain ⟨closed, _, rfl⟩ := List.mem_map.mp inClosed
+    refine ⟨AnswerSlot.cell config.domain closed.name, closed.clean, ?_⟩
+    unfold ClosedSlot.post
+    cases decided : closed.decided with
+    | none => exact .inr rfl
+    | some slot =>
+      refine .inl ⟨.slot, AnswerSlot.key slot.name, AnswerSlot.encode slot,
+        (by decide : ObjectiveActivityCell.Role.slot ≠ .record), ?_⟩
+      simp only [slotPost]
+      rw [closed.named slot decided]
 
 /-- **Every inbox the mail posts is a lawful change of what its cell held**
 (condition (b) of OB8, for the mail): the cell was read in this turn, held
@@ -1215,12 +1771,13 @@ def Journal.guards {rootBytes : Bytes → Digest} (journal : Journal) (config : 
 def InvokeRequest.authority (request : InvokeRequest) : Authority := ⟨some request.subject, none⟩
 
 /-- An invocation's Book batch: register the purses of inboxes its mail opens,
-pay the envelope's public price, escrow every send's postage in its queue's purse. -/
+pay the envelope's public price, escrow every send's postage in its queue's purse, and
+return the escrow its controls release (`refundTransfers`, out of the purses holding it). -/
 def invokeBatch {rootBytes : Bytes → Digest} {snapshot : Snapshot rootBytes} (config : Config) (book : Book)
     (request : InvokeRequest) (mail : Mail config snapshot) : Batch :=
   ⟨mail.registrations book,
     .fee request.account config.collector config.asset (config.tariff.workOf request.envelope) ::
-      creditTransfers config request.account mail.credits, []⟩
+      (creditTransfers config request.account mail.credits ++ refundTransfers config mail.refunds), []⟩
 
 /-- An admitted invocation: the call tree ran to the root's return within the
 envelope, every frame write passed its object's law, its sends are queued (each
@@ -1239,8 +1796,12 @@ structure Invocation {rootBytes : Bytes → Digest} (config : Config) (snapshot 
   postageCovered : journal.outbox ≠ [] → config.covers request.postage = true
   /-- What the call tree commits on a draining object is migratable. -/
   drainedOk : journal.drained = true
+  /-- The mail of the turn's sends. -/
+  sent : Mail config snapshot
+  sentExact : postMail config snapshot request.postage request.account Mail.empty journal.outbox = .ok sent
+  /-- That mail after the turn's controls. -/
   mail : Mail config snapshot
-  mailExact : postMail config snapshot request.postage request.account Mail.empty journal.outbox = .ok mail
+  mailExact : postControls config snapshot height sent journal.controls = .ok mail
   book : BookCell
   bookExact : loadBook config snapshot = .ok book
   posted : Postings book
@@ -1258,7 +1819,10 @@ def invoke {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
     | .ok (result, journal, left) =>
       if postageCovered : journal.outbox ≠ [] → config.covers request.postage = true then
       if drainedOk : journal.drained = true then
-      match mailExact : postMail config snapshot request.postage request.account Mail.empty journal.outbox with
+      match sentExact : postMail config snapshot request.postage request.account Mail.empty journal.outbox with
+      | .error reason => .error reason
+      | .ok sent =>
+      match mailExact : postControls config snapshot height sent journal.controls with
       | .error reason => .error reason
       | .ok mail =>
       match bookExact : loadBook config snapshot with
@@ -1273,8 +1837,8 @@ def invoke {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
             split at postedExact
             · cases postedExact; rfl
             · cases postedExact
-          .ok ⟨covered, result, journal, left, execExact, postageCovered, drainedOk, mail, mailExact, book, bookExact,
-            posted, batchExact, _, rfl⟩
+          .ok ⟨covered, result, journal, left, execExact, postageCovered, drainedOk, sent, sentExact, mail, mailExact,
+            book, bookExact, posted, batchExact, _, rfl⟩
       else .error (.drainConflict request.object.value)
       else .error (.kernel (.uncovered request.postage))
   else .error (.kernel (.uncovered request.envelope))
@@ -1304,7 +1868,7 @@ theorem Invocation.sends_deliverable {rootBytes : Bytes → Digest} {config : Co
     ∀ out ∈ invoked.journal.outbox, ∀ target, out.destination = .object target →
       ∃ d : Deliverable config snapshot target (messageOf config request.postage request.account out),
         deliverable config snapshot target (messageOf config request.postage request.account out) = .ok d :=
-  postMail_deliverable invoked.mailExact
+  postMail_deliverable invoked.sentExact
 
 /-! ## T2: the re-entry guard -/
 
@@ -1630,6 +2194,22 @@ theorem exec_invariant {rootBytes : Bytes → Digest} (config : Config) (snapsho
                   intro c member
                   simp only [Task.below, List.tail_cons] at member
                   exact kept2 c (by simpa [Task.below] using member)
+            · -- a control: only the controls grow
+              rename_i kind slot _
+              split at ran
+              · cases ran
+              · split at ran
+                · cases ran
+                · rename_i next _
+                  obtain ⟨read2, kept2, ⟨new2, writes2, fresh2⟩, ⟨frames2, framesEq2, nodup2⟩⟩ :=
+                    ih _ _ _ _ _ _ _ ran distinct (by
+                      intro c _ _ head
+                      simp only [List.head?_cons, Option.some.injEq] at head
+                      subst head; exact viewed) read
+                  refine ⟨read2, ?_, ⟨new2, writes2, fresh2⟩, ⟨frames2, framesEq2, nodup2⟩⟩
+                  intro c member
+                  simp only [Task.below, List.tail_cons] at member
+                  exact kept2 c (by simpa [Task.below] using member)
         · -- finished
           split at ran
           · cases ran
@@ -1755,8 +2335,9 @@ theorem Invocation.posts_shape {rootBytes : Bytes → Digest} {config : Config} 
     ∀ post ∈ invoked.posts, post = invoked.posted.write config snapshot ∨
       (∃ object current state, readState config snapshot object = .ok current ∧
         post = postAt snapshot (stateCell config.domain object) (stateImage object state)) ∨
-      ∃ cell role key body, role ≠ .record ∧ bodyOf .package (snapshot.canonicalBytes cell) = none ∧
-        post = postAt snapshot cell (image role key body) := by
+      ∃ cell, bodyOf .package (snapshot.canonicalBytes cell) = none ∧
+        ((∃ role key body, role ≠ .record ∧ post = postAt snapshot cell (image role key body)) ∨
+          post = postAt snapshot cell retiredImage) := by
   obtain ⟨read, _⟩ :=
     exec_invariant config snapshot height request.authority (invokeTransaction request) _ [] _ _ _ _ _ _ invoked.execExact (by simp)
       (by intro _ _ h; cases h) (by intro _ h; cases h)
@@ -2105,6 +2686,16 @@ theorem exec_delegations {rootBytes : Bytes → Digest} (config : Config) (snaps
                     have same : ctx = c := by simpa using head
                     subst same; exact mine)
                   exact step
+            · -- a control: only the controls grow
+              split at ran
+              · cases ran
+              · split at ran
+                · cases ran
+                · have step := ih _ _ _ _ _ _ _ ran held (by
+                    intro c _ _ head
+                    have same : ctx = c := by simpa using head
+                    subst same; exact mine)
+                  exact step
         · -- finished
           split at ran
           · cases ran
@@ -2186,5 +2777,12 @@ theorem invocation_delegated_authority {rootBytes : Bytes → Digest} {config : 
 #assert_axioms frameAuthority_spec
 #assert_axioms exec_delegations
 #assert_axioms invocation_delegated_authority
+#assert_axioms controlInbox_spec
+#assert_axioms Mail.control_cases
+#assert_axioms controlSlot_held_name
+#assert_axioms cancelRefunds_escrow
+#assert_axioms Mail.control_cancel_refunds
+#assert_axioms controlSlot_held_delivery
+#assert_axioms Mail.control_cancel_withdraws
 
 end Minidregg.Kernel.ObjectiveCall

@@ -111,10 +111,12 @@ row_call() {
   return $rc
 }
 
-# Asynchronous `send` with inboxes (OB8, Kernel/Inbox + ObjectiveSend): S1-S9 on a fresh native world, S8-S9
+# Asynchronous `send` with inboxes (OB8, Kernel/Inbox + ObjectiveSend): S1-S13 on a fresh native world, S8-S9
 # the row-F interface check (a send to a sending method refused `notDeliverable` at the send; a pipelined one
-# refunded at the RESOLVED target). Plants (vault-open, dir-empty, roomy-postage, relay-deposit) via
-# JOURNEY_PLANT_SEND, as row_call.
+# refunded at the RESOLVED target), S10-S13 row F's sender controls (cancel-if-queued refunds exactly, a cancel
+# after the delivery is a no-op, stop-waiting keeps the message and retires the slot, only the sender controls).
+# Plants (vault-open, dir-empty, roomy-postage, relay-deposit, cancel-late, cancel-early, stop-cancels,
+# sender-controls) via JOURNEY_PLANT_SEND, as row_call.
 row_send() {
   local d=$SRC/native/resource-client/objective-send-native-journey.py
   [ -f "$d" ] || return 99

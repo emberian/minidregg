@@ -3,7 +3,8 @@
 `ObjectiveCall.exec` runs a frame as the program's OWN machine: `runCounted config.limits`
 (`runCounted_outcome`: the machine's `runBounded`) on the frame's state, and at a yield whose
 Plan extracts it resumes the RAW yielded state (no checkpoint, no settling, no collection) with
-`returnedData result` (after a call) or `queuedData id` (after a send). So a frame's states are
+`returnedData result` (after a call), `queuedData id` (after a send) or `ackedData slot` (after a
+`stop`/`cancel`). So a frame's states are
 the reference's own up to the identity chain, and what it commits is the reference's:
 
 * `FrameRun`: the frame's own loop from the method's initial state, as the responses it was
@@ -13,7 +14,7 @@ the reference's own up to the identity chain, and what it commits is the referen
   `vis`, a completion `ret`, a divergence `blackhole`, a refusal `refused`);
 * `exec_run_reference`, `exec_enter_reference`: a frame (or a call) that returns `result`
   ended in a completion `out` that is the reference node `ret out` of the method's initial
-  state along the responses it was resumed with, each a `returnedData` or a `queuedData`, and
+  state along the responses it was resumed with, each a `returnedData`, `queuedData` or `ackedData`, and
   `decodeReturn out` is `(result, write)`;
 * `runMessage_reference`, `messageDelivery_reference`: a delivered inbox message
   (`ObjectiveSend.deliverMessage`) runs no activity machine: it runs a call tree
@@ -98,12 +99,13 @@ theorem FrameRun.vis {limits : Limits} {budget : Budget} {start : State} {respon
 
 /-- The responses a frame is resumed with. -/
 def FrameResponse (response : Term) : Prop :=
-  (∃ result, response = (returnedData result).term) ∨ ∃ id, response = (queuedData id).term
+  (∃ result, response = (returnedData result).term) ∨ (∃ id, response = (queuedData id).term) ∨
+    ∃ slot, response = (ackedData slot).term
 
 /-- **A frame that returns is the reference's return.** If `exec` runs the frame at a state
 of its own loop from `start` and returns `result`, the frame's run completed with `out`,
 which is the reference node `ret out` along the responses so far and the further responses
-it was resumed with (each a `returnedData` or a `queuedData`), and `out` decodes to
+it was resumed with (each a `returnedData`, `queuedData` or `ackedData`), and `out` decodes to
 `(result, write)`. -/
 theorem exec_run_reference {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {authority : Authority} {turn : TransactionId} {ctx : Ctx} {rest : List Ctx} {start : State} :
@@ -162,7 +164,22 @@ theorem exec_run_reference {rootBytes : Bytes → Digest} {config : Config} {sna
                 decodedOut⟩
               · intro r mem
                 rcases List.mem_cons.mp mem with here | there
-                · exact .inr ⟨_, here⟩
+                · exact .inr (.inl ⟨_, here⟩)
+                · exact each r there
+              · rw [← observed, List.append_assoc, List.singleton_append]
+        · rename_i kind slot decoded
+          try dsimp only at ran
+          split at ran
+          · cases ran
+          · split at ran
+            · cases ran
+            · rename_i next resumed
+              obtain ⟨more, out, write, each, observed, decodedOut⟩ :=
+                ih (FrameRun.resumed run counted found resumed) ran
+              refine ⟨(ackedData slot).term :: more, out, write, ?_, ?_, decodedOut⟩
+              · intro r mem
+                rcases List.mem_cons.mp mem with here | there
+                · exact .inr (.inr ⟨_, here⟩)
                 · exact each r there
               · rw [← observed, List.append_assoc, List.singleton_append]
     · rename_i value finished left1 counted

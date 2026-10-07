@@ -976,17 +976,33 @@ theorem stateful_preserves {rootBytes : Bytes → Digest} {config : Config} {sna
 theorem mail_kinded {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     (mail : ObjectiveCall.Mail config snapshot) : ∀ post ∈ mail.posts, Silent snapshot post := by
   intro post member
-  rcases List.mem_append.mp member with inInbox | inSlot
-  · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inInbox
-    exact ⟨.inbox, by decide, by decide, by decide, by decide, readInbox_role held.readExact,
-      payloadOf_image_role _ _ _⟩
-  · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inSlot
-    refine ⟨.slot, by decide, by decide, by decide, by decide, ?_, ?_⟩
-    · simp only [slotPost, postAt]
-      rw [held.named]
-      exact held.slotted
-    · simp only [slotPost, postAt]
-      exact payloadOf_image_role _ _ _
+  rcases List.mem_append.mp member with front | inClosed
+  · rcases List.mem_append.mp front with inInbox | inSlot
+    · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inInbox
+      exact ⟨.inbox, by decide, by decide, by decide, by decide, readInbox_role held.readExact,
+        payloadOf_image_role _ _ _⟩
+    · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inSlot
+      refine ⟨.slot, by decide, by decide, by decide, by decide, ?_, ?_⟩
+      · simp only [slotPost, postAt]
+        rw [held.named]
+        exact held.slotted
+      · simp only [slotPost, postAt]
+        exact payloadOf_image_role _ _ _
+  · obtain ⟨closed, _, rfl⟩ := List.mem_map.mp inClosed
+    unfold ObjectiveCall.ClosedSlot.post
+    cases decided : closed.decided with
+    | none =>
+      refine ⟨.slot, by decide, by decide, by decide, by decide, closed.slotted, ?_⟩
+      intro p found
+      rw [show (slotRetire config snapshot closed.name).bytes = retiredImage from rfl, payloadOf_retired] at found
+      cases found
+    | some slot =>
+      refine ⟨.slot, by decide, by decide, by decide, by decide, ?_, ?_⟩
+      · simp only [slotPost, postAt]
+        rw [closed.named slot decided]
+        exact closed.slotted
+      · simp only [slotPost, postAt]
+        exact payloadOf_image_role _ _ _
 
 /-- The state posts of a call tree whose every dirty entry is drained and was read. -/
 theorem journal_posts_ok {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -1075,6 +1091,17 @@ theorem MessageDelivery.upgradable {rootBytes : Bytes → Digest} {config : Conf
   · simp only [List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at last
     rcases last with isSlot | isBook
     · subst isSlot
+      unfold ObjectiveSend.replyPost
+      split
+      swap
+      · refine .inl ⟨.slot, by decide, by decide, by decide, by decide, ?_, ?_⟩
+        · simp only [slotRetire, postAt]
+          rw [delivered.slotNamed]
+          exact readSlot_role delivered.slotExact
+        · intro p found
+          rw [show (slotRetire config snapshot delivered.slot.name).bytes = retiredImage from rfl,
+            payloadOf_retired] at found
+          cases found
       obtain ⟨_, _, _, decided⟩ := AnswerSlot.decideDelivery_single delivered.decidedExact
       have named : delivered.decided.name = delivered.message.id := by rw [decided]; exact delivered.slotNamed
       refine .inl ⟨.slot, by decide, by decide, by decide, by decide, ?_, ?_⟩

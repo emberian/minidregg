@@ -44,6 +44,12 @@ record Slot:
   slot: Nat
 sum Queued:
   queued: Slot
+sum PlanC:
+  cancel: Slot
+sum PlanT:
+  stop: Slot
+sum Acked:
+  acked: Slot
 record Post:
   target: Nat
   amount: Nat
@@ -107,3 +113,15 @@ def relayVia(view: View, r: Relay) -> Activity<PlanS, Queued, Return>:
     case queued(first):
       match perform(PlanS.send({to: To.slot(first.slot), method: r.method, args: r.amount})):
         case queued(second): {result: first.slot, write: {total: EditNat.keep()}}
+# Row F, the sender's two controls over a message it sent (by its id = its reply slot):
+# `cancel` withdraws it while it is still queued (refunding it and the sends pipelined on
+# its slot; its slot decided `cancelled`), and is a no-op once it was delivered; `stop`
+# only stops waiting (the pipelined sends are refunded, the message is still delivered,
+# and its delivery retires the slot; a decided slot is retired at once). Both are
+# answered `acked` at the yield and take effect when the turn commits.
+def cancelOf(view: View, n: Nat) -> Activity<PlanC, Acked, Return>:
+  match perform(PlanC.cancel({slot: n})):
+    case acked(a): {result: a.slot, write: {total: EditNat.keep()}}
+def stopOf(view: View, n: Nat) -> Activity<PlanT, Acked, Return>:
+  match perform(PlanT.stop({slot: n})):
+    case acked(a): {result: a.slot, write: {total: EditNat.keep()}}

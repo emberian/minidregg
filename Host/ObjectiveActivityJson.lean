@@ -368,6 +368,7 @@ def decisionJson : AnswerSlot.Decision → Json
   | .unknown => .mkObj [("kind", "unknown")]
   | .broken reason => .mkObj [("kind", "broken"), ("reason", toJson reason)]
   | .expired => .mkObj [("kind", "expired")]
+  | .cancelled => .mkObj [("kind", "cancelled")]
 
 def messageJson (message : Inbox.Message) : Json :=
   .mkObj [("id", decimal message.id.value), ("sender", decimal message.sender), ("method", toJson message.method),
@@ -383,7 +384,7 @@ def slotJson (slot : AnswerSlot.Slot) : Json :=
     ("phase", match slot.phase with
       | .opened => "open"
       | .decided decision height => .mkObj [("decision", decisionJson decision), ("height", decimal height)]),
-    ("queued", Json.arr (slot.queued.map messageJson).toArray)]
+    ("queued", Json.arr (slot.queued.map messageJson).toArray), ("watched", toJson slot.watched)]
 
 def inboxJson (inbox : Inbox.Inbox) : Json :=
   .mkObj [("sender", decimal inbox.sender), ("target", decimal inbox.target), ("head", decimal inbox.head),
