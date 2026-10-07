@@ -385,7 +385,7 @@ theorem Step.domainsHold {rootBytes : Bytes → Digest} {config : Config} {befor
     rcases execute_no_partial_data_commit schedule _
       (ActivitySeatEnd.AdmittedTurn.finalIntent sealing posts extra turn) with same | installed
     · rw [same]; exact holds
-    · obtain ⟨_, _, _, judged, _⟩ := ActivitySeatEnd.finish_finalize final
+    · obtain ⟨_, _, _, _, judged, _, _⟩ := ActivitySeatEnd.finish_finalize final
       rw [installed, install_payloads _ (finalIntent_writes sealing)]
       exact judged_preserves judged holds
   | inert intent posts writes inert schedule =>

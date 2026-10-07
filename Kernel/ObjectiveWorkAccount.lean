@@ -2,7 +2,7 @@
 
 Every stage a turn costs the validator is measured in a declared unit, declared in the
 turn's envelope (`ObjectiveInvocationClaim.Capacity`) and priced by the one tariff
-(`ObjectiveTariff.Tariff.workOf`, edition 3):
+(`ObjectiveTariff.Tariff.workOf`, edition 4):
 
 | stage        | unit                                          | declared field  |
 |--------------|-----------------------------------------------|-----------------|
@@ -12,6 +12,7 @@ turn's envelope (`ObjectiveInvocationClaim.Capacity`) and priced by the one tari
 | `execution`  | source ticks of the run                       | `sourceTicks`   |
 | `extraction` | forcing ticks of the Plan/result extraction   | `extractTicks`  |
 | `output`     | bytes of the extracted output                 | `outputBytes`   |
+| `domain`     | reads of the turn end's invariant-domain judgment (`ObjectiveDomain.judgeDomains`) | `domainWork` |
 
 Before this module the front end ran on every turn (`ObjectiveActivity.loadProgram`) priced by
 nothing: a 1 KB package and a 200 KB package cost a birth the same. The two front-end stages
@@ -21,7 +22,9 @@ stored artifact's typed core (which an admitted replay must generate byte for by
 cover it is refused by name (`ObjectiveActivity.Refusal.workUncovered`) before the replay runs.
 The remaining stages are bounded by the budgets the kernel hands the checker, the machine and
 the extractor, each compared with the envelope before anything runs (`Config.covers`,
-`extractUncovered`). -/
+`extractUncovered`). The domain judgment runs last, at the turn's end, and its units are
+compared with the charged envelope's `domainWork` there (`ActivitySeatEnd.finish`,
+`domainUncovered`, `finish_domain_covered`). -/
 import Kernel.ObjectiveTariff
 import Compiler.ObjectiveSourcePackage
 import Compiler.ObjectiveBendSourceArtifact
@@ -39,6 +42,7 @@ inductive Stage where
   | execution
   | extraction
   | output
+  | domain
   deriving DecidableEq, Repr
 
 /-- What an envelope declares for each stage. -/
@@ -49,6 +53,7 @@ def declared (envelope : Capacity) : Stage → Nat
   | .execution => envelope.sourceTicks
   | .extraction => envelope.extractTicks
   | .output => envelope.outputBytes
+  | .domain => envelope.domainWork
 
 /-- The front end's input: every module source the replay decodes and parses
 (`ObjectiveBendPublication.replayModule`). -/
@@ -107,7 +112,8 @@ theorem workOf_stage_step (t : ObjectiveTariff.Tariff) (c : Capacity) :
     t.workOf { c with typeFuel := c.typeFuel + 1 } = t.workOf c + t.typeFuel ∧
     t.workOf { c with sourceTicks := c.sourceTicks + 1 } = t.workOf c + t.sourceTicks ∧
     t.workOf { c with extractTicks := c.extractTicks + 1 } = t.workOf c + t.extractTicks ∧
-    t.workOf { c with outputBytes := c.outputBytes + 1 } = t.workOf c + t.outputBytes := by
+    t.workOf { c with outputBytes := c.outputBytes + 1 } = t.workOf c + t.outputBytes ∧
+    t.workOf { c with domainWork := c.domainWork + 1 } = t.workOf c + t.domainWork := by
   simp only [ObjectiveTariff.Tariff.workOf, Nat.mul_add, Nat.mul_one]
   omega
 
@@ -119,6 +125,7 @@ def rate (t : ObjectiveTariff.Tariff) : Stage → Nat
   | .execution => t.sourceTicks
   | .extraction => t.extractTicks
   | .output => t.outputBytes
+  | .domain => t.domainWork
 
 /-- The envelope declaring one unit of `stage` and nothing else. -/
 def unitOf : Stage → Capacity
@@ -128,6 +135,7 @@ def unitOf : Stage → Capacity
   | .execution => { ObjectiveTariff.zeroCapacity with sourceTicks := 1 }
   | .extraction => { ObjectiveTariff.zeroCapacity with extractTicks := 1 }
   | .output => { ObjectiveTariff.zeroCapacity with outputBytes := 1 }
+  | .domain => { ObjectiveTariff.zeroCapacity with domainWork := 1 }
 
 /-- One declared unit of any stage costs exactly the base plus that stage's rate. -/
 theorem workOf_unitOf (t : ObjectiveTariff.Tariff) (stage : Stage) :
@@ -136,7 +144,7 @@ theorem workOf_unitOf (t : ObjectiveTariff.Tariff) (stage : Stage) :
 
 /-- An inhabitant: a tariff with a positive rate on every stage prices each stage's unit above
 the empty envelope (the premise-free statement above is not vacuous). -/
-def Tariff.everyStage : ObjectiveTariff.Tariff := ⟨ObjectiveTariff.tariffVersion,1,1,1,0,0,0,1,1,0,1,1⟩
+def Tariff.everyStage : ObjectiveTariff.Tariff := ⟨ObjectiveTariff.tariffVersion,1,1,1,0,0,0,1,1,0,1,1,1⟩
 
 theorem workOf_prices_every_stage_unit (stage : Stage) :
     Tariff.everyStage.workOf ObjectiveTariff.zeroCapacity < Tariff.everyStage.workOf (unitOf stage) := by

@@ -789,6 +789,9 @@ inductive Refusal where
   /-- A turn writes a domain's cell, and a member's record as the turn leaves it does not name
   the domain. -/
   | domainUnindexed (domain : Digest) (member : Nat)
+  /-- The turn end's domain judgment needs `units` of domain work (`Capacity.domainWork`) and the
+  envelope the turn is charged for declares only `allowance`. -/
+  | domainUncovered (units allowance : Nat)
   deriving Repr
 
 /-! ## Typing data against declared types

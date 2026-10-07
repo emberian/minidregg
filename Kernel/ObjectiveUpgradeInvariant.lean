@@ -3159,23 +3159,29 @@ theorem Registration.upgradable {rootBytes : Bytes → Digest} {config : Config}
   /- Every post is the domain post or a member's record post, each kinded. -/
   have shape : ∀ p ∈ registered.posts,
       (p = postAt snapshot (domainCell config.domain request.id) (domainImage request.id request.domain)) ∨
-      ∃ pair ∈ request.members.zip registered.records,
-        p = postAt snapshot (objectCell config.domain pair.1) (objectImage pair.1 (joined pair.2 request.id)) := by
+      (∃ pair ∈ request.members.zip registered.records,
+        p = postAt snapshot (objectCell config.domain pair.1) (objectImage pair.1 (joined pair.2 request.id))) ∨
+      p = registered.posted.write config snapshot := by
     rw [registered.postsExact]
     intro p member
     rcases List.mem_cons.mp member with head | tail
     · exact .inl head
+    rcases List.mem_append.mp tail with tail | isBook
     · obtain ⟨pair, inZip, rfl⟩ := List.mem_map.mp tail
-      exact .inr ⟨pair, inZip, rfl⟩
+      exact .inr (.inl ⟨pair, inZip, rfl⟩)
+    · exact .inr (.inr (List.mem_singleton.mp isBook))
+  have bookSilent := book_silent registered.bookExact registered.posted
   have kinded : ∀ p ∈ registered.posts, ∃ role, role ≠ .record ∧ role ≠ .package ∧ role ≠ .state ∧
       Kinded snapshot role p := by
     intro p member
-    rcases shape p member with rfl | ⟨pair, inZip, rfl⟩
+    rcases shape p member with rfl | ⟨pair, inZip, rfl⟩ | rfl
     · exact ⟨.domain, by decide, by decide, by decide,
         ⟨fun q found => by simp [postAt, fresh] at found,
           payloadOf_image_role _ _ _⟩⟩
     · exact ⟨.object, by decide, by decide, by decide,
         ⟨(readObject_role (memberRead pair inZip)).1, payloadOf_image_role _ _ _⟩⟩
+    · obtain ⟨role, r, _, st, pk, k⟩ := bookSilent
+      exact ⟨role, r, pk, st, k⟩
   have awaiting := fun cell => awaiting_after_kinded config snapshot registered.posts cell (fun p member _ => by
     obtain ⟨role, r, _, _, k⟩ := kinded p member; exact ⟨role, r, k⟩)
   have packages := fun cell => packageView_after_kinded snapshot registered.posts cell (fun p member _ => by
@@ -3194,7 +3200,13 @@ theorem Registration.upgradable {rootBytes : Bytes → Digest} {config : Config}
       ⟨kept, _⟩ | ⟨p, member, at_, after⟩
     · exact .inl (by rw [kept])
     · rw [after]
-      rcases shape p member with rfl | ⟨pair, inZip, rfl⟩
+      rcases shape p member with rfl | ⟨pair, inZip, rfl⟩ | rfl
+      rotate_right
+      · left
+        unfold payloads
+        rw [Postings.write_payload, ← at_,
+          show (registered.posted.write config snapshot).cell = config.bookCell from rfl,
+          loadBook_payload registered.bookExact]
       · left
         simp only [postAt, domainImage] at at_ ⊢
         unfold payloads
@@ -3273,7 +3285,7 @@ theorem Step.upgradable {rootBytes : Bytes → Digest} {config : Config} {before
     rcases execute_no_partial_data_commit schedule _
       (ActivitySeatEnd.AdmittedTurn.finalIntent sealing posts extra turn) with same | installed
     · rw [same]; exact holds
-    · obtain ⟨_, _, final, _, _⟩ := ActivitySeatEnd.finish_finalize final
+    · obtain ⟨_, _, _, final, _, _, _⟩ := ActivitySeatEnd.finish_finalize final
       rw [installed, install_payloads _ (finalIntent_writes sealing)]
       exact upgradable_transfer (fun cell guarded => (finalize_agree book turn final cell guarded).symm)
         (AdmittedTurn.upgradable turn holds)

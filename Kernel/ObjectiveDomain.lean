@@ -659,8 +659,13 @@ structure RegisterRequest where
   subject : SubjectId
   members : List CellId
   law : Minidregg.Pred.Pred
-  /-- The Book account that funds the domain cell's retention; never authority. -/
+  /-- The Book account that funds the domain cell's retention and pays the registration's fee;
+  never authority. -/
   payer : AccountId
+  /-- The declared envelope of the registration turn: its public price (`Tariff.workOf`) is the
+  fee `payer` pays (`registerBatch`), and its `domainWork` is the allowance the turn end's
+  judgment of the new domain must fit (`ActivitySeatEnd.AdmittedTurn.domainAllowance`). -/
+  envelope : Capacity
   nonce : Nat
 
 def RegisterRequest.id (request : RegisterRequest) : Digest := domainId request.members request.law
@@ -704,6 +709,10 @@ def joined (record : ObjectRecord) (id : Digest) : ObjectRecord := { record with
 
 def RegisterRequest.domain (request : RegisterRequest) : Domain := ⟨request.members, request.law, request.payer⟩
 
+/-- The registration's fee: the public price of its declared envelope, from the payer's account. -/
+def registerBatch (config : Config) (request : RegisterRequest) : Batch :=
+  ⟨[], [.fee request.payer config.collector config.asset (config.tariff.workOf request.envelope)], []⟩
+
 structure Registration {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : RegisterRequest) where
   private mk ::
@@ -716,10 +725,15 @@ structure Registration {rootBytes : Bytes → Digest} (config : Config) (snapsho
   statesExact : request.members.mapM (readState config snapshot) = .ok states
   /-- The law holds on the members' current states. -/
   judged : judgeJoint request.law request.id states = .ok ()
+  book : BookCell
+  bookExact : loadBook config snapshot = .ok book
+  posted : Postings book
+  postedBatch : posted.batch = registerBatch config request
   posts : List Post
   postsExact : posts = postAt snapshot (domainCell config.domain request.id) (domainImage request.id request.domain) ::
-    (request.members.zip records).map fun (member, record) =>
-      postAt snapshot (objectCell config.domain member) (objectImage member (joined record request.id))
+    ((request.members.zip records).map (fun (member, record) =>
+      postAt snapshot (objectCell config.domain member) (objectImage member (joined record request.id))) ++
+      [posted.write config snapshot])
 
 def register {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (height : Nat)
     (request : RegisterRequest) : Except Refusal (Registration config snapshot height request) :=
@@ -739,7 +753,14 @@ def register {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsh
     | .ok states =>
     match judged : judgeJoint request.law request.id states with
     | .error reason => .error reason
-    | .ok () => .ok ⟨shape, absent, records, recordsExact, consented, states, statesExact, judged, _, rfl⟩
+    | .ok () =>
+    match bookExact : loadBook config snapshot with
+    | .error reason => .error reason
+    | .ok book =>
+    match postedExact : postings book (registerBatch config request) with
+    | .error reason => .error reason
+    | .ok posted => .ok ⟨shape, absent, records, recordsExact, consented, states, statesExact, judged, book,
+        bookExact, posted, postings_batch postedExact, _, rfl⟩
   else .error (.domainShape "members must be 1..16 distinct objects")
 
 /-- A registration reads every member's state: it conflicts with a concurrent write of any. -/
