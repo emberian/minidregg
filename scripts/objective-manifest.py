@@ -40,6 +40,10 @@ usage:
   objective-manifest.py pin    --pins DIR --ledger FILE RUN...   ratchet, then write the pins
   objective-manifest.py draft  --pins DIR --ledger FILE RUN...   print ledger lines (reason TODO,
                                                                  which the ledger refuses) for review
+  objective-manifest.py draft --attribute FROM..TO --out LINES --review REVIEW ... the same lines with
+      commit and reason filled from the commits of FROM..TO that touched each change's cause module
+      (UNATTRIBUTED + TODO where none did), plus a review file: every removed and restated row by
+      name with its commit, redefined rows grouped by root. Appending LINES is the reviewer's act.
   objective-manifest.py expect --pins DIR --ledger FILE RUN --changed KEY=KIND[:VIA]... [--plant KEY] [--against RUN0]
       a scratch run (a copy of one module, mutated): every public row it shows must match its pin
       except the named ones, which must classify as KIND (and, for `redefined`, name VIA among the
@@ -476,6 +480,122 @@ def cmd_selftest(pins, fresh, admitted):
     return 1 if failures else 0
 
 
+def git(*args):
+    import subprocess
+    r = subprocess.run(["git", *args], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise SystemExit(f"attribute: git {' '.join(args)}: {r.stderr.strip()}")
+    return r.stdout
+
+
+def cmd_attribute(a, pins, changes):
+    """Ledger lines for every unadmitted change, each attributed to the commits of RANGE that touched
+    the source module of its cause: the row's own module for removed/restated/axioms; for redefined,
+    the modules of the pinned rows its closure reaches whose own content changed (`via`), else its own.
+    A change no commit of the range explains keeps commit UNATTRIBUTED and reason TODO, which the
+    ledger refuses: a human must place it. Writes the lines to --out and a review to --review."""
+    rng = a.attribute
+    if ".." not in rng:
+        raise SystemExit("attribute: expected FROM..TO")
+    order = git("rev-list", "--reverse", rng).split()
+    pos = {c: i for i, c in enumerate(order)}
+    subject = {}
+    touch = {}
+
+    def note(cs):
+        for c in cs:
+            if c not in subject:
+                subject[c] = git("log", "-1", "--format=%s", c).strip()
+        return sorted(cs, key=lambda c: pos.get(c, -1))
+
+    def commits(mod):
+        if mod not in touch:
+            path = mod.replace(".", "/") + ".lean"
+            touch[mod] = note(git("log", "--format=%H", rng, "--", path).split())
+        return touch[mod]
+
+    narrow = {}
+
+    def commits_for(name, mod):
+        """The commits of RANGE touching `mod`, narrowed to those whose diff of it has a line naming
+        `name`'s last component, when that narrowing is non-empty."""
+        if (name, mod) not in narrow:
+            cs = commits(mod)
+            short = re.escape(name.replace("private ", "").split(" @")[0].rsplit(".", 1)[-1])
+            hit = git("log", "--format=%H", f"-G\\b{short}\\b", rng, "--", mod.replace(".", "/") + ".lean").split() if cs else []
+            narrow[(name, mod)] = note(hit) if hit else cs
+        return narrow[(name, mod)]
+
+    module_of_const = {k: r.module for k, r in pins.items()}
+
+    def const_module(n):
+        m = re.match(r"_private\.(.*?)\.0\.", n)
+        if m:
+            return m.group(1)
+        parts = n.split(".")
+        for i in range(len(parts), 0, -1):
+            pre = ".".join(parts[:i])
+            if pre in module_of_const:
+                return module_of_const[pre]
+        return None
+
+    def candidates(run, f):
+        """Touched modules of the row's closure: where a change outside the pinned rows can be."""
+        mods = {const_module(n) for n in run.reach(f.name) if run.consts[n][0]}
+        return sorted(m for m in mods if m and commits(m))
+
+    lines, review_rows, by_root = [], [], {}
+    for kind, k, old, new, f, run, ok in changes:
+        if ok:
+            continue
+        own = (f.module if f is not None else pins[k].module)
+        roots = via(run, f, pins) if kind == "redefined" else []
+        causes = [(r, pins[r].module) for r in roots if r in pins] or [(k, own)]
+        mods = sorted({m for _, m in causes})
+        cs = sorted({c for r, m in causes for c in commits_for(r, m)}, key=lambda c: pos.get(c, -1))
+        if cs:
+            commit = "+".join(c[:8] for c in cs)
+            reason = (f"{kind}: {', '.join(mods)} changed by "
+                      + "; ".join(f"{c[:8]} {subject[c][:90]}" for c in cs) + f" (attributed by module, {rng})")
+        else:
+            # nothing in the range touched the row's module or a pinned root: the cause is a generated
+            # or private constant elsewhere in the closure. The commit field lists the candidates (the
+            # touched modules of its closure); the reason stays TODO, which the ledger refuses.
+            cand = candidates(run, f) if f is not None and kind == "redefined" else []
+            ccs = sorted({c for m in cand for c in commits(m)}, key=lambda c: pos.get(c, -1))
+            commit = "UNATTRIBUTED:" + ("+".join(c[:8] for c in ccs) or "none")
+            reason = "TODO"
+            mods = cand
+        lines.append("\t".join([k, old, new, kind, commit, reason]))
+        if kind == "redefined":
+            key = ", ".join(roots[:3]) + (" ..." if len(roots) > 3 else "") if roots else "(a generated or unpinned constant)"
+            if not roots and commit.startswith("UNATTRIBUTED"):
+                key = f"(outside the pins; closure candidates {', '.join(mods) or 'none'})"
+            g = by_root.setdefault(key, [0, set()])
+            g[0] += 1
+            g[1].update(cs)
+        else:
+            k_kind = pins[k].kind if k in pins else (f.kind if f else "?")
+            review_rows.append((kind, k_kind, k, commit))
+    with open(a.out, "w") as fh:
+        fh.write(f"# attributed by objective-manifest.py draft --attribute {rng}: {len(lines)} changes\n")
+        for x in lines:
+            fh.write(x + "\n")
+    with open(a.review, "w") as fh:
+        fh.write(f"# review for {rng}: every removed row, every restated/axioms row (theorems first), redefined rows grouped by root\n")
+        for kind in ("removed", "restated", "axioms"):
+            rows = sorted((r for r in review_rows if r[0] == kind), key=lambda r: (r[1] != "theorem", r[2]))
+            fh.write(f"## {kind}: {len(rows)}\n")
+            for _, kk, key, commit in rows:
+                fh.write(f"{kk}\t{key}\t{commit}\n")
+        fh.write(f"## redefined: {sum(g[0] for g in by_root.values())} rows, {len(by_root)} root groups\n")
+        for key, (n, cs) in sorted(by_root.items(), key=lambda x: -x[1][0]):
+            fh.write(f"{n}\t{key}\t{'+'.join(c[:8] for c in sorted(cs, key=lambda c: pos.get(c, -1))) or 'UNATTRIBUTED (reason TODO: place by hand)'}\n")
+    un = sum(1 for x in lines if "\tUNATTRIBUTED" in x)
+    print(f"attribute: {len(lines)} ledger lines -> {a.out} ({un} UNATTRIBUTED, refused until placed); review -> {a.review}")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("command", choices=["check", "pin", "draft", "expect", "selftest"])
@@ -486,6 +606,9 @@ def main():
     ap.add_argument("--plant")
     ap.add_argument("--against", help="expect: compare with this run's rows instead of the pins")
     ap.add_argument("--floor", type=int, default=1)
+    ap.add_argument("--attribute", metavar="FROM..TO", help="draft: attribute each change to the commits of FROM..TO")
+    ap.add_argument("--out", help="draft --attribute: write the ledger lines here")
+    ap.add_argument("--review", help="draft --attribute: write the review (removed, restated, redefined by root) here")
     ap.add_argument("--allow-downstream", action="store_true",
                     help="expect: other rows of the scratch module may be `redefined` (they reach the plant)")
     ap.add_argument("runs", nargs="+")
@@ -504,6 +627,8 @@ def main():
         return cmd_selftest(pins, fresh, admitted)
     changes = ratchet(pins, fresh, admitted)
     if a.command == "draft":
+        if a.attribute:
+            return cmd_attribute(a, pins, changes)
         for kind, k, old, new, f, run, ok in changes:
             if not ok:
                 if kind == "redefined":
