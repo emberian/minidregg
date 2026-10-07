@@ -26,18 +26,18 @@ changes).
                 creates each object, pinning Tally; a second creation of the same
                 object is a transaction conflict; a birth naming the other
                 published package is refused (pinMismatch).
-  ownership     subject 40 cannot birth on the sponsor's object, nor write its state
-                (notObjectHolder); an underfunded birth is refused.
+  ownership     subject 40 cannot birth on the sponsor's object (notObjectHolder); an underfunded birth is
+                refused. (There is no direct write of declared state: only an object's package writes it.)
   tally         born on the sponsor's object: the stranger cannot decide its slot
                 (notDecider), an ill-typed reply is refused, the decider replies,
                 two deliveries are prepared on one snapshot: the first commits, its
                 exact retry replays, the second conflicts, a third naming the spent
                 await conflicts, one naming the new await finds nothing decided.
   view          resume with view: the decider replies 7 and a delivery is prepared;
-                the owner then writes the object's state (99); the prepared
-                delivery is refused (the state moved under it), and a fresh
-                delivery resumes the tally with the reply AND the owner's state,
-                and the tally's delta lands on it (99 + 7 = 106, never 12).
+                a second tally of the same object then moves its state (5 + 93 = 98); the
+                prepared delivery is refused (the state moved under it), and a fresh
+                delivery resumes the tally with the reply AND the moved state,
+                and the tally's delta lands on it (98 + 7 = 105, never 12).
   two tallies   two activities on one object: the second birth cannot `set`
                 the existing state (blindWrite) and joins with `keep`; both
                 replies land whatever the order (3 + 4 = 7).
@@ -447,25 +447,25 @@ await2 = await_of(s2)['id']
 turn('deliver-undecided-refused', sponsor, dict(deliver, **{'await': await2}), 'refused', 'notYetDecided')
 
 # --- resume with view: a write under a moved state is refused; the next resume sees it ---
-turn('stranger-write-state-refused', second, {'kind': 'writeState',
-                                               'object': objects['tally-one']['object'],
-                                               'objectCapability': '4002', 'value': record(total=nat(100))},
-     'refused', 'notObjectHolder')
 slot2 = await_of(s2)['source']['slot']
 turn('resolve-before-write', second, {'kind': 'resolve', 'slot': slot2, 'answer': {'reply': record(amount=nat(7))}},
      'installed')
 turn('deliver-prepared-before-write', sponsor, dict(deliver, **{'await': await2}), 'prepared', prepare=True)
-turn('owner-write-state', sponsor, {'kind': 'writeState', 'object': objects['tally-one']['object'],
-                                    'objectCapability': objects['tally-one']['capability'],
-                                    'value': record(total=nat(99))},
-     'installed')
-w1 = state('tally-one', 'after-owner-write', tx1)
-check('owner-write-is-a-version', total_of(w1) == 99 and w1.get('stateVersion') == '3',
+# The state moves by ANOTHER activity of the same object (no direct write of declared state exists: only the
+# object's package writes it): a second tally joins tally-one, is answered 93 and delivered (5 + 93 = 98).
+txm = birth('birth-mover-joins', sponsor, 'tally-one', 20000, 'installed', init=variant('keep', record()))
+mv = state('tally-one', 'mover-born', txm)
+turn('mover-resolve', second, {'kind': 'resolve', 'slot': await_of(mv)['source']['slot'],
+                               'answer': {'reply': record(amount=nat(93))}}, 'installed')
+turn('mover-deliver', sponsor, {'kind': 'deliver', 'record': mv['recordCell'], 'await': await_of(mv)['id'],
+                                'account': '0', 'accountCapability': '0'}, 'installed')
+w1 = state('tally-one', 'after-mover', tx1)
+check('mover-write-is-a-version', total_of(w1) == 98 and w1.get('stateVersion') == '3',
       {'state': w1.get('state'), 'version': w1.get('stateVersion')})
 resubmit('stale-delivery-refused', attempts / 'deliver-prepared-before-write' / 'ingress.bin', 'refused')
 turn('deliver-with-view', sponsor, dict(deliver, **{'await': await2}), 'installed')
 s3 = state('tally-one', 'after-view', tx1)
-check('reply-lands-on-viewed-state', total_of(s3) == 106 and s3['record'].get('generation') == '2'
+check('reply-lands-on-viewed-state', total_of(s3) == 105 and s3['record'].get('generation') == '2'
       and s3.get('stateVersion') == '4',
       {'state': s3.get('state'), 'version': s3.get('stateVersion'), 'generation': s3['record'].get('generation')})
 

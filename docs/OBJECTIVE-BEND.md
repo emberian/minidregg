@@ -385,14 +385,15 @@ The kernel runs activities on objects. Detail, with every turn and theorem, is i
   `pin`, `schemaVersion`, `law`, upgrade policy, continuity, payer), installed by `create`.
   Its declared state is an `ObjectState {version, value}`. **Every declared-state write is
   judged by the object's law** over the old and new state and the request facts
-  (`admitWrite`; `Birth.write_judged`, `Delivery.write_judged`, `StateWrite.write_judged`).
+  (`admitWrite`; `Birth.write_judged`, `Delivery.write_judged`). A creation may carry the object's initial
+  state (`seed`), judged by the creator's law alone (`create_seed_judged`,
+  `create_seed_refused_names_clause`).
   The judged law is `ObjectRecord.effectiveLaw`: the kernel's package-pin clause
   (`ObjectRecord.pinClause`, `objectivePin` over the record's `pin`) first, then the creator's
   law; the clause is derived from the record, never stored, so no creator law omits it
-  (`create_installs_pin`, `pin_in_every_judged_law`). A direct `writeState` is made by no
-  package code and is refused at the pin on every created object
-  (`ordinary_write_to_object_refused`); a birth, a delivery, a call frame and a delivered
-  message are made under the pinned package and pass it (`Birth.write_passes_pin`,
+  (`create_installs_pin`, `pin_in_every_judged_law`). There is no direct write of declared
+  state: every write after creation is a birth, a delivery, a call frame or a delivered
+  message, made under the pinned package, and passes the pin (`Birth.write_passes_pin`,
   `Delivery.write_passes_pin`, `invocation_writes_pinned`, `MessageDelivery.writes_pinned`).
   A birth must run the pinned package (`birth_refuses_non_object`,
   `birth_refuses_other_pin`, `native_birth_on_pinned_object`). The kernel's cells sit at
@@ -440,8 +441,8 @@ The kernel runs activities on objects. Detail, with every turn and theorem, is i
   with an unextractable result commits `faulted` and returns the unused escrow; it never
   refuses the turn, so a faulty program cannot park its activity
   (`resumedSegment_never_refuses_program_fault`).
-- **Route.** Eleven turns (`publish`, `create`, `birth`, `resolve`, `deliver`, `exhaust`,
-  `abandon`, `topUp`, `writeState`, `invoke`, `deliverMessage`), each a signed native command
+- **Route.** Ten turns (`publish`, `create`, `birth`, `resolve`, `deliver`, `exhaust`,
+  `abandon`, `topUp`, `invoke`, `deliverMessage`), each a signed native command
   (`Kernel/ObjectiveActivityReceiver.lean`; Host operations 210-214; `mini activity`). The
   receiver writes only kernel cells and the Book (`intent_writes_activity_or_book`).
   **Integrated on scratch worlds**: journey rows `activity`

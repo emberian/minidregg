@@ -25,7 +25,7 @@ world/call/Calls.obend; an `invoke` turn calls one method of one object, and the
                 (no grant): refused `lawDenied` naming the vault, `deposit` and the clause. With a scoped grant
                 {vault, deposit, 1 use}: installs. With a spent grant (0 uses): refused `grantSpent`. The
                 stranger cannot invoke the sponsor's permit-all counter (`notObjectHolder`).
-  C7 facet      the gated counter's law admits only calls whose `request/caller` is relayA (or a direct write):
+  C7 facet      the gated counter's law admits only calls whose `request/caller` is relayA (or its creation seed, turn 4):
                 relayB.forward(gated) refused `lawDenied`; relayA.forward(gated) installs.
   C8 shape      a method whose Plan type admits `await` is refused `notCallable` before it runs; an unknown
                 method `notCallable`; a call on a cell with no record `notAnObject`; an envelope too small for
@@ -69,15 +69,13 @@ try:
 
     VAULT = PERMIT_ALL if 'vault-permit-all' in plants else any_of(eq('request/subject', SPONSOR))
     GATED = PERMIT_ALL if 'gate-open' in plants else any_of(eq('request/caller', O['relayA']),
-                                                           eq('request/turn', 3))
+                                                           eq('request/turn', 4))
     laws = {'vault': VAULT, 'gated': GATED}
     starts = {'counter': 0, 'relayA': 0, 'relayB': 0, 'bank': 100, 'payee': 0, 'thief': 0, 'vault': 0,
               'gated': 0}
     for name in NAMES[:-1]:
-        w.create(f'create-{name}', w.sponsor, name, laws.get(name, PERMIT_ALL), 'installed')
-        w.turn(f'init-{name}', w.sponsor, {'kind': 'writeState', 'object': O[name],
-                                           'objectCapability': w.objects[name]['capability'],
-                                           'value': record(total=nat(starts[name]))}, 'installed')
+        w.create(f'create-{name}', w.sponsor, name, laws.get(name, PERMIT_ALL), 'installed',
+                 seed=record(total=nat(starts[name])))
 
     def total(name, label):
         return w.total_of(w.state(name, label))

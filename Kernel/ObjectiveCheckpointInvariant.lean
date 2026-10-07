@@ -18,7 +18,7 @@ induction hypothesis). This module closes the induction:
 A step is one of three things (`Step`), and the node commits nothing else:
 
 1. an admitted kernel turn (`ObjectiveActivity.AdmittedTurn`: `publish`,
-   `create`, `birth`, `resolve`, `deliver`, `topUp`, `writeState`, `exhaust`,
+   `create`, `birth`, `resolve`, `deliver`, `topUp`, `exhaust`,
    `abandon`), executed under any schedule and any receiver's sealing, with its
    final posts (`ActivitySeatEnd.finalize`: an ending turn also closes the seats
    its activity holds);
@@ -648,23 +648,20 @@ theorem publication_safe {rootBytes : Bytes → Digest} {config : Config} {snaps
   exact postSafe_inert (bodyOf_of_payload_none publication.fresh) (recordIn_image_other _ _ (by decide))
 
 theorem creation_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {request : CreateRequest} (created : Creation config snapshot request) :
+    {height : Nat} {request : CreateRequest} (created : Creation config snapshot height request) :
     ∀ post ∈ created.posts, PostSafe config snapshot post := by
   rw [created.postsExact]
   intro post member
-  simp only [List.mem_singleton] at member
-  subst member
-  exact postSafe_inert (bodyOf_of_payload_none (readObject_none_payload created.absent))
-    (recordIn_image_other _ _ (by decide))
-
-theorem stateWrite_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
-    {height : Nat} {request : StateWriteRequest} (written : StateWrite config snapshot height request) :
-    ∀ post ∈ written.posts, PostSafe config snapshot post := by
-  rw [written.postsExact]
-  intro post member
-  simp only [List.mem_singleton] at member
-  subst member
-  exact state_post_safe written.currentExact _
+  rcases List.mem_cons.mp member with head | tail
+  · subst head
+    exact postSafe_inert (bodyOf_of_payload_none (readObject_none_payload created.absent))
+      (recordIn_image_other _ _ (by decide))
+  · cases seeded : request.seed with
+    | none => simp [seeded] at tail
+    | some seed =>
+      simp only [seeded, Option.map_some, Option.toList_some, List.mem_singleton] at tail
+      subst tail
+      exact state_post_safe (created.stateFresh seed seeded) _
 
 /-- An invocation writes only the Book and the state cells of objects its call
 tree read: no record or package cell. -/
@@ -750,7 +747,6 @@ theorem AdmittedTurn.safe {rootBytes : Bytes → Digest} {config : Config} {snap
     simp only [AdmittedTurn.posts, List.mem_singleton] at member
     subst member
     exact book_post_safe topped.bookExact topped.posted
-  | writeState _ written => exact stateWrite_safe written
   | exhaust _ exhausted => exact exhaustion_safe typed exhausted
   | abandon _ abandoned => exact abandonment_safe abandoned
   | invoke _ invoked => exact invocation_safe invoked
@@ -778,7 +774,6 @@ theorem finalIntent_writes {rootBytes : Bytes → Digest} {config : Config} {sna
   | create _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
   | resolve _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
   | topUp _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
-  | writeState _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
   | exhaust _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
   | invoke _ _ => simp [ActivitySeatEnd.finalize, ActivitySeatEnd.AdmittedTurn.ending] at final; rw [← final.1]; rfl
   | deliverMessage _ _ =>
@@ -1464,7 +1459,6 @@ theorem reachable_delivery_stored_complete {rootBytes : Bytes → Digest} {confi
 #assert_axioms resolution_safe
 #assert_axioms publication_safe
 #assert_axioms creation_safe
-#assert_axioms stateWrite_safe
 #assert_axioms invocation_safe
 #assert_axioms AdmittedTurn.safe
 #assert_axioms finalIntent_writes

@@ -2047,7 +2047,7 @@
         "operator"
       ],
       "owner": "activity-native",
-      "purpose": "Kernel activity signed command: signing plan for one Turn (publish, create, birth, resolve, deliver, topUp, writeState, exhaust, abandon) under the object record; session-opened, bounded canonical plan, no state change",
+      "purpose": "Kernel activity signed command: signing plan for one Turn (publish, create, birth, resolve, deliver, topUp, exhaust, abandon) under the object record; session-opened, bounded canonical plan, no state change",
       "receiver": "fnDispatch"
     },
     {

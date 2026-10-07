@@ -85,15 +85,15 @@ intent writing such a cell (`ordinaryGate_refuses`, `forged_protected_write_refu
 `ObjectRecord`: id, package `pin`, `schemaVersion`, `law`, `upgrade` policy, `continuity`,
 `payer`; installed by `create`. The declared state cell holds `ObjectState {version, value}`;
 each committed write installs the next version. Every declared-state write (a birth's or
-delivery's yield, a call frame's, a delivered message's, or a direct `writeState`) is judged by
+delivery's yield, a call frame's, a delivered message's) is judged by
 the object's effective law (`ObjectRecord.effectiveLaw`: the kernel pin clause for the record's
 `pin` first, then the creator's `law`) over the old and new state and the request facts
 (`admitWrite`; facts `objective/artifact` (first: the pinned package's identity, `-1` for the
-direct write), `subject`, `height`, `target`, `turn`, `caller`), with the record read in the
+creation seed), `subject`, `height`, `target`, `turn`, `caller`), with the record read in the
 same turn. A delivery's write is judged with the
 activity's principal as subject, never the deliverer. A law refusal refuses the whole turn and
 names the clause. Theorems: `Birth.write_judged`, `Delivery.write_judged`,
-`StateWrite.write_judged`, `writeState_refuses_lawless`, `birth_refuses_non_object`,
+`create_seed_judged`, `create_seed_refused_names_clause`, `birth_refuses_non_object`,
 `birth_refuses_other_pin`, `create_refuses_existing`.
 
 ### Records, checkpoints and awaits
@@ -143,20 +143,19 @@ after re-running the Lean front end, and every turn reloads and replays the pair
 
 Eleven, each one `DataIntent` that commits all together or not at all, each a signed native
 command (`Kernel/ObjectiveActivityReceiver.lean`: subject, nonce, authority root, turn, Ed25519
-header; command edition `COMMAND/v4`; Host operations 210-214 plan, assemble, submit, lookup,
+header; command edition `COMMAND/v5`; Host operations 210-214 plan, assemble, submit, lookup,
 view; `mini activity`):
 
 | Turn | Who | What |
 | --- | --- | --- |
 | `publish` | anyone | stores an artifact and its package after the front end's replay |
-| `create` | an object holder | installs the `ObjectRecord`; refuses a second record or an unpublished pin |
+| `create` | an object holder | installs the `ObjectRecord` and, if given, the initial declared state (`seed`, judged by the creator's law alone, onto an absent state cell); refuses a second record, an unpublished pin and a refused seed |
 | `birth` | an object holder with an account | instantiates the pinned definition with typed input, runs to the first yield, commits record, state write, slot and postings |
 | `resolve` | the slot's decider | decides the slot, typed against the activity's response type, by the deadline |
 | `deliver` | anyone | settles the await (from its slot, due height or deadline), reads the view, resumes the checkpoint, runs to the next yield or end, commits record, write, next slot and postings |
 | `exhaust` | anyone | commits an attempt that ran out of its declared envelope as a paid turn |
 | `abandon` | anyone, after deadline plus grace | disposes of an await nobody ended |
 | `topUp` | anyone | funds an activity's purse |
-| `writeState` | an object holder | asks to write the declared state directly; refused at the pin clause on every created object (no package code makes it) |
 | `invoke` | a capability holder with an account | a synchronous call tree (below) |
 | `deliverMessage` | anyone | delivers the head of an inbox (below) |
 
@@ -213,7 +212,7 @@ resume/timeout fee pair in the purse (`yield_reserves_pair`), or the activity wa
 The purse returns to the payer when the activity ends (`end_returns_purse`). Every turn's
 postings are one admitted Book batch and conserve every asset (`Birth.conserves`,
 `Delivery.conserves`, `Exhaustion.conserves`, `Abandonment.conserves`, `TopUp.conserves`).
-`publish`, `create`, `writeState`, `resolve` and `topUp` charge no tariff, and no turn charges for
+`publish`, `create`, `resolve` and `topUp` charge no tariff, and no turn charges for
 storing packages, records or state.
 
 ### Metering, disposal and faults
