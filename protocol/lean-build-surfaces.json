@@ -537,7 +537,7 @@
     {
       "module": "Assurance.NativeAcceptedFixtureData",
       "path": "Assurance/NativeAcceptedFixtureData.lean",
-      "sha256": "399674a73ee5d60778a532243c486b8cb28133c3a9fae789c4c62d48df1f53bf",
+      "sha256": "8a85a3eeb0842cfa4315f997ef58752c1faf98ede0d6fe816de783cb1d23f2c4",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4212,7 +4212,7 @@
     {
       "module": "Host.SeatJson",
       "path": "Host/SeatJson.lean",
-      "sha256": "56a25d5114d3b1b64ea8fe3a02c0b5ffb34dd41602a3065ec85b4bba466fb1f4",
+      "sha256": "23f3c1605e1eab3d239ecff0a2544e960fd3adb5ffcb43047ed0d00ec8d80386",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -7880,14 +7880,14 @@
     {
       "module": "Kernel.SeatReceiver",
       "path": "Kernel/SeatReceiver.lean",
-      "sha256": "655f66a1c4b5eba829906e51f2c6e1e31383a66191ff8f050c6bf0a7252d59a6",
+      "sha256": "a440a6fdf1f78a4affa0f5e694ecd597f6385942ca85eb859a66391bbe932b38",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.SeatStore",
       "path": "Kernel/SeatStore.lean",
-      "sha256": "cbe78977df2c5ddb8e93728897f876426bb1deba7acc80811101491c99dfeb7c",
+      "sha256": "6645679bd72951d82d606e69ed58a8326d4591ccbd265703a67f032f2f983da2",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
