@@ -6578,7 +6578,7 @@
     {
       "module": "Kernel.JointControlBootstrapBundle",
       "path": "Kernel/JointControlBootstrapBundle.lean",
-      "sha256": "b0fdd78065f96c8796e22ae697380f6f19d380740015c005ac706e7894b02bba",
+      "sha256": "56696529b0bed02c4d6e64b8bff1ad087f702a6d071744f909dca7b728fda9e6",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
