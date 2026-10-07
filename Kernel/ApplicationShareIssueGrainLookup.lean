@@ -66,7 +66,10 @@ def lookupOriginal (config : Config) (target : Durable) (bytes : List UInt8) :
   let some index := target.image.accepted.findIdx?
       (fun record => record.transactionId == transactionId)
     | return .ok none
-  let .ok selection ← NativeHostReplay.verifyLoadedSelected config target index
+  let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes target with
+    | .error _ => return .error .nativeHistoryUnavailable
+    | .ok reader => pure reader
+  let .ok selection ← NativeHostReplay.verifyLoadedSelected config reader target index
     | return .error .nativeHistoryUnavailable
   let before := selection.selected.before
   let ambient : DeclaredResourceController.Ambient :=

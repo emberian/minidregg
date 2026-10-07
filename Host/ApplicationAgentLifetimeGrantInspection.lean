@@ -153,7 +153,10 @@ def inspectAcceptedCurrent (config : NativeHost.Config) (bytes : List UInt8) :
   match ← NativeHost.openExisting config with
   | .error detail => return .error detail
   | .ok opened =>
-      match ← NativeHostReplay.verifyLoaded config opened.durable with
+      let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes opened.durable with
+        | .error detail => return .error s!"agent lifetime grant history reader: {detail}"
+        | .ok reader => pure reader
+      match ← NativeHostReplay.verifyLoaded config reader opened.durable with
       | .error _ => return .error "agent lifetime grant history unverified"
       | .ok verified => return inspectAcceptedVerified verified bytes
 

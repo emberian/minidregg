@@ -70,7 +70,6 @@ def Session.rememberReadback {config : Config} (session : Session config)
 reads lifecycle history through it). A readback whose Reader cannot be minted is not
 adopted: the session keeps its image and the next request's refresh reads the suffix. -/
 def Session.rememberReadbackVia {config : Config} (session : Session config)
-    {store : DurableHistory.StoreIdentity} (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
     {oldTarget : Durable} (old : NativeHostReplay.Verified config oldTarget)
     (readback : NativeHostReplay.ExactReadback config old) : IO (Session config) := do
   match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes readback.after.durable with

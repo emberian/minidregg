@@ -107,7 +107,10 @@ def receiveVerified {config : Config} {anchor : Opened config} {target : Durable
         match ← DurableReceiverIO.receiveLoadedDetailed config.transport rootBytes
             verified.opened.durable derived.intent with
         | .exact kind appended =>
-            match ← NativeHostReplay.extendSuffixVerified config verified appended.next with
+            let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport rootBytes appended.next with
+              | .error detail => return .uncertain s!"post-append history reader: {detail}"
+              | .ok reader => pure reader
+            match ← NativeHostReplay.extendSuffixVerified config reader verified appended.next with
             | .error failure => return .uncertain s!"enrollment post-image: {failure.detail}"
             | .ok extended =>
                 match receiptExact : extended.receiptAt verified.opened.durable.height with

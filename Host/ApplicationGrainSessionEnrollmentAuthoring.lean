@@ -90,7 +90,7 @@ private def observationSlot (config : Config) (opened : Opened config)
     (command : DeclaredResourceController.Command)
     (prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.durable command)
+      opened.ground command)
     (index resource : Nat) (capability : CapabilityId) (root : Digest) :
     Except String SigningSlot := do
   let probe : DeclaredResourceController.Target :=
@@ -98,14 +98,14 @@ private def observationSlot (config : Config) (opened : Opened config)
       observeCapability := none, schemaVersion := ContentResource.commandVersion, expectedTargetRoot := root,
       payload := .content ⟨[]⟩ }
   let wanted : Request .object :=
-    { DeclaredResourceController.requestFor ground.authority
+    { DeclaredResourceController.requestFor opened.ground.authority
         config.profile.semantics
         ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
         command probe root with verb := .observeObject }
   let marker := DeclaredResourceController.operationMarker
     config.deployment.domain config.profile.semantics command
   let header ← (CredentialSignatureAdmission.signingHeader
-      ground.authority marker (⟨.object, wanted⟩ : PackedEffectRequest)).mapError
+      opened.ground.authority marker (⟨.object, wanted⟩ : PackedEffectRequest)).mapError
       (fun _ => "enrollment observation signing key unavailable")
   pure ⟨9, index, CredentialSignedEnvelopeController.headerCodec.encode header⟩
 
@@ -224,7 +224,7 @@ def prepareForIssue (config : Config) (opened : Opened config)
   let prepared ← match DeclaredResourceController.prepare
       config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.durable command with
+      opened.ground command with
     | .ok prepared => pure prepared
     | .error reason => throw s!"enrollment joint preparation refused: {repr reason}"
   let invocation ← NativeHost.prepareLoaded config opened
