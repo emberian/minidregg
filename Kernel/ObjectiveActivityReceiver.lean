@@ -127,11 +127,13 @@ inductive Turn where
   (`ObjectiveActivity.Stored`). -/
   | publish (artifact package : List UInt8) (payer : Nat) (payerCapability : CapabilityId)
   /-- Make `object` (a native resource cell) an object to the kernel: install its
-  record pinning the published package `pin`, judged by `law`, re-pinnable under
-  `upgrade`, funded by `payer` (`ObjectiveActivity.create`), and optionally install its
-  initial declared state `seed` (data bytes), judged by `law` alone. Only a holder of a
+  record pinning the published package `pin`, its declared state typed at `stateType`,
+  judged by `law`, re-pinnable under `upgrade`, funded by `payer`
+  (`ObjectiveActivity.create`), and optionally install its initial declared state `seed`
+  (data bytes), judged by `law` alone and typed at `stateType`. Only a holder of a
   capability on the object, naming a payer account it owns. -/
-  | create (object : Nat) (objectCapability : CapabilityId) (pin : Digest) (law : Minidregg.Pred.Pred)
+  | create (object : Nat) (objectCapability : CapabilityId) (pin : Digest)
+      (stateType : Minidregg.Theory.ObjectiveBendTypes.Ty) (law : Minidregg.Pred.Pred)
       (upgrade : ObjectRecord.UpgradePolicy) (seed : Option (List UInt8)) (payer : Nat)
       (payerCapability : CapabilityId)
   /-- Birth an activity of `pin` on `object` with `input` (data bytes), paid
@@ -172,8 +174,8 @@ inductive Turn where
   deriving DecidableEq, Repr
 
 abbrev CreateWire :=
-  Nat × CapabilityId × Digest × Minidregg.Pred.Pred × ObjectRecord.UpgradePolicy × Option (List UInt8) × Nat ×
-    CapabilityId
+  Nat × CapabilityId × Digest × Minidregg.Theory.ObjectiveBendTypes.Ty × Minidregg.Pred.Pred ×
+    ObjectRecord.UpgradePolicy × Option (List UInt8) × Nat × CapabilityId
 abbrev PublishWire := List UInt8 × List UInt8 × Nat × CapabilityId
 abbrev BirthWire :=
   Nat × CapabilityId × Nat × CapabilityId × Digest × List UInt8 × Capacity × Capacity × Capacity × Nat
@@ -188,7 +190,7 @@ abbrev TurnWire :=
 
 def Turn.toWire : Turn → TurnWire
   | .publish artifact package p pc => .inl (artifact, package, p, pc)
-  | .create o oc pin law upgrade seed p pc => .inr (.inl (o, oc, pin, law, upgrade, seed, p, pc))
+  | .create o oc pin st law upgrade seed p pc => .inr (.inl (o, oc, pin, st, law, upgrade, seed, p, pc))
   | .birth o oc a ac pin input t r tt d => .inr (.inr (.inl (o, oc, a, ac, pin, input, t, r, tt, d)))
   | .resolve slot answer => .inr (.inr (.inr (.inl (slot, answer))))
   | .deliver record await extra account cap => .inr (.inr (.inr (.inr (.inl (record, await, extra, account, cap)))))
@@ -203,7 +205,7 @@ def Turn.toWire : Turn → TurnWire
 
 def Turn.ofWire : TurnWire → Turn
   | .inl (artifact, package, p, pc) => .publish artifact package p pc
-  | .inr (.inl (o, oc, pin, law, upgrade, seed, p, pc)) => .create o oc pin law upgrade seed p pc
+  | .inr (.inl (o, oc, pin, st, law, upgrade, seed, p, pc)) => .create o oc pin st law upgrade seed p pc
   | .inr (.inr (.inl (o, oc, a, ac, pin, input, t, r, tt, d))) => .birth o oc a ac pin input t r tt d
   | .inr (.inr (.inr (.inl (slot, answer)))) => .resolve slot answer
   | .inr (.inr (.inr (.inr (.inl (record, await, extra, account, cap))))) => .deliver record await extra account cap
@@ -218,9 +220,10 @@ def Turn.ofWire : TurnWire → Turn
 
 def createStream : StreamCodec CreateWire :=
   StreamCodec.product StreamCodec.nat (StreamCodec.product capabilityIdStream
-    (StreamCodec.product digestStream (StreamCodec.product LawLeaf.predStream
+    (StreamCodec.product digestStream (StreamCodec.product ObjectStateType.tyStream
+      (StreamCodec.product LawLeaf.predStream
       (StreamCodec.product ObjectRecord.upgradeStream (StreamCodec.product (StreamCodec.option bytesStream)
-        (StreamCodec.product StreamCodec.nat capabilityIdStream))))))
+        (StreamCodec.product StreamCodec.nat capabilityIdStream)))))))
 
 def publishStream : StreamCodec PublishWire :=
   StreamCodec.product bytesStream (StreamCodec.product bytesStream
@@ -270,10 +273,11 @@ def commandStream : StreamCodec Command :=
     (fun (subject, nonce, root, turn) => ⟨subject, nonce, root, turn⟩)
     (by intro c; cases c; rfl)
 
-/-- v5: `create` carries an optional initial declared state and the turn sum has no `writeState`
-(a direct write of declared state is no turn: only the object's package writes it, under its pin);
-v4 (and older) commands refuse to decode. -/
-def commandFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/COMMAND/v5".toUTF8.toList
+/-- v6: `create` declares the object's state type (`ObjectStateType.tyStream`); v5: `create`
+carries an optional initial declared state, and the turn sum has no `writeState` (a direct write
+of declared state is no turn: only the object's package writes it, under its pin); v5 (and
+older) commands refuse to decode. -/
+def commandFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/COMMAND/v6".toUTF8.toList
 
 def commandCodec : LawfulCodec Command := ObjectiveActivityWire.framed commandFrame commandStream
 
@@ -340,11 +344,12 @@ def answerOf (wire : AnswerWire) : Except ObjectiveActivity.Refusal Answer :=
 
 def birthRequest (command : Command) (object : Nat) (account : Nat) (pin : Digest) (input : Data)
     (envelope resume timeout : Capacity) (deposit : Nat) : BirthRequest :=
-  ⟨command.subject, ⟨object⟩, pin, input, command.nonce, envelope, resume, timeout, account, deposit⟩
+  ⟨command.subject, ⟨object⟩, pin, input, command.nonce, envelope, resume, timeout, account, deposit, none⟩
 
-def createRequest (command : Command) (object : Nat) (pin : Digest) (law : Minidregg.Pred.Pred)
-    (upgrade : ObjectRecord.UpgradePolicy) (seed : Option Data) (payer : Nat) : CreateRequest :=
-  ⟨command.subject, ⟨object⟩, pin, law, upgrade, seed, payer⟩
+def createRequest (command : Command) (object : Nat) (pin : Digest) (stateType : Minidregg.Theory.ObjectiveBendTypes.Ty)
+    (law : Minidregg.Pred.Pred) (upgrade : ObjectRecord.UpgradePolicy) (seed : Option Data) (payer : Nat) :
+    CreateRequest :=
+  ⟨command.subject, ⟨object⟩, pin, stateType, law, upgrade, seed, payer⟩
 
 /-- A seed's data bytes decode, or the command is undecodable (`none`: no seed, which is fine). -/
 def decodeSeed : Option (List UInt8) → Option (Option Data)
@@ -371,9 +376,9 @@ def transactionOf (command : Command) : Option TransactionId :=
   | .publish artifact _ _ _ =>
       (ObjectiveBendSourceArtifact.decode artifact).map fun a =>
         ObjectiveActivity.publishTransaction (ObjectiveBendSourceArtifact.identity a)
-  | .create object _ pin law upgrade seed payer _ =>
+  | .create object _ pin stateType law upgrade seed payer _ =>
       (decodeSeed seed).map fun data =>
-        ObjectiveActivity.createTransaction (createRequest command object pin law upgrade data payer)
+        ObjectiveActivity.createTransaction (createRequest command object pin stateType law upgrade data payer)
   | .birth object _ account _ pin input envelope resume timeout deposit =>
       (decodeDataBytes input).map fun value =>
         ObjectiveActivity.birthTransaction
@@ -420,9 +425,9 @@ def decideTurn {rootBytes : List UInt8 → Digest} (config : Config) (snapshot :
   | .publish artifact package payer _ => do
       let stored : ObjectiveActivity.Stored := ⟨artifact, package, payer⟩
       pure (.publish stored (← kernel (ObjectiveActivity.publish config snapshot stored)))
-  | .create object _ pin law upgrade seed payer _ => do
+  | .create object _ pin stateType law upgrade seed payer _ => do
       let some data := decodeSeed seed | throw .inputUndecodable
-      let request := createRequest command object pin law upgrade data payer
+      let request := createRequest command object pin stateType law upgrade data payer
       pure (.create request (← kernel (ObjectiveActivity.create config snapshot height request)))
   | .birth object _ account _ pin input envelope resume timeout deposit => do
       let some value := decodeDataBytes input | throw .inputUndecodable
@@ -502,7 +507,7 @@ def signedTarget (domain : Digest) (command : Command) : ResourceKind × Nat :=
   | .publish artifact _ _ _ =>
       (.object, (ObjectiveActivity.packageCell domain
         ((ObjectiveBendSourceArtifact.decode artifact).map ObjectiveBendSourceArtifact.identity |>.getD ⟨0⟩)).value)
-  | .create object _ _ _ _ _ _ _ => (.object, object)
+  | .create object _ _ _ _ _ _ _ _ => (.object, object)
   | .birth object _ _ _ _ _ _ _ _ _ => (.object, object)
   | .resolve slot _ => (.object, (AnswerSlot.cell domain slot).value)
   | .deliver record _ _ _ _ => (.object, record.value)
@@ -585,7 +590,7 @@ def authorized (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (c
   match command.turn with
   | .resolve _ _ | .abandon _ _ | .deliverMessage _ _ _ => .ok ()
   | .publish _ _ p pc => account p pc
-  | .create o oc _ _ _ _ p pc => do object o oc; account p pc
+  | .create o oc _ _ _ _ _ p pc => do object o oc; account p pc
   | .birth o oc a ac _ _ _ _ _ _ => do object o oc; account a ac
   | .deliver _ _ extra a ac | .exhaust _ _ extra a ac =>
       if extra = zeroCapacity then .ok () else account a ac
@@ -819,8 +824,10 @@ holds a capability admissible for mutating the object resource, and owns the
 payer account it names. -/
 theorem create_requires_object_holder (accepted : Accepted deployment profile ambient durable ingress)
     {object payer : Nat} {objectCapability payerCapability : CapabilityId} {pin : Digest}
-    {law : Minidregg.Pred.Pred} {upgrade : ObjectRecord.UpgradePolicy} {seed : Option (List UInt8)}
-    (turn : ingress.command.turn = .create object objectCapability pin law upgrade seed payer payerCapability) :
+    {stateType : Minidregg.Theory.ObjectiveBendTypes.Ty} {law : Minidregg.Pred.Pred}
+    {upgrade : ObjectRecord.UpgradePolicy} {seed : Option (List UInt8)}
+    (turn : ingress.command.turn = .create object objectCapability pin stateType law upgrade seed payer
+      payerCapability) :
     objectHolder accepted.prepared.authority.snapshot profile.semantics ambient ingress.command object
         objectCapability accepted.prepared.preRoot accepted.prepared.outcome = true ∧
       accountHolder accepted.prepared.authority.snapshot profile.semantics ambient ingress.command payer
@@ -845,7 +852,7 @@ theorem native_birth_on_pinned_object (accepted : Accepted deployment profile am
     (_decided : accepted.prepared.decided = .birth request born) :
     ∃ object : ObjectRecord.ObjectRecord,
       ObjectiveActivity.readObject accepted.prepared.config durable.snapshot request.object = .ok (some object) ∧
-        object.pin = request.pin :=
+        object.activePin = request.pin :=
   ⟨born.object, born.objectExact, born.pinned⟩
 
 /-- A refusing ownership check refuses the whole command, whatever the kernel
