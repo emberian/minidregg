@@ -1,0 +1,3 @@
+# Kernel.GenericSimplexQuorum: Objective contract manifest. Written by `scripts/check-objective-proofs.sh proofs --pin`;
+# a removed or changed row needs a line in scripts/gates/objective-contract-changes.txt.
+theorem	Minidregg.Kernel.GenericSimplexQuorum.honest_intersection	f2c1064eac7a592fa88e4fd196713e3d8db89fff8e0136bc1f2faf3fbb86dcaa	d1371fa51b5201dd8fb6eb008cd33d4c5f9de5c3c60dba92fa47898bdd235865	3764a49966d8c3eeb27fa088594d79acd71d5f48a7f32a45621d9ef04a4e55de	0effabc4d5aa012c	Classical.choice,Quot.sound,propext	∀ (roster faulty left right : Finset ℕ) (f : ℕ), roster.card = 3 * f + 1 → faulty.card ≤ f → left ⊆ roster → right ⊆ roster → 2 * f + 1 ≤ left.card → 2 * f + 1 ≤ right.card → ∃ member ∈ left, member ∈ right ∧ member ∉ faulty

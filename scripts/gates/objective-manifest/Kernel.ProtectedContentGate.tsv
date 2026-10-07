@@ -1,0 +1,3 @@
+# Kernel.ProtectedContentGate: Objective contract manifest. Written by `scripts/check-objective-proofs.sh proofs --pin`;
+# a removed or changed row needs a line in scripts/gates/objective-contract-changes.txt.
+def	Minidregg.Kernel.ProtectedContentGate.ordinaryGate	5b75f982af6c4565976308dae44a56162e776868faaac7148b20861f43bd7630	374af531014278771be62a234b720c9078ff512cfca1c852158667f0fc4e716a	62fe09d96f109c471a251d26095129ce3c29a3e59db7370b743fba3866aa639a	bc7c1ec08feda9d4	-	{rootBytes : List UInt8 → Minidregg.Theory.TypedAuthorization.Digest} → Minidregg.Compiler.ContentControlFrame.Pin → Minidregg.Kernel.DurableDataIntent.DataSnapshot rootBytes → Minidregg.Kernel.DurableDataIntent.DataIntent rootBytes → Except Minidregg.Kernel.DurableDataIntent.RejectReason Unit

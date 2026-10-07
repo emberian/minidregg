@@ -43,7 +43,7 @@ those are V, not general OO linearization/construction correctness.
 Objective Bend Core4 (Theory/ObjectiveBend*; see docs/OBJECTIVE-BEND.md) has
 compiled S for the core: runBounded_*_sound, typed_stepRaw_preserved and
 check_runBounded_no_refusal; as of 2026-10-05 they are the ObjectiveProofs library
-(statement snapshot and axiom pin: scripts/check-objective-proofs.sh). Surface-to-core
+(contract manifests: scripts/check-objective-proofs.sh). Surface-to-core
 elaboration was TypeScript (objective-elaborate.ts); since 2026-10-04 it is the Lean front
 end (docs/OBJECTIVE-BEND-FRONTEND.md), a trusted boundary whose output the checker
 re-checks and the receiver re-runs, with no theorem that the core means what the source
