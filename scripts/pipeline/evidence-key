@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# scripts/pipeline/evidence-key [SRC] [GATE_TOOLS_DIR] -- the key a landing's evidence is valid for
+# (GPT-6 review row H, 2026-10-06). A gate verdict is evidence about exactly this key; when any
+# component differs, the verdict does not transfer. Prints one line
+#   EVIDENCE-KEY key=<sha12> tree=<git tree> toolchain=<sha12> options=<sha12> deps=<sha12>
+#                gate=<sha12> fixtures=<sha12> generated=<sha12>
+# and, with EVIDENCE_KEY_DETAIL=FILE, every input of every component (name, digest) into FILE.
+#   tree       the commit's git tree (everything tracked)
+#   toolchain  lean-toolchain, `lean --version`, `lake --version`, rustc/cargo/python3/bun versions
+#   options    lakefile.toml (targets, options, moreLeanArgs), rust-toolchain files, .cargo/config*
+#   deps       lake-manifest.json and every tracked Cargo.lock / bun.lock / package-lock
+#   gate       the gate definitions AS RUN: every file of GATE_TOOLS_DIR (default SRC/scripts/pipeline)
+#              plus the tracked check scripts the gate invokes (scripts/check-*.sh, scripts/*.py gates)
+#   fixtures   every tracked path naming a fixture (git blob ids)
+#   generated  generated inputs the gate compares against: scripts/gates/*, protocol/*.json,
+#              protocol/fn/*, ResearchWip.lean
+# Components are listed so a reader can see WHICH one moved; key= hashes them all.
+set -euo pipefail
+SRC=${1:-.}; TOOLS=${2:-$SRC/scripts/pipeline}
+cd "$SRC"
+TOOLS=$(cd "$TOOLS" && pwd)
+detail=${EVIDENCE_KEY_DETAIL:-/dev/null}
+: > "$detail"
+h() { sha256sum | cut -c1-12; }
+blobs() { git ls-files -s -- "$@" 2>/dev/null | awk '{print $2, $4}'; }
+comp() { local name=$1; shift; local body; body=$("$@"); printf '## %s\n%s\n' "$name" "$body" >> "$detail"; printf '%s' "$body" | h; }
+toolchain() {
+  cat lean-toolchain
+  (lean --version 2>&1 || echo "lean: absent") | head -1
+  (lake --version 2>&1 || echo "lake: absent") | head -1
+  for t in rustc cargo python3 bun; do (command -v $t >/dev/null && $t --version 2>&1 | head -1) || echo "$t: absent"; done
+}
+options() { blobs lakefile.toml 'rust-toolchain*' '*/rust-toolchain*' '.cargo/config*' '*/.cargo/config*'; }
+deps() { blobs lake-manifest.json '*Cargo.lock' '*bun.lock*' '*package-lock.json'; }
+gate() {
+  (cd "$TOOLS" && find . -maxdepth 1 -type f ! -name '*.pyc' -print0 | sort -z | xargs -0 sha256sum)
+  blobs 'scripts/check-*.sh' 'scripts/check-*.ts' 'scripts/check-*.lean' scripts/lean-build-surfaces.py scripts/host-operations.py \
+    scripts/gen-sheetlaw.py website/gen-status.py scripts/HypothesisLedger.lean 'Verify/*.lean' scripts/local-gates.sh
+}
+fixtures() { git ls-files -s | awk '{print $2, $4}' | grep -i 'fixture' || true; }
+generated() { blobs 'scripts/gates/*' 'protocol/*.json' 'protocol/fn/*' ResearchWip.lean; }
+tree=$(git rev-parse 'HEAD^{tree}')
+printf '## tree\n%s\n' "$tree" >> "$detail"
+tc=$(comp toolchain toolchain); op=$(comp options options); dp=$(comp deps deps)
+gt=$(comp gate gate); fx=$(comp fixtures fixtures); gn=$(comp generated generated)
+key=$(printf '%s %s %s %s %s %s %s' "$tree" "$tc" "$op" "$dp" "$gt" "$fx" "$gn" | h)
+echo "EVIDENCE-KEY key=$key tree=${tree:0:12} toolchain=$tc options=$op deps=$dp gate=$gt fixtures=$fx generated=$gn"
