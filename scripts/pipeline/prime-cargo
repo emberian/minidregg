@@ -7,18 +7,25 @@
 # with TREE's own toolchain. The registry cache ($CARGO_HOME, default ~/.cargo) is shared by every
 # lane on the box, so after one prime per tip `cargo build --offline --locked` (the candidate
 # builder, the lanes' own builds) never misses a crate (10-07: a lane's publish died offline on
-# serde_yaml). A crate whose fetch fails is named and the script exits 1 after trying the rest.
+# serde_yaml). Every failing crate is named; the exit is 1 only when a candidate role's crate
+# (deploy/candidate/package.py --rust-roles) fails (a research crate whose path dependencies are
+# not in the tree, e.g. bend-ir2-proof, is reported and skipped).
 set -uo pipefail
 PIPELINE_PROG=prime-cargo
 . "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/lib.sh"
 tree=$(CDPATH='' cd -- "${1:?TREE}" && pwd -P) || exit 1
 rust=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' "$tree/rust-toolchain.toml")
 [ -n "$rust" ] || pipeline_die "no Rust channel in $tree/rust-toolchain.toml"
+roles=" $(cd "$tree" && python3 deploy/candidate/package.py --rust-roles 2>/dev/null | awk '{print $2}' | sort -u | paste -sd' ') "
 rc=0 n=0
 for m in "$tree"/native/*/Cargo.toml; do
   [ -f "$(dirname "$m")/Cargo.lock" ] || continue
   if out=$(cargo "+$rust" fetch --locked --manifest-path "$m" 2>&1 </dev/null); then n=$((n + 1))
-  else rc=1; pipeline_log "FAILED $(basename "$(dirname "$m")"): $(printf '%s' "$out" | tail -1)"; fi
+  else
+    c=$(basename "$(dirname "$m")")
+    if [[ $roles == *" $c "* ]]; then rc=1; pipeline_log "FAILED role crate $c: $(printf '%s' "$out" | tail -1)"
+    else pipeline_log "skipped $c (not a candidate role; fetch fails: $(printf '%s' "$out" | tail -1 | cut -c1-120))"; fi
+  fi
 done
 pipeline_log "primed $n crate manifests of $(git -C "$tree" rev-parse --short=12 HEAD 2>/dev/null) ($rust)"
 exit $rc

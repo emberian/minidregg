@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+"""scripts/pipeline/slots -- who holds each build slot of this box, is it BUILDING, and who waits.
+
+    slots                 the table: slot, state, holder lane, pid, age, CPU of the holder's tree, command,
+                          and the waiters (lane, age) queued on that slot; then the sibling box's free slots
+    slots --json          the same as JSON (also written to $PIPELINE_ROOT/slots.status by --watch)
+    slots --reclaim       also RECLAIM idle slots: a holder whose whole process tree has used < 2% of one
+                          CPU for PIPELINE_IDLE_MIN (15) minutes is told (a SLOT-RECLAIMED note in its lane
+                          and $PIPELINE_ROOT/slots.log) and its held command is stopped (SIGTERM to the
+                          flock's process tree, SIGKILL after 30 s). The flock is released with it.
+    slots --watch         --reclaim every 120 s, forever (the box's systemd timer runs it once a minute)
+
+A slot is any /srv/build-slot-* file. Holders and waiters come from /proc/locks (lslocks): a waiter is a
+`flock` blocked on that file. Waiters on a NAMED slot while another slot is free are flagged: they used
+`flock /srv/build-slot-N` instead of /srv/pipeline/scripts/slot.sh (which takes ANY free slot).
+"""
+import glob, json, os, subprocess, sys, time
+
+ROOT = os.environ.get("PIPELINE_ROOT", "/srv/pipeline")
+IDLE_MIN = float(os.environ.get("PIPELINE_IDLE_MIN", "15"))
+IDLE_CPU = 0.02            # fraction of one CPU
+TICK = os.sysconf("SC_CLK_TCK")
+BOOT = time.time() - float(open("/proc/uptime").read().split()[0])
+GATE = set(os.environ.get("PIPELINE_GATE_SLOTS", "/srv/build-slot-mk").split())   # never reclaimed
+
+def stat(pid):
+    try:
+        s = open(f"/proc/{pid}/stat").read()
+        f = s[s.rindex(")") + 2:].split()
+        # ppid; cpu ticks of the process AND its reaped children (cutime/cstime), so a tree's sum over
+        # its live members is monotone and counts short-lived compiler runs; start time
+        return int(f[1]), int(f[11]) + int(f[12]) + int(f[13]) + int(f[14]), BOOT + int(f[19]) / TICK
+    except (OSError, ValueError):
+        return None
+
+def cmdline(pid):
+    try:
+        return open(f"/proc/{pid}/cmdline", "rb").read().replace(b"\0", b" ").decode(errors="replace").strip()
+    except OSError:
+        return ""
+
+def cwd(pid):
+    try:
+        return os.readlink(f"/proc/{pid}/cwd")
+    except OSError:
+        return "?"
+
+def lane_of(path):
+    p = path.split("/")
+    return p[3] if len(p) > 3 and p[1] == "srv" and p[2] == "lanes" else path
+
+def tree_cpu():
+    kids, cpu = {}, {}
+    for d in os.listdir("/proc"):
+        if d.isdigit():
+            st = stat(int(d))
+            if st:
+                kids.setdefault(st[0], []).append(int(d)); cpu[int(d)] = st[1]
+    return kids, cpu
+
+def descendants(pid, kids):
+    out, stack = [], [pid]
+    while stack:
+        p = stack.pop(); out.append(p); stack += kids.get(p, [])
+    return out
+
+def locks():
+    r = subprocess.run(["lslocks", "-r", "-n", "-o", "PID,MODE,BLOCKER,PATH"], capture_output=True, text=True)
+    held, waiting = {}, {}
+    for line in r.stdout.splitlines():
+        f = line.split()
+        if len(f) < 3 or not f[-1].startswith("/srv/build-slot-"):
+            continue
+        pid, mode, path = int(f[0]), f[1], f[-1]
+        if mode.endswith("*"):
+            waiting.setdefault(path, []).append(pid)
+        else:
+            held[path] = pid
+    return held, waiting
+
+def snapshot(sample=3.0):
+    held, waiting = locks()
+    k0, c0 = tree_cpu(); time.sleep(sample); k1, c1 = tree_cpu()
+    now, rows = time.time(), []
+    for path in sorted(glob.glob("/srv/build-slot-*")):
+        row = {"slot": path, "gate": path in GATE, "waiters": []}
+        pid = held.get(path)
+        if pid and stat(pid):
+            ds = descendants(pid, k1)
+            used = (sum(c1.get(p, 0) for p in ds) - sum(c0.get(p, 0) for p in ds)) / TICK / sample
+            kid = (k1.get(pid) or [pid])[0]
+            row.update(pid=pid, lane=lane_of(cwd(pid)), age_s=int(now - stat(pid)[2]), cpu=round(used, 2),
+                       procs=len(ds), command=cmdline(kid)[:200] or cmdline(pid)[:200])
+            row["state"] = "BUILDING" if used >= IDLE_CPU else "IDLE"
+        else:
+            row["state"] = "free"
+        for w in waiting.get(path, []):
+            st = stat(w)
+            if st:
+                row["waiters"].append({"pid": w, "lane": lane_of(cwd(w)), "age_s": int(now - st[2]),
+                                       "command": cmdline(w)[:160]})
+        rows.append(row)
+    return rows
+
+def peer_status():
+    peer = os.environ.get("PIPELINE_PEER", "")
+    if not peer:
+        return None
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        try:
+            r = subprocess.run(["rsync", "-q", f"{peer}:/pipeline/slots.status", f"{d}/s"], capture_output=True,
+                               text=True, timeout=20)
+            return json.load(open(f"{d}/s")) if r.returncode == 0 else None
+        except Exception:
+            return None
+
+def show(rows, peer):
+    lanes_slots = os.environ.get("PIPELINE_SLOTS", "").split()
+    free = [r["slot"] for r in rows if r["state"] == "free" and r["slot"] in lanes_slots]
+    print(f"{os.uname().nodename}  {time.strftime('%H:%M:%SZ', time.gmtime())}  load {open('/proc/loadavg').read().split()[0]}"
+          f" / {os.cpu_count()} threads   lane slots free: {len(free)}/{len(lanes_slots)}")
+    for r in rows:
+        tag = "GATE " if r["gate"] else ""
+        if r["state"] == "free":
+            print(f"  {r['slot']:<26} {tag}free")
+        else:
+            print(f"  {r['slot']:<26} {tag}{r['state']:<8} {r['lane']:<26} pid {r['pid']:<8} {r['age_s']//60:>4}m"
+                  f"  cpu {r['cpu']:>5}  {r['command'][:90]}")
+        for w in r["waiters"]:
+            flag = "  <- NAMED-SLOT WAIT while a slot is free (use slot.sh)" if free else ""
+            print(f"      waiting: {w['lane']:<26} pid {w['pid']:<8} {w['age_s']//60:>4}m{flag}")
+    if peer:
+        ls = peer.get("lane_slots") or []
+        pf = [r["slot"] for r in peer.get("rows", []) if r["state"] == "free" and r["slot"] in ls]
+        print(f"  peer {peer.get('host')}: {len(pf)}/{len(ls)} lane slots free ({' '.join(s.rsplit('-', 1)[-1] for s in pf)}),"
+              f" load {peer.get('load')} as of {peer.get('at')}")
+
+def reclaim(rows):
+    os.makedirs(f"{ROOT}/slot-idle", exist_ok=True)
+    now = time.time()
+    for r in rows:
+        mark = f"{ROOT}/slot-idle/{os.path.basename(r['slot'])}"
+        if r["state"] != "IDLE" or r["gate"]:
+            if os.path.exists(mark): os.remove(mark)
+            continue
+        key = f"{r['pid']}"
+        try:
+            pid0, since = open(mark).read().split()
+        except (OSError, ValueError):
+            pid0, since = "", ""
+        if pid0 != key:
+            open(mark, "w").write(f"{key} {now}\n"); continue
+        idle_min = (now - float(since)) / 60
+        if idle_min < IDLE_MIN:
+            continue
+        msg = (f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} RECLAIMED {r['slot']} from lane {r['lane']} "
+               f"(pid {r['pid']}, held {r['age_s']//60} min, idle {idle_min:.0f} min at cpu {r['cpu']}): {r['command']}\n")
+        open(f"{ROOT}/slots.log", "a").write(msg)
+        if r["lane"] and not r["lane"].startswith("/"):
+            try:
+                open(f"/srv/lanes/{r['lane']}/SLOT-RECLAIMED.txt", "a").write(
+                    msg + "  A build slot is for a running build. Hold it only while compiling; take it with "
+                    "/srv/pipeline/scripts/slot.sh CMD (any free slot) and author while it runs.\n")
+            except OSError:
+                pass
+        k, _ = tree_cpu()
+        for p in reversed(descendants(r["pid"], k)):
+            try: os.kill(p, 15)
+            except OSError: pass
+        time.sleep(30)
+        for p in descendants(r["pid"], tree_cpu()[0]):
+            try: os.kill(p, 9)
+            except OSError: pass
+        os.remove(mark)
+        print(msg, end="")
+
+def main():
+    a = sys.argv[1:]
+    while True:
+        rows = snapshot()
+        status = {"lane_slots": os.environ.get("PIPELINE_SLOTS", "").split(), "host": os.uname().nodename, "at": time.strftime('%H:%M:%SZ', time.gmtime()),
+                  "load": open('/proc/loadavg').read().split()[0], "rows": rows}
+        try:
+            open(f"{ROOT}/slots.status.new", "w").write(json.dumps(status))
+            os.replace(f"{ROOT}/slots.status.new", f"{ROOT}/slots.status")
+        except OSError:
+            pass
+        if "--reclaim" in a or "--watch" in a:
+            reclaim(rows)
+        if "--json" in a:
+            print(json.dumps(status, indent=1))
+        elif "--watch" not in a:
+            show(rows, peer_status())
+        if "--watch" not in a:
+            return
+        time.sleep(120)
+
+main()

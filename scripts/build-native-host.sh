@@ -1237,7 +1237,7 @@ companion_compiled="$output_dir/companion-compiled-modules.txt"
 : > "$companion_compiled"
 if [[ -n "$companion_output" ]]; then
   companion_output=$(cd "$companion_output" && pwd -P)
-  for required in manifest.txt source-sha256.txt reusable-artifact-sha256.txt; do
+  for required in manifest.txt source-sha256.txt source-modules.txt reusable-artifact-sha256.txt; do
     [[ -f "$companion_output/$required" ]] || {
       printf 'build-native-host: companion build lacks %s\n' "$required" >&2
       exit 65
@@ -1255,8 +1255,11 @@ if [[ -n "$companion_output" ]]; then
   : > "$companion_check"
   while IFS= read -r module; do
     stem=${module//./\/}
-    if grep -qE "^[[:xdigit:]]{64}  $stem\.lean\$" "$companion_output/source-sha256.txt" &&
-       grep -qE "^[[:xdigit:]]{64}  \.lake/build/lib/lean/$stem\.olean\$" "$companion_output/reusable-artifact-sha256.txt"; then
+    # Reusable = the companion's own SOURCE closure (source-modules.txt: what reusable-artifact-sha256
+    # covers). Not source-sha256.txt: under --umbrella that lists every umbrella module too, and a
+    # module only the umbrella built has no reusable entry (the consent closure reaching
+    # Theory.MaterializerCardinality, outside the Host closure, refused every consent build at c1df1f08).
+    if grep -qxF "$module" "$companion_output/source-modules.txt"; then
       grep -E "^[[:xdigit:]]{64}  $stem\.lean\$" "$companion_output/source-sha256.txt" >> "$companion_check"
       for path in ".lake/build/lib/lean/$stem.olean" ".lake/build/lib/lean/$stem.ilean" \
           ".lake/build/ir/$stem.c" ".lake/build/ir/$stem.c.o.export"; do

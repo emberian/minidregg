@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# scripts/pipeline/lake-slot -- `lake build TARGET...` in the right build slot of this box, under swarm-build.
+#
+#   lake-slot TARGET...          (in the lane's src/)
+#
+# A delta of at most PIPELINE_SMALL_MAX (50) stale in-tree modules takes a small-check slot at 2 threads
+# (never queued behind a full build); anything bigger takes the first free lane slot ($PIPELINE_SLOTS,
+# any of them, never a named one). SWARM_MEM_MAX defaults to 24G. Use this instead of
+# `flock /srv/build-slot-N ... lake build`: a named slot queues behind its holder while others are free.
+set -uo pipefail
+. "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/lib.sh"
+[ $# -ge 1 ] || pipeline_die "usage: lake-slot TARGET..."
+mods=(); for t in "$@"; do case "$t" in -*|*:*|+*) ;; *) mods+=("$t") ;; esac; done
+SWARM_MEM_MAX=${SWARM_MEM_MAX:-24G} pipeline_build_slot "${mods[@]}" -- swarm-build lake build "$@"

@@ -12,7 +12,8 @@ PIPELINE_ROOT=${PIPELINE_ROOT:-/srv/pipeline}
 # The box's own topology (which slot files lanes may take, where artifacts are built and mirrored,
 # its Lean thread count) lives in ONE box-local file, written when the box is provisioned
 # (scripts/pipeline/box-env); nothing about a particular box is hard-coded here.
-[ -f "$PIPELINE_ROOT/box.env" ] && . "$PIPELINE_ROOT/box.env"
+export PATH=$HOME/.elan/bin:$HOME/.cargo/bin:$PATH
+[ -f "$PIPELINE_ROOT/box.env" ] && . "$PIPELINE_ROOT/box.env"   # after PATH: it may put the lake shim first
 ARTIFACT_ROOT=${ARTIFACT_ROOT:-/srv/artifacts}
 JOURNEY_ROOT=${JOURNEY_ROOT:-/srv/journeys}
 PIPELINE_REPO_URL=${PIPELINE_REPO_URL:-https://github.com/emberian/minidregg.git}
@@ -22,7 +23,6 @@ PIPELINE_MIRRORS=${PIPELINE_MIRRORS:-}
 # The build slots a lane may take on this box (flock files, one Lean build each). The merge gate's
 # own slots are never in this list; the keeper sets PIPELINE_SLOTS to its slot explicitly.
 PIPELINE_SLOTS=${PIPELINE_SLOTS:-/srv/build-slot-1 /srv/build-slot-2}
-export PATH=$HOME/.elan/bin:$HOME/.cargo/bin:$PATH
 
 pipeline_die() { printf '%s: %s\n' "${PIPELINE_PROG:-$(basename -- "$0")}" "$*" >&2; exit 1; }
 pipeline_log() { printf '%s %s: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${PIPELINE_PROG:-$(basename -- "$0")}" "$*"; }
@@ -47,12 +47,15 @@ pipeline_verify_set() {
 # long build in one slot never blocks a waiter while another slot is free). A FAILING CMD is not
 # re-run: only flock's own conflict code 75 moves on to the next slot.
 pipeline_slot() {
-  local rc s
+  local rc s told=0
   while :; do
     for s in $PIPELINE_SLOTS; do
       rc=0; flock -n -E 75 "$s" "$@" || rc=$?
       [ "$rc" = 75 ] || return "$rc"
     done
+    if [ "$told" = 0 ]; then told=1
+      pipeline_log "all lane slots of $(hostname) are held; waiting for the first to free. \`$(dirname -- "${BASH_SOURCE[0]}")/slots\` shows holders here and the free slots of ${PIPELINE_PEER:-the sibling box} (a lane can move there: mk-lane on it, then git fetch from this box)" >&2
+    fi
     sleep "${PIPELINE_SLOT_POLL_S:-5}"
   done
 }
