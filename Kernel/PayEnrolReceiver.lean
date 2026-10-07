@@ -732,6 +732,17 @@ def Legs.writes (factory : FactoryCell deployment directory.directory) : {decisi
       [ResourceBirthController.Concrete.packedWrite deployment.factoryId
         ⟨.declaredObject, factory.payload⟩ ⟨.declaredObject, factory.payload⟩]
 
+/-- **The newborns the enrollment step names** (`ReceivingLaw.namesBirth`): every
+birth write of the plan -- the account and its law source -- as `birth/<id>` ↦
+its exact post root.  The factory's law and the pay law judge the step that
+names them, which is what admits a neutral (unparented) birth. -/
+def Legs.newbornSlots : {decision : Decision} →
+    Legs deployment profile ambient directory authority pay book tariff price decision →
+      List (Minidregg.Pred.Slot × Int)
+  | _, .enrol _ legs => (ResourceBirthController.allocationWrites legs.descriptor).map fun write =>
+      (ReceivingLaw.birthSlot write.cellId.value, Int.ofNat write.exactPost.value)
+  | _, _ => []
+
 /-- The enrollment also spends its birth identity's authority marker. -/
 def Legs.nullifiers : {decision : Decision} →
     Legs deployment profile ambient directory authority pay book tariff price decision →
@@ -925,7 +936,8 @@ def project (planned : Planned deployment profile ambient durable command verifi
      ("pay/price", Int.ofNat (enrolPrice planned.tariff
         (priceAt deployment profile ambient planned.authority command)))] ++
     ResourceAuthorityProjection.grantSlots "authority/enrol" .program command.capability
-      planned.authority.snapshot.logical⟩
+      planned.authority.snapshot.logical ++
+    planned.legs.newbornSlots⟩
 
 /-- The enrollment's law step: the factory's selector slots, the observer's
 self-enrollment request (`installPolicy` on the factory, the self-enrol slot 1),
@@ -1436,7 +1448,7 @@ theorem committed_admitted {oracle : CredentialSignatureIO.Oracle Id}
   obtain ⟨-, -, factoryLawful⟩ := committed_lawful committed
   obtain ⟨kind, -, judgedFactory⟩ := factoryLawful
   have notBirth := factoryWrite_not_birth planned
-  rcases judgedFactory with ⟨-, judgedStep, law, stepEq, resolvedOf, lowerable, inRange, casts,
+  rcases judgedFactory with ⟨-, judgedStep, law, stepEq, resolvedOf, -, lowerable, inRange, casts,
       evaluated⟩ | ⟨-, -, -, noStep⟩ | ⟨-, -, (⟨birth, -⟩ | ⟨-, -, noStep⟩)⟩
   · cases stepEq
     have resolved : (laws deployment profile).resolve durable (factoryWrite planned).cellId.value
