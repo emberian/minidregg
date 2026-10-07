@@ -94,6 +94,12 @@ root = "Host.WorldFoldBench"
 name = "world-root-bench"
 root = "Host.WorldRootBench"
 
+# KN2-STORE-OPEN: Store open / first read / append at a given history length
+# (Host/Kn2StoreBench.lean). Not part of the umbrella gate.
+[[lean_exe]]
+name = "kn2-store-bench"
+root = "Host.Kn2StoreBench"
+
 # The compiled Theory.Nock interpreter behind a CLI (stdin: jam of [subject formula];
 # see Host/NockEval.lean). Driven by the nockvm differential harness. Not part of the umbrella gate.
 [[lean_exe]]
