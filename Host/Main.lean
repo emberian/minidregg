@@ -7654,8 +7654,8 @@ def run (arguments : List String) : IO UInt32 := do
                         | 36 =>
                             let prepared ← if settings.carryRegistry.isSome then do
                               let session ← sessionCarriedWalked pinnedConfig state carriedState settings
-                              pure (ApplicationDispatchAuthoring.prepareRequestSuffix
-                                pinnedConfig session.verified payload)
+                              (ApplicationDispatchAuthoring.prepareRequestSuffix
+                                pinnedConfig session.verified payload).run
                             else do
                               let session ← sessionWalked pinnedConfig state
                               pure (ApplicationDispatchAuthoring.prepareRequestVerified
@@ -7667,8 +7667,8 @@ def run (arguments : List String) : IO UInt32 := do
                         | 82 =>
                             let plan ← if settings.carryRegistry.isSome then do
                               let session ← sessionCarriedWalked pinnedConfig state carriedState settings
-                              IO.ofExcept (ApplicationGrainSessionEnrollmentAuthoring.prepareRequestSuffix
-                                pinnedConfig session.verified payload)
+                              IO.ofExcept (← ExceptT.run (ApplicationGrainSessionEnrollmentAuthoring.prepareRequestSuffix
+                                pinnedConfig session.verified payload))
                             else do
                               let session ← sessionWalked pinnedConfig state
                               IO.ofExcept (ApplicationGrainSessionEnrollmentAuthoring.prepareRequestVerified
@@ -7685,8 +7685,8 @@ def run (arguments : List String) : IO UInt32 := do
                             let signatures ← decodeSignatures signaturesBytes
                             let ingress ← if settings.carryRegistry.isSome then do
                               let session ← sessionCarriedWalked pinnedConfig state carriedState settings
-                              IO.ofExcept (ApplicationGrainSessionEnrollmentAuthoring.assembleCurrentSuffix
-                                pinnedConfig session.verified plan signatures)
+                              IO.ofExcept (← ExceptT.run (ApplicationGrainSessionEnrollmentAuthoring.assembleCurrentSuffix
+                                pinnedConfig session.verified plan signatures))
                             else do
                               let session ← sessionWalked pinnedConfig state
                               IO.ofExcept (ApplicationGrainSessionEnrollmentAuthoring.assembleCurrent

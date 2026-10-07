@@ -80,7 +80,7 @@ def authenticatedPlanSuffix {config : Config} {anchor : Opened config} {target :
     (old : NativeHostReplay.SuffixVerified config anchor target)
     (request signature : List UInt8) (observations : List (List UInt8)) :
     IO (Except String ApplicationDispatchAuthoring.Plan) := do
-  let .ok plan := ApplicationDispatchAuthoring.prepareRequestSuffix config old request
+  let .ok plan ← (ApplicationDispatchAuthoring.prepareRequestSuffix config old request).run
     | return stopped
   authorizePlan config old.opened request signature observations plan
 

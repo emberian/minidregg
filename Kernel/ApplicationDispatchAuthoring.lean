@@ -324,13 +324,13 @@ def prepareVerified (config : Config) {target : Durable}
 Agent tickets still need their separate authenticated reserve/lifetime path. -/
 def prepareSuffix (config : Config) {anchor : Opened config} {target : Durable}
     (verified : NativeHostReplay.SuffixVerified config anchor target) (request : Request) :
-    Except String Plan := do
+    ExceptT String IO Plan := do
   let (spec, issueBytes, originalSourceBytes) ←
     if request.issueIndex < anchor.durable.height then do
       let some origin := verified.origin
         | throw "old dispatch issue lacks authenticated carried origin"
       let custody ← origin.rebindChecked verified.opened.durable
-      let issue ← CarriedApplicationProvenance.selectIssue custody request.issueIndex
+      let issue ← ExceptT.mk (CarriedApplicationProvenance.selectIssue custody request.issueIndex)
       let selected ← CarriedDispatchProvenance.fromIssue issue
       pure (issue.spec, issue.ingress.canonicalBytes, selected.originalSourceBytes)
     else do
@@ -346,7 +346,7 @@ def prepareSuffix (config : Config) {anchor : Opened config} {target : Durable}
 
 def prepareRequestSuffix (config : Config) {anchor : Opened config} {target : Durable}
     (verified : NativeHostReplay.SuffixVerified config anchor target) (bytes : List UInt8) :
-    Except String Plan := do
+    ExceptT String IO Plan := do
   let some request := requestCodec.decode bytes
     | throw "noncanonical dispatch authoring request"
   prepareSuffix config verified request

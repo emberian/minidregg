@@ -54,12 +54,13 @@ def fromIssue {config : Config} {current : Durable} (issue : CarriedIssue config
 The exact outer issue bytes choose their original retained absolute index. -/
 def select {config : Config} {current : Durable}
     (custody : CarriedSegmentIO.PreservedPrefix config current) (issueBytes : List UInt8) :
-    Except String (CarriedDispatchIssue config current) := do
+    IO (Except String (CarriedDispatchIssue config current)) := do
   let some index := custody.source.durable.image.accepted.findIdx? (fun record =>
       record.event.codecVersion == 22 && record.event.canonicalBytes == issueBytes)
-    | throw "carried dispatch issue absent from retained original profile"
-  let issue ← selectIssue custody index
-  fromIssue issue
+    | return .error "carried dispatch issue absent from retained original profile"
+  match ← selectIssue custody index with
+  | .error detail => return .error detail
+  | .ok issue => return fromIssue issue
 
 theorem CarriedDispatchIssue.descriptor_bytes_opaque {config : Config} {current : Durable}
     (selected : CarriedDispatchIssue config current) :
