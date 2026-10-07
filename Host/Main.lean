@@ -96,6 +96,7 @@ import Host.SeatJson
 import Compiler.GenericSimplexSourceAnchor
 import Compiler.FnWireFncu
 import Compiler.DurableStoreAudit
+import Compiler.FnWirePinned
 import Kernel.NativeHostObjectAudience
 import Kernel.NativeHostSession
 import Kernel.NativeReserveContinuity
@@ -3108,6 +3109,11 @@ structure FnPollScopePin where
   queryVersion : Nat
   viewVersion : Nat
   registrationEpoch : Nat
+  /-- The genesis node identity of the fn store (`fn identity`'s `node`, 32 octets as lowercase
+  hex): re-genesis of the store changes it. -/
+  node : String
+  /-- The store's schema digest (`fn identity`'s `schema`, 32 octets as lowercase hex). -/
+  schema : String
   deriving FromJson
 
 def decodeCanonicalHex (label value : String) : Except String (List UInt8) := do
@@ -3227,6 +3233,20 @@ def FnPollScopePin.check (pin : FnPollScopePin)
       projection.registrationEpoch == pin.registrationEpoch do
     throw "fn poll cursor differs from independently pinned consumer scope"
 
+/-- The identity fn's running owner reports must be the pinned store: node, schema, consumer
+history and incarnation equal the pin's, and the wire-grammar file the image renders is the
+file Mini interprets (`FnWire.pinnedDigest`). Each failure is refused by name. -/
+def FnPollScopePin.checkIdentity (pin : FnPollScopePin) (identity : FnWire.Identity) :
+    Except String Unit := do
+  let node ← decodeCanonicalHex "pinned fn node" pin.node
+  let schema ← decodeCanonicalHex "pinned fn schema" pin.schema
+  let history ← decodeCanonicalHex "pinned fn history" pin.history
+  let incarnation ← decodeCanonicalHex "pinned fn incarnation" pin.incarnation
+  match identity.check node schema history incarnation with
+  | .ok _ => pure ()
+  | .error refusal =>
+      throw s!"fn identity differs from the pinned store ({refusal.word}); the grammar digest must be {FnWire.pinnedDigest}"
+
 def FnPollScopePin.progressScope (pin : FnPollScopePin) :
     Except String FnConsumerProgress.Scope := do
   return ⟨← decodeCanonicalHex "pinned fn history" pin.history,
@@ -3236,30 +3256,20 @@ def FnPollScopePin.progressScope (pin : FnPollScopePin) :
     ← decodeCanonicalHex "pinned fn query" pin.query,
     pin.queryVersion, pin.viewVersion, pin.registrationEpoch⟩
 
-def exactNamedDecimal (name field : String) : Except String Nat := do
-  let [label, value] := field.splitOn "="
-    | throw s!"fn {name} field has unexpected framing"
-  unless label == name do throw s!"fn {name} field has unexpected label"
-  exactDecimal name value
-
 structure FnConsumerStatus where
   committedAck : Nat
   frontier : Nat
   distance : Nat
 
-def parseFnConsumerStatus (output : String) : Except String FnConsumerStatus := do
-  let [line, ""] := output.splitOn "\n"
-    | throw "fn consumer status has unexpected framing"
-  let ["consumer", "status", "accepted", ack, frontier, distance] :=
-      line.splitOn " "
-    | throw "fn consumer status has unexpected fields"
-  let committedAck ← exactNamedDecimal "committed-ack" ack
-  let frontier ← exactNamedDecimal "committed-journal-frontier" frontier
-  let distance ← exactNamedDecimal "journal-event-distance" distance
-  unless committedAck ≤ frontier && distance == frontier - committedAck &&
-      frontier ≤ 4294967295 do
-    throw "fn consumer status has invalid positions"
-  return ⟨committedAck, frontier, distance⟩
+/-- A `consumer --frame status` answer: the frame is fn's `fnct.consumer.status-reply` (or a
+reasoned refusal), read by the grammar interpreter; its `where` already pins
+`committed-ack ≤ frontier` and `distance = frontier − committed-ack`, and the u32 fields bound
+the frontier. Only an accepted reply is a status. -/
+def parseFnConsumerStatus (output : List UInt8) : Except String FnConsumerStatus :=
+  match FnWire.readStatusReply output with
+  | .ok (.accepted committedAck frontier distance) => .ok ⟨committedAck, frontier, distance⟩
+  | .ok _ => .error "fn consumer status is not an accepted status reply"
+  | .error refusal => .error s!"fn consumer status frame refused: {refusal.fnWord}"
 
 def projectFnPoll (fnBinary : String) (pin : FnPollScopePin)
     (cursorPath reportPath : String) : IO (List UInt8 × List UInt8 × FnPollProjection) := do
@@ -3331,7 +3341,12 @@ def runFnLocal (fnBinary : String) (args : Array String) (stdoutBound : Nat) :
 refused, uncertain, fault, usage and the transport classes stay distinct. -/
 def fnLocalRefusal (verb : String) (exitCode : Nat) (output : List UInt8)
     (stderrBytes : ByteArray) : IO.Error :=
-  IO.userError s!"{FnOutcome.describe verb exitCode output} (stderrPrefixBytes={stderrBytes.size})"
+  IO.userError s!"{FnOutcome.describe verb exitCode (FnOutcome.textReason output)} (stderrPrefixBytes={stderrBytes.size})"
+
+/-- As `fnLocalRefusal`, for a `--frame` verb: the reason is read from the printed frame. -/
+def fnLocalFrameRefusal (verb : String) (exitCode : Nat) (output : List UInt8)
+    (stderrBytes : ByteArray) : IO.Error :=
+  IO.userError s!"{FnOutcome.describe verb exitCode (FnOutcome.frameReason output)} (stderrPrefixBytes={stderrBytes.size})"
 
 def fnConsumerAscii (scope : FnPollScopePin) : IO String := do
   let consumer ← IO.ofExcept (decodeCanonicalHex "pinned fn consumer" scope.consumer)
@@ -3340,14 +3355,38 @@ def fnConsumerAscii (scope : FnPollScopePin) : IO String := do
     throw (IO.userError "pinned fn consumer is outside local CLI ASCII profile")
   pure (String.fromUTF8! consumer.toByteArray)
 
+/-- `fn identity --frame CONTROL`: the owner's `fnct.store-identity.reply`, read by the pinned
+interpreter. A refusal by name, an unreadable frame and a non-zero exit are each refused. -/
+def queryFnIdentity (fnBinary : String) (controlPath : String) : IO FnWire.Identity := do
+  unless controlPath.startsWith "/" do
+    throw (IO.userError "fn identity control must be absolute")
+  let (exitCode, output, stderrBytes) ← runFnLocal fnBinary
+    #["--fn", "identity", "--frame", controlPath] (FnWire.maxFrameLine 2048)
+  match FnWire.readIdentityReply output with
+  | .ok (.accepted identity) =>
+      unless exitCode == 0 do
+        throw (IO.userError s!"fn identity answered an identity with exit {exitCode}")
+      pure identity
+  | .ok (.refused word) =>
+      throw (IO.userError s!"fn identity refused ({word}) (exit {exitCode}, stderrPrefixBytes={stderrBytes.size})")
+  | .error refusal =>
+      throw (IO.userError s!"fn identity frame refused: {refusal.fnWord} (exit {exitCode}, stderrPrefixBytes={stderrBytes.size})")
+
+/-- The running owner is the pinned store, before anything is asked of it. -/
+def verifyFnIdentity (fnBinary : String) (scope : FnPollScopePin) (controlPath : String) :
+    IO Unit := do
+  let identity ← queryFnIdentity fnBinary controlPath
+  IO.ofExcept (scope.checkIdentity identity)
+
 def queryFnConsumerStatus (fnBinary : String) (scope : FnPollScopePin)
     (controlPath : String) : IO FnConsumerStatus := do
+  verifyFnIdentity fnBinary scope controlPath
   let consumer ← fnConsumerAscii scope
   let (exitCode, output, stderrBytes) ← runFnLocal fnBinary
-    #["--fn", "consumer", "status", controlPath, consumer] 256
-  unless exitCode == 0 && output.all (fun byte => byte.toNat < 128) do
-    throw (fnLocalRefusal "local consumer status" exitCode output stderrBytes)
-  IO.ofExcept (parseFnConsumerStatus (String.fromUTF8! output.toByteArray))
+    #["--fn", "consumer", "--frame", "status", controlPath, consumer] (FnWire.maxFrameLine 13)
+  unless exitCode == 0 do
+    throw (fnLocalFrameRefusal "local consumer status" exitCode output stderrBytes)
+  IO.ofExcept (parseFnConsumerStatus output)
 
 /-- The scope and position of an `fncu` cursor file, read by Mini's own interpreter at fn's
 exported `fncu.cursor` grammar (`Compiler.FnWireFncu`; the grammar is fn's, pinned with its
@@ -3375,9 +3414,17 @@ def queryFnConsumerPosition (fnBinary : String) (scope : FnPollScopePin)
     let path := (directory / "current-position.fncu").toString
     let consumer ← fnConsumerAscii scope
     let (exitCode, output, stderrBytes) ← runFnLocal fnBinary
-      #["--fn", "consumer", "position", controlPath, consumer, path] 128
-    unless exitCode == 0 && output == "consumer accepted\n".toUTF8.toList do
-      throw (fnLocalRefusal "current consumer position" exitCode output stderrBytes)
+      #["--fn", "consumer", "--frame", "position", controlPath, consumer, path]
+      (FnWire.maxFrameLine 513)
+    unless exitCode == 0 do
+      throw (fnLocalFrameRefusal "current consumer position" exitCode output stderrBytes)
+    -- The frame fn printed is an accepted consumer reply; when it carries a cursor, the cursor
+    -- is the one it wrote to the file (checked below), not merely a file of the right shape.
+    let frameCursor ← match FnWire.readConsumerReply output with
+      | .ok (.accepted cursor) => pure cursor
+      | .ok _ => throw (fnLocalFrameRefusal "current consumer position" exitCode output stderrBytes)
+      | .error refusal =>
+          throw (IO.userError s!"fn current position frame refused: {refusal.fnWord}")
     let cursor ← readBoundedBytes path 346
     unless !cursor.isEmpty do
       throw (IO.userError "fn current position returned no cursor")
@@ -3386,6 +3433,9 @@ def queryFnConsumerPosition (fnBinary : String) (scope : FnPollScopePin)
     unless inspectedScope == selectedScope &&
         cursor == (← readBoundedBytes path 346) do
       throw (IO.userError "fn current position scope or cursor changed")
+    if let some (frameScope, framePosition) := frameCursor then
+      unless frameScope == inspectedScope && framePosition == position do
+        throw (IO.userError "fn current position frame differs from the cursor file")
     let status ← queryFnConsumerStatus fnBinary scope controlPath
     unless status.committedAck ≥ position do
       throw (IO.userError "fn current position exceeds fenced durable ACK")
@@ -3402,6 +3452,7 @@ def invokeFnConsumerPollRaw (fnBinary : String) (scope : FnPollScopePin)
   for path in [cursorPath, reportPath] do
     if ← (System.FilePath.mk path).pathExists then
       throw (IO.userError "fn poll output path already exists")
+  verifyFnIdentity fnBinary scope controlPath
   let consumer ← fnConsumerAscii scope
   let (exitCode, output, stderrBytes) ← runFnLocal fnBinary
     #["--fn", "consumer", "poll", controlPath, consumer, cursorPath, reportPath] 512
@@ -3459,6 +3510,7 @@ def invokeFnConsumerPoll (fnBinary : String) (scope : FnPollScopePin)
   for path in [cursorPath, reportPath, carrierPath] do
     if ← (System.FilePath.mk path).pathExists then
       throw (IO.userError "fn poll output path already exists")
+  verifyFnIdentity fnBinary scope controlPath
   let consumer ← fnConsumerAscii scope
   let (exitCode, output, stderrBytes) ← runFnLocal fnBinary
     #["--fn", "consumer", "poll", controlPath, consumer, cursorPath, reportPath] 512
@@ -4053,7 +4105,7 @@ def selectedFnScope (scopePath : String) : IO FnPollScopePin := do
   let json ← IO.ofExcept (Minidregg.Host.Json.parse source)
   IO.ofExcept (requireExactFields "fn selected-release scope"
     ["history", "incarnation", "consumer", "principal", "query",
-     "queryVersion", "viewVersion", "registrationEpoch"] json)
+     "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] json)
   IO.ofExcept (fromJson? json)
 
 /-- The registration author uses only lifetime-pinned operator manifests and
@@ -4420,9 +4472,9 @@ def selectedReleaseFnAck (config : NativeHost.Config) (service : FnPollService)
       unless cursor == liveCursor && sameBytes report liveReport do
         throw (IO.userError "selected-release fn ACK poll differs from retained event")
       let child ← IO.Process.spawn
-        { cmd := executable, args := #["--fn", "consumer", "ack", controlPath, liveCursorPath],
+        { cmd := executable, args := #["--fn", "consumer", "--frame", "ack", controlPath, liveCursorPath],
           stdin := .null, stdout := .piped, stderr := .null }
-      let output ← try readBoundedLoop child.stdout 128
+      let output ← try readBoundedLoop child.stdout (FnWire.maxFrameLine 513)
         catch error =>
           child.kill
           discard <| child.wait
@@ -4519,9 +4571,9 @@ def selectedEmptyFnAck (config : NativeHost.Config) (service : FnPollService)
       unless cursor == liveCursor && report == liveReport && liveReport.isEmpty do
         throw (IO.userError "empty fn ACK poll differs from retained page")
       let child ← IO.Process.spawn
-        { cmd := executable, args := #["--fn", "consumer", "ack", controlPath, liveCursorPath],
+        { cmd := executable, args := #["--fn", "consumer", "--frame", "ack", controlPath, liveCursorPath],
           stdin := .null, stdout := .piped, stderr := .null }
-      let output ← try readBoundedLoop child.stdout 128
+      let output ← try readBoundedLoop child.stdout (FnWire.maxFrameLine 513)
         catch error =>
           child.kill
           discard <| child.wait
@@ -4569,7 +4621,7 @@ def runPollConsumerDecisionLoaded (config : NativeHost.Config)
     ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
   IO.ofExcept (requireExactFields "fn poll scope"
     ["history", "incarnation", "consumer", "principal", "query",
-     "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+     "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
   IO.ofExcept (requireExactFields "fn claim"
     ["sourceIdentity", "messageId", "groups"] claimJson)
   IO.ofExcept (requireExactFields "consumer policy"
@@ -4660,7 +4712,7 @@ def runReplyConsumerPollDecisionLoaded (config : NativeHost.Config)
     IO.ofExcept (requireExactFields label ["sourceIdentity", "messageId", "groups"] value)
   IO.ofExcept (requireExactFields "A fn scope"
     ["history", "incarnation", "consumer", "principal", "query",
-     "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+     "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
   IO.ofExcept (requireExactFields "A reply policy"
     ["application", "subject", "target", "capability"] policyJson)
   let parsedRPin : FnPortablePin ← IO.ofExcept (fromJson? rPinJson)
@@ -4912,7 +4964,7 @@ def runReplyConsumerCatalogDecisionLoaded (config : NativeHost.Config)
     ["sourceIdentity", "messageId", "groups"] qClaimJson)
   IO.ofExcept (requireExactFields "A fn scope"
     ["history", "incarnation", "consumer", "principal", "query",
-     "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+     "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
   IO.ofExcept (requireExactFields "A reply policy"
     ["application", "subject", "target", "capability"] policyJson)
   let rawRPin : FnPortablePin ← IO.ofExcept (fromJson? rPinJson)
@@ -5063,7 +5115,7 @@ def runFnPollSession (config : NativeHost.Config)
       ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
     IO.ofExcept (requireExactFields "fn service scope"
       ["history", "incarnation", "consumer", "principal", "query",
-       "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+       "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
     let rawPin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
     let pin := rawPin.withExecution service.fnExecutable service.fnPublicKey
     let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
@@ -5174,9 +5226,9 @@ def runFnSkipAckSession (pin : FnPortablePin) (scope : FnPollScopePin)
         currentStatus.committedAck
     let child ← IO.Process.spawn
       { cmd := pin.executable,
-        args := #["--fn", "consumer", "ack", controlPath, cursorPath],
+        args := #["--fn", "consumer", "--frame", "ack", controlPath, cursorPath],
         stdin := .null, stdout := .piped, stderr := .null }
-    let output ← try readBoundedLoop child.stdout 128
+    let output ← try readBoundedLoop child.stdout (FnWire.maxFrameLine 513)
       catch error =>
         child.kill
         discard <| child.wait
@@ -5225,7 +5277,7 @@ def runFnAckSession (config : NativeHost.Config)
     ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
   IO.ofExcept (requireExactFields "fn service scope"
     ["history", "incarnation", "consumer", "principal", "query",
-     "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+     "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
   let rawPin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
   let pin := rawPin.withExecution service.fnExecutable service.fnPublicKey
   let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
@@ -5278,9 +5330,9 @@ def runFnAckSession (config : NativeHost.Config)
       throw (IO.userError "fn ack source differs from accepted Mini inbox")
     let child ← IO.Process.spawn
       { cmd := pin.executable,
-        args := #["--fn", "consumer", "ack", service.controlPath, cursorPath],
+        args := #["--fn", "consumer", "--frame", "ack", service.controlPath, cursorPath],
         stdin := .null, stdout := .piped, stderr := .null }
-    let output ← try readBoundedLoop child.stdout 128
+    let output ← try readBoundedLoop child.stdout (FnWire.maxFrameLine 513)
       catch error =>
         child.kill
         discard <| child.wait
@@ -5525,7 +5577,7 @@ def runFnReplyPollSession (config : NativeHost.Config)
       ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
     IO.ofExcept (requireExactFields "A fn service scope"
       ["history", "incarnation", "consumer", "principal", "query",
-       "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+       "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
     let rawPin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
     let pin := rawPin.withExecution service.qExecutable service.qPublicKey
     let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
@@ -5600,7 +5652,7 @@ def runFnReplyCatalogPollSession (config : NativeHost.Config)
       ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
     IO.ofExcept (requireExactFields "A fn catalog scope"
       ["history", "incarnation", "consumer", "principal", "query",
-       "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+       "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
     let rawPin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
     let pin := rawPin.withExecution service.qExecutable service.qPublicKey
     let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
@@ -5711,9 +5763,9 @@ def runCatalogOwnRAckSession (config : NativeHost.Config)
       return response "covered-by-durable-frontier" currentStatus.committedAck
     let child ← IO.Process.spawn
       { cmd := pin.executable,
-        args := #["--fn", "consumer", "ack", service.controlPath, cursorPath],
+        args := #["--fn", "consumer", "--frame", "ack", service.controlPath, cursorPath],
         stdin := .null, stdout := .piped, stderr := .null }
-    let output ← try readBoundedLoop child.stdout 128
+    let output ← try readBoundedLoop child.stdout (FnWire.maxFrameLine 513)
       catch error =>
         child.kill
         discard <| child.wait
@@ -5755,7 +5807,7 @@ def runFnReplyAckSession (config : NativeHost.Config)
     ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
   IO.ofExcept (requireExactFields "A fn scope"
     ["history", "incarnation", "consumer", "principal", "query",
-     "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+     "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
   let rawPin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
   let pin := rawPin.withExecution service.qExecutable service.qPublicKey
   let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
@@ -5814,9 +5866,9 @@ def runFnReplyAckSession (config : NativeHost.Config)
       throw (IO.userError "A reply ack source differs from accepted Mini inbox")
     let child ← IO.Process.spawn
       { cmd := pin.executable,
-        args := #["--fn", "consumer", "ack", service.controlPath, cursorPath],
+        args := #["--fn", "consumer", "--frame", "ack", service.controlPath, cursorPath],
         stdin := .null, stdout := .piped, stderr := .null }
-    let output ← try readBoundedLoop child.stdout 128
+    let output ← try readBoundedLoop child.stdout (FnWire.maxFrameLine 513)
       catch error =>
         child.kill
         discard <| child.wait
@@ -8346,7 +8398,7 @@ def run (arguments : List String) : IO UInt32 := do
             ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
           IO.ofExcept (requireExactFields "fn poll scope"
             ["history", "incarnation", "consumer", "principal", "query",
-             "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+             "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
           IO.ofExcept (requireExactFields "fn claim"
             ["sourceIdentity", "messageId", "groups"] claimJson)
           let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
@@ -8452,7 +8504,7 @@ def run (arguments : List String) : IO UInt32 := do
             ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
           IO.ofExcept (requireExactFields "fn poll scope"
             ["history", "incarnation", "consumer", "principal", "query",
-             "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+             "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
           let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
           let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
           let (polledCursor, polledEvent, polledCarrier) ←
@@ -8506,7 +8558,7 @@ def run (arguments : List String) : IO UInt32 := do
             ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
           IO.ofExcept (requireExactFields "A fn scope"
             ["history", "incarnation", "consumer", "principal", "query",
-             "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+             "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
           let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
           let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
@@ -8537,9 +8589,9 @@ def run (arguments : List String) : IO UInt32 := do
             throw (IO.userError "A reply ack principal differs from accepted Mini inbox")
           let child ← IO.Process.spawn
             { cmd := pin.fnBinary,
-              args := #["--fn", "consumer", "ack", controlPath, cursorPath],
+              args := #["--fn", "consumer", "--frame", "ack", controlPath, cursorPath],
               stdin := .null, stdout := .piped, stderr := .null }
-          let output ← try readBoundedLoop child.stdout 128
+          let output ← try readBoundedLoop child.stdout (FnWire.maxFrameLine 513)
             catch error =>
               child.kill
               discard <| child.wait
@@ -8607,7 +8659,7 @@ def run (arguments : List String) : IO UInt32 := do
             ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
           IO.ofExcept (requireExactFields "fn poll scope"
             ["history", "incarnation", "consumer", "principal", "query",
-             "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+             "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
           let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
           let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
           let (stored, kind, _) ← IO.ofExcept (← exportConsumerPoll config transactionId)
@@ -8641,9 +8693,9 @@ def run (arguments : List String) : IO UInt32 := do
             throw (IO.userError "fn ack source metadata differs from accepted Mini inbox")
           let child ← IO.Process.spawn
             { cmd := pin.fnBinary,
-              args := #["--fn", "consumer", "ack", controlPath, cursorPath],
+              args := #["--fn", "consumer", "--frame", "ack", controlPath, cursorPath],
               stdin := .null, stdout := .piped, stderr := .null }
-          let output ← try readBoundedLoop child.stdout 128
+          let output ← try readBoundedLoop child.stdout (FnWire.maxFrameLine 513)
             catch error =>
               child.kill
               discard <| child.wait
