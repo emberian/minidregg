@@ -567,5 +567,47 @@
    "refusal": "refused (self-rigid): open declaration OpenSelfRigid.AddY"
   },
   "owner": "control"
+ },
+ {
+  "name": "D4a-ReplaceUndeclared",
+  "modules": [
+   {
+    "name": "OpenSuperReplace",
+    "source": "OpenSuperReplace.obend"
+   }
+  ],
+  "entry": "replaced",
+  "arguments": [],
+  "prediction": "GPT-6 row D per-operation constraint: a layer that changes a member type is refused at that layer by name, even when a later layer restores the final self (it used to finish = 4)",
+  "current": {
+   "status": "refused",
+   "refusal": "refused (replace-undeclared)"
+  },
+  "target": {
+   "status": "refused",
+   "refusal": "refused (replace-undeclared)"
+  },
+  "owner": "control"
+ },
+ {
+  "name": "D4b-OverrideSameType",
+  "modules": [
+   {
+    "name": "OpenSuperOverride",
+    "source": "OpenSuperOverride.obend"
+   }
+  ],
+  "entry": "overridden",
+  "arguments": [],
+  "prediction": "pole of D4a: an override at the same type over Super is admitted: size(3) = 3 + 1",
+  "current": {
+   "status": "finished",
+   "value": "4"
+  },
+  "target": {
+   "status": "finished",
+   "value": "4"
+  },
+  "owner": "control"
  }
 ]
