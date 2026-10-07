@@ -515,6 +515,9 @@ def renderClause : Pred → String
   | .eqSlots a b => s!"{renderSlot a} == {renderSlot b}"
   | .leSlots a b => s!"{renderSlot a} <= {renderSlot b}"
   | .leSlotsOff a b k => s!"{renderSlot a} <= {renderSlot b} + {k}"
+  | .sumEq l r =>
+      "sum (" ++ ", ".intercalate (l.map renderSlot) ++ ")" ++ " == " ++
+        "sum (" ++ ", ".intercalate (r.map renderSlot) ++ ")"
   | .hashEq vs b c =>
       s!"{renderSlot c} opens ({", ".intercalate (vs.map renderSlot)}) with {renderSlot b}"
   | .ran program => s!"ran {program}"
@@ -685,6 +688,7 @@ evaluation fails it closed. -/
 def readsOnly (covered : Slot → Bool) : Pred → Bool
   | .eq s _ | .le s _ | .memberOf s _ | .writeOnce s | .monotone s => covered s
   | .eqSlots a b | .leSlots a b | .leSlotsOff a b _ => covered a && covered b
+  | .sumEq l r => l.all covered && r.all covered
   | .witnessed _ => true
   | .hashEq vs b c => covered hashEqCellSlot && vs.all covered && covered b && covered c
   | .ran program => covered (ranSlot program)
@@ -699,7 +703,7 @@ end
 mutual
 theorem readsOnly_all : (p : Pred) → readsOnly (fun _ => true) p = true
   | .eq _ _ | .le _ _ | .memberOf _ _ | .writeOnce _ | .monotone _ | .eqSlots _ _
-  | .leSlots _ _ | .leSlotsOff _ _ _ | .witnessed _ | .hashEq _ _ _ | .ran _ => by
+  | .leSlots _ _ | .leSlotsOff _ _ _ | .sumEq _ _ | .witnessed _ | .hashEq _ _ _ | .ran _ => by
       simp [readsOnly, List.all_eq_true]
   | .not q => by simpa [readsOnly] using readsOnly_all q
   | .allL ps => by simpa [readsOnly] using readsOnlyList_all ps
@@ -726,6 +730,14 @@ theorem getAll_congr {a b : State} (h : Agree covered a b) :
       simp only [List.all_cons, Bool.and_eq_true] at hs
       simp only [State.getAll, h s hs.1, getAll_congr h slots hs.2]
 
+/-- Agreement on every covered slot preserves a sum of covered values. -/
+theorem sumOf_agree {a b : State} (h : Agree covered a b) :
+    (slots : List Slot) → slots.all covered = true → sumOf a slots = sumOf b slots
+  | [], _ => rfl
+  | s :: slots, hs => by
+      simp only [List.all_cons, Bool.and_eq_true] at hs
+      simp only [sumOf, h s hs.1, sumOf_agree h slots hs.2]
+
 mutual
 /-- First-party evaluation of a predicate reading only covered slots is a function of
 those slots. -/
@@ -744,6 +756,9 @@ theorem evalWith_congr (ho : Agree covered o₁ o₂) (hn : Agree covered n₁ n
   | .eqSlots a b, h | .leSlots a b, h | .leSlotsOff a b _, h => by
       simp only [readsOnly, Bool.and_eq_true] at h
       simp only [evalWith, hn _ h.1, hn _ h.2]
+  | .sumEq l r, h => by
+      simp only [readsOnly, Bool.and_eq_true] at h
+      simp only [evalWith, sumOf_agree hn l h.1, sumOf_agree hn r h.2]
   | .witnessed _, _ => rfl
   | .hashEq vs b c, h => by
       simp only [readsOnly, Bool.and_eq_true] at h
@@ -788,7 +803,7 @@ theorem leafWith_congr (ho : Agree covered o₁ o₂) (hn : Agree covered n₁ n
       simp only [leafWith]
       exact leafWithAll_congr ho hn ps h
   | .eq _ _, h | .le _ _, h | .memberOf _ _, h | .writeOnce _, h | .monotone _, h
-  | .witnessed _, h | .eqSlots _ _, h | .leSlots _ _, h | .leSlotsOff _ _ _, h
+  | .witnessed _, h | .eqSlots _ _, h | .leSlots _ _, h | .leSlotsOff _ _ _, h | .sumEq _ _, h
   | .hashEq _ _ _, h | .ran _, h | .not _, h | .anyL _, h => by
       simp only [leafWith]
       rw [evalWith_congr ho hn _ h]

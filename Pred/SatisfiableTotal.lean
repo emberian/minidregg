@@ -768,7 +768,7 @@ theorem atom_sound (b : Bool) (p : Pred) (l : List Sys) (h : atomDnf b p = some 
       cases b <;> simp only [Bool.false_eq_true, if_false, if_true, Atom.offT,
         Atom.offF, List.mem_cons, List.mem_nil_iff, or_false, forall_eq_or_imp, forall_eq] <;>
         and_intros <;> intro hh <;> cases hx : n.get x <;> cases hy : n.get y <;> back_simp <;> omega
-  | witnessed _ | hashEq _ _ _ | ran _ | not _ | allL _ | anyL _ => simp [atomDnf] at h
+  | sumEq _ _ | witnessed _ | hashEq _ _ _ | ran _ | not _ | allL _ | anyL _ => simp [atomDnf] at h
 
 theorem mem_capped {cap : Nat} {l ss : List Sys} (h : capped cap l = some ss) {t : Sys}
     (ht : t ∈ ss) : t ∈ l := by
@@ -852,6 +852,7 @@ theorem dnf_sound (cap : Nat) :
       simp only [dnf, Option.bind_eq_some_iff] at h
       obtain ⟨l, hl, hc⟩ := h
       exact atom_sound b _ l hl t (mem_capped hc ht) hh
+  | _, .sumEq _ _, _, h, _, _, _
   | _, .witnessed _, _, h, _, _, _ | _, .hashEq _ _ _, _, h, _, _, _ | _, .ran _, _, h, _, _, _ => by
       simp [dnf] at h
 theorem dnfAnd_sound (cap : Nat) :
@@ -912,7 +913,7 @@ theorem atom_wf (b : Bool) (p : Pred) (l : List Sys) (h : atomDnf b p = some l) 
         simp only [if_true] at ht
         obtain ⟨x, _, rfl⟩ := List.mem_map.mp (mem_prune ht)
         simp [Sys.WF, Sys.pres, Con.upper, Con.lower]
-  | witnessed _ | hashEq _ _ _ | ran _ | not _ | allL _ | anyL _ => simp [atomDnf] at h
+  | sumEq _ _ | witnessed _ | hashEq _ _ _ | ran _ | not _ | allL _ | anyL _ => simp [atomDnf] at h
   | _ =>
       simp only [atomDnf, Option.some.injEq] at h; subst h
       cases b <;> simp [Sys.WF, Atom.eqT, Atom.eqF, Atom.leT, Atom.leF, Atom.woT, Atom.woF,
@@ -948,6 +949,7 @@ theorem dnf_wf (cap : Nat) :
       simp only [dnf, Option.bind_eq_some_iff] at h
       obtain ⟨l, hl, hc⟩ := h
       exact fun t ht => atom_wf b _ l hl t (mem_capped hc ht)
+  | _, .sumEq _ _, _, h
   | _, .witnessed _, _, h | _, .hashEq _ _ _, _, h | _, .ran _, _, h => by simp [dnf] at h
 theorem dnfAnd_wf (cap : Nat) :
     (b : Bool) → (ps : PredList) → (ss : List Sys) → dnfAnd cap b ps = some ss → ∀ t ∈ ss, t.WF

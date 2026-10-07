@@ -111,6 +111,7 @@ def realize (view : View) : Pred → Option Pred
   | .eqSlots a b => some (.eqSlots a b)
   | .leSlots a b => some (.leSlots a b)
   | .leSlotsOff a b k => some (.leSlotsOff a b k)
+  | .sumEq l r => some (.sumEq l r)
   | .witnessed vk => some (.witnessed vk)
   | .hashEq v b c => some (.hashEq v b c)
   | .ran p => some (.ran p)
@@ -254,6 +255,7 @@ theorem realize_eval (view : View) (o o' n : State) (ho : Shaped view o n) :
   | .eqSlots _ _, q, h => by simp only [realize, Option.some.injEq] at h; subst h; rfl
   | .leSlots _ _, q, h => by simp only [realize, Option.some.injEq] at h; subst h; rfl
   | .leSlotsOff _ _ _, q, h => by simp only [realize, Option.some.injEq] at h; subst h; rfl
+  | .sumEq _ _, q, h => by simp only [realize, Option.some.injEq] at h; subst h; rfl
   | .witnessed _, q, h => by simp only [realize, Option.some.injEq] at h; subst h; rfl
   | .hashEq _ _ _, q, h => by simp only [realize, Option.some.injEq] at h; subst h; rfl
   | .ran _, q, h => by simp only [realize, Option.some.injEq] at h; subst h; rfl
@@ -279,9 +281,10 @@ end
 /-! ## §3. Outside the fragment, named -/
 
 mutual
-/-- The path to the first leaf outside the arithmetic fragment (`witnessed`, `hashEq`,
+/-- The path to the first leaf outside the arithmetic fragment (`sumEq`, `witnessed`, `hashEq`,
 `ran`), in `Pred.subterm`'s path convention. -/
 def outsidePath : Pred → Option (List Nat)
+  | .sumEq _ _ => some []
   | .witnessed _ => some []
   | .hashEq _ _ _ => some []
   | .ran _ => some []
@@ -301,6 +304,7 @@ mutual
 /-- A law with a leaf outside the fragment has no translation, at either polarity. -/
 theorem outside_dnf_none (cap : Nat) :
     ∀ (p : Pred), (outsidePath p).isSome = true → ∀ b, dnf cap b p = none
+  | .sumEq _ _, _, b => by simp [dnf]
   | .witnessed _, _, b => by simp [dnf]
   | .hashEq _ _ _, _, b => by simp [dnf]
   | .ran _, _, b => by simp [dnf]

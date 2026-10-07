@@ -597,6 +597,8 @@ def lowerA (profile : CompilerProfile) : Pred → Term (AirSig F Wire) × Constr
           (PredOrder.indicator width present (orderBits width),
            PredOrder.gadget width present (vr (.val true a)) (offR b c)
              (.aux [] 0) (orderBits width))
+  | .sumEq _ _ =>
+      (cst 0, [cst 1])   -- not lowered: the system refuses every assignment (`lower_sumEq_refuses`)
   | .witnessed _ =>
       (cst 0, [])        -- first-party fail-closed: the indicator is constant 0
   | .hashEq v b c =>
@@ -642,6 +644,7 @@ def supported (profile : CompilerProfile) : Pred → Bool
   | .eqSlots _ _  => true
   | .leSlots _ _  => match profile.order with | .disabled => false | .scalar _ => true
   | .leSlotsOff _ _ _ => match profile.order with | .disabled => false | .scalar _ => true
+  | .sumEq _ _    => false
   | .witnessed _  => true
   | .hashEq _ _ _ => true
   | .ran _        => true
@@ -665,6 +668,7 @@ def lits : Pred → List ℤ
   | .eqSlots _ _  => []
   | .leSlots _ _  => []
   | .leSlotsOff _ _ c => [c]
+  | .sumEq _ _    => []
   | .witnessed _  => []
   | .hashEq _ _ _ => []
   | .ran _        => [1]
@@ -690,7 +694,7 @@ def digests : Pred → State → List ℤ
   | .allL ps, new => digestsL ps new
   | .anyL ps, new => digestsL ps new
   | .eq _ _, _ | .le _ _, _ | .memberOf _ _, _ | .writeOnce _, _ | .monotone _, _
-  | .eqSlots _ _, _ | .leSlots _ _, _ | .leSlotsOff _ _ _, _ | .ran _, _
+  | .eqSlots _ _, _ | .leSlots _ _, _ | .leSlotsOff _ _ _, _ | .sumEq _ _, _ | .ran _, _
   | .witnessed _, _ => []
 
 def digestsL : PredList → State → List ℤ
@@ -738,6 +742,7 @@ def wit (profile : CompilerProfile) : Pred → State → State → List ℕ → 
       | .disabled => 0
       | .scalar width => orderAux width
           ((new.get a).isSome && (new.get b).isSome) (intOf new a) (intOf new b + c) k
+  | .sumEq _ _    => fun _ _ _ _ => 0
   | .witnessed _  => fun _ _ _ _ => 0
   | .hashEq v b c => fun _ new _ k => auxPair (digestOf new v b c - valOf new c) k
   | .ran program  => fun _ new _ k =>
@@ -1125,6 +1130,7 @@ theorem lowerA_forced (profile : CompilerProfile)
     lowerA_forced_leSlots profile hprofile a b old new A hsup hrange h
   | .leSlotsOff a b c, old, new, A, _, hsup, hrange, h =>
     lowerA_forced_leSlotsOff profile hprofile a b c old new A hsup hrange h
+  | .sumEq _ _, _, _, _, _, hsup, _, _ => by simp [supported] at hsup
   | .witnessed vk, old, new, A, _, _, _, _ => by
     simp [lowerA, eval_cst, Minidregg.Pred.eval, Minidregg.Pred.evalWith,
       Minidregg.Pred.failClosed]
@@ -1314,6 +1320,7 @@ theorem lowerA_complete (profile : CompilerProfile) :
   | .leSlots a b, old, new, hsup, hrange => lowerA_complete_leSlots profile a b old new hsup hrange
   | .leSlotsOff a b c, old, new, hsup, hrange =>
     lowerA_complete_leSlotsOff profile a b c old new hsup hrange
+  | .sumEq _ _, _, _, hsup, _ => by simp [supported] at hsup
   | .witnessed vk, old, new, _, _ => by
     simp only [lowerA]
     exact systemAccepts_nil _
@@ -1544,6 +1551,12 @@ theorem lower_leSlots_disabled_refuses (a b : Slot) (asg : Wire → F) :
 
 theorem lower_leSlotsOff_disabled_refuses (a b : Slot) (c : Int) (asg : Wire → F) :
     ¬ systemAccepts asg (lower CompilerProfile.disabled (.leSlotsOff a b c)) := fun h =>
+  one_ne_zero (h (cst 1) (List.mem_append_left _ (List.mem_cons_self)))
+
+/-- `sumEq` is not lowered: under every profile its system refuses every assignment, so a law
+using it is never accepted by a circuit (the kernel judges it by `Pred.eval`). -/
+theorem lower_sumEq_refuses (profile : CompilerProfile) (l r : List Slot) (asg : Wire → F) :
+    ¬ systemAccepts asg (lower profile (.sumEq l r)) := fun h =>
   one_ne_zero (h (cst 1) (List.mem_append_left _ (List.mem_cons_self)))
 
 /-! ## §14. SUBSUMPTION — the general compiler reproduces the hand gadget (n = 1 → n = ∀).
