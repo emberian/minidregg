@@ -35,7 +35,7 @@ the END of every turn that writes a member's declared state, on every member's F
                 the bank's law.
   D6 priced     the domain judgment is paid work (`Capacity.domainWork`, rate 1 in this world): a transfer
                 y -> v declaring NO domain work is refused `domainUncovered <units> 0`, naming the units the
-                judgment needs (y's two domains and v's bank: (3+1) + (2+1) + (3+1) = 11 reads); declaring
+                judgment needs (the DISTINCT domains of y and v: the bank (3+1) and {y, w} (2+1) = 7 reads); declaring
                 units - 1 is refused `domainUncovered <units> <units-1>`; declaring exactly the units installs.
                 The same transfer back declaring 20 more units costs the sponsor exactly 20 more (the fee is
                 the envelope's public price, `Tariff.workOf`), and the bank still balances.
@@ -197,10 +197,10 @@ try:
         refused = transfer('d6-undeclared-refused', 'y', 'v', 0, 'refused', 'domainUncovered')
         named = re.search(r'domainUncovered (\d+) (\d+)', ' '.join(str(unhex(refused.get('detail', ''))).split()))
         units = int(named.group(1)) if named else None
-        # Honest world: y names the bank and {y, w}, v the bank: (3+1) + (2+1) + (3+1) = 11. Under a plant
+        # Honest world: y names the bank and {y, w}, v the bank; each distinct domain once: (3+1) + (2+1) = 7. Under a plant
         # that changes the memberships (joined-drops) the count differs; the refusal still names it.
         w.check('d6-units-named', named is not None and named.group(2) == '0' and units > 0 and
-                (units == 11 or bool(plants)), named and named.group(0))
+                (units == 7 or bool(plants)), named and named.group(0))
         w.check('d6-bank-unchanged', bank() == [11, 4, 7], None)
         if units:
             transfer('d6-one-short-refused', 'y', 'v', units - 1, 'refused', f'domainUncovered {units} {units - 1}')

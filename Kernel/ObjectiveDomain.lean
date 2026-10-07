@@ -254,10 +254,11 @@ The read guards it returns go into the turn's intent (`ActivitySeatEnd.AdmittedT
 what it reads at a posted cell is pinned by that post's own `pre`.
 
 It also returns its UNITS of work (`Capacity.domainWork`, priced by `Tariff.domainWork`): one per
-cell it reads for a domain and guards. Judging a domain reads its cell and every member's state
-(`|members| + 1`, `judgeDomain_length`; the `+ 1` is the law's evaluation); indexing a posted domain
-reads every member's record (`|members|`). A domain judged twice (named by a written object and
-posted) is read, and counted, twice. `ActivitySeatEnd.finish` refuses a turn whose declared
+cell it reads for a domain and guards. Each DISTINCT domain is judged once (a state post names its
+object twice, by the payload it writes and the one its cell holds, and two written objects may share a
+domain: the list is deduplicated, `eraseDups`). Judging a domain reads its cell and every member's
+state (`|members| + 1`, `judgeDomain_length`; the `+ 1` is the law's evaluation); indexing a posted
+domain reads every member's record (`|members|`). `ActivitySeatEnd.finish` refuses a turn whose declared
 allowance is below the units (`domainUncovered`). -/
 def judgeDomains {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (posts : List Post) : Except Refusal (List ReadGuard × Nat) :=
@@ -269,10 +270,10 @@ def judgeDomains {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sn
     match touchedDomains config snapshot posts written with
     | .error reason => .error reason
     | .ok ids =>
-      match judgeEach config snapshot posts (ids ++ posted) with
+      match judgeEach config snapshot posts (ids ++ posted).eraseDups with
       | .error reason => .error reason
       | .ok guards =>
-        match indexEach config snapshot posts posted with
+        match indexEach config snapshot posts posted.eraseDups with
         | .error reason => .error reason
         | .ok index =>
           .ok (guards ++ index ++ written.map fun object => guardAt snapshot (objectCell config.domain object),
@@ -508,12 +509,12 @@ theorem judgeDomains_parts {rootBytes : Bytes → Digest} {config : Config} {sna
     | ok ids =>
       rw [ht] at judged
       simp only at judged
-      cases he : judgeEach config snapshot posts (ids ++ postedDomains snapshot posts) with
+      cases he : judgeEach config snapshot posts (ids ++ postedDomains snapshot posts).eraseDups with
       | error reason => rw [he] at judged; cases judged
       | ok domainGuards =>
         rw [he] at judged
         simp only at judged
-        cases hx : indexEach config snapshot posts (postedDomains snapshot posts) with
+        cases hx : indexEach config snapshot posts (postedDomains snapshot posts).eraseDups with
         | error reason => rw [hx] at judged; cases judged
         | ok index =>
           rw [hx] at judged
@@ -526,11 +527,11 @@ theorem judgeDomains_parts {rootBytes : Bytes → Digest} {config : Config} {sna
               rcases which with ⟨object, written, record, found, named⟩ | posted
               · exact List.mem_append_left _ (touchedDomains_mem ht object written record found id named)
               · exact List.mem_append_right _ posted
-            obtain ⟨here, judgedHere, within⟩ := judgeEach_mem he id inIds
+            obtain ⟨here, judgedHere, within⟩ := judgeEach_mem he id (List.mem_eraseDups.mpr inIds)
             exact ⟨here, judgedHere, fun g inHere =>
               List.mem_append_left _ (List.mem_append_left _ (within g inHere))⟩
           · intro id posted
-            obtain ⟨here, indexedHere, within⟩ := indexEach_mem hx id posted
+            obtain ⟨here, indexedHere, within⟩ := indexEach_mem hx id (List.mem_eraseDups.mpr posted)
             exact ⟨here, indexedHere, fun g inHere =>
               List.mem_append_left _ (List.mem_append_right _ (within g inHere))⟩
 
@@ -634,12 +635,12 @@ theorem judgeDomains_units {rootBytes : Bytes → Digest} {config : Config} {sna
     | ok ids =>
       rw [ht] at judged
       simp only at judged
-      cases he : judgeEach config snapshot posts (ids ++ postedDomains snapshot posts) with
+      cases he : judgeEach config snapshot posts (ids ++ postedDomains snapshot posts).eraseDups with
       | error reason => rw [he] at judged; cases judged
       | ok domainGuards =>
         rw [he] at judged
         simp only at judged
-        cases hx : indexEach config snapshot posts (postedDomains snapshot posts) with
+        cases hx : indexEach config snapshot posts (postedDomains snapshot posts).eraseDups with
         | error reason => rw [hx] at judged; cases judged
         | ok index =>
           rw [hx] at judged
@@ -650,7 +651,7 @@ theorem judgeDomains_units {rootBytes : Bytes → Digest} {config : Config} {sna
             rcases which with ⟨object, written, record, found, named⟩ | posted
             · exact List.mem_append_left _ (touchedDomains_mem ht object written record found id named)
             · exact List.mem_append_right _ posted
-          obtain ⟨here, judgedHere, short⟩ := judgeEach_length he id inIds
+          obtain ⟨here, judgedHere, short⟩ := judgeEach_length he id (List.mem_eraseDups.mpr inIds)
           obtain ⟨domain, found, length⟩ := judgeDomain_length judgedHere
           exact ⟨domain, found, by omega⟩
 
