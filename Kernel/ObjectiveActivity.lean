@@ -2452,7 +2452,9 @@ def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
 
 /-- What each stage of a birth may spend: the front end's input and output (the replayed
 package's source bytes, the generated typed core), the checker fuel, the run's tick budget, the
-extraction's tick budget and the extracted output's byte budget. -/
+extraction's tick budget and the extracted output's byte budget. The prefix runs no domain
+judgment (it runs at the turn's end, `ActivitySeatEnd.finish`, bounded there by the same
+envelope's `domainWork`: `finish_domain_covered`). -/
 def BirthPrefix.spent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : BirthRequest} (pre : BirthPrefix config snapshot height request) :
     ObjectiveWorkAccount.Stage → Nat
@@ -2462,6 +2464,7 @@ def BirthPrefix.spent {rootBytes : Bytes → Digest} {config : Config} {snapshot
   | .execution => request.envelope.sourceTicks
   | .extraction => config.planBudget.ticks
   | .output => config.planBudget.bytes
+  | .domain => 0
 
 /-- The run of an admitted birth is the bounded machine under exactly the declared tick budget
 (`segmentExact`); its extraction under the deployment's Plan budget. -/
@@ -2490,6 +2493,7 @@ theorem BirthPrefix.work_within {rootBytes : Bytes → Digest} {config : Config}
   | execution => exact Nat.le_refl _
   | extraction => exact pre.extractCovered
   | output => exact covers.1.2
+  | domain => exact Nat.zero_le _
 
 def Birth.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : BirthRequest} (born : Birth config snapshot height request) (sealing : Seal) :
