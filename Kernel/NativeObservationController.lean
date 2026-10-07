@@ -1300,6 +1300,18 @@ def grantStanding (snapshot : CredentialAuthorityDomainReceiver.PhysicalSnapshot
           standing authority.snapshot.authState height target stored.head then
             some stored.head.scope.fields else none
 
+/-- The history a query reads beyond the served snapshot, supplied by the caller
+(the Host supplies what the Store's Reader authenticated; `Past.ofLoaded` is the
+loaded image's own, the specification): the state after `k` records, and the
+accepted records above a height with the height of the first. -/
+structure Past where
+  state : Nat → Option CredentialAuthorityDomainReceiver.PhysicalSnapshot
+  since : Nat → Nat × List DurableReceiver.IntentRecord
+
+def Past.ofLoaded (history : Durable) (genesisHeight : Nat) : Past where
+  state := history.atPrefix
+  since := fun _ => (genesisHeight + 1, history.image.accepted)
+
 /-- `at height`, answered against the grants as they stood at `height`, and
 narrowed to that grant's `Scope.fields` exactly as a current read is
 (K-FIELDS, `atView`). A height above the current one or below the retention
@@ -1307,19 +1319,77 @@ floor is `operationRejected`; a grant that did not stand over the target at
 that height is `noGrant`: the reader's current grant was verified, and a
 capability failure at the asked height discloses no more than a missing grant
 does (`RefusalReason`'s disclosure order). -/
-def atCovered (genesisHeight height : Nat) (subject : SubjectId) (grant : GrantRef) (target : Nat) :
+def atCoveredWith (past : Nat → Option CredentialAuthorityDomainReceiver.PhysicalSnapshot)
+    (genesisHeight height : Nat) (subject : SubjectId) (grant : GrantRef) (target : Nat) :
     Except RefusalReason (List UInt8) :=
   if height > genesisHeight + durable.height then
     .error .operationRejected
   else if height < genesisHeight then
     .error .operationRejected
   else
-    match durable.atPrefix (height - genesisHeight) with
+    match past (height - genesisHeight) with
     | none => .error .malformed
     | some snapshot =>
         match grantStanding (deployment := deployment) snapshot subject grant height target with
         | some fields => .ok (atViewCodec.encode (height, atView fields (snapshot.canonicalBytes ⟨target⟩)))
         | none => .error .noGrant
+
+/-- `at` over the loaded image's own past states (the specification the Host's
+Reader-backed answer refines; see `NativeObservationOpeningCache`). -/
+def atCovered (genesisHeight height : Nat) (subject : SubjectId) (grant : GrantRef) (target : Nat) :
+    Except RefusalReason (List UInt8) :=
+  atCoveredWith (deployment := deployment) (durable := durable) durable.atPrefix
+    genesisHeight height subject grant target
+
+/-- **`at` answers only a grant that stood at that height, over WHATEVER past
+state the caller supplies**: the answer is that state's bytes narrowed to the
+grant's fields, and the authority cell of that same state holds the grant's
+capability, naming the reader and standing over the target at that height. The
+Host supplies the state the Store's Reader authenticated (`Reader.stateAt`). -/
+theorem atCoveredWith_sound {past : Nat → Option CredentialAuthorityDomainReceiver.PhysicalSnapshot}
+    {genesisHeight height : Nat} {subject : SubjectId} {grant : GrantRef}
+    {target : Nat} {out : List UInt8}
+    (answered : atCoveredWith (deployment := deployment) (durable := durable) past
+      genesisHeight height subject grant target = .ok out) :
+    genesisHeight ≤ height ∧ height ≤ genesisHeight + durable.height ∧
+    ∃ snapshot authority stored,
+      past (height - genesisHeight) = some snapshot ∧
+      CredentialAuthorityDomainReceiver.loadDeployment deployment snapshot = some authority ∧
+      CredentialAuthorityState.readCapability authority.snapshot.cell grant.kind grant.capability =
+        some stored ∧
+      stored.head.holder.Covers subject ∧
+      standing authority.snapshot.authState height target stored.head = true ∧
+      out = atViewCodec.encode (height,
+        atView stored.head.scope.fields (snapshot.canonicalBytes ⟨target⟩)) := by
+  unfold atCoveredWith at answered
+  split at answered
+  · cases answered
+  rename_i notAbove
+  split at answered
+  · cases answered
+  rename_i notBelow
+  refine ⟨by omega, by omega, ?_⟩
+  split at answered
+  · cases answered
+  rename_i snapshot found
+  split at answered
+  · rename_i fields stands
+    unfold grantStanding at stands
+    split at stands
+    · cases stands
+    rename_i authority loaded
+    split at stands
+    · cases stands
+    rename_i stored read
+    split at stands
+    · rename_i covered
+      simp only [Bool.and_eq_true] at covered
+      cases stands
+      cases answered
+      exact ⟨snapshot, authority, stored, found, loaded, read, holderNames_covers covered.1,
+        covered.2, rfl⟩
+    · cases stands
+  · cases answered
 
 /-- **`at` answers only a grant that stood at that height**: the bytes are
 K-INDEX's `atBytes` (the fold of the prefix), narrowed to that grant's fields,
@@ -1340,37 +1410,12 @@ theorem atCovered_sound {genesisHeight height : Nat} {subject : SubjectId} {gran
         some (snapshot.canonicalBytes ⟨target⟩) ∧
       out = atViewCodec.encode (height,
         atView stored.head.scope.fields (snapshot.canonicalBytes ⟨target⟩)) := by
-  unfold atCovered at answered
-  split at answered
-  · cases answered
-  rename_i notAbove
-  split at answered
-  · cases answered
-  rename_i notBelow
-  split at answered
-  · cases answered
-  rename_i snapshot found
-  split at answered
-  · rename_i fields stands
-    unfold grantStanding at stands
-    split at stands
-    · cases stands
-    rename_i authority loaded
-    split at stands
-    · cases stands
-    rename_i stored read
-    split at stands
-    · rename_i covered
-      simp only [Bool.and_eq_true] at covered
-      cases stands
-      cases answered
-      refine ⟨snapshot, authority, stored, found, loaded, read, holderNames_covers covered.1,
-        covered.2, ?_, rfl⟩
-      unfold atBytes
-      rw [if_pos ⟨by omega, by omega⟩, found]
-      rfl
-    · cases stands
-  · cases answered
+  obtain ⟨floor, within, snapshot, authority, stored, found, loaded, read, holder, stands, encoded⟩ :=
+    atCoveredWith_sound answered
+  refine ⟨snapshot, authority, stored, found, loaded, read, holder, stands, ?_, encoded⟩
+  unfold atBytes
+  rw [if_pos ⟨floor, by omega⟩, found]
+  rfl
 
 /-- Refuting pole: a grant whose capability the authority cell at that height
 does not hold (a reader added later) is refused `noGrant`. -/
@@ -1385,7 +1430,7 @@ theorem atCovered_refused_before_grant {genesisHeight height : Nat} {subject : S
       grant.capability = none) :
     atCovered (deployment := deployment) (durable := durable) genesisHeight height subject grant target =
       .error .noGrant := by
-  unfold atCovered
+  unfold atCovered atCoveredWith
   rw [if_neg (by omega), if_neg (by omega)]
   simp only [found]
   simp [grantStanding, loaded, absent]
@@ -1400,7 +1445,7 @@ theorem atCovered_answers_standing {genesisHeight height : Nat} {subject : Subje
     (stands : grantStanding (deployment := deployment) snapshot subject grant height target = some fields) :
     atCovered (deployment := deployment) (durable := durable) genesisHeight height subject grant target =
       .ok (atViewCodec.encode (height, atView fields (snapshot.canonicalBytes ⟨target⟩))) := by
-  unfold atCovered
+  unfold atCovered atCoveredWith
   rw [if_neg (by omega), if_neg (by omega)]
   simp only [found, stands]
 
@@ -1569,11 +1614,11 @@ current height, or below the retention floor) is `operationRejected`; one whose
 grant did not stand at that height is `noGrant` (`atCovered`); a query that
 does not fit its authorized target (a `tail` of a non-stream cell, a purpose
 that is not a query) is `malformed`. -/
-def AuthorizedIntent.queryResult
+def AuthorizedIntent.queryResultWith
     {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
     (accepted : AuthorizedIntent context profile federation genesisHeight intent)
-    (history : Durable) (_bound : context.sourceImage = some history.image) :
+    (history : Durable) (_bound : context.sourceImage = some history.image) (past : Past) :
     Except RefusalReason (List UInt8) := do
   let .query query := intent.purpose | throw .malformed
   if present : 0 < intent.grants.length then
@@ -1616,10 +1661,11 @@ def AuthorizedIntent.queryResult
     | .since after => do
         let some stored := reader | throw .malformed
         let visible := sees state.parent stored.head query.target
-        pure (sinceViewCodec.encode (sinceFrom visible after (genesisHeight + 1) history.image.accepted))
+        let (start, log) := past.since after
+        pure (sinceViewCodec.encode (sinceFrom visible after start log))
     | .atHeight height =>
-        atCovered (deployment := deployment) (durable := history) genesisHeight height intent.subject
-          grant query.target
+        atCoveredWith (deployment := deployment) (durable := history) past.state genesisHeight height
+          intent.subject grant query.target
     | .tail start count =>
         match checked.selected.packed with
         | ⟨.stream, payload⟩ => do
@@ -1639,6 +1685,15 @@ def AuthorizedIntent.queryResult
         pure (linkViewCodec.encode (false,
           (history.links.links ⟨grant.target⟩).map fun entry => linkRow genesisHeight (⟨grant.target⟩, entry)))
   else throw .malformed
+
+/-- The query answer over the loaded image's own history. -/
+def AuthorizedIntent.queryResult
+    {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
+    {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
+    (accepted : AuthorizedIntent context profile federation genesisHeight intent)
+    (history : Durable) (bound : context.sourceImage = some history.image) :
+    Except RefusalReason (List UInt8) :=
+  accepted.queryResultWith history bound (Past.ofLoaded history genesisHeight)
 
 /-- info: 'Minidregg.Kernel.NativeObservationController.whoSeen_sound' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.whoSeen_sound
@@ -1681,9 +1736,24 @@ theorem AuthorizedIntent.queryResult_resourceScope
          (accepted.grants ⟨0, present⟩).selected.accountBalances
          (if query.kind = .account then
            RunComputeView.load deployment context.view intent.subject else none))) := by
-  unfold AuthorizedIntent.queryResult
+  unfold AuthorizedIntent.queryResult AuthorizedIntent.queryResultWith Past.ofLoaded
   simp only [purpose, view, dif_pos present, read]
   rfl
+
+/-- The `at` view of a signed query is `atCoveredWith` over the query's first grant,
+whatever past the caller supplies. -/
+theorem AuthorizedIntent.queryResultWith_at
+    {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
+    {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
+    (accepted : AuthorizedIntent context profile federation genesisHeight intent)
+    {history : Durable} {bound : context.sourceImage = some history.image} (past : Past)
+    {query : Query} {height : Nat} (purpose : intent.purpose = .query query)
+    (view : query.view = .atHeight height) (present : 0 < intent.grants.length) :
+    accepted.queryResultWith history bound past = atCoveredWith (deployment := deployment)
+      (durable := history) past.state genesisHeight height intent.subject
+      (intent.grants.get ⟨0, present⟩) query.target := by
+  unfold AuthorizedIntent.queryResultWith
+  simp only [purpose, view, dif_pos present]
 
 /-- The `at` view of a signed query is `atCovered` over the query's first grant. -/
 theorem AuthorizedIntent.queryResult_at
@@ -1694,9 +1764,38 @@ theorem AuthorizedIntent.queryResult_at
     {query : Query} {height : Nat} (purpose : intent.purpose = .query query)
     (view : query.view = .atHeight height) (present : 0 < intent.grants.length) :
     accepted.queryResult history bound = atCovered (deployment := deployment) (durable := history)
-      genesisHeight height intent.subject (intent.grants.get ⟨0, present⟩) query.target := by
-  unfold AuthorizedIntent.queryResult
-  simp only [purpose, view, dif_pos present]
+      genesisHeight height intent.subject (intent.grants.get ⟨0, present⟩) query.target :=
+  accepted.queryResultWith_at (bound := bound) (Past.ofLoaded history genesisHeight) purpose view present
+
+/-- **`at` over a supplied past answers only a grant that stood at that height in
+THAT state** (on the Host, the Reader-authenticated one). -/
+theorem at_respects_coverage_at_height_with
+    {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
+    {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
+    (accepted : AuthorizedIntent context profile federation genesisHeight intent)
+    {history : Durable} {bound : context.sourceImage = some history.image} (past : Past)
+    {query : Query} {height : Nat} {out : List UInt8} (purpose : intent.purpose = .query query)
+    (view : query.view = .atHeight height)
+    (answered : accepted.queryResultWith history bound past = .ok out) :
+    ∃ present : 0 < intent.grants.length, ∃ snapshot : CredentialAuthorityDomainReceiver.PhysicalSnapshot,
+      ∃ authority : CredentialAuthorityDomainReceiver.Loaded deployment snapshot, ∃ stored,
+      past.state (height - genesisHeight) = some snapshot ∧
+      CredentialAuthorityDomainReceiver.loadDeployment deployment snapshot = some authority ∧
+      CredentialAuthorityState.readCapability authority.snapshot.cell
+        (intent.grants.get ⟨0, present⟩).kind (intent.grants.get ⟨0, present⟩).capability =
+        some stored ∧
+      stored.head.holder.Covers intent.subject ∧
+      standing authority.snapshot.authState height query.target stored.head = true ∧
+      out = atViewCodec.encode (height,
+        atView stored.head.scope.fields (snapshot.canonicalBytes ⟨query.target⟩)) := by
+  by_cases present : 0 < intent.grants.length
+  · rw [accepted.queryResultWith_at past purpose view present] at answered
+    obtain ⟨_, _, snapshot, authority, stored, found, loaded, read, holder, stands, encoded⟩ :=
+      atCoveredWith_sound answered
+    exact ⟨present, snapshot, authority, stored, found, loaded, read, holder, stands, encoded⟩
+  · unfold AuthorizedIntent.queryResultWith at answered
+    simp only [purpose, dif_neg present] at answered
+    cases answered
 
 /-- **`at_respects_coverage_at_height`**: a signed `at h` query that is
 answered was answered to a grant the authority cell at `h` held, naming the
@@ -1725,7 +1824,7 @@ theorem at_respects_coverage_at_height
     obtain ⟨snapshot, authority, stored, found, loaded, read, holder, stands, _, encoded⟩ :=
       atCovered_sound answered
     exact ⟨present, snapshot, authority, stored, found, loaded, read, holder, stands, encoded⟩
-  · unfold AuthorizedIntent.queryResult at answered
+  · unfold AuthorizedIntent.queryResult AuthorizedIntent.queryResultWith Past.ofLoaded at answered
     simp only [purpose, dif_neg present] at answered
     cases answered
 
@@ -1934,6 +2033,8 @@ theorem read_judged_at_named_clock {context : Context deployment}
   exact ⟨rfl, rfl⟩
 
 #assert_axioms resourceScopeView_roundtrip
+#assert_axioms atCoveredWith_sound
+#assert_axioms at_respects_coverage_at_height_with
 #assert_axioms AuthorizedIntent.queryResult_resourceScope
 #assert_axioms challenge_names_clock
 #assert_axioms read_judged_at_named_clock

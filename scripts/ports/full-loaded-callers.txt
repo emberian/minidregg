@@ -51,6 +51,7 @@ Theory/CellSlot.lean
 Theory/Channel/Trace.lean
 Verify/NativeJointSourceFixture.lean
 scripts/durable-receiver.lean
+scripts/kn2/doc-history-past.lean
 scripts/kn2/history-tamper.lean
 # PROBE (KN2-TRIE, kn2-trie-a): the executed index-tamper plant boots a native Store through the full open and tampers its index rows
 scripts/kn2/index-tamper.lean
