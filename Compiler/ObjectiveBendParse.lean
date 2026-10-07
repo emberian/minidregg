@@ -16,6 +16,7 @@ LineTerminator sets, not ASCII.
 Every recursion is fuel-bounded with fuel proportional to the input; running
 out is a refusal ("capacity"), never a different parse. -/
 import Lean
+import Compiler.ObjectiveBendLaw
 namespace Minidregg.Compiler.ObjectiveBendParse
 open Lean
 set_option autoImplicit false
@@ -655,6 +656,8 @@ def sumRe : Re := seqs [str "sum", many1 space, group 1 ident, chr ':', .done]
 def sumCaseRe : Re := seqs [group 1 ident, many space, chr ':', many space, group 2 (many1 dot), .done]
 def recordRe : Re := seqs [str "record", many1 space, group 1 ident, chr ':', .done]
 def fieldRe : Re := seqs [group 1 (.alt ident quoted), chr ':', many space, group 2 (many1 dot), .done]
+/-- `law NAME: EXPR`, a top-level ENFORCED law of the package (`Compiler.ObjectiveBendLaw`). -/
+def lawRe : Re := seqs [str "law", many1 space, group 1 ident, many space, chr ':', many space, group 2 (many1 dot), .done]
 
 /-- `String.prototype.split` on one character. -/
 def splitChar (s : List Char) (sep : Char) : List (List Char) :=
@@ -790,6 +793,17 @@ def declarations (lines : Array Line) : PS (Array Json × Array Json) := do
       decls := decls.push (Json.mkObj [("kind", toJson "record"), ("name", toJson (cap line.text caps 1)),
         ("methods", Json.arr methods), ("fields", Json.arr fields), ("span", line.span.json)])
       continue
+    -- `law NAME: EXPR` is a law the kernel enforces on every object of the package; its text is
+    -- parsed here (a refusal names the construct outside the fragment) and again by the
+    -- elaborator's module decoder, which keeps the law itself.
+    if let some (_, caps) ← matchAt line lawRe line.text then
+      let text := cap line.text caps 2
+      if let .error message := ObjectiveBendLaw.parse text then fail line message
+      decls := decls.push (Json.mkObj [("kind", toJson "law"), ("name", toJson (cap line.text caps 1)),
+        ("source", toJson text), ("span", line.span.json)])
+      continue
+    if startsWith line.text "law " || line.text == "law".toList || startsWith line.text "law:" then
+      fail line (ObjectiveBendLaw.refusalPrefix ++ "expected `law NAME: EXPR` (a top-level law has a name and no parameters)")
     if startsWith line.text "def " && endsWith line.text ":" then
       let sig ← signature ((line.text.drop 4).take (line.text.length - 5)) line
       let functionBody ← body lines fuel line.indent
