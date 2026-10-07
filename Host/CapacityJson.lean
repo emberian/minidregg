@@ -1,4 +1,4 @@
-/- The declared envelope's JSON surface, ONE definition: the twenty-one
+/- The declared envelope's JSON surface, ONE definition: the twenty-two
 `ObjectiveInvocationClaim.Capacity` lanes as decimal strings, decoded
 (`capacity`) and encoded (`capacityJson`), with the field readers every Host
 JSON authoring module shares. `Host.SeatJson` and `Host.ObjectiveActivityJson`
@@ -34,15 +34,15 @@ def natOf (path : String) (value : Json) : Result Nat := do
 def nat (path : String) (json : Json) (name : String) : Result Nat := do
   natOf s!"{path}.{name}" (← field path json name)
 
-/-- A declared envelope: the twenty-one `Capacity` lanes as decimal strings. -/
+/-- A declared envelope: the twenty-two `Capacity` lanes as decimal strings. -/
 def capacity (path : String) (json : Json) : Result Capacity := do
   let n := nat path json
   pure ⟨← n "typeFuel", ← n "sourceTicks", ← n "heap", ← n "stack", ← n "outputNodes", ← n "outputBytes",
     ← n "extractTicks", ← n "inputBytes", ← n "scalarBits", ← n "memoryTouches", ← n "proofWork", ← n "feeDebit", ← n "turnBytes",
     ← n "witnessBytes", ← n "storageBytes", ← n "sideEffectCount", ← n "networkBytes", ← n "leaseByteBlocks",
-    ← n "incidences", ← n "replayBytes", ← n "coreBytes"⟩
+    ← n "incidences", ← n "replayBytes", ← n "coreBytes", ← n "domainWork"⟩
 
-/-- The twenty-one lanes of an envelope, as named decimal strings. -/
+/-- The twenty-two lanes of an envelope, as named decimal strings. -/
 def capacityLanes (c : Capacity) : List (String × Json) :=
   [("typeFuel", decimal c.typeFuel),
    ("sourceTicks", decimal c.sourceTicks),
@@ -64,7 +64,8 @@ def capacityLanes (c : Capacity) : List (String × Json) :=
    ("leaseByteBlocks", decimal c.leaseByteBlocks),
    ("incidences", decimal c.incidences),
    ("replayBytes", decimal c.replayBytes),
-   ("coreBytes", decimal c.coreBytes)]
+   ("coreBytes", decimal c.coreBytes),
+   ("domainWork", decimal c.domainWork)]
 
 def capacityJson (c : Capacity) : Json := .mkObj (capacityLanes c)
 
@@ -87,7 +88,7 @@ theorem natOf_decimal (path : String) (n : Nat) : natOf path (decimal n) = .ok n
 
 theorem lane_names_nodup : ["typeFuel", "sourceTicks", "heap", "stack", "outputNodes", "outputBytes",
     "extractTicks", "inputBytes", "scalarBits", "memoryTouches", "proofWork", "feeDebit", "turnBytes", "witnessBytes",
-    "storageBytes", "sideEffectCount", "networkBytes", "leaseByteBlocks", "incidences", "replayBytes", "coreBytes"].Nodup := by
+    "storageBytes", "sideEffectCount", "networkBytes", "leaseByteBlocks", "incidences", "replayBytes", "coreBytes", "domainWork"].Nodup := by
   decide
 
 theorem capacityLanes_distinct (c : Capacity) : (capacityLanes c).Pairwise (fun a b => a.1 ≠ b.1) :=
@@ -123,7 +124,8 @@ theorem capacity_capacityJson (path : String) (c : Capacity) :
     nat_capacityJson path c "leaseByteBlocks" c.leaseByteBlocks (by simp [capacityLanes]),
     nat_capacityJson path c "incidences" c.incidences (by simp [capacityLanes]),
     nat_capacityJson path c "replayBytes" c.replayBytes (by simp [capacityLanes]),
-    nat_capacityJson path c "coreBytes" c.coreBytes (by simp [capacityLanes])]
+    nat_capacityJson path c "coreBytes" c.coreBytes (by simp [capacityLanes]),
+    nat_capacityJson path c "domainWork" c.domainWork (by simp [capacityLanes])]
   rfl
 
 #assert_axioms getObjVal_mkObj natOf_decimal capacity_capacityJson

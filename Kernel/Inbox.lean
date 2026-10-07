@@ -316,7 +316,7 @@ theorem fifoAccount_nil_iff {a b : Inbox} {popped pushed : List Message} :
 
 /-! Inhabitants and teeth (closed values, no hashing). -/
 
-def sampleMessage (n : Nat) : Message := ⟨⟨n⟩, 1, "m", [], ⟨0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0⟩, 1, 9, 0, 0, 0⟩
+def sampleMessage (n : Nat) : Message := ⟨⟨n⟩, 1, "m", [], ⟨0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0⟩, 1, 9, 0, 0, 0⟩
 
 def sampleInbox : Inbox := ⟨1, 2, 0, [sampleMessage 10, sampleMessage 11]⟩
 
