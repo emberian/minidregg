@@ -254,7 +254,7 @@ def build_request(s,label,byte=7):
         'capacity':{k:str(capacity[k]) for k in CAP_KEYS},
         'inputCodec':s['constants']['inputCodec'],'outputCodec':s['constants']['genericCodec'],
         'roles':[{'kind':notes['kind'],'resource':notes['target'],'capability':notes['operationCapability'],
-            'schemaVersion':'9','root':digest_hex(root_of('notes')),'observeCapability':notes['observeCapability']}],
+            'schemaVersion':'10','root':digest_hex(root_of('notes')),'observeCapability':notes['observeCapability']}],
         'resultResource':notes['target']}
     if a.request_edit:exec(pathlib.Path(a.request_edit).read_text(),{'request':request,'s':s,'digest_hex':digest_hex})
     (d/'request.json').write_text(json.dumps(request,indent=1))

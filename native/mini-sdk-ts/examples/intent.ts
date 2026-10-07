@@ -26,7 +26,7 @@ const intent: Intent = {
     },
     capability: "9591460230184716503",
     observeCapability: "9591460230184716503",
-    schemaVersion: "9",
+    schemaVersion: "10",
     payload: { type: "content", actions: [{ type: "createAtom", atom: "1", kind: { type: "text" }, payload: "68656c6c6f" }] },
   }],
 };
