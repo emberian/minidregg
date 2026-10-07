@@ -273,7 +273,7 @@ def commandStream : StreamCodec Command :=
 /-- v5: `create` carries an optional initial declared state and the turn sum has no `writeState`
 (a direct write of declared state is no turn: only the object's package writes it, under its pin);
 v4 (and older) commands refuse to decode. -/
-def commandFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/COMMAND/v5".toUTF8.toList
+def commandFrame : List UInt8 := "DREGG/OBJECTIVE/ACTIVITY/COMMAND/v6".toUTF8.toList
 
 def commandCodec : LawfulCodec Command := ObjectiveActivityWire.framed commandFrame commandStream
 

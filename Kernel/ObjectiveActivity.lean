@@ -363,8 +363,9 @@ structure Config where
 
 /-- A declared envelope covers what the kernel spends on a turn: its source
 ticks are within the ceiling, and it declares at least the kernel's fixed heap,
-stack, type-checking fuel and Plan extraction budget, so the whole turn's work
-(the run, the per-turn package check, the extraction) is in the price. -/
+stack, type-checking fuel and Plan extraction output sizes, so the whole turn's work
+(the run, the per-turn package check, the extraction) is in the price. The extraction's
+tick budget is checked by name right after (`extractUncovered`). -/
 def Config.covers (config : Config) (envelope : Capacity) : Bool :=
   decide (envelope.sourceTicks ≤ config.maxTicks) && decide (config.limits.heap ≤ envelope.heap) &&
     decide (config.limits.stack ≤ envelope.stack) && decide (config.typeFuel ≤ envelope.typeFuel) &&
@@ -421,6 +422,10 @@ inductive Refusal where
   cells plus the deployment's per-segment allocation (`segmentLimits`). The submitter adds
   heap to the envelope (`extra`, priced by the tariff, paid by the submitter). -/
   | heapUncovered (needed declared : Nat)
+  /-- A declared envelope does not cover the deployment's extraction tick budget
+  (`planBudget.ticks`): the forcing a Plan or result extraction may do is validator work,
+  declared (`Capacity.extractTicks`) and priced by the tariff like the run's own ticks. -/
+  | extractUncovered (needed declared : Nat)
   | plan (reason : String) | messageAwaitNeedsInbox
   | planExtraction (reason : String) | resultExtraction (reason : String)
   | exhausted
@@ -1587,6 +1592,8 @@ structure Birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
   funded : ¬ (segment.yields ∧ request.deposit <
     (escrowOf config.tariff request.subject request.account request.resume request.timeout).pair +
       storageDeposit config record)
+  /-- The birth's envelope declares the extraction tick budget its segment may spend. -/
+  extractCovered : config.planBudget.ticks ≤ request.envelope.extractTicks
 
 def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (request : BirthRequest) : Except Refusal (Birth config snapshot height request) := do
@@ -1598,6 +1605,13 @@ def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
       if !config.covers request.envelope then throw (.uncovered request.envelope)
       if !config.covers request.resume then throw (.uncovered request.resume)
       if !config.covers request.timeout then throw (.uncovered request.timeout)
+      let ⟨extractCovered⟩ ← (if h : config.planBudget.ticks ≤ request.envelope.extractTicks then pure ⟨h⟩
+        else throw (.extractUncovered config.planBudget.ticks request.envelope.extractTicks) :
+          Except Refusal (PLift (config.planBudget.ticks ≤ request.envelope.extractTicks)))
+      if request.resume.extractTicks < config.planBudget.ticks then
+        throw (.extractUncovered config.planBudget.ticks request.resume.extractTicks)
+      if request.timeout.extractTicks < config.planBudget.ticks then
+        throw (.extractUncovered config.planBudget.ticks request.timeout.extractTicks)
       match programExact : loadProgram config (packageBytes config snapshot request.pin) request.pin request.input with
       | .error reason => throw reason
       | .ok program =>
@@ -1653,7 +1667,7 @@ def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
                     [guardAt snapshot (objectCell config.domain request.object),
                       guardAt snapshot (packageCell config.domain request.pin),
                       guardAt snapshot (stateCell config.domain request.object)], rfl,
-                    object, objectExact, pinned, judged, short⟩
+                    object, objectExact, pinned, judged, short, extractCovered⟩
     else throw (.pinMismatch object.pin request.pin)
 
 def Birth.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -1824,9 +1838,13 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   resumeExact : resume (responseData settlement.decided view).term state = some resumed
   envelope : Capacity
   envelopeExact : envelope = addCapacity (record.escrow.capacity settlement.path) request.extra
+  /-- The deployment covers the declared envelope (`Config.covers`). -/
+  covered : config.covers envelope = true
   /-- The declared envelope covers the resumed run's heap (`segmentLimits`): growth of the
   checkpoint is paid by the delivery that runs it. -/
   heapCovered : (segmentLimits config resumed).heap ≤ envelope.heap
+  /-- The declared envelope covers the extraction tick budget the segment may spend. -/
+  extractCovered : config.planBudget.ticks ≤ envelope.extractTicks
   segment : Segment
   yielded : Option YieldCommit
   /-- The resumed run and its yield commit; a program fault ends it `faulted`. -/
@@ -1898,8 +1916,9 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   | none => .error .checkpointCodec
   | some resumed =>
   let envelope := addCapacity (record.escrow.capacity settlement.path) request.extra
-  if !config.covers envelope then .error (.uncovered envelope) else
+  if covered : config.covers envelope = true then
   if heapCovered : (segmentLimits config resumed).heap ≤ envelope.heap then
+  if extractCovered : config.planBudget.ticks ≤ envelope.extractTicks then
   if 0 < record.tried ∧ envelope.sourceTicks ≤ record.tried then .error (.alreadyExhausted record.tried envelope.sourceTicks) else
   match endExact : resumedSegment config snapshot height (deliveryTransaction await.id) request.record
       record.object (record.generation + 1) envelope.sourceTicks view resumed with
@@ -1928,11 +1947,13 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
     guardAt snapshot (stateCell config.domain record.object) :: settlement.guards
   .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, program, programExact,
     settlement, settled, view, viewExact, response, state, stateExact, resumed, resumeExact, envelope, rfl,
-    heapCovered, segment, yielded, endExact, next, rfl, book, bookExact, batch, batchExact, posted,
+    covered, heapCovered, extractCovered, segment, yielded, endExact, next, rfl, book, bookExact, batch, batchExact, posted,
     postedBatch, posts, rfl, rfl, guards, rfl, awaitClaim await.id :: settlement.claims, rfl,
     object, objectExact, judged⟩
   else .error .bookRefused
+  else .error (.extractUncovered config.planBudget.ticks envelope.extractTicks)
   else .error (.heapUncovered (segmentLimits config resumed).heap envelope.heap)
+  else .error (.uncovered envelope)
   else .error .checkpointDigest
   else .error .awaitMismatch
   else .error .recordMisplaced
@@ -2024,8 +2045,12 @@ structure Exhaustion {rootBytes : Bytes → Digest} (config : Config) (snapshot 
   resumeExact : resume (responseData settlement.decided view).term state = some resumed
   envelope : Capacity
   envelopeExact : envelope = addCapacity (record.escrow.capacity settlement.path) request.extra
+  /-- As a delivery: the deployment covers the declared envelope. -/
+  covered : config.covers envelope = true
   /-- As a delivery: the declared envelope covers the resumed run's heap. -/
   heapCovered : (segmentLimits config resumed).heap ≤ envelope.heap
+  /-- As a delivery: the declared envelope covers the extraction tick budget. -/
+  extractCovered : config.planBudget.ticks ≤ envelope.extractTicks
   raises : record.tried < envelope.sourceTicks
   /-- At the turn cap an exhaustion is a program fault: a delivery commits it `faulted`. -/
   belowCap : envelope.sourceTicks < config.maxTicks
@@ -2076,8 +2101,9 @@ def exhaust {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   | none => .error .checkpointCodec
   | some resumed =>
   let envelope := addCapacity (record.escrow.capacity settlement.path) request.extra
-  if !config.covers envelope then .error (.uncovered envelope) else
+  if covered : config.covers envelope = true then
   if heapCovered : (segmentLimits config resumed).heap ≤ envelope.heap then
+  if extractCovered : config.planBudget.ticks ≤ envelope.extractTicks then
   if raises : record.tried < envelope.sourceTicks then
   -- The charge must be payable BEFORE the run: an unpayable attempt never runs.
   match bookExact : loadBook config snapshot with
@@ -2097,13 +2123,15 @@ def exhaust {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
       guardAt snapshot (stateCell config.domain record.object) :: settlementGuards settlement
     .ok ⟨record, recordExact, located, await, awaiting, idExact, digestExact, input, inputExact, program,
       programExact, settlement, settled, view, viewExact, response, state, stateExact, resumed, resumeExact,
-      envelope, rfl, heapCovered, raises, belowCap, ran, next, rfl, book, bookExact, posted, postedBatch, posts, rfl,
+      envelope, rfl, covered, heapCovered, extractCovered, raises, belowCap, ran, next, rfl, book, bookExact, posted, postedBatch, posts, rfl,
       guards, rfl⟩
   | .error reason => .error reason
   else .error .notExhausted
   else .error .bookRefused
   else .error (.alreadyExhausted record.tried envelope.sourceTicks)
+  else .error (.extractUncovered config.planBudget.ticks envelope.extractTicks)
   else .error (.heapUncovered (segmentLimits config resumed).heap envelope.heap)
+  else .error (.uncovered envelope)
   else .error .checkpointDigest
   else .error .awaitMismatch
   else .error .recordMisplaced
