@@ -3,8 +3,10 @@ scripts/check-objective-proofs.sh).
 
   lake env lean --run scripts/ObjectiveCheckpointTransparency.lean CORE_JSON HEAP STACK TICKS RESPONSES_JSON [MUTANT]
 
-One activity, two turn chains over the same responses, every segment under the same
-limits and the same full tick budget:
+One activity, two turn chains over the same responses, every segment under the same full
+tick budget and the same limits counted from the segment's own heap end
+(`ObjectiveBendDemandCollect.limitsPast`, what `Kernel.ObjectiveActivity.segmentLimits`
+runs a segment under):
 
   lazy    resume the YIELDED state (the machine's own, uncollected);
   kernel  resume what `Kernel.ObjectiveActivity.runSegment` stores: the Plan
@@ -112,14 +114,16 @@ def main (arguments : List String) : IO UInt32 := do
   let mut segment := 0
   let mut pending := responses
   repeat
-    let (lazyOutcome, lazyTicks) := counted limits ticks lazy 0
-    let (kernelOutcome, kernelTicks) := counted limits ticks kernel 0
-    let lazyObserved := observe limits budget lazyOutcome
-    let kernelObserved := observe limits budget kernelOutcome
+    let lazyLimits := limitsPast limits lazy
+    let kernelLimits := limitsPast limits kernel
+    let (lazyOutcome, lazyTicks) := counted lazyLimits ticks lazy 0
+    let (kernelOutcome, kernelTicks) := counted kernelLimits ticks kernel 0
+    let lazyObserved := observe lazyLimits budget lazyOutcome
+    let kernelObserved := observe kernelLimits budget kernelOutcome
     -- the checkpoint each chain would store at this yield
     let (lazyStored, kernelStored) := match lazyOutcome, kernelOutcome with
       | .yielded _ y, .yielded _ y' =>
-        (some y, match yieldedPlan limits budget y' with
+        (some y, match yieldedPlan kernelLimits budget y' with
           | .ok extracted => some (store mutant extracted.state)
           | .error _ => none)
       | _, _ => (none, none)

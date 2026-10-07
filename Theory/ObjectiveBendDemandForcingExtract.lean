@@ -140,37 +140,6 @@ theorem forces_forceWith {gap : Nat} {F : Nat → Nat} {s t : State} (h : Forces
 /-- Two budgets differ only in ticks, the second no smaller. -/
 def TicksLe (b b' : Budget) : Prop := b'.nodes = b.nodes ∧ b'.bytes = b.bytes ∧ b.ticks ≤ b'.ticks
 
-/-- One field of a record's materialization (the body of `materializeWith`'s fold). -/
-def recordStep (policy : State → Bool) (limits : Limits) (depth : Nat)
-    (prior : List (String × Data) × State × Budget) (field : String × Nat) :
-    Except (Failure × State) (List (String × Data) × State × Budget) := do
-  let bytes := field.1.utf8ByteSize+(toString field.1.utf8ByteSize).utf8ByteSize+1
-  if bytes > prior.2.2.bytes || prior.2.2.nodes = 0 then throw (.budget,prior.2.1)
-  let entered : State := {prior.2.1 with control:=.enter field.2,stack:=[]}
-  let (outcome,ticks) := forceWith policy limits prior.2.2.ticks entered
-  let nextBudget := {prior.2.2 with ticks:=ticks,bytes:=prior.2.2.bytes-bytes}
-  match outcome with
-  | .finished forced retained =>
-    let child ← materializeWith policy limits depth nextBudget forced retained
-    pure ((field.1,child.value)::prior.1,child.state,child.remaining)
-  | .suspended _ retained => throw (.suspended,retained)
-  | .divergent _ retained => throw (.divergent,retained)
-  | .refused _ retained => throw (.refused,retained)
-  | .yielded _ retained => throw (.yielded,retained)
-
-theorem materializeWith_record (policy : State → Bool) (limits : Limits) (depth : Nat) (budget : Budget)
-    (fields : List (String × Nat)) (state : State) :
-    materializeWith policy limits (depth+1) budget (.record fields) state = (do
-      if budget.nodes = 0 then throw (.budget,state)
-      let remaining := {budget with nodes:=budget.nodes-1}
-      let headerBytes := (toString fields.length).utf8ByteSize+2
-      if headerBytes > remaining.bytes then throw (.budget,state)
-      let remaining := {remaining with bytes:=remaining.bytes-headerBytes}
-      if (fields.map Prod.fst).eraseDups.length != fields.length then throw (.duplicateField,state)
-      if fields.length > remaining.nodes then throw (.budget,state)
-      let pair ← fields.foldlM (recordStep policy limits depth) ([],state,remaining)
-      pure ⟨.record pair.1.reverse,pair.2.1,pair.2.2⟩) := rfl
-
 theorem ticksLe_with (b : Budget) {t : Nat} (le : b.ticks ≤ t) : TicksLe b {b with ticks := t} := ⟨rfl, rfl, le⟩
 
 /-- The record fold, along a chain: each field forced on the lazy side is forced on the forced
@@ -681,7 +650,7 @@ theorem yieldedPlan_forces {L : Limits} {budget : Budget} {y : State} {r : Resul
   exact ⟨F, chain c y.stack cIn valid.stack⟩
 
 #assert_axioms valueValid_allIn cellValid_allIn frameValid_allIn controlValid_allIn addrValid_of_lexical
-#assert_axioms forces_fits forces_forceWith ticksLe_with materializeWith_record foldlM_forces
+#assert_axioms forces_fits forces_forceWith ticksLe_with foldlM_forces
 #assert_axioms forces_materializeWith forces_yieldedPlan forces_complete
 #assert_axioms forces_runBounded runBounded_zero_forces forces_segment
 #assert_axioms heapForces_refl heapForces_trans heapForces_demand stepRaw_complete_stack forceWith_demand

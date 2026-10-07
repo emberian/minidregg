@@ -19,20 +19,27 @@ forced-state typing (`typed_checkpoint`) and the codec round trip (`state_roundT
   resuming the extraction's state would (settling is an exact lockstep, collecting a
   renaming);
 * `forcingTransparent_of_yieldedPlan`: resuming the state a successful Plan extraction
-  left ends every segment resuming the yielded state ends, alike, with heap headroom of
-  the forced state's size, for every yield that names only allocated addresses
-  (`LexicalInvariant`, which every typed state has). Proof: the extraction is a chain of
-  finished closed demands, each a forcing chain (`ObjectiveBendDemandForcingDemand.
-  demand_forces`), and along a chain the forced run does whatever the lazy run does
-  (`ObjectiveBendDemandForcingExtract.forces_segment`). Without the premise the statement
-  is FALSE (`not_forcingTransparent_dangling`, below);
+  left ends every segment resuming the yielded state ends, alike, under the kernel's own
+  limits (`segmentLimits`: counted from each segment's own heap end), for every yield that
+  names only allocated addresses (`LexicalInvariant`, which every typed state has). Proof:
+  the extraction is a chain of finished closed demands, each a forcing chain
+  (`ObjectiveBendDemandForcingDemand.demand_forces`), and along a chain the forced run does
+  whatever the lazy run does given room for the cells the chain added
+  (`ObjectiveBendDemandForcingExtract.forces_segment`), which counting from the forced
+  state's heap end grants. Without the premise the statement is FALSE
+  (`not_forcingTransparent_dangling`, below);
 * `runSegment_stored_complete`: resuming the stored checkpoint ends every segment the
-  program's OWN yielded state ends, alike, with heap headroom of the forced state's size,
-  for every lexically valid yield;
+  program's OWN yielded state ends, alike, under the kernel's own limits, for every lexically
+  valid yield. Under limits counted from zero it is FALSE (`absolute_limits_refuted`); the
+  converse is FALSE in both resources (`stored_commits_where_lazy_exhausts`,
+  `stored_commits_where_lazy_extraction_fails`: the cache saves ticks and budget);
 * `birth_stored_complete`, `delivery_stored_complete` (and, in
-  `Kernel.ObjectiveCheckpointInvariant`, `reachable_delivery_stored_complete`): so for
-  every checkpoint the kernel stores, with no premise beyond the one the typing
-  invariant already discharges, the stored checkpoint resumes as the program's own yield.
+  `Kernel.ObjectiveCheckpointInvariant`, `reachable_delivery_stored_complete`): for every
+  checkpoint the kernel stores, with no premise beyond the one the typing invariant
+  already discharges, the stored state is the checkpoint of the yield the segment's own run
+  retained, and resumes as that yield (`StoredComplete`);
+* `Delivery.heap_priced`, `Exhaustion.heap_priced`: a resumed run's heap (the checkpoint's
+  cells plus the allocation) is declared and priced by the turn that runs it.
 
 So the before-root check of a kernel checkpoint is codec validity and the digest
 binding (Scribe note B3): no executable machine-state checker is needed for
@@ -56,7 +63,7 @@ open Minidregg.Theory.ObjectiveBendTyping
 open Minidregg.Theory.ObjectiveBendDemandMachine
 open Minidregg.Theory.ObjectiveBendDemandTyping
 open Minidregg.Theory.ObjectiveBendDemandPreservation
-open Minidregg.Theory.ObjectiveBendDemandCollect (collect typed_collect collect_resume_segment checkpoint settle
+open Minidregg.Theory.ObjectiveBendDemandCollect (collect collect_heap_le typed_collect collect_resume_segment checkpoint settle
   settle_resume_segment typed_checkpoint runBounded_yields_outside yieldedPlanWith_control)
 open Minidregg.Theory.ObjectiveBendTyping (decodeTerm)
 open Minidregg.Theory.ObjectiveBendOpenRecursion (Term)
@@ -92,8 +99,8 @@ theorem typed_runBounded_yielded {assumptions : Assumptions} {types : AddressTyp
 and stores that extraction's checkpoint. -/
 theorem runSegment_yielded {config : Config} {ticks : Nat} {start state : State} {plan : PlanAwait}
     (ran : runSegment config ticks start = .ok (.yielded state plan)) :
-    ∃ address retained extracted, runBounded config.limits ticks start = .yielded address retained ∧
-      ObjectiveBendDemandData.yieldedPlan config.limits config.planBudget retained = .ok extracted ∧
+    ∃ address retained extracted, runBounded (segmentLimits config start) ticks start = .yielded address retained ∧
+      ObjectiveBendDemandData.yieldedPlan (segmentLimits config start) config.planBudget retained = .ok extracted ∧
       state = checkpoint extracted.state := by
   unfold runSegment at ran
   split at ran
@@ -146,8 +153,8 @@ theorem birth_checkpoint_typed {rootBytes : Bytes → Digest} {config : Config} 
     rw [yieldedSegment] at ran
     obtain ⟨_, retained, extracted, executed, extractedExact, stored⟩ := runSegment_yielded ran
     obtain ⟨_, ⟨typed⟩⟩ := typed_runBounded_yielded
-      (checked_initial_state birth.program.applied birth.program.checked) config.limits request.envelope.sourceTicks executed
-    have outside := runBounded_yields_outside config.limits request.envelope.sourceTicks _
+      (checked_initial_state birth.program.applied birth.program.checked) _ _ executed
+    have outside := runBounded_yields_outside _ _ _
       (fun p h => by simp [initial] at h) executed
     subst stored
     exact typed_checkpoint typed outside extractedExact
@@ -181,9 +188,9 @@ theorem delivery_checkpoint_typed {rootBytes : Bytes → Digest} {config : Confi
     obtain ⟨resumedState⟩ := resumedTyped
     obtain ⟨_, retained, extracted, executed, extractedExact, stored⟩ := runSegment_yielded ran
     rw [computation]
-    obtain ⟨_, ⟨typedRetained⟩⟩ := typed_runBounded_yielded resumedState config.limits delivery.envelope.sourceTicks executed
+    obtain ⟨_, ⟨typedRetained⟩⟩ := typed_runBounded_yielded resumedState _ _ executed
     have evaluating := (resume_keeps_heap_and_stack _ _ _ delivery.resumeExact).2.2
-    have outside := runBounded_yields_outside config.limits delivery.envelope.sourceTicks _
+    have outside := runBounded_yields_outside _ _ _
       (fun p h => by rw [evaluating] at h; cases h) executed
     subst stored
     exact typed_checkpoint typedRetained outside extractedExact
@@ -200,25 +207,32 @@ theorem Segment.Agrees.trans {a b c : Segment} (one : Segment.Agrees a b) (two :
     Segment.Agrees a c := by
   cases a <;> cases b <;> cases c <;> simp_all [Segment.Agrees]
 
-/-- A segment transfers between two resumed states whose bounded runs correspond:
-every yield whose Plan extracts has a yield whose Plan extracts to the same Data, every
-completion a completion to the same Data, every divergence a divergence, every refusal
-the same refusal. -/
-theorem runSegment_transfer {config config' : Config} {ticks : Nat} {s t : State}
-    (yields : ∀ plan y r, runBounded config.limits ticks s = .yielded plan y →
-      ObjectiveBendDemandData.yieldedPlan config.limits config.planBudget y = .ok r →
-      ∃ plan' y' r', runBounded config'.limits ticks t = .yielded plan' y' ∧
-        ObjectiveBendDemandData.yieldedPlan config'.limits config'.planBudget y' = .ok r' ∧ r'.value = r.value)
-    (finishes : ∀ value y r, runBounded config.limits ticks s = .finished value y →
-      ObjectiveBendDemandData.complete config.limits config.planBudget y = .ok r →
-      ∃ value' y' r', runBounded config'.limits ticks t = .finished value' y' ∧
-        ObjectiveBendDemandData.complete config'.limits config'.planBudget y' = .ok r' ∧ r'.value = r.value)
-    (diverges : ∀ address y, runBounded config.limits ticks s = .divergent address y →
-      ∃ address' y', runBounded config'.limits ticks t = .divergent address' y')
-    (refuses : ∀ reason y, runBounded config.limits ticks s = .refused reason y →
-      ∃ y', runBounded config'.limits ticks t = .refused reason y')
+/-- Two states with heaps of one size run their segments under the same limits. -/
+theorem segmentLimits_of_size {config : Config} {s t : State} (same : s.heap.size = t.heap.size) :
+    segmentLimits config s = segmentLimits config t := by
+  simp only [segmentLimits, ObjectiveBendDemandCollect.limitsPast, same]
+
+/-- A segment transfers between two resumed states whose bounded runs, each under its own
+`segmentLimits`, correspond: every yield whose Plan extracts has a yield whose Plan extracts
+to the same Data, every completion a completion to the same Data, every divergence a
+divergence, every refusal the same refusal. -/
+theorem runSegment_transfer {config : Config} {ticks : Nat} {s t : State}
+    (yields : ∀ plan y r, runBounded (segmentLimits config s) ticks s = .yielded plan y →
+      ObjectiveBendDemandData.yieldedPlan (segmentLimits config s) config.planBudget y = .ok r →
+      ∃ plan' y' r', runBounded (segmentLimits config t) ticks t = .yielded plan' y' ∧
+        ObjectiveBendDemandData.yieldedPlan (segmentLimits config t) config.planBudget y' = .ok r' ∧
+        r'.value = r.value)
+    (finishes : ∀ value y r, runBounded (segmentLimits config s) ticks s = .finished value y →
+      ObjectiveBendDemandData.complete (segmentLimits config s) config.planBudget y = .ok r →
+      ∃ value' y' r', runBounded (segmentLimits config t) ticks t = .finished value' y' ∧
+        ObjectiveBendDemandData.complete (segmentLimits config t) config.planBudget y' = .ok r' ∧
+        r'.value = r.value)
+    (diverges : ∀ address y, runBounded (segmentLimits config s) ticks s = .divergent address y →
+      ∃ address' y', runBounded (segmentLimits config t) ticks t = .divergent address' y')
+    (refuses : ∀ reason y, runBounded (segmentLimits config s) ticks s = .refused reason y →
+      ∃ y', runBounded (segmentLimits config t) ticks t = .refused reason y')
     {segment : Segment} (ran : runSegment config ticks s = .ok segment) :
-    ∃ segment', runSegment config' ticks t = .ok segment' ∧ Segment.Agrees segment segment' := by
+    ∃ segment', runSegment config ticks t = .ok segment' ∧ Segment.Agrees segment segment' := by
   unfold runSegment at ran
   split at ran
   · rename_i address retained equation
@@ -261,79 +275,92 @@ theorem runSegment_transfer {config config' : Config} {ticks : Nat} {s t : State
 
 /-- **What the kernel stores resumes as the extraction's state.** Whatever a segment
 resumed from the state the Plan extraction left commits, the segment resumed from the
-stored checkpoint (that state settled, then collected) commits alike: the same next Plan
-(state, source, patience), the same result, the same fault. Settling is an exact
-lockstep; collecting is a renaming whose heap is no larger. -/
+stored checkpoint (that state settled, then collected) commits alike, each under its own
+`segmentLimits`: the same next Plan (state, source, patience), the same result, the same
+fault. Settling is an exact lockstep on a heap of the same size; collecting is a renaming
+whose heap is smaller by exactly the cells it freed, and the collected segment's limits
+are counted from its own heap end, so it has the same room (`RoomFor`). -/
 theorem runSegment_checkpoint {config : Config} {ticks : Nat} {forced resumed : State} {response : Term}
     (yielded : resume response forced = some resumed) {segment : Segment}
     (ran : runSegment config ticks resumed = .ok segment) :
     ∃ resumed' segment', resume response (checkpoint forced) = some resumed' ∧
       runSegment config ticks resumed' = .ok segment' ∧ Segment.Agrees segment segment' := by
+  have forcedHeap := (resume_keeps_heap_and_stack _ _ _ yielded).1
   obtain ⟨settled, settledResume, sy, sf, sd, sr⟩ :=
-    settle_resume_segment yielded config.limits ticks config.planBudget
-  obtain ⟨seg1, ran1, agree1⟩ := runSegment_transfer (config' := config) (s := resumed) (t := settled)
+    settle_resume_segment yielded (segmentLimits config resumed) ticks config.planBudget
+  have settledHeap := (resume_keeps_heap_and_stack _ _ _ settledResume).1
+  have sameLimits : segmentLimits config settled = segmentLimits config resumed :=
+    segmentLimits_of_size (by rw [settledHeap, forcedHeap, ObjectiveBendDemandCollect.settle_size])
+  obtain ⟨seg1, ran1, agree1⟩ := runSegment_transfer (s := resumed) (t := settled)
     (fun plan y r h1 h2 => by
-      obtain ⟨y', r', a, _, b, c⟩ := sy plan y r h1 h2; exact ⟨plan, y', r', a, b, c.1⟩)
-    (fun value y r h1 h2 => by obtain ⟨y', r', a, b, c⟩ := sf value y r h1 h2; exact ⟨value, y', r', a, b, c⟩)
-    (fun a y h => by obtain ⟨y', h'⟩ := sd a y h; exact ⟨a, y', h'⟩)
-    sr ran
+      obtain ⟨y', r', a, _, b, c⟩ := sy plan y r h1 h2; rw [sameLimits]; exact ⟨plan, y', r', a, b, c.1⟩)
+    (fun value y r h1 h2 => by
+      obtain ⟨y', r', a, b, c⟩ := sf value y r h1 h2; rw [sameLimits]; exact ⟨value, y', r', a, b, c⟩)
+    (fun a y h => by obtain ⟨y', h'⟩ := sd a y h; rw [sameLimits]; exact ⟨a, y', h'⟩)
+    (fun reason y h => by obtain ⟨y', h'⟩ := sr reason y h; rw [sameLimits]; exact ⟨y', h'⟩) ran
+  have heapRoom : (segmentLimits config settled).heap ≤
+      (segmentLimits config (collect (settle forced))).heap +
+        ((settle forced).heap.size - (collect (settle forced)).heap.size) := by
+    have le := collect_heap_le (settle forced)
+    simp only [segmentLimits, ObjectiveBendDemandCollect.limitsPast]
+    rw [settledHeap]
+    omega
   obtain ⟨collected, collectedResume, cy, cf, cd, cr⟩ :=
-    collect_resume_segment settledResume config.limits ticks config.planBudget
-  obtain ⟨seg2, ran2, agree2⟩ := runSegment_transfer (config' := config) (s := settled) (t := collected)
+    collect_resume_segment settledResume (segmentLimits config settled)
+      (segmentLimits config (collect (settle forced))) heapRoom (Nat.le_refl _) ticks config.planBudget
+  have collectedLimits : segmentLimits config collected = segmentLimits config (collect (settle forced)) :=
+    segmentLimits_of_size (by rw [(resume_keeps_heap_and_stack _ _ _ collectedResume).1])
+  obtain ⟨seg2, ran2, agree2⟩ := runSegment_transfer (s := settled) (t := collected)
     (fun plan y r h1 h2 => by
-      obtain ⟨y', r', a, _, b, c⟩ := cy plan y r h1 h2; exact ⟨_, y', r', a, b, c⟩)
-    (fun value y r h1 h2 => by obtain ⟨y', r', a, b, c⟩ := cf value y r h1 h2; exact ⟨_, y', r', a, b, c⟩)
-    (fun a y h => by obtain ⟨y', h'⟩ := cd a y h; exact ⟨_, y', h'⟩)
-    cr ran1
+      obtain ⟨y', r', a, _, b, c⟩ := cy plan y r h1 h2; rw [collectedLimits]; exact ⟨_, y', r', a, b, c⟩)
+    (fun value y r h1 h2 => by
+      obtain ⟨y', r', a, b, c⟩ := cf value y r h1 h2; rw [collectedLimits]; exact ⟨_, y', r', a, b, c⟩)
+    (fun a y h => by obtain ⟨y', h'⟩ := cd a y h; rw [collectedLimits]; exact ⟨_, y', h'⟩)
+    (fun reason y h => by obtain ⟨y', h'⟩ := cr reason y h; rw [collectedLimits]; exact ⟨y', h'⟩) ran1
   exact ⟨collected, seg2, collectedResume, ran2, agree1.trans agree2⟩
 
 /-! ## The extraction's forcing is transparent -/
 
-/-- The configuration with heap headroom of `forced`'s size. -/
-def headroom (config : Config) (forced : State) : Config :=
-  {config with limits := ⟨config.limits.heap + forced.heap.size, config.limits.stack⟩}
+/-- **Sharing transparency, at one yield.**
 
-/-- **Sharing transparency of Plan extraction, at one yield.**
+`yielded` is the machine's own yielded state and `other` a state to resume in its place
+(the state its Plan extraction left, or the checkpoint stored from it). The statement:
+whatever segment resuming `yielded` with `response` ends under `config` and `ticks`,
+resuming `other` with the same response ends ALIKE (`Segment.Agrees`: the same Plan, result
+or fault), under the same config and ticks. There is no headroom: the kernel runs every
+segment under its `segmentLimits`, counted from the segment's own heap end, so a forced
+state's extra cells (`ObjectiveBendDemandCollect.largerYield_checkpoint_grows`: 2 cells
+unforced, 5 forced) do not eat its room. Under limits counted from zero the statement is
+FALSE of the kernel's own checkpoints (`absolute_limits_refuted`).
 
-`yielded` is the machine's own yielded state, `forced` the state its Plan extraction
-left (the same control and stack, every cell the extraction forced cached). The
-statement: whatever segment resuming `yielded` with `response` ends under `config` and
-`ticks`, resuming `forced` with the same response ends ALIKE (`Segment.Agrees`: the same
-Plan, result or fault), under the same ticks and stack, with heap headroom of `forced`'s
-size (`headroom`).
-
-The headroom is not slack: forcing can make a checkpoint LARGER
-(`ObjectiveBendDemandCollect.largerYield_checkpoint_grows`: 2 cells unforced, 5
-forced), so the forced resume can run out of heap where the unforced one would not.
-Ticks and stack need none (the forced run skips work and update frames; it never adds
-any).
-
-It was first stated as a premise of `runSegment_stored_complete`, to hold of every yield
-whose Plan extracts. That is FALSE: `not_forcingTransparent_dangling` (below) is a
-successful extraction at which it fails, a yield whose stack names an address past its
-heap. It HOLDS at every yield that names only allocated addresses
-(`forcingTransparent_of_yieldedPlan`, premise `LexicalInvariant yielded`, which every
-typed state has, so every yield the kernel stores). The premise has named poles:
-`lexicalInvariant_initialNat` satisfies it, `not_lexicalInvariant_danglingYield` refutes
-it. -/
-def ForcingTransparent (config : Config) (yielded forced : State) (response : Term) (ticks : Nat) : Prop :=
-  ∀ (s0 t0 : State) (segment : Segment), resume response yielded = some s0 → resume response forced = some t0 →
+It was first stated as a premise to hold of every yield whose Plan extracts. That is FALSE:
+`not_forcingTransparent_dangling` (below) is a successful extraction at which it fails, a
+yield whose stack names an address past its heap. It HOLDS at every yield that names only
+allocated addresses (`forcingTransparent_of_yieldedPlan`, premise `LexicalInvariant
+yielded`, which every typed state has, so every yield the kernel stores). The premise has
+named poles: `lexicalInvariant_initialNat` satisfies it, `not_lexicalInvariant_danglingYield`
+refutes it. -/
+def ForcingTransparent (config : Config) (yielded other : State) (response : Term) (ticks : Nat) : Prop :=
+  ∀ (s0 t0 : State) (segment : Segment), resume response yielded = some s0 → resume response other = some t0 →
     runSegment config ticks s0 = .ok segment →
-    ∃ segment', runSegment (headroom config forced) ticks t0 = .ok segment' ∧ Segment.Agrees segment segment'
+    ∃ segment', runSegment config ticks t0 = .ok segment' ∧ Segment.Agrees segment segment'
 
 /-- **The extraction's forcing is transparent at every lexically valid yield.** The
-extraction is a chain of finished closed demands; the yielded heap forces to the
-extraction's heap along it (`yieldedPlan_forces`), on the resumed control and the yield's
-stack; and along a forcing chain the forced run ends every segment the lazy run ends,
-alike, within headroom of the cells the chain added (`forces_segment`). -/
-theorem forcingTransparent_of_yieldedPlan {config : Config} {yielded : State}
-    {extracted : ObjectiveBendDemandData.Result}
+extraction (under any limits and budget) is a chain of finished closed demands; the yielded
+heap forces to the extraction's heap along it (`yieldedPlan_forces`), on the resumed control
+and the yield's stack; and along a forcing chain the forced run ends every segment the lazy
+run ends, alike, given heap room of the cells the chain added (`forces_segment`), which is
+exactly what counting the forced segment's limits from its own heap end gives it. -/
+theorem forcingTransparent_of_yieldedPlan {config : Config} {limits : Limits}
+    {budget : ObjectiveBendDemandData.Budget} {yielded : State} {extracted : ObjectiveBendDemandData.Result}
     (valid : ObjectiveBendDemandInvariant.LexicalInvariant yielded)
-    (found : ObjectiveBendDemandData.yieldedPlan config.limits config.planBudget yielded = .ok extracted)
+    (found : ObjectiveBendDemandData.yieldedPlan limits budget yielded = .ok extracted)
     (response : Term) (ticks : Nat) : ForcingTransparent config yielded extracted.state response ticks := by
   intro s0 t0 segment hs ht ran
   have addr := ObjectiveBendDemandForcing.addrValid_of_lexical valid
   obtain ⟨sameControl, sameStack⟩ := yieldedPlanWith_control found
+  have grows : yielded.heap.size ≤ extracted.state.heap.size :=
+    (ObjectiveBendDemandForcing.yieldedPlan_heapForces addr.heap found).2.2.1
   obtain ⟨plan, isYielded⟩ := resume_requires_yield response yielded (by rw [hs]; rfl)
   have s0Eq : s0 = ⟨yielded.heap, .evaluate response [], yielded.stack⟩ := by
     simp only [resume, isYielded, Option.some.injEq] at hs; subst hs; rfl
@@ -341,28 +368,31 @@ theorem forcingTransparent_of_yieldedPlan {config : Config} {yielded : State}
     simp only [resume, sameControl, isYielded, Option.some.injEq] at ht; subst ht; rw [← sameStack]
   obtain ⟨F, chain⟩ := ObjectiveBendDemandForcing.yieldedPlan_forces addr found (.evaluate response [])
     (fun _ m => by cases m)
+  have s0Size : s0.heap.size = yielded.heap.size := by rw [s0Eq]
+  have t0Size : t0.heap.size = extracted.state.heap.size := by rw [t0Eq]
+  have heapRoom : (segmentLimits config s0).heap + (extracted.state.heap.size - yielded.heap.size) ≤
+      (segmentLimits config t0).heap := by
+    simp only [segmentLimits, ObjectiveBendDemandCollect.limitsPast]; omega
+  have stackRoom : (segmentLimits config s0).stack ≤ (segmentLimits config t0).stack := Nat.le_refl _
   rw [← s0Eq, ← t0Eq] at chain
-  have heapRoom : config.limits.heap + (extracted.state.heap.size - yielded.heap.size) ≤
-      (headroom config extracted.state).limits.heap := by simp only [headroom]; omega
-  have stackRoom : config.limits.stack ≤ (headroom config extracted.state).limits.stack := Nat.le_refl _
   obtain ⟨sy, sf, sd, sr⟩ :=
     ObjectiveBendDemandForcing.forces_segment chain heapRoom stackRoom ticks config.planBudget
-  exact runSegment_transfer (config' := headroom config extracted.state) sy sf sd sr ran
+  exact runSegment_transfer sy sf sd sr ran
 
 /-- **What the kernel stores ends every segment the program's own yield ends**, alike,
-with heap headroom of the forced state's size, at every lexically valid yield. The stored
-checkpoint is the extraction's state settled and collected (`runSegment_checkpoint`); the
-extraction's state against the yield is `forcingTransparent_of_yieldedPlan`. -/
-theorem runSegment_stored_complete {config : Config} {ticks : Nat} {yielded resumed : State}
+under the kernel's own limits, at every lexically valid yield. The stored checkpoint is the
+extraction's state settled and collected (`runSegment_checkpoint`); the extraction's state
+against the yield is `forcingTransparent_of_yieldedPlan`. -/
+theorem runSegment_stored_complete {config : Config} {limits : Limits}
+    {budget : ObjectiveBendDemandData.Budget} {ticks : Nat} {yielded resumed : State}
     {response : Term} {extracted : ObjectiveBendDemandData.Result}
-    (found : ObjectiveBendDemandData.yieldedPlan config.limits config.planBudget yielded = .ok extracted)
+    (found : ObjectiveBendDemandData.yieldedPlan limits budget yielded = .ok extracted)
     (valid : ObjectiveBendDemandInvariant.LexicalInvariant yielded)
     (resumedExact : resume response yielded = some resumed) {segment : Segment}
     (ran : runSegment config ticks resumed = .ok segment) :
     ∃ stored segment', resume response (checkpoint extracted.state) = some stored ∧
-      runSegment (headroom config extracted.state) ticks stored = .ok segment' ∧
-      Segment.Agrees segment segment' := by
-  have transparent := forcingTransparent_of_yieldedPlan valid found response ticks
+      runSegment config ticks stored = .ok segment' ∧ Segment.Agrees segment segment' := by
+  have transparent := forcingTransparent_of_yieldedPlan (config := config) valid found response ticks
   have sameControl := (yieldedPlanWith_control found).1
   obtain ⟨plan, isYielded⟩ := resume_requires_yield response yielded (by rw [resumedExact]; rfl)
   have forcedResume : resume response extracted.state =
@@ -372,54 +402,66 @@ theorem runSegment_stored_complete {config : Config} {ticks : Nat} {yielded resu
   obtain ⟨stored, seg2, storedResume, ran2, agree2⟩ := runSegment_checkpoint forcedResume ran1
   exact ⟨stored, seg2, storedResume, ran2, agree1.trans agree2⟩
 
-/-- What a stored checkpoint promises: it is the checkpoint of a successful extraction of
-the program's own yield, and resuming it ends every segment resuming that yield ends, alike,
-within headroom of the extraction's heap. -/
-def StoredComplete (config : Config) (state : State) : Prop :=
-  ∃ (yielded : State) (extracted : ObjectiveBendDemandData.Result),
-    ObjectiveBendDemandData.yieldedPlan config.limits config.planBudget yielded = .ok extracted ∧
-    state = checkpoint extracted.state ∧
-    ∀ (response : Term) (ticks : Nat) (resumed : State) (segment : Segment),
-      resume response yielded = some resumed → runSegment config ticks resumed = .ok segment →
-      ∃ stored segment', resume response state = some stored ∧
-        runSegment (headroom config extracted.state) ticks stored = .ok segment' ∧
-        Segment.Agrees segment segment'
+/-- **What a stored checkpoint promises, of the segment that stored it.** The segment from
+`start` (`ticks`, the kernel's own `segmentLimits`) yielded; `state` is exactly the
+checkpoint of THAT yield's Plan extraction; and resuming `state` ends every segment resuming
+that yield ends, alike, under the same config (`ForcingTransparent`, every response and tick
+budget). The yield is the bounded run's own retained state, named by the run, not chosen. -/
+def StoredComplete (config : Config) (ticks : Nat) (start state : State) : Prop :=
+  match runBounded (segmentLimits config start) ticks start with
+  | .yielded _ yielded =>
+    match ObjectiveBendDemandData.yieldedPlan (segmentLimits config start) config.planBudget yielded with
+    | .ok extracted =>
+      state = checkpoint extracted.state ∧
+        ∀ (response : Term) (ticks' : Nat), ForcingTransparent config yielded state response ticks'
+    | .error _ => False
+  | _ => False
 
-/-- A typed yield whose Plan extracted stores a complete checkpoint. -/
-theorem storedComplete_of_typed {config : Config} {yielded : State} {extracted : ObjectiveBendDemandData.Result}
-    {assumptions : Assumptions} {types : AddressTypes} {result : Ty}
-    (typed : StateTyping assumptions types yielded result)
-    (found : ObjectiveBendDemandData.yieldedPlan config.limits config.planBudget yielded = .ok extracted) :
-    StoredComplete config (checkpoint extracted.state) :=
-  ⟨yielded, extracted, found, rfl, fun _ _ _ _ resumed ran =>
-    runSegment_stored_complete found typed.lexical resumed ran⟩
+/-- A segment that yielded from a start whose yield is lexically valid stored a complete
+checkpoint. -/
+theorem storedComplete_of_yielded {config : Config} {ticks : Nat} {start state : State} {plan : PlanAwait}
+    (ran : runSegment config ticks start = .ok (.yielded state plan))
+    (valid : ∀ address retained, runBounded (segmentLimits config start) ticks start = .yielded address retained →
+      ObjectiveBendDemandInvariant.LexicalInvariant retained) :
+    StoredComplete config ticks start state := by
+  obtain ⟨address, retained, extracted, executed, extractedExact, stored⟩ := runSegment_yielded ran
+  unfold StoredComplete
+  rw [executed]
+  simp only [extractedExact]
+  refine ⟨stored, fun response ticks' s0 t0 segment hs ht ran' => ?_⟩
+  obtain ⟨t1, segment', resumedStored, ran'', agree⟩ :=
+    runSegment_stored_complete extractedExact (valid address retained executed) hs ran'
+  rw [← stored] at resumedStored
+  rw [resumedStored] at ht
+  cases ht
+  exact ⟨segment', ran'', agree⟩
 
 /-- **The checkpoint a birth stores resumes as the program's own yield**, with no premise:
-the yield is typed (`typed_runBounded_yielded` from the checked program), so lexically
-valid. -/
+the yield of the program's initial state is typed (`typed_runBounded_yielded` from the
+checked program), so lexically valid. -/
 theorem birth_stored_complete {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : BirthRequest} (birth : Birth config snapshot height request)
     {state : State} {plan : PlanAwait} (yieldedSegment : birth.segment = .yielded state plan) :
-    StoredComplete config state := by
+    StoredComplete config request.envelope.sourceTicks (initial birth.program.applied.erase) state := by
   have ran := birth.segmentExact
   rw [yieldedSegment] at ran
-  obtain ⟨_, retained, extracted, executed, extractedExact, stored⟩ := runSegment_yielded ran
+  refine storedComplete_of_yielded ran fun _ retained executed => ?_
   obtain ⟨_, ⟨typed⟩⟩ := typed_runBounded_yielded
-    (checked_initial_state birth.program.applied birth.program.checked) config.limits request.envelope.sourceTicks executed
-  rw [stored]
-  exact storedComplete_of_typed typed extractedExact
+    (checked_initial_state birth.program.applied birth.program.checked) _ _ executed
+  exact typed.lexical
 
-/-- **The checkpoint a delivery stores resumes as the program's own yield**, if the
-checkpoint it decoded was typed (`delivery_checkpoint_typed`'s premise, which
-`Kernel.ObjectiveCheckpointInvariant.stored_checkpoints_typed` discharges on every
-reachable world: `reachable_delivery_stored_complete`). -/
+/-- **The checkpoint a delivery stores resumes as the program's own yield** (the yield of
+the run from the delivery's own resumed state), if the checkpoint it decoded was typed
+(`delivery_checkpoint_typed`'s premise, which `Kernel.ObjectiveCheckpointInvariant.
+stored_checkpoints_typed` discharges on every reachable world:
+`reachable_delivery_stored_complete`). -/
 theorem delivery_stored_complete {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {request : DeliverRequest}
     (delivery : Delivery config snapshot height request)
     (prior : ∃ types, Nonempty (StateTyping delivery.program.assumptions types delivery.state
       delivery.program.checked.type))
     {state : State} {plan : PlanAwait} (yieldedSegment : delivery.segment = .yielded state plan) :
-    StoredComplete config state := by
+    StoredComplete config delivery.envelope.sourceTicks delivery.resumed state := by
   have ended := delivery.endExact
   rw [yieldedSegment] at ended
   obtain ⟨ran, _⟩ := resumedSegment_yielded ended
@@ -428,11 +470,9 @@ theorem delivery_stored_complete {rootBytes : Bytes → Digest} {config : Config
   rw [computation] at typed
   obtain ⟨address, waiting⟩ := resume_requires_yield _ _ (by rw [delivery.resumeExact]; rfl)
   obtain ⟨resumedState⟩ := typed_resume_preserved typed waiting delivery.response.typed delivery.resumeExact
-  obtain ⟨_, retained, extracted, executed, extractedExact, stored⟩ := runSegment_yielded ran
-  obtain ⟨_, ⟨typedRetained⟩⟩ :=
-    typed_runBounded_yielded resumedState config.limits delivery.envelope.sourceTicks executed
-  rw [stored]
-  exact storedComplete_of_typed typedRetained extractedExact
+  refine storedComplete_of_yielded ran fun _ retained executed => ?_
+  obtain ⟨_, ⟨typedRetained⟩⟩ := typed_runBounded_yielded resumedState _ _ executed
+  exact typedRetained.lexical
 
 /-- A satisfying point of `LexicalInvariant` (the premise's pole; its refuting pole is
 `not_lexicalInvariant_danglingYield`). -/
@@ -513,7 +553,7 @@ def forcingTransparentCheck (config : Config) (yielded forced : State) (response
   | some s0, some t0 =>
     match runSegment config ticks s0 with
     | .ok segment =>
-      match runSegment (headroom config forced) ticks t0 with
+      match runSegment config ticks t0 with
       | .ok segment' => Segment.agreesB segment segment'
       | .error _ => false
     | .error _ => true
@@ -535,7 +575,7 @@ def forcingOpaqueCheck (config : Config) (yielded forced : State) (response : Te
   | some s0, some t0 =>
     match runSegment config ticks s0 with
     | .ok segment =>
-      match runSegment (headroom config forced) ticks t0 with
+      match runSegment config ticks t0 with
       | .ok segment' => !Segment.agreesB segment segment'
       | .error _ => true
     | .error _ => false
@@ -614,6 +654,192 @@ transparent: resumed, it finishes with the reply where the yield yields again. -
 theorem not_forcingTransparent_lostStack :
     ¬ ForcingTransparent tallyConfig tallyYield {tallyForced with stack := []} tallyReply 200000 :=
   not_forcingTransparent_of_refute (by native_decide)
+
+/-! ### Limits counted from zero refute the claim; the kernel's limits keep it
+
+`ObjectiveBendDemandCollect.largerYield` yields with two cells; the checkpoint of its Plan
+extraction has five (`largerYield_checkpoint_grows`). Resumed with a function that allocates
+two cells and returns a record, the yield finishes within a heap limit of 6 counted from zero
+(2 → 4 cells) where its checkpoint runs out of heap (5 → 7 > 6): under such limits a stored
+checkpoint does NOT resume as the program's own yield (`absolute_limits_refuted`). The
+kernel counts a segment's limits from its own heap (`segmentLimits`): with an allocation room
+of 6 both finish, alike (`largerYield_resumes_exactly`). Reverting `runSegment` to
+`config.limits` turns that decided instance false. -/
+
+def growResponse : Term := .lam (.record [("x", .nat 1)])
+
+/-- The checkpoint stored at `largerYield` (its Plan extracted, settled, collected). -/
+def largerStored : State :=
+  match ObjectiveBendDemandData.yieldedPlan ObjectiveBendDemandCollect.largerLimits
+      ObjectiveBendDemandCollect.largerBudget ObjectiveBendDemandCollect.largerYield with
+  | .ok extracted => checkpoint extracted.state
+  | .error _ => ObjectiveBendDemandCollect.largerYield
+
+def largerConfig : Config := {tallyConfig with limits := ⟨6, 64⟩, planBudget := ⟨64, 64, 256⟩}
+
+/-- **Limits counted from zero refute the claim** (machine level, decided in the kernel):
+under heap limit 6 the yield's resumption finishes and the checkpoint's runs out of heap. -/
+theorem absolute_limits_refuted :
+    (match resume growResponse ObjectiveBendDemandCollect.largerYield, resume growResponse largerStored with
+      | some s0, some t0 =>
+        (match runBounded largerConfig.limits 64 s0 with | .finished _ _ => true | _ => false) &&
+          (match runBounded largerConfig.limits 64 t0 with | .suspended .capacity _ => true | _ => false)
+      | _, _ => false) = true := by
+  decide +kernel
+
+/-- **The kernel's limits keep it**: the same yield, checkpoint and response under the
+kernel's `runSegment` end alike. -/
+theorem largerYield_resumes_exactly :
+    ForcingTransparent largerConfig ObjectiveBendDemandCollect.largerYield largerStored growResponse 64 :=
+  forcingTransparent_of_check (by decide +kernel)
+
+/-! ### The converse: the kernel commits where the lazy run is refused
+
+The forced checkpoint holds cached what the lazy yield would compute again, so its
+resumption spends fewer ticks and less extraction budget. So the converse of
+`runSegment_stored_complete` is FALSE, in both resources, at a lexically valid yield, under
+the deployed `runSegment`:
+
+* `stored_commits_where_lazy_exhausts`: resumed to read the record's field `a`, the yield
+  needs 15 transitions and the checkpoint 11; at 12 ticks the program's own run is
+  refused `exhausted` (it commits nothing; at the turn cap a delivery would commit it as a
+  fault) and the stored run finishes.
+* `stored_commits_where_lazy_extraction_fails`: resumed to return the record, both runs
+  finish; materializing its three fields costs 4 extraction ticks each lazily and 2 each
+  from the checkpoint; with a budget of 8 the program's own result extraction fails
+  (`resultExtraction`, which a delivery commits as a program FAULT, `programFault`) and the
+  stored segment finishes with the record.
+
+The difference is only in resources the cache saved: `runSegment_stored_complete` is the
+statement that whenever the program's own run commits, the stored run commits alike. -/
+
+def readResponse : Term := .lam (.get (.bound 0) "a")
+
+def returnResponse : Term := .lam (.bound 0)
+
+/-- The lazy run refused for running out of ticks, the stored run committed. -/
+def exhaustedConverseCheck (config : Config) (yielded stored : State) (response : Term) (ticks : Nat) : Bool :=
+  match resume response yielded, resume response stored with
+  | some s0, some t0 =>
+    match runSegment config ticks s0, runSegment config ticks t0 with
+    | .error .exhausted, .ok _ => true
+    | _, _ => false
+  | _, _ => false
+
+theorem exhaustedConverse_of_check {config : Config} {yielded stored : State} {response : Term} {ticks : Nat}
+    (checked : exhaustedConverseCheck config yielded stored response ticks = true) :
+    ∃ s0 t0 segment, resume response yielded = some s0 ∧ resume response stored = some t0 ∧
+      runSegment config ticks s0 = .error .exhausted ∧ runSegment config ticks t0 = .ok segment := by
+  unfold exhaustedConverseCheck at checked
+  split at checked
+  · rename_i s0 t0 hs ht
+    split at checked
+    · rename_i segment r1 r2
+      exact ⟨s0, t0, segment, hs, ht, r1, r2⟩
+    · cases checked
+  · cases checked
+
+/-- The lazy run's result extraction failed, the stored run finished. -/
+def extractionConverseCheck (config : Config) (yielded stored : State) (response : Term) (ticks : Nat) : Bool :=
+  match resume response yielded, resume response stored with
+  | some s0, some t0 =>
+    match runSegment config ticks s0, runSegment config ticks t0 with
+    | .error (.resultExtraction _), .ok (.finished _) => true
+    | _, _ => false
+  | _, _ => false
+
+theorem extractionConverse_of_check {config : Config} {yielded stored : State} {response : Term} {ticks : Nat}
+    (checked : extractionConverseCheck config yielded stored response ticks = true) :
+    ∃ s0 t0 reason result, resume response yielded = some s0 ∧ resume response stored = some t0 ∧
+      runSegment config ticks s0 = .error (.resultExtraction reason) ∧
+      runSegment config ticks t0 = .ok (.finished result) := by
+  unfold extractionConverseCheck at checked
+  split at checked
+  · rename_i s0 t0 hs ht
+    split at checked
+    · rename_i reason result r1 r2
+      exact ⟨s0, t0, reason, result, hs, ht, r1, r2⟩
+    · cases checked
+  · cases checked
+
+/-- `largerYield` is lexically valid: the converse fails at a yield the completeness
+theorem covers. -/
+theorem lexicalInvariant_largerYield :
+    ObjectiveBendDemandInvariant.LexicalInvariant ObjectiveBendDemandCollect.largerYield := by
+  refine ⟨fun address cell found => ?_, (by decide : (1 : Nat) < 2), fun frame member => ?_⟩
+  · rcases address with _ | _ | address
+    · simp [ObjectiveBendDemandCollect.largerYield] at found
+      subst found
+      exact ⟨.record (fun field member => by
+        simp at member
+        rcases member with rfl | rfl | rfl <;> exact .natural _), fun _ member => by simp at member⟩
+    · simp [ObjectiveBendDemandCollect.largerYield] at found
+      subst found
+      exact ⟨.bound (by decide), fun a member => by simp at member; subst member; decide⟩
+    · simp [ObjectiveBendDemandCollect.largerYield] at found
+  · simp [ObjectiveBendDemandCollect.largerYield] at member
+    subst member
+    exact ⟨.bound (by decide), fun a member => by simp at member; subst member; decide⟩
+
+/-- **Converse refuted, ticks.** -/
+theorem stored_commits_where_lazy_exhausts :
+    ∃ s0 t0 segment, resume readResponse ObjectiveBendDemandCollect.largerYield = some s0 ∧
+      resume readResponse largerStored = some t0 ∧
+      runSegment largerConfig 12 s0 = .error .exhausted ∧ runSegment largerConfig 12 t0 = .ok segment :=
+  exhaustedConverse_of_check (by decide +kernel)
+
+def budgetConfig : Config := {largerConfig with planBudget := ⟨64, 8, 256⟩}
+
+/-- **Converse refuted, extraction budget**: the program's own result extraction fails
+where the stored segment finishes. -/
+theorem stored_commits_where_lazy_extraction_fails :
+    ∃ s0 t0 reason result, resume returnResponse ObjectiveBendDemandCollect.largerYield = some s0 ∧
+      resume returnResponse largerStored = some t0 ∧
+      runSegment budgetConfig 64 s0 = .error (.resultExtraction reason) ∧
+      runSegment budgetConfig 64 t0 = .ok (.finished result) :=
+  extractionConverse_of_check (by decide +kernel)
+
+/-- The program's own result-extraction failure is a program FAULT a delivery commits
+(the await ends `faulted`), where the stored run commits the finished result. -/
+theorem lazy_extraction_failure_commits_as_fault (config : Config) (envelope : Nat) (reason : String) :
+    (faultOr config envelope (.resultExtraction reason) :
+      Except ObjectiveActivity.Refusal (Segment × Option YieldCommit)) =
+      .ok (.faulted s!"result extraction: {reason}", none) := rfl
+
+/-! ### Growth is paid by the delivery that runs it
+
+A resumed segment's limits are counted from its checkpoint's heap, so a checkpoint may grow
+from segment to segment. Every delivery (and every exhaustion attempt) declares an envelope
+whose heap covers the checkpoint's cells plus the deployment's allocation
+(`Delivery.heapCovered`, refused `heapUncovered` before any run), and the envelope is priced
+by the tariff's `workOf` (the purse pays the escrowed part, the submitter the `extra` it
+adds). So the price a delivery's envelope carries is at least the tariff's heap rate times
+the checkpoint's cells plus the allocation. -/
+
+theorem tariff_heap_le_workOf (tariff : Minidregg.Kernel.ObjectiveTariff.Tariff) (capacity : Minidregg.Compiler.ObjectiveInvocationClaim.Capacity) :
+    tariff.heap * capacity.heap ≤ tariff.workOf capacity := by
+  unfold Minidregg.Kernel.ObjectiveTariff.Tariff.workOf
+  apply Nat.le_add_right_of_le; apply Nat.le_add_right_of_le
+  apply Nat.le_add_right_of_le; apply Nat.le_add_right_of_le
+  exact Nat.le_add_left _ _
+
+/-- **A delivery's declared price covers its checkpoint's heap.** -/
+theorem Delivery.heap_priced {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request) :
+    config.tariff.heap * (delivery.state.heap.size + config.limits.heap) ≤ config.tariff.workOf delivery.envelope := by
+  have covered := delivery.heapCovered
+  have same := (resume_keeps_heap_and_stack _ _ _ delivery.resumeExact).1
+  simp only [segmentLimits, ObjectiveBendDemandCollect.limitsPast, same] at covered
+  exact Nat.le_trans (Nat.mul_le_mul_left _ covered) (tariff_heap_le_workOf _ _)
+
+/-- **So does an exhaustion attempt's.** -/
+theorem Exhaustion.heap_priced {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : ExhaustRequest} (attempt : Exhaustion config snapshot height request) :
+    config.tariff.heap * (attempt.state.heap.size + config.limits.heap) ≤ config.tariff.workOf attempt.envelope := by
+  have covered := attempt.heapCovered
+  have same := (resume_keeps_heap_and_stack _ _ _ attempt.resumeExact).1
+  simp only [segmentLimits, ObjectiveBendDemandCollect.limitsPast, same] at covered
+  exact Nat.le_trans (Nat.mul_le_mul_left _ covered) (tariff_heap_le_workOf _ _)
 
 /-! ## A delivery advances the record
 
@@ -785,11 +1011,12 @@ theorem forcingTransparent_not_of_extraction :
 #assert_axioms birth_checkpoint_typed
 #assert_axioms delivery_checkpoint_typed
 #assert_axioms Segment.Agrees.trans
+#assert_axioms segmentLimits_of_size
 #assert_axioms runSegment_transfer
 #assert_axioms runSegment_checkpoint
 #assert_axioms forcingTransparent_of_yieldedPlan
 #assert_axioms runSegment_stored_complete
-#assert_axioms storedComplete_of_typed
+#assert_axioms storedComplete_of_yielded
 #assert_axioms birth_stored_complete
 #assert_axioms delivery_stored_complete
 #assert_axioms lexicalInvariant_initialNat
@@ -800,6 +1027,17 @@ theorem forcingTransparent_not_of_extraction :
 #assert_axioms not_forcingTransparent_of_refute
 #assert_compiled forcingTransparent_tally
 #assert_compiled not_forcingTransparent_lostStack
+#assert_axioms absolute_limits_refuted
+#assert_axioms largerYield_resumes_exactly
+#assert_axioms exhaustedConverse_of_check
+#assert_axioms extractionConverse_of_check
+#assert_axioms lexicalInvariant_largerYield
+#assert_axioms stored_commits_where_lazy_exhausts
+#assert_axioms stored_commits_where_lazy_extraction_fails
+#assert_axioms lazy_extraction_failure_commits_as_fault
+#assert_axioms tariff_heap_le_workOf
+#assert_axioms Delivery.heap_priced
+#assert_axioms Exhaustion.heap_priced
 #assert_axioms nextRecord_generation
 #assert_axioms Delivery.next_generation
 #assert_axioms encodeRecord_ne_nil

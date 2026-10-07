@@ -445,10 +445,12 @@ Plan that is a small closure over a cell the continuation also holds becomes, fo
 the whole structure that closure computes, all of it live. Here the Plan reads cell 0,
 a suspended record of three fields; the stack holds cell 0 too. Unforced and collected:
 two cells. Forced, settled and collected: five (cell 0's record, the Plan cell and the
-three field cells, all reachable from the stack through cell 0). So a resumed forced
-checkpoint may run out of heap where the unforced one would not, and the resume
-statement `Kernel.ObjectiveResumeContract.ForcingTransparent` carries heap headroom
-of the forced state's size. -/
+three field cells, all reachable from the stack through cell 0). So under heap limits
+counted from zero a resumed forced checkpoint may run out of heap where the unforced one
+would not (`Kernel.ObjectiveResumeContract.absolute_limits_refuted`); the kernel counts a
+segment's limits from its own heap end (`limitsPast`, `Kernel.ObjectiveActivity.
+segmentLimits`), under which it resumes exactly (`ObjectiveResumeContract.
+largerYield_resumes_exactly`, `runSegment_stored_complete`). -/
 
 def largerYield : State :=
   ⟨#[.suspended ⟨.record [("a", .nat 1), ("b", .nat 2), ("c", .nat 3)], []⟩, .suspended ⟨.bound 0, [0]⟩],
