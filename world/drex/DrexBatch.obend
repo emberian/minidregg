@@ -52,12 +52,17 @@ sum Terms:
 
 # The seat kernel's view of one open seat (SeatStore.callData), seats sorted by
 # account.
+sum Exit:
+  onDemand: {}
+  afterDeadline: Nat
 record SeatView:
   seat: Nat
   role: String
   terms: Terms
   give: Amounts
   want: Amounts
+  exit: Exit
+  opened: Nat
   allocation: Amounts
 
 sum Seats:
@@ -271,10 +276,10 @@ def both(first: Amount, second: Amount) -> Amounts:
   Amounts.cons({head: first, tail: Amounts.cons({head: second, tail: Amounts.nil()})})
 
 def bidView(seat: Nat, budget: Nat, qty: Nat) -> SeatView:
-  {seat: seat, role: "bid", terms: Terms.nil(), give: amount(200n, budget), want: amount(100n, qty), allocation: both({asset: 200n, amount: budget}, {asset: 100n, amount: 0n})}
+  {seat: seat, role: "bid", terms: Terms.nil(), give: amount(200n, budget), want: amount(100n, qty), exit: Exit.onDemand(), opened: 0n, allocation: both({asset: 200n, amount: budget}, {asset: 100n, amount: 0n})}
 
 def askView(seat: Nat, qty: Nat, reserve: Nat) -> SeatView:
-  {seat: seat, role: "ask", terms: Terms.nil(), give: amount(100n, qty), want: amount(200n, reserve), allocation: both({asset: 100n, amount: qty}, {asset: 200n, amount: 0n})}
+  {seat: seat, role: "ask", terms: Terms.nil(), give: amount(100n, qty), want: amount(200n, reserve), exit: Exit.onDemand(), opened: 0n, allocation: both({asset: 100n, amount: qty}, {asset: 200n, amount: 0n})}
 
 def demoSeats() -> Seats:
   Seats.cons({head: bidView(51n, 10n, 2n), tail: Seats.cons({head: bidView(52n, 12n, 3n), tail: Seats.cons({head: askView(53n, 2n, 6n), tail: Seats.cons({head: askView(54n, 3n, 12n), tail: Seats.nil()})})})})
