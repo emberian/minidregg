@@ -307,14 +307,13 @@ the instantiated type, with the same uses, given `extra` more fuel); inhabited b
 `{colour, weight}` by the theorem); the rigidity tooth `self_as_bound_row_alias_accepted` /
 `self_as_bound_row_rigid_refused`. The theorem is about the checker.
 
-**What is not.** The elaborator does not yet emit an instance as the substitution of the
-checked template: it re-elaborates each layer at its instance (`chainFix`), and `Super` in a
-template is the literal bound row rather than a second rigid variable. So the front-end
-corollary `instance_accepted` (a discharged instance is accepted, so every refusal after a
-template check is a named discharge refusal) is not stated; until it is, every instance is
-re-checked in the whole program, which is sound but means an anonymous `typing refused` is
-still possible. Ancestry specs and non-plain operands in a `fix` chain keep the closed
-whole-target rule. Instances across package roots are not addressed.
+**How the front end uses it.** Since GPT-6 row D the elaborator emits each open instance as the
+checked template under its substitution (`Super` is a second rigid variable, `super-rigid`), and the
+contract decides by name whether the substitution discharges the bounds (`self-bound`,
+`inherited-unprovided`). The closed program, instances included, is still checked by the checker,
+and that is the check admission relies on; no front-end corollary of `check_instantiate` is stated
+or needed. Ancestry specs and non-plain operands in a `fix` chain keep the closed whole-target rule.
+Instances across package roots are not addressed.
 
 ## Activities
 
@@ -687,7 +686,6 @@ records that a value came from the call that produced it.
   `OrderedPresentationInvariant` (`Compiler/ObjectiveBendC4.lean`) is a `Prop` nothing proves;
   the evidence is compiled vector theorems (`Compiler/ObjectiveBendC4Vectors.lean`: published
   precedence vectors and 4000 seeded DAGs).
-- **`instance_accepted`** (LT2, above).
 - **Laws** (LT6, OB5): spec laws are never checked; no object-law clauses in the source.
 - **Ecosystem** (LT5, OB5): no surface form names another package's root; no dynamic
   selection by label; no generative identity beyond the kernel's object ids.
