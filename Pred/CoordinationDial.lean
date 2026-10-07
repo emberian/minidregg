@@ -162,6 +162,7 @@ theorem eval_congr_slot : ∀ (p : Pred) {k : Slot}, singleSlot p = some k →
   | .eqSlots _ _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
   | .leSlots _ _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
   | .leSlotsOff _ _ _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
+  | .sumEq _ _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
   | .witnessed _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
   | .hashEq _ _ _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
   | .allL _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
@@ -179,6 +180,7 @@ def NewOnly : Pred → Bool
   | .eqSlots _ _ => true
   | .leSlots _ _ => true
   | .leSlotsOff _ _ _ => true
+  | .sumEq _ _ => true
   | .witnessed _ => false
   | .hashEq _ _ _ => true
   | .ran _ => true
@@ -214,6 +216,9 @@ theorem eval_congr_toFun : ∀ (p : Pred), NewOnly p = true →
       simp only [eval, evalWith, ofRead_injective (congrFun h a), ofRead_injective (congrFun h b)]
   | .leSlotsOff a b _, _, _, _, _, _, h => by
       simp only [eval, evalWith, ofRead_injective (congrFun h a), ofRead_injective (congrFun h b)]
+  | .sumEq l r, _, _, _, s, s', h => by
+      have hg : ∀ k, s.get k = s'.get k := fun k => ofRead_injective (congrFun h k)
+      simp only [eval, evalWith, sumOf_congr hg]
   | .witnessed _, hp, _, _, _, _, _ => by simp [NewOnly] at hp
   | .hashEq v b c, _, old, old', s, s', h => by
       have hg : ∀ k, s.get k = s'.get k := fun k => ofRead_injective (congrFun h k)
@@ -322,6 +327,7 @@ def dial : Pred → Verdict
   | .eqSlots _ _ => .free
   | .leSlots _ _ => .free
   | .leSlotsOff _ _ _ => .free
+  | .sumEq _ _ => .ordering
   | .witnessed _ => .thirdParty
   | .hashEq _ _ _ => .ordering
   | .ran _ => .free
@@ -375,6 +381,7 @@ theorem dial_free_closed : ∀ (p : Pred), dial p = .free → MergeClosed p
       intro h₁ h₂
       exact max_le (Int.le_trans h₁ (Int.add_le_add_right (Int.le_max_left _ _) c))
         (Int.le_trans h₂ (Int.add_le_add_right (Int.le_max_right _ _) c))
+  | .sumEq _ _, h => by simp [dial] at h
   | .witnessed _, h => by simp [dial] at h
   | .hashEq _ _ _, h => by simp [dial] at h
   | .not q, h => fun old s t hs ht => by
@@ -406,6 +413,14 @@ theorem dial_sound (p : Pred) (old : State) (h : dial p = .free) :
   exact ⟨mergeState s t, toFun_mergeState s t, dial_free_closed p h old s t hs ht⟩
 
 /-! ## §6 — The finality link. -/
+
+/-- **Why `sumEq` needs ordering**: two writes that each keep `r = a + b` can merge into one
+that breaks it (3 + 5 and 5 + 3 both back 8; their slot-wise join 5 + 5 does not). -/
+theorem sumEq_not_merge_closed : ¬ MergeClosed (.sumEq ["r"] ["a", "b"]) := fun h => by
+  have := h ⟨[]⟩ ⟨[("r", 8), ("a", 3), ("b", 5)]⟩ ⟨[("r", 8), ("a", 5), ("b", 3)]⟩
+    (by decide) (by decide)
+  revert this
+  decide
 
 /-- The tier the dial assigns: `free` runs causal; every refusal is sent to τ-BFT. -/
 def dialTier (p : Pred) : Finality.Tier := if dial p = .free then .causal else .bft

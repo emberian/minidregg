@@ -61,12 +61,15 @@ inductive Token where
   was the single-value `hashEq` of K-HASHEQ; it is retired and refuses to decode, so a record
   carrying it is refused rather than read as a tuple. -/
   | hashEq (values : List String) (blinder commit : String)
+  /-- Tag 17: `sumEq` (the two slot lists whose new values must sum alike). -/
+  | sumEq (left right : List String)
   deriving DecidableEq, Repr
 
 def slotIntStream := StreamCodec.product stringStream IntStream.intStream
 def slotListStream := StreamCodec.product stringStream (StreamCodec.list IntStream.intStream)
 def slotPairStream := StreamCodec.product stringStream stringStream
 def slotPairIntStream := StreamCodec.product slotPairStream IntStream.intStream
+def slotListsStream := StreamCodec.product (StreamCodec.list stringStream) (StreamCodec.list stringStream)
 def slotsPairStream :=
   StreamCodec.product (StreamCodec.list stringStream) (StreamCodec.product stringStream stringStream)
 
@@ -86,6 +89,7 @@ def encodeToken : Token → List UInt8
   | .leSlots left right => 12 :: slotPairStream.encode (left, right)
   | .leSlotsOff left right offset => 13 :: slotPairIntStream.encode ((left, right), offset)
   | .hashEq values blinder commit => 16 :: slotsPairStream.encode (values, (blinder, commit))
+  | .sumEq left right => 17 :: slotListsStream.encode (left, right)
   | .ran program => 14 :: StreamCodec.nat.encode program
 
 def decodeToken : List UInt8 → Option (Token × List UInt8)
@@ -124,6 +128,9 @@ def decodeToken : List UInt8 → Option (Token × List UInt8)
   | 16 :: bytes => do
       let ((values, (blinder, commit)), suffix) ← slotsPairStream.decodePrefix bytes
       some (.hashEq values blinder commit, suffix)
+  | 17 :: bytes => do
+      let ((left, right), suffix) ← slotListsStream.decodePrefix bytes
+      some (.sumEq left right, suffix)
   | 14 :: bytes => do
       let (program, suffix) ← StreamCodec.nat.decodePrefix bytes
       some (.ran program, suffix)
@@ -152,6 +159,7 @@ def step : Token → Stack → Option Stack
   | .leSlots left right, stack => some (.inl (.leSlots left right) :: stack)
   | .leSlotsOff left right offset, stack => some (.inl (.leSlotsOff left right offset) :: stack)
   | .hashEq values blinder commit, stack => some (.inl (.hashEq values blinder commit) :: stack)
+  | .sumEq left right, stack => some (.inl (.sumEq left right) :: stack)
   | .ran program, stack => some (.inl (.ran program) :: stack)
   | .not, .inl predicate :: stack => some (.inl (.not predicate) :: stack)
   | .all, .inr predicates :: stack => some (.inl (.allL predicates) :: stack)
@@ -180,6 +188,7 @@ def tokensInto : Pred → List Token → List Token
   | .leSlotsOff left right offset, suffix => .leSlotsOff left right offset :: suffix
   | .witnessed vk, suffix => .witnessed vk.id :: suffix
   | .hashEq values blinder commit, suffix => .hashEq values blinder commit :: suffix
+  | .sumEq left right, suffix => .sumEq left right :: suffix
   | .ran program, suffix => .ran program :: suffix
   | .not predicate, suffix => tokensInto predicate (.not :: suffix)
   | .allL predicates, suffix => listTokensInto predicates (.all :: suffix)
@@ -206,6 +215,7 @@ theorem runTokens_tokensInto (predicate : Pred) (suffix : List Token) (stack : S
   | leSlotsOff left right offset => rfl
   | witnessed vk => cases vk; rfl
   | hashEq values blinder commit => rfl
+  | sumEq left right => rfl
   | ran program => rfl
   | not predicate =>
       rw [tokensInto, runTokens_tokensInto]
@@ -460,10 +470,10 @@ theorem hashEq_token_round_trip (values : List String) (blinder commit : String)
       some (.hashEq values blinder commit, suffix) :=
   decodeToken_encode _ _
 
-/-- Tags 11-13 are eqSlots/leSlots/leSlotsOff, 14 is `ran`, 16 is the tuple `hashEq`; 15 (the
-retired single-value `hashEq`) and 17 refuse. -/
+/-- Tags 11-13 are eqSlots/leSlots/leSlotsOff, 14 is `ran`, 16 is the tuple `hashEq`, 17 is
+`sumEq`; 15 (the retired single-value `hashEq`) and 18 refuse. -/
 theorem unassigned_tags_rejected (suffix : List UInt8) :
-    decodeToken (15 :: suffix) = none ∧ decodeToken (17 :: suffix) = none := ⟨rfl, rfl⟩
+    decodeToken (15 :: suffix) = none ∧ decodeToken (18 :: suffix) = none := ⟨rfl, rfl⟩
 
 theorem wrong_stack_sort_rejected : decodePred [.nil, .not] = none := rfl
 
@@ -586,9 +596,9 @@ anywhere outside the lane that introduced it, and every tag below 13 keeps its m
 theorem leSlotsOff_tag (left right : String) (offset : Int) :
     (encodeToken (.leSlotsOff left right offset)).head? = some 13 := rfl
 
-/-- The vocabulary is exactly tags 0..14 and 16: tag 15 (retired) and every byte of 17 or more
-refuse to decode, so a record from any other vocabulary is refused rather than read. -/
-theorem decodeToken_unknown_tag (tag : UInt8) (htag : 17 ≤ tag.toNat ∨ tag.toNat = 15)
+/-- The vocabulary is exactly tags 0..14, 16 and 17: tag 15 (retired) and every byte of 18 or
+more refuse to decode, so a record from any other vocabulary is refused rather than read. -/
+theorem decodeToken_unknown_tag (tag : UInt8) (htag : 18 ≤ tag.toNat ∨ tag.toNat = 15)
     (rest : List UInt8) :
     decodeToken (tag :: rest) = none := by
   unfold decodeToken

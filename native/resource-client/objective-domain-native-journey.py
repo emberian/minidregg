@@ -24,12 +24,18 @@ the END of every turn that writes a member's declared state, on every member's F
   D3 stale      p 5, q 6 join `member/0/state/total <= member/1/state/total`. p.deposit(1) is prepared
                 (6 <= 6: admitted). q.withdraw(1) to r installs (5 <= 5). The prepared plan, resubmitted, is
                 re-judged on q's NEW state, though it does not write q: refused `domainLawDenied`.
+  D4 bank       the bank tooth (`Pred.sumEq`): reserve x 10, balances y 4, v 6 join
+                `sum(member/0/state/total) == sum(member/1/state/total, member/2/state/total)`. A transfer
+                y -> v of 1 (y.withdraw paying v.receive: y 3, v 7) installs. A mint into one member alone
+                (y.deposit(1): y 4, reserve still 10) is refused `domainLawDenied` on the sumEq clause, and
+                so is raising the reserve alone (x.deposit(1)). A backed mint (x.forward(y, 1): reserve 11,
+                y 4) installs.
 
 PLANTS (self-test; `--plant` prints `PLANT-RESULT red GROUPS` and exits 1 when exactly the planted rows went red,
 `PLANT-RESULT blind ...` and exits 3 when a planted row stayed green):
   domain-blind      a HOST plant: --bin built from a tree patched by scripts/plants/domain-blind.py
-                    (`judgeDomains` judges nothing) -> D1 red (a.deposit(1) commits, 6 != 5) and D3 red
-                    (the stale plan commits p 6 > q 5)
+                    (`judgeDomains` judges nothing) -> D1 red (a.deposit(1) commits, 6 != 5), D3 red
+                    (the stale plan commits p 6 > q 5) and D4 red (the unbacked mint commits: 10 != 5 + 6)
   member-permit     the members' upgrade authority admits nobody's subject but a stranger's -> D1 red
                     (registration refused `memberDenied`, so the joint law never binds)
 ROOT/transcript holds every command's exact output; ROOT/results.json every row. Exit 1 on any red row.
@@ -40,7 +46,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from activity_world import World, PERMIT_ALL, TICKS, nat, record, eq, any_of, eq_slots, cap  # noqa: E402
 
-PLANTS = {'domain-blind': {'D1-joint', 'D3-stale'}, 'member-permit': {'D1-joint'}}
+PLANTS = {'domain-blind': {'D1-joint', 'D3-stale', 'D4-bank'}, 'member-permit': {'D1-joint'}}
 ap = argparse.ArgumentParser()
 ap.add_argument('--bin', required=True)
 ap.add_argument('--root', required=True)
@@ -50,7 +56,7 @@ plants = {p for p in a.plant.split(',') if p}
 if plants - set(PLANTS):
     raise SystemExit(f'unknown plant {sorted(plants - set(PLANTS))}; known: {sorted(PLANTS)}')
 
-NAMES = ['a', 'b', 't', 'z', 'c', 'u', 'p', 'q', 'r']
+NAMES = ['a', 'b', 't', 'z', 'c', 'u', 'p', 'q', 'r', 'x', 'y', 'v']
 w = World(a.bin, a.root, HERE.parent.parent)
 try:
     w.bring_up(NAMES)
@@ -67,8 +73,9 @@ try:
     MEMBER = governed('999999' if 'member-permit' in plants else SPONSOR)
     policies = {'a': MEMBER, 'b': MEMBER, 't': governed(SPONSOR), 'z': {'frozen': {}},
                 'c': governed('999999'), 'u': governed(SPONSOR, w.SECOND), 'p': governed(SPONSOR),
-                'q': governed(SPONSOR), 'r': governed(SPONSOR)}
-    starts = {'a': 5, 'b': 5, 't': 5, 'z': 5, 'c': 5, 'u': 5, 'p': 5, 'q': 6, 'r': 0}
+                'q': governed(SPONSOR), 'r': governed(SPONSOR), 'x': governed(SPONSOR),
+                'y': governed(SPONSOR), 'v': governed(SPONSOR)}
+    starts = {'a': 5, 'b': 5, 't': 5, 'z': 5, 'c': 5, 'u': 5, 'p': 5, 'q': 6, 'r': 0, 'x': 10, 'y': 4, 'v': 6}
     for name in NAMES:
         w.create(f'create-{name}', w.sponsor, name, PERMIT_ALL, 'installed', seed=record(total=nat(starts[name])),
                  upgrade=policies[name])
@@ -128,6 +135,23 @@ try:
         w.resubmit('d3-stale-refused', w.attempts / 'd3-prepared' / 'ingress.bin', 'refused',
                    ['domainLawDenied', 'leSlots'])
         w.check('d3-p-still-5', total('p', 'd3-p1') == 5, None)
+
+    with w.group('D4-bank'):
+        RESERVE = {'type': 'sumEq', 'left': ['member/0/state/total'],
+                   'right': ['member/1/state/total', 'member/2/state/total']}
+        register('d4-register', ['x', 'y', 'v'], RESERVE, 'installed')
+
+        def bank():
+            return [total(n, f'd4-{n}{next(seq)}') for n in ['x', 'y', 'v']]
+        seq = iter(range(100))
+        transfer = record(to=nat(O['v']), bank=nat(O['y']), amount=nat(1), hook={'tag': 'label', 'value': 'receive'})
+        invoke('d4-transfer-installs', 'y', 'withdraw', transfer, 'installed')
+        w.check('d4-10-3-7', bank() == [10, 3, 7], None)
+        invoke('d4-mint-refused', 'y', 'deposit', nat(1), 'refused', ['domainLawDenied', 'sumEq'])
+        invoke('d4-reserve-alone-refused', 'x', 'deposit', nat(1), 'refused', ['domainLawDenied', 'sumEq'])
+        w.check('d4-still-10-3-7', bank() == [10, 3, 7], None)
+        invoke('d4-backed-mint-installs', 'x', 'forward', hop('y', 1), 'installed')
+        w.check('d4-11-4-7', bank() == [11, 4, 7], None)
 
 finally:
     w.stop()
