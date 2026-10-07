@@ -7914,6 +7914,32 @@ def run (arguments : List String) : IO UInt32 := do
             throw (IO.userError "reserve birth call exceeds host frame bound")
           writeBytes output call
           pure 0
+      | "plan-ungated", [input, output] =>
+          -- Operator-local test tooling: plan the invoke draft of a client intent (`intent.bin`)
+          -- against the Store as it is NOW (each target's expected root re-read from its current
+          -- cell), WITHOUT the served path's observation and law gates (`NativeHost.prepareLoaded`,
+          -- which the operator authoring commands also call). A plan authorizes nothing: it lets a
+          -- test sign a call the served gates would never have planned and hand it to the
+          -- RECEIVER, which must judge it itself (journey JGATE: the gateway law refuses an
+          -- ordinary subject's signed direct call).
+          let some intent := NativeObservationCodec.intentCodec.decode (← readBytes input)
+            | throw (RequestRefusal.malformed "noncanonical observation intent")
+          let .prepare (.invoke commandBytes) := intent.purpose
+            | throw (IO.userError "plan-ungated: the intent's purpose is not an invoke draft")
+          let some command := DeclaredResourceController.commandCodec.decode commandBytes
+            | throw (RequestRefusal.malformed "noncanonical invoke command")
+          let opened ← IO.ofExcept (← NativeHost.openExisting config)
+          let targets ← command.targets.mapM fun target => do
+            let .present cell := opened.directory.directory.slots target.target
+              | throw (IO.userError s!"plan-ungated: target {target.target} is absent")
+            let some pre := DeclaredResourceController.selectTarget config.deployment target cell
+              | throw (IO.userError s!"plan-ungated: target {target.target} does not select its cell")
+            pure { target with expectedTargetRoot := pre.root }
+          let draft := NativeHostCodec.Draft.invoke
+            (DeclaredResourceController.commandCodec.encode { command with targets })
+          let plan ← IO.ofExcept (NativeHost.prepareLoaded config opened draft)
+          writeBytes output (signingPlanCodec.encode plan)
+          pure 0
       | "prepare", [input, output] =>
           let plan ← IO.ofExcept (← NativeHost.prepare config (← readBytes input))
           writeBytes output (signingPlanCodec.encode plan)
