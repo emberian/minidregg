@@ -51,7 +51,8 @@ def configOf {F : Type} [Field F] (deployment : Deployment) (profile : Canonical
     throw (.packageType "the operator disabled objective-core4")
   pure { deployment := deployment, asset := ambient.asset, collector := ambient.collector
          limits := ObjectiveBendNativeAdmission.limits policy.maximum
-         planBudget := ObjectiveBendNativeAdmission.budget policy.maximum
+         -- The extraction's tick budget is its own declared ceiling, never the source ceiling.
+         planBudget := {ObjectiveBendNativeAdmission.budget policy.maximum with ticks := policy.maximum.extractTicks}
          maxTicks := policy.maximum.sourceTicks, maxPatience := maxPatience
          typeFuel := policy.maximum.typeFuel, maxArtifactBytes := policy.sourceBytes
          tariff := policy.tariff
