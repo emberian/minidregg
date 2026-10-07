@@ -26,12 +26,14 @@ structure Reservation (config : Config) where
   readback : NativeHostReplay.ExactReadback config old
   derivedExact : readback.derived.intent = admitted.intent
   confirmation : DurableReceiverIO.Confirmation
+  store : DurableHistory.StoreIdentity
+  reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store
 
 def Reservation.verified {config : Config} (reservation : Reservation config) :
     NativeHostReplay.Verified config
       (NativeHostReplay.exactCandidate reservation.old
         reservation.readback.derived reservation.readback.ready) :=
-  NativeHostReplay.extendExact reservation.old reservation.readback
+  NativeHostReplay.extendExact reservation.reader reservation.old reservation.readback
 
 def Reservation.receipt {config : Config} (reservation : Reservation config) :
     NativeHostCodec.Receipt :=
@@ -47,7 +49,7 @@ theorem Reservation.receipt_in_verified {config : Config}
     (reservation : Reservation config) :
     reservation.verified.receipts =
       reservation.old.receipts ++ [reservation.receipt] :=
-  NativeHostReplay.extendExact_receipts reservation.old reservation.readback
+  NativeHostReplay.extendExact_receipts reservation.reader reservation.old reservation.readback
 
 theorem Reservation.postRecord_exact {config : Config}
     (reservation : Reservation config) :
@@ -126,8 +128,11 @@ def receiveVerified (config : Config) {target : Durable}
       match NativeHostReplay.ExactReadback.ofAppended old derived appended with
       | .error detail => return .uncertain s!"lifecycle claim post-image validation: {detail}"
       | .ok ⟨proof, proofDerived⟩ =>
-            return .reserved ⟨target, old, ingress, admitted,
-              proof, ((congrArg NativeHostReplay.Derived.intent proofDerived).trans admitted.toDerived_intent), kind⟩
+            match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes appended.next with
+            | .error detail => return .uncertain s!"post-append history reader: {detail}"
+            | .ok ⟨_, reader⟩ =>
+              return .reserved ⟨target, old, ingress, admitted,
+                proof, ((congrArg NativeHostReplay.Derived.intent proofDerived).trans admitted.toDerived_intent), kind, _, reader⟩
   | .ordinary ordinary =>
       match ordinary with
       | .confirmed _ _ =>

@@ -107,7 +107,7 @@ private def carriedProjection {config : Config} {opened : Opened config}
     ticketRoot := ingress.ticketRoot
     enrollmentResource := ingress.dispatch.enrollmentResource
     enrollmentRoot := ingress.dispatch.enrollmentRoot
-    authorityRoot := checked.prepared.authority.snapshot.cell.root
+    authorityRoot := opened.ground.authority.cell.root
     appRoot := ingress.dispatch.appRoot
     sessionRoot := checked.selection.sessionRoot
     issueTransaction := admitted.issue.issue.record.transactionId
@@ -229,7 +229,10 @@ private def receiveAdmitted {config : Config} {anchor : Opened config} {target :
     config.transport rootBytes old.opened.durable admitted.intent
   match result with
   | .exact kind appended =>
-      match ← NativeHostReplay.extendSuffixVerified config old appended.next with
+      let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport rootBytes appended.next with
+        | .error detail => return .uncertain s!"post-append history reader: {detail}"
+        | .ok reader => pure reader
+      match ← NativeHostReplay.extendSuffixVerified config reader old appended.next with
       | .error failure => return .uncertain s!"dispatch post-image validation: {failure.detail}"
       | .ok extended =>
           match receiptExact : extended.receiptAt old.opened.durable.height with

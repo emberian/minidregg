@@ -29,12 +29,14 @@ structure Permit (config : Config) where
   freshCas : Bool
   freshInstalled : freshCas = true
   confirmation : DurableReceiverIO.Confirmation
+  store : DurableHistory.StoreIdentity
+  reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store
 
 def Permit.verified {config : Config} (permit : Permit config) :
     NativeHostReplay.Verified config
       (NativeHostReplay.exactCandidate permit.old
         permit.readback.derived permit.readback.ready) :=
-  NativeHostReplay.extendExact permit.old permit.readback
+  NativeHostReplay.extendExact permit.reader permit.old permit.readback
 
 def Permit.receipt {config : Config} (permit : Permit config) : NativeHostCodec.Receipt :=
   let candidate := NativeHostReplay.exactCandidate permit.old
@@ -108,8 +110,11 @@ def receiveVerified (config : Config) {target : Durable}
         match NativeHostReplay.ExactReadback.ofAppended old derived appended with
         | .error detail => return .uncertain s!"lifetime dispatch post-image validation: {detail}"
         | .ok ⟨proof, proofDerived⟩ =>
+              let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes appended.next with
+                | .error detail => return .uncertain s!"post-append history reader: {detail}"
+                | .ok reader => pure reader
               return .permitted ⟨target, old, ingress, admitted, projection,
-                proof, ((congrArg NativeHostReplay.Derived.intent proofDerived).trans admitted.toDerived_intent), fresh, freshInstalled, kind⟩
+                proof, ((congrArg NativeHostReplay.Derived.intent proofDerived).trans admitted.toDerived_intent), fresh, freshInstalled, kind, _, reader⟩
       else return .uncertain "lifetime dispatch exact readback without fresh CAS winner"
   | .ordinary ordinary =>
       match ordinary with

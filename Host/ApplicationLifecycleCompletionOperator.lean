@@ -134,7 +134,8 @@ def prepareVerified (config : Config) {target : Durable}
   let .ok source ← pure <| ApplicationLifecycleCompletionAuthoring.sourcePlan config.expectedSeed
       request.beginBytes request.claimIngressBytes request.signedReportBytes current
     | return .error "completion source identities refused"
-  match ← ApplicationLifecycleCompletionHistory.select config opened source with
+  match ← ApplicationLifecycleCompletionHistory.select config verified.reader
+      opened.durable.height source with
   | .error detail => return .error detail
   | .ok _ => pure ()
   if ApplicationLifecycleCompletionAdmission.appState pin.app appCell !=
@@ -146,11 +147,11 @@ def prepareVerified (config : Config) {target : Durable}
   let command := source.command config.deployment.domain config.profile.semantics
   let .ok prepared := DeclaredResourceController.prepare config.deployment
       config.profile ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.durable command
+      opened.ground command
     | return .error "current completion command preparation refused"
   if !ApplicationLifecycleCompletionAdmission.linkedCurrentPolicies config.deployment
       config.profile ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.durable source prepared then
+      opened.ground source prepared then
     return .error "current completion management/package law differs"
   if !decide (DeclaredResourceController.PhysicalShape prepared) then
     return .error "current completion physical shape refused"
@@ -162,9 +163,9 @@ def prepareVerified (config : Config) {target : Durable}
   let marker := DeclaredResourceController.operationMarker config.deployment.domain
     config.profile.semantics command
   let wanted := ApplicationLifecycleCompletionAdmission.packageRequest
-    config opened source prepared
+    config opened.ground source prepared
   let .ok header := CredentialSignatureAdmission.signingHeader
-      prepared.authority.snapshot marker (⟨.object, wanted⟩ : PackedEffectRequest)
+      opened.ground.authority marker (⟨.object, wanted⟩ : PackedEffectRequest)
     | return .error "current package observation signing key unavailable"
   let packageSlot : SigningSlot :=
     ⟨9, 0, CredentialSignedEnvelopeController.headerCodec.encode header⟩

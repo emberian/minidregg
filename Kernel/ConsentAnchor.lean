@@ -175,7 +175,9 @@ private theorem take_length_take {α : Type} (list : List α) (count : Nat) :
 
 /-- Resume after a retained anchor over a full open that kept its chain
 prefixes (`DurableReceiverIO.loadChained`). -/
-def resume (config : Config) (anchor : Anchor) (target : Durable) (chains : List Digest)
+def resume (config : Config) {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
+    (anchor : Anchor) (target : Durable) (chains : List Digest)
     (chainsExact : chains = DurableLogTags.chainPrefixes target.logStart target.image.accepted) :
     IO (Except ResumeError (Anchored config target)) := do
   if let .error detail := checkStore anchor target chains then
@@ -200,7 +202,7 @@ def resume (config : Config) (anchor : Anchor) (target : Durable) (chains : List
           rw [wraps, imaged]
           exact take_length_take _ _
         have logStartExact : target.logStart = start.durable.logStart := by rw [wraps, started]
-        match ← NativeHostReplay.verifySuffixFrom config start target none seedExact anchorWithin
+        match ← NativeHostReplay.verifySuffixFrom config start reader target none seedExact anchorWithin
             prefixExact logStartExact with
         | .error failure => return .error (.suffix failure)
         | .ok suffix => return .ok ⟨anchor, start, exact, suffix⟩
@@ -231,14 +233,16 @@ def Basis.anchor {config : Config} {target : Durable} (basis : Basis config targ
   Anchor.ofOpened basis.opened
 
 /-- The full re-admission, running it from genesis when the basis is anchored. -/
-def Basis.full? (config : Config) {target : Durable} :
+def Basis.full? (config : Config) {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) {target : Durable} :
     Basis config target → IO (Except NativeHostReplay.Failure (NativeHostReplay.Verified config target))
   | .full verified => pure (.ok verified)
-  | .anchored _ => NativeHostReplay.verifyLoaded config target
+  | .anchored _ => NativeHostReplay.verifyLoaded config reader target
 
 /-- Extend either basis over a target that is the old one followed by more
 records (`DurableReceiverIO.extendFrom`): only those records are admitted. -/
-def Basis.extendAppended (config : Config) {oldTarget : Durable}
+def Basis.extendAppended (config : Config) {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) {oldTarget : Durable}
     (basis : Basis config oldTarget) (target : Durable)
     (seedExact : target.image.seed = oldTarget.image.seed)
     (acceptedExact : target.image.accepted = oldTarget.image.accepted ++
@@ -247,7 +251,7 @@ def Basis.extendAppended (config : Config) {oldTarget : Durable}
     IO (Except NativeHostReplay.Failure (Basis config target)) := do
   match basis with
   | .full verified =>
-      return (← NativeHostReplay.extendVerifiedAppended config verified target seedExact
+      return (← NativeHostReplay.extendVerifiedAppended config reader verified target seedExact
         acceptedExact).map .full
   | .anchored held =>
       have within : oldTarget.image.accepted.length ≤ target.image.accepted.length := by
@@ -257,7 +261,7 @@ def Basis.extendAppended (config : Config) {oldTarget : Durable}
           oldTarget.image.accepted := by
         rw [acceptedExact]
         exact List.take_left' rfl
-      return (← NativeHostReplay.extendSuffixAppended config held.suffix target seedExact
+      return (← NativeHostReplay.extendSuffixAppended config reader held.suffix target seedExact
         within prefixExact logStartExact).map fun suffix =>
           .anchored ⟨held.anchor, held.start, held.startExact, suffix⟩
 
