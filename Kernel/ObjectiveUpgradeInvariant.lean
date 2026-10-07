@@ -979,8 +979,12 @@ theorem mail_kinded {rootBytes : Bytes → Digest} {config : Config} {snapshot :
   rcases List.mem_append.mp member with front | inClosed
   · rcases List.mem_append.mp front with inInbox | inSlot
     · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inInbox
-      exact ⟨.inbox, by decide, by decide, by decide, by decide, readInbox_role held.readExact,
-        payloadOf_image_role _ _ _⟩
+      refine ⟨.inbox, by decide, by decide, by decide, by decide, readInbox_role held.readExact, ?_⟩
+      by_cases empty : held.now.messages = []
+      · intro p found
+        simp [postAt, inboxImage, empty, payloadOf_retired] at found
+      · simp only [postAt, inboxImage, empty, if_false]
+        exact payloadOf_image_role _ _ _
     · obtain ⟨held, _, rfl⟩ := List.mem_map.mp inSlot
       refine ⟨.slot, by decide, by decide, by decide, by decide, ?_, ?_⟩
       · simp only [slotPost, postAt]
