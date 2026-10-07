@@ -11,7 +11,9 @@ open held seat's whole allocation to its payee.
 The ending turn stays ONE Book batch: the activity's own batch `b` (its fees,
 its purse settlement) followed by the seat batch, admitted together on the
 loaded Book (`Seats.Posts.seq`), so the turn conserves every asset
-(`Joined.conserves`) and every held open seat is closed (`Joined.closes`). The
+(`Joined.conserves`) and every held seat is closed (`Joined.closes`): swept to its
+payee in every asset it holds, its Book account deregistered in the same batch,
+removed from the world, its cell retired (`Joined.retires`). The
 turn's Book post is the joint batch's post (`Joined.rewrite` replaces the
 activity's own Book post), and the seat cells the closing changed are written
 in the same intent.
@@ -49,7 +51,7 @@ theorem joint_admission {rootBytes : Bytes → Digest} {domain : Digest} {snapsh
     {height record : Nat} {pre : BookCell} (posted : Postings pre)
     (held : SeatStore.HeldEnd domain snapshot height record (posted.batch.apply (logicalBook pre.logical))) :
     (seqBatch posted.batch held.batch).Admission (logicalBook pre.logical) := by
-  obtain ⟨_, heldPosts, none, _⟩ := held.closes
+  obtain ⟨_, _, heldPosts, none, _⟩ := held.closes
   exact (Posts.seq ⟨posted.accepted.admission, rfl⟩ heldPosts none).1
 
 /-- Join an activity turn's postings with the closing of its held seats; `none`
@@ -84,21 +86,44 @@ theorem Joined.conserves {rootBytes : Bytes → Digest} {config : Config} {snaps
   joined.accepted.conserves asset
 
 /-- **An ending activity closes every seat it holds**: every held seat that was
-open on the loaded seat cells is closed in the seat cells the turn writes, and
+open on the loaded seat cells is gone from the world the turn writes, and
 the Book the turn writes is the activity's batch followed by the seat closing,
 admitted together on the loaded Book. -/
 theorem Joined.closes {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height record : Nat} {pre : BookCell} {posted : Postings pre}
     (joined : Joined config snapshot height record posted) :
     (∀ seat ∈ heldOpen (joined.held.loaded.world (posted.batch.apply (logicalBook pre.logical))) record,
-        ∀ after ∈ joined.held.next.seats, after.account = seat.account → after.isOpen = false) ∧
+        ∀ after ∈ joined.held.next.seats, after.account ≠ seat.account) ∧
       Posts (logicalBook pre.logical) (seqBatch posted.batch joined.held.batch) joined.held.next.book ∧
       logicalBook joined.accepted.post.logical = joined.held.next.book := by
-  obtain ⟨closes, heldPosts, none, _⟩ := joined.held.closes
+  obtain ⟨closes, _, heldPosts, none, _⟩ := joined.held.closes
   have joint := Posts.seq ⟨posted.accepted.admission, rfl⟩ heldPosts none
   refine ⟨closes, joint, ?_⟩
   rw [AcceptedBatch.post_logicalBook]
   exact joint.2.symm
+
+/-- **An ending activity deregisters the accounts of the seats it closes**: after the joint
+batch no closed seat's account is a Book account. -/
+theorem Joined.deregisters {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height record : Nat} {pre : BookCell} {posted : Postings pre}
+    (joined : Joined config snapshot height record posted) :
+    ∀ seat ∈ heldOpen (joined.held.loaded.world (posted.batch.apply (logicalBook pre.logical))) record,
+      seat.account ∉ (logicalBook joined.accepted.post.logical).accounts := by
+  obtain ⟨_, gone, _⟩ := joined.held.closes
+  obtain ⟨_, _, equal⟩ := joined.closes
+  intro seat member
+  rw [equal]
+  exact gone seat member
+
+/-- **An ending activity retires the seat cells it closes**: the turn's final posts include each
+closed seat's cell at the retired image. -/
+theorem Joined.retires {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height record : Nat} {pre : BookCell} {posted : Postings pre}
+    (joined : Joined config snapshot height record posted) (posts : List Post) :
+    ∀ seat ∈ heldOpen (joined.held.loaded.world (posted.batch.apply (logicalBook pre.logical))) record,
+      postAt snapshot (SeatStore.seatCell seat.account) ObjectiveActivity.retiredImage ∈ joined.rewrite posts := by
+  intro seat member
+  exact List.mem_append_right _ (joined.held.retires seat member)
 
 /-- `join` is `none` only for an activity whose holdings cell lists no seat. -/
 theorem join_none {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -170,6 +195,6 @@ def AdmittedTurn.finalIntent {rootBytes : Bytes → Digest} {config : Config} {s
         abandoned.claims sealing
   | turn => turn.intent sealing
 
-#assert_axioms joint_admission Joined.conserves Joined.closes join_none
+#assert_axioms joint_admission Joined.conserves Joined.closes Joined.deregisters Joined.retires join_none
 
 end Minidregg.Kernel.ActivitySeatEnd

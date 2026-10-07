@@ -885,8 +885,8 @@ theorem native_delivery_consumes_once
 turn ends an activity (a birth or delivery that finishes or faults, or an
 abandonment) whose holdings cell lists seats, the turn commits the joint posts
 (`ActivitySeatEnd.Joined.rewrite`: the activity's own, its Book post replaced
-by the joint batch's, and the closed seat cells), every held seat that was open
-is closed, and the Book is the activity's batch followed by the seat closing,
+by the joint batch's, and the retired cells of the closed seats), every held seat that was open
+is gone from the world (and `Joined.deregisters`, `Joined.retires` say its account and cell are closed), and the Book is the activity's batch followed by the seat closing,
 admitted together on the loaded Book. -/
 theorem native_end_closes_held_seats (accepted : Accepted deployment profile ambient durable ingress)
     {record : Nat} {pre : ObjectiveActivity.BookCell} {posted : ObjectiveActivity.Postings pre}
@@ -896,7 +896,7 @@ theorem native_end_closes_held_seats (accepted : Accepted deployment profile amb
       accepted.prepared.final.1 = joined.rewrite accepted.prepared.decided.posts ∧
       (∀ seat ∈ Seats.heldOpen (joined.held.loaded.world
           (posted.batch.apply (Theory.CanonicalResourceKernel.logicalBook pre.logical))) record,
-        ∀ after ∈ joined.held.next.seats, after.account = seat.account → after.isOpen = false) ∧
+        ∀ after ∈ joined.held.next.seats, after.account ≠ seat.account) ∧
       Seats.Posts (Theory.CanonicalResourceKernel.logicalBook pre.logical)
         (Seats.seqBatch posted.batch joined.held.batch) joined.held.next.book := by
   have final := accepted.prepared.finalExact

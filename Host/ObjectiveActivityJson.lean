@@ -8,6 +8,7 @@ Nothing here decides anything: commands are judged by
 `Kernel.ObjectiveActivityReceiver`, artifacts by the kernel's `publish`. -/
 import Kernel.NativeHost
 import Compiler.ObjectiveBendDataWire
+import Host.CapacityJson
 
 namespace Minidregg.Host.ObjectiveActivityJson
 open Lean (Json toJson)
@@ -18,11 +19,8 @@ open Minidregg.Kernel.ObjectiveActivityWire
 open Minidregg.Kernel.ObjectiveActivityReceiver (Command Turn AnswerWire)
 open Minidregg.Compiler.ObjectiveBendDataWire (dataJson)
 open Minidregg.Compiler.ObjectiveInvocationClaim (Capacity)
+open Minidregg.Host.CapacityJson (Result decimal field nat capacity capacityJson)
 set_option autoImplicit false
-
-abbrev Result := Except String
-
-def decimal (value : Nat) : Json := .str (toString value)
 
 def hexDigit (n : Nat) : Char := "0123456789abcdef".toList.getD n '0'
 def hex (bytes : List UInt8) : String :=
@@ -41,18 +39,6 @@ def unhex (text : String) : Result (List UInt8) :=
         pure ((high * 16 + low).toUInt8 :: (← go rest))
     | [_] => throw "odd hex length"
   go text.toList
-
-def field (path : String) (json : Json) (name : String) : Result Json :=
-  match json.getObjVal? name with
-  | .ok value => .ok value
-  | .error _ => .error s!"{path}.{name} missing"
-
-def nat (path : String) (json : Json) (name : String) : Result Nat := do
-  let value ← field path json name
-  let some text := value.getStr?.toOption | throw s!"{path}.{name} must be a decimal string"
-  let some n := text.toNat? | throw s!"{path}.{name} must be a decimal string"
-  unless toString n == text do throw s!"{path}.{name} must be canonical decimal"
-  pure n
 
 def str (path : String) (json : Json) (name : String) : Result String := do
   let some text := (← field path json name).getStr?.toOption | throw s!"{path}.{name} must be a string"
@@ -80,24 +66,6 @@ def answer (json : Json) : Result AnswerWire :=
       | .error _ => match json.getObjVal? "unknown" with
         | .ok _ => .ok .unknown
         | .error _ => .error "$.turn.answer must be reply, refused, broken or unknown"
-
-/-- A declared envelope: every `Capacity` field as a decimal string. -/
-def capacity (path : String) (json : Json) : Result Capacity := do
-  let n := nat path json
-  pure ⟨← n "typeFuel", ← n "sourceTicks", ← n "heap", ← n "stack", ← n "outputNodes", ← n "outputBytes",
-    ← n "inputBytes", ← n "scalarBits", ← n "memoryTouches", ← n "proofWork", ← n "feeDebit", ← n "turnBytes",
-    ← n "witnessBytes", ← n "storageBytes", ← n "sideEffectCount", ← n "networkBytes", ← n "leaseByteBlocks",
-    ← n "incidences"⟩
-
-def capacityJson (c : Capacity) : Json := .mkObj
-  [("typeFuel", decimal c.typeFuel), ("sourceTicks", decimal c.sourceTicks), ("heap", decimal c.heap),
-   ("stack", decimal c.stack), ("outputNodes", decimal c.outputNodes), ("outputBytes", decimal c.outputBytes),
-   ("inputBytes", decimal c.inputBytes), ("scalarBits", decimal c.scalarBits),
-   ("memoryTouches", decimal c.memoryTouches), ("proofWork", decimal c.proofWork), ("feeDebit", decimal c.feeDebit),
-   ("turnBytes", decimal c.turnBytes), ("witnessBytes", decimal c.witnessBytes),
-   ("storageBytes", decimal c.storageBytes), ("sideEffectCount", decimal c.sideEffectCount),
-   ("networkBytes", decimal c.networkBytes), ("leaseByteBlocks", decimal c.leaseByteBlocks),
-   ("incidences", decimal c.incidences)]
 
 /-- An upgrade policy: `{"frozen": {}}` or `{"governed": {"authority": PRED, "floors": [PRED..]}}`. -/
 def upgrade (law : String → Json → Result Minidregg.Pred.Pred) (path : String) (json : Json) :

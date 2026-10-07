@@ -263,6 +263,10 @@ def balances(v):
     return {(b['account'], b['asset']): int(b['balance']) for b in (v.get('balances') or [])}
 
 
+def registered(v, account):
+    return next((b['registered'] for b in (v.get('balances') or []) if b['account'] == str(account)), None)
+
+
 def cell(v, cell_id):
     return next((c for c in v.get('cells', []) if c.get('cell') == str(cell_id)), {})
 
@@ -402,8 +406,15 @@ exit_('E7-stranger-exit-refused', bob_ws, alice_seat, 'refused', 'exitNotAuthori
 before_pay = balances(world('before-exits'))
 exit_('E3-alice-exits', alice_ws, alice_seat, 'installed')
 exit_('E3-bob-exits', bob_ws, bob_seat, 'installed')
-exit_('E3-exit-twice-refused', alice_ws, alice_seat, 'refused', 'seatClosed')
+exit_('E3-exit-twice-refused', alice_ws, alice_seat, 'refused', 'seatMissing')
 b = balances(world('settled', seats=[alice_seat, bob_seat], instances=[objects['swap']['object']]))
+check('E3-exit-deregisters-seat-accounts',
+      registered(world('settled-accounts', seats=[alice_seat, bob_seat]), alice_seat) is False
+      and registered(world('settled-accounts-bob', seats=[alice_seat, bob_seat]), bob_seat) is False,
+      'seat accounts still registered')
+check('E3-exit-retires-seat-cells',
+      all(cell(world('settled-cells', seats=[alice_seat, bob_seat]), s).get('kind') == 'retired'
+          for s in (alice_seat, bob_seat)), 'seat cells not retired')
 check('E3-alice-paid-7Y', b[(ALICE_ACCOUNT, Y)] - before_pay[(ALICE_ACCOUNT, Y)] == 7, b[(ALICE_ACCOUNT, Y)])
 check('E3-bob-paid-10X', b[(BOB_ACCOUNT, X)] - before_pay[(BOB_ACCOUNT, X)] == 10, b[(BOB_ACCOUNT, X)])
 
@@ -550,7 +561,8 @@ check('E8-activity-retired', hrec_after.get('kind') == 'retired', hrec_after.get
 v = world('held-seat-closed', seats=[held_seat])
 b = balances(v)
 held_after = cell(v, held_seat)
-check('E8-activity-end-closes-held-seat', held_after.get('seat', {}).get('open') is False, held_after)
+check('E8-activity-end-retires-held-seat', held_after.get('kind') == 'retired', held_after)
+check('E8-activity-end-deregisters-held-seat', registered(v, held_seat) is False, registered(v, held_seat))
 check('E8-held-seat-pays-offerer', b.get((held_seat, X)) == 0
       and b.get((ALICE_ACCOUNT, X)) == pre_held.get((ALICE_ACCOUNT, X)),
       {'seatX': b.get((held_seat, X)), 'aliceX': [pre_held.get((ALICE_ACCOUNT, X)), b.get((ALICE_ACCOUNT, X))]})

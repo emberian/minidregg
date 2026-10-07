@@ -407,26 +407,33 @@ def Prepared.intent (prepared : Prepared deployment profile ambient durable comm
     DataIntent rootBytes :=
   prepared.decided.intent (admissionSeal prepared ingress)
 
-/-- A cell a seat intent writes is a seat-kind cell at its coordinate, or the Book. -/
+/-- A cell a seat intent writes is a seat-kind cell at its coordinate, the Book, or a
+cell the kernel retires: the registry's retired image at a protected coordinate (a
+closed seat, `Kernel.SeatStore.statePosts`). -/
 def SeatOrBook (deployment : Deployment) (write : DataWrite) : Prop :=
   write.cellId = ⟨deployment.resourceBookId⟩ ∨
-    ∃ payload, SeatStore.payloadOf write.canonicalPostBytes = some payload ∧
-      write.cellId.value = SeatCell.coordinate deployment.domain payload.role payload.key
+    (∃ payload, SeatStore.payloadOf write.canonicalPostBytes = some payload ∧
+      write.cellId.value = SeatCell.coordinate deployment.domain payload.role payload.key) ∨
+    (write.canonicalPostBytes = ObjectiveActivity.retiredImage ∧ SeatCell.reservedBase ≤ write.cellId.value)
 
 instance (deployment : Deployment) (write : DataWrite) : Decidable (SeatOrBook deployment write) :=
   if book : write.cellId = ⟨deployment.resourceBookId⟩ then isTrue (Or.inl book)
+  else if retired : write.canonicalPostBytes = ObjectiveActivity.retiredImage ∧
+      SeatCell.reservedBase ≤ write.cellId.value then isTrue (Or.inr (Or.inr retired))
   else match found : SeatStore.payloadOf write.canonicalPostBytes with
     | none => isFalse (by
-        rintro (h | ⟨payload, hp, _⟩)
+        rintro (h | ⟨payload, hp, _⟩ | h)
         · exact book h
-        · rw [found] at hp; cases hp)
+        · rw [found] at hp; cases hp
+        · exact retired h)
     | some payload =>
       if at_ : write.cellId.value = SeatCell.coordinate deployment.domain payload.role payload.key then
-        isTrue (Or.inr ⟨payload, found, at_⟩)
+        isTrue (Or.inr (Or.inl ⟨payload, found, at_⟩))
       else isFalse (by
-        rintro (h | ⟨other, hp, hat⟩)
+        rintro (h | ⟨other, hp, hat⟩ | h)
         · exact book h
-        · rw [found] at hp; cases hp; exact at_ hat)
+        · rw [found] at hp; cases hp; exact at_ hat
+        · exact retired h)
 
 def PhysicalShape (prepared : Prepared deployment profile ambient durable command) (ingress : DecodedIngress) :
     Prop :=
@@ -550,7 +557,7 @@ may exit by the kernel's own rule (its offerer on demand, anyone at or after its
 due height); the instance's clause is not consulted. -/
 theorem exit_requires_offerer_or_deadline (accepted : Accepted deployment profile ambient durable ingress)
     {seat : Nat} (turn : ingress.command.turn = .exit seat) :
-    ∃ found ∈ accepted.prepared.decided.world.seats, found.account = seat ∧ found.isOpen = true ∧
+    ∃ found ∈ accepted.prepared.decided.world.seats, found.account = seat ∧
       Seats.exitAuthorized ambient.height (.subject ingress.command.subject) found = true :=
   Seats.exit_step_authorized (accepted.prepared.decided.stepExact _ _ (by
     simp [Command.request, turn, SeatStore.Turn.kernelAction]))
