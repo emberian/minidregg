@@ -7,5 +7,4 @@ scripts/kn2/planted-api-faults.lean	stale	DEPUTY-KERNEL	-	PRIORITY: an executed 
 scripts/kn2/planted-token-forges.lean	stale	DEPUTY-KERNEL	-	PRIORITY: an executed plant that no longer runs (type mismatch :21); KN2-TRIE restores it
 scripts/kn2/neutral-birth.lean	unbuilt	DEPUTY-KERNEL	-	imports Verify.ResourceReserveBirthFixture, built by no target: add it to a target
 scripts/NativeTranscripts.lean	stale	DEPUTY-KERNEL	-	census RED on main: Transcript.mk inside a non-Transcript constant (local-gates native-transcripts, no merge-gate row)
-scripts/report-simplex-qualification.lean	unbuilt	DEPUTY-KERNEL	-	unknown module prefix SimplexQualification: build it or delete the report
 scripts/probe-grain-birth-factory-law.lean	stale	DEPUTY-KERNEL	-	#guard_msgs docstring no longer matches (births changed)
