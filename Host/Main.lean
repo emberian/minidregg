@@ -1257,9 +1257,10 @@ def sessionConfirmed (config : NativeHost.Config)
     let t0 ← IO.monoMsNow
     let opened ← sessionOpened config state
     phaseTrace "confirm refresh" t0
-    match NativeHost.historicalReceipt config opened.durable transactionId eventId with
-    | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
-    | some receipt => return .confirmed kind receipt
+    match ← NativeHost.historicalReceiptVia config opened transactionId eventId with
+    | .error refusal => return .uncertain refusal.detail.toUTF8.toList
+    | .ok none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
+    | .ok (some receipt) => return .confirmed kind receipt
   catch error => return .uncertain s!"receipt readback: {error}".toUTF8.toList
 
 /-- The exact post-CAS branch already has the verified successor and original
@@ -1307,10 +1308,11 @@ def selectedReleaseLookupSession (config : NativeHost.Config)
   | some (.error _) =>
       return .refused .conflict "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList
   | some (.ok receipt) =>
-      match NativeHost.historicalReceipt config opened.durable
+      match ← NativeHost.historicalReceiptVia config opened
           receipt.transactionId receipt.eventId with
-      | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
-      | some historical => return .confirmed .replayed historical
+      | .error refusal => return .unavailable refusal.detail.toUTF8.toList
+      | .ok none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
+      | .ok (some historical) => return .confirmed .replayed historical
 
 /-- A BEGIN records source-authorized pending work. Physical launch and
 completion require separate host custody and current claim validation. -/
@@ -1625,10 +1627,11 @@ def selectedSourcePublicationLookupSession (config : NativeHost.Config)
   | some (.error _) =>
       return .refused .conflict "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList
   | some (.ok receipt) =>
-      match NativeHost.historicalReceipt config opened.durable
+      match ← NativeHost.historicalReceiptVia config opened
           receipt.transactionId receipt.eventId with
-      | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
-      | some historical => return .confirmed .replayed historical
+      | .error refusal => return .unavailable refusal.detail.toUTF8.toList
+      | .ok none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
+      | .ok (some historical) => return .confirmed .replayed historical
 
 /-- An issuer's signed app delegation and a factory ticket birth are admitted
 from one verified current image. Existing exact issue receipts recover from
@@ -1669,10 +1672,11 @@ def applicationShareIssueLookupSession (config : NativeHost.Config)
       return .refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList
   | some (.ok receipt) =>
-      match NativeHost.historicalReceipt config opened.durable
+      match ← NativeHost.historicalReceiptVia config opened
           receipt.transactionId receipt.eventId with
-      | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
-      | some historical => return .confirmed .replayed historical
+      | .error refusal => return .unavailable refusal.detail.toUTF8.toList
+      | .ok none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
+      | .ok (some historical) => return .confirmed .replayed historical
 
 /-- Grain-backed issue is a distinct event-22 write. Its receiver combines
 the grain birth and app delegation in one native CAS. Historical lookup is
@@ -3693,8 +3697,7 @@ def exportConsumerInbox (config : NativeHost.Config) (transactionId : Nat) :
   let opened ← match ← NativeHost.openExisting config with
     | .ok opened => pure opened
     | .error detail => return .error detail
-  let some record := opened.durable.image.accepted.find?
-      (fun entry => entry.transactionId.value == transactionId)
+  let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
     | return .error "exact Mini consumer transaction is absent"
   match FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain
       config.profile.semantics record with
@@ -3726,8 +3729,7 @@ def exportConsumerPoll (config : NativeHost.Config) (transactionId : Nat) :
   let opened ← match ← NativeHost.openExisting config with
     | .ok opened => pure opened
     | .error detail => return .error detail
-  let some record := opened.durable.image.accepted.find?
-      (fun entry => entry.transactionId.value == transactionId)
+  let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
     | return .error "exact Mini consumer transaction is absent"
   match FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain
       config.profile.semantics record with
@@ -3876,16 +3878,21 @@ def carriedContinuitySession (config : NativeHost.Config)
 itself is the authorized anchor; ordinary later records come from real replay. -/
 def carriedReceipt (config : NativeHost.Config) (session : CarriedNativeHostSession.Walked config)
     (transactionId eventId : Minidregg.Theory.TypedAuthorization.Digest) :
-    Option NativeHostCodec.Receipt := do
-  let index ← session.verified.opened.durable.image.accepted.findIdx?
-    (fun record => record.transactionId == transactionId)
-  let record ← session.verified.opened.durable.image.accepted[index]?
-  if record.event.eventId != eventId then none else do
-    if index + 1 == session.anchor.durable.height then
-      let origin ← session.verified.origin
-      if transactionId != origin.edge.body.id || eventId != origin.edge.body.id then none else
-      some ⟨transactionId, eventId, index + 1, session.anchor.durable.worldRoot⟩
-    else session.verified.receiptAt index
+    IO (Option NativeHostCodec.Receipt) := do
+  let ⟨_, reader⟩ ← match ← NativeHost.historyReaderOfDurable config session.target with
+    | .ok reader => pure reader
+    | .error refusal => throw (IO.userError refusal.detail)
+  match ← reader.byTx transactionId with
+  | .error refusal => throw (IO.userError refusal.message)
+  | .ok (.absent _) => return none
+  | .ok (.present found) =>
+      let index := found.height - 1
+      if found.read.record.event.eventId != eventId then return none
+      if index + 1 == session.anchor.durable.height then
+        let some origin := session.verified.origin | return none
+        if transactionId != origin.edge.body.id || eventId != origin.edge.body.id then return none
+        return some ⟨transactionId, eventId, index + 1, session.anchor.durable.worldRoot⟩
+      else return session.verified.receiptAt index
 
 /-- Old exact recovery precedes any target submission. A retained original is
 never submitted again, and target confirmation is reselected under its actual
@@ -3908,7 +3915,7 @@ def carriedOrdinaryCall (config : NativeHost.Config)
     let result ← NativeHost.submitDisclosedWith config session.verified.opened call
       (fun kind transaction event => do
         let current ← sessionCarriedWalked config state carried settings
-        match carriedReceipt config current transaction event with
+        match ← carriedReceipt config current transaction event with
         | some receipt => return .confirmed kind receipt
         | none => return .uncertain "original receipt belongs to retained profile".toUTF8.toList)
     NativeHost.logOperatorRefusal result.1
@@ -3917,7 +3924,7 @@ def carriedOrdinaryCall (config : NativeHost.Config)
   match outcome with
   | .confirmed kind candidate =>
       let current ← sessionCarriedWalked config state carried settings
-      match carriedReceipt config current candidate.transactionId candidate.eventId with
+      match ← carriedReceipt config current candidate.transactionId candidate.eventId with
       | some receipt => return .confirmed kind receipt
       | none => return .uncertain "original receipt belongs to retained profile".toUTF8.toList
   | other => return other
@@ -4121,9 +4128,9 @@ def fnFrontierPrepareSession (config : NativeHost.Config)
             projection.sequence + 1 == projection.position &&
             projection.position ≤ cursor.position + FnConsumerScope.maxPollScan do
           throw (IO.userError "selected fn poll is outside authenticated scan window")
-        let original ← IO.ofExcept <| FnSelectiveReleaseFnAck.selectOriginal
+        let original ← IO.ofExcept (← FnSelectiveReleaseFnAck.selectOriginal
           config session.target session.verified transaction
-          projection.source projection.messageId
+          projection.source projection.messageId)
         sourceBytes := projection.source
         selected := some
           { domain := config.deployment.domain
@@ -4348,8 +4355,8 @@ def selectedReleaseFnAck (config : NativeHost.Config) (service : FnPollService)
       | .ok verified => pure verified
       | .error failure =>
           throw (IO.userError s!"selected-release Mini history refused at {failure.index}: {failure.detail}")
-    let selected ← IO.ofExcept <| FnSelectiveReleaseFnAck.selectOriginal config
-      target verified transactionId projection.source projection.messageId
+    let selected ← IO.ofExcept (← FnSelectiveReleaseFnAck.selectOriginal config
+      target verified transactionId projection.source projection.messageId)
     let coverageBytes ← readBoundedBytes coveragePath 16384
     let some coverage := FnSelectedPollCoverage.ingressCodec.decode coverageBytes
       | throw (IO.userError "selected-release fn ACK lacks canonical event17 ingress")
@@ -4758,7 +4765,7 @@ def verifyCatalogOwnR (config : NativeHost.Config)
     throw (IO.userError "A own-R poll differs from native verified article")
   let (prepared, record) ← IO.ofExcept <|
     FnOriginOutbox.selectUniqueParent gateway config.deployment.domain
-      config.profile.semantics projection.messageId opened.durable.image.accepted
+      config.profile.semantics projection.messageId (← NativeHost.operatorAcceptedLog config opened)
   unless fnOwnRCarrierMatches received prepared.carrier do
     throw (IO.userError "A own-R poll differs from exact accepted R carrier or fn injection")
   let (retainedVerified, retainedR, original) ←
@@ -4911,7 +4918,7 @@ def runReplyConsumerCatalogDecisionLoaded (config : NativeHost.Config)
     throw (IO.userError "A Q projection differs from exact native-verified reply")
   let (prepared, _) ← IO.ofExcept (FnOriginOutbox.selectUniqueParent gateway
     config.deployment.domain config.profile.semantics
-    qExtracted.parentMessageId.toUTF8.toList opened.durable.image.accepted)
+    qExtracted.parentMessageId.toUTF8.toList (← NativeHost.operatorAcceptedLog config opened))
   let (rCarrier, rVerified, rExtracted, originPackage, originReceipt) ←
     IO.FS.withTempDir fun directory => do
       let path := (directory / "retained-r-carrier.eml").toString
@@ -5202,8 +5209,7 @@ def runFnAckSession (config : NativeHost.Config)
   let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
   let gateway ← requireGateway config
   let opened ← sessionOpened config state
-  let some record := opened.durable.image.accepted.find?
-      (fun entry => entry.transactionId.value == transactionId)
+  let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
     | throw (IO.userError "fn ack Mini transaction is absent")
   let selectedScope ← IO.ofExcept scope.progressScope
   if let some skipped := FnConsumerProgress.originalSkip gateway selectedScope
@@ -5350,17 +5356,19 @@ def runFnOriginOutboxExportSession (config : NativeHost.Config)
   let gateway ← requireGateway config
   let opened ← sessionOpened config state
   let refused := fun (reason : String) =>
-    (18, (Lean.Json.mkObj
+    ((18 : UInt8), (Lean.Json.mkObj
       [("type", toJson "fn-a-origin-outbox-export-v1"),
        ("status", toJson "refused"), ("reason", toJson reason)]).compress.toUTF8.toList)
-  let some record := opened.durable.image.accepted.find?
-      (fun entry => entry.transactionId.value == transactionId)
+  let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
     | return refused "prepared R transaction is absent"
   let some prepared := FnOriginOutbox.originalPrepared gateway
       config.deployment.domain config.profile.semantics record
     | return refused "transaction is not an accepted prepared R outbox"
-  let some outboxReceipt := NativeHost.historicalReceipt config opened.durable
-      record.transactionId record.event.eventId
+  let outboxReceipt ← match ← NativeHost.historicalReceiptVia config opened
+      record.transactionId record.event.eventId with
+    | .error refusal => throw (IO.userError refusal.detail)
+    | .ok receipt => pure receipt
+  let some outboxReceipt := outboxReceipt
     | return refused "prepared R original receipt is unavailable"
   let some messageId := String.fromUTF8? prepared.messageId.toByteArray
     | return refused "prepared R Message-ID is not UTF-8"
@@ -5728,8 +5736,7 @@ def runFnReplyAckSession (config : NativeHost.Config)
   let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
   let gateway ← requireGateway config
   let opened ← sessionOpened config state
-  let some record := opened.durable.image.accepted.find?
-      (fun entry => entry.transactionId.value == transactionId)
+  let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
     | throw (IO.userError "A reply result transaction is absent")
   let selectedScope ← IO.ofExcept scope.progressScope
   if let some skipped := FnConsumerProgress.originalSkip gateway selectedScope
@@ -6722,30 +6729,34 @@ def run (arguments : List String) : IO UInt32 := do
                             if settings.carryRegistry.isSome then
                               let session ← sessionCarriedWalked pinnedConfig state carriedState settings
                               let registry ← loadCarryRegistry settings
-                              let index := session.verified.opened.durable.image.accepted.findIdx?
-                                (fun record => record.transactionId.value == transactionId)
-                              match index with
-                              | some i =>
-                                  if i < registry.edge.body.cut.height then
+                              let ⟨_, reader⟩ ← match ← NativeHost.historyReaderOfDurable pinnedConfig
+                                  session.target with
+                                | .ok reader => pure reader
+                                | .error refusal =>
+                                    return ((255 : UInt8), refusalFrame "receipt" refusal)
+                              match ← reader.byTx ⟨transactionId⟩ with
+                              | .error refusal => return ((255 : UInt8),
+                                  refusalFrame "receipt" (NativeHost.historyRefusal refusal))
+                              | .ok (.present found) =>
+                                  if found.height - 1 < registry.edge.body.cut.height then
                                     let result ← IO.ofExcept (← RetainedSegmentInspection.serveReceiptByTransaction
                                       pinnedConfig session.verified.opened.durable registry transactionId)
                                     return (102, result.compress.toUTF8.toList)
                                   else
-                                    let some record := session.verified.opened.durable.image.accepted[i]?
-                                      | throw (IO.userError "receipt index unavailable")
-                                    let some receipt := carriedReceipt pinnedConfig session
-                                        ⟨transactionId⟩ record.event.eventId
+                                    let some receipt ← carriedReceipt pinnedConfig session
+                                        ⟨transactionId⟩ found.read.record.event.eventId
                                       | throw (IO.userError "target suffix receipt unavailable")
                                     return (102, (Minidregg.Host.Json.fleetReceiptLookupJson
                                       transactionId (some receipt)).compress.toUTF8.toList)
-                              | none => return (102, (Minidregg.Host.Json.fleetReceiptLookupJson
+                              | .ok (.absent _) => return (102, (Minidregg.Host.Json.fleetReceiptLookupJson
                                   transactionId none).compress.toUTF8.toList)
                             else
                               let opened ← sessionOpened pinnedConfig state
-                              let receipt := NativeHost.receiptByTransactionLoaded pinnedConfig opened
-                                ⟨transactionId⟩
-                              return (102, (Minidregg.Host.Json.fleetReceiptLookupJson
-                                transactionId receipt).compress.toUTF8.toList)
+                              match ← NativeHost.receiptByTransactionVia pinnedConfig opened
+                                  ⟨transactionId⟩ with
+                              | .ok receipt => return (102, (Minidregg.Host.Json.fleetReceiptLookupJson
+                                  transactionId receipt).compress.toUTF8.toList)
+                              | .error refusal => return ((255 : UInt8), refusalFrame "receipt" refusal)
                         | 103 =>
                             let opened ← sessionOpened pinnedConfig state
                             let plan ← IO.ofExcept (NativeHost.payPlanLoaded pinnedConfig opened payload)
@@ -6829,7 +6840,7 @@ def run (arguments : List String) : IO UInt32 := do
                               match outcome with
                               | .confirmed kind receipt =>
                                   let current ← sessionCarriedWalked pinnedConfig state carriedState settings
-                                  match carriedReceipt pinnedConfig current receipt.transactionId receipt.eventId with
+                                  match ← carriedReceipt pinnedConfig current receipt.transactionId receipt.eventId with
                                   | some exact => pure (.confirmed kind exact)
                                   | none => pure (.uncertain "key commitment suffix receipt unavailable".toUTF8.toList)
                               | other => pure other
@@ -8442,8 +8453,7 @@ def run (arguments : List String) : IO UInt32 := do
           let gateway ← requireGateway config
           let transactionId ← IO.ofExcept (exactDecimal "Mini transaction ID" transaction)
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          let some record := opened.durable.image.accepted.find?
-              (fun entry => entry.transactionId.value == transactionId)
+          let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
             | throw (IO.userError "A reply result transaction is absent")
           let some (result, inbox) :=
               FnReplyConsumption.originalResult gateway config.deployment.domain
@@ -8474,8 +8484,7 @@ def run (arguments : List String) : IO UInt32 := do
           let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
           let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          let some record := opened.durable.image.accepted.find?
-              (fun entry => entry.transactionId.value == transactionId)
+          let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
             | throw (IO.userError "A reply result transaction is absent")
           let some (_, inbox) := FnReplyConsumption.originalResult gateway
               config.deployment.domain config.profile.semantics record
@@ -8633,8 +8642,7 @@ def run (arguments : List String) : IO UInt32 := do
           let gateway ← requireGateway config
           let transactionId ← IO.ofExcept (exactDecimal "transaction ID" transaction)
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          let some record := opened.durable.image.accepted.find?
-              (fun entry => entry.transactionId.value == transactionId)
+          let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
             | throw (IO.userError "exact Mini consumer transaction is absent")
           let some (binding, some _, _) :=
               FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain
@@ -8668,8 +8676,7 @@ def run (arguments : List String) : IO UInt32 := do
           let edPublicKey ← IO.ofExcept (decodeCanonicalHex "fn reply Ed25519 key" signer.edPublicKey)
           let mlPublicKey ← IO.ofExcept (decodeCanonicalHex "fn reply ML-DSA-65 key" signer.mlPublicKeyHex)
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          let some record := opened.durable.image.accepted.find?
-              (fun entry => entry.transactionId.value == transactionId)
+          let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
             | throw (IO.userError "exact Mini consumer transaction is absent")
           let some (binding, some _, some store) :=
               FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain
@@ -8765,8 +8772,7 @@ def run (arguments : List String) : IO UInt32 := do
               edPublicKey == (← readBoundedBytes edPublicPath 32) do
             throw (IO.userError "fn reply signer public files differ from pin")
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          let some record := opened.durable.image.accepted.find?
-              (fun entry => entry.transactionId.value == transactionId)
+          let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
             | throw (IO.userError "exact Mini consumer transaction is absent")
           let some (binding, some _, some store) :=
               FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain
