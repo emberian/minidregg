@@ -333,8 +333,8 @@ theorem install_view_verb (profile : RuntimeProfile F) (snapshot : Snapshot)
 /-- **A law that admits no installation is never replaced.** -/
 theorem never_relawed [DecidableEq F] (L : Pred)
     (refuses : ∀ o n : State, eval L o n = true → n.get "request/verb" ≠ some 4)
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
-    {store : PayloadStore} (installed : Installed profile snapshot context store)
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext}
+    {store : PayloadStore} (installed : Installed profile snapshot markers context store)
     (current : Minidregg.Kernel.LawHistory.ActiveComponent
       (installed.prepared.policyConfig store) (L)) : False := by
   have holds := Minidregg.Kernel.LawHistory.authorized_component_eval
@@ -347,8 +347,8 @@ theorem never_relawed [DecidableEq F] (L : Pred)
 /-- **The author cannot change a sealed story under a player**: no accepted installation exists
 on a player's cell whose current law is the sealed story law. -/
 theorem sealed_story_never_relawed [DecidableEq F] (t : Table) (S : Int)
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
-    {store : PayloadStore} (installed : Installed profile snapshot context store)
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext}
+    {store : PayloadStore} (installed : Installed profile snapshot markers context store)
     (current : Minidregg.Kernel.LawHistory.ActiveComponent
       (installed.prepared.policyConfig store) (law t S)) : False :=
   never_relawed (law t S) (fun _ _ h => law_no_install t S h) installed current
@@ -381,8 +381,8 @@ theorem table_no_install {o n : State} (h : eval tableSealed o n = true) :
   simp at mem
 
 theorem sealed_table_never_relawed [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
-    {store : PayloadStore} (installed : Installed profile snapshot context store)
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext}
+    {store : PayloadStore} (installed : Installed profile snapshot markers context store)
     (current : Minidregg.Kernel.LawHistory.ActiveComponent
       (installed.prepared.policyConfig store) (tableSealed)) : False :=
   never_relawed tableSealed (fun _ _ h => table_no_install h) installed current

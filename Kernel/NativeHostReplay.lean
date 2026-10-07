@@ -1006,7 +1006,7 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : DeclaredResourceController.AcceptedInvocation prepared signed) :
       NativeAdmission config opened (accepted.dataIntent shape)
   | install (accepted : PolicyInstallReceiver.AcceptedInstall config.profile config.deployment
-      opened.durable config.federation (logicalHeight config opened.durable)) :
+      opened.ground config.federation (logicalHeight config opened.durable)) :
       NativeAdmission config opened (PolicyInstallReceiver.intent accepted)
   | delegate {ingress : CapabilityDelegationReceiver.DecodedIngress}
       (accepted : CapabilityDelegationReceiver.AcceptedDelegation config.deployment config.profile
@@ -2556,7 +2556,7 @@ private def derive (config : Config) (opened : Opened config)
     match PolicyInstallReceiver.decodeIngress bytes with
     | some ingress =>
         match ← PolicyInstallReceiver.admitDecodedNative config.profile config.deployment config.signature
-            opened.durable config.federation height ingress with
+            opened.ground config.federation height ingress with
         | .error reason => return .error s!"policy installation refused: {repr reason}"
         | .ok accepted => return .ok ⟨PolicyInstallReceiver.intent accepted, .install accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
     | none =>

@@ -179,6 +179,9 @@ inductive Reject where
   | pageUpdateRejected
   /-- The operation marker is already consumed in the durable nullifier set. -/
   | markerSpent
+  /-- The ground has no answer for the operation marker (a light basis that did not
+  declare its replay nullifier): refused first, never read as unspent. -/
+  | undeclaredMarker
   | subjectKeyEpoch
   | signature
   | policyEpoch
@@ -200,40 +203,58 @@ structure Ready (profile : RuntimeProfile F) (snapshot : Snapshot) (declaration 
   successor : Successor declaration.expected declaration.source.source
 
 structure CheckedPreparation (profile : RuntimeProfile F) (snapshot : Snapshot)
-    (context : RequestContext) (declaration : Declaration) where
+    (markers : Nat → Option Bool) (context : RequestContext) (declaration : Declaration) where
   ready : Ready profile snapshot declaration
-  unspent : snapshot.spent (requestDigest profile snapshot context declaration).value = false
+  /-- The operation marker's spent answer, read only through `markers` (a ground's
+  `markerSpent`): declared and unspent. The snapshot's own `spent` is never read for it
+  (on a light ground it is silent for an undeclared key). -/
+  answered : markers (requestDigest profile snapshot context declaration).value = some false
+  update : CredentialAuthorityDomain.PreparedPolicy snapshot
+    declaration.source.policyId declaration.source.version (policyRecordDigest declaration.source)
+
+/-- The state checks and the routed page update, before the marker: what a
+preparation reads of the authority snapshot (never its spent set). -/
+structure ReadyUpdate (profile : RuntimeProfile F) (snapshot : Snapshot) (declaration : Declaration) where
+  ready : Ready profile snapshot declaration
   update : CredentialAuthorityDomain.PreparedPolicy snapshot
     declaration.source.policyId declaration.source.version (policyRecordDigest declaration.source)
 
 /-- The source-owned domain editor derives the patch from the old selected
 entry, checks routed pages, and proves their exact canonical-state projection.
 The requester supplies neither the successor pages nor the field writes. -/
-def prepareChecked (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext)
-    (declaration : Declaration) :
-    Except Reject (CheckedPreparation profile snapshot context declaration) :=
+def checkReady (profile : RuntimeProfile F) (snapshot : Snapshot) (declaration : Declaration) :
+    Except Reject (ReadyUpdate profile snapshot declaration) :=
   if rootExact : declaration.expectedPreRoot = snapshot.cell.root then
     if headExact : snapshot.currentHead declaration.source.policyId = declaration.expected then
       if domainExact : declaration.source.domain = snapshot.domain then
         if semanticsExact : declaration.source.semantics = profile.semantics then
           if supported : Minidregg.Compiler.supported profile.compilerProfile.compiler declaration.source.predicate = true then
             if successor : checkSuccessor declaration.expected declaration.source.source = true then
-              if unspent : snapshot.spent (requestDigest profile snapshot context declaration).value = false then
-                match CredentialAuthorityDomain.preparePolicy snapshot declaration.source.policyId
-                    declaration.source.version (policyRecordDigest declaration.source) with
-                | none => .error .pageUpdateRejected
-                | some update => .ok
-                    { ready := ⟨rootExact, headExact, domainExact, semanticsExact, supported,
-                        (checkSuccessor_iff _ _).mp successor⟩
-                      unspent := unspent
-                      update := update }
-              else .error .markerSpent
+              match CredentialAuthorityDomain.preparePolicy snapshot declaration.source.policyId
+                  declaration.source.version (policyRecordDigest declaration.source) with
+              | none => .error .pageUpdateRejected
+              | some update => .ok
+                  { ready := ⟨rootExact, headExact, domainExact, semanticsExact, supported,
+                      (checkSuccessor_iff _ _).mp successor⟩
+                    update := update }
             else .error .invalidSuccessor
           else .error .unsupportedPolicy
         else .error .wrongSemantics
       else .error .wrongDomain
     else .error .staleHead
   else .error .staleRoot
+
+/-- The marker's answer first (undeclared, then spent, refused by name before any
+state is read), then the state checks. -/
+def prepareChecked (profile : RuntimeProfile F) (snapshot : Snapshot) (markers : Nat → Option Bool)
+    (context : RequestContext)
+    (declaration : Declaration) :
+    Except Reject (CheckedPreparation profile snapshot markers context declaration) :=
+  match answer : markers (requestDigest profile snapshot context declaration).value with
+  | none => .error .undeclaredMarker
+  | some true => .error .markerSpent
+  | some false => (checkReady profile snapshot declaration).map fun checked =>
+      { ready := checked.ready, answered := answer, update := checked.update }
 
 /-- An injectively named sequence of address bytes, with no field reduction.
 The predicate compiler still performs its explicit cast-injectivity check. -/
@@ -272,7 +293,8 @@ private def unitCodec : LawfulCodec Unit where
 request. Its postcondition pins exactly the selected policy head; unrelated
 authority fields may participate in the same composed turn. The fixed Pred
 view below depends only on this head and the retained declaration/context. -/
-def family (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext) :
+def family (profile : RuntimeProfile F) (snapshot : Snapshot) (markers : Nat → Option Bool)
+    (context : RequestContext) :
     SemanticEffectFamily layout CredentialAuthorityCell.materializer Digest where
   pre := snapshot.cell
   request := fun declaration => ⟨.program, request profile snapshot context declaration⟩
@@ -280,7 +302,7 @@ def family (profile : RuntimeProfile F) (snapshot : Snapshot) (context : Request
   declarationCodec := declarationCodec
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
-  ModeEvidence := fun declaration _ => CheckedPreparation profile snapshot context declaration
+  ModeEvidence := fun declaration _ => CheckedPreparation profile snapshot markers context declaration
   Postcondition := fun declaration _ logical =>
     currentHead logical declaration.source.policyId =
       some ⟨declaration.source.version, policyRecordDigest declaration.source⟩ ∧
@@ -294,24 +316,26 @@ def family (profile : RuntimeProfile F) (snapshot : Snapshot) (context : Request
   ReleaseAuthorization := fun _ _ _ => Empty
   DisclosureAllowed := fun _ _ _ => True
 
-structure Prepared (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext) where
+structure Prepared (profile : RuntimeProfile F) (snapshot : Snapshot) (markers : Nat → Option Bool)
+    (context : RequestContext) where
   declaration : Declaration
   additional : List LawComposition.PolicyRef := []
   storageKind : Nat := 0
-  candidate : Candidate (family profile snapshot context) snapshot.cell declaration ()
+  candidate : Candidate (family profile snapshot markers context) snapshot.cell declaration ()
 
-def Prepared.update {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
-    (prepared : Prepared profile snapshot context) :
+def Prepared.update {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext}
+    (prepared : Prepared profile snapshot markers context) :
     CredentialAuthorityDomain.Prepared snapshot (patch snapshot prepared.declaration) :=
   prepared.candidate.modeEvidence.update.prepared
 
-def prepare (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext) (bytes : List UInt8)
+def prepare (profile : RuntimeProfile F) (snapshot : Snapshot) (markers : Nat → Option Bool)
+    (context : RequestContext) (bytes : List UInt8)
     (additional : List LawComposition.PolicyRef := []) (storageKind : Nat := 0) :
-    Except Reject (Prepared profile snapshot context) :=
+    Except Reject (Prepared profile snapshot markers context) :=
   match decodeDeclaration bytes with
   | none => .error .malformedDeclaration
   | some declaration => do
-      let checked ← prepareChecked profile snapshot context declaration
+      let checked ← prepareChecked profile snapshot markers context declaration
       .ok
         { declaration := declaration
           additional := additional
@@ -323,8 +347,8 @@ def prepare (profile : RuntimeProfile F) (snapshot : Snapshot) (context : Reques
               postcondition :=
                 ⟨checked.update.head_exact, checked.update.generation_preserved⟩ } }
 
-def Prepared.step {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
-    (prepared : Prepared profile snapshot context) : PolicyStepContext :=
+def Prepared.step {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext}
+    (prepared : Prepared profile snapshot markers context) : PolicyStepContext :=
   PolicyStepContext.ofCandidate
     (fun logical => project (request profile snapshot context prepared.declaration) prepared.declaration
       logical prepared.storageKind)
@@ -335,8 +359,8 @@ Its native signature authenticates use of an actual stored control capability. -
 abbrev controlPortal := CredentialAuthorityPolicyRegistry.sourceCapabilityPortal
 
 def Prepared.policyConfig [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
-    (prepared : Prepared profile snapshot context) (store : PayloadStore) :
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext}
+    (prepared : Prepared profile snapshot markers context) (store : PayloadStore) :
     ComposedPolicyAdmission.Config F where
   snapshot := snapshot
   store := store
@@ -351,12 +375,12 @@ def Prepared.policyConfig [DecidableEq F]
 is retained beside it, so successful installation cannot discard its checked
 post-state dependency graph. This check does not evaluate the candidate law. -/
 structure Prepared.Accepted [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
-    (prepared : Prepared profile snapshot context) (store : PayloadStore) extends
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext}
+    (prepared : Prepared profile snapshot markers context) (store : PayloadStore) extends
   AcceptedCellEffect
     (portal := (prepared.policyConfig (F := F) store).portal)
     (authState := snapshot.authState)
-    (family profile snapshot context) (request profile snapshot context prepared.declaration)
+    (family profile snapshot markers context) (request profile snapshot context prepared.declaration)
     snapshot.cell prepared.declaration () where
   candidateGraph : PolicyComponentResolution.LoadedRoots
     (CredentialAuthorityDomain.Snapshot.ofCell snapshot.domain snapshot.revision snapshot.spent
@@ -373,8 +397,8 @@ structure Prepared.Accepted [DecidableEq F]
 is never authority to replace a resource's law. The native receipt binds use of
 that capability to this exact source-derived request and operation marker. -/
 def Prepared.admit [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
-    (prepared : Prepared profile snapshot context) (store : PayloadStore)
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext}
+    (prepared : Prepared profile snapshot markers context) (store : PayloadStore)
     (controlCapability : CapabilityId)
     (receipt : CredentialSignatureAdmission.CheckedSignature snapshot) :
     Except Reject (prepared.Accepted store) :=
@@ -410,8 +434,8 @@ def Prepared.admit [DecidableEq F]
 /-- The only native signature producer is invoked on the wanted request computed
 above. Its receipt is then checked by the same capability and compiled-policy path. -/
 def Prepared.admitNative [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
-    (prepared : Prepared profile snapshot context) (store : PayloadStore)
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext}
+    (prepared : Prepared profile snapshot markers context) (store : PayloadStore)
     (native : CredentialSignatureIO.NativeConfig) (controlCapability : CapabilityId)
     (envelopeBytes : List UInt8) : IO (Except Reject (prepared.Accepted store)) := do
   match ← CredentialSignatureAdmission.verifyNative native snapshot
@@ -421,49 +445,49 @@ def Prepared.admitNative [DecidableEq F]
   | .ok receipt => return prepared.admit store controlCapability receipt
 
 structure Installed [DecidableEq F]
-    (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext)
+    (profile : RuntimeProfile F) (snapshot : Snapshot) (markers : Nat → Option Bool) (context : RequestContext)
     (store : PayloadStore) where
-  prepared : Prepared profile snapshot context
+  prepared : Prepared profile snapshot markers context
   accepted : prepared.Accepted store
 
 def run [DecidableEq F]
-    (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext)
+    (profile : RuntimeProfile F) (snapshot : Snapshot) (markers : Nat → Option Bool) (context : RequestContext)
     (store : PayloadStore) (declarationBytes : List UInt8)
     (controlCapability : CapabilityId)
     (receipt : CredentialSignatureAdmission.CheckedSignature snapshot) :
-    Except Reject (Installed profile snapshot context store) := do
-  let prepared ← prepare profile snapshot context declarationBytes
+    Except Reject (Installed profile snapshot markers context store) := do
+  let prepared ← prepare profile snapshot markers context declarationBytes
   let accepted ← prepared.admit store controlCapability receipt
   .ok ⟨prepared, accepted⟩
 
 def Installed.post [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
-    (installed : Installed profile snapshot context store) : Materialized CredentialAuthorityCell.materializer :=
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot markers context store) : Materialized CredentialAuthorityCell.materializer :=
   installed.accepted.prepared.post
 
 def Installed.sourceBytes [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
-    (installed : Installed profile snapshot context store) : List UInt8 :=
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot markers context store) : List UInt8 :=
   policyRecordCodec.encode installed.prepared.declaration.source
 
 theorem Installed.full_request_bound [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
-    (installed : Installed profile snapshot context store) :
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot markers context store) :
     (⟨ResourceKind.program, request profile snapshot context installed.prepared.declaration⟩ : Sigma Request) =
-      (family profile snapshot context).request installed.prepared.declaration :=
+      (family profile snapshot markers context).request installed.prepared.declaration :=
   installed.accepted.requestBound
 
 theorem Installed.actual_pre_bound [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
-    (installed : Installed profile snapshot context store) :
-    snapshot.cell = (family profile snapshot context).pre :=
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot markers context store) :
+    snapshot.cell = (family profile snapshot markers context).pre :=
   installed.accepted.preStateBound
 
 /-- This is a property of every accepted installer token, including callers
 outside `run`: the concrete receiving portal has no signature/proof bypass. -/
 theorem Installed.control_capability_required [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
-    (installed : Installed profile snapshot context store) :
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot markers context store) :
     ∃ capability commitment,
       installed.accepted.authorization.evidence.capabilityValue = some (capability, commitment) ∧
       Verb.installPolicy ∈ capability.scope.verbs := by
@@ -485,8 +509,8 @@ theorem request_policy_is_target (profile : RuntimeProfile F) (snapshot : Snapsh
 snapshot, evaluated on the exact canonical pre-state and installed post-state.
 This holds for every accepted token, not only for calls through `run`. -/
 theorem Installed.old_policy_evaluated [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
-    (installed : Installed profile snapshot context store) :
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot markers context store) :
     ∃ graph : PolicyComponentResolution.LoadedGraph snapshot store profile.semantics
         installed.prepared.declaration.source.policyId.value installed.prepared.additional,
       PolicyComponentResolution.loadTarget snapshot store profile.semantics
@@ -502,15 +526,15 @@ theorem Installed.old_policy_evaluated [DecidableEq F]
 
 /-- The accepted post is the one install patch applied to the old cell. -/
 theorem Installed.post_logical [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
-    (installed : Installed profile snapshot context store) :
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot markers context store) :
     installed.post.logical =
       Patch.run snapshot.logical (patch snapshot installed.prepared.declaration) :=
   rfl
 
 theorem Installed.source_selected_in_post [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
-    (installed : Installed profile snapshot context store) :
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot markers context store) :
     currentHead installed.post.logical installed.prepared.declaration.source.policyId =
       some ⟨installed.prepared.declaration.source.version,
         policyRecordDigest installed.prepared.declaration.source⟩ :=
@@ -520,8 +544,8 @@ theorem Installed.source_selected_in_post [DecidableEq F]
 family postcondition. Composition cannot smuggle an epoch rotation into an
 otherwise accepted source update. Grants still require the newly selected law. -/
 theorem Installed.generation_preserved [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
-    (installed : Installed profile snapshot context store) :
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot markers context store) :
     installed.post.logical ⟨.policyEpoch, installed.prepared.declaration.source.policyId⟩ =
       snapshot.logical ⟨.policyEpoch, installed.prepared.declaration.source.policyId⟩ :=
   installed.accepted.postcondition.2
@@ -529,8 +553,8 @@ theorem Installed.generation_preserved [DecidableEq F]
 /-- The actual source-install patch preserves every stored capability exactly.
 No grant is rewritten or silently reissued to manufacture continued use. -/
 theorem Installed.capability_preserved [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
-    (installed : Installed profile snapshot context store) (kind : ResourceKind) (id : CapabilityId) :
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot markers context store) (kind : ResourceKind) (id : CapabilityId) :
     installed.post.logical ⟨.capability kind, id⟩ = snapshot.logical ⟨.capability kind, id⟩ := by
   rw [installed.post_logical]
   apply Patch.run_frame
@@ -550,22 +574,58 @@ theorem Installed.capability_preserved [DecidableEq F]
     rw [CredentialAuthorityEffects.assignAll_writeFootprint] at footprint
     simp [CredentialAuthorityDomain.policyEntries] at footprint
 
-/-- The operation marker was unspent in the durable nullifier set the snapshot
-was loaded with; the receiver's intent consumes it there. -/
-theorem Installed.marker_was_unspent [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
-    (installed : Installed profile snapshot context store) :
-    snapshot.spent (requestDigest profile snapshot context installed.prepared.declaration).value = false :=
-  installed.accepted.modeEvidence.unspent
+/-- The operation marker was answered declared and unspent by the ground the
+installation was prepared on (`ServedBasis.Ground.markerSpent`); the receiver's
+intent consumes it there. -/
+theorem Installed.marker_answered [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot markers context store) :
+    markers (requestDigest profile snapshot context installed.prepared.declaration).value = some false :=
+  installed.accepted.modeEvidence.answered
+
+/-- **The preparation's outcome on the marker is a function of its answer alone**:
+no answer is `undeclaredMarker`, a spent answer is `markerSpent`, whatever the state. -/
+theorem prepareChecked_unanswered (profile : RuntimeProfile F) (snapshot : Snapshot)
+    (markers : Nat → Option Bool) (context : RequestContext) (declaration : Declaration)
+    (unanswered : markers (requestDigest profile snapshot context declaration).value = none) :
+    (prepareChecked profile snapshot markers context declaration).map (fun _ => ()) = .error .undeclaredMarker := by
+  unfold prepareChecked
+  split <;> (simp_all; try rfl)
+
+theorem prepareChecked_spent (profile : RuntimeProfile F) (snapshot : Snapshot)
+    (markers : Nat → Option Bool) (context : RequestContext) (declaration : Declaration)
+    (spent : markers (requestDigest profile snapshot context declaration).value = some true) :
+    (prepareChecked profile snapshot markers context declaration).map (fun _ => ()) = .error .markerSpent := by
+  unfold prepareChecked
+  split <;> (simp_all; try rfl)
+
+/-- Two grounds whose marker answers agree prepare alike (same refusal, or both
+prepare): the preparation reads the marker only through its answer. -/
+theorem prepareChecked_agrees (profile : RuntimeProfile F) (snapshot : Snapshot)
+    (first second : Nat → Option Bool) (context : RequestContext) (declaration : Declaration)
+    (same : first (requestDigest profile snapshot context declaration).value =
+      second (requestDigest profile snapshot context declaration).value) :
+    (prepareChecked profile snapshot first context declaration).map (fun _ => ()) =
+      (prepareChecked profile snapshot second context declaration).map (fun _ => ()) := by
+  unfold prepareChecked
+  split <;> split
+  all_goals first
+    | (exfalso; simp_all; done)
+    | (cases checkReady profile snapshot declaration <;> rfl)
+
+#assert_axioms Installed.marker_answered
+#assert_axioms prepareChecked_unanswered
+#assert_axioms prepareChecked_spent
+#assert_axioms prepareChecked_agrees
 
 /-- The mandatory family postcondition transports the OLD selected predicate
 to the actual joint post-state. It preserves the complete fixed policy view
 without freezing unrelated canonical authority fields. -/
 theorem Installed.old_policy_evaluated_at_final [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
-    (installed : Installed profile snapshot context store)
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot markers context store)
     (finalState : Store layout)
-    (preserved : (family profile snapshot context).Postcondition installed.prepared.declaration
+    (preserved : (family profile snapshot markers context).Postcondition installed.prepared.declaration
       () finalState) :
     ∃ graph : PolicyComponentResolution.LoadedGraph snapshot store profile.semantics
         installed.prepared.declaration.source.policyId.value installed.prepared.additional,
@@ -588,8 +648,8 @@ theorem Installed.old_policy_evaluated_at_final [DecidableEq F]
 /-- The predecessor and source revision are checked against the actual old head, not
 only against fields asserted in the installation declaration. -/
 theorem Installed.source_successor [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
-    (installed : Installed profile snapshot context store) :
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot markers context store) :
     Successor (snapshot.currentHead installed.prepared.declaration.source.policyId)
       installed.prepared.declaration.source.source := by
   have ready := installed.accepted.modeEvidence.ready
@@ -599,8 +659,8 @@ theorem Installed.source_successor [DecidableEq F]
 /-- Updating a policy removes the retired version's address from the actual
 canonical post. It cannot remain selectable behind a newer current head. -/
 theorem Installed.retired_address_absent [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
-    (installed : Installed profile snapshot context store)
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot markers context store)
     (old : Head)
     (current : snapshot.currentHead installed.prepared.declaration.source.policyId = some old) :
     installed.post.logical
@@ -618,8 +678,8 @@ theorem Installed.retired_address_absent [DecidableEq F]
 /-- Installation admits only sources in the actual compiler's vocabulary;
 serializability of an AST is not evidence that it can execute. -/
 theorem Installed.source_supported [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
-    (installed : Installed profile snapshot context store) :
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {markers : Nat → Option Bool} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot markers context store) :
     Minidregg.Compiler.supported profile.compilerProfile.compiler installed.prepared.declaration.source.predicate = true :=
   installed.accepted.modeEvidence.ready.supported
 
