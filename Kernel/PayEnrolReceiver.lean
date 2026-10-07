@@ -1123,16 +1123,22 @@ theorem verifiedOf_answers {answer : SigQuery → Option Bool} {deployment : Dep
     · cases decided
 
 /-- **The one claim**: the observer's current key over the envelope's own signed
-header (a key lookup and a decode, as the observation family's). -/
-def claims (deployment : Deployment) (durable : Durable) (ingress : DecodedIngress) :
-    Except Reject (List SigQuery) :=
+header (a key lookup and a decode, as the observation family's), for either
+enrollment family's refusal type. -/
+def envelopeClaims {R : Type} (unavailable : R) (signature : CredentialSignatureAdmission.Reject → R)
+    (deployment : Deployment) (durable : Durable) (ingress : DecodedIngress) :
+    Except R (List SigQuery) :=
   match loadDeployment deployment durable.snapshot with
-  | none => .error .authorityUnavailable
+  | none => .error unavailable
   | some authority =>
       match CredentialSignatureAdmission.envelopeClaim authority.snapshot ingress.command.observer
           ingress.ingress.envelope with
-      | .error reason => .error (.signature reason)
+      | .error reason => .error (signature reason)
       | .ok claim => .ok [claim]
+
+def claims (deployment : Deployment) (durable : Durable) (ingress : DecodedIngress) :
+    Except Reject (List SigQuery) :=
+  envelopeClaims .authorityUnavailable .signature deployment durable ingress
 
 end Signatures
 

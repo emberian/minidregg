@@ -1026,13 +1026,20 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
         (((PayObservationReceiver.family config.deployment config.profile).liveReceiver
           (receivingLaws config) config.signature).intent admission.accepted)
   | payEnrol {ingress : PayEnrolReceiver.DecodedIngress}
-      (accepted : PayEnrolReceiver.AcceptedEnrol config.deployment config.profile
+      (admission : ((PayEnrolReceiver.payEnrolFamily config.deployment config.profile).liveReceiver
+        (receivingLaws config) config.signature).Admitted
         ⟨config.federation, logicalHeight config opened.durable, config.tariff⟩ opened.durable ingress) :
-      NativeAdmission config opened (PayEnrolReceiver.intent accepted)
+      NativeAdmission config opened
+        (((PayEnrolReceiver.payEnrolFamily config.deployment config.profile).liveReceiver
+          (receivingLaws config) config.signature).intent admission.accepted)
   | payEnrolV2 {ingress : PayEnrolReceiver.DecodedIngress}
-      (accepted : PayEnrolV2Receiver.AcceptedEnrol config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable, config.tariff⟩ opened.durable ingress) :
-      NativeAdmission config opened (PayEnrolV2Receiver.intent accepted)
+      (admission : ((PayEnrolV2Receiver.payEnrolV2Family config.deployment config.profile).liveReceiver
+        (receivingLaws config) config.signature).Admitted
+        ⟨⟨config.federation, logicalHeight config opened.durable, config.tariff⟩, config.expectedSeed⟩
+        opened.durable ingress) :
+      NativeAdmission config opened
+        (((PayEnrolV2Receiver.payEnrolV2Family config.deployment config.profile).liveReceiver
+          (receivingLaws config) config.signature).intent admission.accepted)
   | payClaim {ingress : PayClaimCommand.DecodedIngress}
       (accepted : PayClaimReceiver.AcceptedClaim config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable, config.tariff⟩ opened.durable ingress) :
@@ -2217,18 +2224,22 @@ private def derive (config : Config) (opened : Opened config)
           .payClaim accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := PayEnrolReceiver.decodeIngress bytes then
     if (PayEnrolV2Receiver.parsedMemo ingress.command.observation).isSome then
-      match ← PayEnrolV2Receiver.admitDecodedNative config.deployment config.profile
-          ⟨config.federation, height, config.tariff⟩ config.expectedSeed opened.durable config.signature ingress with
+      match ← (PayEnrolV2Receiver.payEnrolV2Family config.deployment config.profile).admitNative
+          config.profile.compilerProfile config.deployment config.signature
+          ⟨⟨config.federation, height, config.tariff⟩, config.expectedSeed⟩ opened.durable ingress with
       | .error reason => return .error s!"v2 paid enrollment refused: {repr reason}"
-      | .ok accepted =>
-          return .ok ⟨PayEnrolV2Receiver.intent accepted,
-            .payEnrolV2 accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
-    match ← PayEnrolReceiver.admitDecodedNative config.deployment config.profile
-        ⟨config.federation, height, config.tariff⟩ opened.durable config.signature ingress with
+      | .ok admission =>
+          return .ok ⟨((PayEnrolV2Receiver.payEnrolV2Family config.deployment config.profile).liveReceiver
+              (receivingLaws config) config.signature).intent admission.accepted,
+            .payEnrolV2 admission, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
+    match ← (PayEnrolReceiver.payEnrolFamily config.deployment config.profile).admitNative
+        config.profile.compilerProfile config.deployment config.signature
+        ⟨config.federation, height, config.tariff⟩ opened.durable ingress with
     | .error reason => return .error s!"pay enrolment refused: {repr reason}"
-    | .ok accepted =>
-        return .ok ⟨PayEnrolReceiver.intent accepted,
-          .payEnrol accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
+    | .ok admission =>
+        return .ok ⟨((PayEnrolReceiver.payEnrolFamily config.deployment config.profile).liveReceiver
+            (receivingLaws config) config.signature).intent admission.accepted,
+          .payEnrol admission, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := PurseRefillReceiver.decodeIngress bytes then
     match ← PurseRefillReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with

@@ -117,15 +117,9 @@ def payEnrolSubmitCurrentLoaded (config : Config) (opened : Opened config) (byte
   let some ingress := PayEnrolReceiver.decodeIngress bytes
     | return refused .malformed "pay-enrol" "noncanonical signed enrollment ingress"
   if (PayEnrolV2Receiver.parsedMemo ingress.command.observation).isSome then
-    match ← PayEnrolV2Receiver.receiveLoaded config.deployment config.profile (payEnrolAmbient config opened)
-        config.expectedSeed config.signature config.transport opened.durable bytes with
-    | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
-    | .rejected reason => return refused .operationRejected "pay-enrol-v2" s!"{repr reason}"
-    | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-    | .durableRejected reason => return durableRefusal reason
-    | .contention => return .contention
-    | .unavailable detail => return .unavailable detail.toUTF8.toList
-    | .uncertain detail => return .uncertain detail.toUTF8.toList
+    receivingSubmitLoaded config opened
+      (PayEnrolV2Receiver.payEnrolV2Family config.deployment config.profile)
+      ⟨payEnrolAmbient config opened, config.expectedSeed⟩ "pay-enrol-v2" bytes
   else payEnrolSubmitLoaded config opened bytes
 
 end Minidregg.Kernel.NativeHost
