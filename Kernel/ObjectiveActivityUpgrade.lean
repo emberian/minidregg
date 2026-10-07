@@ -35,7 +35,9 @@
   when no old activity outside the rebirth set awaits (`live = 0`): the state is
   migrated and judged by the next record under the migration's facts, the record
   becomes `ObjectRecord.successor` (`migrate_judged`); given the drained
-  judgment holds of the current state, it cannot fail (`migrate_cannot_fail`).
+  judgment holds of the current state, it is admitted (`migrate_admitted_of_migratable`); in every
+  reachable world it holds, so a drained MIGRATE cannot fail
+  (`ObjectiveUpgradeInvariant.migrate_cannot_fail`).
 * **REBIRTH** (`rebirth`, anyone, `Facts.turn` 9) of an activity left on the old
   package after MIGRATE: ONE turn ends it (claim spent, slot reclaimed) and births
   it again on the object's (new) pin from its stored input, generation 0, on the
@@ -917,13 +919,14 @@ theorem Adoption.migratable {rootBytes : Bytes → Digest} {config : Config} {sn
   obtain ⟨value, _, judged⟩ := migrateCurrent_some exact
   exact ⟨value, judged⟩
 
-/-- **Theorem 6, `migrate_cannot_fail`.** On a draining object with no old activity
+/-- **MIGRATE's admission from a migratable state**: the step of theorem 6, whose statement
+(no premise on the state; a reachable world) is `ObjectiveUpgradeInvariant.migrate_cannot_fail`. On a draining object with no old activity
 left outside the rebirth set (`live = 0`) whose current state passes the drained
 judgment (as every write since the ADOPT did, theorem 5, and the ADOPT's own state,
 `Adoption.migratable`), MIGRATE is admitted whenever the Book admits its declared
 fee: the migration and the next record's judgment it reruns are the same
 deterministic function of the same bytes, so they cannot now refuse. -/
-theorem migrate_cannot_fail {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+theorem migrate_admitted_of_migratable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : MigrateRequest} {record : ObjectRecord} {next : Pending} {deadline : Nat}
     (found : readObject config snapshot request.object = .ok (some record))
     (draining : record.phase = .draining next deadline)
@@ -1094,7 +1097,7 @@ theorem upgrade_payer_irrelevant {rootBytes : Bytes → Digest} (config : Config
 #assert_axioms drained_write_migratable
 #assert_axioms Birth.drained_write_migratable
 #assert_axioms Adoption.migratable
-#assert_axioms migrate_cannot_fail
+#assert_axioms migrate_admitted_of_migratable
 #assert_axioms migrate_judged
 #assert_axioms abort_after_deadline_exclusive
 #assert_axioms nextRecord_shape
